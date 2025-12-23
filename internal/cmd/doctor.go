@@ -100,6 +100,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewLifecycleHygieneCheck())
 
 	// Hook attachment checks
+	d.Register(doctor.NewHookSingletonCheck())
 	d.Register(doctor.NewHookAttachmentValidCheck())
 	d.Register(doctor.NewHookSingletonCheck())
 

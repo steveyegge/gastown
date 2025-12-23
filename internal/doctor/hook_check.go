@@ -4,10 +4,186 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
 )
+
+// HookSingletonCheck verifies that each agent has at most one handoff bead.
+// Multiple handoff beads for the same role create ambiguity about which work
+// is actually assigned to the agent.
+type HookSingletonCheck struct {
+	FixableCheck
+	duplicates []duplicateHandoff
+}
+
+type duplicateHandoff struct {
+	role      string
+	beadsDir  string
+	beadIDs   []string // All bead IDs with this role's handoff title
+}
+
+// NewHookSingletonCheck creates a new hook singleton check.
+func NewHookSingletonCheck() *HookSingletonCheck {
+	return &HookSingletonCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "hook-singleton",
+				CheckDescription: "Ensure each agent has at most one handoff bead",
+			},
+		},
+	}
+}
+
+// Run checks all pinned beads for duplicate handoff beads per role.
+func (c *HookSingletonCheck) Run(ctx *CheckContext) *CheckResult {
+	c.duplicates = nil
+
+	var details []string
+
+	// Check town-level beads
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	townDupes := c.checkBeadsDir(townBeadsDir)
+	for _, dupe := range townDupes {
+		details = append(details, c.formatDuplicate(dupe))
+	}
+	c.duplicates = append(c.duplicates, townDupes...)
+
+	// Check rig-level beads
+	rigDirs := c.findRigBeadsDirs(ctx.TownRoot)
+	for _, rigDir := range rigDirs {
+		rigDupes := c.checkBeadsDir(rigDir)
+		for _, dupe := range rigDupes {
+			details = append(details, c.formatDuplicate(dupe))
+		}
+		c.duplicates = append(c.duplicates, rigDupes...)
+	}
+
+	if len(c.duplicates) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "All agents have at most one handoff bead",
+		}
+	}
+
+	totalDupes := 0
+	for _, d := range c.duplicates {
+		totalDupes += len(d.beadIDs) - 1 // Count extra beads beyond the first
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusError,
+		Message: fmt.Sprintf("Found %d role(s) with duplicate handoff beads", len(c.duplicates)),
+		Details: details,
+		FixHint: "Run 'gt doctor --fix' to remove duplicates, or 'bd close <id>' manually",
+	}
+}
+
+// checkBeadsDir checks all pinned beads in a directory for duplicate handoffs.
+func (c *HookSingletonCheck) checkBeadsDir(beadsDir string) []duplicateHandoff {
+	var duplicates []duplicateHandoff
+
+	b := beads.New(filepath.Dir(beadsDir))
+
+	// List all pinned beads
+	pinnedBeads, err := b.List(beads.ListOptions{
+		Status:   beads.StatusPinned,
+		Priority: -1,
+	})
+	if err != nil {
+		return nil
+	}
+
+	// Group by handoff title pattern
+	// Handoff beads have title like "{role} Handoff"
+	handoffsByRole := make(map[string][]string) // role -> []beadID
+
+	for _, bead := range pinnedBeads {
+		if strings.HasSuffix(bead.Title, " Handoff") {
+			role := strings.TrimSuffix(bead.Title, " Handoff")
+			handoffsByRole[role] = append(handoffsByRole[role], bead.ID)
+		}
+	}
+
+	// Find roles with multiple handoff beads
+	for role, beadIDs := range handoffsByRole {
+		if len(beadIDs) > 1 {
+			// Sort for consistent output
+			sort.Strings(beadIDs)
+			duplicates = append(duplicates, duplicateHandoff{
+				role:     role,
+				beadsDir: beadsDir,
+				beadIDs:  beadIDs,
+			})
+		}
+	}
+
+	// Sort duplicates by role for consistent output
+	sort.Slice(duplicates, func(i, j int) bool {
+		return duplicates[i].role < duplicates[j].role
+	})
+
+	return duplicates
+}
+
+// findRigBeadsDirs finds all rig-level .beads directories.
+func (c *HookSingletonCheck) findRigBeadsDirs(townRoot string) []string {
+	var dirs []string
+
+	cmd := exec.Command("find", townRoot, "-maxdepth", "2", "-type", "d", "-name", ".beads")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
+		}
+		if line == filepath.Join(townRoot, ".beads") {
+			continue
+		}
+		if strings.Contains(line, "/mayor/") {
+			continue
+		}
+		dirs = append(dirs, line)
+	}
+
+	return dirs
+}
+
+// formatDuplicate formats a duplicate handoff for display.
+func (c *HookSingletonCheck) formatDuplicate(dupe duplicateHandoff) string {
+	return fmt.Sprintf("%s: %d handoff beads (%s)",
+		dupe.role, len(dupe.beadIDs), strings.Join(dupe.beadIDs, ", "))
+}
+
+// Fix removes duplicate handoff beads, keeping only the most recent one.
+func (c *HookSingletonCheck) Fix(ctx *CheckContext) error {
+	var errors []string
+
+	for _, dupe := range c.duplicates {
+		b := beads.New(filepath.Dir(dupe.beadsDir))
+
+		// Keep the last one (most recently created based on ID sort), close others
+		// IDs are sorted, so we close all but the last
+		toClose := dupe.beadIDs[:len(dupe.beadIDs)-1]
+
+		for _, id := range toClose {
+			if err := b.Close(id); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to close %s: %v", id, err))
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("%s", strings.Join(errors, "; "))
+	}
+	return nil
+}
 
 // HookAttachmentValidCheck verifies that attached molecules exist and are not closed.
 // This detects when a hook's attached_molecule field points to a non-existent or

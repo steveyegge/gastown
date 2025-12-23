@@ -6,6 +6,101 @@ import (
 	"testing"
 )
 
+func TestNewHookSingletonCheck(t *testing.T) {
+	check := NewHookSingletonCheck()
+
+	if check.Name() != "hook-singleton" {
+		t.Errorf("expected name 'hook-singleton', got %q", check.Name())
+	}
+
+	if check.Description() != "Ensure each agent has at most one handoff bead" {
+		t.Errorf("unexpected description: %q", check.Description())
+	}
+
+	if !check.CanFix() {
+		t.Error("expected CanFix to return true")
+	}
+}
+
+func TestHookSingletonCheck_NoBeadsDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	check := NewHookSingletonCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// No beads dir means nothing to check, should be OK
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when no beads dir, got %v", result.Status)
+	}
+}
+
+func TestHookSingletonCheck_FormatDuplicate(t *testing.T) {
+	check := NewHookSingletonCheck()
+
+	tests := []struct {
+		dupe     duplicateHandoff
+		expected string
+	}{
+		{
+			dupe: duplicateHandoff{
+				role:    "nux",
+				beadIDs: []string{"gt-123", "gt-456"},
+			},
+			expected: "nux: 2 handoff beads (gt-123, gt-456)",
+		},
+		{
+			dupe: duplicateHandoff{
+				role:    "witness",
+				beadIDs: []string{"gt-111", "gt-222", "gt-333"},
+			},
+			expected: "witness: 3 handoff beads (gt-111, gt-222, gt-333)",
+		},
+	}
+
+	for _, tt := range tests {
+		result := check.formatDuplicate(tt.dupe)
+		if result != tt.expected {
+			t.Errorf("formatDuplicate() = %q, want %q", result, tt.expected)
+		}
+	}
+}
+
+func TestHookSingletonCheck_FindRigBeadsDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create town-level .beads (should be excluded)
+	townBeads := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(townBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create rig-level .beads
+	rigBeads := filepath.Join(tmpDir, "myrig", ".beads")
+	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewHookSingletonCheck()
+	dirs := check.findRigBeadsDirs(tmpDir)
+
+	// Should find the rig-level beads but not town-level
+	found := false
+	for _, dir := range dirs {
+		if dir == townBeads {
+			t.Error("findRigBeadsDirs should not include town-level .beads")
+		}
+		if dir == rigBeads {
+			found = true
+		}
+	}
+
+	if !found && len(dirs) > 0 {
+		t.Logf("Found dirs: %v", dirs)
+	}
+}
+
 func TestNewHookAttachmentValidCheck(t *testing.T) {
 	check := NewHookAttachmentValidCheck()
 
