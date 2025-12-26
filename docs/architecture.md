@@ -454,8 +454,8 @@ Molecules are stored as JSONL in `molecules.jsonl`:
 
 ```json
 {
-  "id": "mol-engineer-in-box",
-  "title": "Engineer in Box: {{feature}}",
+  "id": "mol-shiny",
+  "title": "Shiny: {{feature}}",
   "description": "Full workflow from design to merge.",
   "labels": ["template"],
   "issue_type": "epic"
@@ -465,7 +465,7 @@ Molecules are stored as JSONL in `molecules.jsonl`:
 Steps are hierarchical children with dependencies encoded as beads edges:
 
 ```
-mol-engineer-in-box
+mol-shiny
 ├── .1 design      "Think about architecture"
 ├── .2 implement   "Write the code"           ← depends on .1
 ├── .3 review      "Self-review changes"      ← depends on .2
@@ -485,7 +485,7 @@ Molecules compose via bonding - attaching one molecule to another:
 
 ```
 mol-gastown-polecat (composed)
-├── [mol-engineer-in-box steps bonded here]
+├── [mol-shiny steps bonded here]
 │   ├── .1 design
 │   ├── .2 implement
 │   ├── .3 review
@@ -496,7 +496,7 @@ mol-gastown-polecat (composed)
 
 **Composition via bond:**
 ```bash
-bd mol bond mol-engineer-in-box $PARENT_MOL
+bd mol bond mol-shiny $PARENT_MOL
 bd create "Install binary" --parent=$PARENT_MOL --deps=.5
 ```
 
@@ -563,7 +563,7 @@ Proto Molecule (template)
 **Wisp structure:**
 
 ```
-gt-abc123 (Proto: engineer-in-box)
+gt-abc123 (Proto: shiny)
     │
     ▼ bond
 gt-abc123.exec-001 (Wisp Molecule)  ← wisp=true, parent=gt-abc123
@@ -699,7 +699,7 @@ pending → in_progress → completed
 When a molecule is attached to an issue:
 
 ```bash
-gt spawn --issue gt-xyz --molecule mol-engineer-in-box
+gt spawn --issue gt-xyz --molecule mol-shiny
 ```
 
 1. Molecule is validated (steps, dependencies)
@@ -711,13 +711,13 @@ gt spawn --issue gt-xyz --molecule mol-engineer-in-box
 
 **Provenance tracking:**
 - Each instance has an `instantiated_from` edge to the source molecule
-- Enables querying: "show all instances of mol-engineer-in-box"
+- Enables querying: "show all instances of mol-shiny"
 
 ### Standard Molecules
 
 Gas Town includes formula files (`.beads/formulas/`) for standard molecules:
 
-**mol-engineer-in-box** (5 steps):
+**mol-shiny** (5 steps):
 ```
 design → implement → review → test → submit
 ```
@@ -747,13 +747,13 @@ bd cook <formula-id>
 gt molecule list
 
 # Show molecule details
-gt molecule show mol-engineer-in-box
+gt molecule show mol-shiny
 
 # Instantiate on an issue
-gt molecule instantiate mol-engineer-in-box --parent=gt-xyz
+gt molecule instantiate mol-shiny --parent=gt-xyz
 
 # Spawn polecat with molecule
-gt spawn --issue gt-xyz --molecule mol-engineer-in-box
+gt spawn --issue gt-xyz --molecule mol-shiny
 ```
 
 ### Why Molecules?
@@ -1002,7 +1002,7 @@ Each instantiation is independent. The ledger shows all runs, enabling compariso
 | Customization | Edit description | Fork plugin molecule |
 | Use case | Fixed workflows | Extensible workflows |
 
-Both patterns are valid. Use static molecules for well-defined workflows (mol-engineer-in-box, mol-polecat-work). Use pluggable molecules when dimensions should be customizable (mol-code-review, mol-witness-patrol).
+Both patterns are valid. Use static molecules for well-defined workflows (mol-shiny, mol-polecat-work). Use pluggable molecules when dimensions should be customizable (mol-code-review, mol-witness-patrol).
 
 ## Directory Structure
 
@@ -1954,7 +1954,7 @@ gt capture <polecat> "<cmd>"     # Run command in polecat session
 ### Session Management
 
 ```bash
-gt spawn --issue <id> --molecule mol-engineer-in-box  # Spawn polecat with workflow
+gt spawn --issue <id> --molecule mol-shiny  # Spawn polecat with workflow
 gt handoff             # Polecat requests shutdown (run when done)
 gt session stop <p>    # Kill polecat session (Witness uses this)
 ```

@@ -221,4 +221,4 @@ echo "Bootstrap complete!"
 After bootstrapping:
 1. Start a Mayor session: `gt mayor attach`
 2. Check for work: `bd ready`
-3. Spawn workers with molecules: `gt spawn --issue <id> --molecule mol-engineer-in-box`
+3. Spawn workers with molecules: `gt spawn --issue <id> --molecule mol-shiny`

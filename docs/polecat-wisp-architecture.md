@@ -56,7 +56,7 @@ and cleanup within a single ephemeral container.
 │  │  Storage: .beads/ (git-tracked)                                │  │
 │  │                                                                 │  │
 │  │  Could be:                                                      │  │
-│  │  - mol-engineer-in-box (full workflow)                         │  │
+│  │  - mol-shiny (full workflow)                                   │  │
 │  │  - mol-quick-fix (fast path)                                   │  │
 │  │  - Any custom work molecule                                    │  │
 │  │  - Direct issue (no molecule, just task)                       │  │

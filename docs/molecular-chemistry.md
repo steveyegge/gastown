@@ -693,7 +693,7 @@ Gas Town maintains a **library of curated protos** - the fuel stockpile:
 
 ```
 ~/gt/molecules/
-├── mol-engineer-in-box/       # Full quality workflow
+├── mol-shiny/                 # Full quality workflow
 ├── mol-quick-fix/             # Fast path for small changes
 ├── mol-code-review/           # Pluggable review dimensions
 ├── mol-release/               # Release workflow

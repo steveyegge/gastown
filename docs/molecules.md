@@ -40,8 +40,8 @@ Molecules are standard beads issues stored in `molecules.jsonl`:
 
 ```json
 {
-  "id": "mol-engineer-in-box",
-  "title": "Engineer in Box: {{feature_name}}",
+  "id": "mol-shiny",
+  "title": "Shiny: {{feature_name}}",
   "description": "Full workflow from design to merge.\n\nVars:\n- {{feature_name}} - What to build",
   "labels": ["template"],
   "issue_type": "epic"
@@ -59,8 +59,8 @@ Molecules are standard beads issues stored in `molecules.jsonl`:
 Molecules support `{{var}}` placeholders resolved at bond time:
 
 ```bash
-bd mol bond mol-engineer-in-box --var feature_name="user auth"
-# Creates: "Engineer in Box: user auth"
+bd mol bond mol-shiny --var feature_name="user auth"
+# Creates: "Shiny: user auth"
 ```
 
 Variables work in:
@@ -73,12 +73,12 @@ Variables work in:
 Steps are hierarchical children of the molecule:
 
 ```
-mol-engineer-in-box (epic)
-├── mol-engineer-in-box.1  "Design"
-├── mol-engineer-in-box.2  "Implement"       Needs: .1
-├── mol-engineer-in-box.3  "Review"          Needs: .2
-├── mol-engineer-in-box.4  "Test"            Needs: .3
-└── mol-engineer-in-box.5  "Submit"          Needs: .4
+mol-shiny (epic)
+├── mol-shiny.1  "Design"
+├── mol-shiny.2  "Implement"       Needs: .1
+├── mol-shiny.3  "Review"          Needs: .2
+├── mol-shiny.4  "Test"            Needs: .3
+└── mol-shiny.5  "Submit"          Needs: .4
 ```
 
 Dependencies are encoded in beads edges, not in step descriptions.
@@ -103,7 +103,7 @@ bd mol bond <proto-id> [--wisp] [--var key=value...]
 
 ```bash
 # Durable mol
-bd mol bond mol-engineer-in-box --var feature_name="auth"
+bd mol bond mol-shiny --var feature_name="auth"
 
 # Ephemeral wisp for patrol
 bd mol bond mol-witness-patrol --wisp

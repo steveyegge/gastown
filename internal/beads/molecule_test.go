@@ -225,7 +225,7 @@ waitsfor: some-condition`
 	}
 }
 
-func TestParseMoleculeSteps_EngineerInBox(t *testing.T) {
+func TestParseMoleculeSteps_Shiny(t *testing.T) {
 	// The canonical example from the design doc
 	desc := `This workflow takes a task from design to merge.
 
