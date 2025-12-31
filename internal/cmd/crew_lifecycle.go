@@ -351,7 +351,7 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 			// Non-fatal: session works without beacon
 		}
 
-		if err := t.SendKeys(sessionID, "gt prime"); err != nil {
+		if err := t.NudgeSession(sessionID, "gt prime"); err != nil {
 			// Non-fatal: Claude started but priming failed
 			style.PrintWarning("Could not send prime command to %s: %v", arg, err)
 		}
@@ -522,7 +522,7 @@ func restartCrewSession(rigName, crewName, clonePath string) error {
 	beacon := session.SessionBeacon(address, "")
 	_ = t.NudgeSession(sessionID, beacon) // Non-fatal
 
-	if err := t.SendKeys(sessionID, "gt prime"); err != nil {
+	if err := t.NudgeSession(sessionID, "gt prime"); err != nil {
 		// Non-fatal
 	}
 

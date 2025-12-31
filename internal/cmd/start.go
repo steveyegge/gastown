@@ -753,7 +753,7 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 				style.PrintWarning("Timeout waiting for Claude to start: %v", err)
 			}
 			time.Sleep(constants.ShutdownNotifyDelay)
-			if err := t.SendKeys(sessionID, "gt prime"); err != nil {
+			if err := t.NudgeSession(sessionID, "gt prime"); err != nil {
 				style.PrintWarning("Could not send prime command: %v", err)
 			}
 		} else {
@@ -805,8 +805,8 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 			// Non-fatal: session works without beacon
 		}
 
-		// Send gt prime to initialize context
-		if err := t.SendKeys(sessionID, "gt prime"); err != nil {
+		// Send gt prime to initialize context (use NudgeSession for reliable delivery)
+		if err := t.NudgeSession(sessionID, "gt prime"); err != nil {
 			style.PrintWarning("Could not send prime command: %v", err)
 		}
 
