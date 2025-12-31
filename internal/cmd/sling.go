@@ -235,6 +235,33 @@ func runSling(cmd *cobra.Command, args []string) error {
 				// Wake witness and refinery to monitor the new polecat
 				wakeRigAgents(rigName)
 			}
+		} else if rigName, polecatName, isPolecatPath := ParsePolecatTarget(target); isPolecatPath && slingCreate {
+			// Polecat path with --create: create polecat before resolving
+			if slingDryRun {
+				fmt.Printf("Would create polecat '%s' in rig '%s'\n", polecatName, rigName)
+				if slingNaked {
+					fmt.Printf("  --naked: would skip tmux session\n")
+				}
+				targetAgent = fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+				targetPane = "<new-pane>"
+			} else {
+				fmt.Printf("Target is polecat path '%s', creating polecat...\n", target)
+				spawnOpts := SlingSpawnOptions{
+					Force:   slingForce,
+					Naked:   slingNaked,
+					Account: slingAccount,
+					Create:  slingCreate,
+				}
+				spawnInfo, spawnErr := SpawnNamedPolecatForSling(rigName, polecatName, spawnOpts)
+				if spawnErr != nil {
+					return fmt.Errorf("creating polecat: %w", spawnErr)
+				}
+				targetAgent = spawnInfo.AgentID()
+				targetPane = spawnInfo.Pane
+
+				// Wake witness and refinery to monitor the new polecat
+				wakeRigAgents(rigName)
+			}
 		} else {
 			// Slinging to an existing agent
 			// Skip pane lookup if --naked (agent may be terminated)
@@ -667,6 +694,33 @@ func runSlingFormula(args []string) error {
 				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
 					return fmt.Errorf("spawning polecat: %w", spawnErr)
+				}
+				targetAgent = spawnInfo.AgentID()
+				targetPane = spawnInfo.Pane
+
+				// Wake witness and refinery to monitor the new polecat
+				wakeRigAgents(rigName)
+			}
+		} else if rigName, polecatName, isPolecatPath := ParsePolecatTarget(target); isPolecatPath && slingCreate {
+			// Polecat path with --create: create polecat before resolving
+			if slingDryRun {
+				fmt.Printf("Would create polecat '%s' in rig '%s'\n", polecatName, rigName)
+				if slingNaked {
+					fmt.Printf("  --naked: would skip tmux session\n")
+				}
+				targetAgent = fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+				targetPane = "<new-pane>"
+			} else {
+				fmt.Printf("Target is polecat path '%s', creating polecat...\n", target)
+				spawnOpts := SlingSpawnOptions{
+					Force:   slingForce,
+					Naked:   slingNaked,
+					Account: slingAccount,
+					Create:  slingCreate,
+				}
+				spawnInfo, spawnErr := SpawnNamedPolecatForSling(rigName, polecatName, spawnOpts)
+				if spawnErr != nil {
+					return fmt.Errorf("creating polecat: %w", spawnErr)
 				}
 				targetAgent = spawnInfo.AgentID()
 				targetPane = spawnInfo.Pane
