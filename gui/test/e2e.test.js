@@ -273,18 +273,16 @@ describe('Gas Town GUI E2E Tests', () => {
       await page.click('#new-convoy-btn');
       await page.waitForSelector('#new-convoy-modal:not(.hidden)', { timeout: 5000 });
 
-      // Try to submit without name
-      await page.click('#new-convoy-modal button[type="submit"]');
-
-      // Should show validation error or warning toast
-      // Native HTML5 validation will prevent submission if field is required
+      // Check that the name input has required attribute
       const inputRequired = await page.$eval(
         '#new-convoy-modal [name="name"]',
         el => el.hasAttribute('required')
       );
       expect(inputRequired).toBe(true);
 
-      await closeModals(page);
+      // Close modal by clicking the close button
+      await page.click('#new-convoy-modal [data-modal-close]');
+      await page.waitForSelector('#modal-overlay.hidden', { timeout: 5000 });
     });
 
     it('should validate sling form fields', async () => {
@@ -371,6 +369,22 @@ describe('Component Tests', () => {
   describe('Convoy List Component', () => {
     it('should render convoy list or empty state', async () => {
       await navigateToApp(page);
+
+      // Wait for convoy data to load - give more time for API call
+      await sleep(2000);
+
+      // Wait for convoy data to load (either cards or empty state)
+      try {
+        await page.waitForFunction(() => {
+          const hasConvoys = document.querySelector('.convoy-card');
+          const hasEmpty = document.querySelector('#convoy-list .empty-state');
+          return hasConvoys || hasEmpty;
+        }, { timeout: 8000 });
+      } catch (e) {
+        // If timeout, check what's in the convoy-list element for debugging
+        const listContent = await page.$eval('#convoy-list', el => el.innerHTML.substring(0, 200));
+        console.log('[Debug] convoy-list content:', listContent);
+      }
 
       // Either convoy cards or empty state should be present
       const hasConvoys = await elementExists(page, '.convoy-card');

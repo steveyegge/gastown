@@ -77,7 +77,11 @@
           <div class="view-header">
             <h1>Active Convoys</h1>
             <div class="view-actions">
-              <button class="btn btn-primary" id="new-convoy-btn">
+              <button class="btn btn-secondary" id="sling-btn" data-modal-open="sling">
+                <span class="material-icons">send</span>
+                Sling
+              </button>
+              <button class="btn btn-primary" id="new-convoy-btn" data-modal-open="new-convoy">
                 <span class="material-icons">add</span>
                 New Convoy
               </button>
@@ -111,7 +115,7 @@
           <div class="view-header">
             <h1>Inbox</h1>
             <div class="view-actions">
-              <button class="btn btn-secondary" id="compose-mail-btn">
+              <button class="btn btn-secondary" id="compose-mail-btn" data-modal-open="mail-compose">
                 <span class="material-icons">edit</span>
                 Compose
               </button>
@@ -156,60 +160,60 @@
     <!-- Modals -->
     <div class="modal-overlay hidden" id="modal-overlay">
       <!-- New Convoy Modal -->
-      <div class="modal hidden" id="modal-new-convoy">
+      <div class="modal hidden" id="new-convoy-modal">
         <div class="modal-header">
           <h2>Create Convoy</h2>
-          <button class="modal-close" data-close="modal">
+          <button class="modal-close" data-modal-close>
             <span class="material-icons">close</span>
           </button>
         </div>
         <form class="modal-body" id="convoy-form">
           <div class="form-group">
             <label for="convoy-name">Convoy Name</label>
-            <input type="text" id="convoy-name" placeholder="e.g., Deploy v2.0" required>
+            <input type="text" id="convoy-name" name="name" placeholder="e.g., Deploy v2.0" required>
           </div>
           <div class="form-group">
             <label for="convoy-issues">Tracked Issues</label>
-            <textarea id="convoy-issues" placeholder="Enter issue IDs (one per line)&#10;e.g., gt-123&#10;bd-456" rows="4"></textarea>
+            <textarea id="convoy-issues" name="issues" placeholder="Enter issue IDs (one per line)&#10;e.g., gt-123&#10;bd-456" rows="4"></textarea>
           </div>
           <div class="form-group">
             <label for="convoy-notify">Notify on completion</label>
-            <select id="convoy-notify">
+            <select id="convoy-notify" name="notify">
               <option value="">None</option>
               <option value="mayor/">Mayor</option>
               <option value="human">Human Overseer</option>
             </select>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-close="modal">Cancel</button>
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
             <button type="submit" class="btn btn-primary">Create Convoy</button>
           </div>
         </form>
       </div>
 
       <!-- Sling Modal -->
-      <div class="modal hidden" id="modal-sling">
+      <div class="modal hidden" id="sling-modal">
         <div class="modal-header">
           <h2>Sling Work</h2>
-          <button class="modal-close" data-close="modal">
+          <button class="modal-close" data-modal-close>
             <span class="material-icons">close</span>
           </button>
         </div>
         <form class="modal-body" id="sling-form">
           <div class="form-group">
             <label for="sling-bead">Issue or Formula</label>
-            <input type="text" id="sling-bead" placeholder="e.g., gt-123 or shiny-feature" required>
+            <input type="text" id="sling-bead" name="bead" placeholder="e.g., gt-123 or shiny-feature" required>
           </div>
           <div class="form-group">
             <label for="sling-target">Target</label>
-            <select id="sling-target" required>
+            <select id="sling-target" name="target" required>
               <option value="">Select target...</option>
               <!-- Populated dynamically -->
             </select>
           </div>
           <div class="form-group">
             <label for="sling-quality">Quality</label>
-            <select id="sling-quality">
+            <select id="sling-quality" name="quality">
               <option value="shiny">Shiny (default)</option>
               <option value="basic">Basic</option>
               <option value="chrome">Chrome</option>
@@ -217,38 +221,38 @@
           </div>
           <div class="form-group">
             <label for="sling-args">Instructions (optional)</label>
-            <textarea id="sling-args" placeholder="Additional instructions for the worker" rows="3"></textarea>
+            <textarea id="sling-args" name="molecule" placeholder="Additional instructions for the worker" rows="3"></textarea>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-close="modal">Cancel</button>
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
             <button type="submit" class="btn btn-primary">Sling</button>
           </div>
         </form>
       </div>
 
       <!-- Compose Mail Modal -->
-      <div class="modal hidden" id="modal-compose">
+      <div class="modal hidden" id="mail-compose-modal">
         <div class="modal-header">
           <h2>Compose Message</h2>
-          <button class="modal-close" data-close="modal">
+          <button class="modal-close" data-modal-close>
             <span class="material-icons">close</span>
           </button>
         </div>
         <form class="modal-body" id="compose-form">
           <div class="form-group">
             <label for="mail-to">To</label>
-            <input type="text" id="mail-to" placeholder="e.g., mayor/, greenplace/Toast" required>
+            <input type="text" id="mail-to" name="to" placeholder="e.g., mayor/, greenplace/Toast" required>
           </div>
           <div class="form-group">
             <label for="mail-subject">Subject</label>
-            <input type="text" id="mail-subject" placeholder="Subject" required>
+            <input type="text" id="mail-subject" name="subject" placeholder="Subject" required>
           </div>
           <div class="form-group">
             <label for="mail-message">Message</label>
-            <textarea id="mail-message" placeholder="Your message..." rows="6" required></textarea>
+            <textarea id="mail-message" name="message" placeholder="Your message..." rows="6" required></textarea>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-close="modal">Cancel</button>
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
             <button type="submit" class="btn btn-primary">Send</button>
           </div>
         </form>

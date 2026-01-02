@@ -49,14 +49,14 @@ async function init() {
   // Set up theme toggle
   setupThemeToggle();
 
+  // Subscribe to state changes FIRST (before loading data)
+  subscribeToState();
+
   // Connect WebSocket
   connectWebSocket();
 
   // Load initial data
   await loadInitialData();
-
-  // Subscribe to state changes
-  subscribeToState();
 
   console.log('[App] Initialization complete');
 }
