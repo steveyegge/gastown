@@ -7,8 +7,9 @@
     "start": "node server.js",
     "dev": "node server.js --dev",
     "test": "vitest run",
-    "test:e2e": "node tests/e2e/run.js",
-    "test:watch": "vitest watch"
+    "test:e2e": "vitest run test/e2e.test.js",
+    "test:watch": "vitest watch",
+    "test:ui": "vitest run --ui"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -17,7 +18,8 @@
   },
   "devDependencies": {
     "puppeteer": "^21.6.1",
-    "vitest": "^1.0.4"
+    "vitest": "^1.0.4",
+    "@vitest/ui": "^1.0.4"
   },
   "engines": {
     "node": ">=18.0.0"
