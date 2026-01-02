@@ -17,6 +17,9 @@ export default defineConfig({
     // Include test files
     include: ['test/**/*.test.js'],
 
+    // Global setup - start mock server before tests
+    globalSetup: './test/globalSetup.js',
+
     // Global setup
     globals: true,
 

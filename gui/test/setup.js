@@ -7,8 +7,9 @@
 import puppeteer from 'puppeteer';
 
 // Test configuration
+const PORT = process.env.PORT || 4444;
 export const CONFIG = {
-  baseUrl: process.env.TEST_URL || 'http://localhost:3000',
+  baseUrl: process.env.TEST_URL || `http://localhost:${PORT}`,
   headless: process.env.HEADLESS !== 'false',
   slowMo: parseInt(process.env.SLOW_MO) || 0,
   timeout: 30000,
