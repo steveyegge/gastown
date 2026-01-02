@@ -24,7 +24,7 @@ var (
 	installNoBeads    bool
 	installGit        bool
 	installGitHub     string
-	installPrivate    bool
+	installPublic     bool
 )
 
 var installCmd = &cobra.Command{
@@ -46,11 +46,12 @@ See docs/hq.md for advanced HQ configurations including beads
 redirects, multi-system setups, and HQ templates.
 
 Examples:
-  gt install ~/gt                         # Create HQ at ~/gt
-  gt install . --name my-workspace        # Initialize current dir
-  gt install ~/gt --no-beads              # Skip .beads/ initialization
-  gt install ~/gt --git                   # Also init git with .gitignore
-  gt install ~/gt --github=user/repo      # Also create GitHub repo`,
+  gt install ~/gt                              # Create HQ at ~/gt
+  gt install . --name my-workspace             # Initialize current dir
+  gt install ~/gt --no-beads                   # Skip .beads/ initialization
+  gt install ~/gt --git                        # Also init git with .gitignore
+  gt install ~/gt --github=user/repo           # Create private GitHub repo (default)
+  gt install ~/gt --github=user/repo --public  # Create public GitHub repo`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInstall,
 }
@@ -62,8 +63,8 @@ func init() {
 	installCmd.Flags().StringVar(&installPublicName, "public-name", "", "Public display name (defaults to town name)")
 	installCmd.Flags().BoolVar(&installNoBeads, "no-beads", false, "Skip town beads initialization")
 	installCmd.Flags().BoolVar(&installGit, "git", false, "Initialize git with .gitignore")
-	installCmd.Flags().StringVar(&installGitHub, "github", "", "Create GitHub repo (format: owner/repo)")
-	installCmd.Flags().BoolVar(&installPrivate, "private", false, "Make GitHub repo private (use with --github)")
+	installCmd.Flags().StringVar(&installGitHub, "github", "", "Create GitHub repo (format: owner/repo, private by default)")
+	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -217,7 +218,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Initialize git if requested (--git or --github implies --git)
 	if installGit || installGitHub != "" {
 		fmt.Println()
-		if err := InitGitForHarness(absPath, installGitHub, installPrivate); err != nil {
+		if err := InitGitForHarness(absPath, installGitHub, !installPublic); err != nil {
 			return fmt.Errorf("git initialization failed: %w", err)
 		}
 	}
@@ -283,5 +284,3 @@ func initTownBeads(townPath string) error {
 	}
 	return nil
 }
-
-

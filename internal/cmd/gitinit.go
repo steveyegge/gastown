@@ -14,7 +14,7 @@ import (
 
 var (
 	gitInitGitHub  string
-	gitInitPrivate bool
+	gitInitPublic  bool
 )
 
 var gitInitCmd = &cobra.Command{
@@ -26,7 +26,7 @@ var gitInitCmd = &cobra.Command{
 This command:
   1. Creates a comprehensive .gitignore for Gas Town
   2. Initializes a git repository if not already present
-  3. Optionally creates a GitHub repository
+  3. Optionally creates a GitHub repository (private by default)
 
 The .gitignore excludes:
   - Polecat worktrees and rig clones (recreated with 'gt sling' or 'gt rig add')
@@ -39,15 +39,15 @@ And tracks:
   - Rig configs and hop/ directory
 
 Examples:
-  gt git-init                              # Init git with .gitignore
-  gt git-init --github=user/repo           # Also create public GitHub repo
-  gt git-init --github=user/repo --private # Create private GitHub repo`,
+  gt git-init                             # Init git with .gitignore
+  gt git-init --github=user/repo          # Create private GitHub repo (default)
+  gt git-init --github=user/repo --public # Create public GitHub repo`,
 	RunE: runGitInit,
 }
 
 func init() {
-	gitInitCmd.Flags().StringVar(&gitInitGitHub, "github", "", "Create GitHub repo (format: owner/repo)")
-	gitInitCmd.Flags().BoolVar(&gitInitPrivate, "private", false, "Make GitHub repo private")
+	gitInitCmd.Flags().StringVar(&gitInitGitHub, "github", "", "Create GitHub repo (format: owner/repo, private by default)")
+	gitInitCmd.Flags().BoolVar(&gitInitPublic, "public", false, "Make GitHub repo public (repos are private by default)")
 	rootCmd.AddCommand(gitInitCmd)
 }
 
@@ -145,7 +145,7 @@ func runGitInit(cmd *cobra.Command, args []string) error {
 
 	// Create GitHub repo if requested
 	if gitInitGitHub != "" {
-		if err := createGitHubRepo(hqRoot, gitInitGitHub, gitInitPrivate); err != nil {
+		if err := createGitHubRepo(hqRoot, gitInitGitHub, !gitInitPublic); err != nil {
 			return err
 		}
 	}
@@ -222,7 +222,11 @@ func createGitHubRepo(hqRoot, repo string, private bool) error {
 		return fmt.Errorf("invalid GitHub repo format (expected owner/repo): %s", repo)
 	}
 
-	fmt.Printf("   → Creating GitHub repository %s...\n", repo)
+	visibility := "private"
+	if !private {
+		visibility = "public"
+	}
+	fmt.Printf("   → Creating %s GitHub repository %s...\n", visibility, repo)
 
 	// Build gh repo create command
 	args := []string{"repo", "create", repo, "--source", hqRoot}
@@ -241,7 +245,10 @@ func createGitHubRepo(hqRoot, repo string, private bool) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("gh repo create failed: %w", err)
 	}
-	fmt.Printf("   ✓ Created and pushed to GitHub: %s\n", repo)
+	fmt.Printf("   ✓ Created and pushed to GitHub: %s (%s)\n", repo, visibility)
+	if private {
+		fmt.Printf("   ℹ To make this repo public: %s\n", style.Dim.Render("gh repo edit "+repo+" --visibility public"))
+	}
 	return nil
 }
 
