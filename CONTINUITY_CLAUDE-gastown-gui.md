@@ -11,34 +11,61 @@ Create a comprehensive GUI for Gastown multi-agent orchestrator with modern anim
 - Real-time updates via `bd activity --follow`
 
 ## Current State
-**GUI IMPLEMENTATION COMPLETE - ALL 24 TESTS PASSING**
+**IMPLEMENTING REMAINING PHASES**
 - Private repo: https://github.com/web3dev1337/gastown-private
 - Branches: main, master, work1-8 (worktrees)
 - This ledger in work1 worktree
+- Go tests: 31/32 packages pass (beads needs `pip install beads-cli`)
+- GUI tests: 24/24 E2E tests passing
 
-## Tasks
-- [x] Fork repo as private (gastown-private)
-- [x] Create master branch and work1-8 worktrees
-- [x] Set up continuity ledger
-- [x] Deep analysis of codebase with sub-agents (4 agents completed)
-- [ ] Run existing test suite (Go not installed on system)
-- [x] Design GUI architecture (docs/GUI_IMPLEMENTATION_PLAN.md)
-- [x] Create implementation plan
-- [x] Implement GUI with animations
-- [x] Create automated tests with Puppeteer (24/24 passing)
-- [x] Create mock server for testing
-- [x] Fix all E2E test failures
+## Implementation Phases
 
-## Analysis Summary (Completed)
-Sub-agents analyzed:
-1. **Go Package Structure** - 40 internal packages, Cobra CLI, Bubbletea TUI
-2. **CLI Commands** - 100+ commands mapped (gt/bd commands)
-3. **Workflow/State** - Formula → Protomolecule → Mol/Wisp → Digest lifecycle
-4. **UX/UI Requirements** - Dashboard, views, theme support identified
+### Phase 1: Foundation ✅ COMPLETE
+- [x] Repository setup (private fork, worktrees)
+- [x] Codebase analysis (4 sub-agents)
+- [x] Node bridge server (`gui/server.js`)
+- [x] Basic HTML shell (`gui/index.html`)
+- [x] CSS framework with animations (`gui/css/`)
+- [x] WebSocket connection
 
-## GUI Implementation (COMPLETE)
+### Phase 2: Core Dashboard ✅ COMPLETE
+- [x] Sidebar with agent tree (`gui/js/components/sidebar.js`)
+- [x] Convoy list main view (`gui/js/components/convoy-list.js`)
+- [x] Status bar (header + footer)
+- [x] Real-time event stream (`gui/js/components/activity-feed.js`)
 
-### Files Created
+### Phase 3: Convoy Management 🔄 IN PROGRESS
+- [ ] Convoy detail view (expandable rows)
+- [ ] Issue tree with status indicators
+- [ ] Progress visualization (animated progress bars)
+- [ ] Worker assignment panel
+
+### Phase 4: Work Dispatch 🔄 PARTIAL
+- [x] Sling modal (basic)
+- [ ] Issue/formula autocomplete search
+- [ ] Dynamic target selection from agents
+- [x] Confirmation & result toast
+
+### Phase 5: Communication 🔄 PARTIAL
+- [x] Mail inbox (`gui/js/components/mail-list.js`)
+- [x] Compose modal
+- [ ] Nudge interface (from agent cards)
+- [ ] Escalation form
+
+### Phase 6: Polish 🔄 PARTIAL
+- [x] Animations for state transitions
+- [x] Keyboard shortcuts (1/2/3, Ctrl+N, Ctrl+R, ?)
+- [x] Themes (dark/light toggle)
+- [ ] Performance optimization
+- [ ] GSAP for complex animations
+
+### Phase 7: Testing ✅ MOSTLY COMPLETE
+- [x] Puppeteer E2E tests (24/24 passing)
+- [x] Mock server for testing
+- [ ] Unit tests for JS state/logic
+- [ ] Visual regression tests (Percy)
+
+## Files Created
 - `docs/GUI_IMPLEMENTATION_PLAN.md` - Full architecture and requirements
 - `gui/package.json` - Node dependencies
 - `gui/server.js` - Bridge server with REST API + WebSocket
@@ -47,27 +74,27 @@ Sub-agents analyzed:
 - `gui/js/app.js` - Main application entry
 - `gui/js/api.js` - REST and WebSocket client
 - `gui/js/state.js` - Reactive state management
-- `gui/js/components/` - All UI components:
-  - sidebar.js - Agent hierarchy tree
-  - convoy-list.js - Convoy cards with progress
-  - agent-grid.js - Agent status grid
-  - activity-feed.js - Real-time event stream
-  - mail-list.js - Mail inbox
-  - toast.js - Notification system
-  - modals.js - Modal dialog system
+- `gui/js/components/` - All UI components
 
-### Testing Infrastructure
+## Testing Infrastructure
 - `gui/test/setup.js` - Puppeteer test utilities
-- `gui/test/e2e.test.js` - Comprehensive E2E test suite
+- `gui/test/e2e.test.js` - Comprehensive E2E test suite (24 tests)
 - `gui/test/mock-server.js` - Mock server for testing without Go backend
 - `gui/test/globalSetup.js` - Vitest global setup hooks
 - `gui/vitest.config.js` - Vitest configuration
 
-### Running Tests
+## Running Tests
 ```bash
+# GUI tests
 cd gui
 npm install
-PORT=4444 npm test  # Run with explicit port to avoid conflicts
+PORT=5678 npm test
+
+# Go tests (requires Go 1.24+)
+cd /path/to/gastown
+go test ./...
+
+# Note: beads tests require: pip install beads-cli
 ```
 
 ## Commits
@@ -77,18 +104,17 @@ PORT=4444 npm test  # Run with explicit port to avoid conflicts
 4. `1d585fd` - Add mock server for testing and fix HTML selectors
 5. `38e952d` - Update continuity ledger
 6. `0fe8070` - Fix E2E test failures - all 24 tests passing
+7. `e4d88b8` - Update ledger with test results
 
 ## Notes
-- Go is not installed on the system - original Gastown tests cannot run
+- Go 1.24+ installed and working
 - GUI tests work with mock server providing fake API responses
-- Port conflicts may occur - use PORT env variable to override (default 4444)
-- Tests connect via WebSocket and verify page elements load correctly
+- Port conflicts may occur - use PORT env variable to override
+- Original Gastown CLI needs full Go environment to function
 
-## Summary
-The Gastown GUI implementation is complete:
-- Modern, responsive web interface with dark/light themes
-- Real-time updates via WebSocket
-- Navigation between Convoys, Agents, and Mail views
-- Modal dialogs for creating convoys, slinging work, and composing mail
-- Toast notifications for user feedback
-- E2E tests with Puppeteer for automated testing
+## Next Steps
+1. Implement Phase 3: Convoy detail view with expandable rows
+2. Add issue tree visualization
+3. Implement nudge interface
+4. Add unit tests for state.js
+5. Performance optimization

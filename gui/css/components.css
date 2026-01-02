@@ -1014,3 +1014,447 @@ select {
 .issue-list li:last-child {
   border-bottom: none;
 }
+
+/* === Phase 3: Convoy Detail View === */
+.convoy-card.expanded {
+  border-color: var(--accent-primary);
+}
+
+.convoy-expand-btn {
+  padding: var(--space-xs);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.convoy-expand-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.convoy-detail {
+  overflow: hidden;
+  transition: max-height 0.3s ease-out;
+  border-top: 1px solid var(--border-muted);
+  margin: 0 var(--space-md);
+  padding: var(--space-md) 0;
+}
+
+.convoy-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-lg);
+  margin-bottom: var(--space-md);
+}
+
+@media (max-width: 768px) {
+  .convoy-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.convoy-detail-section {
+  min-width: 0;
+}
+
+.convoy-detail-section h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.convoy-detail-section h4 .material-icons {
+  font-size: 16px;
+}
+
+.empty-hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* === Issue Tree === */
+.issue-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.issue-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.issue-item:hover {
+  background: var(--bg-hover);
+}
+
+.issue-item .issue-status-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.issue-item.status-open .issue-status-icon {
+  color: var(--text-muted);
+}
+
+.issue-item.status-in-progress .issue-status-icon {
+  color: var(--status-working);
+}
+
+.issue-item.status-done .issue-status-icon {
+  color: var(--status-done);
+}
+
+.issue-item.status-blocked .issue-status-icon {
+  color: var(--status-stuck);
+}
+
+.issue-title {
+  flex: 1;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.issue-assignee {
+  font-size: var(--text-xs);
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+/* === Worker Panel === */
+.worker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.worker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.worker-item:hover {
+  background: var(--bg-hover);
+}
+
+.worker-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.worker-avatar {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.worker-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.worker-name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.worker-status {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.worker-item.status-working .worker-avatar {
+  background: var(--status-working);
+  animation: pulse 1.5s infinite;
+}
+
+.worker-item.status-idle .worker-avatar {
+  background: var(--status-idle);
+}
+
+.worker-item.status-done .worker-avatar {
+  background: var(--status-done);
+}
+
+.worker-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.worker-task {
+  color: var(--text-muted);
+}
+
+.worker-task .material-icons {
+  font-size: 16px;
+}
+
+.btn-sm {
+  padding: 2px;
+}
+
+.btn-sm .material-icons {
+  font-size: 16px;
+}
+
+/* === Progress Breakdown === */
+.progress-breakdown {
+  padding: var(--space-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.progress-bar-stacked {
+  display: flex;
+  height: 8px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  margin-bottom: var(--space-sm);
+}
+
+.progress-segment {
+  height: 100%;
+  transition: width var(--transition-base);
+}
+
+.progress-segment.done {
+  background: var(--status-done);
+}
+
+.progress-segment.in-progress {
+  background: var(--status-working);
+}
+
+.progress-segment.pending {
+  background: var(--bg-secondary);
+}
+
+.progress-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+}
+
+.legend-item.done .legend-dot {
+  background: var(--status-done);
+}
+
+.legend-item.in-progress .legend-dot {
+  background: var(--status-working);
+}
+
+.legend-item.pending .legend-dot {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+}
+
+/* === Issue Chips (with status) === */
+.issue-chip.status-open {
+  border-left: 2px solid var(--text-muted);
+}
+
+.issue-chip.status-in-progress {
+  border-left: 2px solid var(--status-working);
+}
+
+.issue-chip.status-done {
+  border-left: 2px solid var(--status-done);
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.issue-chip.status-blocked {
+  border-left: 2px solid var(--status-stuck);
+}
+
+/* === Animated Progress Fill === */
+.animate-progress {
+  animation: progress-fill 0.5s ease-out;
+}
+
+@keyframes progress-fill {
+  from {
+    width: 0;
+  }
+}
+
+/* === Spin Animation for Running Status === */
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+/* === Convoy Name Styles === */
+.convoy-name {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* === Convoy Priority === */
+.convoy-priority {
+  font-size: var(--text-xs);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.convoy-priority.priority-high {
+  color: var(--status-stuck);
+  background: rgba(248, 81, 73, 0.15);
+}
+
+.convoy-priority.priority-normal {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.convoy-priority.priority-low {
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+}
+
+/* === Convoy Footer === */
+.convoy-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-tertiary);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.convoy-stats {
+  display: flex;
+  gap: var(--space-md);
+}
+
+.convoy-stats span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xxs);
+}
+
+.convoy-stats .material-icons {
+  font-size: 14px;
+}
+
+/* === Convoy Issues (chips) === */
+.convoy-issues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  padding: 0 var(--space-md) var(--space-sm);
+}
+
+.issue-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xxs);
+  padding: var(--space-xxs) var(--space-sm);
+  font-size: var(--text-xs);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+.issue-chip .material-icons {
+  font-size: 12px;
+}
+
+.issue-chip.more {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+/* === Convoy Progress Bar === */
+.convoy-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md) var(--space-md);
+}
+
+/* === Convoy Status Icon === */
+.convoy-status {
+  flex-shrink: 0;
+}
+
+.convoy-status .material-icons {
+  font-size: 24px;
+}
+
+.convoy-status.status-pending .material-icons {
+  color: var(--text-muted);
+}
+
+.convoy-status.status-running .material-icons {
+  color: var(--status-running);
+}
+
+.convoy-status.status-complete .material-icons {
+  color: var(--status-done);
+}
+
+.convoy-status.status-failed .material-icons {
+  color: var(--status-stuck);
+}
+
+.convoy-status.status-cancelled .material-icons {
+  color: var(--text-muted);
+}
