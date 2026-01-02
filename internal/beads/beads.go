@@ -225,6 +225,21 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	cmd := exec.Command("bd", fullArgs...)
 	cmd.Dir = b.workDir
 
+	// Explicitly set BEADS_DIR for child process to ensure bd uses the correct
+	// database. Without this, bd may search parent directories and find a different
+	// .beads/ directory with a different prefix, causing "prefix mismatch" errors.
+	beadsDir := filepath.Join(b.workDir, ".beads")
+	env := os.Environ()
+	// Filter out any existing BEADS_DIR to avoid conflicts
+	filteredEnv := make([]string, 0, len(env)+1)
+	for _, e := range env {
+		if !strings.HasPrefix(e, "BEADS_DIR=") {
+			filteredEnv = append(filteredEnv, e)
+		}
+	}
+	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
+	cmd.Env = filteredEnv
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

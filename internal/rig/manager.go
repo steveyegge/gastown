@@ -479,16 +479,18 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig boo
 
 	var agents []agentDef
 
-	// Always create rig-specific agents (using canonical naming: prefix-rig-role-name)
+	// Always create rig-specific agents using canonical gt- prefix.
+	// Agent bead IDs use the gastown namespace (gt-) regardless of the rig's
+	// beads prefix. Format: gt-<rig>-<role> (e.g., gt-tribal-witness)
 	agents = append(agents,
 		agentDef{
-			id:       beads.WitnessBeadIDWithPrefix(prefix, rigName),
+			id:       beads.WitnessBeadID(rigName),
 			roleType: "witness",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
 		},
 		agentDef{
-			id:       beads.RefineryBeadIDWithPrefix(prefix, rigName),
+			id:       beads.RefineryBeadID(rigName),
 			roleType: "refinery",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
