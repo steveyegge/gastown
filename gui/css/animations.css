@@ -349,6 +349,302 @@
   transition: transform 0.2s cubic-bezier(0.55, 0.055, 0.675, 0.19);
 }
 
+/* === Complex Animations (Phase 6) === */
+
+/* Typewriter effect */
+@keyframes typewriter {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes blink-caret {
+  0%, 100% {
+    border-right-color: transparent;
+  }
+  50% {
+    border-right-color: var(--accent-primary);
+  }
+}
+
+.typewriter {
+  overflow: hidden;
+  white-space: nowrap;
+  border-right: 2px solid var(--accent-primary);
+  animation: typewriter 2s steps(40) forwards, blink-caret 0.75s step-end infinite;
+}
+
+/* Ripple effect */
+@keyframes ripple {
+  0% {
+    transform: scale(0);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+.ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  pointer-events: none;
+}
+
+.ripple:active::after {
+  animation: ripple 0.6s ease-out;
+}
+
+/* Counter roll */
+@keyframes counter-roll {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.counter-change {
+  animation: counter-roll 0.3s ease-out;
+}
+
+/* Status ring pulse */
+@keyframes status-ring-pulse {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 0.8;
+  }
+  70% {
+    box-shadow: 0 0 0 10px currentColor;
+    opacity: 0;
+  }
+  100% {
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 0;
+  }
+}
+
+.status-pulse {
+  position: relative;
+}
+
+.status-pulse::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  animation: status-ring-pulse 2s infinite;
+}
+
+/* Slide reveal */
+@keyframes slide-reveal-right {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes slide-reveal-up {
+  from {
+    clip-path: inset(100% 0 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.reveal-right {
+  animation: slide-reveal-right 0.5s ease-out forwards;
+}
+
+.reveal-up {
+  animation: slide-reveal-up 0.5s ease-out forwards;
+}
+
+/* Flip animation */
+@keyframes flip-in {
+  0% {
+    transform: perspective(400px) rotateY(90deg);
+    opacity: 0;
+  }
+  100% {
+    transform: perspective(400px) rotateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes flip-out {
+  0% {
+    transform: perspective(400px) rotateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: perspective(400px) rotateY(-90deg);
+    opacity: 0;
+  }
+}
+
+.flip-enter {
+  animation: flip-in 0.4s ease-out;
+}
+
+.flip-exit {
+  animation: flip-out 0.4s ease-in forwards;
+}
+
+/* Success checkmark burst */
+@keyframes success-burst {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.success-icon {
+  animation: success-burst 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* Error shake with color flash */
+@keyframes error-flash {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(239, 68, 68, 0.1);
+  }
+}
+
+.error-shake {
+  animation: shake 0.4s ease, error-flash 0.4s ease;
+}
+
+/* Loading dots */
+@keyframes loading-dots {
+  0%, 80%, 100% {
+    transform: scale(0);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.loading-dots span {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: currentColor;
+  border-radius: 50%;
+  margin: 0 2px;
+  animation: loading-dots 1.4s infinite ease-in-out both;
+}
+
+.loading-dots span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+/* Progress shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+.progress-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Card hover lift with shadow */
+.card-lift {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.3s ease;
+}
+
+.card-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.3);
+}
+
+/* Magnetic button effect */
+.btn-magnetic {
+  transition: transform 0.2s ease;
+}
+
+/* === Performance Hints === */
+
+/* GPU acceleration hints */
+.gpu-accelerated {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
+}
+
+/* Contain for performance */
+.contain-layout {
+  contain: layout;
+}
+
+.contain-paint {
+  contain: paint;
+}
+
+.contain-strict {
+  contain: strict;
+}
+
+/* Layer hint for complex animations */
+.layer {
+  will-change: transform, opacity;
+}
+
+/* Reset will-change after animation */
+.layer.done {
+  will-change: auto;
+}
+
 /* === Reduced Motion === */
 
 @media (prefers-reduced-motion: reduce) {
@@ -359,5 +655,11 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .typewriter {
+    animation: none;
+    border-right: none;
+    width: auto;
   }
 }
