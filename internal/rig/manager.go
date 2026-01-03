@@ -260,6 +260,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("cloning for mayor: %w", err)
 	}
 
+	// Checkout the default branch for mayor (clone defaults to remote's HEAD, not our configured branch)
+	mayorGit := git.NewGitWithDir("", mayorRigPath)
+	if err := mayorGit.Checkout(defaultBranch); err != nil {
+		return nil, fmt.Errorf("checking out default branch for mayor: %w", err)
+	}
+
 	// Check if source repo has .beads/ with its own prefix - if so, use that prefix.
 	// This ensures we use the project's existing beads database instead of creating a new one.
 	// Without this, routing would fail when trying to access existing issues because the
