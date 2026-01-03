@@ -199,11 +199,11 @@ func attachToTmuxSession(sessionID string) error {
 	return cmd.Run()
 }
 
-// ensureMainBranch checks if a git directory is on the default branch.
+// ensureDefaultBranch checks if a git directory is on the default branch.
 // If not, warns the user and offers to switch.
 // Returns true if on default branch (or switched to it), false if user declined.
 // The rigPath parameter is used to look up the configured default branch.
-func ensureMainBranch(dir, roleName, rigPath string) bool {
+func ensureDefaultBranch(dir, roleName, rigPath string) bool {
 	g := git.NewGit(dir)
 
 	branch, err := g.CurrentBranch()
