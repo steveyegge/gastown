@@ -426,6 +426,8 @@ type processInfo struct {
 }
 
 // getTmuxSessionPIDs returns PIDs of all tmux server processes and pane shell PIDs.
+//
+//nolint:unparam // error return kept for future error handling
 func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) {
 	// Get tmux server PID and all pane PIDs
 	pids := make(map[int]bool)

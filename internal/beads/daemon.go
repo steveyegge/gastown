@@ -111,6 +111,8 @@ func EnsureBdDaemonHealth(workDir string) string {
 }
 
 // restartBdDaemons restarts all bd daemons.
+//
+//nolint:unparam // error return kept for future error handling
 func restartBdDaemons() error {
 	// Stop all daemons first
 	stopCmd := exec.Command("bd", "daemon", "killall")

@@ -240,6 +240,8 @@ func (c *LifecycleHygieneCheck) isSessionHealthy(identity, townRoot string) bool
 }
 
 // identityToSessionName converts an identity to its tmux session name.
+//
+//nolint:unparam // townRoot used conditionally for mayor case
 func identityToSessionName(identity, townRoot string) string {
 	switch identity {
 	case "mayor":

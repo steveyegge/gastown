@@ -469,6 +469,8 @@ func outputStatusText(status TownStatus) error {
 }
 
 // renderAgentDetails renders full agent bead details
+//
+//nolint:unparam // indent always receives same value for consistent formatting
 func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string) {
 	// Line 1: Agent bead ID + status
 	// Reconcile bead state with tmux session state to surface mismatches

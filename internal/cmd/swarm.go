@@ -523,6 +523,8 @@ func runSwarmDispatch(cmd *cobra.Command, args []string) error {
 }
 
 // spawnSwarmWorkersFromBeads spawns sessions for swarm workers using beads task list.
+//
+//nolint:unparam // error return kept for future error handling
 func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, workers []string, tasks []struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`

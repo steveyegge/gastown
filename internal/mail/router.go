@@ -185,7 +185,7 @@ func detectTownRoot(startDir string) string {
 // - Rig-level beads ({rig}/.beads) are for project issues only, not mail
 //
 // This ensures messages are visible to all agents in the town.
-func (r *Router) resolveBeadsDir(address string) string {
+func (r *Router) resolveBeadsDir(_ string) string {
 	// If no town root, fall back to workDir's .beads
 	if r.townRoot == "" {
 		return filepath.Join(r.workDir, ".beads")

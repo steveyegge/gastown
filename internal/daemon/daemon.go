@@ -109,7 +109,7 @@ func (d *Daemon) Run() error {
 	for {
 		select {
 		case <-d.ctx.Done():
-			d.logger.Println("Daemon context cancelled, shutting down")
+			d.logger.Println("Daemon context canceled, shutting down")
 			return d.shutdown(state)
 
 		case sig := <-sigChan:
@@ -667,6 +667,8 @@ func (d *Daemon) processLifecycleRequests() {
 }
 
 // shutdown performs graceful shutdown.
+//
+//nolint:unparam // error return kept for future error handling
 func (d *Daemon) shutdown(state *State) error {
 	d.logger.Println("Daemon shutting down")
 

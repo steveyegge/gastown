@@ -63,7 +63,7 @@ func AssignThemeFromPalette(rigName string, palette []Theme) Theme {
 		return DefaultPalette[0]
 	}
 	h := fnv.New32a()
-	h.Write([]byte(rigName))
+	_, _ = h.Write([]byte(rigName))
 	idx := int(h.Sum32()) % len(palette)
 	return palette[idx]
 }

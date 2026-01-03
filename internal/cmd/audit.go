@@ -159,6 +159,8 @@ func parseDuration(s string) (time.Duration, error) {
 }
 
 // collectGitCommits queries git log for commits by the actor.
+//
+//nolint:unparam // error return kept for future error handling
 func collectGitCommits(townRoot, actor string, since time.Time) ([]AuditEntry, error) {
 	var entries []AuditEntry
 

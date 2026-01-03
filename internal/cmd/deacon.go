@@ -23,6 +23,8 @@ import (
 
 // getDeaconSessionName returns the Deacon session name for the current workspace.
 // The session name includes the town name to avoid collisions between multiple HQs.
+//
+//nolint:unparam // error return kept for API consistency
 func getDeaconSessionName() (string, error) {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -1113,6 +1115,8 @@ func getPolecatStaleness(polecatPath string) time.Duration {
 }
 
 // nukeZombie cleans up a zombie polecat.
+//
+//nolint:unparam // error return kept for future error handling
 func nukeZombie(townRoot string, z zombieInfo, t *tmux.Tmux) error {
 	// Step 1: Kill tmux session if somehow still exists
 	if exists, _ := t.HasSession(z.sessionName); exists {
@@ -1226,7 +1230,7 @@ func sendMail(townRoot, to, subject, body string) {
 }
 
 // updateAgentBeadState updates an agent bead's state.
-func updateAgentBeadState(townRoot, agent, state, reason string) {
+func updateAgentBeadState(townRoot, agent, state, _ string) {
 	townName, err := workspace.GetTownName(townRoot)
 	if err != nil {
 		return

@@ -186,7 +186,7 @@ func (l *Lock) write(sessionID string) error {
 		return fmt.Errorf("marshaling lock info: %w", err)
 	}
 
-	if err := os.WriteFile(l.lockPath, data, 0644); err != nil {
+	if err := os.WriteFile(l.lockPath, data, 0600); err != nil {
 		return fmt.Errorf("writing lock file: %w", err)
 	}
 
@@ -340,7 +340,7 @@ type execCmdWrapper struct {
 }
 
 func (c *execCmdWrapper) Output() ([]byte, error) {
-	cmd := exec.Command(c.name, c.args...)
+	cmd := exec.Command(c.name, c.args...) // #nosec G204 -- command constructed internally
 	return cmd.Output()
 }
 

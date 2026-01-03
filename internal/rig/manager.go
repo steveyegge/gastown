@@ -568,7 +568,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 // be initialized with 'gt' prefix for this to work.
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
-func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig bool) error {
+func (m *Manager) initAgentBeads(_, rigName, prefix string, isFirstRig bool) error {
 	// Agent beads go in town beads (gt-* prefix), not rig beads.
 	// This enables cross-rig agent coordination via canonical IDs.
 	townBeadsDir := filepath.Join(m.townRoot, ".beads")
@@ -923,6 +923,7 @@ func (m *Manager) seedPatrolMoleculesManually(rigPath string) error {
 		}
 
 		// Create the molecule
+		// #nosec G204 -- bd is a trusted internal tool
 		cmd := exec.Command("bd", "create",
 			"--type=molecule",
 			"--title="+mol.title,

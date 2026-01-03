@@ -361,11 +361,11 @@ func (e *Engineer) runTests(ctx context.Context) ProcessResult {
 		}
 		lastErr = err
 
-		// Check if context was cancelled
+		// Check if context was canceled
 		if ctx.Err() != nil {
 			return ProcessResult{
 				Success: false,
-				Error:   "test run cancelled",
+				Error:   "test run canceled",
 			}
 		}
 	}
@@ -600,7 +600,7 @@ func (e *Engineer) handleFailureFromQueue(mr *mrqueue.MR, result ProcessResult) 
 // This serializes conflict resolution - only one polecat can resolve conflicts at a time.
 // If the slot is already held, we skip creating the task and let the MR stay in queue.
 // When the current resolution completes and merges, the slot is released.
-func (e *Engineer) createConflictResolutionTask(mr *mrqueue.MR, result ProcessResult) (string, error) {
+func (e *Engineer) createConflictResolutionTask(mr *mrqueue.MR, _ ProcessResult) (string, error) {
 	// === MERGE SLOT GATE: Serialize conflict resolution ===
 	// Ensure merge slot exists (idempotent)
 	slotID, err := e.beads.MergeSlotEnsureExists()

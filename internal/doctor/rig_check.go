@@ -162,7 +162,7 @@ func (c *GitExcludeConfiguredCheck) Run(ctx *CheckContext) *CheckResult {
 				existing[line] = true
 			}
 		}
-		file.Close()
+		_ = file.Close()
 	}
 
 	// Check for missing entries

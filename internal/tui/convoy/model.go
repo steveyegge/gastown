@@ -142,7 +142,7 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 		WHERE d.issue_id = '%s' AND d.type = 'tracks'
 	`, convoyID)
 
-	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, query)
+	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, query) // #nosec G204 -- sqlite3 with controlled args
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
@@ -210,7 +210,7 @@ func getIssueDetailsBatch(townBeads string, issueIDs []string) map[string]IssueI
 	args := append([]string{"show"}, issueIDs...)
 	args = append(args, "--json")
 
-	cmd := exec.CommandContext(ctx, "bd", args...)
+	cmd := exec.CommandContext(ctx, "bd", args...) // #nosec G204 -- bd is a trusted internal tool
 	cmd.Dir = townBeads
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout

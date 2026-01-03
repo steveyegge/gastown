@@ -440,6 +440,7 @@ func (m *Manager) StopAll(force bool) error {
 // This makes the work visible via 'gt hook' when the session starts.
 func (m *Manager) hookIssue(issueID, agentID, workDir string) error {
 	// Use bd update to set status=hooked and assign to the polecat
+	// #nosec G204 -- bd is a trusted internal tool
 	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID)
 	cmd.Dir = workDir
 	cmd.Stderr = os.Stderr

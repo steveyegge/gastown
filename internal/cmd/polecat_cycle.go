@@ -82,6 +82,8 @@ func cyclePolecatSession(direction int, sessionOverride string) error {
 // parsePolecatSessionName extracts rig and polecat name from a tmux session name.
 // Format: gt-<rig>-<name> where name is NOT crew-*, witness, or refinery.
 // Returns empty strings and false if the format doesn't match.
+//
+//nolint:unparam // polecatName kept for API consistency
 func parsePolecatSessionName(sessionName string) (rigName, polecatName string, ok bool) {
 	// Must start with "gt-"
 	if !strings.HasPrefix(sessionName, "gt-") {
@@ -133,6 +135,8 @@ func parsePolecatSessionName(sessionName string) (rigName, polecatName string, o
 // findRigPolecatSessions returns all polecat sessions for a given rig.
 // Uses tmux list-sessions to find sessions matching gt-<rig>-<name> pattern,
 // excluding crew, witness, and refinery sessions.
+//
+//nolint:unparam // error return kept for future error handling
 func findRigPolecatSessions(rigName string) ([]string, error) {
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
 	out, err := cmd.Output()

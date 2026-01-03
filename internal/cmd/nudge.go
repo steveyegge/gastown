@@ -433,6 +433,8 @@ func resolveNudgePattern(pattern string, agents []*AgentSession, townName string
 // Returns (shouldSend bool, level string, err error).
 // If force is true, always returns true.
 // If the agent bead cannot be found, returns true (fail-open for backward compatibility).
+//
+//nolint:unparam // error return kept for future error handling
 func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string, error) {
 	if force {
 		return true, "", nil

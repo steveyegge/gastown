@@ -88,7 +88,7 @@ func (c *Curator) Start() error {
 	eventsPath := filepath.Join(c.townRoot, events.EventsFile)
 
 	// Open events file, creating if needed
-	file, err := os.OpenFile(eventsPath, os.O_RDONLY|os.O_CREATE, 0644)
+	file, err := os.OpenFile(eventsPath, os.O_RDONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return fmt.Errorf("opening events file: %w", err)
 	}

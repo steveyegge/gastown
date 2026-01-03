@@ -35,7 +35,7 @@ func NewMQEventSource(beadsDir string) (*MQEventSource, error) {
 		if err != nil {
 			return nil, err
 		}
-		f.Close()
+		_ = f.Close()
 	}
 
 	file, err := os.Open(logPath)

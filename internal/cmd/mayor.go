@@ -16,6 +16,8 @@ import (
 
 // getMayorSessionName returns the Mayor session name for the current workspace.
 // The session name includes the town name to avoid collisions between multiple HQs.
+//
+//nolint:unparam // error return kept for API consistency
 func getMayorSessionName() (string, error) {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {

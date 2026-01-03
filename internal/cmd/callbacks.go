@@ -274,6 +274,8 @@ func classifyCallback(subject string) CallbackType {
 
 // handlePolecatDone processes a POLECAT_DONE callback.
 // These come from Witnesses forwarding polecat completion notices.
+//
+//nolint:unparam // error return kept for future error handling
 func handlePolecatDone(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
 	matches := patternPolecatDone.FindStringSubmatch(msg.Subject)
 	polecatName := ""
@@ -306,6 +308,8 @@ func handlePolecatDone(townRoot string, msg *mail.Message, dryRun bool) (string,
 }
 
 // handleMergeCompleted processes a merge completion callback from Refinery.
+//
+//nolint:unparam // error return kept for future error handling
 func handleMergeCompleted(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
 	matches := patternMergeCompleted.FindStringSubmatch(msg.Subject)
 	branch := ""
@@ -353,6 +357,8 @@ func handleMergeCompleted(townRoot string, msg *mail.Message, dryRun bool) (stri
 }
 
 // handleMergeRejected processes a merge rejection callback from Refinery.
+//
+//nolint:unparam // error return kept for future error handling
 func handleMergeRejected(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
 	matches := patternMergeRejected.FindStringSubmatch(msg.Subject)
 	branch := ""
