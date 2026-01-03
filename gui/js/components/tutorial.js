@@ -157,10 +157,10 @@ const TUTORIAL_STEPS = [
         <li><strong>Escalations</strong> - "I'm stuck, need help!"</li>
       </ul>
       <p>You (the human overseer) can also send mail to agents.</p>
-      <p><strong>Tip:</strong> Click the Mail tab or press <kbd>3</kbd> to view messages.</p>
+      <p><strong>Tip:</strong> Click the <strong>Mail</strong> tab in the navigation bar, or press <kbd>3</kbd>.</p>
     `,
     action: null,
-    highlight: '[data-view="mail"]',
+    highlight: null,
   },
   {
     id: 'keyboard',
