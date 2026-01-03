@@ -486,6 +486,34 @@ func (e *Engineer) handleSuccessFromQueue(mr *mrqueue.MR, result ProcessResult) 
 		fmt.Fprintf(e.output, "[Engineer] Released merge slot\n")
 	}
 
+	// Update and close the MR bead (matches handleSuccess behavior)
+	if mr.ID != "" {
+		// Fetch the MR bead to update its fields
+		mrBead, err := e.beads.Show(mr.ID)
+		if err != nil {
+			fmt.Fprintf(e.output, "[Engineer] Warning: failed to fetch MR bead %s: %v\n", mr.ID, err)
+		} else {
+			// Update MR with merge_commit SHA and close_reason
+			mrFields := beads.ParseMRFields(mrBead)
+			if mrFields == nil {
+				mrFields = &beads.MRFields{}
+			}
+			mrFields.MergeCommit = result.MergeCommit
+			mrFields.CloseReason = "merged"
+			newDesc := beads.SetMRFields(mrBead, mrFields)
+			if err := e.beads.Update(mr.ID, beads.UpdateOptions{Description: &newDesc}); err != nil {
+				fmt.Fprintf(e.output, "[Engineer] Warning: failed to update MR %s with merge commit: %v\n", mr.ID, err)
+			}
+		}
+
+		// Close MR bead with reason 'merged'
+		if err := e.beads.CloseWithReason("merged", mr.ID); err != nil {
+			fmt.Fprintf(e.output, "[Engineer] Warning: failed to close MR %s: %v\n", mr.ID, err)
+		} else {
+			fmt.Fprintf(e.output, "[Engineer] Closed MR bead: %s\n", mr.ID)
+		}
+	}
+
 	// 1. Close source issue with reference to MR
 	if mr.SourceIssue != "" {
 		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
