@@ -410,7 +410,7 @@ func createSwarmWisp(workDir string, payload *SwarmStartPayload) (string, error)
 
 // findCleanupWisp finds an existing cleanup wisp for a polecat.
 func findCleanupWisp(workDir, polecatName string) (string, error) {
-	cmd := exec.Command("bd", "list",
+	cmd := exec.Command("bd", "list", //nolint:gosec // G204: bd is a trusted internal tool
 		"--wisp",
 		"--labels", fmt.Sprintf("polecat:%s,state:merge-requested", polecatName),
 		"--status", "open",

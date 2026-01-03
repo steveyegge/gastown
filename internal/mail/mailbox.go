@@ -346,7 +346,7 @@ func (m *Mailbox) closeInDir(id, beadsDir string) error {
 	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
 		args = append(args, "--session="+sessionID)
 	}
-	cmd := exec.Command("bd", args...)
+	cmd := exec.Command("bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = m.workDir
 	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 
@@ -740,7 +740,7 @@ func (m *Mailbox) appendLegacy(msg *Message) error {
 	}
 
 	// Open for append
-	file, err := os.OpenFile(m.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(m.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}

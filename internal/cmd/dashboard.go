@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os/exec"
 	"runtime"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/web"
@@ -67,11 +68,16 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		go openBrowser(url)
 	}
 
-	// Start the server
+	// Start the server with timeouts
 	fmt.Printf("🚚 Gas Town Dashboard starting at %s\n", url)
 	fmt.Printf("   Press Ctrl+C to stop\n")
 
-	return http.ListenAndServe(fmt.Sprintf(":%d", dashboardPort), handler)
+	server := &http.Server{
+		Addr:              fmt.Sprintf(":%d", dashboardPort),
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	return server.ListenAndServe()
 }
 
 // openBrowser opens the specified URL in the default browser.

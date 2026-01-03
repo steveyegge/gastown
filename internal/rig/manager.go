@@ -334,7 +334,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			// bd init --prefix will create the database and auto-import from issues.jsonl.
 			sourceBeadsDB := filepath.Join(mayorRigPath, ".beads", "beads.db")
 			if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
-				cmd := exec.Command("bd", "init", "--prefix", sourcePrefix)
+				cmd := exec.Command("bd", "init", "--prefix", sourcePrefix) //nolint:gosec // G204: bd is a trusted internal tool
 				cmd.Dir = mayorRigPath
 				if output, err := cmd.CombinedOutput(); err != nil {
 					fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
@@ -923,7 +923,7 @@ func (m *Manager) seedPatrolMoleculesManually(rigPath string) error {
 		}
 
 		// Create the molecule
-		cmd := exec.Command("bd", "create",
+		cmd := exec.Command("bd", "create", //nolint:gosec // G204: bd is a trusted internal tool
 			"--type=molecule",
 			"--title="+mol.title,
 			"--description="+mol.desc,

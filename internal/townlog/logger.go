@@ -80,7 +80,7 @@ func (l *Logger) LogEvent(event Event) error {
 	}
 
 	// Open file for appending
-	f, err := os.OpenFile(l.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(l.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("opening log file: %w", err)
 	}
@@ -211,7 +211,7 @@ func truncate(s string, maxLen int) string {
 func ReadEvents(townRoot string) ([]Event, error) {
 	path := logPath(townRoot)
 
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed from trusted townRoot
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil // No log file yet

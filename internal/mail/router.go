@@ -622,7 +622,7 @@ func (r *Router) sendToSingle(msg *Message) error {
 	}
 
 	beadsDir := r.resolveBeadsDir(msg.To)
-	cmd := exec.Command("bd", args...)
+	cmd := exec.Command("bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Env = append(cmd.Environ(),
 		"BEADS_DIR="+beadsDir,
 	)

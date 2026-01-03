@@ -101,8 +101,8 @@ func runPrime(cmd *cobra.Command, args []string) error {
 			persistSessionID(cwd, sessionID)
 		}
 		// Set environment for this process (affects event emission below)
-		os.Setenv("GT_SESSION_ID", sessionID)
-		os.Setenv("CLAUDE_SESSION_ID", sessionID) // Legacy compatibility
+		_ = os.Setenv("GT_SESSION_ID", sessionID)
+		_ = os.Setenv("CLAUDE_SESSION_ID", sessionID) // Legacy compatibility
 		// Output session beacon
 		fmt.Printf("[session:%s]\n", sessionID)
 		if source != "" {
@@ -1564,7 +1564,7 @@ func emitSessionEvent(ctx RoleContext) {
 
 	// Emit the event
 	payload := events.SessionPayload(sessionID, actor, topic, ctx.WorkDir)
-	events.LogFeed(events.TypeSessionStart, actor, payload)
+	_ = events.LogFeed(events.TypeSessionStart, actor, payload)
 }
 
 // outputSessionMetadata prints a structured metadata line for seance discovery.

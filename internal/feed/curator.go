@@ -95,7 +95,7 @@ func (c *Curator) Start() error {
 
 	// Seek to end to only process new events
 	if _, err := file.Seek(0, io.SeekEnd); err != nil {
-		file.Close()
+		_ = file.Close() //nolint:gosec // G104: best effort cleanup on error
 		return fmt.Errorf("seeking to end: %w", err)
 	}
 
@@ -291,7 +291,7 @@ func (c *Curator) writeFeedEvent(event *events.Event) {
 	}
 	defer f.Close()
 
-	f.Write(data)
+	_, _ = f.Write(data)
 }
 
 // generateSummary creates a human-readable summary of an event.

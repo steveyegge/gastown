@@ -226,7 +226,7 @@ func runFeedTUI(workDir string) error {
 
 	// Combine all sources
 	multiSource := feed.NewMultiSource(sources...)
-	defer multiSource.Close()
+	defer func() { _ = multiSource.Close() }()
 
 	// Create model and connect event source
 	m := feed.NewModel()

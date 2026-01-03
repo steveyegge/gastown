@@ -35,7 +35,7 @@ func writeJSON(path string, v interface{}) error {
 	}
 
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp) // cleanup on failure
+		_ = os.Remove(tmp) // cleanup on failure
 		return fmt.Errorf("rename: %w", err)
 	}
 

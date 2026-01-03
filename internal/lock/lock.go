@@ -340,7 +340,7 @@ type execCmdWrapper struct {
 }
 
 func (c *execCmdWrapper) Output() ([]byte, error) {
-	cmd := exec.Command(c.name, c.args...)
+	cmd := exec.Command(c.name, c.args...) //nolint:gosec // G204: command args are controlled internally
 	return cmd.Output()
 }
 

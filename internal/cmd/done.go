@@ -326,7 +326,7 @@ func runDone(cmd *cobra.Command, args []string) error {
 	}
 
 	// Log done event (townlog and activity feed)
-	LogDone(townRoot, sender, issueID)
+	_ = LogDone(townRoot, sender, issueID)
 	_ = events.LogFeed(events.TypeDone, sender, events.DonePayload(issueID, branch))
 
 	// Update agent bead state (ZFC: self-report completion)

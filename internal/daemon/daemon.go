@@ -46,7 +46,7 @@ func New(config *Config) (*Daemon, error) {
 	}
 
 	// Open log file
-	logFile, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("opening log file: %w", err)
 	}
@@ -108,7 +108,7 @@ func (d *Daemon) Run() error {
 	for {
 		select {
 		case <-d.ctx.Done():
-			d.logger.Println("Daemon context cancelled, shutting down")
+			d.logger.Println("Daemon context canceled, shutting down")
 			return d.shutdown(state)
 
 		case sig := <-sigChan:

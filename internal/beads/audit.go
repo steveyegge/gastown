@@ -84,7 +84,7 @@ func (b *Beads) LogDetachAudit(entry DetachAuditEntry) error {
 	}
 
 	// Append to audit log file
-	f, err := os.OpenFile(auditPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(auditPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("opening audit log: %w", err)
 	}

@@ -143,7 +143,7 @@ func (m *Manager) Start(foreground bool) error {
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but Claude dead. Kill and recreate.
-		fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, Claude dead). Recreating...")
+		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, Claude dead). Recreating...")
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
@@ -403,14 +403,14 @@ func parseTime(s string) time.Time {
 // The Refinery agent (Claude) handles all merge processing.
 // See: ZFC #5 - Move merge/conflict decisions from Go to Refinery agent
 func (m *Manager) run(ref *Refinery) error {
-	fmt.Fprintln(m.output, "")
-	fmt.Fprintln(m.output, "╔══════════════════════════════════════════════════════════════╗")
-	fmt.Fprintln(m.output, "║  Foreground mode is deprecated.                              ║")
-	fmt.Fprintln(m.output, "║                                                              ║")
-	fmt.Fprintln(m.output, "║  The Refinery agent (Claude) handles all merge decisions.   ║")
-	fmt.Fprintln(m.output, "║  Use 'gt refinery start' to run in background mode.         ║")
-	fmt.Fprintln(m.output, "╚══════════════════════════════════════════════════════════════╝")
-	fmt.Fprintln(m.output, "")
+	_, _ = fmt.Fprintln(m.output, "")
+	_, _ = fmt.Fprintln(m.output, "╔══════════════════════════════════════════════════════════════╗")
+	_, _ = fmt.Fprintln(m.output, "║  Foreground mode is deprecated.                              ║")
+	_, _ = fmt.Fprintln(m.output, "║                                                              ║")
+	_, _ = fmt.Fprintln(m.output, "║  The Refinery agent (Claude) handles all merge decisions.   ║")
+	_, _ = fmt.Fprintln(m.output, "║  Use 'gt refinery start' to run in background mode.         ║")
+	_, _ = fmt.Fprintln(m.output, "╚══════════════════════════════════════════════════════════════╝")
+	_, _ = fmt.Fprintln(m.output, "")
 	return nil
 }
 
@@ -486,7 +486,7 @@ func (m *Manager) runTests(testCmd string) error {
 		return nil
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd := exec.Command(parts[0], parts[1:]...) //nolint:gosec // G204: testCmd is from trusted rig config
 	cmd.Dir = m.workDir
 
 	var stderr bytes.Buffer
@@ -731,7 +731,7 @@ func (m *Manager) Retry(id string, processNow bool) error {
 	// The Refinery agent handles merge processing.
 	// It will pick up this MR in its next patrol cycle.
 	if processNow {
-		fmt.Fprintln(m.output, "Note: --now is deprecated. The Refinery agent will process this MR in its next patrol cycle.")
+		_, _ = fmt.Fprintln(m.output, "Note: --now is deprecated. The Refinery agent will process this MR in its next patrol cycle.")
 	}
 
 	return nil

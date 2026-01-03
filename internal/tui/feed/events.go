@@ -255,7 +255,7 @@ func (s *GtEventsSource) tail(ctx context.Context) {
 	defer close(s.events)
 
 	// Seek to end for live tailing
-	s.file.Seek(0, 2)
+	_, _ = s.file.Seek(0, 2)
 
 	scanner := bufio.NewScanner(s.file)
 	ticker := time.NewTicker(100 * time.Millisecond)

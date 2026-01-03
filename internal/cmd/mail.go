@@ -433,7 +433,7 @@ func init() {
 	// Reply flags
 	mailReplyCmd.Flags().StringVarP(&mailReplySubject, "subject", "s", "", "Override reply subject (default: Re: <original>)")
 	mailReplyCmd.Flags().StringVarP(&mailReplyMessage, "message", "m", "", "Reply message body (required)")
-	mailReplyCmd.MarkFlagRequired("message")
+	_ = mailReplyCmd.MarkFlagRequired("message")
 
 	// Search flags
 	mailSearchCmd.Flags().StringVar(&mailSearchFrom, "from", "", "Filter by sender address")

@@ -221,7 +221,7 @@ func ParseSwarmStart(body string) (*SwarmStartPayload, error) {
 		if strings.HasPrefix(line, "SwarmID:") || strings.HasPrefix(line, "swarm_id:") {
 			payload.SwarmID = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "SwarmID:"), "swarm_id:"))
 		} else if strings.HasPrefix(line, "Total:") {
-			fmt.Sscanf(line, "Total: %d", &payload.Total)
+			_, _ = fmt.Sscanf(line, "Total: %d", &payload.Total)
 		}
 	}
 

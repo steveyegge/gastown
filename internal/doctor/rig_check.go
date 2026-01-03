@@ -162,7 +162,7 @@ func (c *GitExcludeConfiguredCheck) Run(ctx *CheckContext) *CheckResult {
 				existing[line] = true
 			}
 		}
-		file.Close()
+		_ = file.Close() //nolint:gosec // G104: best-effort close
 	}
 
 	// Check for missing entries
@@ -203,7 +203,7 @@ func (c *GitExcludeConfiguredCheck) Fix(ctx *CheckContext) error {
 	}
 
 	// Append missing entries
-	f, err := os.OpenFile(c.excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(c.excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to open exclude file: %w", err)
 	}

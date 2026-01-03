@@ -278,7 +278,7 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
 		agent := fmt.Sprintf("%s/%s", rigName, polecatName)
 		logger := townlog.NewLogger(townRoot)
-		logger.Log(townlog.EventWake, agent, sessionIssue)
+		_ = logger.Log(townlog.EventWake, agent, sessionIssue)
 	}
 
 	return nil
@@ -314,7 +314,7 @@ func runSessionStop(cmd *cobra.Command, args []string) error {
 			reason = "gt session stop --force"
 		}
 		logger := townlog.NewLogger(townRoot)
-		logger.Log(townlog.EventKill, agent, reason)
+		_ = logger.Log(townlog.EventKill, agent, reason)
 	}
 
 	return nil

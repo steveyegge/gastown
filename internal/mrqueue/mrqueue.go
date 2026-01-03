@@ -79,7 +79,7 @@ func (q *Queue) EnsureDir() error {
 // generateID creates a unique MR ID.
 func generateID() string {
 	b := make([]byte, 4)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return fmt.Sprintf("mr-%d-%s", time.Now().Unix(), hex.EncodeToString(b))
 }
 
@@ -280,7 +280,7 @@ func (q *Queue) Claim(id, workerID string) error {
 		return fmt.Errorf("writing temp file: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath) // cleanup
+		_ = os.Remove(tmpPath) // cleanup
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 

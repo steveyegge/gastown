@@ -73,7 +73,7 @@ func HealthCheckStateFile(townRoot string) string {
 func LoadHealthCheckState(townRoot string) (*HealthCheckState, error) {
 	stateFile := HealthCheckStateFile(townRoot)
 
-	data, err := os.ReadFile(stateFile)
+	data, err := os.ReadFile(stateFile) //nolint:gosec // G304: path is constructed from trusted townRoot
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Return empty state
@@ -112,7 +112,7 @@ func SaveHealthCheckState(townRoot string, state *HealthCheckState) error {
 		return fmt.Errorf("marshaling health check state: %w", err)
 	}
 
-	return os.WriteFile(stateFile, data, 0644)
+	return os.WriteFile(stateFile, data, 0600)
 }
 
 // GetAgentState returns the health state for an agent, creating if needed.
