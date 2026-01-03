@@ -453,6 +453,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
 
+	// Store dispatcher in bead description (enables completion notification to dispatcher)
+	if err := storeDispatcherInBead(beadID, actor); err != nil {
+		// Warn but don't fail - polecat will still complete work
+		fmt.Printf("%s Could not store dispatcher in bead: %v\n", style.Dim.Render("Warning:"), err)
+	}
+
 	// Store args in bead description (no-tmux mode: beads as data plane)
 	if slingArgs != "" {
 		if err := storeArgsInBead(beadID, slingArgs); err != nil {
@@ -505,6 +511,52 @@ func storeArgsInBead(beadID, args string) error {
 
 	// Set the args
 	fields.AttachedArgs = args
+
+	// Update the description
+	newDesc := beads.SetAttachmentFields(issue, fields)
+
+	// Update the bead
+	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd.Stderr = os.Stderr
+	if err := updateCmd.Run(); err != nil {
+		return fmt.Errorf("updating bead description: %w", err)
+	}
+
+	return nil
+}
+
+// storeDispatcherInBead stores the dispatcher agent ID in the bead's description.
+// This enables polecats to notify the dispatcher when work is complete.
+func storeDispatcherInBead(beadID, dispatcher string) error {
+	if dispatcher == "" {
+		return nil
+	}
+
+	// Get the bead to preserve existing description content
+	showCmd := exec.Command("bd", "show", beadID, "--json")
+	out, err := showCmd.Output()
+	if err != nil {
+		return fmt.Errorf("fetching bead: %w", err)
+	}
+
+	// Parse the bead
+	var issues []beads.Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return fmt.Errorf("parsing bead: %w", err)
+	}
+	if len(issues) == 0 {
+		return fmt.Errorf("bead not found")
+	}
+	issue := &issues[0]
+
+	// Get or create attachment fields
+	fields := beads.ParseAttachmentFields(issue)
+	if fields == nil {
+		fields = &beads.AttachmentFields{}
+	}
+
+	// Set the dispatcher
+	fields.DispatchedBy = dispatcher
 
 	// Update the description
 	newDesc := beads.SetAttachmentFields(issue, fields)
@@ -860,6 +912,12 @@ func runSlingFormula(args []string) error {
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	// Note: formula slinging uses town root as workDir (no polecat-specific path)
 	updateAgentHookBead(targetAgent, wispResult.RootID, "", townBeadsDir)
+
+	// Store dispatcher in bead description (enables completion notification to dispatcher)
+	if err := storeDispatcherInBead(wispResult.RootID, actor); err != nil {
+		// Warn but don't fail - polecat will still complete work
+		fmt.Printf("%s Could not store dispatcher in bead: %v\n", style.Dim.Render("Warning:"), err)
+	}
 
 	// Store args in wisp bead if provided (no-tmux mode: beads as data plane)
 	if slingArgs != "" {

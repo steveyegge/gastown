@@ -325,6 +325,23 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Witness notified of %s\n", style.Bold.Render("✓"), exitType)
 	}
 
+	// Notify dispatcher if work was dispatched by another agent
+	if issueID != "" {
+		if dispatcher := getDispatcherFromBead(cwd, issueID); dispatcher != "" && dispatcher != sender {
+			dispatcherNotification := &mail.Message{
+				To:      dispatcher,
+				From:    sender,
+				Subject: fmt.Sprintf("WORK_DONE: %s", issueID),
+				Body:    strings.Join(bodyLines, "\n"),
+			}
+			if err := townRouter.Send(dispatcherNotification); err != nil {
+				style.PrintWarning("could not notify dispatcher %s: %v", dispatcher, err)
+			} else {
+				fmt.Printf("%s Dispatcher %s notified of %s\n", style.Bold.Render("✓"), dispatcher, exitType)
+			}
+		}
+	}
+
 	// Log done event (townlog and activity feed)
 	LogDone(townRoot, sender, issueID)
 	_ = events.LogFeed(events.TypeDone, sender, events.DonePayload(issueID, branch))
@@ -407,6 +424,27 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 			return
 		}
 	}
+}
+
+// getDispatcherFromBead retrieves the dispatcher agent ID from the bead's attachment fields.
+// Returns empty string if no dispatcher is recorded.
+func getDispatcherFromBead(cwd, issueID string) string {
+	if issueID == "" {
+		return ""
+	}
+
+	bd := beads.New(cwd)
+	issue, err := bd.Show(issueID)
+	if err != nil {
+		return ""
+	}
+
+	fields := beads.ParseAttachmentFields(issue)
+	if fields == nil {
+		return ""
+	}
+
+	return fields.DispatchedBy
 }
 
 // computeCleanupStatus checks git state and returns the cleanup status.
