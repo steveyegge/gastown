@@ -16,6 +16,9 @@ type Rig struct {
 	// GitURL is the remote repository URL.
 	GitURL string `json:"git_url"`
 
+	// LocalRepo is an optional local repository used for reference clones.
+	LocalRepo string `json:"local_repo,omitempty"`
+
 	// Config is the rig-level configuration.
 	Config *config.BeadsConfig `json:"config,omitempty"`
 

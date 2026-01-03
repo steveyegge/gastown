@@ -44,8 +44,9 @@ func TestRigsConfigRoundTrip(t *testing.T) {
 		Version: 1,
 		Rigs: map[string]RigEntry{
 			"gastown": {
-				GitURL:  "git@github.com:steveyegge/gastown.git",
-				AddedAt: time.Now().Truncate(time.Second),
+				GitURL:    "git@github.com:steveyegge/gastown.git",
+				LocalRepo: "/tmp/local-repo",
+				AddedAt:   time.Now().Truncate(time.Second),
 				BeadsConfig: &BeadsConfig{
 					Repo:   "local",
 					Prefix: "gt-",
@@ -73,6 +74,9 @@ func TestRigsConfigRoundTrip(t *testing.T) {
 	}
 	if rig.BeadsConfig == nil || rig.BeadsConfig.Prefix != "gt-" {
 		t.Errorf("BeadsConfig.Prefix = %v, want 'gt-'", rig.BeadsConfig)
+	}
+	if rig.LocalRepo != "/tmp/local-repo" {
+		t.Errorf("LocalRepo = %q, want %q", rig.LocalRepo, "/tmp/local-repo")
 	}
 }
 
@@ -140,6 +144,7 @@ func TestRigConfigRoundTrip(t *testing.T) {
 	original := NewRigConfig("gastown", "git@github.com:test/gastown.git")
 	original.CreatedAt = time.Now().Truncate(time.Second)
 	original.Beads = &BeadsConfig{Prefix: "gt-"}
+	original.LocalRepo = "/tmp/local-repo"
 
 	if err := SaveRigConfig(path, original); err != nil {
 		t.Fatalf("SaveRigConfig: %v", err)
@@ -161,6 +166,9 @@ func TestRigConfigRoundTrip(t *testing.T) {
 	}
 	if loaded.GitURL != "git@github.com:test/gastown.git" {
 		t.Errorf("GitURL = %q, want expected URL", loaded.GitURL)
+	}
+	if loaded.LocalRepo != "/tmp/local-repo" {
+		t.Errorf("LocalRepo = %q, want %q", loaded.LocalRepo, "/tmp/local-repo")
 	}
 	if loaded.Beads == nil || loaded.Beads.Prefix != "gt-" {
 		t.Error("Beads.Prefix not preserved")

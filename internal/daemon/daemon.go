@@ -261,7 +261,7 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 }
 
 // ensureDeaconRunning ensures the Deacon is running.
-// ZFC-compliant: trusts agent bead state, no tmux inference.
+// ZFC-compliant: trusts agent bead state, with tmux health check fallback.
 // The Deacon is the system's heartbeat - it must always be running.
 func (d *Daemon) ensureDeaconRunning() {
 	// Check agent bead state (ZFC: trust what agent reports)
@@ -273,7 +273,19 @@ func (d *Daemon) ensureDeaconRunning() {
 			return
 		}
 	}
-	// Agent not running (or bead not found) - start it
+
+	// Agent bead check failed or state is not running.
+	// FALLBACK: Check if tmux session is actually healthy before attempting restart.
+	// This prevents killing healthy sessions when bead state is stale or unreadable.
+	hasSession, sessionErr := d.tmux.HasSession(DeaconSessionName)
+	if sessionErr == nil && hasSession {
+		if d.tmux.IsClaudeRunning(DeaconSessionName) {
+			d.logger.Println("Deacon session healthy (Claude running), skipping restart despite stale bead")
+			return
+		}
+	}
+
+	// Agent not running (or bead not found) AND session is not healthy - start it
 	d.logger.Println("Deacon not running per agent bead, starting...")
 
 	// Create session in deacon directory (ensures correct CLAUDE.md is loaded)
@@ -371,7 +383,21 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 		}
 	}
 
-	// Agent not running (or bead not found) - start it
+	// Agent bead check failed or state is not running.
+	// FALLBACK: Check if tmux session is actually healthy before attempting restart.
+	// This prevents killing healthy sessions when bead state is stale or unreadable.
+	hasSession, sessionErr := d.tmux.HasSession(sessionName)
+	if sessionErr == nil && hasSession {
+		// Session exists - check if Claude is actually running in it
+		if d.tmux.IsClaudeRunning(sessionName) {
+			// Session is healthy - don't restart it
+			// The bead state may be stale; agent will update it on next activity
+			d.logger.Printf("Witness for %s session healthy (Claude running), skipping restart despite stale bead", rigName)
+			return
+		}
+	}
+
+	// Agent not running (or bead not found) AND session is not healthy - start it
 	d.logger.Printf("Witness for %s not running per agent bead, starting...", rigName)
 
 	// Create session in witness directory

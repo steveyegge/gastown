@@ -367,7 +367,7 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 	// Send the propulsion nudge to trigger autonomous patrol execution.
 	// Wait for beacon to be fully processed (needs to be separate prompt)
 	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionName, session.PropulsionNudgeForRole("witness")) // Non-fatal
+	_ = t.NudgeSession(sessionName, session.PropulsionNudgeForRole("witness", witnessDir)) // Non-fatal
 
 	return true, nil
 }

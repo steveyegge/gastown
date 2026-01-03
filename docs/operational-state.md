@@ -174,7 +174,7 @@ task nature matters.
 ~/gt/deacon/dogs/boot/
 ```
 
-Session name: `gt-deacon-boot`
+Session name: `gt-boot`
 
 Created/maintained by `bd doctor`.
 

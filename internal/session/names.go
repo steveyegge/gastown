@@ -1,7 +1,12 @@
 // Package session provides polecat session lifecycle management.
 package session
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
 
 // Prefix is the common prefix for all Gas Town tmux session names.
 const Prefix = "gt-"
@@ -50,19 +55,43 @@ func PropulsionNudge() string {
 // - witness/refinery: Start patrol cycle
 // - deacon: Start heartbeat patrol
 // - mayor: Check mail for coordination work
-func PropulsionNudgeForRole(role string) string {
+//
+// The workDir parameter is used to locate .runtime/session_id for including
+// session ID in the message (for Claude Code /resume picker discovery).
+func PropulsionNudgeForRole(role, workDir string) string {
+	var msg string
 	switch role {
 	case "polecat", "crew":
-		return PropulsionNudge()
+		msg = PropulsionNudge()
 	case "witness":
-		return "Run `gt prime` to check patrol status and begin work."
+		msg = "Run `gt prime` to check patrol status and begin work."
 	case "refinery":
-		return "Run `gt prime` to check MQ status and begin patrol."
+		msg = "Run `gt prime` to check MQ status and begin patrol."
 	case "deacon":
-		return "Run `gt prime` to check patrol status and begin heartbeat cycle."
+		msg = "Run `gt prime` to check patrol status and begin heartbeat cycle."
 	case "mayor":
-		return "Run `gt prime` to check mail and begin coordination."
+		msg = "Run `gt prime` to check mail and begin coordination."
 	default:
-		return PropulsionNudge()
+		msg = PropulsionNudge()
 	}
+
+	// Append session ID if available (for /resume picker visibility)
+	if sessionID := readSessionID(workDir); sessionID != "" {
+		msg = fmt.Sprintf("%s [session:%s]", msg, sessionID)
+	}
+	return msg
+}
+
+// readSessionID reads the session ID from .runtime/session_id if it exists.
+// Returns empty string if the file doesn't exist or can't be read.
+func readSessionID(workDir string) string {
+	if workDir == "" {
+		return ""
+	}
+	sessionPath := filepath.Join(workDir, ".runtime", "session_id")
+	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }

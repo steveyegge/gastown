@@ -40,6 +40,12 @@ func (g *Git) WorkDir() string {
 	return g.workDir
 }
 
+// IsRepo returns true if the workDir is a git repository.
+func (g *Git) IsRepo() bool {
+	_, err := g.run("rev-parse", "--git-dir")
+	return err == nil
+}
+
 // run executes a git command and returns stdout.
 func (g *Git) run(args ...string) (string, error) {
 	// If gitDir is set (bare repo), prepend --git-dir flag
@@ -99,6 +105,18 @@ func (g *Git) Clone(url, dest string) error {
 	return nil
 }
 
+// CloneWithReference clones a repository using a local repo as an object reference.
+// This saves disk by sharing objects without changing remotes.
+func (g *Git) CloneWithReference(url, dest, reference string) error {
+	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, dest)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return g.wrapError(err, stderr.String(), []string{"clone", "--reference-if-able", url})
+	}
+	return nil
+}
+
 // CloneBare clones a repository as a bare repo (no working directory).
 // This is used for the shared repo architecture where all worktrees share a single git database.
 func (g *Git) CloneBare(url, dest string) error {
@@ -107,6 +125,17 @@ func (g *Git) CloneBare(url, dest string) error {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stderr.String(), []string{"clone", "--bare", url})
+	}
+	return nil
+}
+
+// CloneBareWithReference clones a bare repository using a local repo as an object reference.
+func (g *Git) CloneBareWithReference(url, dest, reference string) error {
+	cmd := exec.Command("git", "clone", "--bare", "--reference-if-able", reference, url, dest)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return g.wrapError(err, stderr.String(), []string{"clone", "--bare", "--reference-if-able", url})
 	}
 	return nil
 }

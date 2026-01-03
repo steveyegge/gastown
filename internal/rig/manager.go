@@ -28,6 +28,7 @@ type RigConfig struct {
 	Version       int          `json:"version"`                  // schema version
 	Name          string       `json:"name"`                     // rig name
 	GitURL        string       `json:"git_url"`                  // repository URL
+	LocalRepo     string       `json:"local_repo,omitempty"`     // optional local reference repo
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
 	Beads         *BeadsConfig `json:"beads,omitempty"`
@@ -104,10 +105,11 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 	}
 
 	rig := &Rig{
-		Name:   name,
-		Path:   rigPath,
-		GitURL: entry.GitURL,
-		Config: entry.BeadsConfig,
+		Name:      name,
+		Path:      rigPath,
+		GitURL:    entry.GitURL,
+		LocalRepo: entry.LocalRepo,
+		Config:    entry.BeadsConfig,
 	}
 
 	// Scan for polecats
@@ -156,6 +158,38 @@ type AddRigOptions struct {
 	Name        string // Rig name (directory name)
 	GitURL      string // Repository URL
 	BeadsPrefix string // Beads issue prefix (defaults to derived from name)
+	LocalRepo   string // Optional local repo for reference clones
+}
+
+func resolveLocalRepo(path, gitURL string) (string, string) {
+	if path == "" {
+		return "", ""
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Sprintf("local repo path invalid: %v", err)
+	}
+
+	absPath, err = filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", fmt.Sprintf("local repo path invalid: %v", err)
+	}
+
+	repoGit := git.NewGit(absPath)
+	if !repoGit.IsRepo() {
+		return "", fmt.Sprintf("local repo is not a git repository: %s", absPath)
+	}
+
+	origin, err := repoGit.RemoteURL("origin")
+	if err != nil {
+		return absPath, "local repo has no origin; using it anyway"
+	}
+	if origin != gitURL {
+		return "", fmt.Sprintf("local repo origin %q does not match %q", origin, gitURL)
+	}
+
+	return absPath, ""
 }
 
 // AddRig creates a new rig as a container with clones for each agent.
@@ -193,6 +227,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		opts.BeadsPrefix = deriveBeadsPrefix(opts.Name)
 	}
 
+	localRepo, warn := resolveLocalRepo(opts.LocalRepo, opts.GitURL)
+	if warn != "" {
+		fmt.Printf("  Warning: %s\n", warn)
+	}
+
 	// Create container directory
 	if err := os.MkdirAll(rigPath, 0755); err != nil {
 		return nil, fmt.Errorf("creating rig directory: %w", err)
@@ -213,6 +252,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		Version:   CurrentRigConfigVersion,
 		Name:      opts.Name,
 		GitURL:    opts.GitURL,
+		LocalRepo: localRepo,
 		CreatedAt: time.Now(),
 		Beads: &BeadsConfig{
 			Prefix: opts.BeadsPrefix,
@@ -226,8 +266,18 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// This allows refinery to see polecat branches without pushing to remote.
 	// Mayor remains a separate clone (doesn't need branch visibility).
 	bareRepoPath := filepath.Join(rigPath, ".repo.git")
-	if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
-		return nil, fmt.Errorf("creating bare repo: %w", err)
+	if localRepo != "" {
+		if err := m.git.CloneBareWithReference(opts.GitURL, bareRepoPath, localRepo); err != nil {
+			fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
+			_ = os.RemoveAll(bareRepoPath)
+			if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
+				return nil, fmt.Errorf("creating bare repo: %w", err)
+			}
+		}
+	} else {
+		if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
+			return nil, fmt.Errorf("creating bare repo: %w", err)
+		}
 	}
 	bareGit := git.NewGitWithDir(bareRepoPath, "")
 
@@ -246,8 +296,18 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
 	}
-	if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
-		return nil, fmt.Errorf("cloning for mayor: %w", err)
+	if localRepo != "" {
+		if err := m.git.CloneWithReference(opts.GitURL, mayorRigPath, localRepo); err != nil {
+			fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
+			_ = os.RemoveAll(mayorRigPath)
+			if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+				return nil, fmt.Errorf("cloning for mayor: %w", err)
+			}
+		}
+	} else {
+		if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+			return nil, fmt.Errorf("cloning for mayor: %w", err)
+		}
 	}
 
 	// Check if source repo has .beads/ with its own prefix - if so, use that prefix.
@@ -379,8 +439,9 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 
 	// Register in town config
 	m.config.Rigs[opts.Name] = config.RigEntry{
-		GitURL:  opts.GitURL,
-		AddedAt: time.Now(),
+		GitURL:    opts.GitURL,
+		LocalRepo: localRepo,
+		AddedAt:   time.Now(),
 		BeadsConfig: &config.BeadsConfig{
 			Prefix: opts.BeadsPrefix,
 		},

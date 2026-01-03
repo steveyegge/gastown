@@ -36,7 +36,7 @@ Boot lifecycle:
   4. Boot exits (or handoffs in non-degraded mode)
 
 Location: ~/gt/deacon/dogs/boot/
-Session: gt-deacon-boot`,
+Session: gt-boot`,
 }
 
 var bootStatusCmd = &cobra.Command{

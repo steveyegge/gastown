@@ -157,7 +157,7 @@ func startMayorSession(t *tmux.Tmux) error {
 	// Send the propulsion nudge to trigger autonomous coordination.
 	// Wait for beacon to be fully processed (needs to be separate prompt)
 	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(MayorSessionName, session.PropulsionNudgeForRole("mayor")) // Non-fatal
+	_ = t.NudgeSession(MayorSessionName, session.PropulsionNudgeForRole("mayor", townRoot)) // Non-fatal
 
 	return nil
 }

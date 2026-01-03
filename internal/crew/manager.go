@@ -72,8 +72,17 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	}
 
 	// Clone the rig repo
-	if err := m.git.Clone(m.rig.GitURL, crewPath); err != nil {
-		return nil, fmt.Errorf("cloning rig: %w", err)
+	if m.rig.LocalRepo != "" {
+		if err := m.git.CloneWithReference(m.rig.GitURL, crewPath, m.rig.LocalRepo); err != nil {
+			fmt.Printf("Warning: could not clone with local repo reference: %v\n", err)
+			if err := m.git.Clone(m.rig.GitURL, crewPath); err != nil {
+				return nil, fmt.Errorf("cloning rig: %w", err)
+			}
+		}
+	} else {
+		if err := m.git.Clone(m.rig.GitURL, crewPath); err != nil {
+			return nil, fmt.Errorf("cloning rig: %w", err)
+		}
 	}
 
 	crewGit := git.NewGit(crewPath)

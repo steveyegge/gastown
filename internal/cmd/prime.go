@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
@@ -21,6 +23,8 @@ import (
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+var primeHookMode bool
 
 // Role represents a detected agent role.
 type Role string
@@ -47,11 +51,25 @@ Role detection:
   - <rig>/refinery/rig/ → Refinery context
   - <rig>/polecats/<name>/ → Polecat context
 
-This command is typically used in shell prompts or agent initialization.`,
+This command is typically used in shell prompts or agent initialization.
+
+HOOK MODE (--hook):
+  When called as an LLM runtime hook, use --hook to enable session ID handling.
+  This reads session metadata from stdin and persists it for the session.
+
+  Claude Code integration (in .claude/settings.json):
+    "SessionStart": [{"hooks": [{"type": "command", "command": "gt prime --hook"}]}]
+
+  Claude Code sends JSON on stdin:
+    {"session_id": "uuid", "transcript_path": "/path", "source": "startup|resume"}
+
+  Other agents can set GT_SESSION_ID environment variable instead.`,
 	RunE: runPrime,
 }
 
 func init() {
+	primeCmd.Flags().BoolVar(&primeHookMode, "hook", false,
+		"Hook mode: read session ID from stdin JSON (for LLM runtime hooks)")
 	rootCmd.AddCommand(primeCmd)
 }
 
@@ -72,6 +90,23 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	}
 	if townRoot == "" {
 		return fmt.Errorf("not in a Gas Town workspace")
+	}
+
+	// Handle hook mode: read session ID from stdin and persist it
+	if primeHookMode {
+		sessionID, source := readHookSessionID()
+		persistSessionID(townRoot, sessionID)
+		if cwd != townRoot {
+			persistSessionID(cwd, sessionID)
+		}
+		// Set environment for this process (affects event emission below)
+		os.Setenv("GT_SESSION_ID", sessionID)
+		os.Setenv("CLAUDE_SESSION_ID", sessionID) // Legacy compatibility
+		// Output session beacon
+		fmt.Printf("[session:%s]\n", sessionID)
+		if source != "" {
+			fmt.Printf("[source:%s]\n", source)
+		}
 	}
 
 	// Get role using env-aware detection
@@ -1499,7 +1534,7 @@ func outputCheckpointContext(ctx RoleContext) {
 
 // emitSessionEvent emits a session_start event for seance discovery.
 // The event is written to ~/gt/.events.jsonl and can be queried via gt seance.
-// Session ID comes from CLAUDE_SESSION_ID env var if available.
+// Session ID resolution order: GT_SESSION_ID, CLAUDE_SESSION_ID, persisted file, fallback.
 func emitSessionEvent(ctx RoleContext) {
 	if ctx.Role == RoleUnknown {
 		return
@@ -1511,12 +1546,8 @@ func emitSessionEvent(ctx RoleContext) {
 		return
 	}
 
-	// Get session ID from environment (set by Claude Code hooks)
-	sessionID := os.Getenv("CLAUDE_SESSION_ID")
-	if sessionID == "" {
-		// Fall back to a generated identifier
-		sessionID = fmt.Sprintf("%s-%d", actor, os.Getpid())
-	}
+	// Get session ID from multiple sources
+	sessionID := resolveSessionIDForPrime(actor)
 
 	// Determine topic from hook state or default
 	topic := ""
@@ -1543,13 +1574,146 @@ func outputSessionMetadata(ctx RoleContext) {
 		return
 	}
 
-	// Get session ID from environment (set by Claude Code hooks)
-	sessionID := os.Getenv("CLAUDE_SESSION_ID")
-	if sessionID == "" {
-		// Fall back to a generated identifier
-		sessionID = fmt.Sprintf("%s-%d", actor, os.Getpid())
-	}
+	// Get session ID from multiple sources
+	sessionID := resolveSessionIDForPrime(actor)
 
 	// Output structured metadata line
 	fmt.Printf("[GAS TOWN] role:%s pid:%d session:%s\n", actor, os.Getpid(), sessionID)
+}
+
+// resolveSessionIDForPrime finds the session ID from available sources.
+// Priority: GT_SESSION_ID env, CLAUDE_SESSION_ID env, persisted file, fallback.
+func resolveSessionIDForPrime(actor string) string {
+	// 1. GT_SESSION_ID (new canonical)
+	if id := os.Getenv("GT_SESSION_ID"); id != "" {
+		return id
+	}
+
+	// 2. CLAUDE_SESSION_ID (legacy/Claude Code)
+	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
+		return id
+	}
+
+	// 3. Persisted session file (from gt prime --hook)
+	if id := ReadPersistedSessionID(); id != "" {
+		return id
+	}
+
+	// 4. Fallback to generated identifier
+	return fmt.Sprintf("%s-%d", actor, os.Getpid())
+}
+
+// hookInput represents the JSON input from LLM runtime hooks.
+// Claude Code sends this on stdin for SessionStart hooks.
+type hookInput struct {
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
+	Source         string `json:"source"` // startup, resume, clear, compact
+}
+
+// readHookSessionID reads session ID from available sources in hook mode.
+// Priority: stdin JSON, GT_SESSION_ID env, CLAUDE_SESSION_ID env, auto-generate.
+func readHookSessionID() (sessionID, source string) {
+	// 1. Try reading stdin JSON (Claude Code format)
+	if input := readStdinJSON(); input != nil {
+		if input.SessionID != "" {
+			return input.SessionID, input.Source
+		}
+	}
+
+	// 2. Environment variables
+	if id := os.Getenv("GT_SESSION_ID"); id != "" {
+		return id, ""
+	}
+	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
+		return id, ""
+	}
+
+	// 3. Auto-generate
+	return uuid.New().String(), ""
+}
+
+// readStdinJSON attempts to read and parse JSON from stdin.
+// Returns nil if stdin is empty, not a pipe, or invalid JSON.
+func readStdinJSON() *hookInput {
+	// Check if stdin has data (non-blocking)
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return nil
+	}
+
+	// Only read if stdin is a pipe or has data
+	if (stat.Mode() & os.ModeCharDevice) != 0 {
+		// stdin is a terminal, not a pipe - no data to read
+		return nil
+	}
+
+	// Read first line (JSON should be on one line)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return nil
+	}
+
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil
+	}
+
+	var input hookInput
+	if err := json.Unmarshal([]byte(line), &input); err != nil {
+		return nil
+	}
+
+	return &input
+}
+
+// persistSessionID writes the session ID to .runtime/session_id
+// This allows subsequent gt prime calls to find the session ID.
+func persistSessionID(dir, sessionID string) {
+	runtimeDir := filepath.Join(dir, ".runtime")
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		return // Non-fatal
+	}
+
+	sessionFile := filepath.Join(runtimeDir, "session_id")
+	content := fmt.Sprintf("%s\n%s\n", sessionID, time.Now().Format(time.RFC3339))
+	_ = os.WriteFile(sessionFile, []byte(content), 0644) // Non-fatal
+}
+
+// ReadPersistedSessionID reads a previously persisted session ID.
+// Checks cwd first, then town root.
+// Returns empty string if not found.
+func ReadPersistedSessionID() string {
+	// Try cwd first
+	cwd, err := os.Getwd()
+	if err == nil {
+		if id := readSessionFile(cwd); id != "" {
+			return id
+		}
+	}
+
+	// Try town root
+	townRoot, err := workspace.FindFromCwd()
+	if err == nil && townRoot != "" {
+		if id := readSessionFile(townRoot); id != "" {
+			return id
+		}
+	}
+
+	return ""
+}
+
+func readSessionFile(dir string) string {
+	sessionFile := filepath.Join(dir, ".runtime", "session_id")
+	data, err := os.ReadFile(sessionFile)
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(string(data), "\n")
+	if len(lines) > 0 {
+		return strings.TrimSpace(lines[0])
+	}
+	return ""
 }

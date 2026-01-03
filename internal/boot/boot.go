@@ -16,7 +16,11 @@ import (
 )
 
 // SessionName is the tmux session name for Boot.
-const SessionName = "gt-deacon-boot"
+// Note: We use "gt-boot" instead of "gt-deacon-boot" to avoid tmux prefix
+// matching collisions. Tmux matches session names by prefix, so "gt-deacon-boot"
+// would match when checking for "gt-deacon", causing HasSession("gt-deacon")
+// to return true when only Boot is running.
+const SessionName = "gt-boot"
 
 // MarkerFileName is the file that indicates Boot is currently running.
 const MarkerFileName = ".boot-running"

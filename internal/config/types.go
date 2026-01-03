@@ -54,6 +54,7 @@ type RigsConfig struct {
 // RigEntry represents a single rig in the registry.
 type RigEntry struct {
 	GitURL      string       `json:"git_url"`
+	LocalRepo   string       `json:"local_repo,omitempty"`
 	AddedAt     time.Time    `json:"added_at"`
 	BeadsConfig *BeadsConfig `json:"beads,omitempty"`
 }
@@ -92,6 +93,7 @@ type RigConfig struct {
 	Version   int          `json:"version"`    // schema version
 	Name      string       `json:"name"`       // rig name
 	GitURL    string       `json:"git_url"`    // git repository URL
+	LocalRepo string       `json:"local_repo,omitempty"`
 	CreatedAt time.Time    `json:"created_at"` // when the rig was created
 	Beads     *BeadsConfig `json:"beads,omitempty"`
 }

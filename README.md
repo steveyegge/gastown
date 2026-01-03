@@ -32,7 +32,7 @@ gt install ~/gt
 gt rig add myproject https://github.com/you/repo.git
 
 # Enter the Mayor's office (recommended)
-cd ~/gt && gt prime
+gt mayor attach
 ```
 
 Once inside the Mayor session, you're talking to Claude with full town context. Just tell it what you want:

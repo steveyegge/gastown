@@ -363,7 +363,7 @@ func ensureRefinerySession(rigName string, r *rig.Rig) (bool, error) {
 	// Send the propulsion nudge to trigger autonomous patrol execution.
 	// Wait for beacon to be fully processed (needs to be separate prompt)
 	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionName, session.PropulsionNudgeForRole("refinery")) // Non-fatal
+	_ = t.NudgeSession(sessionName, session.PropulsionNudgeForRole("refinery", refineryRigDir)) // Non-fatal
 
 	return true, nil
 }
