@@ -336,10 +336,10 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Set environment
-		t.SetEnvironment(sessionID, "GT_ROLE", "crew")
-		t.SetEnvironment(sessionID, "GT_RIG", r.Name)
-		t.SetEnvironment(sessionID, "GT_CREW", name)
+		// Set environment (non-fatal)
+		_ = t.SetEnvironment(sessionID, "GT_ROLE", constants.RoleCrew)
+		_ = t.SetEnvironment(sessionID, "GT_RIG", r.Name)
+		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
 
 		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
 		theme := getThemeForRig(r.Name)
@@ -515,10 +515,10 @@ func restartCrewSession(rigName, crewName, clonePath string) error {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
-	// Set environment
-	t.SetEnvironment(sessionID, "GT_ROLE", "crew")
-	t.SetEnvironment(sessionID, "GT_RIG", rigName)
-	t.SetEnvironment(sessionID, "GT_CREW", crewName)
+	// Set environment (non-fatal)
+	_ = t.SetEnvironment(sessionID, "GT_ROLE", constants.RoleCrew)
+	_ = t.SetEnvironment(sessionID, "GT_RIG", rigName)
+	_ = t.SetEnvironment(sessionID, "GT_CREW", crewName)
 
 	// Apply rig-based theming
 	theme := getThemeForRig(rigName)
@@ -626,7 +626,7 @@ func runCrewStop(cmd *cobra.Command, args []string) error {
 		if townRoot != "" {
 			agent := fmt.Sprintf("%s/crew/%s", r.Name, name)
 			logger := townlog.NewLogger(townRoot)
-			logger.Log(townlog.EventKill, agent, "gt crew stop")
+			_ = logger.Log(townlog.EventKill, agent, "gt crew stop")
 		}
 
 		// Log captured output (truncated)
@@ -712,7 +712,7 @@ func runCrewStopAll() error {
 		townRoot, _ := workspace.FindFromCwd()
 		if townRoot != "" {
 			logger := townlog.NewLogger(townRoot)
-			logger.Log(townlog.EventKill, agentName, "gt crew stop --all")
+			_ = logger.Log(townlog.EventKill, agentName, "gt crew stop --all")
 		}
 
 		// Log captured output (truncated)
