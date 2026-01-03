@@ -1204,40 +1204,40 @@ func getAgentFields(ctx RoleContext, state string) *beads.AgentFields {
 			RoleType:   "crew",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   "gt-crew-role",
+			RoleBead:   beads.CrewRoleBeadID(),
 		}
 	case RolePolecat:
 		return &beads.AgentFields{
 			RoleType:   "polecat",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   "gt-polecat-role",
+			RoleBead:   beads.PolecatRoleBeadID(),
 		}
 	case RoleMayor:
 		return &beads.AgentFields{
 			RoleType:   "mayor",
 			AgentState: state,
-			RoleBead:   "gt-mayor-role",
+			RoleBead:   beads.MayorRoleBeadID(),
 		}
 	case RoleDeacon:
 		return &beads.AgentFields{
 			RoleType:   "deacon",
 			AgentState: state,
-			RoleBead:   "gt-deacon-role",
+			RoleBead:   beads.DeaconRoleBeadID(),
 		}
 	case RoleWitness:
 		return &beads.AgentFields{
 			RoleType:   "witness",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   "gt-witness-role",
+			RoleBead:   beads.WitnessRoleBeadID(),
 		}
 	case RoleRefinery:
 		return &beads.AgentFields{
 			RoleType:   "refinery",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   "gt-refinery-role",
+			RoleBead:   beads.RefineryRoleBeadID(),
 		}
 	default:
 		return nil

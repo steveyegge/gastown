@@ -903,10 +903,10 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 		return
 	}
 
-	prefix := "gt-polecat-" + rigName + "-"
 	for _, agent := range agents {
 		// Only check polecats for this rig
-		if !strings.HasPrefix(agent.ID, prefix) {
+		rig, role, _, ok := beads.ParseAgentBeadID(agent.ID)
+		if !ok || role != "polecat" || rig != rigName {
 			continue
 		}
 
@@ -1027,20 +1027,13 @@ func (d *Daemon) getDeadAgents() []deadAgentInfo {
 
 // extractRigFromAgentID extracts the rig name from a polecat agent ID.
 // Example: gt-polecat-gastown-max → gastown
+// Example: hq-polecat-gastown-max → gastown
 func (d *Daemon) extractRigFromAgentID(agentID string) string {
-	// Pattern: gt-polecat-<rig>-<name>
-	if !strings.HasPrefix(agentID, "gt-polecat-") {
+	rig, role, _, ok := beads.ParseAgentBeadID(agentID)
+	if !ok || role != "polecat" {
 		return ""
 	}
-
-	rest := strings.TrimPrefix(agentID, "gt-polecat-")
-	// Find the rig name (everything before the last dash)
-	lastDash := strings.LastIndex(rest, "-")
-	if lastDash == -1 {
-		return ""
-	}
-
-	return rest[:lastDash]
+	return rig
 }
 
 // notifyWitnessOfOrphanedWork sends a mail to the rig's witness about orphaned work.
