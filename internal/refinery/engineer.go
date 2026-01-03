@@ -87,12 +87,16 @@ type Engineer struct {
 
 // NewEngineer creates a new Engineer for the given rig.
 func NewEngineer(r *rig.Rig) *Engineer {
+	cfg := DefaultMergeQueueConfig()
+	// Override target branch with rig's configured default branch
+	cfg.TargetBranch = r.DefaultBranch()
+
 	return &Engineer{
 		rig:         r,
 		beads:       beads.New(r.Path),
 		mrQueue:     mrqueue.New(r.Path),
 		git:         git.NewGit(r.Path),
-		config:      DefaultMergeQueueConfig(),
+		config:      cfg,
 		workDir:     r.Path,
 		output:      os.Stdout,
 		eventLogger: mrqueue.NewEventLoggerFromRig(r.Path),

@@ -359,6 +359,9 @@ func (m *Manager) issueToMR(issue *beads.Issue) *MergeRequest {
 		return nil
 	}
 
+	// Get configured default branch for this rig
+	defaultBranch := m.rig.DefaultBranch()
+
 	fields := beads.ParseMRFields(issue)
 	if fields == nil {
 		// No MR fields in description, construct from title/ID
@@ -367,14 +370,14 @@ func (m *Manager) issueToMR(issue *beads.Issue) *MergeRequest {
 			IssueID:      issue.ID,
 			Status:       MROpen,
 			CreatedAt:    parseTime(issue.CreatedAt),
-			TargetBranch: "main",
+			TargetBranch: defaultBranch,
 		}
 	}
 
-	// Default target to main if not specified
+	// Default target to rig's default branch if not specified
 	target := fields.Target
 	if target == "" {
-		target = "main"
+		target = defaultBranch
 	}
 
 	return &MergeRequest{

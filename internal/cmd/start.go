@@ -737,8 +737,8 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Crew workspace %s/%s exists\n", rigName, name)
 	}
 
-	// Ensure crew workspace is on main branch
-	ensureMainBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", rigName, name))
+	// Ensure crew workspace is on default branch
+	ensureMainBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", rigName, name), r.Path)
 
 	// Resolve account for Claude config
 	accountsPath := constants.MayorAccountsPath(townRoot)
@@ -920,8 +920,8 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 		return fmt.Errorf("getting crew worker: %w", err)
 	}
 
-	// Ensure crew workspace is on main branch
-	ensureMainBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", rigName, crewName))
+	// Ensure crew workspace is on default branch
+	ensureMainBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", rigName, crewName), r.Path)
 
 	// Create tmux session
 	t := tmux.NewTmux()

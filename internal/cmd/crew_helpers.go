@@ -199,10 +199,11 @@ func attachToTmuxSession(sessionID string) error {
 	return cmd.Run()
 }
 
-// ensureMainBranch checks if a git directory is on main branch.
+// ensureMainBranch checks if a git directory is on the default branch.
 // If not, warns the user and offers to switch.
-// Returns true if on main (or switched to main), false if user declined.
-func ensureMainBranch(dir, roleName string) bool {
+// Returns true if on default branch (or switched to it), false if user declined.
+// The rigPath parameter is used to look up the configured default branch.
+func ensureMainBranch(dir, roleName, rigPath string) bool {
 	g := git.NewGit(dir)
 
 	branch, err := g.CurrentBranch()
@@ -211,31 +212,38 @@ func ensureMainBranch(dir, roleName string) bool {
 		return true
 	}
 
-	if branch == "main" || branch == "master" {
+	// Get configured default branch for this rig
+	defaultBranch := "main" // fallback
+	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+
+	if branch == defaultBranch || branch == "master" {
 		return true
 	}
 
 	// Warn about wrong branch
-	fmt.Printf("\n%s %s is on branch '%s', not main\n",
+	fmt.Printf("\n%s %s is on branch '%s', not %s\n",
 		style.Warning.Render("⚠"),
 		roleName,
-		branch)
-	fmt.Println("  Persistent roles should work on main to avoid orphaned work.")
+		branch,
+		defaultBranch)
+	fmt.Printf("  Persistent roles should work on %s to avoid orphaned work.\n", defaultBranch)
 	fmt.Println()
 
-	// Auto-switch to main
-	fmt.Printf("  Switching to main...\n")
-	if err := g.Checkout("main"); err != nil {
-		fmt.Printf("  %s Could not switch to main: %v\n", style.Error.Render("✗"), err)
-		fmt.Println("  Please manually run: git checkout main && git pull")
+	// Auto-switch to default branch
+	fmt.Printf("  Switching to %s...\n", defaultBranch)
+	if err := g.Checkout(defaultBranch); err != nil {
+		fmt.Printf("  %s Could not switch to %s: %v\n", style.Error.Render("✗"), defaultBranch, err)
+		fmt.Printf("  Please manually run: git checkout %s && git pull\n", defaultBranch)
 		return false
 	}
 
 	// Pull latest
-	if err := g.Pull("origin", "main"); err != nil {
+	if err := g.Pull("origin", defaultBranch); err != nil {
 		fmt.Printf("  %s Pull failed (continuing anyway): %v\n", style.Warning.Render("⚠"), err)
 	} else {
-		fmt.Printf("  %s Switched to main and pulled latest\n", style.Success.Render("✓"))
+		fmt.Printf("  %s Switched to %s and pulled latest\n", style.Success.Render("✓"), defaultBranch)
 	}
 
 	return true

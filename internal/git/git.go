@@ -226,6 +226,35 @@ func (g *Git) DefaultBranch() string {
 	return "main"
 }
 
+// RemoteDefaultBranch queries the remote for its default branch.
+// Uses `git ls-remote --symref` to get the HEAD symref from the remote.
+// Returns empty string if detection fails (caller should fall back to DefaultBranch).
+func (g *Git) RemoteDefaultBranch(remote string) string {
+	// Use ls-remote --symref to get the remote's HEAD reference
+	// Output format: "ref: refs/heads/main\tHEAD"
+	out, err := g.run("ls-remote", "--symref", remote, "HEAD")
+	if err != nil {
+		return ""
+	}
+
+	// Parse the output to find the symref line
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "ref: refs/heads/") {
+			// Extract branch name: "ref: refs/heads/main\tHEAD" -> "main"
+			parts := strings.Fields(line)
+			if len(parts) >= 1 {
+				ref := parts[0]
+				branch := strings.TrimPrefix(ref, "ref: refs/heads/")
+				if branch != "" {
+					return branch
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
 // HasUncommittedChanges returns true if there are uncommitted changes.
 func (g *Git) HasUncommittedChanges() (bool, error) {
 	status, err := g.Status()

@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -711,18 +712,24 @@ func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
 	return result
 }
 
-// verifyCommitOnMain checks if the polecat's current commit is on main.
+// verifyCommitOnMain checks if the polecat's current commit is on the default branch.
 // This prevents nuking a polecat whose work wasn't actually merged.
 //
 // Returns:
-//   - true, nil: commit is verified on main
-//   - false, nil: commit is NOT on main (don't nuke!)
+//   - true, nil: commit is verified on default branch
+//   - false, nil: commit is NOT on default branch (don't nuke!)
 //   - false, error: couldn't verify (treat as unsafe)
 func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 	// Find town root from workDir
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
 		return false, fmt.Errorf("finding town root: %v", err)
+	}
+
+	// Get configured default branch for this rig
+	defaultBranch := "main" // fallback
+	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
 	}
 
 	// Construct polecat path: <townRoot>/<rigName>/polecats/<polecatName>
@@ -737,16 +744,16 @@ func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 		return false, fmt.Errorf("getting polecat HEAD: %w", err)
 	}
 
-	// Verify it's an ancestor of main (i.e., it's been merged)
-	// We use the polecat's git context to check main
-	isOnMain, err := g.IsAncestor(commitSHA, "origin/main")
+	// Verify it's an ancestor of default branch (i.e., it's been merged)
+	// We use the polecat's git context to check
+	isOnDefaultBranch, err := g.IsAncestor(commitSHA, "origin/"+defaultBranch)
 	if err != nil {
 		// Try without origin/ prefix in case remote isn't set up
-		isOnMain, err = g.IsAncestor(commitSHA, "main")
+		isOnDefaultBranch, err = g.IsAncestor(commitSHA, defaultBranch)
 		if err != nil {
-			return false, fmt.Errorf("checking if commit is on main: %w", err)
+			return false, fmt.Errorf("checking if commit is on %s: %w", defaultBranch, err)
 		}
 	}
 
-	return isOnMain, nil
+	return isOnDefaultBranch, nil
 }
