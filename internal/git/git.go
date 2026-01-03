@@ -226,6 +226,36 @@ func (g *Git) DefaultBranch() string {
 	return "main"
 }
 
+// RemoteDefaultBranch returns the default branch from the remote (origin).
+// This is useful in worktrees where HEAD may not reflect the repo's actual default.
+// Checks origin/HEAD first, then falls back to checking if master/main exists.
+// Returns "main" as final fallback.
+func (g *Git) RemoteDefaultBranch() string {
+	// Try to get from origin/HEAD symbolic ref
+	out, err := g.run("symbolic-ref", "refs/remotes/origin/HEAD")
+	if err == nil && out != "" {
+		// Returns refs/remotes/origin/main -> extract branch name
+		parts := strings.Split(out, "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1]
+		}
+	}
+
+	// Fallback: check if origin/master exists
+	_, err = g.run("rev-parse", "--verify", "origin/master")
+	if err == nil {
+		return "master"
+	}
+
+	// Fallback: check if origin/main exists
+	_, err = g.run("rev-parse", "--verify", "origin/main")
+	if err == nil {
+		return "main"
+	}
+
+	return "main" // final fallback
+}
+
 // HasUncommittedChanges returns true if there are uncommitted changes.
 func (g *Git) HasUncommittedChanges() (bool, error) {
 	status, err := g.Status()

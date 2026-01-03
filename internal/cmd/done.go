@@ -164,13 +164,16 @@ func runDone(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("branch has %d unpushed commit(s); run 'git push -u origin %s' first", unpushedCount, branch)
 		}
 
-		// Check that branch has commits ahead of main (prevents submitting stale branches)
-		aheadCount, err := g.CommitsAhead("main", branch)
+		// Detect the repo's default branch (main vs master)
+		defaultBranch := g.RemoteDefaultBranch()
+
+		// Check that branch has commits ahead of default branch (prevents submitting stale branches)
+		aheadCount, err := g.CommitsAhead(defaultBranch, branch)
 		if err != nil {
-			return fmt.Errorf("checking commits ahead of main: %w", err)
+			return fmt.Errorf("checking commits ahead of %s: %w", defaultBranch, err)
 		}
 		if aheadCount == 0 {
-			return fmt.Errorf("branch '%s' has 0 commits ahead of main; nothing to merge", branch)
+			return fmt.Errorf("branch '%s' has 0 commits ahead of %s; nothing to merge", branch, defaultBranch)
 		}
 
 		if issueID == "" {
@@ -181,7 +184,7 @@ func runDone(cmd *cobra.Command, args []string) error {
 		bd := beads.New(cwd)
 
 		// Determine target branch (auto-detect integration branch if applicable)
-		target := "main"
+		target := defaultBranch
 		autoTarget, err := detectIntegrationBranch(bd, g, issueID)
 		if err == nil && autoTarget != "" {
 			target = autoTarget
