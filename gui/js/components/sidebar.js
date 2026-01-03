@@ -187,11 +187,20 @@ function truncate(str, length) {
   return str.length > length ? str.slice(0, length) + '...' : str;
 }
 
-// Tree node toggle functionality
+// Tree node toggle functionality and agent click handling
 document.addEventListener('click', (e) => {
   const nodeContent = e.target.closest('.tree-node-content');
   if (!nodeContent) return;
 
+  // Check if this is an agent node (has data-agent-id)
+  const agentId = nodeContent.dataset.agentId;
+  if (agentId) {
+    e.stopPropagation();
+    showAgentQuickActions(nodeContent, agentId);
+    return;
+  }
+
+  // Otherwise, handle folder expand/collapse
   const node = nodeContent.closest('.tree-node.expandable');
   if (node) {
     node.classList.toggle('expanded');
@@ -201,3 +210,161 @@ document.addEventListener('click', (e) => {
     }
   }
 });
+
+/**
+ * Show quick actions popover for an agent
+ */
+function showAgentQuickActions(nodeEl, agentId) {
+  // Remove any existing popover
+  const existing = document.querySelector('.agent-quick-actions');
+  if (existing) {
+    existing.remove();
+    // If clicking same agent, just close
+    if (existing.dataset.agentId === agentId) return;
+  }
+
+  const rect = nodeEl.getBoundingClientRect();
+  const agentName = nodeEl.querySelector('.tree-label')?.textContent || agentId;
+  const agentStatus = nodeEl.querySelector('.tree-icon')?.classList.contains('status-working') ? 'working' : 'idle';
+  const currentTask = nodeEl.querySelector('.tree-task')?.textContent || 'No active task';
+
+  const popover = document.createElement('div');
+  popover.className = 'agent-quick-actions';
+  popover.dataset.agentId = agentId;
+  popover.innerHTML = `
+    <div class="agent-popover-header">
+      <span class="agent-popover-name">${agentName}</span>
+      <span class="agent-popover-status status-${agentStatus}">${agentStatus}</span>
+    </div>
+    <div class="agent-popover-task">${currentTask}</div>
+    <div class="agent-popover-actions">
+      <button class="btn btn-sm btn-secondary" data-action="nudge" title="Send a nudge">
+        <span class="material-icons">notifications</span> Nudge
+      </button>
+      <button class="btn btn-sm btn-secondary" data-action="mail" title="Send mail">
+        <span class="material-icons">mail</span> Mail
+      </button>
+      <button class="btn btn-sm btn-secondary" data-action="view" title="View in Agents tab">
+        <span class="material-icons">open_in_new</span> View
+      </button>
+    </div>
+  `;
+
+  // Position the popover
+  popover.style.cssText = `
+    position: fixed;
+    top: ${rect.bottom + 8}px;
+    left: ${rect.left}px;
+    z-index: 9999;
+    min-width: 220px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: var(--space-md);
+    animation: fadeIn 0.15s ease;
+  `;
+
+  document.body.appendChild(popover);
+
+  // Adjust if off-screen
+  const popRect = popover.getBoundingClientRect();
+  if (popRect.right > window.innerWidth) {
+    popover.style.left = `${window.innerWidth - popRect.width - 10}px`;
+  }
+  if (popRect.bottom > window.innerHeight) {
+    popover.style.top = `${rect.top - popRect.height - 8}px`;
+  }
+
+  // Handle action clicks
+  popover.addEventListener('click', (e) => {
+    const actionBtn = e.target.closest('[data-action]');
+    if (!actionBtn) return;
+
+    const action = actionBtn.dataset.action;
+    popover.remove();
+
+    switch (action) {
+      case 'nudge':
+        openNudgeModal(agentId, agentName);
+        break;
+      case 'mail':
+        openMailModal(agentId, agentName);
+        break;
+      case 'view':
+        switchToAgentsTab(agentId);
+        break;
+    }
+  });
+
+  // Close on click outside
+  setTimeout(() => {
+    document.addEventListener('click', function closePopover(e) {
+      if (!popover.contains(e.target) && !nodeEl.contains(e.target)) {
+        popover.remove();
+        document.removeEventListener('click', closePopover);
+      }
+    });
+  }, 0);
+}
+
+/**
+ * Open nudge modal for an agent
+ */
+function openNudgeModal(agentId, agentName) {
+  const nudgeModal = document.getElementById('nudge-modal');
+  if (nudgeModal) {
+    const targetField = nudgeModal.querySelector('[name="to"]');
+    if (targetField) targetField.value = agentId;
+    const titleField = nudgeModal.querySelector('.modal-header h2');
+    if (titleField) titleField.textContent = `Nudge ${agentName}`;
+
+    // Show modal
+    document.getElementById('modal-overlay')?.classList.remove('hidden');
+    nudgeModal.classList.remove('hidden');
+  }
+}
+
+/**
+ * Open mail compose modal for an agent
+ */
+function openMailModal(agentId, agentName) {
+  const mailModal = document.getElementById('compose-modal');
+  if (mailModal) {
+    const toField = mailModal.querySelector('[name="to"]');
+    if (toField) {
+      // If it's a select, try to select the option
+      if (toField.tagName === 'SELECT') {
+        const option = Array.from(toField.options).find(o => o.value === agentId);
+        if (option) toField.value = agentId;
+      } else {
+        toField.value = agentId;
+      }
+    }
+
+    // Show modal
+    document.getElementById('modal-overlay')?.classList.remove('hidden');
+    mailModal.classList.remove('hidden');
+  }
+}
+
+/**
+ * Switch to Agents tab and highlight the agent
+ */
+function switchToAgentsTab(agentId) {
+  // Click the agents tab
+  const agentsTab = document.querySelector('[data-view="agents"]');
+  if (agentsTab) {
+    agentsTab.click();
+
+    // After a short delay, try to highlight the agent card
+    setTimeout(() => {
+      const agentCard = document.querySelector(`[data-agent-id="${agentId}"]`);
+      if (agentCard) {
+        agentCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        agentCard.classList.add('highlight');
+        setTimeout(() => agentCard.classList.remove('highlight'), 2000);
+      }
+    }, 100);
+  }
+}

@@ -2006,15 +2006,12 @@ select {
 
 [data-tooltip]::after {
   content: attr(data-tooltip);
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed;
   padding: var(--space-sm) var(--space-md);
   font-size: var(--text-xs);
   font-weight: normal;
   text-align: center;
-  max-width: 250px;
+  max-width: 280px;
   white-space: normal;
   line-height: 1.4;
   color: var(--text-primary);
@@ -2026,27 +2023,50 @@ select {
   visibility: hidden;
   pointer-events: none;
   transition: opacity var(--transition-fast), visibility var(--transition-fast);
-  z-index: 1000;
+  z-index: var(--z-tooltip);
 }
 
+/* Tooltip arrow - uses fixed positioning for proper z-index */
 [data-tooltip]::before {
   content: '';
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed;
   border: 6px solid transparent;
   border-top-color: var(--border-default);
   opacity: 0;
   visibility: hidden;
   transition: opacity var(--transition-fast), visibility var(--transition-fast);
-  z-index: 1001;
+  z-index: var(--z-tooltip);
 }
 
 [data-tooltip]:hover::after,
 [data-tooltip]:hover::before {
   opacity: 1;
   visibility: visible;
+}
+
+/* Tooltip positioning classes - applied via JS */
+.tooltip-top::after {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tooltip-bottom::after {
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tooltip-left::after {
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tooltip-right::after {
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 /* ============================================
@@ -2262,4 +2282,95 @@ select {
 .stat-label {
   font-size: var(--text-xs);
   color: var(--text-muted);
+}
+
+/* ============================================
+   AGENT QUICK ACTIONS POPOVER
+   ============================================ */
+
+.agent-quick-actions {
+  font-size: var(--text-sm);
+}
+
+.agent-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.agent-popover-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.agent-popover-status {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+}
+
+.agent-popover-status.status-working {
+  color: var(--status-working);
+  background: rgba(210, 153, 34, 0.15);
+}
+
+.agent-popover-status.status-idle {
+  color: var(--status-idle);
+  background: rgba(110, 118, 129, 0.15);
+}
+
+.agent-popover-task {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-style: italic;
+  margin-bottom: var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.agent-popover-actions {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.agent-popover-actions .btn {
+  flex: 1;
+  justify-content: center;
+  font-size: var(--text-xs);
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.agent-popover-actions .btn .material-icons {
+  font-size: 14px;
+}
+
+/* Agent card highlight animation */
+.agent-card.highlight {
+  animation: highlightPulse 0.5s ease 3;
+  border-color: var(--accent-primary) !important;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
+}
+
+@keyframes highlightPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(88, 166, 255, 0.5);
+  }
+}
+
+/* Dynamic tooltip styling */
+.dynamic-tooltip {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
 }
