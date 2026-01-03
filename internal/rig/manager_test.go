@@ -329,13 +329,16 @@ exit 1
 	}
 }
 
-func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
-	rigPath := t.TempDir()
-	beadsDir := filepath.Join(rigPath, ".beads")
+func TestInitAgentBeadsUsesTownBeadsDir(t *testing.T) {
+	// Agent beads use town beads (gt-* prefix) for cross-rig coordination.
+	// The Manager.townRoot determines where agent beads are created.
+	townRoot := t.TempDir()
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	rigPath := filepath.Join(townRoot, "testrip")
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
 
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
-		t.Fatalf("mkdir beads dir: %v", err)
+	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+		t.Fatalf("mkdir town beads dir: %v", err)
 	}
 	if err := os.MkdirAll(mayorRigPath, 0755); err != nil {
 		t.Fatalf("mkdir mayor rig: %v", err)
@@ -386,10 +389,10 @@ esac
 
 	binDir := writeFakeBD(t, script)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("EXPECT_BEADS_DIR", beadsDir)
+	t.Setenv("EXPECT_BEADS_DIR", townBeadsDir)
 	t.Setenv("BEADS_DIR", "")
 
-	manager := &Manager{}
+	manager := &Manager{townRoot: townRoot}
 	if err := manager.initAgentBeads(rigPath, "demo", "gt", false); err != nil {
 		t.Fatalf("initAgentBeads: %v", err)
 	}
