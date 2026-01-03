@@ -44,7 +44,7 @@ func (c *BdDaemonCheck) Run(ctx *CheckContext) *CheckResult {
 		healthCmd.Dir = ctx.TownRoot
 		var healthOut bytes.Buffer
 		healthCmd.Stdout = &healthOut
-		healthCmd.Run() // Ignore error, health check is optional
+		_ = healthCmd.Run() // Ignore error, health check is optional
 
 		healthOutput := healthOut.String()
 		if strings.Contains(healthOutput, "HEALTHY") {

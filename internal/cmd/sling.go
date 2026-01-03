@@ -1166,7 +1166,7 @@ func generateDogName(mgr *dog.Manager) string {
 // slingGenerateShortID generates a short random ID (5 lowercase chars).
 func slingGenerateShortID() string {
 	b := make([]byte, 3)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return strings.ToLower(base32.StdEncoding.EncodeToString(b)[:5])
 }
 

@@ -333,9 +333,9 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 
 	// Set environment
 	bdActor := fmt.Sprintf("%s/witness", rigName)
-	t.SetEnvironment(sessionName, "GT_ROLE", "witness")
-	t.SetEnvironment(sessionName, "GT_RIG", rigName)
-	t.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
+	_ = t.SetEnvironment(sessionName, "GT_ROLE", "witness")
+	_ = t.SetEnvironment(sessionName, "GT_RIG", rigName)
+	_ = t.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
 
 	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(rigName)

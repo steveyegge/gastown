@@ -114,7 +114,7 @@ func EnsureBdDaemonHealth(workDir string) string {
 func restartBdDaemons() error {
 	// Stop all daemons first
 	stopCmd := exec.Command("bd", "daemon", "killall")
-	stopCmd.Run() // Ignore errors - daemons might not be running
+	_ = stopCmd.Run() // Ignore errors - daemons might not be running
 
 	// Give time for cleanup
 	time.Sleep(200 * time.Millisecond)

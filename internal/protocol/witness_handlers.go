@@ -46,17 +46,17 @@ func (h *DefaultWitnessHandler) SetOutput(w io.Writer) {
 // 2. Notifies the polecat of successful merge
 // 3. Initiates polecat cleanup (nuke worktree)
 func (h *DefaultWitnessHandler) HandleMerged(payload *MergedPayload) error {
-	fmt.Fprintf(h.Output, "[Witness] MERGED received for polecat %s\n", payload.Polecat)
-	fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
-	fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
-	fmt.Fprintf(h.Output, "  Merged to: %s\n", payload.TargetBranch)
+	_, _ = fmt.Fprintf(h.Output, "[Witness] MERGED received for polecat %s\n", payload.Polecat)
+	_, _ = fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
+	_, _ = fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
+	_, _ = fmt.Fprintf(h.Output, "  Merged to: %s\n", payload.TargetBranch)
 	if payload.MergeCommit != "" {
-		fmt.Fprintf(h.Output, "  Commit: %s\n", payload.MergeCommit)
+		_, _ = fmt.Fprintf(h.Output, "  Commit: %s\n", payload.MergeCommit)
 	}
 
 	// Notify the polecat about successful merge
 	if err := h.notifyPolecatMerged(payload); err != nil {
-		fmt.Fprintf(h.Output, "[Witness] Warning: failed to notify polecat: %v\n", err)
+		_, _ = fmt.Fprintf(h.Output, "[Witness] Warning: failed to notify polecat: %v\n", err)
 		// Continue - notification is best-effort
 	}
 
@@ -64,13 +64,13 @@ func (h *DefaultWitnessHandler) HandleMerged(payload *MergedPayload) error {
 	// This verifies cleanup_status before nuking to prevent work loss.
 	nukeResult := witness.AutoNukeIfClean(h.WorkDir, h.Rig, payload.Polecat)
 	if nukeResult.Nuked {
-		fmt.Fprintf(h.Output, "[Witness] ✓ Auto-nuked polecat %s: %s\n", payload.Polecat, nukeResult.Reason)
+		_, _ = fmt.Fprintf(h.Output, "[Witness] ✓ Auto-nuked polecat %s: %s\n", payload.Polecat, nukeResult.Reason)
 	} else if nukeResult.Skipped {
-		fmt.Fprintf(h.Output, "[Witness] ⚠ Cleanup skipped for %s: %s\n", payload.Polecat, nukeResult.Reason)
+		_, _ = fmt.Fprintf(h.Output, "[Witness] ⚠ Cleanup skipped for %s: %s\n", payload.Polecat, nukeResult.Reason)
 	} else if nukeResult.Error != nil {
-		fmt.Fprintf(h.Output, "[Witness] ✗ Cleanup failed for %s: %v\n", payload.Polecat, nukeResult.Error)
+		_, _ = fmt.Fprintf(h.Output, "[Witness] ✗ Cleanup failed for %s: %v\n", payload.Polecat, nukeResult.Error)
 	} else {
-		fmt.Fprintf(h.Output, "[Witness] ✓ Polecat %s work merged, cleanup can proceed\n", payload.Polecat)
+		_, _ = fmt.Fprintf(h.Output, "[Witness] ✓ Polecat %s work merged, cleanup can proceed\n", payload.Polecat)
 	}
 
 	return nil
@@ -82,19 +82,19 @@ func (h *DefaultWitnessHandler) HandleMerged(payload *MergedPayload) error {
 // 2. Notifies the polecat about the failure and required fixes
 // 3. Updates the polecat's state to indicate rework needed
 func (h *DefaultWitnessHandler) HandleMergeFailed(payload *MergeFailedPayload) error {
-	fmt.Fprintf(h.Output, "[Witness] MERGE_FAILED received for polecat %s\n", payload.Polecat)
-	fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
-	fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
-	fmt.Fprintf(h.Output, "  Failure type: %s\n", payload.FailureType)
-	fmt.Fprintf(h.Output, "  Error: %s\n", payload.Error)
+	_, _ = fmt.Fprintf(h.Output, "[Witness] MERGE_FAILED received for polecat %s\n", payload.Polecat)
+	_, _ = fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
+	_, _ = fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
+	_, _ = fmt.Fprintf(h.Output, "  Failure type: %s\n", payload.FailureType)
+	_, _ = fmt.Fprintf(h.Output, "  Error: %s\n", payload.Error)
 
 	// Notify the polecat about the failure
 	if err := h.notifyPolecatFailed(payload); err != nil {
-		fmt.Fprintf(h.Output, "[Witness] Warning: failed to notify polecat: %v\n", err)
+		_, _ = fmt.Fprintf(h.Output, "[Witness] Warning: failed to notify polecat: %v\n", err)
 		// Continue - notification is best-effort
 	}
 
-	fmt.Fprintf(h.Output, "[Witness] ✗ Polecat %s merge failed, rework needed\n", payload.Polecat)
+	_, _ = fmt.Fprintf(h.Output, "[Witness] ✗ Polecat %s merge failed, rework needed\n", payload.Polecat)
 
 	return nil
 }
@@ -105,21 +105,21 @@ func (h *DefaultWitnessHandler) HandleMergeFailed(payload *MergeFailedPayload) e
 // 2. Notifies the polecat with rebase instructions
 // 3. Updates the polecat's state to indicate rebase needed
 func (h *DefaultWitnessHandler) HandleReworkRequest(payload *ReworkRequestPayload) error {
-	fmt.Fprintf(h.Output, "[Witness] REWORK_REQUEST received for polecat %s\n", payload.Polecat)
-	fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
-	fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
-	fmt.Fprintf(h.Output, "  Target: %s\n", payload.TargetBranch)
+	_, _ = fmt.Fprintf(h.Output, "[Witness] REWORK_REQUEST received for polecat %s\n", payload.Polecat)
+	_, _ = fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
+	_, _ = fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
+	_, _ = fmt.Fprintf(h.Output, "  Target: %s\n", payload.TargetBranch)
 	if len(payload.ConflictFiles) > 0 {
-		fmt.Fprintf(h.Output, "  Conflicts in: %v\n", payload.ConflictFiles)
+		_, _ = fmt.Fprintf(h.Output, "  Conflicts in: %v\n", payload.ConflictFiles)
 	}
 
 	// Notify the polecat about the rebase requirement
 	if err := h.notifyPolecatRebase(payload); err != nil {
-		fmt.Fprintf(h.Output, "[Witness] Warning: failed to notify polecat: %v\n", err)
+		_, _ = fmt.Fprintf(h.Output, "[Witness] Warning: failed to notify polecat: %v\n", err)
 		// Continue - notification is best-effort
 	}
 
-	fmt.Fprintf(h.Output, "[Witness] ⚠ Polecat %s needs to rebase onto %s\n", payload.Polecat, payload.TargetBranch)
+	_, _ = fmt.Fprintf(h.Output, "[Witness] ⚠ Polecat %s needs to rebase onto %s\n", payload.Polecat, payload.TargetBranch)
 
 	return nil
 }

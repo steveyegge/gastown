@@ -155,7 +155,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		if agent == "" {
 			agent = currentSession
 		}
-		LogHandoff(townRoot, agent, handoffSubject)
+		_ = LogHandoff(townRoot, agent, handoffSubject)
 		// Also log to activity feed
 		_ = events.LogFeed(events.TypeHandoff, agent, events.HandoffPayload(handoffSubject, true))
 	}

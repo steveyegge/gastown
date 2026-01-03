@@ -337,7 +337,7 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 		}
 
 		// Set environment
-		t.SetEnvironment(sessionID, "GT_ROLE", "crew")
+		_ = t.SetEnvironment(sessionID, "GT_ROLE", "crew")
 		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
 		theme := getThemeForRig(r.Name)
 		_ = t.ConfigureGasTownSession(sessionID, theme, r.Name, name, "crew")
@@ -596,7 +596,7 @@ func runCrewStop(cmd *cobra.Command, args []string) error {
 		if townRoot != "" {
 			agent := fmt.Sprintf("%s/crew/%s", r.Name, name)
 			logger := townlog.NewLogger(townRoot)
-			logger.Log(townlog.EventKill, agent, "gt crew stop")
+			_ = logger.Log(townlog.EventKill, agent, "gt crew stop")
 		}
 
 		// Log captured output (truncated)
@@ -682,7 +682,7 @@ func runCrewStopAll() error {
 		townRoot, _ := workspace.FindFromCwd()
 		if townRoot != "" {
 			logger := townlog.NewLogger(townRoot)
-			logger.Log(townlog.EventKill, agentName, "gt crew stop --all")
+			_ = logger.Log(townlog.EventKill, agentName, "gt crew stop --all")
 		}
 
 		// Log captured output (truncated)

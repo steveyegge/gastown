@@ -51,10 +51,10 @@ func (h *DefaultRefineryHandler) SetOutput(w io.Writer) {
 // 2. Adds it to the merge queue
 // 3. Acknowledges receipt
 func (h *DefaultRefineryHandler) HandleMergeReady(payload *MergeReadyPayload) error {
-	fmt.Fprintf(h.Output, "[Refinery] MERGE_READY received for polecat %s\n", payload.Polecat)
-	fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
-	fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
-	fmt.Fprintf(h.Output, "  Verified: %s\n", payload.Verified)
+	_, _ = fmt.Fprintf(h.Output, "[Refinery] MERGE_READY received for polecat %s\n", payload.Polecat)
+	_, _ = fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
+	_, _ = fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
+	_, _ = fmt.Fprintf(h.Output, "  Verified: %s\n", payload.Verified)
 
 	// Validate required fields
 	if payload.Branch == "" {
@@ -77,12 +77,12 @@ func (h *DefaultRefineryHandler) HandleMergeReady(payload *MergeReadyPayload) er
 
 	// Add to queue
 	if err := h.Queue.Submit(mr); err != nil {
-		fmt.Fprintf(h.Output, "[Refinery] Error adding to queue: %v\n", err)
+		_, _ = fmt.Fprintf(h.Output, "[Refinery] Error adding to queue: %v\n", err)
 		return fmt.Errorf("failed to add merge request to queue: %w", err)
 	}
 
-	fmt.Fprintf(h.Output, "[Refinery] ✓ Added to merge queue: %s\n", mr.ID)
-	fmt.Fprintf(h.Output, "  Queue length: %d\n", h.Queue.Count())
+	_, _ = fmt.Fprintf(h.Output, "[Refinery] ✓ Added to merge queue: %s\n", mr.ID)
+	_, _ = fmt.Fprintf(h.Output, "  Queue length: %d\n", h.Queue.Count())
 
 	return nil
 }
