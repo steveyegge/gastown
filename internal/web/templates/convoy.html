@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gas Town Dashboard</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        :root {
+            --bg-dark: #1a1a2e;
+            --bg-card: #16213e;
+            --text-primary: #eee;
+            --text-secondary: #aaa;
+            --border: #0f3460;
+            --green: #4ade80;
+            --yellow: #facc15;
+            --red: #f87171;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .dashboard {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .refresh-info {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .convoy-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-card);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .convoy-table th,
+        .convoy-table td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .convoy-table th {
+            background: var(--bg-dark);
+            font-weight: 500;
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .convoy-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .convoy-table tr:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        /* Status indicators */
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-open .status-indicator {
+            background: var(--yellow);
+        }
+
+        .status-closed .status-indicator {
+            background: var(--green);
+        }
+
+        /* Activity colors */
+        .activity-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .activity-green .activity-dot {
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+        }
+
+        .activity-yellow .activity-dot {
+            background: var(--yellow);
+            box-shadow: 0 0 8px var(--yellow);
+        }
+
+        .activity-red .activity-dot {
+            background: var(--red);
+            box-shadow: 0 0 8px var(--red);
+        }
+
+        .activity-unknown .activity-dot {
+            background: var(--text-secondary);
+        }
+
+        .convoy-id {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .convoy-title {
+            color: var(--text-secondary);
+            margin-left: 8px;
+        }
+
+        .progress {
+            font-variant-numeric: tabular-nums;
+        }
+
+        .progress-bar {
+            width: 60px;
+            height: 4px;
+            background: var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--green);
+            border-radius: 2px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 48px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state h2 {
+            font-size: 1.25rem;
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            font-size: 0.875rem;
+        }
+
+        /* htmx loading indicator */
+        .htmx-request .htmx-indicator {
+            opacity: 1;
+        }
+
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 200ms ease-in;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard" hx-get="/" hx-trigger="every 30s" hx-swap="outerHTML">
+        <header>
+            <h1>🚚 Gas Town Convoys</h1>
+            <span class="refresh-info">
+                Auto-refresh: every 30s
+                <span class="htmx-indicator">⟳</span>
+            </span>
+        </header>
+
+        {{if .Convoys}}
+        <table class="convoy-table">
+            <thead>
+                <tr>
+                    <th>Status</th>
+                    <th>Convoy</th>
+                    <th>Progress</th>
+                    <th>Last Activity</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Convoys}}
+                <tr class="{{statusClass .Status}}">
+                    <td>
+                        <span class="status-indicator"></span>
+                        {{if eq .Status "open"}}●{{else}}✓{{end}}
+                    </td>
+                    <td>
+                        <span class="convoy-id">{{.ID}}</span>
+                        <span class="convoy-title">{{.Title}}</span>
+                    </td>
+                    <td class="progress">
+                        {{.Progress}}
+                        {{if .Total}}
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: {{progressPercent .Completed .Total}}%;"></div>
+                        </div>
+                        {{end}}
+                    </td>
+                    <td class="{{activityClass .LastActivity}}">
+                        <span class="activity-dot"></span>
+                        {{.LastActivity.FormattedAge}}
+                    </td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+        {{else}}
+        <div class="empty-state">
+            <h2>No convoys found</h2>
+            <p>Create a convoy with: gt convoy create &lt;name&gt; [issues...]</p>
+        </div>
+        {{end}}
+    </div>
+</body>
+</html>
