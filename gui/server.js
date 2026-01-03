@@ -308,6 +308,104 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// ============= Setup & Onboarding API =============
+
+// Get setup status (for onboarding wizard)
+app.get('/api/setup/status', async (req, res) => {
+  const status = {
+    gt_installed: false,
+    gt_version: null,
+    bd_installed: false,
+    bd_version: null,
+    workspace_initialized: false,
+    workspace_path: GT_ROOT,
+    rigs: [],
+  };
+
+  // Check gt
+  try {
+    const gtResult = await execAsync('gt version', { timeout: 5000 });
+    status.gt_installed = true;
+    status.gt_version = gtResult.stdout.trim().split('\n')[0];
+  } catch {
+    status.gt_installed = false;
+  }
+
+  // Check bd
+  try {
+    const bdResult = await execAsync('bd version', { timeout: 5000 });
+    status.bd_installed = true;
+    status.bd_version = bdResult.stdout.trim().split('\n')[0];
+  } catch {
+    status.bd_installed = false;
+  }
+
+  // Check workspace
+  try {
+    const fs = await import('fs');
+    const path = await import('path');
+    const mayorPath = path.join(GT_ROOT, 'mayor');
+    status.workspace_initialized = fs.existsSync(mayorPath);
+  } catch {
+    status.workspace_initialized = false;
+  }
+
+  // Get rigs
+  try {
+    const rigResult = await executeGT(['rig', 'list', '--json']);
+    if (rigResult.success) {
+      const rigs = parseJSON(rigResult.data);
+      status.rigs = rigs || [];
+    }
+  } catch {
+    status.rigs = [];
+  }
+
+  res.json(status);
+});
+
+// Add a rig (project)
+app.post('/api/rigs', async (req, res) => {
+  const { name, url } = req.body;
+
+  if (!name || !url) {
+    return res.status(400).json({ error: 'Name and URL are required' });
+  }
+
+  const result = await executeGT(['rig', 'add', name, url]);
+
+  if (result.success) {
+    broadcast({ type: 'rig_added', data: { name, url } });
+    res.json({ success: true, name, raw: result.data });
+  } else {
+    res.status(500).json({ success: false, error: result.error });
+  }
+});
+
+// List rigs
+app.get('/api/rigs', async (req, res) => {
+  const result = await executeGT(['rig', 'list', '--json']);
+
+  if (result.success) {
+    const data = parseJSON(result.data);
+    res.json(data || []);
+  } else {
+    res.json([]);
+  }
+});
+
+// Run gt doctor
+app.get('/api/doctor', async (req, res) => {
+  const result = await executeGT(['doctor', '--json']);
+
+  if (result.success) {
+    const data = parseJSON(result.data);
+    res.json(data || { raw: result.data });
+  } else {
+    res.status(500).json({ error: result.error });
+  }
+});
+
 // ============= WebSocket for Real-time Events =============
 
 // Start activity stream

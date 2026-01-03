@@ -15,6 +15,7 @@ import { renderMailList } from './components/mail-list.js';
 import { showToast } from './components/toast.js';
 import { initModals } from './components/modals.js';
 import { startTutorial, shouldShowTutorial } from './components/tutorial.js';
+import { startOnboarding, shouldShowOnboarding, resetOnboarding } from './components/onboarding.js';
 
 // DOM Elements
 const elements = {
@@ -61,10 +62,19 @@ async function init() {
 
   console.log('[App] Initialization complete');
 
-  // Auto-start tutorial for first-time users
-  if (shouldShowTutorial()) {
+  // Check for first-time users - show onboarding wizard
+  const showOnboarding = await shouldShowOnboarding();
+  if (showOnboarding) {
+    setTimeout(() => startOnboarding(), 500);
+  } else if (shouldShowTutorial()) {
+    // Show tutorial only if onboarding was already completed
     setTimeout(() => startTutorial(), 1000);
   }
+
+  // Listen for onboarding completion
+  document.addEventListener('onboarding:complete', () => {
+    loadInitialData();
+  });
 }
 
 // Navigation setup
@@ -357,4 +367,4 @@ if (document.readyState === 'loading') {
 }
 
 // Export for debugging
-window.gastown = { state, api, ws, startTutorial };
+window.gastown = { state, api, ws, startTutorial, startOnboarding, resetOnboarding };

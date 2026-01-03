@@ -490,6 +490,16 @@
                 <div class="shortcut"><kbd>Esc</kbd> Close modal</div>
               </div>
             </div>
+            <div class="help-actions">
+              <button class="btn btn-secondary" onclick="window.gastown.startOnboarding(); document.getElementById('modal-overlay').classList.add('hidden');">
+                <span class="material-icons">rocket_launch</span>
+                Restart Setup Wizard
+              </button>
+              <button class="btn btn-secondary" onclick="window.gastown.startTutorial(); document.getElementById('modal-overlay').classList.add('hidden');">
+                <span class="material-icons">school</span>
+                Show Tutorial
+              </button>
+            </div>
           </div>
         </div>
       </div>

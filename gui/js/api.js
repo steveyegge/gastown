@@ -128,6 +128,23 @@ export const api = {
   escalate(convoyId, reason, priority = 'normal') {
     return this.post('/api/escalate', { convoy_id: convoyId, reason, priority });
   },
+
+  // === Setup & Onboarding ===
+  getSetupStatus() {
+    return this.get('/api/setup/status');
+  },
+
+  getRigs() {
+    return this.get('/api/rigs');
+  },
+
+  addRig(name, url) {
+    return this.post('/api/rigs', { name, url });
+  },
+
+  runDoctor() {
+    return this.get('/api/doctor');
+  },
 };
 
 // WebSocket Client
