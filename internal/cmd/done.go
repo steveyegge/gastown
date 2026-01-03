@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -10,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -104,6 +106,12 @@ func runDone(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Get configured default branch for this rig
+	defaultBranch := "main" // fallback
+	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+
 	// Initialize git for the current directory
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -147,11 +155,11 @@ func runDone(cmd *cobra.Command, args []string) error {
 		agentBeadID = getAgentBeadID(ctx)
 	}
 
-	// For COMPLETED, we need an issue ID and branch must not be main
+	// For COMPLETED, we need an issue ID and branch must not be the default branch
 	var mrID string
 	if exitType == ExitCompleted {
-		if branch == "main" || branch == "master" {
-			return fmt.Errorf("cannot submit main/master branch to merge queue")
+		if branch == defaultBranch || branch == "master" {
+			return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
 		}
 
 		// Check for unpushed commits - branch must be pushed before MR creation
@@ -164,13 +172,13 @@ func runDone(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("branch has %d unpushed commit(s); run 'git push -u origin %s' first", unpushedCount, branch)
 		}
 
-		// Check that branch has commits ahead of main (prevents submitting stale branches)
-		aheadCount, err := g.CommitsAhead("main", branch)
+		// Check that branch has commits ahead of default branch (prevents submitting stale branches)
+		aheadCount, err := g.CommitsAhead(defaultBranch, branch)
 		if err != nil {
-			return fmt.Errorf("checking commits ahead of main: %w", err)
+			return fmt.Errorf("checking commits ahead of %s: %w", defaultBranch, err)
 		}
 		if aheadCount == 0 {
-			return fmt.Errorf("branch '%s' has 0 commits ahead of main; nothing to merge", branch)
+			return fmt.Errorf("branch '%s' has 0 commits ahead of %s; nothing to merge", branch, defaultBranch)
 		}
 
 		if issueID == "" {
@@ -181,7 +189,7 @@ func runDone(cmd *cobra.Command, args []string) error {
 		bd := beads.New(cwd)
 
 		// Determine target branch (auto-detect integration branch if applicable)
-		target := "main"
+		target := defaultBranch
 		autoTarget, err := detectIntegrationBranch(bd, g, issueID)
 		if err == nil && autoTarget != "" {
 			target = autoTarget

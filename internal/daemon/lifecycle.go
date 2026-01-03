@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -475,6 +476,20 @@ func (d *Daemon) applySessionTheme(sessionName string, parsed *ParsedIdentity) {
 // syncWorkspace syncs a git workspace before starting a new session.
 // This ensures agents with persistent clones (like refinery) start with current code.
 func (d *Daemon) syncWorkspace(workDir string) {
+	// Determine default branch from rig config
+	// workDir is like <townRoot>/<rigName>/<role>/rig or <townRoot>/<rigName>/crew/<name>
+	defaultBranch := "main" // fallback
+	rel, err := filepath.Rel(d.config.TownRoot, workDir)
+	if err == nil {
+		parts := strings.Split(rel, string(filepath.Separator))
+		if len(parts) > 0 {
+			rigPath := filepath.Join(d.config.TownRoot, parts[0])
+			if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
+				defaultBranch = rigCfg.DefaultBranch
+			}
+		}
+	}
+
 	// Fetch latest from origin
 	fetchCmd := exec.Command("git", "fetch", "origin")
 	fetchCmd.Dir = workDir
@@ -483,7 +498,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	}
 
 	// Pull with rebase to incorporate changes
-	pullCmd := exec.Command("git", "pull", "--rebase", "origin", "main")
+	pullCmd := exec.Command("git", "pull", "--rebase", "origin", defaultBranch)
 	pullCmd.Dir = workDir
 	if err := pullCmd.Run(); err != nil {
 		d.logger.Printf("Warning: git pull failed in %s: %v", workDir, err)

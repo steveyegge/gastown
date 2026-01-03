@@ -153,9 +153,10 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 
 // AddRigOptions configures rig creation.
 type AddRigOptions struct {
-	Name        string // Rig name (directory name)
-	GitURL      string // Repository URL
-	BeadsPrefix string // Beads issue prefix (defaults to derived from name)
+	Name          string // Rig name (directory name)
+	GitURL        string // Repository URL
+	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
+	DefaultBranch string // Default branch (defaults to auto-detected from remote)
 }
 
 // AddRig creates a new rig as a container with clones for each agent.
@@ -231,8 +232,17 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}
 	bareGit := git.NewGitWithDir(bareRepoPath, "")
 
-	// Detect default branch (main, master, etc.)
-	defaultBranch := bareGit.DefaultBranch()
+	// Determine default branch: use provided value or auto-detect from remote
+	var defaultBranch string
+	if opts.DefaultBranch != "" {
+		defaultBranch = opts.DefaultBranch
+	} else {
+		// Try to get default branch from remote first, fall back to local detection
+		defaultBranch = bareGit.RemoteDefaultBranch("origin")
+		if defaultBranch == "" {
+			defaultBranch = bareGit.DefaultBranch()
+		}
+	}
 	rigConfig.DefaultBranch = defaultBranch
 	// Re-save config with default branch
 	if err := m.saveRigConfig(rigPath, rigConfig); err != nil {
@@ -248,6 +258,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}
 	if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
 		return nil, fmt.Errorf("cloning for mayor: %w", err)
+	}
+
+	// Checkout the default branch for mayor (clone defaults to remote's HEAD, not our configured branch)
+	mayorGit := git.NewGitWithDir("", mayorRigPath)
+	if err := mayorGit.Checkout(defaultBranch); err != nil {
+		return nil, fmt.Errorf("checking out default branch for mayor: %w", err)
 	}
 
 	// Check if source repo has .beads/ with its own prefix - if so, use that prefix.
