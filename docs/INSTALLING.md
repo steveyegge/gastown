@@ -103,7 +103,6 @@ gt install ~/gt
 #   ~/gt/
 #   ├── CLAUDE.md          # Mayor role context
 #   ├── mayor/             # Mayor config and state
-#   ├── rigs/              # Project containers (initially empty)
 #   └── .beads/            # Town-level issue tracking
 ```
 

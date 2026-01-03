@@ -39,7 +39,7 @@ The HQ (headquarters) is the top-level directory where Gas Town is installed -
 the root of your workspace where all rigs and agents live. It contains:
   - CLAUDE.md            Mayor role context (Mayor runs from HQ root)
   - mayor/               Mayor config, state, and rig registry
-  - rigs/                Managed rig containers (created by 'gt rig add')
+  - <rig>/               Rig containers (created by 'gt rig add')
   - .beads/              Town-level beads DB (hq-* prefix for mayor mail)
 
 If path is omitted, uses the current directory.
@@ -170,12 +170,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("   ✓ Created mayor/rigs.json\n")
 
-	// Create rigs directory (for managed rig clones)
-	rigsDir := filepath.Join(absPath, "rigs")
-	if err := os.MkdirAll(rigsDir, 0755); err != nil {
-		return fmt.Errorf("creating rigs directory: %w", err)
-	}
-	fmt.Printf("   ✓ Created rigs/\n")
 
 	// Create mayor state.json
 	mayorState := &config.AgentState{

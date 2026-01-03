@@ -33,7 +33,6 @@ func TestInstallCreatesCorrectStructure(t *testing.T) {
 	// Verify directory structure
 	assertDirExists(t, hqPath, "HQ root")
 	assertDirExists(t, filepath.Join(hqPath, "mayor"), "mayor/")
-	assertDirExists(t, filepath.Join(hqPath, "rigs"), "rigs/")
 
 	// Verify mayor/town.json
 	townPath := filepath.Join(hqPath, "mayor", "town.json")
