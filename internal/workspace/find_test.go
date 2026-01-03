@@ -144,7 +144,6 @@ func TestIsWorkspace(t *testing.T) {
 }
 
 func TestFindFollowsSymlinks(t *testing.T) {
-	// Create workspace
 	root := realPath(t, t.TempDir())
 	mayorDir := filepath.Join(root, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
@@ -155,7 +154,6 @@ func TestFindFollowsSymlinks(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	// Create a symlinked directory
 	linkTarget := filepath.Join(root, "actual")
 	if err := os.MkdirAll(linkTarget, 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -166,12 +164,87 @@ func TestFindFollowsSymlinks(t *testing.T) {
 		t.Skipf("symlink not supported: %v", err)
 	}
 
-	// Find from symlinked dir should work
 	found, err := Find(linkName)
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
 	if found != root {
 		t.Errorf("Find = %q, want %q", found, root)
+	}
+}
+
+func TestResolvePath(t *testing.T) {
+	root := realPath(t, t.TempDir())
+	subdir := filepath.Join(root, "some", "path")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	resolved, err := ResolvePath(subdir)
+	if err != nil {
+		t.Fatalf("ResolvePath: %v", err)
+	}
+
+	if resolved != subdir {
+		t.Errorf("ResolvePath = %q, want %q", resolved, subdir)
+	}
+}
+
+func TestResolvePath_Symlink(t *testing.T) {
+	root := realPath(t, t.TempDir())
+	actual := filepath.Join(root, "actual")
+	if err := os.MkdirAll(actual, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(actual, link); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	resolved, err := ResolvePath(link)
+	if err != nil {
+		t.Fatalf("ResolvePath: %v", err)
+	}
+
+	if resolved != actual {
+		t.Errorf("ResolvePath(%q) = %q, want %q", link, resolved, actual)
+	}
+}
+
+func TestRelativePathWithSymlinks(t *testing.T) {
+	root := realPath(t, t.TempDir())
+
+	mayorDir := filepath.Join(root, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	townFile := filepath.Join(mayorDir, "town.json")
+	if err := os.WriteFile(townFile, []byte(`{}`), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	worktree := filepath.Join(root, "gastownui", "polecats", "furiosa")
+	if err := os.MkdirAll(worktree, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	townRoot, err := Find(worktree)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+
+	cwd, err := ResolvePath(worktree)
+	if err != nil {
+		t.Fatalf("ResolvePath: %v", err)
+	}
+
+	relPath, err := filepath.Rel(townRoot, cwd)
+	if err != nil {
+		t.Fatalf("Rel: %v", err)
+	}
+
+	if relPath != "gastownui/polecats/furiosa" {
+		t.Errorf("Rel = %q, want 'gastownui/polecats/furiosa'", relPath)
 	}
 }

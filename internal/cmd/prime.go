@@ -170,8 +170,14 @@ func detectRole(cwd, townRoot string) RoleInfo {
 		Source:   "cwd",
 	}
 
-	// Get relative path from town root
-	relPath, err := filepath.Rel(townRoot, cwd)
+	// Resolve symlinks on cwd to match townRoot (which is symlink-resolved by workspace.Find).
+	// Without this, filepath.Rel fails on systems with symlinks (e.g., /tmp → /private/tmp on macOS).
+	resolvedCwd, err := workspace.ResolvePath(cwd)
+	if err != nil {
+		return ctx
+	}
+
+	relPath, err := filepath.Rel(townRoot, resolvedCwd)
 	if err != nil {
 		return ctx
 	}

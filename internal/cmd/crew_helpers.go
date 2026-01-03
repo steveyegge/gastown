@@ -18,12 +18,11 @@ import (
 
 // inferRigFromCwd tries to determine the rig from the current directory.
 func inferRigFromCwd(townRoot string) (string, error) {
-	cwd, err := filepath.Abs(".")
+	cwd, err := workspace.ResolvedCwd()
 	if err != nil {
 		return "", err
 	}
 
-	// Check if cwd is within a rig
 	rel, err := filepath.Rel(townRoot, cwd)
 	if err != nil {
 		return "", fmt.Errorf("not in workspace")
@@ -94,12 +93,11 @@ type crewDetection struct {
 // detectCrewFromCwd attempts to detect the crew workspace from the current directory.
 // It looks for the pattern <town>/<rig>/crew/<name>/ in the current path.
 func detectCrewFromCwd() (*crewDetection, error) {
-	cwd, err := os.Getwd()
+	cwd, err := workspace.ResolvedCwd()
 	if err != nil {
 		return nil, fmt.Errorf("getting cwd: %w", err)
 	}
 
-	// Find town root
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return nil, fmt.Errorf("not in Gas Town workspace: %w", err)
@@ -108,7 +106,6 @@ func detectCrewFromCwd() (*crewDetection, error) {
 		return nil, fmt.Errorf("not in Gas Town workspace")
 	}
 
-	// Get relative path from town root
 	relPath, err := filepath.Rel(townRoot, cwd)
 	if err != nil {
 		return nil, fmt.Errorf("getting relative path: %w", err)

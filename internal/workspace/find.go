@@ -102,6 +102,38 @@ func FindFromCwdOrError() (string, error) {
 	return FindOrError(cwd)
 }
 
+// ResolvePath resolves symlinks in the given path to match the format returned by Find().
+// This is necessary because Find() resolves symlinks (e.g., /tmp → /private/tmp on macOS),
+// but os.Getwd() may return symlink paths. Using filepath.Rel() with mismatched paths
+// produces incorrect results like "../../../tmp/..." instead of "rig/polecats/name".
+//
+// Use this function on cwd before computing relative paths against a town root:
+//
+//	townRoot, _ := workspace.FindFromCwd()
+//	cwd, _ := workspace.ResolvePath(os.Getwd())
+//	relPath, _ := filepath.Rel(townRoot, cwd)  // Now works correctly
+func ResolvePath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolving absolute path: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", fmt.Errorf("evaluating symlinks: %w", err)
+	}
+	return resolved, nil
+}
+
+// ResolvedCwd returns the current working directory with symlinks resolved.
+// This is a convenience wrapper around ResolvePath(os.Getwd()).
+func ResolvedCwd() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getting current directory: %w", err)
+	}
+	return ResolvePath(cwd)
+}
+
 // IsWorkspace checks if the given directory is a Gas Town workspace root.
 // A directory is a workspace if it has a primary marker (mayor/town.json)
 // or a secondary marker (mayor/ directory).

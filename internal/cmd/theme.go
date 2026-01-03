@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	themeListFlag    bool
-	themeApplyFlag   bool
+	themeListFlag     bool
+	themeApplyFlag    bool
 	themeApplyAllFlag bool
 )
 
@@ -42,7 +42,7 @@ var themeApplyCmd = &cobra.Command{
 
 By default, only applies to sessions in the current rig.
 Use --all to apply to sessions across all rigs.`,
-	RunE:  runThemeApply,
+	RunE: runThemeApply,
 }
 
 func init() {
@@ -213,19 +213,16 @@ func detectCurrentRig() string {
 		}
 	}
 
-	// Try to detect from actual cwd path
-	cwd, err := os.Getwd()
+	cwd, err := workspace.ResolvedCwd()
 	if err != nil {
 		return ""
 	}
 
-	// Find town root to extract rig name
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil || townRoot == "" {
 		return ""
 	}
 
-	// Get path relative to town root
 	rel, err := filepath.Rel(townRoot, cwd)
 	if err != nil {
 		return ""

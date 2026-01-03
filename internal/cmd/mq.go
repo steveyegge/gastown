@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // MQ command flags
@@ -307,12 +307,11 @@ func init() {
 // findCurrentRig determines the current rig from the working directory.
 // Returns the rig name and rig object, or an error if not in a rig.
 func findCurrentRig(townRoot string) (string, *rig.Rig, error) {
-	cwd, err := os.Getwd()
+	cwd, err := workspace.ResolvedCwd()
 	if err != nil {
 		return "", nil, fmt.Errorf("getting current directory: %w", err)
 	}
 
-	// Get relative path from town root to cwd
 	relPath, err := filepath.Rel(townRoot, cwd)
 	if err != nil {
 		return "", nil, fmt.Errorf("computing relative path: %w", err)

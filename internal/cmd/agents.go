@@ -382,11 +382,11 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 
 // CollisionReport holds the results of a collision check.
 type CollisionReport struct {
-	TotalSessions int                    `json:"total_sessions"`
-	TotalLocks    int                    `json:"total_locks"`
-	Collisions    int                    `json:"collisions"`
-	StaleLocks    int                    `json:"stale_locks"`
-	Issues        []CollisionIssue       `json:"issues,omitempty"`
+	TotalSessions int                       `json:"total_sessions"`
+	TotalLocks    int                       `json:"total_locks"`
+	Collisions    int                       `json:"collisions"`
+	StaleLocks    int                       `json:"stale_locks"`
+	Issues        []CollisionIssue          `json:"issues,omitempty"`
 	Locks         map[string]*lock.LockInfo `json:"locks,omitempty"`
 }
 
@@ -553,7 +553,12 @@ func buildCollisionReport(townRoot string) (*CollisionReport, error) {
 }
 
 func guessSessionFromWorkerDir(workerDir, townRoot string) string {
-	relPath, err := filepath.Rel(townRoot, workerDir)
+	resolvedWorkerDir, err := workspace.ResolvePath(workerDir)
+	if err != nil {
+		return ""
+	}
+
+	relPath, err := filepath.Rel(townRoot, resolvedWorkerDir)
 	if err != nil {
 		return ""
 	}
