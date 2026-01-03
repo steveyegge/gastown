@@ -84,7 +84,7 @@ func TestInstallCreatesCorrectStructure(t *testing.T) {
 }
 
 // TestInstallBeadsHasCorrectPrefix validates that beads is initialized
-// with the correct "hq-" prefix for town-level beads.
+// with the correct "gt-" prefix for town-level beads.
 func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
 	// Skip if bd is not available
 	if _, err := exec.LookPath("bd"); err != nil {
@@ -125,8 +125,8 @@ func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
 	}
 
 	prefix := strings.TrimSpace(string(prefixOutput))
-	if prefix != "hq" {
-		t.Errorf("beads issue_prefix = %q, want %q", prefix, "hq")
+	if prefix != "gt" {
+		t.Errorf("beads issue_prefix = %q, want %q", prefix, "gt")
 	}
 }
 

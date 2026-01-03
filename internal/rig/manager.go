@@ -489,6 +489,55 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	return nil
 }
 
+// ensureTownBeadsInitialized ensures the town-level beads database (.beads/ at HQ root)
+// is initialized with the "gt" prefix. This is required before creating agent beads.
+//
+// This handles the case where:
+// 1. gt install was run with --no-beads, OR
+// 2. gt install ran but beads initialization failed, OR
+// 3. User is running gt rig add in an HQ that doesn't have beads yet
+//
+// The function idempotently initializes the database if needed.
+func (m *Manager) ensureTownBeadsInitialized(townBeadsDir string) error {
+	// Create .beads directory if needed
+	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+		return fmt.Errorf("creating .beads directory: %w", err)
+	}
+
+	// Check if the database already exists and is working by attempting to get its info
+	// We use a simple check: try to list beads in quiet mode
+	checkCmd := exec.Command("bd", "list", "-q", "--allow-stale")
+	checkCmd.Dir = m.townRoot
+	// Set explicit BEADS_DIR to ensure we're checking the town beads, not a parent or rig beads
+	checkCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
+	if err := checkCmd.Run(); err == nil {
+		// Database is working, assume it's ready
+		return nil
+	}
+
+	// Database doesn't exist or is corrupted, (re)initialize it with gt prefix.
+	// bd init is idempotent - safe to run multiple times
+	initCmd := exec.Command("bd", "init", "--prefix", "gt")
+	initCmd.Dir = m.townRoot
+	initCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
+	output, err := initCmd.CombinedOutput()
+	if err != nil {
+		// Check if already initialized (different error message versions)
+		outputStr := strings.TrimSpace(string(output))
+		if strings.Contains(outputStr, "already initialized") {
+			return nil
+		}
+		// If bd is not available or failed, create minimal structure
+		configContent := "prefix: gt\n"
+		configPath := filepath.Join(townBeadsDir, "config.yaml")
+		if writeErr := os.WriteFile(configPath, []byte(configContent), 0644); writeErr != nil {
+			return fmt.Errorf("creating beads config: %w", writeErr)
+		}
+	}
+
+	return nil
+}
+
 // initAgentBeads creates agent beads for this rig and optionally global agents.
 // - Always creates: gt-<rig>-witness, gt-<rig>-refinery
 // - First rig only: gt-deacon, gt-mayor
@@ -502,6 +551,14 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig boo
 	// Agent beads go in town beads (gt-* prefix), not rig beads.
 	// This enables cross-rig agent coordination via canonical IDs.
 	townBeadsDir := filepath.Join(m.townRoot, ".beads")
+	
+	// Ensure town beads database is initialized before creating agent beads.
+	// This handles cases where gt install was run with --no-beads or where
+	// beads initialization failed earlier.
+	if err := m.ensureTownBeadsInitialized(townBeadsDir); err != nil {
+		return fmt.Errorf("ensuring town beads initialized: %w", err)
+	}
+	
 	bd := beads.NewWithBeadsDir(m.townRoot, townBeadsDir)
 
 	// Define agents to create

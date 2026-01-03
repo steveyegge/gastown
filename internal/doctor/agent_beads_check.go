@@ -11,12 +11,12 @@ import (
 
 // AgentBeadsCheck verifies that agent beads exist for all agents.
 // This includes:
-// - Global agents (deacon, mayor) - stored in first rig's beads
-// - Per-rig agents (witness, refinery) - stored in each rig's beads
-// - Crew workers - stored in each rig's beads
+// - Global agents (deacon, mayor) - stored in town beads with gt- prefix
+// - Per-rig agents (witness, refinery) - stored in town beads with gt- prefix
+// - Crew workers - stored in town beads with gt- prefix
 //
 // Agent beads are created by gt rig add (see gt-h3hak, gt-pinkq) and gt crew add.
-// Each rig uses its configured prefix (e.g., "gt-" for gastown, "bd-" for beads).
+// All agent beads use the canonical "gt-" prefix in the town beads for cross-rig coordination.
 type AgentBeadsCheck struct {
 	FixableCheck
 }
@@ -80,27 +80,24 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	var checked int
 
 	// Find the first rig (by name, alphabetically) for global agents
-	// Only consider gt-prefix rigs since other prefixes can't have agent beads yet
 	var firstRigName string
-	for prefix, info := range prefixToRig {
-		if prefix != "gt" {
-			continue // Skip non-gt prefixes for first rig selection
-		}
+	for _, info := range prefixToRig {
 		if firstRigName == "" || info.name < firstRigName {
 			firstRigName = info.name
 		}
 	}
 
-	// Check each rig for its agents
-	for prefix, info := range prefixToRig {
-		// Get beads client for this rig using the route path directly
-		rigBeadsPath := filepath.Join(ctx.TownRoot, info.beadsPath)
-		bd := beads.New(rigBeadsPath)
+	// Agent beads are stored in town beads with canonical gt- prefix
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	bd := beads.New(townBeadsDir)
+
+	// Check each rig for its agents (in town beads, not rig beads)
+	for _, info := range prefixToRig {
 		rigName := info.name
 
-		// Check rig-specific agents (using canonical naming: prefix-rig-role-name)
-		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
-		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
+		// Check rig-specific agents (using canonical gt- prefix in town beads)
+		witnessID := beads.WitnessBeadID(rigName)
+		refineryID := beads.RefineryBeadID(rigName)
 
 		if _, err := bd.Show(witnessID); err != nil {
 			missing = append(missing, witnessID)
@@ -112,10 +109,10 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 		checked++
 
-		// Check crew worker agents
+		// Check crew worker agents (in town beads with gt- prefix)
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
-			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
+			crewID := beads.CrewBeadID(rigName, workerName)
 			if _, err := bd.Show(crewID); err != nil {
 				missing = append(missing, crewID)
 			}
@@ -183,26 +180,24 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		return nil // Nothing to fix
 	}
 
-	// Find the first rig for global agents (only gt-prefix rigs)
+	// Find the first rig for global agents
 	var firstRigName string
-	for prefix, info := range prefixToRig {
-		if prefix != "gt" {
-			continue
-		}
+	for _, info := range prefixToRig {
 		if firstRigName == "" || info.name < firstRigName {
 			firstRigName = info.name
 		}
 	}
 
-	// Create missing agents for each rig
-	for prefix, info := range prefixToRig {
-		// Use the route path directly instead of hardcoding /mayor/rig
-		rigBeadsPath := filepath.Join(ctx.TownRoot, info.beadsPath)
-		bd := beads.New(rigBeadsPath)
+	// Agent beads are stored in town beads with canonical gt- prefix
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	bd := beads.New(townBeadsDir)
+
+	// Create missing agents for each rig (in town beads, not rig beads)
+	for _, info := range prefixToRig {
 		rigName := info.name
 
-		// Create rig-specific agents if missing (using canonical naming: prefix-rig-role-name)
-		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
+		// Create rig-specific agents if missing (using canonical gt- prefix in town beads)
+		witnessID := beads.WitnessBeadID(rigName)
 		if _, err := bd.Show(witnessID); err != nil {
 			fields := &beads.AgentFields{
 				RoleType:   "witness",
@@ -216,7 +211,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			}
 		}
 
-		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
+		refineryID := beads.RefineryBeadID(rigName)
 		if _, err := bd.Show(refineryID); err != nil {
 			fields := &beads.AgentFields{
 				RoleType:   "refinery",
@@ -230,10 +225,10 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			}
 		}
 
-		// Create crew worker agents if missing
+		// Create crew worker agents if missing (in town beads with gt- prefix)
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
-			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
+			crewID := beads.CrewBeadID(rigName, workerName)
 			if _, err := bd.Show(crewID); err != nil {
 				fields := &beads.AgentFields{
 					RoleType:   "crew",

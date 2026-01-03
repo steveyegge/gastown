@@ -925,11 +925,9 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	}
 
 	// Set the role slot if specified (this is the authoritative storage)
+	// Role beads may not exist yet (they're created separately), so silently ignore errors
 	if fields != nil && fields.RoleBead != "" {
-		if _, err := b.run("slot", "set", id, "role", fields.RoleBead); err != nil {
-			// Non-fatal: warn but continue
-			fmt.Printf("Warning: could not set role slot: %v\n", err)
-		}
+		_, _ = b.run("slot", "set", id, "role", fields.RoleBead)
 	}
 
 	return &issue, nil

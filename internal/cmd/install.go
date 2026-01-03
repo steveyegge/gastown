@@ -201,7 +201,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if err := initTownBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with hq- prefix)\n")
+			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with gt- prefix)\n")
 		}
 
 		// NOTE: Agent beads (gt-deacon, gt-mayor) are created by gt rig add,
@@ -276,10 +276,11 @@ func writeJSON(path string, data interface{}) error {
 }
 
 // initTownBeads initializes town-level beads database using bd init.
-// Town beads use the "hq-" prefix for mayor mail and cross-rig coordination.
+// Town beads use the "gt-" prefix for agent beads (deacon, mayor, witness, etc.)
+// and cross-rig coordination.
 func initTownBeads(townPath string) error {
-	// Run: bd init --prefix hq
-	cmd := exec.Command("bd", "init", "--prefix", "hq")
+	// Run: bd init --prefix gt
+	cmd := exec.Command("bd", "init", "--prefix", "gt")
 	cmd.Dir = townPath
 
 	output, err := cmd.CombinedOutput()
@@ -306,11 +307,24 @@ func initTownBeads(townPath string) error {
 // ensureRepoFingerprint runs bd migrate --update-repo-id to ensure the database
 // has a repository fingerprint. Legacy databases (pre-0.17.5) lack this, which
 // prevents the daemon from starting properly.
+// 
+// This is skipped if the directory is not yet a git repository (fingerprint
+// will be added later when git is initialized or by the first rig).
 func ensureRepoFingerprint(beadsPath string) error {
-	cmd := exec.Command("bd", "migrate", "--update-repo-id")
+	// Check if this is a git repository
+	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	cmd.Dir = beadsPath
+	if err := cmd.Run(); err != nil {
+		// Not a git repository yet - skip fingerprint (it's optional)
+		return nil
+	}
+
+	// This is a git repo, so try to set the fingerprint
+	cmd = exec.Command("bd", "migrate", "--update-repo-id")
 	cmd.Dir = beadsPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		// Log as debug info but don't fail - fingerprint is optional for functionality
 		return fmt.Errorf("bd migrate --update-repo-id: %s", strings.TrimSpace(string(output)))
 	}
 	return nil

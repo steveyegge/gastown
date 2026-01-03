@@ -29,17 +29,17 @@ go install github.com/steveyegge/gastown/cmd/gt@latest
 gt install ~/gt
 
 # Add a project
+cd ~/gt
 gt rig add myproject https://github.com/you/repo.git
 
-# Enter the Mayor's office (recommended)
-cd ~/gt && gt prime
+# Start Gas Town (recommended)
+gt start
+
+# The Mayor will launch in a tmux session. Inside it, just ask:
+# "Help me fix the authentication bug in myproject"
 ```
 
-Once inside the Mayor session, you're talking to Claude with full town context. Just tell it what you want:
-
-> "Help me fix the authentication bug in myproject"
-
-The Mayor will create convoys, dispatch workers, and coordinate everything. You can also run CLI commands directly:
+The Mayor creates convoys, dispatches workers, and coordinates everything. You can also run CLI commands directly from the shell:
 
 ```bash
 # Create a convoy and sling work (CLI workflow)
@@ -55,7 +55,7 @@ gt agents
 
 ## Core Concepts
 
-**The Mayor** is your AI coordinator. It's Claude Code with full context about your workspace, projects, and agents. The Mayor session (`gt prime`) is the primary way to interact with Gas Town - just tell it what you want to accomplish.
+**The Mayor** is your AI coordinator. It's Claude Code with full context about your workspace, projects, and agents. Start it with `gt start` - the Mayor session is the primary way to interact with Gas Town. Just tell it what you want to accomplish.
 
 ```
 Town (~/gt/)              Your workspace
@@ -78,7 +78,6 @@ The primary Gas Town experience. Agents run in tmux sessions with the Mayor as y
 
 ```bash
 gt start                               # Start Gas Town (daemon + Mayor session)
-cd ~/gt && gt prime                    # Enter Mayor session
 
 # Inside Mayor session, just ask:
 # "Create a convoy for issues 123 and 456 in myproject"
