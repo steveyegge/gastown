@@ -175,7 +175,7 @@ All 8 implementation phases are complete:
 - Autocomplete for bead/formula search
 - Dynamic target selection with agent grouping
 - Escalation form with priority levels
-- Enhanced animations (31 CSS keyframe animations)
+- Enhanced animations (32 CSS keyframe animations)
 - Performance utilities (debounce, throttle, virtual scroll, etc.)
 - Comprehensive test suite (128 tests total):
   - 24 E2E tests (page load, navigation, modals, responsive)
@@ -184,6 +184,14 @@ All 8 implementation phases are complete:
   - 33 manual Puppeteer tests (mock server)
   - 23 manual Puppeteer tests (real server)
 - Real Gastown backend tested and verified working
+
+### Recent UX Improvements
+- **Mail compose dropdown**: Recipients selectable from agent list (no free text)
+- **Help modal**: Tabbed onboarding with Concepts, Roles, Workflow, Shortcuts
+- **Tooltips**: All interactive elements have hover explanations
+- **Role colors**: Sidebar agents color-coded by role (Mayor=blue, Polecat=orange)
+- **Improved tree view**: Proper expand/collapse with animations
+- **Keyboard shortcut**: `?` opens help modal
 
 The GUI is **production-ready** and fully integrated with the Gastown Go backend.
 All features fully automated and tested with Puppeteer against both mock and real servers.
