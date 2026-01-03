@@ -506,7 +506,7 @@ func (m *Mailbox) appendToArchive(msg *Message) error {
 	}
 
 	// Open for append
-	file, err := os.OpenFile(archivePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(archivePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: archive is non-sensitive operational data
 	if err != nil {
 		return err
 	}

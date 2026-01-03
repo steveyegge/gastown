@@ -568,7 +568,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 // be initialized with 'gt' prefix for this to work.
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
-func (m *Manager) initAgentBeads(_, rigName, prefix string, isFirstRig bool) error { // rigPath unused: agents use town beads not rig beads
+func (m *Manager) initAgentBeads(_, rigName, _ string, isFirstRig bool) error { // rigPath and prefix unused: agents use town beads not rig beads
 	// Agent beads go in town beads (gt-* prefix), not rig beads.
 	// This enables cross-rig agent coordination via canonical IDs.
 	townBeadsDir := filepath.Join(m.townRoot, ".beads")

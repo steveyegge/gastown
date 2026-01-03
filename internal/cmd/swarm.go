@@ -114,7 +114,7 @@ var swarmCancelCmd = &cobra.Command{
 	Short: "Cancel a swarm",
 	Long: `Cancel an active swarm.
 
-Marks the swarm as cancelled and optionally cleans up branches.`,
+Marks the swarm as canceled and optionally cleans up branches.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runSwarmCancel,
 }
@@ -158,7 +158,7 @@ func init() {
 	swarmStatusCmd.Flags().BoolVar(&swarmStatusJSON, "json", false, "Output as JSON")
 
 	// List flags
-	swarmListCmd.Flags().StringVar(&swarmListStatus, "status", "", "Filter by status (active, landed, cancelled, failed)")
+	swarmListCmd.Flags().StringVar(&swarmListStatus, "status", "", "Filter by status (active, landed, canceled, failed)")
 	swarmListCmd.Flags().BoolVar(&swarmListJSON, "json", false, "Output as JSON")
 
 	// Dispatch flags
@@ -523,10 +523,10 @@ func runSwarmDispatch(cmd *cobra.Command, args []string) error {
 }
 
 // spawnSwarmWorkersFromBeads spawns sessions for swarm workers using beads task list.
-func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, workers []string, tasks []struct { //nolint:unparam // error return kept for future use
+func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, workers []string, tasks []struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
-}) error {
+}) error { //nolint:unparam // error return kept for future use
 	t := tmux.NewTmux()
 	sessMgr := session.NewManager(t, r)
 	polecatGit := git.NewGit(r.Path)

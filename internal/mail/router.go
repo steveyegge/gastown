@@ -827,7 +827,7 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 
 	// Announce messages go to town-level beads (shared location)
 	beadsDir := r.resolveBeadsDir("")
-	cmd := exec.Command("bd", args...)
+	cmd := exec.Command("bd", args...) //nolint:gosec // G204: args are constructed internally, not from user input
 	cmd.Env = append(cmd.Environ(),
 		"BEADS_DIR="+beadsDir,
 	)
@@ -869,7 +869,7 @@ func (r *Router) pruneAnnounce(announceName string, retainCount int) error {
 		"--asc", // Oldest first
 	}
 
-	cmd := exec.Command("bd", args...)
+	cmd := exec.Command("bd", args...) //nolint:gosec // G204: args are constructed internally
 	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 	cmd.Dir = filepath.Dir(beadsDir)
 
@@ -904,7 +904,7 @@ func (r *Router) pruneAnnounce(announceName string, retainCount int) error {
 	// Delete oldest messages
 	for i := 0; i < toDelete && i < len(messages); i++ {
 		deleteArgs := []string{"close", messages[i].ID, "--reason=retention pruning"}
-		deleteCmd := exec.Command("bd", deleteArgs...)
+		deleteCmd := exec.Command("bd", deleteArgs...) //nolint:gosec // G204: args are constructed internally
 		deleteCmd.Env = append(deleteCmd.Environ(), "BEADS_DIR="+beadsDir)
 		deleteCmd.Dir = filepath.Dir(beadsDir)
 

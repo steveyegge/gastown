@@ -115,7 +115,7 @@ func (c *PatrolMoleculesExistCheck) Fix(ctx *CheckContext) error {
 		rigPath := filepath.Join(ctx.TownRoot, rigName)
 		for _, mol := range missing {
 			desc := getPatrolMoleculeDesc(mol)
-			cmd := exec.Command("bd", "create",
+			cmd := exec.Command("bd", "create", //nolint:gosec // G204: args are constructed internally
 				"--type=molecule",
 				"--title="+mol,
 				"--description="+desc,
