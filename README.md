@@ -26,13 +26,13 @@ Multi-agent orchestrator for Claude Code. Track work with convoys; sling to agen
 go install github.com/steveyegge/gastown/cmd/gt@latest
 
 # Create workspace
-gt install ~/gt
+gt install ~/gt && cd ~/gt
 
 # Add a project
 gt rig add myproject https://github.com/you/repo.git
 
 # Enter the Mayor's office (recommended)
-cd ~/gt && gt prime
+gt prime
 ```
 
 Once inside the Mayor session, you're talking to Claude with full town context. Just tell it what you want:
