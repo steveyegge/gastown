@@ -39,7 +39,7 @@ func ResolveBeadsDir(workDir string) string {
 	redirectPath := filepath.Join(beadsDir, "redirect")
 
 	// Check for redirect file
-	data, err := os.ReadFile(redirectPath)
+	data, err := os.ReadFile(redirectPath) //nolint:gosec // G304: path is constructed internally
 	if err != nil {
 		// No redirect, use local .beads
 		return beadsDir

@@ -113,7 +113,7 @@ func (c *MoleculeCatalog) Count() int {
 // Each line should be a JSON object with id, title, and description fields.
 // The source parameter is added to each loaded molecule.
 func (c *MoleculeCatalog) LoadFromFile(path, source string) error {
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // G304: path is from trusted molecule catalog locations
 	if err != nil {
 		return err
 	}

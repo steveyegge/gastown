@@ -190,7 +190,7 @@ func ProvisionCommands(workspacePath string) error {
 			return fmt.Errorf("reading %s: %w", entry.Name(), err)
 		}
 
-		if err := os.WriteFile(destPath, content, 0644); err != nil {
+		if err := os.WriteFile(destPath, content, 0644); err != nil { //nolint:gosec // G306: template files are non-sensitive
 			return fmt.Errorf("writing %s: %w", entry.Name(), err)
 		}
 	}

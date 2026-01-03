@@ -624,7 +624,7 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 	// Update with new state
 	newLabels := strings.Join(CleanupWispLabels(polecatName, newState), ",")
 
-	updateCmd := exec.Command("bd", "update", wispID, "--labels", newLabels)
+	updateCmd := exec.Command("bd", "update", wispID, "--labels", newLabels) //nolint:gosec // G204: args are constructed internally
 	updateCmd.Dir = workDir
 
 	var stderr bytes.Buffer
@@ -647,7 +647,7 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 func NukePolecat(workDir, rigName, polecatName string) error {
 	address := fmt.Sprintf("%s/%s", rigName, polecatName)
 
-	cmd := exec.Command("gt", "polecat", "nuke", address)
+	cmd := exec.Command("gt", "polecat", "nuke", address) //nolint:gosec // G204: address is constructed from validated internal data
 	cmd.Dir = workDir
 
 	var stderr bytes.Buffer

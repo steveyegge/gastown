@@ -136,7 +136,7 @@ func (b *Boot) SaveStatus(status *Status) error {
 		return err
 	}
 
-	return os.WriteFile(b.statusPath(), data, 0644)
+	return os.WriteFile(b.statusPath(), data, 0644) //nolint:gosec // G306: boot status is non-sensitive operational data
 }
 
 // LoadStatus loads Boot's last execution status.
