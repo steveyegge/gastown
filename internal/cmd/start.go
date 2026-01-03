@@ -323,17 +323,17 @@ func ensureRefinerySession(rigName string, r *rig.Rig) (bool, error) {
 		return false, fmt.Errorf("creating session: %w", err)
 	}
 
-	// Set environment
+	// Set environment (non-fatal)
 	bdActor := fmt.Sprintf("%s/refinery", rigName)
-	t.SetEnvironment(sessionName, "GT_ROLE", "refinery")
-	t.SetEnvironment(sessionName, "GT_RIG", rigName)
-	t.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
+	_ = t.SetEnvironment(sessionName, "GT_ROLE", constants.RoleRefinery)
+	_ = t.SetEnvironment(sessionName, "GT_RIG", rigName)
+	_ = t.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
 
-	// Set beads environment
+	// Set beads environment (non-fatal)
 	beadsDir := filepath.Join(r.Path, "mayor", "rig", ".beads")
-	t.SetEnvironment(sessionName, "BEADS_DIR", beadsDir)
-	t.SetEnvironment(sessionName, "BEADS_NO_DAEMON", "1")
-	t.SetEnvironment(sessionName, "BEADS_AGENT_NAME", fmt.Sprintf("%s/refinery", rigName))
+	_ = t.SetEnvironment(sessionName, "BEADS_DIR", beadsDir)
+	_ = t.SetEnvironment(sessionName, "BEADS_NO_DAEMON", "1")
+	_ = t.SetEnvironment(sessionName, "BEADS_AGENT_NAME", fmt.Sprintf("%s/refinery", rigName))
 
 	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(rigName)
