@@ -28,6 +28,12 @@ export function initModals() {
     onSubmit: handleNewConvoySubmit,
   });
 
+  registerModal('new-bead', {
+    element: document.getElementById('new-bead-modal'),
+    onOpen: initNewBeadModal,
+    onSubmit: handleNewBeadSubmit,
+  });
+
   registerModal('sling', {
     element: document.getElementById('sling-modal'),
     onOpen: initSlingModal,
@@ -205,6 +211,56 @@ async function handleNewConvoySubmit(form) {
     document.dispatchEvent(new CustomEvent('convoy:created', { detail: result }));
   } catch (err) {
     showToast(`Failed to create convoy: ${err.message}`, 'error');
+  }
+}
+
+// === New Bead Modal ===
+
+function initNewBeadModal(element, data) {
+  // Clear any previous state
+  const form = element.querySelector('form');
+  if (form) form.reset();
+}
+
+async function handleNewBeadSubmit(form) {
+  const title = form.querySelector('[name="title"]')?.value;
+  const description = form.querySelector('[name="description"]')?.value || '';
+  const priority = form.querySelector('[name="priority"]')?.value || 'normal';
+  const labelsText = form.querySelector('[name="labels"]')?.value || '';
+  const slingNow = form.querySelector('[name="sling_now"]')?.checked || false;
+
+  if (!title) {
+    showToast('Please enter a title for the bead', 'warning');
+    return;
+  }
+
+  // Parse labels
+  const labels = labelsText
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  try {
+    const result = await api.createBead(title, { description, priority, labels });
+
+    if (result.success) {
+      showToast(`Bead "${title}" created: ${result.bead_id}`, 'success');
+      closeAllModals();
+
+      // Dispatch event for UI refresh
+      document.dispatchEvent(new CustomEvent('bead:created', { detail: result }));
+
+      // If "sling now" was checked, open sling modal with bead pre-filled
+      if (slingNow && result.bead_id) {
+        setTimeout(() => {
+          openModal('sling', { bead: result.bead_id });
+        }, 100);
+      }
+    } else {
+      showToast(`Failed to create bead: ${result.error}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Failed to create bead: ${err.message}`, 'error');
   }
 }
 

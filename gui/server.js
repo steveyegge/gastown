@@ -193,6 +193,82 @@ app.post('/api/mail', async (req, res) => {
   }
 });
 
+// ============= Beads API =============
+
+// Create a new bead (issue)
+app.post('/api/beads', async (req, res) => {
+  const { title, description, priority, labels } = req.body;
+
+  if (!title) {
+    return res.status(400).json({ error: 'Title is required' });
+  }
+
+  // Build bd new command
+  // bd new "title" --description "..." --priority high --label bug --label enhancement
+  const args = ['new', title];
+
+  if (description) {
+    args.push('--description', description);
+  }
+  if (priority && priority !== 'normal') {
+    args.push('--priority', priority);
+  }
+  if (labels && Array.isArray(labels) && labels.length > 0) {
+    labels.forEach(label => {
+      args.push('--label', label);
+    });
+  }
+
+  const result = await executeBD(args);
+
+  if (result.success) {
+    // Parse the bead ID from output (format: "Created bead: gt-abc123")
+    const match = result.data.match(/(?:Created|created)\s*(?:bead|issue)?:?\s*(\S+)/i);
+    const beadId = match ? match[1] : result.data.trim();
+
+    broadcast({ type: 'bead_created', data: { bead_id: beadId, title } });
+    res.json({ success: true, bead_id: beadId, raw: result.data });
+  } else {
+    res.status(500).json({ success: false, error: result.error });
+  }
+});
+
+// Search beads
+app.get('/api/beads/search', async (req, res) => {
+  const query = req.query.q || '';
+
+  // bd search "query" or bd list if no query
+  const args = query ? ['search', query] : ['list'];
+  args.push('--json');
+
+  const result = await executeBD(args);
+
+  if (result.success) {
+    const data = parseJSON(result.data);
+    res.json(data || []);
+  } else {
+    // Return empty array on error (may just be no results)
+    res.json([]);
+  }
+});
+
+// List all beads
+app.get('/api/beads', async (req, res) => {
+  const status = req.query.status;
+  const args = ['list'];
+  if (status) args.push(`--status=${status}`);
+  args.push('--json');
+
+  const result = await executeBD(args);
+
+  if (result.success) {
+    const data = parseJSON(result.data);
+    res.json(data || []);
+  } else {
+    res.json([]);
+  }
+});
+
 // Nudge agent
 app.post('/api/nudge', async (req, res) => {
   const { target, message } = req.body;

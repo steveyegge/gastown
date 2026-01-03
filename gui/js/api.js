@@ -102,7 +102,16 @@ export const api = {
     return this.post('/api/nudge', { target, message });
   },
 
-  // === Search ===
+  // === Beads ===
+  createBead(title, options = {}) {
+    return this.post('/api/beads', {
+      title,
+      description: options.description,
+      priority: options.priority,
+      labels: options.labels,
+    });
+  },
+
   searchBeads(query) {
     return this.get(`/api/beads/search?q=${encodeURIComponent(query)}`);
   },

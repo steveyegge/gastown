@@ -80,6 +80,10 @@
           <div class="view-header">
             <h1>Active Convoys</h1>
             <div class="view-actions">
+              <button class="btn btn-secondary" id="new-bead-btn" data-modal-open="new-bead" data-tooltip="Create a new issue (bead) to track work">
+                <span class="material-icons">add_circle</span>
+                New Bead
+              </button>
               <button class="btn btn-secondary" id="sling-btn" data-modal-open="sling" data-tooltip="Assign work to a polecat worker agent">
                 <span class="material-icons">send</span>
                 Sling
@@ -190,6 +194,52 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
             <button type="submit" class="btn btn-primary">Create Convoy</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- New Bead Modal -->
+      <div class="modal hidden" id="new-bead-modal">
+        <div class="modal-header">
+          <h2>Create Bead</h2>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <form class="modal-body" id="new-bead-form">
+          <div class="form-group">
+            <label for="bead-title">Title</label>
+            <input type="text" id="bead-title" name="title" placeholder="e.g., Fix login bug, Add dark mode" required>
+          </div>
+          <div class="form-group">
+            <label for="bead-description">Description (optional)</label>
+            <textarea id="bead-description" name="description" placeholder="Describe what needs to be done..." rows="4"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="bead-priority">Priority</label>
+            <select id="bead-priority" name="priority">
+              <option value="normal">Normal</option>
+              <option value="low">Low</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="bead-labels">Labels (comma-separated)</label>
+            <input type="text" id="bead-labels" name="labels" placeholder="e.g., bug, enhancement, docs">
+          </div>
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="bead-sling-now" name="sling_now" value="true">
+              Sling immediately after creation
+            </label>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+            <button type="submit" class="btn btn-primary">
+              <span class="material-icons">add_circle</span>
+              Create Bead
+            </button>
           </div>
         </form>
       </div>
