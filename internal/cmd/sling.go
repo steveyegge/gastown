@@ -905,15 +905,14 @@ func runSlingFormula(args []string) error {
 // bd slot set has a bug where it doesn't support this. See BD_BUG_AGENT_STATE_ROUTING.md.
 // The work is still correctly attached via `bd update <bead> --assignee=<agent>`.
 func updateAgentHookBead(agentID, _, workDir, townBeadsDir string) { // beadID unused due to BD_BUG_AGENT_STATE_ROUTING
-	_ = townBeadsDir // Not used - BEADS_DIR breaks redirect mechanism
-
 	// Convert agent ID to agent bead ID
 	// Format examples (canonical: prefix-rig-role-name):
-	//   greenplace/crew/max -> gt-greenplace-crew-max
-	//   greenplace/polecats/Toast -> gt-greenplace-polecat-Toast
+	//   greenplace/crew/max -> <prefix>-greenplace-crew-max
+	//   greenplace/polecats/Toast -> <prefix>-greenplace-polecat-Toast
 	//   mayor -> gt-mayor
-	//   greenplace/witness -> gt-greenplace-witness
-	agentBeadID := agentIDToBeadID(agentID)
+	//   greenplace/witness -> <prefix>-greenplace-witness
+	townRoot := filepath.Dir(townBeadsDir)
+	agentBeadID := agentIDToBeadIDWithTownRoot(townRoot, agentID)
 	if agentBeadID == "" {
 		return
 	}
@@ -969,10 +968,18 @@ func detectActor() string {
 }
 
 // agentIDToBeadID converts an agent ID to its corresponding agent bead ID.
-// Uses canonical naming: prefix-rig-role-name
-// This function uses "gt-" prefix by default. For non-gastown rigs, use the
-// appropriate *WithPrefix functions that accept the rig's configured prefix.
+// Uses canonical naming: prefix-rig-role-name.
 func agentIDToBeadID(agentID string) string {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		townRoot = ""
+	}
+	return agentIDToBeadIDWithTownRoot(townRoot, agentID)
+}
+
+// agentIDToBeadIDWithTownRoot converts an agent ID to its corresponding agent
+// bead ID using rig-specific prefixes from routes.jsonl.
+func agentIDToBeadIDWithTownRoot(townRoot, agentID string) string {
 	// Handle simple cases (town-level agents)
 	if agentID == "mayor" {
 		return beads.MayorBeadID()
@@ -988,16 +995,20 @@ func agentIDToBeadID(agentID string) string {
 	}
 
 	rig := parts[0]
+	prefix := "gt"
+	if townRoot != "" {
+		prefix = beads.GetPrefixForRig(townRoot, rig)
+	}
 
 	switch {
 	case len(parts) == 2 && parts[1] == "witness":
-		return beads.WitnessBeadID(rig)
+		return beads.WitnessBeadIDWithPrefix(prefix, rig)
 	case len(parts) == 2 && parts[1] == "refinery":
-		return beads.RefineryBeadID(rig)
+		return beads.RefineryBeadIDWithPrefix(prefix, rig)
 	case len(parts) == 3 && parts[1] == "crew":
-		return beads.CrewBeadID(rig, parts[2])
+		return beads.CrewBeadIDWithPrefix(prefix, rig, parts[2])
 	case len(parts) == 3 && parts[1] == "polecats":
-		return beads.PolecatBeadID(rig, parts[2])
+		return beads.PolecatBeadIDWithPrefix(prefix, rig, parts[2])
 	default:
 		return ""
 	}
@@ -1277,10 +1288,10 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 
 	// Track results for summary
 	type slingResult struct {
-		beadID   string
-		polecat  string
-		success  bool
-		errMsg   string
+		beadID  string
+		polecat string
+		success bool
+		errMsg  string
 	}
 	results := make([]slingResult, 0, len(beadIDs))
 

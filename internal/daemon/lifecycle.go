@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -221,8 +223,8 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 // ParsedIdentity holds the components extracted from an agent identity string.
 // This is used to look up the appropriate role bead for lifecycle config.
 type ParsedIdentity struct {
-	RoleType string // mayor, deacon, witness, refinery, crew, polecat
-	RigName  string // Empty for town-level agents (mayor, deacon)
+	RoleType  string // mayor, deacon, witness, refinery, crew, polecat
+	RigName   string // Empty for town-level agents (mayor, deacon)
 	AgentName string // Empty for singletons (mayor, deacon, witness, refinery)
 }
 
@@ -665,7 +667,7 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 		Type        string `json:"issue_type"`
 		Description string `json:"description"`
 		UpdatedAt   string `json:"updated_at"`
-		HookBead    string `json:"hook_bead"`    // Read from database column
+		HookBead    string `json:"hook_bead"`   // Read from database column
 		AgentState  string `json:"agent_state"` // Read from database column
 	}
 
@@ -713,19 +715,24 @@ func (d *Daemon) identityToAgentBeadID(identity string) string {
 		return ""
 	}
 
+	prefix := "gt"
+	if parsed.RigName != "" {
+		prefix = beads.GetPrefixForRig(d.config.TownRoot, parsed.RigName)
+	}
+
 	switch parsed.RoleType {
 	case "deacon":
 		return beads.DeaconBeadID()
 	case "mayor":
 		return beads.MayorBeadID()
 	case "witness":
-		return beads.WitnessBeadID(parsed.RigName)
+		return beads.WitnessBeadIDWithPrefix(prefix, parsed.RigName)
 	case "refinery":
-		return beads.RefineryBeadID(parsed.RigName)
+		return beads.RefineryBeadIDWithPrefix(prefix, parsed.RigName)
 	case "crew":
-		return beads.CrewBeadID(parsed.RigName, parsed.AgentName)
+		return beads.CrewBeadIDWithPrefix(prefix, parsed.RigName, parsed.AgentName)
 	case "polecat":
-		return beads.PolecatBeadID(parsed.RigName, parsed.AgentName)
+		return beads.PolecatBeadIDWithPrefix(prefix, parsed.RigName, parsed.AgentName)
 	default:
 		return ""
 	}
@@ -754,8 +761,9 @@ func (d *Daemon) checkStaleAgents() {
 	} else {
 		// Add rig-specific agents (witness, refinery) for each discovered rig
 		for rigName := range rigsConfig.Rigs {
-			agentBeadIDs = append(agentBeadIDs, beads.WitnessBeadID(rigName))
-			agentBeadIDs = append(agentBeadIDs, beads.RefineryBeadID(rigName))
+			prefix := beads.GetPrefixForRig(d.config.TownRoot, rigName)
+			agentBeadIDs = append(agentBeadIDs, beads.WitnessBeadIDWithPrefix(prefix, rigName))
+			agentBeadIDs = append(agentBeadIDs, beads.RefineryBeadIDWithPrefix(prefix, rigName))
 		}
 	}
 
@@ -873,33 +881,13 @@ func (d *Daemon) checkGUPPViolations() {
 
 // checkRigGUPPViolations checks polecats in a specific rig for GUPP violations.
 func (d *Daemon) checkRigGUPPViolations(rigName string) {
-	// List polecat agent beads for this rig
-	// Pattern: gt-polecat-<rig>-<name>
-	cmd := exec.Command("bd", "list", "--type=agent", "--json")
-	cmd.Dir = d.config.TownRoot
-
-	output, err := cmd.Output()
+	agents, err := listAgentBeadsAcrossRoutes(d.config.TownRoot)
 	if err != nil {
-		return // Silently fail - bd might not be available
-	}
-
-	var agents []struct {
-		ID          string `json:"id"`
-		Type        string `json:"issue_type"`
-		Description string `json:"description"`
-		UpdatedAt   string `json:"updated_at"`
-		HookBead    string `json:"hook_bead"` // Read from database column, not description
-		AgentState  string `json:"agent_state"`
-	}
-
-	if err := json.Unmarshal(output, &agents); err != nil {
 		return
 	}
-
-	prefix := "gt-polecat-" + rigName + "-"
 	for _, agent := range agents {
-		// Only check polecats for this rig
-		if !strings.HasPrefix(agent.ID, prefix) {
+		rig, role, _, ok := beads.ParseAgentBeadID(agent.ID)
+		if !ok || role != "polecat" || rig != rigName {
 			continue
 		}
 
@@ -986,22 +974,8 @@ type deadAgentInfo struct {
 
 // getDeadAgents returns all agent beads with state=dead.
 func (d *Daemon) getDeadAgents() []deadAgentInfo {
-	cmd := exec.Command("bd", "list", "--type=agent", "--json")
-	cmd.Dir = d.config.TownRoot
-
-	output, err := cmd.Output()
+	agents, err := listAgentBeadsAcrossRoutes(d.config.TownRoot)
 	if err != nil {
-		return nil
-	}
-
-	var agents []struct {
-		ID         string `json:"id"`
-		Type       string `json:"issue_type"`
-		HookBead   string `json:"hook_bead"`    // Read from database column
-		AgentState string `json:"agent_state"` // Read from database column
-	}
-
-	if err := json.Unmarshal(output, &agents); err != nil {
 		return nil
 	}
 
@@ -1018,22 +992,79 @@ func (d *Daemon) getDeadAgents() []deadAgentInfo {
 	return dead
 }
 
+func agentBeadsDirsFromRoutes(townRoot string) ([]string, error) {
+	if townRoot == "" {
+		return nil, nil
+	}
+
+	beadsDir := filepath.Join(townRoot, ".beads")
+	routes, err := beads.LoadRoutes(beadsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var dirs []string
+	for _, route := range routes {
+		if route.Path == "" {
+			continue
+		}
+		dirs = append(dirs, filepath.Join(townRoot, route.Path))
+	}
+
+	sort.Strings(dirs)
+	return dirs, nil
+}
+
+func listAgentBeadsAcrossRoutes(townRoot string) (map[string]*beads.Issue, error) {
+	if townRoot == "" {
+		return nil, nil
+	}
+
+	workDirs := []string{townRoot}
+	routeDirs, err := agentBeadsDirsFromRoutes(townRoot)
+	if err != nil {
+		return nil, err
+	}
+	workDirs = append(workDirs, routeDirs...)
+
+	agentsByID := make(map[string]*beads.Issue)
+	seenDirs := make(map[string]struct{})
+
+	for _, dir := range workDirs {
+		if dir == "" {
+			continue
+		}
+		if _, seen := seenDirs[dir]; seen {
+			continue
+		}
+		seenDirs[dir] = struct{}{}
+
+		bd := beads.New(dir)
+		issues, err := bd.ListAgentBeads()
+		if err != nil {
+			if errors.Is(err, beads.ErrNotARepo) || errors.Is(err, beads.ErrNotInstalled) {
+				continue
+			}
+			return nil, err
+		}
+		for id, issue := range issues {
+			if _, exists := agentsByID[id]; !exists {
+				agentsByID[id] = issue
+			}
+		}
+	}
+
+	return agentsByID, nil
+}
+
 // extractRigFromAgentID extracts the rig name from a polecat agent ID.
 // Example: gt-polecat-gastown-max → gastown
 func (d *Daemon) extractRigFromAgentID(agentID string) string {
-	// Pattern: gt-polecat-<rig>-<name>
-	if !strings.HasPrefix(agentID, "gt-polecat-") {
+	rig, role, _, ok := beads.ParseAgentBeadID(agentID)
+	if !ok || role != "polecat" {
 		return ""
 	}
-
-	rest := strings.TrimPrefix(agentID, "gt-polecat-")
-	// Find the rig name (everything before the last dash)
-	lastDash := strings.LastIndex(rest, "-")
-	if lastDash == -1 {
-		return ""
-	}
-
-	return rest[:lastDash]
+	return rig
 }
 
 // notifyWitnessOfOrphanedWork sends a mail to the rig's witness about orphaned work.
@@ -1056,4 +1087,3 @@ Action needed: Either restart the agent or reassign the work.`,
 		d.logger.Printf("Notified %s of orphaned work for %s", witnessAddr, agentID)
 	}
 }
-

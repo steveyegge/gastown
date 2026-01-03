@@ -430,7 +430,7 @@ func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string
 	}
 
 	// Try to determine agent bead ID from address
-	agentBeadID := addressToAgentBeadID(targetAddress)
+	agentBeadID := addressToAgentBeadIDWithTownRoot(townRoot, targetAddress)
 	if agentBeadID == "" {
 		// Can't determine agent bead, allow the nudge
 		return true, "", nil
@@ -449,19 +449,28 @@ func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string
 
 // addressToAgentBeadID converts a target address to an agent bead ID.
 // Examples:
-//   - "mayor" -> "gt-{town}-mayor"
-//   - "deacon" -> "gt-{town}-deacon"
-//   - "gastown/witness" -> "gt-gastown-witness"
-//   - "gastown/alpha" -> "gt-gastown-polecat-alpha"
+//   - "mayor" -> "gt-mayor"
+//   - "gastown/witness" -> "<prefix>-gastown-witness"
+//   - "gastown/alpha" -> "<prefix>-gastown-polecat-alpha"
 //
 // Returns empty string if the address cannot be converted.
 func addressToAgentBeadID(address string) string {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		townRoot = ""
+	}
+	return addressToAgentBeadIDWithTownRoot(townRoot, address)
+}
+
+// addressToAgentBeadIDWithTownRoot converts a target address to an agent bead ID
+// using the rig's configured prefix (routes.jsonl). Falls back to "gt".
+func addressToAgentBeadIDWithTownRoot(townRoot, address string) string {
 	// Handle special cases
 	switch address {
 	case "mayor":
-		return session.MayorSessionName()
+		return beads.MayorBeadID()
 	case "deacon":
-		return session.DeaconSessionName()
+		return beads.DeaconBeadID()
 	}
 
 	// Parse rig/role format
@@ -476,18 +485,22 @@ func addressToAgentBeadID(address string) string {
 
 	rig := parts[0]
 	role := parts[1]
+	prefix := "gt"
+	if townRoot != "" {
+		prefix = beads.GetPrefixForRig(townRoot, rig)
+	}
 
 	switch role {
 	case "witness":
-		return fmt.Sprintf("gt-%s-witness", rig)
+		return beads.WitnessBeadIDWithPrefix(prefix, rig)
 	case "refinery":
-		return fmt.Sprintf("gt-%s-refinery", rig)
+		return beads.RefineryBeadIDWithPrefix(prefix, rig)
 	default:
 		// Assume polecat
 		if strings.HasPrefix(role, "crew/") {
 			crewName := strings.TrimPrefix(role, "crew/")
-			return fmt.Sprintf("gt-%s-crew-%s", rig, crewName)
+			return beads.CrewBeadIDWithPrefix(prefix, rig, crewName)
 		}
-		return fmt.Sprintf("gt-%s-polecat-%s", rig, role)
+		return beads.PolecatBeadIDWithPrefix(prefix, rig, role)
 	}
 }

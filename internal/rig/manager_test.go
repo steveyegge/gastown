@@ -329,9 +329,7 @@ exit 1
 	}
 }
 
-func TestInitAgentBeadsUsesTownBeadsDir(t *testing.T) {
-	// Agent beads use town beads (gt-* prefix) for cross-rig coordination.
-	// The Manager.townRoot determines where agent beads are created.
+func TestInitAgentBeadsUsesRigBeadsDirForRigAgents(t *testing.T) {
 	townRoot := t.TempDir()
 	townBeadsDir := filepath.Join(townRoot, ".beads")
 	rigPath := filepath.Join(townRoot, "testrip")
@@ -351,49 +349,70 @@ if [[ "$1" == "--no-daemon" ]]; then
 fi
 cmd="$1"
 shift
+id=""
 case "$cmd" in
   show)
-    if [[ "$BEADS_DIR" != "$EXPECT_BEADS_DIR" ]]; then
-      echo "BEADS_DIR mismatch" >&2
-      exit 1
-    fi
-    echo "[]"
+    id="$1"
     ;;
   create)
-    if [[ "$BEADS_DIR" != "$EXPECT_BEADS_DIR" ]]; then
-      echo "BEADS_DIR mismatch" >&2
-      exit 1
-    fi
-    id=""
-    title=""
     for arg in "$@"; do
       case "$arg" in
         --id=*) id="${arg#--id=}" ;;
-        --title=*) title="${arg#--title=}" ;;
       esac
     done
-    printf '{"id":"%s","title":"%s","description":"","issue_type":"agent"}' "$id" "$title"
     ;;
   slot)
-    if [[ "$BEADS_DIR" != "$EXPECT_BEADS_DIR" ]]; then
-      echo "BEADS_DIR mismatch" >&2
-      exit 1
-    fi
+    id="$2"
     ;;
   *)
     echo "unexpected command: $cmd" >&2
     exit 1
     ;;
 esac
+
+expected_beads_dir=""
+expected_dir="$EXPECT_RIG_DIR"
+if [[ "$id" == "gt-deacon" || "$id" == "gt-mayor" ]]; then
+  expected_beads_dir="$EXPECT_TOWN_BEADS_DIR"
+  expected_dir="$EXPECT_TOWN_ROOT"
+fi
+
+if [[ "$BEADS_DIR" != "$expected_beads_dir" ]]; then
+  echo "BEADS_DIR mismatch for $id" >&2
+  exit 1
+fi
+if [[ "$PWD" != "$expected_dir" ]]; then
+  echo "work dir mismatch for $id" >&2
+  exit 1
+fi
+
+case "$cmd" in
+  show)
+    echo "[]"
+    ;;
+  create)
+    title=""
+    for arg in "$@"; do
+      case "$arg" in
+        --title=*) title="${arg#--title=}" ;;
+      esac
+    done
+    printf '{"id":"%s","title":"%s","description":"","issue_type":"agent"}' "$id" "$title"
+    ;;
+  slot)
+    ;;
+esac
 `
 
 	binDir := writeFakeBD(t, script)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("EXPECT_BEADS_DIR", townBeadsDir)
+	t.Setenv("EXPECT_TOWN_BEADS_DIR", townBeadsDir)
+	t.Setenv("EXPECT_TOWN_ROOT", townRoot)
+	t.Setenv("EXPECT_RIG_DIR", rigPath)
 	t.Setenv("BEADS_DIR", "")
 
 	manager := &Manager{townRoot: townRoot}
-	if err := manager.initAgentBeads(rigPath, "demo", "gt", false); err != nil {
+	if err := manager.initAgentBeads(rigPath, "demo", "hw", true); err != nil {
 		t.Fatalf("initAgentBeads: %v", err)
 	}
 }

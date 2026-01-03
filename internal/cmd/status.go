@@ -171,7 +171,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	allAgentBeads := make(map[string]*beads.Issue)
 	allHookBeads := make(map[string]*beads.Issue)
 	for _, r := range rigs {
-		rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
+		rigBeadsPath := r.Path
+		mayorRigBeads := filepath.Join(r.Path, "mayor", "rig", ".beads")
+		if _, err := os.Stat(mayorRigBeads); err == nil {
+			rigBeadsPath = filepath.Join(r.Path, "mayor", "rig")
+		}
 		rigBeads := beads.New(rigBeadsPath)
 		rigAgentBeads, _ := rigBeads.ListAgentBeads()
 		if rigAgentBeads == nil {

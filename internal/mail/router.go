@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -219,10 +221,10 @@ const (
 
 // ParsedGroup represents a parsed @group address.
 type ParsedGroup struct {
-	Type      GroupType
-	RoleType  string // witness, crew, polecat, dog, etc.
-	Rig       string // rig name for rig-scoped groups
-	Original  string // original @group string
+	Type     GroupType
+	RoleType string // witness, crew, polecat, dog, etc.
+	Rig      string // rig name for rig-scoped groups
+	Original string // original @group string
 }
 
 // parseGroupAddress parses a @group address into its components.
@@ -300,32 +302,55 @@ func agentBeadToAddress(bead *agentBead) string {
 		return ""
 	}
 
-	id := bead.ID
-	if !strings.HasPrefix(id, "gt-") {
-		return "" // Not a valid agent bead ID
-	}
-
-	// Strip prefix
-	rest := strings.TrimPrefix(id, "gt-")
-	parts := strings.Split(rest, "-")
-
-	switch len(parts) {
-	case 1:
-		// Town-level: gt-mayor, gt-deacon
-		return parts[0] + "/"
-	case 2:
-		// Rig singleton: gt-gastown-witness
-		return parts[0] + "/" + parts[1]
-	default:
-		// Rig named agent: gt-gastown-crew-max, gt-gastown-polecat-Toast
-		// Skip the role part (parts[1]) and use rig/name format
-		if len(parts) >= 3 {
-			// Rejoin if name has hyphens: gt-gastown-polecat-my-agent
-			name := strings.Join(parts[2:], "-")
-			return parts[0] + "/" + name
-		}
+	rig, role, name, ok := beads.ParseAgentBeadID(bead.ID)
+	if !ok {
 		return ""
 	}
+
+	switch role {
+	case "mayor", "deacon":
+		return role + "/"
+	case "witness", "refinery":
+		if rig == "" {
+			return ""
+		}
+		return rig + "/" + role
+	case "crew", "polecat":
+		if rig == "" || name == "" {
+			return ""
+		}
+		return rig + "/" + name
+	case "dog":
+		if name == "" {
+			return ""
+		}
+		return "deacon/dogs/" + name
+	default:
+		return ""
+	}
+}
+
+func agentBeadsDirsFromRoutes(townRoot string) ([]string, error) {
+	if townRoot == "" {
+		return nil, nil
+	}
+
+	beadsDir := filepath.Join(townRoot, ".beads")
+	routes, err := beads.LoadRoutes(beadsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var dirs []string
+	for _, route := range routes {
+		if route.Path == "" {
+			continue
+		}
+		dirs = append(dirs, filepath.Join(townRoot, route.Path))
+	}
+
+	sort.Strings(dirs)
+	return dirs, nil
 }
 
 // ResolveGroupAddress resolves a @group address to individual recipient addresses.
@@ -446,37 +471,58 @@ func (r *Router) resolveAgentsByRig(rig string) ([]string, error) {
 
 // queryAgents queries agent beads using bd list with description filtering.
 func (r *Router) queryAgents(descContains string) ([]*agentBead, error) {
-	beadsDir := r.resolveBeadsDir("")
-	args := []string{"list", "--type=agent", "--json", "--limit=0"}
-
-	if descContains != "" {
-		args = append(args, "--desc-contains="+descContains)
-	}
-
-	cmd := exec.Command("bd", args...)
-	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
-	cmd.Dir = filepath.Dir(beadsDir)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg != "" {
-			return nil, errors.New(errMsg)
+	workDirs := make([]string, 0, 1)
+	if r.townRoot != "" {
+		workDirs = append(workDirs, r.townRoot)
+		routeDirs, err := agentBeadsDirsFromRoutes(r.townRoot)
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("querying agents: %w", err)
+		workDirs = append(workDirs, routeDirs...)
+	} else if r.workDir != "" {
+		workDirs = append(workDirs, r.workDir)
 	}
 
-	var agents []*agentBead
-	if err := json.Unmarshal(stdout.Bytes(), &agents); err != nil {
-		return nil, fmt.Errorf("parsing agent query result: %w", err)
+	agentsByID := make(map[string]*agentBead)
+	seenDirs := make(map[string]struct{})
+
+	for _, dir := range workDirs {
+		if dir == "" {
+			continue
+		}
+		if _, seen := seenDirs[dir]; seen {
+			continue
+		}
+		seenDirs[dir] = struct{}{}
+
+		bd := beads.New(dir)
+		issues, err := bd.ListAgentBeads()
+		if err != nil {
+			if errors.Is(err, beads.ErrNotARepo) {
+				continue
+			}
+			return nil, err
+		}
+
+		for _, issue := range issues {
+			if descContains != "" && !strings.Contains(issue.Description, descContains) {
+				continue
+			}
+			if _, exists := agentsByID[issue.ID]; exists {
+				continue
+			}
+			agentsByID[issue.ID] = &agentBead{
+				ID:          issue.ID,
+				Title:       issue.Title,
+				Description: issue.Description,
+				Status:      issue.Status,
+			}
+		}
 	}
 
 	// Filter for open agents only (closed agents are inactive)
 	var active []*agentBead
-	for _, agent := range agents {
+	for _, agent := range agentsByID {
 		if agent.Status == "open" || agent.Status == "in_progress" {
 			active = append(active, agent)
 		}
@@ -953,6 +999,13 @@ func (r *Router) notifyRecipient(msg *Message) error {
 // addressToSessionID converts a mail address to a tmux session ID.
 // Returns empty string if address format is not recognized.
 func addressToSessionID(address string) string {
+	// Dog address: "deacon/dogs/<name>"
+	if strings.HasPrefix(address, "deacon/dogs/") {
+		name := strings.TrimPrefix(address, "deacon/dogs/")
+		if name != "" && !strings.Contains(name, "/") {
+			return "gt-deacon-" + name
+		}
+	}
 	// Mayor address: "mayor/" or "mayor"
 	if strings.HasPrefix(address, "mayor") {
 		return session.MayorSessionName()

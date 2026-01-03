@@ -399,7 +399,8 @@ func (d *Daemon) ensureWitnessesRunning() {
 
 // ensureWitnessRunning ensures the witness for a specific rig is running.
 func (d *Daemon) ensureWitnessRunning(rigName string) {
-	agentID := beads.WitnessBeadID(rigName)
+	prefix := beads.GetPrefixForRig(d.config.TownRoot, rigName)
+	agentID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
 	sessionName := "gt-" + rigName + "-witness"
 
 	// Check agent bead state (ZFC: trust what agent reports)
@@ -485,7 +486,8 @@ func (d *Daemon) ensureRefineriesRunning() {
 
 // ensureRefineryRunning ensures the refinery for a specific rig is running.
 func (d *Daemon) ensureRefineryRunning(rigName string) {
-	agentID := beads.RefineryBeadID(rigName)
+	prefix := beads.GetPrefixForRig(d.config.TownRoot, rigName)
+	agentID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
 	sessionName := "gt-" + rigName + "-refinery"
 
 	// Check agent bead state (ZFC: trust what agent reports)
@@ -582,7 +584,6 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 
 	d.logger.Printf("Refinery session for %s started successfully", rigName)
 }
-
 // getKnownRigs returns list of registered rig names.
 func (d *Daemon) getKnownRigs() []string {
 	rigsPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
@@ -804,7 +805,8 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 	}
 
 	// Session is dead. Check if the polecat has work-on-hook.
-	agentBeadID := beads.PolecatBeadID(rigName, polecatName)
+	prefix := beads.GetPrefixForRig(d.config.TownRoot, rigName)
+	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
 	info, err := d.getAgentBeadInfo(agentBeadID)
 	if err != nil {
 		// Agent bead doesn't exist or error - polecat might not be registered

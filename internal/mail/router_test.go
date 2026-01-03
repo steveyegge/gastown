@@ -3,7 +3,10 @@ package mail
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 func TestDetectTownRoot(t *testing.T) {
@@ -86,6 +89,35 @@ func TestIsTownLevelAddress(t *testing.T) {
 	}
 }
 
+func TestAgentBeadsDirsFromRoutes(t *testing.T) {
+	townRoot := t.TempDir()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("create beads dir: %v", err)
+	}
+
+	routes := []beads.Route{
+		{Prefix: "hw-", Path: "helloworld/mayor/rig"},
+		{Prefix: "bd-", Path: "beads/mayor/rig"},
+	}
+	if err := beads.WriteRoutes(beadsDir, routes); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+
+	got, err := agentBeadsDirsFromRoutes(townRoot)
+	if err != nil {
+		t.Fatalf("agentBeadsDirsFromRoutes error: %v", err)
+	}
+
+	want := []string{
+		filepath.Join(townRoot, "beads", "mayor", "rig"),
+		filepath.Join(townRoot, "helloworld", "mayor", "rig"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("agentBeadsDirsFromRoutes() = %v, want %v", got, want)
+	}
+}
+
 func TestAddressToSessionID(t *testing.T) {
 	tests := []struct {
 		address string
@@ -97,9 +129,9 @@ func TestAddressToSessionID(t *testing.T) {
 		{"gastown/refinery", "gt-gastown-refinery"},
 		{"gastown/Toast", "gt-gastown-Toast"},
 		{"beads/witness", "gt-beads-witness"},
-		{"gastown/", ""},   // Empty target
-		{"gastown", ""},    // No slash
-		{"", ""},           // Empty address
+		{"gastown/", ""}, // Empty target
+		{"gastown", ""},  // No slash
+		{"", ""},         // Empty address
 	}
 
 	for _, tt := range tests {
@@ -142,9 +174,9 @@ func TestShouldBeWisp(t *testing.T) {
 	r := &Router{}
 
 	tests := []struct {
-		name    string
-		msg     *Message
-		want    bool
+		name string
+		msg  *Message
+		want bool
 	}{
 		{
 			name: "explicit wisp flag",
@@ -655,9 +687,9 @@ func TestParseGroupAddress(t *testing.T) {
 
 func TestAgentBeadToAddress(t *testing.T) {
 	tests := []struct {
-		name   string
-		bead   *agentBead
-		want   string
+		name string
+		bead *agentBead
+		want string
 	}{
 		{
 			name: "nil bead",
@@ -673,6 +705,11 @@ func TestAgentBeadToAddress(t *testing.T) {
 			name: "town-level deacon",
 			bead: &agentBead{ID: "gt-deacon"},
 			want: "deacon/",
+		},
+		{
+			name: "dog agent",
+			bead: &agentBead{ID: "gt-dog-alpha"},
+			want: "deacon/dogs/alpha",
 		},
 		{
 			name: "rig singleton witness",
@@ -700,9 +737,9 @@ func TestAgentBeadToAddress(t *testing.T) {
 			want: "gastown/my-agent",
 		},
 		{
-			name: "non-gt prefix (invalid)",
+			name: "non-gt prefix",
 			bead: &agentBead{ID: "bd-gastown-witness"},
-			want: "",
+			want: "gastown/witness",
 		},
 		{
 			name: "empty ID",
