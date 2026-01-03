@@ -353,10 +353,18 @@ app.get('/api/setup/status', async (req, res) => {
 
   // Get rigs
   try {
-    const rigResult = await executeGT(['rig', 'list', '--json']);
+    const rigResult = await executeGT(['rig', 'list']);
     if (rigResult.success) {
-      const rigs = parseJSON(rigResult.data);
-      status.rigs = rigs || [];
+      // Parse text output
+      const rigs = [];
+      const lines = rigResult.data.split('\n');
+      for (const line of lines) {
+        const match = line.match(/^  ([a-zA-Z0-9_-]+)$/);
+        if (match) {
+          rigs.push({ name: match[1] });
+        }
+      }
+      status.rigs = rigs;
     }
   } catch {
     status.rigs = [];
@@ -385,11 +393,20 @@ app.post('/api/rigs', async (req, res) => {
 
 // List rigs
 app.get('/api/rigs', async (req, res) => {
-  const result = await executeGT(['rig', 'list', '--json']);
+  const result = await executeGT(['rig', 'list']);
 
   if (result.success) {
-    const data = parseJSON(result.data);
-    res.json(data || []);
+    // Parse text output: "  rigname\n    Polecats: 0..."
+    const rigs = [];
+    const lines = result.data.split('\n');
+    for (const line of lines) {
+      // Rig names are indented with 2 spaces, not 4
+      const match = line.match(/^  ([a-zA-Z0-9_-]+)$/);
+      if (match) {
+        rigs.push({ name: match[1] });
+      }
+    }
+    res.json(rigs);
   } else {
     res.json([]);
   }
