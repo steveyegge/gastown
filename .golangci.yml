@@ -30,6 +30,8 @@ linters:
         - (os).MkdirAll
         - (fmt).Sscanf
         # fmt.Fprintf/Fprintln errors are typically safe to ignore for logging
+        - fmt.Fprintf
+        - fmt.Fprintln
         - (fmt).Fprintf
         - (fmt).Fprintln
     misspell:
@@ -43,7 +45,7 @@ linters:
           - gosec
         text: "G304"
       # G304: Config/state file loading uses constructed paths, not user input
-      - path: 'internal/config/|internal/beads/|internal/connection/'
+      - path: 'internal/config/|internal/beads/|internal/connection/|internal/keepalive/|internal/mrqueue/|internal/rig/'
         linters:
           - gosec
         text: "G304"
@@ -53,7 +55,7 @@ linters:
           - gosec
         text: "G306"
       # G302/G306: Non-sensitive operational files (state, config, logs) can use 0644
-      - path: 'internal/config/|internal/boot/|internal/dog/|internal/keepalive/|internal/rig/|internal/templates/'
+      - path: 'internal/config/|internal/boot/|internal/dog/|internal/keepalive/|internal/rig/|internal/templates/|internal/mrqueue/'
         linters:
           - gosec
         text: "G306|G302"
@@ -62,7 +64,7 @@ linters:
           - gosec
         text: "G302.*0700|G301.*0750"
       # G204: Safe subprocess launches with validated arguments (internal tools)
-      - path: 'internal/tmux/|internal/git/|internal/cmd/|internal/daemon/|internal/witness/|internal/protocol/|internal/doctor/|internal/mail/|internal/tui/'
+      - path: 'internal/tmux/|internal/git/|internal/cmd/|internal/daemon/|internal/witness/|internal/protocol/|internal/doctor/|internal/mail/|internal/tui/|internal/web/'
         linters:
           - gosec
         text: 'G204'
