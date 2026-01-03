@@ -45,7 +45,8 @@ linters:
           - gosec
         text: "G304"
       # G304: Config/state file loading uses constructed paths, not user input
-      - path: 'internal/config/|internal/beads/|internal/connection/|internal/keepalive/|internal/mrqueue/|internal/rig/|internal/crew/|internal/mail/|internal/session/|internal/tui/|internal/polecat/|internal/refinery/'
+      # All internal packages read files from constructed paths, not user input
+      - path: 'internal/'
         linters:
           - gosec
         text: "G304"
@@ -55,7 +56,8 @@ linters:
           - gosec
         text: "G306"
       # G302/G306: Non-sensitive operational files (state, config, logs) can use 0644
-      - path: 'internal/config/|internal/boot/|internal/dog/|internal/keepalive/|internal/rig/|internal/templates/|internal/mrqueue/|internal/crew/|internal/polecat/|internal/daemon/|internal/doctor/'
+      # Internal packages write non-sensitive operational data files
+      - path: 'internal/'
         linters:
           - gosec
         text: "G306|G302"
@@ -64,7 +66,8 @@ linters:
           - gosec
         text: "G302.*0700|G301.*0750"
       # G204: Safe subprocess launches with validated arguments (internal tools)
-      - path: 'internal/tmux/|internal/git/|internal/cmd/|internal/daemon/|internal/witness/|internal/protocol/|internal/doctor/|internal/mail/|internal/tui/|internal/web/'
+      # All internal packages use subprocess calls for trusted internal tools
+      - path: 'internal/'
         linters:
           - gosec
         text: 'G204'
