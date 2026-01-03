@@ -195,12 +195,16 @@ This closes the message in beads.`,
 }
 
 var mailArchiveCmd = &cobra.Command{
-	Use:   "archive <message-id>",
-	Short: "Archive a message",
-	Long: `Archive a message (alias for delete).
+	Use:   "archive <message-id> [message-id...]",
+	Short: "Archive messages",
+	Long: `Archive one or more messages.
 
-Removes the message from your inbox by closing it in beads.`,
-	Args: cobra.ExactArgs(1),
+Removes the messages from your inbox by closing them in beads.
+
+Examples:
+  gt mail archive hq-abc123
+  gt mail archive hq-abc123 hq-def456 hq-ghi789`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: runMailArchive,
 }
 
@@ -832,8 +836,6 @@ func runMailDelete(cmd *cobra.Command, args []string) error {
 }
 
 func runMailArchive(cmd *cobra.Command, args []string) error {
-	msgID := args[0]
-
 	// Determine which inbox
 	address := detectSender()
 
@@ -850,11 +852,32 @@ func runMailArchive(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting mailbox: %w", err)
 	}
 
-	if err := mailbox.Delete(msgID); err != nil {
-		return fmt.Errorf("archiving message: %w", err)
+	// Archive all specified messages
+	archived := 0
+	var errors []string
+	for _, msgID := range args {
+		if err := mailbox.Delete(msgID); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", msgID, err))
+		} else {
+			archived++
+		}
 	}
 
-	fmt.Printf("%s Message archived\n", style.Bold.Render("✓"))
+	// Report results
+	if len(errors) > 0 {
+		fmt.Printf("%s Archived %d/%d messages\n",
+			style.Bold.Render("⚠"), archived, len(args))
+		for _, e := range errors {
+			fmt.Printf("  Error: %s\n", e)
+		}
+		return fmt.Errorf("failed to archive %d messages", len(errors))
+	}
+
+	if len(args) == 1 {
+		fmt.Printf("%s Message archived\n", style.Bold.Render("✓"))
+	} else {
+		fmt.Printf("%s Archived %d messages\n", style.Bold.Render("✓"), archived)
+	}
 	return nil
 }
 
