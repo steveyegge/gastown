@@ -51,10 +51,10 @@ func (h *DefaultRefineryHandler) SetOutput(w io.Writer) {
 // 2. Adds it to the merge queue
 // 3. Acknowledges receipt
 func (h *DefaultRefineryHandler) HandleMergeReady(payload *MergeReadyPayload) error {
-	fmt.Fprintf(h.Output, "[Refinery] MERGE_READY received for polecat %s\n", payload.Polecat)
-	fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
-	fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
-	fmt.Fprintf(h.Output, "  Verified: %s\n", payload.Verified)
+	_, _ = fmt.Fprintf(h.Output, "[Refinery] MERGE_READY received for polecat %s\n", payload.Polecat)
+	_, _ = fmt.Fprintf(h.Output, "  Branch: %s\n", payload.Branch)
+	_, _ = fmt.Fprintf(h.Output, "  Issue: %s\n", payload.Issue)
+	_, _ = fmt.Fprintf(h.Output, "  Verified: %s\n", payload.Verified)
 
 	// Validate required fields
 	if payload.Branch == "" {

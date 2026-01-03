@@ -402,7 +402,7 @@ func parseTime(s string) time.Time {
 // run is deprecated - foreground mode now just prints a message.
 // The Refinery agent (Claude) handles all merge processing.
 // See: ZFC #5 - Move merge/conflict decisions from Go to Refinery agent
-func (m *Manager) run(ref *Refinery) error {
+func (m *Manager) run(_ *Refinery) error { // ref unused: deprecated function
 	_, _ = fmt.Fprintln(m.output, "")
 	_, _ = fmt.Fprintln(m.output, "╔══════════════════════════════════════════════════════════════╗")
 	_, _ = fmt.Fprintln(m.output, "║  Foreground mode is deprecated.                              ║")

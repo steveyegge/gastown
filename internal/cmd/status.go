@@ -469,7 +469,7 @@ func outputStatusText(status TownStatus) error {
 }
 
 // renderAgentDetails renders full agent bead details
-func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string) {
+func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string) { //nolint:unparam // indent kept for future customization
 	// Line 1: Agent bead ID + status
 	// Reconcile bead state with tmux session state to surface mismatches
 	// States: "running" (active), "idle" (waiting), "stopped", "dead", etc.

@@ -112,7 +112,7 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 // listFromDir queries messages from a beads directory.
 // Returns messages where identity is the assignee OR a CC recipient.
 // Includes both open and hooked messages (hooked = auto-assigned handoff mail).
-func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
+func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) { //nolint:unparam // error return kept for future use
 	seen := make(map[string]bool)
 	var messages []*Message
 

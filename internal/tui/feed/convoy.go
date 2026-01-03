@@ -93,7 +93,7 @@ func listConvoys(beadsDir, status string) ([]convoyListItem, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bd", listArgs...)
+	cmd := exec.CommandContext(ctx, "bd", listArgs...) //nolint:gosec // G204: args are constructed internally
 	cmd.Dir = beadsDir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -169,7 +169,7 @@ func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
 
 	// Query tracked dependencies from SQLite
 	// convoyID is validated above to match ^hq-[a-zA-Z0-9-]+$
-	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath,
+	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, //nolint:gosec // G204: convoyID is validated against strict pattern
 		fmt.Sprintf(`SELECT depends_on_id FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, convoyID))
 
 	var stdout bytes.Buffer

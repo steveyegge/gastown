@@ -400,7 +400,7 @@ func (c *OrphanProcessCheck) hasCrewAncestor(pid int, crewPanePIDs map[int]bool)
 		}
 
 		// Get parent PID
-		out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", currentPID), "-o", "ppid=").Output()
+		out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", currentPID), "-o", "ppid=").Output() //nolint:gosec // G204: PID is numeric from internal state
 		if err != nil {
 			break
 		}
@@ -422,7 +422,7 @@ type processInfo struct {
 }
 
 // getTmuxSessionPIDs returns PIDs of all tmux server processes and pane shell PIDs.
-func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) {
+func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //nolint:unparam // error return kept for future use
 	// Get tmux server PID and all pane PIDs
 	pids := make(map[int]bool)
 
@@ -534,7 +534,7 @@ func (c *OrphanProcessCheck) isOrphanProcess(proc processInfo, tmuxPIDs map[int]
 		}
 
 		// Get parent's parent
-		out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", currentPPID), "-o", "ppid=").Output()
+		out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", currentPPID), "-o", "ppid=").Output() //nolint:gosec // G204: PID is numeric from internal state
 		if err != nil {
 			break
 		}

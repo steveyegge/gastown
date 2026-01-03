@@ -660,7 +660,7 @@ func (d *Daemon) processLifecycleRequests() {
 }
 
 // shutdown performs graceful shutdown.
-func (d *Daemon) shutdown(state *State) error {
+func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return kept for future use
 	d.logger.Println("Daemon shutting down")
 
 	// Stop feed curator

@@ -352,7 +352,7 @@ func runDone(cmd *cobra.Command, args []string) error {
 //   - PHASE_COMPLETE → "awaiting-gate"
 //
 // Also self-reports cleanup_status for ZFC compliance (#10).
-func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
+func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unused but kept for future audit logging
 	// Get role context
 	roleInfo, err := GetRoleWithContext(cwd, townRoot)
 	if err != nil {

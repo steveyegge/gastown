@@ -186,7 +186,7 @@ func (l *Lock) write(sessionID string) error {
 		return fmt.Errorf("marshaling lock info: %w", err)
 	}
 
-	if err := os.WriteFile(l.lockPath, data, 0644); err != nil {
+	if err := os.WriteFile(l.lockPath, data, 0644); err != nil { //nolint:gosec // G306: lock files are non-sensitive operational data
 		return fmt.Errorf("writing lock file: %w", err)
 	}
 

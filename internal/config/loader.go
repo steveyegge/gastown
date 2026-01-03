@@ -71,7 +71,7 @@ func SaveTownConfig(path string, config *TownConfig) error {
 
 // LoadRigsConfig loads and validates a rigs registry file.
 func LoadRigsConfig(path string) (*RigsConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
@@ -115,7 +115,7 @@ func SaveRigsConfig(path string, config *RigsConfig) error {
 
 // LoadAgentState loads an agent state file.
 func LoadAgentState(path string) (*AgentState, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
@@ -150,7 +150,7 @@ func SaveAgentState(path string, state *AgentState) error {
 		return fmt.Errorf("encoding state: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0644); err != nil { //nolint:gosec // G306: state files don't contain secrets
 		return fmt.Errorf("writing state: %w", err)
 	}
 
@@ -192,7 +192,7 @@ func validateAgentState(s *AgentState) error {
 
 // LoadRigConfig loads and validates a rig configuration file.
 func LoadRigConfig(path string) (*RigConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)

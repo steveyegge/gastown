@@ -259,7 +259,7 @@ func (c *LifecycleHygieneCheck) Fix(ctx *CheckContext) error {
 
 	// Delete stale lifecycle messages
 	for _, msg := range c.staleMessages {
-		cmd := exec.Command("gt", "mail", "delete", msg.ID)
+		cmd := exec.Command("gt", "mail", "delete", msg.ID) //nolint:gosec // G204: msg.ID is from internal state, not user input
 		cmd.Dir = ctx.TownRoot
 		if err := cmd.Run(); err != nil {
 			errors = append(errors, fmt.Sprintf("failed to delete message %s: %v", msg.ID, err))

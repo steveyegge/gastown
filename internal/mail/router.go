@@ -184,7 +184,7 @@ func detectTownRoot(startDir string) string {
 // - Rig-level beads ({rig}/.beads) are for project issues only, not mail
 //
 // This ensures messages are visible to all agents in the town.
-func (r *Router) resolveBeadsDir(address string) string {
+func (r *Router) resolveBeadsDir(_ string) string { // address unused: all mail uses town-level beads
 	// If no town root, fall back to workDir's .beads
 	if r.townRoot == "" {
 		return filepath.Join(r.workDir, ".beads")
@@ -744,7 +744,7 @@ func (r *Router) sendToQueue(msg *Message) error {
 
 	// Queue messages go to town-level beads (shared location)
 	beadsDir := r.resolveBeadsDir("")
-	cmd := exec.Command("bd", args...)
+	cmd := exec.Command("bd", args...) //nolint:gosec // G204: args are constructed internally, not from user input
 	cmd.Env = append(cmd.Environ(),
 		"BEADS_DIR="+beadsDir,
 	)

@@ -202,7 +202,7 @@ func attachToTmuxSession(sessionID string) error {
 // ensureMainBranch checks if a git directory is on main branch.
 // If not, warns the user and offers to switch.
 // Returns true if on main (or switched to main), false if user declined.
-func ensureMainBranch(dir, roleName string) bool {
+func ensureMainBranch(dir, roleName string) bool { //nolint:unparam // bool return kept for future callers to check
 	g := git.NewGit(dir)
 
 	branch, err := g.CurrentBranch()
@@ -271,7 +271,7 @@ func parseCrewSessionName(sessionName string) (rigName, crewName string, ok bool
 
 // findRigCrewSessions returns all crew sessions for a given rig, sorted alphabetically.
 // Uses tmux list-sessions to find sessions matching gt-<rig>-crew-* pattern.
-func findRigCrewSessions(rigName string) ([]string, error) {
+func findRigCrewSessions(rigName string) ([]string, error) { //nolint:unparam // error return kept for future use
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
 	out, err := cmd.Output()
 	if err != nil {

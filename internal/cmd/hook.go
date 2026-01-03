@@ -114,7 +114,7 @@ func runHookOrStatus(cmd *cobra.Command, args []string) error {
 	return runHook(cmd, args)
 }
 
-func runHook(cmd *cobra.Command, args []string) error {
+func runHook(_ *cobra.Command, args []string) error {
 	beadID := args[0]
 
 	// Polecats cannot hook - they use gt done for lifecycle

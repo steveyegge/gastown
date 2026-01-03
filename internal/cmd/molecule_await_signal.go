@@ -235,7 +235,7 @@ func calculateEffectiveTimeout(idleCycles int) (time.Duration, error) {
 }
 
 // waitForActivitySignal starts bd activity --follow and waits for any output.
-// Returns immediately when a line is received, or when context is cancelled.
+// Returns immediately when a line is received, or when context is canceled.
 func waitForActivitySignal(ctx context.Context, workDir string) (*AwaitSignalResult, error) {
 	// Start bd activity --follow
 	cmd := exec.CommandContext(ctx, "bd", "activity", "--follow")

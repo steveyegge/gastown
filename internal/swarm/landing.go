@@ -195,7 +195,7 @@ func (m *Manager) gitRunOutput(dir string, args ...string) (string, error) {
 }
 
 // notifyMayorCodeAtRisk sends an alert to Mayor about code at risk.
-func (m *Manager) notifyMayorCodeAtRisk(townRoot, swarmID string, workers []string) {
+func (m *Manager) notifyMayorCodeAtRisk(_, swarmID string, workers []string) { // townRoot unused: router uses gitDir
 	router := mail.NewRouter(m.gitDir)
 	msg := &mail.Message{
 		From: fmt.Sprintf("%s/refinery", m.rig.Name),
@@ -214,7 +214,7 @@ Manual intervention required.`,
 }
 
 // notifyMayorLanded sends a landing report to Mayor.
-func (m *Manager) notifyMayorLanded(townRoot string, swarm *Swarm, result *LandingResult) {
+func (m *Manager) notifyMayorLanded(_ string, swarm *Swarm, result *LandingResult) { // townRoot unused: router uses gitDir
 	router := mail.NewRouter(m.gitDir)
 	msg := &mail.Message{
 		From: fmt.Sprintf("%s/refinery", m.rig.Name),
