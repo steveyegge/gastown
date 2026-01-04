@@ -46,9 +46,18 @@ function broadcast(data) {
   });
 }
 
+// Quote arguments that contain spaces
+function quoteArg(arg) {
+  if (arg.includes(' ') || arg.includes('"') || arg.includes("'")) {
+    // Escape any existing double quotes and wrap in double quotes
+    return `"${arg.replace(/"/g, '\\"')}"`;
+  }
+  return arg;
+}
+
 // Execute a Gas Town command
 async function executeGT(args, options = {}) {
-  const cmd = `gt ${args.join(' ')}`;
+  const cmd = `gt ${args.map(quoteArg).join(' ')}`;
   console.log(`[GT] Executing: ${cmd}`);
 
   try {
@@ -71,13 +80,17 @@ async function executeGT(args, options = {}) {
 
 // Execute a Beads command
 async function executeBD(args, options = {}) {
-  const cmd = `bd ${args.join(' ')}`;
+  const cmd = `bd ${args.map(quoteArg).join(' ')}`;
   console.log(`[BD] Executing: ${cmd}`);
+
+  // Set BEADS_DIR to ensure bd finds the database
+  const beadsDir = path.join(GT_ROOT, '.beads');
 
   try {
     const { stdout, stderr } = await execAsync(cmd, {
       cwd: options.cwd || GT_ROOT,
-      timeout: options.timeout || 30000
+      timeout: options.timeout || 30000,
+      env: { ...process.env, BEADS_DIR: beadsDir }
     });
 
     return { success: true, data: stdout.trim() };
@@ -137,13 +150,16 @@ app.get('/api/convoy/:id', async (req, res) => {
 // Create convoy
 app.post('/api/convoy', async (req, res) => {
   const { name, issues, notify } = req.body;
-  const args = ['convoy', 'create', name, ...(issues || []), '--json'];
+  const args = ['convoy', 'create', name, ...(issues || [])];
   if (notify) args.push('--notify', notify);
 
   const result = await executeGT(args);
   if (result.success) {
-    broadcast({ type: 'convoy_created', data: parseJSON(result.data) });
-    res.json({ success: true, data: parseJSON(result.data) });
+    // Parse convoy ID from text output (e.g., "Created convoy: convoy-abc123")
+    const match = result.data.match(/(?:Created|created)\s*(?:convoy)?:?\s*(\S+)/i);
+    const convoyId = match ? match[1] : result.data.trim();
+    broadcast({ type: 'convoy_created', data: { convoy_id: convoyId, name } });
+    res.json({ success: true, convoy_id: convoyId, raw: result.data });
   } else {
     res.status(500).json({ error: result.error });
   }
@@ -158,12 +174,13 @@ app.post('/api/sling', async (req, res) => {
   if (molecule) cmdArgs.push('--molecule', molecule);
   if (quality) cmdArgs.push(`--quality=${quality}`);
   if (slingArgs) cmdArgs.push('--args', slingArgs);
-  cmdArgs.push('--json');
 
   const result = await executeGT(cmdArgs);
   if (result.success) {
-    broadcast({ type: 'work_slung', data: parseJSON(result.data) });
-    res.json({ success: true, data: parseJSON(result.data) });
+    // Parse output - may or may not be JSON
+    const jsonData = parseJSON(result.data);
+    broadcast({ type: 'work_slung', data: jsonData || { bead, target, raw: result.data } });
+    res.json({ success: true, data: jsonData || { bead, target }, raw: result.data });
   } else {
     res.status(500).json({ error: result.error });
   }
@@ -206,7 +223,8 @@ app.post('/api/beads', async (req, res) => {
 
   // Build bd new command
   // bd new "title" --description "..." --priority high --label bug --label enhancement
-  const args = ['new', title];
+  // Use --no-daemon to avoid timeout issues
+  const args = ['--no-daemon', 'new', title];
 
   if (description) {
     args.push('--description', description);
@@ -239,7 +257,8 @@ app.get('/api/beads/search', async (req, res) => {
   const query = req.query.q || '';
 
   // bd search "query" or bd list if no query
-  const args = query ? ['search', query] : ['list'];
+  // Use --no-daemon to avoid timeout issues
+  const args = query ? ['--no-daemon', 'search', query] : ['--no-daemon', 'list'];
   args.push('--json');
 
   const result = await executeBD(args);
@@ -256,7 +275,8 @@ app.get('/api/beads/search', async (req, res) => {
 // List all beads
 app.get('/api/beads', async (req, res) => {
   const status = req.query.status;
-  const args = ['list'];
+  // Use --no-daemon to avoid timeout issues
+  const args = ['--no-daemon', 'list'];
   if (status) args.push(`--status=${status}`);
   args.push('--json');
 
