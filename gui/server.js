@@ -55,6 +55,40 @@ function quoteArg(arg) {
   return arg;
 }
 
+// Get running tmux sessions for polecats
+async function getRunningPolecats() {
+  try {
+    const { stdout } = await execAsync('tmux ls 2>/dev/null || echo ""');
+    const sessions = new Set();
+    // Parse tmux ls output: "gt-rig-polecat: 1 windows (created ...)"
+    for (const line of stdout.split('\n')) {
+      const match = line.match(/^(gt-[^:]+):/);
+      if (match) {
+        // Convert "gt-hytopia-map-compression-capable" to "hytopia-map-compression/capable"
+        const parts = match[1].replace('gt-', '').split('-');
+        if (parts.length >= 2) {
+          const name = parts.pop();
+          const rig = parts.join('-');
+          sessions.add(`${rig}/${name}`);
+        }
+      }
+    }
+    return sessions;
+  } catch {
+    return new Set();
+  }
+}
+
+// Get polecat output from tmux (last N lines)
+async function getPolecatOutput(sessionName, lines = 50) {
+  try {
+    const { stdout } = await execAsync(`tmux capture-pane -t ${sessionName} -p 2>/dev/null | tail -${lines}`);
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
 // Execute a Gas Town command
 async function executeGT(args, options = {}) {
   const cmd = `gt ${args.map(quoteArg).join(' ')}`;
@@ -112,9 +146,30 @@ function parseJSON(output) {
 
 // Town status overview
 app.get('/api/status', async (req, res) => {
-  const result = await executeGT(['status', '--json', '--fast']);
+  const [result, runningPolecats] = await Promise.all([
+    executeGT(['status', '--json', '--fast']),
+    getRunningPolecats()
+  ]);
+
   if (result.success) {
     const data = parseJSON(result.data);
+    if (data) {
+      // Enhance rigs with running state from tmux
+      for (const rig of data.rigs || []) {
+        for (const hook of rig.hooks || []) {
+          // Check if this polecat has a running tmux session
+          const agentPath = hook.agent; // e.g., "hytopia-map-compression/capable"
+          hook.running = runningPolecats.has(agentPath);
+
+          // Also check polecats subdirectory format
+          const polecatPath = agentPath.replace(/\//, '/polecats/');
+          if (!hook.running && runningPolecats.has(polecatPath)) {
+            hook.running = true;
+          }
+        }
+      }
+      data.runningPolecats = Array.from(runningPolecats);
+    }
     res.json(data || { raw: result.data });
   } else {
     res.status(500).json({ error: result.error });
@@ -322,13 +377,54 @@ app.post('/api/nudge', async (req, res) => {
 
 // Get agent list
 app.get('/api/agents', async (req, res) => {
-  const result = await executeGT(['status', '--json']);
+  const [result, runningPolecats] = await Promise.all([
+    executeGT(['status', '--json']),
+    getRunningPolecats()
+  ]);
+
   if (result.success) {
     const data = parseJSON(result.data);
-    // Extract agents from status response
-    res.json(data?.agents || []);
+    const agents = data?.agents || [];
+
+    // Enhance agents with running state
+    for (const agent of agents) {
+      agent.running = runningPolecats.has(agent.address?.replace(/\/$/, ''));
+    }
+
+    // Also include running polecats from rigs
+    const polecats = [];
+    for (const rig of data?.rigs || []) {
+      for (const hook of rig.hooks || []) {
+        const isRunning = runningPolecats.has(hook.agent) ||
+          runningPolecats.has(hook.agent?.replace(/\//, '/polecats/'));
+        polecats.push({
+          name: hook.agent,
+          rig: rig.name,
+          role: hook.role,
+          running: isRunning,
+          has_work: hook.has_work,
+          hook_bead: hook.hook_bead
+        });
+      }
+    }
+
+    res.json({ agents, polecats, runningPolecats: Array.from(runningPolecats) });
   } else {
     res.status(500).json({ error: result.error });
+  }
+});
+
+// Get polecat output (what they're working on)
+app.get('/api/polecat/:rig/:name/output', async (req, res) => {
+  const { rig, name } = req.params;
+  const lines = parseInt(req.query.lines) || 50;
+  const sessionName = `gt-${rig}-${name}`;
+
+  const output = await getPolecatOutput(sessionName, lines);
+  if (output !== null) {
+    res.json({ session: sessionName, output, running: true });
+  } else {
+    res.json({ session: sessionName, output: null, running: false });
   }
 });
 
