@@ -975,6 +975,17 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		}
 	}
 
+	// Set the hook slot if specified (atomic at spawn time)
+	// This uses bd slot set to update the SQLite column directly, ensuring
+	// consistency with bd slot show and other commands that read from SQLite.
+	// Previously, hook_bead was only in description text which caused #gt-mol-6xg5o.
+	if fields != nil && fields.HookBead != "" {
+		if _, err := b.run("slot", "set", id, "hook", fields.HookBead); err != nil {
+			// Non-fatal: warn but continue
+			fmt.Printf("Warning: could not set hook slot: %v\n", err)
+		}
+	}
+
 	return &issue, nil
 }
 
