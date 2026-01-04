@@ -30,6 +30,10 @@
             <span class="material-icons">local_shipping</span>
             Convoys
           </button>
+          <button class="nav-tab" data-view="work" data-tooltip="Individual tasks (beads) and their completion status.">
+            <span class="material-icons">task_alt</span>
+            Work
+          </button>
           <button class="nav-tab" data-view="agents" data-tooltip="Worker agents: Mayor, Witness, Refinery, and Polecats.">
             <span class="material-icons">groups</span>
             Agents
@@ -103,6 +107,33 @@
             </div>
           </div>
           <div class="convoy-list" id="convoy-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Work View (Beads/Tasks) -->
+        <div class="view" id="view-work">
+          <div class="view-header">
+            <h1 id="work-view-title">All Work</h1>
+            <div class="view-filters">
+              <button class="btn btn-sm btn-ghost" id="work-filter-all" title="All beads">
+                <span class="material-icons">list</span> All
+              </button>
+              <button class="btn btn-sm btn-ghost" id="work-filter-open" title="Open tasks">
+                <span class="material-icons">pending</span> Open
+              </button>
+              <button class="btn btn-sm btn-secondary filter-active" id="work-filter-closed" title="Completed tasks">
+                <span class="material-icons">check_circle</span> Completed
+              </button>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-primary" id="new-bead-btn-work" data-modal-open="new-bead">
+                <span class="material-icons">add</span>
+                New Task
+              </button>
+            </div>
+          </div>
+          <div class="work-list" id="work-list">
             <!-- Populated by JS -->
           </div>
         </div>

@@ -11,6 +11,7 @@ import { renderSidebar } from './components/sidebar.js';
 import { renderConvoyList } from './components/convoy-list.js';
 import { renderAgentGrid } from './components/agent-grid.js';
 import { renderActivityFeed } from './components/activity-feed.js';
+import { renderWorkList } from './components/work-list.js';
 import { renderMailList } from './components/mail-list.js';
 import { showToast } from './components/toast.js';
 import { initModals } from './components/modals.js';
@@ -26,6 +27,7 @@ const elements = {
   statusMessage: document.getElementById('status-message'),
   agentTree: document.getElementById('agent-tree'),
   convoyList: document.getElementById('convoy-list'),
+  workList: document.getElementById('work-list'),
   agentGrid: document.getElementById('agent-grid'),
   feedList: document.getElementById('feed-list'),
   mailList: document.getElementById('mail-list'),
@@ -47,6 +49,9 @@ async function init() {
 
   // Set up convoy filters
   setupConvoyFilters();
+
+  // Set up work filters
+  setupWorkFilters();
 
   // Set up keyboard shortcuts
   setupKeyboardShortcuts();
@@ -106,6 +111,8 @@ function switchView(viewId) {
     loadMail();
   } else if (viewId === 'agents') {
     loadAgents();
+  } else if (viewId === 'work') {
+    loadWork();
   }
 }
 
@@ -270,6 +277,55 @@ async function loadAgents() {
     state.setAgents(allAgents);
   } catch (err) {
     console.error('[App] Failed to load agents:', err);
+  }
+}
+
+// Track work filter state
+let workFilter = 'closed'; // Default to showing completed work
+
+async function loadWork() {
+  try {
+    const params = workFilter === 'all' ? {} : { status: workFilter };
+    const beads = await api.get(`/api/beads${workFilter !== 'all' ? `?status=${workFilter}` : ''}`);
+    renderWorkList(elements.workList, beads || []);
+  } catch (err) {
+    console.error('[App] Failed to load work:', err);
+  }
+}
+
+// Setup work filter toggle
+function setupWorkFilters() {
+  const allBtn = document.getElementById('work-filter-all');
+  const openBtn = document.getElementById('work-filter-open');
+  const closedBtn = document.getElementById('work-filter-closed');
+  const title = document.getElementById('work-view-title');
+
+  const buttons = [allBtn, openBtn, closedBtn];
+
+  function setActiveFilter(activeBtn, filter, titleText) {
+    workFilter = filter;
+    buttons.forEach(btn => {
+      if (btn) {
+        btn.classList.remove('btn-secondary', 'filter-active');
+        btn.classList.add('btn-ghost');
+      }
+    });
+    if (activeBtn) {
+      activeBtn.classList.remove('btn-ghost');
+      activeBtn.classList.add('btn-secondary', 'filter-active');
+    }
+    if (title) title.textContent = titleText;
+    loadWork();
+  }
+
+  if (allBtn) {
+    allBtn.addEventListener('click', () => setActiveFilter(allBtn, 'all', 'All Work'));
+  }
+  if (openBtn) {
+    openBtn.addEventListener('click', () => setActiveFilter(openBtn, 'open', 'Open Tasks'));
+  }
+  if (closedBtn) {
+    closedBtn.addEventListener('click', () => setActiveFilter(closedBtn, 'closed', 'Completed Work'));
   }
 }
 

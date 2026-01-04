@@ -3229,3 +3229,424 @@ select {
 .help-actions .btn {
   flex: 1;
 }
+
+/* === Work/Bead Cards === */
+.work-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  overflow-y: auto;
+}
+
+.bead-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.bead-card:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-muted);
+}
+
+.bead-card.status-closed {
+  border-left: 3px solid var(--accent-success);
+}
+
+.bead-card.status-open {
+  border-left: 3px solid var(--accent-warning);
+}
+
+.bead-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+}
+
+.bead-status {
+  flex-shrink: 0;
+}
+
+.bead-status .material-icons {
+  font-size: 20px;
+}
+
+.status-closed .bead-status .material-icons {
+  color: var(--accent-success);
+}
+
+.status-open .bead-status .material-icons {
+  color: var(--accent-warning);
+}
+
+.bead-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.bead-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--space-xs) 0;
+}
+
+.bead-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.bead-meta .material-icons {
+  font-size: 14px;
+  vertical-align: middle;
+}
+
+.bead-id {
+  font-family: var(--font-mono);
+  color: var(--accent-primary);
+}
+
+.bead-type {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.bead-assignee {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-secondary);
+}
+
+.bead-priority {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.bead-priority.priority-0 {
+  background: #dc262620;
+  color: #dc2626;
+}
+
+.bead-priority.priority-1 {
+  background: #f9731620;
+  color: #f97316;
+}
+
+.bead-priority.priority-2 {
+  background: #3b82f620;
+  color: #3b82f6;
+}
+
+.bead-result {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--accent-success)10;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.bead-result .material-icons {
+  font-size: 16px;
+  color: var(--accent-success);
+  flex-shrink: 0;
+}
+
+.result-text {
+  line-height: 1.4;
+}
+
+.bead-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* === Commit/PR Links in Work List === */
+.commit-link,
+.pr-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  background: var(--accent-primary)15;
+  border-radius: var(--radius-sm);
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.commit-link:hover,
+.pr-link:hover {
+  background: var(--accent-primary)30;
+  color: var(--accent-primary);
+}
+
+.commit-link .material-icons,
+.pr-link .material-icons {
+  font-size: 14px;
+}
+
+/* === Bead Detail Modal === */
+.bead-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.bead-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex: 1;
+}
+
+.bead-detail-title-row h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.bead-detail-title-row .status-icon {
+  font-size: 24px;
+}
+
+.bead-detail-title-row .status-icon.status-closed {
+  color: var(--accent-success);
+}
+
+.bead-detail-title-row .status-icon.status-open {
+  color: var(--accent-warning);
+}
+
+.bead-detail-body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.bead-detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.meta-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  min-width: 80px;
+}
+
+.meta-value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.meta-value .material-icons {
+  font-size: 16px;
+  color: var(--text-muted);
+}
+
+.bead-id-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  color: var(--accent-primary);
+}
+
+.btn-xs {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.btn-xs .material-icons {
+  font-size: 14px;
+}
+
+.priority-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.priority-badge.priority-0 {
+  background: #dc262620;
+  color: #dc2626;
+}
+
+.priority-badge.priority-1 {
+  background: #f9731620;
+  color: #f97316;
+}
+
+.priority-badge.priority-2 {
+  background: #3b82f620;
+  color: #3b82f6;
+}
+
+.priority-badge.priority-3,
+.priority-badge.priority-4 {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.status-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.status-badge.status-open {
+  background: #f9731620;
+  color: #f97316;
+}
+
+.status-badge.status-closed {
+  background: #22c55e20;
+  color: #22c55e;
+}
+
+.status-badge.status-in-progress,
+.status-badge.status-in_progress {
+  background: #3b82f620;
+  color: #3b82f6;
+}
+
+.status-badge.status-blocked {
+  background: #dc262620;
+  color: #dc2626;
+}
+
+.bead-detail-section {
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-muted);
+}
+
+.bead-detail-section h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-sm) 0;
+}
+
+.bead-detail-section h4 .material-icons {
+  font-size: 18px;
+  color: var(--accent-success);
+}
+
+.bead-description {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.bead-close-reason {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  line-height: 1.6;
+  padding: var(--space-sm);
+  background: var(--accent-success)08;
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--accent-success);
+}
+
+.completion-section h4 {
+  color: var(--accent-success);
+}
+
+.code-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--accent-primary)15;
+  border-radius: var(--radius-sm);
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.code-link:hover {
+  background: var(--accent-primary)25;
+}
+
+.code-link .material-icons {
+  font-size: 14px;
+}
+
+.filename {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: 1px 4px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  color: var(--text-secondary);
+}
+
+.bead-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.label-tag {
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* Copy toast animation */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}

@@ -113,6 +113,10 @@ export function initModals() {
       subject: e.detail.mail.subject,
     });
   });
+
+  document.addEventListener('bead:detail', (e) => {
+    showBeadDetailModal(e.detail.beadId, e.detail.bead);
+  });
 }
 
 /**
@@ -728,6 +732,186 @@ function showMailDetailModal(mailId, mail) {
     </div>
   `;
   showDynamicModal('mail-detail', content);
+}
+
+// === Bead Detail Modal ===
+
+function showBeadDetailModal(beadId, bead) {
+  if (!bead) {
+    showToast('Bead data not available', 'warning');
+    return;
+  }
+
+  const statusIcons = {
+    open: 'radio_button_unchecked',
+    closed: 'check_circle',
+    'in-progress': 'pending',
+    in_progress: 'pending',
+    blocked: 'block',
+  };
+
+  const typeIcons = {
+    task: 'task_alt',
+    bug: 'bug_report',
+    feature: 'star',
+    chore: 'build',
+    epic: 'flag',
+  };
+
+  const statusIcon = statusIcons[bead.status] || 'help_outline';
+  const typeIcon = typeIcons[bead.issue_type] || 'assignment';
+  const assignee = bead.assignee ? bead.assignee.split('/').pop() : null;
+
+  // Parse close_reason for links
+  const closeReasonHtml = bead.close_reason
+    ? parseCloseReasonForModal(bead.close_reason)
+    : '';
+
+  const content = `
+    <div class="modal-header bead-detail-header">
+      <div class="bead-detail-title-row">
+        <span class="material-icons status-icon status-${bead.status}">${statusIcon}</span>
+        <h2>${escapeHtml(bead.title)}</h2>
+      </div>
+      <button class="btn btn-icon" data-modal-close>
+        <span class="material-icons">close</span>
+      </button>
+    </div>
+    <div class="modal-body bead-detail-body">
+      <div class="bead-detail-meta">
+        <div class="meta-row">
+          <span class="meta-label">ID:</span>
+          <code class="bead-id-code">${escapeHtml(beadId)}</code>
+          <button class="btn btn-icon btn-xs copy-btn" data-copy="${beadId}" title="Copy ID">
+            <span class="material-icons">content_copy</span>
+          </button>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Type:</span>
+          <span class="meta-value">
+            <span class="material-icons">${typeIcon}</span>
+            ${bead.issue_type || 'task'}
+          </span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Priority:</span>
+          <span class="priority-badge priority-${bead.priority || 2}">P${bead.priority || 2}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Status:</span>
+          <span class="status-badge status-${bead.status}">${bead.status || 'open'}</span>
+        </div>
+        ${assignee ? `
+          <div class="meta-row">
+            <span class="meta-label">Assignee:</span>
+            <span class="meta-value">
+              <span class="material-icons">person</span>
+              ${escapeHtml(assignee)}
+            </span>
+          </div>
+        ` : ''}
+        <div class="meta-row">
+          <span class="meta-label">Created:</span>
+          <span class="meta-value">${bead.created_at ? new Date(bead.created_at).toLocaleString() : 'Unknown'}</span>
+        </div>
+        ${bead.closed_at ? `
+          <div class="meta-row">
+            <span class="meta-label">Completed:</span>
+            <span class="meta-value">${new Date(bead.closed_at).toLocaleString()}</span>
+          </div>
+        ` : ''}
+      </div>
+
+      ${bead.description ? `
+        <div class="bead-detail-section">
+          <h4>Description</h4>
+          <div class="bead-description">${escapeHtml(bead.description)}</div>
+        </div>
+      ` : ''}
+
+      ${bead.close_reason ? `
+        <div class="bead-detail-section completion-section">
+          <h4>
+            <span class="material-icons">check_circle</span>
+            Completion Summary
+          </h4>
+          <div class="bead-close-reason">${closeReasonHtml}</div>
+        </div>
+      ` : ''}
+
+      ${bead.labels && bead.labels.length > 0 ? `
+        <div class="bead-detail-section">
+          <h4>Labels</h4>
+          <div class="bead-labels">
+            ${bead.labels.map(l => `<span class="label-tag">${escapeHtml(l)}</span>`).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-modal-close>Close</button>
+      ${bead.status !== 'closed' ? `
+        <button class="btn btn-primary" onclick="document.dispatchEvent(new CustomEvent('bead:sling', { detail: { beadId: '${beadId}' } })); closeAllModals();">
+          <span class="material-icons">send</span>
+          Sling Work
+        </button>
+      ` : ''}
+    </div>
+  `;
+
+  const modal = showDynamicModal('bead-detail', content);
+
+  // Add copy button handlers
+  modal.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const text = btn.dataset.copy;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast(`Copied: ${text}`, 'success');
+      });
+    });
+  });
+
+  // Add commit link handlers
+  modal.querySelectorAll('.commit-link').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const hash = link.dataset.commit;
+      navigator.clipboard.writeText(hash).then(() => {
+        showToast(`Copied commit: ${hash}`, 'success');
+      });
+    });
+  });
+}
+
+/**
+ * Parse close_reason for the detail modal (with more formatting)
+ */
+function parseCloseReasonForModal(text) {
+  if (!text) return '';
+
+  let result = escapeHtml(text);
+
+  // Replace commit references with styled links
+  result = result.replace(/commit\s+([a-f0-9]{7,40})/gi, (match, hash) => {
+    return `<a href="#" class="commit-link code-link" data-commit="${hash}" title="Click to copy">
+      <span class="material-icons">commit</span>${hash.substring(0, 7)}
+    </a>`;
+  });
+
+  // Replace PR references
+  result = result.replace(/PR\s*#?(\d+)/gi, (match, num) => {
+    return `<a href="#" class="pr-link code-link" data-pr="${num}" title="Pull Request #${num}">
+      <span class="material-icons">merge</span>PR #${num}
+    </a>`;
+  });
+
+  // Replace file paths (→ filename.ext pattern)
+  result = result.replace(/→\s*([A-Za-z0-9_.-]+\.[A-Za-z0-9]+)/g, (match, filename) => {
+    return `→ <code class="filename">${filename}</code>`;
+  });
+
+  return result;
 }
 
 // === Escalation Modal ===
