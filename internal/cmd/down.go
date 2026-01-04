@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -73,35 +73,20 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get session names
-	mayorSession := getMayorSessionName()
-	deaconSession := getDeaconSessionName()
-
-	// 2. Stop Mayor
-	if err := stopSession(t, mayorSession); err != nil {
-		printDownStatus("Mayor", false, err.Error())
-		allOK = false
-	} else {
-		printDownStatus("Mayor", true, "stopped")
+	// 2. Stop town-level sessions (Mayor, Boot, Deacon) in correct order
+	for _, ts := range session.TownSessions() {
+		stopped, err := session.StopTownSession(t, ts, downForce)
+		if err != nil {
+			printDownStatus(ts.Name, false, err.Error())
+			allOK = false
+		} else if stopped {
+			printDownStatus(ts.Name, true, "stopped")
+		} else {
+			printDownStatus(ts.Name, true, "not running")
+		}
 	}
 
-	// 3. Stop Boot (Deacon's watchdog)
-	if err := stopSession(t, boot.SessionName); err != nil {
-		printDownStatus("Boot", false, err.Error())
-		allOK = false
-	} else {
-		printDownStatus("Boot", true, "stopped")
-	}
-
-	// 4. Stop Deacon
-	if err := stopSession(t, deaconSession); err != nil {
-		printDownStatus("Deacon", false, err.Error())
-		allOK = false
-	} else {
-		printDownStatus("Deacon", true, "stopped")
-	}
-
-	// 5. Stop Daemon last
+	// 3. Stop Daemon last
 	running, _, _ := daemon.IsRunning(townRoot)
 	if running {
 		if err := daemon.StopDaemon(townRoot); err != nil {
@@ -114,7 +99,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		printDownStatus("Daemon", true, "not running")
 	}
 
-	// 6. Kill tmux server if --all
+	// 4. Kill tmux server if --all
 	if downAll {
 		if err := t.KillServer(); err != nil {
 			printDownStatus("Tmux server", false, err.Error())
