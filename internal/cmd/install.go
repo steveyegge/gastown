@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/formula"
@@ -187,6 +188,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   %s Could not create CLAUDE.md: %v\n", style.Dim.Render("⚠"), err)
 	} else {
 		fmt.Printf("   ✓ Created CLAUDE.md\n")
+	}
+
+	// Ensure Mayor has Claude settings with SessionStart hooks.
+	// This ensures gt prime runs on Claude startup, which outputs the Mayor
+	// delegation protocol - critical for preventing direct implementation.
+	if err := claude.EnsureSettingsForRole(absPath, "mayor"); err != nil {
+		fmt.Printf("   %s Could not create .claude/settings.json: %v\n", style.Dim.Render("⚠"), err)
+	} else {
+		fmt.Printf("   ✓ Created .claude/settings.json\n")
 	}
 
 	// Initialize town-level beads database (optional)

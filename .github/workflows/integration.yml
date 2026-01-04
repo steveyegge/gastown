@@ -29,8 +29,17 @@ jobs:
           git config --global user.name "CI Bot"
           git config --global user.email "ci@gastown.test"
 
+      - name: Install beads (bd)
+        run: go install github.com/steveyegge/beads/cmd/bd@latest
+
+      - name: Add to PATH
+        run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Generate embedded files
+        run: go generate ./internal/formula/...
+
       - name: Build
         run: go build -v ./cmd/gt
 
       - name: Run integration tests
-        run: go test -v -tags=integration -timeout=4m ./...
+        run: go test -v -tags=integration -timeout=4m ./internal/cmd/...
