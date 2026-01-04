@@ -145,6 +145,11 @@ export const api = {
   runDoctor() {
     return this.get('/api/doctor');
   },
+
+  // === Polecat Output ===
+  getPeekOutput(rig, name) {
+    return this.get(`/api/polecat/${encodeURIComponent(rig)}/${encodeURIComponent(name)}/output`);
+  },
 };
 
 // WebSocket Client

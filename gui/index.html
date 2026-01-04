@@ -572,6 +572,37 @@
           </div>
         </div>
       </div>
+
+      <!-- Agent Peek Modal -->
+      <div class="modal modal-lg hidden" id="peek-modal">
+        <div class="modal-header">
+          <h2>
+            <span class="material-icons">visibility</span>
+            <span id="peek-agent-name">Agent Output</span>
+          </h2>
+          <div class="peek-controls">
+            <button class="btn btn-sm btn-secondary" id="peek-refresh" title="Refresh output">
+              <span class="material-icons">refresh</span>
+            </button>
+            <label class="peek-auto-refresh">
+              <input type="checkbox" id="peek-auto-refresh-toggle">
+              Auto-refresh
+            </label>
+          </div>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="peek-status" id="peek-status">
+            <span class="status-indicator"></span>
+            <span class="status-text">Loading...</span>
+          </div>
+          <div class="peek-output" id="peek-output">
+            <pre class="output-content"></pre>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Toast Container -->

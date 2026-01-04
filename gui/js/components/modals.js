@@ -15,6 +15,10 @@ const modals = new Map();
 // References
 let overlay = null;
 
+// Peek modal state
+let peekAutoRefreshInterval = null;
+let currentPeekAgentId = null;
+
 // GitHub repo mapping for known rigs (same as work-list.js)
 const GITHUB_REPOS = {
   'hytopia-map-compression': 'web3dev1337/hytopia-map-compression',
@@ -141,6 +145,16 @@ export function initModals() {
   document.addEventListener('bead:detail', (e) => {
     showBeadDetailModal(e.detail.beadId, e.detail.bead);
   });
+
+  document.addEventListener('agent:peek', (e) => {
+    showPeekModal(e.detail.agentId);
+  });
+
+  // Register peek modal
+  registerModal('peek', {
+    element: document.getElementById('peek-modal'),
+    onOpen: initPeekModal,
+  });
 }
 
 /**
@@ -188,6 +202,18 @@ export function closeAllModals() {
 
   // Reset forms
   document.querySelectorAll('.modal form').forEach(form => form.reset());
+
+  // Stop peek modal auto-refresh if active
+  stopPeekAutoRefresh();
+}
+
+// Helper to stop peek auto-refresh from closeAllModals
+function stopPeekAutoRefresh() {
+  if (peekAutoRefreshInterval) {
+    clearInterval(peekAutoRefreshInterval);
+    peekAutoRefreshInterval = null;
+  }
+  currentPeekAgentId = null;
 }
 
 /**
@@ -1086,6 +1112,133 @@ function showDynamicModal(id, content) {
   });
 
   return modal;
+}
+
+// === Peek Modal ===
+
+function initPeekModal(element, data) {
+  // Set up refresh button
+  const refreshBtn = element.querySelector('#peek-refresh');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      if (currentPeekAgentId) {
+        refreshPeekOutput(currentPeekAgentId);
+      }
+    });
+  }
+
+  // Set up auto-refresh toggle
+  const autoRefreshToggle = element.querySelector('#peek-auto-refresh-toggle');
+  if (autoRefreshToggle) {
+    autoRefreshToggle.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        startAutoRefresh();
+      } else {
+        stopAutoRefresh();
+      }
+    });
+  }
+}
+
+async function showPeekModal(agentId) {
+  currentPeekAgentId = agentId;
+
+  // Parse agent ID (format: "rig/name")
+  const parts = agentId.split('/');
+  const rig = parts[0];
+  const name = parts[1] || parts[0];
+
+  // Update header
+  const headerEl = document.getElementById('peek-agent-name');
+  if (headerEl) {
+    headerEl.textContent = `Output: ${name}`;
+  }
+
+  // Reset auto-refresh state
+  const autoRefreshToggle = document.getElementById('peek-auto-refresh-toggle');
+  if (autoRefreshToggle) {
+    autoRefreshToggle.checked = false;
+  }
+  stopAutoRefresh();
+
+  // Open modal
+  openModal('peek', { agentId, rig, name });
+
+  // Fetch initial output
+  await refreshPeekOutput(agentId);
+}
+
+async function refreshPeekOutput(agentId) {
+  const parts = agentId.split('/');
+  const rig = parts[0];
+  const name = parts[1] || parts[0];
+
+  const statusEl = document.getElementById('peek-status');
+  const outputEl = document.getElementById('peek-output');
+  const outputContent = outputEl?.querySelector('.output-content');
+
+  if (statusEl) {
+    statusEl.innerHTML = '<span class="loading-spinner"></span> Loading...';
+  }
+
+  try {
+    const response = await api.getPeekOutput(rig, name);
+
+    // Update status
+    if (statusEl) {
+      const statusClass = response.running ? 'status-running' : 'status-stopped';
+      const statusText = response.running ? 'Running' : 'Stopped';
+      const sessionInfo = response.session ? ` (${response.session})` : '';
+      statusEl.innerHTML = `
+        <span class="peek-status-badge ${statusClass}">
+          <span class="material-icons">${response.running ? 'play_circle' : 'stop_circle'}</span>
+          ${statusText}
+        </span>
+        <span class="peek-session-info">${sessionInfo}</span>
+      `;
+    }
+
+    // Update output
+    if (outputContent) {
+      if (response.output && response.output.trim()) {
+        outputContent.textContent = response.output;
+        // Scroll to bottom
+        outputEl.scrollTop = outputEl.scrollHeight;
+      } else {
+        outputContent.textContent = '(No output available)';
+      }
+    }
+  } catch (err) {
+    if (statusEl) {
+      statusEl.innerHTML = `
+        <span class="peek-status-badge status-error">
+          <span class="material-icons">error</span>
+          Error
+        </span>
+      `;
+    }
+    if (outputContent) {
+      outputContent.textContent = `Failed to fetch output: ${err.message}`;
+    }
+    console.error('[Peek] Failed to fetch output:', err);
+  }
+}
+
+function startAutoRefresh() {
+  if (peekAutoRefreshInterval) return;
+
+  peekAutoRefreshInterval = setInterval(() => {
+    if (currentPeekAgentId) {
+      refreshPeekOutput(currentPeekAgentId);
+    }
+  }, 2000); // Refresh every 2 seconds
+}
+
+function stopAutoRefresh() {
+  if (peekAutoRefreshInterval) {
+    clearInterval(peekAutoRefreshInterval);
+    peekAutoRefreshInterval = null;
+  }
 }
 
 // Utility
