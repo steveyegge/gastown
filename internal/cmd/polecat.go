@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Polecat command flags
@@ -195,15 +196,15 @@ Examples:
 }
 
 var (
-	polecatSyncAll      bool
-	polecatSyncFromMain bool
-	polecatStatusJSON   bool
-	polecatGitStateJSON bool
-	polecatGCDryRun           bool
-	polecatNukeAll            bool
-	polecatNukeDryRun         bool
-	polecatNukeForce          bool
-	polecatCheckRecoveryJSON  bool
+	polecatSyncAll           bool
+	polecatSyncFromMain      bool
+	polecatStatusJSON        bool
+	polecatGitStateJSON      bool
+	polecatGCDryRun          bool
+	polecatNukeAll           bool
+	polecatNukeDryRun        bool
+	polecatNukeForce         bool
+	polecatCheckRecoveryJSON bool
 )
 
 var polecatGCCmd = &cobra.Command{
@@ -1117,6 +1118,14 @@ type RecoveryStatus struct {
 	Issue         string `json:"issue,omitempty"`
 }
 
+func rigBeadPrefixForRigPath(rigPath, rigName string) string {
+	townRoot, err := workspace.Find(rigPath)
+	if err != nil || townRoot == "" {
+		return "gt"
+	}
+	return beads.GetPrefixForRig(townRoot, rigName)
+}
+
 func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 	rigName, polecatName, err := parseAddress(args[0])
 	if err != nil {
@@ -1128,6 +1137,8 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	prefix := rigBeadPrefixForRigPath(r.Path, rigName)
+
 	// Verify polecat exists and get info
 	p, err := mgr.Get(polecatName)
 	if err != nil {
@@ -1138,7 +1149,7 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 	// We need to read it directly from beads since manager doesn't expose it
 	rigPath := r.Path
 	bd := beads.New(rigPath)
-	agentBeadID := beads.PolecatBeadID(rigName, polecatName)
+	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
 	_, fields, err := bd.GetAgentBead(agentBeadID)
 
 	status := RecoveryStatus{
@@ -1391,8 +1402,9 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			polecatInfo, infoErr := p.mgr.Get(p.polecatName)
 
 			// Check 1: Unpushed commits via cleanup_status or git state
+			prefix := rigBeadPrefixForRigPath(p.r.Path, p.rigName)
 			bd := beads.New(p.r.Path)
-			agentBeadID := beads.PolecatBeadID(p.rigName, p.polecatName)
+			agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, p.rigName, p.polecatName)
 			agentIssue, fields, err := bd.GetAgentBead(agentBeadID)
 
 			if err != nil || fields == nil {
@@ -1482,18 +1494,19 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 	nuked := 0
 
 	for _, p := range toNuke {
+		prefix := rigBeadPrefixForRigPath(p.r.Path, p.rigName)
 		if polecatNukeDryRun {
 			fmt.Printf("Would nuke %s/%s:\n", p.rigName, p.polecatName)
 			fmt.Printf("  - Kill session: gt-%s-%s\n", p.rigName, p.polecatName)
 			fmt.Printf("  - Delete worktree: %s/polecats/%s\n", p.r.Path, p.polecatName)
 			fmt.Printf("  - Delete branch (if exists)\n")
-			fmt.Printf("  - Close agent bead: %s\n", beads.PolecatBeadID(p.rigName, p.polecatName))
+			fmt.Printf("  - Close agent bead: %s\n", beads.PolecatBeadIDWithPrefix(prefix, p.rigName, p.polecatName))
 
 			// Show safety check status in dry-run
 			fmt.Printf("\n  Safety checks:\n")
 			polecatInfo, infoErr := p.mgr.Get(p.polecatName)
 			bd := beads.New(p.r.Path)
-			agentBeadID := beads.PolecatBeadID(p.rigName, p.polecatName)
+			agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, p.rigName, p.polecatName)
 			agentIssue, fields, err := bd.GetAgentBead(agentBeadID)
 
 			// Check 1: Git state
@@ -1596,7 +1609,7 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 		}
 
 		// Step 5: Close agent bead (if exists)
-		agentBeadID := beads.PolecatBeadID(p.rigName, p.polecatName)
+		agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, p.rigName, p.polecatName)
 		closeArgs := []string{"close", agentBeadID, "--reason=nuked"}
 		if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
 			closeArgs = append(closeArgs, "--session="+sessionID)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -17,9 +18,9 @@ import (
 
 // Common errors
 var (
-	ErrPolecatExists     = errors.New("polecat already exists")
-	ErrPolecatNotFound   = errors.New("polecat not found")
-	ErrHasChanges        = errors.New("polecat has uncommitted changes")
+	ErrPolecatExists      = errors.New("polecat already exists")
+	ErrPolecatNotFound    = errors.New("polecat not found")
+	ErrHasChanges         = errors.New("polecat has uncommitted changes")
 	ErrHasUncommittedWork = errors.New("polecat has uncommitted work")
 )
 
@@ -99,7 +100,11 @@ func (m *Manager) agentBeadID(name string) string {
 	// Find town root to lookup prefix from routes.jsonl
 	townRoot, err := workspace.Find(m.rig.Path)
 	if err != nil || townRoot == "" {
-		// Fall back to default prefix
+		// Fall back to rig config prefix if available
+		if m.rig.Config != nil && m.rig.Config.Prefix != "" {
+			prefix := strings.TrimSuffix(m.rig.Config.Prefix, "-")
+			return beads.PolecatBeadIDWithPrefix(prefix, m.rig.Name, name)
+		}
 		return beads.PolecatBeadID(m.rig.Name, name)
 	}
 	prefix := beads.GetPrefixForRig(townRoot, m.rig.Name)
@@ -255,7 +260,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
-		RoleBead:   "gt-polecat-role",
+		RoleBead:   beads.RoleBeadID("polecat"),
 		HookBead:   opts.HookBead, // Set atomically at spawn time
 	})
 	if err != nil {
@@ -471,7 +476,7 @@ func (m *Manager) RecreateWithOptions(name string, force bool, opts AddOptions) 
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
-		RoleBead:   "gt-polecat-role",
+		RoleBead:   beads.RoleBeadID("polecat"),
 		HookBead:   opts.HookBead, // Set atomically at spawn time
 	})
 	if err != nil {

@@ -5,7 +5,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // testDaemon creates a minimal Daemon for testing.
@@ -40,6 +43,78 @@ func testDaemonWithTown(t *testing.T, townName string) (*Daemon, func()) {
 
 	return d, func() {
 		// Cleanup handled by t.TempDir()
+	}
+}
+
+func writeTestRoutes(t *testing.T, townRoot string, routes []beads.Route) {
+	t.Helper()
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("create beads dir: %v", err)
+	}
+	if err := beads.WriteRoutes(beadsDir, routes); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
+}
+
+func TestIdentityToAgentBeadID_UsesRigPrefix(t *testing.T) {
+	townRoot := t.TempDir()
+	writeTestRoutes(t, townRoot, []beads.Route{
+		{Prefix: "hw-", Path: "helloworld/mayor/rig"},
+	})
+
+	d := &Daemon{
+		config: &Config{TownRoot: townRoot},
+		logger: log.New(io.Discard, "", 0),
+	}
+
+	tests := []struct {
+		identity string
+		expected string
+	}{
+		{"helloworld-witness", "hw-helloworld-witness"},
+		{"helloworld-refinery", "hw-helloworld-refinery"},
+		{"helloworld-crew-max", "hw-helloworld-crew-max"},
+		{"helloworld-polecat-rictus", "hw-helloworld-polecat-rictus"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.identity, func(t *testing.T) {
+			got := d.identityToAgentBeadID(tt.identity)
+			if got != tt.expected {
+				t.Errorf("identityToAgentBeadID(%q) = %q, want %q", tt.identity, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExtractRigFromAgentID_UsesAnyPrefix(t *testing.T) {
+	d := testDaemon()
+
+	got := d.extractRigFromAgentID("bd-helloworld-polecat-rictus")
+	if got != "helloworld" {
+		t.Fatalf("extractRigFromAgentID() = %q, want %q", got, "helloworld")
+	}
+}
+
+func TestAgentBeadsDirsFromRoutes(t *testing.T) {
+	townRoot := t.TempDir()
+	writeTestRoutes(t, townRoot, []beads.Route{
+		{Prefix: "hw-", Path: "helloworld/mayor/rig"},
+		{Prefix: "bd-", Path: "beads/mayor/rig"},
+	})
+
+	got, err := agentBeadsDirsFromRoutes(townRoot)
+	if err != nil {
+		t.Fatalf("agentBeadsDirsFromRoutes error: %v", err)
+	}
+
+	want := []string{
+		filepath.Join(townRoot, "beads", "mayor", "rig"),
+		filepath.Join(townRoot, "helloworld", "mayor", "rig"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("agentBeadsDirsFromRoutes() = %v, want %v", got, want)
 	}
 }
 
