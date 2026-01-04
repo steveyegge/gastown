@@ -29,3 +29,22 @@ This file exists for compatibility with tools that look for AGENTS.md.
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+
+## Dependency Management
+
+Periodically check for outdated dependencies:
+
+```bash
+go list -m -u all | grep '\['
+```
+
+Update direct dependencies:
+
+```bash
+go get <package>@latest
+go mod tidy
+go build ./...
+go test ./...
+```
+
+Check release notes for breaking changes before major version bumps.
