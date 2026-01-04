@@ -1017,6 +1017,16 @@ func TestParseAgentBeadID(t *testing.T) {
 		{"gt-gastown-polecat-capable", "gastown", "polecat", "capable", true},
 		// Names with hyphens
 		{"gt-gastown-polecat-my-agent", "gastown", "polecat", "my-agent", true},
+		// Hyphenated rig names (GitHub issue #90)
+		{"ge-gastown-example-polecat-worker1", "gastown-example", "polecat", "worker1", true},
+		{"ge-gastown-example-witness", "gastown-example", "witness", "", true},
+		{"ge-gastown-example-refinery", "gastown-example", "refinery", "", true},
+		{"ge-gastown-example-crew-steve", "gastown-example", "crew", "steve", true},
+		{"mp-my-project-polecat-nux", "my-project", "polecat", "nux", true},
+		// Hyphenated rig AND hyphenated name
+		{"ge-my-cool-rig-polecat-my-agent-name", "my-cool-rig", "polecat", "my-agent-name", true},
+		// Multiple hyphens in rig name
+		{"xx-a-b-c-witness", "a-b-c", "witness", "", true},
 		// Parseable but not valid agent roles (IsAgentSessionBead will reject)
 		{"gt-abc123", "", "abc123", "", true}, // Parses as town-level but not valid role
 		// Other prefixes (bd-, hq-)

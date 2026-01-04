@@ -1323,11 +1323,29 @@ func PolecatBeadID(rig, name string) string {
 	return PolecatBeadIDWithPrefix("gt", rig, name)
 }
 
+// knownAgentRoles is the set of valid agent role names.
+// Used by ParseAgentBeadID to identify role boundaries in agent bead IDs.
+var knownAgentRoles = map[string]bool{
+	"mayor":    true,
+	"deacon":   true,
+	"witness":  true,
+	"refinery": true,
+	"crew":     true,
+	"polecat":  true,
+	"dog":      true,
+}
+
 // ParseAgentBeadID parses an agent bead ID into its components.
 // Returns rig, role, name, and whether parsing succeeded.
 // For town-level agents, rig will be empty.
 // For singletons, name will be empty.
 // Accepts any valid prefix (e.g., "gt-", "bd-"), not just "gt-".
+//
+// Supports hyphenated rig names by scanning from right to find known roles.
+// Example: "ge-gastown-example-polecat-worker1" parses as:
+//   - rig: "gastown-example"
+//   - role: "polecat"
+//   - name: "worker1"
 func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 	// Find the prefix (everything before the first hyphen)
 	// Valid prefixes are 2-3 characters (e.g., "gt", "bd", "hq")
@@ -1339,34 +1357,45 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 	rest := id[hyphenIdx+1:]
 	parts := strings.Split(rest, "-")
 
-	switch len(parts) {
-	case 1:
-		// Town-level: gt-mayor, bd-deacon
-		return "", parts[0], "", true
-	case 2:
-		// Could be rig-level singleton (gt-gastown-witness) or
-		// town-level named (gt-dog-alpha for dogs)
-		if parts[0] == "dog" {
-			// Dogs are town-level named agents: gt-dog-<name>
-			return "", "dog", parts[1], true
-		}
-		// Rig-level singleton: gt-gastown-witness
-		return parts[0], parts[1], "", true
-	case 3:
-		// Rig-level named: gt-gastown-crew-max, bd-beads-polecat-pearl
-		return parts[0], parts[1], parts[2], true
-	default:
-		// Handle names with hyphens: gt-gastown-polecat-my-agent-name
-		// or gt-dog-my-agent-name
-		if len(parts) >= 3 {
-			if parts[0] == "dog" {
-				// Dog with hyphenated name: gt-dog-my-dog-name
-				return "", "dog", strings.Join(parts[1:], "-"), true
-			}
-			return parts[0], parts[1], strings.Join(parts[2:], "-"), true
-		}
+	if len(parts) == 0 {
 		return "", "", "", false
 	}
+
+	// Case 1: Single part - town-level singleton (gt-mayor, gt-deacon)
+	if len(parts) == 1 {
+		return "", parts[0], "", true
+	}
+
+	// Case 2+: Scan from right to find a known role
+	// This handles hyphenated rig names like "gastown-example"
+	roleIdx := -1
+	for i := len(parts) - 1; i >= 0; i-- {
+		if knownAgentRoles[parts[i]] {
+			roleIdx = i
+			break
+		}
+	}
+
+	// No known role found - treat first part as role (may be invalid, caller validates)
+	if roleIdx == -1 {
+		// Fallback: assume parts[0] is role (for unknown/custom roles)
+		return "", parts[0], strings.Join(parts[1:], "-"), true
+	}
+
+	// Role found at roleIdx
+	role = parts[roleIdx]
+
+	// Everything before roleIdx is the rig name (joined with hyphens)
+	if roleIdx > 0 {
+		rig = strings.Join(parts[:roleIdx], "-")
+	}
+
+	// Everything after roleIdx is the agent name (joined with hyphens)
+	if roleIdx < len(parts)-1 {
+		name = strings.Join(parts[roleIdx+1:], "-")
+	}
+
+	return rig, role, name, true
 }
 
 // IsAgentSessionBead returns true if the bead ID represents an agent session molecule.
