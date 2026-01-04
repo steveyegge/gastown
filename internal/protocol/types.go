@@ -38,6 +38,16 @@ const (
 	// branch needs rebasing due to conflicts with the target branch.
 	// Subject format: "REWORK_REQUEST <polecat-name>"
 	TypeReworkRequest MessageType = "REWORK_REQUEST"
+
+	// TypeSemanticConflictEscalated is sent from Refinery to Mayor when
+	// semantic conflicts are detected that require decision-making.
+	// Subject format: "SEMANTIC_CONFLICT_ESCALATED <mr-id>"
+	TypeSemanticConflictEscalated MessageType = "SEMANTIC_CONFLICT_ESCALATED"
+
+	// TypeSemanticConflictResolved is sent from Mayor to Witness/Refinery
+	// after a semantic conflict has been resolved with a decision.
+	// Subject format: "SEMANTIC_CONFLICT_RESOLVED <mr-id>"
+	TypeSemanticConflictResolved MessageType = "SEMANTIC_CONFLICT_RESOLVED"
 )
 
 // ParseMessageType extracts the protocol message type from a mail subject.
@@ -51,6 +61,8 @@ func ParseMessageType(subject string) MessageType {
 		TypeMerged,
 		TypeMergeFailed,
 		TypeReworkRequest,
+		TypeSemanticConflictEscalated,
+		TypeSemanticConflictResolved,
 	}
 
 	for _, prefix := range prefixes {
@@ -163,6 +175,86 @@ type ReworkRequestPayload struct {
 
 	// Instructions provides specific rebase instructions.
 	Instructions string `json:"instructions,omitempty"`
+}
+
+// SemanticConflictEscalatedPayload contains the data for a SEMANTIC_CONFLICT_ESCALATED message.
+// Sent by Refinery when semantic conflicts are detected that require Mayor decision.
+type SemanticConflictEscalatedPayload struct {
+	// MRID is the merge request ID containing the conflicts.
+	MRID string `json:"mr_id"`
+
+	// Branch is the source branch with conflicts.
+	Branch string `json:"branch"`
+
+	// Rig is the rig name.
+	Rig string `json:"rig"`
+
+	// EscalatedAt is when the escalation occurred.
+	EscalatedAt time.Time `json:"escalated_at"`
+
+	// Conflicts lists all detected semantic conflicts.
+	Conflicts []SemanticConflictData `json:"conflicts"`
+
+	// MailID is the ID of the escalation mail sent to Mayor.
+	MailID string `json:"mail_id"`
+}
+
+// SemanticConflictData represents a single semantic conflict.
+type SemanticConflictData struct {
+	// BeadID is the bead with conflicting changes.
+	BeadID string `json:"bead_id"`
+
+	// Field is the field with conflicting values.
+	Field string `json:"field"`
+
+	// Changes lists all conflicting changes to this field.
+	Changes []BeadFieldChangeData `json:"changes"`
+}
+
+// BeadFieldChangeData represents a modification to a bead field.
+type BeadFieldChangeData struct {
+	// Polecat is the agent that made this change.
+	Polecat string `json:"polecat"`
+
+	// OldValue is the previous value.
+	OldValue string `json:"old_value"`
+
+	// NewValue is the new value.
+	NewValue string `json:"new_value"`
+
+	// CommitSHA is the git commit that made this change.
+	CommitSHA string `json:"commit_sha"`
+
+	// Timestamp is when the change was made.
+	Timestamp time.Time `json:"timestamp"`
+
+	// Confidence is the confidence score (0.0-1.0, optional).
+	Confidence float64 `json:"confidence,omitempty"`
+
+	// Reasoning explains why this change was made (optional).
+	Reasoning string `json:"reasoning,omitempty"`
+}
+
+// SemanticConflictResolvedPayload contains the data for a SEMANTIC_CONFLICT_RESOLVED message.
+// Sent by Mayor after deciding how to resolve semantic conflicts.
+type SemanticConflictResolvedPayload struct {
+	// MRID is the merge request ID.
+	MRID string `json:"mr_id"`
+
+	// Rig is the rig name.
+	Rig string `json:"rig"`
+
+	// ResolvedAt is when the resolution was made.
+	ResolvedAt time.Time `json:"resolved_at"`
+
+	// Resolutions maps "beadID:field" to the resolved value.
+	Resolutions map[string]string `json:"resolutions"`
+
+	// DecisionReasoning explains the Mayor's decision.
+	DecisionReasoning string `json:"decision_reasoning"`
+
+	// DecisionMaker identifies who made the decision (mayor or human).
+	DecisionMaker string `json:"decision_maker"`
 }
 
 // IsProtocolMessage returns true if the subject matches a known protocol type.

@@ -51,6 +51,31 @@ type MergeQueueConfig struct {
 
 	// MaxConcurrent is the maximum number of MRs to process concurrently.
 	MaxConcurrent int `json:"max_concurrent"`
+
+	// SemanticConflicts configures detection and escalation of semantic conflicts.
+	SemanticConflicts SemanticConflictConfig `json:"semantic_conflicts"`
+}
+
+// SemanticConflictConfig configures semantic conflict detection and escalation.
+type SemanticConflictConfig struct {
+	// Enabled controls whether semantic conflict detection is active.
+	Enabled bool `json:"enabled"`
+
+	// EscalateFields lists bead fields that require Mayor decision on conflict.
+	// Example: ["priority", "assignee", "estimated_minutes"]
+	EscalateFields []string `json:"escalate_fields"`
+
+	// AutoResolveFields lists fields that use automatic resolution (LWW, Union, etc.).
+	// Example: ["labels", "title", "description"]
+	AutoResolveFields []string `json:"auto_resolve_fields"`
+
+	// EscalationTimeout is the maximum time to wait for Mayor decision before
+	// falling back to automatic resolution (LWW).
+	EscalationTimeout time.Duration `json:"escalation_timeout"`
+
+	// RequireConfidence when true, requires Polecats to report confidence scores
+	// with bead modifications to help Mayor make informed decisions.
+	RequireConfidence bool `json:"require_confidence"`
 }
 
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
@@ -66,6 +91,13 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		RetryFlakyTests:      1,
 		PollInterval:         30 * time.Second,
 		MaxConcurrent:        1,
+		SemanticConflicts: SemanticConflictConfig{
+			Enabled:           false, // Opt-in feature
+			EscalateFields:    []string{"priority", "assignee"},
+			AutoResolveFields: []string{"labels", "title"},
+			EscalationTimeout: 1 * time.Hour,
+			RequireConfidence: false,
+		},
 	}
 }
 
@@ -144,6 +176,13 @@ func (e *Engineer) LoadConfig() error {
 		RetryFlakyTests      *int    `json:"retry_flaky_tests"`
 		PollInterval         *string `json:"poll_interval"`
 		MaxConcurrent        *int    `json:"max_concurrent"`
+		SemanticConflicts    *struct {
+			Enabled           *bool     `json:"enabled"`
+			EscalateFields    []string  `json:"escalate_fields"`
+			AutoResolveFields []string  `json:"auto_resolve_fields"`
+			EscalationTimeout *string   `json:"escalation_timeout"`
+			RequireConfidence *bool     `json:"require_confidence"`
+		} `json:"semantic_conflicts"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -185,6 +224,28 @@ func (e *Engineer) LoadConfig() error {
 		}
 		e.config.PollInterval = dur
 	}
+	if mqRaw.SemanticConflicts != nil {
+		sc := mqRaw.SemanticConflicts
+		if sc.Enabled != nil {
+			e.config.SemanticConflicts.Enabled = *sc.Enabled
+		}
+		if sc.EscalateFields != nil {
+			e.config.SemanticConflicts.EscalateFields = sc.EscalateFields
+		}
+		if sc.AutoResolveFields != nil {
+			e.config.SemanticConflicts.AutoResolveFields = sc.AutoResolveFields
+		}
+		if sc.EscalationTimeout != nil {
+			dur, err := time.ParseDuration(*sc.EscalationTimeout)
+			if err != nil {
+				return fmt.Errorf("invalid semantic_conflicts.escalation_timeout %q: %w", *sc.EscalationTimeout, err)
+			}
+			e.config.SemanticConflicts.EscalationTimeout = dur
+		}
+		if sc.RequireConfidence != nil {
+			e.config.SemanticConflicts.RequireConfidence = *sc.RequireConfidence
+		}
+	}
 
 	return nil
 }
@@ -219,6 +280,19 @@ func (e *Engineer) ProcessMR(ctx context.Context, mr *beads.Issue) ProcessResult
 	_, _ = fmt.Fprintf(e.output, "  Branch: %s\n", mrFields.Branch)
 	_, _ = fmt.Fprintf(e.output, "  Target: %s\n", mrFields.Target)
 	_, _ = fmt.Fprintf(e.output, "  Worker: %s\n", mrFields.Worker)
+
+	// Check for semantic conflicts before attempting merge
+	if e.config.SemanticConflicts.Enabled {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Checking for semantic conflicts...\n")
+		conflicts, err := e.detectSemanticConflicts(mr)
+		if err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: semantic conflict detection failed: %v\n", err)
+			// Continue with merge - semantic conflict detection is best-effort
+		} else if len(conflicts) > 0 {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Found %d semantic conflict(s)\n", len(conflicts))
+			return e.escalateSemanticConflict(mr, conflicts)
+		}
+	}
 
 	return e.doMerge(ctx, mrFields.Branch, mrFields.Target, mrFields.SourceIssue)
 }
