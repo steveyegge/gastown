@@ -1,0 +1,49 @@
+{
+  "formula": "mol-semantic-conflict-detector",
+  "description": "Detects semantic conflicts in MR bead modifications and escalates to Mayor for decision.\n\n## Purpose\nWhen multiple Polecats modify the same bead field with different values, this plugin detects the conflict and escalates to Mayor for a decision rather than using automatic resolution (LWW).\n\n## Labels\n- template: Can be instantiated as wisp\n- plugin: Optional workflow extension\n- refinery: Bonds during refinery MR processing\n- tier:sonnet: Requires Sonnet-level reasoning\n\n## Configuration\nEnable in rig config.json:\n```json\n{\n  \"refinery\": {\n    \"plugins\": {\n      \"semantic-conflict-detector\": {\n        \"enabled\": true,\n        \"escalate_fields\": [\"priority\", \"assignee\"]\n      }\n    }\n  }\n}\n```\n\n## Execution\n```bash\nbd mol bond mol-semantic-conflict-detector $MR_ID --var branch=\"$BRANCH\"\n```",
+  "version": 1,
+  "labels": ["template", "plugin", "refinery", "tier:sonnet"],
+  "vars": {
+    "branch": {
+      "description": "MR branch to analyze",
+      "required": true
+    },
+    "target": {
+      "description": "Target branch (default: main)",
+      "default": "main"
+    },
+    "escalate_fields": {
+      "description": "Comma-separated list of fields requiring Mayor decision",
+      "default": "priority,assignee"
+    },
+    "timeout": {
+      "description": "Timeout waiting for Mayor decision",
+      "default": "1h"
+    }
+  },
+  "steps": [
+    {
+      "id": "detect-conflicts",
+      "title": "Detect semantic conflicts",
+      "description": "Analyze commits in the MR branch for conflicting bead field modifications.\n\n## Action\n```bash\ngt semantic-conflict detect --branch $branch --target $target --fields $escalate_fields\n```\n\n## Output\nCreates `conflicts.json` with detected conflicts:\n```json\n{\n  \"conflicts\": [\n    {\n      \"bead_id\": \"gt-abc123\",\n      \"field\": \"priority\",\n      \"changes\": [\n        {\"polecat\": \"security-agent\", \"value\": \"0\", \"confidence\": 0.95},\n        {\"polecat\": \"product-agent\", \"value\": \"2\", \"confidence\": 0.60}\n      ]\n    }\n  ]\n}\n```\n\n## Verify\n1. Detection completed without error\n2. If no conflicts: Close this step AND skip remaining steps (burn molecule)\n3. If conflicts found: Continue to escalation"
+    },
+    {
+      "id": "escalate-to-mayor",
+      "title": "Escalate conflicts to Mayor",
+      "needs": ["detect-conflicts"],
+      "description": "Send escalation mail to Mayor with conflict details.\n\n## Action\n```bash\ngt semantic-conflict escalate --conflicts conflicts.json --mr $MR_ID\n```\n\n## What It Does\n1. Acquires merge slot (serializes conflict resolution)\n2. Formats conflict details with confidence scores and reasoning\n3. Sends mail to mayor/ with subject: \"SEMANTIC_CONFLICT_ESCALATED $MR_ID\"\n4. Records escalation mail ID for tracking\n\n## Verify\n1. Merge slot acquired (or queued)\n2. Mail sent successfully\n3. Mail ID recorded in step metadata"
+    },
+    {
+      "id": "await-mayor-decision",
+      "title": "Await Mayor decision",
+      "needs": ["escalate-to-mayor"],
+      "description": "Wait for Mayor to respond with resolution.\n\n## Action\n```bash\ngt semantic-conflict await --mr $MR_ID --timeout $timeout\n```\n\n## What It Does\n1. Polls for mail with subject: \"SEMANTIC_CONFLICT_RESOLVED $MR_ID\"\n2. Blocks until resolution received or timeout\n3. On timeout: Falls back to LWW resolution\n\n## Verify\n1. Resolution mail received OR timeout triggered\n2. Resolution parsed successfully\n3. Resolutions recorded in step metadata"
+    },
+    {
+      "id": "apply-resolution",
+      "title": "Apply Mayor's resolution",
+      "needs": ["await-mayor-decision"],
+      "description": "Apply the resolved values to affected beads.\n\n## Action\n```bash\ngt semantic-conflict apply --resolution resolution.json --mr $MR_ID\n```\n\n## What It Does\n1. Parses resolution (map of \"bead:field\" -> value)\n2. Updates each bead field with resolved value\n3. Releases merge slot\n4. Notifies polecats of decision\n\n## Verify\n1. All resolutions applied successfully\n2. Merge slot released\n3. Polecats notified"
+    }
+  ]
+}
