@@ -33,6 +33,36 @@ jobs:
           fi
           echo "No .beads/issues.jsonl changes detected"
 
+  # Verify committed formulas allow build without go:generate
+  # This catches issues where go install @latest would fail
+  check-embedded-formulas:
+    name: Check embedded formulas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build without go:generate
+        run: |
+          # This must succeed with committed formulas only
+          # If this fails, run: go generate ./... && git add -A && git commit
+          go build -v ./cmd/gt
+
+      - name: Verify formulas are in sync
+        run: |
+          # Regenerate and check for differences
+          go generate ./internal/formula/...
+          if ! git diff --exit-code internal/formula/formulas/; then
+            echo ""
+            echo "ERROR: Committed formulas are out of sync with .beads/formulas/"
+            echo "Run: go generate ./... && git add -A && git commit"
+            exit 1
+          fi
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -48,9 +78,6 @@ jobs:
         run: |
           git config --global user.name "CI Bot"
           git config --global user.email "ci@gastown.test"
-
-      - name: Generate embedded files
-        run: go generate ./internal/formula/...
 
       - name: Build
         run: go build -v ./cmd/gt
@@ -68,9 +95,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-
-      - name: Generate embedded files
-        run: go generate ./internal/formula/...
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -96,9 +120,6 @@ jobs:
 
       - name: Install beads (bd)
         run: go install github.com/steveyegge/beads/cmd/bd@latest
-
-      - name: Generate embedded files
-        run: go generate ./internal/formula/...
 
       - name: Build gt
         run: go build -v -o gt ./cmd/gt
