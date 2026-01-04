@@ -1,0 +1,73 @@
+{
+  "name": "gastown",
+  "version": "1.0.0",
+  "description": "Multi-agent Claude Code orchestration with Gastown",
+  "author": "csellis",
+  "triggers": [
+    "gastown",
+    "multi-agent",
+    "polecat",
+    "convoy",
+    "dispatch work",
+    "agent coordination",
+    "beads",
+    "gt ",
+    "bd "
+  ],
+  "files": [
+    "SKILL.md",
+    "references/setup.md",
+    "references/commands.md",
+    "references/workflows.md",
+    "references/mayor-context.md",
+    "references/architecture.md",
+    "PLUGIN_NOTES.md"
+  ],
+  "localConfig": {
+    "townRoot": "~/gt",
+    "configFiles": [
+      "~/gt/mayor/town.json",
+      "~/gt/mayor/rigs.json",
+      "~/gt/mayor/overseer.json",
+      "~/gt/mayor/state.json"
+    ],
+    "binaries": [
+      "~/go/bin/gt",
+      "~/go/bin/bd"
+    ],
+    "envVars": {
+      "BEADS_DIR": "$HOME/gt/<rig>/.beads",
+      "PATH": "$HOME/go/bin:$PATH"
+    }
+  },
+  "pluginCandidate": {
+    "reason": "Gastown coordinates multi-agent workflows with persistent state tracking. Could be packaged as official plugin with MCP server for gt/bd commands.",
+    "mcpTools": [
+      {
+        "name": "gt_hook",
+        "description": "Check current work on agent's hook"
+      },
+      {
+        "name": "gt_sling",
+        "description": "Dispatch work to an agent"
+      },
+      {
+        "name": "bd_list",
+        "description": "List beads/issues"
+      },
+      {
+        "name": "bd_show",
+        "description": "Show bead/issue details"
+      },
+      {
+        "name": "gt_convoy_status",
+        "description": "Check convoy progress"
+      }
+    ],
+    "requiredCapabilities": [
+      "bash_execution",
+      "file_read",
+      "tmux_integration"
+    ]
+  }
+}
