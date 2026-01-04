@@ -14,6 +14,7 @@ import { spawn, exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
@@ -631,6 +632,63 @@ app.get('/api/polecat/:rig/:name/output', async (req, res) => {
     res.json({ session: sessionName, output, running: true });
   } else {
     res.json({ session: sessionName, output: null, running: false });
+  }
+});
+
+// Get full agent transcript (Claude session log)
+app.get('/api/polecat/:rig/:name/transcript', async (req, res) => {
+  const { rig, name } = req.params;
+  const sessionName = `gt-${rig}-${name}`;
+
+  try {
+    // First try to get tmux output (full history)
+    const output = await getPolecatOutput(sessionName, 2000);
+
+    // Also try to find Claude session transcript files
+    // Claude Code typically stores transcripts in ~/.claude/projects/ or .claude/ directories
+    let transcriptContent = null;
+    const transcriptPaths = [
+      path.join(GT_ROOT, rig, '.claude', 'sessions'),
+      path.join(GT_ROOT, rig, '.claude', 'transcripts'),
+      path.join(os.homedir(), '.claude', 'projects', rig, 'sessions'),
+    ];
+
+    for (const transcriptPath of transcriptPaths) {
+      try {
+        if (fs.existsSync(transcriptPath)) {
+          // Find most recent transcript file
+          const files = fs.readdirSync(transcriptPath)
+            .filter(f => f.endsWith('.json') || f.endsWith('.md') || f.endsWith('.jsonl'))
+            .map(f => ({
+              name: f,
+              time: fs.statSync(path.join(transcriptPath, f)).mtime.getTime()
+            }))
+            .sort((a, b) => b.time - a.time);
+
+          if (files.length > 0) {
+            transcriptContent = fs.readFileSync(
+              path.join(transcriptPath, files[0].name),
+              'utf-8'
+            );
+            break;
+          }
+        }
+      } catch (e) {
+        // Ignore errors, try next path
+      }
+    }
+
+    res.json({
+      session: sessionName,
+      rig,
+      name,
+      running: output !== null,
+      output: output || '(No tmux output available)',
+      transcript: transcriptContent,
+      hasTranscript: !!transcriptContent,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

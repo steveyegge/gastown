@@ -1138,6 +1138,16 @@ function initPeekModal(element, data) {
       }
     });
   }
+
+  // Set up transcript button
+  const transcriptBtn = element.querySelector('#peek-transcript');
+  if (transcriptBtn) {
+    transcriptBtn.addEventListener('click', () => {
+      if (currentPeekAgentId) {
+        showAgentTranscript(currentPeekAgentId);
+      }
+    });
+  }
 }
 
 async function showPeekModal(agentId) {
@@ -1238,6 +1248,105 @@ function stopAutoRefresh() {
   if (peekAutoRefreshInterval) {
     clearInterval(peekAutoRefreshInterval);
     peekAutoRefreshInterval = null;
+  }
+}
+
+async function showAgentTranscript(agentId) {
+  const parts = agentId.split('/');
+  const rig = parts[0];
+  const name = parts[1] || parts[0];
+
+  // Show loading in a modal
+  const loadingContent = `
+    <div class="modal-header">
+      <h2>
+        <span class="material-icons">article</span>
+        Transcript: ${escapeHtml(name)}
+      </h2>
+      <button class="btn btn-icon" data-modal-close>
+        <span class="material-icons">close</span>
+      </button>
+    </div>
+    <div class="modal-body transcript-body">
+      <div class="transcript-loading">
+        <span class="loading-spinner"></span>
+        <p>Loading transcript...</p>
+      </div>
+    </div>
+  `;
+  const modal = showDynamicModal('transcript', loadingContent);
+
+  try {
+    const response = await api.getAgentTranscript(rig, name);
+
+    // Build transcript content
+    let transcriptHtml = '';
+
+    // Claude session transcript files
+    if (response.transcripts && response.transcripts.length > 0) {
+      transcriptHtml += `
+        <div class="transcript-section">
+          <h3>
+            <span class="material-icons">history</span>
+            Claude Session Transcripts
+          </h3>
+          <div class="transcript-files">
+            ${response.transcripts.map(t => `
+              <div class="transcript-file">
+                <div class="transcript-file-header">
+                  <span class="material-icons">description</span>
+                  <span class="transcript-filename">${escapeHtml(t.filename)}</span>
+                  <span class="transcript-date">${t.modified ? new Date(t.modified).toLocaleString() : ''}</span>
+                </div>
+                <pre class="transcript-content">${escapeHtml(t.content || '(Empty)')}</pre>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    // Tmux session output
+    if (response.output) {
+      transcriptHtml += `
+        <div class="transcript-section">
+          <h3>
+            <span class="material-icons">terminal</span>
+            Recent Tmux Output
+          </h3>
+          <pre class="transcript-content tmux-output">${escapeHtml(response.output)}</pre>
+        </div>
+      `;
+    }
+
+    // No content found
+    if (!transcriptHtml) {
+      transcriptHtml = `
+        <div class="transcript-empty">
+          <span class="material-icons">info</span>
+          <p>No transcript data found for this agent.</p>
+          <p class="hint">Transcripts are created when Claude sessions are run.</p>
+        </div>
+      `;
+    }
+
+    // Update modal content
+    const modalBody = modal.querySelector('.modal-body');
+    if (modalBody) {
+      modalBody.innerHTML = transcriptHtml;
+    }
+
+  } catch (err) {
+    const modalBody = modal.querySelector('.modal-body');
+    if (modalBody) {
+      modalBody.innerHTML = `
+        <div class="transcript-error">
+          <span class="material-icons">error</span>
+          <p>Failed to load transcript: ${escapeHtml(err.message)}</p>
+        </div>
+      `;
+    }
+    console.error('[Transcript] Failed to fetch:', err);
   }
 }
 

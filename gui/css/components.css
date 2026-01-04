@@ -4853,3 +4853,154 @@ select {
   font-size: var(--text-sm);
   color: var(--text-primary);
 }
+
+/* === Transcript Modal === */
+#transcript-modal {
+  max-width: 900px;
+  max-height: 85vh;
+}
+
+#transcript-modal .modal-header h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+#transcript-modal .modal-header h2 .material-icons {
+  color: var(--accent-primary);
+}
+
+.transcript-body {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.transcript-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2xl);
+  color: var(--text-secondary);
+}
+
+.transcript-loading .loading-spinner {
+  width: 36px;
+  height: 36px;
+  margin-bottom: var(--space-md);
+}
+
+.transcript-section {
+  margin-bottom: var(--space-xl);
+}
+
+.transcript-section:last-child {
+  margin-bottom: 0;
+}
+
+.transcript-section h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+}
+
+.transcript-section h3 .material-icons {
+  color: var(--accent-primary);
+  font-size: 20px;
+}
+
+.transcript-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.transcript-file {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.transcript-file-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.transcript-file-header .material-icons {
+  color: var(--text-secondary);
+  font-size: 18px;
+}
+
+.transcript-filename {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.transcript-date {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.transcript-content {
+  margin: 0;
+  padding: var(--space-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.transcript-content.tmux-output {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+.transcript-empty,
+.transcript-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2xl);
+  text-align: center;
+}
+
+.transcript-empty .material-icons {
+  font-size: 48px;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-md);
+}
+
+.transcript-error .material-icons {
+  font-size: 48px;
+  color: var(--accent-danger);
+  margin-bottom: var(--space-md);
+}
+
+.transcript-empty p,
+.transcript-error p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.transcript-empty .hint {
+  margin-top: var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}

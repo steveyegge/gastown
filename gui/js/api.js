@@ -200,6 +200,10 @@ export const api = {
     return this.get(`/api/polecat/${encodeURIComponent(rig)}/${encodeURIComponent(name)}/output`);
   },
 
+  getAgentTranscript(rig, name) {
+    return this.get(`/api/polecat/${encodeURIComponent(rig)}/${encodeURIComponent(name)}/transcript`);
+  },
+
   // === Agent Controls ===
   startAgent(rig, name) {
     return this.post(`/api/polecat/${encodeURIComponent(rig)}/${encodeURIComponent(name)}/start`);
