@@ -64,6 +64,9 @@ type WitnessHandler interface {
 
 	// HandleReworkRequest is called when a branch needs rebasing.
 	HandleReworkRequest(payload *ReworkRequestPayload) error
+
+	// HandleSemanticConflictResolved is called when Mayor resolves a semantic conflict.
+	HandleSemanticConflictResolved(payload *SemanticConflictResolvedPayload) error
 }
 
 // RefineryHandler defines the interface for Refinery protocol handlers.
