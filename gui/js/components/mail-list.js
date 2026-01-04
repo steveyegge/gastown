@@ -4,48 +4,14 @@
  * Renders the mail inbox with messages from the Gastown system.
  */
 
+import { AGENT_TYPES, getAgentType, getAgentConfig, formatAgentName } from '../shared/agent-types.js';
+
 // Priority icons and colors
 const PRIORITY_CONFIG = {
   high: { icon: 'priority_high', class: 'priority-high' },
   normal: { icon: 'mail', class: 'priority-normal' },
   low: { icon: 'mail_outline', class: 'priority-low' },
 };
-
-// Agent type detection and colors
-const AGENT_TYPES = {
-  mayor: { color: '#a855f7', icon: 'account_balance', label: 'Mayor' },
-  witness: { color: '#3b82f6', icon: 'visibility', label: 'Witness' },
-  deacon: { color: '#f59e0b', icon: 'gavel', label: 'Deacon' },
-  refinery: { color: '#ef4444', icon: 'precision_manufacturing', label: 'Refinery' },
-  polecat: { color: '#22c55e', icon: 'smart_toy', label: 'Polecat' },
-  crew: { color: '#06b6d4', icon: 'groups', label: 'Crew' },
-  human: { color: '#ec4899', icon: 'person', label: 'Human' },
-  system: { color: '#6b7280', icon: 'settings', label: 'System' },
-};
-
-/**
- * Detect agent type from agent path
- */
-function getAgentType(agentPath) {
-  if (!agentPath) return 'system';
-  const lower = agentPath.toLowerCase();
-
-  if (lower.includes('mayor')) return 'mayor';
-  if (lower.includes('witness')) return 'witness';
-  if (lower.includes('deacon')) return 'deacon';
-  if (lower.includes('refinery')) return 'refinery';
-  if (lower.includes('polecats/') || lower.includes('polecat')) return 'polecat';
-  if (lower.includes('crew/')) return 'crew';
-  if (lower === 'human' || lower === 'human/') return 'human';
-
-  // Check if it's a polecat by name pattern (rig/name without special folders)
-  const parts = agentPath.split('/');
-  if (parts.length === 2 && !['mayor', 'witness', 'deacon', 'refinery'].includes(parts[1])) {
-    return 'polecat'; // Likely a polecat like "rig/slit"
-  }
-
-  return 'system';
-}
 
 /**
  * Get unique agents from mail list for filtering
@@ -55,12 +21,12 @@ function getUniqueAgents(mail) {
   mail.forEach(m => {
     if (m.from) {
       const type = getAgentType(m.from);
-      const name = formatAgentShort(m.from);
+      const name = formatAgentName(m.from);
       agents.set(m.from, { path: m.from, name, type });
     }
     if (m.to) {
       const type = getAgentType(m.to);
-      const name = formatAgentShort(m.to);
+      const name = formatAgentName(m.to);
       agents.set(m.to, { path: m.to, name, type });
     }
   });
@@ -85,14 +51,6 @@ function getUniqueRigs(mail) {
   return Array.from(rigs).sort();
 }
 
-/**
- * Short format for agent name
- */
-function formatAgentShort(name) {
-  if (!name) return 'unknown';
-  const parts = name.split('/');
-  return parts[parts.length - 1] || parts[0];
-}
 
 /**
  * Render the mail list
@@ -301,12 +259,12 @@ function renderMailItem(mail, index) {
   const fromTo = isFeedMail && mail.to
     ? `<span class="agent-badge" style="--agent-color: ${fromConfig.color}">
          <span class="material-icons">${fromConfig.icon}</span>
-         ${formatAgentShort(mail.from)}
+         ${formatAgentName(mail.from)}
        </span>
        <span class="mail-arrow">→</span>
        <span class="agent-badge" style="--agent-color: ${toConfig.color}">
          <span class="material-icons">${toConfig.icon}</span>
-         ${formatAgentShort(mail.to)}
+         ${formatAgentName(mail.to)}
        </span>`
     : `<span class="agent-badge" style="--agent-color: ${fromConfig.color}">
          <span class="material-icons">${fromConfig.icon}</span>

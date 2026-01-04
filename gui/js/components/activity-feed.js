@@ -4,21 +4,24 @@
  * Renders real-time activity events from the Gastown system.
  */
 
-// Event type configuration
+import { AGENT_TYPES, getAgentConfig, formatAgentName } from '../shared/agent-types.js';
+
+// Event type configuration (uses shared agent colors where applicable)
 const EVENT_CONFIG = {
-  convoy_created: { icon: 'add_circle', color: 'var(--status-success)', label: 'Convoy Created' },
-  convoy_updated: { icon: 'update', color: 'var(--status-info)', label: 'Convoy Updated' },
-  convoy_complete: { icon: 'check_circle', color: 'var(--status-success)', label: 'Convoy Complete' },
-  work_slung: { icon: 'send', color: 'var(--accent-primary)', label: 'Work Dispatched' },
-  work_complete: { icon: 'task_alt', color: 'var(--status-success)', label: 'Work Complete' },
-  work_failed: { icon: 'error', color: 'var(--status-error)', label: 'Work Failed' },
-  agent_spawned: { icon: 'person_add', color: 'var(--role-polecat)', label: 'Agent Spawned' },
-  agent_despawned: { icon: 'person_remove', color: 'var(--text-muted)', label: 'Agent Despawned' },
-  bead_created: { icon: 'bubble_chart', color: 'var(--accent-secondary)', label: 'Bead Created' },
-  bead_updated: { icon: 'edit', color: 'var(--status-info)', label: 'Bead Updated' },
-  mail_received: { icon: 'mail', color: 'var(--accent-tertiary)', label: 'Mail Received' },
-  system: { icon: 'info', color: 'var(--text-muted)', label: 'System' },
-  error: { icon: 'error_outline', color: 'var(--status-error)', label: 'Error' },
+  convoy_created: { icon: 'add_circle', color: '#22c55e', label: 'Convoy Created' },
+  convoy_updated: { icon: 'update', color: '#3b82f6', label: 'Convoy Updated' },
+  convoy_complete: { icon: 'check_circle', color: '#22c55e', label: 'Convoy Complete' },
+  work_slung: { icon: 'send', color: '#a855f7', label: 'Work Dispatched' },
+  work_complete: { icon: 'task_alt', color: '#22c55e', label: 'Work Complete' },
+  work_failed: { icon: 'error', color: '#ef4444', label: 'Work Failed' },
+  agent_spawned: { icon: 'person_add', color: AGENT_TYPES.polecat.color, label: 'Agent Spawned' },
+  agent_despawned: { icon: 'person_remove', color: '#6b7280', label: 'Agent Despawned' },
+  bead_created: { icon: 'bubble_chart', color: '#f59e0b', label: 'Bead Created' },
+  bead_updated: { icon: 'edit', color: '#3b82f6', label: 'Bead Updated' },
+  mail: { icon: 'mail', color: '#ec4899', label: 'Mail Sent' },
+  mail_received: { icon: 'mail', color: '#ec4899', label: 'Mail Received' },
+  system: { icon: 'info', color: '#6b7280', label: 'System' },
+  error: { icon: 'error_outline', color: '#ef4444', label: 'Error' },
 };
 
 /**
@@ -132,15 +135,15 @@ function renderFeedItem(event, index, isNew) {
  * Format event message based on type
  */
 function formatMessage(event) {
-  const msg = event.message || event.description || '';
+  const msg = event.message || event.summary || event.description || '';
 
   // Add special formatting for certain event types
   switch (event.type) {
     case 'work_slung':
-      return `Slung <strong>${escapeHtml(event.bead || 'work')}</strong> to ${escapeHtml(event.target || 'target')}`;
+      return `Slung <strong>${escapeHtml(event.bead || 'work')}</strong> to ${formatAgentBadge(event.target)}`;
 
     case 'agent_spawned':
-      return `<strong>${escapeHtml(event.agent_name || event.agent_id || 'Agent')}</strong> joined as ${event.role || 'worker'}`;
+      return `${formatAgentBadge(event.agent_id || event.agent_name, event.role)} joined`;
 
     case 'bead_created':
       return `Created bead <strong>${escapeHtml(event.bead_id || 'unknown')}</strong>`;
@@ -148,12 +151,29 @@ function formatMessage(event) {
     case 'convoy_created':
       return `Convoy <strong>${escapeHtml(event.convoy_name || event.convoy_id || 'unknown')}</strong> created`;
 
+    case 'mail':
     case 'mail_received':
-      return `From <strong>${escapeHtml(event.from || 'unknown')}</strong>: ${escapeHtml(truncate(event.subject || msg, 50))}`;
+      const fromConfig = getAgentConfig(event.actor || event.from);
+      const toConfig = getAgentConfig(event.payload?.to || event.to);
+      return `${formatAgentBadge(event.actor || event.from)} → ${formatAgentBadge(event.payload?.to || event.to)}: ${escapeHtml(truncate(event.payload?.subject || event.subject || msg, 40))}`;
 
     default:
+      // For events with actor, show the actor badge
+      if (event.actor) {
+        return `${formatAgentBadge(event.actor)}: ${escapeHtml(msg)}`;
+      }
       return escapeHtml(msg);
   }
+}
+
+/**
+ * Create a small inline agent badge for feed items
+ */
+function formatAgentBadge(agentPath, role = null) {
+  if (!agentPath) return '<span class="feed-agent">unknown</span>';
+  const config = getAgentConfig(agentPath, role);
+  const name = formatAgentName(agentPath);
+  return `<span class="feed-agent" style="color: ${config.color}"><span class="material-icons" style="font-size: 12px">${config.icon}</span> ${escapeHtml(name)}</span>`;
 }
 
 /**

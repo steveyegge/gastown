@@ -4,23 +4,7 @@
  * Renders agents in a responsive grid layout with status and actions.
  */
 
-// Role icons and colors
-const ROLE_CONFIG = {
-  mayor: { icon: 'stars', color: 'var(--role-mayor)' },
-  deacon: { icon: 'church', color: 'var(--role-deacon)' },
-  polecat: { icon: 'pets', color: 'var(--role-polecat)' },
-  witness: { icon: 'visibility', color: 'var(--role-witness)' },
-  refinery: { icon: 'precision_manufacturing', color: 'var(--role-refinery)' },
-};
-
-// Status configuration
-const STATUS_CONFIG = {
-  idle: { icon: 'schedule', class: 'status-idle' },
-  working: { icon: 'sync', class: 'status-working' },
-  waiting: { icon: 'hourglass_empty', class: 'status-waiting' },
-  error: { icon: 'error', class: 'status-error' },
-  complete: { icon: 'check_circle', class: 'status-complete' },
-};
+import { AGENT_TYPES, STATUS_ICONS, STATUS_COLORS, getAgentConfig, formatAgentName } from '../shared/agent-types.js';
 
 /**
  * Render the agent grid
@@ -69,23 +53,25 @@ export function renderAgentGrid(container, agents) {
  */
 function renderAgentCard(agent, index) {
   const role = agent.role?.toLowerCase() || 'polecat';
-  const roleConfig = ROLE_CONFIG[role] || ROLE_CONFIG.polecat;
-  const status = agent.status || 'idle';
-  const statusConfig = STATUS_CONFIG[status] || STATUS_CONFIG.idle;
+  const agentConfig = getAgentConfig(agent.address || agent.id, role);
+  const status = agent.running ? 'running' : (agent.status || 'idle');
+  const statusIcon = STATUS_ICONS[status] || STATUS_ICONS.idle;
+  const statusColor = STATUS_COLORS[status] || STATUS_COLORS.idle;
 
   return `
     <div class="agent-card animate-spawn stagger-${Math.min(index, 6)}"
-         data-agent-id="${agent.id}">
+         data-agent-id="${agent.id || agent.address}"
+         style="--agent-color: ${agentConfig.color}">
       <div class="agent-header">
-        <div class="agent-avatar" style="background-color: ${roleConfig.color}20; border-color: ${roleConfig.color}">
-          <span class="material-icons" style="color: ${roleConfig.color}">${roleConfig.icon}</span>
+        <div class="agent-avatar" style="background-color: ${agentConfig.color}20; border-color: ${agentConfig.color}">
+          <span class="material-icons" style="color: ${agentConfig.color}">${agentConfig.icon}</span>
         </div>
         <div class="agent-info">
-          <h3 class="agent-name">${escapeHtml(agent.name || agent.id)}</h3>
-          <div class="agent-role">${capitalize(role)}</div>
+          <h3 class="agent-name">${escapeHtml(agent.name || formatAgentName(agent.id))}</h3>
+          <div class="agent-role" style="color: ${agentConfig.color}">${agentConfig.label}</div>
         </div>
-        <div class="agent-status ${statusConfig.class}">
-          <span class="material-icons">${statusConfig.icon}</span>
+        <div class="agent-status status-${status}">
+          <span class="material-icons" style="color: ${statusColor}">${statusIcon}</span>
         </div>
       </div>
 

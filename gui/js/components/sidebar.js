@@ -4,23 +4,7 @@
  * Renders the agent tree and quick status in the sidebar.
  */
 
-// Agent status icons
-const STATUS_ICONS = {
-  idle: 'schedule',
-  working: 'sync',
-  waiting: 'hourglass_empty',
-  error: 'error',
-  complete: 'check_circle',
-};
-
-// Role colors (matches CSS variables)
-const ROLE_CLASSES = {
-  mayor: 'role-mayor',
-  deacon: 'role-deacon',
-  polecat: 'role-polecat',
-  witness: 'role-witness',
-  refinery: 'role-refinery',
-};
+import { AGENT_TYPES, STATUS_ICONS, getAgentType, getAgentConfig, formatAgentName } from '../shared/agent-types.js';
 
 /**
  * Render the sidebar with agent tree
@@ -108,11 +92,13 @@ function renderAgentTree(agentsByRole) {
     const agents = agentsByRole[role];
     if (!agents || agents.length === 0) return;
 
+    const config = AGENT_TYPES[role] || AGENT_TYPES.system;
+
     html += `
       <li class="tree-node expandable expanded">
         <div class="tree-node-content">
-          <span class="material-icons tree-icon">folder_open</span>
-          <span class="tree-label ${ROLE_CLASSES[role] || ''}">${capitalize(role)}s</span>
+          <span class="material-icons tree-icon" style="color: ${config.color}">${config.icon}</span>
+          <span class="tree-label" style="color: ${config.color}">${config.label}s</span>
           <span class="tree-badge">${agents.length}</span>
         </div>
         <ul class="tree-children">
@@ -130,15 +116,15 @@ function renderAgentTree(agentsByRole) {
  * Render a single agent node
  */
 function renderAgentNode(agent) {
-  const status = agent.status || 'idle';
-  const icon = STATUS_ICONS[status] || 'help';
-  const roleClass = ROLE_CLASSES[agent.role?.toLowerCase()] || '';
+  const status = agent.running ? 'running' : (agent.status || 'idle');
+  const statusIcon = STATUS_ICONS[status] || 'help';
+  const config = getAgentConfig(agent.address || agent.id, agent.role);
 
   return `
     <li class="tree-node">
-      <div class="tree-node-content agent-node" data-agent-id="${agent.id || ''}">
-        <span class="material-icons tree-icon status-${status}">${icon}</span>
-        <span class="tree-label ${roleClass}">${agent.name || agent.id || 'Unknown'}</span>
+      <div class="tree-node-content agent-node" data-agent-id="${agent.id || agent.address || ''}">
+        <span class="material-icons tree-icon status-${status}" style="color: ${config.color}">${statusIcon}</span>
+        <span class="tree-label" style="color: ${config.color}">${agent.name || formatAgentName(agent.id) || 'Unknown'}</span>
         ${agent.current_task ? `<span class="tree-task">${truncate(agent.current_task, 20)}</span>` : ''}
       </div>
     </li>

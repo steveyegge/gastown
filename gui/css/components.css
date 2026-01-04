@@ -1052,6 +1052,18 @@ select {
   color: var(--accent-primary);
 }
 
+.feed-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 500;
+}
+
+.feed-agent .material-icons {
+  font-size: 12px;
+  vertical-align: middle;
+}
+
 .feed-details {
   font-size: var(--text-xs);
   color: var(--text-muted);
