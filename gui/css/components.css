@@ -582,6 +582,199 @@ select {
   font-size: var(--text-xs);
 }
 
+/* === Rig Card === */
+.rig-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.rig-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  transition: all var(--transition-fast);
+}
+
+.rig-card:hover {
+  border-color: var(--border-accent);
+}
+
+.rig-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.rig-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.rig-icon .material-icons {
+  font-size: 24px;
+  color: var(--accent-primary);
+}
+
+.rig-info {
+  flex: 1;
+}
+
+.rig-name {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin-bottom: var(--space-xxs);
+}
+
+.rig-meta {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.rig-github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xxs);
+  color: var(--accent-primary);
+  text-decoration: none;
+}
+
+.rig-github-link:hover {
+  text-decoration: underline;
+}
+
+.rig-github-link .material-icons {
+  font-size: 14px;
+}
+
+.rig-local {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.rig-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.rig-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.rig-status .status-dot.active {
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+}
+
+.rig-stats {
+  display: flex;
+  gap: var(--space-lg);
+  padding: var(--space-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-md);
+}
+
+.rig-stat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.rig-stat .material-icons {
+  font-size: 20px;
+}
+
+.rig-stat .stat-value {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.rig-stat .stat-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.rig-agents {
+  margin-bottom: var(--space-md);
+}
+
+.rig-agents .agents-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-sm);
+}
+
+.rig-agents .agents-header .material-icons {
+  font-size: 16px;
+}
+
+.rig-agents .agents-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.rig-agent {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+
+.rig-agent .agent-icon {
+  font-size: 16px;
+}
+
+.rig-agent .agent-name {
+  font-weight: 500;
+}
+
+.rig-agent .agent-role {
+  font-size: var(--text-xs);
+  margin-left: auto;
+}
+
+.rig-agent .agent-status {
+  display: flex;
+  align-items: center;
+}
+
+.rig-agent .agent-status .material-icons {
+  font-size: 14px;
+}
+
+.rig-agent .agent-work-badge {
+  font-size: 12px;
+}
+
+.rig-actions {
+  display: flex;
+  gap: var(--space-sm);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-default);
+}
+
 /* === Mail Item === */
 .mail-item {
   display: flex;

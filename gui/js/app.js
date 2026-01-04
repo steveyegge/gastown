@@ -13,6 +13,7 @@ import { renderAgentGrid } from './components/agent-grid.js';
 import { renderActivityFeed } from './components/activity-feed.js';
 import { renderWorkList } from './components/work-list.js';
 import { renderMailList } from './components/mail-list.js';
+import { renderRigList } from './components/rig-list.js';
 import { showToast } from './components/toast.js';
 import { initModals } from './components/modals.js';
 import { startTutorial, shouldShowTutorial } from './components/tutorial.js';
@@ -31,6 +32,7 @@ const elements = {
   agentGrid: document.getElementById('agent-grid'),
   feedList: document.getElementById('feed-list'),
   mailList: document.getElementById('mail-list'),
+  rigList: document.getElementById('rig-list'),
 };
 
 // Navigation
@@ -116,6 +118,8 @@ function switchView(viewId) {
     loadAgents();
   } else if (viewId === 'work') {
     loadWork();
+  } else if (viewId === 'rigs') {
+    loadRigs();
   }
 }
 
@@ -319,6 +323,17 @@ async function loadAgents() {
     state.setAgents(allAgents);
   } catch (err) {
     console.error('[App] Failed to load agents:', err);
+  }
+}
+
+async function loadRigs() {
+  try {
+    // Get rigs from status (has more details than /api/rigs)
+    const status = await api.getStatus();
+    const rigs = status.rigs || [];
+    renderRigList(elements.rigList, rigs);
+  } catch (err) {
+    console.error('[App] Failed to load rigs:', err);
   }
 }
 

@@ -156,8 +156,19 @@ app.get('/api/status', async (req, res) => {
   if (result.success) {
     const data = parseJSON(result.data);
     if (data) {
-      // Enhance rigs with running state from tmux
+      // Enhance rigs with running state from tmux and git_url from config
       for (const rig of data.rigs || []) {
+        // Try to read rig config to get git_url
+        try {
+          const rigConfigPath = path.join(GT_ROOT, rig.name, 'config.json');
+          if (fs.existsSync(rigConfigPath)) {
+            const rigConfig = JSON.parse(fs.readFileSync(rigConfigPath, 'utf8'));
+            rig.git_url = rigConfig.git_url || null;
+          }
+        } catch (e) {
+          // Config not found or invalid, continue
+        }
+
         for (const hook of rig.hooks || []) {
           // Check if this polecat has a running tmux session
           const agentPath = hook.agent; // e.g., "hytopia-map-compression/capable"

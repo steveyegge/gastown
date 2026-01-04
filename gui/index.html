@@ -38,6 +38,10 @@
             <span class="material-icons">groups</span>
             Agents
           </button>
+          <button class="nav-tab" data-view="rigs" data-tooltip="Git projects with their agents and GitHub integration.">
+            <span class="material-icons">folder_special</span>
+            Rigs
+          </button>
           <button class="nav-tab" data-view="mail" data-tooltip="Messages between agents and the human overseer.">
             <span class="material-icons">mail</span>
             Mail
@@ -152,6 +156,22 @@
             </div>
           </div>
           <div class="agent-grid" id="agent-grid">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Rigs View -->
+        <div class="view" id="view-rigs">
+          <div class="view-header">
+            <h1>Rigs</h1>
+            <div class="view-actions">
+              <button class="btn btn-primary" id="new-rig-btn" data-modal-open="new-rig">
+                <span class="material-icons">add</span>
+                Add Rig
+              </button>
+            </div>
+          </div>
+          <div class="rig-list" id="rig-list">
             <!-- Populated by JS -->
           </div>
         </div>
