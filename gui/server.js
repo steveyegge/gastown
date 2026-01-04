@@ -176,14 +176,32 @@ app.post('/api/sling', async (req, res) => {
   if (slingArgs) cmdArgs.push('--args', slingArgs);
 
   // Sling spawns a polecat which can take 60+ seconds
-  const result = await executeGT(cmdArgs, { timeout: 90000 });
-  if (result.success) {
-    // Parse output - may or may not be JSON
+  // Use ignoreStderr since sling has many non-fatal warnings
+  const result = await executeGT(cmdArgs, { timeout: 90000, ignoreStderr: true });
+
+  // Check for success indicators in output - sling can have warnings but still succeed
+  const output = result.data || result.error || '';
+  const workAttached = output.includes('Work attached to hook') || output.includes('✓ Work attached');
+  const promptSent = output.includes('Start prompt sent') || output.includes('▶ Start prompt sent');
+  const polecatSpawned = output.includes('Polecat') && output.includes('spawned');
+
+  // Consider success if work was attached or prompt was sent
+  const actualSuccess = result.success || workAttached || promptSent;
+
+  if (actualSuccess) {
     const jsonData = parseJSON(result.data);
-    broadcast({ type: 'work_slung', data: jsonData || { bead, target, raw: result.data } });
-    res.json({ success: true, data: jsonData || { bead, target }, raw: result.data });
+    const responseData = {
+      bead,
+      target,
+      workAttached,
+      promptSent,
+      polecatSpawned,
+      raw: output
+    };
+    broadcast({ type: 'work_slung', data: jsonData || responseData });
+    res.json({ success: true, data: jsonData || responseData, raw: output });
   } else {
-    res.status(500).json({ error: result.error });
+    res.status(500).json({ error: result.error || 'Sling failed - no work attached' });
   }
 });
 
