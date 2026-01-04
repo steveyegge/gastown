@@ -221,8 +221,17 @@ async function loadMail() {
 
 async function loadAgents() {
   try {
-    const agents = await api.getAgents();
-    state.setAgents(agents);
+    const response = await api.getAgents();
+    // Combine agents and polecats into a flat list
+    const allAgents = [
+      ...(response.agents || []),
+      ...(response.polecats || []).map(p => ({
+        ...p,
+        id: p.name,
+        status: p.running ? 'working' : 'idle',
+      })),
+    ];
+    state.setAgents(allAgents);
   } catch (err) {
     console.error('[App] Failed to load agents:', err);
   }

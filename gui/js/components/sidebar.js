@@ -30,7 +30,21 @@ const ROLE_CLASSES = {
 export function renderSidebar(container, status) {
   if (!container || !status) return;
 
-  const agents = status.agents || [];
+  // Combine town-level agents with rig agents (polecats, witnesses, refineries)
+  const townAgents = status.agents || [];
+  const rigAgents = [];
+
+  for (const rig of status.rigs || []) {
+    for (const agent of rig.agents || []) {
+      rigAgents.push({
+        ...agent,
+        rig: rig.name,
+        id: agent.address || `${rig.name}/${agent.name}`,
+      });
+    }
+  }
+
+  const agents = [...townAgents, ...rigAgents];
   const hook = status.hook;
 
   // Group agents by role
