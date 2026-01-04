@@ -403,7 +403,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Formula wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
 
 		// Step 3: Bond wisp to original bead (creates compound)
-		bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
+		// Use --no-daemon for mol bond (requires direct database access)
+		bondArgs := []string{"--no-daemon", "mol", "bond", wispRootID, beadID, "--json"}
 		bondCmd := exec.Command("bd", bondArgs...)
 		bondCmd.Stderr = os.Stderr
 		bondOut, err := bondCmd.Output()
