@@ -167,7 +167,7 @@ func (c *PatrolHooksWiredCheck) Run(ctx *CheckContext) *CheckResult {
 			Name:    c.Name(),
 			Status:  StatusWarning,
 			Message: "Daemon config not found",
-			FixHint: "Run 'gt daemon init' to configure daemon",
+			FixHint: "Run 'gt daemon start' to start the daemon",
 		}
 	}
 
@@ -220,7 +220,7 @@ func (c *PatrolHooksWiredCheck) Run(ctx *CheckContext) *CheckResult {
 		Name:    c.Name(),
 		Status:  StatusWarning,
 		Message: "Patrol hooks not configured in daemon",
-		FixHint: "Configure patrols in mayor/daemon.json or run 'gt daemon init'",
+		FixHint: "Configure patrols in mayor/daemon.json or run 'gt daemon start'",
 	}
 }
 
