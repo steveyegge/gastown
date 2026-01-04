@@ -112,6 +112,27 @@ export const api = {
     });
   },
 
+  getBead(beadId) {
+    return this.get(`/api/bead/${encodeURIComponent(beadId)}`);
+  },
+
+  // === Work Actions ===
+  markWorkDone(beadId, summary) {
+    return this.post(`/api/work/${encodeURIComponent(beadId)}/done`, { summary });
+  },
+
+  parkWork(beadId, reason) {
+    return this.post(`/api/work/${encodeURIComponent(beadId)}/park`, { reason });
+  },
+
+  releaseWork(beadId) {
+    return this.post(`/api/work/${encodeURIComponent(beadId)}/release`);
+  },
+
+  reassignWork(beadId, target) {
+    return this.post(`/api/work/${encodeURIComponent(beadId)}/reassign`, { target });
+  },
+
   searchBeads(query) {
     return this.get(`/api/beads/search?q=${encodeURIComponent(query)}`);
   },

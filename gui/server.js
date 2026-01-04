@@ -424,6 +424,103 @@ app.get('/api/beads', async (req, res) => {
   }
 });
 
+// ============= Work Actions =============
+
+// Mark work as done
+app.post('/api/work/:beadId/done', async (req, res) => {
+  const { beadId } = req.params;
+  const { summary } = req.body;
+
+  console.log(`[Work] Marking ${beadId} as done...`);
+
+  const args = ['done', beadId];
+  if (summary) {
+    args.push('-m', summary);
+  }
+
+  const result = await executeBD(args);
+
+  if (result.success) {
+    broadcast({ type: 'work_done', data: { beadId, summary } });
+    res.json({ success: true, beadId, message: `${beadId} marked as done`, raw: result.data });
+  } else {
+    res.status(500).json({ success: false, error: result.error });
+  }
+});
+
+// Park work (temporarily set aside)
+app.post('/api/work/:beadId/park', async (req, res) => {
+  const { beadId } = req.params;
+  const { reason } = req.body;
+
+  console.log(`[Work] Parking ${beadId}...`);
+
+  const args = ['park', beadId];
+  if (reason) {
+    args.push('-m', reason);
+  }
+
+  const result = await executeBD(args);
+
+  if (result.success) {
+    broadcast({ type: 'work_parked', data: { beadId, reason } });
+    res.json({ success: true, beadId, message: `${beadId} parked`, raw: result.data });
+  } else {
+    res.status(500).json({ success: false, error: result.error });
+  }
+});
+
+// Release work (unassign from agent)
+app.post('/api/work/:beadId/release', async (req, res) => {
+  const { beadId } = req.params;
+
+  console.log(`[Work] Releasing ${beadId}...`);
+
+  const result = await executeBD(['release', beadId]);
+
+  if (result.success) {
+    broadcast({ type: 'work_released', data: { beadId } });
+    res.json({ success: true, beadId, message: `${beadId} released`, raw: result.data });
+  } else {
+    res.status(500).json({ success: false, error: result.error });
+  }
+});
+
+// Reassign work to a different agent
+app.post('/api/work/:beadId/reassign', async (req, res) => {
+  const { beadId } = req.params;
+  const { target } = req.body;
+
+  if (!target) {
+    return res.status(400).json({ error: 'Target is required' });
+  }
+
+  console.log(`[Work] Reassigning ${beadId} to ${target}...`);
+
+  const result = await executeBD(['reassign', beadId, target]);
+
+  if (result.success) {
+    broadcast({ type: 'work_reassigned', data: { beadId, target } });
+    res.json({ success: true, beadId, target, message: `${beadId} reassigned to ${target}`, raw: result.data });
+  } else {
+    res.status(500).json({ success: false, error: result.error });
+  }
+});
+
+// Get bead details
+app.get('/api/bead/:beadId', async (req, res) => {
+  const { beadId } = req.params;
+
+  const result = await executeBD(['show', beadId, '--json']);
+
+  if (result.success) {
+    const data = parseJSON(result.data);
+    res.json(data || { id: beadId });
+  } else {
+    res.status(404).json({ error: 'Bead not found' });
+  }
+});
+
 // Nudge agent
 app.post('/api/nudge', async (req, res) => {
   const { target, message } = req.body;
