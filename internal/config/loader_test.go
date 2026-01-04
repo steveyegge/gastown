@@ -80,36 +80,6 @@ func TestRigsConfigRoundTrip(t *testing.T) {
 	}
 }
 
-func TestAgentStateRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.json")
-
-	original := &AgentState{
-		Role:       "mayor",
-		LastActive: time.Now().Truncate(time.Second),
-		Session:    "abc123",
-		Extra: map[string]any{
-			"custom": "value",
-		},
-	}
-
-	if err := SaveAgentState(path, original); err != nil {
-		t.Fatalf("SaveAgentState: %v", err)
-	}
-
-	loaded, err := LoadAgentState(path)
-	if err != nil {
-		t.Fatalf("LoadAgentState: %v", err)
-	}
-
-	if loaded.Role != original.Role {
-		t.Errorf("Role = %q, want %q", loaded.Role, original.Role)
-	}
-	if loaded.Session != original.Session {
-		t.Errorf("Session = %q, want %q", loaded.Session, original.Session)
-	}
-}
-
 func TestLoadTownConfigNotFound(t *testing.T) {
 	_, err := LoadTownConfig("/nonexistent/path.json")
 	if err == nil {
@@ -128,12 +98,6 @@ func TestValidationErrors(t *testing.T) {
 	tc = &TownConfig{Type: "wrong", Version: 1, Name: "test"}
 	if err := validateTownConfig(tc); err == nil {
 		t.Error("expected error for wrong type")
-	}
-
-	// Missing role
-	as := &AgentState{}
-	if err := validateAgentState(as); err == nil {
-		t.Error("expected error for missing role")
 	}
 }
 

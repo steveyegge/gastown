@@ -171,17 +171,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("   ✓ Created mayor/rigs.json\n")
 
-	// Create mayor state.json
-	mayorState := &config.AgentState{
-		Role:       "mayor",
-		LastActive: time.Now(),
-	}
-	statePath := filepath.Join(mayorDir, "state.json")
-	if err := config.SaveAgentState(statePath, mayorState); err != nil {
-		return fmt.Errorf("writing mayor state: %w", err)
-	}
-	fmt.Printf("   ✓ Created mayor/state.json\n")
-
 	// Create Mayor CLAUDE.md at HQ root (Mayor runs from there)
 	if err := createMayorCLAUDEmd(absPath, absPath); err != nil {
 		fmt.Printf("   %s Could not create CLAUDE.md: %v\n", style.Dim.Render("⚠"), err)

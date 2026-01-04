@@ -30,7 +30,6 @@ Workspace checks:
   - rigs-registry-exists     Check mayor/rigs.json exists (fixable)
   - rigs-registry-valid      Check registered rigs exist (fixable)
   - mayor-exists             Check mayor/ directory structure
-  - mayor-state-valid        Check mayor/state.json is valid (fixable)
 
 Infrastructure checks:
   - daemon                   Check if daemon is running (fixable)

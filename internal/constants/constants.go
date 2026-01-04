@@ -64,9 +64,6 @@ const (
 	// FileTownJSON is the town configuration file in mayor/.
 	FileTownJSON = "town.json"
 
-	// FileStateJSON is the agent state file.
-	FileStateJSON = "state.json"
-
 	// FileConfigJSON is the general config file.
 	FileConfigJSON = "config.json"
 
@@ -174,11 +171,6 @@ func MayorRigsPath(townRoot string) string {
 // MayorTownPath returns the path to town.json within a town root.
 func MayorTownPath(townRoot string) string {
 	return townRoot + "/" + DirMayor + "/" + FileTownJSON
-}
-
-// MayorStatePath returns the path to mayor state.json within a town root.
-func MayorStatePath(townRoot string) string {
-	return townRoot + "/" + DirMayor + "/" + FileStateJSON
 }
 
 // RigMayorPath returns the path to mayor/rig within a rig.

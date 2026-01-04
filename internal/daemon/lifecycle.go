@@ -3,7 +3,6 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -160,11 +159,6 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 
 	d.logger.Printf("Executing %s for session %s", request.Action, sessionName)
 
-	// Verify agent state shows requesting_<action>=true before killing
-	if err := d.verifyAgentRequestingState(request.From, request.Action); err != nil {
-		return fmt.Errorf("state verification failed: %w", err)
-	}
-
 	// Check agent bead state (ZFC: trust what agent reports) - gt-39ttg
 	agentBeadID := d.identityToAgentBeadID(request.From)
 	if agentBeadID != "" {
@@ -206,11 +200,6 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 			return fmt.Errorf("restarting session: %w", err)
 		}
 		d.logger.Printf("Restarted session %s", sessionName)
-
-		// Clear the requesting state so we don't cycle again
-		if err := d.clearAgentRequestingState(request.From, request.Action); err != nil {
-			d.logger.Printf("Warning: failed to clear agent state: %v", err)
-		}
 		return nil
 
 	default:
@@ -515,115 +504,6 @@ func (d *Daemon) closeMessage(id string) error {
 	}
 	d.logger.Printf("Deleted lifecycle message: %s", id)
 	return nil
-}
-
-// verifyAgentRequestingState verifies that the agent has set requesting_<action>=true
-// in its state.json before we kill its session. This ensures the agent is actually
-// ready to be killed and has completed its pre-shutdown tasks (git clean, handoff mail, etc).
-func (d *Daemon) verifyAgentRequestingState(identity string, action LifecycleAction) error {
-	stateFile := d.identityToStateFile(identity)
-	if stateFile == "" {
-		// If we can't determine state file, log warning but allow action
-		// This maintains backwards compatibility with agents that don't support state files yet
-		d.logger.Printf("Warning: cannot determine state file for %s, skipping verification", identity)
-		return nil
-	}
-
-	data, err := os.ReadFile(stateFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("agent state file not found: %s (agent must set requesting_%s=true before lifecycle request)", stateFile, action)
-		}
-		return fmt.Errorf("reading agent state: %w", err)
-	}
-
-	var state map[string]interface{}
-	if err := json.Unmarshal(data, &state); err != nil {
-		return fmt.Errorf("parsing agent state: %w", err)
-	}
-
-	// Check for requesting_<action>=true
-	key := "requesting_" + string(action)
-	val, ok := state[key]
-	if !ok {
-		return fmt.Errorf("agent state missing %s field (agent must set this before lifecycle request)", key)
-	}
-
-	requesting, ok := val.(bool)
-	if !ok || !requesting {
-		return fmt.Errorf("agent state %s is not true (got: %v)", key, val)
-	}
-
-	d.logger.Printf("Verified agent %s has %s=true", identity, key)
-	return nil
-}
-
-// clearAgentRequestingState clears the requesting_<action>=true flag after
-// successfully completing a lifecycle action. This prevents the daemon from
-// repeatedly cycling the same session.
-func (d *Daemon) clearAgentRequestingState(identity string, action LifecycleAction) error {
-	stateFile := d.identityToStateFile(identity)
-	if stateFile == "" {
-		return fmt.Errorf("cannot determine state file for %s", identity)
-	}
-
-	data, err := os.ReadFile(stateFile)
-	if err != nil {
-		return fmt.Errorf("reading state file: %w", err)
-	}
-
-	var state map[string]interface{}
-	if err := json.Unmarshal(data, &state); err != nil {
-		return fmt.Errorf("parsing state: %w", err)
-	}
-
-	// Remove the requesting_<action> key
-	key := "requesting_" + string(action)
-	delete(state, key)
-	delete(state, "requesting_time") // Also clean up the timestamp
-
-	// Write back
-	newData, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling state: %w", err)
-	}
-
-	if err := os.WriteFile(stateFile, newData, 0644); err != nil {
-		return fmt.Errorf("writing state file: %w", err)
-	}
-
-	d.logger.Printf("Cleared %s from agent %s state", key, identity)
-	return nil
-}
-
-// identityToStateFile maps an agent identity to its state.json file path.
-// Uses parseIdentity to extract components, then derives state file location.
-func (d *Daemon) identityToStateFile(identity string) string {
-	parsed, err := parseIdentity(identity)
-	if err != nil {
-		return ""
-	}
-
-	// Derive state file path based on working directory
-	workDir := d.getWorkDir(nil, parsed) // Use defaults, not role bead config
-	if workDir == "" {
-		return ""
-	}
-
-	// For mayor and deacon, state file is in a subdirectory
-	switch parsed.RoleType {
-	case "mayor":
-		return filepath.Join(d.config.TownRoot, "mayor", "state.json")
-	case "deacon":
-		return filepath.Join(d.config.TownRoot, "deacon", "state.json")
-	case "witness":
-		return filepath.Join(d.config.TownRoot, parsed.RigName, "witness", "state.json")
-	case "refinery":
-		return filepath.Join(d.config.TownRoot, parsed.RigName, "refinery", "state.json")
-	default:
-		// For crew and polecat, state file is in their working directory
-		return filepath.Join(workDir, "state.json")
-	}
 }
 
 // AgentBeadInfo represents the parsed fields from an agent bead.
