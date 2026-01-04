@@ -137,8 +137,8 @@ func TestConvoyTemplate_HtmxAutoRefresh(t *testing.T) {
 	if !strings.Contains(output, "hx-trigger") {
 		t.Error("Template should contain hx-trigger for auto-refresh")
 	}
-	if !strings.Contains(output, "every 30s") {
-		t.Error("Template should refresh every 30 seconds")
+	if !strings.Contains(output, "every 10s") {
+		t.Error("Template should refresh every 10 seconds")
 	}
 }
 

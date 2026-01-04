@@ -17,7 +17,9 @@ const (
 	ShellReadyTimeout = 5 * time.Second
 
 	// DefaultDebounceMs is the default debounce for SendKeys operations.
-	DefaultDebounceMs = 100
+	// 500ms is required for Claude Code to reliably process paste before Enter.
+	// See NudgeSession comment: "Wait 500ms for paste to complete (tested, required)"
+	DefaultDebounceMs = 500
 
 	// DefaultDisplayMs is the default duration for tmux display-message.
 	DefaultDisplayMs = 5000

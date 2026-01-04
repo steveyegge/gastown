@@ -14,14 +14,37 @@ var templateFS embed.FS
 
 // ConvoyData represents data passed to the convoy template.
 type ConvoyData struct {
-	Convoys []ConvoyRow
+	Convoys    []ConvoyRow
+	MergeQueue []MergeQueueRow
+	Polecats   []PolecatRow
+}
+
+// PolecatRow represents a polecat worker in the dashboard.
+type PolecatRow struct {
+	Name         string        // e.g., "dag", "nux"
+	Rig          string        // e.g., "roxas", "gastown"
+	SessionID    string        // e.g., "gt-roxas-dag"
+	LastActivity activity.Info // Colored activity display
+	StatusHint   string        // Last line from pane (optional)
+}
+
+// MergeQueueRow represents a PR in the merge queue.
+type MergeQueueRow struct {
+	Number     int
+	Repo       string // Short repo name (e.g., "roxas", "gastown")
+	Title      string
+	URL        string
+	CIStatus   string // "pass", "fail", "pending"
+	Mergeable  string // "ready", "conflict", "pending"
+	ColorClass string // "mq-green", "mq-yellow", "mq-red"
 }
 
 // ConvoyRow represents a single convoy in the dashboard.
 type ConvoyRow struct {
 	ID            string
 	Title         string
-	Status        string // "open" or "closed"
+	Status        string // "open" or "closed" (raw beads status)
+	WorkStatus    string // Computed: "complete", "active", "stale", "stuck", "waiting"
 	Progress      string // e.g., "2/5"
 	Completed     int
 	Total         int
@@ -43,6 +66,7 @@ func LoadTemplates() (*template.Template, error) {
 	funcMap := template.FuncMap{
 		"activityClass":   activityClass,
 		"statusClass":     statusClass,
+		"workStatusClass": workStatusClass,
 		"progressPercent": progressPercent,
 	}
 
@@ -84,6 +108,24 @@ func statusClass(status string) string {
 		return "status-closed"
 	default:
 		return "status-unknown"
+	}
+}
+
+// workStatusClass returns the CSS class for a computed work status.
+func workStatusClass(workStatus string) string {
+	switch workStatus {
+	case "complete":
+		return "work-complete"
+	case "active":
+		return "work-active"
+	case "stale":
+		return "work-stale"
+	case "stuck":
+		return "work-stuck"
+	case "waiting":
+		return "work-waiting"
+	default:
+		return "work-unknown"
 	}
 }
 

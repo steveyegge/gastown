@@ -260,6 +260,33 @@ gt doctor                         # Health check
 gt doctor --fix                   # Auto-repair
 ```
 
+## Dashboard
+
+Web-based dashboard for monitoring Gas Town activity.
+
+```bash
+# Start the dashboard
+gt dashboard --port 8080
+
+# Open in browser
+open http://localhost:8080
+```
+
+**Features:**
+- **Convoy tracking** - View all active convoys with progress bars and work status
+- **Polecat workers** - See active worker sessions and their activity status
+- **Refinery status** - Monitor merge queue and PR processing
+- **Auto-refresh** - Updates every 10 seconds via htmx
+
+Work status indicators:
+| Status | Color | Meaning |
+|--------|-------|---------|
+| `complete` | Green | All tracked items done |
+| `active` | Green | Recent activity (< 1 min) |
+| `stale` | Yellow | Activity 1-5 min ago |
+| `stuck` | Red | Activity > 5 min ago |
+| `waiting` | Gray | No assignee/activity |
+
 ## Shell Completions
 
 Enable tab completion for `gt` commands:
