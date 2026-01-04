@@ -181,7 +181,7 @@ func runDone(cmd *cobra.Command, args []string) error {
 		}
 
 		// Initialize beads
-		bd := beads.New(cwd)
+		bd := beads.New(beads.ResolveBeadsDir(cwd))
 
 		// Determine target branch (auto-detect integration branch if applicable)
 		target := defaultBranch
@@ -277,7 +277,7 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s\n", style.Dim.Render("Witness will dispatch new polecat when gate closes."))
 
 		// Register this polecat as a waiter on the gate
-		bd := beads.New(cwd)
+		bd := beads.New(beads.ResolveBeadsDir(cwd))
 		if err := bd.AddGateWaiter(doneGate, sender); err != nil {
 			style.PrintWarning("could not register as gate waiter: %v", err)
 		} else {
