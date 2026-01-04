@@ -37,8 +37,9 @@ bd show hq-abc    # Routes to town-level beads
 bd show wyv-123   # Routes to wyvern rig's beads
 ```
 
-**How it works**: Routes are defined in `~/gt/.beads/routes.jsonl`. Each rig's
-prefix maps to its beads location (the mayor's clone in that rig).
+**How it works**: Multi-repo hydration via `bd repo add` + `bd repo sync`.
+Registered repositories are stored in `.beads/config.yaml`. After sync,
+prefix routing works automatically.
 
 | Prefix | Routes To | Purpose |
 |--------|-----------|---------|
@@ -46,7 +47,7 @@ prefix maps to its beads location (the mayor's clone in that rig).
 | `gp-*` | `~/gt/greenplace/mayor/rig/.beads/` | Greenplace project issues |
 | `wyv-*` | `~/gt/wyvern/mayor/rig/.beads/` | Wyvern project issues |
 
-Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
+See [multi-repo-setup.md](multi-repo-setup.md) for detailed setup instructions.
 
 ## Configuration
 
