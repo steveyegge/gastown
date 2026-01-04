@@ -699,6 +699,123 @@ app.get('/api/doctor', async (req, res) => {
   }
 });
 
+// ============= Service Controls (Mayor, Witness, Refinery) =============
+
+// Start a service
+app.post('/api/service/:name/up', async (req, res) => {
+  const { name } = req.params;
+  const validServices = ['mayor', 'witness', 'refinery', 'deacon'];
+
+  if (!validServices.includes(name.toLowerCase())) {
+    return res.status(400).json({ error: `Invalid service: ${name}. Valid services: ${validServices.join(', ')}` });
+  }
+
+  console.log(`[Service] Starting ${name}...`);
+
+  try {
+    const result = await executeGT([name, 'up'], { timeout: 30000 });
+
+    if (result.success) {
+      broadcast({ type: 'service_started', data: { service: name } });
+      res.json({ success: true, service: name, message: `${name} started`, raw: result.data });
+    } else {
+      res.status(500).json({ success: false, error: result.error });
+    }
+  } catch (err) {
+    console.error(`[Service] Failed to start ${name}:`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Stop a service
+app.post('/api/service/:name/down', async (req, res) => {
+  const { name } = req.params;
+  const validServices = ['mayor', 'witness', 'refinery', 'deacon'];
+
+  if (!validServices.includes(name.toLowerCase())) {
+    return res.status(400).json({ error: `Invalid service: ${name}. Valid services: ${validServices.join(', ')}` });
+  }
+
+  console.log(`[Service] Stopping ${name}...`);
+
+  try {
+    const result = await executeGT([name, 'down'], { timeout: 10000 });
+
+    if (result.success) {
+      broadcast({ type: 'service_stopped', data: { service: name } });
+      res.json({ success: true, service: name, message: `${name} stopped`, raw: result.data });
+    } else {
+      // Try killing tmux session directly
+      const sessionName = `gt-${name}`;
+      try {
+        await execAsync(`tmux kill-session -t ${sessionName} 2>/dev/null`);
+        broadcast({ type: 'service_stopped', data: { service: name } });
+        res.json({ success: true, service: name, message: `${name} stopped via tmux` });
+      } catch {
+        res.status(500).json({ success: false, error: result.error });
+      }
+    }
+  } catch (err) {
+    console.error(`[Service] Failed to stop ${name}:`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Restart a service
+app.post('/api/service/:name/restart', async (req, res) => {
+  const { name } = req.params;
+  const validServices = ['mayor', 'witness', 'refinery', 'deacon'];
+
+  if (!validServices.includes(name.toLowerCase())) {
+    return res.status(400).json({ error: `Invalid service: ${name}. Valid services: ${validServices.join(', ')}` });
+  }
+
+  console.log(`[Service] Restarting ${name}...`);
+
+  try {
+    // Stop first
+    try {
+      await executeGT([name, 'down'], { timeout: 10000 });
+    } catch {
+      // Ignore stop errors
+    }
+
+    // Wait a moment
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Start
+    const result = await executeGT([name, 'up'], { timeout: 30000 });
+
+    if (result.success) {
+      broadcast({ type: 'service_restarted', data: { service: name } });
+      res.json({ success: true, service: name, message: `${name} restarted`, raw: result.data });
+    } else {
+      res.status(500).json({ success: false, error: result.error });
+    }
+  } catch (err) {
+    console.error(`[Service] Failed to restart ${name}:`, err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Get service status
+app.get('/api/service/:name/status', async (req, res) => {
+  const { name } = req.params;
+
+  try {
+    const runningPolecats = await getRunningPolecats();
+    const sessionName = `gt-${name}`;
+
+    // Check if service has a tmux session
+    const { stdout } = await execAsync('tmux ls 2>/dev/null || echo ""');
+    const running = stdout.includes(sessionName);
+
+    res.json({ service: name, running, session: running ? sessionName : null });
+  } catch (err) {
+    res.json({ service: name, running: false, error: err.message });
+  }
+});
+
 // ============= Formula Management =============
 
 // List all formulas

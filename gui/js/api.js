@@ -180,6 +180,23 @@ export const api = {
     return this.post(`/api/polecat/${encodeURIComponent(rig)}/${encodeURIComponent(name)}/restart`);
   },
 
+  // === Service Controls ===
+  startService(name) {
+    return this.post(`/api/service/${encodeURIComponent(name)}/up`);
+  },
+
+  stopService(name) {
+    return this.post(`/api/service/${encodeURIComponent(name)}/down`);
+  },
+
+  restartService(name) {
+    return this.post(`/api/service/${encodeURIComponent(name)}/restart`);
+  },
+
+  getServiceStatus(name) {
+    return this.get(`/api/service/${encodeURIComponent(name)}/status`);
+  },
+
   // === GitHub Integration ===
   getGitHubPRs(state = 'open') {
     return this.get(`/api/github/prs?state=${encodeURIComponent(state)}`);
