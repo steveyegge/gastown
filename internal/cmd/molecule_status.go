@@ -19,9 +19,9 @@ import (
 // buildAgentBeadID constructs the agent bead ID from an agent identity.
 // Uses canonical naming: prefix-rig-role-name.
 // Examples:
-//   - "mayor" -> "gt-mayor"
-//   - "deacon" -> "gt-deacon"
-//   - "gastown/witness" -> "gt-gastown-witness"
+//   - "mayor" -> "hq-mayor" (town-level agent)
+//   - "deacon" -> "hq-deacon" (town-level agent)
+//   - "gastown/witness" -> "gt-gastown-witness" (rig uses its configured prefix)
 //   - "gastown/refinery" -> "gt-gastown-refinery"
 //   - "gastown/nux" (polecat) -> "gt-gastown-polecat-nux"
 //   - "gastown/crew/max" -> "gt-gastown-crew-max"

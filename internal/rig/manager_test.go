@@ -372,7 +372,7 @@ esac
 
 expected_beads_dir=""
 expected_dir="$EXPECT_RIG_DIR"
-if [[ "$id" == "gt-deacon" || "$id" == "gt-mayor" ]]; then
+if [[ "$id" == "hq-deacon" || "$id" == "hq-mayor" ]]; then
   expected_beads_dir="$EXPECT_TOWN_BEADS_DIR"
   expected_dir="$EXPECT_TOWN_ROOT"
 fi

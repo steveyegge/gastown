@@ -197,10 +197,9 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with hq- prefix)\n")
 		}
 
-		// NOTE: Agent beads (gt-deacon, gt-mayor) are created by gt rig add,
-		// not here. This is because the daemon looks up beads by prefix routing,
-		// and no rig exists yet at install time. The first rig added will get
-		// these global agent beads in its beads database.
+		// NOTE: Agent beads (hq-deacon, hq-mayor) are created by gt rig add,
+		// not here. The first rig added creates these global agent beads in
+		// the town-level beads database.
 	}
 
 	// Detect and save overseer identity

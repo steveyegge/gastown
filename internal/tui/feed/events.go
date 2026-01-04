@@ -174,7 +174,7 @@ func parseSimpleLine(line string) *Event {
 
 // parseBeadContext extracts actor/rig/role from a bead ID
 // Uses canonical naming: prefix-rig-role-name
-// Examples: gt-gastown-crew-joe, gt-gastown-witness, gt-mayor
+// Examples: gt-gastown-crew-joe, gt-gastown-witness, hq-mayor
 func parseBeadContext(beadID string) (actor, rig, role string) {
 	if beadID == "" {
 		return

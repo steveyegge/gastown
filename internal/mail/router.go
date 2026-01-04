@@ -292,8 +292,8 @@ type agentBead struct {
 
 // agentBeadToAddress converts an agent bead to a mail address.
 // Uses the agent bead ID to derive the address:
-//   - gt-mayor → mayor/
-//   - gt-deacon → deacon/
+//   - hq-mayor → mayor/
+//   - hq-deacon → deacon/
 //   - gt-gastown-witness → gastown/witness
 //   - gt-gastown-crew-max → gastown/max
 //   - gt-gastown-polecat-Toast → gastown/Toast

@@ -260,7 +260,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
-		RoleBead:   "gt-polecat-role",
+		RoleBead:   beads.RoleBeadID("polecat"),
 		HookBead:   opts.HookBead, // Set atomically at spawn time
 	})
 	if err != nil {
@@ -476,7 +476,7 @@ func (m *Manager) RecreateWithOptions(name string, force bool, opts AddOptions) 
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
-		RoleBead:   "gt-polecat-role",
+		RoleBead:   beads.RoleBeadID("polecat"),
 		HookBead:   opts.HookBead, // Set atomically at spawn time
 	})
 	if err != nil {

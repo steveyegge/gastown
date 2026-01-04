@@ -271,7 +271,8 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 // The Deacon is the system's heartbeat - it must always be running.
 func (d *Daemon) ensureDeaconRunning() {
 	// Check agent bead state (ZFC: trust what agent reports)
-	beadState, beadErr := d.getAgentBeadState(d.getDeaconSessionName())
+	// Use bead ID (hq-deacon), not session name (gt-deacon)
+	beadState, beadErr := d.getAgentBeadState(beads.DeaconBeadID())
 	if beadErr == nil {
 		if beadState == "running" || beadState == "working" {
 			// Agent reports it's running - trust it

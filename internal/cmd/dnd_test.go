@@ -41,8 +41,8 @@ func TestAddressToAgentBeadID_UsesRigPrefix(t *testing.T) {
 		address  string
 		expected string
 	}{
-		{"mayor", "gt-mayor"},
-		{"deacon", "gt-deacon"},
+		{"mayor", "hq-mayor"},
+		{"deacon", "hq-deacon"},
 		{"helloworld/witness", "hw-helloworld-witness"},
 		{"helloworld/refinery", "hw-helloworld-refinery"},
 		{"helloworld/alpha", "hw-helloworld-polecat-alpha"},
@@ -123,8 +123,8 @@ func TestAgentIDToBeadID_UsesRigPrefix(t *testing.T) {
 		agentID  string
 		expected string
 	}{
-		{"mayor", "gt-mayor"},
-		{"deacon", "gt-deacon"},
+		{"mayor", "hq-mayor"},
+		{"deacon", "hq-deacon"},
 		{"helloworld/witness", "hw-helloworld-witness"},
 		{"helloworld/refinery", "hw-helloworld-refinery"},
 		{"helloworld/crew/max", "hw-helloworld-crew-max"},

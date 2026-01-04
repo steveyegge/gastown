@@ -1094,9 +1094,9 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 //   prefix-rig-role-name
 //
 // Examples:
-//   - gt-mayor (town-level, no rig)
-//   - gt-deacon (town-level, no rig)
-//   - gt-gastown-witness (rig-level singleton)
+//   - hq-mayor (town-level, no rig - uses "hq" prefix)
+//   - hq-deacon (town-level, no rig - uses "hq" prefix)
+//   - gt-gastown-witness (rig-level singleton - uses rig's prefix)
 //   - gt-gastown-refinery (rig-level singleton)
 //   - gt-gastown-crew-max (rig-level named agent)
 //   - gt-gastown-polecat-Toast (rig-level named agent)
@@ -1126,19 +1126,21 @@ func AgentBeadID(rig, role, name string) string {
 }
 
 // MayorBeadID returns the Mayor agent bead ID.
+// Mayor is a town-level agent, so it uses the "hq-" prefix.
 func MayorBeadID() string {
-	return "gt-mayor"
+	return "hq-mayor"
 }
 
 // DeaconBeadID returns the Deacon agent bead ID.
+// Deacon is a town-level agent, so it uses the "hq-" prefix.
 func DeaconBeadID() string {
-	return "gt-deacon"
+	return "hq-deacon"
 }
 
 // DogBeadID returns a Dog agent bead ID.
-// Dogs are town-level agents, so they follow the pattern: gt-dog-<name>
+// Dogs are town-level agents, so they use the "hq-" prefix.
 func DogBeadID(name string) string {
-	return "gt-dog-" + name
+	return "hq-dog-" + name
 }
 
 // DogRoleBeadID returns the Dog role bead ID.
@@ -1288,13 +1290,13 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 
 	switch len(parts) {
 	case 1:
-		// Town-level: gt-mayor, bd-deacon
+		// Town-level: hq-mayor, hq-deacon
 		return "", parts[0], "", true
 	case 2:
 		// Could be rig-level singleton (gt-gastown-witness) or
-		// town-level named (gt-dog-alpha for dogs)
+		// town-level named (hq-dog-alpha for dogs)
 		if parts[0] == "dog" {
-			// Dogs are town-level named agents: gt-dog-<name>
+			// Dogs are town-level named agents: hq-dog-<name>
 			return "", "dog", parts[1], true
 		}
 		// Rig-level singleton: gt-gastown-witness
@@ -1317,8 +1319,8 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 }
 
 // IsAgentSessionBead returns true if the bead ID represents an agent session molecule.
-// Agent session beads follow patterns like gt-mayor, bd-beads-witness, gt-gastown-crew-joe.
-// Supports any valid prefix (e.g., "gt-", "bd-"), not just "gt-".
+// Agent session beads follow patterns like hq-mayor, bd-beads-witness, gt-gastown-crew-joe.
+// Supports any valid prefix (e.g., "hq-", "gt-", "bd-").
 // These are used to track agent state and update frequently, which can create noise.
 func IsAgentSessionBead(beadID string) bool {
 	_, role, _, ok := ParseAgentBeadID(beadID)
@@ -1335,20 +1337,24 @@ func IsAgentSessionBead(beadID string) bool {
 }
 
 // Role bead ID naming convention:
-//   gt-<role>-role
+//   hq-<role>-role
+//
+// Role beads are stored in town beads (which uses "hq" prefix) because they
+// define shared lifecycle configuration for all agents of each type.
 //
 // Examples:
-//   - gt-mayor-role
-//   - gt-deacon-role
-//   - gt-witness-role
-//   - gt-refinery-role
-//   - gt-crew-role
-//   - gt-polecat-role
+//   - hq-mayor-role
+//   - hq-deacon-role
+//   - hq-witness-role
+//   - hq-refinery-role
+//   - hq-crew-role
+//   - hq-polecat-role
 
 // RoleBeadID returns the role bead ID for a given role type.
 // Role beads define lifecycle configuration for each agent type.
+// They are stored in town beads, so they use the "hq-" prefix.
 func RoleBeadID(roleType string) string {
-	return "gt-" + roleType + "-role"
+	return "hq-" + roleType + "-role"
 }
 
 // MayorRoleBeadID returns the Mayor role bead ID.

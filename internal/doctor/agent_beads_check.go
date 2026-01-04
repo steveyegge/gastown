@@ -183,17 +183,6 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		return nil // Nothing to fix
 	}
 
-	// Find the first rig for global agents (only gt-prefix rigs)
-	var firstRigName string
-	for prefix, info := range prefixToRig {
-		if prefix != "gt" {
-			continue
-		}
-		if firstRigName == "" || info.name < firstRigName {
-			firstRigName = info.name
-		}
-	}
-
 	// Create missing agents for each rig
 	for prefix, info := range prefixToRig {
 		// Use the route path directly instead of hardcoding /mayor/rig
@@ -208,7 +197,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 				RoleType:   "witness",
 				Rig:        rigName,
 				AgentState: "idle",
-				RoleBead:   "gt-witness-role",
+				RoleBead:   beads.RoleBeadID("witness"),
 			}
 			desc := fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName)
 			if _, err := bd.CreateAgentBead(witnessID, desc, fields); err != nil {
@@ -222,7 +211,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 				RoleType:   "refinery",
 				Rig:        rigName,
 				AgentState: "idle",
-				RoleBead:   "gt-refinery-role",
+				RoleBead:   beads.RoleBeadID("refinery"),
 			}
 			desc := fmt.Sprintf("Refinery for %s - processes merge queue.", rigName)
 			if _, err := bd.CreateAgentBead(refineryID, desc, fields); err != nil {
@@ -239,7 +228,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 					RoleType:   "crew",
 					Rig:        rigName,
 					AgentState: "idle",
-					RoleBead:   "gt-crew-role",
+					RoleBead:   beads.RoleBeadID("crew"),
 				}
 				desc := fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName)
 				if _, err := bd.CreateAgentBead(crewID, desc, fields); err != nil {
@@ -248,35 +237,35 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			}
 		}
 
-		// Create global agents in first rig if missing
-		if rigName == firstRigName {
-			deaconID := beads.DeaconBeadID()
-			if _, err := bd.Show(deaconID); err != nil {
-				fields := &beads.AgentFields{
-					RoleType:   "deacon",
-					Rig:        "",
-					AgentState: "idle",
-					RoleBead:   "gt-deacon-role",
-				}
-				desc := "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring."
-				if _, err := bd.CreateAgentBead(deaconID, desc, fields); err != nil {
-					return fmt.Errorf("creating %s: %w", deaconID, err)
-				}
-			}
+	}
 
-			mayorID := beads.MayorBeadID()
-			if _, err := bd.Show(mayorID); err != nil {
-				fields := &beads.AgentFields{
-					RoleType:   "mayor",
-					Rig:        "",
-					AgentState: "idle",
-					RoleBead:   "gt-mayor-role",
-				}
-				desc := "Mayor - global coordinator, handles cross-rig communication and escalations."
-				if _, err := bd.CreateAgentBead(mayorID, desc, fields); err != nil {
-					return fmt.Errorf("creating %s: %w", mayorID, err)
-				}
-			}
+	// Create global agents in town beads if missing (separate from rig loop)
+	townBeads := beads.New(ctx.TownRoot)
+	deaconID := beads.DeaconBeadID()
+	if _, err := townBeads.Show(deaconID); err != nil {
+		fields := &beads.AgentFields{
+			RoleType:   "deacon",
+			Rig:        "",
+			AgentState: "idle",
+			RoleBead:   beads.RoleBeadID("deacon"),
+		}
+		desc := "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring."
+		if _, err := townBeads.CreateAgentBead(deaconID, desc, fields); err != nil {
+			return fmt.Errorf("creating %s: %w", deaconID, err)
+		}
+	}
+
+	mayorID := beads.MayorBeadID()
+	if _, err := townBeads.Show(mayorID); err != nil {
+		fields := &beads.AgentFields{
+			RoleType:   "mayor",
+			Rig:        "",
+			AgentState: "idle",
+			RoleBead:   beads.RoleBeadID("mayor"),
+		}
+		desc := "Mayor - global coordinator, handles cross-rig communication and escalations."
+		if _, err := townBeads.CreateAgentBead(mayorID, desc, fields); err != nil {
+			return fmt.Errorf("creating %s: %w", mayorID, err)
 		}
 	}
 

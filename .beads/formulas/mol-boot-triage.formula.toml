@@ -35,7 +35,7 @@ gt peek deacon --lines 20
 
 **Step 2: Check agent bead state**
 ```bash
-bd show gt-deacon 2>/dev/null
+bd show hq-deacon 2>/dev/null
 # Look for:
 # - state: running/working/idle
 # - last_activity: when was last update?

@@ -1204,40 +1204,40 @@ func getAgentFields(ctx RoleContext, state string) *beads.AgentFields {
 			RoleType:   "crew",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   "gt-crew-role",
+			RoleBead:   beads.RoleBeadID("crew"),
 		}
 	case RolePolecat:
 		return &beads.AgentFields{
 			RoleType:   "polecat",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   "gt-polecat-role",
+			RoleBead:   beads.RoleBeadID("polecat"),
 		}
 	case RoleMayor:
 		return &beads.AgentFields{
 			RoleType:   "mayor",
 			AgentState: state,
-			RoleBead:   "gt-mayor-role",
+			RoleBead:   beads.RoleBeadID("mayor"),
 		}
 	case RoleDeacon:
 		return &beads.AgentFields{
 			RoleType:   "deacon",
 			AgentState: state,
-			RoleBead:   "gt-deacon-role",
+			RoleBead:   beads.RoleBeadID("deacon"),
 		}
 	case RoleWitness:
 		return &beads.AgentFields{
 			RoleType:   "witness",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   "gt-witness-role",
+			RoleBead:   beads.RoleBeadID("witness"),
 		}
 	case RoleRefinery:
 		return &beads.AgentFields{
 			RoleType:   "refinery",
 			Rig:        ctx.Rig,
 			AgentState: state,
-			RoleBead:   "gt-refinery-role",
+			RoleBead:   beads.RoleBeadID("refinery"),
 		}
 	default:
 		return nil
@@ -1245,7 +1245,7 @@ func getAgentFields(ctx RoleContext, state string) *beads.AgentFields {
 }
 
 // getAgentBeadID returns the agent bead ID for the current role.
-// Rig-scoped agents use the rig's configured prefix; town agents remain gt-.
+// Rig-scoped agents use the rig's configured prefix; town agents use hq-.
 // Returns empty string for unknown roles.
 func getAgentBeadID(ctx RoleContext) string {
 	switch ctx.Role {

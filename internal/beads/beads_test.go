@@ -1369,17 +1369,18 @@ func TestRoleConfigRoundTrip(t *testing.T) {
 }
 
 // TestRoleBeadID tests role bead ID generation.
+// Role beads are stored in town beads, so they use the "hq-" prefix.
 func TestRoleBeadID(t *testing.T) {
 	tests := []struct {
 		roleType string
 		want     string
 	}{
-		{"mayor", "gt-mayor-role"},
-		{"deacon", "gt-deacon-role"},
-		{"witness", "gt-witness-role"},
-		{"refinery", "gt-refinery-role"},
-		{"crew", "gt-crew-role"},
-		{"polecat", "gt-polecat-role"},
+		{"mayor", "hq-mayor-role"},
+		{"deacon", "hq-deacon-role"},
+		{"witness", "hq-witness-role"},
+		{"refinery", "hq-refinery-role"},
+		{"crew", "hq-crew-role"},
+		{"polecat", "hq-polecat-role"},
 	}
 
 	for _, tt := range tests {

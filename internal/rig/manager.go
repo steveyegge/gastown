@@ -561,10 +561,10 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 
 // initAgentBeads creates agent beads for this rig and optionally global agents.
 // - Always creates: <prefix>-<rig>-witness, <prefix>-<rig>-refinery
-// - First rig only: gt-deacon, gt-mayor
+// - First rig only: hq-deacon, hq-mayor
 //
 // Rig-scoped agent beads live in the rig's beads DB using the rig prefix.
-// Global agents remain in town beads with the gt- prefix.
+// Global agents live in town beads with the hq- prefix.
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
 func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig bool) error {
@@ -641,13 +641,13 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig boo
 		}
 
 		// RoleBead points to the shared role definition bead for this agent type.
-		// Role beads are shared: gt-witness-role, gt-refinery-role, etc.
+		// Role beads are stored in town beads, so they use the "hq-" prefix.
 		fields := &beads.AgentFields{
 			RoleType:   agent.roleType,
 			Rig:        agent.rig,
 			AgentState: "idle",
 			HookBead:   "",
-			RoleBead:   "gt-" + agent.roleType + "-role",
+			RoleBead:   "hq-" + agent.roleType + "-role",
 		}
 
 		if _, err := bd.CreateAgentBead(agent.id, agent.desc, fields); err != nil {
