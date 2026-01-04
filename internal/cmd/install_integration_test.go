@@ -3,7 +3,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,22 +58,6 @@ func TestInstallCreatesCorrectStructure(t *testing.T) {
 	}
 	if len(rigsConfig.Rigs) != 0 {
 		t.Errorf("rigs.json should be empty, got %d rigs", len(rigsConfig.Rigs))
-	}
-
-	// Verify mayor/state.json
-	statePath := filepath.Join(hqPath, "mayor", "state.json")
-	assertFileExists(t, statePath, "mayor/state.json")
-
-	stateData, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatalf("failed to read state.json: %v", err)
-	}
-	var state map[string]interface{}
-	if err := json.Unmarshal(stateData, &state); err != nil {
-		t.Fatalf("failed to parse state.json: %v", err)
-	}
-	if state["role"] != "mayor" {
-		t.Errorf("state.json role = %q, want %q", state["role"], "mayor")
 	}
 
 	// Verify CLAUDE.md exists

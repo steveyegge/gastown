@@ -542,17 +542,20 @@ func TestRigAddCreatesAgentDirs(t *testing.T) {
 
 	rigPath := filepath.Join(townRoot, "agenttest")
 
-	// Verify agent state files exist
-	expectedStateFiles := []string{
-		"witness/state.json",
-		"refinery/state.json",
-		"mayor/state.json",
+	// Verify agent directories exist (state.json files are no longer created)
+	expectedDirs := []string{
+		"witness",
+		"refinery",
+		"mayor",
 	}
 
-	for _, stateFile := range expectedStateFiles {
-		path := filepath.Join(rigPath, stateFile)
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("expected state file %s to exist: %v", stateFile, err)
+	for _, dir := range expectedDirs {
+		path := filepath.Join(rigPath, dir)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("expected directory %s to exist: %v", dir, err)
+		} else if !info.IsDir() {
+			t.Errorf("expected %s to be a directory", dir)
 		}
 	}
 }

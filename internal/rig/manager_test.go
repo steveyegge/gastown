@@ -40,18 +40,12 @@ func createTestRig(t *testing.T, root, name string) {
 		t.Fatalf("mkdir rig: %v", err)
 	}
 
-	// Create agent dirs
+	// Create agent dirs (witness, refinery, mayor)
 	for _, dir := range AgentDirs {
 		dirPath := filepath.Join(rigPath, dir)
 		if err := os.MkdirAll(dirPath, 0755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
-	}
-
-	// Create witness state.json (witnesses don't have clones, just state)
-	witnessState := filepath.Join(rigPath, "witness", "state.json")
-	if err := os.WriteFile(witnessState, []byte(`{"role":"witness"}`), 0644); err != nil {
-		t.Fatalf("write witness state: %v", err)
 	}
 
 	// Create some polecats

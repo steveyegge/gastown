@@ -113,50 +113,6 @@ func SaveRigsConfig(path string, config *RigsConfig) error {
 	return nil
 }
 
-// LoadAgentState loads an agent state file.
-func LoadAgentState(path string) (*AgentState, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
-		}
-		return nil, fmt.Errorf("reading state: %w", err)
-	}
-
-	var state AgentState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("parsing state: %w", err)
-	}
-
-	if err := validateAgentState(&state); err != nil {
-		return nil, err
-	}
-
-	return &state, nil
-}
-
-// SaveAgentState saves an agent state to a file.
-func SaveAgentState(path string, state *AgentState) error {
-	if err := validateAgentState(state); err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("creating directory: %w", err)
-	}
-
-	data, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encoding state: %w", err)
-	}
-
-	if err := os.WriteFile(path, data, 0644); err != nil { //nolint:gosec // G306: state files don't contain secrets
-		return fmt.Errorf("writing state: %w", err)
-	}
-
-	return nil
-}
-
 // validateTownConfig validates a TownConfig.
 func validateTownConfig(c *TownConfig) error {
 	if c.Type != "town" && c.Type != "" {
@@ -178,14 +134,6 @@ func validateRigsConfig(c *RigsConfig) error {
 	}
 	if c.Rigs == nil {
 		c.Rigs = make(map[string]RigEntry)
-	}
-	return nil
-}
-
-// validateAgentState validates an AgentState.
-func validateAgentState(s *AgentState) error {
-	if s.Role == "" {
-		return fmt.Errorf("%w: role", ErrMissingField)
 	}
 	return nil
 }

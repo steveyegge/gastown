@@ -133,9 +133,9 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 		}
 	}
 
-	// Check for witness (witnesses don't have clones, just state.json)
-	witnessStatePath := filepath.Join(rigPath, "witness", "state.json")
-	if _, err := os.Stat(witnessStatePath); err == nil {
+	// Check for witness (witnesses don't have clones, just the witness directory)
+	witnessPath := filepath.Join(rigPath, "witness")
+	if info, err := os.Stat(witnessPath); err == nil && info.IsDir() {
 		rig.HasWitness = true
 	}
 
@@ -414,11 +414,6 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		return nil, fmt.Errorf("creating polecats dir: %w", err)
 	}
 
-	// Initialize agent state files
-	if err := m.initAgentStates(rigPath); err != nil {
-		return nil, fmt.Errorf("initializing agent states: %w", err)
-	}
-
 	// Initialize beads at rig level
 	fmt.Printf("  Initializing beads database...\n")
 	if err := m.initBeads(rigPath, opts.BeadsPrefix); err != nil {
@@ -482,33 +477,6 @@ func LoadRigConfig(rigPath string) (*RigConfig, error) {
 		return nil, err
 	}
 	return &cfg, nil
-}
-
-// initAgentStates creates initial state.json files for agents.
-func (m *Manager) initAgentStates(rigPath string) error {
-	agents := []struct {
-		path string
-		role string
-	}{
-		{filepath.Join(rigPath, "refinery", "state.json"), "refinery"},
-		{filepath.Join(rigPath, "witness", "state.json"), "witness"},
-		{filepath.Join(rigPath, "mayor", "state.json"), "mayor"},
-	}
-
-	for _, agent := range agents {
-		state := &config.AgentState{
-			Role:       agent.role,
-			LastActive: time.Now(),
-		}
-		data, err := json.MarshalIndent(state, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(agent.path, data, 0644); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // initBeads initializes the beads database at rig level.

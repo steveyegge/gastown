@@ -373,78 +373,6 @@ func (c *MayorExistsCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// MayorStateValidCheck verifies mayor/state.json is valid JSON if it exists.
-type MayorStateValidCheck struct {
-	FixableCheck
-}
-
-// NewMayorStateValidCheck creates a new mayor state validation check.
-func NewMayorStateValidCheck() *MayorStateValidCheck {
-	return &MayorStateValidCheck{
-		FixableCheck: FixableCheck{
-			BaseCheck: BaseCheck{
-				CheckName:        "mayor-state-valid",
-				CheckDescription: "Check that mayor/state.json is valid if it exists",
-			},
-		},
-	}
-}
-
-// Run validates mayor/state.json if it exists.
-func (c *MayorStateValidCheck) Run(ctx *CheckContext) *CheckResult {
-	statePath := filepath.Join(ctx.TownRoot, "mayor", "state.json")
-
-	data, err := os.ReadFile(statePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &CheckResult{
-				Name:    c.Name(),
-				Status:  StatusOK,
-				Message: "mayor/state.json not present (optional)",
-			}
-		}
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusError,
-			Message: "Cannot read mayor/state.json",
-			Details: []string{err.Error()},
-		}
-	}
-
-	// Just verify it's valid JSON
-	var state interface{}
-	if err := json.Unmarshal(data, &state); err != nil {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusError,
-			Message: "mayor/state.json is not valid JSON",
-			Details: []string{err.Error()},
-			FixHint: "Run 'gt doctor --fix' to reset to default state",
-		}
-	}
-
-	return &CheckResult{
-		Name:    c.Name(),
-		Status:  StatusOK,
-		Message: "mayor/state.json is valid JSON",
-	}
-}
-
-// Fix resets mayor/state.json to default empty state.
-func (c *MayorStateValidCheck) Fix(ctx *CheckContext) error {
-	statePath := filepath.Join(ctx.TownRoot, "mayor", "state.json")
-
-	// Default empty state
-	defaultState := map[string]interface{}{}
-
-	data, err := json.MarshalIndent(defaultState, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling default state: %w", err)
-	}
-
-	return os.WriteFile(statePath, data, 0644)
-}
-
 // WorkspaceChecks returns all workspace-level health checks.
 func WorkspaceChecks() []Check {
 	return []Check{
@@ -453,6 +381,5 @@ func WorkspaceChecks() []Check {
 		NewRigsRegistryExistsCheck(),
 		NewRigsRegistryValidCheck(),
 		NewMayorExistsCheck(),
-		NewMayorStateValidCheck(),
 	}
 }
