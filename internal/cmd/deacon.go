@@ -1118,22 +1118,14 @@ func notifyMayorOfWitnessFailure(townRoot string, zombies []zombieInfo) {
 }
 
 // agentAddressToIDs converts an agent address to bead ID and session name.
-// Uses rig-specific prefixes for bead IDs; session names remain gt-*.
 // Supports formats: "gastown/polecats/max", "gastown/witness", "deacon", "mayor"
+// Note: Town-level agents (Mayor, Deacon) use hq- prefix bead IDs stored in town beads.
 func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
-	townRoot, err := workspace.FindFromCwd()
-	if err != nil {
-		townRoot = ""
-	}
-	return agentAddressToIDsWithTownRoot(townRoot, address)
-}
-
-func agentAddressToIDsWithTownRoot(townRoot, address string) (beadID, sessionName string, err error) {
 	switch address {
 	case "deacon":
-		return beads.DeaconBeadID(), session.DeaconSessionName(), nil
+		return beads.DeaconBeadIDTown(), session.DeaconSessionName(), nil
 	case "mayor":
-		return beads.MayorBeadID(), session.MayorSessionName(), nil
+		return beads.MayorBeadIDTown(), session.MayorSessionName(), nil
 	}
 
 	parts := strings.Split(address, "/")
@@ -1141,30 +1133,22 @@ func agentAddressToIDsWithTownRoot(townRoot, address string) (beadID, sessionNam
 	case 2:
 		// rig/role: "gastown/witness", "gastown/refinery"
 		rig, role := parts[0], parts[1]
-		prefix := "gt"
-		if townRoot != "" {
-			prefix = beads.GetPrefixForRig(townRoot, rig)
-		}
 		switch role {
 		case "witness":
-			return beads.WitnessBeadIDWithPrefix(prefix, rig), fmt.Sprintf("gt-%s-witness", rig), nil
+			return fmt.Sprintf("gt-%s-witness", rig), fmt.Sprintf("gt-%s-witness", rig), nil
 		case "refinery":
-			return beads.RefineryBeadIDWithPrefix(prefix, rig), fmt.Sprintf("gt-%s-refinery", rig), nil
+			return fmt.Sprintf("gt-%s-refinery", rig), fmt.Sprintf("gt-%s-refinery", rig), nil
 		default:
 			return "", "", fmt.Errorf("unknown role: %s", role)
 		}
 	case 3:
 		// rig/type/name: "gastown/polecats/max", "gastown/crew/alpha"
 		rig, agentType, name := parts[0], parts[1], parts[2]
-		prefix := "gt"
-		if townRoot != "" {
-			prefix = beads.GetPrefixForRig(townRoot, rig)
-		}
 		switch agentType {
 		case "polecats":
-			return beads.PolecatBeadIDWithPrefix(prefix, rig, name), fmt.Sprintf("gt-%s-%s", rig, name), nil
+			return fmt.Sprintf("gt-%s-polecat-%s", rig, name), fmt.Sprintf("gt-%s-%s", rig, name), nil
 		case "crew":
-			return beads.CrewBeadIDWithPrefix(prefix, rig, name), fmt.Sprintf("gt-%s-crew-%s", rig, name), nil
+			return fmt.Sprintf("gt-%s-crew-%s", rig, name), fmt.Sprintf("gt-%s-crew-%s", rig, name), nil
 		default:
 			return "", "", fmt.Errorf("unknown agent type: %s", agentType)
 		}
@@ -1216,3 +1200,4 @@ func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused b
 	cmd.Dir = townRoot
 	_ = cmd.Run() // Best effort
 }
+

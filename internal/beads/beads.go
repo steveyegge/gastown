@@ -512,6 +512,49 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	return &issue, nil
 }
 
+// CreateWithID creates an issue with a specific ID.
+// This is useful for agent beads, role beads, and other beads that need
+// deterministic IDs rather than auto-generated ones.
+func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
+	args := []string{"create", "--json", "--id=" + id}
+
+	if opts.Title != "" {
+		args = append(args, "--title="+opts.Title)
+	}
+	if opts.Type != "" {
+		args = append(args, "--type="+opts.Type)
+	}
+	if opts.Priority >= 0 {
+		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
+	}
+	if opts.Description != "" {
+		args = append(args, "--description="+opts.Description)
+	}
+	if opts.Parent != "" {
+		args = append(args, "--parent="+opts.Parent)
+	}
+	// Default Actor from BD_ACTOR env var if not specified
+	actor := opts.Actor
+	if actor == "" {
+		actor = os.Getenv("BD_ACTOR")
+	}
+	if actor != "" {
+		args = append(args, "--actor="+actor)
+	}
+
+	out, err := b.run(args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var issue Issue
+	if err := json.Unmarshal(out, &issue); err != nil {
+		return nil, fmt.Errorf("parsing bd create output: %w", err)
+	}
+
+	return &issue, nil
+}
+
 // Update updates an existing issue.
 func (b *Beads) Update(id string, opts UpdateOptions) error {
 	args := []string{"update", id}
@@ -1094,9 +1137,9 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 //   prefix-rig-role-name
 //
 // Examples:
-//   - hq-mayor (town-level, no rig - uses "hq" prefix)
-//   - hq-deacon (town-level, no rig - uses "hq" prefix)
-//   - gt-gastown-witness (rig-level singleton - uses rig's prefix)
+//   - gt-mayor (town-level, no rig)
+//   - gt-deacon (town-level, no rig)
+//   - gt-gastown-witness (rig-level singleton)
 //   - gt-gastown-refinery (rig-level singleton)
 //   - gt-gastown-crew-max (rig-level named agent)
 //   - gt-gastown-polecat-Toast (rig-level named agent)
@@ -1126,21 +1169,29 @@ func AgentBeadID(rig, role, name string) string {
 }
 
 // MayorBeadID returns the Mayor agent bead ID.
-// Mayor is a town-level agent, so it uses the "hq-" prefix.
+//
+// Deprecated: Use MayorBeadIDTown() for town-level beads (hq- prefix).
+// This function returns "gt-mayor" which is for rig-level storage.
+// Town-level agents like Mayor should use the hq- prefix.
 func MayorBeadID() string {
-	return "hq-mayor"
+	return "gt-mayor"
 }
 
 // DeaconBeadID returns the Deacon agent bead ID.
-// Deacon is a town-level agent, so it uses the "hq-" prefix.
+//
+// Deprecated: Use DeaconBeadIDTown() for town-level beads (hq- prefix).
+// This function returns "gt-deacon" which is for rig-level storage.
+// Town-level agents like Deacon should use the hq- prefix.
 func DeaconBeadID() string {
-	return "hq-deacon"
+	return "gt-deacon"
 }
 
 // DogBeadID returns a Dog agent bead ID.
-// Dogs are town-level agents, so they use the "hq-" prefix.
+// Dogs are town-level agents, so they follow the pattern: gt-dog-<name>
+// Deprecated: Use DogBeadIDTown() for town-level beads with hq- prefix.
+// Dogs are town-level agents and should use hq-dog-<name>, not gt-dog-<name>.
 func DogBeadID(name string) string {
-	return "hq-dog-" + name
+	return "gt-dog-" + name
 }
 
 // DogRoleBeadID returns the Dog role bead ID.
@@ -1290,13 +1341,13 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 
 	switch len(parts) {
 	case 1:
-		// Town-level: hq-mayor, hq-deacon
+		// Town-level: gt-mayor, bd-deacon
 		return "", parts[0], "", true
 	case 2:
 		// Could be rig-level singleton (gt-gastown-witness) or
-		// town-level named (hq-dog-alpha for dogs)
+		// town-level named (gt-dog-alpha for dogs)
 		if parts[0] == "dog" {
-			// Dogs are town-level named agents: hq-dog-<name>
+			// Dogs are town-level named agents: gt-dog-<name>
 			return "", "dog", parts[1], true
 		}
 		// Rig-level singleton: gt-gastown-witness
@@ -1319,8 +1370,8 @@ func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
 }
 
 // IsAgentSessionBead returns true if the bead ID represents an agent session molecule.
-// Agent session beads follow patterns like hq-mayor, bd-beads-witness, gt-gastown-crew-joe.
-// Supports any valid prefix (e.g., "hq-", "gt-", "bd-").
+// Agent session beads follow patterns like gt-mayor, bd-beads-witness, gt-gastown-crew-joe.
+// Supports any valid prefix (e.g., "gt-", "bd-"), not just "gt-".
 // These are used to track agent state and update frequently, which can create noise.
 func IsAgentSessionBead(beadID string) bool {
 	_, role, _, ok := ParseAgentBeadID(beadID)
@@ -1337,24 +1388,22 @@ func IsAgentSessionBead(beadID string) bool {
 }
 
 // Role bead ID naming convention:
-//   hq-<role>-role
-//
-// Role beads are stored in town beads (which uses "hq" prefix) because they
-// define shared lifecycle configuration for all agents of each type.
+//   gt-<role>-role
 //
 // Examples:
-//   - hq-mayor-role
-//   - hq-deacon-role
-//   - hq-witness-role
-//   - hq-refinery-role
-//   - hq-crew-role
-//   - hq-polecat-role
+//   - gt-mayor-role
+//   - gt-deacon-role
+//   - gt-witness-role
+//   - gt-refinery-role
+//   - gt-crew-role
+//   - gt-polecat-role
 
 // RoleBeadID returns the role bead ID for a given role type.
 // Role beads define lifecycle configuration for each agent type.
-// They are stored in town beads, so they use the "hq-" prefix.
+// Deprecated: Use RoleBeadIDTown() for town-level beads with hq- prefix.
+// Role beads are global templates and should use hq-<role>-role, not gt-<role>-role.
 func RoleBeadID(roleType string) string {
-	return "hq-" + roleType + "-role"
+	return "gt-" + roleType + "-role"
 }
 
 // MayorRoleBeadID returns the Mayor role bead ID.

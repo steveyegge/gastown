@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/deps"
+	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
@@ -195,11 +197,21 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
 			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with hq- prefix)\n")
+
+			// Provision embedded formulas to .beads/formulas/
+			if count, err := formula.ProvisionFormulas(absPath); err != nil {
+				// Non-fatal: formulas are optional, just convenience
+				fmt.Printf("   %s Could not provision formulas: %v\n", style.Dim.Render("⚠"), err)
+			} else if count > 0 {
+				fmt.Printf("   ✓ Provisioned %d formulas\n", count)
+			}
 		}
 
-		// NOTE: Agent beads (hq-deacon, hq-mayor) are created by gt rig add,
-		// not here. The first rig added creates these global agent beads in
-		// the town-level beads database.
+		// Create town-level agent beads (Mayor, Deacon) and role beads.
+		// These use hq- prefix and are stored in town beads for cross-rig coordination.
+		if err := initTownAgentBeads(absPath); err != nil {
+			fmt.Printf("   %s Could not create town-level agent beads: %v\n", style.Dim.Render("⚠"), err)
+		}
 	}
 
 	// Detect and save overseer identity
@@ -319,5 +331,118 @@ func ensureRepoFingerprint(beadsPath string) error {
 	if err != nil {
 		return fmt.Errorf("bd migrate --update-repo-id: %s", strings.TrimSpace(string(output)))
 	}
+	return nil
+}
+
+// initTownAgentBeads creates town-level agent and role beads using hq- prefix.
+// This creates:
+// - hq-mayor, hq-deacon (agent beads for town-level agents)
+// - hq-mayor-role, hq-deacon-role, hq-witness-role, hq-refinery-role,
+//   hq-polecat-role, hq-crew-role (role definition beads)
+//
+// These beads are stored in town beads (~/gt/.beads/) and are shared across all rigs.
+// Rig-level agent beads (witness, refinery) are created by gt rig add in rig beads.
+func initTownAgentBeads(townPath string) error {
+	bd := beads.New(townPath)
+
+	// Town-level agent beads
+	agentDefs := []struct {
+		id       string
+		roleType string
+		title    string
+	}{
+		{
+			id:       beads.MayorBeadIDTown(),
+			roleType: "mayor",
+			title:    "Mayor - global coordinator, handles cross-rig communication and escalations.",
+		},
+		{
+			id:       beads.DeaconBeadIDTown(),
+			roleType: "deacon",
+			title:    "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring.",
+		},
+	}
+
+	for _, agent := range agentDefs {
+		// Check if already exists
+		if _, err := bd.Show(agent.id); err == nil {
+			continue // Already exists
+		}
+
+		fields := &beads.AgentFields{
+			RoleType:   agent.roleType,
+			Rig:        "", // Town-level agents have no rig
+			AgentState: "idle",
+			HookBead:   "",
+			RoleBead:   beads.RoleBeadIDTown(agent.roleType),
+		}
+
+		if _, err := bd.CreateAgentBead(agent.id, agent.title, fields); err != nil {
+			return fmt.Errorf("creating %s: %w", agent.id, err)
+		}
+		fmt.Printf("   ✓ Created agent bead: %s\n", agent.id)
+	}
+
+	// Role beads (global templates)
+	roleDefs := []struct {
+		id    string
+		title string
+		desc  string
+	}{
+		{
+			id:    beads.MayorRoleBeadIDTown(),
+			title: "Mayor Role",
+			desc:  "Role definition for Mayor agents. Global coordinator for cross-rig work.",
+		},
+		{
+			id:    beads.DeaconRoleBeadIDTown(),
+			title: "Deacon Role",
+			desc:  "Role definition for Deacon agents. Daemon beacon for heartbeats and monitoring.",
+		},
+		{
+			id:    beads.WitnessRoleBeadIDTown(),
+			title: "Witness Role",
+			desc:  "Role definition for Witness agents. Per-rig worker monitor with progressive nudging.",
+		},
+		{
+			id:    beads.RefineryRoleBeadIDTown(),
+			title: "Refinery Role",
+			desc:  "Role definition for Refinery agents. Merge queue processor with verification gates.",
+		},
+		{
+			id:    beads.PolecatRoleBeadIDTown(),
+			title: "Polecat Role",
+			desc:  "Role definition for Polecat agents. Ephemeral workers for batch work dispatch.",
+		},
+		{
+			id:    beads.CrewRoleBeadIDTown(),
+			title: "Crew Role",
+			desc:  "Role definition for Crew agents. Persistent user-managed workspaces.",
+		},
+	}
+
+	for _, role := range roleDefs {
+		// Check if already exists
+		if _, err := bd.Show(role.id); err == nil {
+			continue // Already exists
+		}
+
+		// Create role bead using bd create --type=role
+		cmd := exec.Command("bd", "create",
+			"--type=role",
+			"--id="+role.id,
+			"--title="+role.title,
+			"--description="+role.desc,
+		)
+		cmd.Dir = townPath
+		if output, err := cmd.CombinedOutput(); err != nil {
+			// Log but continue - role beads are optional
+			fmt.Printf("   %s Could not create role bead %s: %s\n",
+				style.Dim.Render("⚠"), role.id, strings.TrimSpace(string(output)))
+			continue
+		}
+		fmt.Printf("   ✓ Created role bead: %s\n", role.id)
+	}
+
 	return nil
 }

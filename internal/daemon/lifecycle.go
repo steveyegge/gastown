@@ -722,9 +722,9 @@ func (d *Daemon) identityToAgentBeadID(identity string) string {
 
 	switch parsed.RoleType {
 	case "deacon":
-		return beads.DeaconBeadID()
+		return beads.DeaconBeadIDTown()
 	case "mayor":
-		return beads.MayorBeadID()
+		return beads.MayorBeadIDTown()
 	case "witness":
 		return beads.WitnessBeadIDWithPrefix(prefix, parsed.RigName)
 	case "refinery":
@@ -748,8 +748,8 @@ const DeadAgentTimeout = 15 * time.Minute
 func (d *Daemon) checkStaleAgents() {
 	// Known agent bead IDs to check
 	agentBeadIDs := []string{
-		beads.DeaconBeadID(),
-		beads.MayorBeadID(),
+		beads.DeaconBeadIDTown(),
+		beads.MayorBeadIDTown(),
 	}
 
 	// Dynamically discover rigs from the rigs config

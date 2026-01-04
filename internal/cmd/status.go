@@ -170,12 +170,39 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Pre-fetch agent beads across all rig-specific beads DBs.
 	allAgentBeads := make(map[string]*beads.Issue)
 	allHookBeads := make(map[string]*beads.Issue)
-	for _, r := range rigs {
-		rigBeadsPath := r.Path
-		mayorRigBeads := filepath.Join(r.Path, "mayor", "rig", ".beads")
-		if _, err := os.Stat(mayorRigBeads); err == nil {
-			rigBeadsPath = filepath.Join(r.Path, "mayor", "rig")
+
+	// Fetch town-level agent beads (Mayor, Deacon) from town beads
+	townBeadsPath := beads.GetTownBeadsPath(townRoot)
+	townBeadsClient := beads.New(townBeadsPath)
+	townAgentBeads, _ := townBeadsClient.ListAgentBeads()
+	for id, issue := range townAgentBeads {
+		allAgentBeads[id] = issue
+	}
+
+	// Fetch hook beads from town beads
+	var townHookIDs []string
+	for _, issue := range townAgentBeads {
+		hookID := issue.HookBead
+		if hookID == "" {
+			fields := beads.ParseAgentFields(issue.Description)
+			if fields != nil {
+				hookID = fields.HookBead
+			}
 		}
+		if hookID != "" {
+			townHookIDs = append(townHookIDs, hookID)
+		}
+	}
+	if len(townHookIDs) > 0 {
+		townHookBeads, _ := townBeadsClient.ShowMultiple(townHookIDs)
+		for id, issue := range townHookBeads {
+			allHookBeads[id] = issue
+		}
+	}
+
+	// Fetch rig-level agent beads
+	for _, r := range rigs {
+		rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
 		rigBeads := beads.New(rigBeadsPath)
 		rigAgentBeads, _ := rigBeads.ListAgentBeads()
 		if rigAgentBeads == nil {
@@ -206,16 +233,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		hookBeads, _ := rigBeads.ShowMultiple(hookIDs)
 		for id, issue := range hookBeads {
 			allHookBeads[id] = issue
-		}
-	}
-
-	// Also load town beads for global agents (hq-mayor, hq-deacon)
-	townBeadsPath := filepath.Join(townRoot, ".beads")
-	if _, err := os.Stat(townBeadsPath); err == nil {
-		townBeads := beads.New(townRoot)
-		townAgentBeads, _ := townBeads.ListAgentBeads()
-		for id, issue := range townAgentBeads {
-			allAgentBeads[id] = issue
 		}
 	}
 
@@ -522,21 +539,14 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 	}
 
 	// Build agent bead ID using canonical naming: prefix-rig-role-name
-	agentBeadID := ""
+	agentBeadID := "gt-" + agent.Name
 	if agent.Address != "" && agent.Address != agent.Name {
 		// Use address for full path agents like gastown/crew/joe → gt-gastown-crew-joe
 		addr := strings.TrimSuffix(agent.Address, "/") // Remove trailing slash for global agents
 		parts := strings.Split(addr, "/")
 		if len(parts) == 1 {
-			// Global agent: mayor/, deacon/ → hq-mayor, hq-deacon
-			switch parts[0] {
-			case "mayor":
-				agentBeadID = beads.MayorBeadID()
-			case "deacon":
-				agentBeadID = beads.DeaconBeadID()
-			default:
-				agentBeadID = "hq-" + parts[0]
-			}
+			// Global agent: mayor/, deacon/ → gt-mayor, gt-deacon
+			agentBeadID = beads.AgentBeadID("", parts[0], "")
 		} else if len(parts) >= 2 {
 			rig := parts[0]
 			prefix := beads.GetPrefixForRig(townRoot, rig)
@@ -551,10 +561,6 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 				agentBeadID = beads.PolecatBeadIDWithPrefix(prefix, rig, parts[1])
 			}
 		}
-	}
-	// Fallback for agents without a proper address
-	if agentBeadID == "" {
-		agentBeadID = "gt-" + agent.Name
 	}
 
 	fmt.Printf("%s%s %s%s\n", indent, style.Dim.Render(agentBeadID), statusStr, stateInfo)
@@ -675,6 +681,7 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 	deaconSession := getDeaconSessionName()
 
 	// Define agents to discover
+	// Note: Mayor and Deacon are town-level agents with hq- prefix bead IDs
 	agentDefs := []struct {
 		name    string
 		address string
@@ -682,8 +689,8 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 		role    string
 		beadID  string
 	}{
-		{"mayor", "mayor/", mayorSession, "coordinator", beads.MayorBeadID()},
-		{"deacon", "deacon/", deaconSession, "health-check", beads.DeaconBeadID()},
+		{"mayor", "mayor/", mayorSession, "coordinator", beads.MayorBeadIDTown()},
+		{"deacon", "deacon/", deaconSession, "health-check", beads.DeaconBeadIDTown()},
 	}
 
 	agents := make([]AgentRuntime, len(agentDefs))

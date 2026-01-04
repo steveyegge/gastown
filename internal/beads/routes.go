@@ -130,6 +130,13 @@ func WriteRoutes(beadsDir string, routes []Route) error {
 	return nil
 }
 
+// GetTownBeadsPath returns the path to town-level beads directory.
+// Town beads store hq-* prefixed issues including Mayor, Deacon, and role beads.
+// The townRoot should be the Gas Town root directory (e.g., ~/gt).
+func GetTownBeadsPath(townRoot string) string {
+	return filepath.Join(townRoot, ".beads")
+}
+
 // GetPrefixForRig returns the beads prefix for a given rig name.
 // The prefix is returned without the trailing hyphen (e.g., "bd" not "bd-").
 // If the rig is not found in routes, returns "gt" as the default.

@@ -163,6 +163,60 @@ func TestInstallIdempotent(t *testing.T) {
 	}
 }
 
+// TestInstallFormulasProvisioned validates that embedded formulas are copied
+// to .beads/formulas/ during installation.
+func TestInstallFormulasProvisioned(t *testing.T) {
+	// Skip if bd is not available
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not installed, skipping formulas test")
+	}
+
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	gtBinary := buildGT(t)
+
+	// Run gt install (includes beads and formula provisioning)
+	cmd := exec.Command(gtBinary, "install", hqPath)
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
+	}
+
+	// Verify .beads/formulas/ directory exists
+	formulasDir := filepath.Join(hqPath, ".beads", "formulas")
+	assertDirExists(t, formulasDir, ".beads/formulas/")
+
+	// Verify at least some expected formulas exist
+	expectedFormulas := []string{
+		"mol-deacon-patrol.formula.toml",
+		"mol-refinery-patrol.formula.toml",
+		"code-review.formula.toml",
+	}
+	for _, f := range expectedFormulas {
+		formulaPath := filepath.Join(formulasDir, f)
+		assertFileExists(t, formulaPath, f)
+	}
+
+	// Verify the count matches embedded formulas
+	entries, err := os.ReadDir(formulasDir)
+	if err != nil {
+		t.Fatalf("failed to read formulas dir: %v", err)
+	}
+	// Count only formula files (not directories)
+	var fileCount int
+	for _, e := range entries {
+		if !e.IsDir() {
+			fileCount++
+		}
+	}
+	// Should have at least 20 formulas (allows for some variation)
+	if fileCount < 20 {
+		t.Errorf("expected at least 20 formulas, got %d", fileCount)
+	}
+}
+
 // TestInstallNoBeadsFlag validates that --no-beads skips beads initialization.
 func TestInstallNoBeadsFlag(t *testing.T) {
 	tmpDir := t.TempDir()
