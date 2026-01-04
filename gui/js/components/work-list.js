@@ -4,6 +4,9 @@
  * Renders the list of beads (tasks/work items) with status and completion info.
  */
 
+import { api } from '../api.js';
+import { showToast } from './toast.js';
+
 // Issue type icons
 const TYPE_ICONS = {
   task: 'task_alt',
@@ -166,6 +169,83 @@ export function renderWorkList(container, beads) {
       e.stopPropagation(); // Don't trigger card click, but let the link navigate
     });
   });
+
+  // Add action button handlers
+  container.querySelectorAll('.bead-actions [data-action]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const action = btn.dataset.action;
+      const beadId = btn.dataset.beadId;
+      await handleWorkAction(action, beadId, btn);
+    });
+  });
+}
+
+/**
+ * Handle work action (done, park, release, reassign)
+ */
+async function handleWorkAction(action, beadId, btn) {
+  const originalIcon = btn.innerHTML;
+  btn.innerHTML = '<span class="material-icons spinning">sync</span>';
+  btn.disabled = true;
+
+  try {
+    let result;
+    switch (action) {
+      case 'done':
+        const summary = prompt('Enter completion summary (optional):');
+        if (summary === null) {
+          // User cancelled
+          btn.innerHTML = originalIcon;
+          btn.disabled = false;
+          return;
+        }
+        result = await api.markWorkDone(beadId, summary || 'Completed via GUI');
+        break;
+
+      case 'park':
+        const reason = prompt('Enter reason for parking:');
+        if (!reason) {
+          btn.innerHTML = originalIcon;
+          btn.disabled = false;
+          return;
+        }
+        result = await api.parkWork(beadId, reason);
+        break;
+
+      case 'release':
+        if (!confirm('Release this work item?')) {
+          btn.innerHTML = originalIcon;
+          btn.disabled = false;
+          return;
+        }
+        result = await api.releaseWork(beadId);
+        break;
+
+      case 'reassign':
+        const target = prompt('Enter target agent address:');
+        if (!target) {
+          btn.innerHTML = originalIcon;
+          btn.disabled = false;
+          return;
+        }
+        result = await api.reassignWork(beadId, target);
+        break;
+    }
+
+    if (result && result.success) {
+      showToast(`Work ${action === 'done' ? 'completed' : action + 'ed'}: ${beadId}`, 'success');
+      // Trigger work list refresh
+      document.dispatchEvent(new CustomEvent('work:refresh'));
+    } else if (result) {
+      showToast(`Failed: ${result.error || 'Unknown error'}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  } finally {
+    btn.innerHTML = originalIcon;
+    btn.disabled = false;
+  }
 }
 
 /**
@@ -216,6 +296,22 @@ function renderBeadCard(bead, index) {
         <div class="bead-time">
           ${bead.closed_at ? `Completed ${formatTime(bead.closed_at)}` : `Created ${formatTime(bead.created_at)}`}
         </div>
+        ${status !== 'closed' ? `
+          <div class="bead-actions">
+            <button class="btn btn-xs btn-success-ghost" data-action="done" data-bead-id="${bead.id}" title="Mark as done">
+              <span class="material-icons">check_circle</span>
+            </button>
+            <button class="btn btn-xs btn-ghost" data-action="park" data-bead-id="${bead.id}" title="Park work">
+              <span class="material-icons">pause_circle</span>
+            </button>
+            <button class="btn btn-xs btn-ghost" data-action="release" data-bead-id="${bead.id}" title="Release work">
+              <span class="material-icons">cancel</span>
+            </button>
+            <button class="btn btn-xs btn-ghost" data-action="reassign" data-bead-id="${bead.id}" title="Reassign work">
+              <span class="material-icons">person_add</span>
+            </button>
+          </div>
+        ` : ''}
       </div>
     </div>
   `;

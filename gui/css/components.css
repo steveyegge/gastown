@@ -4594,3 +4594,62 @@ select {
 .btn-icon.btn-xs .material-icons {
   font-size: 16px;
 }
+
+/* === Work/Bead Action Buttons === */
+.bead-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.bead-actions {
+  display: flex;
+  gap: var(--space-xs);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.bead-card:hover .bead-actions {
+  opacity: 1;
+}
+
+.btn-xs {
+  padding: 4px 8px;
+  font-size: var(--text-xs);
+}
+
+.btn-xs .material-icons {
+  font-size: 16px;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+}
+
+.btn-ghost:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.btn-success-ghost {
+  background: transparent;
+  color: #22c55e;
+  border: none;
+}
+
+.btn-success-ghost:hover {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.btn-danger-ghost {
+  background: transparent;
+  color: #ef4444;
+  border: none;
+}
+
+.btn-danger-ghost:hover {
+  background: rgba(239, 68, 68, 0.15);
+}

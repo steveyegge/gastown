@@ -106,6 +106,11 @@ async function init() {
   document.addEventListener('rigs:refresh', () => {
     loadRigs();
   });
+
+  // Listen for work refresh (from work actions)
+  document.addEventListener('work:refresh', () => {
+    loadWork();
+  });
 }
 
 // Navigation setup
