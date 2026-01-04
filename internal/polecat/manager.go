@@ -47,16 +47,12 @@ type Manager struct {
 
 // NewManager creates a new polecat manager.
 func NewManager(r *rig.Rig, g *git.Git) *Manager {
-	// Determine the canonical beads location:
-	// - If mayor/rig/.beads exists (source repo has beads tracked), use that
-	// - Otherwise use rig root .beads/ (created by initBeads during gt rig add)
-	// This matches the conditional logic in setupSharedBeads and route registration.
-	// For repos that have .beads/ tracked in git, the canonical database lives in mayor/rig/.
-	mayorRigBeads := filepath.Join(r.Path, "mayor", "rig", ".beads")
-	beadsPath := r.Path
-	if _, err := os.Stat(mayorRigBeads); err == nil {
-		beadsPath = filepath.Join(r.Path, "mayor", "rig")
-	}
+	// Always use mayor/rig as the beads path.
+	// This matches routes.jsonl which maps prefixes to <rig>/mayor/rig.
+	// The rig root .beads/ only contains config.yaml (no database),
+	// so running bd from there causes it to walk up and find town beads
+	// with the wrong prefix (e.g., 'gm' instead of the rig's prefix).
+	beadsPath := filepath.Join(r.Path, "mayor", "rig")
 
 	// Try to load rig settings for namepool config
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
