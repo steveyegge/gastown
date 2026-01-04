@@ -10,6 +10,87 @@ import { state } from '../state.js';
 import { showToast } from './toast.js';
 import { AGENT_TYPES, STATUS_COLORS, getAgentConfig } from '../shared/agent-types.js';
 
+/**
+ * Calculate agent work status from an array of agents
+ * @returns {{ working: number, available: number, stopped: number, total: number, statusText: string }}
+ */
+function getAgentStats(agents) {
+  const working = agents.filter(a => a.running && (a.has_work || a.hook)).length;
+  const available = agents.filter(a => a.running && !a.has_work && !a.hook).length;
+  const stopped = agents.filter(a => !a.running).length;
+  const total = agents.length;
+
+  let statusText;
+  if (total === 0) {
+    statusText = 'none';
+  } else if (working > 0 && available > 0) {
+    statusText = `${working} working, ${available} idle`;
+  } else if (working > 0) {
+    statusText = `${working} working`;
+  } else if (available > 0) {
+    statusText = `${available} available`;
+  } else {
+    statusText = `${stopped} stopped`;
+  }
+
+  return { working, available, stopped, total, statusText };
+}
+
+/**
+ * Derive basic health status from status data (fast, no doctor call)
+ * Returns a health object with checks array for calculateHealthStatus()
+ */
+function deriveHealthFromStatus(status) {
+  const checks = [];
+  const rigs = status.rigs || [];
+  const agents = status.agents || [];
+
+  // Check: Are there any rigs configured?
+  if (rigs.length === 0) {
+    checks.push({ name: 'Rigs', status: 'warn', message: 'No rigs configured' });
+  } else {
+    checks.push({ name: 'Rigs', status: 'pass', message: `${rigs.length} rig(s) configured` });
+  }
+
+  // Check: Are core agents (mayor, deacon) running?
+  const mayor = agents.find(a => a.name === 'mayor' || a.role === 'coordinator');
+  const deacon = agents.find(a => a.name === 'deacon' || a.role === 'health-check');
+
+  if (mayor && mayor.running) {
+    checks.push({ name: 'Mayor', status: 'pass', message: 'Running' });
+  } else if (mayor) {
+    checks.push({ name: 'Mayor', status: 'warn', message: 'Not running' });
+  }
+
+  if (deacon && deacon.running) {
+    checks.push({ name: 'Deacon', status: 'pass', message: 'Running' });
+  } else if (deacon) {
+    checks.push({ name: 'Deacon', status: 'warn', message: 'Not running' });
+  }
+
+  // Check: Any polecats running in rigs?
+  let runningPolecats = 0;
+  let totalPolecats = 0;
+  rigs.forEach(rig => {
+    if (rig.agents) {
+      rig.agents.forEach(agent => {
+        totalPolecats++;
+        if (agent.running) runningPolecats++;
+      });
+    }
+  });
+
+  if (totalPolecats > 0) {
+    if (runningPolecats > 0) {
+      checks.push({ name: 'Polecats', status: 'pass', message: `${runningPolecats}/${totalPolecats} running` });
+    } else {
+      checks.push({ name: 'Polecats', status: 'warn', message: 'None running' });
+    }
+  }
+
+  return { checks };
+}
+
 let container = null;
 let refreshBtn = null;
 
@@ -38,14 +119,13 @@ export async function loadDashboard() {
   container.innerHTML = renderLoadingSkeleton();
 
   try {
-    // Load all data in parallel
-    const [statusResult, healthResult] = await Promise.all([
-      api.getStatus().catch(() => null),
-      api.runDoctor().catch(() => null),
-    ]);
+    // Only load status - doctor is too slow for dashboard (15-20s)
+    // User can click through to Health page for full diagnostics
+    const statusResult = await api.getStatus().catch(() => null);
 
     const status = statusResult || state.get('status') || {};
-    const health = healthResult || {};
+    // Derive basic health from status data (fast, no doctor call)
+    const health = deriveHealthFromStatus(status);
 
     renderDashboard(status, health);
   } catch (err) {
@@ -111,7 +191,7 @@ function renderDashboard(status, health) {
     <div class="dashboard-metrics">
       ${renderMetricCard('local_shipping', 'Active Convoys', metrics.activeConvoys, metrics.totalConvoys, 'convoys', '#3b82f6')}
       ${renderMetricCard('task_alt', 'Open Work', metrics.openWork, metrics.totalWork, 'work', '#22c55e')}
-      ${renderMetricCard('groups', 'Active Agents', metrics.runningAgents, metrics.totalAgents, 'agents', '#a855f7')}
+      ${renderAgentMetricCard(metrics)}
       ${renderMetricCard('mail', 'Unread Mail', metrics.unreadMail, metrics.totalMail, 'mail', '#f59e0b')}
     </div>
 
@@ -173,16 +253,18 @@ function renderDashboard(status, health) {
 function calculateMetrics(rigs, convoys, work, agents, mail) {
   const activeConvoys = convoys.filter(c => c.status !== 'completed' && c.status !== 'closed').length;
   const openWork = work.filter(w => w.status !== 'closed' && w.status !== 'done').length;
-  const runningAgents = agents.filter(a => a.running || a.status === 'running').length;
   const unreadMail = mail.filter(m => !m.read).length;
+
+  // Collect all agents from rigs and get stats
+  const allAgents = rigs.flatMap(rig => rig.agents || []);
+  const agentStats = getAgentStats(allAgents);
 
   return {
     activeConvoys,
     totalConvoys: convoys.length,
     openWork,
     totalWork: work.length,
-    runningAgents,
-    totalAgents: agents.length,
+    ...agentStats,  // working, available, stopped, total, statusText
     unreadMail,
     totalMail: mail.length,
   };
@@ -260,6 +342,36 @@ function renderMetricCard(icon, label, value, total, viewId, color) {
 }
 
 /**
+ * Render agent metric card with working/available distinction
+ */
+function renderAgentMetricCard(metrics) {
+  const { working, available, total, statusText } = metrics;
+  const running = working + available;
+  const color = '#8b5cf6'; // Purple for agents
+
+  // Calculate bar percentages
+  const workingPct = total > 0 ? (working / total * 100) : 0;
+  const availablePct = total > 0 ? (available / total * 100) : 0;
+
+  return `
+    <div class="metric-card" data-navigate="agents" style="--metric-color: ${color}">
+      <div class="metric-icon">
+        <span class="material-icons">smart_toy</span>
+      </div>
+      <div class="metric-content">
+        <div class="metric-value">${running}</div>
+        <div class="metric-label">Active Agents</div>
+        <div class="metric-secondary">${statusText}</div>
+      </div>
+      <div class="metric-progress agent-progress">
+        <div class="metric-progress-bar working" style="width: ${workingPct}%"></div>
+        <div class="metric-progress-bar available" style="width: ${availablePct}%; left: ${workingPct}%"></div>
+      </div>
+    </div>
+  `;
+}
+
+/**
  * Render quick actions
  */
 function renderQuickActions() {
@@ -288,35 +400,46 @@ function renderQuickActions() {
 
 /**
  * Render agent status
+ * Shows distinction between: working (has task), available (running but idle), stopped
  */
 function renderAgentStatus(rigs, agents) {
-  // Group agents by type
   const agentTypes = ['mayor', 'deacon', 'witness', 'refinery', 'polecat'];
-  const statusByType = {};
 
-  agentTypes.forEach(type => {
-    statusByType[type] = { running: 0, stopped: 0, total: 0 };
-  });
+  // Group all agents by type
+  const agentsByType = {};
+  agentTypes.forEach(type => { agentsByType[type] = []; });
 
-  // Count from rigs
   rigs.forEach(rig => {
-    if (rig.agents) {
-      rig.agents.forEach(agent => {
-        const type = (agent.role || 'polecat').toLowerCase();
-        if (statusByType[type]) {
-          statusByType[type].total++;
-          if (agent.running) statusByType[type].running++;
-          else statusByType[type].stopped++;
-        }
-      });
-    }
+    (rig.agents || []).forEach(agent => {
+      const type = (agent.role || 'polecat').toLowerCase();
+      if (agentsByType[type]) {
+        agentsByType[type].push(agent);
+      }
+    });
   });
 
   return `
     <div class="agent-status-list">
       ${agentTypes.map(type => {
         const config = AGENT_TYPES[type];
-        const stats = statusByType[type];
+        const stats = getAgentStats(agentsByType[type]);
+
+        // Determine indicator icon/class
+        let statusIcon, statusClass;
+        if (stats.working > 0) {
+          statusIcon = 'pending';
+          statusClass = 'working';
+        } else if (stats.available > 0) {
+          statusIcon = 'check_circle';
+          statusClass = 'active';
+        } else {
+          statusIcon = 'radio_button_unchecked';
+          statusClass = '';
+        }
+
+        const workingPct = stats.total > 0 ? (stats.working / stats.total * 100) : 0;
+        const availablePct = stats.total > 0 ? (stats.available / stats.total * 100) : 0;
+
         return `
           <div class="agent-status-row" style="--agent-color: ${config.color}">
             <div class="agent-status-icon">
@@ -324,13 +447,14 @@ function renderAgentStatus(rigs, agents) {
             </div>
             <div class="agent-status-info">
               <span class="agent-type-label">${config.label}</span>
-              <span class="agent-count">${stats.running}/${stats.total}</span>
+              <span class="agent-count">${stats.statusText}</span>
             </div>
             <div class="agent-status-bar">
-              <div class="status-bar-fill" style="width: ${stats.total > 0 ? (stats.running / stats.total * 100) : 0}%"></div>
+              <div class="status-bar-fill working" style="width: ${workingPct}%"></div>
+              <div class="status-bar-fill available" style="width: ${availablePct}%; left: ${workingPct}%"></div>
             </div>
-            <span class="agent-status-indicator ${stats.running > 0 ? 'active' : ''}">
-              <span class="material-icons">${stats.running > 0 ? 'check_circle' : 'radio_button_unchecked'}</span>
+            <span class="agent-status-indicator ${statusClass}">
+              <span class="material-icons">${statusIcon}</span>
             </span>
           </div>
         `;
@@ -400,8 +524,9 @@ function renderRigOverview(rigs) {
   return `
     <div class="rig-overview-list">
       ${rigs.slice(0, 4).map(rig => {
-        const runningAgents = (rig.agents || []).filter(a => a.running).length;
-        const totalAgents = (rig.agents || []).length;
+        const stats = getAgentStats(rig.agents || []);
+        const indicatorClass = stats.working > 0 ? 'working' : (stats.available > 0 ? 'active' : '');
+
         return `
           <div class="rig-overview-item" data-rig="${rig.name}">
             <div class="rig-icon">
@@ -409,9 +534,9 @@ function renderRigOverview(rigs) {
             </div>
             <div class="rig-info">
               <span class="rig-name">${escapeHtml(rig.name)}</span>
-              <span class="rig-agents">${runningAgents}/${totalAgents} agents active</span>
+              <span class="rig-agents">${stats.statusText}</span>
             </div>
-            <span class="rig-status-indicator ${runningAgents > 0 ? 'active' : ''}"></span>
+            <span class="rig-status-indicator ${indicatorClass}"></span>
           </div>
         `;
       }).join('')}

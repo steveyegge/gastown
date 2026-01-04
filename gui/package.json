@@ -6,11 +6,11 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js --dev",
-    "test": "vitest run",
-    "test:unit": "vitest run --config vitest.unit.config.js",
-    "test:e2e": "vitest run test/e2e.test.js",
-    "test:watch": "vitest watch",
-    "test:ui": "vitest run --ui"
+    "test": "PORT=5678 vitest run",
+    "test:unit": "PORT=5678 vitest run --config vitest.unit.config.js",
+    "test:e2e": "PORT=5678 vitest run test/e2e.test.js",
+    "test:watch": "PORT=5678 vitest watch",
+    "test:ui": "PORT=5678 vitest run --ui"
   },
   "dependencies": {
     "express": "^4.18.2",

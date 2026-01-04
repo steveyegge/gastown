@@ -99,38 +99,53 @@ describe('Comprehensive Integration Tests', () => {
 
   describe('Sling Modal and Autocomplete', () => {
     it('should open sling modal', async () => {
+      // Switch to convoys view first (sling button is in convoys view)
+      await page.click('[data-view="convoys"]');
+      await page.waitForSelector('#view-convoys.active', { timeout: 5000 });
+
       // Click sling button
-      await page.click('#sling-btn, [data-modal-open="sling"], button[title*="Sling"]').catch(() => {});
+      await page.click('#sling-btn');
       await page.waitForTimeout(300);
 
       // Check modal is visible
       const modalVisible = await page.evaluate(() => {
-        const modal = document.querySelector('#sling-modal, .modal[id*="sling"]');
+        const modal = document.querySelector('#sling-modal');
         return modal && !modal.classList.contains('hidden');
       });
       expect(modalVisible).toBe(true);
     });
 
     it('should populate target dropdown with options', async () => {
+      // Switch to convoys view first
+      await page.click('[data-view="convoys"]');
+      await page.waitForSelector('#view-convoys.active', { timeout: 5000 });
+
       // Open sling modal
-      await page.click('#sling-btn, [data-modal-open="sling"], button[title*="Sling"]').catch(() => {});
+      await page.click('#sling-btn');
+      await page.waitForSelector('#sling-modal:not(.hidden)', { timeout: 5000 });
+
+      // Wait for target dropdown to populate (async fetch)
       await page.waitForTimeout(500);
 
       // Check target dropdown has options
       const hasTargets = await page.evaluate(() => {
-        const select = document.querySelector('#sling-modal select[name="target"], select[name="target"]');
+        const select = document.querySelector('#sling-modal select[name="target"]');
         return select && select.options.length > 1;
       });
       expect(hasTargets).toBe(true);
     });
 
     it('should show autocomplete dropdown when typing in bead field', async () => {
+      // Switch to convoys view first
+      await page.click('[data-view="convoys"]');
+      await page.waitForSelector('#view-convoys.active', { timeout: 5000 });
+
       // Open sling modal
-      await page.click('#sling-btn, [data-modal-open="sling"]').catch(() => {});
-      await page.waitForTimeout(300);
+      await page.click('#sling-btn');
+      await page.waitForSelector('#sling-modal:not(.hidden)', { timeout: 5000 });
 
       // Type in bead field
-      const beadInput = await page.$('#sling-modal input[name="bead"], input[name="bead"]');
+      const beadInput = await page.$('#sling-modal input[name="bead"]');
       if (beadInput) {
         await beadInput.type('gt-', { delay: 100 });
         await page.waitForTimeout(400);
@@ -148,12 +163,18 @@ describe('Comprehensive Integration Tests', () => {
   describe('Escalation Flow', () => {
     it('should have escalate button on convoy cards', async () => {
       // Navigate to convoys
-      await page.click('[data-view="convoys"], .tab[data-view="convoys"]').catch(() => {});
-      await page.waitForTimeout(500);
+      await page.click('[data-view="convoys"]');
+      await page.waitForSelector('#view-convoys.active', { timeout: 5000 });
 
-      // Check for escalate button
+      // Wait for convoy cards to load (either convoy cards or empty state)
+      await page.waitForFunction(() => {
+        return document.querySelector('.convoy-card') !== null ||
+               document.querySelector('.empty-state') !== null;
+      }, { timeout: 5000 });
+
+      // Check for escalate button on convoy cards
       const hasEscalateBtn = await page.evaluate(() => {
-        const btn = document.querySelector('[data-action="escalate"], button[title*="Escalate"]');
+        const btn = document.querySelector('[data-action="escalate"]');
         return btn !== null;
       });
       expect(hasEscalateBtn).toBe(true);
@@ -161,33 +182,39 @@ describe('Comprehensive Integration Tests', () => {
 
     it('should open escalation modal when clicking escalate', async () => {
       // Navigate to convoys
-      await page.click('[data-view="convoys"], .tab[data-view="convoys"]').catch(() => {});
-      await page.waitForTimeout(500);
+      await page.click('[data-view="convoys"]');
+      await page.waitForSelector('#view-convoys.active', { timeout: 5000 });
+
+      // Wait for convoy cards to load
+      await page.waitForSelector('.convoy-card', { timeout: 5000 });
 
       // Click escalate button
-      await page.click('[data-action="escalate"], button[title*="Escalate"]').catch(() => {});
+      await page.click('[data-action="escalate"]');
       await page.waitForTimeout(300);
 
-      // Check escalation modal
+      // Check escalation modal (created dynamically)
       const modalVisible = await page.evaluate(() => {
-        const modal = document.querySelector('#escalation-modal, .modal:not(.hidden)');
-        const hasEscalateText = modal?.innerHTML?.includes('Escalate') ||
-                               modal?.innerHTML?.includes('Priority Level');
-        return modal && hasEscalateText;
+        const modal = document.querySelector('#escalation-modal');
+        return modal && !modal.classList.contains('hidden');
       });
       expect(modalVisible).toBe(true);
     });
 
     it('should have priority dropdown in escalation form', async () => {
-      // Navigate and open escalation modal
-      await page.click('[data-view="convoys"]').catch(() => {});
-      await page.waitForTimeout(300);
-      await page.click('[data-action="escalate"]').catch(() => {});
-      await page.waitForTimeout(300);
+      // Navigate to convoys
+      await page.click('[data-view="convoys"]');
+      await page.waitForSelector('#view-convoys.active', { timeout: 5000 });
 
-      // Check for priority select
+      // Wait for convoy cards to load
+      await page.waitForSelector('.convoy-card', { timeout: 5000 });
+
+      // Open escalation modal
+      await page.click('[data-action="escalate"]');
+      await page.waitForSelector('#escalation-modal:not(.hidden)', { timeout: 5000 });
+
+      // Check for priority select with expected options
       const hasPrioritySelect = await page.evaluate(() => {
-        const select = document.querySelector('select[name="priority"], #escalation-priority');
+        const select = document.querySelector('#escalation-priority');
         if (!select) return false;
         const options = Array.from(select.options).map(o => o.value);
         return options.includes('normal') && options.includes('high') && options.includes('critical');

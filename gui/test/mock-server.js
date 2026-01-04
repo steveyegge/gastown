@@ -226,13 +226,18 @@ app.get('/api/formulas/search', (req, res) => {
 });
 
 app.get('/api/targets', (req, res) => {
+  // Match the format from server.js - grouped by type
   const targets = [
-    { id: 'work1/', name: 'work1', path: 'work1/', status: 'idle' },
-    { id: 'work2/', name: 'work2', path: 'work2/', status: 'busy' },
-    { id: 'work3/', name: 'work3', path: 'work3/', status: 'idle' },
-    { id: 'work4/', name: 'work4', path: 'work4/', status: 'idle' },
-    { id: 'greenplace/Toast', name: 'Toast', path: 'greenplace/Toast', status: 'idle' },
-    { id: 'greenplace/Witness', name: 'Witness', path: 'greenplace/Witness', status: 'idle' },
+    // Global agents
+    { id: 'mayor', name: 'Mayor', type: 'global', icon: 'account_balance', description: 'Global coordinator' },
+    { id: 'deacon', name: 'Deacon', type: 'global', icon: 'health_and_safety', description: 'Health monitor' },
+    { id: 'deacon/dogs', name: 'Deacon Dogs', type: 'global', icon: 'pets', description: 'Auto-dispatch to idle dog' },
+    // Rigs (can spawn polecats)
+    { id: 'greenplace', name: 'greenplace', type: 'rig', icon: 'folder_special', description: 'Auto-spawn polecat in greenplace' },
+    { id: 'work1', name: 'work1', type: 'rig', icon: 'folder_special', description: 'Auto-spawn polecat in work1' },
+    // Running agents
+    { id: 'greenplace/Toast', name: 'greenplace/Toast', type: 'agent', role: 'polecat', icon: 'engineering', description: 'polecat in greenplace', running: true, has_work: false },
+    { id: 'greenplace/Witness', name: 'greenplace/Witness', type: 'agent', role: 'witness', icon: 'visibility', description: 'witness in greenplace', running: true, has_work: true },
   ];
   res.json(targets);
 });
@@ -250,6 +255,17 @@ app.post('/api/escalate', (req, res) => {
       timestamp: new Date().toISOString(),
     },
   });
+});
+
+app.get('/api/github/repos', (req, res) => {
+  // Mock list of user's repos
+  const repos = [
+    { name: 'gastown', nameWithOwner: 'web3dev1337/gastown', description: 'Gas Town orchestration tool', url: 'https://github.com/web3dev1337/gastown', isPrivate: false, isFork: false, pushedAt: new Date().toISOString(), primaryLanguage: { name: 'Go' }, stargazerCount: 12 },
+    { name: 'zoo-game', nameWithOwner: 'web3dev1337/zoo-game', description: 'HyTopia zoo game', url: 'https://github.com/web3dev1337/zoo-game', isPrivate: true, isFork: false, pushedAt: new Date(Date.now() - 86400000).toISOString(), primaryLanguage: { name: 'TypeScript' }, stargazerCount: 0 },
+    { name: 'epic-survivors', nameWithOwner: 'web3dev1337/epic-survivors', description: 'Survivor game', url: 'https://github.com/web3dev1337/epic-survivors', isPrivate: true, isFork: false, pushedAt: new Date(Date.now() - 172800000).toISOString(), primaryLanguage: { name: 'C#' }, stargazerCount: 0 },
+    { name: 'ai-claude-standards', nameWithOwner: 'web3dev1337/ai-claude-standards', description: 'Claude configuration', url: 'https://github.com/web3dev1337/ai-claude-standards', isPrivate: false, isFork: false, pushedAt: new Date(Date.now() - 259200000).toISOString(), primaryLanguage: { name: 'Markdown' }, stargazerCount: 5 },
+  ];
+  res.json(repos);
 });
 
 // Create HTTP server
@@ -322,10 +338,14 @@ function stopActivitySimulation() {
 }
 
 // Start server
-const PORT = process.env.PORT || 4444;
+// Use 5678 by default to avoid port conflicts with Claude orchestrator (3000)
+// and to keep production server port (5555) free
+const PORT = process.env.PORT || 5678;
+console.log(`[Mock Server] PORT configured as: ${PORT}`);
 
 export function startMockServer() {
   return new Promise((resolve) => {
+    console.log(`[Mock Server] Starting on port ${PORT}...`);
     server.listen(PORT, () => {
       console.log(`[Mock Server] Running on http://localhost:${PORT}`);
       startActivitySimulation();

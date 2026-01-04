@@ -195,8 +195,13 @@ export const api = {
     return this.request(`/api/rigs/${encodeURIComponent(name)}`, { method: 'DELETE' });
   },
 
-  runDoctor() {
-    return this.get('/api/doctor');
+  runDoctor(options = {}) {
+    const params = options.refresh ? '?refresh=true' : '';
+    return this.get(`/api/doctor${params}`);
+  },
+
+  runDoctorFix() {
+    return this.post('/api/doctor/fix');
   },
 
   // === Polecat Output ===
@@ -254,6 +259,16 @@ export const api = {
 
   getGitHubIssue(repo, number) {
     return this.get(`/api/github/issue/${encodeURIComponent(repo)}/${number}`);
+  },
+
+  // === GitHub Repos ===
+  getGitHubRepos(options = {}) {
+    const params = new URLSearchParams();
+    if (options.limit) params.set('limit', options.limit);
+    if (options.visibility) params.set('visibility', options.visibility);
+    if (options.refresh) params.set('refresh', 'true');
+    const query = params.toString();
+    return this.get(`/api/github/repos${query ? '?' + query : ''}`);
   },
 };
 

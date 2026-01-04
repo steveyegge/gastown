@@ -410,7 +410,7 @@ async function populateTargetDropdown(modalElement) {
   targetSelect.appendChild(placeholder);
 
   try {
-    // Try to get targets from API first
+    // Get targets from API
     let targets = [];
     try {
       targets = await api.getTargets();
@@ -419,60 +419,61 @@ async function populateTargetDropdown(modalElement) {
       targets = state.get('agents') || [];
     }
 
-    // Group targets by rig/town
-    const groups = new Map();
+    // Group targets by type: global, rig, agent
+    const groups = {
+      global: { label: 'Global Agents', targets: [] },
+      rig: { label: 'Rigs (auto-spawn polecat)', targets: [] },
+      agent: { label: 'Running Agents', targets: [] },
+    };
+
     targets.forEach(target => {
-      const parts = (target.path || target.id || '').split('/');
-      const group = parts.length > 1 ? parts[0] : 'Workers';
-      if (!groups.has(group)) {
-        groups.set(group, []);
+      const type = target.type || 'agent';
+      if (groups[type]) {
+        groups[type].targets.push(target);
+      } else {
+        groups.agent.targets.push(target);
       }
-      groups.get(group).push(target);
     });
 
-    // Create optgroups
-    groups.forEach((agents, groupName) => {
-      const optgroup = document.createElement('optgroup');
-      optgroup.label = groupName;
+    // Create optgroups for each non-empty group
+    Object.entries(groups).forEach(([type, group]) => {
+      if (group.targets.length === 0) return;
 
-      agents.forEach(agent => {
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = group.label;
+
+      group.targets.forEach(target => {
         const option = document.createElement('option');
-        option.value = agent.path || agent.id;
-        option.textContent = agent.name || agent.id;
-        if (agent.status === 'busy') {
+        option.value = target.id;
+        option.textContent = target.name || target.id;
+
+        // Add status indicators
+        if (target.has_work) {
           option.textContent += ' (busy)';
           option.className = 'target-busy';
+        } else if (target.running === false) {
+          option.textContent += ' (stopped)';
+          option.className = 'target-stopped';
         }
+
+        // Add description as title
+        if (target.description) {
+          option.title = target.description;
+        }
+
         optgroup.appendChild(option);
       });
 
       targetSelect.appendChild(optgroup);
     });
 
-    // If no groups, add flat list
-    if (groups.size === 0 && targets.length > 0) {
-      targets.forEach(target => {
-        const option = document.createElement('option');
-        option.value = target.path || target.id;
-        option.textContent = target.name || target.id;
-        targetSelect.appendChild(option);
-      });
-    }
-
-    // If still empty, add default workers
+    // If no targets at all, show helpful message
     if (targetSelect.options.length === 1) {
-      const defaults = [
-        { id: 'work1/', name: 'work1' },
-        { id: 'work2/', name: 'work2' },
-        { id: 'work3/', name: 'work3' },
-        { id: 'work4/', name: 'work4' },
-      ];
-      defaults.forEach(d => {
-        const option = document.createElement('option');
-        option.value = d.id;
-        option.textContent = d.name;
-        targetSelect.appendChild(option);
-      });
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No targets available - add a rig first';
+      option.disabled = true;
+      targetSelect.appendChild(option);
     }
   } catch (err) {
     console.error('[Modals] Failed to populate targets:', err);
@@ -640,9 +641,158 @@ function initHelpModal(element) {
 
 // === New Rig Modal ===
 
+// Cache for GitHub repos
+let cachedGitHubRepos = null;
+
 function initNewRigModal(element, data) {
   const form = element.querySelector('form');
   if (form) form.reset();
+
+  // Reset GitHub repo picker state
+  const repoList = document.getElementById('github-repo-list');
+  const pickerBtn = document.getElementById('github-repo-picker-btn');
+  if (repoList) repoList.classList.add('hidden');
+  if (pickerBtn) {
+    pickerBtn.querySelector('.btn-text').textContent = 'Load My Repositories';
+    pickerBtn.disabled = false;
+  }
+
+  // Set up GitHub repo picker button
+  pickerBtn?.addEventListener('click', loadGitHubRepos, { once: true });
+
+  // Set up search filtering
+  const searchInput = document.getElementById('github-repo-search');
+  searchInput?.addEventListener('input', (e) => {
+    filterGitHubRepos(e.target.value);
+  });
+}
+
+async function loadGitHubRepos() {
+  const pickerBtn = document.getElementById('github-repo-picker-btn');
+  const repoList = document.getElementById('github-repo-list');
+  const repoItems = document.getElementById('github-repo-items');
+
+  if (!pickerBtn || !repoList || !repoItems) return;
+
+  // Show loading state
+  pickerBtn.disabled = true;
+  pickerBtn.querySelector('.btn-text').textContent = 'Loading...';
+  repoItems.innerHTML = '<div class="github-repo-loading"><span class="loading-spinner"></span> Loading repositories...</div>';
+  repoList.classList.remove('hidden');
+
+  try {
+    // Use cached repos if available
+    if (!cachedGitHubRepos) {
+      cachedGitHubRepos = await api.getGitHubRepos({ limit: 100 });
+    }
+
+    renderGitHubRepos(cachedGitHubRepos);
+    pickerBtn.querySelector('.btn-text').textContent = 'Refresh List';
+    pickerBtn.disabled = false;
+
+    // Re-add click listener for refresh
+    pickerBtn.addEventListener('click', async () => {
+      cachedGitHubRepos = null;
+      await loadGitHubRepos();
+    }, { once: true });
+
+  } catch (err) {
+    repoItems.innerHTML = `<div class="github-repo-empty">Failed to load repos: ${err.message}</div>`;
+    pickerBtn.querySelector('.btn-text').textContent = 'Retry';
+    pickerBtn.disabled = false;
+    pickerBtn.addEventListener('click', loadGitHubRepos, { once: true });
+  }
+}
+
+function renderGitHubRepos(repos) {
+  const repoItems = document.getElementById('github-repo-items');
+  if (!repoItems) return;
+
+  if (!repos || repos.length === 0) {
+    repoItems.innerHTML = '<div class="github-repo-empty">No repositories found</div>';
+    return;
+  }
+
+  repoItems.innerHTML = repos.map(repo => `
+    <div class="github-repo-item ${repo.isPrivate ? 'private' : ''}"
+         data-name="${escapeAttr(repo.name)}"
+         data-url="${escapeAttr(repo.url)}">
+      <span class="material-icons repo-icon">${repo.isPrivate ? 'lock' : 'public'}</span>
+      <div class="repo-info">
+        <div class="repo-name">${escapeHtml(repo.nameWithOwner)}</div>
+        <div class="repo-desc">${escapeHtml(repo.description || 'No description')}</div>
+      </div>
+      <div class="repo-meta">
+        ${repo.primaryLanguage ? `
+          <span class="repo-lang">
+            <span class="lang-dot" style="background: ${getLanguageColor(repo.primaryLanguage.name)}"></span>
+            ${escapeHtml(repo.primaryLanguage.name)}
+          </span>
+        ` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  // Add click handlers
+  repoItems.querySelectorAll('.github-repo-item').forEach(item => {
+    item.addEventListener('click', () => selectGitHubRepo(item));
+  });
+}
+
+function filterGitHubRepos(query) {
+  if (!cachedGitHubRepos) return;
+
+  const q = query.toLowerCase();
+  const filtered = cachedGitHubRepos.filter(repo =>
+    repo.name.toLowerCase().includes(q) ||
+    repo.nameWithOwner.toLowerCase().includes(q) ||
+    (repo.description || '').toLowerCase().includes(q)
+  );
+  renderGitHubRepos(filtered);
+}
+
+function selectGitHubRepo(item) {
+  const name = item.dataset.name;
+  const url = item.dataset.url;
+
+  // Fill in the form fields
+  const nameInput = document.getElementById('rig-name');
+  const urlInput = document.getElementById('rig-url');
+
+  if (nameInput) nameInput.value = name;
+  if (urlInput) urlInput.value = url;
+
+  // Hide the repo list
+  const repoList = document.getElementById('github-repo-list');
+  if (repoList) repoList.classList.add('hidden');
+
+  // Show feedback
+  showToast(`Selected: ${name}`, 'success');
+}
+
+function getLanguageColor(lang) {
+  const colors = {
+    'JavaScript': '#f1e05a',
+    'TypeScript': '#3178c6',
+    'Python': '#3572A5',
+    'Go': '#00ADD8',
+    'Rust': '#dea584',
+    'Ruby': '#701516',
+    'Java': '#b07219',
+    'C#': '#178600',
+    'C++': '#f34b7d',
+    'C': '#555555',
+    'PHP': '#4F5D95',
+    'Swift': '#F05138',
+    'Kotlin': '#A97BFF',
+    'Markdown': '#083fa1',
+  };
+  return colors[lang] || '#8b949e';
+}
+
+function escapeAttr(str) {
+  if (!str) return '';
+  return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 async function handleNewRigSubmit(form) {

@@ -40,6 +40,22 @@ const elements = {
   rigList: document.getElementById('rig-list'),
 };
 
+// Loading state helpers
+function showLoadingState(container, message = 'Loading...') {
+  if (!container) return;
+  container.innerHTML = `
+    <div class="view-loading-state">
+      <div class="spinner-large"></div>
+      <span class="loading-text">${message}</span>
+    </div>
+  `;
+}
+
+function hideLoadingState(container) {
+  // Loading state is automatically replaced when content renders
+  // This is a no-op but kept for clarity
+}
+
 // Navigation
 const navTabs = document.querySelectorAll('.nav-tab');
 const views = document.querySelectorAll('.view');
@@ -286,12 +302,19 @@ async function loadInitialData() {
 let showAllConvoys = false;
 
 async function loadConvoys() {
+  showLoadingState(elements.convoyList, 'Loading convoys...');
   try {
     const params = showAllConvoys ? { all: 'true' } : {};
     const convoys = await api.getConvoys(params);
     state.setConvoys(convoys);
   } catch (err) {
     console.error('[App] Failed to load convoys:', err);
+    elements.convoyList.innerHTML = `
+      <div class="empty-state">
+        <span class="material-icons">error_outline</span>
+        <p>Failed to load convoys</p>
+      </div>
+    `;
   }
 }
 
@@ -328,6 +351,7 @@ function setupConvoyFilters() {
 let mailFilter = 'mine'; // 'mine' = my inbox, 'all' = all system mail
 
 async function loadMail() {
+  showLoadingState(elements.mailList, 'Loading mail...');
   try {
     let mail;
     if (mailFilter === 'all') {
@@ -340,6 +364,12 @@ async function loadMail() {
     state.setMail(mail || []);
   } catch (err) {
     console.error('[App] Failed to load mail:', err);
+    elements.mailList.innerHTML = `
+      <div class="empty-state">
+        <span class="material-icons">error_outline</span>
+        <p>Failed to load mail</p>
+      </div>
+    `;
   }
 }
 
@@ -373,6 +403,7 @@ function setupMailFilters() {
 }
 
 async function loadAgents() {
+  showLoadingState(elements.agentGrid, 'Loading agents...');
   try {
     const response = await api.getAgents();
     // Combine agents and polecats into a flat list
@@ -387,10 +418,17 @@ async function loadAgents() {
     state.setAgents(allAgents);
   } catch (err) {
     console.error('[App] Failed to load agents:', err);
+    elements.agentGrid.innerHTML = `
+      <div class="empty-state">
+        <span class="material-icons">error_outline</span>
+        <p>Failed to load agents</p>
+      </div>
+    `;
   }
 }
 
 async function loadRigs() {
+  showLoadingState(elements.rigList, 'Loading rigs...');
   try {
     // Get rigs from status (has more details than /api/rigs)
     const status = await api.getStatus();
@@ -398,6 +436,12 @@ async function loadRigs() {
     renderRigList(elements.rigList, rigs);
   } catch (err) {
     console.error('[App] Failed to load rigs:', err);
+    elements.rigList.innerHTML = `
+      <div class="empty-state">
+        <span class="material-icons">error_outline</span>
+        <p>Failed to load rigs</p>
+      </div>
+    `;
   }
 }
 
@@ -405,12 +449,19 @@ async function loadRigs() {
 let workFilter = 'closed'; // Default to showing completed work
 
 async function loadWork() {
+  showLoadingState(elements.workList, 'Loading work...');
   try {
     const params = workFilter === 'all' ? {} : { status: workFilter };
     const beads = await api.get(`/api/beads${workFilter !== 'all' ? `?status=${workFilter}` : ''}`);
     renderWorkList(elements.workList, beads || []);
   } catch (err) {
     console.error('[App] Failed to load work:', err);
+    elements.workList.innerHTML = `
+      <div class="empty-state">
+        <span class="material-icons">error_outline</span>
+        <p>Failed to load work</p>
+      </div>
+    `;
   }
 }
 

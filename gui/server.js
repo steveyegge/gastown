@@ -31,6 +31,54 @@ const PORT = process.env.PORT || 3000;
 const HOME = process.env.HOME || require('os').homedir();
 const GT_ROOT = process.env.GT_ROOT || path.join(HOME, 'gt');
 
+// Simple in-memory cache with TTL
+const cache = new Map();
+const CACHE_TTL = {
+  status: 5000,       // 5 seconds for status (frequently changing)
+  convoys: 10000,     // 10 seconds for convoys
+  mail: 15000,        // 15 seconds for mail list
+  agents: 10000,      // 10 seconds for agents
+  formulas: 60000,    // 1 minute for formulas (rarely changes)
+  github_prs: 30000,  // 30 seconds for GitHub PRs
+  github_issues: 30000, // 30 seconds for GitHub issues
+  doctor: 30000,      // 30 seconds for doctor
+};
+
+function getCached(key) {
+  const entry = cache.get(key);
+  if (entry && Date.now() < entry.expires) {
+    return entry.data;
+  }
+  cache.delete(key);
+  return null;
+}
+
+function setCache(key, data, ttl) {
+  cache.set(key, { data, expires: Date.now() + ttl });
+}
+
+// Pending requests map - prevents duplicate concurrent requests for same data
+const pendingRequests = new Map();
+
+// Get or create a pending request - deduplicates concurrent calls
+function getPendingOrExecute(key, executor) {
+  // Return cached data if available
+  const cached = getCached(key);
+  if (cached) return Promise.resolve(cached);
+
+  // Return existing pending request if one is in flight
+  if (pendingRequests.has(key)) {
+    return pendingRequests.get(key);
+  }
+
+  // Execute and store promise
+  const promise = executor().finally(() => {
+    pendingRequests.delete(key);
+  });
+  pendingRequests.set(key, promise);
+  return promise;
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -110,6 +158,11 @@ async function executeGT(args, options = {}) {
 
     return { success: true, data: stdout.trim() };
   } catch (error) {
+    // Commands like 'gt doctor' exit with code 1 when issues found, but still have useful output
+    if (error.stdout) {
+      console.warn(`[GT] Command exited with error but has output: ${error.message}`);
+      return { success: true, data: error.stdout.trim(), exitCode: error.code };
+    }
     console.error(`[GT] Error: ${error.message}`);
     return { success: false, error: error.message };
   }
@@ -149,6 +202,14 @@ function parseJSON(output) {
 
 // Town status overview
 app.get('/api/status', async (req, res) => {
+  // Check cache first (skip if ?refresh=true)
+  if (req.query.refresh !== 'true') {
+    const cached = getCached('status');
+    if (cached) {
+      return res.json(cached);
+    }
+  }
+
   const [result, runningPolecats] = await Promise.all([
     executeGT(['status', '--json', '--fast']),
     getRunningPolecats()
@@ -183,6 +244,9 @@ app.get('/api/status', async (req, res) => {
         }
       }
       data.runningPolecats = Array.from(runningPolecats);
+
+      // Cache the result
+      setCache('status', data, CACHE_TTL.status);
     }
     res.json(data || { raw: result.data });
   } else {
@@ -192,14 +256,23 @@ app.get('/api/status', async (req, res) => {
 
 // List convoys
 app.get('/api/convoys', async (req, res) => {
+  const cacheKey = `convoys_${req.query.all || 'false'}_${req.query.status || 'all'}`;
+
+  // Check cache
+  if (req.query.refresh !== 'true') {
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+  }
+
   const args = ['convoy', 'list', '--json'];
   if (req.query.all === 'true') args.push('--all');
   if (req.query.status) args.push(`--status=${req.query.status}`);
 
   const result = await executeGT(args);
   if (result.success) {
-    const data = parseJSON(result.data);
-    res.json(data || []);
+    const data = parseJSON(result.data) || [];
+    setCache(cacheKey, data, CACHE_TTL.convoys);
+    res.json(data);
   } else {
     res.status(500).json({ error: result.error });
   }
@@ -274,12 +347,131 @@ app.post('/api/sling', async (req, res) => {
   }
 });
 
+// Get available sling targets
+app.get('/api/targets', async (req, res) => {
+  try {
+    // Get status which includes rigs and agents
+    const statusResult = await getPendingOrExecute('status', async () => {
+      const result = await executeGT(['status', '--json', '--fast']);
+      if (result.success) {
+        const data = parseJSON(result.data) || {};
+        setCache('status', data, CACHE_TTL.status);
+        return data;
+      }
+      return null;
+    });
+
+    const status = statusResult || {};
+    const rigs = status.rigs || [];
+    const targets = [];
+
+    // Global agents
+    targets.push({
+      id: 'mayor',
+      name: 'Mayor',
+      type: 'global',
+      icon: 'account_balance',
+      description: 'Global coordinator - dispatches work across all projects'
+    });
+    targets.push({
+      id: 'deacon',
+      name: 'Deacon',
+      type: 'global',
+      icon: 'health_and_safety',
+      description: 'Health monitor - can dispatch to dogs'
+    });
+    targets.push({
+      id: 'deacon/dogs',
+      name: 'Deacon Dogs',
+      type: 'global',
+      icon: 'pets',
+      description: 'Auto-dispatch to an idle dog worker'
+    });
+
+    // Rigs (can spawn polecats)
+    rigs.forEach(rig => {
+      targets.push({
+        id: rig.name,
+        name: rig.name,
+        type: 'rig',
+        icon: 'folder_special',
+        description: `Auto-spawn polecat in ${rig.name}`
+      });
+
+      // Existing agents in rig
+      if (rig.agents) {
+        rig.agents.forEach(agent => {
+          if (agent.running) {
+            targets.push({
+              id: `${rig.name}/${agent.name}`,
+              name: `${rig.name}/${agent.name}`,
+              type: 'agent',
+              role: agent.role,
+              icon: agent.role === 'witness' ? 'visibility' :
+                    agent.role === 'refinery' ? 'merge_type' : 'engineering',
+              description: `${agent.role} in ${rig.name}`,
+              running: agent.running,
+              has_work: agent.has_work
+            });
+          }
+        });
+      }
+    });
+
+    res.json(targets);
+  } catch (err) {
+    console.error('[API] Error getting targets:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Escalate issue to human overseer
+app.post('/api/escalate', async (req, res) => {
+  // UI sends: convoy_id, reason, priority
+  // gt escalate expects: <topic> -s <severity> -m <message>
+  const { convoy_id, reason, priority } = req.body;
+
+  if (!reason) {
+    return res.status(400).json({ error: 'Reason is required' });
+  }
+
+  // Map priority to severity: normal→MEDIUM, high→HIGH, critical→CRITICAL
+  const severityMap = {
+    normal: 'MEDIUM',
+    high: 'HIGH',
+    critical: 'CRITICAL'
+  };
+  const severity = severityMap[priority] || 'MEDIUM';
+
+  // Build topic from convoy context
+  const topic = convoy_id
+    ? `Convoy ${convoy_id.slice(0, 8)} needs attention`
+    : 'Issue needs attention';
+
+  const args = ['escalate', topic, '-s', severity, '-m', reason];
+
+  const result = await executeGT(args);
+  if (result.success) {
+    broadcast({ type: 'escalation', data: { convoy_id, reason, priority, severity } });
+    res.json({ success: true, data: result.data });
+  } else {
+    res.status(500).json({ error: result.error });
+  }
+});
+
 // Get mail inbox
 app.get('/api/mail', async (req, res) => {
+  // Check cache
+  if (req.query.refresh !== 'true') {
+    const cached = getCached('mail');
+    if (cached) return res.json(cached);
+  }
+
   const result = await executeGT(['mail', 'inbox', '--json']);
   if (result.success) {
-    const data = parseJSON(result.data);
-    res.json(data || []);
+    const data = parseJSON(result.data) || [];
+    setCache('mail', data, CACHE_TTL.mail);
+    res.json(data);
   } else {
     res.status(500).json({ error: result.error });
   }
@@ -584,8 +776,14 @@ app.post('/api/nudge', async (req, res) => {
 
 // Get agent list
 app.get('/api/agents', async (req, res) => {
+  // Check cache
+  if (req.query.refresh !== 'true') {
+    const cached = getCached('agents');
+    if (cached) return res.json(cached);
+  }
+
   const [result, runningPolecats] = await Promise.all([
-    executeGT(['status', '--json', '--fast'], { timeout: 60000 }),
+    executeGT(['status', '--json', '--fast'], { timeout: 30000 }),
     getRunningPolecats()
   ]);
 
@@ -615,7 +813,9 @@ app.get('/api/agents', async (req, res) => {
       }
     }
 
-    res.json({ agents, polecats, runningPolecats: Array.from(runningPolecats) });
+    const response = { agents, polecats, runningPolecats: Array.from(runningPolecats) };
+    setCache('agents', response, CACHE_TTL.agents);
+    res.json(response);
   } else {
     res.status(500).json({ error: result.error });
   }
@@ -863,6 +1063,22 @@ app.post('/api/rigs', async (req, res) => {
   const result = await executeGT(['rig', 'add', name, url]);
 
   if (result.success) {
+    // Create agent beads for witness and refinery (targeted, not gt doctor --fix)
+    const agentRoles = ['witness', 'refinery'];
+    for (const role of agentRoles) {
+      const beadResult = await executeBD([
+        'create', '--type', 'agent',
+        '--agent-rig', name,
+        '--role-type', role,
+        '--silent'
+      ]);
+      if (!beadResult.success) {
+        console.warn(`[BD] Failed to create ${role} bead for ${name}:`, beadResult.error);
+      } else {
+        console.log(`[BD] Created ${role} agent bead for ${name}`);
+      }
+    }
+
     broadcast({ type: 'rig_added', data: { name, url } });
     res.json({ success: true, name, raw: result.data });
   } else {
@@ -911,50 +1127,113 @@ app.delete('/api/rigs/:name', async (req, res) => {
 
 // Run gt doctor
 app.get('/api/doctor', async (req, res) => {
-  // First try with --json flag
-  let result = await executeGT(['doctor', '--json']);
+  // Check cache first (skip if ?refresh=true)
+  if (req.query.refresh !== 'true') {
+    const cached = getCached('doctor');
+    if (cached) {
+      return res.json(cached);
+    }
+  }
+
+  // First try with --json flag (gt doctor can take 15-20s)
+  let result = await executeGT(['doctor', '--json'], { timeout: 25000 });
 
   if (result.success) {
     const data = parseJSON(result.data);
     if (data) {
+      setCache('doctor', data, 30000); // 30s cache
       return res.json(data);
     }
     // If JSON parse failed, return raw output
-    return res.json({ raw: result.data, checks: [] });
+    const response = { raw: result.data, checks: [] };
+    setCache('doctor', response, 30000);
+    return res.json(response);
   }
 
-  // Fallback: try without --json flag
-  result = await executeGT(['doctor']);
+  // Fallback: try without --json flag (gt doctor can take 15-20s)
+  result = await executeGT(['doctor'], { timeout: 25000 });
 
   if (result.success) {
-    // Parse text output into structured format
+    // Parse text output into structured format with details
     const lines = result.data.split('\n');
     const checks = [];
+    let currentCheck = null;
 
     for (const line of lines) {
-      // Parse lines like "✓ Mayor running" or "✗ Witness not running"
-      const passMatch = line.match(/^[✓✔]\s*(.+)$/);
-      const failMatch = line.match(/^[✗✘×]\s*(.+)$/);
-      const warnMatch = line.match(/^[⚠!]\s*(.+)$/);
+      // Parse status lines: "✓ check-name: description" or "✗ check-name: description"
+      const checkMatch = line.match(/^([✓✔✗✘×⚠!])\s*([^:]+):\s*(.+)$/);
 
-      if (passMatch) {
-        checks.push({ name: passMatch[1].trim(), status: 'pass', result: 'pass' });
-      } else if (failMatch) {
-        checks.push({ name: failMatch[1].trim(), status: 'fail', result: 'fail' });
-      } else if (warnMatch) {
-        checks.push({ name: warnMatch[1].trim(), status: 'warn', result: 'warn' });
+      if (checkMatch) {
+        // Save previous check
+        if (currentCheck) checks.push(currentCheck);
+
+        const [, symbol, checkName, description] = checkMatch;
+        const status = '✓✔'.includes(symbol) ? 'pass' : '✗✘×'.includes(symbol) ? 'fail' : 'warn';
+
+        currentCheck = {
+          id: checkName.trim(),
+          name: checkName.trim(),
+          description: description.trim(),
+          status,
+          details: [],
+          fix: null
+        };
+      } else if (currentCheck) {
+        // Capture detail lines (indented)
+        const detailMatch = line.match(/^\s{4}(.+)$/);
+        if (detailMatch) {
+          const detail = detailMatch[1].trim();
+          // Check if it's a fix command
+          if (detail.startsWith('→')) {
+            currentCheck.fix = detail.substring(1).trim();
+          } else {
+            currentCheck.details.push(detail);
+          }
+        }
       }
     }
 
-    return res.json({ checks, raw: result.data });
+    // Don't forget last check
+    if (currentCheck) checks.push(currentCheck);
+
+    // Parse summary line
+    const summaryMatch = result.data.match(/(\d+)\s*checks?,\s*(\d+)\s*passed?,\s*(\d+)\s*warnings?,\s*(\d+)\s*errors?/);
+    const summary = summaryMatch ? {
+      total: parseInt(summaryMatch[1]),
+      passed: parseInt(summaryMatch[2]),
+      warnings: parseInt(summaryMatch[3]),
+      errors: parseInt(summaryMatch[4])
+    } : null;
+
+    const response = { checks, summary, raw: result.data };
+    setCache('doctor', response, 30000);
+    return res.json(response);
   }
 
   // Both failed - return error but with 200 to avoid breaking the UI
-  res.json({
+  const response = {
     checks: [],
     raw: result.error || 'gt doctor command not available',
     error: result.error
-  });
+  };
+  setCache('doctor', response, 10000); // Short cache for errors
+  res.json(response);
+});
+
+// Run gt doctor --fix
+app.post('/api/doctor/fix', async (req, res) => {
+  try {
+    const result = await executeGT(['doctor', '--fix'], { timeout: 60000 });
+    // Clear doctor cache so next check shows fresh results
+    cache.delete('doctor');
+    if (result.success) {
+      res.json({ success: true, output: result.data });
+    } else {
+      res.json({ success: false, error: result.error, output: result.data || '' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ============= Service Controls (Mayor, Witness, Refinery) =============
@@ -1078,12 +1357,19 @@ app.get('/api/service/:name/status', async (req, res) => {
 
 // List all formulas
 app.get('/api/formulas', async (req, res) => {
+  // Check cache
+  if (req.query.refresh !== 'true') {
+    const cached = getCached('formulas');
+    if (cached) return res.json(cached);
+  }
+
   // Try gt formula list first
   let result = await executeGT(['formula', 'list', '--json']);
 
   if (result.success) {
     const formulas = parseJSON(result.data);
     if (formulas) {
+      setCache('formulas', formulas, CACHE_TTL.formulas);
       return res.json(formulas);
     }
   }
@@ -1101,6 +1387,7 @@ app.get('/api/formulas', async (req, res) => {
       }
     }
     if (formulas.length > 0) {
+      setCache('formulas', formulas, CACHE_TTL.formulas);
       return res.json(formulas);
     }
   }
@@ -1112,6 +1399,7 @@ app.get('/api/formulas', async (req, res) => {
       timeout: 10000
     });
     const formulas = JSON.parse(stdout || '[]');
+    setCache('formulas', formulas, CACHE_TTL.formulas);
     return res.json(formulas);
   } catch {
     // Final fallback - empty array
@@ -1220,11 +1508,19 @@ function extractGitHubRepo(gitUrl) {
 // Get all GitHub PRs across rigs
 app.get('/api/github/prs', async (req, res) => {
   const state = req.query.state || 'open'; // open, closed, all
-  const allPRs = [];
+  const cacheKey = `github_prs_${state}`;
+
+  // Check cache first (skip if ?refresh=true)
+  if (req.query.refresh !== 'true') {
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+  }
 
   try {
-    // Get status to find rigs and their git_urls
-    const result = await executeGT(['status', '--json']);
+    // Get status with --fast flag (uses cached status data from gt)
+    const result = await executeGT(['status', '--json', '--fast']);
     if (!result.success) {
       return res.status(500).json({ error: 'Failed to get status' });
     }
@@ -1232,42 +1528,53 @@ app.get('/api/github/prs', async (req, res) => {
     const data = parseJSON(result.data) || {};
     const rigs = data.rigs || [];
 
-    // Read config.json for each rig to get git_url
+    // Enrich rigs with git_url from config.json (not in raw status)
     for (const rig of rigs) {
-      try {
-        const rigConfigPath = path.join(GT_ROOT, rig.name, 'config.json');
-        if (fs.existsSync(rigConfigPath)) {
-          const rigConfig = JSON.parse(fs.readFileSync(rigConfigPath, 'utf8'));
-          const repo = extractGitHubRepo(rigConfig.git_url);
-
-          if (repo) {
-            // Fetch PRs for this repo using gh CLI
-            try {
-              const { stdout } = await execAsync(
-                `gh pr list --repo ${repo} --state ${state} --json number,title,author,createdAt,updatedAt,url,headRefName,state,isDraft,reviewDecision --limit 20`,
-                { timeout: 15000 }
-              );
-
-              const prs = JSON.parse(stdout || '[]');
-              prs.forEach(pr => {
-                allPRs.push({
-                  ...pr,
-                  rig: rig.name,
-                  repo: repo
-                });
-              });
-            } catch (ghErr) {
-              console.error(`[GitHub] Failed to fetch PRs for ${repo}:`, ghErr.message);
-            }
+      if (!rig.git_url) {
+        try {
+          const rigConfigPath = path.join(GT_ROOT, rig.name, 'config.json');
+          if (fs.existsSync(rigConfigPath)) {
+            const rigConfig = JSON.parse(fs.readFileSync(rigConfigPath, 'utf8'));
+            rig.git_url = rigConfig.git_url || null;
           }
+        } catch (e) {
+          // Config not found or invalid
         }
-      } catch (e) {
-        console.error(`[GitHub] Error reading rig config for ${rig.name}:`, e.message);
       }
     }
+    console.log(`[GitHub] Found ${rigs.length} rigs, ${rigs.filter(r => r.git_url).length} with git_url`);
+
+    // Extract repos from rigs
+    const repoPromises = rigs
+      .filter(rig => rig.git_url)
+      .map(rig => {
+        const repo = extractGitHubRepo(rig.git_url);
+        if (!repo) return Promise.resolve([]);
+
+        // Fetch PRs in parallel
+        return execAsync(
+          `gh pr list --repo ${repo} --state ${state} --json number,title,author,createdAt,updatedAt,url,headRefName,state,isDraft,reviewDecision --limit 20`,
+          { timeout: 10000 }
+        )
+          .then(({ stdout }) => {
+            const prs = JSON.parse(stdout || '[]');
+            return prs.map(pr => ({ ...pr, rig: rig.name, repo }));
+          })
+          .catch(err => {
+            console.error(`[GitHub] Failed to fetch PRs for ${repo}:`, err.message);
+            return [];
+          });
+      });
+
+    // Wait for all PR fetches to complete in parallel
+    const results = await Promise.all(repoPromises);
+    const allPRs = results.flat();
 
     // Sort by updated date descending
     allPRs.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+
+    // Cache the result
+    setCache(cacheKey, allPRs, CACHE_TTL.github_prs);
 
     res.json(allPRs);
   } catch (err) {
@@ -1297,11 +1604,17 @@ app.get('/api/github/pr/:repo/:number', async (req, res) => {
 // Get GitHub issues across all rigs
 app.get('/api/github/issues', async (req, res) => {
   const state = req.query.state || 'open'; // open, closed, all
-  const allIssues = [];
+  const cacheKey = `github_issues_${state}`;
+
+  // Check cache
+  if (req.query.refresh !== 'true') {
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+  }
 
   try {
-    // Get status to find rigs and their git_urls
-    const result = await executeGT(['status', '--json']);
+    // Get status with --fast flag
+    const result = await executeGT(['status', '--json', '--fast']);
     if (!result.success) {
       return res.status(500).json({ error: 'Failed to get status' });
     }
@@ -1309,50 +1622,51 @@ app.get('/api/github/issues', async (req, res) => {
     const status = parseJSON(result.data);
     const rigs = status?.rigs || [];
 
-    // Extract GitHub repos from rigs
+    // Enrich rigs with git_url from config.json
     for (const rig of rigs) {
-      let repoUrl = rig.git_url || rig.github_url;
-
-      // Try to read from config if not in status
-      if (!repoUrl && rig.path) {
+      if (!rig.git_url) {
         try {
-          const configPath = path.join(rig.path, '.bd', 'config.json');
-          const configContent = await fs.readFile(configPath, 'utf-8');
-          const config = JSON.parse(configContent);
-          repoUrl = config.git_url || config.github_url || config.remote?.github;
-        } catch (e) {
-          // No config
-        }
-      }
-
-      if (repoUrl) {
-        // Extract owner/repo from URL
-        const match = repoUrl.match(/github\.com[\/:]([^\/]+)\/([^\/\.]+)/);
-        if (match) {
-          const repo = `${match[1]}/${match[2]}`;
-          try {
-            // Use gh CLI to list issues
-            const { stdout } = await execAsync(
-              `gh issue list --repo ${repo} --state ${state} --json number,title,author,labels,createdAt,updatedAt,url,state,body --limit 50`,
-              { timeout: 15000 }
-            );
-            const issues = JSON.parse(stdout || '[]');
-            issues.forEach(issue => {
-              allIssues.push({
-                ...issue,
-                repo,
-                rig: rig.name,
-              });
-            });
-          } catch (e) {
-            console.warn(`[GitHub] Failed to fetch issues for ${repo}:`, e.message);
+          const rigConfigPath = path.join(GT_ROOT, rig.name, 'config.json');
+          if (fs.existsSync(rigConfigPath)) {
+            const rigConfig = JSON.parse(fs.readFileSync(rigConfigPath, 'utf8'));
+            rig.git_url = rigConfig.git_url || null;
           }
+        } catch (e) {
+          // Config not found
         }
       }
     }
 
+    // Fetch issues in parallel (like PRs)
+    const issuePromises = rigs
+      .filter(rig => rig.git_url)
+      .map(rig => {
+        const repo = extractGitHubRepo(rig.git_url);
+        if (!repo) return Promise.resolve([]);
+
+        return execAsync(
+          `gh issue list --repo ${repo} --state ${state} --json number,title,author,labels,createdAt,updatedAt,url,state --limit 30`,
+          { timeout: 10000 }
+        )
+          .then(({ stdout }) => {
+            const issues = JSON.parse(stdout || '[]');
+            return issues.map(issue => ({ ...issue, repo, rig: rig.name }));
+          })
+          .catch(err => {
+            console.warn(`[GitHub] Failed to fetch issues for ${repo}:`, err.message);
+            return [];
+          });
+      });
+
+    // Wait for all fetches in parallel
+    const results = await Promise.all(issuePromises);
+    const allIssues = results.flat();
+
     // Sort by updatedAt descending
     allIssues.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+
+    // Cache result
+    setCache(cacheKey, allIssues, CACHE_TTL.github_issues);
 
     res.json(allIssues);
   } catch (err) {
@@ -1375,6 +1689,39 @@ app.get('/api/github/issue/:repo/:number', async (req, res) => {
     res.json(issue);
   } catch (err) {
     console.error(`[GitHub] Error fetching issue #${number}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List all GitHub repos for current user
+app.get('/api/github/repos', async (req, res) => {
+  const limit = parseInt(req.query.limit) || 100;
+  const visibility = req.query.visibility || 'all'; // all, public, private
+  const cacheKey = `github_repos_${visibility}_${limit}`;
+
+  // Check cache (repos don't change often)
+  if (req.query.refresh !== 'true') {
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+  }
+
+  try {
+    const { stdout } = await execAsync(
+      `gh repo list --limit ${limit} --visibility ${visibility} --json name,nameWithOwner,description,url,isPrivate,isFork,pushedAt,primaryLanguage,stargazerCount`,
+      { timeout: 30000 }
+    );
+
+    const repos = JSON.parse(stdout || '[]');
+
+    // Sort by most recently pushed
+    repos.sort((a, b) => new Date(b.pushedAt) - new Date(a.pushedAt));
+
+    // Cache for 5 minutes
+    setCache(cacheKey, repos, 5 * 60 * 1000);
+
+    res.json(repos);
+  } catch (err) {
+    console.error('[GitHub] Error listing repos:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1456,11 +1803,21 @@ wss.on('connection', (ws) => {
     startActivityStream();
   }
 
-  // Send initial status
-  executeGT(['status', '--json', '--fast']).then(result => {
+  // Send initial status - uses deduplication to prevent duplicate concurrent requests
+  getPendingOrExecute('status', async () => {
+    const result = await executeGT(['status', '--json', '--fast']);
     if (result.success) {
-      ws.send(JSON.stringify({ type: 'status', data: parseJSON(result.data) }));
+      const data = parseJSON(result.data);
+      if (data) setCache('status', data, CACHE_TTL.status);
+      return data;
     }
+    return null;
+  }).then(data => {
+    if (data && ws.readyState === 1) { // OPEN
+      ws.send(JSON.stringify({ type: 'status', data }));
+    }
+  }).catch(err => {
+    console.error('[WS] Error getting initial status:', err.message);
   });
 
   ws.on('close', () => {

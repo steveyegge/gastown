@@ -506,6 +506,26 @@
           </button>
         </div>
         <form class="modal-body" id="new-rig-form">
+          <!-- GitHub Repo Picker -->
+          <div class="form-group">
+            <label>Pick from GitHub</label>
+            <div class="github-repo-picker">
+              <button type="button" class="btn btn-secondary btn-block" id="github-repo-picker-btn">
+                <span class="material-icons">cloud_download</span>
+                <span class="btn-text">Load My Repositories</span>
+              </button>
+              <div class="github-repo-list hidden" id="github-repo-list">
+                <input type="text" class="github-repo-search" id="github-repo-search" placeholder="Search repos...">
+                <div class="github-repo-items" id="github-repo-items">
+                  <!-- Populated by JS -->
+                </div>
+              </div>
+            </div>
+            <span class="form-hint">Or enter details manually below</span>
+          </div>
+          <div class="form-divider">
+            <span>or enter manually</span>
+          </div>
           <div class="form-group">
             <label for="rig-name">Rig Name</label>
             <input type="text" id="rig-name" name="name" placeholder="e.g., my-project" required>
