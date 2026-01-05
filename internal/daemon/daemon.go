@@ -780,6 +780,7 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", "polecat")
 	_ = d.tmux.SetEnvironment(sessionName, "GT_RIG", rigName)
 	_ = d.tmux.SetEnvironment(sessionName, "GT_POLECAT", polecatName)
+	_ = d.tmux.SetEnvironment(sessionName, "GT_ROOT", d.config.TownRoot)
 
 	bdActor := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
 	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", bdActor)

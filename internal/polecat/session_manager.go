@@ -155,9 +155,16 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		debugSession("SetEnvironment CLAUDE_CONFIG_DIR", m.tmux.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", opts.ClaudeConfigDir))
 	}
 
-	// Set beads environment for worktree polecats (non-fatal)
-	townRoot := filepath.Dir(m.rig.Path)
+	// CRITICAL: Set beads environment for worktree polecats (non-fatal: session works without)
+	// Polecats need access to TOWN-level beads (parent of rig) for hooks and convoys.
+	// Town beads use hq- prefix and store hooks, mail, and cross-rig coordination.
+	// BEADS_NO_DAEMON=1 prevents daemon from committing to wrong branch.
+	// Using town-level beads ensures gt prime and bd commands can find hooked work.
+	// GT_ROOT allows beads formula parser to find formulas in town beads when running
+	// from rig context
+	townRoot := filepath.Dir(m.rig.Path) // Town root is parent of rig directory
 	beadsDir := filepath.Join(townRoot, ".beads")
+	debugSession("SetEnvironment GT_ROOT", m.tmux.SetEnvironment(sessionID, "GT_ROOT", townRoot))
 	debugSession("SetEnvironment BEADS_DIR", m.tmux.SetEnvironment(sessionID, "BEADS_DIR", beadsDir))
 	debugSession("SetEnvironment BEADS_NO_DAEMON", m.tmux.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1"))
 	debugSession("SetEnvironment BEADS_AGENT_NAME", m.tmux.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/%s", m.rig.Name, polecat)))

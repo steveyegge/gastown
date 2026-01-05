@@ -398,9 +398,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 		// Run from hookWorkDir (polecat worktree) so wisp is created in rig beads,
 		// not town beads. This ensures wisp and target bead are in the same database
 		// so bd mol bond can find both.
+		// Set GT_ROOT so beads can find formulas in town beads
 		featureVar := fmt.Sprintf("feature=%s", info.Title)
 		wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--json"}
 		wispCmd := exec.Command("bd", wispArgs...)
+		wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
 		if hookWorkDir != "" {
 			wispCmd.Dir = hookWorkDir
 		}

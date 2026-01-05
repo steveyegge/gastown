@@ -898,7 +898,7 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 }
 
 func TestBuildPolecatStartupCommand(t *testing.T) {
-	cmd := BuildPolecatStartupCommand("gastown", "toast", "", "")
+	cmd := BuildPolecatStartupCommand("gastown", "toast", "/home/user/gt/gastown", "")
 
 	if !strings.Contains(cmd, "GT_ROLE=polecat") {
 		t.Error("expected GT_ROLE=polecat in command")
@@ -909,13 +909,16 @@ func TestBuildPolecatStartupCommand(t *testing.T) {
 	if !strings.Contains(cmd, "GT_POLECAT=toast") {
 		t.Error("expected GT_POLECAT=toast in command")
 	}
+	if !strings.Contains(cmd, "GT_ROOT=/home/user/gt") {
+		t.Error("expected GT_ROOT in command")
+	}
 	if !strings.Contains(cmd, "BD_ACTOR=gastown/polecats/toast") {
 		t.Error("expected BD_ACTOR in command")
 	}
 }
 
 func TestBuildCrewStartupCommand(t *testing.T) {
-	cmd := BuildCrewStartupCommand("gastown", "max", "", "")
+	cmd := BuildCrewStartupCommand("gastown", "max", "/home/user/gt/gastown", "")
 
 	if !strings.Contains(cmd, "GT_ROLE=crew") {
 		t.Error("expected GT_ROLE=crew in command")
