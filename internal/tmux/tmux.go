@@ -14,6 +14,11 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
+// versionPattern matches semantic version strings like "2.0.76".
+// Claude Code reports its version as the pane command in some environments.
+// Compiled once at package init for performance.
+var versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+`)
+
 // Common errors
 var (
 	ErrNoServer       = errors.New("no tmux server running")
@@ -540,8 +545,8 @@ func (t *Tmux) IsClaudeRunning(session string) bool {
 		return true
 	}
 	// Check for version pattern (e.g., "2.0.76") - Claude Code shows version as pane command
-	matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+`, cmd)
-	return matched
+	// Uses pre-compiled versionPattern for performance
+	return versionPattern.MatchString(cmd)
 }
 
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.

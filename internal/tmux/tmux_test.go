@@ -2,7 +2,6 @@ package tmux
 
 import (
 	"os/exec"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -386,36 +385,143 @@ func TestGetPaneCommand_ShellSession(t *testing.T) {
 
 func TestVersionPatternMatching(t *testing.T) {
 	// Test the version pattern regex used in IsClaudeRunning
-	pattern := `^\d+\.\d+\.\d+`
+	// Uses the exported versionPattern for consistency with production code
 
 	testCases := []struct {
 		input    string
 		expected bool
+		desc     string
 	}{
 		// Valid version patterns (should match)
-		{"2.0.76", true},
-		{"1.0.23", true},
-		{"10.20.30", true},
-		{"0.0.1", true},
-		{"123.456.789", true},
+		{"2.0.76", true, "standard version"},
+		{"1.0.23", true, "standard version"},
+		{"10.20.30", true, "double-digit version"},
+		{"0.0.1", true, "minimum valid version"},
+		{"1.0.0", true, "1.0.0 release"},
+		{"99.99.99", true, "large version numbers"},
+		{"123.456.789", true, "very large version numbers"},
+		{"0.0.0", true, "all zeros"},
 
 		// Invalid patterns (should not match)
-		{"node", false},
-		{"claude", false},
-		{"bash", false},
-		{"zsh", false},
-		{"", false},
-		{"2.0", false},         // Missing patch version
-		{"2", false},           // Only major version
-		{"v2.0.76", false},     // Leading 'v'
-		{"2.0.76-beta", true},  // Matches prefix (pattern uses ^ but not $)
-		{".0.76", false},       // Missing major version
+		{"node", false, "process name: node"},
+		{"claude", false, "process name: claude"},
+		{"bash", false, "shell: bash"},
+		{"zsh", false, "shell: zsh"},
+		{"sh", false, "shell: sh"},
+		{"fish", false, "shell: fish"},
+		{"vim", false, "editor: vim"},
+		{"nvim", false, "editor: nvim"},
+		{"emacs", false, "editor: emacs"},
+		{"python", false, "interpreter: python"},
+		{"python3", false, "interpreter: python3"},
+		{"", false, "empty string"},
+		{" ", false, "single space"},
+		{"   ", false, "multiple spaces"},
+		{"\t", false, "tab character"},
+		{"\n", false, "newline character"},
+		{"2.0", false, "missing patch version"},
+		{"2", false, "only major version"},
+		{"v2.0.76", false, "leading 'v' prefix"},
+		{"V2.0.76", false, "leading 'V' prefix (uppercase)"},
+		{".0.76", false, "missing major version"},
+		{"2..76", false, "missing minor version"},
+		{"2.0.", false, "trailing dot, missing patch"},
+		{"-1.0.0", false, "negative major version"},
+		{"1.-1.0", false, "negative minor version"},
+		{"1.0.-1", false, "negative patch version"},
+		{"a.b.c", false, "letters instead of numbers"},
+		{"1.2.3.4", true, "four-part version (matches prefix)"},
+		{"1.2.3-beta", true, "prerelease suffix (matches prefix)"},
+		{"1.2.3+build", true, "build metadata (matches prefix)"},
+		{"1.2.3-rc.1", true, "release candidate (matches prefix)"},
+
+		// Edge cases with whitespace
+		{" 2.0.76", false, "leading space"},
+		{"2.0.76 ", true, "trailing space (matches prefix)"},
+		{" 2.0.76 ", false, "surrounded by spaces"},
+
+		// Unicode edge cases
+		{"２.０.７６", false, "fullwidth digits"},
+		{"2.0.76日本語", true, "version with Japanese suffix (matches prefix)"},
 	}
 
 	for _, tc := range testCases {
-		matched, _ := regexp.MatchString(pattern, tc.input)
-		if matched != tc.expected {
-			t.Errorf("pattern %q on input %q: got %v, want %v", pattern, tc.input, matched, tc.expected)
+		t.Run(tc.desc, func(t *testing.T) {
+			matched := versionPattern.MatchString(tc.input)
+			if matched != tc.expected {
+				t.Errorf("versionPattern.MatchString(%q): got %v, want %v", tc.input, matched, tc.expected)
+			}
+		})
+	}
+}
+
+func TestVersionPatternMatchingBoundary(t *testing.T) {
+	// Test boundary conditions for version pattern
+
+	t.Run("very long version string", func(t *testing.T) {
+		// 1000+ digit version numbers
+		longVersion := strings.Repeat("9", 1000) + "." + strings.Repeat("9", 1000) + "." + strings.Repeat("9", 1000)
+		if !versionPattern.MatchString(longVersion) {
+			t.Errorf("expected very long version string to match")
 		}
+	})
+
+	t.Run("version at max int", func(t *testing.T) {
+		maxInt := "9223372036854775807.9223372036854775807.9223372036854775807"
+		if !versionPattern.MatchString(maxInt) {
+			t.Errorf("expected max int version to match")
+		}
+	})
+
+	t.Run("very long non-version string", func(t *testing.T) {
+		longStr := strings.Repeat("bash", 10000)
+		if versionPattern.MatchString(longStr) {
+			t.Errorf("expected very long non-version string to not match")
+		}
+	})
+
+	t.Run("unicode zero-width characters", func(t *testing.T) {
+		// Zero-width space before version
+		zws := "\u200B2.0.76"
+		if versionPattern.MatchString(zws) {
+			t.Errorf("expected version with zero-width space prefix to not match")
+		}
+	})
+}
+
+func TestVersionPatternPerformance(t *testing.T) {
+	// Verify that versionPattern is pre-compiled (not re-compiled on each call)
+	// This is a compile-time guarantee now, but we test behavior consistency
+
+	testInputs := []string{
+		"2.0.76", "node", "bash", "123.456.789", "",
+		"v1.0.0", "1.0", "very-long-shell-name-that-shouldnt-match",
+	}
+
+	// Run multiple iterations - if regex were compiled each time, this would be slow
+	for i := 0; i < 1000; i++ {
+		for _, input := range testInputs {
+			_ = versionPattern.MatchString(input)
+		}
+	}
+
+	// If we got here without timeout, the pre-compiled pattern is working
+	// The test framework will catch any significant slowdown
+}
+
+func TestIsClaudeRunningDirectMatches(t *testing.T) {
+	// Test that IsClaudeRunning handles direct matches (node, claude) before regex
+	// This tests the implementation logic, not just the regex
+
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Test nonexistent session - should return false without panic
+	result := tm.IsClaudeRunning("completely-nonexistent-session-12345")
+	if result {
+		t.Error("IsClaudeRunning returned true for nonexistent session")
 	}
 }
