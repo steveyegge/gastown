@@ -46,8 +46,8 @@ bd show hq-deacon 2>/dev/null
 # Recent feed events
 gt feed --since 10m --plain | head -20
 
-# Recent wisps (operational state)
-ls -lt ~/gt/.beads-wisp/*.wisp.json 2>/dev/null | head -5
+# Recent wisps (operational state, now in main beads)
+bd list --type=wisp --sort=updated 2>/dev/null | head -5
 ```
 
 **Step 4: Check Deacon mail**

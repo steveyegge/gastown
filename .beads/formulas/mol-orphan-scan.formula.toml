@@ -139,9 +139,9 @@ needs = ["determine-scope"]
 description = """
 Find wisps from terminated sessions.
 
-**1. List wisps in ephemeral storage:**
+**1. List wisps in beads:**
 ```bash
-ls .beads-wisp/             # Or equivalent location
+bd list --type=wisp         # Wisps now stored in main .beads/
 ```
 
 **2. For each wisp, check spawner session:**
@@ -229,8 +229,8 @@ Recommended action: ..."
 
 **5. BURN orphans:**
 ```bash
-# For empty wisps, etc.
-rm .beads-wisp/<wisp-file>
+# For empty wisps, etc. (wisps now in main beads)
+bd mol burn <wisp-id>
 ```
 
 **Exit criteria:** All orphans handled."""

@@ -161,8 +161,8 @@ tmux list-sessions 2>/dev/null
 # Claude processes
 pgrep -f claude
 
-# Wisps
-ls .beads-wisp/ 2>/dev/null | wc -l
+# Wisps (type=wisp in .beads/)
+bd list --type=wisp 2>/dev/null | wc -l
 ```
 
 **3. Compare before/after:**
