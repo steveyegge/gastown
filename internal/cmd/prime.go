@@ -977,9 +977,23 @@ func checkSlungWork(ctx RoleContext) bool {
 		Assignee: agentID,
 		Priority: -1,
 	})
-	if err != nil || len(hookedBeads) == 0 {
-		// No hooked beads - no slung work
+	if err != nil {
 		return false
+	}
+
+	// If no hooked beads found, also check in_progress beads assigned to this agent.
+	// This handles the case where work was claimed (status changed to in_progress)
+	// but the session was interrupted before completion. The hook should persist.
+	if len(hookedBeads) == 0 {
+		inProgressBeads, err := b.List(beads.ListOptions{
+			Status:   "in_progress",
+			Assignee: agentID,
+			Priority: -1,
+		})
+		if err != nil || len(inProgressBeads) == 0 {
+			return false
+		}
+		hookedBeads = inProgressBeads
 	}
 
 	// Use the first hooked bead (agents typically have one)
