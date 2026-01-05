@@ -9,8 +9,8 @@ import (
 )
 
 func TestBuiltinPresets(t *testing.T) {
-	// Ensure all built-in presets are accessible (E2E tested agents only)
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex}
+	// Ensure all built-in presets are accessible
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -21,6 +21,11 @@ func TestBuiltinPresets(t *testing.T) {
 
 		if info.Command == "" {
 			t.Errorf("preset %s has empty Command", preset)
+		}
+
+		// All presets should have ProcessNames for agent detection
+		if len(info.ProcessNames) == 0 {
+			t.Errorf("preset %s has empty ProcessNames", preset)
 		}
 	}
 }
@@ -34,6 +39,7 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"claude", AgentClaude, false},
 		{"gemini", AgentGemini, false},
 		{"codex", AgentCodex, false},
+		{"cursor", AgentCursor, false},
 		{"aider", "", true},    // Not built-in, can be added via config
 		{"opencode", "", true}, // Not built-in, can be added via config
 		{"unknown", "", true},
@@ -63,6 +69,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentClaude, "claude"},
 		{AgentGemini, "gemini"},
 		{AgentCodex, "codex"},
+		{AgentCursor, "cursor-agent"},
 	}
 
 	for _, tt := range tests {
@@ -84,6 +91,7 @@ func TestIsKnownPreset(t *testing.T) {
 		{"claude", true},
 		{"gemini", true},
 		{"codex", true},
+		{"cursor", true},
 		{"aider", false},    // Not built-in, can be added via config
 		{"opencode", false}, // Not built-in, can be added via config
 		{"unknown", false},
@@ -286,6 +294,7 @@ func TestSupportsSessionResume(t *testing.T) {
 		{"claude", true},
 		{"gemini", true},
 		{"codex", true},
+		{"cursor", true},
 		{"unknown", false},
 	}
 
@@ -305,7 +314,8 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 	}{
 		{"claude", "CLAUDE_SESSION_ID"},
 		{"gemini", "GEMINI_SESSION_ID"},
-		{"codex", ""}, // Codex uses JSONL output instead
+		{"codex", ""},              // Codex uses JSONL output instead
+		{"cursor", "CURSOR_CHAT_ID"}, // Cursor uses chat ID
 		{"unknown", ""},
 	}
 
@@ -315,5 +325,80 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 				t.Errorf("GetSessionIDEnvVar(%s) = %q, want %q", tt.agentName, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetProcessNames(t *testing.T) {
+	tests := []struct {
+		agentName string
+		want      []string
+	}{
+		{"claude", []string{"node"}},
+		{"gemini", []string{"gemini"}},
+		{"codex", []string{"codex"}},
+		{"cursor", []string{"cursor-agent"}},
+		{"unknown", []string{"node"}}, // Falls back to Claude's process
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agentName, func(t *testing.T) {
+			got := GetProcessNames(tt.agentName)
+			if len(got) != len(tt.want) {
+				t.Errorf("GetProcessNames(%s) = %v, want %v", tt.agentName, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("GetProcessNames(%s)[%d] = %q, want %q", tt.agentName, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestCursorAgentPreset(t *testing.T) {
+	// Verify cursor agent preset is correctly configured
+	info := GetAgentPreset(AgentCursor)
+	if info == nil {
+		t.Fatal("cursor preset not found")
+	}
+
+	// Check command
+	if info.Command != "cursor-agent" {
+		t.Errorf("cursor command = %q, want cursor-agent", info.Command)
+	}
+
+	// Check YOLO-equivalent flags (-p for headless, -f for force)
+	hasP := false
+	hasF := false
+	for _, arg := range info.Args {
+		if arg == "-p" {
+			hasP = true
+		}
+		if arg == "-f" {
+			hasF = true
+		}
+	}
+	if !hasP {
+		t.Error("cursor args missing -p (headless mode)")
+	}
+	if !hasF {
+		t.Error("cursor args missing -f (force/YOLO mode)")
+	}
+
+	// Check ProcessNames for detection
+	if len(info.ProcessNames) == 0 {
+		t.Error("cursor ProcessNames is empty")
+	}
+	if info.ProcessNames[0] != "cursor-agent" {
+		t.Errorf("cursor ProcessNames[0] = %q, want cursor-agent", info.ProcessNames[0])
+	}
+
+	// Check resume support
+	if info.ResumeFlag != "--resume" {
+		t.Errorf("cursor ResumeFlag = %q, want --resume", info.ResumeFlag)
+	}
+	if info.ResumeStyle != "flag" {
+		t.Errorf("cursor ResumeStyle = %q, want flag", info.ResumeStyle)
 	}
 }

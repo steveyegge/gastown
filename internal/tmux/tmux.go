@@ -526,15 +526,29 @@ Run: gt mail inbox
 	return t.SendKeys(session, banner)
 }
 
-// IsClaudeRunning checks if Claude appears to be running in the session.
-// Only trusts the pane command - UI markers in scrollback cause false positives.
-func (t *Tmux) IsClaudeRunning(session string) bool {
-	// Check pane command - Claude runs as node
+// IsAgentRunning checks if any of the specified process names are running in the session.
+// This is the generalized version of IsClaudeRunning that supports multiple agent types.
+// processNames should contain the expected pane_current_command values (e.g., ["node"] for Claude,
+// ["cursor-agent"] for Cursor).
+func (t *Tmux) IsAgentRunning(session string, processNames []string) bool {
 	cmd, err := t.GetPaneCommand(session)
 	if err != nil {
 		return false
 	}
-	return cmd == "node"
+	for _, name := range processNames {
+		if cmd == name {
+			return true
+		}
+	}
+	return false
+}
+
+// IsClaudeRunning checks if Claude appears to be running in the session.
+// Only trusts the pane command - UI markers in scrollback cause false positives.
+// This is a convenience wrapper around IsAgentRunning for backwards compatibility.
+func (t *Tmux) IsClaudeRunning(session string) bool {
+	// Check pane command - Claude runs as node
+	return t.IsAgentRunning(session, []string{"node"})
 }
 
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.

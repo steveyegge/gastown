@@ -21,6 +21,8 @@ const (
 	AgentGemini AgentPreset = "gemini"
 	// AgentCodex is OpenAI Codex.
 	AgentCodex AgentPreset = "codex"
+	// AgentCursor is Cursor Agent.
+	AgentCursor AgentPreset = "cursor"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -34,6 +36,11 @@ type AgentPresetInfo struct {
 
 	// Args are the default command-line arguments for autonomous mode.
 	Args []string `json:"args"`
+
+	// ProcessNames are the process names to look for when detecting if the agent is running.
+	// Used by tmux.IsAgentRunning to check pane_current_command.
+	// E.g., ["node"] for Claude, ["cursor-agent"] for Cursor.
+	ProcessNames []string `json:"process_names,omitempty"`
 
 	// SessionIDEnv is the environment variable for session ID.
 	// Used for resuming sessions across restarts.
@@ -91,6 +98,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentClaude,
 		Command:             "claude",
 		Args:                []string{"--dangerously-skip-permissions"},
+		ProcessNames:        []string{"node"}, // Claude runs as Node.js
 		SessionIDEnv:        "CLAUDE_SESSION_ID",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
@@ -102,6 +110,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentGemini,
 		Command:             "gemini",
 		Args:                []string{"--approval-mode", "yolo"},
+		ProcessNames:        []string{"gemini"}, // Gemini CLI binary
 		SessionIDEnv:        "GEMINI_SESSION_ID",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
@@ -116,6 +125,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentCodex,
 		Command:             "codex",
 		Args:                []string{"--yolo"},
+		ProcessNames:        []string{"codex"}, // Codex CLI binary
 		SessionIDEnv:        "", // Codex captures from JSONL output
 		ResumeFlag:          "resume",
 		ResumeStyle:         "subcommand",
@@ -124,6 +134,21 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "exec",
 			OutputFlag: "--json",
+		},
+	},
+	AgentCursor: {
+		Name:                AgentCursor,
+		Command:             "cursor-agent",
+		Args:                []string{"-p", "-f"}, // Headless + force (YOLO equivalent)
+		ProcessNames:        []string{"cursor-agent"},
+		SessionIDEnv:        "CURSOR_CHAT_ID",
+		ResumeFlag:          "--resume",
+		ResumeStyle:         "flag",
+		SupportsHooks:       false, // TODO: verify hooks support
+		SupportsForkSession: false,
+		NonInteractive: &NonInteractiveConfig{
+			PromptFlag: "-p",
+			OutputFlag: "--output-format json",
 		},
 	},
 }
@@ -303,6 +328,18 @@ func GetSessionIDEnvVar(agentName string) string {
 		return ""
 	}
 	return info.SessionIDEnv
+}
+
+// GetProcessNames returns the process names used to detect if an agent is running.
+// Used by tmux.IsAgentRunning to check pane_current_command.
+// Returns ["node"] for Claude (default) if agent is not found or has no ProcessNames.
+func GetProcessNames(agentName string) []string {
+	info := GetAgentPresetByName(agentName)
+	if info == nil || len(info.ProcessNames) == 0 {
+		// Default to Claude's process name for backwards compatibility
+		return []string{"node"}
+	}
+	return info.ProcessNames
 }
 
 // MergeWithPreset applies preset defaults to a RuntimeConfig.
