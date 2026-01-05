@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -529,12 +530,22 @@ Run: gt mail inbox
 // IsClaudeRunning checks if Claude appears to be running in the session.
 // Only trusts the pane command - UI markers in scrollback cause false positives.
 func (t *Tmux) IsClaudeRunning(session string) bool {
-	// Check pane command - Claude runs as node
+	// Check pane command - Claude can report as different names depending on installation:
+	// - "node" for npm-installed Claude Code (runs via Node.js)
+	// - "claude" for native binary installation
+	// - version like "2.0.76" for native binary (spawns versioned subprocess)
 	cmd, err := t.GetPaneCommand(session)
 	if err != nil {
 		return false
 	}
-	return cmd == "node"
+	// Direct matches for known command names
+	if cmd == "node" || cmd == "claude" {
+		return true
+	}
+	// Check for version pattern (e.g., "2.0.76") - native Claude Code installation
+	// shows the version number as the pane command because it spawns a versioned binary
+	matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+`, cmd)
+	return matched
 }
 
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.
