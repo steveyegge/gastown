@@ -594,6 +594,11 @@ func sessionToAgentID(sessionName string) string {
 // verifyBeadExists checks that the bead exists using bd show.
 func verifyBeadExists(beadID string) error {
 	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
+	// Set BEADS_DIR to town root so hq-* beads are accessible
+	if townRoot, err := workspace.FindFromCwd(); err == nil {
+		cmd.Env = append(os.Environ(), "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
+		cmd.Dir = townRoot
+	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
 	}
