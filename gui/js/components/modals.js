@@ -9,6 +9,7 @@ import { showToast } from './toast.js';
 import { initAutocomplete, renderBeadItem, renderAgentItem } from './autocomplete.js';
 import { state } from '../state.js';
 import { escapeHtml, escapeAttr } from '../utils/html.js';
+import { debounce } from '../utils/performance.js';
 
 // Modal registry
 const modals = new Map();
@@ -773,10 +774,11 @@ function initNewRigModal(element, data) {
   // Set up GitHub repo picker button
   pickerBtn?.addEventListener('click', loadGitHubRepos, { once: true });
 
-  // Set up search filtering
+  // Set up search filtering with debounce
   const searchInput = document.getElementById('github-repo-search');
+  const debouncedFilter = debounce((value) => filterGitHubRepos(value), 150);
   searchInput?.addEventListener('input', (e) => {
-    filterGitHubRepos(e.target.value);
+    debouncedFilter(e.target.value);
   });
 }
 

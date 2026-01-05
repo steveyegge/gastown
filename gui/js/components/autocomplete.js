@@ -5,6 +5,8 @@
  * Supports both local and remote data sources.
  */
 
+import { debounce as debounceFn } from '../utils/performance.js';
+
 /**
  * Initialize autocomplete on an input element
  * @param {HTMLInputElement} input - Input element to attach autocomplete to
@@ -13,7 +15,7 @@
  * @param {Function} options.renderItem - Function to render a suggestion item
  * @param {Function} options.onSelect - Callback when item is selected
  * @param {number} options.minChars - Minimum characters before searching (default: 2)
- * @param {number} options.debounce - Debounce delay in ms (default: 200)
+ * @param {number} options.debounceDelay - Debounce delay in ms (default: 200)
  */
 export function initAutocomplete(input, options) {
   const {
@@ -21,7 +23,7 @@ export function initAutocomplete(input, options) {
     renderItem = defaultRenderItem,
     onSelect,
     minChars = 2,
-    debounce = 200,
+    debounceDelay = 200,
   } = options;
 
   // Create dropdown container
@@ -30,13 +32,22 @@ export function initAutocomplete(input, options) {
   input.parentElement.style.position = 'relative';
   input.parentElement.appendChild(dropdown);
 
-  let debounceTimer = null;
   let selectedIndex = -1;
   let suggestions = [];
 
+  // Debounced search handler
+  const debouncedSearch = debounceFn(async (query) => {
+    try {
+      suggestions = await search(query);
+      renderDropdown(suggestions);
+    } catch (err) {
+      console.error('[Autocomplete] Search error:', err);
+      hideDropdown();
+    }
+  }, debounceDelay);
+
   // Input handler with debounce
   input.addEventListener('input', () => {
-    clearTimeout(debounceTimer);
     const query = input.value.trim();
 
     if (query.length < minChars) {
@@ -44,15 +55,7 @@ export function initAutocomplete(input, options) {
       return;
     }
 
-    debounceTimer = setTimeout(async () => {
-      try {
-        suggestions = await search(query);
-        renderDropdown(suggestions);
-      } catch (err) {
-        console.error('[Autocomplete] Search error:', err);
-        hideDropdown();
-      }
-    }, debounce);
+    debouncedSearch(query);
   });
 
   // Keyboard navigation
