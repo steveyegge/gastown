@@ -7,6 +7,7 @@
 import { AGENT_TYPES, STATUS_ICONS, STATUS_COLORS, getAgentConfig } from '../shared/agent-types.js';
 import { api } from '../api.js';
 import { showToast } from './toast.js';
+import { escapeHtml } from '../utils/html.js';
 
 /**
  * Render the rig list
@@ -343,12 +344,4 @@ async function handleRigRemove(rigName, btn) {
     btn.innerHTML = originalIcon;
     btn.disabled = false;
   }
-}
-
-// Utility
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
 }
