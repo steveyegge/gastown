@@ -5,6 +5,8 @@
  * Phase 3: Added expandable detail view, issue tree, worker panel.
  */
 
+import { escapeHtml, escapeAttr, truncate } from '../utils/html.js';
+
 // Status icons for convoys
 const STATUS_ICONS = {
   pending: 'hourglass_empty',
@@ -216,10 +218,10 @@ function renderConvoyCard(convoy, index) {
 
   return `
     <div class="convoy-card animate-spawn stagger-${Math.min(index, 6)} ${isExpanded ? 'expanded' : ''}"
-         data-convoy-id="${convoy.id}"
-         data-status="${status}"
-         data-issues='${JSON.stringify(convoy.issues || [])}'
-         data-workers='${JSON.stringify(convoy.workers || [])}'>
+         data-convoy-id="${escapeAttr(convoy.id)}"
+         data-status="${escapeAttr(status)}"
+         data-issues='${escapeAttr(JSON.stringify(convoy.issues || []))}'
+         data-workers='${escapeAttr(JSON.stringify(convoy.workers || []))}'>
       <div class="convoy-header">
         <button class="btn btn-icon convoy-expand-btn" title="Expand">
           <span class="material-icons">${isExpanded ? 'expand_less' : 'expand_more'}</span>
@@ -514,19 +516,6 @@ function getWorkerInitials(name) {
     return (parts[0][0] + parts[1][0]).toUpperCase();
   }
   return name.slice(0, 2).toUpperCase();
-}
-
-// Utility functions
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function truncate(str, length) {
-  if (!str) return '';
-  return str.length > length ? str.slice(0, length) + '...' : str;
 }
 
 function formatTime(timestamp) {
