@@ -82,7 +82,7 @@ func (t *Tmux) NewSession(name, workDir string) error {
 //
 // A session is considered a zombie if:
 // - The tmux session exists
-// - But Claude (node process) is not running in it
+// - But Claude is not running in it
 //
 // Returns nil if session was created successfully.
 func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
@@ -390,7 +390,7 @@ func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
 
 // FindSessionByWorkDir finds tmux sessions where the pane's current working directory
 // matches or is under the target directory. Returns session names that match.
-// If checkClaude is true, only returns sessions that have Claude (node) running.
+// If checkClaude is true, only returns sessions that have Claude running.
 func (t *Tmux) FindSessionByWorkDir(targetDir string, checkClaude bool) ([]string, error) {
 	sessions, err := t.ListSessions()
 	if err != nil {
@@ -529,12 +529,12 @@ Run: gt mail inbox
 // IsClaudeRunning checks if Claude appears to be running in the session.
 // Only trusts the pane command - UI markers in scrollback cause false positives.
 func (t *Tmux) IsClaudeRunning(session string) bool {
-	// Check pane command - Claude runs as node
+	// Check pane command - Claude runs as "claude" (current) or "node" (legacy)
 	cmd, err := t.GetPaneCommand(session)
 	if err != nil {
 		return false
 	}
-	return cmd == "node"
+	return cmd == "claude" || cmd == "node"
 }
 
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.
