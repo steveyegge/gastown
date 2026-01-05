@@ -58,6 +58,22 @@ function setCache(key, data, ttl) {
   cache.set(key, { data, expires: Date.now() + ttl });
 }
 
+// Cache cleanup interval - removes expired entries to prevent memory leaks
+const CACHE_CLEANUP_INTERVAL = 60000; // 1 minute
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [key, entry] of cache.entries()) {
+    if (now >= entry.expires) {
+      cache.delete(key);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[Cache] Cleaned ${cleaned} expired entries, ${cache.size} remaining`);
+  }
+}, CACHE_CLEANUP_INTERVAL);
+
 // Pending requests map - prevents duplicate concurrent requests for same data
 const pendingRequests = new Map();
 
