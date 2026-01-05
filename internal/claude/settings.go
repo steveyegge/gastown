@@ -78,3 +78,42 @@ func EnsureSettings(workDir string, roleType RoleType) error {
 func EnsureSettingsForRole(workDir, role string) error {
 	return EnsureSettings(workDir, RoleTypeFor(role))
 }
+
+// RegenerateSettings always regenerates .claude/settings.json, overwriting any existing file.
+// Use this for ephemeral roles like polecats that should always get fresh settings.
+func RegenerateSettings(workDir string, roleType RoleType) error {
+	claudeDir := filepath.Join(workDir, ".claude")
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+
+	// Create .claude directory if needed
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		return fmt.Errorf("creating .claude directory: %w", err)
+	}
+
+	// Select template based on role type
+	var templateName string
+	switch roleType {
+	case Autonomous:
+		templateName = "config/settings-autonomous.json"
+	default:
+		templateName = "config/settings-interactive.json"
+	}
+
+	// Read template
+	content, err := configFS.ReadFile(templateName)
+	if err != nil {
+		return fmt.Errorf("reading template %s: %w", templateName, err)
+	}
+
+	// Write settings file (always overwrite)
+	if err := os.WriteFile(settingsPath, content, 0600); err != nil {
+		return fmt.Errorf("writing settings: %w", err)
+	}
+
+	return nil
+}
+
+// RegenerateSettingsForRole is a convenience function that combines RoleTypeFor and RegenerateSettings.
+func RegenerateSettingsForRole(workDir, role string) error {
+	return RegenerateSettings(workDir, RoleTypeFor(role))
+}

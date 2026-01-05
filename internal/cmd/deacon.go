@@ -551,7 +551,7 @@ func ensurePatrolHooks(workspacePath string) error {
         "hooks": [
           {
             "type": "command",
-            "command": "gt prime && gt mail check --inject && gt nudge deacon session-started"
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime && gt mail check --inject && gt nudge deacon session-started"
           }
         ]
       }
@@ -562,7 +562,7 @@ func ensurePatrolHooks(workspacePath string) error {
         "hooks": [
           {
             "type": "command",
-            "command": "gt prime"
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime"
           }
         ]
       }
@@ -573,7 +573,7 @@ func ensurePatrolHooks(workspacePath string) error {
         "hooks": [
           {
             "type": "command",
-            "command": "gt mail check --inject"
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt mail check --inject"
           }
         ]
       }

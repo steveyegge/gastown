@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/debug"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
@@ -1118,6 +1119,9 @@ func detectSenderFromCwd() string {
 }
 
 func runMailCheck(cmd *cobra.Command, args []string) error {
+	opID := debug.LogStart("mail", "runMailCheck")
+	defer func() { debug.LogEnd("mail", "runMailCheck", opID, nil) }()
+
 	// Determine which inbox (priority: --identity flag, auto-detect)
 	address := ""
 	if mailCheckIdentity != "" {
@@ -1125,16 +1129,19 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 	} else {
 		address = detectSender()
 	}
+	debug.Log("mail", "check: address=%s inject=%v", address, mailCheckInject)
 
 	// All mail uses town beads (two-level architecture)
 	workDir, err := findMailWorkDir()
 	if err != nil {
+		debug.Log("mail", "check: workDir error: %v", err)
 		if mailCheckInject {
 			// Inject mode: always exit 0, silent on error
 			return nil
 		}
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
+	debug.Log("mail", "check: workDir=%s", workDir)
 
 	// Get mailbox
 	router := mail.NewRouter(workDir)

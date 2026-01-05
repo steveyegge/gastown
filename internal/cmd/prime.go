@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/debug"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/session"
@@ -79,10 +80,14 @@ func init() {
 type RoleContext = RoleInfo
 
 func runPrime(cmd *cobra.Command, args []string) error {
+	opID := debug.LogStart("prime", "runPrime")
+	defer func() { debug.LogEnd("prime", "runPrime", opID, nil) }()
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting current directory: %w", err)
 	}
+	debug.Log("prime", "cwd=%s hook=%v", cwd, primeHookMode)
 
 	// Find town root
 	townRoot, err := workspace.FindFromCwd()
@@ -92,10 +97,12 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	if townRoot == "" {
 		return fmt.Errorf("not in a Gas Town workspace")
 	}
+	debug.Log("prime", "townRoot=%s", townRoot)
 
 	// Handle hook mode: read session ID from stdin and persist it
 	if primeHookMode {
 		sessionID, source := readHookSessionID()
+		debug.Log("prime", "hook mode: sessionID=%s source=%s", sessionID, source)
 		persistSessionID(townRoot, sessionID)
 		if cwd != townRoot {
 			persistSessionID(cwd, sessionID)

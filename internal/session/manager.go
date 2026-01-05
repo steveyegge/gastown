@@ -128,9 +128,10 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 		workDir = m.polecatDir(polecat)
 	}
 
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(workDir, "polecat"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	// Regenerate Claude settings to ensure fresh hooks (polecats are ephemeral)
+	// This fixes stale hooks when polecat names are recycled (Issue #4, #8)
+	if err := claude.RegenerateSettingsForRole(workDir, "polecat"); err != nil {
+		return fmt.Errorf("regenerating Claude settings: %w", err)
 	}
 
 	// Create session
