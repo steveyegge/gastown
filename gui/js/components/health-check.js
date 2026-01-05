@@ -6,6 +6,7 @@
 
 import { api } from '../api.js';
 import { showToast } from './toast.js';
+import { escapeHtml } from '../utils/html.js';
 
 let container = null;
 let refreshBtn = null;
@@ -303,14 +304,4 @@ function setupCopyButtons() {
       }
     });
   });
-}
-
-/**
- * Escape HTML entities
- */
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
 }

@@ -6,6 +6,7 @@
 
 import { api } from '../api.js';
 import { showToast } from './toast.js';
+import { escapeHtml, truncate } from '../utils/html.js';
 
 // Issue type icons
 const TYPE_ICONS = {
@@ -357,19 +358,6 @@ function showCopyToast(message) {
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 2000);
   }, 0);
-}
-
-// Utility functions
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function truncate(str, length) {
-  if (!str) return '';
-  return str.length > length ? str.slice(0, length) + '...' : str;
 }
 
 function formatTime(timestamp) {

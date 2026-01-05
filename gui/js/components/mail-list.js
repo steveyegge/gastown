@@ -7,6 +7,8 @@
 import { AGENT_TYPES, getAgentType, getAgentConfig, formatAgentName } from '../shared/agent-types.js';
 import { api } from '../api.js';
 import { showToast } from './toast.js';
+import { escapeHtml, truncate } from '../utils/html.js';
+import { debounce } from '../utils/performance.js';
 
 // Priority icons and colors
 const PRIORITY_CONFIG = {
@@ -267,14 +269,11 @@ function setupFilterHandlers(container, mail, options) {
   }
 
   if (searchInput) {
-    let searchTimeout;
-    searchInput.addEventListener('input', () => {
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(() => {
-        currentFilters.search = searchInput.value;
-        renderMailList(container, mail, options);
-      }, 300);
-    });
+    const handleSearch = debounce(() => {
+      currentFilters.search = searchInput.value;
+      renderMailList(container, mail, options);
+    }, 300);
+    searchInput.addEventListener('input', handleSearch);
   }
 
   if (clearBtn) {
@@ -411,17 +410,4 @@ function formatTime(timestamp) {
 
   // Older - show date
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-// Utility functions
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function truncate(str, length) {
-  if (!str) return '';
-  return str.length > length ? str.slice(0, length) + '...' : str;
 }

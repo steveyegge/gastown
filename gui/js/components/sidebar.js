@@ -7,6 +7,7 @@
 import { AGENT_TYPES, STATUS_ICONS, getAgentType, getAgentConfig, formatAgentName } from '../shared/agent-types.js';
 import { api } from '../api.js';
 import { showToast } from './toast.js';
+import { escapeHtml, escapeAttr, truncate, capitalize } from '../utils/html.js';
 
 /**
  * Render the sidebar with agent tree
@@ -135,10 +136,10 @@ function renderAgentNode(agent) {
 
   return `
     <li class="tree-node">
-      <div class="tree-node-content agent-node" data-agent-id="${agent.id || agent.address || ''}">
-        <span class="material-icons tree-icon status-${status}" style="color: ${config.color}">${statusIcon}</span>
-        <span class="tree-label" style="color: ${config.color}">${agent.name || formatAgentName(agent.id) || 'Unknown'}</span>
-        ${agent.current_task ? `<span class="tree-task">${truncate(agent.current_task, 20)}</span>` : ''}
+      <div class="tree-node-content agent-node" data-agent-id="${escapeAttr(agent.id || agent.address || '')}">
+        <span class="material-icons tree-icon status-${escapeAttr(status)}" style="color: ${config.color}">${statusIcon}</span>
+        <span class="tree-label" style="color: ${config.color}">${escapeHtml(agent.name || formatAgentName(agent.id) || 'Unknown')}</span>
+        ${agent.current_task ? `<span class="tree-task">${escapeHtml(truncate(agent.current_task, 20))}</span>` : ''}
       </div>
     </li>
   `;
@@ -155,11 +156,11 @@ function renderHookSection(hook) {
         Hook
       </h3>
       <div class="hook-card">
-        <div class="hook-bead">${hook.bead_id || 'Unknown'}</div>
+        <div class="hook-bead">${escapeHtml(hook.bead_id || 'Unknown')}</div>
         <div class="hook-meta">
-          <span class="hook-status status-${hook.status || 'idle'}">${hook.status || 'idle'}</span>
+          <span class="hook-status status-${escapeAttr(hook.status || 'idle')}">${escapeHtml(hook.status || 'idle')}</span>
         </div>
-        ${hook.title ? `<div class="hook-title">${truncate(hook.title, 40)}</div>` : ''}
+        ${hook.title ? `<div class="hook-title">${escapeHtml(truncate(hook.title, 40))}</div>` : ''}
       </div>
     </div>
   `;
@@ -287,16 +288,6 @@ async function handleServiceAction(action, service, btn) {
   }
 }
 
-// Utility functions
-function capitalize(str) {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-function truncate(str, length) {
-  if (!str) return '';
-  return str.length > length ? str.slice(0, length) + '...' : str;
-}
-
 // Tree node toggle functionality and agent click handling
 document.addEventListener('click', (e) => {
   const nodeContent = e.target.closest('.tree-node-content');
@@ -343,10 +334,10 @@ function showAgentQuickActions(nodeEl, agentId) {
   popover.dataset.agentId = agentId;
   popover.innerHTML = `
     <div class="agent-popover-header">
-      <span class="agent-popover-name">${agentName}</span>
-      <span class="agent-popover-status status-${agentStatus}">${agentStatus}</span>
+      <span class="agent-popover-name">${escapeHtml(agentName)}</span>
+      <span class="agent-popover-status status-${escapeAttr(agentStatus)}">${escapeHtml(agentStatus)}</span>
     </div>
-    <div class="agent-popover-task">${currentTask}</div>
+    <div class="agent-popover-task">${escapeHtml(currentTask)}</div>
     <div class="agent-popover-actions">
       <button class="btn btn-sm btn-secondary" data-action="nudge" title="Send a nudge">
         <span class="material-icons">notifications</span> Nudge

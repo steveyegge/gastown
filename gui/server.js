@@ -14,6 +14,7 @@ import { spawn, exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import os from 'os';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
@@ -57,6 +58,48 @@ function setCache(key, data, ttl) {
   cache.set(key, { data, expires: Date.now() + ttl });
 }
 
+// Rig config cache TTL (5 minutes - rig configs rarely change)
+const RIG_CONFIG_TTL = 300000;
+
+/**
+ * Get rig configuration with caching
+ * @param {string} rigName - Name of the rig
+ * @returns {Promise<Object|null>} - Rig config or null if not found
+ */
+async function getRigConfig(rigName) {
+  const cacheKey = `rig-config:${rigName}`;
+  const cached = getCached(cacheKey);
+  if (cached !== null) return cached;
+
+  try {
+    const rigConfigPath = path.join(GT_ROOT, rigName, 'config.json');
+    const rigConfigContent = await fsPromises.readFile(rigConfigPath, 'utf8');
+    const config = JSON.parse(rigConfigContent);
+    setCache(cacheKey, config, RIG_CONFIG_TTL);
+    return config;
+  } catch (e) {
+    // Config not found or invalid - cache null to avoid repeated reads
+    setCache(cacheKey, null, 60000); // Cache null for 1 minute
+    return null;
+  }
+}
+
+// Cache cleanup interval - removes expired entries to prevent memory leaks
+const CACHE_CLEANUP_INTERVAL = 60000; // 1 minute
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [key, entry] of cache.entries()) {
+    if (now >= entry.expires) {
+      cache.delete(key);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[Cache] Cleaned ${cleaned} expired entries, ${cache.size} remaining`);
+  }
+}, CACHE_CLEANUP_INTERVAL);
+
 // Pending requests map - prevents duplicate concurrent requests for same data
 const pendingRequests = new Map();
 
@@ -97,13 +140,14 @@ function broadcast(data) {
   });
 }
 
-// Quote arguments that contain spaces
+// Safely quote shell arguments to prevent command injection
+// Escapes all shell metacharacters and wraps in single quotes
 function quoteArg(arg) {
-  if (arg.includes(' ') || arg.includes('"') || arg.includes("'")) {
-    // Escape any existing double quotes and wrap in double quotes
-    return `"${arg.replace(/"/g, '\\"')}"`;
-  }
-  return arg;
+  if (arg === null || arg === undefined) return "''";
+  const str = String(arg);
+  // Single quotes are the safest - only need to escape single quotes themselves
+  // Replace each ' with '\'' (end quote, escaped quote, start quote)
+  return "'" + str.replace(/'/g, "'\\''") + "'";
 }
 
 // Get running tmux sessions for polecats
@@ -133,7 +177,8 @@ async function getRunningPolecats() {
 // Get polecat output from tmux (last N lines)
 async function getPolecatOutput(sessionName, lines = 50) {
   try {
-    const { stdout } = await execAsync(`tmux capture-pane -t ${sessionName} -p 2>/dev/null | tail -${lines}`);
+    const safeLines = Math.max(1, Math.min(10000, parseInt(lines, 10) || 50));
+    const { stdout } = await execAsync(`tmux capture-pane -t ${quoteArg(sessionName)} -p 2>/dev/null | tail -${safeLines}`);
     return stdout.trim();
   } catch {
     return null;
@@ -220,15 +265,10 @@ app.get('/api/status', async (req, res) => {
     if (data) {
       // Enhance rigs with running state from tmux and git_url from config
       for (const rig of data.rigs || []) {
-        // Try to read rig config to get git_url
-        try {
-          const rigConfigPath = path.join(GT_ROOT, rig.name, 'config.json');
-          if (fs.existsSync(rigConfigPath)) {
-            const rigConfig = JSON.parse(fs.readFileSync(rigConfigPath, 'utf8'));
-            rig.git_url = rigConfig.git_url || null;
-          }
-        } catch (e) {
-          // Config not found or invalid, continue
+        // Get git_url from cached rig config
+        const rigConfig = await getRigConfig(rig.name);
+        if (rigConfig) {
+          rig.git_url = rigConfig.git_url || null;
         }
 
         for (const hook of rig.hooks || []) {
@@ -524,12 +564,19 @@ app.post('/api/mail', async (req, res) => {
   }
 });
 
-// Get all mail from feed (for observability)
+// Get all mail from feed (for observability) with pagination
 app.get('/api/mail/all', async (req, res) => {
   try {
+    // Pagination params (default: page 1, 50 items per page)
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const offset = (page - 1) * limit;
+
     const feedPath = path.join(GT_ROOT, '.feed.jsonl');
-    if (!fs.existsSync(feedPath)) {
-      return res.json([]);
+    try {
+      await fsPromises.access(feedPath);
+    } catch {
+      return res.json({ items: [], total: 0, page, limit, hasMore: false });
     }
 
     const fileStream = fs.createReadStream(feedPath);
@@ -564,7 +611,19 @@ app.get('/api/mail/all', async (req, res) => {
 
     // Sort newest first
     mailEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    res.json(mailEvents);
+
+    // Apply pagination
+    const total = mailEvents.length;
+    const paginatedItems = mailEvents.slice(offset, offset + limit);
+    const hasMore = offset + limit < total;
+
+    res.json({
+      items: paginatedItems,
+      total,
+      page,
+      limit,
+      hasMore
+    });
   } catch (err) {
     console.error('[API] Failed to read feed for mail:', err);
     res.status(500).json({ error: 'Failed to read mail feed' });
@@ -842,7 +901,7 @@ app.get('/api/bead/:beadId/links', async (req, res) => {
       const rigPath = path.join(GT_ROOT, rigName, 'mayor', 'rig');
 
       try {
-        const { stdout } = await execAsync(`git -C "${rigPath}" remote get-url origin`, { timeout: 5000 });
+        const { stdout } = await execAsync(`git -C ${quoteArg(rigPath)} remote get-url origin`, { timeout: 5000 });
         const repoUrl = stdout.trim();
 
         // Extract owner/repo from GitHub URL
@@ -853,7 +912,7 @@ app.get('/api/bead/:beadId/links', async (req, res) => {
         // Search for PRs (title, body, branch containing bead ID, or polecat PRs near close time)
         try {
           const { stdout: prOutput } = await execAsync(
-            `gh pr list --repo ${repo} --state all --limit 20 --json number,title,url,state,headRefName,body,createdAt,updatedAt`,
+            `gh pr list --repo ${quoteArg(repo)} --state all --limit 20 --json number,title,url,state,headRefName,body,createdAt,updatedAt`,
             { timeout: 10000 }
           );
           const prs = JSON.parse(prOutput || '[]');
@@ -994,23 +1053,27 @@ app.get('/api/polecat/:rig/:name/transcript', async (req, res) => {
 
     for (const transcriptPath of transcriptPaths) {
       try {
-        if (fs.existsSync(transcriptPath)) {
-          // Find most recent transcript file
-          const files = fs.readdirSync(transcriptPath)
-            .filter(f => f.endsWith('.json') || f.endsWith('.md') || f.endsWith('.jsonl'))
-            .map(f => ({
-              name: f,
-              time: fs.statSync(path.join(transcriptPath, f)).mtime.getTime()
-            }))
-            .sort((a, b) => b.time - a.time);
+        await fsPromises.access(transcriptPath);
+        // Find most recent transcript file
+        const dirFiles = await fsPromises.readdir(transcriptPath);
+        const filteredFiles = dirFiles.filter(f =>
+          f.endsWith('.json') || f.endsWith('.md') || f.endsWith('.jsonl')
+        );
 
-          if (files.length > 0) {
-            transcriptContent = fs.readFileSync(
-              path.join(transcriptPath, files[0].name),
-              'utf-8'
-            );
-            break;
-          }
+        const filesWithTime = await Promise.all(
+          filteredFiles.map(async f => {
+            const stat = await fsPromises.stat(path.join(transcriptPath, f));
+            return { name: f, time: stat.mtime.getTime() };
+          })
+        );
+        filesWithTime.sort((a, b) => b.time - a.time);
+
+        if (filesWithTime.length > 0) {
+          transcriptContent = await fsPromises.readFile(
+            path.join(transcriptPath, filesWithTime[0].name),
+            'utf-8'
+          );
+          break;
         }
       } catch (e) {
         // Ignore errors, try next path
@@ -1063,7 +1126,7 @@ app.post('/api/polecat/:rig/:name/stop', async (req, res) => {
 
   try {
     // Kill the tmux session
-    await execAsync(`tmux kill-session -t ${sessionName} 2>/dev/null`);
+    await execAsync(`tmux kill-session -t ${quoteArg(sessionName)} 2>/dev/null`);
     broadcast({ type: 'agent_stopped', data: { rig, name, session: sessionName } });
     res.json({ success: true, message: `Stopped ${rig}/${name}` });
   } catch (err) {
@@ -1088,7 +1151,7 @@ app.post('/api/polecat/:rig/:name/restart', async (req, res) => {
   try {
     // First try to kill existing session (ignore errors)
     try {
-      await execAsync(`tmux kill-session -t ${sessionName} 2>/dev/null`);
+      await execAsync(`tmux kill-session -t ${quoteArg(sessionName)} 2>/dev/null`);
     } catch {
       // Ignore - session might not exist
     }
@@ -1161,10 +1224,9 @@ app.get('/api/setup/status', async (req, res) => {
 
   // Check workspace
   try {
-    const fs = await import('fs');
-    const path = await import('path');
     const mayorPath = path.join(GT_ROOT, 'mayor');
-    status.workspace_initialized = fs.existsSync(mayorPath);
+    await fsPromises.access(mayorPath);
+    status.workspace_initialized = true;
   } catch {
     status.workspace_initialized = false;
   }
@@ -1424,7 +1486,7 @@ app.post('/api/service/:name/down', async (req, res) => {
       // Try killing tmux session directly
       const sessionName = `gt-${name}`;
       try {
-        await execAsync(`tmux kill-session -t ${sessionName} 2>/dev/null`);
+        await execAsync(`tmux kill-session -t ${quoteArg(sessionName)} 2>/dev/null`);
         broadcast({ type: 'service_stopped', data: { service: name } });
         res.json({ success: true, service: name, message: `${name} stopped via tmux` });
       } catch {
@@ -1670,14 +1732,9 @@ app.get('/api/github/prs', async (req, res) => {
     // Enrich rigs with git_url from config.json (not in raw status)
     for (const rig of rigs) {
       if (!rig.git_url) {
-        try {
-          const rigConfigPath = path.join(GT_ROOT, rig.name, 'config.json');
-          if (fs.existsSync(rigConfigPath)) {
-            const rigConfig = JSON.parse(fs.readFileSync(rigConfigPath, 'utf8'));
-            rig.git_url = rigConfig.git_url || null;
-          }
-        } catch (e) {
-          // Config not found or invalid
+        const rigConfig = await getRigConfig(rig.name);
+        if (rigConfig) {
+          rig.git_url = rigConfig.git_url || null;
         }
       }
     }
@@ -1764,14 +1821,9 @@ app.get('/api/github/issues', async (req, res) => {
     // Enrich rigs with git_url from config.json
     for (const rig of rigs) {
       if (!rig.git_url) {
-        try {
-          const rigConfigPath = path.join(GT_ROOT, rig.name, 'config.json');
-          if (fs.existsSync(rigConfigPath)) {
-            const rigConfig = JSON.parse(fs.readFileSync(rigConfigPath, 'utf8'));
-            rig.git_url = rigConfig.git_url || null;
-          }
-        } catch (e) {
-          // Config not found
+        const rigConfig = await getRigConfig(rig.name);
+        if (rigConfig) {
+          rig.git_url = rigConfig.git_url || null;
         }
       }
     }

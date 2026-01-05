@@ -362,8 +362,9 @@ async function loadMail() {
   try {
     let mail;
     if (mailFilter === 'all') {
-      // Get all mail from feed
-      mail = await api.get('/api/mail/all');
+      // Get all mail from feed (paginated response)
+      const response = await api.get('/api/mail/all');
+      mail = response.items || response; // Handle both paginated and legacy responses
     } else {
       // Get my inbox only
       mail = await api.getMail();
