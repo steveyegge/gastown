@@ -20,6 +20,22 @@ var (
 	ErrNotFound     = errors.New("issue not found")
 )
 
+// RunCommand executes a bd command with --no-daemon to avoid stale cache issues.
+// This is the preferred way to call bd from gastown code outside of the Beads wrapper.
+// The --no-daemon flag ensures fresh data by bypassing the daemon's in-memory cache.
+//
+// Usage:
+//
+//	cmd := beads.RunCommand("list", "--status=open", "--json")
+//	cmd.Dir = workDir
+//	output, err := cmd.Output()
+//
+// Note: For structured operations, prefer using the Beads wrapper methods instead.
+func RunCommand(args ...string) *exec.Cmd {
+	fullArgs := append([]string{"--no-daemon"}, args...)
+	return exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
+}
+
 // ResolveBeadsDir returns the actual beads directory, following any redirect.
 // If workDir/.beads/redirect exists, it reads the redirect path and resolves it
 // relative to workDir (not the .beads directory). Otherwise, returns workDir/.beads.

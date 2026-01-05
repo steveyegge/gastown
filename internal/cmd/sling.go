@@ -432,7 +432,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Hook the bead using bd update
 	// Set BEADS_DIR to town-level beads so hq-* beads are accessible
 	// even when running from polecat worktree (which only sees gt-* via redirect)
-	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+	// Use --no-daemon to avoid stale cache issues (ga-7m33w)
+	hookCmd := beads.RunCommand("update", beadID, "--status=hooked", "--assignee="+targetAgent)
 	hookCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
 	if hookWorkDir != "" {
 		hookCmd.Dir = hookWorkDir
@@ -842,7 +843,8 @@ func runSlingFormula(args []string) error {
 
 	// Step 3: Hook the wisp bead using bd update (discovery-based approach)
 	// Set BEADS_DIR to town-level beads so hq-* beads are accessible
-	hookCmd := exec.Command("bd", "update", wispResult.RootID, "--status=hooked", "--assignee="+targetAgent)
+	// Use --no-daemon to avoid stale cache issues (ga-7m33w)
+	hookCmd := beads.RunCommand("update", wispResult.RootID, "--status=hooked", "--assignee="+targetAgent)
 	hookCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
 	hookCmd.Dir = townRoot
 	hookCmd.Stderr = os.Stderr
@@ -1336,7 +1338,8 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		}
 
 		// Hook the bead
-		hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+		// Use --no-daemon to avoid stale cache issues (ga-7m33w)
+		hookCmd := beads.RunCommand("update", beadID, "--status=hooked", "--assignee="+targetAgent)
 		hookCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
 		if hookWorkDir != "" {
 			hookCmd.Dir = hookWorkDir

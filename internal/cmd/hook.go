@@ -175,7 +175,7 @@ func runHook(_ *cobra.Command, args []string) error {
 					if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
 						closeArgs = append(closeArgs, "--session="+sessionID)
 					}
-					closeCmd := exec.Command("bd", closeArgs...)
+					closeCmd := beads.RunCommand(closeArgs...)
 					closeCmd.Stderr = os.Stderr
 					if err := closeCmd.Run(); err != nil {
 						return fmt.Errorf("closing completed bead %s: %w", existing.ID, err)
@@ -219,7 +219,8 @@ func runHook(_ *cobra.Command, args []string) error {
 	}
 
 	// Hook the bead using bd update (discovery-based approach)
-	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
+	// Use --no-daemon to avoid stale cache issues (ga-7m33w)
+	hookCmd := beads.RunCommand("update", beadID, "--status=hooked", "--assignee="+agentID)
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking bead: %w", err)

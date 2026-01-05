@@ -1040,8 +1040,9 @@ func scanRigForZombies(townRoot, rigName string, t *tmux.Tmux) ([]zombieInfo, er
 // checkPolecatHookedWork checks if a polecat has hooked work.
 func checkPolecatHookedWork(townRoot, rigName, polecatName string) string {
 	// Query beads for hooked issues assigned to this polecat
+	// Use --no-daemon to avoid stale cache issues (ga-7m33w)
 	assignee := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
-	cmd := exec.Command("bd", "list", "--status=hooked", "--assignee="+assignee, "--json")
+	cmd := beads.RunCommand("list", "--status=hooked", "--assignee="+assignee, "--json")
 	cmd.Dir = townRoot
 
 	output, err := cmd.Output()
@@ -1158,8 +1159,9 @@ func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 }
 
 // getAgentBeadUpdateTime gets the update time from an agent bead.
+// Uses --no-daemon to avoid stale cache issues (ga-7m33w)
 func getAgentBeadUpdateTime(townRoot, beadID string) (time.Time, error) {
-	cmd := exec.Command("bd", "show", beadID, "--json")
+	cmd := beads.RunCommand("show", beadID, "--json")
 	cmd.Dir = townRoot
 
 	output, err := cmd.Output()
@@ -1189,6 +1191,7 @@ func sendMail(townRoot, to, subject, body string) {
 }
 
 // updateAgentBeadState updates an agent bead's state.
+// Uses --no-daemon to avoid stale cache issues (ga-7m33w)
 func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused but kept for API consistency
 	beadID, _, err := agentAddressToIDs(agent)
 	if err != nil {
@@ -1196,7 +1199,7 @@ func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused b
 	}
 
 	// Use bd agent state command
-	cmd := exec.Command("bd", "agent", "state", beadID, state)
+	cmd := beads.RunCommand("agent", "state", beadID, state)
 	cmd.Dir = townRoot
 	_ = cmd.Run() // Best effort
 }
