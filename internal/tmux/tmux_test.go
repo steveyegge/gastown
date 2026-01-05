@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -302,5 +303,119 @@ func TestEnsureSessionFresh_IdempotentOnZombie(t *testing.T) {
 	}
 	if !has {
 		t.Error("expected session to exist after multiple EnsureSessionFresh calls")
+	}
+}
+
+func TestIsClaudeRunning_ShellSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-claude-shell-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create a session (will run default shell)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// A shell session should NOT be detected as Claude running
+	if tm.IsClaudeRunning(sessionName) {
+		cmd, _ := tm.GetPaneCommand(sessionName)
+		t.Errorf("IsClaudeRunning returned true for shell session (cmd=%q)", cmd)
+	}
+}
+
+func TestIsClaudeRunning_NonexistentSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Should return false for nonexistent session
+	if tm.IsClaudeRunning("nonexistent-session-xyz-abc") {
+		t.Error("IsClaudeRunning returned true for nonexistent session")
+	}
+}
+
+func TestGetPaneCommand_ShellSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-pane-cmd-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	cmd, err := tm.GetPaneCommand(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneCommand: %v", err)
+	}
+
+	// Should be a shell (bash, zsh, etc.) not claude or node
+	validShells := []string{"bash", "zsh", "sh", "fish", "tcsh", "csh"}
+	isShell := false
+	for _, shell := range validShells {
+		if cmd == shell {
+			isShell = true
+			break
+		}
+	}
+	if !isShell {
+		t.Errorf("GetPaneCommand returned %q, expected a shell", cmd)
+	}
+
+	// Specifically verify it's not detected as claude
+	if cmd == "claude" || cmd == "node" {
+		t.Errorf("GetPaneCommand returned %q for new shell session, should be shell name", cmd)
+	}
+}
+
+func TestVersionPatternMatching(t *testing.T) {
+	// Test the version pattern regex used in IsClaudeRunning
+	pattern := `^\d+\.\d+\.\d+`
+
+	testCases := []struct {
+		input    string
+		expected bool
+	}{
+		// Valid version patterns (should match)
+		{"2.0.76", true},
+		{"1.0.23", true},
+		{"10.20.30", true},
+		{"0.0.1", true},
+		{"123.456.789", true},
+
+		// Invalid patterns (should not match)
+		{"node", false},
+		{"claude", false},
+		{"bash", false},
+		{"zsh", false},
+		{"", false},
+		{"2.0", false},         // Missing patch version
+		{"2", false},           // Only major version
+		{"v2.0.76", false},     // Leading 'v'
+		{"2.0.76-beta", true},  // Matches prefix (pattern uses ^ but not $)
+		{".0.76", false},       // Missing major version
+	}
+
+	for _, tc := range testCases {
+		matched, _ := regexp.MatchString(pattern, tc.input)
+		if matched != tc.expected {
+			t.Errorf("pattern %q on input %q: got %v, want %v", pattern, tc.input, matched, tc.expected)
+		}
 	}
 }
