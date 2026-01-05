@@ -30,9 +30,10 @@ func createTestGitRepo(t *testing.T, name string) string {
 		t.Fatalf("mkdir repo: %v", err)
 	}
 
-	// Initialize git repo
+	// Initialize git repo with explicit main branch
+	// (system default may vary, causing checkout failures)
 	cmds := [][]string{
-		{"git", "init"},
+		{"git", "init", "--initial-branch=main"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test User"},
 	}
