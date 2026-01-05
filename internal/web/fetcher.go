@@ -769,7 +769,7 @@ type depTreeNode struct {
 func (f *LiveConvoyFetcher) getDependencyTree(issueID string) []DependencyNode {
 	// #nosec G204 -- bd is a trusted internal tool, issueID is from beads database
 	cmd := exec.Command("bd", "dep", "tree", issueID, "--json")
-	cmd.Dir = f.townBeads
+	cmd.Dir = filepath.Dir(f.townBeads) // townRoot, where routes.jsonl is
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
