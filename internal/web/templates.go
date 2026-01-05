@@ -50,6 +50,8 @@ type ConvoyRow struct {
 	Total         int
 	LastActivity  activity.Info
 	TrackedIssues []TrackedIssue
+	PRNumber      int    // Associated PR number (0 if none)
+	PRURL         string // Associated PR URL (empty if none)
 }
 
 // TrackedIssue represents an issue tracked by a convoy.

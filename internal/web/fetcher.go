@@ -134,6 +134,9 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 			}
 		}
 
+		// Detect associated PR from tracked issues
+		row.PRNumber, row.PRURL = f.detectPRForConvoy(tracked)
+
 		rows = append(rows, row)
 	}
 
@@ -148,6 +151,83 @@ type trackedIssueInfo struct {
 	Assignee     string
 	LastActivity time.Time
 	UpdatedAt    time.Time // Fallback for activity when no assignee
+}
+
+// detectPRForConvoy finds an associated PR for a convoy by checking branches
+// of its tracked issues' assignees.
+// Returns (prNumber, prURL) or (0, "") if no PR found.
+func (f *LiveConvoyFetcher) detectPRForConvoy(tracked []trackedIssueInfo) (int, string) {
+	// Collect unique branches from assignees
+	checkedBranches := make(map[string]bool)
+
+	for _, t := range tracked {
+		if t.Assignee == "" {
+			continue
+		}
+
+		// Parse assignee: "rigname/polecats/polecatname" -> branch "polecat/rigname-polecatname"
+		parts := strings.Split(t.Assignee, "/")
+		if len(parts) != 3 || parts[1] != "polecats" {
+			continue
+		}
+		rig := parts[0]
+		polecat := parts[2]
+		branch := fmt.Sprintf("polecat/%s-%s", rig, polecat)
+
+		if checkedBranches[branch] {
+			continue
+		}
+		checkedBranches[branch] = true
+
+		// Check for PRs with this head branch
+		prNum, prURL := f.findPRForBranch(branch)
+		if prNum > 0 {
+			return prNum, prURL
+		}
+	}
+
+	return 0, ""
+}
+
+// findPRForBranch queries GitHub for a PR with the given head branch.
+// Checks configured repos in order and returns the first matching PR.
+func (f *LiveConvoyFetcher) findPRForBranch(branch string) (int, string) {
+	// Repos to check for PRs (same as merge queue)
+	repos := []string{
+		"michaellady/roxas",
+		"michaellady/gastown",
+	}
+
+	for _, repo := range repos {
+		// #nosec G204 -- gh is a trusted CLI, repo and branch are internal values
+		cmd := exec.Command("gh", "pr", "list",
+			"--repo", repo,
+			"--head", branch,
+			"--state", "open",
+			"--json", "number,url",
+			"--limit", "1")
+
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+
+		if err := cmd.Run(); err != nil {
+			continue
+		}
+
+		var prs []struct {
+			Number int    `json:"number"`
+			URL    string `json:"url"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &prs); err != nil {
+			continue
+		}
+
+		if len(prs) > 0 {
+			return prs[0].Number, prs[0].URL
+		}
+	}
+
+	return 0, ""
 }
 
 // getTrackedIssues fetches tracked issues for a convoy.

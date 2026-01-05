@@ -339,6 +339,7 @@
                     <th>Status</th>
                     <th>Convoy</th>
                     <th>Progress</th>
+                    <th>PR</th>
                     <th>Last Activity</th>
                 </tr>
             </thead>
@@ -359,6 +360,11 @@
                             <div class="progress-fill" style="width: {{progressPercent .Completed .Total}}%;"></div>
                         </div>
                         {{end}}
+                    </td>
+                    <td>
+                        {{if .PRURL}}
+                        <a href="{{.PRURL}}" target="_blank" class="pr-link">#{{.PRNumber}}</a>
+                        {{else}}-{{end}}
                     </td>
                     <td class="{{activityClass .LastActivity}}">
                         <span class="activity-dot"></span>
