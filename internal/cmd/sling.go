@@ -376,7 +376,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Instantiating formula %s...\n", formulaName)
 
 		// Step 1: Cook the formula (ensures proto exists)
-		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
+		cookCmd := exec.Command("bd", "cook", formulaName)
 		cookCmd.Stderr = os.Stderr
 		if err := cookCmd.Run(); err != nil {
 			return fmt.Errorf("cooking formula %s: %w", formulaName, err)
@@ -384,7 +384,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 		// Step 2: Create wisp with feature variable from bead title
 		featureVar := fmt.Sprintf("feature=%s", info.Title)
-		wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--json"}
+		wispArgs := []string{"mol", "wisp", formulaName, "--var", featureVar, "--json"}
 		wispCmd := exec.Command("bd", wispArgs...)
 		wispCmd.Stderr = os.Stderr
 		wispOut, err := wispCmd.Output()
@@ -403,8 +403,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Formula wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
 
 		// Step 3: Bond wisp to original bead (creates compound)
-		// Use --no-daemon for mol bond (requires direct database access)
-		bondArgs := []string{"--no-daemon", "mol", "bond", wispRootID, beadID, "--json"}
+		bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
 		bondCmd := exec.Command("bd", bondArgs...)
 		bondCmd.Stderr = os.Stderr
 		bondOut, err := bondCmd.Output()
@@ -433,7 +432,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Hook the bead using bd update
 	// Set BEADS_DIR to town-level beads so hq-* beads are accessible
 	// even when running from polecat worktree (which only sees gt-* via redirect)
-	hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+	// Use --no-daemon to avoid stale cache issues (ga-7m33w)
+	hookCmd := beads.RunCommand("update", beadID, "--status=hooked", "--assignee="+targetAgent)
 	hookCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
 	if hookWorkDir != "" {
 		hookCmd.Dir = hookWorkDir
@@ -453,12 +453,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
-
-	// Store dispatcher in bead description (enables completion notification to dispatcher)
-	if err := storeDispatcherInBead(beadID, actor); err != nil {
-		// Warn but don't fail - polecat will still complete work
-		fmt.Printf("%s Could not store dispatcher in bead: %v\n", style.Dim.Render("Warning:"), err)
-	}
 
 	// Store args in bead description (no-tmux mode: beads as data plane)
 	if slingArgs != "" {
@@ -488,7 +482,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 // This enables no-tmux mode where agents discover args via gt prime / bd show.
 func storeArgsInBead(beadID, args string) error {
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
+	showCmd := exec.Command("bd", "show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -512,52 +506,6 @@ func storeArgsInBead(beadID, args string) error {
 
 	// Set the args
 	fields.AttachedArgs = args
-
-	// Update the description
-	newDesc := beads.SetAttachmentFields(issue, fields)
-
-	// Update the bead
-	updateCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--description="+newDesc)
-	updateCmd.Stderr = os.Stderr
-	if err := updateCmd.Run(); err != nil {
-		return fmt.Errorf("updating bead description: %w", err)
-	}
-
-	return nil
-}
-
-// storeDispatcherInBead stores the dispatcher agent ID in the bead's description.
-// This enables polecats to notify the dispatcher when work is complete.
-func storeDispatcherInBead(beadID, dispatcher string) error {
-	if dispatcher == "" {
-		return nil
-	}
-
-	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json")
-	out, err := showCmd.Output()
-	if err != nil {
-		return fmt.Errorf("fetching bead: %w", err)
-	}
-
-	// Parse the bead
-	var issues []beads.Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return fmt.Errorf("parsing bead: %w", err)
-	}
-	if len(issues) == 0 {
-		return fmt.Errorf("bead not found")
-	}
-	issue := &issues[0]
-
-	// Get or create attachment fields
-	fields := beads.ParseAttachmentFields(issue)
-	if fields == nil {
-		fields = &beads.AttachmentFields{}
-	}
-
-	// Set the dispatcher
-	fields.DispatchedBy = dispatcher
 
 	// Update the description
 	newDesc := beads.SetAttachmentFields(issue, fields)
@@ -645,12 +593,7 @@ func sessionToAgentID(sessionName string) string {
 
 // verifyBeadExists checks that the bead exists using bd show.
 func verifyBeadExists(beadID string) error {
-	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
-	// Set BEADS_DIR to town root so hq-* beads are accessible
-	if townRoot, err := workspace.FindFromCwd(); err == nil {
-		cmd.Env = append(os.Environ(), "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
-		cmd.Dir = townRoot
-	}
+	cmd := exec.Command("bd", "show", beadID, "--json")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
 	}
@@ -666,7 +609,7 @@ type beadInfo struct {
 
 // getBeadInfo returns status and assignee for a bead.
 func getBeadInfo(beadID string) (*beadInfo, error) {
-	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
+	cmd := exec.Command("bd", "show", beadID, "--json")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
@@ -735,13 +678,13 @@ func resolveSelfTarget() (agentID string, pane string, hookRoot string, err erro
 // Formulas are TOML files (.formula.toml).
 func verifyFormulaExists(formulaName string) error {
 	// Try bd formula show (handles all formula file formats)
-	cmd := exec.Command("bd", "--no-daemon", "formula", "show", formulaName)
+	cmd := exec.Command("bd", "formula", "show", formulaName)
 	if err := cmd.Run(); err == nil {
 		return nil
 	}
 
 	// Try with mol- prefix
-	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "mol-"+formulaName)
+	cmd = exec.Command("bd", "formula", "show", "mol-"+formulaName)
 	if err := cmd.Run(); err == nil {
 		return nil
 	}
@@ -864,7 +807,7 @@ func runSlingFormula(args []string) error {
 
 	// Step 1: Cook the formula (ensures proto exists)
 	fmt.Printf("  Cooking formula...\n")
-	cookArgs := []string{"--no-daemon", "cook", formulaName}
+	cookArgs := []string{"cook", formulaName}
 	cookCmd := exec.Command("bd", cookArgs...)
 	cookCmd.Stderr = os.Stderr
 	if err := cookCmd.Run(); err != nil {
@@ -873,7 +816,7 @@ func runSlingFormula(args []string) error {
 
 	// Step 2: Create wisp instance (ephemeral)
 	fmt.Printf("  Creating wisp...\n")
-	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName}
+	wispArgs := []string{"mol", "wisp", formulaName}
 	for _, v := range slingVars {
 		wispArgs = append(wispArgs, "--var", v)
 	}
@@ -900,7 +843,8 @@ func runSlingFormula(args []string) error {
 
 	// Step 3: Hook the wisp bead using bd update (discovery-based approach)
 	// Set BEADS_DIR to town-level beads so hq-* beads are accessible
-	hookCmd := exec.Command("bd", "--no-daemon", "update", wispResult.RootID, "--status=hooked", "--assignee="+targetAgent)
+	// Use --no-daemon to avoid stale cache issues (ga-7m33w)
+	hookCmd := beads.RunCommand("update", wispResult.RootID, "--status=hooked", "--assignee="+targetAgent)
 	hookCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
 	hookCmd.Dir = townRoot
 	hookCmd.Stderr = os.Stderr
@@ -918,12 +862,6 @@ func runSlingFormula(args []string) error {
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	// Note: formula slinging uses town root as workDir (no polecat-specific path)
 	updateAgentHookBead(targetAgent, wispResult.RootID, "", townBeadsDir)
-
-	// Store dispatcher in bead description (enables completion notification to dispatcher)
-	if err := storeDispatcherInBead(wispResult.RootID, actor); err != nil {
-		// Warn but don't fail - polecat will still complete work
-		fmt.Printf("%s Could not store dispatcher in bead: %v\n", style.Dim.Render("Warning:"), err)
-	}
 
 	// Store args in wisp bead if provided (no-tmux mode: beads as data plane)
 	if slingArgs != "" {
@@ -958,17 +896,17 @@ func runSlingFormula(args []string) error {
 	return nil
 }
 
-// updateAgentHookBead updates the agent bead's state and hook when work is slung.
+// updateAgentHookBead updates the agent bead's state when work is slung.
 // This enables the witness to see that each agent is working.
 //
 // We run from the polecat's workDir (which redirects to the rig's beads database)
 // WITHOUT setting BEADS_DIR, so the redirect mechanism works for gt-* agent beads.
 //
-// For rig-level beads (same database), we set the hook_bead slot directly.
-// For cross-database scenarios (agent in rig db, hook bead in town db),
-// the slot set may fail - this is handled gracefully with a warning.
+// Note: We only update the agent_state field, not hook_bead. The hook_bead field
+// requires cross-database access (agent in rig db, hook bead in town db), but
+// bd slot set has a bug where it doesn't support this. See BD_BUG_AGENT_STATE_ROUTING.md.
 // The work is still correctly attached via `bd update <bead> --assignee=<agent>`.
-func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
+func updateAgentHookBead(agentID, _, workDir, townBeadsDir string) { // beadID unused due to BD_BUG_AGENT_STATE_ROUTING
 	_ = townBeadsDir // Not used - BEADS_DIR breaks redirect mechanism
 
 	// Convert agent ID to agent bead ID
@@ -997,11 +935,9 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	}
 
 	// Run from workDir WITHOUT BEADS_DIR to enable redirect-based routing.
-	// Update agent_state to "running" and set hook_bead to the slung work.
-	// For same-database beads, the hook slot is set via `bd slot set`.
-	// For cross-database scenarios, slot set may fail gracefully (warning only).
+	// Only update agent_state (not hook_bead) due to bd cross-database bug.
 	bd := beads.New(bdWorkDir)
-	if err := bd.UpdateAgentState(agentBeadID, "running", &beadID); err != nil {
+	if err := bd.UpdateAgentState(agentBeadID, "running", nil); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't update agent %s state: %v\n", agentBeadID, err)
 		return
@@ -1296,7 +1232,7 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 		"--description=" + description,
 	}
 
-	createCmd := exec.Command("bd", append([]string{"--no-daemon"}, createArgs...)...)
+	createCmd := exec.Command("bd", createArgs...)
 	createCmd.Dir = townBeads
 	createCmd.Stderr = os.Stderr
 
@@ -1305,8 +1241,7 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 	}
 
 	// Add tracking relation: convoy tracks the issue
-	trackBeadID := formatTrackBeadID(beadID)
-	depArgs := []string{"--no-daemon", "dep", "add", convoyID, trackBeadID, "--type=tracks"}
+	depArgs := []string{"dep", "add", convoyID, beadID, "--type=tracks"}
 	depCmd := exec.Command("bd", depArgs...)
 	depCmd.Dir = townBeads
 	depCmd.Stderr = os.Stderr
@@ -1344,10 +1279,10 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 
 	// Track results for summary
 	type slingResult struct {
-		beadID  string
-		polecat string
-		success bool
-		errMsg  string
+		beadID   string
+		polecat  string
+		success  bool
+		errMsg   string
 	}
 	results := make([]slingResult, 0, len(beadIDs))
 
@@ -1403,7 +1338,8 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		}
 
 		// Hook the bead
-		hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+		// Use --no-daemon to avoid stale cache issues (ga-7m33w)
+		hookCmd := beads.RunCommand("update", beadID, "--status=hooked", "--assignee="+targetAgent)
 		hookCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
 		if hookWorkDir != "" {
 			hookCmd.Dir = hookWorkDir
@@ -1464,25 +1400,4 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 	}
 
 	return nil
-}
-
-// formatTrackBeadID formats a bead ID for use in convoy tracking dependencies.
-// Cross-rig beads (non-hq- prefixed) are formatted as external references
-// so the bd tool can resolve them when running from HQ context.
-//
-// Examples:
-//   - "hq-abc123" -> "hq-abc123" (HQ beads unchanged)
-//   - "gt-mol-xyz" -> "external:gt-mol:gt-mol-xyz"
-//   - "beads-task-123" -> "external:beads-task:beads-task-123"
-func formatTrackBeadID(beadID string) string {
-	if strings.HasPrefix(beadID, "hq-") {
-		return beadID
-	}
-	parts := strings.SplitN(beadID, "-", 3)
-	if len(parts) >= 2 {
-		rigPrefix := parts[0] + "-" + parts[1]
-		return fmt.Sprintf("external:%s:%s", rigPrefix, beadID)
-	}
-	// Fallback for malformed IDs (single segment)
-	return beadID
 }

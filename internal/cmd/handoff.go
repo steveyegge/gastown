@@ -572,7 +572,8 @@ func sendHandoffMail(subject, message string) (string, error) {
 	}
 
 	// Auto-hook the created mail bead
-	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
+	// Use --no-daemon to avoid stale cache issues (ga-7m33w)
+	hookCmd := beads.RunCommand("update", beadID, "--status=hooked", "--assignee="+agentID)
 	hookCmd.Dir = townRoot
 	hookCmd.Env = append(os.Environ(), "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
 	hookCmd.Stderr = os.Stderr
@@ -600,9 +601,10 @@ func looksLikeBeadID(s string) bool {
 }
 
 // hookBeadForHandoff attaches a bead to the current agent's hook.
+// Uses --no-daemon to avoid stale cache issues (ga-7m33w)
 func hookBeadForHandoff(beadID string) error {
 	// Verify the bead exists first
-	verifyCmd := exec.Command("bd", "show", beadID, "--json")
+	verifyCmd := beads.RunCommand("show", beadID, "--json")
 	if err := verifyCmd.Run(); err != nil {
 		return fmt.Errorf("bead '%s' not found", beadID)
 	}
@@ -621,7 +623,8 @@ func hookBeadForHandoff(beadID string) error {
 	}
 
 	// Pin the bead using bd update (discovery-based approach)
-	pinCmd := exec.Command("bd", "update", beadID, "--status=pinned", "--assignee="+agentID)
+	// Use --no-daemon to avoid stale cache issues (ga-7m33w)
+	pinCmd := beads.RunCommand("update", beadID, "--status=pinned", "--assignee="+agentID)
 	pinCmd.Stderr = os.Stderr
 	if err := pinCmd.Run(); err != nil {
 		return fmt.Errorf("pinning bead: %w", err)
@@ -659,8 +662,8 @@ func collectHandoffState() string {
 		}
 	}
 
-	// Get ready beads
-	readyOutput, err := exec.Command("bd", "ready").Output()
+	// Get ready beads (use --no-daemon for fresh data, ga-7m33w)
+	readyOutput, err := beads.RunCommand("ready").Output()
 	if err == nil {
 		readyStr := strings.TrimSpace(string(readyOutput))
 		if readyStr != "" && !strings.Contains(readyStr, "No issues ready") {
@@ -673,8 +676,8 @@ func collectHandoffState() string {
 		}
 	}
 
-	// Get in-progress beads
-	inProgressOutput, err := exec.Command("bd", "list", "--status=in_progress").Output()
+	// Get in-progress beads (use --no-daemon for fresh data, ga-7m33w)
+	inProgressOutput, err := beads.RunCommand("list", "--status=in_progress").Output()
 	if err == nil {
 		ipStr := strings.TrimSpace(string(inProgressOutput))
 		if ipStr != "" && !strings.Contains(ipStr, "No issues") {

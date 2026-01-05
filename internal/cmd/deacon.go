@@ -186,6 +186,33 @@ This helps the Deacon understand which agents may need attention.`,
 	RunE: runDeaconHealthState,
 }
 
+var deaconZombieScanCmd = &cobra.Command{
+	Use:   "zombie-scan [rig]",
+	Short: "Scan for idle polecats that should have been nuked",
+	Long: `Backup check for polecats the Witness should have cleaned up.
+
+Scans for "zombie" polecats that meet ALL of these criteria:
+- State: idle or done (no active work)
+- Session: not running (tmux session dead)
+- No hooked work
+- Last activity: older than threshold (default 10 minutes)
+
+These are polecats that the Witness should have nuked but didn't.
+This provides defense-in-depth against Witness failures.
+
+Actions:
+1. Log warning about witness failure
+2. Nuke the zombie polecat directly
+3. Notify mayor of witness issue (optional)
+
+Examples:
+  gt deacon zombie-scan                    # Scan all rigs
+  gt deacon zombie-scan gastown            # Scan specific rig
+  gt deacon zombie-scan --dry-run          # Preview only
+  gt deacon zombie-scan --threshold=5m     # Custom staleness threshold`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runDeaconZombieScan,
+}
 
 var (
 	triggerTimeout time.Duration
@@ -198,6 +225,11 @@ var (
 	// Force kill flags
 	forceKillReason     string
 	forceKillSkipNotify bool
+
+	// Zombie scan flags
+	zombieScanDryRun    bool
+	zombieScanThreshold time.Duration
+	zombieScanNuke      bool
 )
 
 func init() {
@@ -211,6 +243,7 @@ func init() {
 	deaconCmd.AddCommand(deaconHealthCheckCmd)
 	deaconCmd.AddCommand(deaconForceKillCmd)
 	deaconCmd.AddCommand(deaconHealthStateCmd)
+	deaconCmd.AddCommand(deaconZombieScanCmd)
 
 	// Flags for trigger-pending
 	deaconTriggerPendingCmd.Flags().DurationVar(&triggerTimeout, "timeout", 2*time.Second,
@@ -229,6 +262,14 @@ func init() {
 		"Reason for force-kill (included in notifications)")
 	deaconForceKillCmd.Flags().BoolVar(&forceKillSkipNotify, "skip-notify", false,
 		"Skip sending notification mail to mayor")
+
+	// Flags for zombie-scan
+	deaconZombieScanCmd.Flags().BoolVarP(&zombieScanDryRun, "dry-run", "n", false,
+		"Show what would be done without nuking")
+	deaconZombieScanCmd.Flags().DurationVar(&zombieScanThreshold, "threshold", 10*time.Minute,
+		"Staleness threshold for zombie detection")
+	deaconZombieScanCmd.Flags().BoolVar(&zombieScanNuke, "nuke", true,
+		"Nuke detected zombies (use --nuke=false to report only)")
 
 	rootCmd.AddCommand(deaconCmd)
 }
@@ -824,6 +865,259 @@ func runDeaconHealthState(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runDeaconZombieScan scans for idle polecats that should have been nuked by the Witness.
+// This is a defense-in-depth backup check.
+func runDeaconZombieScan(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	t := tmux.NewTmux()
+
+	// Get list of rigs to scan
+	var rigsToScan []string
+	if len(args) > 0 {
+		rigsToScan = []string{args[0]}
+	} else {
+		// Scan all rigs by finding directories with polecats/ subdirectories
+		entries, err := os.ReadDir(townRoot)
+		if err != nil {
+			return fmt.Errorf("reading town root: %w", err)
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			// Skip non-rig directories
+			if entry.Name() == "deacon" || entry.Name() == "mayor" ||
+				entry.Name() == "plugins" || entry.Name() == "docs" ||
+				strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			// Check if it has a polecats directory
+			polecatsDir := filepath.Join(townRoot, entry.Name(), "polecats")
+			if info, err := os.Stat(polecatsDir); err == nil && info.IsDir() {
+				rigsToScan = append(rigsToScan, entry.Name())
+			}
+		}
+	}
+
+	if len(rigsToScan) == 0 {
+		fmt.Printf("%s No rigs found to scan\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	fmt.Printf("%s Scanning for zombie polecats (threshold: %s)...\n",
+		style.Bold.Render("🧟"), zombieScanThreshold)
+
+	var zombies []zombieInfo
+	for _, rigName := range rigsToScan {
+		rigZombies, err := scanRigForZombies(townRoot, rigName, t)
+		if err != nil {
+			style.PrintWarning("failed to scan rig %s: %v", rigName, err)
+			continue
+		}
+		zombies = append(zombies, rigZombies...)
+	}
+
+	if len(zombies) == 0 {
+		fmt.Printf("%s No zombies found (all polecats healthy)\n", style.Bold.Render("✓"))
+		return nil
+	}
+
+	// Report zombies
+	fmt.Printf("\n%s Found %d zombie(s):\n\n", style.Bold.Render("⚠"), len(zombies))
+	for _, z := range zombies {
+		fmt.Printf("  %s %s/%s\n", style.Dim.Render("🧟"), z.rig, z.name)
+		fmt.Printf("    State: %s, Session: %s\n", z.state, z.sessionStatus)
+		fmt.Printf("    Hooked work: %s\n", z.hookedWork)
+		fmt.Printf("    Last activity: %s ago\n", z.staleness.Round(time.Second))
+		fmt.Printf("    Reason: %s\n", z.reason)
+		fmt.Println()
+	}
+
+	// Nuke zombies if enabled
+	if zombieScanNuke && !zombieScanDryRun {
+		fmt.Printf("%s Nuking zombies...\n", style.Bold.Render("💀"))
+		for _, z := range zombies {
+			if err := nukeZombie(townRoot, z, t); err != nil {
+				style.PrintWarning("failed to nuke %s/%s: %v", z.rig, z.name, err)
+			} else {
+				fmt.Printf("  %s Nuked %s/%s\n", style.Bold.Render("✓"), z.rig, z.name)
+			}
+		}
+
+		// Notify mayor about witness failure
+		notifyMayorOfWitnessFailure(townRoot, zombies)
+	} else if zombieScanDryRun {
+		fmt.Printf("%s Dry run - would nuke %d zombie(s)\n", style.Dim.Render("ℹ"), len(zombies))
+	}
+
+	return nil
+}
+
+// zombieInfo holds information about a detected zombie polecat.
+type zombieInfo struct {
+	rig           string
+	name          string
+	state         string
+	sessionStatus string
+	hookedWork    string
+	staleness     time.Duration
+	reason        string
+	sessionName   string
+}
+
+// scanRigForZombies scans a rig for zombie polecats.
+func scanRigForZombies(townRoot, rigName string, t *tmux.Tmux) ([]zombieInfo, error) {
+	rigPath := filepath.Join(townRoot, rigName)
+	polecatsDir := filepath.Join(rigPath, "polecats")
+
+	entries, err := os.ReadDir(polecatsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // No polecats dir
+		}
+		return nil, err
+	}
+
+	var zombies []zombieInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+
+		// Build session name for this polecat
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, name)
+
+		// Check if session is running
+		sessionRunning, _ := t.HasSession(sessionName)
+
+		// Check for hooked work
+		hookedWork := checkPolecatHookedWork(townRoot, rigName, name)
+
+		// Get last activity time from polecat directory
+		polecatPath := filepath.Join(polecatsDir, name)
+		staleness := getPolecatStaleness(polecatPath)
+
+		// Determine if this is a zombie
+		state := "unknown"
+		if sessionRunning {
+			state = "session_running"
+			continue // Not a zombie if session is running
+		}
+		state = "session_dead"
+
+		// Check all zombie criteria
+		if hookedWork != "" {
+			// Has hooked work - not a zombie (just needs to be started)
+			continue
+		}
+
+		if staleness < zombieScanThreshold {
+			// Recently active - not stale enough
+			continue
+		}
+
+		// This is a zombie
+		zombies = append(zombies, zombieInfo{
+			rig:           rigName,
+			name:          name,
+			state:         state,
+			sessionStatus: "not running",
+			hookedWork:    "none",
+			staleness:     staleness,
+			reason:        fmt.Sprintf("idle for %s with no session or hooked work", staleness.Round(time.Minute)),
+			sessionName:   sessionName,
+		})
+	}
+
+	return zombies, nil
+}
+
+// checkPolecatHookedWork checks if a polecat has hooked work.
+func checkPolecatHookedWork(townRoot, rigName, polecatName string) string {
+	// Query beads for hooked issues assigned to this polecat
+	// Use --no-daemon to avoid stale cache issues (ga-7m33w)
+	assignee := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+	cmd := beads.RunCommand("list", "--status=hooked", "--assignee="+assignee, "--json")
+	cmd.Dir = townRoot
+
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	var issues []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil || len(issues) == 0 {
+		return ""
+	}
+
+	return issues[0].ID
+}
+
+// getPolecatStaleness returns how long since the polecat was last active.
+func getPolecatStaleness(polecatPath string) time.Duration {
+	// Check .beads/last-touched if it exists
+	lastTouchedPath := filepath.Join(polecatPath, ".beads", "last-touched")
+	if info, err := os.Stat(lastTouchedPath); err == nil {
+		return time.Since(info.ModTime())
+	}
+
+	// Fall back to directory modification time
+	if info, err := os.Stat(polecatPath); err == nil {
+		return time.Since(info.ModTime())
+	}
+
+	// Very stale if we can't determine
+	return 24 * time.Hour
+}
+
+// nukeZombie cleans up a zombie polecat.
+func nukeZombie(townRoot string, z zombieInfo, t *tmux.Tmux) error { //nolint:unparam // error return kept for future use
+	// Step 1: Kill tmux session if somehow still exists
+	if exists, _ := t.HasSession(z.sessionName); exists {
+		_ = t.KillSession(z.sessionName)
+	}
+
+	// Step 2: Run gt polecat nuke to clean up
+	cmd := exec.Command("gt", "polecat", "nuke", z.name, "--rig="+z.rig, "--force")
+	cmd.Dir = townRoot
+	if err := cmd.Run(); err != nil {
+		// Non-fatal - polecat might already be cleaned up
+		style.PrintWarning("polecat nuke returned error (may be already cleaned): %v", err)
+	}
+
+	return nil
+}
+
+// notifyMayorOfWitnessFailure notifies the mayor about witness cleanup failures.
+func notifyMayorOfWitnessFailure(townRoot string, zombies []zombieInfo) {
+	if len(zombies) == 0 {
+		return
+	}
+
+	// Group by rig
+	rigCounts := make(map[string]int)
+	for _, z := range zombies {
+		rigCounts[z.rig]++
+	}
+
+	var details strings.Builder
+	details.WriteString("Deacon detected zombie polecats that Witness should have cleaned:\n\n")
+	for rig, count := range rigCounts {
+		details.WriteString(fmt.Sprintf("- %s: %d zombie(s)\n", rig, count))
+	}
+	details.WriteString("\nDeacon has nuked them directly. Check Witness health.")
+
+	sendMail(townRoot, "mayor/", "⚠️ Witness cleanup failure detected", details.String())
+}
+
 // agentAddressToIDs converts an agent address to bead ID and session name.
 // Supports formats: "gastown/polecats/max", "gastown/witness", "deacon", "mayor"
 // Note: Town-level agents (Mayor, Deacon) use hq- prefix bead IDs stored in town beads.
@@ -865,8 +1159,9 @@ func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 }
 
 // getAgentBeadUpdateTime gets the update time from an agent bead.
+// Uses --no-daemon to avoid stale cache issues (ga-7m33w)
 func getAgentBeadUpdateTime(townRoot, beadID string) (time.Time, error) {
-	cmd := exec.Command("bd", "show", beadID, "--json")
+	cmd := beads.RunCommand("show", beadID, "--json")
 	cmd.Dir = townRoot
 
 	output, err := cmd.Output()
@@ -896,6 +1191,7 @@ func sendMail(townRoot, to, subject, body string) {
 }
 
 // updateAgentBeadState updates an agent bead's state.
+// Uses --no-daemon to avoid stale cache issues (ga-7m33w)
 func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused but kept for API consistency
 	beadID, _, err := agentAddressToIDs(agent)
 	if err != nil {
@@ -903,7 +1199,7 @@ func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused b
 	}
 
 	// Use bd agent state command
-	cmd := exec.Command("bd", "agent", "state", beadID, state)
+	cmd := beads.RunCommand("agent", "state", beadID, state)
 	cmd.Dir = townRoot
 	_ = cmd.Run() // Best effort
 }
