@@ -21,4 +21,4 @@
 - `npm test` (in `gui/`) — warning: `test.poolOptions` deprecated in Vitest 4.
 
 ## Follow-up Candidates
-- Update Vitest config to remove `test.poolOptions` usage per the Vitest 4 migration guide.
+- Update Vitest config to remove `test.poolOptions` usage per the Vitest 4 migration guide. (Issue: gt-dn3ar)
