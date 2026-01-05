@@ -975,6 +975,16 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		}
 	}
 
+	// Set the hook slot if specified (this is the authoritative storage)
+	// This fixes the slot inconsistency bug where bead status is 'hooked' but
+	// agent's hook slot is empty. See mi-619.
+	if fields != nil && fields.HookBead != "" {
+		if _, err := b.run("slot", "set", id, "hook", fields.HookBead); err != nil {
+			// Non-fatal: warn but continue - description text has the backup
+			fmt.Printf("Warning: could not set hook slot: %v\n", err)
+		}
+	}
+
 	return &issue, nil
 }
 

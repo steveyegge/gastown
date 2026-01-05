@@ -895,17 +895,17 @@ func runSlingFormula(args []string) error {
 	return nil
 }
 
-// updateAgentHookBead updates the agent bead's state when work is slung.
+// updateAgentHookBead updates the agent bead's state and hook when work is slung.
 // This enables the witness to see that each agent is working.
 //
 // We run from the polecat's workDir (which redirects to the rig's beads database)
 // WITHOUT setting BEADS_DIR, so the redirect mechanism works for gt-* agent beads.
 //
-// Note: We only update the agent_state field, not hook_bead. The hook_bead field
-// requires cross-database access (agent in rig db, hook bead in town db), but
-// bd slot set has a bug where it doesn't support this. See BD_BUG_AGENT_STATE_ROUTING.md.
+// For rig-level beads (same database), we set the hook_bead slot directly.
+// For cross-database scenarios (agent in rig db, hook bead in town db),
+// the slot set may fail - this is handled gracefully with a warning.
 // The work is still correctly attached via `bd update <bead> --assignee=<agent>`.
-func updateAgentHookBead(agentID, _, workDir, townBeadsDir string) { // beadID unused due to BD_BUG_AGENT_STATE_ROUTING
+func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	_ = townBeadsDir // Not used - BEADS_DIR breaks redirect mechanism
 
 	// Convert agent ID to agent bead ID
@@ -934,9 +934,11 @@ func updateAgentHookBead(agentID, _, workDir, townBeadsDir string) { // beadID u
 	}
 
 	// Run from workDir WITHOUT BEADS_DIR to enable redirect-based routing.
-	// Only update agent_state (not hook_bead) due to bd cross-database bug.
+	// Update agent_state to "running" and set hook_bead to the slung work.
+	// For same-database beads, the hook slot is set via `bd slot set`.
+	// For cross-database scenarios, slot set may fail gracefully (warning only).
 	bd := beads.New(bdWorkDir)
-	if err := bd.UpdateAgentState(agentBeadID, "running", nil); err != nil {
+	if err := bd.UpdateAgentState(agentBeadID, "running", &beadID); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't update agent %s state: %v\n", agentBeadID, err)
 		return
