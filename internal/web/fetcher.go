@@ -240,41 +240,40 @@ func (f *LiveConvoyFetcher) detectPRForConvoy(tracked []trackedIssueInfo) (int, 
 }
 
 // findPRForBranch queries GitHub for a PR with the given head branch.
-// Checks configured repos in order and returns the first matching PR.
+// Checks configured upstream repos and returns the first matching PR.
+// Uses --head forkowner:branch format for cross-fork PR search.
 func (f *LiveConvoyFetcher) findPRForBranch(branch string) (int, string) {
-	// Repos to check for PRs (same as merge queue)
-	repos := []string{
-		"michaellady/roxas",
-		"michaellady/gastown",
+	// Search upstream repo for PRs from our fork
+	// Format: gh pr list --repo upstream --head forkowner:branch
+	repo := "steveyegge/gastown"
+	forkOwner := "michaellady"
+	headFilter := forkOwner + ":" + branch
+
+	// #nosec G204 -- gh is a trusted CLI, repo and branch are internal values
+	cmd := exec.Command("gh", "pr", "list",
+		"--repo", repo,
+		"--head", headFilter,
+		"--state", "open",
+		"--json", "number,url",
+		"--limit", "1")
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return 0, ""
 	}
 
-	for _, repo := range repos {
-		// #nosec G204 -- gh is a trusted CLI, repo and branch are internal values
-		cmd := exec.Command("gh", "pr", "list",
-			"--repo", repo,
-			"--head", branch,
-			"--state", "open",
-			"--json", "number,url",
-			"--limit", "1")
+	var prs []struct {
+		Number int    `json:"number"`
+		URL    string `json:"url"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &prs); err != nil {
+		return 0, ""
+	}
 
-		var stdout bytes.Buffer
-		cmd.Stdout = &stdout
-
-		if err := cmd.Run(); err != nil {
-			continue
-		}
-
-		var prs []struct {
-			Number int    `json:"number"`
-			URL    string `json:"url"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &prs); err != nil {
-			continue
-		}
-
-		if len(prs) > 0 {
-			return prs[0].Number, prs[0].URL
-		}
+	if len(prs) > 0 {
+		return prs[0].Number, prs[0].URL
 	}
 
 	return 0, ""
@@ -631,20 +630,24 @@ func calculateWorkStatus(completed, total int, activityColor string) string {
 }
 
 // FetchMergeQueue fetches open PRs from configured repos.
+// PRs from forks are submitted to upstream repos, so we search upstream repos
+// and filter by --head owner:branch to find PRs from our fork.
 func (f *LiveConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
-	// Repos to query for PRs
-	repos := []struct {
-		Full  string // Full repo path for gh CLI
-		Short string // Short name for display
-	}{
-		{"michaellady/roxas", "roxas"},
-		{"michaellady/gastown", "gastown"},
+	// Repos to query for PRs - search upstream repos where PRs are submitted
+	// Fork owner is used with --head to find PRs from our fork branches
+	type repoConfig struct {
+		Upstream  string // Upstream repo to search (where PRs are submitted)
+		ForkOwner string // Fork owner for --head filtering
+		Short     string // Short name for display
+	}
+	repos := []repoConfig{
+		{"steveyegge/gastown", "michaellady", "gastown"},
 	}
 
 	var result []MergeQueueRow
 
 	for _, repo := range repos {
-		prs, err := f.fetchPRsForRepo(repo.Full, repo.Short)
+		prs, err := f.fetchPRsForRepo(repo.Upstream, repo.ForkOwner, repo.Short)
 		if err != nil {
 			// Non-fatal: continue with other repos
 			continue
@@ -669,12 +672,23 @@ type prResponse struct {
 }
 
 // fetchPRsForRepo fetches open PRs for a single repo.
-func (f *LiveConvoyFetcher) fetchPRsForRepo(repoFull, repoShort string) ([]MergeQueueRow, error) {
-	// #nosec G204 -- gh is a trusted CLI, repo is from hardcoded list
-	cmd := exec.Command("gh", "pr", "list",
+// forkOwner is used with --head to filter PRs from a specific fork (cross-fork PR search).
+func (f *LiveConvoyFetcher) fetchPRsForRepo(repoFull, forkOwner, repoShort string) ([]MergeQueueRow, error) {
+	// Build command args - use --head owner: to find PRs from fork branches
+	// Format: gh pr list --repo upstream/repo --head forkowner:
+	// The trailing colon matches any branch from that owner
+	args := []string{"pr", "list",
 		"--repo", repoFull,
 		"--state", "open",
-		"--json", "number,title,url,mergeable,statusCheckRollup")
+		"--json", "number,title,url,mergeable,statusCheckRollup"}
+
+	// Add --head filter if fork owner specified (for cross-fork PR search)
+	if forkOwner != "" {
+		args = append(args, "--head", forkOwner+":")
+	}
+
+	// #nosec G204 -- gh is a trusted CLI, repo and forkOwner are from hardcoded list
+	cmd := exec.Command("gh", args...)
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
