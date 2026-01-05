@@ -8,6 +8,7 @@ import { api } from '../api.js';
 import { showToast } from './toast.js';
 import { initAutocomplete, renderBeadItem, renderAgentItem } from './autocomplete.js';
 import { state } from '../state.js';
+import { escapeHtml, escapeAttr } from '../utils/html.js';
 
 // Modal registry
 const modals = new Map();
@@ -573,9 +574,9 @@ function showSlingError(form, errorData) {
       <div class="sling-error-content">
         <div class="sling-error-title">Formula Not Found</div>
         <div class="sling-error-message">
-          <code>${errorData.formula}</code> doesn't exist yet.
+          <code>${escapeHtml(errorData.formula)}</code> doesn't exist yet.
         </div>
-        <div class="sling-error-hint">${errorData.hint}</div>
+        <div class="sling-error-hint">${escapeHtml(errorData.hint)}</div>
         <div class="sling-error-actions">
           <button type="button" class="btn btn-secondary btn-sm" onclick="this.closest('form').querySelector('[name=quality]').value = ''; this.closest('.sling-error').remove(); showToast('Quality cleared - try again', 'info');">
             <span class="material-icons">remove_circle</span>
@@ -591,7 +592,7 @@ function showSlingError(form, errorData) {
       </div>
       <div class="sling-error-content">
         <div class="sling-error-title">Bead Not Found</div>
-        <div class="sling-error-message">${errorData.hint}</div>
+        <div class="sling-error-message">${escapeHtml(errorData.hint)}</div>
       </div>
     `;
   } else {
@@ -601,7 +602,7 @@ function showSlingError(form, errorData) {
       </div>
       <div class="sling-error-content">
         <div class="sling-error-title">Sling Failed</div>
-        <div class="sling-error-message">${errorData.error || 'Unknown error'}</div>
+        <div class="sling-error-message">${escapeHtml(errorData.error || 'Unknown error')}</div>
       </div>
     `;
   }
@@ -1065,7 +1066,7 @@ async function showAgentDetailModal(agentId) {
       </button>
     </div>
     <div class="modal-body">
-      <p>Agent ID: <code>${agentId}</code></p>
+      <p>Agent ID: <code>${escapeHtml(agentId)}</code></p>
       <p>Detailed agent view coming soon...</p>
     </div>
   `;
@@ -1082,7 +1083,7 @@ function showNudgeModal(agentId) {
     </div>
     <div class="modal-body">
       <form id="nudge-form">
-        <input type="hidden" name="agent_id" value="${agentId}">
+        <input type="hidden" name="agent_id" value="${escapeAttr(agentId)}">
         <div class="form-group">
           <label for="nudge-message">Message</label>
           <textarea id="nudge-message" name="message" rows="3" placeholder="Enter a message to send to the agent..."></textarea>
@@ -1798,10 +1799,4 @@ async function showAgentTranscript(agentId) {
   }
 }
 
-// Utility
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
+// Note: escapeHtml and escapeAttr imported from ../utils/html.js
