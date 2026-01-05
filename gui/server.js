@@ -10,7 +10,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
-import { spawn, exec } from 'child_process';
+import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
@@ -20,7 +20,7 @@ import readline from 'readline';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -196,10 +196,10 @@ function validateRigAndName(req, res) {
 // Get running tmux sessions for polecats
 async function getRunningPolecats() {
   try {
-    const { stdout } = await execAsync('tmux ls 2>/dev/null || echo ""');
+    const { stdout } = await execFileAsync('tmux', ['ls']);
     const sessions = new Set();
     // Parse tmux ls output: "gt-rig-polecat: 1 windows (created ...)"
-    for (const line of stdout.split('\n')) {
+    for (const line of String(stdout || '').split('\n')) {
       const match = line.match(/^(gt-[^:]+):/);
       if (match) {
         // Convert "gt-hytopia-map-compression-capable" to "hytopia-map-compression/capable"
@@ -221,8 +221,11 @@ async function getRunningPolecats() {
 async function getPolecatOutput(sessionName, lines = 50) {
   try {
     const safeLines = Math.max(1, Math.min(10000, parseInt(lines, 10) || 50));
-    const { stdout } = await execAsync(`tmux capture-pane -t ${quoteArg(sessionName)} -p 2>/dev/null | tail -${safeLines}`);
-    return stdout.trim();
+    const { stdout } = await execFileAsync('tmux', ['capture-pane', '-t', sessionName, '-p']);
+    const output = String(stdout || '');
+    if (!output) return '';
+    const outputLines = output.split('\n');
+    return outputLines.slice(-safeLines).join('\n').trim();
   } catch {
     return null;
   }
@@ -230,11 +233,11 @@ async function getPolecatOutput(sessionName, lines = 50) {
 
 // Execute a Gas Town command
 async function executeGT(args, options = {}) {
-  const cmd = `gt ${args.map(quoteArg).join(' ')}`;
+  const cmd = `gt ${args.join(' ')}`;
   console.log(`[GT] Executing: ${cmd}`);
 
   try {
-    const { stdout, stderr } = await execAsync(cmd, {
+    const { stdout, stderr } = await execFileAsync('gt', args, {
       cwd: options.cwd || GT_ROOT,
       timeout: options.timeout || 30000,
       env: { ...process.env, ...options.env }
@@ -244,12 +247,12 @@ async function executeGT(args, options = {}) {
       console.warn(`[GT] stderr: ${stderr}`);
     }
 
-    return { success: true, data: stdout.trim() };
+    return { success: true, data: String(stdout || '').trim() };
   } catch (error) {
     // Commands like 'gt doctor' exit with code 1 when issues found, but still have useful output
     if (error.stdout) {
       console.warn(`[GT] Command exited with error but has output: ${error.message}`);
-      return { success: true, data: error.stdout.trim(), exitCode: error.code };
+      return { success: true, data: String(error.stdout || '').trim(), exitCode: error.code };
     }
     console.error(`[GT] Error: ${error.message}`);
     return { success: false, error: error.message };
@@ -258,20 +261,20 @@ async function executeGT(args, options = {}) {
 
 // Execute a Beads command
 async function executeBD(args, options = {}) {
-  const cmd = `bd ${args.map(quoteArg).join(' ')}`;
+  const cmd = `bd ${args.join(' ')}`;
   console.log(`[BD] Executing: ${cmd}`);
 
   // Set BEADS_DIR to ensure bd finds the database
   const beadsDir = path.join(GT_ROOT, '.beads');
 
   try {
-    const { stdout, stderr } = await execAsync(cmd, {
+    const { stdout } = await execFileAsync('bd', args, {
       cwd: options.cwd || GT_ROOT,
       timeout: options.timeout || 30000,
       env: { ...process.env, BEADS_DIR: beadsDir }
     });
 
-    return { success: true, data: stdout.trim() };
+    return { success: true, data: String(stdout || '').trim() };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -944,8 +947,8 @@ app.get('/api/bead/:beadId/links', async (req, res) => {
       const rigPath = path.join(GT_ROOT, rigName, 'mayor', 'rig');
 
       try {
-        const { stdout } = await execAsync(`git -C ${quoteArg(rigPath)} remote get-url origin`, { timeout: 5000 });
-        const repoUrl = stdout.trim();
+        const { stdout } = await execFileAsync('git', ['-C', rigPath, 'remote', 'get-url', 'origin'], { timeout: 5000 });
+        const repoUrl = String(stdout || '').trim();
 
         // Extract owner/repo from GitHub URL
         const repoMatch = repoUrl.match(/github\.com[/:]([^/]+\/[^/.\s]+)/);
@@ -954,11 +957,12 @@ app.get('/api/bead/:beadId/links', async (req, res) => {
 
         // Search for PRs (title, body, branch containing bead ID, or polecat PRs near close time)
         try {
-          const { stdout: prOutput } = await execAsync(
-            `gh pr list --repo ${quoteArg(repo)} --state all --limit 20 --json number,title,url,state,headRefName,body,createdAt,updatedAt`,
+          const { stdout: prOutput } = await execFileAsync(
+            'gh',
+            ['pr', 'list', '--repo', repo, '--state', 'all', '--limit', '20', '--json', 'number,title,url,state,headRefName,body,createdAt,updatedAt'],
             { timeout: 10000 }
           );
-          const prs = JSON.parse(prOutput || '[]');
+          const prs = JSON.parse(String(prOutput || '') || '[]');
 
           for (const pr of prs) {
             // Check if PR is related to this bead
@@ -1173,12 +1177,13 @@ app.post('/api/polecat/:rig/:name/stop', async (req, res) => {
 
   try {
     // Kill the tmux session
-    await execAsync(`tmux kill-session -t ${quoteArg(sessionName)} 2>/dev/null`);
+    await execFileAsync('tmux', ['kill-session', '-t', sessionName]);
     broadcast({ type: 'agent_stopped', data: { rig, name, session: sessionName } });
     res.json({ success: true, message: `Stopped ${rig}/${name}` });
   } catch (err) {
     // Session might not exist, which is fine
-    if (err.message.includes("can't find session")) {
+    const errText = `${err.stderr || ''} ${err.message || ''}`;
+    if (errText.includes("can't find session")) {
       res.json({ success: true, message: `${rig}/${name} was not running` });
     } else {
       console.error(`[Agent] Failed to stop ${rig}/${name}:`, err);
@@ -1199,7 +1204,7 @@ app.post('/api/polecat/:rig/:name/restart', async (req, res) => {
   try {
     // First try to kill existing session (ignore errors)
     try {
-      await execAsync(`tmux kill-session -t ${quoteArg(sessionName)} 2>/dev/null`);
+      await execFileAsync('tmux', ['kill-session', '-t', sessionName]);
     } catch {
       // Ignore - session might not exist
     }
@@ -1254,18 +1259,18 @@ app.get('/api/setup/status', async (req, res) => {
 
   // Check gt
   try {
-    const gtResult = await execAsync('gt version', { timeout: 5000 });
+    const gtResult = await execFileAsync('gt', ['version'], { timeout: 5000 });
     status.gt_installed = true;
-    status.gt_version = gtResult.stdout.trim().split('\n')[0];
+    status.gt_version = String(gtResult.stdout || '').trim().split('\n')[0];
   } catch {
     status.gt_installed = false;
   }
 
   // Check bd
   try {
-    const bdResult = await execAsync('bd version', { timeout: 5000 });
+    const bdResult = await execFileAsync('bd', ['version'], { timeout: 5000 });
     status.bd_installed = true;
-    status.bd_version = bdResult.stdout.trim().split('\n')[0];
+    status.bd_version = String(bdResult.stdout || '').trim().split('\n')[0];
   } catch {
     status.bd_installed = false;
   }
@@ -1534,7 +1539,7 @@ app.post('/api/service/:name/down', async (req, res) => {
       // Try killing tmux session directly
       const sessionName = `gt-${name}`;
       try {
-        await execAsync(`tmux kill-session -t ${quoteArg(sessionName)} 2>/dev/null`);
+        await execFileAsync('tmux', ['kill-session', '-t', sessionName]);
         broadcast({ type: 'service_stopped', data: { service: name } });
         res.json({ success: true, service: name, message: `${name} stopped via tmux` });
       } catch {
@@ -1593,8 +1598,13 @@ app.get('/api/service/:name/status', async (req, res) => {
     const sessionName = `gt-${name}`;
 
     // Check if service has a tmux session
-    const { stdout } = await execAsync('tmux ls 2>/dev/null || echo ""');
-    const running = stdout.includes(sessionName);
+    let running = false;
+    try {
+      const { stdout } = await execFileAsync('tmux', ['ls']);
+      running = String(stdout || '').includes(sessionName);
+    } catch {
+      running = false;
+    }
 
     res.json({ service: name, running, session: running ? sessionName : null });
   } catch (err) {
@@ -1643,11 +1653,11 @@ app.get('/api/formulas', async (req, res) => {
 
   // Fallback: try bd formula list
   try {
-    const { stdout } = await execAsync('bd formula list --json', {
+    const { stdout } = await execFileAsync('bd', ['formula', 'list', '--json'], {
       cwd: GT_ROOT,
       timeout: 10000
     });
-    const formulas = JSON.parse(stdout || '[]');
+    const formulas = JSON.parse(String(stdout || '') || '[]');
     setCache('formulas', formulas, CACHE_TTL.formulas);
     return res.json(formulas);
   } catch {
@@ -1796,12 +1806,13 @@ app.get('/api/github/prs', async (req, res) => {
         if (!repo) return Promise.resolve([]);
 
         // Fetch PRs in parallel
-        return execAsync(
-          `gh pr list --repo ${repo} --state ${state} --json number,title,author,createdAt,updatedAt,url,headRefName,state,isDraft,reviewDecision --limit 20`,
+        return execFileAsync(
+          'gh',
+          ['pr', 'list', '--repo', repo, '--state', state, '--json', 'number,title,author,createdAt,updatedAt,url,headRefName,state,isDraft,reviewDecision', '--limit', '20'],
           { timeout: 10000 }
         )
           .then(({ stdout }) => {
-            const prs = JSON.parse(stdout || '[]');
+            const prs = JSON.parse(String(stdout || '') || '[]');
             return prs.map(pr => ({ ...pr, rig: rig.name, repo }));
           })
           .catch(err => {
@@ -1832,12 +1843,13 @@ app.get('/api/github/pr/:repo/:number', async (req, res) => {
   const { repo, number } = req.params;
 
   try {
-    const { stdout } = await execAsync(
-      `gh pr view ${number} --repo ${repo} --json number,title,author,body,createdAt,updatedAt,url,headRefName,baseRefName,state,isDraft,additions,deletions,commits,files,reviews,comments`,
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['pr', 'view', String(number), '--repo', repo, '--json', 'number,title,author,body,createdAt,updatedAt,url,headRefName,baseRefName,state,isDraft,additions,deletions,commits,files,reviews,comments'],
       { timeout: 15000 }
     );
 
-    const pr = JSON.parse(stdout);
+    const pr = JSON.parse(String(stdout || '') || '{}');
     res.json(pr);
   } catch (err) {
     console.error(`[GitHub] Error fetching PR #${number}:`, err.message);
@@ -1883,12 +1895,13 @@ app.get('/api/github/issues', async (req, res) => {
         const repo = extractGitHubRepo(rig.git_url);
         if (!repo) return Promise.resolve([]);
 
-        return execAsync(
-          `gh issue list --repo ${repo} --state ${state} --json number,title,author,labels,createdAt,updatedAt,url,state --limit 30`,
+        return execFileAsync(
+          'gh',
+          ['issue', 'list', '--repo', repo, '--state', state, '--json', 'number,title,author,labels,createdAt,updatedAt,url,state', '--limit', '30'],
           { timeout: 10000 }
         )
           .then(({ stdout }) => {
-            const issues = JSON.parse(stdout || '[]');
+            const issues = JSON.parse(String(stdout || '') || '[]');
             return issues.map(issue => ({ ...issue, repo, rig: rig.name }));
           })
           .catch(err => {
@@ -1919,12 +1932,13 @@ app.get('/api/github/issue/:repo/:number', async (req, res) => {
   const { repo, number } = req.params;
 
   try {
-    const { stdout } = await execAsync(
-      `gh issue view ${number} --repo ${repo} --json number,title,author,body,createdAt,updatedAt,url,state,labels,comments,assignees`,
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['issue', 'view', String(number), '--repo', repo, '--json', 'number,title,author,body,createdAt,updatedAt,url,state,labels,comments,assignees'],
       { timeout: 15000 }
     );
 
-    const issue = JSON.parse(stdout);
+    const issue = JSON.parse(String(stdout || '') || '{}');
     res.json(issue);
   } catch (err) {
     console.error(`[GitHub] Error fetching issue #${number}:`, err.message);
@@ -1945,14 +1959,13 @@ app.get('/api/github/repos', async (req, res) => {
   }
 
   try {
-    // Only add --visibility flag if specifically requested (public/private)
-    const visibilityFlag = visibility && visibility !== 'all' ? `--visibility ${visibility}` : '';
-    const { stdout } = await execAsync(
-      `gh repo list --limit ${limit} ${visibilityFlag} --json name,nameWithOwner,description,url,isPrivate,isFork,pushedAt,primaryLanguage,stargazerCount`,
-      { timeout: 30000 }
-    );
+    const args = ['repo', 'list', '--limit', String(limit), '--json', 'name,nameWithOwner,description,url,isPrivate,isFork,pushedAt,primaryLanguage,stargazerCount'];
+    if (visibility && visibility !== 'all') {
+      args.push('--visibility', visibility);
+    }
+    const { stdout } = await execFileAsync('gh', args, { timeout: 30000 });
 
-    const repos = JSON.parse(stdout || '[]');
+    const repos = JSON.parse(String(stdout || '') || '[]');
 
     // Sort by most recently pushed
     repos.sort((a, b) => new Date(b.pushedAt) - new Date(a.pushedAt));
@@ -1978,8 +1991,7 @@ function startActivityStream() {
   console.log('[WS] Starting activity stream...');
 
   activityProcess = spawn('bd', ['activity', '--follow'], {
-    cwd: GT_ROOT,
-    shell: true
+    cwd: GT_ROOT
   });
 
   activityProcess.stdout.on('data', (data) => {
