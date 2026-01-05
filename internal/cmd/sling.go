@@ -430,16 +430,10 @@ func runSling(cmd *cobra.Command, args []string) error {
 		beadID = wispRootID
 	}
 
-	// Hook the bead using bd update
-	// Set BEADS_DIR to town-level beads so hq-* beads are accessible
-	// even when running from polecat worktree (which only sees gt-* via redirect)
+	// Hook the bead using bd update.
+	// See: https://github.com/steveyegge/gastown/issues/148
 	hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
-	hookCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
-	if hookWorkDir != "" {
-		hookCmd.Dir = hookWorkDir
-	} else {
-		hookCmd.Dir = townRoot
-	}
+	hookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking bead: %w", err)
@@ -898,11 +892,10 @@ func runSlingFormula(args []string) error {
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispResult.RootID)
 
-	// Step 3: Hook the wisp bead using bd update (discovery-based approach)
-	// Set BEADS_DIR to town-level beads so hq-* beads are accessible
+	// Step 3: Hook the wisp bead using bd update.
+	// See: https://github.com/steveyegge/gastown/issues/148
 	hookCmd := exec.Command("bd", "--no-daemon", "update", wispResult.RootID, "--status=hooked", "--assignee="+targetAgent)
-	hookCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
-	hookCmd.Dir = townRoot
+	hookCmd.Dir = beads.ResolveHookDir(townRoot, wispResult.RootID, "")
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking wisp bead: %w", err)
@@ -1402,12 +1395,10 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			}
 		}
 
-		// Hook the bead
+		// Hook the bead. See: https://github.com/steveyegge/gastown/issues/148
+		townRoot := filepath.Dir(townBeadsDir)
 		hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
-		hookCmd.Env = append(os.Environ(), "BEADS_DIR="+townBeadsDir)
-		if hookWorkDir != "" {
-			hookCmd.Dir = hookWorkDir
-		}
+		hookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 		hookCmd.Stderr = os.Stderr
 		if err := hookCmd.Run(); err != nil {
 			results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: false, errMsg: "hook failed"})

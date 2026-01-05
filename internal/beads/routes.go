@@ -185,3 +185,60 @@ func FindConflictingPrefixes(beadsDir string) (map[string][]string, error) {
 
 	return conflicts, nil
 }
+
+// ExtractPrefix extracts the prefix from a bead ID.
+// For example, "ap-qtsup.16" returns "ap-", "hq-cv-abc" returns "hq-".
+// Returns empty string if no valid prefix found (empty input, no hyphen,
+// or hyphen at position 0 which would indicate an invalid prefix).
+func ExtractPrefix(beadID string) string {
+	if beadID == "" {
+		return ""
+	}
+
+	idx := strings.Index(beadID, "-")
+	if idx <= 0 {
+		return ""
+	}
+
+	return beadID[:idx+1]
+}
+
+// GetRigPathForPrefix returns the rig path for a given bead ID prefix.
+// The townRoot should be the Gas Town root directory (e.g., ~/gt).
+// Returns the full absolute path to the rig directory, or empty string if not found.
+// For town-level beads (path="."), returns townRoot.
+func GetRigPathForPrefix(townRoot, prefix string) string {
+	beadsDir := filepath.Join(townRoot, ".beads")
+	routes, err := LoadRoutes(beadsDir)
+	if err != nil || routes == nil {
+		return ""
+	}
+
+	for _, r := range routes {
+		if r.Prefix == prefix {
+			if r.Path == "." {
+				return townRoot // Town-level beads
+			}
+			return filepath.Join(townRoot, r.Path)
+		}
+	}
+
+	return ""
+}
+
+// ResolveHookDir determines the directory for running bd update on a bead.
+// Since bd update doesn't support routing or redirects, we must resolve the
+// actual rig directory from the bead's prefix. hookWorkDir is only used as
+// a fallback if prefix resolution fails.
+func ResolveHookDir(townRoot, beadID, hookWorkDir string) string {
+	// Always try prefix resolution first - bd update needs the actual rig dir
+	prefix := ExtractPrefix(beadID)
+	if rigPath := GetRigPathForPrefix(townRoot, prefix); rigPath != "" {
+		return rigPath
+	}
+	// Fallback to hookWorkDir if provided
+	if hookWorkDir != "" {
+		return hookWorkDir
+	}
+	return townRoot
+}
