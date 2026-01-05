@@ -9,22 +9,12 @@
   bottom: 0;
   background: var(--bg-primary) url('../assets/loading-background.jpeg') center/cover no-repeat;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
+  padding-bottom: 15vh;
   z-index: 10000;
   opacity: 1;
   transition: opacity 0.3s ease;
-}
-
-.loading-overlay::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 0;
 }
 
 .loading-overlay.hidden {
@@ -33,8 +23,6 @@
 }
 
 .loading-content {
-  position: relative;
-  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -44,11 +32,13 @@
 .loading-spinner {
   width: 80px;
   height: 80px;
-  border: 5px solid rgba(255, 255, 255, 0.2);
-  border-top-color: var(--accent-primary);
+  border: 6px solid rgba(0, 0, 0, 0.3);
+  border-top-color: #2563eb;
+  border-right-color: #1e40af;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 40px rgba(37, 99, 235, 0.3);
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
 }
 
 @keyframes spin {
@@ -57,10 +47,12 @@
 
 .loading-text {
   font-size: var(--text-xl);
-  color: #ffffff;
-  font-weight: 600;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-  letter-spacing: 0.5px;
+  color: #1e293b;
+  font-weight: 700;
+  text-shadow:
+    0 2px 4px rgba(255, 255, 255, 0.8),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+  letter-spacing: 1px;
 }
 
 /* === Buttons === */
