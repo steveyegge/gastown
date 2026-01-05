@@ -36,6 +36,7 @@ Unlike polecats which are witness-managed and transient, crew workers are:
 
 Commands:
   gt crew start <name>     Start a crew workspace (creates if needed)
+  gt crew stop <name>      Stop crew workspace session(s)
   gt crew add <name>       Create a new crew workspace
   gt crew list             List crew workspaces with status
   gt crew at <name>        Attach to crew workspace session
@@ -239,28 +240,70 @@ var crewPrevCmd = &cobra.Command{
 }
 
 var crewStartCmd = &cobra.Command{
-	Use:   "start [name...]",
-	Short: "Start crew workspace(s) (creates if needed)",
-	Long: `Start one or more crew workspaces, creating them if they don't exist.
+	Use:     "start [rig] [name...]",
+	Aliases: []string{"spawn"},
+	Short:   "Start crew worker(s) in a rig",
+	Long: `Start crew workers in a rig, creating workspaces if they don't exist.
 
-This is an alias for 'gt start crew'. It combines 'gt crew add' and 'gt crew at --detached'.
+The rig name can be provided as the first argument, or inferred from the
+current directory. Optionally specify crew member names to start specific
+workers, or use --all to start all crew members in the rig.
+
 The crew session starts in the background with Claude running and ready.
 
-The name can include the rig in slash format (e.g., greenplace/joe).
+Examples:
+  gt crew start gastown joe       # Start joe in gastown rig
+  gt crew start gastown --all     # Start all crew in gastown rig
+  gt crew start --all             # Start all crew (rig inferred from cwd)
+  gt crew start beads grip fang   # Start grip and fang in beads rig`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		// With --all, we can have 0 args (infer rig) or 1+ args (rig specified)
+		if crewAll {
+			return nil
+		}
+		// Without --all, need at least rig and one crew name
+		if len(args) < 2 {
+			return fmt.Errorf("requires rig and crew name, or use --all")
+		}
+		return nil
+	},
+	RunE: runCrewStart,
+}
+
+var crewStopCmd = &cobra.Command{
+	Use:   "stop [name...]",
+	Short: "Stop crew workspace session(s)",
+	Long: `Stop one or more running crew workspace sessions.
+
+Kills the tmux session(s) for the specified crew member(s). Use --all to
+stop all running crew sessions across all rigs.
+
+The name can include the rig in slash format (e.g., beads/emma).
 If not specified, the rig is inferred from the current directory.
 
-Role Discovery:
-  If no name is provided, attempts to detect the crew workspace from the
-  current directory. If you're in <rig>/crew/<name>/, it will start that
-  workspace automatically.
+Output is captured before stopping for debugging purposes (use --force
+to skip capture for faster shutdown).
 
 Examples:
-  gt crew start joe                         # Start joe in current rig
-  gt crew start greenplace/joe                 # Start joe in gastown rig
-  gt crew start beads/grip beads/fang       # Start multiple crew members
-  gt crew start joe --rig beads             # Start joe in beads rig
-  gt crew start                             # Auto-detect from cwd`,
-	RunE: runCrewStart,
+  gt crew stop dave                         # Stop dave's session
+  gt crew stop beads/emma beads/grip        # Stop multiple from specific rig
+  gt crew stop --all                        # Stop all running crew sessions
+  gt crew stop --all --rig beads            # Stop all crew in beads rig
+  gt crew stop --all --dry-run              # Preview what would be stopped
+  gt crew stop dave --force                 # Stop without capturing output`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if crewAll {
+			if len(args) > 0 {
+				return fmt.Errorf("cannot specify both --all and a name")
+			}
+			return nil
+		}
+		if len(args) < 1 {
+			return fmt.Errorf("requires at least 1 argument (or --all)")
+		}
+		return nil
+	},
+	RunE: runCrewStop,
 }
 
 func init() {
@@ -294,8 +337,13 @@ func init() {
 	crewRestartCmd.Flags().BoolVar(&crewAll, "all", false, "Restart all running crew sessions")
 	crewRestartCmd.Flags().BoolVar(&crewDryRun, "dry-run", false, "Show what would be restarted without restarting")
 
-	crewStartCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
+	crewStartCmd.Flags().BoolVar(&crewAll, "all", false, "Start all crew members in the rig")
 	crewStartCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use")
+
+	crewStopCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use (filter when using --all)")
+	crewStopCmd.Flags().BoolVar(&crewAll, "all", false, "Stop all running crew sessions")
+	crewStopCmd.Flags().BoolVar(&crewDryRun, "dry-run", false, "Show what would be stopped without stopping")
+	crewStopCmd.Flags().BoolVar(&crewForce, "force", false, "Skip output capture for faster shutdown")
 
 	// Add subcommands
 	crewCmd.AddCommand(crewAddCmd)
@@ -315,6 +363,7 @@ func init() {
 	crewCmd.AddCommand(crewNextCmd)
 	crewCmd.AddCommand(crewPrevCmd)
 	crewCmd.AddCommand(crewStartCmd)
+	crewCmd.AddCommand(crewStopCmd)
 
 	rootCmd.AddCommand(crewCmd)
 }

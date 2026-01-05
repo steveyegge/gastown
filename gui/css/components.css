@@ -1,5 +1,52 @@
 /* Gas Town - Component CSS */
 
+/* === Loading Overlay === */
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+.loading-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.loading-spinner {
+  width: 64px;
+  height: 64px;
+  border: 4px solid var(--border-default);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: var(--text-lg);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
 /* === Buttons === */
 .btn {
   display: inline-flex;
@@ -2390,14 +2437,14 @@ select {
   top: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-md);
   font-size: var(--text-xs);
   font-weight: normal;
   text-align: center;
   max-width: 280px;
   min-width: 120px;
   white-space: normal;
-  line-height: 1.4;
+  line-height: 1.5;
   color: var(--text-primary);
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
@@ -2414,11 +2461,11 @@ select {
 [data-tooltip]::before {
   content: '';
   position: absolute;
-  top: 100%;
+  top: -6px;
   left: 50%;
   transform: translateX(-50%);
   border: 6px solid transparent;
-  border-bottom-color: var(--border-default);
+  border-bottom-color: var(--bg-elevated);
   opacity: 0;
   visibility: hidden;
   transition: opacity var(--transition-fast), visibility var(--transition-fast);

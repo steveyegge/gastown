@@ -152,7 +152,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// Ensure DB is in sync with JSONL to avoid stale-data failures.
-	syncCmd := Command(dir, "sync", "--import-only")
+	syncCmd := Command(dir, "--no-daemon", "sync", "--import-only")
 	if err := syncCmd.Run(); err != nil {
 		t.Skipf("bd sync --import-only failed: %v", err)
 	}

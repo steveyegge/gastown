@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -51,13 +52,17 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 		role = os.Getenv("GT_ROLE")
 	}
 
+	// Get session names for comparison
+	mayorSession := getMayorSessionName()
+	deaconSession := getDeaconSessionName()
+
 	// Determine identity and output based on role
-	if role == "mayor" || statusLineSession == "gt-mayor" {
+	if role == "mayor" || statusLineSession == mayorSession {
 		return runMayorStatusLine(t)
 	}
 
 	// Deacon status line
-	if role == "deacon" || statusLineSession == "gt-deacon" {
+	if role == "deacon" || statusLineSession == deaconSession {
 		return runDeaconStatusLine(t)
 	}
 
@@ -159,14 +164,26 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 
 	// Get town root from mayor pane's working directory
 	var townRoot string
-	paneDir, err := t.GetPaneWorkDir("gt-mayor")
+	mayorSession := getMayorSessionName()
+	paneDir, err := t.GetPaneWorkDir(mayorSession)
 	if err == nil && paneDir != "" {
 		townRoot, _ = workspace.Find(paneDir)
 	}
 
+	// Load registered rigs to validate against
+	registeredRigs := make(map[string]bool)
+	if townRoot != "" {
+		rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+		if rigsConfig, err := config.LoadRigsConfig(rigsConfigPath); err == nil {
+			for rigName := range rigsConfig.Rigs {
+				registeredRigs[rigName] = true
+			}
+		}
+	}
+
 	// Count polecats and rigs
 	// Polecats: only actual polecats (not witnesses, refineries, deacon, crew)
-	// Rigs: any rig with active sessions (witness, refinery, crew, or polecat)
+	// Rigs: only registered rigs with active sessions
 	polecatCount := 0
 	rigs := make(map[string]bool)
 	for _, s := range sessions {
@@ -174,12 +191,12 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		if agent == nil {
 			continue
 		}
-		// Count rigs from any rig-level agent (has non-empty Rig field)
-		if agent.Rig != "" {
+		// Count rigs from any rig-level agent, but only if registered
+		if agent.Rig != "" && registeredRigs[agent.Rig] {
 			rigs[agent.Rig] = true
 		}
-		// Count only polecats for polecat count
-		if agent.Type == AgentPolecat {
+		// Count only polecats for polecat count (in registered rigs)
+		if agent.Type == AgentPolecat && registeredRigs[agent.Rig] {
 			polecatCount++
 		}
 	}
@@ -224,9 +241,21 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 
 	// Get town root from deacon pane's working directory
 	var townRoot string
-	paneDir, err := t.GetPaneWorkDir("gt-deacon")
+	deaconSession := getDeaconSessionName()
+	paneDir, err := t.GetPaneWorkDir(deaconSession)
 	if err == nil && paneDir != "" {
 		townRoot, _ = workspace.Find(paneDir)
+	}
+
+	// Load registered rigs to validate against
+	registeredRigs := make(map[string]bool)
+	if townRoot != "" {
+		rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+		if rigsConfig, err := config.LoadRigsConfig(rigsConfigPath); err == nil {
+			for rigName := range rigsConfig.Rigs {
+				registeredRigs[rigName] = true
+			}
+		}
 	}
 
 	rigs := make(map[string]bool)
@@ -236,10 +265,11 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 		if agent == nil {
 			continue
 		}
-		if agent.Rig != "" {
+		// Only count registered rigs
+		if agent.Rig != "" && registeredRigs[agent.Rig] {
 			rigs[agent.Rig] = true
 		}
-		if agent.Type == AgentPolecat {
+		if agent.Type == AgentPolecat && registeredRigs[agent.Rig] {
 			polecatCount++
 		}
 	}

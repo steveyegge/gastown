@@ -39,7 +39,8 @@ const CACHE_TTL = {
   status: 5000,       // 5 seconds for status (frequently changing)
   convoys: 10000,     // 10 seconds for convoys
   mail: 15000,        // 15 seconds for mail list
-  agents: 10000,      // 10 seconds for agents
+  agents: 15000,      // 15 seconds for agents
+  rigs: 30000,        // 30 seconds for rigs (rarely changes)
   formulas: 60000,    // 1 minute for formulas (rarely changes)
   github_prs: 30000,  // 30 seconds for GitHub PRs
   github_issues: 30000, // 30 seconds for GitHub issues
@@ -1366,6 +1367,12 @@ app.post('/api/rigs', async (req, res) => {
 
 // List rigs
 app.get('/api/rigs', async (req, res) => {
+  // Check cache
+  if (req.query.refresh !== 'true') {
+    const cached = getCached('rigs');
+    if (cached) return res.json(cached);
+  }
+
   const result = await executeGT(['rig', 'list']);
 
   if (result.success) {
@@ -1379,6 +1386,7 @@ app.get('/api/rigs', async (req, res) => {
         rigs.push({ name: match[1] });
       }
     }
+    setCache('rigs', rigs, CACHE_TTL.rigs);
     res.json(rigs);
   } else {
     res.json([]);

@@ -267,6 +267,210 @@ func (c *SettingsCheck) findRigs(townRoot string) []string {
 	return findAllRigs(townRoot)
 }
 
+// SessionHookCheck verifies settings.json files use session-start.sh for proper
+// session_id passthrough. Without this wrapper, gt seance cannot discover sessions.
+type SessionHookCheck struct {
+	BaseCheck
+}
+
+// NewSessionHookCheck creates a new session hook check.
+func NewSessionHookCheck() *SessionHookCheck {
+	return &SessionHookCheck{
+		BaseCheck: BaseCheck{
+			CheckName:        "session-hooks",
+			CheckDescription: "Check that settings.json hooks use session-start.sh",
+		},
+	}
+}
+
+// Run checks if all settings.json files use session-start.sh wrapper.
+func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
+	var issues []string
+	var checked int
+
+	// Find all settings.json files in the town
+	settingsFiles := c.findSettingsFiles(ctx.TownRoot)
+
+	for _, settingsPath := range settingsFiles {
+		relPath, _ := filepath.Rel(ctx.TownRoot, settingsPath)
+
+		problems := c.checkSettingsFile(settingsPath)
+		if len(problems) > 0 {
+			for _, problem := range problems {
+				issues = append(issues, fmt.Sprintf("%s: %s", relPath, problem))
+			}
+		}
+		checked++
+	}
+
+	if len(issues) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: fmt.Sprintf("All %d settings.json file(s) use session-start.sh", checked),
+		}
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d hook issue(s) found across settings.json files", len(issues)),
+		Details: issues,
+		FixHint: "Update SessionStart/PreCompact hooks to use 'bash ~/.claude/hooks/session-start.sh' for session_id passthrough",
+	}
+}
+
+// checkSettingsFile checks a single settings.json file for hook issues.
+func (c *SessionHookCheck) checkSettingsFile(path string) []string {
+	var problems []string
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil // Can't read file, skip
+	}
+
+	content := string(data)
+
+	// Check for SessionStart hooks
+	if strings.Contains(content, "SessionStart") {
+		if !c.usesSessionStartScript(content, "SessionStart") {
+			problems = append(problems, "SessionStart uses bare 'gt prime' (missing session_id passthrough)")
+		}
+	}
+
+	// Check for PreCompact hooks
+	if strings.Contains(content, "PreCompact") {
+		if !c.usesSessionStartScript(content, "PreCompact") {
+			problems = append(problems, "PreCompact uses bare 'gt prime' (missing session_id passthrough)")
+		}
+	}
+
+	return problems
+}
+
+// usesSessionStartScript checks if the hook configuration uses session-start.sh.
+// Returns true if the hook is properly configured or if no hook is configured.
+func (c *SessionHookCheck) usesSessionStartScript(content, hookType string) bool {
+	// Find the hook section - look for the hook type followed by its configuration
+	// This is a simple heuristic - we look for "gt prime" without session-start.sh
+
+	// Split around the hook type to find its section
+	parts := strings.SplitN(content, `"`+hookType+`"`, 2)
+	if len(parts) < 2 {
+		return true // Hook type not found, nothing to check
+	}
+
+	// Get the section after the hook type declaration (until next top-level key)
+	section := parts[1]
+
+	// Find the end of this hook section (next top-level key at same depth)
+	// Simple approach: look until we find another "Session" or "User" or end of hooks
+	endMarkers := []string{`"SessionStart"`, `"PreCompact"`, `"UserPromptSubmit"`, `"Stop"`, `"Notification"`}
+	sectionEnd := len(section)
+	for _, marker := range endMarkers {
+		if marker == `"`+hookType+`"` {
+			continue // Skip the one we're looking for
+		}
+		if idx := strings.Index(section, marker); idx > 0 && idx < sectionEnd {
+			sectionEnd = idx
+		}
+	}
+	section = section[:sectionEnd]
+
+	// Check if this section contains session-start.sh
+	if strings.Contains(section, "session-start.sh") {
+		return true // Uses the wrapper script
+	}
+
+	// Check if it uses bare 'gt prime' without the wrapper
+	// Patterns to detect: "gt prime", "'gt prime'", "gt prime\""
+	if strings.Contains(section, "gt prime") {
+		return false // Uses bare gt prime without session-start.sh
+	}
+
+	// No gt prime or session-start.sh found - might be a different hook configuration
+	return true
+}
+
+// findSettingsFiles finds all settings.json files in the town.
+func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
+	var files []string
+
+	// Town root
+	townSettings := filepath.Join(townRoot, ".claude", "settings.json")
+	if _, err := os.Stat(townSettings); err == nil {
+		files = append(files, townSettings)
+	}
+
+	// Find all rigs
+	rigs := findAllRigs(townRoot)
+	for _, rig := range rigs {
+		// Rig root
+		rigSettings := filepath.Join(rig, ".claude", "settings.json")
+		if _, err := os.Stat(rigSettings); err == nil {
+			files = append(files, rigSettings)
+		}
+
+		// Mayor/rig
+		mayorRigSettings := filepath.Join(rig, "mayor", "rig", ".claude", "settings.json")
+		if _, err := os.Stat(mayorRigSettings); err == nil {
+			files = append(files, mayorRigSettings)
+		}
+
+		// Witness
+		witnessSettings := filepath.Join(rig, "witness", ".claude", "settings.json")
+		if _, err := os.Stat(witnessSettings); err == nil {
+			files = append(files, witnessSettings)
+		}
+
+		// Witness/rig
+		witnessRigSettings := filepath.Join(rig, "witness", "rig", ".claude", "settings.json")
+		if _, err := os.Stat(witnessRigSettings); err == nil {
+			files = append(files, witnessRigSettings)
+		}
+
+		// Refinery
+		refinerySettings := filepath.Join(rig, "refinery", ".claude", "settings.json")
+		if _, err := os.Stat(refinerySettings); err == nil {
+			files = append(files, refinerySettings)
+		}
+
+		// Refinery/rig
+		refineryRigSettings := filepath.Join(rig, "refinery", "rig", ".claude", "settings.json")
+		if _, err := os.Stat(refineryRigSettings); err == nil {
+			files = append(files, refineryRigSettings)
+		}
+
+		// Crew members
+		crewPath := filepath.Join(rig, "crew")
+		if crewEntries, err := os.ReadDir(crewPath); err == nil {
+			for _, crew := range crewEntries {
+				if crew.IsDir() && !strings.HasPrefix(crew.Name(), ".") {
+					crewSettings := filepath.Join(crewPath, crew.Name(), ".claude", "settings.json")
+					if _, err := os.Stat(crewSettings); err == nil {
+						files = append(files, crewSettings)
+					}
+				}
+			}
+		}
+
+		// Polecats
+		polecatsPath := filepath.Join(rig, "polecats")
+		if polecatEntries, err := os.ReadDir(polecatsPath); err == nil {
+			for _, polecat := range polecatEntries {
+				if polecat.IsDir() && !strings.HasPrefix(polecat.Name(), ".") {
+					polecatSettings := filepath.Join(polecatsPath, polecat.Name(), ".claude", "settings.json")
+					if _, err := os.Stat(polecatSettings); err == nil {
+						files = append(files, polecatSettings)
+					}
+				}
+			}
+		}
+	}
+
+	return files
+}
+
 // findAllRigs is a shared helper that returns all rig directories within a town.
 func findAllRigs(townRoot string) []string {
 	var rigs []string

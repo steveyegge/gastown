@@ -36,6 +36,9 @@ type MR struct {
 	// Claiming fields for parallel refinery workers
 	ClaimedBy string     `json:"claimed_by,omitempty"` // Worker ID that claimed this MR
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"` // When the MR was claimed
+
+	// Blocking fields for non-blocking delegation
+	BlockedBy string `json:"blocked_by,omitempty"` // Task ID that blocks this MR (e.g., conflict resolution task)
 }
 
 // Queue manages the MR storage.
@@ -76,7 +79,7 @@ func (q *Queue) EnsureDir() error {
 // generateID creates a unique MR ID.
 func generateID() string {
 	b := make([]byte, 4)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return fmt.Sprintf("mr-%d-%s", time.Now().Unix(), hex.EncodeToString(b))
 }
 
@@ -277,7 +280,7 @@ func (q *Queue) Claim(id, workerID string) error {
 		return fmt.Errorf("writing temp file: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath) // cleanup
+		_ = os.Remove(tmpPath) // cleanup
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 
@@ -354,3 +357,113 @@ var (
 	ErrNotFound       = fmt.Errorf("merge request not found")
 	ErrAlreadyClaimed = fmt.Errorf("merge request already claimed by another worker")
 )
+
+// SetBlockedBy marks an MR as blocked by a task (e.g., conflict resolution).
+// When the blocking task closes, the MR becomes ready for processing again.
+func (q *Queue) SetBlockedBy(mrID, taskID string) error {
+	path := filepath.Join(q.dir, mrID+".json")
+
+	mr, err := q.load(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("loading MR: %w", err)
+	}
+
+	mr.BlockedBy = taskID
+
+	data, err := json.MarshalIndent(mr, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling MR: %w", err)
+	}
+
+	return os.WriteFile(path, data, 0644)
+}
+
+// ClearBlockedBy removes the blocking task from an MR.
+func (q *Queue) ClearBlockedBy(mrID string) error {
+	return q.SetBlockedBy(mrID, "")
+}
+
+// IsBlocked checks if an MR is blocked by a task that is still open.
+// If blocked, returns true and the blocking task ID.
+// checkStatus is a function that checks if a bead is still open.
+func (mr *MR) IsBlocked(checkStatus func(beadID string) (isOpen bool, err error)) (bool, string, error) {
+	if mr.BlockedBy == "" {
+		return false, "", nil
+	}
+
+	isOpen, err := checkStatus(mr.BlockedBy)
+	if err != nil {
+		// If we can't check status, assume not blocked (fail open)
+		return false, "", nil
+	}
+
+	return isOpen, mr.BlockedBy, nil
+}
+
+// BeadStatusChecker is a function type that checks if a bead is open.
+// Returns true if the bead is open (not closed), false if closed or not found.
+type BeadStatusChecker func(beadID string) (isOpen bool, err error)
+
+// ListReady returns MRs that are ready for processing:
+// - Not claimed by another worker (or claim is stale)
+// - Not blocked by an open task
+// Sorted by priority score (highest first).
+// The checkStatus function is used to check if blocking tasks are still open.
+func (q *Queue) ListReady(checkStatus BeadStatusChecker) ([]*MR, error) {
+	all, err := q.ListByScore()
+	if err != nil {
+		return nil, err
+	}
+
+	var ready []*MR
+	for _, mr := range all {
+		// Skip if claimed by another worker (and not stale)
+		if mr.ClaimedBy != "" {
+			if mr.ClaimedAt != nil && time.Since(*mr.ClaimedAt) < ClaimStaleTimeout {
+				continue
+			}
+			// Stale claim - include in ready list
+		}
+
+		// Skip if blocked by an open task
+		if mr.BlockedBy != "" && checkStatus != nil {
+			isOpen, err := checkStatus(mr.BlockedBy)
+			if err == nil && isOpen {
+				// Blocked by an open task - skip
+				continue
+			}
+			// If error or task closed, proceed (fail open)
+		}
+
+		ready = append(ready, mr)
+	}
+
+	return ready, nil
+}
+
+// ListBlocked returns MRs that are blocked by open tasks.
+// Useful for reporting/monitoring.
+func (q *Queue) ListBlocked(checkStatus BeadStatusChecker) ([]*MR, error) {
+	all, err := q.List()
+	if err != nil {
+		return nil, err
+	}
+
+	var blocked []*MR
+	for _, mr := range all {
+		if mr.BlockedBy == "" {
+			continue
+		}
+		if checkStatus != nil {
+			isOpen, err := checkStatus(mr.BlockedBy)
+			if err == nil && isOpen {
+				blocked = append(blocked, mr)
+			}
+		}
+	}
+
+	return blocked, nil
+}

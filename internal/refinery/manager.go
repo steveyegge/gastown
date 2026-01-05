@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/mrqueue"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -136,7 +137,16 @@ func (m *Manager) Start(foreground bool) error {
 	// Background mode: check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		return ErrAlreadyRunning
+		// Session exists - check if Claude is actually running (healthy vs zombie)
+		if t.IsClaudeRunning(sessionID) {
+			// Healthy - Claude is running
+			return ErrAlreadyRunning
+		}
+		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, Claude dead). Recreating...")
+		if err := t.KillSession(sessionID); err != nil {
+			return fmt.Errorf("killing zombie session: %w", err)
+		}
 	}
 
 	// Also check via PID for backwards compatibility
@@ -193,7 +203,8 @@ func (m *Manager) Start(foreground bool) error {
 	// Start Claude agent with full permissions (like polecats)
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Restarts are handled by daemon via LIFECYCLE mail, not shell loops
-	command := config.GetRuntimeCommand("")
+	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
+	command := config.BuildAgentStartupCommand("refinery", bdActor, "", "")
 	if err := t.SendKeys(sessionID, command); err != nil {
 		// Clean up the session on failure (best-effort cleanup)
 		_ = t.KillSession(sessionID)
@@ -273,14 +284,25 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 		})
 	}
 
-	// Sort issues by priority (P0 first, then P1, etc.)
-	sort.Slice(issues, func(i, j int) bool {
-		return issues[i].Priority < issues[j].Priority
+	// Score and sort issues by priority score (highest first)
+	now := time.Now()
+	type scoredIssue struct {
+		issue *beads.Issue
+		score float64
+	}
+	scored := make([]scoredIssue, 0, len(issues))
+	for _, issue := range issues {
+		score := m.calculateIssueScore(issue, now)
+		scored = append(scored, scoredIssue{issue: issue, score: score})
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
 	})
 
-	// Convert beads issues to queue items
-	for _, issue := range issues {
-		mr := m.issueToMR(issue)
+	// Convert scored issues to queue items
+	for _, s := range scored {
+		mr := m.issueToMR(s.issue)
 		if mr != nil {
 			// Skip if this is the currently processing MR
 			if ref.CurrentMR != nil && ref.CurrentMR.ID == mr.ID {
@@ -298,11 +320,47 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	return items, nil
 }
 
+// calculateIssueScore computes the priority score for an MR issue.
+// Higher scores mean higher priority (process first).
+func (m *Manager) calculateIssueScore(issue *beads.Issue, now time.Time) float64 {
+	fields := beads.ParseMRFields(issue)
+
+	// Parse MR creation time
+	mrCreatedAt := parseTime(issue.CreatedAt)
+	if mrCreatedAt.IsZero() {
+		mrCreatedAt = now // Fallback
+	}
+
+	// Build score input
+	input := mrqueue.ScoreInput{
+		Priority:    issue.Priority,
+		MRCreatedAt: mrCreatedAt,
+		Now:         now,
+	}
+
+	// Add fields from MR metadata if available
+	if fields != nil {
+		input.RetryCount = fields.RetryCount
+
+		// Parse convoy created at if available
+		if fields.ConvoyCreatedAt != "" {
+			if convoyTime := parseTime(fields.ConvoyCreatedAt); !convoyTime.IsZero() {
+				input.ConvoyCreatedAt = &convoyTime
+			}
+		}
+	}
+
+	return mrqueue.ScoreMRWithDefaults(input)
+}
+
 // issueToMR converts a beads issue to a MergeRequest.
 func (m *Manager) issueToMR(issue *beads.Issue) *MergeRequest {
 	if issue == nil {
 		return nil
 	}
+
+	// Get configured default branch for this rig
+	defaultBranch := m.rig.DefaultBranch()
 
 	fields := beads.ParseMRFields(issue)
 	if fields == nil {
@@ -312,14 +370,14 @@ func (m *Manager) issueToMR(issue *beads.Issue) *MergeRequest {
 			IssueID:      issue.ID,
 			Status:       MROpen,
 			CreatedAt:    parseTime(issue.CreatedAt),
-			TargetBranch: "main",
+			TargetBranch: defaultBranch,
 		}
 	}
 
-	// Default target to main if not specified
+	// Default target to rig's default branch if not specified
 	target := fields.Target
 	if target == "" {
-		target = "main"
+		target = defaultBranch
 	}
 
 	return &MergeRequest{
@@ -347,15 +405,15 @@ func parseTime(s string) time.Time {
 // run is deprecated - foreground mode now just prints a message.
 // The Refinery agent (Claude) handles all merge processing.
 // See: ZFC #5 - Move merge/conflict decisions from Go to Refinery agent
-func (m *Manager) run(ref *Refinery) error {
-	fmt.Fprintln(m.output, "")
-	fmt.Fprintln(m.output, "╔══════════════════════════════════════════════════════════════╗")
-	fmt.Fprintln(m.output, "║  Foreground mode is deprecated.                              ║")
-	fmt.Fprintln(m.output, "║                                                              ║")
-	fmt.Fprintln(m.output, "║  The Refinery agent (Claude) handles all merge decisions.   ║")
-	fmt.Fprintln(m.output, "║  Use 'gt refinery start' to run in background mode.         ║")
-	fmt.Fprintln(m.output, "╚══════════════════════════════════════════════════════════════╝")
-	fmt.Fprintln(m.output, "")
+func (m *Manager) run(_ *Refinery) error { // ref unused: deprecated function
+	_, _ = fmt.Fprintln(m.output, "")
+	_, _ = fmt.Fprintln(m.output, "╔══════════════════════════════════════════════════════════════╗")
+	_, _ = fmt.Fprintln(m.output, "║  Foreground mode is deprecated.                              ║")
+	_, _ = fmt.Fprintln(m.output, "║                                                              ║")
+	_, _ = fmt.Fprintln(m.output, "║  The Refinery agent (Claude) handles all merge decisions.   ║")
+	_, _ = fmt.Fprintln(m.output, "║  Use 'gt refinery start' to run in background mode.         ║")
+	_, _ = fmt.Fprintln(m.output, "╚══════════════════════════════════════════════════════════════╝")
+	_, _ = fmt.Fprintln(m.output, "")
 	return nil
 }
 
@@ -403,7 +461,7 @@ func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg s
 		// Close the MR (in_progress → closed)
 		if err := mr.Close(closeReason); err != nil {
 			// Log error but continue - this shouldn't happen
-			fmt.Fprintf(m.output, "Warning: failed to close MR: %v\n", err)
+			_, _ = fmt.Fprintf(m.output, "Warning: failed to close MR: %v\n", err)
 		}
 		switch closeReason {
 		case CloseReasonMerged:
@@ -416,7 +474,7 @@ func (m *Manager) completeMR(mr *MergeRequest, closeReason CloseReason, errMsg s
 		// Reopen the MR for rework (in_progress → open)
 		if err := mr.Reopen(); err != nil {
 			// Log error but continue
-			fmt.Fprintf(m.output, "Warning: failed to reopen MR: %v\n", err)
+			_, _ = fmt.Fprintf(m.output, "Warning: failed to reopen MR: %v\n", err)
 		}
 	}
 
@@ -431,7 +489,7 @@ func (m *Manager) runTests(testCmd string) error {
 		return nil
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd := exec.Command(parts[0], parts[1:]...) //nolint:gosec // G204: testCmd is from trusted rig config
 	cmd.Dir = m.workDir
 
 	var stderr bytes.Buffer
@@ -516,7 +574,7 @@ func (m *Manager) pushWithRetry(targetBranch string, config MergeConfig) error {
 
 	for attempt := 0; attempt <= config.PushRetryCount; attempt++ {
 		if attempt > 0 {
-			fmt.Fprintf(m.output, "Push retry %d/%d after %v\n", attempt, config.PushRetryCount, delay)
+			_, _ = fmt.Fprintf(m.output, "Push retry %d/%d after %v\n", attempt, config.PushRetryCount, delay)
 			time.Sleep(delay)
 			delay *= 2 // Exponential backoff
 		}
@@ -676,7 +734,7 @@ func (m *Manager) Retry(id string, processNow bool) error {
 	// The Refinery agent handles merge processing.
 	// It will pick up this MR in its next patrol cycle.
 	if processNow {
-		fmt.Fprintln(m.output, "Note: --now is deprecated. The Refinery agent will process this MR in its next patrol cycle.")
+		_, _ = fmt.Fprintln(m.output, "Note: --now is deprecated. The Refinery agent will process this MR in its next patrol cycle.")
 	}
 
 	return nil

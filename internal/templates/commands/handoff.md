@@ -12,7 +12,7 @@ Execute these steps in order:
 
 1. If user provided a message, send handoff mail to yourself first.
    Construct your mail address from your identity (e.g., gastown/crew/max for crew, mayor/ for mayor).
-   Example: `gt mail send gastown/crew/max -s "🤝 HANDOFF: Session cycling" -m "USER_MESSAGE_HERE"`
+   Example: `gt mail send gastown/crew/max -s "HANDOFF: Session cycling" -m "USER_MESSAGE_HERE"`
 
 2. Run the handoff command (this will respawn your session with a fresh Claude):
    `gt handoff`

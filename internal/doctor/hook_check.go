@@ -80,7 +80,7 @@ func (c *HookAttachmentValidCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // checkBeadsDir checks all pinned beads in a directory for invalid attachments.
-func (c *HookAttachmentValidCheck) checkBeadsDir(beadsDir, location string) []invalidAttachment {
+func (c *HookAttachmentValidCheck) checkBeadsDir(beadsDir, _ string) []invalidAttachment { // location unused but kept for future diagnostic output
 	var invalid []invalidAttachment
 
 	b := beads.New(filepath.Dir(beadsDir))

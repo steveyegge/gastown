@@ -39,7 +39,7 @@ func ResolveBeadsDir(workDir string) string {
 	redirectPath := filepath.Join(beadsDir, "redirect")
 
 	// Check for redirect file
-	data, err := os.ReadFile(redirectPath)
+	data, err := os.ReadFile(redirectPath) //nolint:gosec // G304: path is constructed internally
 	if err != nil {
 		// No redirect, use local .beads
 		return beadsDir
@@ -209,7 +209,8 @@ type SyncStatus struct {
 
 // Beads wraps bd CLI operations for a working directory.
 type Beads struct {
-	workDir string
+	workDir  string
+	beadsDir string // Optional BEADS_DIR override for cross-database access
 }
 
 // New creates a new Beads wrapper for the given directory.
@@ -263,14 +264,31 @@ func ApplyEnv(cmd *exec.Cmd, workDir string) {
 	cmd.Env = env
 }
 
+// NewWithBeadsDir creates a Beads wrapper with an explicit BEADS_DIR.
+// This is needed when running from a polecat worktree but accessing town-level beads.
+func NewWithBeadsDir(workDir, beadsDir string) *Beads {
+	return &Beads{workDir: workDir, beadsDir: beadsDir}
+}
+
 // run executes a bd command and returns stdout.
 func (b *Beads) run(args ...string) ([]byte, error) {
 	// Use --no-daemon for faster read operations (avoids daemon IPC overhead)
 	// The daemon is primarily useful for write coalescing, not reads
 	fullArgs := append([]string{"--no-daemon"}, args...)
-	cmd := exec.Command("bd", fullArgs...)
+	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 	ApplyEnv(cmd, b.workDir)
+
+	// Set BEADS_DIR if specified (enables cross-database access)
+	if b.beadsDir != "" {
+		env := cmd.Env
+		if len(env) == 0 {
+			env = os.Environ()
+		}
+		env = setEnv(env, "BEADS_DIR", b.beadsDir)
+		env = setEnv(env, "BEADS_JSONL", resolveJSONLPath(b.beadsDir))
+		cmd.Env = env
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -279,7 +297,8 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	err := cmd.Run()
 	if err != nil {
 		stderrStr := stderr.String()
-		if strings.Contains(stderrStr, "Database out of sync with JSONL") {
+		stdoutStr := stdout.String()
+		if strings.Contains(stderrStr, "Database out of sync with JSONL") || strings.Contains(stdoutStr, "Database out of sync with JSONL") {
 			syncCmd := Command(b.workDir, "--no-daemon", "sync", "--import-only")
 			if syncErr := syncCmd.Run(); syncErr == nil {
 				stdout.Reset()
@@ -287,6 +306,15 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 				cmd = exec.Command("bd", fullArgs...)
 				cmd.Dir = b.workDir
 				ApplyEnv(cmd, b.workDir)
+				if b.beadsDir != "" {
+					env := cmd.Env
+					if len(env) == 0 {
+						env = os.Environ()
+					}
+					env = setEnv(env, "BEADS_DIR", b.beadsDir)
+					env = setEnv(env, "BEADS_JSONL", resolveJSONLPath(b.beadsDir))
+					cmd.Env = env
+				}
 				cmd.Stdout = &stdout
 				cmd.Stderr = &stderr
 				err = cmd.Run()
@@ -295,7 +323,11 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 			}
 		}
 		if err != nil {
-			return nil, b.wrapError(err, stderr.String(), args)
+			errOut := stderrStr
+			if errOut == "" {
+				errOut = stdoutStr
+			}
+			return nil, b.wrapError(err, errOut, args)
 		}
 	}
 
@@ -563,6 +595,49 @@ func (b *Beads) Blocked() ([]*Issue, error) {
 // This ensures created_by is populated for issue provenance tracking.
 func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	args := []string{"create", "--json"}
+
+	if opts.Title != "" {
+		args = append(args, "--title="+opts.Title)
+	}
+	if opts.Type != "" {
+		args = append(args, "--type="+opts.Type)
+	}
+	if opts.Priority >= 0 {
+		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
+	}
+	if opts.Description != "" {
+		args = append(args, "--description="+opts.Description)
+	}
+	if opts.Parent != "" {
+		args = append(args, "--parent="+opts.Parent)
+	}
+	// Default Actor from BD_ACTOR env var if not specified
+	actor := opts.Actor
+	if actor == "" {
+		actor = os.Getenv("BD_ACTOR")
+	}
+	if actor != "" {
+		args = append(args, "--actor="+actor)
+	}
+
+	out, err := b.run(args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var issue Issue
+	if err := json.Unmarshal(out, &issue); err != nil {
+		return nil, fmt.Errorf("parsing bd create output: %w", err)
+	}
+
+	return &issue, nil
+}
+
+// CreateWithID creates an issue with a specific ID.
+// This is useful for agent beads, role beads, and other beads that need
+// deterministic IDs rather than auto-generated ones.
+func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
+	args := []string{"create", "--json", "--id=" + id}
 
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
@@ -1021,6 +1096,16 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		}
 	}
 
+	// Set the hook slot if specified (this is the authoritative storage)
+	// This fixes the slot inconsistency bug where bead status is 'hooked' but
+	// agent's hook slot is empty. See mi-619.
+	if fields != nil && fields.HookBead != "" {
+		if _, err := b.run("slot", "set", id, "hook", fields.HookBead); err != nil {
+			// Non-fatal: warn but continue - description text has the backup
+			fmt.Printf("Warning: could not set hook slot: %v\n", err)
+		}
+	}
+
 	return &issue, nil
 }
 
@@ -1215,17 +1300,27 @@ func AgentBeadID(rig, role, name string) string {
 }
 
 // MayorBeadID returns the Mayor agent bead ID.
+//
+// Deprecated: Use MayorBeadIDTown() for town-level beads (hq- prefix).
+// This function returns "gt-mayor" which is for rig-level storage.
+// Town-level agents like Mayor should use the hq- prefix.
 func MayorBeadID() string {
 	return "gt-mayor"
 }
 
 // DeaconBeadID returns the Deacon agent bead ID.
+//
+// Deprecated: Use DeaconBeadIDTown() for town-level beads (hq- prefix).
+// This function returns "gt-deacon" which is for rig-level storage.
+// Town-level agents like Deacon should use the hq- prefix.
 func DeaconBeadID() string {
 	return "gt-deacon"
 }
 
 // DogBeadID returns a Dog agent bead ID.
 // Dogs are town-level agents, so they follow the pattern: gt-dog-<name>
+// Deprecated: Use DogBeadIDTown() for town-level beads with hq- prefix.
+// Dogs are town-level agents and should use hq-dog-<name>, not gt-dog-<name>.
 func DogBeadID(name string) string {
 	return "gt-dog-" + name
 }
@@ -1424,18 +1519,25 @@ func IsAgentSessionBead(beadID string) bool {
 }
 
 // Role bead ID naming convention:
-//   gt-<role>-role
+// Role beads are stored in town beads (~/.beads/) with hq- prefix.
+//
+// Canonical format: hq-<role>-role
 //
 // Examples:
-//   - gt-mayor-role
-//   - gt-deacon-role
-//   - gt-witness-role
-//   - gt-refinery-role
-//   - gt-crew-role
-//   - gt-polecat-role
+//   - hq-mayor-role
+//   - hq-deacon-role
+//   - hq-witness-role
+//   - hq-refinery-role
+//   - hq-crew-role
+//   - hq-polecat-role
+//
+// Use RoleBeadIDTown() to get canonical role bead IDs.
+// The legacy RoleBeadID() function returns gt-<role>-role for backward compatibility.
 
 // RoleBeadID returns the role bead ID for a given role type.
 // Role beads define lifecycle configuration for each agent type.
+// Deprecated: Use RoleBeadIDTown() for town-level beads with hq- prefix.
+// Role beads are global templates and should use hq-<role>-role, not gt-<role>-role.
 func RoleBeadID(roleType string) string {
 	return "gt-" + roleType + "-role"
 }
@@ -1511,4 +1613,144 @@ func (b *Beads) FindMRForBranch(branch string) (*Issue, error) {
 	}
 
 	return nil, nil
+}
+
+// AddGateWaiter registers an agent as a waiter on a gate bead.
+// When the gate closes, the waiter will receive a wake notification via gt gate wake.
+// The waiter is typically the polecat's address (e.g., "gastown/polecats/Toast").
+func (b *Beads) AddGateWaiter(gateID, waiter string) error {
+	// Use bd gate add-waiter to register the waiter on the gate
+	// This adds the waiter to the gate's native waiters field
+	_, err := b.run("gate", "add-waiter", gateID, waiter)
+	if err != nil {
+		return fmt.Errorf("adding gate waiter: %w", err)
+	}
+	return nil
+}
+
+// ===== Merge Slot Functions (serialized conflict resolution) =====
+
+// MergeSlotStatus represents the result of checking a merge slot.
+type MergeSlotStatus struct {
+	ID        string   `json:"id"`
+	Available bool     `json:"available"`
+	Holder    string   `json:"holder,omitempty"`
+	Waiters   []string `json:"waiters,omitempty"`
+	Error     string   `json:"error,omitempty"`
+}
+
+// MergeSlotCreate creates the merge slot bead for the current rig.
+// The slot is used for serialized conflict resolution in the merge queue.
+// Returns the slot ID if successful.
+func (b *Beads) MergeSlotCreate() (string, error) {
+	out, err := b.run("merge-slot", "create", "--json")
+	if err != nil {
+		return "", fmt.Errorf("creating merge slot: %w", err)
+	}
+
+	var result struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return "", fmt.Errorf("parsing merge-slot create output: %w", err)
+	}
+
+	return result.ID, nil
+}
+
+// MergeSlotCheck checks the availability of the merge slot.
+// Returns the current status including holder and waiters if held.
+func (b *Beads) MergeSlotCheck() (*MergeSlotStatus, error) {
+	out, err := b.run("merge-slot", "check", "--json")
+	if err != nil {
+		// Check if slot doesn't exist
+		if strings.Contains(err.Error(), "not found") {
+			return &MergeSlotStatus{Error: "not found"}, nil
+		}
+		return nil, fmt.Errorf("checking merge slot: %w", err)
+	}
+
+	var status MergeSlotStatus
+	if err := json.Unmarshal(out, &status); err != nil {
+		return nil, fmt.Errorf("parsing merge-slot check output: %w", err)
+	}
+
+	return &status, nil
+}
+
+// MergeSlotAcquire attempts to acquire the merge slot for exclusive access.
+// If holder is empty, defaults to BD_ACTOR environment variable.
+// If addWaiter is true and the slot is held, the requester is added to the waiters queue.
+// Returns the acquisition result.
+func (b *Beads) MergeSlotAcquire(holder string, addWaiter bool) (*MergeSlotStatus, error) {
+	args := []string{"merge-slot", "acquire", "--json"}
+	if holder != "" {
+		args = append(args, "--holder="+holder)
+	}
+	if addWaiter {
+		args = append(args, "--wait")
+	}
+
+	out, err := b.run(args...)
+	if err != nil {
+		// Parse the output even on error - it may contain useful info
+		var status MergeSlotStatus
+		if jsonErr := json.Unmarshal(out, &status); jsonErr == nil {
+			return &status, nil
+		}
+		return nil, fmt.Errorf("acquiring merge slot: %w", err)
+	}
+
+	var status MergeSlotStatus
+	if err := json.Unmarshal(out, &status); err != nil {
+		return nil, fmt.Errorf("parsing merge-slot acquire output: %w", err)
+	}
+
+	return &status, nil
+}
+
+// MergeSlotRelease releases the merge slot after conflict resolution completes.
+// If holder is provided, it verifies the slot is held by that holder before releasing.
+func (b *Beads) MergeSlotRelease(holder string) error {
+	args := []string{"merge-slot", "release", "--json"}
+	if holder != "" {
+		args = append(args, "--holder="+holder)
+	}
+
+	out, err := b.run(args...)
+	if err != nil {
+		return fmt.Errorf("releasing merge slot: %w", err)
+	}
+
+	var result struct {
+		Released bool   `json:"released"`
+		Error    string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return fmt.Errorf("parsing merge-slot release output: %w", err)
+	}
+
+	if !result.Released && result.Error != "" {
+		return fmt.Errorf("slot release failed: %s", result.Error)
+	}
+
+	return nil
+}
+
+// MergeSlotEnsureExists creates the merge slot if it doesn't exist.
+// This is idempotent - safe to call multiple times.
+func (b *Beads) MergeSlotEnsureExists() (string, error) {
+	// Check if slot exists first
+	status, err := b.MergeSlotCheck()
+	if err != nil {
+		return "", err
+	}
+
+	if status.Error == "not found" {
+		// Create it
+		return b.MergeSlotCreate()
+	}
+
+	return status.ID, nil
 }

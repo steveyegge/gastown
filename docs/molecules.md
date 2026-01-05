@@ -26,6 +26,31 @@ Protomolecule (frozen template) ─── Solid
 | **Wisp** | Ephemeral molecule for patrol cycles (never synced) |
 | **Digest** | Squashed summary of completed molecule |
 
+## Common Mistake: Reading Formulas Directly
+
+**WRONG:**
+```bash
+# Reading a formula file and manually creating beads for each step
+cat .beads/formulas/mol-polecat-work.formula.toml
+bd create --title "Step 1: Load context" --type task
+bd create --title "Step 2: Branch setup" --type task
+# ... creating beads from formula prose
+```
+
+**RIGHT:**
+```bash
+# Cook the formula into a proto, pour into a molecule
+bd cook mol-polecat-work
+bd mol pour mol-polecat-work --var issue=gt-xyz
+# Now work through the step beads that were created
+bd ready                    # Find next step
+bd close <step-id>          # Complete it
+```
+
+**Key insight:** Formulas are source templates (like source code). You never read
+them directly during work. The `cook` → `pour` pipeline creates step beads for you.
+Your molecule already has steps - use `bd ready` to find them.
+
 ## Navigating Molecules
 
 Molecules help you track where you are in multi-step workflows.

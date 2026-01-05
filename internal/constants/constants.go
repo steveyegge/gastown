@@ -17,7 +17,9 @@ const (
 	ShellReadyTimeout = 5 * time.Second
 
 	// DefaultDebounceMs is the default debounce for SendKeys operations.
-	DefaultDebounceMs = 100
+	// 500ms is required for Claude Code to reliably process paste before Enter.
+	// See NudgeSession comment: "Wait 500ms for paste to complete (tested, required)"
+	DefaultDebounceMs = 500
 
 	// DefaultDisplayMs is the default duration for tmux display-message.
 	DefaultDisplayMs = 5000
@@ -64,9 +66,6 @@ const (
 	// FileTownJSON is the town configuration file in mayor/.
 	FileTownJSON = "town.json"
 
-	// FileStateJSON is the agent state file.
-	FileStateJSON = "state.json"
-
 	// FileConfigJSON is the general config file.
 	FileConfigJSON = "config.json"
 
@@ -90,15 +89,15 @@ const (
 )
 
 // Tmux session names.
+// Mayor and Deacon use hq- prefix: hq-mayor, hq-deacon (town-level, one per machine).
+// Rig-level services use gt- prefix: gt-<rig>-witness, gt-<rig>-refinery, etc.
+// Use session.MayorSessionName() and session.DeaconSessionName().
 const (
-	// SessionMayor is the tmux session name for the mayor.
-	SessionMayor = "gt-mayor"
-
-	// SessionDeacon is the tmux session name for the deacon.
-	SessionDeacon = "gt-deacon"
-
-	// SessionPrefix is the prefix for all Gas Town tmux sessions.
+	// SessionPrefix is the prefix for rig-level Gas Town tmux sessions.
 	SessionPrefix = "gt-"
+
+	// HQSessionPrefix is the prefix for town-level services (Mayor, Deacon).
+	HQSessionPrefix = "hq-"
 )
 
 // Agent role names.
@@ -178,11 +177,6 @@ func MayorRigsPath(townRoot string) string {
 // MayorTownPath returns the path to town.json within a town root.
 func MayorTownPath(townRoot string) string {
 	return townRoot + "/" + DirMayor + "/" + FileTownJSON
-}
-
-// MayorStatePath returns the path to mayor state.json within a town root.
-func MayorStatePath(townRoot string) string {
-	return townRoot + "/" + DirMayor + "/" + FileStateJSON
 }
 
 // RigMayorPath returns the path to mayor/rig within a rig.

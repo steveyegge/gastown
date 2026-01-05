@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/mrqueue"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -59,8 +61,15 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Apply additional filters
-	var filtered []*beads.Issue
+	// Apply additional filters and calculate scores
+	now := time.Now()
+	type scoredIssue struct {
+		issue  *beads.Issue
+		fields *beads.MRFields
+		score  float64
+	}
+	var scored []scoredIssue
+
 	for _, issue := range issues {
 		// Parse MR fields
 		fields := beads.ParseMRFields(issue)
@@ -88,7 +97,20 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		filtered = append(filtered, issue)
+		// Calculate priority score
+		score := calculateMRScore(issue, fields, now)
+		scored = append(scored, scoredIssue{issue: issue, fields: fields, score: score})
+	}
+
+	// Sort by score descending (highest priority first)
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	// Extract filtered issues for JSON output compatibility
+	var filtered []*beads.Issue
+	for _, s := range scored {
+		filtered = append(filtered, s.issue)
 	}
 
 	// JSON output
@@ -104,19 +126,21 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create styled table
+	// Create styled table with SCORE column
 	table := style.NewTable(
 		style.Column{Name: "ID", Width: 12},
-		style.Column{Name: "STATUS", Width: 12},
+		style.Column{Name: "SCORE", Width: 7, Align: style.AlignRight},
 		style.Column{Name: "PRI", Width: 4},
-		style.Column{Name: "BRANCH", Width: 28},
-		style.Column{Name: "WORKER", Width: 10},
+		style.Column{Name: "CONVOY", Width: 12},
+		style.Column{Name: "BRANCH", Width: 24},
+		style.Column{Name: "STATUS", Width: 10},
 		style.Column{Name: "AGE", Width: 6, Align: style.AlignRight},
 	)
 
-	// Add rows
-	for _, issue := range filtered {
-		fields := beads.ParseMRFields(issue)
+	// Add rows using scored items (already sorted by score)
+	for _, item := range scored {
+		issue := item.issue
+		fields := item.fields
 
 		// Determine display status
 		displayStatus := issue.Status
@@ -143,10 +167,20 @@ func runMQList(cmd *cobra.Command, args []string) error {
 
 		// Get MR fields
 		branch := ""
-		worker := ""
+		convoyID := ""
 		if fields != nil {
 			branch = fields.Branch
-			worker = fields.Worker
+			convoyID = fields.ConvoyID
+		}
+
+		// Format convoy column
+		convoyDisplay := style.Dim.Render("(none)")
+		if convoyID != "" {
+			// Truncate convoy ID for display
+			if len(convoyID) > 12 {
+				convoyID = convoyID[:12]
+			}
+			convoyDisplay = convoyID
 		}
 
 		// Format priority with color
@@ -157,6 +191,9 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			priority = style.Warning.Render(priority)
 		}
 
+		// Format score
+		scoreStr := fmt.Sprintf("%.1f", item.score)
+
 		// Calculate age
 		age := formatMRAge(issue.CreatedAt)
 
@@ -166,13 +203,14 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			displayID = displayID[:12]
 		}
 
-		table.AddRow(displayID, styledStatus, priority, branch, worker, style.Dim.Render(age))
+		table.AddRow(displayID, scoreStr, priority, convoyDisplay, branch, styledStatus, style.Dim.Render(age))
 	}
 
 	fmt.Print(table.Render())
 
 	// Show blocking details below table
-	for _, issue := range filtered {
+	for _, item := range scored {
+		issue := item.issue
 		displayStatus := issue.Status
 		if issue.Status == "open" && (len(issue.BlockedBy) > 0 || issue.BlockedByCount > 0) {
 			displayStatus = "blocked"
@@ -220,4 +258,38 @@ func outputJSON(data interface{}) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(data)
+}
+
+// calculateMRScore computes the priority score for an MR using the mrqueue scoring function.
+// Higher scores mean higher priority (process first).
+func calculateMRScore(issue *beads.Issue, fields *beads.MRFields, now time.Time) float64 {
+	// Parse MR creation time
+	mrCreatedAt, err := time.Parse(time.RFC3339, issue.CreatedAt)
+	if err != nil {
+		mrCreatedAt, err = time.Parse("2006-01-02T15:04:05Z", issue.CreatedAt)
+		if err != nil {
+			mrCreatedAt = now // Fallback to now if parsing fails
+		}
+	}
+
+	// Build score input
+	input := mrqueue.ScoreInput{
+		Priority:    issue.Priority,
+		MRCreatedAt: mrCreatedAt,
+		Now:         now,
+	}
+
+	// Add fields from MR metadata if available
+	if fields != nil {
+		input.RetryCount = fields.RetryCount
+
+		// Parse convoy created at if available
+		if fields.ConvoyCreatedAt != "" {
+			if convoyTime, err := time.Parse(time.RFC3339, fields.ConvoyCreatedAt); err == nil {
+				input.ConvoyCreatedAt = &convoyTime
+			}
+		}
+	}
+
+	return mrqueue.ScoreMRWithDefaults(input)
 }

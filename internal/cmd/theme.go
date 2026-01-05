@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -116,10 +117,14 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 	// Determine current rig
 	rigName := detectCurrentRig()
 
+	// Get session names for comparison
+	mayorSession := session.MayorSessionName()
+	deaconSession := session.DeaconSessionName()
+
 	// Apply to matching sessions
 	applied := 0
-	for _, session := range sessions {
-		if !strings.HasPrefix(session, "gt-") {
+	for _, sess := range sessions {
+		if !strings.HasPrefix(sess, "gt-") {
 			continue
 		}
 
@@ -127,23 +132,23 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 		var theme tmux.Theme
 		var rig, worker, role string
 
-		if session == "gt-mayor" {
+		if sess == mayorSession {
 			theme = tmux.MayorTheme()
 			worker = "Mayor"
 			role = "coordinator"
-		} else if session == "gt-deacon" {
+		} else if sess == deaconSession {
 			theme = tmux.DeaconTheme()
 			worker = "Deacon"
 			role = "health-check"
-		} else if strings.HasSuffix(session, "-witness") && strings.HasPrefix(session, "gt-") {
+		} else if strings.HasSuffix(sess, "-witness") && strings.HasPrefix(sess, "gt-") {
 			// Witness sessions: gt-<rig>-witness
-			rig = strings.TrimPrefix(strings.TrimSuffix(session, "-witness"), "gt-")
+			rig = strings.TrimPrefix(strings.TrimSuffix(sess, "-witness"), "gt-")
 			theme = getThemeForRole(rig, "witness")
 			worker = "witness"
 			role = "witness"
 		} else {
 			// Parse session name: gt-<rig>-<worker> or gt-<rig>-crew-<name>
-			parts := strings.SplitN(session, "-", 3)
+			parts := strings.SplitN(sess, "-", 3)
 			if len(parts) < 3 {
 				continue
 			}
@@ -171,20 +176,20 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 		}
 
 		// Apply theme and status format
-		if err := t.ApplyTheme(session, theme); err != nil {
-			fmt.Printf("  %s: failed (%v)\n", session, err)
+		if err := t.ApplyTheme(sess, theme); err != nil {
+			fmt.Printf("  %s: failed (%v)\n", sess, err)
 			continue
 		}
-		if err := t.SetStatusFormat(session, rig, worker, role); err != nil {
-			fmt.Printf("  %s: failed to set format (%v)\n", session, err)
+		if err := t.SetStatusFormat(sess, rig, worker, role); err != nil {
+			fmt.Printf("  %s: failed to set format (%v)\n", sess, err)
 			continue
 		}
-		if err := t.SetDynamicStatus(session); err != nil {
-			fmt.Printf("  %s: failed to set dynamic status (%v)\n", session, err)
+		if err := t.SetDynamicStatus(sess); err != nil {
+			fmt.Printf("  %s: failed to set dynamic status (%v)\n", sess, err)
 			continue
 		}
 
-		fmt.Printf("  %s: applied %s theme\n", session, theme.Name)
+		fmt.Printf("  %s: applied %s theme\n", sess, theme.Name)
 		applied++
 	}
 

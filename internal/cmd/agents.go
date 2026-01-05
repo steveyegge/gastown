@@ -127,23 +127,28 @@ func init() {
 
 // categorizeSession determines the agent type from a session name.
 func categorizeSession(name string) *AgentSession {
-	// Must start with gt- prefix
+	session := &AgentSession{Name: name}
+
+	// Town-level agents use hq- prefix: hq-mayor, hq-deacon
+	if strings.HasPrefix(name, "hq-") {
+		suffix := strings.TrimPrefix(name, "hq-")
+		if suffix == "mayor" {
+			session.Type = AgentMayor
+			return session
+		}
+		if suffix == "deacon" {
+			session.Type = AgentDeacon
+			return session
+		}
+		return nil // Unknown hq- session
+	}
+
+	// Rig-level agents use gt- prefix
 	if !strings.HasPrefix(name, "gt-") {
 		return nil
 	}
 
-	session := &AgentSession{Name: name}
 	suffix := strings.TrimPrefix(name, "gt-")
-
-	// Town-level agents
-	if suffix == "mayor" {
-		session.Type = AgentMayor
-		return session
-	}
-	if suffix == "deacon" {
-		session.Type = AgentDeacon
-		return session
-	}
 
 	// Witness sessions: legacy format gt-witness-<rig> (fallback)
 	if strings.HasPrefix(suffix, "witness-") {

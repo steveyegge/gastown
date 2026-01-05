@@ -117,7 +117,7 @@ func write(event Event) error {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	f, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: events file is non-sensitive operational data
 	if err != nil {
 		return fmt.Errorf("opening events file: %w", err)
 	}

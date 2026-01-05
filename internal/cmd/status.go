@@ -126,6 +126,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	// Check bd daemon health and attempt restart if needed
+	// This is non-blocking - if daemons can't be started, we show a warning but continue
+	bdWarning := beads.EnsureBdDaemonHealth(townRoot)
+
 	// Load town config
 	townConfigPath := constants.MayorTownPath(townRoot)
 	townConfig, err := config.LoadTownConfig(townConfigPath)
@@ -166,6 +170,37 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Pre-fetch agent beads across all rig-specific beads DBs.
 	allAgentBeads := make(map[string]*beads.Issue)
 	allHookBeads := make(map[string]*beads.Issue)
+
+	// Fetch town-level agent beads (Mayor, Deacon) from town beads
+	townBeadsPath := beads.GetTownBeadsPath(townRoot)
+	townBeadsClient := beads.New(townBeadsPath)
+	townAgentBeads, _ := townBeadsClient.ListAgentBeads()
+	for id, issue := range townAgentBeads {
+		allAgentBeads[id] = issue
+	}
+
+	// Fetch hook beads from town beads
+	var townHookIDs []string
+	for _, issue := range townAgentBeads {
+		hookID := issue.HookBead
+		if hookID == "" {
+			fields := beads.ParseAgentFields(issue.Description)
+			if fields != nil {
+				hookID = fields.HookBead
+			}
+		}
+		if hookID != "" {
+			townHookIDs = append(townHookIDs, hookID)
+		}
+	}
+	if len(townHookIDs) > 0 {
+		townHookBeads, _ := townBeadsClient.ShowMultiple(townHookIDs)
+		for id, issue := range townHookBeads {
+			allHookBeads[id] = issue
+		}
+	}
+
+	// Fetch rig-level agent beads
 	for _, r := range rigs {
 		rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
 		rigBeads := beads.New(rigBeadsPath)
@@ -302,7 +337,17 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if statusJSON {
 		return outputStatusJSON(status)
 	}
-	return outputStatusText(status)
+	if err := outputStatusText(status); err != nil {
+		return err
+	}
+
+	// Show bd daemon warning at the end if there were issues
+	if bdWarning != "" {
+		fmt.Printf("%s %s\n", style.Warning.Render("⚠"), bdWarning)
+		fmt.Printf("  Run 'bd daemon killall && bd daemon --start' to restart daemons\n")
+	}
+
+	return nil
 }
 
 func outputStatusJSON(status TownStatus) error {
@@ -455,16 +500,42 @@ func outputStatusText(status TownStatus) error {
 }
 
 // renderAgentDetails renders full agent bead details
-func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string) {
+func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string) { //nolint:unparam // indent kept for future customization
 	// Line 1: Agent bead ID + status
-	statusStr := style.Success.Render("running")
-	if !agent.Running {
+	// Reconcile bead state with tmux session state to surface mismatches
+	// States: "running" (active), "idle" (waiting), "stopped", "dead", etc.
+	beadState := agent.State
+	sessionExists := agent.Running
+
+	// "idle" is a normal operational state (running but waiting for work)
+	// Treat it the same as "running" for reconciliation purposes
+	beadSaysRunning := beadState == "running" || beadState == "idle" || beadState == ""
+
+	var statusStr string
+	var stateInfo string
+
+	switch {
+	case beadSaysRunning && sessionExists:
+		// Normal running state - session exists and bead agrees
+		statusStr = style.Success.Render("running")
+	case beadSaysRunning && !sessionExists:
+		// Bead thinks running but session is gone - stale bead state
+		statusStr = style.Error.Render("running")
+		stateInfo = style.Warning.Render(" [dead]")
+	case !beadSaysRunning && sessionExists:
+		// Session exists but bead says stopped/dead - mismatch!
+		// This is the key case: tmux says alive, bead says dead/stopped
+		statusStr = style.Success.Render("running")
+		stateInfo = style.Warning.Render(" [bead: " + beadState + "]")
+	default:
+		// Both agree: stopped
 		statusStr = style.Error.Render("stopped")
 	}
 
-	stateInfo := ""
-	if agent.State != "" && agent.State != "idle" && agent.State != "running" {
-		stateInfo = style.Dim.Render(fmt.Sprintf(" [%s]", agent.State))
+	// Add agent state info if not already shown and state is interesting
+	// Skip "idle" and "running" as they're normal operational states
+	if stateInfo == "" && beadState != "" && beadState != "idle" && beadState != "running" {
+		stateInfo = style.Dim.Render(fmt.Sprintf(" [%s]", beadState))
 	}
 
 	// Build agent bead ID using canonical naming: prefix-rig-role-name
@@ -605,7 +676,12 @@ func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
 // allAgentBeads is a preloaded map of agent beads for O(1) lookup.
 // allHookBeads is a preloaded map of hook beads for O(1) lookup.
 func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]*beads.Issue, allHookBeads map[string]*beads.Issue, mailRouter *mail.Router, skipMail bool) []AgentRuntime {
+	// Get session names dynamically
+	mayorSession := getMayorSessionName()
+	deaconSession := getDeaconSessionName()
+
 	// Define agents to discover
+	// Note: Mayor and Deacon are town-level agents with hq- prefix bead IDs
 	agentDefs := []struct {
 		name    string
 		address string
@@ -613,8 +689,8 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 		role    string
 		beadID  string
 	}{
-		{"mayor", "mayor/", MayorSessionName, "coordinator", "gt-mayor"},
-		{"deacon", "deacon/", DeaconSessionName, "health-check", "gt-deacon"},
+		{"mayor", "mayor/", mayorSession, "coordinator", beads.MayorBeadIDTown()},
+		{"deacon", "deacon/", deaconSession, "health-check", beads.DeaconBeadIDTown()},
 	}
 
 	agents := make([]AgentRuntime, len(agentDefs))

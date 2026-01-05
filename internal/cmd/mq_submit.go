@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -78,8 +80,14 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if branch == "main" || branch == "master" {
-		return fmt.Errorf("cannot submit main/master branch to merge queue")
+	// Get configured default branch for this rig
+	defaultBranch := "main" // fallback
+	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+
+	if branch == defaultBranch || branch == "master" {
+		return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
 	}
 
 	// CRITICAL: Verify branch is pushed before creating MR bead
@@ -111,7 +119,7 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	bd := beads.New(cwd)
 
 	// Determine target branch
-	target := "main"
+	target := defaultBranch
 	if mqSubmitEpic != "" {
 		// Explicit --epic flag takes precedence
 		target = "integration/" + mqSubmitEpic
@@ -119,7 +127,7 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		// Auto-detect: check if source issue has a parent epic with an integration branch
 		autoTarget, err := detectIntegrationBranch(bd, g, issueID)
 		if err != nil {
-			// Non-fatal: log and continue with main as target
+			// Non-fatal: log and continue with default branch as target
 			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("(note: %v)", err)))
 		} else if autoTarget != "" {
 			target = autoTarget

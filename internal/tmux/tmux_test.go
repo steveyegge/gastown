@@ -209,3 +209,98 @@ func TestWrapError(t *testing.T) {
 		}
 	}
 }
+
+func TestEnsureSessionFresh_NoExistingSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-fresh-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// EnsureSessionFresh should create a new session
+	if err := tm.EnsureSessionFresh(sessionName, ""); err != nil {
+		t.Fatalf("EnsureSessionFresh: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Verify session exists
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Error("expected session to exist after EnsureSessionFresh")
+	}
+}
+
+func TestEnsureSessionFresh_ZombieSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-zombie-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create a zombie session (session exists but no Claude/node running)
+	// A normal tmux session with bash/zsh is a "zombie" for our purposes
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Verify it's a zombie (not running Claude/node)
+	if tm.IsClaudeRunning(sessionName) {
+		t.Skip("session unexpectedly has Claude running - can't test zombie case")
+	}
+
+	// EnsureSessionFresh should kill the zombie and create fresh session
+	// This should NOT error with "session already exists"
+	if err := tm.EnsureSessionFresh(sessionName, ""); err != nil {
+		t.Fatalf("EnsureSessionFresh on zombie: %v", err)
+	}
+
+	// Session should still exist
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Error("expected session to exist after EnsureSessionFresh on zombie")
+	}
+}
+
+func TestEnsureSessionFresh_IdempotentOnZombie(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-idem-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Call EnsureSessionFresh multiple times - should work each time
+	for i := 0; i < 3; i++ {
+		if err := tm.EnsureSessionFresh(sessionName, ""); err != nil {
+			t.Fatalf("EnsureSessionFresh attempt %d: %v", i+1, err)
+		}
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Session should exist
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Error("expected session to exist after multiple EnsureSessionFresh calls")
+	}
+}

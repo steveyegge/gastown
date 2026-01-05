@@ -82,14 +82,22 @@ func cyclePolecatSession(direction int, sessionOverride string) error {
 // parsePolecatSessionName extracts rig and polecat name from a tmux session name.
 // Format: gt-<rig>-<name> where name is NOT crew-*, witness, or refinery.
 // Returns empty strings and false if the format doesn't match.
-func parsePolecatSessionName(sessionName string) (rigName, polecatName string, ok bool) {
+func parsePolecatSessionName(sessionName string) (rigName, polecatName string, ok bool) { //nolint:unparam // polecatName kept for API consistency
 	// Must start with "gt-"
 	if !strings.HasPrefix(sessionName, "gt-") {
 		return "", "", false
 	}
 
-	// Exclude town-level sessions
-	if sessionName == "gt-mayor" || sessionName == "gt-deacon" {
+	// Exclude town-level sessions by exact match
+	mayorSession := getMayorSessionName()
+	deaconSession := getDeaconSessionName()
+	if sessionName == mayorSession || sessionName == deaconSession {
+		return "", "", false
+	}
+
+	// Also exclude by suffix pattern (gt-{town}-mayor, gt-{town}-deacon)
+	// This handles cases where town config isn't available
+	if strings.HasSuffix(sessionName, "-mayor") || strings.HasSuffix(sessionName, "-deacon") {
 		return "", "", false
 	}
 
@@ -125,7 +133,7 @@ func parsePolecatSessionName(sessionName string) (rigName, polecatName string, o
 // findRigPolecatSessions returns all polecat sessions for a given rig.
 // Uses tmux list-sessions to find sessions matching gt-<rig>-<name> pattern,
 // excluding crew, witness, and refinery sessions.
-func findRigPolecatSessions(rigName string) ([]string, error) {
+func findRigPolecatSessions(rigName string) ([]string, error) { //nolint:unparam // error return kept for future use
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
 	out, err := cmd.Output()
 	if err != nil {

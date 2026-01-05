@@ -33,7 +33,7 @@ func (c *LocalConnection) IsLocal() bool {
 
 // ReadFile reads the named file.
 func (c *LocalConnection) ReadFile(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from Connection interface, validated by caller
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, &NotFoundError{Path: path}

@@ -146,7 +146,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 				// Log kill event
 				agent := fmt.Sprintf("%s/%s", r.Name, info.Polecat)
 				logger := townlog.NewLogger(townRoot)
-				logger.Log(townlog.EventKill, agent, "gt stop")
+				_ = logger.Log(townlog.EventKill, agent, "gt stop")
 
 				// Log kill event to activity feed
 				_ = events.LogFeed(events.TypeKill, "gt", events.KillPayload(r.Name, info.Polecat, "gt stop"))

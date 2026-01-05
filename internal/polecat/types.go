@@ -19,10 +19,9 @@ const (
 	// StateStuck means the polecat needs assistance.
 	StateStuck State = "stuck"
 
-	// Legacy states for backward compatibility during transition.
-	// New code should not use these.
-	StateIdle   State = "idle"   // Deprecated: use StateWorking
-	StateActive State = "active" // Deprecated: use StateWorking
+	// StateActive is deprecated: use StateWorking.
+	// Kept only for backward compatibility with existing data.
+	StateActive State = "active"
 )
 
 // IsWorking returns true if the polecat is currently working.
@@ -32,9 +31,9 @@ func (s State) IsWorking() bool {
 
 // IsActive returns true if the polecat session is actively working.
 // For transient polecats, this is true for working state and
-// legacy idle/active states (treated as working).
+// legacy active state (treated as working).
 func (s State) IsActive() bool {
-	return s == StateWorking || s == StateIdle || s == StateActive
+	return s == StateWorking || s == StateActive
 }
 
 // Polecat represents a worker agent in a rig.

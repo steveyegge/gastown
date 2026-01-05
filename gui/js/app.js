@@ -26,6 +26,7 @@ import { startOnboarding, shouldShowOnboarding, resetOnboarding } from './compon
 
 // DOM Elements
 const elements = {
+  loadingOverlay: document.getElementById('loading-overlay'),
   townName: document.getElementById('town-name'),
   connectionStatus: document.getElementById('connection-status'),
   mailBadge: document.getElementById('mail-badge'),
@@ -298,10 +299,54 @@ async function loadInitialData() {
     await loadDashboard();
 
     elements.statusMessage.textContent = 'Ready';
+
+    // Hide loading overlay
+    hideLoadingOverlay();
+
+    // Background preload of other data (don't await, let it load in background)
+    preloadBackgroundData();
   } catch (err) {
     console.error('[App] Failed to load initial data:', err);
     elements.statusMessage.textContent = 'Error loading data';
     showToast('Failed to load data', 'error');
+
+    // Hide loading overlay even on error
+    hideLoadingOverlay();
+  }
+}
+
+// Hide the loading overlay
+function hideLoadingOverlay() {
+  if (elements.loadingOverlay) {
+    elements.loadingOverlay.classList.add('hidden');
+    // Remove from DOM after transition
+    setTimeout(() => {
+      elements.loadingOverlay.style.display = 'none';
+    }, 300);
+  }
+}
+
+// Preload data in background for faster modal/tab access
+async function preloadBackgroundData() {
+  try {
+    // Wait 500ms to let initial UI settle, then preload in background
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    console.log('[App] Preloading background data...');
+
+    // Preload these in parallel
+    await Promise.allSettled([
+      api.getAgents(),  // Preload agents list
+      api.getRigs(),    // Preload rigs list
+      loadPRs(),        // Preload PRs
+      loadFormulas(),   // Preload formulas
+      loadIssues(),     // Preload issues
+    ]);
+
+    console.log('[App] Background data preloaded');
+  } catch (err) {
+    console.error('[App] Failed to preload background data:', err);
+    // Don't show error to user - this is background loading
   }
 }
 
@@ -411,7 +456,12 @@ function setupMailFilters() {
 }
 
 async function loadAgents() {
-  showLoadingState(elements.agentGrid, 'Loading agents...');
+  // Show loading state only if we don't have cached data
+  const hasCache = state.getAgents().length > 0;
+  if (!hasCache) {
+    showLoadingState(elements.agentGrid, 'Loading agents...');
+  }
+
   try {
     const response = await api.getAgents();
     // Combine agents and polecats into a flat list
@@ -426,30 +476,45 @@ async function loadAgents() {
     state.setAgents(allAgents);
   } catch (err) {
     console.error('[App] Failed to load agents:', err);
-    elements.agentGrid.innerHTML = `
-      <div class="empty-state">
-        <span class="material-icons">error_outline</span>
-        <p>Failed to load agents</p>
-      </div>
-    `;
+    // Only show error if we don't have cached data
+    if (!hasCache) {
+      elements.agentGrid.innerHTML = `
+        <div class="empty-state">
+          <span class="material-icons">error_outline</span>
+          <p>Failed to load agents</p>
+        </div>
+      `;
+    }
   }
 }
 
 async function loadRigs() {
-  showLoadingState(elements.rigList, 'Loading rigs...');
+  // Show loading state only if we don't have cached data
+  const hasCache = state.getRigs().length > 0;
+  if (!hasCache) {
+    showLoadingState(elements.rigList, 'Loading rigs...');
+  } else {
+    // Show cached data immediately
+    renderRigList(elements.rigList, state.getRigs());
+  }
+
   try {
     // Get rigs from status (has more details than /api/rigs)
     const status = await api.getStatus();
     const rigs = status.rigs || [];
+    state.setStatus(status); // Update state
     renderRigList(elements.rigList, rigs);
   } catch (err) {
     console.error('[App] Failed to load rigs:', err);
-    elements.rigList.innerHTML = `
-      <div class="empty-state">
-        <span class="material-icons">error_outline</span>
-        <p>Failed to load rigs</p>
-      </div>
-    `;
+    // Only show error if we don't have cached data
+    if (!hasCache) {
+      elements.rigList.innerHTML = `
+        <div class="empty-state">
+          <span class="material-icons">error_outline</span>
+          <p>Failed to load rigs</p>
+        </div>
+      `;
+    }
   }
 }
 

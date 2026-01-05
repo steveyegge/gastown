@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,19 +24,51 @@ import (
 // generateShortID generates a short random ID (5 lowercase chars).
 func generateShortID() string {
 	b := make([]byte, 3)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return strings.ToLower(base32.StdEncoding.EncodeToString(b)[:5])
+}
+
+// looksLikeIssueID checks if a string looks like a beads issue ID.
+// Issue IDs have the format: prefix-id (e.g., gt-abc, bd-xyz, hq-123).
+func looksLikeIssueID(s string) bool {
+	// Common beads prefixes
+	prefixes := []string{"gt-", "bd-", "hq-"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	// Also check for pattern: 2-3 lowercase letters followed by hyphen
+	// This catches custom prefixes defined in routes.jsonl
+	if len(s) >= 4 && s[2] == '-' || (len(s) >= 5 && s[3] == '-') {
+		hyphenIdx := strings.Index(s, "-")
+		if hyphenIdx >= 2 && hyphenIdx <= 3 {
+			prefix := s[:hyphenIdx]
+			// Check if prefix is all lowercase letters
+			allLower := true
+			for _, c := range prefix {
+				if c < 'a' || c > 'z' {
+					allLower = false
+					break
+				}
+			}
+			return allLower
+		}
+	}
+	return false
 }
 
 // Convoy command flags
 var (
-	convoyMolecule    string
-	convoyNotify      string
-	convoyStatusJSON  bool
-	convoyListJSON    bool
-	convoyListStatus  string
-	convoyListAll     bool
-	convoyInteractive bool
+	convoyMolecule     string
+	convoyNotify       string
+	convoyStatusJSON   bool
+	convoyListJSON     bool
+	convoyListStatus   string
+	convoyListAll      bool
+	convoyListTree     bool
+	convoyInteractive  bool
+	convoyStrandedJSON bool
 )
 
 var convoyCmd = &cobra.Command{
@@ -114,6 +147,7 @@ Examples:
   gt convoy list              # Open convoys only (default)
   gt convoy list --all        # All convoys (open + closed)
   gt convoy list --status=closed  # Recently landed
+  gt convoy list --tree       # Show convoy + child status tree
   gt convoy list --json`,
 	RunE: runConvoyList,
 }
@@ -132,6 +166,39 @@ Examples:
 	RunE: runConvoyAdd,
 }
 
+var convoyCheckCmd = &cobra.Command{
+	Use:   "check",
+	Short: "Check and auto-close completed convoys",
+	Long: `Check all open convoys and auto-close any where all tracked issues are complete.
+
+This handles cross-rig convoy completion: convoys in town beads tracking issues
+in rig beads won't auto-close via bd close alone. This command bridges that gap.
+
+Can be run manually or by deacon patrol to ensure convoys close promptly.`,
+	RunE: runConvoyCheck,
+}
+
+var convoyStrandedCmd = &cobra.Command{
+	Use:   "stranded",
+	Short: "Find stranded convoys with ready work but no workers",
+	Long: `Find convoys that have ready issues but no workers processing them.
+
+A convoy is "stranded" when:
+- Convoy is open
+- Has tracked issues where:
+  - status = open (not in_progress, not closed)
+  - not blocked (all dependencies met)
+  - no assignee OR assignee session is dead
+
+Use this to detect convoys that need feeding. The Deacon patrol runs this
+periodically and dispatches dogs to feed stranded convoys.
+
+Examples:
+  gt convoy stranded              # Show stranded convoys
+  gt convoy stranded --json       # Machine-readable output for automation`,
+	RunE: runConvoyStranded,
+}
+
 func init() {
 	// Create flags
 	convoyCreateCmd.Flags().StringVar(&convoyMolecule, "molecule", "", "Associated molecule ID")
@@ -145,15 +212,21 @@ func init() {
 	convoyListCmd.Flags().BoolVar(&convoyListJSON, "json", false, "Output as JSON")
 	convoyListCmd.Flags().StringVar(&convoyListStatus, "status", "", "Filter by status (open, closed)")
 	convoyListCmd.Flags().BoolVar(&convoyListAll, "all", false, "Show all convoys (open and closed)")
+	convoyListCmd.Flags().BoolVar(&convoyListTree, "tree", false, "Show convoy + child status tree")
 
 	// Interactive TUI flag (on parent command)
 	convoyCmd.Flags().BoolVarP(&convoyInteractive, "interactive", "i", false, "Interactive tree view")
+
+	// Stranded flags
+	convoyStrandedCmd.Flags().BoolVar(&convoyStrandedJSON, "json", false, "Output as JSON")
 
 	// Add subcommands
 	convoyCmd.AddCommand(convoyCreateCmd)
 	convoyCmd.AddCommand(convoyStatusCmd)
 	convoyCmd.AddCommand(convoyListCmd)
 	convoyCmd.AddCommand(convoyAddCmd)
+	convoyCmd.AddCommand(convoyCheckCmd)
+	convoyCmd.AddCommand(convoyStrandedCmd)
 
 	rootCmd.AddCommand(convoyCmd)
 }
@@ -170,6 +243,18 @@ func getTownBeadsDir() (string, error) {
 func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	trackedIssues := args[1:]
+
+	// If first arg looks like an issue ID (has beads prefix), treat all args as issues
+	// and auto-generate a name from the first issue's title
+	if looksLikeIssueID(name) {
+		trackedIssues = args // All args are issue IDs
+		// Get the first issue's title to use as convoy name
+		if details := getIssueDetails(args[0]); details != nil && details.Title != "" {
+			name = details.Title
+		} else {
+			name = fmt.Sprintf("Tracking %s", args[0])
+		}
+	}
 
 	townBeads, err := getTownBeadsDir()
 	if err != nil {
@@ -322,6 +407,301 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runConvoyCheck(cmd *cobra.Command, args []string) error {
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return err
+	}
+
+	closed, err := checkAndCloseCompletedConvoys(townBeads)
+	if err != nil {
+		return err
+	}
+
+	if len(closed) == 0 {
+		fmt.Println("No convoys ready to close.")
+	} else {
+		fmt.Printf("%s Auto-closed %d convoy(s):\n", style.Bold.Render("✓"), len(closed))
+		for _, c := range closed {
+			fmt.Printf("  🚚 %s: %s\n", c.ID, c.Title)
+		}
+	}
+
+	return nil
+}
+
+// strandedConvoyInfo holds info about a stranded convoy.
+type strandedConvoyInfo struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	ReadyCount  int      `json:"ready_count"`
+	ReadyIssues []string `json:"ready_issues"`
+}
+
+// readyIssueInfo holds info about a ready (stranded) issue.
+type readyIssueInfo struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Priority string `json:"priority"`
+}
+
+func runConvoyStranded(cmd *cobra.Command, args []string) error {
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return err
+	}
+
+	stranded, err := findStrandedConvoys(townBeads)
+	if err != nil {
+		return err
+	}
+
+	if convoyStrandedJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(stranded)
+	}
+
+	if len(stranded) == 0 {
+		fmt.Println("No stranded convoys found.")
+		return nil
+	}
+
+	fmt.Printf("%s Found %d stranded convoy(s):\n\n", style.Warning.Render("⚠"), len(stranded))
+	for _, s := range stranded {
+		fmt.Printf("  🚚 %s: %s\n", s.ID, s.Title)
+		fmt.Printf("     Ready issues: %d\n", s.ReadyCount)
+		for _, issueID := range s.ReadyIssues {
+			fmt.Printf("       • %s\n", issueID)
+		}
+		fmt.Println()
+	}
+
+	fmt.Println("To feed stranded convoys, run:")
+	for _, s := range stranded {
+		fmt.Printf("  gt sling mol-convoy-feed deacon/dogs --var convoy=%s\n", s.ID)
+	}
+
+	return nil
+}
+
+// findStrandedConvoys finds convoys with ready work but no workers.
+func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
+	var stranded []strandedConvoyInfo
+
+	// Get blocked issues (we need this to filter out blocked issues)
+	blockedIssues := getBlockedIssueIDs()
+
+	// List all open convoys
+	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
+	listCmd := exec.Command("bd", listArgs...)
+	listCmd.Dir = townBeads
+	var stdout bytes.Buffer
+	listCmd.Stdout = &stdout
+
+	if err := listCmd.Run(); err != nil {
+		return nil, fmt.Errorf("listing convoys: %w", err)
+	}
+
+	var convoys []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil {
+		return nil, fmt.Errorf("parsing convoy list: %w", err)
+	}
+
+	// Check each convoy for stranded state
+	for _, convoy := range convoys {
+		tracked := getTrackedIssues(townBeads, convoy.ID)
+		if len(tracked) == 0 {
+			continue
+		}
+
+		// Find ready issues (open, not blocked, no live assignee)
+		var readyIssues []string
+		for _, t := range tracked {
+			if isReadyIssue(t, blockedIssues) {
+				readyIssues = append(readyIssues, t.ID)
+			}
+		}
+
+		if len(readyIssues) > 0 {
+			stranded = append(stranded, strandedConvoyInfo{
+				ID:          convoy.ID,
+				Title:       convoy.Title,
+				ReadyCount:  len(readyIssues),
+				ReadyIssues: readyIssues,
+			})
+		}
+	}
+
+	return stranded, nil
+}
+
+// getBlockedIssueIDs returns a set of issue IDs that are currently blocked.
+func getBlockedIssueIDs() map[string]bool {
+	blocked := make(map[string]bool)
+
+	// Run bd blocked --json
+	blockedCmd := exec.Command("bd", "blocked", "--json")
+	var stdout bytes.Buffer
+	blockedCmd.Stdout = &stdout
+
+	if err := blockedCmd.Run(); err != nil {
+		return blocked // Return empty set on error
+	}
+
+	var issues []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return blocked
+	}
+
+	for _, issue := range issues {
+		blocked[issue.ID] = true
+	}
+
+	return blocked
+}
+
+// isReadyIssue checks if an issue is ready for dispatch (stranded).
+// An issue is ready if:
+// - status = "open" (not in_progress, closed, hooked)
+// - not in blocked set
+// - no assignee OR assignee session is dead
+func isReadyIssue(t trackedIssueInfo, blockedIssues map[string]bool) bool {
+	// Must be open status (not in_progress, closed, hooked)
+	if t.Status != "open" {
+		return false
+	}
+
+	// Must not be blocked
+	if blockedIssues[t.ID] {
+		return false
+	}
+
+	// Check assignee
+	if t.Assignee == "" {
+		return true // No assignee = ready
+	}
+
+	// Has assignee - check if session is alive
+	// Use the shared assigneeToSessionName from rig.go
+	sessionName, _ := assigneeToSessionName(t.Assignee)
+	if sessionName == "" {
+		return true // Can't determine session = treat as ready
+	}
+
+	// Check if tmux session exists
+	checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
+	if err := checkCmd.Run(); err != nil {
+		return true // Session doesn't exist = ready
+	}
+
+	return false // Session exists = not ready (worker is active)
+}
+
+// checkAndCloseCompletedConvoys finds open convoys where all tracked issues are closed
+// and auto-closes them. Returns the list of convoys that were closed.
+func checkAndCloseCompletedConvoys(townBeads string) ([]struct{ ID, Title string }, error) {
+	var closed []struct{ ID, Title string }
+
+	// List all open convoys
+	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
+	listCmd := exec.Command("bd", listArgs...)
+	listCmd.Dir = townBeads
+	var stdout bytes.Buffer
+	listCmd.Stdout = &stdout
+
+	if err := listCmd.Run(); err != nil {
+		return nil, fmt.Errorf("listing convoys: %w", err)
+	}
+
+	var convoys []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil {
+		return nil, fmt.Errorf("parsing convoy list: %w", err)
+	}
+
+	// Check each convoy
+	for _, convoy := range convoys {
+		tracked := getTrackedIssues(townBeads, convoy.ID)
+		if len(tracked) == 0 {
+			continue // No tracked issues, nothing to check
+		}
+
+		// Check if all tracked issues are closed
+		allClosed := true
+		for _, t := range tracked {
+			if t.Status != "closed" && t.Status != "tombstone" {
+				allClosed = false
+				break
+			}
+		}
+
+		if allClosed {
+			// Close the convoy
+			closeArgs := []string{"close", convoy.ID, "-r", "All tracked issues completed"}
+			closeCmd := exec.Command("bd", closeArgs...)
+			closeCmd.Dir = townBeads
+
+			if err := closeCmd.Run(); err != nil {
+				style.PrintWarning("couldn't close convoy %s: %v", convoy.ID, err)
+				continue
+			}
+
+			closed = append(closed, struct{ ID, Title string }{convoy.ID, convoy.Title})
+
+			// Check if convoy has notify address and send notification
+			notifyConvoyCompletion(townBeads, convoy.ID, convoy.Title)
+		}
+	}
+
+	return closed, nil
+}
+
+// notifyConvoyCompletion sends a notification if the convoy has a notify address.
+func notifyConvoyCompletion(townBeads, convoyID, title string) {
+	// Get convoy description to find notify address
+	showArgs := []string{"show", convoyID, "--json"}
+	showCmd := exec.Command("bd", showArgs...)
+	showCmd.Dir = townBeads
+	var stdout bytes.Buffer
+	showCmd.Stdout = &stdout
+
+	if err := showCmd.Run(); err != nil {
+		return
+	}
+
+	var convoys []struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil || len(convoys) == 0 {
+		return
+	}
+
+	// Parse notify address from description
+	desc := convoys[0].Description
+	for _, line := range strings.Split(desc, "\n") {
+		if strings.HasPrefix(line, "Notify: ") {
+			addr := strings.TrimPrefix(line, "Notify: ")
+			if addr != "" {
+				// Send notification via gt mail
+				mailArgs := []string{"mail", "send", addr,
+					"-s", fmt.Sprintf("🚚 Convoy landed: %s", title),
+					"-m", fmt.Sprintf("Convoy %s has completed.\n\nAll tracked issues are now closed.", convoyID)}
+				mailCmd := exec.Command("gt", mailArgs...)
+				_ = mailCmd.Run() // Best effort, ignore errors
+			}
+			break
+		}
+	}
 }
 
 func runConvoyStatus(cmd *cobra.Command, args []string) error {
@@ -552,12 +932,72 @@ func runConvoyList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Tree view: show convoys with their child issues
+	if convoyListTree {
+		return printConvoyTree(townBeads, convoys)
+	}
+
 	fmt.Printf("%s\n\n", style.Bold.Render("Convoys"))
 	for i, c := range convoys {
 		status := formatConvoyStatus(c.Status)
 		fmt.Printf("  %d. 🚚 %s: %s %s\n", i+1, c.ID, c.Title, status)
 	}
 	fmt.Printf("\nUse 'gt convoy status <id>' or 'gt convoy status <n>' for detailed view.\n")
+
+	return nil
+}
+
+// printConvoyTree displays convoys with their child issues in a tree format.
+func printConvoyTree(townBeads string, convoys []struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+}) error {
+	for _, c := range convoys {
+		// Get tracked issues for this convoy
+		tracked := getTrackedIssues(townBeads, c.ID)
+
+		// Count completed
+		completed := 0
+		for _, t := range tracked {
+			if t.Status == "closed" {
+				completed++
+			}
+		}
+
+		// Print convoy header with progress
+		total := len(tracked)
+		progress := ""
+		if total > 0 {
+			progress = fmt.Sprintf(" (%d/%d)", completed, total)
+		}
+		fmt.Printf("🚚 %s: %s%s\n", c.ID, c.Title, progress)
+
+		// Print tracked issues as tree children
+		for i, t := range tracked {
+			// Determine tree connector
+			isLast := i == len(tracked)-1
+			connector := "├──"
+			if isLast {
+				connector = "└──"
+			}
+
+			// Status symbol: ✓ closed, ▶ in_progress/hooked, ○ other
+			status := "○"
+			switch t.Status {
+			case "closed":
+				status = "✓"
+			case "in_progress", "hooked":
+				status = "▶"
+			}
+
+			fmt.Printf("%s %s %s: %s\n", connector, status, t.ID, t.Title)
+		}
+
+		// Add blank line between convoys
+		fmt.Println()
+	}
 
 	return nil
 }
@@ -773,14 +1213,14 @@ type workerInfo struct {
 
 // getWorkersForIssues finds workers currently assigned to the given issues.
 // Returns a map from issue ID to worker info.
+//
+// Optimized to batch queries per rig (O(R) instead of O(N×R)) and
+// parallelize across rigs.
 func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 	result := make(map[string]*workerInfo)
 	if len(issueIDs) == 0 {
 		return result
 	}
-
-	// Query agent beads where hook_bead matches one of our issues
-	// We need to check beads across all rigs, so query each potential rig
 
 	// Find town root
 	townRoot, err := workspace.FindFromCwd()
@@ -788,49 +1228,83 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		return result
 	}
 
-	// Discover rigs
+	// Discover rigs with beads databases
 	rigDirs, _ := filepath.Glob(filepath.Join(townRoot, "*", "polecats"))
+	var beadsDBS []string
 	for _, polecatsDir := range rigDirs {
 		rigDir := filepath.Dir(polecatsDir)
 		beadsDB := filepath.Join(rigDir, "mayor", "rig", ".beads", "beads.db")
-
-		// Check if beads.db exists
-		if _, err := os.Stat(beadsDB); err != nil {
-			continue
+		if _, err := os.Stat(beadsDB); err == nil {
+			beadsDBS = append(beadsDBS, beadsDB)
 		}
+	}
 
-		// Query for agent beads with matching hook_bead
-		for _, issueID := range issueIDs {
-			if _, ok := result[issueID]; ok {
-				continue // Already found a worker for this issue
-			}
+	if len(beadsDBS) == 0 {
+		return result
+	}
 
-			// Query for agent bead with this hook_bead
-			safeID := strings.ReplaceAll(issueID, "'", "''")
-			query := fmt.Sprintf(
-				`SELECT id, hook_bead, last_activity FROM issues WHERE issue_type = 'agent' AND status = 'open' AND hook_bead = '%s' LIMIT 1`,
-				safeID)
+	// Build the IN clause with properly escaped issue IDs
+	var quotedIDs []string
+	for _, id := range issueIDs {
+		safeID := strings.ReplaceAll(id, "'", "''")
+		quotedIDs = append(quotedIDs, fmt.Sprintf("'%s'", safeID))
+	}
+	inClause := strings.Join(quotedIDs, ", ")
 
-			queryCmd := exec.Command("sqlite3", "-json", beadsDB, query)
+	// Batch query: fetch all matching agents in one query per rig
+	query := fmt.Sprintf(
+		`SELECT id, hook_bead, last_activity FROM issues WHERE issue_type = 'agent' AND status = 'open' AND hook_bead IN (%s)`,
+		inClause)
+
+	// Query all rigs in parallel
+	type rigResult struct {
+		agents []struct {
+			ID           string `json:"id"`
+			HookBead     string `json:"hook_bead"`
+			LastActivity string `json:"last_activity"`
+		}
+	}
+
+	resultChan := make(chan rigResult, len(beadsDBS))
+	var wg sync.WaitGroup
+
+	for _, beadsDB := range beadsDBS {
+		wg.Add(1)
+		go func(db string) {
+			defer wg.Done()
+
+			queryCmd := exec.Command("sqlite3", "-json", db, query)
 			var stdout bytes.Buffer
 			queryCmd.Stdout = &stdout
 			if err := queryCmd.Run(); err != nil {
-				continue
+				resultChan <- rigResult{}
+				return
 			}
 
-			var agents []struct {
-				ID           string `json:"id"`
-				HookBead     string `json:"hook_bead"`
-				LastActivity string `json:"last_activity"`
+			var rr rigResult
+			if err := json.Unmarshal(stdout.Bytes(), &rr.agents); err != nil {
+				resultChan <- rigResult{}
+				return
 			}
-			if err := json.Unmarshal(stdout.Bytes(), &agents); err != nil || len(agents) == 0 {
+			resultChan <- rr
+		}(beadsDB)
+	}
+
+	// Wait for all queries to complete
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results from all rigs
+	for rr := range resultChan {
+		for _, agent := range rr.agents {
+			// Skip if we already found a worker for this issue
+			if _, ok := result[agent.HookBead]; ok {
 				continue
 			}
-
-			agent := agents[0]
 
 			// Parse agent ID to get worker identity
-			// Format: gt-<rig>-<role>-<name> or gt-<rig>-<name>
 			workerID := parseWorkerFromAgentBead(agent.ID)
 			if workerID == "" {
 				continue
@@ -844,7 +1318,7 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 				}
 			}
 
-			result[issueID] = &workerInfo{
+			result[agent.HookBead] = &workerInfo{
 				Worker: workerID,
 				Age:    age,
 			}

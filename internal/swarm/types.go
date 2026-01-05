@@ -22,13 +22,13 @@ const (
 	// SwarmFailed means the swarm failed and cannot be recovered.
 	SwarmFailed SwarmState = "failed"
 
-	// SwarmCancelled means the swarm was explicitly cancelled.
-	SwarmCancelled SwarmState = "cancelled"
+	// SwarmCanceled means the swarm was explicitly canceled.
+	SwarmCanceled SwarmState = "canceled"
 )
 
 // IsTerminal returns true if the swarm is in a terminal state.
 func (s SwarmState) IsTerminal() bool {
-	return s == SwarmLanded || s == SwarmFailed || s == SwarmCancelled
+	return s == SwarmLanded || s == SwarmFailed || s == SwarmCanceled
 }
 
 // IsActive returns true if the swarm is actively running.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/templates"
 )
 
 // PatrolMoleculesExistCheck verifies that patrol molecules exist for each rig.
@@ -114,7 +115,7 @@ func (c *PatrolMoleculesExistCheck) Fix(ctx *CheckContext) error {
 		rigPath := filepath.Join(ctx.TownRoot, rigName)
 		for _, mol := range missing {
 			desc := getPatrolMoleculeDesc(mol)
-			cmd := exec.Command("bd", "create",
+			cmd := exec.Command("bd", "create", //nolint:gosec // G204: args are constructed internally
 				"--type=molecule",
 				"--title="+mol,
 				"--description="+desc,
@@ -166,7 +167,7 @@ func (c *PatrolHooksWiredCheck) Run(ctx *CheckContext) *CheckResult {
 			Name:    c.Name(),
 			Status:  StatusWarning,
 			Message: "Daemon config not found",
-			FixHint: "Run 'gt daemon init' to configure daemon",
+			FixHint: "Run 'gt daemon start' to start the daemon",
 		}
 	}
 
@@ -219,7 +220,7 @@ func (c *PatrolHooksWiredCheck) Run(ctx *CheckContext) *CheckResult {
 		Name:    c.Name(),
 		Status:  StatusWarning,
 		Message: "Patrol hooks not configured in daemon",
-		FixHint: "Configure patrols in mayor/daemon.json or run 'gt daemon init'",
+		FixHint: "Configure patrols in mayor/daemon.json or run 'gt daemon start'",
 	}
 }
 
@@ -392,30 +393,36 @@ func (c *PatrolPluginsAccessibleCheck) Fix(ctx *CheckContext) error {
 	return nil
 }
 
-// PatrolRolesHavePromptsCheck verifies that internal/templates/roles/*.md.tmpl exist for each role.
+// PatrolRolesHavePromptsCheck verifies that internal/templates/roles/*.md.tmpl exist for each rig.
+// Checks at <town>/<rig>/mayor/rig/internal/templates/roles/*.md.tmpl
+// Fix copies embedded templates to missing locations.
 type PatrolRolesHavePromptsCheck struct {
-	BaseCheck
+	FixableCheck
+	// missingByRig tracks missing templates per rig: rigName -> []missingFiles
+	missingByRig map[string][]string
 }
 
 // NewPatrolRolesHavePromptsCheck creates a new patrol roles have prompts check.
 func NewPatrolRolesHavePromptsCheck() *PatrolRolesHavePromptsCheck {
 	return &PatrolRolesHavePromptsCheck{
-		BaseCheck: BaseCheck{
-			CheckName:        "patrol-roles-have-prompts",
-			CheckDescription: "Check if internal/templates/roles/*.md.tmpl exist for each patrol role",
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "patrol-roles-have-prompts",
+				CheckDescription: "Check if internal/templates/roles/*.md.tmpl exist for each patrol role",
+			},
 		},
 	}
 }
 
-// requiredRolePrompts are the required role prompt template files.
 var requiredRolePrompts = []string{
 	"deacon.md.tmpl",
 	"witness.md.tmpl",
 	"refinery.md.tmpl",
 }
 
-// Run checks if role prompts exist.
 func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
+	c.missingByRig = make(map[string][]string)
+
 	rigs, err := discoverRigs(ctx.TownRoot)
 	if err != nil {
 		return &CheckResult{
@@ -440,11 +447,16 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 		mayorRig := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig")
 		templatesDir := filepath.Join(mayorRig, "internal", "templates", "roles")
 
+		var rigMissing []string
 		for _, roleFile := range requiredRolePrompts {
 			promptPath := filepath.Join(templatesDir, roleFile)
 			if _, err := os.Stat(promptPath); os.IsNotExist(err) {
 				missingPrompts = append(missingPrompts, fmt.Sprintf("%s: %s", rigName, roleFile))
+				rigMissing = append(rigMissing, roleFile)
 			}
+		}
+		if len(rigMissing) > 0 {
+			c.missingByRig[rigName] = rigMissing
 		}
 	}
 
@@ -454,7 +466,7 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 			Status:  StatusWarning,
 			Message: fmt.Sprintf("%d role prompt template(s) missing", len(missingPrompts)),
 			Details: missingPrompts,
-			FixHint: "Role prompt templates should be in the project repository under internal/templates/roles/",
+			FixHint: "Run 'gt doctor --fix' to copy embedded templates to rig repos",
 		}
 	}
 
@@ -463,6 +475,36 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 		Status:  StatusOK,
 		Message: "All patrol role prompt templates found",
 	}
+}
+
+func (c *PatrolRolesHavePromptsCheck) Fix(ctx *CheckContext) error {
+	allTemplates, err := templates.GetAllRoleTemplates()
+	if err != nil {
+		return fmt.Errorf("getting embedded templates: %w", err)
+	}
+
+	for rigName, missingFiles := range c.missingByRig {
+		mayorRig := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig")
+		templatesDir := filepath.Join(mayorRig, "internal", "templates", "roles")
+
+		if err := os.MkdirAll(templatesDir, 0755); err != nil {
+			return fmt.Errorf("creating %s: %w", templatesDir, err)
+		}
+
+		for _, roleFile := range missingFiles {
+			content, ok := allTemplates[roleFile]
+			if !ok {
+				continue
+			}
+
+			destPath := filepath.Join(templatesDir, roleFile)
+			if err := os.WriteFile(destPath, content, 0644); err != nil {
+				return fmt.Errorf("writing %s in %s: %w", roleFile, rigName, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // discoverRigs finds all registered rigs.

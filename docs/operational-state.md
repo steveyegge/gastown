@@ -102,6 +102,9 @@ bd list --type=role --label=mode:degraded
 
 ## Boot: The Deacon's Watchdog
 
+> See [Watchdog Chain](watchdog-chain.md) for the complete Daemon/Boot/Deacon
+> architecture and design rationale.
+
 Boot is a dog (Deacon helper) that triages the Deacon's health. The daemon pokes
 Boot instead of the Deacon directly, centralizing the "when to wake" decision in
 an agent that can reason about it.
@@ -171,7 +174,7 @@ task nature matters.
 ~/gt/deacon/dogs/boot/
 ```
 
-Session name: `gt-deacon-boot`
+Session name: `gt-boot`
 
 Created/maintained by `bd doctor`.
 

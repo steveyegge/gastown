@@ -44,8 +44,9 @@ func TestRigsConfigRoundTrip(t *testing.T) {
 		Version: 1,
 		Rigs: map[string]RigEntry{
 			"gastown": {
-				GitURL:  "git@github.com:steveyegge/gastown.git",
-				AddedAt: time.Now().Truncate(time.Second),
+				GitURL:    "git@github.com:steveyegge/gastown.git",
+				LocalRepo: "/tmp/local-repo",
+				AddedAt:   time.Now().Truncate(time.Second),
 				BeadsConfig: &BeadsConfig{
 					Repo:   "local",
 					Prefix: "gt-",
@@ -74,35 +75,8 @@ func TestRigsConfigRoundTrip(t *testing.T) {
 	if rig.BeadsConfig == nil || rig.BeadsConfig.Prefix != "gt-" {
 		t.Errorf("BeadsConfig.Prefix = %v, want 'gt-'", rig.BeadsConfig)
 	}
-}
-
-func TestAgentStateRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.json")
-
-	original := &AgentState{
-		Role:       "mayor",
-		LastActive: time.Now().Truncate(time.Second),
-		Session:    "abc123",
-		Extra: map[string]any{
-			"custom": "value",
-		},
-	}
-
-	if err := SaveAgentState(path, original); err != nil {
-		t.Fatalf("SaveAgentState: %v", err)
-	}
-
-	loaded, err := LoadAgentState(path)
-	if err != nil {
-		t.Fatalf("LoadAgentState: %v", err)
-	}
-
-	if loaded.Role != original.Role {
-		t.Errorf("Role = %q, want %q", loaded.Role, original.Role)
-	}
-	if loaded.Session != original.Session {
-		t.Errorf("Session = %q, want %q", loaded.Session, original.Session)
+	if rig.LocalRepo != "/tmp/local-repo" {
+		t.Errorf("LocalRepo = %q, want %q", rig.LocalRepo, "/tmp/local-repo")
 	}
 }
 
@@ -125,12 +99,6 @@ func TestValidationErrors(t *testing.T) {
 	if err := validateTownConfig(tc); err == nil {
 		t.Error("expected error for wrong type")
 	}
-
-	// Missing role
-	as := &AgentState{}
-	if err := validateAgentState(as); err == nil {
-		t.Error("expected error for missing role")
-	}
 }
 
 func TestRigConfigRoundTrip(t *testing.T) {
@@ -140,6 +108,7 @@ func TestRigConfigRoundTrip(t *testing.T) {
 	original := NewRigConfig("gastown", "git@github.com:test/gastown.git")
 	original.CreatedAt = time.Now().Truncate(time.Second)
 	original.Beads = &BeadsConfig{Prefix: "gt-"}
+	original.LocalRepo = "/tmp/local-repo"
 
 	if err := SaveRigConfig(path, original); err != nil {
 		t.Fatalf("SaveRigConfig: %v", err)
@@ -161,6 +130,9 @@ func TestRigConfigRoundTrip(t *testing.T) {
 	}
 	if loaded.GitURL != "git@github.com:test/gastown.git" {
 		t.Errorf("GitURL = %q, want expected URL", loaded.GitURL)
+	}
+	if loaded.LocalRepo != "/tmp/local-repo" {
+		t.Errorf("LocalRepo = %q, want %q", loaded.LocalRepo, "/tmp/local-repo")
 	}
 	if loaded.Beads == nil || loaded.Beads.Prefix != "gt-" {
 		t.Error("Beads.Prefix not preserved")
@@ -997,4 +969,134 @@ func TestLoadRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	if rc.Command != "claude" {
 		t.Errorf("Command = %q, want %q (default)", rc.Command, "claude")
 	}
+}
+
+func TestSaveTownSettings(t *testing.T) {
+	t.Run("saves valid town settings", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		settingsPath := filepath.Join(tmpDir, "settings", "config.json")
+
+		settings := &TownSettings{
+			Type:         "town-settings",
+			Version:      CurrentTownSettingsVersion,
+			DefaultAgent: "gemini",
+			Agents: map[string]*RuntimeConfig{
+				"my-agent": {
+					Command: "my-agent",
+					Args:    []string{"--arg1", "--arg2"},
+				},
+			},
+		}
+
+		err := SaveTownSettings(settingsPath, settings)
+		if err != nil {
+			t.Fatalf("SaveTownSettings failed: %v", err)
+		}
+
+		// Verify file exists
+		data, err := os.ReadFile(settingsPath)
+		if err != nil {
+			t.Fatalf("reading settings file: %v", err)
+		}
+
+		// Verify it contains expected content
+		content := string(data)
+		if !strings.Contains(content, `"type": "town-settings"`) {
+			t.Errorf("missing type field")
+		}
+		if !strings.Contains(content, `"default_agent": "gemini"`) {
+			t.Errorf("missing default_agent field")
+		}
+		if !strings.Contains(content, `"my-agent"`) {
+			t.Errorf("missing custom agent")
+		}
+	})
+
+	t.Run("creates parent directories", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		settingsPath := filepath.Join(tmpDir, "deeply", "nested", "settings", "config.json")
+
+		settings := NewTownSettings()
+
+		err := SaveTownSettings(settingsPath, settings)
+		if err != nil {
+			t.Fatalf("SaveTownSettings failed: %v", err)
+		}
+
+		// Verify file exists
+		if _, err := os.Stat(settingsPath); err != nil {
+			t.Errorf("settings file not created: %v", err)
+		}
+	})
+
+	t.Run("rejects invalid type", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		settingsPath := filepath.Join(tmpDir, "config.json")
+
+		settings := &TownSettings{
+			Type:    "invalid-type",
+			Version: CurrentTownSettingsVersion,
+		}
+
+		err := SaveTownSettings(settingsPath, settings)
+		if err == nil {
+			t.Error("expected error for invalid type")
+		}
+	})
+
+	t.Run("rejects unsupported version", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		settingsPath := filepath.Join(tmpDir, "config.json")
+
+		settings := &TownSettings{
+			Type:    "town-settings",
+			Version: CurrentTownSettingsVersion + 100,
+		}
+
+		err := SaveTownSettings(settingsPath, settings)
+		if err == nil {
+			t.Error("expected error for unsupported version")
+		}
+	})
+
+	t.Run("roundtrip save and load", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		settingsPath := filepath.Join(tmpDir, "config.json")
+
+		original := &TownSettings{
+			Type:         "town-settings",
+			Version:      CurrentTownSettingsVersion,
+			DefaultAgent: "codex",
+			Agents: map[string]*RuntimeConfig{
+				"custom-1": {
+					Command: "custom-agent",
+					Args:    []string{"--flag"},
+				},
+			},
+		}
+
+		err := SaveTownSettings(settingsPath, original)
+		if err != nil {
+			t.Fatalf("SaveTownSettings failed: %v", err)
+		}
+
+		loaded, err := LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("LoadOrCreateTownSettings failed: %v", err)
+		}
+
+		if loaded.Type != original.Type {
+			t.Errorf("Type = %q, want %q", loaded.Type, original.Type)
+		}
+		if loaded.Version != original.Version {
+			t.Errorf("Version = %d, want %d", loaded.Version, original.Version)
+		}
+		if loaded.DefaultAgent != original.DefaultAgent {
+			t.Errorf("DefaultAgent = %q, want %q", loaded.DefaultAgent, original.DefaultAgent)
+		}
+
+		if len(loaded.Agents) != len(original.Agents) {
+			t.Errorf("Agents count = %d, want %d", len(loaded.Agents), len(original.Agents))
+		}
+	})
 }

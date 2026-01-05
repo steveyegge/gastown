@@ -59,7 +59,7 @@ func Path(polecatDir string) string {
 func Read(polecatDir string) (*Checkpoint, error) {
 	path := Path(polecatDir)
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed from trusted polecatDir
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -96,7 +96,7 @@ func Write(polecatDir string, cp *Checkpoint) error {
 	}
 
 	path := Path(polecatDir)
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("writing checkpoint: %w", err)
 	}
 

@@ -509,7 +509,7 @@ func (m *Manager) saveState(name string, state *DogState) error {
 		return err
 	}
 
-	return os.WriteFile(m.stateFilePath(name), data, 0644)
+	return os.WriteFile(m.stateFilePath(name), data, 0644) //nolint:gosec // G306: dog state is non-sensitive operational data
 }
 
 // GetIdleDog returns an idle dog suitable for work assignment.

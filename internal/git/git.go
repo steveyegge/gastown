@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -38,6 +40,12 @@ func NewGitWithDir(gitDir, workDir string) *Git {
 // WorkDir returns the working directory for this Git instance.
 func (g *Git) WorkDir() string {
 	return g.workDir
+}
+
+// IsRepo returns true if the workDir is a git repository.
+func (g *Git) IsRepo() bool {
+	_, err := g.run("rev-parse", "--git-dir")
+	return err == nil
 }
 
 // run executes a git command and returns stdout.
@@ -96,7 +104,21 @@ func (g *Git) Clone(url, dest string) error {
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stderr.String(), []string{"clone", url})
 	}
-	return nil
+	// Configure hooks path for Gas Town clones
+	return configureHooksPath(dest)
+}
+
+// CloneWithReference clones a repository using a local repo as an object reference.
+// This saves disk by sharing objects without changing remotes.
+func (g *Git) CloneWithReference(url, dest, reference string) error {
+	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, dest)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return g.wrapError(err, stderr.String(), []string{"clone", "--reference-if-able", url})
+	}
+	// Configure hooks path for Gas Town clones
+	return configureHooksPath(dest)
 }
 
 // CloneBare clones a repository as a bare repo (no working directory).
@@ -107,6 +129,36 @@ func (g *Git) CloneBare(url, dest string) error {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stderr.String(), []string{"clone", "--bare", url})
+	}
+	return nil
+}
+
+// configureHooksPath sets core.hooksPath to use the repo's .githooks directory
+// if it exists. This ensures Gas Town agents use the pre-push hook that blocks
+// pushes to non-main branches (internal PRs are not allowed).
+func configureHooksPath(repoPath string) error {
+	hooksDir := filepath.Join(repoPath, ".githooks")
+	if _, err := os.Stat(hooksDir); os.IsNotExist(err) {
+		// No .githooks directory, nothing to configure
+		return nil
+	}
+
+	cmd := exec.Command("git", "-C", repoPath, "config", "core.hooksPath", ".githooks")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("configuring hooks path: %s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// CloneBareWithReference clones a bare repository using a local repo as an object reference.
+func (g *Git) CloneBareWithReference(url, dest, reference string) error {
+	cmd := exec.Command("git", "clone", "--bare", "--reference-if-able", reference, url, dest)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return g.wrapError(err, stderr.String(), []string{"clone", "--bare", "--reference-if-able", url})
 	}
 	return nil
 }
@@ -226,6 +278,36 @@ func (g *Git) DefaultBranch() string {
 	return "main"
 }
 
+// RemoteDefaultBranch returns the default branch from the remote (origin).
+// This is useful in worktrees where HEAD may not reflect the repo's actual default.
+// Checks origin/HEAD first, then falls back to checking if master/main exists.
+// Returns "main" as final fallback.
+func (g *Git) RemoteDefaultBranch() string {
+	// Try to get from origin/HEAD symbolic ref
+	out, err := g.run("symbolic-ref", "refs/remotes/origin/HEAD")
+	if err == nil && out != "" {
+		// Returns refs/remotes/origin/main -> extract branch name
+		parts := strings.Split(out, "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1]
+		}
+	}
+
+	// Fallback: check if origin/master exists
+	_, err = g.run("rev-parse", "--verify", "origin/master")
+	if err == nil {
+		return "master"
+	}
+
+	// Fallback: check if origin/main exists
+	_, err = g.run("rev-parse", "--verify", "origin/main")
+	if err == nil {
+		return "main"
+	}
+
+	return "main" // final fallback
+}
+
 // HasUncommittedChanges returns true if there are uncommitted changes.
 func (g *Git) HasUncommittedChanges() (bool, error) {
 	status, err := g.Status()
@@ -238,6 +320,18 @@ func (g *Git) HasUncommittedChanges() (bool, error) {
 // RemoteURL returns the URL for the given remote.
 func (g *Git) RemoteURL(remote string) (string, error) {
 	return g.run("remote", "get-url", remote)
+}
+
+// Remotes returns the list of configured remote names.
+func (g *Git) Remotes() ([]string, error) {
+	out, err := g.run("remote")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
 }
 
 // Merge merges the given branch into the current branch.
@@ -464,6 +558,13 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 	return err
 }
 
+// WorktreeAddFromRef creates a new worktree at the given path with a new branch
+// starting from the specified ref (e.g., "origin/main").
+func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
+	_, err := g.run("worktree", "add", "-b", branch, path, startPoint)
+	return err
+}
+
 // WorktreeAddDetached creates a new worktree at the given path with a detached HEAD.
 func (g *Git) WorktreeAddDetached(path, ref string) error {
 	_, err := g.run("worktree", "add", "--detach", path, ref)
@@ -585,6 +686,24 @@ func (g *Git) BranchCreatedDate(branch string) (string, error) {
 // are on feature that are not on main.
 func (g *Git) CommitsAhead(base, branch string) (int, error) {
 	out, err := g.run("rev-list", "--count", base+".."+branch)
+	if err != nil {
+		return 0, err
+	}
+
+	var count int
+	_, err = fmt.Sscanf(out, "%d", &count)
+	if err != nil {
+		return 0, fmt.Errorf("parsing commit count: %w", err)
+	}
+
+	return count, nil
+}
+
+// CountCommitsBehind returns the number of commits that HEAD is behind the given ref.
+// For example, CountCommitsBehind("origin/main") returns how many commits
+// are on origin/main that are not on the current HEAD.
+func (g *Git) CountCommitsBehind(ref string) (int, error) {
+	out, err := g.run("rev-list", "--count", "HEAD.."+ref)
 	if err != nil {
 		return 0, err
 	}

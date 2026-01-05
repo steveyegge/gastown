@@ -84,6 +84,16 @@ export const state = {
     notify('agents');
   },
 
+  // Get agents
+  getAgents() {
+    return store.agents || [];
+  },
+
+  // Get rigs from status
+  getRigs() {
+    return store.status?.rigs || [];
+  },
+
   // Add event
   addEvent(event) {
     // Add timestamp if missing

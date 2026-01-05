@@ -483,10 +483,13 @@ func showDogStatus(mgr *dog.Manager, name string) error {
 	// Check for tmux session
 	townRoot, _ := workspace.FindFromCwd()
 	if townRoot != "" {
-		sessionName := fmt.Sprintf("gt-deacon-%s", name)
-		tm := tmux.NewTmux()
-		if has, _ := tm.HasSession(sessionName); has {
-			fmt.Printf("\nSession: %s (running)\n", sessionName)
+		townName, err := workspace.GetTownName(townRoot)
+		if err == nil {
+			sessionName := fmt.Sprintf("gt-%s-deacon-%s", townName, name)
+			tm := tmux.NewTmux()
+			if has, _ := tm.HasSession(sessionName); has {
+				fmt.Printf("\nSession: %s (running)\n", sessionName)
+			}
 		}
 	}
 

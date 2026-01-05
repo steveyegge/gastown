@@ -21,15 +21,15 @@ const (
 // AgentIdentity represents a parsed Gas Town agent identity.
 type AgentIdentity struct {
 	Role Role   // mayor, deacon, witness, refinery, crew, polecat
-	Rig  string // empty for mayor/deacon
+	Rig  string // rig name (empty for mayor/deacon)
 	Name string // crew/polecat name (empty for mayor/deacon/witness/refinery)
 }
 
 // ParseSessionName parses a tmux session name into an AgentIdentity.
 //
 // Session name formats:
-//   - gt-mayor → Role: mayor
-//   - gt-deacon → Role: deacon
+//   - hq-mayor → Role: mayor (town-level, one per machine)
+//   - hq-deacon → Role: deacon (town-level, one per machine)
 //   - gt-<rig>-witness → Role: witness, Rig: <rig>
 //   - gt-<rig>-refinery → Role: refinery, Rig: <rig>
 //   - gt-<rig>-crew-<name> → Role: crew, Rig: <rig>, Name: <name>
@@ -39,8 +39,21 @@ type AgentIdentity struct {
 // is assumed to be the polecat name. This works for simple rig names but may
 // be ambiguous for rig names containing hyphens.
 func ParseSessionName(session string) (*AgentIdentity, error) {
+	// Check for town-level roles (hq- prefix)
+	if strings.HasPrefix(session, HQPrefix) {
+		suffix := strings.TrimPrefix(session, HQPrefix)
+		if suffix == "mayor" {
+			return &AgentIdentity{Role: RoleMayor}, nil
+		}
+		if suffix == "deacon" {
+			return &AgentIdentity{Role: RoleDeacon}, nil
+		}
+		return nil, fmt.Errorf("invalid session name %q: unknown hq- role", session)
+	}
+
+	// Rig-level roles use gt- prefix
 	if !strings.HasPrefix(session, Prefix) {
-		return nil, fmt.Errorf("invalid session name %q: missing %q prefix", session, Prefix)
+		return nil, fmt.Errorf("invalid session name %q: missing %q or %q prefix", session, HQPrefix, Prefix)
 	}
 
 	suffix := strings.TrimPrefix(session, Prefix)
@@ -48,15 +61,7 @@ func ParseSessionName(session string) (*AgentIdentity, error) {
 		return nil, fmt.Errorf("invalid session name %q: empty after prefix", session)
 	}
 
-	// Check for global roles first (no rig)
-	switch suffix {
-	case "mayor":
-		return &AgentIdentity{Role: RoleMayor}, nil
-	case "deacon":
-		return &AgentIdentity{Role: RoleDeacon}, nil
-	}
-
-	// Parse rig-based roles
+	// Parse into parts for rig-level roles
 	parts := strings.Split(suffix, "-")
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("invalid session name %q: expected rig-role format", session)

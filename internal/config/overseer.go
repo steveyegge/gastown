@@ -30,7 +30,7 @@ func OverseerConfigPath(townRoot string) string {
 
 // LoadOverseerConfig loads and validates an overseer configuration file.
 func LoadOverseerConfig(path string) (*OverseerConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
@@ -65,7 +65,7 @@ func SaveOverseerConfig(path string, config *OverseerConfig) error {
 		return fmt.Errorf("encoding overseer config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0644); err != nil { //nolint:gosec // G306: overseer config doesn't contain secrets
 		return fmt.Errorf("writing overseer config: %w", err)
 	}
 
