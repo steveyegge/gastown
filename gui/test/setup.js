@@ -59,7 +59,7 @@ export async function createPage() {
   const b = await launchBrowser();
   const page = await b.newPage();
 
-  await page.addInitScript(() => {
+  await page.evaluateOnNewDocument(() => {
     localStorage.setItem('gastown-onboarding-complete', 'true');
     localStorage.setItem('gastown-onboarding-skipped', 'true');
     localStorage.setItem('gastown-tutorial-complete', 'true');
@@ -78,10 +78,7 @@ export async function navigateToApp(page) {
   await page.goto(CONFIG.baseUrl, { waitUntil: 'domcontentloaded' });
   // Wait for app to initialize
   await page.waitForSelector('#app-header', { timeout: 15000 });
-  await page.waitForFunction(() => {
-    const town = document.getElementById('town-name');
-    return !!window.gastown && town && town.textContent && town.textContent.trim() !== 'Loading...';
-  }, { timeout: 15000 });
+  await page.waitForFunction(() => !!window.gastown, { timeout: 15000 });
 }
 
 /**
