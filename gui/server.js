@@ -29,6 +29,7 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '127.0.0.1';
 const HOME = process.env.HOME || require('os').homedir();
 const GT_ROOT = process.env.GT_ROOT || path.join(HOME, 'gt');
 
@@ -123,9 +124,34 @@ function getPendingOrExecute(key, executor) {
 }
 
 // Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.static(__dirname));
+app.disable('x-powered-by');
+
+const defaultOrigins = [
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
+];
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean)
+  : defaultOrigins;
+const allowAllOrigins = allowedOrigins.includes('*');
+const allowNullOrigin = process.env.ALLOW_NULL_ORIGIN === 'true';
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowAllOrigins) return callback(null, true);
+    if (origin === 'null') return callback(allowNullOrigin ? null : new Error('CORS origin not allowed'), allowNullOrigin);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('CORS origin not allowed'));
+  },
+}));
+app.use(express.json({ limit: '1mb' }));
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
+app.use('/css', express.static(path.join(__dirname, 'css')));
+app.use('/js', express.static(path.join(__dirname, 'js')));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 // Store connected WebSocket clients
 const clients = new Set();
@@ -2031,14 +2057,15 @@ wss.on('connection', (ws) => {
 
 // ============= Start Server =============
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
+  const displayHost = HOST === '0.0.0.0' || HOST === '::' ? 'localhost' : HOST;
   console.log(`
 ╔══════════════════════════════════════════════════════════╗
 ║              GAS TOWN GUI SERVER                         ║
 ╠══════════════════════════════════════════════════════════╣
-║  URL:        http://localhost:${PORT}                       ║
+║  URL:        http://${displayHost}:${PORT}                       ║
 ║  GT_ROOT:    ${GT_ROOT.padEnd(40)}║
-║  WebSocket:  ws://localhost:${PORT}/ws                      ║
+║  WebSocket:  ws://${displayHost}:${PORT}/ws                      ║
 ╚══════════════════════════════════════════════════════════╝
   `);
 });
