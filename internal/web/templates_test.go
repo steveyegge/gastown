@@ -236,3 +236,82 @@ func TestConvoyTemplate_EmptyState(t *testing.T) {
 		t.Error("Template should show empty state message when no convoys")
 	}
 }
+
+func TestConvoyTemplate_SectionHeaderCounts(t *testing.T) {
+	tmpl, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() error = %v", err)
+	}
+
+	data := ConvoyData{
+		Convoys: []ConvoyRow{
+			{ID: "hq-cv-1", Title: "Convoy 1", Status: "open"},
+			{ID: "hq-cv-2", Title: "Convoy 2", Status: "open"},
+			{ID: "hq-cv-3", Title: "Convoy 3", Status: "closed"},
+		},
+		MergeQueue: []MergeQueueRow{
+			{Number: 1, Repo: "gastown", Title: "Feature 1", CIStatus: "pass"},
+			{Number: 2, Repo: "beads", Title: "Feature 2", CIStatus: "pending"},
+		},
+		Polecats: []PolecatRow{
+			{Rig: "gastown", Name: "nux", SessionID: "gt-gastown-nux"},
+			{Rig: "gastown", Name: "capable", SessionID: "gt-gastown-capable"},
+			{Rig: "beads", Name: "furiosa", SessionID: "gt-beads-furiosa"},
+			{Rig: "beads", Name: "dag", SessionID: "gt-beads-dag"},
+		},
+	}
+
+	var buf bytes.Buffer
+	err = tmpl.ExecuteTemplate(&buf, "convoy.html", data)
+	if err != nil {
+		t.Fatalf("ExecuteTemplate() error = %v", err)
+	}
+
+	output := buf.String()
+
+	// Check convoy count in header
+	if !strings.Contains(output, "Convoys (3)") {
+		t.Error("Template should show 'Convoys (3)' in header for 3 convoys")
+	}
+
+	// Check merge queue count in header
+	if !strings.Contains(output, "Merge Queue (2)") {
+		t.Error("Template should show 'Merge Queue (2)' in header for 2 merge queue items")
+	}
+
+	// Check polecat count in header
+	if !strings.Contains(output, "Polecat Workers (4)") {
+		t.Error("Template should show 'Polecat Workers (4)' in header for 4 polecats")
+	}
+}
+
+func TestConvoyTemplate_SectionHeaderCounts_Zero(t *testing.T) {
+	tmpl, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() error = %v", err)
+	}
+
+	data := ConvoyData{
+		Convoys:    []ConvoyRow{},
+		MergeQueue: []MergeQueueRow{},
+		Polecats:   []PolecatRow{},
+	}
+
+	var buf bytes.Buffer
+	err = tmpl.ExecuteTemplate(&buf, "convoy.html", data)
+	if err != nil {
+		t.Fatalf("ExecuteTemplate() error = %v", err)
+	}
+
+	output := buf.String()
+
+	// Check convoy count is 0
+	if !strings.Contains(output, "Convoys (0)") {
+		t.Error("Template should show 'Convoys (0)' in header when no convoys")
+	}
+
+	// Check merge queue count is 0
+	if !strings.Contains(output, "Merge Queue (0)") {
+		t.Error("Template should show 'Merge Queue (0)' in header when empty")
+	}
+}
