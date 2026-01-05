@@ -309,7 +309,7 @@ exit 1
 	t.Setenv("EXPECT_BEADS_DIR", beadsDir)
 
 	manager := &Manager{}
-	if err := manager.initBeads(rigPath, "gt"); err != nil {
+	if err := manager.initBeads(rigPath, "gt", false); err != nil {
 		t.Fatalf("initBeads: %v", err)
 	}
 
@@ -467,7 +467,7 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 
 	for _, prefix := range tests {
 		t.Run(prefix, func(t *testing.T) {
-			err := manager.initBeads(rigPath, prefix)
+			err := manager.initBeads(rigPath, prefix, false)
 			if err == nil {
 				t.Errorf("initBeads(%q) should have failed", prefix)
 			}
@@ -475,5 +475,40 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 				t.Errorf("initBeads(%q) error = %q, want error containing 'invalid beads prefix'", prefix, err.Error())
 			}
 		})
+	}
+}
+
+// TestInitBeadsExistingDatabase tests that initBeads warns/errors on existing database (GitHub #56)
+func TestInitBeadsExistingDatabase(t *testing.T) {
+	rigPath := t.TempDir()
+	beadsDir := filepath.Join(rigPath, ".beads")
+
+	// Create existing beads database with content
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir beads dir: %v", err)
+	}
+	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
+	if err := os.WriteFile(issuesPath, []byte(`{"id":"test-123"}`+"\n"), 0644); err != nil {
+		t.Fatalf("write issues.jsonl: %v", err)
+	}
+
+	manager := &Manager{}
+
+	// Without force, should error
+	err := manager.initBeads(rigPath, "test", false)
+	if err == nil {
+		t.Errorf("initBeads without force should fail when database exists")
+	}
+	if err != nil && !strings.Contains(err.Error(), "existing beads database found") {
+		t.Errorf("error = %q, want error containing 'existing beads database found'", err.Error())
+	}
+	if err != nil && !strings.Contains(err.Error(), "--force") {
+		t.Errorf("error = %q, want error mentioning '--force'", err.Error())
+	}
+
+	// With force, should succeed (and we'd expect a warning, but that goes to stdout)
+	err = manager.initBeads(rigPath, "test", true)
+	if err != nil {
+		t.Errorf("initBeads with force should succeed, got: %v", err)
 	}
 }

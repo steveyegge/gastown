@@ -162,6 +162,7 @@ type AddRigOptions struct {
 	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
 	LocalRepo     string // Optional local repo for reference clones
 	DefaultBranch string // Default branch (defaults to auto-detected from remote)
+	Force         bool   // Force overwrite of existing beads database (GitHub #56)
 }
 
 func resolveLocalRepo(path, gitURL string) (string, string) {
@@ -434,7 +435,7 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 
 	// Initialize beads at rig level
 	fmt.Printf("  Initializing beads database...\n")
-	if err := m.initBeads(rigPath, opts.BeadsPrefix); err != nil {
+	if err := m.initBeads(rigPath, opts.BeadsPrefix, opts.Force); err != nil {
 		return nil, fmt.Errorf("initializing beads: %w", err)
 	}
 	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
@@ -500,13 +501,26 @@ func LoadRigConfig(rigPath string) (*RigConfig, error) {
 // The project's .beads/config.yaml determines sync-branch settings.
 // Use `bd doctor --fix` in the project to configure sync-branch if needed.
 // TODO(bd-yaml): beads config should migrate to JSON (see beads issue)
-func (m *Manager) initBeads(rigPath, prefix string) error {
+func (m *Manager) initBeads(rigPath, prefix string, force bool) error {
 	// Validate prefix format to prevent command injection from config files
 	if !isValidBeadsPrefix(prefix) {
 		return fmt.Errorf("invalid beads prefix %q: must be alphanumeric with optional hyphens, start with letter, max 20 chars", prefix)
 	}
 
 	beadsDir := filepath.Join(rigPath, ".beads")
+
+	// Check for existing beads database before initializing (GitHub #56)
+	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
+	if _, err := os.Stat(issuesPath); err == nil {
+		// issues.jsonl exists - check if it has content
+		info, statErr := os.Stat(issuesPath)
+		if statErr == nil && info.Size() > 0 {
+			if !force {
+				return fmt.Errorf("existing beads database found at %s (use --force to overwrite)", beadsDir)
+			}
+			fmt.Printf("   ⚠ Warning: overwriting existing beads database at %s\n", beadsDir)
+		}
+	}
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		return err
 	}
