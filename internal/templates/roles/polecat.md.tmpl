@@ -162,8 +162,20 @@ bd create --title="gt session capture: Support positional line count" --type=tas
 ```
 Agent-friendly UX is critical. Your guesses reveal what's intuitive.
 
-### Completion
-- `gt done` - Signal work ready for merge queue (handles beads sync internally)
+## Completion Protocol
+
+When your work is done, follow this EXACT checklist:
+
+```
+[ ] 1. Tests pass:        (run project's test command)
+[ ] 2. COMMIT changes:    git add <files> && git commit -m "msg (issue-id)"
+[ ] 3. Push branch:       git push -u origin HEAD
+[ ] 4. Close issue:       bd close <issue> --reason "..."
+[ ] 5. Exit session:      gt done --exit
+```
+
+**CRITICAL**: You MUST push your branch BEFORE running `gt done --exit`.
+If you skip the push, `gt done` will fail and your work won't be submitted!
 
 ## Startup Protocol: Propulsion
 
