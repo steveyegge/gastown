@@ -47,6 +47,7 @@ func init() {
 type TownStatus struct {
 	Name     string         `json:"name"`
 	Location string         `json:"location"`
+	Cwd      string         `json:"cwd,omitempty"` // Current working directory
 	Overseer *OverseerInfo  `json:"overseer,omitempty"` // Human operator
 	Agents   []AgentRuntime `json:"agents"`             // Global agents (Mayor, Deacon)
 	Rigs     []RigStatus    `json:"rigs"`
@@ -255,10 +256,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Get current working directory
+	cwd, _ := os.Getwd()
+
 	// Build status - parallel fetch global agents and rigs
 	status := TownStatus{
 		Name:     townConfig.Name,
 		Location: townRoot,
+		Cwd:      cwd,
 		Overseer: overseerInfo,
 		Rigs:     make([]RigStatus, len(rigs)),
 	}
@@ -359,7 +364,11 @@ func outputStatusJSON(status TownStatus) error {
 func outputStatusText(status TownStatus) error {
 	// Header
 	fmt.Printf("%s %s\n", style.Bold.Render("Town:"), status.Name)
-	fmt.Printf("%s\n\n", style.Dim.Render(status.Location))
+	fmt.Printf("%s\n", style.Dim.Render(status.Location))
+	if status.Cwd != "" {
+		fmt.Printf("%s %s\n", style.Dim.Render("cwd:"), status.Cwd)
+	}
+	fmt.Println()
 
 	// Overseer info
 	if status.Overseer != nil {
