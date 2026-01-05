@@ -325,7 +325,7 @@
 <body>
     <div class="dashboard" hx-get="/" hx-trigger="every 10s" hx-swap="outerHTML">
         <header>
-            <h1>🚚 Gas Town Convoys</h1>
+            <h1>🚚 Gas Town Convoys ({{len .Convoys}})</h1>
             <span class="refresh-info">
                 Auto-refresh: every 10s
                 <span class="htmx-indicator">⟳</span>
@@ -375,7 +375,7 @@
         </div>
         {{end}}
 
-        <h2 class="section-header">🔀 Refinery Merge Queue</h2>
+        <h2 class="section-header">🔀 Refinery Merge Queue ({{len .MergeQueue}})</h2>
         {{if .MergeQueue}}
         <table class="convoy-table">
             <thead>
@@ -426,7 +426,7 @@
         {{end}}
 
         {{if .Polecats}}
-        <h2 class="section-header">🐾 Polecat Workers</h2>
+        <h2 class="section-header">🐾 Polecat Workers ({{len .Polecats}})</h2>
         <table class="convoy-table">
             <thead>
                 <tr>
