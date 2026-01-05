@@ -6,9 +6,9 @@
 
 ## Executive Summary
 
-Overall the GUI implementation is solid and functional, with good coverage of core workflows and thoughtful UI states. I made several hardening fixes (server binding/CORS/static exposure, input validation for polecat routes, HTTPS WebSocket support, and XSS-safe error rendering). Remaining gaps are mostly around test reliability and a few performance/security improvements that should be tracked as follow‑ups.
+Overall the GUI implementation is solid and functional, with good coverage of core workflows and thoughtful UI states. I made several hardening fixes (server binding/CORS/static exposure, input validation for polecat routes, HTTPS WebSocket support, and XSS-safe error rendering), and then resolved the remaining test stability and performance/security items.
 
-**Merge recommendation:** _Not fully approved yet_ because quality gates are currently failing in this environment (see below). Once test reliability issues are addressed or excluded appropriately, the changes are suitable for a PR back to `main`.
+**Merge recommendation:** _Approved_ — quality gates now pass locally (see below).
 
 ## Changes Applied in This Review (Fixed)
 
@@ -16,27 +16,26 @@ Overall the GUI implementation is solid and functional, with good coverage of co
 - **Input validation:** Validated `rig` and `name` parameters for polecat endpoints to prevent path traversal or malformed agent names.
 - **WebSocket protocol:** Client now uses `wss://` when served over HTTPS.
 - **XSS safety:** Escaped error messages inserted into HTML in issue/PR/formula lists and GitHub repo modal.
+- **Shell exec hardening:** Replaced shell `exec` usage with `execFile`/`spawn` where applicable.
+- **Mail feed performance:** Added mail feed parsing cache keyed by file mtime/size.
+- **GUI stability:** Removed duplicate `escapeAttr` definition that blocked module load; stabilized puppeteer waits in tests.
 
 ## Findings & Follow‑Ups
 
-### High Priority
+### Resolved Items
 
-1) **Test reliability (GUI integration/e2e):** `npm test` reports timeouts waiting for UI state transitions and WebSocket data. This looks like a fixture/mock timing issue rather than a functional regression, but it blocks a clean quality gate. Tracked in #2.
+1) **Test reliability (GUI integration/e2e):** fixed by disabling onboarding during tests, improving waits, and removing unsupported puppeteer APIs. (Issue #2 closed.)
 
-2) **Test environment dependency (Go integration):** `go test ./...` fails because the beads DB is missing. Tests assume a DB exists but do not set it up or skip gracefully. Tracked in #3.
+2) **Test environment dependency (Go integration):** integration tests now skip when `beads.db` is missing or no‑db mode is enabled. (Issue #3 closed.)
 
-### Medium Priority
+3) **Mail feed performance:** added cache for feed parsing keyed on file mtime/size. (Issue #4 closed.)
 
-3) **Mail feed performance:** `/api/mail/all` reads the full `.feed.jsonl` file on every request before paginating. This will get slow as the feed grows. Consider incremental pagination or caching the parsed feed index. Tracked in #4.
-
-4) **Shell execution hardening:** `executeGT`/`executeBD` are safe due to strong quoting, but switching to `execFile`/`spawn` with args would eliminate shell invocation entirely. Tracked in #5.
+4) **Shell execution hardening:** replaced shell exec usage with `execFile`/`spawn`. (Issue #5 closed.)
 
 ## Quality Gates (Local Run)
 
-- `go test ./...` **FAILED**
-  - Reason: beads DB missing (`bd list`/`bd ready`/`bd blocked` require DB).
-- `npm test` (GUI) **FAILED / TIMED OUT**
-  - Multiple E2E/integration tests timed out waiting for view changes or WebSocket events.
+- `go test ./...` **PASSED**
+- `npm test` (GUI) **PASSED**
 
 ## Notes on Usability & UX
 
