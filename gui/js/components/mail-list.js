@@ -7,6 +7,7 @@
 import { AGENT_TYPES, getAgentType, getAgentConfig, formatAgentName } from '../shared/agent-types.js';
 import { api } from '../api.js';
 import { showToast } from './toast.js';
+import { escapeHtml, truncate } from '../utils/html.js';
 
 // Priority icons and colors
 const PRIORITY_CONFIG = {
@@ -411,17 +412,4 @@ function formatTime(timestamp) {
 
   // Older - show date
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-// Utility functions
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function truncate(str, length) {
-  if (!str) return '';
-  return str.length > length ? str.slice(0, length) + '...' : str;
 }
