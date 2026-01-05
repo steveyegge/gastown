@@ -673,7 +673,7 @@ app.get('/api/mail/all', async (req, res) => {
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const offset = (page - 1) * limit;
 
-    const feedPath = path.join(GT_ROOT, '.feed.jsonl');
+    const feedPath = path.join(GT_ROOT, '.events.jsonl');
     try {
       await fsPromises.access(feedPath);
     } catch {
