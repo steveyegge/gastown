@@ -137,7 +137,56 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 		rows = append(rows, row)
 	}
 
+	// Cross-reference convoy activity with actual polecat session activity.
+	// This ensures convoy LastActivity reflects the most recent worker activity,
+	// even if the assignee lookup via beads was stale or incomplete.
+	f.updateConvoyActivityFromPolecats(rows)
+
 	return rows, nil
+}
+
+// updateConvoyActivityFromPolecats updates convoy LastActivity based on actual polecat session activity.
+// For each convoy, if any assigned polecat has more recent activity than the convoy's current LastActivity,
+// the convoy's LastActivity is updated to reflect the polecat's activity.
+func (f *LiveConvoyFetcher) updateConvoyActivityFromPolecats(rows []ConvoyRow) {
+	// Fetch current polecat activity
+	polecats, err := f.FetchPolecats()
+	if err != nil || len(polecats) == 0 {
+		return
+	}
+
+	// Build map of assignee path -> polecat activity timestamp
+	// Assignee format: "rig/polecats/name"
+	polecatActivityMap := make(map[string]time.Time)
+	for _, p := range polecats {
+		assigneePath := fmt.Sprintf("%s/polecats/%s", p.Rig, p.Name)
+		polecatActivityMap[assigneePath] = p.LastActivity.LastActivity
+	}
+
+	// Update each convoy's LastActivity if a polecat has more recent activity
+	for i := range rows {
+		var mostRecentPolecatActivity time.Time
+
+		// Check all tracked issues for this convoy
+		for _, issue := range rows[i].TrackedIssues {
+			if issue.Assignee == "" {
+				continue
+			}
+			if polecatActivity, ok := polecatActivityMap[issue.Assignee]; ok {
+				if polecatActivity.After(mostRecentPolecatActivity) {
+					mostRecentPolecatActivity = polecatActivity
+				}
+			}
+		}
+
+		// If polecat activity is more recent than convoy's current LastActivity, update it
+		if !mostRecentPolecatActivity.IsZero() &&
+			mostRecentPolecatActivity.After(rows[i].LastActivity.LastActivity) {
+			rows[i].LastActivity = activity.Calculate(mostRecentPolecatActivity)
+			// Recalculate work status with new activity
+			rows[i].WorkStatus = calculateWorkStatus(rows[i].Completed, rows[i].Total, rows[i].LastActivity.ColorClass)
+		}
+	}
 }
 
 // trackedIssueInfo holds info about an issue being tracked by a convoy.
