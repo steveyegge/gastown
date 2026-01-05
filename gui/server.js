@@ -14,6 +14,7 @@ import { spawn, exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import os from 'os';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
@@ -223,10 +224,9 @@ app.get('/api/status', async (req, res) => {
         // Try to read rig config to get git_url
         try {
           const rigConfigPath = path.join(GT_ROOT, rig.name, 'config.json');
-          if (fs.existsSync(rigConfigPath)) {
-            const rigConfig = JSON.parse(fs.readFileSync(rigConfigPath, 'utf8'));
-            rig.git_url = rigConfig.git_url || null;
-          }
+          const rigConfigContent = await fsPromises.readFile(rigConfigPath, 'utf8');
+          const rigConfig = JSON.parse(rigConfigContent);
+          rig.git_url = rigConfig.git_url || null;
         } catch (e) {
           // Config not found or invalid, continue
         }
@@ -528,7 +528,9 @@ app.post('/api/mail', async (req, res) => {
 app.get('/api/mail/all', async (req, res) => {
   try {
     const feedPath = path.join(GT_ROOT, '.feed.jsonl');
-    if (!fs.existsSync(feedPath)) {
+    try {
+      await fsPromises.access(feedPath);
+    } catch {
       return res.json([]);
     }
 
@@ -994,23 +996,27 @@ app.get('/api/polecat/:rig/:name/transcript', async (req, res) => {
 
     for (const transcriptPath of transcriptPaths) {
       try {
-        if (fs.existsSync(transcriptPath)) {
-          // Find most recent transcript file
-          const files = fs.readdirSync(transcriptPath)
-            .filter(f => f.endsWith('.json') || f.endsWith('.md') || f.endsWith('.jsonl'))
-            .map(f => ({
-              name: f,
-              time: fs.statSync(path.join(transcriptPath, f)).mtime.getTime()
-            }))
-            .sort((a, b) => b.time - a.time);
+        await fsPromises.access(transcriptPath);
+        // Find most recent transcript file
+        const dirFiles = await fsPromises.readdir(transcriptPath);
+        const filteredFiles = dirFiles.filter(f =>
+          f.endsWith('.json') || f.endsWith('.md') || f.endsWith('.jsonl')
+        );
 
-          if (files.length > 0) {
-            transcriptContent = fs.readFileSync(
-              path.join(transcriptPath, files[0].name),
-              'utf-8'
-            );
-            break;
-          }
+        const filesWithTime = await Promise.all(
+          filteredFiles.map(async f => {
+            const stat = await fsPromises.stat(path.join(transcriptPath, f));
+            return { name: f, time: stat.mtime.getTime() };
+          })
+        );
+        filesWithTime.sort((a, b) => b.time - a.time);
+
+        if (filesWithTime.length > 0) {
+          transcriptContent = await fsPromises.readFile(
+            path.join(transcriptPath, filesWithTime[0].name),
+            'utf-8'
+          );
+          break;
         }
       } catch (e) {
         // Ignore errors, try next path
@@ -1161,10 +1167,9 @@ app.get('/api/setup/status', async (req, res) => {
 
   // Check workspace
   try {
-    const fs = await import('fs');
-    const path = await import('path');
     const mayorPath = path.join(GT_ROOT, 'mayor');
-    status.workspace_initialized = fs.existsSync(mayorPath);
+    await fsPromises.access(mayorPath);
+    status.workspace_initialized = true;
   } catch {
     status.workspace_initialized = false;
   }
@@ -1672,10 +1677,9 @@ app.get('/api/github/prs', async (req, res) => {
       if (!rig.git_url) {
         try {
           const rigConfigPath = path.join(GT_ROOT, rig.name, 'config.json');
-          if (fs.existsSync(rigConfigPath)) {
-            const rigConfig = JSON.parse(fs.readFileSync(rigConfigPath, 'utf8'));
-            rig.git_url = rigConfig.git_url || null;
-          }
+          const rigConfigContent = await fsPromises.readFile(rigConfigPath, 'utf8');
+          const rigConfig = JSON.parse(rigConfigContent);
+          rig.git_url = rigConfig.git_url || null;
         } catch (e) {
           // Config not found or invalid
         }
@@ -1766,10 +1770,9 @@ app.get('/api/github/issues', async (req, res) => {
       if (!rig.git_url) {
         try {
           const rigConfigPath = path.join(GT_ROOT, rig.name, 'config.json');
-          if (fs.existsSync(rigConfigPath)) {
-            const rigConfig = JSON.parse(fs.readFileSync(rigConfigPath, 'utf8'));
-            rig.git_url = rigConfig.git_url || null;
-          }
+          const rigConfigContent = await fsPromises.readFile(rigConfigPath, 'utf8');
+          const rigConfig = JSON.parse(rigConfigContent);
+          rig.git_url = rigConfig.git_url || null;
         } catch (e) {
           // Config not found
         }
