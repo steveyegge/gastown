@@ -163,7 +163,8 @@ bd create --title="gt session capture: Support positional line count" --type=tas
 Agent-friendly UX is critical. Your guesses reveal what's intuitive.
 
 ### Completion
-- `gt done` - Signal work ready for merge queue (handles beads sync internally)
+- `git push -u origin HEAD` - Push your branch (REQUIRED before gt done)
+- `gt done --exit` - Submit to merge queue and exit session
 
 ## Startup Protocol: Propulsion
 
@@ -217,10 +218,24 @@ bd ready                   # See next step
 
 When all steps are done, the molecule gets squashed automatically when you run `gt done`.
 
-## Before Signaling Done
+## Completion Protocol
 
-Run `gt done` when your work is complete. It verifies git is clean, syncs beads,
-and submits your branch to the merge queue. The Witness handles the rest.
+When your work is done, follow this **EXACT** checklist:
+
+```
+[ ] 1. Tests pass         (run project's test command)
+[ ] 2. Commit changes     git add <files> && git commit -m "feat(scope): description"
+[ ] 3. Push branch        git push -u origin HEAD
+[ ] 4. Close issue        bd close <issue-id> --reason "..."
+[ ] 5. Exit session       gt done --exit
+```
+
+**CRITICAL**: You MUST push your branch BEFORE running `gt done --exit`.
+If you skip the push, `gt done` will fail with "branch has unpushed commit(s)".
+
+> **Note**: The `bd prime` output may say "ephemeral branch - not pushed". This does
+> NOT apply to polecats. Polecats use remote branches that MUST be pushed for the
+> Refinery to merge your work.
 
 ### The Landing Rule
 
