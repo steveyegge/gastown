@@ -9,10 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/dog"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/session"
@@ -466,12 +468,24 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Try to inject the "start now" prompt (graceful if no tmux)
 	if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
-	} else if err := injectStartPrompt(targetPane, beadID, slingSubject, slingArgs); err != nil {
-		// Graceful fallback for no-tmux mode
-		fmt.Printf("%s Could not nudge (no tmux?): %v\n", style.Dim.Render("○"), err)
-		fmt.Printf("  Agent will discover work via gt prime / bd show\n")
 	} else {
-		fmt.Printf("%s Start prompt sent\n", style.Bold.Render("▶"))
+		// Ensure Claude is ready before nudging (prevents race condition where
+		// message arrives before Claude has fully started - see issue #115)
+		sessionName := getSessionFromPane(targetPane)
+		if sessionName != "" {
+			if err := ensureClaudeReady(sessionName); err != nil {
+				// Non-fatal: warn and continue, agent will discover work via gt prime
+				fmt.Printf("%s Could not verify Claude ready: %v\n", style.Dim.Render("○"), err)
+			}
+		}
+
+		if err := injectStartPrompt(targetPane, beadID, slingSubject, slingArgs); err != nil {
+			// Graceful fallback for no-tmux mode
+			fmt.Printf("%s Could not nudge (no tmux?): %v\n", style.Dim.Render("○"), err)
+			fmt.Printf("  Agent will discover work via gt prime / bd show\n")
+		} else {
+			fmt.Printf("%s Start prompt sent\n", style.Bold.Render("▶"))
+		}
 	}
 
 	return nil
@@ -544,6 +558,55 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 	// Use the reliable nudge pattern (same as gt nudge / tmux.NudgeSession)
 	t := tmux.NewTmux()
 	return t.NudgePane(pane, prompt)
+}
+
+// getSessionFromPane extracts session name from a pane target.
+// Pane targets can be:
+// - "%9" (pane ID) - need to query tmux for session
+// - "gt-rig-name:0.0" (session:window.pane) - extract session name
+func getSessionFromPane(pane string) string {
+	if strings.HasPrefix(pane, "%") {
+		// Pane ID format - query tmux for the session
+		cmd := exec.Command("tmux", "display-message", "-t", pane, "-p", "#{session_name}")
+		out, err := cmd.Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	// Session:window.pane format - extract session name
+	if idx := strings.Index(pane, ":"); idx > 0 {
+		return pane[:idx]
+	}
+	return pane
+}
+
+// ensureClaudeReady waits for Claude to be ready before nudging an existing session.
+// Uses the same pragmatic approach as session.Start(): poll for node process,
+// accept bypass dialog if present, then wait for full initialization.
+// Returns early if Claude is already running and ready.
+func ensureClaudeReady(sessionName string) error {
+	t := tmux.NewTmux()
+
+	// If Claude is already running, assume it's ready (session was started earlier)
+	if t.IsClaudeRunning(sessionName) {
+		return nil
+	}
+
+	// Claude not running yet - wait for it to start (shell → node transition)
+	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+		return fmt.Errorf("waiting for Claude to start: %w", err)
+	}
+
+	// Accept bypass permissions warning if present
+	_ = t.AcceptBypassPermissionsWarning(sessionName)
+
+	// Wait for Claude to be fully ready at the prompt
+	// PRAGMATIC APPROACH: Use fixed delay rather than detection.
+	// Claude startup takes ~5-8 seconds on typical machines.
+	time.Sleep(8 * time.Second)
+
+	return nil
 }
 
 // resolveTargetAgent converts a target spec to agent ID, pane, and hook root.
