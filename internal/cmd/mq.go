@@ -47,6 +47,10 @@ var (
 
 	// Integration status flags
 	mqIntegrationStatusJSON bool
+
+	// Integration create flags
+	mqIntegrationCreateBranch string
+	mqIntegrationCreateTicket string
 )
 
 var mqCmd = &cobra.Command{
@@ -190,18 +194,34 @@ var mqIntegrationCreateCmd = &cobra.Command{
 	Short: "Create an integration branch for an epic",
 	Long: `Create an integration branch for batch work on an epic.
 
-Creates a branch named integration/<epic-id> from main and pushes it
-to origin. Future MRs for this epic's children can target this branch.
+Creates a branch from main using a configurable naming template.
+Future MRs for this epic's children can target this branch.
+
+Branch naming:
+  Default: integration/<epic-id>
+  Template: Configured via merge_queue.integration_branch_template
+  Override: Use --branch flag for one-off custom names
+
+Template variables:
+  {{epic}}   - The epic ID (required)
+  {{user}}   - Git user.name
+  {{ticket}} - External ticket ID (via --ticket flag)
 
 Actions:
   1. Verify epic exists
-  2. Create branch integration/<epic-id> from main
+  2. Create branch from main using template
   3. Push to origin
   4. Store integration branch info in epic metadata
 
-Example:
+Examples:
   gt mq integration create gt-auth-epic
-  # Creates integration/gt-auth-epic from main`,
+  # Creates integration/gt-auth-epic from main (default)
+
+  gt mq integration create gt-auth-epic --branch "klauern/PROJ-1234/{{epic}}"
+  # Creates klauern/PROJ-1234/gt-auth-epic
+
+  gt mq integration create gt-auth-epic --ticket PROJ-1234
+  # Uses configured template with ticket variable`,
 	Args: cobra.ExactArgs(1),
 	RunE: runMqIntegrationCreate,
 }
@@ -287,6 +307,8 @@ func init() {
 	mqCmd.AddCommand(mqStatusCmd)
 
 	// Integration branch subcommands
+	mqIntegrationCreateCmd.Flags().StringVar(&mqIntegrationCreateBranch, "branch", "", "Branch name template (overrides config)")
+	mqIntegrationCreateCmd.Flags().StringVar(&mqIntegrationCreateTicket, "ticket", "", "External ticket ID for {{ticket}} variable")
 	mqIntegrationCmd.AddCommand(mqIntegrationCreateCmd)
 
 	// Integration land flags

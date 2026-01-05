@@ -281,6 +281,12 @@ type MergeQueueConfig struct {
 	// IntegrationBranches enables integration branch workflow for epics.
 	IntegrationBranches bool `json:"integration_branches"`
 
+	// IntegrationBranchTemplate is the template for integration branch names.
+	// Supports variables: {{epic}}, {{user}}, {{ticket}}
+	// Default: "integration/{{epic}}" (the current hardcoded behavior)
+	// Example: "{{user}}/{{ticket}}/{{epic}}" for "klauern/PROJ-1234/gt-auth"
+	IntegrationBranchTemplate string `json:"integration_branch_template,omitempty"`
+
 	// OnConflict specifies conflict resolution strategy: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`
 

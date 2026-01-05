@@ -434,3 +434,309 @@ func TestFilterMRsByTarget_NoMRFields(t *testing.T) {
 		t.Errorf("filterMRsByTarget() should filter out issues without MR fields, got %d", len(got))
 	}
 }
+
+// Tests for integration branch template functionality
+
+func TestExpandBranchTemplate(t *testing.T) {
+	tests := []struct {
+		name        string
+		template    string
+		epicID      string
+		ticket      string
+		gitUserName string
+		want        string
+	}{
+		{
+			name:        "default template",
+			template:    "integration/{{epic}}",
+			epicID:      "gt-auth",
+			ticket:      "",
+			gitUserName: "",
+			want:        "integration/gt-auth",
+		},
+		{
+			name:        "with user",
+			template:    "{{user}}/integration/{{epic}}",
+			epicID:      "gt-auth",
+			ticket:      "",
+			gitUserName: "klauern",
+			want:        "klauern/integration/gt-auth",
+		},
+		{
+			name:        "with ticket",
+			template:    "{{ticket}}/{{epic}}",
+			epicID:      "gt-auth",
+			ticket:      "PROJ-1234",
+			gitUserName: "",
+			want:        "PROJ-1234/gt-auth",
+		},
+		{
+			name:        "full template",
+			template:    "{{user}}/{{ticket}}/{{epic}}",
+			epicID:      "gt-auth",
+			ticket:      "PROJ-1234",
+			gitUserName: "klauern",
+			want:        "klauern/PROJ-1234/gt-auth",
+		},
+		{
+			name:        "missing variable left as-is",
+			template:    "{{user}}/{{epic}}",
+			epicID:      "gt-auth",
+			ticket:      "",
+			gitUserName: "",
+			want:        "{{user}}/gt-auth",
+		},
+		{
+			name:        "unknown variable left as-is",
+			template:    "{{unknown}}/{{epic}}",
+			epicID:      "gt-auth",
+			ticket:      "",
+			gitUserName: "",
+			want:        "{{unknown}}/gt-auth",
+		},
+		{
+			name:        "no template variables",
+			template:    "static-branch-name",
+			epicID:      "gt-auth",
+			ticket:      "",
+			gitUserName: "",
+			want:        "static-branch-name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := expandBranchTemplate(tt.template, tt.epicID, tt.ticket, tt.gitUserName)
+			if got != tt.want {
+				t.Errorf("expandBranchTemplate() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeBranchName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:    "valid simple branch",
+			input:   "integration/gt-auth",
+			want:    "integration/gt-auth",
+			wantErr: false,
+		},
+		{
+			name:    "valid with user",
+			input:   "klauern/PROJ-1234/gt-auth",
+			want:    "klauern/PROJ-1234/gt-auth",
+			wantErr: false,
+		},
+		{
+			name:    "empty branch name",
+			input:   "",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "unexpanded template variable",
+			input:   "{{user}}/gt-auth",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "contains space",
+			input:   "my branch/gt-auth",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "starts with slash",
+			input:   "/integration/gt-auth",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "ends with slash",
+			input:   "integration/gt-auth/",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "starts with dot",
+			input:   ".hidden/gt-auth",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "ends with dot",
+			input:   "integration/gt-auth.",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "ends with .lock",
+			input:   "integration/gt-auth.lock",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "contains double dot",
+			input:   "integration/../gt-auth",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "contains double slash",
+			input:   "integration//gt-auth",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "contains tilde",
+			input:   "integration/gt~auth",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "contains caret",
+			input:   "integration/gt^auth",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "contains colon",
+			input:   "integration:gt-auth",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "contains question mark",
+			input:   "integration/gt-auth?",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "contains asterisk",
+			input:   "integration/*",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "contains backslash",
+			input:   "integration\\gt-auth",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "valid with dots in middle",
+			input:   "integration/v1.2.3",
+			want:    "integration/v1.2.3",
+			wantErr: false,
+		},
+		{
+			name:    "valid with hyphens and underscores",
+			input:   "feature_branch-1/gt-auth-epic_2",
+			want:    "feature_branch-1/gt-auth-epic_2",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := sanitizeBranchName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("sanitizeBranchName() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("sanitizeBranchName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeBranchName_Length(t *testing.T) {
+	// Test branch name length limit
+	longName := "integration/"
+	for i := 0; i < 200; i++ {
+		longName += "a"
+	}
+
+	_, err := sanitizeBranchName(longName)
+	if err == nil {
+		t.Error("sanitizeBranchName() should reject branch names over 200 chars")
+	}
+}
+
+func TestGetIntegrationBranchFromEpic(t *testing.T) {
+	tests := []struct {
+		name string
+		epic *beads.Issue
+		want string
+	}{
+		{
+			name: "nil epic",
+			epic: nil,
+			want: "",
+		},
+		{
+			name: "empty description",
+			epic: &beads.Issue{
+				ID:          "gt-epic",
+				Description: "",
+			},
+			want: "",
+		},
+		{
+			name: "no integration_branch field",
+			epic: &beads.Issue{
+				ID:          "gt-epic",
+				Description: "Just a description",
+			},
+			want: "",
+		},
+		{
+			name: "integration_branch at start",
+			epic: &beads.Issue{
+				ID:          "gt-epic",
+				Description: "integration_branch: klauern/PROJ-1234/gt-epic\nSome description",
+			},
+			want: "klauern/PROJ-1234/gt-epic",
+		},
+		{
+			name: "integration_branch in middle",
+			epic: &beads.Issue{
+				ID:          "gt-epic",
+				Description: "Line 1\nintegration_branch: custom/branch/name\nLine 3",
+			},
+			want: "custom/branch/name",
+		},
+		{
+			name: "integration_branch case insensitive",
+			epic: &beads.Issue{
+				ID:          "gt-epic",
+				Description: "Integration_Branch: case-test/branch\n",
+			},
+			want: "case-test/branch",
+		},
+		{
+			name: "integration_branch with extra whitespace",
+			epic: &beads.Issue{
+				ID:          "gt-epic",
+				Description: "  integration_branch:   spacy/branch  \n",
+			},
+			want: "spacy/branch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getIntegrationBranchFromEpic(tt.epic)
+			if got != tt.want {
+				t.Errorf("getIntegrationBranchFromEpic() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
