@@ -75,9 +75,9 @@ Formula-on-Bead (--on flag):
   gt sling shiny --on gt-abc crew       # Apply formula, sling to crew
 
 Quality Levels (shorthand for polecat workflows):
-  gt sling gp-abc greenplace --quality=basic   # mol-polecat-basic (trivial fixes)
-  gt sling gp-abc greenplace --quality=shiny   # mol-polecat-shiny (standard)
-  gt sling gp-abc greenplace --quality=chrome  # mol-polecat-chrome (max rigor)
+  gt sling gp-abc greenplace --quality=basic   # No formula (trivial fixes)
+  gt sling gp-abc greenplace --quality=shiny   # shiny formula (standard)
+  gt sling gp-abc greenplace --quality=chrome  # shiny-enterprise formula (max rigor)
 
 Compare:
   gt hook <bead>      # Just attach (no action)
@@ -164,18 +164,23 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	// --quality is shorthand for formula-on-bead with polecat workflow
 	// Convert: gt sling gp-abc greenplace --quality=shiny
-	// To:      gt sling mol-polecat-shiny --on gt-abc gastown
+	// To:      gt sling shiny --on gt-abc gastown
+	// For --quality=basic, no formula is applied (just sling the bead directly)
 	if slingQuality != "" {
 		qualityFormula, err := qualityToFormula(slingQuality)
 		if err != nil {
 			return err
 		}
-		// The first arg should be the bead, and we wrap it with the formula
-		if slingOnTarget != "" {
-			return fmt.Errorf("--quality cannot be used with --on (both specify formula)")
+		// Empty formula means basic quality - skip formula application
+		if qualityFormula != "" {
+			// The first arg should be the bead, and we wrap it with the formula
+			if slingOnTarget != "" {
+				return fmt.Errorf("--quality cannot be used with --on (both specify formula)")
+			}
+			slingOnTarget = args[0]  // The bead becomes --on target
+			args[0] = qualityFormula // The formula becomes first arg
 		}
-		slingOnTarget = args[0]  // The bead becomes --on target
-		args[0] = qualityFormula // The formula becomes first arg
+		// For basic quality (empty formula), just proceed with bare bead sling
 	}
 
 	// Determine mode based on flags and argument types
@@ -1070,14 +1075,21 @@ func agentIDToBeadID(agentID string) string {
 }
 
 // qualityToFormula converts a quality level to the corresponding polecat workflow formula.
+// Quality levels map to formula files in .beads/formulas/:
+//   - basic: no formula (just sling the bead directly)
+//   - shiny: standard workflow (design → implement → review → test → submit)
+//   - chrome: rigorous workflow with security focus
+// Returns empty string for basic (caller should skip formula application).
 func qualityToFormula(quality string) (string, error) {
 	switch strings.ToLower(quality) {
 	case "basic", "b":
-		return "mol-polecat-basic", nil
+		// For basic tasks, skip the formal workflow entirely
+		// Return empty to indicate no formula should be applied
+		return "", nil
 	case "shiny", "s":
-		return "mol-polecat-shiny", nil
+		return "shiny", nil
 	case "chrome", "c":
-		return "mol-polecat-chrome", nil
+		return "shiny-enterprise", nil
 	default:
 		return "", fmt.Errorf("invalid quality level '%s' (use: basic, shiny, or chrome)", quality)
 	}
