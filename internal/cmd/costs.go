@@ -605,6 +605,16 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 
 	eventID := strings.TrimSpace(string(output))
 
+	// Auto-close session events immediately after creation.
+	// These are informational audit events that don't need to stay open.
+	// The event data is preserved in the closed bead and remains queryable.
+	closeCmd := exec.Command("bd", "close", eventID, "--reason=auto-closed session event")
+	if closeErr := closeCmd.Run(); closeErr != nil {
+		// Non-fatal: event was created, just couldn't auto-close
+		// The witness patrol can clean these up if needed
+		fmt.Fprintf(os.Stderr, "warning: could not auto-close session event %s: %v\n", eventID, closeErr)
+	}
+
 	// Output confirmation (silent if cost is zero and no work item)
 	if cost > 0 || recordWorkItem != "" {
 		fmt.Printf("%s Recorded $%.2f for %s (event: %s)", style.Success.Render("✓"), cost, session, eventID)
