@@ -304,3 +304,81 @@ func TestEnsureSessionFresh_IdempotentOnZombie(t *testing.T) {
 		t.Error("expected session to exist after multiple EnsureSessionFresh calls")
 	}
 }
+
+func TestIsClaudeRunning_ShellSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-claude-shell-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create a session (will run default shell)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// A shell session should NOT be detected as Claude running
+	if tm.IsClaudeRunning(sessionName) {
+		cmd, _ := tm.GetPaneCommand(sessionName)
+		t.Errorf("IsClaudeRunning returned true for shell session (cmd=%q)", cmd)
+	}
+}
+
+func TestIsClaudeRunning_NonexistentSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Should return false for nonexistent session
+	if tm.IsClaudeRunning("nonexistent-session-xyz-abc") {
+		t.Error("IsClaudeRunning returned true for nonexistent session")
+	}
+}
+
+func TestGetPaneCommand_ShellSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-pane-cmd-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	cmd, err := tm.GetPaneCommand(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneCommand: %v", err)
+	}
+
+	// Should be a shell (bash, zsh, etc.) not claude or node
+	validShells := []string{"bash", "zsh", "sh", "fish", "tcsh", "csh"}
+	isShell := false
+	for _, shell := range validShells {
+		if cmd == shell {
+			isShell = true
+			break
+		}
+	}
+	if !isShell {
+		t.Errorf("GetPaneCommand returned %q, expected a shell", cmd)
+	}
+
+	// Specifically verify it's not detected as claude
+	if cmd == "claude" || cmd == "node" {
+		t.Errorf("GetPaneCommand returned %q for new shell session, should be shell name", cmd)
+	}
+}
