@@ -25,7 +25,7 @@ MR: <mr-id>          # if exit=MERGED
 Branch: <branch>
 ```
 
-**Trigger**: `gt polecat done` command generates this automatically.
+**Trigger**: `gt done` command generates this automatically.
 
 **Handler**: Witness creates a cleanup wisp for the polecat.
 

@@ -1,0 +1,635 @@
+description = """
+Mayor's daemon patrol loop.
+
+The Deacon is the Mayor's background process that runs continuously, handling callbacks, monitoring rig health, and performing cleanup. Each patrol cycle runs these steps in sequence, then loops or exits.
+
+## Idle Town Principle
+
+**The Deacon should be silent/invisible when the town is healthy and idle.**
+
+- Skip HEALTH_CHECK nudges when no active work exists
+- Sleep 60+ seconds between patrol cycles (longer when idle)
+- Let the feed subscription wake agents on actual events
+- The daemon (10-minute heartbeat) is the safety net for dead sessions
+
+This prevents flooding idle agents with health checks every few seconds.
+
+## Second-Order Monitoring
+
+Witnesses send WITNESS_PING messages to verify the Deacon is alive. This
+prevents the "who watches the watchers" problem - if the Deacon dies,
+Witnesses detect it and escalate to the Mayor.
+
+The Deacon's agent bead last_activity timestamp is updated during each patrol
+cycle. Witnesses check this timestamp to verify health."""
+formula = "mol-deacon-patrol"
+version = 4
+
+[[steps]]
+id = "inbox-check"
+title = "Handle callbacks from agents"
+description = """
+Handle callbacks from agents.
+
+Check the Mayor's inbox for messages from:
+- Witnesses reporting polecat status
+- Refineries reporting merge results
+- Polecats requesting help or escalation
+- External triggers (webhooks, timers)
+
+```bash
+gt mail inbox
+# For each message:
+gt mail read <id>
+# Handle based on message type
+```
+
+**WITNESS_PING**:
+Witnesses periodically ping to verify Deacon is alive. Simply acknowledge
+and archive - the fact that you're processing mail proves you're running.
+Your agent bead last_activity is updated automatically during patrol.
+```bash
+gt mail archive <message-id>
+```
+
+**HELP / Escalation**:
+Assess and handle or forward to Mayor.
+Archive after handling:
+```bash
+gt mail archive <message-id>
+```
+
+**LIFECYCLE messages**:
+Polecats reporting completion, refineries reporting merge results.
+Archive after processing:
+```bash
+gt mail archive <message-id>
+```
+
+**DOG_DONE messages**:
+Dogs report completion after infrastructure tasks (orphan-scan, session-gc, etc.).
+Subject format: `DOG_DONE <hostname>`
+Body contains: task name, counts, status.
+```bash
+# Parse the report, log metrics if needed
+gt mail read <id>
+# Archive after noting completion
+gt mail archive <message-id>
+```
+Dogs return to idle automatically. The report is informational - no action needed
+unless the dog reports errors that require escalation.
+
+Callbacks may spawn new polecats, update issue state, or trigger other actions.
+
+**Hygiene principle**: Archive messages after they're fully processed.
+Keep inbox near-empty - only unprocessed items should remain."""
+
+[[steps]]
+id = "trigger-pending-spawns"
+title = "Nudge newly spawned polecats"
+needs = ["inbox-check"]
+description = """
+Nudge newly spawned polecats that are ready for input.
+
+When polecats are spawned, their Claude session takes 10-20 seconds to initialize. The spawn command returns immediately without waiting. This step finds spawned polecats that are now ready and sends them a trigger to start working.
+
+**ZFC-Compliant Observation** (AI observes AI):
+
+```bash
+# View pending spawns with captured terminal output
+gt deacon pending
+```
+
+For each pending session, analyze the captured output:
+- Look for Claude's prompt indicator "> " at the start of a line
+- If prompt is visible, Claude is ready for input
+- Make the judgment call yourself - you're the AI observer
+
+For each ready polecat:
+```bash
+# 1. Trigger the polecat
+gt nudge <session> "Begin."
+
+# 2. Clear from pending list
+gt deacon pending <session>
+```
+
+This triggers the UserPromptSubmit hook, which injects mail so the polecat sees its assignment.
+
+**Bootstrap mode** (daemon-only, no AI available):
+The daemon uses `gt deacon trigger-pending` with regex detection. This ZFC violation is acceptable during cold startup when no AI agent is running yet."""
+
+[[steps]]
+id = "gate-evaluation"
+title = "Evaluate pending async gates"
+needs = ["inbox-check"]
+description = """
+Evaluate pending async gates.
+
+Gates are async coordination primitives that block until conditions are met.
+The Deacon is responsible for monitoring gates and closing them when ready.
+
+**Timer gates** (await_type: timer):
+Check if elapsed time since creation exceeds the timeout duration.
+
+```bash
+# List all open gates
+bd gate list --json
+
+# For each timer gate, check if elapsed:
+# - CreatedAt + Timeout < Now → gate is ready to close
+# - Close with: bd gate close <id> --reason "Timer elapsed"
+```
+
+**GitHub gates** (await_type: gh:run, gh:pr) - handled in separate step.
+
+**Human/Mail gates** - require external input, skip here.
+
+After closing a gate, the Waiters field contains mail addresses to notify.
+Send a brief notification to each waiter that the gate has cleared."""
+
+[[steps]]
+id = "check-convoy-completion"
+title = "Check convoy completion"
+needs = ["inbox-check"]
+description = """
+Check convoy completion status.
+
+Convoys are coordination beads that track multiple issues across rigs. When all tracked issues close, the convoy auto-closes.
+
+**Step 1: Find open convoys**
+```bash
+bd list --type=convoy --status=open
+```
+
+**Step 2: For each open convoy, check tracked issues**
+```bash
+bd show <convoy-id>
+# Look for 'tracks' or 'dependencies' field listing tracked issues
+```
+
+**Step 3: If all tracked issues are closed, close the convoy**
+```bash
+# Check each tracked issue
+for issue in tracked_issues:
+    bd show <issue-id>
+    # If status is open/in_progress, convoy stays open
+    # If all are closed (completed, wontfix, etc.), convoy is complete
+
+# Close convoy when all tracked issues are done
+bd close <convoy-id> --reason "All tracked issues completed"
+```
+
+**Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues). Use full IDs when checking."""
+
+[[steps]]
+id = "resolve-external-deps"
+title = "Resolve external dependencies"
+needs = ["check-convoy-completion"]
+description = """
+Resolve external dependencies across rigs.
+
+When an issue in one rig closes, any dependencies in other rigs should be notified. This enables cross-rig coordination without tight coupling.
+
+**Step 1: Check recent closures from feed**
+```bash
+gt feed --since 10m --plain | grep "✓"
+# Look for recently closed issues
+```
+
+**Step 2: For each closed issue, check cross-rig dependents**
+```bash
+bd show <closed-issue>
+# Look at 'blocks' field - these are issues that were waiting on this one
+# If any blocked issue is in a different rig/prefix, it may now be unblocked
+```
+
+**Step 3: Update blocked status**
+For blocked issues in other rigs, the closure should automatically unblock them (beads handles this). But verify:
+```bash
+bd blocked
+# Should no longer show the previously-blocked issue if dependency is met
+```
+
+**Cross-rig scenarios:**
+- bd-xxx closes → gt-yyy that depended on it is unblocked
+- External issue closes → internal convoy step can proceed
+- Rig A issue closes → Rig B issue waiting on it proceeds
+
+No manual intervention needed if dependencies are properly tracked - this step just validates the propagation occurred."""
+
+[[steps]]
+id = "fire-notifications"
+title = "Fire notifications"
+needs = ["resolve-external-deps"]
+description = """
+Fire notifications for convoy and cross-rig events.
+
+After convoy completion or cross-rig dependency resolution, notify relevant parties.
+
+**Convoy completion notifications:**
+When a convoy closes (all tracked issues done), notify the Overseer:
+```bash
+# Convoy gt-convoy-xxx just completed
+gt mail send mayor/ -s "Convoy complete: <convoy-title>" \\
+  -m "Convoy <id> has completed. All tracked issues closed.
+      Duration: <start to end>
+      Issues: <count>
+
+      Summary: <brief description of what was accomplished>"
+```
+
+**Cross-rig resolution notifications:**
+When a cross-rig dependency resolves, notify the affected rig:
+```bash
+# Issue bd-xxx closed, unblocking gt-yyy
+gt mail send gastown/witness -s "Dependency resolved: <bd-xxx>" \\
+  -m "External dependency bd-xxx has closed.
+      Unblocked: gt-yyy (<title>)
+      This issue may now proceed."
+```
+
+**Notification targets:**
+- Convoy complete → mayor/ (for strategic visibility)
+- Cross-rig dep resolved → <rig>/witness (for operational awareness)
+
+Keep notifications brief and actionable. The recipient can run bd show for details."""
+
+[[steps]]
+id = "health-scan"
+title = "Check Witness and Refinery health"
+needs = ["trigger-pending-spawns", "gate-evaluation", "fire-notifications"]
+description = """
+Check Witness and Refinery health for each rig.
+
+**IMPORTANT: Idle Town Protocol**
+Before sending health check nudges, check if the town is idle:
+```bash
+# Check for active work
+bd list --status=in_progress --limit=5
+```
+
+If NO active work (empty result or only patrol molecules):
+- **Skip HEALTH_CHECK nudges** - don't disturb idle agents
+- Just verify sessions exist via status commands
+- The town should be silent when healthy and idle
+
+If ACTIVE work exists:
+- Proceed with health check nudges below
+
+**ZFC Principle**: You (Claude) make the judgment call about what is "stuck" or "unresponsive" - there are no hardcoded thresholds in Go. Read the signals, consider context, and decide.
+
+For each rig, run:
+```bash
+gt witness status <rig>
+gt refinery status <rig>
+
+# ONLY if active work exists - health ping (clears backoff as side effect)
+gt nudge <rig>/witness 'HEALTH_CHECK from deacon'
+gt nudge <rig>/refinery 'HEALTH_CHECK from deacon'
+```
+
+**Health Ping Benefit**: The nudge commands serve dual purposes:
+1. **Liveness verification** - Agent responds to prove it's alive
+2. **Backoff reset** - Any nudge resets agent's backoff to base interval
+
+This ensures patrol agents remain responsive during active work periods.
+
+**Signals to assess:**
+
+| Component | Healthy Signals | Concerning Signals |
+|-----------|-----------------|-------------------|
+| Witness | State: running, recent activity | State: not running, no heartbeat |
+| Refinery | State: running, queue processing | Queue stuck, merge failures |
+
+**Tracking unresponsive cycles:**
+
+Maintain in your patrol state (persisted across cycles):
+```
+health_state:
+  <rig>:
+    witness:
+      unresponsive_cycles: 0
+      last_seen_healthy: <timestamp>
+    refinery:
+      unresponsive_cycles: 0
+      last_seen_healthy: <timestamp>
+```
+
+**Decision matrix** (you decide the thresholds based on context):
+
+| Cycles Unresponsive | Suggested Action |
+|---------------------|------------------|
+| 1-2 | Note it, check again next cycle |
+| 3-4 | Attempt restart: gt witness restart <rig> |
+| 5+ | Escalate to Mayor with context |
+
+**Restart commands:**
+```bash
+gt witness restart <rig>
+gt refinery restart <rig>
+```
+
+**Escalation:**
+```bash
+gt mail send mayor/ -s "Health: <rig> <component> unresponsive" \\
+  -m "Component has been unresponsive for N cycles. Restart attempts failed.
+      Last healthy: <timestamp>
+      Error signals: <details>"
+```
+
+Reset unresponsive_cycles to 0 when component responds normally."""
+
+[[steps]]
+id = "zombie-scan"
+title = "Backup check for zombie polecats"
+needs = ["health-scan"]
+description = """
+Defense-in-depth check for zombie polecats that Witness should have cleaned.
+
+**Why this exists:**
+The Witness is responsible for nuking polecats after they complete work (via POLECAT_DONE).
+This step provides backup detection in case the Witness fails to clean up.
+
+**Zombie criteria:**
+- State: idle or done (no active work assigned)
+- Session: not running (tmux session dead)
+- No hooked work (nothing pending for this polecat)
+- Last activity: older than 10 minutes
+
+**Run the zombie scan:**
+```bash
+gt deacon zombie-scan --dry-run
+```
+
+**If zombies detected:**
+1. Review the output to confirm they are truly abandoned
+2. Run without --dry-run to nuke them:
+   ```bash
+   gt deacon zombie-scan
+   ```
+3. This will:
+   - Nuke each zombie polecat
+   - Notify the Mayor about Witness failure
+   - Log the cleanup action
+
+**If no zombies:**
+No action needed - Witness is doing its job.
+
+**Note:** This is a backup mechanism. If you frequently find zombies,
+investigate why the Witness isn't cleaning up properly."""
+
+[[steps]]
+id = "plugin-run"
+title = "Execute registered plugins"
+needs = ["zombie-scan"]
+description = """
+Execute registered plugins.
+
+Scan ~/gt/plugins/ for plugin directories. Each plugin has a plugin.md with TOML frontmatter defining its gate (when to run) and instructions (what to do).
+
+See docs/deacon-plugins.md for full documentation.
+
+Gate types:
+- cooldown: Time since last run (e.g., 24h)
+- cron: Schedule-based (e.g., "0 9 * * *")
+- condition: Metric threshold (e.g., wisp count > 50)
+- event: Trigger-based (e.g., startup, heartbeat)
+
+For each plugin:
+1. Read plugin.md frontmatter to check gate
+2. Compare against state.json (last run, etc.)
+3. If gate is open, execute the plugin
+
+Plugins marked parallel: true can run concurrently using Task tool subagents. Sequential plugins run one at a time in directory order.
+
+Skip this step if ~/gt/plugins/ does not exist or is empty."""
+
+[[steps]]
+id = "dog-pool-maintenance"
+title = "Maintain dog pool"
+needs = ["health-scan"]
+description = """
+Ensure dog pool has available workers for dispatch.
+
+**Step 1: Check dog pool status**
+```bash
+gt dog status
+# Shows idle/working counts
+```
+
+**Step 2: Ensure minimum idle dogs**
+If idle count is 0 and working count is at capacity, consider spawning:
+```bash
+# If no idle dogs available
+gt dog add <name>
+# Names: alpha, bravo, charlie, delta, etc.
+```
+
+**Step 3: Retire stale dogs (optional)**
+Dogs that have been idle for >24 hours can be removed to save resources:
+```bash
+gt dog status <name>
+# Check last_active timestamp
+# If idle > 24h: gt dog remove <name>
+```
+
+**Pool sizing guidelines:**
+- Minimum: 1 idle dog always available
+- Maximum: 4 dogs total (balance resources vs throughput)
+- Spawn on demand when pool is empty
+
+**Exit criteria:** Pool has at least 1 idle dog."""
+
+[[steps]]
+id = "orphan-check"
+title = "Detect abandoned work"
+needs = ["dog-pool-maintenance"]
+description = """
+**DETECT ONLY** - Check for orphaned state and dispatch to dog if found.
+
+**Step 1: Quick orphan scan**
+```bash
+# Check for in_progress issues with dead assignees
+bd list --status=in_progress --json | head -20
+```
+
+For each in_progress issue, check if assignee session exists:
+```bash
+tmux has-session -t <session> 2>/dev/null && echo "alive" || echo "orphan"
+```
+
+**Step 2: If orphans detected, dispatch to dog**
+```bash
+# Sling orphan-scan formula to an idle dog
+gt sling mol-orphan-scan deacon/dogs --var scope=town
+```
+
+**Important:** Do NOT fix orphans inline. Dogs handle recovery.
+The Deacon's job is detection and dispatch, not execution.
+
+**Step 3: If no orphans detected**
+Skip dispatch - nothing to do.
+
+**Exit criteria:** Orphan scan dispatched to dog (if needed)."""
+
+[[steps]]
+id = "session-gc"
+title = "Detect cleanup needs"
+needs = ["orphan-check"]
+description = """
+**DETECT ONLY** - Check if cleanup is needed and dispatch to dog.
+
+**Step 1: Preview cleanup needs**
+```bash
+gt doctor -v
+# Check output for issues that need cleaning
+```
+
+**Step 2: If cleanup needed, dispatch to dog**
+```bash
+# Sling session-gc formula to an idle dog
+gt sling mol-session-gc deacon/dogs --var mode=conservative
+```
+
+**Important:** Do NOT run `gt doctor --fix` inline. Dogs handle cleanup.
+The Deacon stays lightweight - detection only.
+
+**Step 3: If nothing to clean**
+Skip dispatch - system is healthy.
+
+**Cleanup types (for reference):**
+- orphan-sessions: Dead tmux sessions
+- orphan-processes: Orphaned Claude processes
+- wisp-gc: Old wisps past retention
+
+**Exit criteria:** Session GC dispatched to dog (if needed)."""
+
+[[steps]]
+id = "log-maintenance"
+title = "Rotate logs and prune state"
+needs = ["session-gc"]
+description = """
+Maintain daemon logs and state files.
+
+**Step 1: Check daemon.log size**
+```bash
+# Get log file size
+ls -la ~/.beads/daemon*.log 2>/dev/null || ls -la ~/gt/.beads/daemon*.log 2>/dev/null
+```
+
+If daemon.log exceeds 10MB:
+```bash
+# Rotate with date suffix and gzip
+LOGFILE="$HOME/gt/.beads/daemon.log"
+if [ -f "$LOGFILE" ] && [ $(stat -f%z "$LOGFILE" 2>/dev/null || stat -c%s "$LOGFILE") -gt 10485760 ]; then
+    DATE=$(date +%Y-%m-%dT%H-%M-%S)
+    mv "$LOGFILE" "${LOGFILE%.log}-${DATE}.log"
+    gzip "${LOGFILE%.log}-${DATE}.log"
+fi
+```
+
+**Step 2: Archive old daemon logs**
+
+Clean up daemon logs older than 7 days:
+```bash
+find ~/gt/.beads/ -name "daemon-*.log.gz" -mtime +7 -delete
+```
+
+**Step 3: Prune state.json of dead sessions**
+
+The state.json tracks active sessions. Prune entries for sessions that no longer exist:
+```bash
+# Check for stale session entries
+gt daemon status --json 2>/dev/null
+```
+
+If state.json references sessions not in tmux:
+- Remove the stale entries
+- The daemon's internal cleanup should handle this, but verify
+
+**Note**: Log rotation prevents disk bloat from long-running daemons.
+State pruning keeps runtime state accurate."""
+
+[[steps]]
+id = "patrol-cleanup"
+title = "End-of-cycle inbox hygiene"
+needs = ["log-maintenance"]
+description = """
+Verify inbox hygiene before ending patrol cycle.
+
+**Step 1: Check inbox state**
+```bash
+gt mail inbox
+```
+
+Inbox should be EMPTY or contain only just-arrived unprocessed messages.
+
+**Step 2: Archive any remaining processed messages**
+
+All message types should have been archived during inbox-check processing:
+- WITNESS_PING → archived after acknowledging
+- HELP/Escalation → archived after handling
+- LIFECYCLE → archived after processing
+
+If any were missed:
+```bash
+# For each stale message found:
+gt mail archive <message-id>
+```
+
+**Goal**: Inbox should have ≤2 active messages at end of cycle.
+Deacon mail should flow through quickly - no accumulation."""
+
+[[steps]]
+id = "context-check"
+title = "Check own context limit"
+needs = ["patrol-cleanup"]
+description = """
+Check own context limit.
+
+The Deacon runs in a Claude session with finite context. Check if approaching the limit:
+
+```bash
+gt context --usage
+```
+
+If context is high (>80%), prepare for handoff:
+- Summarize current state
+- Note any pending work
+- Write handoff to molecule state
+
+This enables the Deacon to burn and respawn cleanly."""
+
+[[steps]]
+id = "loop-or-exit"
+title = "Burn and respawn or loop"
+needs = ["context-check"]
+description = """
+Burn and let daemon respawn, or exit if context high.
+
+Decision point at end of patrol cycle:
+
+If context is LOW:
+- **Sleep 60 seconds minimum** before next patrol cycle
+- If town is idle (no in_progress work), sleep longer (2-5 minutes)
+- Return to inbox-check step
+
+**Why longer sleep?**
+- Idle agents should not be disturbed
+- Health checks every few seconds flood inboxes and waste context
+- The daemon (10-minute heartbeat) is the safety net for dead sessions
+- Active work triggers feed events, which wake agents naturally
+
+If context is HIGH:
+- Write state to persistent storage
+- Exit cleanly
+- Let the daemon orchestrator respawn a fresh Deacon
+
+The daemon ensures Deacon is always running:
+```bash
+# Daemon respawns on exit
+gt daemon status
+```
+
+This enables infinite patrol duration via context-aware respawning."""

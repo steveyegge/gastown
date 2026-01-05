@@ -57,13 +57,13 @@ Check the current system state:
 
 ```bash
 # Is Deacon session alive?
-tmux has-session -t gt-deacon 2>/dev/null && echo "alive" || echo "dead"
+tmux has-session -t {{ .DeaconSession }} 2>/dev/null && echo "alive" || echo "dead"
 
 # If alive, what's the pane showing?
 gt peek deacon --lines 20
 
 # Agent bead state
-bd show gt-deacon 2>/dev/null
+bd show hq-deacon 2>/dev/null
 
 # Recent activity
 gt feed --since 10m --plain | head -20

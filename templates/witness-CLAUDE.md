@@ -126,8 +126,20 @@ Before killing ANY polecat session, verify:
    worktree parent repo (mayor/rig or .repo.git) and handles cleanup properly.
    The nuke will automatically block if cleanup_status indicates unpushed work.
 
-**NOTE:** Do NOT notify Mayor about routine polecat processing. The Witness handles
-all routine lifecycle autonomously. Only escalate genuine problems to Mayor.
+**CRITICAL: NO ROUTINE REPORTS TO MAYOR**
+
+Every mail costs money (tokens). Do NOT send:
+- "Patrol complete" summaries
+- "Polecat X processed" notifications
+- Status updates
+- Queue cleared notifications
+
+ONLY mail Mayor for:
+- RECOVERY_NEEDED (unpushed work at risk)
+- ESCALATION (stuck worker after 3 nudge attempts)
+- CRITICAL (systemic failures)
+
+If in doubt, DON'T SEND IT. The Mayor doesn't need to know you're doing your job.
 
 ---
 

@@ -148,9 +148,12 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	}
 
 	// CRITICAL: Set beads environment for worktree polecats (non-fatal: session works without)
-	// Polecats share the rig's beads directory (at rig root, not mayor/rig)
-	// BEADS_NO_DAEMON=1 prevents daemon from committing to wrong branch
-	beadsDir := filepath.Join(m.rig.Path, ".beads")
+	// Polecats need access to TOWN-level beads (parent of rig) for hooks and convoys.
+	// Town beads use hq- prefix and store hooks, mail, and cross-rig coordination.
+	// BEADS_NO_DAEMON=1 prevents daemon from committing to wrong branch.
+	// Using town-level beads ensures gt prime and bd commands can find hooked work.
+	townRoot := filepath.Dir(m.rig.Path) // Town root is parent of rig directory
+	beadsDir := filepath.Join(townRoot, ".beads")
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_DIR", beadsDir)
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1")
 	_ = m.tmux.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/%s", m.rig.Name, polecat))
@@ -190,12 +193,18 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 		// Non-fatal warning - Claude might still start
 	}
 
+	// Accept bypass permissions warning dialog if it appears.
+	// When Claude starts with --dangerously-skip-permissions, it shows a warning that
+	// requires pressing Down to select "Yes, I accept" and Enter to confirm.
+	// This is needed for automated polecat startup.
+	_ = m.tmux.AcceptBypassPermissionsWarning(sessionID)
+
 	// Wait for Claude to be fully ready at the prompt (not just started)
 	// PRAGMATIC APPROACH: Use fixed delay rather than detection.
 	// WaitForClaudeReady has false positives (detects > in various contexts).
 	// Claude startup takes ~5-8 seconds on typical machines.
-	// 10 second delay is conservative but reliable.
-	time.Sleep(10 * time.Second)
+	// Reduced from 10s to 8s since AcceptBypassPermissionsWarning already adds ~1.2s.
+	time.Sleep(8 * time.Second)
 
 	// Inject startup nudge for predecessor discovery via /resume
 	// This becomes the session title in Claude Code's session picker
@@ -374,6 +383,21 @@ func (m *Manager) Attach(polecat string) error {
 func (m *Manager) Capture(polecat string, lines int) (string, error) {
 	sessionID := m.SessionName(polecat)
 
+	running, err := m.tmux.HasSession(sessionID)
+	if err != nil {
+		return "", fmt.Errorf("checking session: %w", err)
+	}
+	if !running {
+		return "", ErrSessionNotFound
+	}
+
+	return m.tmux.CapturePane(sessionID, lines)
+}
+
+// CaptureSession returns the recent output from a session by raw session ID.
+// Use this for crew workers or other non-polecat sessions where the session
+// name doesn't follow the standard gt-{rig}-{polecat} pattern.
+func (m *Manager) CaptureSession(sessionID string, lines int) (string, error) {
 	running, err := m.tmux.HasSession(sessionID)
 	if err != nil {
 		return "", fmt.Errorf("checking session: %w", err)

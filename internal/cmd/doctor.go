@@ -30,10 +30,10 @@ Workspace checks:
   - rigs-registry-exists     Check mayor/rigs.json exists (fixable)
   - rigs-registry-valid      Check registered rigs exist (fixable)
   - mayor-exists             Check mayor/ directory structure
-  - mayor-state-valid        Check mayor/state.json is valid (fixable)
 
 Infrastructure checks:
   - daemon                   Check if daemon is running (fixable)
+  - repo-fingerprint         Check database has valid repo fingerprint (fixable)
   - boot-health              Check Boot watchdog health (vet mode)
 
 Cleanup checks (fixable):
@@ -56,6 +56,9 @@ Rig checks (with --rig flag):
 
 Routing checks (fixable):
   - routes-config            Check beads routing configuration
+
+Session hook checks:
+  - session-hooks            Check settings.json use session-start.sh
 
 Patrol checks:
   - patrol-molecules-exist   Verify patrol molecules exist
@@ -99,8 +102,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Register built-in checks
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewDaemonCheck())
+	d.Register(doctor.NewRepoFingerprintCheck())
 	d.Register(doctor.NewBootHealthCheck())
 	d.Register(doctor.NewBeadsDatabaseCheck())
+	d.Register(doctor.NewBdDaemonCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
 	d.Register(doctor.NewRoutesCheck())
 	d.Register(doctor.NewOrphanSessionCheck())
@@ -125,11 +130,13 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Config architecture checks
 	d.Register(doctor.NewSettingsCheck())
+	d.Register(doctor.NewSessionHookCheck())
 	d.Register(doctor.NewRuntimeGitignoreCheck())
 	d.Register(doctor.NewLegacyGastownCheck())
 
 	// Crew workspace checks
 	d.Register(doctor.NewCrewStateCheck())
+	d.Register(doctor.NewCommandsCheck())
 
 	// Lifecycle hygiene checks
 	d.Register(doctor.NewLifecycleHygieneCheck())

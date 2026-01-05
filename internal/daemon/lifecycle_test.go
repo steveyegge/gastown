@@ -3,6 +3,8 @@ package daemon
 import (
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -11,6 +13,33 @@ func testDaemon() *Daemon {
 	return &Daemon{
 		config: &Config{TownRoot: "/tmp/test"},
 		logger: log.New(io.Discard, "", 0), // silent logger for tests
+	}
+}
+
+// testDaemonWithTown creates a Daemon with a proper town setup for testing.
+// Returns the daemon and a cleanup function.
+func testDaemonWithTown(t *testing.T, townName string) (*Daemon, func()) {
+	t.Helper()
+	townRoot := t.TempDir()
+
+	// Create mayor directory and town.json
+	mayorDir := filepath.Join(townRoot, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("failed to create mayor dir: %v", err)
+	}
+	townJSON := filepath.Join(mayorDir, "town.json")
+	content := `{"name": "` + townName + `"}`
+	if err := os.WriteFile(townJSON, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write town.json: %v", err)
+	}
+
+	d := &Daemon{
+		config: &Config{TownRoot: townRoot},
+		logger: log.New(io.Discard, "", 0),
+	}
+
+	return d, func() {
+		// Cleanup handled by t.TempDir()
 	}
 }
 
@@ -152,11 +181,13 @@ func TestParseLifecycleRequest_AlwaysUsesFromField(t *testing.T) {
 }
 
 func TestIdentityToSession_Mayor(t *testing.T) {
-	d := testDaemon()
+	d, cleanup := testDaemonWithTown(t, "ai")
+	defer cleanup()
 
+	// Mayor session name is now fixed (one per machine, uses hq- prefix)
 	result := d.identityToSession("mayor")
-	if result != "gt-mayor" {
-		t.Errorf("identityToSession('mayor') = %q, expected 'gt-mayor'", result)
+	if result != "hq-mayor" {
+		t.Errorf("identityToSession('mayor') = %q, expected 'hq-mayor'", result)
 	}
 }
 

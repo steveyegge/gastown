@@ -12,6 +12,8 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -28,7 +30,15 @@ type HandlerResult struct {
 
 // HandlePolecatDone processes a POLECAT_DONE message from a polecat.
 // For ESCALATED/DEFERRED exits (no pending MR), auto-nukes if clean.
-// For exits with pending MR, creates a cleanup wisp to wait for MERGED.
+// For PHASE_COMPLETE exits, recycles the polecat (session ends, worktree kept).
+// For COMPLETED exits with MR and clean state, auto-nukes immediately (ephemeral model).
+// For exits with pending MR but dirty state, creates cleanup wisp for manual intervention.
+//
+// Ephemeral Polecat Model:
+// Polecats are truly ephemeral - done at MR submission, recyclable immediately.
+// Once the branch is pushed (cleanup_status=clean), the polecat can be nuked.
+// The MR lifecycle continues independently in the Refinery.
+// If conflicts arise, Refinery creates a NEW conflict-resolution task for a NEW polecat.
 func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResult {
 	result := &HandlerResult{
 		MessageID:    msg.ID,
@@ -42,27 +52,44 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 		return result
 	}
 
+	// Handle PHASE_COMPLETE: recycle polecat (session ends but worktree stays)
+	// The polecat is registered as a waiter on the gate and will be re-dispatched
+	// when the gate closes via gt gate wake.
+	if payload.Exit == "PHASE_COMPLETE" {
+		result.Handled = true
+		result.Action = fmt.Sprintf("phase-complete for %s (gate=%s) - session recycled, awaiting gate", payload.PolecatName, payload.Gate)
+		// Note: The polecat has already registered itself as a gate waiter via bd
+		// The gate wake mechanism (gt gate wake) will send mail when gate closes
+		// A new polecat will be dispatched to continue the molecule from the next step
+		return result
+	}
+
 	// Check if this polecat has a pending MR
 	// ESCALATED/DEFERRED exits typically have no MR pending
 	hasPendingMR := payload.MRID != "" || payload.Exit == "COMPLETED"
 
-	if !hasPendingMR {
-		// No MR pending - can auto-nuke immediately if clean
-		nukeResult := AutoNukeIfClean(workDir, rigName, payload.PolecatName)
-		if nukeResult.Nuked {
-			result.Handled = true
+	// Ephemeral model: try to auto-nuke immediately regardless of MR status
+	// If cleanup_status is clean, the branch is pushed and polecat is recyclable.
+	// The MR will be processed independently by the Refinery.
+	nukeResult := AutoNukeIfClean(workDir, rigName, payload.PolecatName)
+	if nukeResult.Nuked {
+		result.Handled = true
+		if hasPendingMR {
+			// Ephemeral model: polecat nuked, MR continues in Refinery
+			result.Action = fmt.Sprintf("auto-nuked %s (ephemeral: exit=%s, MR=%s): %s", payload.PolecatName, payload.Exit, payload.MRID, nukeResult.Reason)
+		} else {
 			result.Action = fmt.Sprintf("auto-nuked %s (exit=%s, no MR): %s", payload.PolecatName, payload.Exit, nukeResult.Reason)
-			return result
 		}
-		if nukeResult.Error != nil {
-			// Nuke failed - fall through to create wisp for manual cleanup
-			result.Error = nukeResult.Error
-		}
-		// Couldn't auto-nuke (dirty state or verification failed) - create wisp for manual intervention
+		return result
+	}
+	if nukeResult.Error != nil {
+		// Nuke failed - fall through to create wisp for manual cleanup
+		result.Error = nukeResult.Error
 	}
 
-	// Create a cleanup wisp for this polecat
-	// Either waiting for MR to be merged, or needs manual cleanup
+	// Couldn't auto-nuke (dirty state or verification failed) - create wisp for manual intervention
+	// Note: Even with pending MR, if we can't auto-nuke it means something is wrong
+	// (uncommitted changes, unpushed commits, etc.) that needs attention.
 	wispID, err := createCleanupWisp(workDir, payload.PolecatName, payload.IssueID, payload.Branch)
 	if err != nil {
 		result.Error = fmt.Errorf("creating cleanup wisp: %w", err)
@@ -72,9 +99,9 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 	result.Handled = true
 	result.WispCreated = wispID
 	if hasPendingMR {
-		result.Action = fmt.Sprintf("created cleanup wisp %s for %s (waiting for MR %s)", wispID, payload.PolecatName, payload.MRID)
+		result.Action = fmt.Sprintf("created cleanup wisp %s for %s (MR=%s, needs intervention: %s)", wispID, payload.PolecatName, payload.MRID, nukeResult.Reason)
 	} else {
-		result.Action = fmt.Sprintf("created cleanup wisp %s for %s (needs manual cleanup: dirty state)", wispID, payload.PolecatName)
+		result.Action = fmt.Sprintf("created cleanup wisp %s for %s (needs manual cleanup: %s)", wispID, payload.PolecatName, nukeResult.Reason)
 	}
 
 	return result
@@ -310,7 +337,7 @@ func createCleanupWisp(workDir, polecatName, issueID, branch string) (string, er
 
 	labels := strings.Join(CleanupWispLabels(polecatName, "pending"), ",")
 
-	cmd := exec.Command("bd", "create",
+	cmd := exec.Command("bd", "create", //nolint:gosec // G204: args are constructed internally
 		"--wisp",
 		"--title", title,
 		"--description", description,
@@ -355,7 +382,7 @@ func createSwarmWisp(workDir string, payload *SwarmStartPayload) (string, error)
 
 	labels := strings.Join(SwarmWispLabels(payload.SwarmID, payload.Total, 0, payload.StartedAt), ",")
 
-	cmd := exec.Command("bd", "create",
+	cmd := exec.Command("bd", "create", //nolint:gosec // G204: args are constructed internally
 		"--wisp",
 		"--title", title,
 		"--description", description,
@@ -385,7 +412,7 @@ func createSwarmWisp(workDir string, payload *SwarmStartPayload) (string, error)
 
 // findCleanupWisp finds an existing cleanup wisp for a polecat.
 func findCleanupWisp(workDir, polecatName string) (string, error) {
-	cmd := exec.Command("bd", "list",
+	cmd := exec.Command("bd", "list", //nolint:gosec // G204: bd is a trusted internal tool
 		"--wisp",
 		"--labels", fmt.Sprintf("polecat:%s,state:merge-requested", polecatName),
 		"--status", "open",
@@ -450,7 +477,7 @@ func getCleanupStatus(workDir, rigName, polecatName string) string {
 	prefix := beads.GetPrefixForRig(townRoot, rigName)
 	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
 
-	cmd := exec.Command("bd", "show", agentBeadID, "--json")
+	cmd := exec.Command("bd", "show", agentBeadID, "--json") //nolint:gosec // G204: agentBeadID is validated internally
 	cmd.Dir = workDir
 
 	var stdout, stderr bytes.Buffer
@@ -599,7 +626,7 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 	// Update with new state
 	newLabels := strings.Join(CleanupWispLabels(polecatName, newState), ",")
 
-	updateCmd := exec.Command("bd", "update", wispID, "--labels", newLabels)
+	updateCmd := exec.Command("bd", "update", wispID, "--labels", newLabels) //nolint:gosec // G204: args are constructed internally
 	updateCmd.Dir = workDir
 
 	var stderr bytes.Buffer
@@ -620,9 +647,31 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 // This kills the tmux session, removes the worktree, and cleans up beads.
 // Should only be called after all safety checks pass.
 func NukePolecat(workDir, rigName, polecatName string) error {
+	// CRITICAL: Kill the tmux session FIRST and unconditionally.
+	// The session name follows the pattern gt-<rig>-<polecat>.
+	// We do this explicitly here because gt polecat nuke may fail to kill the
+	// session due to rig loading issues or race conditions with IsRunning checks.
+	// See: gt-g9ft5 - sessions were piling up because nuke wasn't killing them.
+	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	t := tmux.NewTmux()
+
+	// Check if session exists and kill it
+	if running, _ := t.HasSession(sessionName); running {
+		// Try graceful shutdown first (Ctrl-C), then force kill
+		_ = t.SendKeysRaw(sessionName, "C-c")
+		// Brief delay for graceful handling
+		time.Sleep(100 * time.Millisecond)
+		// Force kill the session
+		if err := t.KillSession(sessionName); err != nil {
+			// Log but continue - session might already be dead
+			// The important thing is we tried
+		}
+	}
+
+	// Now run gt polecat nuke to clean up worktree, branch, and beads
 	address := fmt.Sprintf("%s/%s", rigName, polecatName)
 
-	cmd := exec.Command("gt", "polecat", "nuke", address)
+	cmd := exec.Command("gt", "polecat", "nuke", address) //nolint:gosec // G204: address is constructed from validated internal data
 	cmd.Dir = workDir
 
 	var stderr bytes.Buffer
@@ -698,18 +747,28 @@ func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
 	return result
 }
 
-// verifyCommitOnMain checks if the polecat's current commit is on main.
+// verifyCommitOnMain checks if the polecat's current commit is on the default branch.
 // This prevents nuking a polecat whose work wasn't actually merged.
 //
+// In multi-remote setups, the code may live on a remote other than "origin"
+// (e.g., "gastown" for gastown.git). This function checks ALL remotes to find
+// the one containing the default branch with the merged commit.
+//
 // Returns:
-//   - true, nil: commit is verified on main
-//   - false, nil: commit is NOT on main (don't nuke!)
+//   - true, nil: commit is verified on default branch
+//   - false, nil: commit is NOT on default branch (don't nuke!)
 //   - false, error: couldn't verify (treat as unsafe)
 func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 	// Find town root from workDir
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
 		return false, fmt.Errorf("finding town root: %v", err)
+	}
+
+	// Get configured default branch for this rig
+	defaultBranch := "main" // fallback
+	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
 	}
 
 	// Construct polecat path: <townRoot>/<rigName>/polecats/<polecatName>
@@ -724,16 +783,33 @@ func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 		return false, fmt.Errorf("getting polecat HEAD: %w", err)
 	}
 
-	// Verify it's an ancestor of main (i.e., it's been merged)
-	// We use the polecat's git context to check main
-	isOnMain, err := g.IsAncestor(commitSHA, "origin/main")
+	// Get all configured remotes and check each one for the commit
+	// This handles multi-remote setups where code may be on a remote other than "origin"
+	remotes, err := g.Remotes()
 	if err != nil {
-		// Try without origin/ prefix in case remote isn't set up
-		isOnMain, err = g.IsAncestor(commitSHA, "main")
+		// If we can't list remotes, fall back to checking just the local branch
+		isOnDefaultBranch, err := g.IsAncestor(commitSHA, defaultBranch)
 		if err != nil {
-			return false, fmt.Errorf("checking if commit is on main: %w", err)
+			return false, fmt.Errorf("checking if commit is on %s: %w", defaultBranch, err)
+		}
+		return isOnDefaultBranch, nil
+	}
+
+	// Try each remote/<defaultBranch> until we find one where commit is an ancestor
+	for _, remote := range remotes {
+		remoteBranch := remote + "/" + defaultBranch
+		isOnRemote, err := g.IsAncestor(commitSHA, remoteBranch)
+		if err == nil && isOnRemote {
+			return true, nil
 		}
 	}
 
-	return isOnMain, nil
+	// Also try the local default branch (in case we're not tracking a remote)
+	isOnDefaultBranch, err := g.IsAncestor(commitSHA, defaultBranch)
+	if err == nil && isOnDefaultBranch {
+		return true, nil
+	}
+
+	// Commit is not on any remote's default branch
+	return false, nil
 }

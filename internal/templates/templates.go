@@ -5,11 +5,16 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"os"
+	"path/filepath"
 	"text/template"
 )
 
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
+
+//go:embed commands/*.md
+var commandsFS embed.FS
 
 // Templates manages role and message templates.
 type Templates struct {
@@ -19,14 +24,17 @@ type Templates struct {
 
 // RoleData contains information for rendering role contexts.
 type RoleData struct {
-	Role        string   // mayor, witness, refinery, polecat, crew, deacon
-	RigName     string   // e.g., "greenplace"
-	TownRoot    string   // e.g., "/Users/steve/ai"
-	WorkDir     string   // current working directory
-	Polecat     string   // polecat name (for polecat role)
-	Polecats    []string // list of polecats (for witness role)
-	BeadsDir    string   // BEADS_DIR path
-	IssuePrefix string   // beads issue prefix
+	Role           string   // mayor, witness, refinery, polecat, crew, deacon
+	RigName        string   // e.g., "greenplace"
+	TownRoot       string   // e.g., "/Users/steve/ai"
+	TownName       string   // e.g., "ai" - the town identifier for session names
+	WorkDir        string   // current working directory
+	Polecat        string   // polecat name (for polecat role)
+	Polecats       []string // list of polecats (for witness role)
+	BeadsDir       string   // BEADS_DIR path
+	IssuePrefix    string   // beads issue prefix
+	MayorSession   string   // e.g., "gt-ai-mayor" - dynamic mayor session name
+	DeaconSession  string   // e.g., "gt-ai-deacon" - dynamic deacon session name
 }
 
 // SpawnData contains information for spawn assignment messages.
@@ -62,14 +70,14 @@ type EscalationData struct {
 
 // HandoffData contains information for session handoff messages.
 type HandoffData struct {
-	Role         string
-	CurrentWork  string
-	Status       string
-	NextSteps    []string
-	Notes        string
-	PendingMail  int
-	GitBranch    string
-	GitDirty     bool
+	Role        string
+	CurrentWork string
+	Status      string
+	NextSteps   []string
+	Notes       string
+	PendingMail int
+	GitBranch   string
+	GitDirty    bool
 }
 
 // New creates a new Templates instance.
@@ -125,4 +133,113 @@ func (t *Templates) RoleNames() []string {
 // MessageNames returns the list of available message templates.
 func (t *Templates) MessageNames() []string {
 	return []string{"spawn", "nudge", "escalation", "handoff"}
+}
+
+// GetAllRoleTemplates returns all role templates as a map of filename to content.
+func GetAllRoleTemplates() (map[string][]byte, error) {
+	entries, err := templateFS.ReadDir("roles")
+	if err != nil {
+		return nil, fmt.Errorf("reading roles directory: %w", err)
+	}
+
+	result := make(map[string][]byte)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		content, err := templateFS.ReadFile("roles/" + entry.Name())
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", entry.Name(), err)
+		}
+		result[entry.Name()] = content
+	}
+
+	return result, nil
+}
+
+// ProvisionCommands creates the .claude/commands/ directory with standard slash commands.
+// This ensures crew/polecat workspaces have the handoff command and other utilities
+// even if the source repo doesn't have them tracked.
+// If a command already exists, it is skipped (no overwrite).
+func ProvisionCommands(workspacePath string) error {
+	entries, err := commandsFS.ReadDir("commands")
+	if err != nil {
+		return fmt.Errorf("reading commands directory: %w", err)
+	}
+
+	// Create .claude/commands/ directory
+	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
+	if err := os.MkdirAll(commandsDir, 0755); err != nil {
+		return fmt.Errorf("creating commands directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		destPath := filepath.Join(commandsDir, entry.Name())
+
+		// Skip if command already exists (don't overwrite user customizations)
+		if _, err := os.Stat(destPath); err == nil {
+			continue
+		}
+
+		content, err := commandsFS.ReadFile("commands/" + entry.Name())
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", entry.Name(), err)
+		}
+
+		if err := os.WriteFile(destPath, content, 0644); err != nil { //nolint:gosec // G306: template files are non-sensitive
+			return fmt.Errorf("writing %s: %w", entry.Name(), err)
+		}
+	}
+
+	return nil
+}
+
+// CommandNames returns the list of embedded slash commands.
+func CommandNames() ([]string, error) {
+	entries, err := commandsFS.ReadDir("commands")
+	if err != nil {
+		return nil, fmt.Errorf("reading commands directory: %w", err)
+	}
+
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	return names, nil
+}
+
+// HasCommands checks if a workspace has the .claude/commands/ directory provisioned.
+func HasCommands(workspacePath string) bool {
+	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
+	info, err := os.Stat(commandsDir)
+	return err == nil && info.IsDir()
+}
+
+// MissingCommands returns the list of embedded commands missing from the workspace.
+func MissingCommands(workspacePath string) ([]string, error) {
+	entries, err := commandsFS.ReadDir("commands")
+	if err != nil {
+		return nil, fmt.Errorf("reading commands directory: %w", err)
+	}
+
+	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
+	var missing []string
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		destPath := filepath.Join(commandsDir, entry.Name())
+		if _, err := os.Stat(destPath); os.IsNotExist(err) {
+			missing = append(missing, entry.Name())
+		}
+	}
+
+	return missing, nil
 }

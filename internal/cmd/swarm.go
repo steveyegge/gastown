@@ -114,7 +114,7 @@ var swarmCancelCmd = &cobra.Command{
 	Short: "Cancel a swarm",
 	Long: `Cancel an active swarm.
 
-Marks the swarm as cancelled and optionally cleans up branches.`,
+Marks the swarm as canceled and optionally cleans up branches.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runSwarmCancel,
 }
@@ -158,7 +158,7 @@ func init() {
 	swarmStatusCmd.Flags().BoolVar(&swarmStatusJSON, "json", false, "Output as JSON")
 
 	// List flags
-	swarmListCmd.Flags().StringVar(&swarmListStatus, "status", "", "Filter by status (active, landed, cancelled, failed)")
+	swarmListCmd.Flags().StringVar(&swarmListStatus, "status", "", "Filter by status (active, landed, canceled, failed)")
 	swarmListCmd.Flags().BoolVar(&swarmListJSON, "json", false, "Output as JSON")
 
 	// Dispatch flags
@@ -526,7 +526,7 @@ func runSwarmDispatch(cmd *cobra.Command, args []string) error {
 func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, workers []string, tasks []struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
-}) error {
+}) error { //nolint:unparam // error return kept for future use
 	t := tmux.NewTmux()
 	sessMgr := session.NewManager(t, r)
 	polecatGit := git.NewGit(r.Path)
@@ -866,8 +866,8 @@ func runSwarmCancel(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Close the swarm epic in beads with cancelled reason
-	closeArgs := []string{"close", swarmID, "--reason", "Swarm cancelled"}
+	// Close the swarm epic in beads with canceled reason
+	closeArgs := []string{"close", swarmID, "--reason", "Swarm canceled"}
 	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
 		closeArgs = append(closeArgs, "--session="+sessionID)
 	}
@@ -877,7 +877,7 @@ func runSwarmCancel(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("closing swarm: %w", err)
 	}
 
-	fmt.Printf("%s Swarm %s cancelled\n", style.Bold.Render("✓"), swarmID)
+	fmt.Printf("%s Swarm %s canceled\n", style.Bold.Render("✓"), swarmID)
 	return nil
 }
 

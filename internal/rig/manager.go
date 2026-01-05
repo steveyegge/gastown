@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/templates"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Common errors
@@ -28,6 +30,7 @@ type RigConfig struct {
 	Version       int          `json:"version"`                  // schema version
 	Name          string       `json:"name"`                     // rig name
 	GitURL        string       `json:"git_url"`                  // repository URL
+	LocalRepo     string       `json:"local_repo,omitempty"`     // optional local reference repo
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
 	Beads         *BeadsConfig `json:"beads,omitempty"`
@@ -104,10 +107,11 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 	}
 
 	rig := &Rig{
-		Name:   name,
-		Path:   rigPath,
-		GitURL: entry.GitURL,
-		Config: entry.BeadsConfig,
+		Name:      name,
+		Path:      rigPath,
+		GitURL:    entry.GitURL,
+		LocalRepo: entry.LocalRepo,
+		Config:    entry.BeadsConfig,
 	}
 
 	// Scan for polecats
@@ -130,9 +134,9 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 		}
 	}
 
-	// Check for witness (witnesses don't have clones, just state.json)
-	witnessStatePath := filepath.Join(rigPath, "witness", "state.json")
-	if _, err := os.Stat(witnessStatePath); err == nil {
+	// Check for witness (witnesses don't have clones, just the witness directory)
+	witnessPath := filepath.Join(rigPath, "witness")
+	if info, err := os.Stat(witnessPath); err == nil && info.IsDir() {
 		rig.HasWitness = true
 	}
 
@@ -153,9 +157,42 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 
 // AddRigOptions configures rig creation.
 type AddRigOptions struct {
-	Name        string // Rig name (directory name)
-	GitURL      string // Repository URL
-	BeadsPrefix string // Beads issue prefix (defaults to derived from name)
+	Name          string // Rig name (directory name)
+	GitURL        string // Repository URL
+	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
+	LocalRepo     string // Optional local repo for reference clones
+	DefaultBranch string // Default branch (defaults to auto-detected from remote)
+}
+
+func resolveLocalRepo(path, gitURL string) (string, string) {
+	if path == "" {
+		return "", ""
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Sprintf("local repo path invalid: %v", err)
+	}
+
+	absPath, err = filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", fmt.Sprintf("local repo path invalid: %v", err)
+	}
+
+	repoGit := git.NewGit(absPath)
+	if !repoGit.IsRepo() {
+		return "", fmt.Sprintf("local repo is not a git repository: %s", absPath)
+	}
+
+	origin, err := repoGit.RemoteURL("origin")
+	if err != nil {
+		return absPath, "local repo has no origin; using it anyway"
+	}
+	if origin != gitURL {
+		return "", fmt.Sprintf("local repo origin %q does not match %q", origin, gitURL)
+	}
+
+	return absPath, ""
 }
 
 // AddRig creates a new rig as a container with clones for each agent.
@@ -174,6 +211,14 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, ErrRigExists
 	}
 
+	// Validate rig name: reject characters that break agent ID parsing
+	// Agent IDs use format <prefix>-<rig>-<role>[-<name>] with hyphens as delimiters
+	if strings.ContainsAny(opts.Name, "-. ") {
+		sanitized := strings.NewReplacer("-", "_", ".", "_", " ", "_").Replace(opts.Name)
+		sanitized = strings.ToLower(sanitized)
+		return nil, fmt.Errorf("rig name %q contains invalid characters; hyphens, dots, and spaces are reserved for agent ID parsing. Try %q instead (underscores are allowed)", opts.Name, sanitized)
+	}
+
 	rigPath := filepath.Join(m.townRoot, opts.Name)
 
 	// Check if directory already exists
@@ -184,6 +229,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Derive defaults
 	if opts.BeadsPrefix == "" {
 		opts.BeadsPrefix = deriveBeadsPrefix(opts.Name)
+	}
+
+	localRepo, warn := resolveLocalRepo(opts.LocalRepo, opts.GitURL)
+	if warn != "" {
+		fmt.Printf("  Warning: %s\n", warn)
 	}
 
 	// Create container directory
@@ -206,6 +256,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		Version:   CurrentRigConfigVersion,
 		Name:      opts.Name,
 		GitURL:    opts.GitURL,
+		LocalRepo: localRepo,
 		CreatedAt: time.Now(),
 		Beads: &BeadsConfig{
 			Prefix: opts.BeadsPrefix,
@@ -218,14 +269,35 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Create shared bare repo as source of truth for refinery and polecats.
 	// This allows refinery to see polecat branches without pushing to remote.
 	// Mayor remains a separate clone (doesn't need branch visibility).
+	fmt.Printf("  Cloning repository (this may take a moment)...\n")
 	bareRepoPath := filepath.Join(rigPath, ".repo.git")
-	if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
-		return nil, fmt.Errorf("creating bare repo: %w", err)
+	if localRepo != "" {
+		if err := m.git.CloneBareWithReference(opts.GitURL, bareRepoPath, localRepo); err != nil {
+			fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
+			_ = os.RemoveAll(bareRepoPath)
+			if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
+				return nil, fmt.Errorf("creating bare repo: %w", err)
+			}
+		}
+	} else {
+		if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
+			return nil, fmt.Errorf("creating bare repo: %w", err)
+		}
 	}
+	fmt.Printf("   ✓ Created shared bare repo\n")
 	bareGit := git.NewGitWithDir(bareRepoPath, "")
 
-	// Detect default branch (main, master, etc.)
-	defaultBranch := bareGit.DefaultBranch()
+	// Determine default branch: use provided value or auto-detect from remote
+	var defaultBranch string
+	if opts.DefaultBranch != "" {
+		defaultBranch = opts.DefaultBranch
+	} else {
+		// Try to get default branch from remote first, fall back to local detection
+		defaultBranch = bareGit.RemoteDefaultBranch()
+		if defaultBranch == "" {
+			defaultBranch = bareGit.DefaultBranch()
+		}
+	}
 	rigConfig.DefaultBranch = defaultBranch
 	// Re-save config with default branch
 	if err := m.saveRigConfig(rigPath, rigConfig); err != nil {
@@ -235,13 +307,60 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Create mayor as regular clone (separate from bare repo).
 	// Mayor doesn't need to see polecat branches - that's refinery's job.
 	// This also allows mayor to stay on the default branch without conflicting with refinery.
+	fmt.Printf("  Creating mayor clone...\n")
 	mayorRigPath := filepath.Join(rigPath, "mayor", "rig")
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
 	}
-	if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
-		return nil, fmt.Errorf("cloning for mayor: %w", err)
+	if localRepo != "" {
+		if err := m.git.CloneWithReference(opts.GitURL, mayorRigPath, localRepo); err != nil {
+			fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
+			_ = os.RemoveAll(mayorRigPath)
+			if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+				return nil, fmt.Errorf("cloning for mayor: %w", err)
+			}
+		}
+	} else {
+		if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+			return nil, fmt.Errorf("cloning for mayor: %w", err)
+		}
 	}
+
+	// Checkout the default branch for mayor (clone defaults to remote's HEAD, not our configured branch)
+	mayorGit := git.NewGitWithDir("", mayorRigPath)
+	if err := mayorGit.Checkout(defaultBranch); err != nil {
+		return nil, fmt.Errorf("checking out default branch for mayor: %w", err)
+	}
+	fmt.Printf("   ✓ Created mayor clone\n")
+
+	// Check if source repo has .beads/ with its own prefix - if so, use that prefix.
+	// This ensures we use the project's existing beads database instead of creating a new one.
+	// Without this, routing would fail when trying to access existing issues because the
+	// rig config would have a different prefix than what the issues actually use.
+	sourceBeadsConfig := filepath.Join(mayorRigPath, ".beads", "config.yaml")
+	if _, err := os.Stat(sourceBeadsConfig); err == nil {
+		if sourcePrefix := detectBeadsPrefixFromConfig(sourceBeadsConfig); sourcePrefix != "" {
+			fmt.Printf("  Detected existing beads prefix '%s' from source repo\n", sourcePrefix)
+			opts.BeadsPrefix = sourcePrefix
+			rigConfig.Beads.Prefix = sourcePrefix
+			// Re-save rig config with detected prefix
+			if err := m.saveRigConfig(rigPath, rigConfig); err != nil {
+				return nil, fmt.Errorf("updating rig config with detected prefix: %w", err)
+			}
+			// Initialize bd database with the detected prefix.
+			// beads.db is gitignored so it doesn't exist after clone - we need to create it.
+			// bd init --prefix will create the database and auto-import from issues.jsonl.
+			sourceBeadsDB := filepath.Join(mayorRigPath, ".beads", "beads.db")
+			if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
+				cmd := exec.Command("bd", "init", "--prefix", sourcePrefix) // sourcePrefix validated by isValidBeadsPrefix
+				cmd.Dir = mayorRigPath
+				if output, err := cmd.CombinedOutput(); err != nil {
+					fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
+				}
+			}
+		}
+	}
+
 	// Create mayor CLAUDE.md (overrides any from cloned repo)
 	if err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
@@ -250,6 +369,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// Create refinery as worktree from bare repo on default branch.
 	// Refinery needs to see polecat branches (shared .repo.git) and merges them.
 	// Being on the default branch allows direct merge workflow.
+	fmt.Printf("  Creating refinery worktree...\n")
 	refineryRigPath := filepath.Join(rigPath, "refinery", "rig")
 	if err := os.MkdirAll(filepath.Dir(refineryRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating refinery dir: %w", err)
@@ -257,6 +377,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := bareGit.WorktreeAddExisting(refineryRigPath, defaultBranch); err != nil {
 		return nil, fmt.Errorf("creating refinery worktree: %w", err)
 	}
+	fmt.Printf("   ✓ Created refinery worktree\n")
 	// Create refinery CLAUDE.md (overrides any from cloned repo)
 	if err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating refinery CLAUDE.md: %w", err)
@@ -311,20 +432,16 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		return nil, fmt.Errorf("creating polecats dir: %w", err)
 	}
 
-	// Initialize agent state files
-	if err := m.initAgentStates(rigPath); err != nil {
-		return nil, fmt.Errorf("initializing agent states: %w", err)
-	}
-
 	// Initialize beads at rig level
+	fmt.Printf("  Initializing beads database...\n")
 	if err := m.initBeads(rigPath, opts.BeadsPrefix); err != nil {
 		return nil, fmt.Errorf("initializing beads: %w", err)
 	}
+	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
 
-	// Create agent beads for this rig (witness, refinery) and
-	// global agents (deacon, mayor) if this is the first rig.
-	isFirstRig := len(m.config.Rigs) == 0
-	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix, isFirstRig); err != nil {
+	// Create rig-level agent beads (witness, refinery) in rig beads.
+	// Town-level agents (mayor, deacon) are created by gt install in town beads.
+	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix); err != nil {
 		// Non-fatal: log warning but continue
 		fmt.Printf("  Warning: Could not create agent beads: %v\n", err)
 	}
@@ -343,8 +460,9 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 
 	// Register in town config
 	m.config.Rigs[opts.Name] = config.RigEntry{
-		GitURL:  opts.GitURL,
-		AddedAt: time.Now(),
+		GitURL:    opts.GitURL,
+		LocalRepo: localRepo,
+		AddedAt:   time.Now(),
 		BeadsConfig: &config.BeadsConfig{
 			Prefix: opts.BeadsPrefix,
 		},
@@ -378,46 +496,36 @@ func LoadRigConfig(rigPath string) (*RigConfig, error) {
 	return &cfg, nil
 }
 
-// initAgentStates creates initial state.json files for agents.
-func (m *Manager) initAgentStates(rigPath string) error {
-	agents := []struct {
-		path string
-		role string
-	}{
-		{filepath.Join(rigPath, "refinery", "state.json"), "refinery"},
-		{filepath.Join(rigPath, "witness", "state.json"), "witness"},
-		{filepath.Join(rigPath, "mayor", "state.json"), "mayor"},
-	}
-
-	for _, agent := range agents {
-		state := &config.AgentState{
-			Role:       agent.role,
-			LastActive: time.Now(),
-		}
-		data, err := json.MarshalIndent(state, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(agent.path, data, 0644); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // initBeads initializes the beads database at rig level.
 // The project's .beads/config.yaml determines sync-branch settings.
 // Use `bd doctor --fix` in the project to configure sync-branch if needed.
 // TODO(bd-yaml): beads config should migrate to JSON (see beads issue)
 func (m *Manager) initBeads(rigPath, prefix string) error {
+	// Validate prefix format to prevent command injection from config files
+	if !isValidBeadsPrefix(prefix) {
+		return fmt.Errorf("invalid beads prefix %q: must be alphanumeric with optional hyphens, start with letter, max 20 chars", prefix)
+	}
+
 	beadsDir := filepath.Join(rigPath, ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		return err
 	}
 
-	// Run bd init if available, with --no-agents to skip AGENTS.md creation
-	cmd := exec.Command("bd", "init", "--prefix", prefix, "--no-agents")
+	// Build environment with explicit BEADS_DIR to prevent bd from
+	// finding a parent directory's .beads/ database
+	env := os.Environ()
+	filteredEnv := make([]string, 0, len(env)+1)
+	for _, e := range env {
+		if !strings.HasPrefix(e, "BEADS_DIR=") {
+			filteredEnv = append(filteredEnv, e)
+		}
+	}
+	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
+
+	// Run bd init if available
+	cmd := exec.Command("bd", "init", "--prefix", prefix)
 	cmd.Dir = rigPath
+	cmd.Env = filteredEnv
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		// bd might not be installed or failed, create minimal structure
@@ -428,32 +536,35 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 			return writeErr
 		}
 	}
+
+	// Ensure database has repository fingerprint (GH #25).
+	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
+	// Without fingerprint, the bd daemon fails to start silently.
+	migrateCmd := exec.Command("bd", "migrate", "--update-repo-id")
+	migrateCmd.Dir = rigPath
+	migrateCmd.Env = filteredEnv
+	// Ignore errors - fingerprint is optional for functionality
+	_, _ = migrateCmd.CombinedOutput()
+
 	return nil
 }
 
-// initAgentBeads creates agent beads for this rig and optionally global agents.
-// - Always creates: <prefix>-witness-<rig>, <prefix>-refinery-<rig>
-// - First rig only: <prefix>-deacon, <prefix>-mayor
+// initAgentBeads creates rig-level agent beads for Witness and Refinery.
+// These agents use the rig's beads prefix and are stored in rig beads.
+//
+// Town-level agents (Mayor, Deacon) are created by gt install in town beads.
+// Role beads are also created by gt install with hq- prefix.
+//
+// Format: <prefix>-<rig>-<role> (e.g., gt-gastown-witness)
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
-func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig bool) error {
-	// Run bd commands from rig root where .beads/ was initialized
-	// Set BEADS_DIR explicitly to ensure bd finds the database
-	beadsDir := filepath.Join(rigPath, ".beads")
-	prevBeadsDir, hadBeadsDir := os.LookupEnv("BEADS_DIR")
-	if err := os.Setenv("BEADS_DIR", beadsDir); err != nil {
-		return fmt.Errorf("setting BEADS_DIR: %w", err)
-	}
-	defer func() {
-		if hadBeadsDir {
-			_ = os.Setenv("BEADS_DIR", prevBeadsDir)
-		} else {
-			_ = os.Unsetenv("BEADS_DIR")
-		}
-	}()
-	bd := beads.New(rigPath)
+func (m *Manager) initAgentBeads(_, rigName, _ string) error { // rigPath and prefix unused until Phase 2
+	// TEMPORARY (gt-4r1ph): Currently all agent beads go in town beads.
+	// After Phase 2, only Mayor/Deacon will be here; Witness/Refinery go to rig beads.
+	townBeadsDir := filepath.Join(m.townRoot, ".beads")
+	bd := beads.NewWithBeadsDir(m.townRoot, townBeadsDir)
 
-	// Define agents to create
+	// Define rig-level agents to create
 	type agentDef struct {
 		id       string
 		roleType string
@@ -461,41 +572,24 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig boo
 		desc     string
 	}
 
-	var agents []agentDef
-
-	// Always create rig-specific agents (using canonical naming: prefix-rig-role-name)
-	agents = append(agents,
-		agentDef{
-			id:       beads.WitnessBeadIDWithPrefix(prefix, rigName),
+	// Create rig-specific agents using gt prefix (agents stored in town beads).
+	// Format: gt-<rig>-<role> (e.g., gt-gastown-witness)
+	agents := []agentDef{
+		{
+			id:       beads.WitnessBeadID(rigName),
 			roleType: "witness",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
 		},
-		agentDef{
-			id:       beads.RefineryBeadIDWithPrefix(prefix, rigName),
+		{
+			id:       beads.RefineryBeadID(rigName),
 			roleType: "refinery",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
 		},
-	)
-
-	// First rig also gets global agents (deacon, mayor)
-	if isFirstRig {
-		agents = append(agents,
-			agentDef{
-				id:       beads.DeaconBeadID(),
-				roleType: "deacon",
-				rig:      "",
-				desc:     "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring.",
-			},
-			agentDef{
-				id:       beads.MayorBeadID(),
-				roleType: "mayor",
-				rig:      "",
-				desc:     "Mayor - global coordinator, handles cross-rig communication and escalations.",
-			},
-		)
 	}
+
+	// Note: Mayor and Deacon are now created by gt install in town beads.
 
 	for _, agent := range agents {
 		// Check if already exists
@@ -504,13 +598,13 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig boo
 		}
 
 		// RoleBead points to the shared role definition bead for this agent type.
-		// Role beads are shared: gt-witness-role, gt-refinery-role, etc.
+		// Role beads are in town beads with hq- prefix (e.g., hq-witness-role).
 		fields := &beads.AgentFields{
 			RoleType:   agent.roleType,
 			Rig:        agent.rig,
 			AgentState: "idle",
 			HookBead:   "",
-			RoleBead:   "gt-" + agent.roleType + "-role",
+			RoleBead:   beads.RoleBeadIDTown(agent.roleType),
 		}
 
 		if _, err := bd.CreateAgentBead(agent.id, agent.desc, fields); err != nil {
@@ -539,7 +633,7 @@ func (m *Manager) ensureGitignoreEntry(gitignorePath, entry string) error {
 	}
 
 	// Append entry
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: .gitignore should be readable by git tools
 	if err != nil {
 		return err
 	}
@@ -585,6 +679,87 @@ func deriveBeadsPrefix(name string) string {
 	return strings.ToLower(name[:2])
 }
 
+// detectBeadsPrefixFromConfig reads the issue prefix from a beads config.yaml file.
+// Returns empty string if the file doesn't exist or doesn't contain a prefix.
+// Falls back to detecting prefix from existing issues in issues.jsonl.
+//
+// beadsPrefixRegexp validates beads prefix format: alphanumeric, may contain hyphens,
+// must start with letter, max 20 chars. Prevents shell injection via config files.
+var beadsPrefixRegexp = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]{0,19}$`)
+
+// isValidBeadsPrefix checks if a prefix is safe for use in shell commands.
+// Prefixes must be alphanumeric (with optional hyphens), start with a letter,
+// and be at most 20 characters. This prevents command injection from
+// malicious config files.
+func isValidBeadsPrefix(prefix string) bool {
+	return beadsPrefixRegexp.MatchString(prefix)
+}
+
+// When adding a rig from a source repo that has .beads/ tracked in git (like a project
+// that already uses beads for issue tracking), we need to use that project's existing
+// prefix instead of generating a new one. Otherwise, the rig would have a mismatched
+// prefix and routing would fail to find the existing issues.
+func detectBeadsPrefixFromConfig(configPath string) string {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+
+	// Parse YAML-style config (simple line-by-line parsing)
+	// Looking for "issue-prefix: <value>" or "prefix: <value>"
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Skip comments and empty lines
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Check for issue-prefix or prefix key
+		for _, key := range []string{"issue-prefix:", "prefix:"} {
+			if strings.HasPrefix(line, key) {
+				value := strings.TrimSpace(strings.TrimPrefix(line, key))
+				// Remove quotes if present
+				value = strings.Trim(value, `"'`)
+				if value != "" && isValidBeadsPrefix(value) {
+					return value
+				}
+			}
+		}
+	}
+
+	// Fallback: try to detect prefix from existing issues in issues.jsonl
+	// Look for the first issue ID pattern like "gt-abc123"
+	beadsDir := filepath.Dir(configPath)
+	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
+	if issuesData, err := os.ReadFile(issuesPath); err == nil {
+		issuesLines := strings.Split(string(issuesData), "\n")
+		for _, line := range issuesLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			// Look for "id":"<prefix>-<hash>" pattern
+			if idx := strings.Index(line, `"id":"`); idx != -1 {
+				start := idx + 6 // len(`"id":"`)
+				if end := strings.Index(line[start:], `"`); end != -1 {
+					issueID := line[start : start+end]
+					// Extract prefix (everything before the last hyphen-hash part)
+					if dashIdx := strings.LastIndex(issueID, "-"); dashIdx > 0 {
+						prefix := issueID[:dashIdx]
+						// Handle prefixes like "gt" (from "gt-abc") - return without trailing hyphen
+						if isValidBeadsPrefix(prefix) {
+							return prefix
+						}
+					}
+				}
+			}
+			break // Only check first issue
+		}
+	}
+
+	return ""
+}
+
 // RemoveRig unregisters a rig (does not delete files).
 func (m *Manager) RemoveRig(name string) error {
 	if !m.RigExists(name) {
@@ -613,12 +788,18 @@ func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName 
 		return err
 	}
 
+	// Get town name for session names
+	townName, _ := workspace.GetTownName(m.townRoot)
+
 	data := templates.RoleData{
-		Role:     role,
-		RigName:  rigName,
-		TownRoot: m.townRoot,
-		WorkDir:  workspacePath,
-		Polecat:  workerName, // Used for crew member name as well
+		Role:          role,
+		RigName:       rigName,
+		TownRoot:      m.townRoot,
+		TownName:      townName,
+		WorkDir:       workspacePath,
+		Polecat:       workerName, // Used for crew member name as well
+		MayorSession:  fmt.Sprintf("gt-%s-mayor", townName),
+		DeaconSession: fmt.Sprintf("gt-%s-deacon", townName),
 	}
 
 	content, err := tmpl.RenderRole(role, data)
@@ -727,7 +908,7 @@ func (m *Manager) seedPatrolMoleculesManually(rigPath string) error {
 		}
 
 		// Create the molecule
-		cmd := exec.Command("bd", "create",
+		cmd := exec.Command("bd", "create", //nolint:gosec // G204: bd is a trusted internal tool
 			"--type=molecule",
 			"--title="+mol.title,
 			"--description="+mol.desc,

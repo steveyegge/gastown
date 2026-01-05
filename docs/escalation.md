@@ -225,7 +225,7 @@ EOF
 gt escalate --type decision --issue $ISSUE "Caching approach needs decision"
 
 # 3. Exit cleanly
-gt done --exit ESCALATED
+gt done --status ESCALATED
 ```
 
 ## Mayor Startup Check

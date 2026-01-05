@@ -88,7 +88,7 @@ func (m *Manager) LoadSwarm(epicID string) (*Swarm, error) {
 		EpicID:       epicID,
 		BaseCommit:   baseCommit,
 		Integration:  fmt.Sprintf("swarm/%s", epicID),
-		TargetBranch: "main",
+		TargetBranch: m.rig.DefaultBranch(),
 		State:        state,
 		Workers:      []string{}, // Discovered from active tasks
 		Tasks:        []SwarmTask{},
@@ -190,12 +190,12 @@ func (m *Manager) IsComplete(swarmID string) (bool, error) {
 // isValidTransition checks if a state transition is allowed.
 func isValidTransition(from, to SwarmState) bool {
 	transitions := map[SwarmState][]SwarmState{
-		SwarmCreated:   {SwarmActive, SwarmCancelled},
-		SwarmActive:    {SwarmMerging, SwarmFailed, SwarmCancelled},
-		SwarmMerging:   {SwarmLanded, SwarmFailed, SwarmCancelled},
-		SwarmLanded:    {}, // Terminal
-		SwarmFailed:    {}, // Terminal
-		SwarmCancelled: {}, // Terminal
+		SwarmCreated:  {SwarmActive, SwarmCanceled},
+		SwarmActive:   {SwarmMerging, SwarmFailed, SwarmCanceled},
+		SwarmMerging:  {SwarmLanded, SwarmFailed, SwarmCanceled},
+		SwarmLanded:   {}, // Terminal
+		SwarmFailed:   {}, // Terminal
+		SwarmCanceled: {}, // Terminal
 	}
 
 	allowed, ok := transitions[from]

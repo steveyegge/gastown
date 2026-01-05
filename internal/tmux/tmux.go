@@ -76,6 +76,40 @@ func (t *Tmux) NewSession(name, workDir string) error {
 	return err
 }
 
+// EnsureSessionFresh ensures a session is available and healthy.
+// If the session exists but is a zombie (Claude not running), it kills the session first.
+// This prevents "session already exists" errors when trying to restart dead agents.
+//
+// A session is considered a zombie if:
+// - The tmux session exists
+// - But Claude (node process) is not running in it
+//
+// Returns nil if session was created successfully.
+func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
+	// Check if session already exists
+	exists, err := t.HasSession(name)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+
+	if exists {
+		// Session exists - check if it's a zombie
+		if !t.IsClaudeRunning(name) {
+			// Zombie session: tmux alive but Claude dead
+			// Kill it so we can create a fresh one
+			if err := t.KillSession(name); err != nil {
+				return fmt.Errorf("killing zombie session: %w", err)
+			}
+		} else {
+			// Session is healthy (Claude running) - nothing to do
+			return nil
+		}
+	}
+
+	// Create fresh session
+	return t.NewSession(name, workDir)
+}
+
 // KillSession terminates a tmux session.
 func (t *Tmux) KillSession(name string) error {
 	_, err := t.run("kill-session", "-t", name)
@@ -97,9 +131,11 @@ func (t *Tmux) IsAvailable() bool {
 	return cmd.Run() == nil
 }
 
-// HasSession checks if a session exists.
+// HasSession checks if a session exists (exact match).
+// Uses "=" prefix for exact matching, preventing prefix matches
+// (e.g., "gt-deacon-boot" won't match when checking for "gt-deacon").
 func (t *Tmux) HasSession(name string) (bool, error) {
-	_, err := t.run("has-session", "-t", name)
+	_, err := t.run("has-session", "-t", "="+name)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrNoServer) {
 			return false, nil
@@ -238,12 +274,19 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	// 2. Wait 500ms for paste to complete (tested, required)
 	time.Sleep(500 * time.Millisecond)
 
-	// 3. Send Enter as separate command (key to reliability)
-	if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
-		return err
+	// 3. Send Enter with retry (critical for message submission)
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
 	}
-
-	return nil
+	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
 }
 
 // NudgePane sends a message to a specific pane reliably.
@@ -257,8 +300,55 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	// 2. Wait 500ms for paste to complete (tested, required)
 	time.Sleep(500 * time.Millisecond)
 
-	// 3. Send Enter as separate command (key to reliability)
-	if _, err := t.run("send-keys", "-t", pane, "Enter"); err != nil {
+	// 3. Send Enter with retry (critical for message submission)
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if _, err := t.run("send-keys", "-t", pane, "Enter"); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+}
+
+// AcceptBypassPermissionsWarning dismisses the Claude Code bypass permissions warning dialog.
+// When Claude starts with --dangerously-skip-permissions, it shows a warning dialog that
+// requires pressing Down arrow to select "Yes, I accept" and then Enter to confirm.
+// This function checks if the warning is present before sending keys to avoid interfering
+// with sessions that don't show the warning (e.g., already accepted or different config).
+//
+// Call this after starting Claude and waiting for it to initialize (WaitForCommand),
+// but before sending any prompts.
+func (t *Tmux) AcceptBypassPermissionsWarning(session string) error {
+	// Wait for the dialog to potentially render
+	time.Sleep(1 * time.Second)
+
+	// Check if the bypass permissions warning is present
+	content, err := t.CapturePane(session, 30)
+	if err != nil {
+		return err
+	}
+
+	// Look for the characteristic warning text
+	if !strings.Contains(content, "Bypass Permissions mode") {
+		// Warning not present, nothing to do
+		return nil
+	}
+
+	// Press Down to select "Yes, I accept" (option 2)
+	if _, err := t.run("send-keys", "-t", session, "Down"); err != nil {
+		return err
+	}
+
+	// Small delay to let selection update
+	time.Sleep(200 * time.Millisecond)
+
+	// Press Enter to confirm
+	if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
 		return err
 	}
 

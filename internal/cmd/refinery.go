@@ -34,8 +34,9 @@ into integration branches and ultimately to main.`,
 }
 
 var refineryStartCmd = &cobra.Command{
-	Use:   "start [rig]",
-	Short: "Start the refinery",
+	Use:     "start [rig]",
+	Aliases: []string{"spawn"},
+	Short:   "Start the refinery",
 	Long: `Start the Refinery for a rig.
 
 Launches the merge queue processor which monitors for polecat work branches
@@ -167,6 +168,43 @@ Examples:
 
 var refineryUnclaimedJSON bool
 
+var refineryReadyCmd = &cobra.Command{
+	Use:   "ready [rig]",
+	Short: "List MRs ready for processing (unclaimed and unblocked)",
+	Long: `List merge requests ready for processing.
+
+Shows MRs that are:
+- Not currently claimed by any worker (or claim is stale)
+- Not blocked by an open task (e.g., conflict resolution in progress)
+
+This is the preferred command for finding work to process.
+
+Examples:
+  gt refinery ready
+  gt refinery ready --json`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runRefineryReady,
+}
+
+var refineryReadyJSON bool
+
+var refineryBlockedCmd = &cobra.Command{
+	Use:   "blocked [rig]",
+	Short: "List MRs blocked by open tasks",
+	Long: `List merge requests blocked by open tasks.
+
+Shows MRs waiting for conflict resolution or other blocking tasks to complete.
+When the blocking task closes, the MR will appear in 'ready'.
+
+Examples:
+  gt refinery blocked
+  gt refinery blocked --json`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runRefineryBlocked,
+}
+
+var refineryBlockedJSON bool
+
 func init() {
 	// Start flags
 	refineryStartCmd.Flags().BoolVar(&refineryForeground, "foreground", false, "Run in foreground (default: background)")
@@ -180,6 +218,12 @@ func init() {
 	// Unclaimed flags
 	refineryUnclaimedCmd.Flags().BoolVar(&refineryUnclaimedJSON, "json", false, "Output as JSON")
 
+	// Ready flags
+	refineryReadyCmd.Flags().BoolVar(&refineryReadyJSON, "json", false, "Output as JSON")
+
+	// Blocked flags
+	refineryBlockedCmd.Flags().BoolVar(&refineryBlockedJSON, "json", false, "Output as JSON")
+
 	// Add subcommands
 	refineryCmd.AddCommand(refineryStartCmd)
 	refineryCmd.AddCommand(refineryStopCmd)
@@ -190,6 +234,8 @@ func init() {
 	refineryCmd.AddCommand(refineryClaimCmd)
 	refineryCmd.AddCommand(refineryReleaseCmd)
 	refineryCmd.AddCommand(refineryUnclaimedCmd)
+	refineryCmd.AddCommand(refineryReadyCmd)
+	refineryCmd.AddCommand(refineryBlockedCmd)
 
 	rootCmd.AddCommand(refineryCmd)
 }
@@ -566,6 +612,97 @@ func runRefineryUnclaimed(cmd *cobra.Command, args []string) error {
 		priority := fmt.Sprintf("P%d", mr.Priority)
 		fmt.Printf("  %d. [%s] %s → %s\n", i+1, priority, mr.Branch, mr.Target)
 		fmt.Printf("     ID: %s  Worker: %s\n", mr.ID, mr.Worker)
+	}
+
+	return nil
+}
+
+func runRefineryReady(cmd *cobra.Command, args []string) error {
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
+
+	_, r, rigName, err := getRefineryManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	// Create engineer for the rig (it has beads access for status checking)
+	eng := refinery.NewEngineer(r)
+
+	// Get ready MRs (unclaimed AND unblocked)
+	ready, err := eng.ListReadyMRs()
+	if err != nil {
+		return fmt.Errorf("listing ready MRs: %w", err)
+	}
+
+	// JSON output
+	if refineryReadyJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(ready)
+	}
+
+	// Human-readable output
+	fmt.Printf("%s Ready MRs for '%s':\n\n", style.Bold.Render("🚀"), rigName)
+
+	if len(ready) == 0 {
+		fmt.Printf("  %s\n", style.Dim.Render("(none ready)"))
+		return nil
+	}
+
+	for i, mr := range ready {
+		priority := fmt.Sprintf("P%d", mr.Priority)
+		fmt.Printf("  %d. [%s] %s → %s\n", i+1, priority, mr.Branch, mr.Target)
+		fmt.Printf("     ID: %s  Worker: %s\n", mr.ID, mr.Worker)
+	}
+
+	return nil
+}
+
+func runRefineryBlocked(cmd *cobra.Command, args []string) error {
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
+
+	_, r, rigName, err := getRefineryManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	// Create engineer for the rig (it has beads access for status checking)
+	eng := refinery.NewEngineer(r)
+
+	// Get blocked MRs
+	blocked, err := eng.ListBlockedMRs()
+	if err != nil {
+		return fmt.Errorf("listing blocked MRs: %w", err)
+	}
+
+	// JSON output
+	if refineryBlockedJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(blocked)
+	}
+
+	// Human-readable output
+	fmt.Printf("%s Blocked MRs for '%s':\n\n", style.Bold.Render("🚧"), rigName)
+
+	if len(blocked) == 0 {
+		fmt.Printf("  %s\n", style.Dim.Render("(none blocked)"))
+		return nil
+	}
+
+	for i, mr := range blocked {
+		priority := fmt.Sprintf("P%d", mr.Priority)
+		fmt.Printf("  %d. [%s] %s → %s\n", i+1, priority, mr.Branch, mr.Target)
+		fmt.Printf("     ID: %s  Worker: %s\n", mr.ID, mr.Worker)
+		if mr.BlockedBy != "" {
+			fmt.Printf("     Blocked by: %s\n", mr.BlockedBy)
+		}
 	}
 
 	return nil

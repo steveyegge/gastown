@@ -144,14 +144,18 @@ func NewReplyMessage(from, to, subject, body string, original *Message) *Message
 // generateID creates a random message ID.
 func generateID() string {
 	b := make([]byte, 8)
-	_, _ = rand.Read(b) // crypto/rand.Read only fails on broken system
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand.Read failed: " + err.Error())
+	}
 	return "msg-" + hex.EncodeToString(b)
 }
 
 // generateThreadID creates a random thread ID.
 func generateThreadID() string {
 	b := make([]byte, 6)
-	_, _ = rand.Read(b) // crypto/rand.Read only fails on broken system
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand.Read failed: " + err.Error())
+	}
 	return "thread-" + hex.EncodeToString(b)
 }
 

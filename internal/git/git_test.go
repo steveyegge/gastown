@@ -41,6 +41,53 @@ func initTestRepo(t *testing.T) string {
 	return dir
 }
 
+func TestIsRepo(t *testing.T) {
+	dir := t.TempDir()
+	g := NewGit(dir)
+
+	if g.IsRepo() {
+		t.Fatal("expected IsRepo to be false for empty dir")
+	}
+
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
+	if !g.IsRepo() {
+		t.Fatal("expected IsRepo to be true after git init")
+	}
+}
+
+func TestCloneWithReferenceCreatesAlternates(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src")
+	dst := filepath.Join(tmp, "dst")
+
+	if err := exec.Command("git", "init", src).Run(); err != nil {
+		t.Fatalf("init src: %v", err)
+	}
+	_ = exec.Command("git", "-C", src, "config", "user.email", "test@test.com").Run()
+	_ = exec.Command("git", "-C", src, "config", "user.name", "Test User").Run()
+
+	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	_ = exec.Command("git", "-C", src, "add", ".").Run()
+	_ = exec.Command("git", "-C", src, "commit", "-m", "initial").Run()
+
+	g := NewGit(tmp)
+	if err := g.CloneWithReference(src, dst, src); err != nil {
+		t.Fatalf("CloneWithReference: %v", err)
+	}
+
+	alternates := filepath.Join(dst, ".git", "objects", "info", "alternates")
+	if _, err := os.Stat(alternates); err != nil {
+		t.Fatalf("expected alternates file: %v", err)
+	}
+}
+
 func TestCurrentBranch(t *testing.T) {
 	dir := initTestRepo(t)
 	g := NewGit(dir)

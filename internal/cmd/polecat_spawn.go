@@ -76,7 +76,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	}
 	fmt.Printf("Allocated polecat: %s\n", polecatName)
 
-	// Check if polecat already exists (shouldn't, since we allocated fresh)
+	// Check if polecat already exists (shouldn't happen - indicates stale state needing repair)
 	existingPolecat, err := polecatMgr.Get(polecatName)
 
 	// Build add options with hook_bead set atomically at spawn time
@@ -85,7 +85,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	}
 
 	if err == nil {
-		// Exists - recreate with fresh worktree
+		// Stale state: polecat exists despite fresh name allocation - repair it
 		// Check for uncommitted work first
 		if !opts.Force {
 			pGit := git.NewGit(existingPolecat.ClonePath)
@@ -95,9 +95,9 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 					polecatName, workStatus.String())
 			}
 		}
-		fmt.Printf("Recreating polecat %s with fresh worktree...\n", polecatName)
-		if _, err = polecatMgr.RecreateWithOptions(polecatName, opts.Force, addOpts); err != nil {
-			return nil, fmt.Errorf("recreating polecat: %w", err)
+		fmt.Printf("Repairing stale polecat %s with fresh worktree...\n", polecatName)
+		if _, err = polecatMgr.RepairWorktreeWithOptions(polecatName, opts.Force, addOpts); err != nil {
+			return nil, fmt.Errorf("repairing stale polecat: %w", err)
 		}
 	} else if err == polecat.ErrPolecatNotFound {
 		// Create new polecat
@@ -122,7 +122,9 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		fmt.Printf("Polecat created. Agent must be started manually.\n\n")
 		fmt.Printf("To start the agent:\n")
 		fmt.Printf("  cd %s\n", polecatObj.ClonePath)
-		fmt.Printf("  claude --dangerously-skip-permissions\n\n")
+		// Use rig's configured agent command
+		agentCmd := config.ResolveAgentConfig(townRoot, r.Path).BuildCommand()
+		fmt.Printf("  %s\n\n", agentCmd)
 		fmt.Printf("Agent will discover work via gt prime on startup.\n")
 
 		return &SpawnedPolecatInfo{

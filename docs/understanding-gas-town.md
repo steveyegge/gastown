@@ -27,7 +27,7 @@ These roles manage the Gas Town system itself:
 | Role | Description | Lifecycle |
 |------|-------------|-----------|
 | **Mayor** | Global coordinator at town root | Singleton, persistent |
-| **Deacon** | Background supervisor daemon | Singleton, persistent |
+| **Deacon** | Background supervisor daemon ([watchdog chain](watchdog-chain.md)) | Singleton, persistent |
 | **Witness** | Per-rig polecat lifecycle manager | One per rig, persistent |
 | **Refinery** | Per-rig merge queue processor | One per rig, persistent |
 
@@ -37,7 +37,7 @@ These roles do actual project work:
 
 | Role | Description | Lifecycle |
 |------|-------------|-----------|
-| **Polecat** | Ephemeral worker with own worktree | Transient, Witness-managed |
+| **Polecat** | Ephemeral worker with own worktree | Transient, Witness-managed ([details](polecat-lifecycle.md)) |
 | **Crew** | Persistent worker with own clone | Long-lived, user-managed |
 | **Dog** | Deacon helper for infrastructure tasks | Ephemeral, Deacon-managed |
 

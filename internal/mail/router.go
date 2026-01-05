@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -183,7 +184,7 @@ func detectTownRoot(startDir string) string {
 // - Rig-level beads ({rig}/.beads) are for project issues only, not mail
 //
 // This ensures messages are visible to all agents in the town.
-func (r *Router) resolveBeadsDir(address string) string {
+func (r *Router) resolveBeadsDir(_ string) string { // address unused: all mail uses town-level beads
 	// If no town root, fall back to workDir's .beads
 	if r.townRoot == "" {
 		return filepath.Join(r.workDir, ".beads")
@@ -621,7 +622,7 @@ func (r *Router) sendToSingle(msg *Message) error {
 	}
 
 	beadsDir := r.resolveBeadsDir(msg.To)
-	cmd := exec.Command("bd", args...)
+	cmd := exec.Command("bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Env = append(cmd.Environ(),
 		"BEADS_DIR="+beadsDir,
 	)
@@ -743,7 +744,7 @@ func (r *Router) sendToQueue(msg *Message) error {
 
 	// Queue messages go to town-level beads (shared location)
 	beadsDir := r.resolveBeadsDir("")
-	cmd := exec.Command("bd", args...)
+	cmd := exec.Command("bd", args...) //nolint:gosec // G204: args are constructed internally, not from user input
 	cmd.Env = append(cmd.Environ(),
 		"BEADS_DIR="+beadsDir,
 	)
@@ -826,7 +827,7 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 
 	// Announce messages go to town-level beads (shared location)
 	beadsDir := r.resolveBeadsDir("")
-	cmd := exec.Command("bd", args...)
+	cmd := exec.Command("bd", args...) //nolint:gosec // G204: args are constructed internally, not from user input
 	cmd.Env = append(cmd.Environ(),
 		"BEADS_DIR="+beadsDir,
 	)
@@ -868,7 +869,7 @@ func (r *Router) pruneAnnounce(announceName string, retainCount int) error {
 		"--asc", // Oldest first
 	}
 
-	cmd := exec.Command("bd", args...)
+	cmd := exec.Command("bd", args...) //nolint:gosec // G204: args are constructed internally
 	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 	cmd.Dir = filepath.Dir(beadsDir)
 
@@ -903,7 +904,7 @@ func (r *Router) pruneAnnounce(announceName string, retainCount int) error {
 	// Delete oldest messages
 	for i := 0; i < toDelete && i < len(messages); i++ {
 		deleteArgs := []string{"close", messages[i].ID, "--reason=retention pruning"}
-		deleteCmd := exec.Command("bd", deleteArgs...)
+		deleteCmd := exec.Command("bd", deleteArgs...) //nolint:gosec // G204: args are constructed internally
 		deleteCmd.Env = append(deleteCmd.Environ(), "BEADS_DIR="+beadsDir)
 		deleteCmd.Dir = filepath.Dir(beadsDir)
 
@@ -954,7 +955,12 @@ func (r *Router) notifyRecipient(msg *Message) error {
 func addressToSessionID(address string) string {
 	// Mayor address: "mayor/" or "mayor"
 	if strings.HasPrefix(address, "mayor") {
-		return "gt-mayor"
+		return session.MayorSessionName()
+	}
+
+	// Deacon address: "deacon/" or "deacon"
+	if strings.HasPrefix(address, "deacon") {
+		return session.DeaconSessionName()
 	}
 
 	// Rig-based address: "rig/target"

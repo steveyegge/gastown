@@ -16,7 +16,7 @@ Multi-agent orchestrator for Claude Code. Track work with convoys; sling to agen
 - **Go 1.23+** - [go.dev/dl](https://go.dev/dl/)
 - **Git 2.25+** - for worktree support
 - **beads (bd)** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads) - required for issue tracking
-- **tmux 3.0+** - for full stack mode (optional for minimal mode)
+- **tmux 3.0+** - recommended for the full experience (the Mayor session is the primary interface)
 - **Claude Code CLI** - [claude.ai/code](https://claude.ai/code)
 
 ## Quick Start
@@ -25,30 +25,58 @@ Multi-agent orchestrator for Claude Code. Track work with convoys; sling to agen
 # Install
 go install github.com/steveyegge/gastown/cmd/gt@latest
 
-# Create workspace
-gt install ~/gt
+# Ensure Go binaries are in your PATH (add to ~/.zshrc or ~/.bashrc)
+export PATH="$PATH:$HOME/go/bin"
+
+# Create workspace (--git auto-initializes git repository)
+gt install ~/gt --git
+cd ~/gt
 
 # Add a project
 gt rig add myproject https://github.com/you/repo.git
 
-# Create a convoy and sling work (standard workflow)
+# Create your personal workspace
+gt crew add <yourname> --rig myproject
+
+# Start working
+cd myproject/crew/<yourname>
+```
+
+For advanced multi-agent coordination, use the Mayor session:
+
+```bash
+gt mayor attach                        # Enter the Mayor's office
+```
+
+Inside the Mayor session, you're talking to Claude with full town context:
+
+> "Help me fix the authentication bug in myproject"
+
+The Mayor will create convoys, dispatch workers, and coordinate everything. You can also run CLI commands directly:
+
+```bash
+# Create a convoy and sling work (CLI workflow)
 gt convoy create "Feature X" issue-123 issue-456 --notify --human
 gt sling issue-123 myproject
-gt sling issue-456 myproject
 
-# Track progress on dashboard
+# Track progress
 gt convoy list
+
+# Switch between agent sessions
+gt agents
 ```
 
 ## Core Concepts
 
+**The Mayor** is your AI coordinator. It's Claude Code with full context about your workspace, projects, and agents. The Mayor session (`gt prime`) is the primary way to interact with Gas Town - just tell it what you want to accomplish.
+
 ```
 Town (~/gt/)              Your workspace
+├── Mayor                 Your AI coordinator (start here)
 ├── Rig (project)         Container for a git project + its agents
 │   ├── Polecats          Workers (ephemeral, spawn → work → disappear)
 │   ├── Witness           Monitors workers, handles lifecycle
 │   └── Refinery          Merge queue processor
-└── Mayor                 Global coordinator
 ```
 
 **Hook**: Each agent has a hook where work hangs. On wake, run what's on your hook.
@@ -56,6 +84,26 @@ Town (~/gt/)              Your workspace
 **Beads**: Git-backed issue tracker. All work state lives here. [github.com/steveyegge/beads](https://github.com/steveyegge/beads)
 
 ## Workflows
+
+### Full Stack (Recommended)
+
+The primary Gas Town experience. Agents run in tmux sessions with the Mayor as your interface.
+
+```bash
+gt start                               # Start Gas Town (daemon + Mayor session)
+gt mayor attach                        # Enter Mayor session
+
+# Inside Mayor session, just ask:
+# "Create a convoy for issues 123 and 456 in myproject"
+# "What's the status of my work?"
+# "Show me what the witness is doing"
+
+# Or use CLI commands:
+gt convoy create "Feature X" issue-123 issue-456
+gt sling issue-123 myproject           # Spawns polecat automatically
+gt convoy list                         # Dashboard view
+gt agents                              # Navigate between sessions
+```
 
 ### Minimal (No Tmux)
 
@@ -66,18 +114,6 @@ gt convoy create "Fix bugs" issue-123  # Create convoy (sling auto-creates if sk
 gt sling issue-123 myproject           # Assign to worker
 claude --resume                        # Agent reads mail, runs work
 gt convoy list                         # Check progress
-```
-
-### Full Stack (Tmux)
-
-Agents run in tmux sessions. Daemon manages lifecycle.
-
-```bash
-gt daemon start                        # Start lifecycle manager
-gt convoy create "Feature X" issue-123 issue-456
-gt sling issue-123 myproject           # Spawns polecat automatically
-gt sling issue-456 myproject           # Another worker
-gt convoy list                         # Dashboard view
 ```
 
 ### Pick Your Roles
@@ -199,6 +235,22 @@ gt <role> attach                  # Jump into any agent session
                                   # e.g., gt mayor attach, gt witness attach
 ```
 
+### Configuration
+
+```bash
+gt config agent list [--json]     # List all agents (built-in + custom)
+gt config agent get <name>        # Show agent configuration
+gt config agent set <name> <cmd>  # Create or update custom agent
+gt config agent remove <name>     # Remove custom agent (built-ins protected)
+gt config default-agent [name]    # Get or set town default agent
+```
+
+**Example**: Use a cheaper model for most work:
+```bash
+gt config agent set claude-glm "claude-glm --model glm-4"
+gt config default-agent claude-glm
+```
+
 Most other work happens through agents - just ask them.
 
 ### For Agents
@@ -225,6 +277,63 @@ gt peek <agent>                   # Check agent health
 # Diagnostics
 gt doctor                         # Health check
 gt doctor --fix                   # Auto-repair
+```
+
+## Dashboard
+
+Web-based dashboard for monitoring Gas Town activity.
+
+```bash
+# Start the dashboard
+gt dashboard --port 8080
+
+# Open in browser
+open http://localhost:8080
+```
+
+**Features:**
+- **Convoy tracking** - View all active convoys with progress bars and work status
+- **Polecat workers** - See active worker sessions and their activity status
+- **Refinery status** - Monitor merge queue and PR processing
+- **Auto-refresh** - Updates every 10 seconds via htmx
+
+Work status indicators:
+| Status | Color | Meaning |
+|--------|-------|---------|
+| `complete` | Green | All tracked items done |
+| `active` | Green | Recent activity (< 1 min) |
+| `stale` | Yellow | Activity 1-5 min ago |
+| `stuck` | Red | Activity > 5 min ago |
+| `waiting` | Gray | No assignee/activity |
+
+## Shell Completions
+
+Enable tab completion for `gt` commands:
+
+### Bash
+
+```bash
+# Add to ~/.bashrc
+source <(gt completion bash)
+
+# Or install permanently
+gt completion bash > /usr/local/etc/bash_completion.d/gt
+```
+
+### Zsh
+
+```bash
+# Add to ~/.zshrc (before compinit)
+source <(gt completion zsh)
+
+# Or install to fpath
+gt completion zsh > "${fpath[1]}/_gt"
+```
+
+### Fish
+
+```bash
+gt completion fish > ~/.config/fish/completions/gt.fish
 ```
 
 ## Roles

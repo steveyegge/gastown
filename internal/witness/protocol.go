@@ -45,10 +45,11 @@ const (
 // PolecatDonePayload contains parsed data from a POLECAT_DONE message.
 type PolecatDonePayload struct {
 	PolecatName string
-	Exit        string // MERGED, ESCALATED, DEFERRED
+	Exit        string // COMPLETED, ESCALATED, DEFERRED, PHASE_COMPLETE
 	IssueID     string
 	MRID        string
 	Branch      string
+	Gate        string // Gate ID when Exit is PHASE_COMPLETE
 }
 
 // HelpPayload contains parsed data from a HELP message.
@@ -101,9 +102,10 @@ func ClassifyMessage(subject string) ProtocolType {
 // Subject format: POLECAT_DONE <polecat-name>
 // Body format:
 //
-//	Exit: MERGED|ESCALATED|DEFERRED
+//	Exit: COMPLETED|ESCALATED|DEFERRED|PHASE_COMPLETE
 //	Issue: <issue-id>
 //	MR: <mr-id>
+//	Gate: <gate-id>
 //	Branch: <branch>
 func ParsePolecatDone(subject, body string) (*PolecatDonePayload, error) {
 	matches := PatternPolecatDone.FindStringSubmatch(subject)
@@ -124,6 +126,8 @@ func ParsePolecatDone(subject, body string) (*PolecatDonePayload, error) {
 			payload.IssueID = strings.TrimSpace(strings.TrimPrefix(line, "Issue:"))
 		} else if strings.HasPrefix(line, "MR:") {
 			payload.MRID = strings.TrimSpace(strings.TrimPrefix(line, "MR:"))
+		} else if strings.HasPrefix(line, "Gate:") {
+			payload.Gate = strings.TrimSpace(strings.TrimPrefix(line, "Gate:"))
 		} else if strings.HasPrefix(line, "Branch:") {
 			payload.Branch = strings.TrimSpace(strings.TrimPrefix(line, "Branch:"))
 		}
@@ -217,7 +221,7 @@ func ParseSwarmStart(body string) (*SwarmStartPayload, error) {
 		if strings.HasPrefix(line, "SwarmID:") || strings.HasPrefix(line, "swarm_id:") {
 			payload.SwarmID = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "SwarmID:"), "swarm_id:"))
 		} else if strings.HasPrefix(line, "Total:") {
-			fmt.Sscanf(line, "Total: %d", &payload.Total)
+			_, _ = fmt.Sscanf(line, "Total: %d", &payload.Total)
 		}
 	}
 

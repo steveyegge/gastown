@@ -12,7 +12,7 @@ They execute molecule steps sequentially, closing each step as they complete it.
 | Type | Storage | Use Case |
 |------|---------|----------|
 | **Regular Molecule** | `.beads/` (synced) | Discrete deliverables, audit trail |
-| **Wisp** | `.beads-wisp/` (ephemeral) | Patrol cycles, operational loops |
+| **Wisp** | `.beads/` (ephemeral, type=wisp) | Patrol cycles, operational loops |
 
 Polecats typically use **regular molecules** because each assignment has audit value.
 Patrol agents (Witness, Refinery, Deacon) use **wisps** to prevent accumulation.

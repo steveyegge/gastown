@@ -22,9 +22,12 @@ func TestRenderRole_Mayor(t *testing.T) {
 	}
 
 	data := RoleData{
-		Role:     "mayor",
-		TownRoot: "/test/town",
-		WorkDir:  "/test/town",
+		Role:          "mayor",
+		TownRoot:      "/test/town",
+		TownName:      "town",
+		WorkDir:       "/test/town",
+		MayorSession:  "gt-town-mayor",
+		DeaconSession: "gt-town-deacon",
 	}
 
 	output, err := tmpl.RenderRole("mayor", data)
@@ -51,11 +54,14 @@ func TestRenderRole_Polecat(t *testing.T) {
 	}
 
 	data := RoleData{
-		Role:     "polecat",
-		RigName:  "myrig",
-		TownRoot: "/test/town",
-		WorkDir:  "/test/town/myrig/polecats/TestCat",
-		Polecat:  "TestCat",
+		Role:          "polecat",
+		RigName:       "myrig",
+		TownRoot:      "/test/town",
+		TownName:      "town",
+		WorkDir:       "/test/town/myrig/polecats/TestCat",
+		Polecat:       "TestCat",
+		MayorSession:  "gt-town-mayor",
+		DeaconSession: "gt-town-deacon",
 	}
 
 	output, err := tmpl.RenderRole("polecat", data)
@@ -82,9 +88,12 @@ func TestRenderRole_Deacon(t *testing.T) {
 	}
 
 	data := RoleData{
-		Role:     "deacon",
-		TownRoot: "/test/town",
-		WorkDir:  "/test/town",
+		Role:          "deacon",
+		TownRoot:      "/test/town",
+		TownName:      "town",
+		WorkDir:       "/test/town",
+		MayorSession:  "gt-town-mayor",
+		DeaconSession: "gt-town-deacon",
 	}
 
 	output, err := tmpl.RenderRole("deacon", data)
@@ -185,6 +194,54 @@ func TestRoleNames(t *testing.T) {
 	for i, name := range names {
 		if name != expected[i] {
 			t.Errorf("RoleNames()[%d] = %q, want %q", i, name, expected[i])
+		}
+	}
+}
+
+func TestGetAllRoleTemplates(t *testing.T) {
+	templates, err := GetAllRoleTemplates()
+	if err != nil {
+		t.Fatalf("GetAllRoleTemplates() error = %v", err)
+	}
+
+	if len(templates) == 0 {
+		t.Fatal("GetAllRoleTemplates() returned empty map")
+	}
+
+	expectedFiles := []string{
+		"deacon.md.tmpl",
+		"witness.md.tmpl",
+		"refinery.md.tmpl",
+		"mayor.md.tmpl",
+		"polecat.md.tmpl",
+		"crew.md.tmpl",
+	}
+
+	for _, file := range expectedFiles {
+		content, ok := templates[file]
+		if !ok {
+			t.Errorf("GetAllRoleTemplates() missing %s", file)
+			continue
+		}
+		if len(content) == 0 {
+			t.Errorf("GetAllRoleTemplates()[%s] has empty content", file)
+		}
+	}
+}
+
+func TestGetAllRoleTemplates_ContentValidity(t *testing.T) {
+	templates, err := GetAllRoleTemplates()
+	if err != nil {
+		t.Fatalf("GetAllRoleTemplates() error = %v", err)
+	}
+
+	for name, content := range templates {
+		if !strings.HasSuffix(name, ".md.tmpl") {
+			t.Errorf("unexpected file %s (should end with .md.tmpl)", name)
+		}
+		contentStr := string(content)
+		if !strings.Contains(contentStr, "Context") {
+			t.Errorf("%s doesn't contain 'Context' - may not be a valid role template", name)
 		}
 	}
 }

@@ -226,7 +226,7 @@ func runFeedTUI(workDir string) error {
 
 	// Combine all sources
 	multiSource := feed.NewMultiSource(sources...)
-	defer multiSource.Close()
+	defer func() { _ = multiSource.Close() }()
 
 	// Create model and connect event source
 	m := feed.NewModel()
@@ -305,7 +305,7 @@ func runFeedInWindow(workDir string, bdArgs []string) error {
 
 // windowExists checks if a window with the given name exists in the session.
 // Note: getCurrentTmuxSession is defined in handoff.go
-func windowExists(t *tmux.Tmux, session, windowName string) (bool, error) {
+func windowExists(_ *tmux.Tmux, session, windowName string) (bool, error) { // t unused: direct exec for simplicity
 	cmd := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_name}")
 	out, err := cmd.Output()
 	if err != nil {
@@ -321,14 +321,14 @@ func windowExists(t *tmux.Tmux, session, windowName string) (bool, error) {
 }
 
 // createWindow creates a new tmux window with the given name and command.
-func createWindow(t *tmux.Tmux, session, windowName, workDir, command string) error {
+func createWindow(_ *tmux.Tmux, session, windowName, workDir, command string) error { // t unused: direct exec for simplicity
 	args := []string{"new-window", "-t", session, "-n", windowName, "-c", workDir, command}
 	cmd := exec.Command("tmux", args...)
 	return cmd.Run()
 }
 
 // selectWindow switches to the specified window.
-func selectWindow(t *tmux.Tmux, target string) error {
+func selectWindow(_ *tmux.Tmux, target string) error { // t unused: direct exec for simplicity
 	cmd := exec.Command("tmux", "select-window", "-t", target)
 	return cmd.Run()
 }

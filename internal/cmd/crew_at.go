@@ -52,8 +52,8 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting crew worker: %w", err)
 	}
 
-	// Ensure crew workspace is on main branch (persistent roles should not use feature branches)
-	ensureMainBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", r.Name, name))
+	// Ensure crew workspace is on default branch (persistent roles should not use feature branches)
+	ensureDefaultBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", r.Name, name), r.Path)
 
 	// If --no-tmux, just print the path
 	if crewNoTmux {
@@ -183,10 +183,11 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 
 	// Check if we're already in the target session
 	if isInTmuxSession(sessionID) {
-		// We're in the session at a shell prompt - just start Claude directly
-		// Pass "gt prime" as initial prompt so Claude loads context immediately
-		fmt.Printf("Starting Claude in current session...\n")
-		return execClaude("gt prime")
+		// We're in the session at a shell prompt - just start the agent directly
+		// Pass "gt prime" as initial prompt so it loads context immediately
+		agentCfg := config.ResolveAgentConfig(townRoot, r.Path)
+		fmt.Printf("Starting %s in current session...\n", agentCfg.Command)
+		return execAgent(agentCfg, "gt prime")
 	}
 
 	// If inside tmux (but different session), don't switch - just inform user

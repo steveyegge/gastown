@@ -3,6 +3,7 @@ package beads
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -158,6 +159,17 @@ func TestIntegration(t *testing.T) {
 	}
 
 	b := New(dir)
+
+	// Sync database with JSONL before testing to avoid "Database out of sync" errors.
+	// This can happen when JSONL is updated (e.g., by git pull) but the SQLite database
+	// hasn't been imported yet. Running sync --import-only ensures we test against
+	// consistent data and prevents flaky test failures.
+	syncCmd := exec.Command("bd", "--no-daemon", "sync", "--import-only")
+	syncCmd.Dir = dir
+	if err := syncCmd.Run(); err != nil {
+		// If sync fails (e.g., no database exists), just log and continue
+		t.Logf("bd sync --import-only failed (may not have db): %v", err)
+	}
 
 	// Test List
 	t.Run("List", func(t *testing.T) {

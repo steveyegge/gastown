@@ -117,7 +117,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("starting daemon: %w", err)
 	}
 
-	// Wait a moment for the daemon to initialize
+	// Wait a moment for the daemon to initialize and acquire the lock
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify it started
@@ -127,6 +127,15 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	}
 	if !running {
 		return fmt.Errorf("daemon failed to start (check logs with 'gt daemon logs')")
+	}
+
+	// Check if our spawned process is the one that won the race.
+	// If another concurrent start won, our process would have exited after
+	// failing to acquire the lock, and the PID file would have a different PID.
+	if pid != daemonCmd.Process.Pid {
+		// Another daemon won the race - that's fine, report it
+		fmt.Printf("%s Daemon already running (PID %d)\n", style.Bold.Render("●"), pid)
+		return nil
 	}
 
 	fmt.Printf("%s Daemon started (PID %d)\n", style.Bold.Render("✓"), pid)
@@ -181,6 +190,16 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 					state.LastHeartbeat.Format("15:04:05"),
 					state.HeartbeatCount)
 			}
+
+			// Check if binary is newer than process
+			if binaryModTime, err := getBinaryModTime(); err == nil {
+				fmt.Printf("  Binary: %s\n", binaryModTime.Format("2006-01-02 15:04:05"))
+				if binaryModTime.After(state.StartedAt) {
+					fmt.Printf("  %s Binary is newer than process - consider '%s'\n",
+						style.Bold.Render("⚠"),
+						style.Dim.Render("gt daemon stop && gt daemon start"))
+				}
+			}
 		}
 	} else {
 		fmt.Printf("%s Daemon is %s\n",
@@ -190,6 +209,19 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// getBinaryModTime returns the modification time of the current executable
+func getBinaryModTime() (time.Time, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return time.Time{}, err
+	}
+	info, err := os.Stat(exePath)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
 }
 
 func runDaemonLogs(cmd *cobra.Command, args []string) error {

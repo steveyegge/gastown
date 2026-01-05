@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // townCycleSession is the --session flag for town next/prev commands.
@@ -13,9 +14,28 @@ import (
 // correct, so we pass the session name explicitly via #{session_name} expansion.
 var townCycleSession string
 
-// Town-level sessions that participate in cycling (mayor, deacon).
-// These are the session names without the "gt-" prefix.
-var townLevelSessions = []string{"gt-mayor", "gt-deacon"}
+// getTownLevelSessions returns the town-level session names for the current workspace.
+func getTownLevelSessions() []string {
+	mayorSession := getMayorSessionName()
+	deaconSession := getDeaconSessionName()
+	return []string{mayorSession, deaconSession}
+}
+
+// isTownLevelSession checks if the given session name is a town-level session.
+func isTownLevelSession(sessionName string) bool {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return false
+	}
+	townName, err := workspace.GetTownName(townRoot)
+	if err != nil {
+		return false
+	}
+	mayorSession := getMayorSessionName()
+	deaconSession := getDeaconSessionName()
+	_ = townName // used for session name generation
+	return sessionName == mayorSession || sessionName == deaconSession
+}
 
 func init() {
 	rootCmd.AddCommand(townCmd)
@@ -78,15 +98,7 @@ func cycleTownSession(direction int, sessionOverride string) error {
 	}
 
 	// Check if current session is a town-level session
-	isTownSession := false
-	for _, s := range townLevelSessions {
-		if s == currentSession {
-			isTownSession = true
-			break
-		}
-	}
-
-	if !isTownSession {
+	if !isTownLevelSession(currentSession) {
 		// Not a town session - no cycling, just stay put
 		return nil
 	}
@@ -143,6 +155,12 @@ func findRunningTownSessions() ([]string, error) {
 	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
 	if err != nil {
 		return nil, fmt.Errorf("listing tmux sessions: %w", err)
+	}
+
+	// Get town-level session names
+	townLevelSessions := getTownLevelSessions()
+	if townLevelSessions == nil {
+		return nil, fmt.Errorf("cannot determine town-level sessions")
 	}
 
 	var running []string

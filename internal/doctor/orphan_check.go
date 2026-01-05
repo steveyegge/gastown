@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -55,24 +56,28 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 	// Get list of valid rigs
 	validRigs := c.getValidRigs(ctx.TownRoot)
 
+	// Get session names for mayor/deacon
+	mayorSession := session.MayorSessionName()
+	deaconSession := session.DeaconSessionName()
+
 	// Check each session
 	var orphans []string
 	var validCount int
 
-	for _, session := range sessions {
-		if session == "" {
+	for _, sess := range sessions {
+		if sess == "" {
 			continue
 		}
 
 		// Only check gt-* sessions (Gas Town sessions)
-		if !strings.HasPrefix(session, "gt-") {
+		if !strings.HasPrefix(sess, "gt-") {
 			continue
 		}
 
-		if c.isValidSession(session, validRigs) {
+		if c.isValidSession(sess, validRigs, mayorSession, deaconSession) {
 			validCount++
 		} else {
-			orphans = append(orphans, session)
+			orphans = append(orphans, sess)
 		}
 	}
 
@@ -166,27 +171,27 @@ func (c *OrphanSessionCheck) getValidRigs(townRoot string) []string {
 
 // isValidSession checks if a session name matches expected Gas Town patterns.
 // Valid patterns:
-//   - gt-mayor
-//   - gt-deacon
+//   - gt-{town}-mayor (dynamic based on town name)
+//   - gt-{town}-deacon (dynamic based on town name)
 //   - gt-<rig>-witness
 //   - gt-<rig>-refinery
 //   - gt-<rig>-<polecat> (where polecat is any name)
 //
 // Note: We can't verify polecat names without reading state, so we're permissive.
-func (c *OrphanSessionCheck) isValidSession(session string, validRigs []string) bool {
-	// gt-mayor is always valid
-	if session == "gt-mayor" {
+func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, mayorSession, deaconSession string) bool {
+	// Mayor session is always valid (dynamic name based on town)
+	if mayorSession != "" && sess == mayorSession {
 		return true
 	}
 
-	// gt-deacon is always valid
-	if session == "gt-deacon" {
+	// Deacon session is always valid (dynamic name based on town)
+	if deaconSession != "" && sess == deaconSession {
 		return true
 	}
 
 	// For rig-specific sessions, extract rig name
 	// Pattern: gt-<rig>-<role>
-	parts := strings.SplitN(session, "-", 3)
+	parts := strings.SplitN(sess, "-", 3)
 	if len(parts) < 3 {
 		// Invalid format - must be gt-<rig>-<something>
 		return false
@@ -395,7 +400,7 @@ func (c *OrphanProcessCheck) hasCrewAncestor(pid int, crewPanePIDs map[int]bool)
 		}
 
 		// Get parent PID
-		out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", currentPID), "-o", "ppid=").Output()
+		out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", currentPID), "-o", "ppid=").Output() //nolint:gosec // G204: PID is numeric from internal state
 		if err != nil {
 			break
 		}
@@ -417,7 +422,7 @@ type processInfo struct {
 }
 
 // getTmuxSessionPIDs returns PIDs of all tmux server processes and pane shell PIDs.
-func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) {
+func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //nolint:unparam // error return kept for future use
 	// Get tmux server PID and all pane PIDs
 	pids := make(map[int]bool)
 
@@ -529,7 +534,7 @@ func (c *OrphanProcessCheck) isOrphanProcess(proc processInfo, tmuxPIDs map[int]
 		}
 
 		// Get parent's parent
-		out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", currentPPID), "-o", "ppid=").Output()
+		out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", currentPPID), "-o", "ppid=").Output() //nolint:gosec // G204: PID is numeric from internal state
 		if err != nil {
 			break
 		}

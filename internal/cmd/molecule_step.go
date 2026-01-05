@@ -250,7 +250,7 @@ func findNextReadyStep(b *beads.Beads, moleculeID string) (*beads.Issue, bool, e
 }
 
 // handleStepContinue handles continuing to the next step.
-func handleStepContinue(cwd, townRoot, workDir string, nextStep *beads.Issue, dryRun bool) error {
+func handleStepContinue(cwd, townRoot, _ string, nextStep *beads.Issue, dryRun bool) error { // workDir unused but kept for signature consistency
 	fmt.Printf("\n%s Next step: %s\n", style.Bold.Render("→"), nextStep.ID)
 	fmt.Printf("  %s\n", nextStep.Title)
 

@@ -184,7 +184,7 @@ Gas Town is modular. Enable only what you need:
 |--------------|-------|----------|
 | **Polecats only** | Workers | Manual spawning, no monitoring |
 | **+ Witness** | + Monitor | Automatic lifecycle, stuck detection |
-| **+ Refinery** | + Merge queue | PR review, code integration |
+| **+ Refinery** | + Merge queue | MR review, code integration |
 | **+ Mayor** | + Coordinator | Cross-project coordination |
 
 ## Troubleshooting

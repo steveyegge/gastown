@@ -1,7 +1,10 @@
 // Package beads provides field parsing utilities for structured issue descriptions.
 package beads
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Note: AgentFields, ParseAgentFields, FormatAgentDescription, and CreateAgentBead are in beads.go
 
@@ -17,6 +20,7 @@ type AttachmentFields struct {
 	AttachedMolecule string // Root issue ID of the attached molecule
 	AttachedAt       string // ISO 8601 timestamp when attached
 	AttachedArgs     string // Natural language args passed via gt sling --args (no-tmux mode)
+	DispatchedBy     string // Agent ID that dispatched this work (for completion notification)
 }
 
 // ParseAttachmentFields extracts attachment fields from an issue's description.
@@ -58,6 +62,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 		case "attached_args", "attached-args", "attachedargs":
 			fields.AttachedArgs = value
 			hasFields = true
+		case "dispatched_by", "dispatched-by", "dispatchedby":
+			fields.DispatchedBy = value
+			hasFields = true
 		}
 	}
 
@@ -85,6 +92,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	if fields.AttachedArgs != "" {
 		lines = append(lines, "attached_args: "+fields.AttachedArgs)
 	}
+	if fields.DispatchedBy != "" {
+		lines = append(lines, "dispatched_by: "+fields.DispatchedBy)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -104,6 +114,9 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"attached_args":     true,
 		"attached-args":     true,
 		"attachedargs":      true,
+		"dispatched_by":     true,
+		"dispatched-by":     true,
+		"dispatchedby":      true,
 	}
 
 	// Collect non-attachment lines from existing description
@@ -165,6 +178,15 @@ type MRFields struct {
 	MergeCommit string // SHA of merge commit (set on close)
 	CloseReason string // Reason for closing: merged, rejected, conflict, superseded
 	AgentBead   string // Agent bead ID that created this MR (for traceability)
+
+	// Conflict resolution fields (for priority scoring)
+	RetryCount      int    // Number of conflict-resolution cycles
+	LastConflictSHA string // SHA of main when conflict occurred
+	ConflictTaskID  string // Link to conflict-resolution task (if any)
+
+	// Convoy tracking (for priority scoring - convoy starvation prevention)
+	ConvoyID        string // Parent convoy ID if part of a convoy
+	ConvoyCreatedAt string // Convoy creation time (ISO 8601) for starvation prevention
 }
 
 // ParseMRFields extracts structured merge-request fields from an issue's description.
@@ -222,6 +244,23 @@ func ParseMRFields(issue *Issue) *MRFields {
 		case "agent_bead", "agent-bead", "agentbead":
 			fields.AgentBead = value
 			hasFields = true
+		case "retry_count", "retry-count", "retrycount":
+			if n, err := parseIntField(value); err == nil {
+				fields.RetryCount = n
+				hasFields = true
+			}
+		case "last_conflict_sha", "last-conflict-sha", "lastconflictsha":
+			fields.LastConflictSHA = value
+			hasFields = true
+		case "conflict_task_id", "conflict-task-id", "conflicttaskid":
+			fields.ConflictTaskID = value
+			hasFields = true
+		case "convoy_id", "convoy-id", "convoyid", "convoy":
+			fields.ConvoyID = value
+			hasFields = true
+		case "convoy_created_at", "convoy-created-at", "convoycreatedat":
+			fields.ConvoyCreatedAt = value
+			hasFields = true
 		}
 	}
 
@@ -229,6 +268,13 @@ func ParseMRFields(issue *Issue) *MRFields {
 		return nil
 	}
 	return fields
+}
+
+// parseIntField parses an integer from a string, returning 0 on error.
+func parseIntField(s string) (int, error) {
+	var n int
+	_, err := fmt.Sscanf(s, "%d", &n)
+	return n, err
 }
 
 // FormatMRFields formats MRFields as a string suitable for an issue description.
@@ -264,6 +310,21 @@ func FormatMRFields(fields *MRFields) string {
 	if fields.AgentBead != "" {
 		lines = append(lines, "agent_bead: "+fields.AgentBead)
 	}
+	if fields.RetryCount > 0 {
+		lines = append(lines, fmt.Sprintf("retry_count: %d", fields.RetryCount))
+	}
+	if fields.LastConflictSHA != "" {
+		lines = append(lines, "last_conflict_sha: "+fields.LastConflictSHA)
+	}
+	if fields.ConflictTaskID != "" {
+		lines = append(lines, "conflict_task_id: "+fields.ConflictTaskID)
+	}
+	if fields.ConvoyID != "" {
+		lines = append(lines, "convoy_id: "+fields.ConvoyID)
+	}
+	if fields.ConvoyCreatedAt != "" {
+		lines = append(lines, "convoy_created_at: "+fields.ConvoyCreatedAt)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -278,22 +339,38 @@ func SetMRFields(issue *Issue, fields *MRFields) string {
 
 	// Known MR field keys (lowercase)
 	mrKeys := map[string]bool{
-		"branch":       true,
-		"target":       true,
-		"source_issue": true,
-		"source-issue": true,
-		"sourceissue":  true,
-		"worker":       true,
-		"rig":          true,
-		"merge_commit": true,
-		"merge-commit": true,
-		"mergecommit":  true,
-		"close_reason": true,
-		"close-reason": true,
-		"closereason":  true,
-		"agent_bead":   true,
-		"agent-bead":   true,
-		"agentbead":    true,
+		"branch":             true,
+		"target":             true,
+		"source_issue":       true,
+		"source-issue":       true,
+		"sourceissue":        true,
+		"worker":             true,
+		"rig":                true,
+		"merge_commit":       true,
+		"merge-commit":       true,
+		"mergecommit":        true,
+		"close_reason":       true,
+		"close-reason":       true,
+		"closereason":        true,
+		"agent_bead":         true,
+		"agent-bead":         true,
+		"agentbead":          true,
+		"retry_count":        true,
+		"retry-count":        true,
+		"retrycount":         true,
+		"last_conflict_sha":  true,
+		"last-conflict-sha":  true,
+		"lastconflictsha":    true,
+		"conflict_task_id":   true,
+		"conflict-task-id":   true,
+		"conflicttaskid":     true,
+		"convoy_id":          true,
+		"convoy-id":          true,
+		"convoyid":           true,
+		"convoy":             true,
+		"convoy_created_at":  true,
+		"convoy-created-at":  true,
+		"convoycreatedat":    true,
 	}
 
 	// Collect non-MR lines from existing description
@@ -432,7 +509,7 @@ func FormatSynthesisFields(fields *SynthesisFields) string {
 type RoleConfig struct {
 	// SessionPattern defines how to derive tmux session name.
 	// Supports placeholders: {rig}, {name}, {role}
-	// Examples: "gt-mayor", "gt-{rig}-{role}", "gt-{rig}-{name}"
+	// Examples: "hq-mayor", "hq-deacon", "gt-{rig}-{role}", "gt-{rig}-{name}"
 	SessionPattern string
 
 	// WorkDirPattern defines the working directory relative to town root.

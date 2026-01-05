@@ -5,10 +5,10 @@ import (
 )
 
 func TestResolveNudgePattern(t *testing.T) {
-	// Create test agent sessions
+	// Create test agent sessions (mayor/deacon use hq- prefix)
 	agents := []*AgentSession{
-		{Name: "gt-mayor", Type: AgentMayor},
-		{Name: "gt-deacon", Type: AgentDeacon},
+		{Name: "hq-mayor", Type: AgentMayor},
+		{Name: "hq-deacon", Type: AgentDeacon},
 		{Name: "gt-gastown-witness", Type: AgentWitness, Rig: "gastown"},
 		{Name: "gt-gastown-refinery", Type: AgentRefinery, Rig: "gastown"},
 		{Name: "gt-gastown-crew-max", Type: AgentCrew, Rig: "gastown", AgentName: "max"},
@@ -27,12 +27,12 @@ func TestResolveNudgePattern(t *testing.T) {
 		{
 			name:     "mayor special case",
 			pattern:  "mayor",
-			expected: []string{"gt-mayor"},
+			expected: []string{"hq-mayor"},
 		},
 		{
 			name:     "deacon special case",
 			pattern:  "deacon",
-			expected: []string{"gt-deacon"},
+			expected: []string{"hq-deacon"},
 		},
 		{
 			name:     "specific witness",

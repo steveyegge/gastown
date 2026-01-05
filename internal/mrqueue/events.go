@@ -78,7 +78,7 @@ func (l *EventLogger) LogEvent(event Event) error {
 	}
 
 	// Append to log file
-	f, err := os.OpenFile(l.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(l.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("opening event log: %w", err)
 	}

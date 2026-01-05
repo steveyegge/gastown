@@ -17,6 +17,9 @@
 .DS_Store
 Thumbs.db
 
+# Claude Code local state
+.claude/
+
 # Test
 coverage.out
 *.test
@@ -29,7 +32,20 @@ gt
 # Runtime state
 state.json
 .runtime/
+
+# Beads runtime state (not tracked)
+# Formulas ARE tracked for `go install @latest` - see bottom of file
 .beads/redirect
+.beads/issues.jsonl
+.beads/interactions.jsonl
+.beads/metadata.json
+.beads/mq/
+.beads/last-touched
+.beads/daemon-*.log.gz
+.beads-wisp/
 
 # Clone-specific CLAUDE.md (regenerated locally per clone)
 CLAUDE.md
+
+# Embedded formulas are committed so `go install @latest` works
+# Run `go generate ./...` after modifying .beads/formulas/

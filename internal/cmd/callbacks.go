@@ -274,7 +274,7 @@ func classifyCallback(subject string) CallbackType {
 
 // handlePolecatDone processes a POLECAT_DONE callback.
 // These come from Witnesses forwarding polecat completion notices.
-func handlePolecatDone(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
+func handlePolecatDone(townRoot string, msg *mail.Message, dryRun bool) (string, error) { //nolint:unparam // error return kept for consistency with callback interface
 	matches := patternPolecatDone.FindStringSubmatch(msg.Subject)
 	polecatName := ""
 	if len(matches) > 1 {
@@ -306,7 +306,7 @@ func handlePolecatDone(townRoot string, msg *mail.Message, dryRun bool) (string,
 }
 
 // handleMergeCompleted processes a merge completion callback from Refinery.
-func handleMergeCompleted(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
+func handleMergeCompleted(townRoot string, msg *mail.Message, dryRun bool) (string, error) { //nolint:unparam // error return kept for consistency with callback interface
 	matches := patternMergeCompleted.FindStringSubmatch(msg.Subject)
 	branch := ""
 	if len(matches) > 1 {
@@ -353,7 +353,7 @@ func handleMergeCompleted(townRoot string, msg *mail.Message, dryRun bool) (stri
 }
 
 // handleMergeRejected processes a merge rejection callback from Refinery.
-func handleMergeRejected(townRoot string, msg *mail.Message, dryRun bool) (string, error) {
+func handleMergeRejected(townRoot string, msg *mail.Message, dryRun bool) (string, error) { //nolint:unparam // error return kept for consistency with callback interface
 	matches := patternMergeRejected.FindStringSubmatch(msg.Subject)
 	branch := ""
 	if len(matches) > 1 {

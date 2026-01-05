@@ -38,8 +38,9 @@ that seem blocked, and reports status to the mayor.`,
 }
 
 var witnessStartCmd = &cobra.Command{
-	Use:   "start <rig>",
-	Short: "Start the witness",
+	Use:     "start <rig>",
+	Aliases: []string{"spawn"},
+	Short:   "Start the witness",
 	Long: `Start the Witness for a rig.
 
 Launches the monitoring agent which watches polecats for stuck or idle
@@ -283,7 +284,8 @@ func witnessSessionName(rigName string) string {
 }
 
 // ensureWitnessSession creates a witness tmux session if it doesn't exist.
-// Returns true if a new session was created, false if it already existed.
+// Returns true if a new session was created, false if it already existed (and is healthy).
+// Implements 'ensure' semantics: if session exists but Claude is dead (zombie), kills and recreates.
 func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 	t := tmux.NewTmux()
 	sessionName := witnessSessionName(rigName)
@@ -295,7 +297,16 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 	}
 
 	if running {
-		return false, nil
+		// Session exists - check if Claude is actually running (healthy vs zombie)
+		if t.IsClaudeRunning(sessionName) {
+			// Healthy - Claude is running
+			return false, nil
+		}
+		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		fmt.Printf("%s Detected zombie session (tmux alive, Claude dead). Recreating...\n", style.Dim.Render("⚠"))
+		if err := t.KillSession(sessionName); err != nil {
+			return false, fmt.Errorf("killing zombie session: %w", err)
+		}
 	}
 
 	// Working directory is the witness's rig clone (if it exists) or witness dir
@@ -322,9 +333,9 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 
 	// Set environment
 	bdActor := fmt.Sprintf("%s/witness", rigName)
-	t.SetEnvironment(sessionName, "GT_ROLE", "witness")
-	t.SetEnvironment(sessionName, "GT_RIG", rigName)
-	t.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
+	_ = t.SetEnvironment(sessionName, "GT_ROLE", "witness")
+	_ = t.SetEnvironment(sessionName, "GT_RIG", rigName)
+	_ = t.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
 
 	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(rigName)
@@ -356,7 +367,7 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 	// Send the propulsion nudge to trigger autonomous patrol execution.
 	// Wait for beacon to be fully processed (needs to be separate prompt)
 	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionName, session.PropulsionNudgeForRole("witness")) // Non-fatal
+	_ = t.NudgeSession(sessionName, session.PropulsionNudgeForRole("witness", witnessDir)) // Non-fatal
 
 	return true, nil
 }

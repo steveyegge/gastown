@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -83,11 +84,13 @@ func (c *LinkedPaneCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Cache for Fix (exclude gt-mayor since we don't want to kill it)
+	// Cache for Fix (exclude mayor session since we don't want to kill it)
+	mayorSession := session.MayorSessionName()
+
 	c.linkedSessions = nil
-	for session := range linkedSessionSet {
-		if session != "gt-mayor" {
-			c.linkedSessions = append(c.linkedSessions, session)
+	for sess := range linkedSessionSet {
+		if mayorSession == "" || sess != mayorSession {
+			c.linkedSessions = append(c.linkedSessions, sess)
 		}
 	}
 
@@ -108,7 +111,7 @@ func (c *LinkedPaneCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-// Fix kills sessions with linked panes (except gt-mayor).
+// Fix kills sessions with linked panes (except mayor session).
 // The daemon will recreate them with independent panes.
 func (c *LinkedPaneCheck) Fix(ctx *CheckContext) error {
 	if len(c.linkedSessions) == 0 {

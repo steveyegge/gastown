@@ -15,7 +15,7 @@ func TestSwarmStateIsTerminal(t *testing.T) {
 		{SwarmMerging, false},
 		{SwarmLanded, true},
 		{SwarmFailed, true},
-		{SwarmCancelled, true},
+		{SwarmCanceled, true},
 	}
 
 	for _, tt := range tests {
@@ -35,7 +35,7 @@ func TestSwarmStateIsActive(t *testing.T) {
 		{SwarmMerging, true},
 		{SwarmLanded, false},
 		{SwarmFailed, false},
-		{SwarmCancelled, false},
+		{SwarmCanceled, false},
 	}
 
 	for _, tt := range tests {

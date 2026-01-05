@@ -408,7 +408,7 @@ func getConvoyMeta(convoyID string) (*ConvoyMeta, error) {
 }
 
 // collectLegOutputs gathers outputs from all convoy legs.
-func collectLegOutputs(meta *ConvoyMeta, f *formula.Formula) ([]LegOutput, bool, error) {
+func collectLegOutputs(meta *ConvoyMeta, f *formula.Formula) ([]LegOutput, bool, error) { //nolint:unparam // error return kept for future use
 	var outputs []LegOutput
 	allComplete := true
 

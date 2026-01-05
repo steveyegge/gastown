@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -10,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -24,46 +26,72 @@ This is a convenience command for polecats that:
 1. Submits the current branch to the merge queue
 2. Auto-detects issue ID from branch name
 3. Notifies the Witness with the exit outcome
+4. Optionally exits the Claude session (--exit flag)
 
-Exit types:
-  COMPLETED  - Work done, MR submitted (default)
-  ESCALATED  - Hit blocker, needs human intervention
-  DEFERRED   - Work paused, issue still open
+Exit statuses:
+  COMPLETED      - Work done, MR submitted (default)
+  ESCALATED      - Hit blocker, needs human intervention
+  DEFERRED       - Work paused, issue still open
+  PHASE_COMPLETE - Phase done, awaiting gate (use --phase-complete)
+
+Phase handoff workflow:
+  When a molecule has gate steps (async waits), use --phase-complete to signal
+  that the current phase is complete but work continues after the gate closes.
+  The Witness will recycle this polecat and dispatch a new one when the gate
+  resolves.
 
 Examples:
-  gt done                       # Submit branch, notify COMPLETED
-  gt done --issue gt-abc        # Explicit issue ID
-  gt done --exit ESCALATED      # Signal blocker, skip MR
-  gt done --exit DEFERRED       # Pause work, skip MR`,
+  gt done                              # Submit branch, notify COMPLETED
+  gt done --exit                       # Submit and exit Claude session
+  gt done --issue gt-abc               # Explicit issue ID
+  gt done --status ESCALATED           # Signal blocker, skip MR
+  gt done --status DEFERRED            # Pause work, skip MR
+  gt done --phase-complete --gate g-x  # Phase done, waiting on gate g-x`,
 	RunE: runDone,
 }
 
 var (
-	doneIssue    string
-	donePriority int
-	doneExit     string
+	doneIssue         string
+	donePriority      int
+	doneStatus        string
+	doneExit          bool
+	donePhaseComplete bool
+	doneGate          string
 )
 
 // Valid exit types for gt done
 const (
-	ExitCompleted = "COMPLETED"
-	ExitEscalated = "ESCALATED"
-	ExitDeferred  = "DEFERRED"
+	ExitCompleted     = "COMPLETED"
+	ExitEscalated     = "ESCALATED"
+	ExitDeferred      = "DEFERRED"
+	ExitPhaseComplete = "PHASE_COMPLETE"
 )
 
 func init() {
 	doneCmd.Flags().StringVar(&doneIssue, "issue", "", "Source issue ID (default: parse from branch name)")
 	doneCmd.Flags().IntVarP(&donePriority, "priority", "p", -1, "Override priority (0-4, default: inherit from issue)")
-	doneCmd.Flags().StringVar(&doneExit, "exit", ExitCompleted, "Exit type: COMPLETED, ESCALATED, or DEFERRED")
+	doneCmd.Flags().StringVar(&doneStatus, "status", ExitCompleted, "Exit status: COMPLETED, ESCALATED, or DEFERRED")
+	doneCmd.Flags().BoolVar(&doneExit, "exit", false, "Exit Claude session after MR submission (self-terminate)")
+	doneCmd.Flags().BoolVar(&donePhaseComplete, "phase-complete", false, "Signal phase complete - await gate before continuing")
+	doneCmd.Flags().StringVar(&doneGate, "gate", "", "Gate bead ID to wait on (with --phase-complete)")
 
 	rootCmd.AddCommand(doneCmd)
 }
 
 func runDone(cmd *cobra.Command, args []string) error {
-	// Validate exit type
-	exitType := strings.ToUpper(doneExit)
-	if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
-		return fmt.Errorf("invalid exit type '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneExit)
+	// Handle --phase-complete flag (overrides --status)
+	var exitType string
+	if donePhaseComplete {
+		exitType = ExitPhaseComplete
+		if doneGate == "" {
+			return fmt.Errorf("--phase-complete requires --gate <gate-id>")
+		}
+	} else {
+		// Validate exit status
+		exitType = strings.ToUpper(doneStatus)
+		if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
+			return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneStatus)
+		}
 	}
 
 	// Find workspace
@@ -121,11 +149,17 @@ func runDone(cmd *cobra.Command, args []string) error {
 		agentBeadID = getAgentBeadID(ctx)
 	}
 
-	// For COMPLETED, we need an issue ID and branch must not be main
+	// Get configured default branch for this rig
+	defaultBranch := "main" // fallback
+	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+
+	// For COMPLETED, we need an issue ID and branch must not be the default branch
 	var mrID string
 	if exitType == ExitCompleted {
-		if branch == "main" || branch == "master" {
-			return fmt.Errorf("cannot submit main/master branch to merge queue")
+		if branch == defaultBranch || branch == "master" {
+			return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
 		}
 
 		// Check for unpushed commits - branch must be pushed before MR creation
@@ -138,13 +172,13 @@ func runDone(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("branch has %d unpushed commit(s); run 'git push -u origin %s' first", unpushedCount, branch)
 		}
 
-		// Check that branch has commits ahead of main (prevents submitting stale branches)
-		aheadCount, err := g.CommitsAhead("main", branch)
+		// Check that branch has commits ahead of default branch (prevents submitting stale branches)
+		aheadCount, err := g.CommitsAhead(defaultBranch, branch)
 		if err != nil {
-			return fmt.Errorf("checking commits ahead of main: %w", err)
+			return fmt.Errorf("checking commits ahead of %s: %w", defaultBranch, err)
 		}
 		if aheadCount == 0 {
-			return fmt.Errorf("branch '%s' has 0 commits ahead of main; nothing to merge", branch)
+			return fmt.Errorf("branch '%s' has 0 commits ahead of %s; nothing to merge", branch, defaultBranch)
 		}
 
 		if issueID == "" {
@@ -152,10 +186,10 @@ func runDone(cmd *cobra.Command, args []string) error {
 		}
 
 		// Initialize beads
-		bd := beads.New(cwd)
+		bd := beads.New(beads.ResolveBeadsDir(cwd))
 
 		// Determine target branch (auto-detect integration branch if applicable)
-		target := "main"
+		target := defaultBranch
 		autoTarget, err := detectIntegrationBranch(bd, g, issueID)
 		if err == nil && autoTarget != "" {
 			target = autoTarget
@@ -199,6 +233,11 @@ func runDone(cmd *cobra.Command, args []string) error {
 				description += fmt.Sprintf("\nagent_bead: %s", agentBeadID)
 			}
 
+			// Add conflict resolution tracking fields (initialized, updated by Refinery)
+			description += "\nretry_count: 0"
+			description += "\nlast_conflict_sha: null"
+			description += "\nconflict_task_id: null"
+
 			// Create MR bead (ephemeral wisp - will be cleaned up after merge)
 			mrIssue, err := bd.Create(beads.CreateOptions{
 				Title:       title,
@@ -231,6 +270,24 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Priority: P%d\n", priority)
 		fmt.Println()
 		fmt.Printf("%s\n", style.Dim.Render("The Refinery will process your merge request."))
+	} else if exitType == ExitPhaseComplete {
+		// Phase complete - register as waiter on gate, then recycle
+		fmt.Printf("%s Phase complete, awaiting gate\n", style.Bold.Render("→"))
+		fmt.Printf("  Gate: %s\n", doneGate)
+		if issueID != "" {
+			fmt.Printf("  Issue: %s\n", issueID)
+		}
+		fmt.Printf("  Branch: %s\n", branch)
+		fmt.Println()
+		fmt.Printf("%s\n", style.Dim.Render("Witness will dispatch new polecat when gate closes."))
+
+		// Register this polecat as a waiter on the gate
+		bd := beads.New(beads.ResolveBeadsDir(cwd))
+		if err := bd.AddGateWaiter(doneGate, sender); err != nil {
+			style.PrintWarning("could not register as gate waiter: %v", err)
+		} else {
+			fmt.Printf("%s Registered as waiter on gate %s\n", style.Bold.Render("✓"), doneGate)
+		}
 	} else {
 		// For ESCALATED or DEFERRED, just print status
 		fmt.Printf("%s Signaling %s\n", style.Bold.Render("→"), exitType)
@@ -254,6 +311,9 @@ func runDone(cmd *cobra.Command, args []string) error {
 	if mrID != "" {
 		bodyLines = append(bodyLines, fmt.Sprintf("MR: %s", mrID))
 	}
+	if doneGate != "" {
+		bodyLines = append(bodyLines, fmt.Sprintf("Gate: %s", doneGate))
+	}
 	bodyLines = append(bodyLines, fmt.Sprintf("Branch: %s", branch))
 
 	doneNotification := &mail.Message{
@@ -270,12 +330,38 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Witness notified of %s\n", style.Bold.Render("✓"), exitType)
 	}
 
+	// Notify dispatcher if work was dispatched by another agent
+	if issueID != "" {
+		if dispatcher := getDispatcherFromBead(cwd, issueID); dispatcher != "" && dispatcher != sender {
+			dispatcherNotification := &mail.Message{
+				To:      dispatcher,
+				From:    sender,
+				Subject: fmt.Sprintf("WORK_DONE: %s", issueID),
+				Body:    strings.Join(bodyLines, "\n"),
+			}
+			if err := townRouter.Send(dispatcherNotification); err != nil {
+				style.PrintWarning("could not notify dispatcher %s: %v", dispatcher, err)
+			} else {
+				fmt.Printf("%s Dispatcher %s notified of %s\n", style.Bold.Render("✓"), dispatcher, exitType)
+			}
+		}
+	}
+
 	// Log done event (townlog and activity feed)
-	LogDone(townRoot, sender, issueID)
+	_ = LogDone(townRoot, sender, issueID)
 	_ = events.LogFeed(events.TypeDone, sender, events.DonePayload(issueID, branch))
 
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
+
+	// Handle session self-termination if requested
+	if doneExit {
+		fmt.Println()
+		fmt.Printf("%s Session self-terminating (--exit flag)\n", style.Bold.Render("→"))
+		fmt.Printf("  Witness will handle worktree cleanup.\n")
+		fmt.Printf("  Goodbye!\n")
+		os.Exit(0)
+	}
 
 	return nil
 }
@@ -285,9 +371,10 @@ func runDone(cmd *cobra.Command, args []string) error {
 //   - COMPLETED → "done"
 //   - ESCALATED → "stuck"
 //   - DEFERRED → "idle"
+//   - PHASE_COMPLETE → "awaiting-gate"
 //
 // Also self-reports cleanup_status for ZFC compliance (#10).
-func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
+func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unused but kept for future audit logging
 	// Get role context
 	roleInfo, err := GetRoleWithContext(cwd, townRoot)
 	if err != nil {
@@ -316,13 +403,22 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 		newState = "stuck"
 	case ExitDeferred:
 		newState = "idle"
+	case ExitPhaseComplete:
+		newState = "awaiting-gate"
 	default:
 		return
 	}
 
 	// Update agent bead with new state and clear hook_bead (work is done)
-	// Use town root for routing - ensures cross-beads references work
-	bd := beads.New(townRoot)
+	// Use rig path for slot commands - bd slot doesn't route from town root
+	var beadsPath string
+	switch ctx.Role {
+	case RoleMayor, RoleDeacon:
+		beadsPath = townRoot
+	default:
+		beadsPath = filepath.Join(townRoot, ctx.Rig)
+	}
+	bd := beads.New(beadsPath)
 	emptyHook := ""
 	if err := bd.UpdateAgentState(agentBeadID, newState, &emptyHook); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
@@ -340,6 +436,27 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, issueID string) {
 			return
 		}
 	}
+}
+
+// getDispatcherFromBead retrieves the dispatcher agent ID from the bead's attachment fields.
+// Returns empty string if no dispatcher is recorded.
+func getDispatcherFromBead(cwd, issueID string) string {
+	if issueID == "" {
+		return ""
+	}
+
+	bd := beads.New(beads.ResolveBeadsDir(cwd))
+	issue, err := bd.Show(issueID)
+	if err != nil {
+		return ""
+	}
+
+	fields := beads.ParseAttachmentFields(issue)
+	if fields == nil {
+		return ""
+	}
+
+	return fields.DispatchedBy
 }
 
 // computeCleanupStatus checks git state and returns the cleanup status.

@@ -77,9 +77,12 @@ func cycleToSession(direction int, sessionOverride string) error {
 	}
 
 	// Check if it's a town-level session
-	for _, townSession := range townLevelSessions {
-		if session == townSession {
-			return cycleTownSession(direction, session)
+	townLevelSessions := getTownLevelSessions()
+	if townLevelSessions != nil {
+		for _, townSession := range townLevelSessions {
+			if session == townSession {
+				return cycleTownSession(direction, session)
+			}
 		}
 	}
 
