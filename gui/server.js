@@ -1696,8 +1696,8 @@ app.get('/api/github/issue/:repo/:number', async (req, res) => {
 // List all GitHub repos for current user
 app.get('/api/github/repos', async (req, res) => {
   const limit = parseInt(req.query.limit) || 100;
-  const visibility = req.query.visibility || 'all'; // all, public, private
-  const cacheKey = `github_repos_${visibility}_${limit}`;
+  const visibility = req.query.visibility; // public, private, or omit for all
+  const cacheKey = `github_repos_${visibility || 'all'}_${limit}`;
 
   // Check cache (repos don't change often)
   if (req.query.refresh !== 'true') {
@@ -1706,8 +1706,10 @@ app.get('/api/github/repos', async (req, res) => {
   }
 
   try {
+    // Only add --visibility flag if specifically requested (public/private)
+    const visibilityFlag = visibility && visibility !== 'all' ? `--visibility ${visibility}` : '';
     const { stdout } = await execAsync(
-      `gh repo list --limit ${limit} --visibility ${visibility} --json name,nameWithOwner,description,url,isPrivate,isFork,pushedAt,primaryLanguage,stargazerCount`,
+      `gh repo list --limit ${limit} ${visibilityFlag} --json name,nameWithOwner,description,url,isPrivate,isFork,pushedAt,primaryLanguage,stargazerCount`,
       { timeout: 30000 }
     );
 
