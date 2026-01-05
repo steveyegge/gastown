@@ -2,6 +2,9 @@
 #
 # This file configures the available AI runtimes and their role assignments.
 # The Auditor role uses an alternate runtime for independent code verification.
+#
+# IMPORTANT: Verification is MANDATORY. All code must be reviewed by an LLM
+# before it can be merged. This cannot be disabled.
 
 # Available runtimes and their CLI configurations
 runtimes:
@@ -33,16 +36,15 @@ roles:
 
 # Fallback chain for the auditor role
 # If the primary runtime is not available, try these in order
+# NOTE: At least ONE runtime MUST be available for verification to work
 auditor_fallback:
   - codex      # Preferred: different model for true independent review
   - opencode   # Alternative: open-source option
-  - claude     # Last resort: same model (still useful for syntax/style checks)
+  - claude     # Last resort: same model (still useful for second-pass review)
 
 # Verification configuration
+# NOTE: Verification is MANDATORY and cannot be disabled
 verification:
-  # Enable/disable verification
-  enabled: true
-
   # Minimum confidence threshold for auto-approval
   # Results below this threshold escalate to NEEDS_HUMAN
   required_confidence: 0.7
@@ -50,13 +52,29 @@ verification:
   # Timeout for verification operations (seconds)
   timeout_seconds: 300
 
-  # Which beads/MRs require verification
-  # Options: all, critical, none
-  scope: critical
+  # Require independent verification (different model than Claude)
+  # If true, verification will FAIL if only Claude is available
+  # If false, Claude can be used as fallback
+  require_independent: false
 
-  # Labels that trigger verification
-  critical_labels:
+  # Scope of verification - what gets verified
+  # Options:
+  #   all      - Every MR must pass verification
+  #   critical - Only MRs with critical labels
+  # NOTE: 'none' is not a valid option - verification cannot be skipped
+  scope: all
+
+  # Labels that indicate high-priority verification
+  # These get flagged for extra scrutiny
+  priority_labels:
     - security
     - critical
     - high-priority
-    - needs-verification
+    - breaking-change
+
+# Verification ensures:
+# - Code meets requirements as described in the task
+# - No bugs or security vulnerabilities
+# - Tests exist and pass
+# - Code quality meets standards
+# - Build succeeds without errors

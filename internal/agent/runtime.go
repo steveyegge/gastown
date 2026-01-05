@@ -214,3 +214,44 @@ func (r *RuntimeRegistry) Register(rt Runtime) {
 	defer r.mu.Unlock()
 	r.runtimes[rt.Name()] = rt
 }
+
+// MustGetForRole returns the appropriate runtime for a role, panicking if none available.
+// This enforces that verification is always LLM-driven - the system cannot proceed
+// without a runtime to perform verification.
+func (r *RuntimeRegistry) MustGetForRole(role string) Runtime {
+	rt := r.GetForRole(role)
+	if rt == nil {
+		panic(fmt.Sprintf("no runtime available for role %q - verification requires an LLM", role))
+	}
+	return rt
+}
+
+// RequireRuntime returns an error if no runtime is available for the given role.
+// Use this for graceful error handling instead of MustGetForRole.
+func (r *RuntimeRegistry) RequireRuntime(role string) (Runtime, error) {
+	rt := r.GetForRole(role)
+	if rt == nil {
+		return nil, fmt.Errorf("no runtime available for role %q: install claude, codex, or opencode CLI", role)
+	}
+	return rt, nil
+}
+
+// AnyAvailable returns true if at least one runtime is available.
+// Verification requires at least one LLM runtime to function.
+func (r *RuntimeRegistry) AnyAvailable() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.runtimes) > 0
+}
+
+// IsIndependentVerification returns true if the auditor runtime is different
+// from the primary Claude runtime. True independent verification uses a
+// different model (Codex/OpenCode) for review.
+func (r *RuntimeRegistry) IsIndependentVerification() bool {
+	auditorRT := r.GetForRole("auditor")
+	if auditorRT == nil {
+		return false
+	}
+	// Independent if not Claude (using a different model)
+	return auditorRT.Name() != "claude"
+}

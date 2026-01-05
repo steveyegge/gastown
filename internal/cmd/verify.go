@@ -123,10 +123,19 @@ func runVerifyStatus(cmd *cobra.Command, args []string) {
 	fmt.Println("==========================")
 	fmt.Println()
 
+	fmt.Println("Verification is MANDATORY - all work must be LLM reviewed")
+	fmt.Println()
+
 	if auditorRuntime != nil {
 		fmt.Printf("Active runtime: %s\n", auditorRuntime.Name())
+		if auditorRuntime.Name() != "claude" {
+			fmt.Println("Mode: Independent verification (different model)")
+		} else {
+			fmt.Println("Mode: Same-model verification (Claude reviewing Claude)")
+		}
 	} else {
-		fmt.Println("Active runtime: none (verification disabled)")
+		fmt.Println("Active runtime: NONE - verification will fail!")
+		fmt.Println("ERROR: Install claude, codex, or opencode CLI")
 	}
 	fmt.Println()
 
@@ -260,10 +269,18 @@ func runVerifyConfig(cmd *cobra.Command, args []string) {
 
 	fmt.Println()
 	config := auditor.DefaultVerificationConfig()
-	fmt.Println("Default verification settings:")
-	fmt.Printf("  Enabled:             %v\n", config.Enabled)
+	fmt.Println("Verification settings:")
+	fmt.Println("  Mandatory:           YES (cannot be disabled)")
 	fmt.Printf("  Required confidence: %.0f%%\n", config.RequiredConfidence*100)
 	fmt.Printf("  Timeout:             %ds\n", config.TimeoutSeconds)
+	fmt.Printf("  Require independent: %v\n", config.RequireIndependent)
+
+	fmt.Println()
+	fmt.Println("Verification ensures:")
+	fmt.Println("  - Code meets requirements")
+	fmt.Println("  - No bugs or security issues")
+	fmt.Println("  - Tests are adequate")
+	fmt.Println("  - Code quality standards met")
 }
 
 func runVerifyMR(cmd *cobra.Command, args []string) error {
@@ -332,6 +349,13 @@ func printVerificationResult(result *auditor.VerificationResult) {
 
 	fmt.Printf("Confidence: %.0f%%\n", result.Confidence*100)
 	fmt.Printf("Reviewed by: %s\n", result.ReviewedBy)
+
+	if result.IsIndependent {
+		fmt.Println("Verification type: Independent (different model)")
+	} else {
+		fmt.Println("Verification type: Same-model review")
+	}
+
 	fmt.Printf("Duration: %s\n", result.Duration.Round(time.Millisecond))
 	fmt.Println()
 
@@ -362,6 +386,12 @@ func printVerificationInfo(info *refinery.VerificationInfo) {
 
 	if info.ReviewedBy != "" {
 		fmt.Printf("Reviewed by: %s\n", info.ReviewedBy)
+	}
+
+	if info.IsIndependent {
+		fmt.Println("Verification type: Independent (different model)")
+	} else if info.ReviewedBy != "" {
+		fmt.Println("Verification type: Same-model review")
 	}
 
 	if info.Confidence > 0 {
