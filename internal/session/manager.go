@@ -55,6 +55,10 @@ type StartOptions struct {
 	// ClaudeConfigDir is resolved CLAUDE_CONFIG_DIR for the account.
 	// If set, this is injected as an environment variable.
 	ClaudeConfigDir string
+
+	// Model specifies the Claude model to use (e.g., 'sonnet', 'opus', or full model name).
+	// If set, passed to claude as --model flag.
+	Model string
 }
 
 // Info contains information about a running session.
@@ -183,6 +187,10 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 		// Polecats run with full permissions - Gas Town is for grownups
 		// Export env vars inline so Claude's role detection works
 		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
+	}
+	// Append --model flag if specified
+	if opts.Model != "" {
+		command = command + " --model " + opts.Model
 	}
 	if err := m.tmux.SendKeys(sessionID, command); err != nil {
 		return fmt.Errorf("sending command: %w", err)

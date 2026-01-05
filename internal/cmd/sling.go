@@ -58,6 +58,7 @@ Spawning Options (when target is a rig):
   gt sling gp-abc greenplace --naked                # No-tmux (manual start)
   gt sling gp-abc greenplace --force                # Ignore unread mail
   gt sling gp-abc greenplace --account work         # Use specific Claude account
+  gt sling gp-abc greenplace --model opus           # Use specific Claude model
 
 Natural Language Args:
   gt sling gt-abc --args "patch release"
@@ -111,6 +112,7 @@ var (
 	slingAccount  string // --account: Claude Code account handle to use
 	slingQuality  string // --quality: shorthand for polecat workflow (basic|shiny|chrome)
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
+	slingModel    string // --model: Claude model to use (e.g., 'sonnet', 'opus', or full model name)
 )
 
 func init() {
@@ -129,6 +131,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
 	slingCmd.Flags().StringVarP(&slingQuality, "quality", "q", "", "Polecat workflow quality level (basic|shiny|chrome)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
+	slingCmd.Flags().StringVar(&slingModel, "model", "", "Claude model to use (e.g., 'sonnet', 'opus', or 'claude-sonnet-4-5-20250929')")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -818,6 +821,7 @@ func runSlingFormula(args []string) error {
 					Naked:   slingNaked,
 					Account: slingAccount,
 					Create:  slingCreate,
+					Model:   slingModel,
 				}
 				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {

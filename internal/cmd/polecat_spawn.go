@@ -39,6 +39,7 @@ type SlingSpawnOptions struct {
 	Account  string // Claude Code account handle to use
 	Create   bool   // Create polecat if it doesn't exist (currently always true for sling)
 	HookBead string // Bead ID to set as hook_bead at spawn time (atomic assignment)
+	Model    string // Claude model to use (e.g., 'sonnet', 'opus', or full model name)
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -145,6 +146,9 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	if accountHandle != "" {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
+	if opts.Model != "" {
+		fmt.Printf("Using model: %s\n", opts.Model)
+	}
 
 	// Start session
 	t := tmux.NewTmux()
@@ -156,6 +160,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 		startOpts := session.StartOptions{
 			ClaudeConfigDir: claudeConfigDir,
+			Model:           opts.Model,
 		}
 		if err := sessMgr.Start(polecatName, startOpts); err != nil {
 			return nil, fmt.Errorf("starting session: %w", err)
