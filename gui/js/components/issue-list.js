@@ -54,7 +54,7 @@ export async function loadIssues() {
   }
   if (!container) return;
 
-  container.innerHTML = '<div class="loading-state"><span class="material-icons spinning">sync</span> Loading issues...</div>';
+  container.innerHTML = '<div class="loading-state"><span class="loading-spinner"></span> Loading issues...</div>';
 
   try {
     issues = await api.getGitHubIssues(currentState);

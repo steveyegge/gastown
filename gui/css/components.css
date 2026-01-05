@@ -1044,7 +1044,9 @@ select {
   color: var(--text-muted);
   text-align: center;
   gap: var(--space-md);
-  min-height: 200px;
+  min-height: 300px;
+  flex: 1;
+  width: 100%;
 }
 
 .view-loading-state .spinner-large {
@@ -1057,8 +1059,9 @@ select {
 }
 
 .view-loading-state .loading-text {
-  font-size: var(--text-sm);
+  font-size: 1rem;
   color: var(--text-muted);
+  font-weight: 500;
 }
 
 /* === Tooltips === */
@@ -4338,9 +4341,21 @@ select {
   padding: var(--space-xl);
   color: var(--text-muted);
   text-align: center;
+  min-height: 300px;
+  flex: 1;
+  width: 100%;
 }
 
-.pr-list .loading-state .loading-spinner,
+.pr-list .loading-state .loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--border-default);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: var(--space-md);
+}
+
 .pr-list .empty-state .material-icons,
 .pr-list .error-state .material-icons {
   font-size: 48px;
@@ -4831,6 +4846,46 @@ select {
 
 .text-muted {
   color: var(--text-tertiary);
+}
+
+/* Generic loading/empty/error states for list containers */
+.issue-list .loading-state,
+.issue-list .empty-state,
+.issue-list .error-state,
+.formula-list .loading-state,
+.formula-list .empty-state,
+.formula-list .error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  color: var(--text-muted);
+  text-align: center;
+  min-height: 300px;
+  flex: 1;
+  width: 100%;
+  grid-column: 1 / -1; /* Span full width in grid layouts */
+}
+
+.issue-list .loading-state .loading-spinner,
+.formula-list .loading-state .loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--border-default);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: var(--space-md);
+}
+
+.issue-list .empty-state .material-icons,
+.issue-list .error-state .material-icons,
+.formula-list .empty-state .material-icons,
+.formula-list .error-state .material-icons {
+  font-size: 48px;
+  margin-bottom: var(--space-md);
+  opacity: 0.5;
 }
 
 /* === Mail Detail Modal === */

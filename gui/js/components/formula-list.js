@@ -54,7 +54,7 @@ export async function loadFormulas() {
   }
   if (!container) return;
 
-  container.innerHTML = '<div class="loading-state"><span class="material-icons spinning">sync</span> Loading formulas...</div>';
+  container.innerHTML = '<div class="loading-state"><span class="loading-spinner"></span> Loading formulas...</div>';
 
   try {
     formulas = await api.getFormulas();
