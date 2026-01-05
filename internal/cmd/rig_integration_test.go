@@ -53,6 +53,7 @@ func createTestGitRepo(t *testing.T, name string) string {
 	commitCmds := [][]string{
 		{"git", "add", "."},
 		{"git", "commit", "-m", "Initial commit"},
+		{"git", "branch", "-M", "main"}, // Ensure branch is named 'main' regardless of git config
 	}
 	for _, args := range commitCmds {
 		cmd := exec.Command(args[0], args[1:]...)
