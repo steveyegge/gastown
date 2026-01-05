@@ -62,13 +62,14 @@ func NewManager(townRoot string, rigsConfig *config.RigsConfig, g *git.Git) *Man
 }
 
 // DiscoverRigs returns all rigs registered in the workspace.
+// Rigs that fail to load are logged to stderr and skipped; partial results are returned.
 func (m *Manager) DiscoverRigs() ([]*Rig, error) {
 	var rigs []*Rig
 
 	for name, entry := range m.config.Rigs {
 		rig, err := m.loadRig(name, entry)
 		if err != nil {
-			// Log error but continue with other rigs
+			fmt.Fprintf(os.Stderr, "Warning: failed to load rig %q: %v\n", name, err)
 			continue
 		}
 		rigs = append(rigs, rig)
@@ -443,19 +444,19 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
 	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix); err != nil {
 		// Non-fatal: log warning but continue
-		fmt.Printf("  Warning: Could not create agent beads: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  Warning: Could not create agent beads: %v\n", err)
 	}
 
 	// Seed patrol molecules for this rig
 	if err := m.seedPatrolMolecules(rigPath); err != nil {
 		// Non-fatal: log warning but continue
-		fmt.Printf("  Warning: Could not seed patrol molecules: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  Warning: Could not seed patrol molecules: %v\n", err)
 	}
 
 	// Create plugin directories
 	if err := m.createPluginDirectories(rigPath); err != nil {
 		// Non-fatal: log warning but continue
-		fmt.Printf("  Warning: Could not create plugin directories: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  Warning: Could not create plugin directories: %v\n", err)
 	}
 
 	// Register in town config

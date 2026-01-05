@@ -871,7 +871,8 @@ func (g *Git) BranchPushedToRemote(localBranch, remote string) (bool, int, error
 	// See: gt-cehl8 (gt done fails in worktrees due to missing origin tracking ref)
 	remoteRef := "refs/remotes/" + remoteBranch
 	if _, err := g.run("rev-parse", "--verify", remoteRef); err != nil {
-		// Remote ref doesn't exist locally - update it from FETCH_HEAD if fetch succeeded
+		// Remote ref doesn't exist locally - update it from FETCH_HEAD if fetch succeeded.
+		// Best-effort: if this fails, the code below falls back to ls-remote.
 		if fetchErr == nil {
 			_, _ = g.run("update-ref", remoteRef, "FETCH_HEAD")
 		}
