@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -545,6 +546,15 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	migrateCmd.Env = filteredEnv
 	// Ignore errors - fingerprint is optional for functionality
 	_, _ = migrateCmd.CombinedOutput()
+
+	// Add route from rig beads to town beads for cross-database resolution.
+	// This allows rig beads to resolve hq-* prefixed beads (role beads, etc.)
+	// that are stored in town beads.
+	townRoute := beads.Route{Prefix: "hq-", Path: ".."}
+	if err := beads.WriteRoutes(beadsDir, []beads.Route{townRoute}); err != nil {
+		// Non-fatal: role slot set will fail but agent beads still work
+		fmt.Printf("   %s Could not add route to town beads: %v\n", style.Dim.Render("⚠"), err)
+	}
 
 	return nil
 }
