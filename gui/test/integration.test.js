@@ -15,6 +15,7 @@ import puppeteer from 'puppeteer';
 
 const PORT = process.env.PORT || 5678;
 const BASE_URL = `http://localhost:${PORT}`;
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 describe('Comprehensive Integration Tests', () => {
   let browser;
@@ -33,12 +34,14 @@ describe('Comprehensive Integration Tests', () => {
 
   beforeEach(async () => {
     page = await browser.newPage();
-    await page.goto(BASE_URL, { waitUntil: 'networkidle0' });
-    // Wait for initial WebSocket connection
-    await page.waitForFunction(() => {
-      return document.querySelector('.connection-status')?.textContent?.includes('Connected') ||
-             document.body.innerText.includes('Test Town');
-    }, { timeout: 5000 });
+    await page.evaluateOnNewDocument(() => {
+      localStorage.setItem('gastown-onboarding-complete', 'true');
+      localStorage.setItem('gastown-onboarding-skipped', 'true');
+      localStorage.setItem('gastown-tutorial-complete', 'true');
+    });
+    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#app-header', { timeout: 15000 });
+    await page.waitForFunction(() => !!window.gastown, { timeout: 15000 });
   });
 
   afterEach(async () => {
@@ -47,6 +50,12 @@ describe('Comprehensive Integration Tests', () => {
 
   describe('WebSocket Integration', () => {
     it('should establish WebSocket connection on page load', async () => {
+      await page.waitForFunction(() => {
+        const status = document.querySelector('.connection-status');
+        return status?.classList.contains('connected') ||
+               status?.textContent?.toLowerCase().includes('connected');
+      }, { timeout: 15000 });
+
       // Check connection indicator
       const connected = await page.evaluate(() => {
         const status = document.querySelector('.connection-status');
@@ -57,6 +66,11 @@ describe('Comprehensive Integration Tests', () => {
     });
 
     it('should receive initial status data via WebSocket', async () => {
+      await page.waitForFunction(() => {
+        const header = document.querySelector('.town-name, h1, .header-title');
+        return header?.textContent?.includes('Test Town');
+      }, { timeout: 15000 });
+
       // The town name should be populated from WebSocket
       const townName = await page.evaluate(() => {
         const header = document.querySelector('.town-name, h1, .header-title');
@@ -70,7 +84,7 @@ describe('Comprehensive Integration Tests', () => {
     it('should fetch and display convoys', async () => {
       // Navigate to convoys view
       await page.click('[data-view="convoys"], .tab[data-view="convoys"], button:has-text("Convoys")').catch(() => {});
-      await page.waitForTimeout(500);
+      await sleep(500);
 
       // Check if convoys are rendered
       const hasConvoys = await page.evaluate(() => {
@@ -86,7 +100,7 @@ describe('Comprehensive Integration Tests', () => {
     it('should fetch agents from API', async () => {
       // Navigate to agents view
       await page.click('[data-view="agents"], .tab[data-view="agents"]').catch(() => {});
-      await page.waitForTimeout(500);
+      await sleep(500);
 
       // Check if agents section exists
       const hasAgents = await page.evaluate(() => {
@@ -105,7 +119,7 @@ describe('Comprehensive Integration Tests', () => {
 
       // Click sling button
       await page.click('#sling-btn');
-      await page.waitForTimeout(300);
+      await sleep(300);
 
       // Check modal is visible
       const modalVisible = await page.evaluate(() => {
@@ -125,7 +139,7 @@ describe('Comprehensive Integration Tests', () => {
       await page.waitForSelector('#sling-modal:not(.hidden)', { timeout: 5000 });
 
       // Wait for target dropdown to populate (async fetch)
-      await page.waitForTimeout(500);
+      await sleep(500);
 
       // Check target dropdown has options
       const hasTargets = await page.evaluate(() => {
@@ -148,7 +162,7 @@ describe('Comprehensive Integration Tests', () => {
       const beadInput = await page.$('#sling-modal input[name="bead"]');
       if (beadInput) {
         await beadInput.type('gt-', { delay: 100 });
-        await page.waitForTimeout(400);
+        await sleep(400);
 
         // Check if autocomplete dropdown appeared
         const hasDropdown = await page.evaluate(() => {
@@ -190,7 +204,7 @@ describe('Comprehensive Integration Tests', () => {
 
       // Click escalate button
       await page.click('[data-action="escalate"]');
-      await page.waitForTimeout(300);
+      await sleep(300);
 
       // Check escalation modal (created dynamically)
       const modalVisible = await page.evaluate(() => {
@@ -227,11 +241,11 @@ describe('Comprehensive Integration Tests', () => {
     it('should expand convoy card when clicking expand button', async () => {
       // Navigate to convoys
       await page.click('[data-view="convoys"]').catch(() => {});
-      await page.waitForTimeout(500);
+      await sleep(500);
 
       // Click expand button
       await page.click('.convoy-expand-btn, .convoy-card button[title*="Expand"]').catch(() => {});
-      await page.waitForTimeout(500);
+      await sleep(500);
 
       // Check if detail section appeared
       const hasDetail = await page.evaluate(() => {
@@ -244,9 +258,9 @@ describe('Comprehensive Integration Tests', () => {
     it('should show issue tree in expanded convoy', async () => {
       // Navigate and expand convoy
       await page.click('[data-view="convoys"]').catch(() => {});
-      await page.waitForTimeout(300);
+      await sleep(300);
       await page.click('.convoy-expand-btn').catch(() => {});
-      await page.waitForTimeout(500);
+      await sleep(500);
 
       // Check for issue tree
       const hasIssueTree = await page.evaluate(() => {
@@ -261,7 +275,7 @@ describe('Comprehensive Integration Tests', () => {
     it('should display mail list', async () => {
       // Navigate to mail view
       await page.click('[data-view="mail"], .tab[data-view="mail"]').catch(() => {});
-      await page.waitForTimeout(500);
+      await sleep(500);
 
       // Check for mail list
       const hasMail = await page.evaluate(() => {
@@ -274,9 +288,9 @@ describe('Comprehensive Integration Tests', () => {
     it('should open compose modal', async () => {
       // Navigate to mail and click compose
       await page.click('[data-view="mail"]').catch(() => {});
-      await page.waitForTimeout(300);
+      await sleep(300);
       await page.click('#compose-btn, [data-modal-open="mail-compose"], button:has-text("Compose")').catch(() => {});
-      await page.waitForTimeout(300);
+      await sleep(300);
 
       // Check compose modal
       const modalVisible = await page.evaluate(() => {
@@ -301,7 +315,7 @@ describe('Comprehensive Integration Tests', () => {
 
       // Click theme toggle
       await page.click('#theme-toggle, button[title*="Theme"], .theme-toggle').catch(() => {});
-      await page.waitForTimeout(200);
+      await sleep(200);
 
       // Get new theme
       const newTheme = await page.evaluate(() => {
@@ -317,7 +331,7 @@ describe('Comprehensive Integration Tests', () => {
     it('should respond to keyboard shortcuts', async () => {
       // Press a number key to switch views (1, 2, 3 are mapped)
       await page.keyboard.press('1');
-      await page.waitForTimeout(200);
+      await sleep(200);
 
       // Check that keyboard shortcuts are registered
       const hasKeyboardHandler = await page.evaluate(() => {
@@ -342,7 +356,7 @@ describe('Comprehensive Integration Tests', () => {
   describe('New Convoy Creation', () => {
     it('should open new convoy modal', async () => {
       await page.click('#new-convoy-btn, [data-modal-open="new-convoy"], button:has-text("New Convoy")').catch(() => {});
-      await page.waitForTimeout(300);
+      await sleep(300);
 
       const modalVisible = await page.evaluate(() => {
         const modal = document.querySelector('#new-convoy-modal, .modal:not(.hidden)');
@@ -354,11 +368,11 @@ describe('Comprehensive Integration Tests', () => {
     it('should validate required fields on convoy creation', async () => {
       // Open modal
       await page.click('#new-convoy-btn, [data-modal-open="new-convoy"]').catch(() => {});
-      await page.waitForTimeout(200);
+      await sleep(200);
 
       // Try to submit empty form
       await page.click('#new-convoy-modal button[type="submit"], .modal button[type="submit"]').catch(() => {});
-      await page.waitForTimeout(300);
+      await sleep(300);
 
       // Check for validation (either native or toast)
       const hasValidation = await page.evaluate(() => {

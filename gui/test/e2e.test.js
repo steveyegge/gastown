@@ -148,14 +148,14 @@ describe('Gas Town GUI E2E Tests', () => {
         const toggleIcon = await page.$('.tree-node.expandable .tree-toggle');
         if (toggleIcon) {
           await toggleIcon.click();
-          await page.waitForTimeout(300); // Wait for animation
+          await sleep(300); // Wait for animation
 
           // Check if class changed
           const afterFirstClick = await expandableNode.evaluate(el => el.classList.contains('expanded'));
 
           // Second click to toggle back
           await toggleIcon.click();
-          await page.waitForTimeout(300); // Wait for animation
+          await sleep(300); // Wait for animation
 
           const afterSecondClick = await expandableNode.evaluate(el => el.classList.contains('expanded'));
 
@@ -444,6 +444,11 @@ describe('Component Tests', () => {
       await navigateToApp(page);
       await switchView(page, 'agents');
 
+      await page.waitForFunction(() => {
+        const grid = document.getElementById('agent-grid');
+        return grid && (grid.querySelector('.agent-card') || grid.querySelector('.empty-state'));
+      }, { timeout: 5000 });
+
       // Either agent cards or empty state should be present
       const hasAgents = await elementExists(page, '.agent-card');
       const hasEmptyState = await elementExists(page, '#agent-grid .empty-state');
@@ -456,6 +461,11 @@ describe('Component Tests', () => {
     it('should render mail list or empty state', async () => {
       await navigateToApp(page);
       await switchView(page, 'mail');
+
+      await page.waitForFunction(() => {
+        const list = document.getElementById('mail-list');
+        return list && (list.querySelector('.mail-item') || list.querySelector('.empty-state'));
+      }, { timeout: 5000 });
 
       // Either mail items or empty state should be present
       const hasMail = await elementExists(page, '.mail-item');

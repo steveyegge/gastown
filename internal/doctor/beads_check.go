@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -127,8 +126,7 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 		}
 
 		// Run bd sync to rebuild from JSONL
-		cmd := exec.Command("bd", "sync", "--from-main")
-		cmd.Dir = ctx.TownRoot
+		cmd := beads.Command(ctx.TownRoot, "sync", "--from-main")
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
@@ -150,8 +148,7 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 				return err
 			}
 
-			cmd := exec.Command("bd", "sync", "--from-main")
-			cmd.Dir = ctx.RigPath()
+			cmd := beads.Command(ctx.RigPath(), "sync", "--from-main")
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			if err := cmd.Run(); err != nil {

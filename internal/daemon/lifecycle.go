@@ -483,8 +483,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	}
 
 	// Sync beads
-	bdCmd := exec.Command("bd", "sync")
-	bdCmd.Dir = workDir
+	bdCmd := beads.Command(workDir, "sync")
 	if err := bdCmd.Run(); err != nil {
 		d.logger.Printf("Warning: bd sync failed in %s: %v", workDir, err)
 	}
@@ -1045,4 +1044,3 @@ Action needed: Either restart the agent or reassign the work.`,
 		d.logger.Printf("Notified %s of orphaned work for %s", witnessAddr, agentID)
 	}
 }
-

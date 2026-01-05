@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/util"
@@ -314,8 +314,7 @@ func (m *Manager) Pristine(name string) (*PristineResult, error) {
 
 // runBdSync runs bd sync in the given directory.
 func (m *Manager) runBdSync(dir string) error {
-	cmd := exec.Command("bd", "sync")
-	cmd.Dir = dir
+	cmd := beads.Command(dir, "sync")
 	return cmd.Run()
 }
 

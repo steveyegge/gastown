@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // RigIsGitRepoCheck verifies the rig has a valid mayor/rig git clone.
@@ -690,8 +692,7 @@ func (c *BeadsConfigValidCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Check if bd command works
-	cmd := exec.Command("bd", "stats", "--json")
-	cmd.Dir = c.rigPath
+	cmd := beads.Command(c.rigPath, "stats", "--json")
 	if err := cmd.Run(); err != nil {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -703,8 +704,7 @@ func (c *BeadsConfigValidCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Check sync status
-	cmd = exec.Command("bd", "sync", "--status")
-	cmd.Dir = c.rigPath
+	cmd = beads.Command(c.rigPath, "sync", "--status")
 	output, err := cmd.CombinedOutput()
 	c.needsSync = false
 	if err != nil {
@@ -735,8 +735,7 @@ func (c *BeadsConfigValidCheck) Fix(ctx *CheckContext) error {
 		return nil
 	}
 
-	cmd := exec.Command("bd", "sync")
-	cmd.Dir = c.rigPath
+	cmd := beads.Command(c.rigPath, "sync")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bd sync failed: %s", string(output))

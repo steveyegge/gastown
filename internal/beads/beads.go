@@ -217,6 +217,52 @@ func New(workDir string) *Beads {
 	return &Beads{workDir: workDir}
 }
 
+// Command creates a bd command scoped to the given work directory and
+// injects BEADS_DIR/BEADS_JSONL if they are not already set.
+func Command(workDir string, args ...string) *exec.Cmd {
+	cmd := exec.Command("bd", args...)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	ApplyEnv(cmd, workDir)
+	return cmd
+}
+
+// ApplyEnv ensures BEADS_DIR and BEADS_JSONL are set for a bd command when not
+// already provided. This avoids bd resolving paths against the git common dir
+// in worktree setups.
+func ApplyEnv(cmd *exec.Cmd, workDir string) {
+	if workDir == "" {
+		if cmd.Dir != "" {
+			workDir = cmd.Dir
+		} else if wd, err := os.Getwd(); err == nil {
+			workDir = wd
+		}
+	}
+	if workDir == "" {
+		return
+	}
+
+	beadsDir := ResolveBeadsDir(workDir)
+	if beadsDir == "" {
+		return
+	}
+
+	env := cmd.Env
+	if len(env) == 0 {
+		env = os.Environ()
+	}
+
+	if !envHas(env, "BEADS_DIR") {
+		env = setEnv(env, "BEADS_DIR", beadsDir)
+	}
+	if !envHas(env, "BEADS_JSONL") {
+		env = setEnv(env, "BEADS_JSONL", resolveJSONLPath(beadsDir))
+	}
+
+	cmd.Env = env
+}
+
 // run executes a bd command and returns stdout.
 func (b *Beads) run(args ...string) ([]byte, error) {
 	// Use --no-daemon for faster read operations (avoids daemon IPC overhead)
@@ -224,6 +270,7 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	fullArgs := append([]string{"--no-daemon"}, args...)
 	cmd := exec.Command("bd", fullArgs...)
 	cmd.Dir = b.workDir
+	ApplyEnv(cmd, b.workDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -231,10 +278,64 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		return nil, b.wrapError(err, stderr.String(), args)
+		stderrStr := stderr.String()
+		if strings.Contains(stderrStr, "Database out of sync with JSONL") {
+			syncCmd := Command(b.workDir, "--no-daemon", "sync", "--import-only")
+			if syncErr := syncCmd.Run(); syncErr == nil {
+				stdout.Reset()
+				stderr.Reset()
+				cmd = exec.Command("bd", fullArgs...)
+				cmd.Dir = b.workDir
+				ApplyEnv(cmd, b.workDir)
+				cmd.Stdout = &stdout
+				cmd.Stderr = &stderr
+				err = cmd.Run()
+			} else {
+				return nil, fmt.Errorf("bd sync --import-only failed: %w", syncErr)
+			}
+		}
+		if err != nil {
+			return nil, b.wrapError(err, stderr.String(), args)
+		}
 	}
 
 	return stdout.Bytes(), nil
+}
+
+func resolveJSONLPath(beadsDir string) string {
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err == nil {
+		var meta struct {
+			JSONLExport string `json:"jsonl_export"`
+		}
+		if json.Unmarshal(data, &meta) == nil && meta.JSONLExport != "" {
+			return filepath.Join(beadsDir, meta.JSONLExport)
+		}
+	}
+
+	return filepath.Join(beadsDir, "issues.jsonl")
+}
+
+func envHas(env []string, key string) bool {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
 
 // wrapError wraps bd errors with context.

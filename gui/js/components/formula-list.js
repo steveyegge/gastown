@@ -64,7 +64,7 @@ export async function loadFormulas() {
     container.innerHTML = `
       <div class="error-state">
         <span class="material-icons">error_outline</span>
-        <p>Failed to load formulas: ${err.message}</p>
+        <p>Failed to load formulas: ${escapeHtml(err.message)}</p>
         <button class="btn btn-secondary" onclick="window.location.reload()">Retry</button>
       </div>
     `;

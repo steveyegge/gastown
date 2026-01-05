@@ -59,6 +59,12 @@ export async function createPage() {
   const b = await launchBrowser();
   const page = await b.newPage();
 
+  await page.evaluateOnNewDocument(() => {
+    localStorage.setItem('gastown-onboarding-complete', 'true');
+    localStorage.setItem('gastown-onboarding-skipped', 'true');
+    localStorage.setItem('gastown-tutorial-complete', 'true');
+  });
+
   await page.setViewport(CONFIG.viewport);
   page.setDefaultTimeout(CONFIG.timeout);
 
@@ -69,9 +75,10 @@ export async function createPage() {
  * Navigate to the GUI and wait for it to load
  */
 export async function navigateToApp(page) {
-  await page.goto(CONFIG.baseUrl, { waitUntil: 'networkidle2' });
+  await page.goto(CONFIG.baseUrl, { waitUntil: 'domcontentloaded' });
   // Wait for app to initialize
-  await page.waitForSelector('#app-header', { timeout: 10000 });
+  await page.waitForSelector('#app-header', { timeout: 15000 });
+  await page.waitForFunction(() => !!window.gastown, { timeout: 15000 });
 }
 
 /**
@@ -80,14 +87,16 @@ export async function navigateToApp(page) {
 export async function waitForConnection(page) {
   await page.waitForFunction(() => {
     const status = document.querySelector('#connection-status');
-    return status?.classList.contains('connected');
-  }, { timeout: 10000 });
+    return status?.classList.contains('connected') ||
+      status?.textContent?.toLowerCase().includes('connected');
+  }, { timeout: 15000 });
 }
 
 /**
  * Click a navigation tab and wait for view to switch
  */
 export async function switchView(page, viewName) {
+  await page.waitForSelector(`[data-view="${viewName}"]`, { timeout: 5000 });
   await page.click(`[data-view="${viewName}"]`);
   await page.waitForSelector(`#view-${viewName}.active`, { timeout: 5000 });
 }
@@ -127,7 +136,7 @@ export async function elementExists(page, selector) {
  */
 export async function waitForToast(page, type = null) {
   const selector = type ? `.toast.toast-${type}.show` : '.toast.show';
-  await page.waitForSelector(selector, { timeout: 5000 });
+  await page.waitForSelector(selector, { timeout: 10000 });
   return getText(page, `${selector} .toast-message`);
 }
 

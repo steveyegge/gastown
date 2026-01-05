@@ -756,8 +756,7 @@ func runPolecatSync(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("Syncing %s/%s...\n", rigName, name)
 
-		syncCmd := exec.Command("bd", syncArgs...)
-		syncCmd.Dir = polecatDir
+		syncCmd := beads.Command(polecatDir, syncArgs...)
 		output, err := syncCmd.CombinedOutput()
 		if err != nil {
 			syncErrors = append(syncErrors, fmt.Sprintf("%s: %v", name, err))
@@ -1574,8 +1573,7 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 		if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
 			closeArgs = append(closeArgs, "--session="+sessionID)
 		}
-		closeCmd := exec.Command("bd", closeArgs...)
-		closeCmd.Dir = filepath.Join(p.r.Path, "mayor", "rig")
+		closeCmd := beads.Command(filepath.Join(p.r.Path, "mayor", "rig"), closeArgs...)
 		if err := closeCmd.Run(); err != nil {
 			// Non-fatal - agent bead might not exist
 			fmt.Printf("  %s agent bead not found or already closed\n", style.Dim.Render("○"))

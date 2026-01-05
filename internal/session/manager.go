@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -260,8 +260,7 @@ func (m *Manager) Stop(polecat string, force bool) error {
 
 // syncBeads runs bd sync in the given directory.
 func (m *Manager) syncBeads(workDir string) error {
-	cmd := exec.Command("bd", "sync")
-	cmd.Dir = workDir
+	cmd := beads.Command(workDir, "sync")
 	return cmd.Run()
 }
 
@@ -431,8 +430,7 @@ func (m *Manager) StopAll(force bool) error {
 // This makes the work visible via 'gt hook' when the session starts.
 func (m *Manager) hookIssue(issueID, agentID, workDir string) error {
 	// Use bd update to set status=hooked and assign to the polecat
-	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID)
-	cmd.Dir = workDir
+	cmd := beads.Command(workDir, "update", issueID, "--status=hooked", "--assignee="+agentID)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("bd update failed: %w", err)
