@@ -78,7 +78,7 @@ export async function loadPRs() {
       <div class="error-state">
         <span class="material-icons">error</span>
         <p>Failed to load PRs</p>
-        <small>${err.message}</small>
+        <small>${escapeHtml(err.message)}</small>
       </div>
     `;
   }

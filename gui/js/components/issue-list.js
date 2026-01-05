@@ -64,7 +64,7 @@ export async function loadIssues() {
     container.innerHTML = `
       <div class="error-state">
         <span class="material-icons">error_outline</span>
-        <p>Failed to load issues: ${err.message}</p>
+        <p>Failed to load issues: ${escapeHtml(err.message)}</p>
         <button class="btn btn-secondary" onclick="window.location.reload()">Retry</button>
       </div>
     `;

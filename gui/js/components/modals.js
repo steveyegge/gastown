@@ -812,7 +812,7 @@ async function loadGitHubRepos() {
     }, { once: true });
 
   } catch (err) {
-    repoItems.innerHTML = `<div class="github-repo-empty">Failed to load repos: ${err.message}</div>`;
+    repoItems.innerHTML = `<div class="github-repo-empty">Failed to load repos: ${escapeHtml(err.message)}</div>`;
     pickerBtn.querySelector('.btn-text').textContent = 'Retry';
     pickerBtn.disabled = false;
     pickerBtn.addEventListener('click', loadGitHubRepos, { once: true });
