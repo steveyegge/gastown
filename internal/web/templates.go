@@ -54,10 +54,19 @@ type ConvoyRow struct {
 
 // TrackedIssue represents an issue tracked by a convoy.
 type TrackedIssue struct {
+	ID           string
+	Title        string
+	Status       string
+	Assignee     string
+	Dependencies []DependencyNode // Dependency tree for this issue
+}
+
+// DependencyNode represents a node in a dependency tree.
+type DependencyNode struct {
 	ID       string
 	Title    string
 	Status   string
-	Assignee string
+	Children []DependencyNode
 }
 
 // LoadTemplates loads and parses all HTML templates.

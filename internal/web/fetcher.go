@@ -123,14 +123,15 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 		// Calculate work status based on progress and activity
 		row.WorkStatus = calculateWorkStatus(row.Completed, row.Total, row.LastActivity.ColorClass)
 
-		// Get tracked issues for expandable view
+		// Get tracked issues for expandable view with dependency trees
 		row.TrackedIssues = make([]TrackedIssue, len(tracked))
 		for i, t := range tracked {
 			row.TrackedIssues[i] = TrackedIssue{
-				ID:       t.ID,
-				Title:    t.Title,
-				Status:   t.Status,
-				Assignee: t.Assignee,
+				ID:           t.ID,
+				Title:        t.Title,
+				Status:       t.Status,
+				Assignee:     t.Assignee,
+				Dependencies: f.getDependencyTree(t.ID),
 			}
 		}
 
@@ -752,4 +753,124 @@ func parseActivityTimestamp(s string) (int64, bool) {
 		return 0, false
 	}
 	return unix, true
+}
+
+// depTreeNode represents a node in the bd dep tree --json output.
+type depTreeNode struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Depth    int    `json:"depth"`
+	ParentID string `json:"parent_id"`
+}
+
+// getDependencyTree fetches the dependency tree for an issue.
+// Returns the tree as a slice of DependencyNode (direct children of the issue).
+func (f *LiveConvoyFetcher) getDependencyTree(issueID string) []DependencyNode {
+	// #nosec G204 -- bd is a trusted internal tool, issueID is from beads database
+	cmd := exec.Command("bd", "dep", "tree", issueID, "--json")
+	cmd.Dir = f.townBeads
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+
+	var nodes []depTreeNode
+	if err := json.Unmarshal(stdout.Bytes(), &nodes); err != nil {
+		return nil
+	}
+
+	// Build the tree structure from flat list
+	return buildDependencyTree(nodes, issueID)
+}
+
+// buildDependencyTree converts a flat list of dep tree nodes into a hierarchical tree.
+// The nodes are ordered by depth, with parent_id indicating the parent in the tree.
+func buildDependencyTree(nodes []depTreeNode, rootID string) []DependencyNode {
+	if len(nodes) == 0 {
+		return nil
+	}
+
+	// Create a map for quick lookup
+	nodeMap := make(map[string]*DependencyNode)
+	for _, n := range nodes {
+		nodeMap[n.ID] = &DependencyNode{
+			ID:       n.ID,
+			Title:    n.Title,
+			Status:   n.Status,
+			Children: nil,
+		}
+	}
+
+	// Build parent-child relationships
+	var roots []DependencyNode
+	for _, n := range nodes {
+		if n.ID == rootID {
+			// Skip the root itself (depth 0)
+			continue
+		}
+
+		node := nodeMap[n.ID]
+		if n.ParentID == rootID {
+			// Direct child of root
+			roots = append(roots, *node)
+		} else if parent, ok := nodeMap[n.ParentID]; ok {
+			// Child of another node
+			parent.Children = append(parent.Children, *node)
+		}
+	}
+
+	// Since we built with pointers but appended copies, rebuild with proper children
+	return rebuildTreeWithChildren(nodeMap, nodes)
+}
+
+// rebuildTreeWithChildren ensures children are properly nested.
+func rebuildTreeWithChildren(nodeMap map[string]*DependencyNode, nodes []depTreeNode) []DependencyNode {
+	// Create a children map
+	childrenMap := make(map[string][]string)
+	for _, n := range nodes {
+		if n.Depth > 0 {
+			childrenMap[n.ParentID] = append(childrenMap[n.ParentID], n.ID)
+		}
+	}
+
+	// Recursively build nodes
+	var buildNode func(id string) DependencyNode
+	buildNode = func(id string) DependencyNode {
+		node := nodeMap[id]
+		if node == nil {
+			return DependencyNode{ID: id}
+		}
+
+		result := DependencyNode{
+			ID:     node.ID,
+			Title:  node.Title,
+			Status: node.Status,
+		}
+
+		for _, childID := range childrenMap[id] {
+			result.Children = append(result.Children, buildNode(childID))
+		}
+
+		return result
+	}
+
+	// Find root children (depth 1 nodes where parent_id is the root)
+	var rootID string
+	for _, n := range nodes {
+		if n.Depth == 0 {
+			rootID = n.ID
+			break
+		}
+	}
+
+	var result []DependencyNode
+	for _, childID := range childrenMap[rootID] {
+		result = append(result, buildNode(childID))
+	}
+
+	return result
 }

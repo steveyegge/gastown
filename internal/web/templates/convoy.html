@@ -320,6 +320,115 @@
             opacity: 0;
             transition: opacity 200ms ease-in;
         }
+
+        /* Collapsible dependency tree styles */
+        .convoy-row {
+            cursor: pointer;
+        }
+
+        .convoy-row:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .expand-icon {
+            display: inline-block;
+            width: 16px;
+            transition: transform 0.2s ease;
+            color: var(--text-secondary);
+        }
+
+        .convoy-row.expanded .expand-icon {
+            transform: rotate(90deg);
+        }
+
+        .deps-row {
+            display: none;
+        }
+
+        .deps-row.visible {
+            display: table-row;
+        }
+
+        .deps-row td {
+            padding: 8px 16px 16px 48px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .dep-tree {
+            font-size: 0.875rem;
+        }
+
+        .dep-tree ul {
+            list-style: none;
+            padding-left: 20px;
+            margin: 4px 0;
+        }
+
+        .dep-tree > ul {
+            padding-left: 0;
+        }
+
+        .dep-node {
+            position: relative;
+            padding: 2px 0;
+        }
+
+        .dep-node::before {
+            content: '';
+            position: absolute;
+            left: -16px;
+            top: 0;
+            width: 12px;
+            height: 50%;
+            border-left: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .dep-tree > ul > .dep-node::before {
+            display: none;
+        }
+
+        .dep-node:last-child::after {
+            content: '';
+            position: absolute;
+            left: -16px;
+            top: 50%;
+            bottom: 0;
+            width: 1px;
+            background: var(--bg-card);
+        }
+
+        .dep-id {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .dep-title {
+            color: var(--text-secondary);
+            margin-left: 8px;
+        }
+
+        .dep-status {
+            margin-left: 8px;
+            font-size: 0.75rem;
+        }
+
+        .dep-status-open {
+            color: var(--yellow);
+        }
+
+        .dep-status-closed {
+            color: var(--green);
+        }
+
+        .dep-status-closed::after {
+            content: ' ✓';
+        }
+
+        .no-deps {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -343,26 +452,53 @@
                 </tr>
             </thead>
             <tbody>
-                {{range .Convoys}}
-                <tr class="{{workStatusClass .WorkStatus}}">
+                {{range $idx, $convoy := .Convoys}}
+                <tr class="convoy-row {{workStatusClass $convoy.WorkStatus}}" onclick="toggleDeps('deps-{{$idx}}')" data-deps-id="deps-{{$idx}}">
                     <td>
-                        <span class="work-status">{{.WorkStatus}}</span>
+                        <span class="expand-icon">▶</span>
+                        <span class="work-status">{{$convoy.WorkStatus}}</span>
                     </td>
                     <td>
-                        <span class="convoy-id">{{.ID}}</span>
-                        <span class="convoy-title">{{.Title}}</span>
+                        <span class="convoy-id">{{$convoy.ID}}</span>
+                        <span class="convoy-title">{{$convoy.Title}}</span>
                     </td>
                     <td class="progress">
-                        {{.Progress}}
-                        {{if .Total}}
+                        {{$convoy.Progress}}
+                        {{if $convoy.Total}}
                         <div class="progress-bar">
-                            <div class="progress-fill" style="width: {{progressPercent .Completed .Total}}%;"></div>
+                            <div class="progress-fill" style="width: {{progressPercent $convoy.Completed $convoy.Total}}%;"></div>
                         </div>
                         {{end}}
                     </td>
-                    <td class="{{activityClass .LastActivity}}">
+                    <td class="{{activityClass $convoy.LastActivity}}">
                         <span class="activity-dot"></span>
-                        {{.LastActivity.FormattedAge}}
+                        {{$convoy.LastActivity.FormattedAge}}
+                    </td>
+                </tr>
+                <tr class="deps-row" id="deps-{{$idx}}">
+                    <td colspan="4">
+                        <div class="dep-tree">
+                            {{if $convoy.TrackedIssues}}
+                            <ul>
+                                {{range $convoy.TrackedIssues}}
+                                <li class="dep-node">
+                                    <span class="dep-id">{{.ID}}</span>
+                                    <span class="dep-title">{{.Title}}</span>
+                                    <span class="dep-status dep-status-{{.Status}}">[{{.Status}}]</span>
+                                    {{if .Dependencies}}
+                                    <ul>
+                                        {{range .Dependencies}}
+                                        {{template "depNode" .}}
+                                        {{end}}
+                                    </ul>
+                                    {{end}}
+                                </li>
+                                {{end}}
+                            </ul>
+                            {{else}}
+                            <span class="no-deps">No tracked issues</span>
+                            {{end}}
+                        </div>
                     </td>
                 </tr>
                 {{end}}
@@ -454,5 +590,35 @@
         </table>
         {{end}}
     </div>
+
+    <script>
+        function toggleDeps(id) {
+            const depsRow = document.getElementById(id);
+            const convoyRow = document.querySelector('[data-deps-id="' + id + '"]');
+
+            if (depsRow.classList.contains('visible')) {
+                depsRow.classList.remove('visible');
+                convoyRow.classList.remove('expanded');
+            } else {
+                depsRow.classList.add('visible');
+                convoyRow.classList.add('expanded');
+            }
+        }
+    </script>
 </body>
 </html>
+
+{{define "depNode"}}
+<li class="dep-node">
+    <span class="dep-id">{{.ID}}</span>
+    <span class="dep-title">{{.Title}}</span>
+    <span class="dep-status dep-status-{{.Status}}">[{{.Status}}]</span>
+    {{if .Children}}
+    <ul>
+        {{range .Children}}
+        {{template "depNode" .}}
+        {{end}}
+    </ul>
+    {{end}}
+</li>
+{{end}}
