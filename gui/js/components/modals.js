@@ -430,10 +430,9 @@ async function populateTargetDropdown(modalElement) {
   const targetSelect = modalElement.querySelector('[name="target"]');
   if (!targetSelect) return;
 
-  // Keep first option (placeholder)
-  const placeholder = targetSelect.options[0];
-  targetSelect.innerHTML = '';
-  targetSelect.appendChild(placeholder);
+  // Show loading state
+  targetSelect.innerHTML = '<option value="">Loading targets...</option>';
+  targetSelect.disabled = true;
 
   try {
     // Get targets from API
@@ -444,6 +443,10 @@ async function populateTargetDropdown(modalElement) {
       // Fallback to agents from state
       targets = state.get('agents') || [];
     }
+
+    // Reset and add placeholder
+    targetSelect.innerHTML = '<option value="">Select target agent...</option>';
+    targetSelect.disabled = false;
 
     // Group targets by type: global, rig, agent
     const groups = {
@@ -503,6 +506,8 @@ async function populateTargetDropdown(modalElement) {
     }
   } catch (err) {
     console.error('[Modals] Failed to populate targets:', err);
+    targetSelect.innerHTML = '<option value="">Failed to load targets</option>';
+    targetSelect.disabled = false;
   }
 }
 
@@ -976,6 +981,23 @@ async function handleMailComposeSubmit(form) {
 // === Dynamic Modals ===
 
 async function showConvoyDetailModal(convoyId) {
+  // Show loading modal immediately
+  const loadingContent = `
+    <div class="modal-header">
+      <h2>Convoy: ${escapeHtml(convoyId)}</h2>
+      <button class="btn btn-icon" data-modal-close>
+        <span class="material-icons">close</span>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="loading-state">
+        <span class="loading-spinner"></span>
+        Loading convoy details...
+      </div>
+    </div>
+  `;
+  const modal = showDynamicModal('convoy-detail', loadingContent);
+
   try {
     const convoy = await api.getConvoy(convoyId);
     const content = `
@@ -1010,9 +1032,26 @@ async function showConvoyDetailModal(convoyId) {
         </div>
       </div>
     `;
-    showDynamicModal('convoy-detail', content);
+    modal.innerHTML = content;
+
+    // Re-add close button handler
+    modal.querySelector('[data-modal-close]')?.addEventListener('click', closeAllModals);
   } catch (err) {
-    showToast(`Failed to load convoy: ${err.message}`, 'error');
+    modal.innerHTML = `
+      <div class="modal-header">
+        <h2>Convoy: ${escapeHtml(convoyId)}</h2>
+        <button class="btn btn-icon" data-modal-close>
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="error-state">
+          <span class="material-icons">error_outline</span>
+          <p>Failed to load convoy: ${escapeHtml(err.message)}</p>
+        </div>
+      </div>
+    `;
+    modal.querySelector('[data-modal-close]')?.addEventListener('click', closeAllModals);
   }
 }
 
