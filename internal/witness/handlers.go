@@ -281,6 +281,56 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 	return result
 }
 
+// HandleMergeFailed processes a MERGE_FAILED message from the Refinery.
+// Notifies the polecat that their merge was rejected and rework is needed.
+func HandleMergeFailed(workDir, rigName string, msg *mail.Message, router *mail.Router) *HandlerResult {
+	result := &HandlerResult{
+		MessageID:    msg.ID,
+		ProtocolType: ProtoMergeFailed,
+	}
+
+	// Parse the message
+	payload, err := ParseMergeFailed(msg.Subject, msg.Body)
+	if err != nil {
+		result.Error = fmt.Errorf("parsing MERGE_FAILED: %w", err)
+		return result
+	}
+
+	// Notify the polecat about the failure
+	polecatAddr := fmt.Sprintf("%s/polecats/%s", rigName, payload.PolecatName)
+	notification := &mail.Message{
+		From:     fmt.Sprintf("%s/witness", rigName),
+		To:       polecatAddr,
+		Subject:  fmt.Sprintf("Merge failed: %s", payload.FailureType),
+		Priority: mail.PriorityHigh,
+		Type:     mail.TypeTask,
+		Body: fmt.Sprintf(`Your merge request was rejected.
+
+Branch: %s
+Issue: %s
+Failure: %s
+Error: %s
+
+Please fix the issue and resubmit with 'gt done'.`,
+			payload.Branch,
+			payload.IssueID,
+			payload.FailureType,
+			payload.Error,
+		),
+	}
+
+	if err := router.Send(notification); err != nil {
+		result.Error = fmt.Errorf("sending failure notification: %w", err)
+		return result
+	}
+
+	result.Handled = true
+	result.MailSent = notification.ID
+	result.Action = fmt.Sprintf("notified %s of merge failure: %s - %s", payload.PolecatName, payload.FailureType, payload.Error)
+
+	return result
+}
+
 // HandleSwarmStart processes a SWARM_START message from the Mayor.
 // Creates a swarm tracking wisp to monitor batch polecat work.
 func HandleSwarmStart(workDir string, msg *mail.Message) *HandlerResult {

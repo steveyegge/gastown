@@ -22,6 +22,9 @@ var (
 	// MERGED <name> - refinery confirms branch merged
 	PatternMerged = regexp.MustCompile(`^MERGED\s+(\S+)`)
 
+	// MERGE_FAILED <name> - refinery reporting merge failure
+	PatternMergeFailed = regexp.MustCompile(`^MERGE_FAILED\s+(\S+)`)
+
 	// HANDOFF - session continuity message
 	PatternHandoff = regexp.MustCompile(`^🤝\s*HANDOFF`)
 
@@ -37,6 +40,7 @@ const (
 	ProtoLifecycleShutdown ProtocolType = "lifecycle_shutdown"
 	ProtoHelp              ProtocolType = "help"
 	ProtoMerged            ProtocolType = "merged"
+	ProtoMergeFailed       ProtocolType = "merge_failed"
 	ProtoHandoff           ProtocolType = "handoff"
 	ProtoSwarmStart        ProtocolType = "swarm_start"
 	ProtoUnknown           ProtocolType = "unknown"
@@ -70,6 +74,16 @@ type MergedPayload struct {
 	MergedAt    time.Time
 }
 
+// MergeFailedPayload contains parsed data from a MERGE_FAILED message.
+type MergeFailedPayload struct {
+	PolecatName string
+	Branch      string
+	IssueID     string
+	FailureType string // "build", "test", "lint", etc.
+	Error       string
+	FailedAt    time.Time
+}
+
 // SwarmStartPayload contains parsed data from a SWARM_START message.
 type SwarmStartPayload struct {
 	SwarmID   string
@@ -89,6 +103,8 @@ func ClassifyMessage(subject string) ProtocolType {
 		return ProtoHelp
 	case PatternMerged.MatchString(subject):
 		return ProtoMerged
+	case PatternMergeFailed.MatchString(subject):
+		return ProtoMergeFailed
 	case PatternHandoff.MatchString(subject):
 		return ProtoHandoff
 	case PatternSwarmStart.MatchString(subject):
@@ -201,6 +217,43 @@ func ParseMerged(subject, body string) (*MergedPayload, error) {
 			if t, err := time.Parse(time.RFC3339, ts); err == nil {
 				payload.MergedAt = t
 			}
+		}
+	}
+
+	return payload, nil
+}
+
+// ParseMergeFailed extracts payload from a MERGE_FAILED message.
+// Subject format: MERGE_FAILED <polecat-name>
+// Body format:
+//
+//	Branch: <branch>
+//	Issue: <issue-id>
+//	FailureType: <type>
+//	Error: <error-message>
+func ParseMergeFailed(subject, body string) (*MergeFailedPayload, error) {
+	matches := PatternMergeFailed.FindStringSubmatch(subject)
+	if len(matches) < 2 {
+		return nil, fmt.Errorf("invalid MERGE_FAILED subject: %s", subject)
+	}
+
+	payload := &MergeFailedPayload{
+		PolecatName: matches[1],
+		FailedAt:    time.Now(),
+	}
+
+	// Parse body for structured fields
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "Branch:"):
+			payload.Branch = strings.TrimSpace(strings.TrimPrefix(line, "Branch:"))
+		case strings.HasPrefix(line, "Issue:"):
+			payload.IssueID = strings.TrimSpace(strings.TrimPrefix(line, "Issue:"))
+		case strings.HasPrefix(line, "FailureType:"):
+			payload.FailureType = strings.TrimSpace(strings.TrimPrefix(line, "FailureType:"))
+		case strings.HasPrefix(line, "Error:"):
+			payload.Error = strings.TrimSpace(strings.TrimPrefix(line, "Error:"))
 		}
 	}
 

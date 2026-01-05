@@ -16,7 +16,9 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/mrqueue"
+	"github.com/steveyegge/gastown/internal/protocol"
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
@@ -80,6 +82,7 @@ type Engineer struct {
 	workDir     string
 	output      io.Writer // Output destination for user-facing messages
 	eventLogger *mrqueue.EventLogger
+	router      *mail.Router // Mail router for sending protocol messages
 
 	// stopCh is used for graceful shutdown
 	stopCh chan struct{}
@@ -96,6 +99,7 @@ func NewEngineer(r *rig.Rig) *Engineer {
 		workDir:     r.Path,
 		output:      os.Stdout,
 		eventLogger: mrqueue.NewEventLoggerFromRig(r.Path),
+		router:      mail.NewRouter(r.Path),
 		stopCh:      make(chan struct{}),
 	}
 }
@@ -528,6 +532,21 @@ func (e *Engineer) handleFailureFromQueue(mr *mrqueue.MR, result ProcessResult) 
 	// Emit merge_failed event
 	if err := e.eventLogger.LogMergeFailed(mr, result.Error); err != nil {
 		fmt.Fprintf(e.output, "[Engineer] Warning: failed to log merge_failed event: %v\n", err)
+	}
+
+	// Notify Witness of the failure so polecat can be alerted
+	// Determine failure type from result
+	failureType := "build"
+	if result.Conflict {
+		failureType = "conflict"
+	} else if result.TestsFailed {
+		failureType = "tests"
+	}
+	msg := protocol.NewMergeFailedMessage(e.rig.Name, mr.Worker, mr.Branch, mr.SourceIssue, mr.Target, failureType, result.Error)
+	if err := e.router.Send(msg); err != nil {
+		fmt.Fprintf(e.output, "[Engineer] Warning: failed to send MERGE_FAILED to witness: %v\n", err)
+	} else {
+		fmt.Fprintf(e.output, "[Engineer] Notified witness of merge failure for %s\n", mr.Worker)
 	}
 
 	// If this was a conflict, create a conflict-resolution task for dispatch
