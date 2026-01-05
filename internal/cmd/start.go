@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -149,19 +151,28 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Starting Gas Town from %s\n\n", style.Dim.Render(townRoot))
 
-	// Start core agents (Mayor and Deacon)
+	// Step 1: Ensure daemon is running
+	if err := ensureDaemonRunning(townRoot); err != nil {
+		return fmt.Errorf("starting daemon: %w", err)
+	}
+
+	// Step 2: Start core agents (Mayor and Deacon)
 	if err := startCoreAgents(t); err != nil {
 		return err
 	}
 
-	// If --all, start witnesses and refineries for all rigs
-	if startAll {
-		fmt.Println()
-		fmt.Println("Starting rig agents...")
-		startRigAgents(t, townRoot)
+	// Step 3: Wait for core agents to be healthy
+	if err := waitForCoreAgentsHealthy(t); err != nil {
+		// Non-fatal: agents may still be initializing
+		fmt.Printf("  %s Warning: %v\n", style.Dim.Render("⚠"), err)
 	}
 
-	// Auto-start configured crew for each rig
+	// Step 4: Always start rig agents (Witnesses, Refineries)
+	fmt.Println()
+	fmt.Println("Starting rig agents...")
+	startRigAgents(t, townRoot)
+
+	// Step 5: Auto-start configured crew for each rig
 	fmt.Println()
 	fmt.Println("Starting configured crew...")
 	startConfiguredCrew(t, townRoot)
@@ -174,6 +185,109 @@ func runStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Check status:     %s\n", style.Dim.Render("gt status"))
 
 	return nil
+}
+
+// ensureDaemonRunning starts the daemon if not running.
+// It verifies the PID file exists and the process is alive.
+// This is idempotent - safe to call multiple times.
+func ensureDaemonRunning(townRoot string) error {
+	running, pid, err := daemon.IsRunning(townRoot)
+	if err != nil {
+		return fmt.Errorf("checking daemon status: %w", err)
+	}
+	if running {
+		fmt.Printf("  %s Daemon already running (PID %d)\n", style.Dim.Render("○"), pid)
+		return nil
+	}
+
+	fmt.Printf("  %s Starting daemon...\n", style.Bold.Render("→"))
+
+	// Start daemon in background using 'gt daemon run'
+	gtPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("finding executable: %w", err)
+	}
+
+	daemonCmd := exec.Command(gtPath, "daemon", "run")
+	daemonCmd.Dir = townRoot
+	// Detach from terminal
+	daemonCmd.Stdin = nil
+	daemonCmd.Stdout = nil
+	daemonCmd.Stderr = nil
+
+	if err := daemonCmd.Start(); err != nil {
+		return fmt.Errorf("starting daemon process: %w", err)
+	}
+
+	// Wait for daemon to initialize (5s timeout as per design)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+		running, pid, err = daemon.IsRunning(townRoot)
+		if err != nil {
+			continue
+		}
+		if running {
+			fmt.Printf("  %s Daemon started (PID %d)\n", style.Bold.Render("✓"), pid)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("daemon failed to start within 5s (check logs with 'gt daemon logs')")
+}
+
+// waitForCoreAgentsHealthy waits for Mayor and Deacon to be healthy.
+// A healthy agent has a tmux session with Claude (node) running.
+// Uses a 10s timeout with polling as per design.
+func waitForCoreAgentsHealthy(t *tmux.Tmux) error {
+	mayorSession := getMayorSessionName()
+	deaconSession := getDeaconSessionName()
+
+	fmt.Printf("  %s Waiting for core agents to be healthy...\n", style.Dim.Render("○"))
+
+	deadline := time.Now().Add(10 * time.Second)
+	mayorHealthy := false
+	deaconHealthy := false
+
+	for time.Now().Before(deadline) {
+		// Check Mayor
+		if !mayorHealthy {
+			if hasSess, _ := t.HasSession(mayorSession); hasSess {
+				if t.IsClaudeRunning(mayorSession) {
+					mayorHealthy = true
+					fmt.Printf("  %s Mayor is healthy\n", style.Bold.Render("✓"))
+				}
+			}
+		}
+
+		// Check Deacon
+		if !deaconHealthy {
+			if hasSess, _ := t.HasSession(deaconSession); hasSess {
+				if t.IsClaudeRunning(deaconSession) {
+					deaconHealthy = true
+					fmt.Printf("  %s Deacon is healthy\n", style.Bold.Render("✓"))
+				}
+			}
+		}
+
+		// Both healthy - success
+		if mayorHealthy && deaconHealthy {
+			return nil
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Timeout - report what's still unhealthy
+	var unhealthy []string
+	if !mayorHealthy {
+		unhealthy = append(unhealthy, "Mayor")
+	}
+	if !deaconHealthy {
+		unhealthy = append(unhealthy, "Deacon")
+	}
+
+	return fmt.Errorf("agents not healthy after 10s: %s", strings.Join(unhealthy, ", "))
 }
 
 // startCoreAgents starts Mayor and Deacon sessions.
