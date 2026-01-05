@@ -905,11 +905,6 @@ function getLanguageColor(lang) {
   return colors[lang] || '#8b949e';
 }
 
-function escapeAttr(str) {
-  if (!str) return '';
-  return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
 async function handleNewRigSubmit(form) {
   const name = form.querySelector('[name="name"]')?.value;
   const url = form.querySelector('[name="url"]')?.value;
