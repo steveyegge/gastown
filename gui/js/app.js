@@ -298,10 +298,37 @@ async function loadInitialData() {
     await loadDashboard();
 
     elements.statusMessage.textContent = 'Ready';
+
+    // Background preload of other data (don't await, let it load in background)
+    preloadBackgroundData();
   } catch (err) {
     console.error('[App] Failed to load initial data:', err);
     elements.statusMessage.textContent = 'Error loading data';
     showToast('Failed to load data', 'error');
+  }
+}
+
+// Preload data in background for faster modal/tab access
+async function preloadBackgroundData() {
+  try {
+    // Wait 500ms to let initial UI settle, then preload in background
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    console.log('[App] Preloading background data...');
+
+    // Preload these in parallel
+    await Promise.allSettled([
+      api.getAgents(),  // Preload agents list
+      api.getRigs(),    // Preload rigs list
+      loadPRs(),        // Preload PRs
+      loadFormulas(),   // Preload formulas
+      loadIssues(),     // Preload issues
+    ]);
+
+    console.log('[App] Background data preloaded');
+  } catch (err) {
+    console.error('[App] Failed to preload background data:', err);
+    // Don't show error to user - this is background loading
   }
 }
 
