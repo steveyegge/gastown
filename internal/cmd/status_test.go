@@ -95,3 +95,59 @@ func TestRenderAgentDetails_UsesRigPrefix(t *testing.T) {
 		t.Fatalf("output %q does not contain rig-prefixed bead ID", output)
 	}
 }
+
+func TestTownStatus_CwdField(t *testing.T) {
+	// Test that TownStatus includes the Cwd field
+	status := TownStatus{
+		Name:     "test-town",
+		Location: "/path/to/town",
+		Cwd:      "/path/to/town/gastown/polecats/nux",
+	}
+
+	if status.Cwd == "" {
+		t.Error("TownStatus.Cwd should not be empty when set")
+	}
+
+	if status.Cwd != "/path/to/town/gastown/polecats/nux" {
+		t.Errorf("TownStatus.Cwd = %q, want %q", status.Cwd, "/path/to/town/gastown/polecats/nux")
+	}
+}
+
+func TestOutputStatusText_ShowsCwd(t *testing.T) {
+	status := TownStatus{
+		Name:     "test-town",
+		Location: "/path/to/town",
+		Cwd:      "/current/working/dir",
+		Rigs:     []RigStatus{},
+	}
+
+	output := captureStdout(t, func() {
+		_ = outputStatusText(status)
+	})
+
+	// Should show cwd in output
+	if !strings.Contains(output, "cwd:") {
+		t.Errorf("outputStatusText should include 'cwd:' line, got:\n%s", output)
+	}
+	if !strings.Contains(output, "/current/working/dir") {
+		t.Errorf("outputStatusText should include the cwd path, got:\n%s", output)
+	}
+}
+
+func TestOutputStatusText_NoCwdWhenEmpty(t *testing.T) {
+	status := TownStatus{
+		Name:     "test-town",
+		Location: "/path/to/town",
+		Cwd:      "", // Empty cwd
+		Rigs:     []RigStatus{},
+	}
+
+	output := captureStdout(t, func() {
+		_ = outputStatusText(status)
+	})
+
+	// Should NOT show cwd line when empty
+	if strings.Contains(output, "cwd:") {
+		t.Errorf("outputStatusText should not include 'cwd:' when Cwd is empty, got:\n%s", output)
+	}
+}
