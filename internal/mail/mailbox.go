@@ -112,9 +112,12 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 // listFromDir queries messages from a beads directory.
 // Returns messages where identity is the assignee OR a CC recipient.
 // Includes both open and hooked messages (hooked = auto-assigned handoff mail).
-func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) { //nolint:unparam // error return kept for future use
+// If all queries fail, returns the last error encountered.
+func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 	seen := make(map[string]bool)
 	var messages []*Message
+	var lastErr error
+	anySucceeded := false
 
 	// Get all identity variants to query (handles legacy vs normalized formats)
 	identities := m.identityVariants()
@@ -123,7 +126,10 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) { //nolint:un
 	for _, identity := range identities {
 		for _, status := range []string{"open", "hooked"} {
 			msgs, err := m.queryMessages(beadsDir, "--assignee", identity, status)
-			if err == nil {
+			if err != nil {
+				lastErr = err
+			} else {
+				anySucceeded = true
 				for _, msg := range msgs {
 					if !seen[msg.ID] {
 						seen[msg.ID] = true
@@ -137,7 +143,10 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) { //nolint:un
 	// Query for CC'd messages (open only)
 	for _, identity := range identities {
 		ccMsgs, err := m.queryMessages(beadsDir, "--label", "cc:"+identity, "open")
-		if err == nil {
+		if err != nil {
+			lastErr = err
+		} else {
+			anySucceeded = true
 			for _, msg := range ccMsgs {
 				if !seen[msg.ID] {
 					seen[msg.ID] = true
@@ -145,6 +154,11 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) { //nolint:un
 				}
 			}
 		}
+	}
+
+	// If ALL queries failed, return the last error
+	if !anySucceeded && lastErr != nil {
+		return nil, fmt.Errorf("all mailbox queries failed: %w", lastErr)
 	}
 
 	return messages, nil
