@@ -555,14 +555,15 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 // Town-level agents (Mayor, Deacon) are created by gt install in town beads.
 // Role beads are also created by gt install with hq- prefix.
 //
-// Format: <prefix>-<rig>-<role> (e.g., gt-gastown-witness)
+// Rig-level agents (Witness, Refinery) are created here in rig beads with rig prefix.
+// Format: <prefix>-<rig>-<role> (e.g., pi-pixelforge-witness)
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
-func (m *Manager) initAgentBeads(_, rigName, _ string) error { // rigPath and prefix unused until Phase 2
-	// TEMPORARY (gt-4r1ph): Currently all agent beads go in town beads.
-	// After Phase 2, only Mayor/Deacon will be here; Witness/Refinery go to rig beads.
-	townBeadsDir := filepath.Join(m.townRoot, ".beads")
-	bd := beads.NewWithBeadsDir(m.townRoot, townBeadsDir)
+func (m *Manager) initAgentBeads(rigPath, rigName, prefix string) error {
+	// Rig-level agents go in rig beads with rig prefix (per docs/architecture.md).
+	// Town-level agents (Mayor, Deacon) are created by gt install in town beads.
+	rigBeadsDir := filepath.Join(rigPath, ".beads")
+	bd := beads.NewWithBeadsDir(rigPath, rigBeadsDir)
 
 	// Define rig-level agents to create
 	type agentDef struct {
@@ -572,17 +573,17 @@ func (m *Manager) initAgentBeads(_, rigName, _ string) error { // rigPath and pr
 		desc     string
 	}
 
-	// Create rig-specific agents using gt prefix (agents stored in town beads).
-	// Format: gt-<rig>-<role> (e.g., gt-gastown-witness)
+	// Create rig-specific agents using rig prefix in rig beads.
+	// Format: <prefix>-<rig>-<role> (e.g., pi-pixelforge-witness)
 	agents := []agentDef{
 		{
-			id:       beads.WitnessBeadID(rigName),
+			id:       beads.WitnessBeadIDWithPrefix(prefix, rigName),
 			roleType: "witness",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
 		},
 		{
-			id:       beads.RefineryBeadID(rigName),
+			id:       beads.RefineryBeadIDWithPrefix(prefix, rigName),
 			roleType: "refinery",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
