@@ -256,6 +256,13 @@ function handleWebSocketMessage(message) {
       loadConvoys();
       break;
 
+    case 'bead_created':
+      // Bead was created - refresh work list if visible
+      if (state.currentView === 'work') {
+        loadWork();
+      }
+      break;
+
     default:
       console.log('[WS] Unknown message type:', message.type);
   }

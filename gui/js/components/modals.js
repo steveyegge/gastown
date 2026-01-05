@@ -495,6 +495,14 @@ async function handleSlingSubmit(form) {
   const errorContainer = form.querySelector('.sling-error');
   if (errorContainer) errorContainer.remove();
 
+  // Show loading state on submit button
+  const submitBtn = form.querySelector('button[type="submit"]');
+  const originalText = submitBtn?.innerHTML;
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="material-icons spinning">sync</span> Slinging...';
+  }
+
   try {
     const result = await api.sling(bead, target, { molecule, quality });
     showToast(`Work slung: ${bead} → ${target}`, 'success');
@@ -508,6 +516,12 @@ async function handleSlingSubmit(form) {
       showSlingError(form, err.errorData);
     } else {
       showToast(`Failed to sling work: ${err.message}`, 'error');
+    }
+  } finally {
+    // Restore button state
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = originalText;
     }
   }
 }
