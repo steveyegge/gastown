@@ -395,9 +395,15 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 
 		// Step 2: Create wisp with feature variable from bead title
+		// Run from hookWorkDir (polecat worktree) so wisp is created in rig beads,
+		// not town beads. This ensures wisp and target bead are in the same database
+		// so bd mol bond can find both.
 		featureVar := fmt.Sprintf("feature=%s", info.Title)
 		wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--json"}
 		wispCmd := exec.Command("bd", wispArgs...)
+		if hookWorkDir != "" {
+			wispCmd.Dir = hookWorkDir
+		}
 		wispCmd.Stderr = os.Stderr
 		wispOut, err := wispCmd.Output()
 		if err != nil {
@@ -412,9 +418,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Formula wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
 
 		// Step 3: Bond wisp to original bead (creates compound)
-		// Use --no-daemon for mol bond (requires direct database access)
-		bondArgs := []string{"--no-daemon", "mol", "bond", wispRootID, beadID, "--json"}
+		// Run from hookWorkDir to ensure both wisp and target bead are found in rig beads.
+		bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
 		bondCmd := exec.Command("bd", bondArgs...)
+		if hookWorkDir != "" {
+			bondCmd.Dir = hookWorkDir
+		}
 		bondCmd.Stderr = os.Stderr
 		bondOut, err := bondCmd.Output()
 		if err != nil {
