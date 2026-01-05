@@ -87,23 +87,38 @@ func parseAnnounceName(address string) string {
 	return strings.TrimPrefix(address, "announce:")
 }
 
-// expandList returns the recipients for a mailing list.
-// Returns ErrUnknownList if the list is not found.
-func (r *Router) expandList(listName string) ([]string, error) {
-	// Load messaging config from town root
+// expandFromConfig is a generic helper for config-based expansion.
+// It loads the messaging config and calls the getter to extract the desired value.
+// This consolidates the common pattern of: check townRoot, load config, lookup in map.
+func expandFromConfig[T any](r *Router, name string, getter func(*config.MessagingConfig) (T, bool), errType error) (T, error) {
+	var zero T
 	if r.townRoot == "" {
-		return nil, fmt.Errorf("%w: %s (no town root)", ErrUnknownList, listName)
+		return zero, fmt.Errorf("%w: %s (no town root)", errType, name)
 	}
 
 	configPath := config.MessagingConfigPath(r.townRoot)
 	cfg, err := config.LoadMessagingConfig(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("loading messaging config: %w", err)
+		return zero, fmt.Errorf("loading messaging config: %w", err)
 	}
 
-	recipients, ok := cfg.Lists[listName]
+	result, ok := getter(cfg)
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrUnknownList, listName)
+		return zero, fmt.Errorf("%w: %s", errType, name)
+	}
+
+	return result, nil
+}
+
+// expandList returns the recipients for a mailing list.
+// Returns ErrUnknownList if the list is not found.
+func (r *Router) expandList(listName string) ([]string, error) {
+	recipients, err := expandFromConfig(r, listName, func(cfg *config.MessagingConfig) ([]string, bool) {
+		r, ok := cfg.Lists[listName]
+		return r, ok
+	}, ErrUnknownList)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(recipients) == 0 {
@@ -116,45 +131,25 @@ func (r *Router) expandList(listName string) ([]string, error) {
 // expandQueue returns the QueueConfig for a queue name.
 // Returns ErrUnknownQueue if the queue is not found.
 func (r *Router) expandQueue(queueName string) (*config.QueueConfig, error) {
-	// Load messaging config from town root
-	if r.townRoot == "" {
-		return nil, fmt.Errorf("%w: %s (no town root)", ErrUnknownQueue, queueName)
-	}
-
-	configPath := config.MessagingConfigPath(r.townRoot)
-	cfg, err := config.LoadMessagingConfig(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("loading messaging config: %w", err)
-	}
-
-	queueCfg, ok := cfg.Queues[queueName]
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrUnknownQueue, queueName)
-	}
-
-	return &queueCfg, nil
+	return expandFromConfig(r, queueName, func(cfg *config.MessagingConfig) (*config.QueueConfig, bool) {
+		qc, ok := cfg.Queues[queueName]
+		if !ok {
+			return nil, false
+		}
+		return &qc, true
+	}, ErrUnknownQueue)
 }
 
 // expandAnnounce returns the AnnounceConfig for an announce channel name.
 // Returns ErrUnknownAnnounce if the channel is not found.
 func (r *Router) expandAnnounce(announceName string) (*config.AnnounceConfig, error) {
-	// Load messaging config from town root
-	if r.townRoot == "" {
-		return nil, fmt.Errorf("%w: %s (no town root)", ErrUnknownAnnounce, announceName)
-	}
-
-	configPath := config.MessagingConfigPath(r.townRoot)
-	cfg, err := config.LoadMessagingConfig(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("loading messaging config: %w", err)
-	}
-
-	announceCfg, ok := cfg.Announces[announceName]
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrUnknownAnnounce, announceName)
-	}
-
-	return &announceCfg, nil
+	return expandFromConfig(r, announceName, func(cfg *config.MessagingConfig) (*config.AnnounceConfig, bool) {
+		ac, ok := cfg.Announces[announceName]
+		if !ok {
+			return nil, false
+		}
+		return &ac, true
+	}, ErrUnknownAnnounce)
 }
 
 // detectTownRoot finds the town root by looking for mayor/town.json.
