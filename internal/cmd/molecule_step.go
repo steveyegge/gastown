@@ -314,6 +314,17 @@ func handleStepContinue(cwd, townRoot string, nextStep *beads.Issue, dryRun bool
 
 	fmt.Printf("%s Next step pinned: %s\n", style.Bold.Render("📌"), nextStep.ID)
 
+	// Record step start (capture starting cost for the next step)
+	// Extract molecule ID from step ID
+	moleculeID := extractMoleculeIDFromStep(nextStep.ID)
+	if moleculeID != "" {
+		stepCost := captureStepCost(nextStep.ID)
+		if err := recordStepStart(nextStep.ID, moleculeID, stepCost); err != nil {
+			// Non-fatal: log warning but continue
+			style.PrintWarning("could not record step start metrics: %v", err)
+		}
+	}
+
 	// Respawn the pane
 	if !tmux.IsInsideTmux() {
 		// Not in tmux - just print next action
@@ -606,6 +617,82 @@ func recordStepCompletion(stepID, moleculeID string, costData StepCostData) erro
 	output, err := bdCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("creating step.completed event: %w\nOutput: %s", err, string(output))
+	}
+
+	eventID := strings.TrimSpace(string(output))
+
+	// Auto-close the event (it's an audit event, not actionable)
+	closeCmd := exec.Command("bd", "close", eventID, "--reason=auto-closed step event")
+	if closeErr := closeCmd.Run(); closeErr != nil {
+		// Non-fatal: event was created, just couldn't auto-close
+		return fmt.Errorf("created event %s but could not auto-close: %w", eventID, closeErr)
+	}
+
+	return nil
+}
+
+// recordStepStart creates a step.started event in beads with initial cost data.
+func recordStepStart(stepID, moleculeID string, costData StepCostData) error {
+	// Build event payload
+	payload := map[string]interface{}{
+		"step_id":     stepID,
+		"molecule_id": moleculeID,
+	}
+
+	if costData.Captured {
+		payload["cost_usd_start"] = costData.CostUSD
+		payload["session_id"] = costData.SessionID
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshaling payload: %w", err)
+	}
+
+	// Detect agent identity for actor field
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting cwd: %w", err)
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding workspace: %w", err)
+	}
+
+	roleInfo, err := GetRoleWithContext(cwd, townRoot)
+	if err != nil {
+		return fmt.Errorf("detecting role: %w", err)
+	}
+
+	roleCtx := RoleContext{
+		Role:     roleInfo.Role,
+		Rig:      roleInfo.Rig,
+		Polecat:  roleInfo.Polecat,
+		TownRoot: townRoot,
+		WorkDir:  cwd,
+	}
+	agentPath := buildAgentPath(string(roleCtx.Role), roleCtx.Rig, roleCtx.Polecat)
+
+	// Build event title
+	title := fmt.Sprintf("Step started: %s", stepID)
+
+	// Create step.started event
+	bdArgs := []string{
+		"create",
+		"--type=event",
+		"--title=" + title,
+		"--event-category=step.started",
+		"--event-actor=" + agentPath,
+		"--event-payload=" + string(payloadJSON),
+		"--event-target=" + stepID,
+		"--silent",
+	}
+
+	bdCmd := exec.Command("bd", bdArgs...)
+	output, err := bdCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("creating step.started event: %w\nOutput: %s", err, string(output))
 	}
 
 	eventID := strings.TrimSpace(string(output))
