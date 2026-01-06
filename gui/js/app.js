@@ -262,6 +262,16 @@ function handleWebSocketMessage(message) {
       if (state.currentView === 'work') {
         loadWork();
       }
+      showToast('Work item created', 'success');
+      break;
+
+    case 'rig_added':
+      // Rig was added - refresh rigs list and status
+      showToast(`Rig added: ${message.data?.name || 'unknown'}`, 'success');
+      api.getStatus(true); // Force refresh
+      if (state.currentView === 'rigs') {
+        loadRigs();
+      }
       break;
 
     default:
