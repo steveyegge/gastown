@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -19,10 +22,13 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
+	"golang.org/x/term"
 )
 
 var statusJSON bool
 var statusFast bool
+var statusWatch bool
+var statusInterval int
 
 var statusCmd = &cobra.Command{
 	Use:     "status",
@@ -33,13 +39,16 @@ var statusCmd = &cobra.Command{
 
 Shows town name, registered rigs, active polecats, and witness status.
 
-Use --fast to skip mail lookups for faster execution.`,
+Use --fast to skip mail lookups for faster execution.
+Use --watch to continuously refresh status at regular intervals.`,
 	RunE: runStatus,
 }
 
 func init() {
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Output as JSON")
 	statusCmd.Flags().BoolVar(&statusFast, "fast", false, "Skip mail lookups for faster execution")
+	statusCmd.Flags().BoolVarP(&statusWatch, "watch", "w", false, "Watch mode: refresh status continuously")
+	statusCmd.Flags().IntVarP(&statusInterval, "interval", "n", 2, "Refresh interval in seconds")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -120,6 +129,58 @@ type StatusSum struct {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
+	if statusWatch {
+		return runStatusWatch(cmd, args)
+	}
+	return runStatusOnce(cmd, args)
+}
+
+func runStatusWatch(cmd *cobra.Command, args []string) error {
+	if statusJSON {
+		return fmt.Errorf("--json and --watch cannot be used together")
+	}
+	if statusInterval <= 0 {
+		return fmt.Errorf("interval must be positive, got %d", statusInterval)
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+
+	ticker := time.NewTicker(time.Duration(statusInterval) * time.Second)
+	defer ticker.Stop()
+
+	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+
+	for {
+		if isTTY {
+			fmt.Print("\033[H\033[2J") // ANSI: cursor home + clear screen
+		}
+
+		timestamp := time.Now().Format("15:04:05")
+		header := fmt.Sprintf("[%s] gt status --watch (every %ds, Ctrl+C to stop)", timestamp, statusInterval)
+		if isTTY {
+			fmt.Printf("%s\n\n", style.Dim.Render(header))
+		} else {
+			fmt.Printf("%s\n\n", header)
+		}
+
+		if err := runStatusOnce(cmd, args); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+
+		select {
+		case <-sigChan:
+			if isTTY {
+				fmt.Println("\nStopped.")
+			}
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func runStatusOnce(_ *cobra.Command, _ []string) error {
 	// Find town root
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
