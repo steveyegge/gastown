@@ -931,6 +931,110 @@ func TestBuildCrewStartupCommand(t *testing.T) {
 	}
 }
 
+func TestResolveAgentConfigWithOverride(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Town settings: default agent is gemini, plus a custom alias.
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "gemini"
+	townSettings.Agents["claude-haiku"] = &RuntimeConfig{
+		Command: "claude",
+		Args:    []string{"--model", "haiku", "--dangerously-skip-permissions"},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Rig settings: prefer codex unless overridden.
+	rigSettings := NewRigSettings()
+	rigSettings.Agent = "codex"
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	t.Run("no override uses rig agent", func(t *testing.T) {
+		rc, name, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "")
+		if err != nil {
+			t.Fatalf("ResolveAgentConfigWithOverride: %v", err)
+		}
+		if name != "codex" {
+			t.Fatalf("name = %q, want %q", name, "codex")
+		}
+		if rc.Command != "codex" {
+			t.Fatalf("rc.Command = %q, want %q", rc.Command, "codex")
+		}
+	})
+
+	t.Run("override uses built-in preset", func(t *testing.T) {
+		rc, name, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "gemini")
+		if err != nil {
+			t.Fatalf("ResolveAgentConfigWithOverride: %v", err)
+		}
+		if name != "gemini" {
+			t.Fatalf("name = %q, want %q", name, "gemini")
+		}
+		if rc.Command != "gemini" {
+			t.Fatalf("rc.Command = %q, want %q", rc.Command, "gemini")
+		}
+	})
+
+	t.Run("override uses custom agent alias", func(t *testing.T) {
+		rc, name, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "claude-haiku")
+		if err != nil {
+			t.Fatalf("ResolveAgentConfigWithOverride: %v", err)
+		}
+		if name != "claude-haiku" {
+			t.Fatalf("name = %q, want %q", name, "claude-haiku")
+		}
+		if rc.Command != "claude" {
+			t.Fatalf("rc.Command = %q, want %q", rc.Command, "claude")
+		}
+		if got := rc.BuildCommand(); got != "claude --model haiku --dangerously-skip-permissions" {
+			t.Fatalf("BuildCommand() = %q, want %q", got, "claude --model haiku --dangerously-skip-permissions")
+		}
+	})
+
+	t.Run("unknown override errors", func(t *testing.T) {
+		_, _, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "nope-not-an-agent")
+		if err == nil {
+			t.Fatal("expected error for unknown agent override")
+		}
+	})
+}
+
+func TestBuildPolecatStartupCommandWithAgentOverride(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// The rig settings file must exist for resolver calls that load it.
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildPolecatStartupCommandWithAgentOverride("testrig", "toast", rigPath, "", "gemini")
+	if err != nil {
+		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
+	}
+	if !strings.Contains(cmd, "GT_ROLE=polecat") {
+		t.Fatalf("expected GT_ROLE export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_RIG=testrig") {
+		t.Fatalf("expected GT_RIG export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_POLECAT=toast") {
+		t.Fatalf("expected GT_POLECAT export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "gemini --approval-mode yolo") {
+		t.Fatalf("expected gemini command in output: %q", cmd)
+	}
+}
+
 func TestLoadRuntimeConfigFromSettings(t *testing.T) {
 	// Create temp rig with custom runtime config
 	dir := t.TempDir()

@@ -104,6 +104,7 @@ var (
 	slingCreate   bool   // --create: create polecat if it doesn't exist
 	slingForce    bool   // --force: force spawn even if polecat has unread mail
 	slingAccount  string // --account: Claude Code account handle to use
+	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
 )
 
@@ -120,6 +121,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingCreate, "create", false, "Create polecat if it doesn't exist")
 	slingCmd.Flags().BoolVar(&slingForce, "force", false, "Force spawn even if polecat has unread mail")
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
+	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
 
 	rootCmd.AddCommand(slingCmd)
@@ -243,6 +245,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 					Account:  slingAccount,
 					Create:   slingCreate,
 					HookBead: beadID, // Set atomically at spawn time
+					Agent:    slingAgent,
 				}
 				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
@@ -849,6 +852,7 @@ func runSlingFormula(args []string) error {
 					Naked:   slingNaked,
 					Account: slingAccount,
 					Create:  slingCreate,
+					Agent:   slingAgent,
 				}
 				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
@@ -1100,7 +1104,6 @@ func agentIDToBeadID(agentID, townRoot string) string {
 		return ""
 	}
 }
-
 
 // IsDogTarget checks if target is a dog target pattern.
 // Returns the dog name (or empty for pool dispatch) and true if it's a dog target.
@@ -1395,6 +1398,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			Account:  slingAccount,
 			Create:   slingCreate,
 			HookBead: beadID, // Set atomically at spawn time
+			Agent:    slingAgent,
 		}
 		spawnInfo, err := SpawnPolecatForSling(rigName, spawnOpts)
 		if err != nil {

@@ -838,6 +838,61 @@ func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
 	return lookupAgentConfig(agentName, townSettings)
 }
 
+// ResolveAgentConfigWithOverride resolves the agent configuration for a rig, with an optional override.
+// If agentOverride is non-empty, it is used instead of rig/town defaults.
+// Returns the resolved RuntimeConfig, the selected agent name, and an error if the override name
+// does not exist in town custom agents or built-in presets.
+func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*RuntimeConfig, string, error) {
+	// Load rig settings
+	rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath))
+	if err != nil {
+		rigSettings = nil
+	}
+
+	// Backwards compatibility: if Runtime is set directly, use it (but still report agentOverride if present)
+	if rigSettings != nil && rigSettings.Runtime != nil && agentOverride == "" {
+		rc := rigSettings.Runtime
+		return fillRuntimeDefaults(rc), "", nil
+	}
+
+	// Load town settings for agent lookup
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	// Load custom agent registry if it exists
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+
+	// Determine which agent name to use
+	agentName := ""
+	if agentOverride != "" {
+		agentName = agentOverride
+	} else if rigSettings != nil && rigSettings.Agent != "" {
+		agentName = rigSettings.Agent
+	} else if townSettings.DefaultAgent != "" {
+		agentName = townSettings.DefaultAgent
+	} else {
+		agentName = "claude" // ultimate fallback
+	}
+
+	// If an override is requested, validate it exists.
+	if agentOverride != "" {
+		if townSettings.Agents != nil {
+			if custom, ok := townSettings.Agents[agentName]; ok && custom != nil {
+				return fillRuntimeDefaults(custom), agentName, nil
+			}
+		}
+		if preset := GetAgentPresetByName(agentName); preset != nil {
+			return RuntimeConfigFromPreset(AgentPreset(agentName)), agentName, nil
+		}
+		return nil, "", fmt.Errorf("agent '%s' not found", agentName)
+	}
+
+	// Normal lookup path (no override)
+	return lookupAgentConfig(agentName, townSettings), agentName, nil
+}
+
 // lookupAgentConfig looks up an agent by name.
 // First checks town's custom agents, then built-in presets from agents.go.
 func lookupAgentConfig(name string, townSettings *TownSettings) *RuntimeConfig {
@@ -893,6 +948,29 @@ func GetRuntimeCommand(rigPath string) string {
 	return ResolveAgentConfig(townRoot, rigPath).BuildCommand()
 }
 
+// GetRuntimeCommandWithAgentOverride returns the full command for starting an LLM session,
+// using agentOverride if non-empty.
+func GetRuntimeCommandWithAgentOverride(rigPath, agentOverride string) (string, error) {
+	if rigPath == "" {
+		townRoot, err := findTownRootFromCwd()
+		if err != nil {
+			return DefaultRuntimeConfig().BuildCommand(), nil
+		}
+		rc, _, resolveErr := ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		return rc.BuildCommand(), nil
+	}
+
+	townRoot := filepath.Dir(rigPath)
+	rc, _, err := ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
+	if err != nil {
+		return "", err
+	}
+	return rc.BuildCommand(), nil
+}
+
 // GetRuntimeCommandWithPrompt returns the full command with an initial prompt.
 func GetRuntimeCommandWithPrompt(rigPath, prompt string) string {
 	if rigPath == "" {
@@ -905,6 +983,29 @@ func GetRuntimeCommandWithPrompt(rigPath, prompt string) string {
 	}
 	townRoot := filepath.Dir(rigPath)
 	return ResolveAgentConfig(townRoot, rigPath).BuildCommandWithPrompt(prompt)
+}
+
+// GetRuntimeCommandWithPromptAndAgentOverride returns the full command with an initial prompt,
+// using agentOverride if non-empty.
+func GetRuntimeCommandWithPromptAndAgentOverride(rigPath, prompt, agentOverride string) (string, error) {
+	if rigPath == "" {
+		townRoot, err := findTownRootFromCwd()
+		if err != nil {
+			return DefaultRuntimeConfig().BuildCommandWithPrompt(prompt), nil
+		}
+		rc, _, resolveErr := ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		return rc.BuildCommandWithPrompt(prompt), nil
+	}
+
+	townRoot := filepath.Dir(rigPath)
+	rc, _, err := ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
+	if err != nil {
+		return "", err
+	}
+	return rc.BuildCommandWithPrompt(prompt), nil
 }
 
 // findTownRootFromCwd locates the town root by walking up from cwd.
@@ -981,6 +1082,52 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	return cmd
 }
 
+// BuildStartupCommandWithAgentOverride builds a startup command like BuildStartupCommand,
+// but uses agentOverride if non-empty.
+func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride string) (string, error) {
+	var rc *RuntimeConfig
+
+	if rigPath != "" {
+		townRoot := filepath.Dir(rigPath)
+		var err error
+		rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		townRoot, err := findTownRootFromCwd()
+		if err != nil {
+			rc = DefaultRuntimeConfig()
+		} else {
+			var resolveErr error
+			rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
+			if resolveErr != nil {
+				return "", resolveErr
+			}
+		}
+	}
+
+	// Build environment export prefix
+	var exports []string
+	for k, v := range envVars {
+		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+	}
+	sort.Strings(exports)
+
+	var cmd string
+	if len(exports) > 0 {
+		cmd = "export " + strings.Join(exports, " ") + " && "
+	}
+
+	if prompt != "" {
+		cmd += rc.BuildCommandWithPrompt(prompt)
+	} else {
+		cmd += rc.BuildCommand()
+	}
+
+	return cmd, nil
+}
+
 // BuildAgentStartupCommand is a convenience function for starting agent sessions.
 // It sets standard environment variables (GT_ROLE, BD_ACTOR, GIT_AUTHOR_NAME)
 // and builds the full startup command.
@@ -991,6 +1138,16 @@ func BuildAgentStartupCommand(role, bdActor, rigPath, prompt string) string {
 		"GIT_AUTHOR_NAME": bdActor,
 	}
 	return BuildStartupCommand(envVars, rigPath, prompt)
+}
+
+// BuildAgentStartupCommandWithAgentOverride is like BuildAgentStartupCommand, but uses agentOverride if non-empty.
+func BuildAgentStartupCommandWithAgentOverride(role, bdActor, rigPath, prompt, agentOverride string) (string, error) {
+	envVars := map[string]string{
+		"GT_ROLE":         role,
+		"BD_ACTOR":        bdActor,
+		"GIT_AUTHOR_NAME": bdActor,
+	}
+	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }
 
 // BuildPolecatStartupCommand builds the startup command for a polecat.
@@ -1007,6 +1164,19 @@ func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) st
 	return BuildStartupCommand(envVars, rigPath, prompt)
 }
 
+// BuildPolecatStartupCommandWithAgentOverride is like BuildPolecatStartupCommand, but uses agentOverride if non-empty.
+func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, prompt, agentOverride string) (string, error) {
+	bdActor := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+	envVars := map[string]string{
+		"GT_ROLE":         "polecat",
+		"GT_RIG":          rigName,
+		"GT_POLECAT":      polecatName,
+		"BD_ACTOR":        bdActor,
+		"GIT_AUTHOR_NAME": polecatName,
+	}
+	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+}
+
 // BuildCrewStartupCommand builds the startup command for a crew member.
 // Sets GT_ROLE, GT_RIG, GT_CREW, BD_ACTOR, and GIT_AUTHOR_NAME.
 func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
@@ -1019,6 +1189,19 @@ func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
 		"GIT_AUTHOR_NAME": crewName,
 	}
 	return BuildStartupCommand(envVars, rigPath, prompt)
+}
+
+// BuildCrewStartupCommandWithAgentOverride is like BuildCrewStartupCommand, but uses agentOverride if non-empty.
+func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt, agentOverride string) (string, error) {
+	bdActor := fmt.Sprintf("%s/crew/%s", rigName, crewName)
+	envVars := map[string]string{
+		"GT_ROLE":         "crew",
+		"GT_RIG":          rigName,
+		"GT_CREW":         crewName,
+		"BD_ACTOR":        bdActor,
+		"GIT_AUTHOR_NAME": crewName,
+	}
+	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }
 
 // GetRigPrefix returns the beads prefix for a rig from rigs.json.
