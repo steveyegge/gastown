@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/util"
@@ -381,50 +382,7 @@ type PristineResult struct {
 
 // setupSharedBeads creates a redirect file so the crew worker uses the rig's shared .beads database.
 // This eliminates the need for git sync between crew clones - all crew members share one database.
-//
-// Structure:
-//
-//	rig/
-//	  mayor/rig/.beads/     <- Shared database (the canonical location)
-//	  crew/
-//	    <name>/
-//	      .beads/
-//	        redirect        <- Contains "../../mayor/rig/.beads"
 func (m *Manager) setupSharedBeads(crewPath string) error {
-	// The shared beads database is at rig/mayor/rig/.beads/
-	// Crew clones are at rig/crew/<name>/
-	// So the relative path is ../../mayor/rig/.beads
-	sharedBeadsPath := filepath.Join(m.rig.Path, "mayor", "rig", ".beads")
-
-	// Verify the shared beads exists
-	if _, err := os.Stat(sharedBeadsPath); os.IsNotExist(err) {
-		// Fall back to rig root .beads if mayor/rig doesn't exist
-		sharedBeadsPath = filepath.Join(m.rig.Path, ".beads")
-		if _, err := os.Stat(sharedBeadsPath); os.IsNotExist(err) {
-			return fmt.Errorf("no shared beads database found")
-		}
-	}
-
-	// Create crew's .beads directory
-	crewBeadsDir := filepath.Join(crewPath, ".beads")
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
-		return fmt.Errorf("creating crew .beads dir: %w", err)
-	}
-
-	// Calculate relative path from crew/.beads/ to shared beads
-	// crew/<name>/.beads/ -> ../../mayor/rig/.beads or ../../.beads
-	var redirectContent string
-	if _, err := os.Stat(filepath.Join(m.rig.Path, "mayor", "rig", ".beads")); err == nil {
-		redirectContent = "../../mayor/rig/.beads\n"
-	} else {
-		redirectContent = "../../.beads\n"
-	}
-
-	// Create redirect file
-	redirectPath := filepath.Join(crewBeadsDir, "redirect")
-	if err := os.WriteFile(redirectPath, []byte(redirectContent), 0644); err != nil {
-		return fmt.Errorf("creating redirect file: %w", err)
-	}
-
-	return nil
+	townRoot := filepath.Dir(m.rig.Path)
+	return beads.SetupRedirect(townRoot, crewPath)
 }

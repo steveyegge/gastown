@@ -179,7 +179,8 @@ func (m *Manager) Start(foreground bool) error {
 	_ = t.SetEnvironment(sessionID, "BD_ACTOR", bdActor)
 
 	// Set beads environment - refinery uses rig-level beads (non-fatal)
-	beadsDir := filepath.Join(m.rig.Path, "mayor", "rig", ".beads")
+	// Use ResolveBeadsDir to handle both tracked (mayor/rig) and local beads
+	beadsDir := beads.ResolveBeadsDir(m.rig.Path)
 	_ = t.SetEnvironment(sessionID, "BEADS_DIR", beadsDir)
 	_ = t.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1")
 	_ = t.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/refinery", m.rig.Name))

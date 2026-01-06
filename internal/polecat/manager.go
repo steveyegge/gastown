@@ -48,12 +48,11 @@ type Manager struct {
 
 // NewManager creates a new polecat manager.
 func NewManager(r *rig.Rig, g *git.Git) *Manager {
-	// Always use mayor/rig as the beads path.
-	// This matches routes.jsonl which maps prefixes to <rig>/mayor/rig.
-	// The rig root .beads/ only contains config.yaml (no database),
-	// so running bd from there causes it to walk up and find town beads
-	// with the wrong prefix (e.g., 'gm' instead of the rig's prefix).
-	beadsPath := filepath.Join(r.Path, "mayor", "rig")
+	// Use the resolved beads directory to find where bd commands should run.
+	// For tracked beads: rig/.beads/redirect -> mayor/rig/.beads, so use mayor/rig
+	// For local beads: rig/.beads is the database, so use rig root
+	resolvedBeads := beads.ResolveBeadsDir(r.Path)
+	beadsPath := filepath.Dir(resolvedBeads) // Get the directory containing .beads
 
 	// Try to load rig settings for namepool config
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
@@ -721,74 +720,9 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.
 // This eliminates the need for git sync between polecat clones - all polecats share one database.
-//
-// Structure:
-//
-//	rig/
-//	  .beads/              <- Shared database (ensured to exist)
-//	  polecats/
-//	    <name>/
-//	      .beads/
-//	        redirect       <- Contains "../../.beads" or "../../mayor/rig/.beads"
-//
-// IMPORTANT: If the polecat was created from a branch that had .beads/ tracked in git,
-// those files will be present. We must clean them out and replace with just the redirect.
-//
-// The redirect target is conditional: repos with .beads/ tracked in git have their canonical
-// database at mayor/rig/.beads, while fresh rigs use the database at rig root .beads/.
 func (m *Manager) setupSharedBeads(polecatPath string) error {
-	// Determine the shared beads location:
-	// - If mayor/rig/.beads exists (source repo has beads tracked in git), use that
-	// - Otherwise fall back to rig/.beads (created by initBeads during gt rig add)
-	// This matches the crew manager's logic for consistency.
-	mayorRigBeads := filepath.Join(m.rig.Path, "mayor", "rig", ".beads")
-	rigRootBeads := filepath.Join(m.rig.Path, ".beads")
-
-	var sharedBeadsPath string
-	var redirectContent string
-
-	if _, err := os.Stat(mayorRigBeads); err == nil {
-		// Source repo has .beads/ tracked - use mayor/rig/.beads
-		sharedBeadsPath = mayorRigBeads
-		redirectContent = "../../mayor/rig/.beads\n"
-	} else {
-		// No beads in source repo - use rig root .beads (from initBeads)
-		sharedBeadsPath = rigRootBeads
-		redirectContent = "../../.beads\n"
-		// Ensure rig root has .beads/ directory
-		if err := os.MkdirAll(rigRootBeads, 0755); err != nil {
-			return fmt.Errorf("creating rig .beads dir: %w", err)
-		}
-	}
-
-	// Verify shared beads exists
-	if _, err := os.Stat(sharedBeadsPath); os.IsNotExist(err) {
-		return fmt.Errorf("no shared beads database found at %s", sharedBeadsPath)
-	}
-
-	// Clean up any existing .beads/ contents from the branch
-	// This handles the case where the polecat was created from a branch that
-	// had .beads/ tracked (e.g., from previous bd sync operations)
-	polecatBeadsDir := filepath.Join(polecatPath, ".beads")
-	if _, err := os.Stat(polecatBeadsDir); err == nil {
-		// Directory exists - remove it entirely and recreate fresh
-		if err := os.RemoveAll(polecatBeadsDir); err != nil {
-			return fmt.Errorf("cleaning existing .beads dir: %w", err)
-		}
-	}
-
-	// Create fresh .beads directory
-	if err := os.MkdirAll(polecatBeadsDir, 0755); err != nil {
-		return fmt.Errorf("creating polecat .beads dir: %w", err)
-	}
-
-	// Create redirect file pointing to the shared beads location
-	redirectPath := filepath.Join(polecatBeadsDir, "redirect")
-	if err := os.WriteFile(redirectPath, []byte(redirectContent), 0644); err != nil {
-		return fmt.Errorf("creating redirect file: %w", err)
-	}
-
-	return nil
+	townRoot := filepath.Dir(m.rig.Path)
+	return beads.SetupRedirect(townRoot, polecatPath)
 }
 
 // CleanupStaleBranches removes orphaned polecat branches that are no longer in use.
