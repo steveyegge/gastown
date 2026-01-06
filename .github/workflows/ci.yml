@@ -96,9 +96,8 @@ jobs:
           path: |
             coverage.out
             test-output.txt
-          retention-days: 7
 
-  # Separate job to process coverage after all tests complete
+  # Separate job to process coverage after ALL tests complete
   coverage:
     name: Coverage Report
     runs-on: ubuntu-latest
