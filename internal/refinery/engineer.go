@@ -234,12 +234,19 @@ func (e *Engineer) ProcessMR(ctx context.Context, mr *beads.Issue) ProcessResult
 // doMerge performs the actual git merge operation.
 // This is the core merge logic shared by ProcessMR and ProcessMRFromQueue.
 func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue string) ProcessResult {
-	// Step 1: Fetch the source branch from origin
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Fetching branch %s from origin...\n", branch)
-	if err := e.git.FetchBranch("origin", branch); err != nil {
+	// Step 1: Verify source branch exists locally (shared .repo.git with polecats)
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking local branch %s...\n", branch)
+	exists, err := e.git.BranchExists(branch)
+	if err != nil {
 		return ProcessResult{
 			Success: false,
-			Error:   fmt.Sprintf("failed to fetch branch %s: %v", branch, err),
+			Error:   fmt.Sprintf("failed to check branch %s: %v", branch, err),
+		}
+	}
+	if !exists {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("branch %s not found locally", branch),
 		}
 	}
 
@@ -258,10 +265,9 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: pull from origin/%s: %v (continuing)\n", target, err)
 	}
 
-	// Step 3: Check for merge conflicts
+	// Step 3: Check for merge conflicts (using local branch)
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking for conflicts...\n")
-	remoteBranch := "origin/" + branch
-	conflicts, err := e.git.CheckConflicts(remoteBranch, target)
+	conflicts, err := e.git.CheckConflicts(branch, target)
 	if err != nil {
 		return ProcessResult{
 			Success:  false,
@@ -297,7 +303,7 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		mergeMsg = fmt.Sprintf("Merge %s into %s (%s)", branch, target, sourceIssue)
 	}
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging with message: %s\n", mergeMsg)
-	if err := e.git.MergeNoFF(remoteBranch, mergeMsg); err != nil {
+	if err := e.git.MergeNoFF(branch, mergeMsg); err != nil {
 		if errors.Is(err, git.ErrMergeConflict) {
 			_ = e.git.AbortMerge()
 			return ProcessResult{

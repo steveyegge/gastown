@@ -1,8 +1,11 @@
 description = """
-Full Gas Town shutdown and restart.
+Full Gas Town shutdown with cleanup.
 
-This is an idempotent shutdown - it stops Claude sessions but preserves
-polecat sandboxes and hooks. Polecats can resume their work after restart.
+This molecule provides a clean shutdown that:
+- Preserves work (no forcing, no lost work)
+- Cleans ephemeral state (wisps, stale beads)
+- Resets agents to clean state
+- Is idempotent (safe to run multiple times)
 
 Use when you need to:
 - Reset all state for a fresh start
@@ -14,7 +17,7 @@ Sling to Mayor when ready to reboot:
 """
 formula = "mol-town-shutdown"
 type = "workflow"
-version = 2
+version = 3
 
 [[steps]]
 id = "preflight-check"
@@ -30,7 +33,8 @@ This checks for:
 - **Uncommitted changes**: Polecats with dirty git status
 - **Unpushed commits**: Work that hasn't reached remote
 - **Active merges**: Refinery mid-merge (could corrupt state)
-- **Pending CI**: PRs waiting on GitHub Actions
+- **Hooked work**: Agents with work still attached
+- **In-progress beads**: Work that hasn't completed
 
 Output is a report with warnings/blockers:
 
@@ -39,7 +43,8 @@ Output is a report with warnings/blockers:
 | BLOCKER | Active merge in progress | Abort shutdown |
 | WARNING | Uncommitted polecat changes | List affected polecats |
 | WARNING | Unpushed commits | List repos needing push |
-| INFO | Pending CI runs | Note for awareness |
+| WARNING | Hooked work | List agents with hooks |
+| INFO | In-progress beads | Will be reset to open |
 
 If blockers exist, STOP and resolve them first.
 If only warnings, decide whether to proceed (work will be preserved).
@@ -71,15 +76,58 @@ What this does NOT do:
 - Remove hook attachments
 - Lose any git state
 
-After restart, polecats can be respawned and will resume from their hooks.
-
 Note: Crew workers are NOT stopped (they're user-managed).
+"""
+
+[[steps]]
+id = "clear-hooks"
+title = "Clear agent hooks"
+needs = ["stop-sessions"]
+description = """
+Detach all hooked work from agents.
+
+```bash
+# Clear hooks for all agents
+for rig in $(gt rig list --names); do
+  gt unsling $rig/witness
+  gt unsling $rig/refinery
+  for polecat in $(gt polecat list $rig --names); do
+    gt unsling $rig/polecats/$polecat
+  done
+done
+
+# Clear deacon hook
+gt unsling deacon
+```
+
+This ensures no agent will auto-start work on restart.
+The beads themselves are preserved - just detached from hooks.
+"""
+
+[[steps]]
+id = "reset-in-progress"
+title = "Reset in-progress beads to open"
+needs = ["clear-hooks"]
+description = """
+Reset beads that were in-progress to open status.
+
+```bash
+# Find all in-progress beads and reset
+bd list --status=in_progress --format=ids | while read id; do
+  bd update $id --status=open --assignee=""
+done
+```
+
+This ensures:
+- No beads stuck in limbo after restart
+- Work can be re-assigned fresh
+- No orphaned assignments
 """
 
 [[steps]]
 id = "clear-inboxes"
 title = "Archive and clear inboxes"
-needs = ["stop-sessions"]
+needs = ["reset-in-progress"]
 description = """
 Archive and clear all agent inboxes across all rigs.
 
@@ -92,6 +140,9 @@ done
 
 # Clear Mayor inbox
 gt mail clear mayor --archive
+
+# Clear Deacon inbox
+gt mail clear deacon --archive
 ```
 
 Messages are archived to `.beads/mail-archive/` before deletion.
@@ -99,9 +150,34 @@ Crew inboxes are NOT cleared (user manages those).
 """
 
 [[steps]]
+id = "burn-wisps"
+title = "Clean up ephemeral data"
+needs = ["clear-inboxes"]
+description = """
+Remove wisp directories and ephemeral beads.
+
+```bash
+# Remove wisp directories
+for rig in $(gt rig list --paths); do
+  rm -rf $rig/.beads-wisp/
+done
+
+# Delete wisp beads from issues (hq-wisp-*, gt-wisp-*, etc.)
+bd list --type=wisp --format=ids | while read id; do
+  bd delete $id --force
+done
+
+# Delete stale hooked handoff beads (more than 7 days old)
+bd cleanup --stale-handoffs --age=7d
+```
+
+This prevents unbounded accumulation of ephemeral state.
+"""
+
+[[steps]]
 id = "stop-daemon"
 title = "Stop the daemon"
-needs = ["clear-inboxes"]
+needs = ["burn-wisps"]
 description = """
 Stop the Gas Town daemon gracefully.
 
@@ -128,7 +204,7 @@ Rotate logs to prevent unbounded growth.
 # Rotate daemon logs
 gt daemon rotate-logs
 
-# Clean up old session captures (but not current sandboxes)
+# Clean up old session captures
 gt doctor --fix
 ```
 
@@ -143,6 +219,12 @@ description = """
 Ensure all beads state is persisted.
 
 ```bash
+# Sync all rig beads
+for rig in $(gt rig list --paths); do
+  (cd $rig && bd sync)
+done
+
+# Sync town beads
 bd sync
 ```
 
@@ -152,9 +234,32 @@ own work when they resume.
 """
 
 [[steps]]
+id = "validate-clean"
+title = "Validate clean state"
+needs = ["sync-state"]
+description = """
+Verify all cleanup operations succeeded.
+
+```bash
+gt shutdown validate
+```
+
+Checks:
+- [ ] All inboxes empty (except crew)
+- [ ] No hooked work
+- [ ] No in-progress beads
+- [ ] Beads synced
+- [ ] No wisp directories
+- [ ] Daemon stopped
+
+Reports any discrepancies. Non-blocking - shutdown continues
+but issues are logged for manual review.
+"""
+
+[[steps]]
 id = "handoff-mayor"
 title = "Send Mayor handoff"
-needs = ["sync-state"]
+needs = ["validate-clean"]
 description = """
 Record shutdown context for the fresh Mayor session.
 
@@ -164,6 +269,9 @@ Town shutdown completed. State preserved.
 
 Polecat sandboxes: PRESERVED (will resume from hooks)
 Inboxes: ARCHIVED and cleared
+Hooks: CLEARED
+In-progress beads: RESET to open
+Wisps: BURNED
 Daemon: STOPPED
 
 Next steps:
@@ -194,5 +302,5 @@ The daemon will:
 - Resume background coordination
 
 Polecats are NOT auto-respawned. Use `gt sling` or let Witness
-restart them based on their preserved hooks.
+restart them based on available work.
 """
