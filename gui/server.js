@@ -1342,7 +1342,11 @@ app.post('/api/rigs', async (req, res) => {
 
   const result = await executeGT(['rig', 'add', name, url]);
 
-  if (result.success) {
+  // Check if rig add actually succeeded (not just "has output")
+  // If the output contains "Error:", it's a real failure even if success=true
+  const hasError = result.data && (result.data.includes('Error:') || result.data.includes('error:'));
+
+  if (result.success && !hasError) {
     // Create agent beads for witness and refinery (targeted, not gt doctor --fix)
     const agentRoles = ['witness', 'refinery'];
     for (const role of agentRoles) {
@@ -1364,7 +1368,8 @@ app.post('/api/rigs', async (req, res) => {
     broadcast({ type: 'rig_added', data: { name, url } });
     res.json({ success: true, name, raw: result.data });
   } else {
-    res.status(500).json({ success: false, error: result.error });
+    const errorMsg = hasError ? result.data : (result.error || 'Failed to add rig');
+    res.status(500).json({ success: false, error: errorMsg });
   }
 });
 
