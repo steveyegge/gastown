@@ -368,6 +368,77 @@ func NewMayorConfig() *MayorConfig {
 	}
 }
 
+// DaemonPatrolConfigPath returns the path to the daemon patrol config file.
+func DaemonPatrolConfigPath(townRoot string) string {
+	return filepath.Join(townRoot, "mayor", DaemonPatrolConfigFileName)
+}
+
+// LoadDaemonPatrolConfig loads and validates a daemon patrol config file.
+func LoadDaemonPatrolConfig(path string) (*DaemonPatrolConfig, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+		}
+		return nil, fmt.Errorf("reading daemon patrol config: %w", err)
+	}
+
+	var config DaemonPatrolConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("parsing daemon patrol config: %w", err)
+	}
+
+	if err := validateDaemonPatrolConfig(&config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+// SaveDaemonPatrolConfig saves a daemon patrol config to a file.
+func SaveDaemonPatrolConfig(path string, config *DaemonPatrolConfig) error {
+	if err := validateDaemonPatrolConfig(config); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding daemon patrol config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil { //nolint:gosec // G306: config files don't contain secrets
+		return fmt.Errorf("writing daemon patrol config: %w", err)
+	}
+
+	return nil
+}
+
+func validateDaemonPatrolConfig(c *DaemonPatrolConfig) error {
+	if c.Type != "daemon-patrol-config" && c.Type != "" {
+		return fmt.Errorf("%w: expected type 'daemon-patrol-config', got '%s'", ErrInvalidType, c.Type)
+	}
+	if c.Version > CurrentDaemonPatrolConfigVersion {
+		return fmt.Errorf("%w: got %d, max supported %d", ErrInvalidVersion, c.Version, CurrentDaemonPatrolConfigVersion)
+	}
+	return nil
+}
+
+// EnsureDaemonPatrolConfig creates the daemon patrol config if it doesn't exist.
+func EnsureDaemonPatrolConfig(townRoot string) error {
+	path := DaemonPatrolConfigPath(townRoot)
+	if _, err := os.Stat(path); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("checking daemon patrol config: %w", err)
+		}
+		return SaveDaemonPatrolConfig(path, NewDaemonPatrolConfig())
+	}
+	return nil
+}
+
 // LoadAccountsConfig loads and validates an accounts configuration file.
 func LoadAccountsConfig(path string) (*AccountsConfig, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input

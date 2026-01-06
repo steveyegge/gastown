@@ -145,6 +145,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	if err := config.EnsureDaemonPatrolConfig(townRoot); err != nil {
+		fmt.Printf("  %s Could not ensure daemon config: %v\n", style.Dim.Render("○"), err)
+	}
+
 	t := tmux.NewTmux()
 
 	fmt.Printf("Starting Gas Town from %s\n\n", style.Dim.Render(townRoot))
