@@ -8,12 +8,12 @@ Gas Town is a workspace manager that lets you coordinate multiple Claude Code ag
 
 ### What Problem Does This Solve?
 
-| Challenge | Gas Town Solution |
-|-----------|------------------|
-| Agents lose context on restart | Work persists in git-backed hooks |
-| Manual agent coordination | Built-in mailboxes, identities, and handoffs |
-| 4-10 agents become chaotic | Scale comfortably to 20-30 agents |
-| Work state lost in agent memory | Work state stored in Beads ledger |
+| Challenge                       | Gas Town Solution                            |
+| ------------------------------- | -------------------------------------------- |
+| Agents lose context on restart  | Work persists in git-backed hooks            |
+| Manual agent coordination       | Built-in mailboxes, identities, and handoffs |
+| 4-10 agents become chaotic      | Scale comfortably to 20-30 agents            |
+| Work state lost in agent memory | Work state stored in Beads ledger            |
 
 ### Architecture
 
@@ -21,22 +21,22 @@ Gas Town is a workspace manager that lets you coordinate multiple Claude Code ag
 graph TB
     Mayor[The Mayor<br/>AI Coordinator]
     Town[Town Workspace<br/>~/gt/]
-    
+
     Town --> Mayor
     Town --> Rig1[Rig: Project A]
     Town --> Rig2[Rig: Project B]
-    
+
     Rig1 --> Crew1[Crew Member<br/>Your workspace]
     Rig1 --> Hooks1[Hooks<br/>Persistent storage]
     Rig1 --> Polecats1[Polecats<br/>Worker agents]
-    
+
     Rig2 --> Crew2[Crew Member]
     Rig2 --> Hooks2[Hooks]
     Rig2 --> Polecats2[Polecats]
-    
+
     Hooks1 -.git worktree.-> GitRepo1[Git Repository]
     Hooks2 -.git worktree.-> GitRepo2[Git Repository]
-    
+
     style Mayor fill:#e1f5ff
     style Town fill:#f0f0f0
     style Rig1 fill:#fff4e1
@@ -46,27 +46,35 @@ graph TB
 ## Core Concepts
 
 ### The Mayor 🎩
+
 Your primary AI coordinator. The Mayor is a Claude Code instance with full context about your workspace, projects, and agents. **Start here** - just tell the Mayor what you want to accomplish.
 
 ### Town 🏘️
+
 Your workspace directory (e.g., `~/gt/`). Contains all projects, agents, and configuration.
 
 ### Rigs 🏗️
+
 Project containers. Each rig wraps a git repository and manages its associated agents.
 
 ### Crew Members 👤
+
 Your personal workspace within a rig. Where you do hands-on work.
 
 ### Polecats 🦨
+
 Ephemeral worker agents that spawn, complete a task, and disappear.
 
 ### Hooks 🪝
+
 Git worktree-based persistent storage for agent work. Survives crashes and restarts.
 
 ### Convoys 🚚
+
 Work tracking units. Bundle multiple issues/tasks that get assigned to agents.
 
 ### Beads Integration 📿
+
 Git-backed issue tracking system that stores work state as structured data.
 
 ## Installation
@@ -114,7 +122,7 @@ sequenceDiagram
     participant Convoy
     participant Agent
     participant Hook
-    
+
     You->>Mayor: Tell Mayor what to build
     Mayor->>Convoy: Create convoy with issues
     Mayor->>Agent: Sling issue to agent
@@ -160,6 +168,7 @@ flowchart LR
 ```
 
 **Commands:**
+
 ```bash
 # Attach to Mayor
 gt mayor attach
@@ -178,27 +187,29 @@ gt convoy list
 Formulas are YAML-defined workflows stored in `.beads/formulas/`.
 
 **Example Formula** (`.beads/formulas/release.yaml`):
+
 ```yaml
 formula: release
 description: Standard release process
 steps:
   - name: bump-version
     command: ./scripts/bump-version.sh {{version}}
-  
+
   - name: run-tests
     command: make test
-  
+
   - name: build
     command: make build
-  
+
   - name: create-tag
     command: git tag -a v{{version}} -m "Release v{{version}}"
-  
+
   - name: publish
     command: ./scripts/publish.sh
 ```
 
 **Execute:**
+
 ```bash
 # List available formulas
 bd formula list
@@ -292,6 +303,7 @@ open http://localhost:8080
 ```
 
 Features:
+
 - Real-time agent status
 - Convoy progress tracking
 - Hook state visualization
@@ -348,13 +360,13 @@ gt completion fish > ~/.config/fish/completions/gt.fish
 
 ## Project Roles
 
-| Role | Description | Primary Interface |
-|------|-------------|-------------------|
-| **Mayor** | AI coordinator | `gt mayor attach` |
-| **Human (You)** | Crew member | Your crew directory |
-| **Polecat** | Worker agent | Spawned by Mayor |
-| **Hook** | Persistent storage | Git worktree |
-| **Convoy** | Work tracker | `gt convoy` commands |
+| Role            | Description        | Primary Interface    |
+| --------------- | ------------------ | -------------------- |
+| **Mayor**       | AI coordinator     | `gt mayor attach`    |
+| **Human (You)** | Crew member        | Your crew directory  |
+| **Polecat**     | Worker agent       | Spawned by Mayor     |
+| **Hook**        | Persistent storage | Git worktree         |
+| **Convoy**      | Work tracker       | `gt convoy` commands |
 
 ## Tips
 
@@ -368,20 +380,26 @@ gt completion fish > ~/.config/fish/completions/gt.fish
 ## Troubleshooting
 
 ### Agents lose connection
+
 Check hooks are properly initialized:
+
 ```bash
 gt hooks list
 gt hooks repair
 ```
 
 ### Convoy stuck
+
 Force refresh:
+
 ```bash
 gt convoy refresh <convoy-id>
 ```
 
 ### Mayor not responding
+
 Restart Mayor session:
+
 ```bash
 gt mayor detach
 gt mayor attach
