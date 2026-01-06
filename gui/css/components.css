@@ -32,15 +32,19 @@
 }
 
 .loading-spinner {
-  width: 80px;
-  height: 80px;
-  border: 6px solid rgba(0, 0, 0, 0.3);
-  border-top-color: #2563eb;
-  border-right-color: #1e40af;
+  width: 120px;
+  height: 120px;
+  border: 8px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #3b82f6;
+  border-right-color: #2563eb;
+  border-bottom-color: #1d4ed8;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 40px rgba(37, 99, 235, 0.3);
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+  box-shadow:
+    0 0 30px rgba(59, 130, 246, 0.6),
+    0 0 60px rgba(37, 99, 235, 0.4),
+    inset 0 0 20px rgba(255, 255, 255, 0.1);
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 70%);
 }
 
 @keyframes spin {
@@ -48,13 +52,15 @@
 }
 
 .loading-text {
-  font-size: var(--text-xl);
-  color: #1e293b;
+  font-size: 32px;
+  color: #ffffff;
   font-weight: 700;
   text-shadow:
-    0 2px 4px rgba(255, 255, 255, 0.8),
-    0 4px 12px rgba(0, 0, 0, 0.3);
-  letter-spacing: 1px;
+    0 2px 0 #000000,
+    0 4px 8px rgba(0, 0, 0, 0.8),
+    0 6px 20px rgba(0, 0, 0, 0.6);
+  letter-spacing: 2px;
+  text-transform: uppercase;
 }
 
 /* === Buttons === */
