@@ -679,7 +679,8 @@ func detectCurrentTmuxSession() string {
 
 	session := strings.TrimSpace(string(output))
 	// Only return if it looks like a Gas Town session
-	if strings.HasPrefix(session, constants.SessionPrefix) {
+	// Accept both gt- (rig sessions) and hq- (town-level sessions like hq-mayor)
+	if strings.HasPrefix(session, constants.SessionPrefix) || strings.HasPrefix(session, constants.HQSessionPrefix) {
 		return session
 	}
 	return ""
