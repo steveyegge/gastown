@@ -650,9 +650,13 @@ func deriveSessionName() string {
 		return fmt.Sprintf("gt-%s-crew-%s", rig, crew)
 	}
 
-	// Town-level roles (mayor, deacon): gt-{town}-{role}
-	if (role == "mayor" || role == "deacon") && town != "" {
-		return fmt.Sprintf("gt-%s-%s", town, role)
+	// Town-level roles (mayor, deacon): gt-{town}-{role} or gt-{role}
+	if role == "mayor" || role == "deacon" {
+		if town != "" {
+			return fmt.Sprintf("gt-%s-%s", town, role)
+		}
+		// No town set - use simple gt-{role} pattern
+		return fmt.Sprintf("gt-%s", role)
 	}
 
 	// Rig-based roles (witness, refinery): gt-{rig}-{role}
