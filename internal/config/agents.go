@@ -25,12 +25,14 @@ const (
 	AgentCursor AgentPreset = "cursor"
 	// AgentAuggie is Auggie CLI.
 	AgentAuggie AgentPreset = "auggie"
+	// AgentAmp is Sourcegraph AMP.
+	AgentAmp AgentPreset = "amp"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
 // This extends the basic RuntimeConfig with agent-specific metadata.
 type AgentPresetInfo struct {
-	// Name is the preset identifier (e.g., "claude", "gemini", "codex", "cursor", "auggie").
+	// Name is the preset identifier (e.g., "claude", "gemini", "codex", "cursor", "auggie", "amp").
 	Name AgentPreset `json:"name"`
 
 	// Command is the CLI binary to invoke.
@@ -161,6 +163,17 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SessionIDEnv:        "",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
+		SupportsHooks:       false,
+		SupportsForkSession: false,
+	},
+	AgentAmp: {
+		Name:                AgentAmp,
+		Command:             "amp",
+		Args:                []string{"--dangerously-allow-all", "--no-ide"},
+		ProcessNames:        []string{"amp"},
+		SessionIDEnv:        "",
+		ResumeFlag:          "threads continue",
+		ResumeStyle:         "subcommand", // 'amp threads continue <threadId>'
 		SupportsHooks:       false,
 		SupportsForkSession: false,
 	},
