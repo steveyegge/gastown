@@ -499,10 +499,10 @@ func buildCollisionReport(townRoot string) (*CollisionReport, error) {
 		sessions = []string{} // Continue even if tmux not running
 	}
 
-	// Filter to gt- sessions
+	// Filter to Gas Town sessions (gt-* and hq-*)
 	var gtSessions []string
 	for _, s := range sessions {
-		if constants.IsRigSession(s) {
+		if constants.IsGasTownSession(s) {
 			gtSessions = append(gtSessions, s)
 		}
 	}

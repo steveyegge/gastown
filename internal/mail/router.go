@@ -284,8 +284,8 @@ type agentBead struct {
 
 // agentBeadToAddress converts an agent bead to a mail address.
 // Uses the agent bead ID to derive the address:
-//   - gt-mayor → mayor/
-//   - gt-deacon → deacon/
+//   - hq-mayor → mayor/
+//   - hq-deacon → deacon/
 //   - gt-gastown-witness → gastown/witness
 //   - gt-gastown-crew-max → gastown/max
 //   - gt-gastown-polecat-Toast → gastown/Toast
@@ -295,17 +295,23 @@ func agentBeadToAddress(bead *agentBead) string {
 	}
 
 	id := bead.ID
-	if !constants.IsRigSession(id) {
+	if !constants.IsGasTownSession(id) {
 		return "" // Not a valid agent bead ID
 	}
 
-	// Strip prefix
-	rest := strings.TrimPrefix(id, "gt-")
+	// Handle town-level agents (hq-*)
+	if constants.IsTownSession(id) {
+		rest := strings.TrimPrefix(id, constants.HQSessionPrefix)
+		return rest + "/"
+	}
+
+	// Handle rig-level agents (gt-*)
+	rest := strings.TrimPrefix(id, constants.SessionPrefix)
 	parts := strings.Split(rest, "-")
 
 	switch len(parts) {
 	case 1:
-		// Town-level: gt-mayor, gt-deacon
+		// Shouldn't happen for gt-* (would be just "gt-something")
 		return parts[0] + "/"
 	case 2:
 		// Rig singleton: gt-gastown-witness

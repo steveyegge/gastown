@@ -41,10 +41,10 @@ func (c *ThemeCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Check for Gas Town sessions
+	// Check for Gas Town sessions (gt-* and hq-*)
 	var gtSessions []string
 	for _, s := range sessions {
-		if constants.IsRigSession(s) {
+		if constants.IsGasTownSession(s) {
 			gtSessions = append(gtSessions, s)
 		}
 	}

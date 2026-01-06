@@ -122,10 +122,10 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 	mayorSession := session.MayorSessionName()
 	deaconSession := session.DeaconSessionName()
 
-	// Apply to matching sessions
+	// Apply to matching sessions (both gt-* rig sessions and hq-* town sessions)
 	applied := 0
 	for _, sess := range sessions {
-		if !constants.IsRigSession(sess) {
+		if !constants.IsGasTownSession(sess) {
 			continue
 		}
 

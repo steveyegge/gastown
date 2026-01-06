@@ -70,8 +70,8 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Only check gt-* sessions (Gas Town sessions)
-		if !constants.IsRigSession(sess) {
+		// Only check Gas Town sessions (gt-* and hq-*)
+		if !constants.IsGasTownSession(sess) {
 			continue
 		}
 
