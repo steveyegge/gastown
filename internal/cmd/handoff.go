@@ -323,6 +323,17 @@ func resolvePathToSession(path string) (string, error) {
 	return "", fmt.Errorf("cannot parse path '%s' - expected <rig>/<polecat>, <rig>/crew/<name>, <rig>/witness, or <rig>/refinery", path)
 }
 
+// claudeEnvVars lists the Claude-related environment variables to propagate
+// during handoff. These vars aren't inherited by tmux respawn-pane's fresh shell.
+var claudeEnvVars = []string{
+	// Claude API and config
+	"ANTHROPIC_API_KEY",
+	"CLAUDE_CODE_USE_BEDROCK",
+	// AWS vars for Bedrock
+	"AWS_PROFILE",
+	"AWS_REGION",
+}
+
 // buildRestartCommand creates the command to run when respawning a session's pane.
 // This needs to be the actual command to execute (e.g., claude), not a session attach command.
 // The command includes a cd to the correct working directory for the role.
@@ -345,14 +356,32 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// For respawn-pane, we:
 	// 1. cd to the right directory (role's canonical home)
 	// 2. export GT_ROLE and BD_ACTOR so role detection works correctly
-	// 3. run claude with "gt prime" as initial prompt (triggers GUPP)
+	// 3. export Claude-related env vars (not inherited by fresh shell)
+	// 4. run claude with "gt prime" as initial prompt (triggers GUPP)
 	// Use exec to ensure clean process replacement.
 	// IMPORTANT: Passing "gt prime" as argument injects it as the first prompt,
 	// which triggers the agent to execute immediately. Without this, agents
 	// wait for user input despite all GUPP prompting in hooks.
 	runtimeCmd := config.GetRuntimeCommandWithPrompt("", "gt prime")
+
+	// Build environment exports - role vars first, then Claude vars
+	var exports []string
 	if gtRole != "" {
-		return fmt.Sprintf("cd %s && export GT_ROLE=%s BD_ACTOR=%s GIT_AUTHOR_NAME=%s && exec %s", workDir, gtRole, gtRole, gtRole, runtimeCmd), nil
+		exports = append(exports, fmt.Sprintf("GT_ROLE=%s", gtRole))
+		exports = append(exports, fmt.Sprintf("BD_ACTOR=%s", gtRole))
+		exports = append(exports, fmt.Sprintf("GIT_AUTHOR_NAME=%s", gtRole))
+	}
+
+	// Add Claude-related env vars from current environment
+	for _, name := range claudeEnvVars {
+		if val := os.Getenv(name); val != "" {
+			// Shell-escape the value in case it contains special chars
+			exports = append(exports, fmt.Sprintf("%s=%q", name, val))
+		}
+	}
+
+	if len(exports) > 0 {
+		return fmt.Sprintf("cd %s && export %s && exec %s", workDir, strings.Join(exports, " "), runtimeCmd), nil
 	}
 	return fmt.Sprintf("cd %s && exec %s", workDir, runtimeCmd), nil
 }
