@@ -2,11 +2,13 @@ package witness
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -52,6 +54,11 @@ func (m *Manager) saveState(w *Witness) error {
 	return m.stateManager.Save(w)
 }
 
+// sessionName returns the tmux session name for this witness.
+func (m *Manager) sessionName() string {
+	return fmt.Sprintf("gt-%s-witness", m.rig.Name)
+}
+
 // Status returns the current witness status.
 // ZFC-compliant: trusts agent-reported state, no PID inference.
 // The daemon reads agent bead state for liveness checks.
@@ -95,12 +102,23 @@ func (m *Manager) Stop() error {
 		return err
 	}
 
-	if w.State != StateRunning {
+	// Check if tmux session exists
+	t := tmux.NewTmux()
+	sessionID := m.sessionName()
+	sessionRunning, _ := t.HasSession(sessionID)
+
+	// If neither state nor session indicates running, it's not running
+	if w.State != StateRunning && !sessionRunning {
 		return ErrNotRunning
 	}
 
+	// Kill tmux session if it exists (best-effort: may already be dead)
+	if sessionRunning {
+		_ = t.KillSession(sessionID)
+	}
+
 	// If we have a PID, try to stop it gracefully
-	if w.PID > 0 && w.PID != os.Getpid() {
+	if w.PID > 0 && w.PID != os.Getpid() && util.ProcessExists(w.PID) {
 		// Send SIGTERM (best-effort graceful stop)
 		if proc, err := os.FindProcess(w.PID); err == nil {
 			_ = proc.Signal(os.Interrupt)
