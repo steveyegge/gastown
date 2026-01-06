@@ -23,12 +23,14 @@ const (
 	AgentCodex AgentPreset = "codex"
 	// AgentCursor is Cursor Agent.
 	AgentCursor AgentPreset = "cursor"
+	// AgentAuggie is Auggie CLI.
+	AgentAuggie AgentPreset = "auggie"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
 // This extends the basic RuntimeConfig with agent-specific metadata.
 type AgentPresetInfo struct {
-	// Name is the preset identifier (e.g., "claude", "gemini", "codex", "cursor").
+	// Name is the preset identifier (e.g., "claude", "gemini", "codex", "cursor", "auggie").
 	Name AgentPreset `json:"name"`
 
 	// Command is the CLI binary to invoke.
@@ -139,9 +141,9 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentCursor: {
 		Name:                AgentCursor,
 		Command:             "cursor-agent",
-		Args:                []string{"-p", "-f"}, // Headless + force (YOLO equivalent)
+		Args:                []string{"-f"}, // Force mode (YOLO equivalent), -p requires prompt
 		ProcessNames:        []string{"cursor-agent"},
-		SessionIDEnv:        "CURSOR_CHAT_ID",
+		SessionIDEnv:        "", // Uses --resume with chatId directly
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
 		SupportsHooks:       false, // TODO: verify hooks support
@@ -150,6 +152,17 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			PromptFlag: "-p",
 			OutputFlag: "--output-format json",
 		},
+	},
+	AgentAuggie: {
+		Name:                AgentAuggie,
+		Command:             "auggie",
+		Args:                []string{"--allow-indexing"},
+		ProcessNames:        []string{"auggie"},
+		SessionIDEnv:        "",
+		ResumeFlag:          "--resume",
+		ResumeStyle:         "flag",
+		SupportsHooks:       false,
+		SupportsForkSession: false,
 	},
 }
 

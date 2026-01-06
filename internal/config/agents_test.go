@@ -10,7 +10,7 @@ import (
 
 func TestBuiltinPresets(t *testing.T) {
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -40,6 +40,7 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"gemini", AgentGemini, false},
 		{"codex", AgentCodex, false},
 		{"cursor", AgentCursor, false},
+		{"auggie", AgentAuggie, false},
 		{"aider", "", true},    // Not built-in, can be added via config
 		{"opencode", "", true}, // Not built-in, can be added via config
 		{"unknown", "", true},
@@ -70,6 +71,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentGemini, "gemini"},
 		{AgentCodex, "codex"},
 		{AgentCursor, "cursor-agent"},
+		{AgentAuggie, "auggie"},
 	}
 
 	for _, tt := range tests {
@@ -92,6 +94,7 @@ func TestIsKnownPreset(t *testing.T) {
 		{"gemini", true},
 		{"codex", true},
 		{"cursor", true},
+		{"auggie", true},
 		{"aider", false},    // Not built-in, can be added via config
 		{"opencode", false}, // Not built-in, can be added via config
 		{"unknown", false},
@@ -295,6 +298,7 @@ func TestSupportsSessionResume(t *testing.T) {
 		{"gemini", true},
 		{"codex", true},
 		{"cursor", true},
+		{"auggie", true},
 		{"unknown", false},
 	}
 
@@ -314,8 +318,9 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 	}{
 		{"claude", "CLAUDE_SESSION_ID"},
 		{"gemini", "GEMINI_SESSION_ID"},
-		{"codex", ""},              // Codex uses JSONL output instead
-		{"cursor", "CURSOR_CHAT_ID"}, // Cursor uses chat ID
+		{"codex", ""},    // Codex uses JSONL output instead
+		{"cursor", ""},   // Cursor uses --resume with chatId directly
+		{"auggie", ""},   // Auggie uses --resume directly
 		{"unknown", ""},
 	}
 
@@ -337,6 +342,7 @@ func TestGetProcessNames(t *testing.T) {
 		{"gemini", []string{"gemini"}},
 		{"codex", []string{"codex"}},
 		{"cursor", []string{"cursor-agent"}},
+		{"auggie", []string{"auggie"}},
 		{"unknown", []string{"node"}}, // Falls back to Claude's process
 	}
 
@@ -358,7 +364,7 @@ func TestGetProcessNames(t *testing.T) {
 
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor}
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -407,7 +413,12 @@ func TestAgentCommandGeneration(t *testing.T) {
 		{
 			preset:       AgentCursor,
 			wantCommand:  "cursor-agent",
-			wantContains: []string{"-p", "-f"},
+			wantContains: []string{"-f"},
+		},
+		{
+			preset:       AgentAuggie,
+			wantCommand:  "auggie",
+			wantContains: []string{"--allow-indexing"},
 		},
 	}
 
@@ -452,19 +463,13 @@ func TestCursorAgentPreset(t *testing.T) {
 		t.Errorf("cursor command = %q, want cursor-agent", info.Command)
 	}
 
-	// Check YOLO-equivalent flags (-p for headless, -f for force)
-	hasP := false
+	// Check YOLO-equivalent flag (-f for force mode)
+	// Note: -p is for non-interactive mode with prompt, not used for default Args
 	hasF := false
 	for _, arg := range info.Args {
-		if arg == "-p" {
-			hasP = true
-		}
 		if arg == "-f" {
 			hasF = true
 		}
-	}
-	if !hasP {
-		t.Error("cursor args missing -p (headless mode)")
 	}
 	if !hasF {
 		t.Error("cursor args missing -f (force/YOLO mode)")
