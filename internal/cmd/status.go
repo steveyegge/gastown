@@ -180,7 +180,7 @@ func runStatusWatch(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func runStatusOnce(cmd *cobra.Command, args []string) error {
+func runStatusOnce(_ *cobra.Command, _ []string) error {
 	// Find town root
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {

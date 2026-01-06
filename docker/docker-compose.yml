@@ -1,0 +1,41 @@
+services:
+  gastown-debug:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: debug
+    container_name: gastown-debug
+    stdin_open: true
+    tty: true
+    volumes:
+      - gastown-data:/home/tester/gt-test
+      - type: bind
+        source: ..
+        target: /src/gastown
+        read_only: true
+    environment:
+      - TERM=xterm-256color
+      - GT_DEBUG=1
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    command: /bin/bash
+
+  gastown-prod:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: production
+    container_name: gastown-prod
+    stdin_open: true
+    tty: true
+    volumes:
+      - gastown-prod-data:/home/tester/gt-test
+    environment:
+      - TERM=xterm-256color
+    command: /bin/bash
+
+volumes:
+  gastown-data:
+  gastown-prod-data:
