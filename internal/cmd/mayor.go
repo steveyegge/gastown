@@ -31,6 +31,8 @@ The Mayor is the global coordinator for Gas Town, running as a persistent
 tmux session. Use the subcommands to start, stop, attach, and check status.`,
 }
 
+var mayorAgentOverride string
+
 var mayorStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the Mayor session",
@@ -84,6 +86,10 @@ func init() {
 	mayorCmd.AddCommand(mayorStatusCmd)
 	mayorCmd.AddCommand(mayorRestartCmd)
 
+	mayorStartCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
+	mayorAttachCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
+	mayorRestartCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
+
 	rootCmd.AddCommand(mayorCmd)
 }
 
@@ -101,7 +107,7 @@ func runMayorStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Mayor session already running. Attach with: gt mayor attach")
 	}
 
-	if err := startMayorSession(t, sessionName); err != nil {
+	if err := startMayorSession(t, sessionName, mayorAgentOverride); err != nil {
 		return err
 	}
 
@@ -113,7 +119,7 @@ func runMayorStart(cmd *cobra.Command, args []string) error {
 }
 
 // startMayorSession creates and initializes the Mayor tmux session.
-func startMayorSession(t *tmux.Tmux, sessionName string) error {
+func startMayorSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	// Find workspace root
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -139,8 +145,11 @@ func startMayorSession(t *tmux.Tmux, sessionName string) error {
 	// Use SendKeysDelayed to allow shell initialization after NewSession
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
 	// Mayor uses default runtime config (empty rigPath) since it's not rig-specific
-	claudeCmd := config.BuildAgentStartupCommand("mayor", "mayor", "", "")
-	if err := t.SendKeysDelayed(sessionName, claudeCmd, 200); err != nil {
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", "", agentOverride)
+	if err != nil {
+		return fmt.Errorf("building startup command: %w", err)
+	}
+	if err := t.SendKeysDelayed(sessionName, startupCmd, 200); err != nil {
 		return fmt.Errorf("sending command: %w", err)
 	}
 
@@ -208,7 +217,7 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 	if !running {
 		// Auto-start if not running
 		fmt.Println("Mayor session not running, starting...")
-		if err := startMayorSession(t, sessionName); err != nil {
+		if err := startMayorSession(t, sessionName, mayorAgentOverride); err != nil {
 			return err
 		}
 	}

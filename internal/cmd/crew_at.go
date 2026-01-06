@@ -150,8 +150,11 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// This gives cleaner lifecycle: Claude exits → session ends (no intermediate shell)
 		// Pass "gt prime" as initial prompt so Claude loads context immediately
 		// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-		claudeCmd := config.BuildCrewStartupCommand(r.Name, name, r.Path, "gt prime")
-		if err := t.RespawnPane(paneID, claudeCmd); err != nil {
+		startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, "gt prime", crewAgentOverride)
+		if err != nil {
+			return fmt.Errorf("building startup command: %w", err)
+		}
+		if err := t.RespawnPane(paneID, startupCmd); err != nil {
 			return fmt.Errorf("starting claude: %w", err)
 		}
 
@@ -174,8 +177,11 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			// Use respawn-pane to replace shell with Claude directly
 			// Pass "gt prime" as initial prompt so Claude loads context immediately
 			// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-			claudeCmd := config.BuildCrewStartupCommand(r.Name, name, r.Path, "gt prime")
-			if err := t.RespawnPane(paneID, claudeCmd); err != nil {
+			startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, "gt prime", crewAgentOverride)
+			if err != nil {
+				return fmt.Errorf("building startup command: %w", err)
+			}
+			if err := t.RespawnPane(paneID, startupCmd); err != nil {
 				return fmt.Errorf("restarting claude: %w", err)
 			}
 		}
@@ -185,7 +191,10 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	if isInTmuxSession(sessionID) {
 		// We're in the session at a shell prompt - just start the agent directly
 		// Pass "gt prime" as initial prompt so it loads context immediately
-		agentCfg := config.ResolveAgentConfig(townRoot, r.Path)
+		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, r.Path, crewAgentOverride)
+		if err != nil {
+			return fmt.Errorf("resolving agent: %w", err)
+		}
 		fmt.Printf("Starting %s in current session...\n", agentCfg.Command)
 		return execAgent(agentCfg, "gt prime")
 	}

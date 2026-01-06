@@ -8,17 +8,18 @@ import (
 
 // Crew command flags
 var (
-	crewRig      string
-	crewBranch   bool
-	crewJSON     bool
-	crewForce    bool
-	crewPurge    bool
-	crewNoTmux   bool
-	crewDetached bool
-	crewMessage  string
-	crewAccount  string
-	crewAll      bool
-	crewDryRun   bool
+	crewRig           string
+	crewBranch        bool
+	crewJSON          bool
+	crewForce         bool
+	crewPurge         bool
+	crewNoTmux        bool
+	crewDetached      bool
+	crewMessage       string
+	crewAccount       string
+	crewAgentOverride string
+	crewAll           bool
+	crewDryRun        bool
 )
 
 var crewCmd = &cobra.Command{
@@ -328,6 +329,7 @@ func init() {
 	crewAtCmd.Flags().BoolVar(&crewNoTmux, "no-tmux", false, "Just print directory path")
 	crewAtCmd.Flags().BoolVarP(&crewDetached, "detached", "d", false, "Start session without attaching")
 	crewAtCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use (overrides default)")
+	crewAtCmd.Flags().StringVar(&crewAgentOverride, "agent", "", "Agent alias to run crew worker with (overrides rig/town default)")
 
 	crewRemoveCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 	crewRemoveCmd.Flags().BoolVar(&crewForce, "force", false, "Force remove (skip safety checks)")
@@ -350,6 +352,7 @@ func init() {
 
 	crewStartCmd.Flags().BoolVar(&crewAll, "all", false, "Start all crew members in the rig")
 	crewStartCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use")
+	crewStartCmd.Flags().StringVar(&crewAgentOverride, "agent", "", "Agent alias to run crew worker with (overrides rig/town default)")
 
 	crewStopCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use (filter when using --all)")
 	crewStopCmd.Flags().BoolVar(&crewAll, "all", false, "Stop all running crew sessions")

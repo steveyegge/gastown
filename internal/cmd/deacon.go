@@ -88,6 +88,8 @@ Stops the current session (if running) and starts a fresh one.`,
 	RunE: runDeaconRestart,
 }
 
+var deaconAgentOverride string
+
 var deaconHeartbeatCmd = &cobra.Command{
 	Use:   "heartbeat [action]",
 	Short: "Update the Deacon heartbeat",
@@ -202,7 +204,6 @@ Examples:
 	RunE: runDeaconStaleHooks,
 }
 
-
 var (
 	triggerTimeout time.Duration
 
@@ -257,6 +258,10 @@ func init() {
 	deaconStaleHooksCmd.Flags().BoolVar(&staleHooksDryRun, "dry-run", false,
 		"Preview what would be unhooked without making changes")
 
+	deaconStartCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
+	deaconAttachCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
+	deaconRestartCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
+
 	rootCmd.AddCommand(deaconCmd)
 }
 
@@ -274,7 +279,7 @@ func runDeaconStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Deacon session already running. Attach with: gt deacon attach")
 	}
 
-	if err := startDeaconSession(t, sessionName); err != nil {
+	if err := startDeaconSession(t, sessionName, deaconAgentOverride); err != nil {
 		return err
 	}
 
@@ -286,7 +291,7 @@ func runDeaconStart(cmd *cobra.Command, args []string) error {
 }
 
 // startDeaconSession creates and initializes the Deacon tmux session.
-func startDeaconSession(t *tmux.Tmux, sessionName string) error {
+func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	// Find workspace root
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -325,7 +330,11 @@ func startDeaconSession(t *tmux.Tmux, sessionName string) error {
 	// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat
 	// The startup hook handles context loading automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	if err := t.SendKeys(sessionName, config.BuildAgentStartupCommand("deacon", "deacon", "", "")); err != nil {
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "deacon", "", "", agentOverride)
+	if err != nil {
+		return fmt.Errorf("building startup command: %w", err)
+	}
+	if err := t.SendKeys(sessionName, startupCmd); err != nil {
 		return fmt.Errorf("sending command: %w", err)
 	}
 
@@ -393,7 +402,7 @@ func runDeaconAttach(cmd *cobra.Command, args []string) error {
 	if !running {
 		// Auto-start if not running
 		fmt.Println("Deacon session not running, starting...")
-		if err := startDeaconSession(t, sessionName); err != nil {
+		if err := startDeaconSession(t, sessionName, deaconAgentOverride); err != nil {
 			return err
 		}
 	}
@@ -999,4 +1008,3 @@ func runDeaconStaleHooks(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
-
