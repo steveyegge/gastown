@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -45,7 +46,7 @@ func (c *LinkedPaneCheck) Run(ctx *CheckContext) *CheckResult {
 	// Filter to gt-* sessions only
 	var gtSessions []string
 	for _, session := range sessions {
-		if strings.HasPrefix(session, "gt-") {
+		if constants.IsRigSession(session) {
 			gtSessions = append(gtSessions, session)
 		}
 	}

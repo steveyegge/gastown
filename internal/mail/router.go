@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -294,7 +295,7 @@ func agentBeadToAddress(bead *agentBead) string {
 	}
 
 	id := bead.ID
-	if !strings.HasPrefix(id, "gt-") {
+	if !constants.IsRigSession(id) {
 		return "" // Not a valid agent bead ID
 	}
 

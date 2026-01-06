@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -349,8 +350,8 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 	if rigName == "" {
 		// Try to extract from session name: gt-<rig>-witness
-		if strings.HasSuffix(statusLineSession, "-witness") && strings.HasPrefix(statusLineSession, "gt-") {
-			rigName = strings.TrimPrefix(strings.TrimSuffix(statusLineSession, "-witness"), "gt-")
+		if strings.HasSuffix(statusLineSession, "-witness") && constants.IsRigSession(statusLineSession) {
+			rigName = strings.TrimPrefix(strings.TrimSuffix(statusLineSession, "-witness"), constants.SessionPrefix)
 		}
 	}
 
@@ -422,8 +423,8 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 	if rigName == "" {
 		// Try to extract from session name: gt-<rig>-refinery
-		if strings.HasPrefix(statusLineSession, "gt-") && strings.HasSuffix(statusLineSession, "-refinery") {
-			rigName = strings.TrimPrefix(statusLineSession, "gt-")
+		if constants.IsRigSession(statusLineSession) && strings.HasSuffix(statusLineSession, "-refinery") {
+			rigName = strings.TrimPrefix(statusLineSession, constants.SessionPrefix)
 			rigName = strings.TrimSuffix(rigName, "-refinery")
 		}
 	}

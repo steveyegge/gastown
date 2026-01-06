@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -43,7 +44,7 @@ func (c *ThemeCheck) Run(ctx *CheckContext) *CheckResult {
 	// Check for Gas Town sessions
 	var gtSessions []string
 	for _, s := range sessions {
-		if strings.HasPrefix(s, "gt-") {
+		if constants.IsRigSession(s) {
 			gtSessions = append(gtSessions, s)
 		}
 	}

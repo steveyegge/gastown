@@ -448,7 +448,7 @@ func runShutdown(cmd *cobra.Command, args []string) error {
 func categorizeSessions(sessions []string, mayorSession, deaconSession string) (toStop, preserved []string) {
 	for _, sess := range sessions {
 		// Gas Town sessions use gt- (rig-level) or hq- (town-level) prefix
-		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
+		if !constants.IsGasTownSession(sess) {
 			continue // Not a Gas Town session
 		}
 

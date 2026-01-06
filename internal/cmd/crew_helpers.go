@@ -260,7 +260,7 @@ func ensureDefaultBranch(dir, roleName, rigPath string) bool { //nolint:unparam 
 // Returns empty strings and false if the format doesn't match.
 func parseCrewSessionName(sessionName string) (rigName, crewName string, ok bool) {
 	// Must start with "gt-" and contain "-crew-"
-	if !strings.HasPrefix(sessionName, "gt-") {
+	if !constants.IsRigSession(sessionName) {
 		return "", "", false
 	}
 

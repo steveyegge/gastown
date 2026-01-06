@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -153,7 +154,7 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 		if strings.Contains(line, "Root issue:") || strings.Contains(line, "Created") {
 			parts := strings.Fields(line)
 			for _, p := range parts {
-				if strings.HasPrefix(p, "wisp-") || strings.HasPrefix(p, "gt-") {
+				if strings.HasPrefix(p, "wisp-") || constants.IsRigSession(p) {
 					patrolID = p
 					break
 				}

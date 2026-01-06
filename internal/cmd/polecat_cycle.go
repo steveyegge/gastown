@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // cyclePolecatSession switches to the next or previous polecat session in the same rig.
@@ -84,7 +86,7 @@ func cyclePolecatSession(direction int, sessionOverride string) error {
 // Returns empty strings and false if the format doesn't match.
 func parsePolecatSessionName(sessionName string) (rigName, polecatName string, ok bool) { //nolint:unparam // polecatName kept for API consistency
 	// Must start with "gt-"
-	if !strings.HasPrefix(sessionName, "gt-") {
+	if !constants.IsRigSession(sessionName) {
 		return "", "", false
 	}
 

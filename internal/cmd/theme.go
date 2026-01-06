@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -124,7 +125,7 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 	// Apply to matching sessions
 	applied := 0
 	for _, sess := range sessions {
-		if !strings.HasPrefix(sess, "gt-") {
+		if !constants.IsRigSession(sess) {
 			continue
 		}
 
@@ -140,7 +141,7 @@ func runThemeApply(cmd *cobra.Command, args []string) error {
 			theme = tmux.DeaconTheme()
 			worker = "Deacon"
 			role = "health-check"
-		} else if strings.HasSuffix(sess, "-witness") && strings.HasPrefix(sess, "gt-") {
+		} else if strings.HasSuffix(sess, "-witness") && constants.IsRigSession(sess) {
 			// Witness sessions: gt-<rig>-witness
 			rig = strings.TrimPrefix(strings.TrimSuffix(sess, "-witness"), "gt-")
 			theme = getThemeForRole(rig, "witness")

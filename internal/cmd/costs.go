@@ -133,8 +133,8 @@ func runLiveCosts() error {
 	var total float64
 
 	for _, session := range sessions {
-		// Only process Gas Town sessions (start with "gt-")
-		if !strings.HasPrefix(session, constants.SessionPrefix) {
+		// Only process rig-level Gas Town sessions (gt-*)
+		if !constants.IsRigSession(session) {
 			continue
 		}
 
@@ -679,8 +679,7 @@ func detectCurrentTmuxSession() string {
 
 	session := strings.TrimSpace(string(output))
 	// Only return if it looks like a Gas Town session
-	// Accept both gt- (rig sessions) and hq- (town-level sessions like hq-mayor)
-	if strings.HasPrefix(session, constants.SessionPrefix) || strings.HasPrefix(session, constants.HQSessionPrefix) {
+	if constants.IsGasTownSession(session) {
 		return session
 	}
 	return ""

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -70,7 +71,7 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 
 		// Only check gt-* sessions (Gas Town sessions)
-		if !strings.HasPrefix(sess, "gt-") {
+		if !constants.IsRigSession(sess) {
 			continue
 		}
 

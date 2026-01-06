@@ -2,7 +2,10 @@
 // Centralizing these magic strings improves maintainability and consistency.
 package constants
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Timing constants for session management and tmux operations.
 const (
@@ -99,6 +102,22 @@ const (
 	// HQSessionPrefix is the prefix for town-level services (Mayor, Deacon).
 	HQSessionPrefix = "hq-"
 )
+
+// IsGasTownSession returns true if the name belongs to Gas Town.
+// This includes both rig-level sessions (gt-*) and HQ sessions (hq-*).
+func IsGasTownSession(name string) bool {
+	return strings.HasPrefix(name, SessionPrefix) || strings.HasPrefix(name, HQSessionPrefix)
+}
+
+// IsRigSession returns true if the name is a rig-level Gas Town session (gt-*).
+func IsRigSession(name string) bool {
+	return strings.HasPrefix(name, SessionPrefix)
+}
+
+// IsTownSession returns true if the name is a town-level session (hq-*).
+func IsTownSession(name string) bool {
+	return strings.HasPrefix(name, HQSessionPrefix)
+}
 
 // Agent role names.
 const (

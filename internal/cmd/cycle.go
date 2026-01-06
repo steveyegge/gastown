@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // cycleSession is the --session flag for cycle next/prev commands.
@@ -87,7 +88,7 @@ func cycleToSession(direction int, sessionOverride string) error {
 	}
 
 	// Check if it's a crew session (format: gt-<rig>-crew-<name>)
-	if strings.HasPrefix(session, "gt-") && strings.Contains(session, "-crew-") {
+	if constants.IsRigSession(session) && strings.Contains(session, "-crew-") {
 		return cycleCrewSession(direction, session)
 	}
 
@@ -109,7 +110,7 @@ func cycleToSession(direction int, sessionOverride string) error {
 // Returns empty string if not a rig infra session.
 // Format: gt-<rig>-witness or gt-<rig>-refinery
 func parseRigInfraSession(session string) string {
-	if !strings.HasPrefix(session, "gt-") {
+	if !constants.IsRigSession(session) {
 		return ""
 	}
 	rest := session[3:] // Remove "gt-" prefix

@@ -130,8 +130,8 @@ func categorizeSession(name string) *AgentSession {
 	session := &AgentSession{Name: name}
 
 	// Town-level agents use hq- prefix: hq-mayor, hq-deacon
-	if strings.HasPrefix(name, "hq-") {
-		suffix := strings.TrimPrefix(name, "hq-")
+	if constants.IsTownSession(name) {
+		suffix := strings.TrimPrefix(name, constants.HQSessionPrefix)
 		if suffix == "mayor" {
 			session.Type = AgentMayor
 			return session
@@ -144,7 +144,7 @@ func categorizeSession(name string) *AgentSession {
 	}
 
 	// Rig-level agents use gt- prefix
-	if !strings.HasPrefix(name, "gt-") {
+	if !constants.IsRigSession(name) {
 		return nil
 	}
 
@@ -502,7 +502,7 @@ func buildCollisionReport(townRoot string) (*CollisionReport, error) {
 	// Filter to gt- sessions
 	var gtSessions []string
 	for _, s := range sessions {
-		if strings.HasPrefix(s, "gt-") {
+		if constants.IsRigSession(s) {
 			gtSessions = append(gtSessions, s)
 		}
 	}

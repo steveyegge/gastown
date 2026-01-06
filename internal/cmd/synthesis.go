@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -555,7 +556,7 @@ func createSynthesisBead(convoyID string, meta *ConvoyMeta, f *formula.Formula,
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		// Try to extract ID from non-JSON output
 		out := strings.TrimSpace(stdout.String())
-		if strings.HasPrefix(out, "hq-") || strings.HasPrefix(out, "gt-") {
+		if constants.IsGasTownSession(out) {
 			return out, nil
 		}
 		return "", fmt.Errorf("parsing created bead: %w", err)

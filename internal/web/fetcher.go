@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/activity"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -622,7 +623,7 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		sessionName := parts[0]
 
 		// Filter for gt-<rig>-<polecat> pattern
-		if !strings.HasPrefix(sessionName, "gt-") {
+		if !constants.IsRigSession(sessionName) {
 			continue
 		}
 
@@ -723,7 +724,7 @@ func truncateStatusHint(line string) string {
 // Format: gt-<rig>-<polecat> -> (rig, polecat, true)
 // Returns ("", "", false) if the format is invalid.
 func parsePolecatSessionName(sessionName string) (rig, polecat string, ok bool) {
-	if !strings.HasPrefix(sessionName, "gt-") {
+	if !constants.IsRigSession(sessionName) {
 		return "", "", false
 	}
 	parts := strings.SplitN(sessionName, "-", 3)
