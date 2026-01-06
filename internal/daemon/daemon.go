@@ -83,7 +83,7 @@ func (d *Daemon) Run() error {
 	if !locked {
 		return fmt.Errorf("daemon already running (lock held by another process)")
 	}
-	defer fileLock.Unlock()
+	defer func() { _ = fileLock.Unlock() }()
 
 	// Write PID file
 	if err := os.WriteFile(d.config.PidFile, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
