@@ -341,42 +341,9 @@ gt mail send mayor/ -s "Health: <rig> <component> unresponsive" \\
 Reset unresponsive_cycles to 0 when component responds normally."""
 
 [[steps]]
-id = "stale-hook-check"
-title = "Cleanup stale hooked beads"
-needs = ["health-scan"]
-description = """
-Find and unhook beads stuck in 'hooked' status.
-
-Beads can get stuck in 'hooked' status when agents die or abandon work without
-properly unhooking. This step cleans them up so the work can be reassigned.
-
-**Step 1: Preview stale hooks**
-```bash
-gt deacon stale-hooks --dry-run
-```
-
-Review the output - it shows:
-- Hooked beads older than 1 hour
-- Whether the assignee agent is still alive
-- What action would be taken
-
-**Step 2: If stale hooks found with dead agents, unhook them**
-```bash
-gt deacon stale-hooks
-```
-
-This sets status back to 'open' for beads whose assignee agent is no longer running.
-
-**Step 3: If no stale hooks**
-No action needed - hooks are healthy.
-
-**Note**: This is a backstop. Primary fix is ensuring agents properly unhook
-beads when they exit or hand off work."""
-
-[[steps]]
 id = "zombie-scan"
 title = "Backup check for zombie polecats"
-needs = ["stale-hook-check"]
+needs = ["health-scan"]
 description = """
 Defense-in-depth check for zombie polecats that Witness should have cleaned.
 
