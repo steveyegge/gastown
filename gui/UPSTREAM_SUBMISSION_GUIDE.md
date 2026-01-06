@@ -158,6 +158,19 @@ gh repo edit web3dev1337/gastown-private --visibility public
 3. Click "Change visibility"
 4. Select "Public"
 
+### Attach Demo Video (Optional)
+
+You have a demo video showing the GUI in action:
+
+**Location:** `/mnt/c/Users/AB/Desktop/combined_twitter_video.mp4`
+
+**To attach to PR:**
+1. Upload to GitHub PR as attachment
+2. Or upload to YouTube/Vimeo and link in PR description
+3. Or add to repo in `gui/demo/` folder and link
+
+**Video shows:** (presumably the GUI in action - rig creation, work items, etc.)
+
 ### Final Review
 
 - [ ] Read through README.md one more time
@@ -166,6 +179,7 @@ gh repo edit web3dev1337/gastown-private --visibility public
 - [ ] Check no secrets/credentials in code
 - [ ] Verify all commits are meaningful
 - [ ] Review disclaimers are appropriate
+- [ ] Decide if you want to attach demo video
 
 ### Set Expectations
 

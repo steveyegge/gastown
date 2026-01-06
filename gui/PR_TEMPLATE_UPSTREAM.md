@@ -405,6 +405,33 @@ I'm presenting this as a **candidate implementation** and would appreciate feedb
 
 ---
 
+## Development Context
+
+**Time Constraints:**
+
+This was built with Claude Code over the course of a week. I ran out of Claude Max credits with **2 days left to go** in the billing cycle, so this represents what was achievable within those constraints.
+
+**Demo Video:**
+
+A demo video showing the GUI in action is available (combined_twitter_video.mp4). *(Can be uploaded to PR if helpful)*
+
+**What This Means:**
+
+- Built iteratively with AI assistance
+- Not every edge case tested
+- Some features prioritized over others
+- Focused on core workflows first
+- Documentation added at the end
+
+Despite time/credit constraints, the core functionality works and the architecture is sound. More time would allow for:
+- More comprehensive testing
+- Additional features
+- Better error handling
+- Performance optimization
+- Security hardening
+
+---
+
 ## Disclaimer
 
 ⚠️ **Important:**
@@ -413,6 +440,7 @@ I'm presenting this as a **candidate implementation** and would appreciate feedb
 - May be **missing features** you consider essential
 - **Not certain** it aligns with your vision for Gas Town
 - Presented as a **candidate for testing** and a **starting point**
+- Built under **time/resource constraints** (ran out of credits)
 
 If this isn't the right direction, it can serve as:
 - Reference implementation
