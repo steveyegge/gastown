@@ -112,6 +112,11 @@ func runMoleculeStepDone(cmd *cobra.Command, args []string) error {
 		MoleculeID: moleculeID,
 	}
 
+	// Step 2.5: Capture step completion cost (before closing)
+	// This captures the ending cost for the step, which will be recorded in a step.completed event.
+	// Non-fatal: if cost capture fails, we still proceed with closing the step.
+	stepCost := captureStepCost(stepID)
+
 	// Step 3: Close the step
 	if moleculeStepDryRun {
 		fmt.Printf("[dry-run] Would close step: %s\n", stepID)
@@ -122,6 +127,12 @@ func runMoleculeStepDone(cmd *cobra.Command, args []string) error {
 		}
 		result.StepClosed = true
 		fmt.Printf("%s Closed step %s: %s\n", style.Bold.Render("✓"), stepID, step.Title)
+
+		// Create step.completed event (non-fatal if it fails)
+		if err := recordStepCompletion(stepID, moleculeID, stepCost); err != nil {
+			// Log warning but don't fail the step completion
+			style.PrintWarning("could not record step completion metrics: %v", err)
+		}
 	}
 
 	// Step 4: Find all ready steps (supports fan-out pattern)
@@ -493,4 +504,121 @@ func handleMoleculeComplete(cwd, townRoot, moleculeID string, dryRun bool) error
 	return nil
 }
 
+// StepCostData holds cost metrics for a step.
+type StepCostData struct {
+	SessionID string
+	CostUSD   float64
+	Captured  bool
+}
+
+// captureStepCost captures the current session cost for step completion tracking.
+// Returns cost data if successful, or zero values if capture fails.
+// This is non-fatal - step completion continues even if cost capture fails.
+func captureStepCost(stepID string) StepCostData {
+	result := StepCostData{Captured: false}
+
+	// Detect current session
+	session := os.Getenv("GT_SESSION")
+	if session == "" {
+		session = detectCurrentTmuxSession()
+	}
+	if session == "" {
+		return result // Not in a GT session
+	}
+
+	result.SessionID = session
+
+	// Capture pane content
+	t := tmux.NewTmux()
+	content, err := t.CapturePaneAll(session)
+	if err != nil {
+		return result // Could not capture pane
+	}
+
+	// Extract cost
+	cost := extractCost(content)
+	result.CostUSD = cost
+	result.Captured = true
+
+	return result
+}
+
+// recordStepCompletion creates a step.completed event in beads with cost data.
+func recordStepCompletion(stepID, moleculeID string, costData StepCostData) error {
+	// Build event payload
+	payload := map[string]interface{}{
+		"step_id":     stepID,
+		"molecule_id": moleculeID,
+	}
+
+	if costData.Captured {
+		payload["cost_usd_end"] = costData.CostUSD
+		payload["session_id"] = costData.SessionID
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshaling payload: %w", err)
+	}
+
+	// Detect agent identity for actor field
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting cwd: %w", err)
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding workspace: %w", err)
+	}
+
+	roleInfo, err := GetRoleWithContext(cwd, townRoot)
+	if err != nil {
+		return fmt.Errorf("detecting role: %w", err)
+	}
+
+	roleCtx := RoleContext{
+		Role:     roleInfo.Role,
+		Rig:      roleInfo.Rig,
+		Polecat:  roleInfo.Polecat,
+		TownRoot: townRoot,
+		WorkDir:  cwd,
+	}
+	// Convert Role type to string and use existing buildAgentPath from costs.go
+	agentPath := buildAgentPath(string(roleCtx.Role), roleCtx.Rig, roleCtx.Polecat)
+
+	// Build event title
+	title := fmt.Sprintf("Step completed: %s", stepID)
+
+	// Create step.completed event
+	bdArgs := []string{
+		"create",
+		"--type=event",
+		"--title=" + title,
+		"--event-category=step.completed",
+		"--event-actor=" + agentPath,
+		"--event-payload=" + string(payloadJSON),
+		"--event-target=" + stepID,
+		"--silent",
+	}
+
+	bdCmd := exec.Command("bd", bdArgs...)
+	output, err := bdCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("creating step.completed event: %w\nOutput: %s", err, string(output))
+	}
+
+	eventID := strings.TrimSpace(string(output))
+
+	// Auto-close the event (it's an audit event, not actionable)
+	closeCmd := exec.Command("bd", "close", eventID, "--reason=auto-closed step event")
+	if closeErr := closeCmd.Run(); closeErr != nil {
+		// Non-fatal: event was created, just couldn't auto-close
+		return fmt.Errorf("created event %s but could not auto-close: %w", eventID, closeErr)
+	}
+
+	return nil
+}
+
 // getGitRoot is defined in prime.go
+// buildAgentPath is defined in costs.go
