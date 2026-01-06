@@ -21,7 +21,20 @@ const (
 	AgentGemini AgentPreset = "gemini"
 	// AgentCodex is OpenAI Codex.
 	AgentCodex AgentPreset = "codex"
+	// AgentOpenCode is OpenCode CLI.
+	AgentOpenCode AgentPreset = "opencode"
 )
+
+// BuiltInAgentNames returns the names of all built-in agent presets.
+// Use this instead of hardcoding agent names in multiple places.
+func BuiltInAgentNames() []string {
+	return []string{
+		string(AgentClaude),
+		string(AgentGemini),
+		string(AgentCodex),
+		string(AgentOpenCode),
+	}
+}
 
 // AgentPresetInfo contains the configuration details for an agent preset.
 // This extends the basic RuntimeConfig with agent-specific metadata.
@@ -124,6 +137,20 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "exec",
 			OutputFlag: "--json",
+		},
+	},
+	AgentOpenCode: {
+		Name:                AgentOpenCode,
+		Command:             "opencode",
+		Args:                []string{},
+		SessionIDEnv:        "",
+		ResumeFlag:          "--continue",
+		ResumeStyle:         "flag",
+		SupportsHooks:       false,
+		SupportsForkSession: false,
+		NonInteractive: &NonInteractiveConfig{
+			Subcommand: "run",
+			OutputFlag: "--format json",
 		},
 	},
 }

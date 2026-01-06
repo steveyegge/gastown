@@ -9,8 +9,7 @@ import (
 )
 
 func TestBuiltinPresets(t *testing.T) {
-	// Ensure all built-in presets are accessible (E2E tested agents only)
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentOpenCode}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -34,8 +33,8 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"claude", AgentClaude, false},
 		{"gemini", AgentGemini, false},
 		{"codex", AgentCodex, false},
-		{"aider", "", true},    // Not built-in, can be added via config
-		{"opencode", "", true}, // Not built-in, can be added via config
+		{"opencode", AgentOpenCode, false},
+		{"aider", "", true}, // Not built-in, can be added via config
 		{"unknown", "", true},
 	}
 
@@ -63,6 +62,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentClaude, "claude"},
 		{AgentGemini, "gemini"},
 		{AgentCodex, "codex"},
+		{AgentOpenCode, "opencode"},
 	}
 
 	for _, tt := range tests {
@@ -84,8 +84,8 @@ func TestIsKnownPreset(t *testing.T) {
 		{"claude", true},
 		{"gemini", true},
 		{"codex", true},
-		{"aider", false},    // Not built-in, can be added via config
-		{"opencode", false}, // Not built-in, can be added via config
+		{"opencode", true},
+		{"aider", false}, // Not built-in, can be added via config
 		{"unknown", false},
 		{"chatgpt", false},
 	}
@@ -247,6 +247,13 @@ func TestBuildResumeCommand(t *testing.T) {
 			contains:  []string{"codex", "resume", "codex-sess-789", "--yolo"},
 		},
 		{
+			name:      "opencode with session",
+			agentName: "opencode",
+			sessionID: "oc-sess-123",
+			wantEmpty: false,
+			contains:  []string{"opencode", "--continue", "oc-sess-123"},
+		},
+		{
 			name:      "empty session ID",
 			agentName: "claude",
 			sessionID: "",
@@ -286,6 +293,7 @@ func TestSupportsSessionResume(t *testing.T) {
 		{"claude", true},
 		{"gemini", true},
 		{"codex", true},
+		{"opencode", true},
 		{"unknown", false},
 	}
 
@@ -305,7 +313,8 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 	}{
 		{"claude", "CLAUDE_SESSION_ID"},
 		{"gemini", "GEMINI_SESSION_ID"},
-		{"codex", ""}, // Codex uses JSONL output instead
+		{"codex", ""},    // Codex uses JSONL output instead
+		{"opencode", ""}, // OpenCode manages sessions internally
 		{"unknown", ""},
 	}
 
