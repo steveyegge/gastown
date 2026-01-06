@@ -644,6 +644,7 @@ func (f *LiveConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
 		Short     string // Short name for display
 	}
 	repos := []repoConfig{
+		{"steveyegge/roxas", "michaellady", "roxas"},
 		{"steveyegge/gastown", "michaellady", "gastown"},
 	}
 
