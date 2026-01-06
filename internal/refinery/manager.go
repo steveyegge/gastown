@@ -136,7 +136,9 @@ func (m *Manager) Start(foreground bool) error {
 	running, _ := t.HasSession(sessionID)
 	if running {
 		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		townRoot := filepath.Dir(m.rig.Path)
+		agentCfg := config.ResolveAgentConfig(townRoot, m.rig.Path)
+		if t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 			// Healthy - Claude is running
 			return ErrAlreadyRunning
 		}

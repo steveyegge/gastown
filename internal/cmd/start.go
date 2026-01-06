@@ -272,7 +272,8 @@ func startConfiguredCrew(t *tmux.Tmux, townRoot string) {
 			sessionID := crewSessionName(r.Name, crewName)
 			if running, _ := t.HasSession(sessionID); running {
 				// Session exists - check if Claude is still running
-				if !t.IsClaudeRunning(sessionID) {
+				agentCfg := config.ResolveAgentConfig(townRoot, r.Path)
+				if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 					// Claude has exited, restart it
 					fmt.Printf("  %s %s/%s session exists, restarting Claude...\n", style.Dim.Render("○"), r.Name, crewName)
 					claudeCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, "gt prime")
@@ -795,7 +796,11 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 
 	if hasSession {
 		// Session exists - check if Claude is still running
-		if !t.IsClaudeRunning(sessionID) {
+		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, r.Path, startCrewAgentOverride)
+		if err != nil {
+			return fmt.Errorf("resolving agent: %w", err)
+		}
+		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 			// Claude has exited, restart it with "gt prime" as initial prompt
 			fmt.Printf("Session exists, restarting Claude...\n")
 			startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(rigName, name, r.Path, "gt prime", startCrewAgentOverride)

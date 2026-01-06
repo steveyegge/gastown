@@ -447,13 +447,13 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
 	} else {
-		// Ensure Claude is ready before nudging (prevents race condition where
+		// Ensure agent is ready before nudging (prevents race condition where
 		// message arrives before Claude has fully started - see issue #115)
 		sessionName := getSessionFromPane(targetPane)
 		if sessionName != "" {
-			if err := ensureClaudeReady(sessionName); err != nil {
+			if err := ensureAgentReady(sessionName); err != nil {
 				// Non-fatal: warn and continue, agent will discover work via gt prime
-				fmt.Printf("%s Could not verify Claude ready: %v\n", style.Dim.Render("○"), err)
+				fmt.Printf("%s Could not verify agent ready: %v\n", style.Dim.Render("○"), err)
 			}
 		}
 
@@ -605,30 +605,32 @@ func getSessionFromPane(pane string) string {
 	return pane
 }
 
-// ensureClaudeReady waits for Claude to be ready before nudging an existing session.
-// Uses the same pragmatic approach as session.Start(): poll for node process,
-// accept bypass dialog if present, then wait for full initialization.
-// Returns early if Claude is already running and ready.
-func ensureClaudeReady(sessionName string) error {
+// ensureAgentReady waits for an agent to be ready before nudging an existing session.
+// Uses a pragmatic approach: wait for the pane to leave a shell, then (Claude-only)
+// accept the bypass permissions warning and give it a moment to finish initializing.
+func ensureAgentReady(sessionName string) error {
 	t := tmux.NewTmux()
 
-	// If Claude is already running, assume it's ready (session was started earlier)
-	if t.IsClaudeRunning(sessionName) {
+	// If an agent is already running, assume it's ready (session was started earlier)
+	if t.IsAgentRunning(sessionName) {
 		return nil
 	}
 
-	// Claude not running yet - wait for it to start (shell → node transition)
+	// Agent not running yet - wait for it to start (shell → program transition)
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		return fmt.Errorf("waiting for Claude to start: %w", err)
+		return fmt.Errorf("waiting for agent to start: %w", err)
 	}
 
-	// Accept bypass permissions warning if present
-	_ = t.AcceptBypassPermissionsWarning(sessionName)
+	// Claude-only: accept bypass permissions warning if present
+	if t.IsClaudeRunning(sessionName) {
+		_ = t.AcceptBypassPermissionsWarning(sessionName)
 
-	// Wait for Claude to be fully ready at the prompt
-	// PRAGMATIC APPROACH: Use fixed delay rather than detection.
-	// Claude startup takes ~5-8 seconds on typical machines.
-	time.Sleep(8 * time.Second)
+		// PRAGMATIC APPROACH: fixed delay rather than prompt detection.
+		// Claude startup takes ~5-8 seconds on typical machines.
+		time.Sleep(8 * time.Second)
+	} else {
+		time.Sleep(1 * time.Second)
+	}
 
 	return nil
 }

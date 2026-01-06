@@ -1204,6 +1204,18 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }
 
+// ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
+// For example, Claude runs as "node", while most other runtimes report their executable name.
+func ExpectedPaneCommands(rc *RuntimeConfig) []string {
+	if rc == nil || rc.Command == "" {
+		return nil
+	}
+	if filepath.Base(rc.Command) == "claude" {
+		return []string{"node"}
+	}
+	return []string{filepath.Base(rc.Command)}
+}
+
 // GetRigPrefix returns the beads prefix for a rig from rigs.json.
 // Falls back to "gt" if the rig isn't found or has no prefix configured.
 // townRoot is the path to the town directory (e.g., ~/gt).

@@ -321,8 +321,9 @@ func (d *Daemon) ensureDeaconRunning() {
 		deaconSession := d.getDeaconSessionName()
 		hasSession, sessionErr := d.tmux.HasSession(deaconSession)
 		if sessionErr == nil && hasSession {
-			if d.tmux.IsClaudeRunning(deaconSession) {
-				d.logger.Println("Deacon session healthy (Claude running), skipping restart despite stale bead")
+			agentCfg := config.ResolveAgentConfig(d.config.TownRoot, "")
+			if d.tmux.IsAgentRunning(deaconSession, config.ExpectedPaneCommands(agentCfg)...) {
+				d.logger.Println("Deacon session healthy (agent running), skipping restart despite stale bead")
 				return
 			}
 		}
@@ -453,10 +454,11 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 		hasSession, sessionErr := d.tmux.HasSession(sessionName)
 		if sessionErr == nil && hasSession {
 			// Session exists - check if Claude is actually running in it
-			if d.tmux.IsClaudeRunning(sessionName) {
+			agentCfg := config.ResolveAgentConfig(d.config.TownRoot, rigPath)
+			if d.tmux.IsAgentRunning(sessionName, config.ExpectedPaneCommands(agentCfg)...) {
 				// Session is healthy - don't restart it
 				// The bead state may be stale; agent will update it on next activity
-				d.logger.Printf("Witness for %s session healthy (Claude running), skipping restart despite stale bead", rigName)
+				d.logger.Printf("Witness for %s session healthy (agent running), skipping restart despite stale bead", rigName)
 				return
 			}
 		}
@@ -508,6 +510,7 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	prefix := config.GetRigPrefix(d.config.TownRoot, rigName)
 	agentID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
 	sessionName := "gt-" + rigName + "-refinery"
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
 
 	// Check agent bead state (ZFC: trust what agent reports)
 	beadState, beadErr := d.getAgentBeadState(agentID)
@@ -540,10 +543,11 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 		hasSession, sessionErr := d.tmux.HasSession(sessionName)
 		if sessionErr == nil && hasSession {
 			// Session exists - check if Claude is actually running in it
-			if d.tmux.IsClaudeRunning(sessionName) {
+			agentCfg := config.ResolveAgentConfig(d.config.TownRoot, rigPath)
+			if d.tmux.IsAgentRunning(sessionName, config.ExpectedPaneCommands(agentCfg)...) {
 				// Session is healthy - don't restart it
 				// The bead state may be stale; agent will update it on next activity
-				d.logger.Printf("Refinery for %s session healthy (Claude running), skipping restart despite stale bead", rigName)
+				d.logger.Printf("Refinery for %s session healthy (agent running), skipping restart despite stale bead", rigName)
 				return
 			}
 		}
@@ -553,7 +557,6 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	d.logger.Printf("Refinery for %s not running per agent bead, starting...", rigName)
 
 	// Determine working directory
-	rigPath := filepath.Join(d.config.TownRoot, rigName)
 	refineryDir := filepath.Join(rigPath, "refinery", "rig")
 	if _, err := os.Stat(refineryDir); os.IsNotExist(err) {
 		// Fall back to rig path if refinery/rig doesn't exist
@@ -599,7 +602,10 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal - Claude might still start
 	}
-	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
+	agentCfg := config.ResolveAgentConfig(d.config.TownRoot, rigPath)
+	if filepath.Base(agentCfg.Command) == "claude" {
+		_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
+	}
 
 	d.logger.Printf("Refinery session for %s started successfully", rigName)
 }

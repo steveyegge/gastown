@@ -298,7 +298,9 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 
 	if running {
 		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionName) {
+		townRoot := filepath.Dir(r.Path)
+		agentCfg := config.ResolveAgentConfig(townRoot, r.Path)
+		if t.IsAgentRunning(sessionName, config.ExpectedPaneCommands(agentCfg)...) {
 			// Healthy - Claude is running
 			return false, nil
 		}

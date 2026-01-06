@@ -150,8 +150,8 @@ func runLiveCosts() error {
 		// Extract cost from content
 		cost := extractCost(content)
 
-		// Check if Claude is running
-		running := t.IsClaudeRunning(session)
+		// Check if an agent appears to be running
+		running := t.IsAgentRunning(session)
 
 		costs = append(costs, SessionCost{
 			Session: session,
@@ -427,7 +427,6 @@ func extractCost(content string) float64 {
 	_, _ = fmt.Sscanf(lastMatch[1], "%f", &cost)
 	return cost
 }
-
 
 func outputCostsJSON(output CostsOutput) error {
 	enc := json.NewEncoder(os.Stdout)

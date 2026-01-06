@@ -1165,6 +1165,22 @@ func TestGetRuntimeCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 	}
 }
 
+func TestExpectedPaneCommands(t *testing.T) {
+	t.Run("claude maps to node", func(t *testing.T) {
+		got := ExpectedPaneCommands(&RuntimeConfig{Command: "claude"})
+		if len(got) != 1 || got[0] != "node" {
+			t.Fatalf("ExpectedPaneCommands(claude) = %v, want %v", got, []string{"node"})
+		}
+	})
+
+	t.Run("codex maps to executable", func(t *testing.T) {
+		got := ExpectedPaneCommands(&RuntimeConfig{Command: "codex"})
+		if len(got) != 1 || got[0] != "codex" {
+			t.Fatalf("ExpectedPaneCommands(codex) = %v, want %v", got, []string{"codex"})
+		}
+	})
+}
+
 func TestLoadRuntimeConfigFromSettings(t *testing.T) {
 	// Create temp rig with custom runtime config
 	dir := t.TempDir()
