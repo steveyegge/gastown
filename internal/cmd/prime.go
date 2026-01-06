@@ -371,7 +371,7 @@ func outputMayorContext(ctx RoleContext) {
 	fmt.Println("- `gt mail inbox` - Check your messages")
 	fmt.Println("- `gt mail read <id>` - Read a specific message")
 	fmt.Println("- `gt status` - Show overall town status")
-	fmt.Println("- `gt rigs` - List all rigs")
+	fmt.Println("- `gt rig list` - List all rigs")
 	fmt.Println("- `bd ready` - Issues ready to work")
 	fmt.Println()
 	fmt.Println("## Hookable Mail")

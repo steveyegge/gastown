@@ -78,7 +78,7 @@ Gather activity data from each rig in the town.
 
 **1. List accessible rigs:**
 ```bash
-gt rigs
+gt rig list
 # Returns list of rigs: gastown, beads, etc.
 ```
 

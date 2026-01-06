@@ -85,7 +85,7 @@ Archive and clear all agent inboxes across all rigs.
 
 ```bash
 # For each rig
-for rig in $(gt rigs --names); do
+for rig in $(gt rig list --names); do
   gt mail clear $rig/witness --archive
   gt mail clear $rig/refinery --archive
 done

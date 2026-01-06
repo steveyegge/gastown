@@ -57,7 +57,7 @@ gt hook               # Shows scope in hook_bead
 
 ```bash
 # If town-wide
-gt rigs                     # Get list of all rigs
+gt rig list                 # Get list of all rigs
 
 # If specific rig
 # Just use that rig
