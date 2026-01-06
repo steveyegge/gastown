@@ -892,8 +892,12 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 	if !strings.Contains(cmd, "BD_ACTOR=gastown/witness") {
 		t.Error("expected BD_ACTOR in command")
 	}
-	if !strings.Contains(cmd, "claude --dangerously-skip-permissions") {
+	// Check for claude command (runtime config may customize the executable name)
+	if !strings.Contains(cmd, "claude") {
 		t.Error("expected claude command in output")
+	}
+	if !strings.Contains(cmd, "--dangerously-skip-permissions") {
+		t.Error("expected --dangerously-skip-permissions flag in output")
 	}
 }
 
