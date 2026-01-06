@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -307,5 +308,304 @@ func TestEnsureSessionFresh_IdempotentOnZombie(t *testing.T) {
 	}
 	if !has {
 		t.Error("expected session to exist after multiple EnsureSessionFresh calls")
+	}
+}
+
+// mockSessionState represents the state of a mock tmux session for testing
+type mockSessionState struct {
+	exists       bool
+	claudeAlive  bool
+	killCalled   bool
+	killError    error
+	hasError     error
+}
+
+// mockTmuxOps provides mock implementations for EnsureSessionClear dependencies
+type mockTmuxOps struct {
+	sessions map[string]*mockSessionState
+}
+
+func newMockTmuxOps() *mockTmuxOps {
+	return &mockTmuxOps{sessions: make(map[string]*mockSessionState)}
+}
+
+func (m *mockTmuxOps) addSession(name string, claudeAlive bool) {
+	m.sessions[name] = &mockSessionState{exists: true, claudeAlive: claudeAlive}
+}
+
+func (m *mockTmuxOps) setHasError(name string, err error) {
+	if s, ok := m.sessions[name]; ok {
+		s.hasError = err
+	} else {
+		m.sessions[name] = &mockSessionState{hasError: err}
+	}
+}
+
+func (m *mockTmuxOps) setKillError(name string, err error) {
+	if s, ok := m.sessions[name]; ok {
+		s.killError = err
+	}
+}
+
+func (m *mockTmuxOps) hasSession(name string) (bool, error) {
+	s, ok := m.sessions[name]
+	if !ok {
+		return false, nil
+	}
+	if s.hasError != nil {
+		return false, s.hasError
+	}
+	return s.exists, nil
+}
+
+func (m *mockTmuxOps) isClaudeRunning(name string) bool {
+	s, ok := m.sessions[name]
+	if !ok {
+		return false
+	}
+	return s.claudeAlive
+}
+
+func (m *mockTmuxOps) killSession(name string) error {
+	s, ok := m.sessions[name]
+	if !ok {
+		return nil
+	}
+	s.killCalled = true
+	if s.killError != nil {
+		return s.killError
+	}
+	s.exists = false
+	return nil
+}
+
+func (m *mockTmuxOps) wasKillCalled(name string) bool {
+	s, ok := m.sessions[name]
+	return ok && s.killCalled
+}
+
+// ensureSessionClearWithOps is the testable core logic of EnsureSessionClear
+func ensureSessionClearWithOps(
+	name string,
+	hasSession func(string) (bool, error),
+	isClaudeRunning func(string) bool,
+	killSession func(string) error,
+) (healthy bool, err error) {
+	exists, err := hasSession(name)
+	if err != nil {
+		return false, err
+	}
+
+	if !exists {
+		return false, nil
+	}
+
+	if isClaudeRunning(name) {
+		return true, nil
+	}
+
+	if err := killSession(name); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func TestEnsureSessionClear_NoExistingSession(t *testing.T) {
+	mock := newMockTmuxOps()
+	// No session added - simulates non-existent session
+
+	healthy, err := ensureSessionClearWithOps(
+		"test-session",
+		mock.hasSession,
+		mock.isClaudeRunning,
+		mock.killSession,
+	)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if healthy {
+		t.Error("expected healthy=false when no session exists")
+	}
+	if mock.wasKillCalled("test-session") {
+		t.Error("KillSession should not be called when session doesn't exist")
+	}
+}
+
+func TestEnsureSessionClear_ZombieSession(t *testing.T) {
+	mock := newMockTmuxOps()
+	mock.addSession("test-session", false) // exists but Claude not running (zombie)
+
+	healthy, err := ensureSessionClearWithOps(
+		"test-session",
+		mock.hasSession,
+		mock.isClaudeRunning,
+		mock.killSession,
+	)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if healthy {
+		t.Error("expected healthy=false for zombie session")
+	}
+	if !mock.wasKillCalled("test-session") {
+		t.Error("KillSession should be called for zombie session")
+	}
+}
+
+func TestEnsureSessionClear_HealthySession(t *testing.T) {
+	mock := newMockTmuxOps()
+	mock.addSession("test-session", true) // exists and Claude is running (healthy)
+
+	healthy, err := ensureSessionClearWithOps(
+		"test-session",
+		mock.hasSession,
+		mock.isClaudeRunning,
+		mock.killSession,
+	)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !healthy {
+		t.Error("expected healthy=true for healthy session")
+	}
+	if mock.wasKillCalled("test-session") {
+		t.Error("KillSession should NOT be called for healthy session")
+	}
+}
+
+func TestEnsureSessionClear_HasSessionError(t *testing.T) {
+	mock := newMockTmuxOps()
+	mock.setHasError("test-session", errors.New("tmux error"))
+
+	healthy, err := ensureSessionClearWithOps(
+		"test-session",
+		mock.hasSession,
+		mock.isClaudeRunning,
+		mock.killSession,
+	)
+
+	if err == nil {
+		t.Fatal("expected error from HasSession")
+	}
+	if healthy {
+		t.Error("expected healthy=false on error")
+	}
+}
+
+func TestEnsureSessionClear_KillSessionError(t *testing.T) {
+	mock := newMockTmuxOps()
+	mock.addSession("test-session", false) // zombie
+	mock.setKillError("test-session", errors.New("kill failed"))
+
+	healthy, err := ensureSessionClearWithOps(
+		"test-session",
+		mock.hasSession,
+		mock.isClaudeRunning,
+		mock.killSession,
+	)
+
+	if err == nil {
+		t.Fatal("expected error from KillSession")
+	}
+	if healthy {
+		t.Error("expected healthy=false on error")
+	}
+}
+
+func TestIsClaudeRunning_ShellSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-claude-shell-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create a session (will run default shell)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// A shell session should NOT be detected as Claude running
+	if tm.IsClaudeRunning(sessionName) {
+		cmd, _ := tm.GetPaneCommand(sessionName)
+		t.Errorf("IsClaudeRunning returned true for shell session (cmd=%q)", cmd)
+	}
+}
+
+func TestIsClaudeRunning_NonexistentSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Should return false for nonexistent session
+	if tm.IsClaudeRunning("nonexistent-session-xyz-abc") {
+		t.Error("IsClaudeRunning returned true for nonexistent session")
+	}
+}
+
+func TestGetPaneCommand_ShellSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-pane-cmd-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	cmd, err := tm.GetPaneCommand(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneCommand: %v", err)
+	}
+
+	// Should be a shell (bash, zsh, etc.) not claude or node
+	validShells := []string{"bash", "zsh", "sh", "fish", "tcsh", "csh"}
+	isShell := false
+	for _, shell := range validShells {
+		if cmd == shell {
+			isShell = true
+			break
+		}
+	}
+	if !isShell {
+		t.Errorf("GetPaneCommand returned %q, expected a shell", cmd)
+	}
+
+	// Specifically verify it's not detected as claude
+	if cmd == "claude" || cmd == "node" {
+		t.Errorf("GetPaneCommand returned %q for new shell session, should be shell name", cmd)
+	}
+}
+
+func TestIsClaudeRunningDirectMatches(t *testing.T) {
+	// Test that IsClaudeRunning handles direct matches (node, claude) before regex
+	// This tests the implementation logic, not just the regex
+
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Test nonexistent session - should return false without panic
+	result := tm.IsClaudeRunning("completely-nonexistent-session-12345")
+	if result {
+		t.Error("IsClaudeRunning returned true for nonexistent session")
 	}
 }

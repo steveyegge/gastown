@@ -76,6 +76,34 @@ func (t *Tmux) NewSession(name, workDir string) error {
 	return err
 }
 
+// EnsureSessionClear checks if a session exists and handles zombies.
+// Use this when you need to do custom setup between zombie detection and session creation.
+//
+// Returns:
+//   - (true, nil) if a healthy session exists (Claude running) - caller should skip creation
+//   - (false, nil) if no session exists or zombie was killed - caller can create new session
+//   - (false, err) on error
+func (t *Tmux) EnsureSessionClear(name string) (healthy bool, err error) {
+	exists, err := t.HasSession(name)
+	if err != nil {
+		return false, fmt.Errorf("checking session: %w", err)
+	}
+
+	if !exists {
+		return false, nil // No session, clear to create
+	}
+
+	if t.IsClaudeRunning(name) {
+		return true, nil // Healthy session exists
+	}
+
+	// Zombie - kill it
+	if err := t.KillSession(name); err != nil {
+		return false, fmt.Errorf("killing zombie session: %w", err)
+	}
+	return false, nil // Was zombie, now clear to create
+}
+
 // EnsureSessionFresh ensures a session is available and healthy.
 // If the session exists but is a zombie (Claude not running), it kills the session first.
 // This prevents "session already exists" errors when trying to restart dead agents.
@@ -84,28 +112,15 @@ func (t *Tmux) NewSession(name, workDir string) error {
 // - The tmux session exists
 // - But Claude (node process) is not running in it
 //
-// Returns nil if session was created successfully.
+// Returns nil if session is healthy or was created successfully.
 func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
-	// Check if session already exists
-	exists, err := t.HasSession(name)
+	healthy, err := t.EnsureSessionClear(name)
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+		return err
 	}
-
-	if exists {
-		// Session exists - check if it's a zombie
-		if !t.IsAgentRunning(name) {
-			// Zombie session: tmux alive but Claude dead
-			// Kill it so we can create a fresh one
-			if err := t.KillSession(name); err != nil {
-				return fmt.Errorf("killing zombie session: %w", err)
-			}
-		} else {
-			// Session is healthy (Claude running) - nothing to do
-			return nil
-		}
+	if healthy {
+		return nil // Session already healthy
 	}
-
 	// Create fresh session
 	return t.NewSession(name, workDir)
 }

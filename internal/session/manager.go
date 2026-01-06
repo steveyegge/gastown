@@ -122,12 +122,12 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 
 	sessionID := m.SessionName(polecat)
 
-	// Check if session already exists
-	running, err := m.tmux.HasSession(sessionID)
+	// Check if session already exists, handle zombies
+	healthy, err := m.tmux.EnsureSessionClear(sessionID)
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+		return err
 	}
-	if running {
+	if healthy {
 		return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 	}
 

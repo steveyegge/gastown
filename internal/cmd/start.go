@@ -944,9 +944,17 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 	// Ensure crew workspace is on default branch
 	ensureDefaultBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", rigName, crewName), r.Path)
 
-	// Create tmux session
+	// Create tmux session (handle zombies if present)
 	t := tmux.NewTmux()
 	sessionID := crewSessionName(rigName, crewName)
+
+	healthy, err := t.EnsureSessionClear(sessionID)
+	if err != nil {
+		return err
+	}
+	if healthy {
+		return nil // Session already running
+	}
 
 	if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
 		return fmt.Errorf("creating session: %w", err)
