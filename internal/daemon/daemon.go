@@ -420,6 +420,7 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	prefix := config.GetRigPrefix(d.config.TownRoot, rigName)
 	agentID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
 	sessionName := "gt-" + rigName + "-witness"
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
 
 	// Check agent bead state (ZFC: trust what agent reports)
 	beadState, beadErr := d.getAgentBeadState(agentID)
@@ -485,7 +486,7 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 		"BD_ACTOR":        bdActor,
 		"GIT_AUTHOR_NAME": bdActor,
 	}
-	if err := d.tmux.SendKeys(sessionName, config.BuildStartupCommand(envVars, "", "")); err != nil {
+	if err := d.tmux.SendKeys(sessionName, config.BuildStartupCommand(envVars, rigPath, "")); err != nil {
 		d.logger.Printf("Error launching Claude in witness session for %s: %v", rigName, err)
 		return
 	}
@@ -589,7 +590,7 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 		"BD_ACTOR":        bdActor,
 		"GIT_AUTHOR_NAME": bdActor,
 	}
-	if err := d.tmux.SendKeys(sessionName, config.BuildStartupCommand(envVars, "", "")); err != nil {
+	if err := d.tmux.SendKeys(sessionName, config.BuildStartupCommand(envVars, rigPath, "")); err != nil {
 		d.logger.Printf("Error launching Claude in refinery session for %s: %v", rigName, err)
 		return
 	}

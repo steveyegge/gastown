@@ -1118,6 +1118,53 @@ func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
 	}
 }
 
+func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "gemini"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rigSettings := NewRigSettings()
+	rigSettings.Agent = "codex"
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "witness"}, rigPath, "")
+	if !strings.Contains(cmd, "codex") {
+		t.Fatalf("expected rig agent (codex) in command: %q", cmd)
+	}
+	if strings.Contains(cmd, "gemini --approval-mode yolo") {
+		t.Fatalf("did not expect town default agent in command: %q", cmd)
+	}
+}
+
+func TestGetRuntimeCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "gemini"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rigSettings := NewRigSettings()
+	rigSettings.Agent = "codex"
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := GetRuntimeCommand(rigPath)
+	if !strings.HasPrefix(cmd, "codex") {
+		t.Fatalf("GetRuntimeCommand() = %q, want prefix %q", cmd, "codex")
+	}
+}
+
 func TestLoadRuntimeConfigFromSettings(t *testing.T) {
 	// Create temp rig with custom runtime config
 	dir := t.TempDir()

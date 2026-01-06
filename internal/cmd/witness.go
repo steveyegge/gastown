@@ -345,7 +345,7 @@ func ensureWitnessSession(rigName string, r *rig.Rig) (bool, error) {
 	// Restarts are handled by daemon via LIFECYCLE mail or deacon health-scan
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	if err := t.SendKeys(sessionName, config.BuildAgentStartupCommand("witness", bdActor, "", "")); err != nil {
+	if err := t.SendKeys(sessionName, config.BuildAgentStartupCommand("witness", bdActor, r.Path, "")); err != nil {
 		return false, fmt.Errorf("sending command: %w", err)
 	}
 

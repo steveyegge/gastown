@@ -24,9 +24,9 @@ import (
 
 // Common errors
 var (
-	ErrNotRunning    = errors.New("refinery not running")
+	ErrNotRunning     = errors.New("refinery not running")
 	ErrAlreadyRunning = errors.New("refinery already running")
-	ErrNoQueue       = errors.New("no items in queue")
+	ErrNoQueue        = errors.New("no items in queue")
 )
 
 // Manager handles refinery lifecycle and queue operations.
@@ -203,7 +203,7 @@ func (m *Manager) Start(foreground bool) error {
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Restarts are handled by daemon via LIFECYCLE mail, not shell loops
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	command := config.BuildAgentStartupCommand("refinery", bdActor, "", "")
+	command := config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
 	if err := t.SendKeys(sessionID, command); err != nil {
 		// Clean up the session on failure (best-effort cleanup)
 		_ = t.KillSession(sessionID)
@@ -539,7 +539,6 @@ func (m *Manager) pushWithRetry(targetBranch string, config MergeConfig) error {
 	return fmt.Errorf("push failed after %d retries: %v", config.PushRetryCount, lastErr)
 }
 
-
 // formatAge formats a duration since the given time.
 func formatAge(t time.Time) string {
 	d := time.Since(t)
@@ -560,8 +559,8 @@ func formatAge(t time.Time) string {
 func (m *Manager) notifyWorkerConflict(mr *MergeRequest) {
 	router := mail.NewRouter(m.workDir)
 	msg := &mail.Message{
-		From: fmt.Sprintf("%s/refinery", m.rig.Name),
-		To:   fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
+		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
+		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
 		Subject: "Merge conflict - rebase required",
 		Body: fmt.Sprintf(`Your branch %s has conflicts with %s.
 
@@ -581,8 +580,8 @@ Then the Refinery will retry the merge.`,
 func (m *Manager) notifyWorkerMerged(mr *MergeRequest) {
 	router := mail.NewRouter(m.workDir)
 	msg := &mail.Message{
-		From: fmt.Sprintf("%s/refinery", m.rig.Name),
-		To:   fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
+		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
+		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
 		Subject: "Work merged successfully",
 		Body: fmt.Sprintf(`Your branch %s has been merged to %s.
 

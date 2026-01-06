@@ -366,7 +366,7 @@ func ensureRefinerySession(rigName string, r *rig.Rig) (bool, error) {
 
 	// Launch Claude directly (no respawn loop - daemon handles restart)
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	if err := t.SendKeys(sessionName, config.BuildAgentStartupCommand("refinery", bdActor, "", "")); err != nil {
+	if err := t.SendKeys(sessionName, config.BuildAgentStartupCommand("refinery", bdActor, r.Path, "")); err != nil {
 		return false, fmt.Errorf("sending command: %w", err)
 	}
 

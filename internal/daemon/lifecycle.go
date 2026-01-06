@@ -211,8 +211,8 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 // ParsedIdentity holds the components extracted from an agent identity string.
 // This is used to look up the appropriate role bead for lifecycle config.
 type ParsedIdentity struct {
-	RoleType string // mayor, deacon, witness, refinery, crew, polecat
-	RigName  string // Empty for town-level agents (mayor, deacon)
+	RoleType  string // mayor, deacon, witness, refinery, crew, polecat
+	RigName   string // Empty for town-level agents (mayor, deacon)
 	AgentName string // Empty for singletons (mayor, deacon, witness, refinery)
 }
 
@@ -436,12 +436,17 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		return beads.ExpandRolePattern(roleConfig.StartCommand, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)
 	}
 
+	rigPath := ""
+	if parsed != nil && parsed.RigName != "" {
+		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
+	}
+
 	// Default command for all agents - use runtime config
-	defaultCmd := "exec " + config.GetRuntimeCommand("")
+	defaultCmd := "exec " + config.GetRuntimeCommand(rigPath)
 
 	// Polecats need environment variables set in the command
 	if parsed.RoleType == "polecat" {
-		return config.BuildPolecatStartupCommand(parsed.RigName, parsed.AgentName, "", "")
+		return config.BuildPolecatStartupCommand(parsed.RigName, parsed.AgentName, rigPath, "")
 	}
 
 	return defaultCmd
@@ -572,7 +577,7 @@ func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 		Type        string `json:"issue_type"`
 		Description string `json:"description"`
 		UpdatedAt   string `json:"updated_at"`
-		HookBead    string `json:"hook_bead"`    // Read from database column
+		HookBead    string `json:"hook_bead"`   // Read from database column
 		AgentState  string `json:"agent_state"` // Read from database column
 	}
 
@@ -913,7 +918,7 @@ func (d *Daemon) getDeadAgents() []deadAgentInfo {
 	var agents []struct {
 		ID         string `json:"id"`
 		Type       string `json:"issue_type"`
-		HookBead   string `json:"hook_bead"`    // Read from database column
+		HookBead   string `json:"hook_bead"`   // Read from database column
 		AgentState string `json:"agent_state"` // Read from database column
 	}
 
@@ -972,4 +977,3 @@ Action needed: Either restart the agent or reassign the work.`,
 		d.logger.Printf("Notified %s of orphaned work for %s", witnessAddr, agentID)
 	}
 }
-
