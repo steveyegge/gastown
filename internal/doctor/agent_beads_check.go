@@ -1,8 +1,10 @@
 package doctor
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -220,8 +222,16 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	for prefix, info := range prefixToRig {
 		// Use the route path directly instead of hardcoding /mayor/rig
 		rigBeadsPath := filepath.Join(ctx.TownRoot, info.beadsPath)
-		bd := beads.New(rigBeadsPath)
 		rigName := info.name
+
+		// Ensure the beads database has issue_prefix configured.
+		// This handles the case where beads.db exists (from cloning) but is missing
+		// the issue_prefix config entry, which causes bd commands to fail.
+		if err := ensureBeadsPrefixSet(rigBeadsPath, prefix); err != nil {
+			return fmt.Errorf("ensuring prefix for %s: %w", rigName, err)
+		}
+
+		bd := beads.New(rigBeadsPath)
 
 		// Create rig-specific agents if missing (using canonical naming: prefix-rig-role-name)
 		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
@@ -289,4 +299,65 @@ func listCrewWorkers(townRoot, rigName string) []string {
 		}
 	}
 	return workers
+}
+
+// ensureBeadsPrefixSet checks if the beads database has an issue_prefix configured,
+// and if not, inserts it using sqlite3 CLI. This handles the case where a beads.db
+// exists (from cloning) but is missing the issue_prefix config entry.
+//
+// The prefix is derived from routes.jsonl, which maps prefixes to rig paths.
+// If the prefix can't be determined, the function returns an error.
+func ensureBeadsPrefixSet(beadsPath, prefix string) error {
+	dbPath := filepath.Join(beadsPath, "beads.db")
+
+	// Check if database exists
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return nil // No database to fix
+	}
+
+	// Check if issue_prefix is already set using sqlite3 CLI
+	checkCmd := exec.Command("sqlite3", dbPath,
+		"SELECT value FROM config WHERE key = 'issue_prefix';")
+	var checkOut bytes.Buffer
+	checkCmd.Stdout = &checkOut
+	checkCmd.Stderr = &bytes.Buffer{}
+
+	if err := checkCmd.Run(); err != nil {
+		// sqlite3 command failed - might be missing or table doesn't exist
+		// Try to create the config table and insert the prefix
+		return insertBeadsPrefix(dbPath, prefix)
+	}
+
+	// If we got output, the prefix is already set
+	if strings.TrimSpace(checkOut.String()) != "" {
+		return nil
+	}
+
+	// Prefix not set, insert it
+	return insertBeadsPrefix(dbPath, prefix)
+}
+
+// insertBeadsPrefix inserts the issue_prefix into the beads database config table.
+// Creates the config table if it doesn't exist.
+func insertBeadsPrefix(dbPath, prefix string) error {
+	// Ensure prefix has trailing hyphen (bd convention)
+	if !strings.HasSuffix(prefix, "-") {
+		prefix = prefix + "-"
+	}
+
+	// Use a single SQL statement that creates table if needed and inserts
+	sql := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT);
+		INSERT OR REPLACE INTO config (key, value) VALUES ('issue_prefix', '%s');
+	`, prefix)
+
+	cmd := exec.Command("sqlite3", dbPath, sql)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("inserting issue_prefix: %s: %w", stderr.String(), err)
+	}
+
+	return nil
 }
