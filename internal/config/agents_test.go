@@ -356,6 +356,90 @@ func TestGetProcessNames(t *testing.T) {
 	}
 }
 
+func TestListAgentPresetsMatchesConstants(t *testing.T) {
+	// Ensure all AgentPreset constants are returned by ListAgentPresets
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor}
+	presets := ListAgentPresets()
+
+	// Convert to map for quick lookup
+	presetMap := make(map[string]bool)
+	for _, p := range presets {
+		presetMap[p] = true
+	}
+
+	// Verify all constants are in the list
+	for _, c := range allConstants {
+		if !presetMap[string(c)] {
+			t.Errorf("ListAgentPresets() missing constant %q", c)
+		}
+	}
+
+	// Verify no empty names
+	for _, p := range presets {
+		if p == "" {
+			t.Error("ListAgentPresets() contains empty string")
+		}
+	}
+}
+
+func TestAgentCommandGeneration(t *testing.T) {
+	// Test full command line generation for each agent
+	tests := []struct {
+		preset       AgentPreset
+		wantCommand  string
+		wantContains []string // Args that should be present
+	}{
+		{
+			preset:       AgentClaude,
+			wantCommand:  "claude",
+			wantContains: []string{"--dangerously-skip-permissions"},
+		},
+		{
+			preset:       AgentGemini,
+			wantCommand:  "gemini",
+			wantContains: []string{"--approval-mode", "yolo"},
+		},
+		{
+			preset:       AgentCodex,
+			wantCommand:  "codex",
+			wantContains: []string{"--yolo"},
+		},
+		{
+			preset:       AgentCursor,
+			wantCommand:  "cursor-agent",
+			wantContains: []string{"-p", "-f"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.preset), func(t *testing.T) {
+			rc := RuntimeConfigFromPreset(tt.preset)
+			if rc == nil {
+				t.Fatal("RuntimeConfigFromPreset returned nil")
+			}
+
+			if rc.Command != tt.wantCommand {
+				t.Errorf("Command = %q, want %q", rc.Command, tt.wantCommand)
+			}
+
+			// Check required args are present
+			argsStr := strings.Join(rc.Args, " ")
+			for _, arg := range tt.wantContains {
+				found := false
+				for _, a := range rc.Args {
+					if a == arg {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Args %q missing expected %q", argsStr, arg)
+				}
+			}
+		})
+	}
+}
+
 func TestCursorAgentPreset(t *testing.T) {
 	// Verify cursor agent preset is correctly configured
 	info := GetAgentPreset(AgentCursor)
