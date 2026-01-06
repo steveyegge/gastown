@@ -362,14 +362,20 @@ Should be empty. If not:
 - Pop and commit: `git stash pop && git add -A && git commit`
 - Or drop if garbage: `git stash drop`
 
-**4. Verify nothing left behind:**
+**4. Push your branch:**
+```bash
+git push -u origin $(git branch --show-current)
+```
+
+**5. Verify nothing left behind:**
 ```bash
 git status                  # Clean
 git stash list              # Empty
-git log origin/main..HEAD   # Your commits (local only, not pushed)
+git log origin/main..HEAD   # Your commits
+git diff origin/main...HEAD # Your changes (expected)
 ```
 
-**Exit criteria:** Workspace clean, commits ready for Refinery."""
+**Exit criteria:** Branch pushed, workspace clean, no cruft."""
 
 [[steps]]
 id = "prepare-for-review"
@@ -436,7 +442,7 @@ You should see output like:
 
 **3. You're recyclable:**
 Your work is in the queue. The Witness knows you're done.
-Refinery will access your local branch via shared .repo.git.
+Your sandbox can be cleaned up - all work is pushed to origin.
 
 If you have context remaining, you may:
 - Pick up new work from `bd ready`

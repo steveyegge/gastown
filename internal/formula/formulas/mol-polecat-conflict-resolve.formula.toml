@@ -145,39 +145,20 @@ git stash list              # Should be empty
 
 If dirty, clean up first (stash or discard).
 
-**2. Fetch latest main:**
+**2. Fetch latest state:**
 ```bash
 git fetch origin
+git fetch origin {{branch}}:refs/remotes/origin/{{branch}}
 ```
 
-**3. Locate the source polecat's worktree:**
-
-The branch is local-only (not pushed to origin). Find the source polecat path
-from the task metadata. The path follows the pattern:
-```
-~/gt/<rig>/polecats/<polecat-name>
-```
-
-Extract the source polecat name from the MR metadata:
+**3. Checkout the branch:**
 ```bash
-bd show {{original_mr}} --json | jq -r '.description' | grep -oP 'Source polecat: \K\S+'
-```
-
-**4. Fetch the branch from the source polecat's worktree:**
-```bash
-# The source polecat's worktree still exists (cleanup is deferred until MR merges)
-SOURCE_POLECAT_PATH="$HOME/gt/{{rig}}/polecats/{{source_polecat}}"
-git fetch "$SOURCE_POLECAT_PATH" {{branch}}:{{branch}}
-```
-
-**5. Checkout the branch:**
-```bash
-git checkout -b temp-resolve {{branch}}
+git checkout -b temp-resolve origin/{{branch}}
 ```
 
 Using `temp-resolve` as the local branch name keeps things clear.
 
-**6. Verify the branch state:**
+**4. Verify the branch state:**
 ```bash
 git log --oneline -5        # Recent commits
 git log origin/main..HEAD   # Commits not on main
@@ -401,12 +382,4 @@ required = true
 
 [vars.branch]
 description = "The branch to rebase (extracted from task metadata)"
-required = true
-
-[vars.rig]
-description = "The rig where the source polecat resides"
-required = true
-
-[vars.source_polecat]
-description = "The name of the polecat whose local branch contains the work (extracted from MR metadata)"
 required = true
