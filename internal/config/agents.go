@@ -28,7 +28,7 @@ const (
 // AgentPresetInfo contains the configuration details for an agent preset.
 // This extends the basic RuntimeConfig with agent-specific metadata.
 type AgentPresetInfo struct {
-	// Name is the preset identifier (e.g., "claude", "gemini", "codex").
+	// Name is the preset identifier (e.g., "claude", "gemini", "codex", "cursor").
 	Name AgentPreset `json:"name"`
 
 	// Command is the CLI binary to invoke.
