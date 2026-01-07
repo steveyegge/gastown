@@ -21,6 +21,7 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
+	"github.com/steveyegge/gastown/internal/wrappers"
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 	installGitHub     string
 	installPublic     bool
 	installShell      bool
+	installWrappers   bool
 )
 
 var installCmd = &cobra.Command{
@@ -74,6 +76,7 @@ func init() {
 	installCmd.Flags().StringVar(&installGitHub, "github", "", "Create GitHub repo (format: owner/repo, private by default)")
 	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
+	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -276,6 +279,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   %s Could not enable Gas Town: %v\n", style.Dim.Render("⚠"), err)
 		} else {
 			fmt.Printf("   ✓ Enabled Gas Town globally\n")
+		}
+	}
+
+	if installWrappers {
+		fmt.Println()
+		if err := wrappers.Install(); err != nil {
+			fmt.Printf("   %s Could not install wrapper scripts: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
 		}
 	}
 

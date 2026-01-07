@@ -108,6 +108,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Register workspace-level checks first (fundamental)
 	d.RegisterAll(doctor.WorkspaceChecks()...)
 
+	d.Register(doctor.NewGlobalStateCheck())
+
 	// Register built-in checks
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewDaemonCheck())
