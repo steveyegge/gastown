@@ -1,6 +1,10 @@
 package cmd
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestParseWispIDFromJSON(t *testing.T) {
 	tests := []struct {
@@ -179,6 +183,143 @@ func TestFormatTrackBeadIDConsumerCompatibility(t *testing.T) {
 			if parsed != tt.wantOriginalID {
 				t.Errorf("round-trip failed: formatTrackBeadID(%q) = %q, parsed back to %q, want %q",
 					tt.beadID, formatted, parsed, tt.wantOriginalID)
+			}
+		})
+	}
+}
+
+func TestCalculateWorkDirFromSession(t *testing.T) {
+	// Create a temporary town structure
+	townRoot := t.TempDir()
+
+	// Create mayor/town.json to make it look like a town (workspace detection marker)
+	mayorDir := filepath.Join(townRoot, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`), 0644); err != nil {
+		t.Fatalf("write town.json: %v", err)
+	}
+
+	// Change to town root so workspace.FindFromCwd works
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		sessionName string
+		wantSuffix  string // Expected suffix of the work dir (relative to townRoot)
+	}{
+		// Town-level agents
+		{
+			name:        "mayor session",
+			sessionName: "hq-mayor",
+			wantSuffix:  "mayor",
+		},
+		{
+			name:        "deacon session",
+			sessionName: "hq-deacon",
+			wantSuffix:  "deacon",
+		},
+
+		// Rig-level singletons
+		{
+			name:        "witness session",
+			sessionName: "gt-testrig-witness",
+			wantSuffix:  filepath.Join("testrig", "witness", "rig"),
+		},
+		{
+			name:        "refinery session",
+			sessionName: "gt-testrig-refinery",
+			wantSuffix:  filepath.Join("testrig", "refinery", "rig"),
+		},
+
+		// Named workers
+		{
+			name:        "crew session",
+			sessionName: "gt-testrig-crew-max",
+			wantSuffix:  filepath.Join("testrig", "crew", "max"),
+		},
+		{
+			name:        "polecat session",
+			sessionName: "gt-testrig-nux",
+			wantSuffix:  filepath.Join("testrig", "polecats", "nux"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := calculateWorkDirFromSession(tt.sessionName)
+
+			// Calculate expected path
+			var want string
+			if tt.wantSuffix == "" {
+				want = townRoot
+			} else {
+				want = filepath.Join(townRoot, tt.wantSuffix)
+			}
+
+			if got != want {
+				t.Errorf("calculateWorkDirFromSession(%q) = %q, want %q", tt.sessionName, got, want)
+			}
+		})
+	}
+}
+
+func TestCalculateWorkDirFromSession_InvalidSession(t *testing.T) {
+	// Create a temporary town structure
+	townRoot := t.TempDir()
+
+	// Create mayor/town.json to make it look like a town
+	mayorDir := filepath.Join(townRoot, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test"}`), 0644); err != nil {
+		t.Fatalf("write town.json: %v", err)
+	}
+
+	// Change to town root so workspace.FindFromCwd works
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		sessionName string
+	}{
+		{
+			name:        "invalid prefix",
+			sessionName: "invalid-session",
+		},
+		{
+			name:        "empty session",
+			sessionName: "",
+		},
+		{
+			name:        "just prefix",
+			sessionName: "gt-",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := calculateWorkDirFromSession(tt.sessionName)
+			if got != "" {
+				t.Errorf("calculateWorkDirFromSession(%q) = %q, want empty string", tt.sessionName, got)
 			}
 		})
 	}

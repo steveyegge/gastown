@@ -689,8 +689,10 @@ func resolveTargetAgent(target string, skipPane bool) (agentID string, pane stri
 	agentID = sessionToAgentID(sessionName)
 
 	// Skip pane lookup if requested (--naked mode)
+	// But still calculate hookRoot from target path - needed for bd commands
 	if skipPane {
-		return agentID, "", "", nil
+		hookRoot = calculateWorkDirFromSession(sessionName)
+		return agentID, "", hookRoot, nil
 	}
 
 	// Get the pane for that session
@@ -718,6 +720,41 @@ func sessionToAgentID(sessionName string) string {
 		return sessionName
 	}
 	return identity.Address()
+}
+
+// calculateWorkDirFromSession calculates the work directory from a session name.
+// Used in --naked mode when tmux is not available to query the pane's cwd.
+func calculateWorkDirFromSession(sessionName string) string {
+	identity, err := session.ParseSessionName(sessionName)
+	if err != nil {
+		return ""
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return ""
+	}
+
+	// Map session.Role to cmd.Role and call getRoleHome
+	var role Role
+	switch identity.Role {
+	case session.RoleMayor:
+		role = RoleMayor
+	case session.RoleDeacon:
+		role = RoleDeacon
+	case session.RoleWitness:
+		role = RoleWitness
+	case session.RoleRefinery:
+		role = RoleRefinery
+	case session.RoleCrew:
+		role = RoleCrew
+	case session.RolePolecat:
+		role = RolePolecat
+	default:
+		return ""
+	}
+
+	return getRoleHome(role, identity.Rig, identity.Name, townRoot)
 }
 
 // verifyBeadExists checks that the bead exists using bd show.
