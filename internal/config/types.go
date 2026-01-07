@@ -225,8 +225,9 @@ type RuntimeConfig struct {
 	Command string `json:"command,omitempty"`
 
 	// Args are additional command-line arguments.
-	// Default: ["--dangerously-skip-permissions"]
-	Args []string `json:"args,omitempty"`
+	// Default: ["--dangerously-skip-permissions"] for built-in agents.
+	// Empty array [] means no args (not "use defaults").
+	Args []string `json:"args"`
 
 	// InitialPrompt is an optional first message to send after startup.
 	// For claude, this is passed as the prompt argument.
