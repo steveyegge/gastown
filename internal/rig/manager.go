@@ -614,6 +614,11 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		fmt.Printf("   ⚠ Could not add route to town beads: %v\n", err)
 	}
 
+	typesCmd := exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,slot")
+	typesCmd.Dir = rigPath
+	typesCmd.Env = filteredEnv
+	_, _ = typesCmd.CombinedOutput()
+
 	return nil
 }
 
