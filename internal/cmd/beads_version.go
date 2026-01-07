@@ -84,14 +84,12 @@ func (v beadsVersion) compare(other beadsVersion) int {
 	return 0
 }
 
-// getBeadsVersion executes `bd --version` and parses the output.
-// Returns the version string (e.g., "0.44.0") or error.
 func getBeadsVersion() (string, error) {
-	cmd := exec.Command("bd", "--version")
+	cmd := exec.Command("bd", "version")
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("bd --version failed: %s", string(exitErr.Stderr))
+			return "", fmt.Errorf("bd version failed: %s", string(exitErr.Stderr))
 		}
 		return "", fmt.Errorf("failed to run bd: %w (is beads installed?)", err)
 	}
