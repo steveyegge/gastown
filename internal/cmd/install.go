@@ -321,6 +321,14 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not verify repo fingerprint: %v\n", style.Dim.Render("⚠"), err)
 	}
 
+	// Register Gas Town custom types (agent, role, rig, convoy, slot).
+	// These types are not built into beads core - they must be registered
+	// before creating agent/role beads. See GH #gt-xyz for context.
+	if err := ensureCustomTypes(townPath); err != nil {
+		// Non-fatal but will cause agent bead creation to fail
+		fmt.Printf("   %s Could not register custom types: %v\n", style.Dim.Render("⚠"), err)
+	}
+
 	return nil
 }
 
@@ -333,6 +341,20 @@ func ensureRepoFingerprint(beadsPath string) error {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bd migrate --update-repo-id: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// ensureCustomTypes registers Gas Town custom issue types with beads.
+// Beads core only supports built-in types (bug, feature, task, etc.).
+// Gas Town needs custom types: agent, role, rig, convoy, slot.
+// This is idempotent - safe to call multiple times.
+func ensureCustomTypes(beadsPath string) error {
+	cmd := exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,slot")
+	cmd.Dir = beadsPath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
 }
