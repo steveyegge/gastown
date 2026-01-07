@@ -275,15 +275,29 @@ func (d *Daemon) getRoleConfigForIdentity(identity string) (*beads.RoleConfig, *
 	}
 
 	// Look up role bead
-	roleBeadID := beads.RoleBeadID(parsed.RoleType)
 	b := beads.New(d.config.TownRoot)
-	config, err := b.GetRoleConfig(roleBeadID)
+
+	roleBeadID := beads.RoleBeadIDTown(parsed.RoleType)
+	roleConfig, err := b.GetRoleConfig(roleBeadID)
 	if err != nil {
 		d.logger.Printf("Warning: failed to get role config for %s: %v", roleBeadID, err)
 	}
 
+	// Backward compatibility: fall back to legacy role bead IDs.
+	if roleConfig == nil {
+		legacyRoleBeadID := beads.RoleBeadID(parsed.RoleType) // gt-<role>-role
+		if legacyRoleBeadID != roleBeadID {
+			legacyCfg, legacyErr := b.GetRoleConfig(legacyRoleBeadID)
+			if legacyErr != nil {
+				d.logger.Printf("Warning: failed to get legacy role config for %s: %v", legacyRoleBeadID, legacyErr)
+			} else if legacyCfg != nil {
+				roleConfig = legacyCfg
+			}
+		}
+	}
+
 	// Return parsed identity even if config is nil (caller can use defaults)
-	return config, parsed, nil
+	return roleConfig, parsed, nil
 }
 
 // identityToSession converts a beads identity to a tmux session name.
