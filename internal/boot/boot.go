@@ -197,6 +197,11 @@ func (b *Boot) spawnTmux() error {
 	// Launch Claude with environment exported inline and initial triage prompt
 	// The "gt boot triage" prompt tells Boot to immediately start triage (GUPP principle)
 	startCmd := config.BuildAgentStartupCommand("boot", "deacon-boot", "", "gt boot triage")
+	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
+	if err := b.tmux.WaitForShellReady(SessionName, 5*time.Second); err != nil {
+		_ = b.tmux.KillSession(SessionName)
+		return fmt.Errorf("waiting for shell: %w", err)
+	}
 	if err := b.tmux.SendKeys(SessionName, startCmd); err != nil {
 		return fmt.Errorf("sending startup command: %w", err)
 	}

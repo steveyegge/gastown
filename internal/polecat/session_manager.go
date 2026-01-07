@@ -183,6 +183,11 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if command == "" {
 		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
 	}
+	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
+	if err := m.tmux.WaitForShellReady(sessionID, 5*time.Second); err != nil {
+		_ = m.tmux.KillSession(sessionID)
+		return fmt.Errorf("waiting for shell: %w", err)
+	}
 	if err := m.tmux.SendKeys(sessionID, command); err != nil {
 		return fmt.Errorf("sending command: %w", err)
 	}

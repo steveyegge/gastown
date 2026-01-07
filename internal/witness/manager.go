@@ -183,6 +183,11 @@ func (m *Manager) Start(foreground bool) error {
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
 	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
 	command := config.BuildAgentStartupCommand("witness", bdActor, m.rig.Path, "")
+	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
+	if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
+		_ = t.KillSession(sessionID)
+		return fmt.Errorf("waiting for shell: %w", err)
+	}
 	if err := t.SendKeys(sessionID, command); err != nil {
 		_ = t.KillSession(sessionID) // best-effort cleanup
 		return fmt.Errorf("starting Claude agent: %w", err)

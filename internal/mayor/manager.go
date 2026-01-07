@@ -98,6 +98,11 @@ func (m *Manager) Start(agentOverride string) error {
 		_ = t.KillSession(sessionID) // best-effort cleanup
 		return fmt.Errorf("building startup command: %w", err)
 	}
+	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
+	if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
+		_ = t.KillSession(sessionID)
+		return fmt.Errorf("waiting for shell: %w", err)
+	}
 	if err := t.SendKeysDelayed(sessionID, startupCmd, 200); err != nil {
 		_ = t.KillSession(sessionID) // best-effort cleanup
 		return fmt.Errorf("starting Claude agent: %w", err)
