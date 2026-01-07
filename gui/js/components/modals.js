@@ -876,11 +876,17 @@ function getLanguageColor(lang) {
 }
 
 async function handleNewRigSubmit(form) {
-  const name = form.querySelector('[name="name"]')?.value;
-  const url = form.querySelector('[name="url"]')?.value;
+  const name = form.querySelector('[name="name"]')?.value?.trim();
+  const url = form.querySelector('[name="url"]')?.value?.trim();
 
   if (!name || !url) {
     showToast('Please enter both name and path', 'warning');
+    return;
+  }
+
+  // Validate name format (lowercase, numbers, hyphens only)
+  if (!/^[a-z0-9-]+$/.test(name)) {
+    showToast('Rig name must be lowercase letters, numbers, and hyphens only (no spaces)', 'warning');
     return;
   }
 
