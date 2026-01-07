@@ -24,7 +24,7 @@
 
 .loading-content {
   position: relative;
-  z-index: 1;
+  z-index: 10001;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -45,6 +45,8 @@
     0 0 60px rgba(37, 99, 235, 0.4),
     inset 0 0 20px rgba(255, 255, 255, 0.1);
   background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 70%);
+  position: relative;
+  z-index: 2;
 }
 
 @keyframes spin {
@@ -52,13 +54,21 @@
 }
 
 .loading-text {
-  font-size: 32px;
+  font-size: 64px;
   color: #ffffff;
   font-weight: 700;
+  /* Solid black outline for visibility */
   text-shadow:
-    0 2px 0 #000000,
-    0 4px 8px rgba(0, 0, 0, 0.8),
-    0 6px 20px rgba(0, 0, 0, 0.6);
+    -2px -2px 0 #000,
+     2px -2px 0 #000,
+    -2px  2px 0 #000,
+     2px  2px 0 #000,
+    -2px  0   0 #000,
+     2px  0   0 #000,
+     0   -2px 0 #000,
+     0    2px 0 #000,
+     0    4px 8px rgba(0, 0, 0, 0.8),
+     0    6px 20px rgba(0, 0, 0, 0.6);
   letter-spacing: 2px;
   text-transform: uppercase;
 }
