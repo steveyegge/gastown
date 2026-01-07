@@ -70,7 +70,7 @@ func runRigQuickAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no git remote found: %w", err)
 	}
 
-	rigName := filepath.Base(gitRoot)
+	rigName := sanitizeRigName(filepath.Base(gitRoot))
 
 	townRoot, err := findOrCreateTown()
 	if err != nil {
@@ -80,6 +80,11 @@ func runRigQuickAdd(cmd *cobra.Command, args []string) error {
 	rigPath := filepath.Join(townRoot, rigName)
 	if _, err := os.Stat(rigPath); err == nil {
 		return fmt.Errorf("rig %q already exists in %s", rigName, townRoot)
+	}
+
+	originalName := filepath.Base(gitRoot)
+	if rigName != originalName && !quickAddQuiet {
+		fmt.Printf("Note: Using %q as rig name (sanitized from %q)\n", rigName, originalName)
 	}
 
 	if !quickAddQuiet {
@@ -94,6 +99,8 @@ func runRigQuickAdd(cmd *cobra.Command, args []string) error {
 	addCmd.Stdout = os.Stdout
 	addCmd.Stderr = os.Stderr
 	if err := addCmd.Run(); err != nil {
+		fmt.Printf("\n%s Failed to add rig. You can try manually:\n", style.Warning.Render("⚠"))
+		fmt.Printf("  cd %s && gt rig add %s %s\n", townRoot, rigName, gitURL)
 		return fmt.Errorf("gt rig add failed: %w", err)
 	}
 
@@ -111,12 +118,12 @@ func runRigQuickAdd(cmd *cobra.Command, args []string) error {
 
 	crewArgs := []string{"crew", "add", user, "--rig", rigName}
 	crewCmd := exec.Command("gt", crewArgs...)
-	crewCmd.Dir = townRoot
+	crewCmd.Dir = filepath.Join(townRoot, rigName)
 	crewCmd.Stdout = os.Stdout
 	crewCmd.Stderr = os.Stderr
 	if err := crewCmd.Run(); err != nil {
 		fmt.Printf("  %s Could not create crew workspace: %v\n", style.Dim.Render("⚠"), err)
-		fmt.Printf("  Run manually: gt crew add %s --rig %s\n", user, rigName)
+		fmt.Printf("  Run manually: cd %s && gt crew add %s --rig %s\n", filepath.Join(townRoot, rigName), user, rigName)
 	}
 
 	crewPath := filepath.Join(townRoot, rigName, "crew", user)
@@ -147,6 +154,13 @@ func findGitRemoteURL(gitRoot string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func sanitizeRigName(name string) string {
+	name = strings.ReplaceAll(name, "-", "_")
+	name = strings.ReplaceAll(name, ".", "_")
+	name = strings.ReplaceAll(name, " ", "_")
+	return name
 }
 
 func findOrCreateTown() (string, error) {
