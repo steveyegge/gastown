@@ -734,7 +734,7 @@ func formatMQSummaryCompact(mq *MQSummary) string {
 }
 
 // renderAgentCompactWithSuffix renders a single-line agent status with an extra suffix
-func renderAgentCompactWithSuffix(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string, suffix string) {
+func renderAgentCompactWithSuffix(agent AgentRuntime, indent string, hooks []AgentHookInfo, _ string, suffix string) {
 	// Build status indicator (gt-zecmc: use tmux state, not bead state)
 	statusIndicator := buildStatusIndicator(agent)
 
@@ -774,7 +774,7 @@ func renderAgentCompactWithSuffix(agent AgentRuntime, indent string, hooks []Age
 }
 
 // renderAgentCompact renders a single-line agent status
-func renderAgentCompact(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string) {
+func renderAgentCompact(agent AgentRuntime, indent string, hooks []AgentHookInfo, _ string) {
 	// Build status indicator (gt-zecmc: use tmux state, not bead state)
 	statusIndicator := buildStatusIndicator(agent)
 
