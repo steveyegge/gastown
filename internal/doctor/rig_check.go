@@ -1034,6 +1034,10 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 			// Continue - minimal config created
 		} else {
 			_ = output // bd init succeeded
+			// Configure custom types for Gas Town (beads v0.46.0+)
+			configCmd := exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,event")
+			configCmd.Dir = rigPath
+			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
 		}
 		return nil
 	}

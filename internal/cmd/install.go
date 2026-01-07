@@ -313,6 +313,16 @@ func initTownBeads(townPath string) error {
 		}
 	}
 
+	// Configure custom types for Gas Town (agent, role, rig, convoy).
+	// These were extracted from beads core in v0.46.0 and now require explicit config.
+	customTypes := "agent,role,rig,convoy,event"
+	configCmd := exec.Command("bd", "config", "set", "types.custom", customTypes)
+	configCmd.Dir = townPath
+	if configOutput, configErr := configCmd.CombinedOutput(); configErr != nil {
+		// Non-fatal: older beads versions don't need this, newer ones do
+		fmt.Printf("   %s Could not set custom types: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(configOutput)))
+	}
+
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
 	// Without fingerprint, the bd daemon fails to start silently.
