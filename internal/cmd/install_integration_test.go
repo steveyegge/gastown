@@ -143,6 +143,21 @@ func TestInstallTownRoleSlots(t *testing.T) {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
 
+	// Log install output for CI debugging
+	t.Logf("gt install output:\n%s", output)
+
+	// Verify beads directory was created
+	beadsDir := filepath.Join(hqPath, ".beads")
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+		t.Fatalf("beads directory not created at %s", beadsDir)
+	}
+
+	// List beads for debugging
+	listCmd := exec.Command("bd", "--no-daemon", "list", "--type=agent")
+	listCmd.Dir = hqPath
+	listOutput, _ := listCmd.CombinedOutput()
+	t.Logf("bd list --type=agent output:\n%s", listOutput)
+
 	assertSlotValue(t, hqPath, "hq-mayor", "role", "hq-mayor-role")
 	assertSlotValue(t, hqPath, "hq-deacon", "role", "hq-deacon-role")
 }
