@@ -200,9 +200,21 @@ _gastown_offer_add() {
     case "$response" in
         y|Y|yes)
             echo "Adding to Gas Town..."
-            if gt rig quick-add "$repo_root" --yes 2>&1; then
-                echo ""
-                echo "Run 'source ~/.zshrc' or open new terminal to activate."
+            local output
+            output=$(gt rig quick-add "$repo_root" --yes 2>&1)
+            local exit_code=$?
+            echo "$output"
+            
+            if [[ $exit_code -eq 0 ]]; then
+                local crew_path
+                crew_path=$(echo "$output" | grep "^GT_CREW_PATH=" | cut -d= -f2)
+                if [[ -n "$crew_path" && -d "$crew_path" ]]; then
+                    echo ""
+                    echo "Switching to crew workspace..."
+                    cd "$crew_path" || true
+                    # Re-run hook to set GT_TOWN_ROOT and GT_RIG
+                    _gastown_hook
+                fi
             fi
             ;;
         never)
