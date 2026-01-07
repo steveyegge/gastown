@@ -17,6 +17,41 @@ This GUI provides a browser-based interface to Gas Town's command-line tools (`g
 
 ---
 
+## ⚠️ SECURITY WARNING ⚠️
+
+**🔴 THIS GUI HAS NO AUTHENTICATION - LOCALHOST DEVELOPMENT ONLY 🔴**
+
+**Safe for:**
+- ✅ Local development on `localhost`
+- ✅ Trusted internal networks (with extreme caution)
+
+**NEVER use for:**
+- ❌ Public internet exposure
+- ❌ Production environments
+- ❌ Untrusted networks
+- ❌ Multi-user systems
+
+**Why this matters:**
+- Any user with network access can execute arbitrary Git Town commands
+- No user validation or session management
+- No rate limiting or input sanitization
+- Direct CLI command execution without authentication
+
+**For production use, you MUST implement:**
+- [ ] User authentication (OAuth, JWT, etc.)
+- [ ] Session management
+- [ ] Input validation and sanitization
+- [ ] Rate limiting on all endpoints
+- [ ] HTTPS/TLS encryption
+- [ ] CORS restrictions
+- [ ] Audit logging
+- [ ] Command allowlisting
+- [ ] Role-based access control
+
+See [Deployment](#deployment) section for hardening checklist.
+
+---
+
 ## Architecture
 
 ### Tech Stack
@@ -523,14 +558,39 @@ switch (data.type) {
 
 ## Deployment
 
-### Production Considerations
+### ⚠️ Production Hardening Required
 
-**Security:**
-- [ ] Add authentication (currently none)
-- [ ] Validate all user inputs
-- [ ] Rate limit API endpoints
-- [ ] Use HTTPS
-- [ ] Restrict CORS origins
+**🔴 CRITICAL: This GUI has NO authentication and is NOT production-ready! 🔴**
+
+Before deploying beyond localhost, you **MUST** implement these security measures:
+
+**Authentication & Authorization:**
+- [ ] User authentication system (OAuth2, SAML, JWT, etc.)
+- [ ] Session management with secure cookies
+- [ ] Role-based access control (RBAC)
+- [ ] Command execution permissions per user
+- [ ] Multi-factor authentication (MFA) recommended
+
+**Input Security:**
+- [ ] Validate and sanitize ALL user inputs
+- [ ] Allowlist permitted commands (reject arbitrary shell access)
+- [ ] Escape shell arguments to prevent injection
+- [ ] Limit file path access to allowed directories
+- [ ] Block execution of dangerous commands
+
+**Network Security:**
+- [ ] Use HTTPS/TLS for all connections
+- [ ] Strict CORS policy (no wildcards)
+- [ ] Rate limiting on all API endpoints (per-user, per-IP)
+- [ ] Web Application Firewall (WAF)
+- [ ] Network isolation (private VPC/subnet)
+
+**Operational Security:**
+- [ ] Audit logging for all commands executed
+- [ ] Monitoring and alerting for suspicious activity
+- [ ] Regular security audits and penetration testing
+- [ ] Secrets management (no credentials in code)
+- [ ] Automatic security updates
 
 **Performance:**
 - [x] WebSocket for real-time updates
