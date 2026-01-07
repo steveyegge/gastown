@@ -324,13 +324,16 @@ func (d *Daemon) ensureDeaconRunning() {
 	}
 
 	// Set environment (non-fatal: session works without these)
-	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", "deacon")
-	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", "deacon")
+	// Use shared RoleEnvVars for consistency across all role startup paths
+	envVars := config.RoleEnvVars("deacon", "", "")
+	for k, v := range envVars {
+		_ = d.tmux.SetEnvironment(sessionName, k, v)
+	}
 
 	// Launch Claude directly (no shell respawn loop)
 	// The daemon will detect if Claude exits and restart it on next heartbeat
-	// Export GT_ROLE and BD_ACTOR so Claude inherits them (tmux SetEnvironment doesn't export to processes)
-	if err := d.tmux.SendKeys(sessionName, config.BuildAgentStartupCommand("deacon", "deacon", "", "")); err != nil {
+	// Export env vars so Claude inherits them (tmux SetEnvironment doesn't export to processes)
+	if err := d.tmux.SendKeys(sessionName, config.BuildStartupCommand(envVars, "", "")); err != nil {
 		d.logger.Printf("Error launching Claude in Deacon session: %v", err)
 		return
 	}
@@ -800,17 +803,19 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	}
 
 	// Set environment variables
-	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", "polecat")
-	_ = d.tmux.SetEnvironment(sessionName, "GT_RIG", rigName)
-	_ = d.tmux.SetEnvironment(sessionName, "GT_POLECAT", polecatName)
+	// Use shared RoleEnvVars for consistency across all role startup paths
+	envVars := config.RoleEnvVars("polecat", rigName, polecatName)
 
-	bdActor := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
-	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
-
+	// Add polecat-specific beads configuration
 	beadsDir := filepath.Join(d.config.TownRoot, rigName, ".beads")
-	_ = d.tmux.SetEnvironment(sessionName, "BEADS_DIR", beadsDir)
-	_ = d.tmux.SetEnvironment(sessionName, "BEADS_NO_DAEMON", "1")
-	_ = d.tmux.SetEnvironment(sessionName, "BEADS_AGENT_NAME", fmt.Sprintf("%s/%s", rigName, polecatName))
+	envVars["BEADS_DIR"] = beadsDir
+	envVars["BEADS_NO_DAEMON"] = "1"
+	envVars["BEADS_AGENT_NAME"] = fmt.Sprintf("%s/%s", rigName, polecatName)
+
+	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
+	for k, v := range envVars {
+		_ = d.tmux.SetEnvironment(sessionName, k, v)
+	}
 
 	// Apply theme
 	theme := tmux.AssignTheme(rigName)
@@ -823,7 +828,7 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	// Launch Claude with environment exported inline
 	// Pass rigPath so rig agent settings are honored (not town-level defaults)
 	rigPath := filepath.Join(d.config.TownRoot, rigName)
-	startCmd := config.BuildPolecatStartupCommand(rigName, polecatName, rigPath, "")
+	startCmd := config.BuildStartupCommand(envVars, rigPath, "")
 	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
 		return fmt.Errorf("sending startup command: %w", err)
 	}

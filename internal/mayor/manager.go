@@ -84,16 +84,19 @@ func (m *Manager) Start(agentOverride string) error {
 	}
 
 	// Set environment variables (non-fatal: session works without these)
-	_ = t.SetEnvironment(sessionID, "GT_ROLE", "mayor")
-	_ = t.SetEnvironment(sessionID, "BD_ACTOR", "mayor")
+	// Use shared RoleEnvVars for consistency across all role startup paths
+	envVars := config.RoleEnvVars("mayor", "", "")
+	for k, v := range envVars {
+		_ = t.SetEnvironment(sessionID, k, v)
+	}
 
 	// Apply Mayor theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.MayorTheme()
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Mayor", "coordinator")
 
 	// Launch Claude - the startup hook handles 'gt prime' automatically
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", "", agentOverride)
+	// Export env vars in command since tmux SetEnvironment only affects new panes
+	startupCmd, err := config.BuildStartupCommandWithAgentOverride(envVars, "", "", agentOverride)
 	if err != nil {
 		_ = t.KillSession(sessionID) // best-effort cleanup
 		return fmt.Errorf("building startup command: %w", err)

@@ -157,10 +157,11 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	// Set environment variables (non-fatal: session works without these)
-	bdActor := fmt.Sprintf("%s/witness", m.rig.Name)
-	_ = t.SetEnvironment(sessionID, "GT_ROLE", "witness")
-	_ = t.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
-	_ = t.SetEnvironment(sessionID, "BD_ACTOR", bdActor)
+	// Use shared RoleEnvVars for consistency across all role startup paths
+	envVars := config.RoleEnvVars("witness", m.rig.Name, "")
+	for k, v := range envVars {
+		_ = t.SetEnvironment(sessionID, k, v)
+	}
 
 	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(m.rig.Name)
@@ -180,9 +181,9 @@ func (m *Manager) Start(foreground bool) error {
 	// Launch Claude directly (no shell respawn loop)
 	// Restarts are handled by daemon via LIFECYCLE mail or deacon health-scan
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
+	// Export env vars in command since tmux SetEnvironment only affects new panes
 	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
-	command := config.BuildAgentStartupCommand("witness", bdActor, m.rig.Path, "")
+	command := config.BuildStartupCommand(envVars, m.rig.Path, "")
 	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
 	if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
 		_ = t.KillSession(sessionID)
