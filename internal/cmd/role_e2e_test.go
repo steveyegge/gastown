@@ -10,6 +10,18 @@ import (
 	"testing"
 )
 
+// cleanGTEnv returns os.Environ() with all GT_* variables removed.
+// This ensures tests don't inherit stale role environment from CI or previous tests.
+func cleanGTEnv() []string {
+	var clean []string
+	for _, env := range os.Environ() {
+		if !strings.HasPrefix(env, "GT_") {
+			clean = append(clean, env)
+		}
+	}
+	return clean
+}
+
 // TestRoleHomeE2E validates that gt role home returns correct paths
 // for all role types after a full gt install.
 func TestRoleHomeE2E(t *testing.T) {
@@ -18,7 +30,7 @@ func TestRoleHomeE2E(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -66,7 +78,7 @@ func TestRoleHomeE2E(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(gtBinary, tt.args...)
 			cmd.Dir = hqPath
-			cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+			cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 
 			// Use Output() to only capture stdout (warnings go to stderr)
 			output, err := cmd.Output()
@@ -89,7 +101,7 @@ func TestRoleHomeMissingFlags(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -128,7 +140,8 @@ func TestRoleHomeMissingFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(gtBinary, tt.args...)
 			cmd.Dir = hqPath
-			cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+			// Use cleanGTEnv to ensure no stale GT_* vars affect the test
+			cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 
 			output, err := cmd.CombinedOutput()
 			if err == nil {
@@ -146,7 +159,7 @@ func TestRoleHomeCwdDetection(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -207,7 +220,7 @@ func TestRoleHomeCwdDetection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(gtBinary, "role", "home")
 			cmd.Dir = tt.cwd
-			cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+			cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 
 			output, err := cmd.CombinedOutput()
 			if err != nil {
@@ -229,7 +242,7 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -318,7 +331,7 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(gtBinary, "role", "env")
 			cmd.Dir = tt.cwd
-			cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+			cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 
 			output, err := cmd.CombinedOutput()
 			if err != nil {
@@ -342,14 +355,14 @@ func TestRoleListE2E(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
 
 	cmd = exec.Command(gtBinary, "role", "list")
 	cmd.Dir = hqPath
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -379,7 +392,7 @@ func TestRoleShowE2E(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -445,7 +458,7 @@ func TestRoleShowE2E(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(gtBinary, "role", "show")
 			cmd.Dir = tt.cwd
-			cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+			cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 
 			output, err := cmd.CombinedOutput()
 			if err != nil {
@@ -488,7 +501,7 @@ func TestRoleShowMismatch(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -496,7 +509,7 @@ func TestRoleShowMismatch(t *testing.T) {
 	// Run from mayor dir but set GT_ROLE to deacon
 	cmd = exec.Command(gtBinary, "role", "show")
 	cmd.Dir = filepath.Join(hqPath, "mayor")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir, "GT_ROLE=deacon")
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir, "GT_ROLE=deacon")
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -537,7 +550,7 @@ func TestRoleDetectE2E(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -606,7 +619,7 @@ func TestRoleDetectE2E(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(gtBinary, "role", "detect")
 			cmd.Dir = tt.cwd
-			cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+			cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 
 			output, err := cmd.CombinedOutput()
 			if err != nil {
@@ -649,7 +662,7 @@ func TestRoleDetectIgnoresGTRole(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -657,7 +670,7 @@ func TestRoleDetectIgnoresGTRole(t *testing.T) {
 	// Run from mayor dir but set GT_ROLE to deacon
 	cmd = exec.Command(gtBinary, "role", "detect")
 	cmd.Dir = filepath.Join(hqPath, "mayor")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir, "GT_ROLE=deacon")
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir, "GT_ROLE=deacon")
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -688,7 +701,7 @@ func TestRoleDetectInvalidPaths(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -745,7 +758,7 @@ func TestRoleDetectInvalidPaths(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(gtBinary, "role", "detect")
 			cmd.Dir = tt.cwd
-			cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+			cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 
 			output, err := cmd.CombinedOutput()
 			if err != nil {
@@ -767,7 +780,7 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -869,7 +882,7 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(gtBinary, "role", "env")
 			cmd.Dir = tt.cwd
-			cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+			cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 			cmd.Env = append(cmd.Env, tt.envVars...)
 
 			// Use CombinedOutput to see stderr for debugging, but separate stdout/stderr
@@ -877,7 +890,7 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 			// Re-run to get stderr
 			cmd2 := exec.Command(gtBinary, "role", "env")
 			cmd2.Dir = tt.cwd
-			cmd2.Env = append(os.Environ(), "HOME="+tmpDir)
+			cmd2.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 			cmd2.Env = append(cmd2.Env, tt.envVars...)
 			combined, _ := cmd2.CombinedOutput()
 			stderr := strings.TrimPrefix(string(combined), string(stdout))
@@ -911,7 +924,7 @@ func TestRoleEnvCwdMismatchFromIncompleteDir(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -960,7 +973,7 @@ func TestRoleEnvCwdMismatchFromIncompleteDir(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(gtBinary, "role", "env")
 			cmd.Dir = tt.cwd
-			cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+			cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 			cmd.Env = append(cmd.Env, tt.envVars...)
 
 			combined, err := cmd.CombinedOutput()
@@ -983,7 +996,7 @@ func TestRoleHomeInvalidPaths(t *testing.T) {
 	gtBinary := buildGT(t)
 
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
 	}
@@ -1028,7 +1041,7 @@ func TestRoleHomeInvalidPaths(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(gtBinary, "role", "home")
 			cmd.Dir = tt.cwd
-			cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+			cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 
 			_, err := cmd.CombinedOutput()
 			if tt.shouldErr && err == nil {

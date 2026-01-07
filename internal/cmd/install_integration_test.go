@@ -24,7 +24,7 @@ func TestInstallCreatesCorrectStructure(t *testing.T) {
 
 	// Run gt install
 	cmd := exec.Command(gtBinary, "install", hqPath, "--name", "test-town")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
@@ -91,7 +91,7 @@ func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
 
 	// Run gt install (includes beads init by default)
 	cmd := exec.Command(gtBinary, "install", hqPath)
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
@@ -137,7 +137,7 @@ func TestInstallTownRoleSlots(t *testing.T) {
 
 	// Run gt install (includes beads init by default)
 	cmd := exec.Command(gtBinary, "install", hqPath)
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
@@ -172,14 +172,14 @@ func TestInstallIdempotent(t *testing.T) {
 
 	// First install should succeed
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("first install failed: %v\nOutput: %s", err, output)
 	}
 
 	// Second install without --force should fail
 	cmd = exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatal("second install should have failed without --force")
@@ -190,7 +190,7 @@ func TestInstallIdempotent(t *testing.T) {
 
 	// Third install with --force should succeed
 	cmd = exec.Command(gtBinary, "install", hqPath, "--no-beads", "--force")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("install with --force failed: %v\nOutput: %s", err, output)
 	}
@@ -211,7 +211,7 @@ func TestInstallFormulasProvisioned(t *testing.T) {
 
 	// Run gt install (includes beads and formula provisioning)
 	cmd := exec.Command(gtBinary, "install", hqPath)
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
@@ -259,7 +259,7 @@ func TestInstallNoBeadsFlag(t *testing.T) {
 
 	// Run gt install with --no-beads
 	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	cmd.Env = append(cleanGTEnv(), "HOME="+tmpDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gt install --no-beads failed: %v\nOutput: %s", err, output)
