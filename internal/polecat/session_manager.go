@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -156,8 +157,8 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}
 
 	// Set beads environment for worktree polecats (non-fatal)
-	townRoot := filepath.Dir(m.rig.Path)
-	beadsDir := filepath.Join(townRoot, ".beads")
+	// Use ResolveBeadsDir to follow redirects for repos with tracked beads
+	beadsDir := beads.ResolveBeadsDir(m.rig.Path)
 	debugSession("SetEnvironment BEADS_DIR", m.tmux.SetEnvironment(sessionID, "BEADS_DIR", beadsDir))
 	debugSession("SetEnvironment BEADS_NO_DAEMON", m.tmux.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1"))
 	debugSession("SetEnvironment BEADS_AGENT_NAME", m.tmux.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/%s", m.rig.Name, polecat)))

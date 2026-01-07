@@ -807,7 +807,9 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	envVars := config.RoleEnvVars("polecat", rigName, polecatName)
 
 	// Add polecat-specific beads configuration
-	beadsDir := filepath.Join(d.config.TownRoot, rigName, ".beads")
+	// Use ResolveBeadsDir to follow redirects for repos with tracked beads
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
+	beadsDir := beads.ResolveBeadsDir(rigPath)
 	envVars["BEADS_DIR"] = beadsDir
 	envVars["BEADS_NO_DAEMON"] = "1"
 	envVars["BEADS_AGENT_NAME"] = fmt.Sprintf("%s/%s", rigName, polecatName)
@@ -827,7 +829,6 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 
 	// Launch Claude with environment exported inline
 	// Pass rigPath so rig agent settings are honored (not town-level defaults)
-	rigPath := filepath.Join(d.config.TownRoot, rigName)
 	startCmd := config.BuildStartupCommand(envVars, rigPath, "")
 	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
 		return fmt.Errorf("sending startup command: %w", err)
