@@ -1128,7 +1128,33 @@ select {
 }
 
 /* === Tooltips === */
-/* Tooltip styles moved to line ~2446 - single definition to avoid conflicts */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+  z-index: var(--z-tooltip);
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+}
 
 /* === Toast Notifications === */
 .toast-container {
@@ -2424,7 +2450,7 @@ select {
 [data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
-  top: calc(100% + 12px);
+  top: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
   padding: var(--space-md);
@@ -2433,9 +2459,7 @@ select {
   text-align: center;
   max-width: 280px;
   min-width: 120px;
-  width: max-content;
   white-space: normal;
-  word-wrap: break-word;
   line-height: 1.5;
   color: var(--text-primary);
   background: var(--bg-elevated);
@@ -2447,28 +2471,21 @@ select {
   pointer-events: none;
   transition: opacity var(--transition-fast), visibility var(--transition-fast);
   z-index: var(--z-tooltip);
-  /* Force background to cover all content */
-  box-sizing: border-box;
-  display: block;
 }
 
 /* Tooltip arrow pointing up */
 [data-tooltip]::before {
   content: '';
   position: absolute;
-  top: calc(100% + 6px);
+  top: -6px;
   left: 50%;
   transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 6px solid var(--bg-elevated);
-  filter: drop-shadow(0 -1px 0 var(--border-default));
+  border: 6px solid transparent;
+  border-bottom-color: var(--bg-elevated);
   opacity: 0;
   visibility: hidden;
   transition: opacity var(--transition-fast), visibility var(--transition-fast);
-  z-index: calc(var(--z-tooltip) + 1);
+  z-index: var(--z-tooltip);
 }
 
 [data-tooltip]:hover::after,
