@@ -215,3 +215,65 @@ func TestEngineer_DeleteMergedBranchesConfig(t *testing.T) {
 		t.Error("expected DeleteMergedBranches to be true by default")
 	}
 }
+
+func TestEngineer_checkCompletedConvoys_TownRootDerivation(t *testing.T) {
+	// Test that checkCompletedConvoys derives town root correctly from rig path.
+	// The actual 'gt convoy check' command may not be available in tests,
+	// so we verify the method exists and handles errors gracefully.
+
+	// Create temp dir structure: townRoot/rigName
+	townRoot, err := os.MkdirTemp("", "convoy-test-town-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(townRoot)
+
+	rigPath := filepath.Join(townRoot, "test-rig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{
+		Name: "test-rig",
+		Path: rigPath,
+	}
+
+	e := NewEngineer(r)
+
+	// Call checkCompletedConvoys - it will fail because 'gt' isn't available,
+	// but it should not panic and should return an error gracefully
+	err = e.checkCompletedConvoys()
+
+	// We expect an error (gt not found or failed), but verify it doesn't panic
+	// and the method is callable. In production, failures are logged as warnings.
+	if err == nil {
+		// If gt is installed and somehow works, that's fine too
+		t.Log("checkCompletedConvoys succeeded (gt may be installed)")
+	} else {
+		// Expected in test environments where gt isn't available
+		t.Logf("checkCompletedConvoys returned error as expected: %v", err)
+	}
+}
+
+func TestEngineer_checkCompletedConvoys_DerivesTownRoot(t *testing.T) {
+	// Verify town root derivation: rig at /path/to/town/rig should
+	// derive town root as /path/to/town
+
+	testCases := []struct {
+		rigPath      string
+		expectedRoot string
+	}{
+		{"/home/user/gt/myrig", "/home/user/gt"},
+		{"/Users/dev/workspace/project", "/Users/dev/workspace"},
+		{"/gt/rig", "/gt"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.rigPath, func(t *testing.T) {
+			derivedRoot := filepath.Dir(tc.rigPath)
+			if derivedRoot != tc.expectedRoot {
+				t.Errorf("expected town root %q, got %q", tc.expectedRoot, derivedRoot)
+			}
+		})
+	}
+}

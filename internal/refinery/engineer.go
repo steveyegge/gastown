@@ -549,6 +549,13 @@ func (e *Engineer) handleSuccessFromQueue(mr *mrqueue.MR, result ProcessResult) 
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to remove MR from queue: %v\n", err)
 	}
 
+	// 3.5. Check for completed convoys (cross-rig auto-close)
+	// Convoys in town beads may track rig-level issues. When rig issues close,
+	// convoys don't auto-close. This bridges that gap by calling gt convoy check.
+	if err := e.checkCompletedConvoys(); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: convoy check failed: %v\n", err)
+	}
+
 	// 4. Log success
 	_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
 }
@@ -586,6 +593,25 @@ func (e *Engineer) handleFailureFromQueue(mr *mrqueue.MR, result ProcessResult) 
 	} else {
 		_, _ = fmt.Fprintln(e.output, "[Engineer] MR remains in queue for retry")
 	}
+}
+
+// checkCompletedConvoys runs 'gt convoy check' to auto-close completed convoys.
+// This bridges the cross-rig gap: convoys in town beads tracking rig-level issues
+// don't auto-close when the rig issues close via 'bd close'. This command checks
+// all open convoys and closes any where all tracked issues are complete.
+//
+// Errors are logged as warnings but don't fail the merge - convoy cleanup is
+// non-critical and can be retried manually or by deacon patrol.
+func (e *Engineer) checkCompletedConvoys() error {
+	// Derive town root from rig path (rig is ~/gt/<rigname>, town is ~/gt)
+	townRoot := filepath.Dir(e.rig.Path)
+
+	cmd := exec.Command("gt", "convoy", "check")
+	cmd.Dir = townRoot
+	cmd.Stdout = e.output
+	cmd.Stderr = e.output
+
+	return cmd.Run()
 }
 
 // createConflictResolutionTask creates a dispatchable task for resolving merge conflicts.
