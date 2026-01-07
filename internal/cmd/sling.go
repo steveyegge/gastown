@@ -104,11 +104,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
 	}
 
-	// --var is only for standalone formula mode, not formula-on-bead mode
-	if slingOnTarget != "" && len(slingVars) > 0 {
-		return fmt.Errorf("--var cannot be used with --on (formula-on-bead mode doesn't support variables)")
-	}
-
 	// Determine mode based on flags and argument types
 	var beadID string
 	var formulaName string
@@ -216,10 +211,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Would run: bd update %s --status=pinned --assignee=%s\n", beadID, targetAgent)
 		if formulaName != "" {
 			fmt.Printf("  formula-on-bead: %s\n", formulaName)
-			fmt.Printf("  would: bd cook %s\n", formulaName)
-			fmt.Printf("  would: bd wisp %s --var feature=<bead-title> --json\n", formulaName)
-			fmt.Printf("  would: bd mol bond <wisp-id> %s --json\n", beadID)
-			fmt.Printf("  would: attach compound root to %s (attached_molecule)\n", beadID)
+			fmt.Printf("  would: bd mol wisp create %s --json\n", formulaName)
+			for _, v := range slingVars {
+				fmt.Printf("    --var %s\n", v)
+			}
+			fmt.Printf("  would: attach wisp root to %s (attached_molecule)\n", beadID)
 		}
 		if slingSubject != "" {
 			fmt.Printf("  subject (in nudge): %s\n", slingSubject)
@@ -243,8 +239,13 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Work attached to hook (pinned bead)\n", style.Bold.Render("✓"))
 
-	// Formula-on-bead mode: create wisp + bond, then attach molecule root to the pinned bead.
-	// The hook stays on the original beadID (feature/ticket); attached_molecule points to the compound root.
+	// Keep agent bead hook slot in sync (best effort; some identities have no agent bead)
+	if err := updateAgentHookSlot(targetAgent, beadID); err != nil {
+		fmt.Printf("%s Could not update agent hook slot: %v\n", style.Dim.Render("Warning:"), err)
+	}
+
+	// Formula-on-bead mode: create a wisp molecule, then attach its root to the pinned bead.
+	// The hook stays on the original beadID (feature/ticket); attached_molecule points to the wisp root.
 	if formulaName != "" {
 		workDir, err := findLocalBeadsDir()
 		if err != nil {
@@ -252,46 +253,29 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 		b := beads.New(workDir)
 
-		issue, err := b.Show(beadID)
+		resolvedFormula, err := resolveFormulaName(formulaName)
 		if err != nil {
-			return fmt.Errorf("fetching bead: %w", err)
-		}
-
-		fmt.Printf("  Cooking formula...\n")
-		cookCmd := exec.Command("bd", "cook", formulaName)
-		cookCmd.Stderr = os.Stderr
-		if err := cookCmd.Run(); err != nil {
-			return fmt.Errorf("cooking formula: %w", err)
+			return err
 		}
 
 		fmt.Printf("  Creating wisp...\n")
-		wispArgs := []string{"wisp", formulaName, "--var", "feature=" + issue.Title, "--json"}
+		wispArgs := []string{"mol", "wisp", "create", resolvedFormula, "--json"}
+		for _, v := range slingVars {
+			wispArgs = append(wispArgs, "--var", v)
+		}
 		wispCmd := exec.Command("bd", wispArgs...)
 		wispCmd.Stderr = os.Stderr
 		wispOut, err := wispCmd.Output()
 		if err != nil {
 			return fmt.Errorf("creating wisp: %w", err)
 		}
-		wispID := parseBeadsIDFromJSON(wispOut, "root_id", "new_epic_id", "result_id")
+		wispID := parseBeadsIDFromJSON(wispOut, "new_epic_id", "root_id", "result_id")
 		if wispID == "" {
 			return fmt.Errorf("could not parse wisp id from bd output")
 		}
 		fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispID)
 
-		fmt.Printf("  Bonding wisp to bead...\n")
-		bondCmd := exec.Command("bd", "mol", "bond", wispID, beadID, "--json")
-		bondCmd.Stderr = os.Stderr
-		bondOut, err := bondCmd.Output()
-		if err != nil {
-			return fmt.Errorf("bonding wisp to bead: %w", err)
-		}
-		compoundID := parseBeadsIDFromJSON(bondOut, "result_id", "root_id", "new_root_id", "compound_id")
-		if compoundID == "" {
-			compoundID = wispID
-		}
-		fmt.Printf("%s Molecule created: %s\n", style.Bold.Render("✓"), compoundID)
-
-		if _, err := b.AttachMolecule(beadID, compoundID); err != nil {
+		if _, err := b.AttachMolecule(beadID, wispID); err != nil {
 			return fmt.Errorf("attaching molecule to pinned bead: %w", err)
 		}
 		fmt.Printf("%s Molecule attached to %s\n", style.Bold.Render("✓"), beadID)
@@ -335,6 +319,44 @@ func parseBeadsIDFromJSON(out []byte, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func resolveFormulaName(formulaName string) (string, error) {
+	cmd := exec.Command("bd", "formula", "show", formulaName)
+	if err := cmd.Run(); err == nil {
+		return formulaName, nil
+	}
+
+	withPrefix := "mol-" + formulaName
+	cmd = exec.Command("bd", "formula", "show", withPrefix)
+	if err := cmd.Run(); err == nil {
+		return withPrefix, nil
+	}
+
+	return "", fmt.Errorf("formula '%s' not found (check 'bd formula list')", formulaName)
+}
+
+func updateAgentHookSlot(targetAgent, hookBeadID string) error {
+	workDir, err := findLocalBeadsDir()
+	if err != nil {
+		return err
+	}
+	b := beads.New(workDir)
+
+	agentBeadID := buildAgentBeadID(targetAgent, RoleUnknown)
+	if agentBeadID == "" {
+		return nil
+	}
+
+	agentBead, err := b.Show(agentBeadID)
+	if err != nil || agentBead == nil || agentBead.Type != "agent" {
+		return nil
+	}
+
+	fields := beads.ParseAgentFieldsFromDescription(agentBead.Description)
+	fields.HookBead = hookBeadID
+	desc := beads.FormatAgentDescription(agentBead.Title, fields)
+	return b.Update(agentBeadID, beads.UpdateOptions{Description: &desc})
 }
 
 // storeArgsInBead stores args in the bead's description using attached_args field.
@@ -545,25 +567,17 @@ func resolveSelfTarget() (agentID string, pane string, hookRoot string, err erro
 // verifyFormulaExists checks that the formula exists using bd formula show.
 // Formulas are TOML files (.formula.toml).
 func verifyFormulaExists(formulaName string) error {
-	// Try bd formula show (handles all formula file formats)
-	cmd := exec.Command("bd", "formula", "show", formulaName)
-	if err := cmd.Run(); err == nil {
-		return nil
-	}
-
-	// Try with mol- prefix
-	cmd = exec.Command("bd", "formula", "show", "mol-"+formulaName)
-	if err := cmd.Run(); err == nil {
-		return nil
-	}
-
-	return fmt.Errorf("formula '%s' not found (check 'bd formula list')", formulaName)
+	_, err := resolveFormulaName(formulaName)
+	return err
 }
 
 // runSlingFormula handles standalone formula slinging.
-// Flow: cook → wisp → attach to hook → nudge
+// Flow: wisp → attach to hook → nudge
 func runSlingFormula(args []string) error {
-	formulaName := args[0]
+	formulaName, err := resolveFormulaName(args[0])
+	if err != nil {
+		return err
+	}
 
 	// Determine target (self or specified)
 	var target string
@@ -574,7 +588,6 @@ func runSlingFormula(args []string) error {
 	// Resolve target agent and pane
 	var targetAgent string
 	var targetPane string
-	var err error
 
 	if target != "" {
 		// Check if target is a rig name (auto-spawn polecat)
@@ -621,7 +634,6 @@ func runSlingFormula(args []string) error {
 	fmt.Printf("%s Slinging formula %s to %s...\n", style.Bold.Render("🎯"), formulaName, targetAgent)
 
 	if slingDryRun {
-		fmt.Printf("Would cook formula: %s\n", formulaName)
 		fmt.Printf("Would create wisp and pin to: %s\n", targetAgent)
 		for _, v := range slingVars {
 			fmt.Printf("  --var %s\n", v)
@@ -630,18 +642,9 @@ func runSlingFormula(args []string) error {
 		return nil
 	}
 
-	// Step 1: Cook the formula (ensures proto exists)
-	fmt.Printf("  Cooking formula...\n")
-	cookArgs := []string{"cook", formulaName}
-	cookCmd := exec.Command("bd", cookArgs...)
-	cookCmd.Stderr = os.Stderr
-	if err := cookCmd.Run(); err != nil {
-		return fmt.Errorf("cooking formula: %w", err)
-	}
-
-	// Step 2: Create wisp instance (ephemeral)
+	// Step 1: Create wisp instance (ephemeral)
 	fmt.Printf("  Creating wisp...\n")
-	wispArgs := []string{"wisp", formulaName}
+	wispArgs := []string{"mol", "wisp", "create", formulaName}
 	for _, v := range slingVars {
 		wispArgs = append(wispArgs, "--var", v)
 	}
@@ -654,29 +657,29 @@ func runSlingFormula(args []string) error {
 		return fmt.Errorf("creating wisp: %w", err)
 	}
 
-	// Parse wisp output to get the root ID
-	var wispResult struct {
-		RootID string `json:"root_id"`
-	}
-	if err := json.Unmarshal(wispOut, &wispResult); err != nil {
-		// Fallback: use formula name as identifier, but warn user
-		fmt.Printf("%s Could not parse wisp output, using formula name as ID\n", style.Dim.Render("Warning:"))
-		wispResult.RootID = formulaName
+	wispID := parseBeadsIDFromJSON(wispOut, "new_epic_id", "root_id", "result_id")
+	if wispID == "" {
+		return fmt.Errorf("could not parse wisp id from bd output")
 	}
 
-	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispResult.RootID)
+	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispID)
 
-	// Step 3: Pin the wisp bead using bd update (discovery-based approach)
-	pinCmd := exec.Command("bd", "update", wispResult.RootID, "--status=pinned", "--assignee="+targetAgent)
+	// Step 2: Pin the wisp bead using bd update (discovery-based approach)
+	pinCmd := exec.Command("bd", "update", wispID, "--status=pinned", "--assignee="+targetAgent)
 	pinCmd.Stderr = os.Stderr
 	if err := pinCmd.Run(); err != nil {
 		return fmt.Errorf("pinning wisp bead: %w", err)
 	}
 	fmt.Printf("%s Attached to hook (pinned bead)\n", style.Bold.Render("✓"))
 
+	// Keep agent bead hook slot in sync (best effort; some identities have no agent bead)
+	if err := updateAgentHookSlot(targetAgent, wispID); err != nil {
+		fmt.Printf("%s Could not update agent hook slot: %v\n", style.Dim.Render("Warning:"), err)
+	}
+
 	// Store args in wisp bead if provided (no-tmux mode: beads as data plane)
 	if slingArgs != "" {
-		if err := storeArgsInBead(wispResult.RootID, slingArgs); err != nil {
+		if err := storeArgsInBead(wispID, slingArgs); err != nil {
 			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
 		} else {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
