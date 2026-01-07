@@ -3,6 +3,7 @@ package rig
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,6 +56,10 @@ func createTestRig(t *testing.T, root, name string) {
 			t.Fatalf("mkdir polecat: %v", err)
 		}
 	}
+	// Create a shared support dir that should not be treated as a polecat worktree.
+	if err := os.MkdirAll(filepath.Join(polecatsDir, ".claude"), 0755); err != nil {
+		t.Fatalf("mkdir polecats/.claude: %v", err)
+	}
 }
 
 func TestDiscoverRigs(t *testing.T) {
@@ -83,6 +88,9 @@ func TestDiscoverRigs(t *testing.T) {
 	}
 	if len(rig.Polecats) != 2 {
 		t.Errorf("Polecats count = %d, want 2", len(rig.Polecats))
+	}
+	if slices.Contains(rig.Polecats, ".claude") {
+		t.Errorf("expected polecats/.claude to be ignored, got %v", rig.Polecats)
 	}
 	if !rig.HasWitness {
 		t.Error("expected HasWitness = true")
@@ -430,17 +438,17 @@ func TestIsValidBeadsPrefix(t *testing.T) {
 		{"a-b-c", true},
 
 		// Invalid prefixes
-		{"", false},                    // empty
-		{"1abc", false},                // starts with number
-		{"-abc", false},                // starts with hyphen
-		{"abc def", false},             // contains space
-		{"abc;ls", false},              // shell injection attempt
-		{"$(whoami)", false},           // command substitution
-		{"`id`", false},                // backtick command
-		{"abc|cat", false},             // pipe
-		{"../etc/passwd", false},       // path traversal
+		{"", false},                      // empty
+		{"1abc", false},                  // starts with number
+		{"-abc", false},                  // starts with hyphen
+		{"abc def", false},               // contains space
+		{"abc;ls", false},                // shell injection attempt
+		{"$(whoami)", false},             // command substitution
+		{"`id`", false},                  // backtick command
+		{"abc|cat", false},               // pipe
+		{"../etc/passwd", false},         // path traversal
 		{"aaaaaaaaaaaaaaaaaaaaa", false}, // too long (21 chars, >20 limit)
-		{"valid-but-with-$var", false}, // variable reference
+		{"valid-but-with-$var", false},   // variable reference
 	}
 
 	for _, tt := range tests {

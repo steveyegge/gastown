@@ -120,9 +120,14 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 	polecatsDir := filepath.Join(rigPath, "polecats")
 	if entries, err := os.ReadDir(polecatsDir); err == nil {
 		for _, e := range entries {
-			if e.IsDir() {
-				rig.Polecats = append(rig.Polecats, e.Name())
+			if !e.IsDir() {
+				continue
 			}
+			name := e.Name()
+			if strings.HasPrefix(name, ".") {
+				continue
+			}
+			rig.Polecats = append(rig.Polecats, name)
 		}
 	}
 
