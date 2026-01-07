@@ -168,6 +168,53 @@ _gastown_ignored() {
     return 1
 }
 
+_gastown_already_asked() {
+    local repo_root="$1"
+    local asked_file="$HOME/.cache/gastown/asked-repos"
+    [[ -f "$asked_file" ]] && grep -qF "$repo_root" "$asked_file" 2>/dev/null
+}
+
+_gastown_mark_asked() {
+    local repo_root="$1"
+    local asked_file="$HOME/.cache/gastown/asked-repos"
+    mkdir -p "$(dirname "$asked_file")"
+    echo "$repo_root" >> "$asked_file"
+}
+
+_gastown_offer_add() {
+    local repo_root="$1"
+    
+    _gastown_already_asked "$repo_root" && return 0
+    
+    [[ -t 0 ]] || return 0
+    
+    local repo_name
+    repo_name=$(basename "$repo_root")
+    
+    echo ""
+    echo -n "Add '$repo_name' to Gas Town? [y/N/never] "
+    read -r response </dev/tty
+    
+    _gastown_mark_asked "$repo_root"
+    
+    case "$response" in
+        y|Y|yes)
+            echo "Adding to Gas Town..."
+            if gt rig quick-add "$repo_root" --yes 2>&1; then
+                echo ""
+                echo "Run 'source ~/.zshrc' or open new terminal to activate."
+            fi
+            ;;
+        never)
+            touch "$repo_root/.gastown-ignore"
+            echo "Created .gastown-ignore - won't ask again for this repo."
+            ;;
+        *)
+            echo "Skipped. Run 'gt rig quick-add' later to add manually."
+            ;;
+    esac
+}
+
 _gastown_hook() {
     local previous_exit_status=$?
 
@@ -203,21 +250,37 @@ _gastown_hook() {
     fi
 
     if command -v gt &>/dev/null; then
-        (gt rig detect --cache "$repo_root" &>/dev/null &)
+        local detect_output
+        detect_output=$(gt rig detect "$repo_root" 2>/dev/null)
+        if [[ -n "$detect_output" ]]; then
+            eval "$detect_output"
+            (gt rig detect --cache "$repo_root" &>/dev/null &)
+        else
+            unset GT_TOWN_ROOT GT_RIG
+            if [[ -n "$_GASTOWN_OFFER_ADD" ]]; then
+                _gastown_offer_add "$repo_root"
+                unset _GASTOWN_OFFER_ADD
+            fi
+        fi
     fi
 
     return $previous_exit_status
 }
 
+_gastown_chpwd_hook() {
+    _GASTOWN_OFFER_ADD=1
+    _gastown_hook
+}
+
 case "${SHELL##*/}" in
     zsh)
         autoload -Uz add-zsh-hook
-        add-zsh-hook chpwd _gastown_hook
+        add-zsh-hook chpwd _gastown_chpwd_hook
         add-zsh-hook precmd _gastown_hook
         ;;
     bash)
         if [[ ";${PROMPT_COMMAND[*]:-};" != *";_gastown_hook;"* ]]; then
-            PROMPT_COMMAND="_gastown_hook${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+            PROMPT_COMMAND="_gastown_chpwd_hook${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
         fi
         ;;
 esac
