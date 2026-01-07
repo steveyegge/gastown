@@ -22,6 +22,7 @@ import (
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -81,12 +82,15 @@ func init() {
 type RoleContext = RoleInfo
 
 func runPrime(cmd *cobra.Command, args []string) error {
+	if !state.IsEnabled() {
+		return nil
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting current directory: %w", err)
 	}
 
-	// Find town root
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return fmt.Errorf("finding workspace: %w", err)
