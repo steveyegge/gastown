@@ -164,16 +164,11 @@ func ensureRegistry() {
 	initRegistryLocked()
 }
 
-// LoadAgentRegistry loads agent definitions from a JSON file and merges with built-ins.
-// User-defined agents override built-in presets with the same name.
-// This function caches loaded paths to avoid redundant file reads.
-func LoadAgentRegistry(path string) error {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-
+// loadAgentRegistryFromPath loads agent definitions from a JSON file and merges with built-ins.
+// Caller must hold registryMu write lock.
+func loadAgentRegistryFromPathLocked(path string) error {
 	initRegistryLocked()
 
-	// Check if already loaded from this path
 	if loadedPaths[path] {
 		return nil
 	}
@@ -181,8 +176,8 @@ func LoadAgentRegistry(path string) error {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from config
 	if err != nil {
 		if os.IsNotExist(err) {
-			loadedPaths[path] = true // Mark as "loaded" (no file)
-			return nil               // No custom config, use built-ins only
+			loadedPaths[path] = true
+			return nil
 		}
 		return err
 	}
@@ -192,7 +187,6 @@ func LoadAgentRegistry(path string) error {
 		return err
 	}
 
-	// Merge user-defined agents (override built-ins)
 	for name, preset := range userRegistry.Agents {
 		preset.Name = AgentPreset(name)
 		globalRegistry.Agents[name] = preset
@@ -202,10 +196,39 @@ func LoadAgentRegistry(path string) error {
 	return nil
 }
 
+// LoadAgentRegistry loads agent definitions from a JSON file and merges with built-ins.
+// User-defined agents override built-in presets with the same name.
+// This function caches loaded paths to avoid redundant file reads.
+func LoadAgentRegistry(path string) error {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	return loadAgentRegistryFromPathLocked(path)
+}
+
 // DefaultAgentRegistryPath returns the default path for agent registry.
 // Located alongside other town settings.
 func DefaultAgentRegistryPath(townRoot string) string {
 	return filepath.Join(townRoot, "settings", "agents.json")
+}
+
+// DefaultRigAgentRegistryPath returns the default path for rig-level agent registry.
+// Located in <rig>/settings/agents.json.
+func DefaultRigAgentRegistryPath(rigPath string) string {
+	return filepath.Join(rigPath, "settings", "agents.json")
+}
+
+// RigAgentRegistryPath returns the path for rig-level agent registry.
+// Alias for DefaultRigAgentRegistryPath for consistency with other path functions.
+func RigAgentRegistryPath(rigPath string) string {
+	return DefaultRigAgentRegistryPath(rigPath)
+}
+
+// LoadRigAgentRegistry loads agent definitions from a rig-level JSON file and merges with built-ins.
+// This function works similarly to LoadAgentRegistry but for rig-level configurations.
+func LoadRigAgentRegistry(path string) error {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	return loadAgentRegistryFromPathLocked(path)
 }
 
 // GetAgentPreset returns the preset info for a given agent name.

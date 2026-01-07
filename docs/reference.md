@@ -361,11 +361,52 @@ gt config default-agent [name]    # Get or set town default agent
 
 **Built-in agents**: `claude`, `gemini`, `codex`
 
-**Custom agents**: Define per-town in `mayor/town.json`:
+**Custom agents**: Define per-town via CLI or JSON:
 ```bash
 gt config agent set claude-glm "claude-glm --model glm-4"
 gt config agent set claude "claude-opus"  # Override built-in
 gt config default-agent claude-glm       # Set default
+```
+
+**Advanced agent config** (`settings/agents.json`):
+```json
+{
+  "version": 1,
+  "agents": {
+    "opencode": {
+      "command": "opencode",
+      "args": [],
+      "resume_flag": "--session",
+      "resume_style": "flag",
+      "non_interactive": {
+        "subcommand": "run",
+        "output_flag": "--format json"
+      }
+    }
+  }
+}
+```
+
+**Rig-level agents** (`<rig>/settings/config.json`):
+```json
+{
+  "type": "rig-settings",
+  "version": 1,
+  "agent": "opencode",
+  "agents": {
+    "opencode": {
+      "command": "opencode",
+      "args": ["--session"]
+    }
+  }
+}
+```
+
+**Agent resolution order**: rig-level → town-level → built-in presets.
+
+For OpenCode autonomous mode, set env var in your shell profile:
+```bash
+export OPENCODE_PERMISSION='{"*":"allow"}'
 ```
 
 ### Rig Management

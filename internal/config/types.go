@@ -195,6 +195,11 @@ type RigSettings struct {
 	// If empty, uses the town's default_agent setting.
 	// Takes precedence over Runtime if both are set.
 	Agent string `json:"agent,omitempty"`
+
+	// Agents defines custom agent configurations or overrides for this rig.
+	// Similar to TownSettings.Agents but applies to this rig only.
+	// Allows per-rig custom agents for polecats and crew members.
+	Agents map[string]*RuntimeConfig `json:"agents,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.

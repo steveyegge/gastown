@@ -128,7 +128,7 @@ func TestLoadAgentRegistry(t *testing.T) {
 	// Reset global registry for test isolation
 	ResetRegistryForTesting()
 
-	// Load the custom registry
+	// Load should succeed
 	if err := LoadAgentRegistry(configPath); err != nil {
 		t.Fatalf("LoadAgentRegistry failed: %v", err)
 	}
@@ -138,6 +138,7 @@ func TestLoadAgentRegistry(t *testing.T) {
 	if myAgent == nil {
 		t.Fatal("custom agent 'my-agent' not found after loading registry")
 	}
+
 	if myAgent.Command != "my-agent-bin" {
 		t.Errorf("my-agent.Command = %v, want my-agent-bin", myAgent.Command)
 	}
@@ -196,6 +197,7 @@ func TestMergeWithPreset(t *testing.T) {
 	if merged.Command != "/custom/claude" {
 		t.Errorf("merged command should be user value, got %s", merged.Command)
 	}
+
 	if len(merged.Args) != 1 || merged.Args[0] != "--custom-arg" {
 		t.Errorf("merged args should be user value, got %v", merged.Args)
 	}
@@ -251,12 +253,14 @@ func TestBuildResumeCommand(t *testing.T) {
 			agentName: "claude",
 			sessionID: "",
 			wantEmpty: true,
+			contains:  []string{"claude"},
 		},
 		{
 			name:      "unknown agent",
 			agentName: "unknown-agent",
 			sessionID: "session-123",
 			wantEmpty: true,
+			contains:  []string{},
 		},
 	}
 
@@ -316,4 +320,113 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDefaultRigAgentRegistryPath verifies that the default rig agent registry path is constructed correctly.
+func TestDefaultRigAgentRegistryPath(t *testing.T) {
+	tests := []struct {
+		rigPath      string
+		expectedPath string
+	}{
+		{"/Users/alice/gt/myproject", "/Users/alice/gt/myproject/settings/agents.json"},
+		{"/tmp/my-rig", "/tmp/my-rig/settings/agents.json"},
+		{"relative/path", "relative/path/settings/agents.json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.rigPath, func(t *testing.T) {
+			got := DefaultRigAgentRegistryPath(tt.rigPath)
+			want := tt.expectedPath
+			if got != want {
+				t.Errorf("DefaultRigAgentRegistryPath(%s) = %s, want %s", tt.rigPath, got, want)
+			}
+		})
+	}
+}
+
+// TestLoadRigAgentRegistry verifies that rig-level agent registry is loaded correctly.
+func TestLoadRigAgentRegistry(t *testing.T) {
+	// Reset registry for test isolation
+	ResetRegistryForTesting()
+	t.Cleanup(ResetRegistryForTesting)
+
+	tmpDir := t.TempDir()
+	registryPath := filepath.Join(tmpDir, "settings", "agents.json")
+	configDir := filepath.Join(tmpDir, "settings")
+
+	// Create settings directory
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create settings dir: %v", err)
+	}
+
+	// Write agent registry
+	registryContent := `{
+  "version": 1,
+  "agents": {
+    "opencode": {
+      "command": "opencode",
+      "args": ["--session"],
+      "non_interactive": {
+        "subcommand": "run",
+        "output_flag": "--format json"
+      }
+    }
+  }
+}`
+
+	if err := os.WriteFile(registryPath, []byte(registryContent), 0644); err != nil {
+		t.Fatalf("failed to write registry file: %v", err)
+	}
+
+	// Test 1: Load should succeed and merge agents
+	t.Run("load and merge", func(t *testing.T) {
+		if err := LoadRigAgentRegistry(registryPath); err != nil {
+			t.Fatalf("LoadRigAgentRegistry(%s) failed: %v", registryPath, err)
+		}
+
+		info := GetAgentPresetByName("opencode")
+		if info == nil {
+			t.Fatal("expected opencode agent to be available after loading rig registry")
+		}
+
+		if info.Command != "opencode" {
+			t.Errorf("expected opencode agent command to be 'opencode', got %s", info.Command)
+		}
+	})
+
+	// Test 2: File not found should return nil (no error)
+	t.Run("file not found", func(t *testing.T) {
+		nonExistentPath := filepath.Join(tmpDir, "other-rig", "settings", "agents.json")
+		if err := LoadRigAgentRegistry(nonExistentPath); err != nil {
+			t.Errorf("LoadRigAgentRegistry(%s) should not error for non-existent file: %v", nonExistentPath, err)
+		}
+
+		// Verify that previously loaded agent (from test 1) is still available
+		info := GetAgentPresetByName("opencode")
+		if info == nil {
+			t.Errorf("expected opencode agent to still be available after loading non-existent path")
+			return
+		}
+		if info.Command != "opencode" {
+			t.Errorf("expected opencode agent command to be 'opencode', got %s", info.Command)
+		}
+	})
+
+	// Test 3: Invalid JSON should error
+	t.Run("invalid JSON", func(t *testing.T) {
+		invalidRegistryPath := filepath.Join(tmpDir, "bad-rig", "settings", "agents.json")
+		badConfigDir := filepath.Join(tmpDir, "bad-rig", "settings")
+		if err := os.MkdirAll(badConfigDir, 0755); err != nil {
+			t.Fatalf("failed to create bad-rig settings dir: %v", err)
+		}
+
+		invalidContent := `{"version": 1, "agents": {invalid json}}`
+		if err := os.WriteFile(invalidRegistryPath, []byte(invalidContent), 0644); err != nil {
+			t.Fatalf("failed to write invalid registry file: %v", err)
+		}
+
+		if err := LoadRigAgentRegistry(invalidRegistryPath); err == nil {
+			t.Errorf("LoadRigAgentRegistry(%s) should error for invalid JSON: got nil", invalidRegistryPath)
+		}
+	})
 }

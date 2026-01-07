@@ -824,6 +824,9 @@ func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
 	// Load custom agent registry if it exists
 	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
 
+	// Load rig-level custom agent registry if it exists (for per-rig custom agents)
+	_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+
 	// Determine which agent name to use
 	agentName := ""
 	if rigSettings != nil && rigSettings.Agent != "" {
@@ -834,8 +837,7 @@ func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
 		agentName = "claude" // ultimate fallback
 	}
 
-	// Look up the agent configuration
-	return lookupAgentConfig(agentName, townSettings)
+	return lookupAgentConfig(agentName, townSettings, rigSettings)
 }
 
 // ResolveAgentConfigWithOverride resolves the agent configuration for a rig, with an optional override.
@@ -864,6 +866,9 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 	// Load custom agent registry if it exists
 	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
 
+	// Load rig-level custom agent registry if it exists (for per-rig custom agents)
+	_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+
 	// Determine which agent name to use
 	agentName := ""
 	if agentOverride != "" {
@@ -876,13 +881,21 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 		agentName = "claude" // ultimate fallback
 	}
 
-	// If an override is requested, validate it exists.
+	// If an override is requested, validate it exists
 	if agentOverride != "" {
+		// Check rig-level custom agents first
+		if rigSettings != nil && rigSettings.Agents != nil {
+			if custom, ok := rigSettings.Agents[agentName]; ok && custom != nil {
+				return fillRuntimeDefaults(custom), agentName, nil
+			}
+		}
+		// Then check town-level custom agents
 		if townSettings.Agents != nil {
 			if custom, ok := townSettings.Agents[agentName]; ok && custom != nil {
 				return fillRuntimeDefaults(custom), agentName, nil
 			}
 		}
+		// Then check built-in presets
 		if preset := GetAgentPresetByName(agentName); preset != nil {
 			return RuntimeConfigFromPreset(AgentPreset(agentName)), agentName, nil
 		}
@@ -890,13 +903,20 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 	}
 
 	// Normal lookup path (no override)
-	return lookupAgentConfig(agentName, townSettings), agentName, nil
+	return lookupAgentConfig(agentName, townSettings, rigSettings), agentName, nil
 }
 
 // lookupAgentConfig looks up an agent by name.
-// First checks town's custom agents, then built-in presets from agents.go.
-func lookupAgentConfig(name string, townSettings *TownSettings) *RuntimeConfig {
-	// First check town's custom agents
+// Checks rig-level custom agents first, then town's custom agents, then built-in presets from agents.go.
+func lookupAgentConfig(name string, townSettings *TownSettings, rigSettings *RigSettings) *RuntimeConfig {
+	// First check rig's custom agents (NEW - fix for rig-level agent support)
+	if rigSettings != nil && rigSettings.Agents != nil {
+		if custom, ok := rigSettings.Agents[name]; ok && custom != nil {
+			return fillRuntimeDefaults(custom)
+		}
+	}
+
+	// Then check town's custom agents (existing)
 	if townSettings != nil && townSettings.Agents != nil {
 		if custom, ok := townSettings.Agents[name]; ok && custom != nil {
 			return fillRuntimeDefaults(custom)
