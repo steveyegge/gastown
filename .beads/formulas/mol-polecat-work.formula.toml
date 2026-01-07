@@ -1,22 +1,26 @@
 description = """
-Full polecat work lifecycle from assignment through merge-ready handoff.
+Full polecat work lifecycle from assignment through MR submission.
 
 This molecule guides a polecat through a complete work assignment. Each step
 has clear entry/exit criteria and specific commands to run. A polecat can
 crash after any step and resume from the last completed step.
 
-## Polecat Contract
+## Polecat Contract (Ephemeral Model)
 
-You are an autonomous worker. You:
+You are an ephemeral worker. You:
 1. Receive work via your hook (pinned molecule + issue)
-2. Execute the work following this formula
-3. Signal completion to Witness (who verifies and merges)
-4. Wait for Witness to terminate your session
+2. Work through molecule steps using `bd ready` / `bd close <step>`
+3. Submit to merge queue via `gt done`
+4. Become recyclable - Refinery handles the rest
+
+**Important:** This formula defines the template. Your molecule already has step
+beads created from it. Use `bd ready` to find them - do NOT read this file directly.
 
 **You do NOT:**
 - Push directly to main (Refinery merges)
-- Kill your own session (Witness does cleanup)
-- Skip verification steps (quality gates exist for a reason)
+- Close your own issue (Refinery closes after merge)
+- Wait for merge (you're done at MR submission)
+- Handle rebase conflicts (Refinery dispatches fresh polecats for that)
 
 ## Variables
 
@@ -33,7 +37,7 @@ You are an autonomous worker. You:
 | Context filling | Use gt handoff to cycle to fresh session |
 | Unsure what to do | Mail Witness, don't guess |"""
 formula = "mol-polecat-work"
-version = 3
+version = 4
 
 [[steps]]
 id = "load-context"
@@ -374,21 +378,24 @@ git diff origin/main...HEAD # Your changes (expected)
 **Exit criteria:** Branch pushed, workspace clean, no cruft."""
 
 [[steps]]
-id = "close-issue"
-title = "Close the assigned issue"
+id = "prepare-for-review"
+title = "Prepare work for review"
 needs = ["cleanup-workspace"]
 description = """
-Mark the issue as complete in beads.
+Verify work is complete and ready for merge queue.
 
-**1. Close with a summary:**
-```bash
-bd close {{issue}} --reason "Implemented: <brief summary of what was done>"
-```
+**Note:** Do NOT close the issue. The Refinery will close it after successful merge.
+This enables conflict-resolution retries without reopening closed issues.
 
-**2. Verify closure:**
+**1. Verify the issue shows your work:**
 ```bash
 bd show {{issue}}
-# Status should show 'closed'
+# Status should still be 'in_progress' (you're working on it)
+```
+
+**2. Add completion notes:**
+```bash
+bd update {{issue}} --notes "Implemented: <brief summary of what was done>"
 ```
 
 **3. Sync beads:**
@@ -396,44 +403,55 @@ bd show {{issue}}
 bd sync
 ```
 
-**Exit criteria:** Issue closed in beads, synced to remote."""
+**Exit criteria:** Issue updated with completion notes, beads synced."""
 
 [[steps]]
-id = "signal-complete"
-title = "Signal completion to Witness"
-needs = ["close-issue"]
+id = "submit-and-exit"
+title = "Submit to merge queue and exit"
+needs = ["prepare-for-review"]
 description = """
-Notify Witness you're done and wait for termination.
+Submit your work to the merge queue. You become recyclable after this.
 
-**1. Update your agent state:**
+**Ephemeral Polecat Model:**
+Once you submit, you're done. The Refinery will:
+1. Process your merge request
+2. Handle rebasing (mechanical rebases done automatically)
+3. Close your issue after successful merge
+4. Create conflict-resolution tasks if needed (fresh polecat handles those)
+
+**1. Submit with gt done:**
 ```bash
-# Your agent bead should reflect completion
-gt mol done                 # Or equivalent command
+gt done
 ```
 
-**2. Send POLECAT_DONE mail:**
-```bash
-gt mail send <rig>/witness -s "POLECAT_DONE $(hostname)" -m "Exit: MERGED
-Issue: {{issue}}
-Branch: $(git branch --show-current)
-Commits: $(git log --oneline origin/main..HEAD | wc -l | tr -d ' ')
+This single command:
+- Creates an MR bead in the merge queue
+- Notifies the Witness (POLECAT_DONE)
+- Updates your agent state to 'done'
+- Reports cleanup status (ZFC compliance)
 
-Work complete. Ready for merge queue."
+**2. Verify submission:**
+You should see output like:
+```
+✓ Work submitted to merge queue
+  MR ID: gt-xxxxx
+  Source: polecat/<name>
+  Target: main
+  Issue: {{issue}}
 ```
 
-**3. WAIT FOR WITNESS:**
-Do NOT exit or kill your session. The Witness will:
-1. Verify your git state is clean
-2. Send MERGE_READY to Refinery
-3. Wait for MERGED confirmation
-4. Kill your session
+**3. You're recyclable:**
+Your work is in the queue. The Witness knows you're done.
+Your sandbox can be cleaned up - all work is pushed to origin.
 
-You may see a ~30-60 second delay while this happens.
-If you don't get killed within 5 minutes, mail Witness again.
+If you have context remaining, you may:
+- Pick up new work from `bd ready`
+- Or use `gt handoff` to cycle to a fresh session
 
-**CRITICAL:** Do not exit yourself. Do not run `exit`. Just wait.
+If the Refinery needs conflict resolution, it will dispatch a fresh polecat.
+You do NOT need to wait around.
 
-**Exit criteria:** Witness terminates your session (you won't reach this)."""
+**Exit criteria:** MR submitted, Witness notified, polecat recyclable."""
 
 [vars]
 [vars.issue]

@@ -1,7 +1,7 @@
 description = """
 Generate daily digest for overseer (Mayor).
 
-Dogs execute this formula on a scheduled basis (daily, or triggered by plugin)
+Dogs work through molecules (poured from this formula) on a scheduled basis (daily, or triggered by plugin)
 to create summary digests of Gas Town activity. This aggregates:
 - Work completed across all rigs
 - Issues filed and closed

@@ -1,7 +1,7 @@
 description = """
 Propagate cross-rig dependency resolution.
 
-Dogs execute this formula when dependencies resolve across rig boundaries.
+Dogs work through molecules (poured from this formula) when dependencies resolve across rig boundaries.
 When an issue in one rig closes, dependent issues in other rigs may unblock.
 This formula handles:
 - Finding cross-rig dependents

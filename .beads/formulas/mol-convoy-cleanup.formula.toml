@@ -1,7 +1,7 @@
 description = """
 Archive completed convoys and notify overseer.
 
-Dogs execute this formula when convoys complete. The Deacon detects completed
+Dogs work through molecules (poured from this formula) when convoys complete. The Deacon detects completed
 convoys (all tracked issues closed) and slings this work to a dog for:
 - Generating convoy summary
 - Archiving convoy state

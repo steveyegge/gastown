@@ -1,7 +1,7 @@
 description = """
 Find and reassign orphaned work.
 
-Dogs execute this formula to scan for orphaned state across the town:
+Dogs work through molecules (poured from this formula) to scan for orphaned state:
 - Issues marked in_progress with no active polecat
 - Molecules attached but worker gone
 - Merge queue entries with dead owners
