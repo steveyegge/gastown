@@ -397,6 +397,13 @@ func ensureCustomTypes(beadsPath string) error {
 func initTownAgentBeads(townPath string) error {
 	bd := beads.New(townPath)
 
+	// bd init doesn't enable "custom" issue types by default, but Gas Town uses
+	// agent/role beads during install and runtime. Ensure these types are enabled
+	// before attempting to create any town-level system beads.
+	if err := ensureBeadsCustomTypes(townPath, []string{"agent", "role", "rig", "convoy", "slot"}); err != nil {
+		return err
+	}
+
 	// Role beads (global templates)
 	roleDefs := []struct {
 		id    string
@@ -513,5 +520,19 @@ func initTownAgentBeads(townPath string) error {
 		fmt.Printf("   ✓ Created agent bead: %s\n", agent.id)
 	}
 
+	return nil
+}
+
+func ensureBeadsCustomTypes(workDir string, types []string) error {
+	if len(types) == 0 {
+		return nil
+	}
+
+	cmd := exec.Command("bd", "config", "set", "types.custom", strings.Join(types, ","))
+	cmd.Dir = workDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd config set types.custom failed: %s", strings.TrimSpace(string(output)))
+	}
 	return nil
 }
