@@ -414,4 +414,4 @@ MIT License - see LICENSE file for details
 
 ---
 
-**Getting Started:** Run `gt install ~/gt --git && cd ~/gt && gt mayor attach` and tell the Mayor what you want to build!
+**Getting Started:** Run `gt install ~/gt --git && cd ~/gt && gt config agent list && gt mayor attach` (or `gt mayor attach --agent codex`) and tell the Mayor what you want to build!
