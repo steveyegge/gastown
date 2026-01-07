@@ -115,6 +115,8 @@ type MoleculeStatusInfo struct {
 // MoleculeCurrentInfo contains info about what an agent should be working on.
 type MoleculeCurrentInfo struct {
 	Identity      string `json:"identity"`
+	HookBeadID    string `json:"hook_bead_id,omitempty"`
+	HookBeadTitle string `json:"hook_bead_title,omitempty"`
 	HandoffID     string `json:"handoff_id,omitempty"`
 	HandoffTitle  string `json:"handoff_title,omitempty"`
 	MoleculeID    string `json:"molecule_id,omitempty"`
@@ -409,7 +411,33 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 
 	// Determine next action if no work is slung
 	if !status.HasWork {
-		status.NextAction = "Check inbox for work assignments: gt mail inbox"
+		// Patrol roles can carry long-lived work on a role handoff bead, even when nothing is pinned.
+		// Fall back to that before declaring "no work".
+		if role := handoffRoleFromTarget(target); role != "" {
+			handoff, err := b.FindHandoffBead(role)
+			if err == nil && handoff != nil {
+				status.HasWork = true
+				status.PinnedBead = handoff
+
+				attachment := beads.ParseAttachmentFields(handoff)
+				if attachment != nil {
+					status.AttachedMolecule = attachment.AttachedMolecule
+					status.AttachedAt = attachment.AttachedAt
+					status.AttachedArgs = attachment.AttachedArgs
+
+					if attachment.AttachedMolecule != "" {
+						progress, _ := getMoleculeProgressInfo(b, attachment.AttachedMolecule)
+						status.Progress = progress
+					}
+				}
+
+				status.NextAction = determineNextAction(status)
+			}
+		}
+
+		if !status.HasWork {
+			status.NextAction = "Check inbox for work assignments: gt mail inbox"
+		}
 	} else if status.AttachedMolecule == "" {
 		status.NextAction = "Attach a molecule to start work: gt mol attach <bead-id> <molecule-id>"
 	}
@@ -673,40 +701,85 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 
 	b := beads.New(workDir)
 
-	// Extract role from target for handoff bead lookup
-	parts := strings.Split(target, "/")
-	role := parts[len(parts)-1]
-
-	// Find handoff bead for this identity
-	handoff, err := b.FindHandoffBead(role)
-	if err != nil {
-		return fmt.Errorf("finding handoff bead: %w", err)
-	}
-
 	// Build current info
 	info := MoleculeCurrentInfo{
 		Identity: target,
 	}
 
-	if handoff == nil {
+	// Prefer hook slot + hooked bead attachment.
+	var attachedMoleculeID string
+	agentBeadID := buildAgentBeadID(target, roleCtx.Role)
+	if agentBeadID != "" {
+		agentBead, err := b.Show(agentBeadID)
+		if err == nil && agentBead != nil && agentBead.Type == "agent" {
+			agentFields := beads.ParseAgentFieldsFromDescription(agentBead.Description)
+			if agentFields != nil && agentFields.HookBead != "" {
+				hookBead, err := b.Show(agentFields.HookBead)
+				if err == nil && hookBead != nil {
+					info.HookBeadID = hookBead.ID
+					info.HookBeadTitle = hookBead.Title
+
+					attachment := beads.ParseAttachmentFields(hookBead)
+					if attachment != nil {
+						attachedMoleculeID = attachment.AttachedMolecule
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: discovery-based pinned-query approach (legacy hook model).
+	if attachedMoleculeID == "" && info.HookBeadID == "" {
+		pinnedBeads, err := b.List(beads.ListOptions{
+			Status:   beads.StatusPinned,
+			Assignee: target,
+			Priority: -1,
+		})
+		if err != nil {
+			return fmt.Errorf("listing pinned beads: %w", err)
+		}
+		if len(pinnedBeads) == 0 && isTownLevelRole(target) {
+			pinnedBeads = scanAllRigsForPinnedBeads(townRoot, target)
+		}
+		if len(pinnedBeads) > 0 {
+			info.HookBeadID = pinnedBeads[0].ID
+			info.HookBeadTitle = pinnedBeads[0].Title
+
+			attachment := beads.ParseAttachmentFields(pinnedBeads[0])
+			if attachment != nil {
+				attachedMoleculeID = attachment.AttachedMolecule
+			}
+		}
+	}
+
+	// Fallback: role handoff bead attachment (legacy patrol model).
+	role := handoffRoleFromTarget(target)
+	if role != "" {
+		handoff, err := b.FindHandoffBead(role)
+		if err != nil {
+			return fmt.Errorf("finding handoff bead: %w", err)
+		}
+		if handoff != nil {
+			info.HandoffID = handoff.ID
+			info.HandoffTitle = handoff.Title
+			if attachedMoleculeID == "" {
+				attachment := beads.ParseAttachmentFields(handoff)
+				if attachment != nil {
+					attachedMoleculeID = attachment.AttachedMolecule
+				}
+			}
+		}
+	}
+
+	if attachedMoleculeID == "" {
 		info.Status = "naked"
 		return outputMoleculeCurrent(info)
 	}
 
-	info.HandoffID = handoff.ID
-	info.HandoffTitle = handoff.Title
-
-	// Check for attached molecule
-	attachment := beads.ParseAttachmentFields(handoff)
-	if attachment == nil || attachment.AttachedMolecule == "" {
-		info.Status = "naked"
-		return outputMoleculeCurrent(info)
-	}
-
-	info.MoleculeID = attachment.AttachedMolecule
+	info.MoleculeID = attachedMoleculeID
 
 	// Get the molecule root to find its title and children
-	molRoot, err := b.Show(attachment.AttachedMolecule)
+	molRoot, err := b.Show(attachedMoleculeID)
 	if err != nil {
 		// Molecule not found - might be a template ID, still report what we have
 		info.Status = "working"
@@ -717,7 +790,7 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 
 	// Find all children (steps) of the molecule root
 	children, err := b.List(beads.ListOptions{
-		Parent:   attachment.AttachedMolecule,
+		Parent:   attachedMoleculeID,
 		Status:   "all",
 		Priority: -1,
 	})
@@ -794,6 +867,12 @@ func outputMoleculeCurrent(info MoleculeCurrentInfo) error {
 	// Human-readable output matching spec format
 	fmt.Printf("Identity: %s\n", info.Identity)
 
+	if info.HookBeadID != "" {
+		fmt.Printf("Hook:     %s (%s)\n", info.HookBeadID, info.HookBeadTitle)
+	} else {
+		fmt.Printf("Hook:     %s\n", style.Dim.Render("(none)"))
+	}
+
 	if info.HandoffID != "" {
 		fmt.Printf("Handoff:  %s (%s)\n", info.HandoffID, info.HandoffTitle)
 	} else {
@@ -842,6 +921,21 @@ func getGitRootForMolStatus() (string, error) {
 // pinned beads in any rig's beads directory.
 func isTownLevelRole(agentID string) bool {
 	return agentID == "mayor" || agentID == "deacon"
+}
+
+func handoffRoleFromTarget(target string) string {
+	switch {
+	case target == "mayor":
+		return "mayor"
+	case target == "deacon":
+		return "deacon"
+	case strings.HasSuffix(target, "/witness"):
+		return "witness"
+	case strings.HasSuffix(target, "/refinery"):
+		return "refinery"
+	default:
+		return ""
+	}
 }
 
 // scanAllRigsForPinnedBeads scans all registered rigs for pinned beads

@@ -215,7 +215,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if slingDryRun {
 		fmt.Printf("Would run: bd update %s --status=pinned --assignee=%s\n", beadID, targetAgent)
 		if formulaName != "" {
-			fmt.Printf("  formula: %s\n", formulaName)
+			fmt.Printf("  formula-on-bead: %s\n", formulaName)
+			fmt.Printf("  would: bd cook %s\n", formulaName)
+			fmt.Printf("  would: bd wisp %s --var feature=<bead-title> --json\n", formulaName)
+			fmt.Printf("  would: bd mol bond <wisp-id> %s --json\n", beadID)
+			fmt.Printf("  would: attach compound root to %s (attached_molecule)\n", beadID)
 		}
 		if slingSubject != "" {
 			fmt.Printf("  subject (in nudge): %s\n", slingSubject)
@@ -239,7 +243,62 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Work attached to hook (pinned bead)\n", style.Bold.Render("✓"))
 
-	// Store args in bead description (no-tmux mode: beads as data plane)
+	// Formula-on-bead mode: create wisp + bond, then attach molecule root to the pinned bead.
+	// The hook stays on the original beadID (feature/ticket); attached_molecule points to the compound root.
+	if formulaName != "" {
+		workDir, err := findLocalBeadsDir()
+		if err != nil {
+			return fmt.Errorf("not in a beads workspace: %w", err)
+		}
+		b := beads.New(workDir)
+
+		issue, err := b.Show(beadID)
+		if err != nil {
+			return fmt.Errorf("fetching bead: %w", err)
+		}
+
+		fmt.Printf("  Cooking formula...\n")
+		cookCmd := exec.Command("bd", "cook", formulaName)
+		cookCmd.Stderr = os.Stderr
+		if err := cookCmd.Run(); err != nil {
+			return fmt.Errorf("cooking formula: %w", err)
+		}
+
+		fmt.Printf("  Creating wisp...\n")
+		wispArgs := []string{"wisp", formulaName, "--var", "feature=" + issue.Title, "--json"}
+		wispCmd := exec.Command("bd", wispArgs...)
+		wispCmd.Stderr = os.Stderr
+		wispOut, err := wispCmd.Output()
+		if err != nil {
+			return fmt.Errorf("creating wisp: %w", err)
+		}
+		wispID := parseBeadsIDFromJSON(wispOut, "root_id", "new_epic_id", "result_id")
+		if wispID == "" {
+			return fmt.Errorf("could not parse wisp id from bd output")
+		}
+		fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispID)
+
+		fmt.Printf("  Bonding wisp to bead...\n")
+		bondCmd := exec.Command("bd", "mol", "bond", wispID, beadID, "--json")
+		bondCmd.Stderr = os.Stderr
+		bondOut, err := bondCmd.Output()
+		if err != nil {
+			return fmt.Errorf("bonding wisp to bead: %w", err)
+		}
+		compoundID := parseBeadsIDFromJSON(bondOut, "result_id", "root_id", "new_root_id", "compound_id")
+		if compoundID == "" {
+			compoundID = wispID
+		}
+		fmt.Printf("%s Molecule created: %s\n", style.Bold.Render("✓"), compoundID)
+
+		if _, err := b.AttachMolecule(beadID, compoundID); err != nil {
+			return fmt.Errorf("attaching molecule to pinned bead: %w", err)
+		}
+		fmt.Printf("%s Molecule attached to %s\n", style.Bold.Render("✓"), beadID)
+	}
+
+	// Store args in bead description (no-tmux mode: beads as data plane).
+	// For formula-on-bead, do this AFTER attaching so we don't clobber attached_molecule/attached_at.
 	if slingArgs != "" {
 		if err := storeArgsInBead(beadID, slingArgs); err != nil {
 			// Warn but don't fail - args will still be in the nudge prompt
@@ -261,6 +320,21 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func parseBeadsIDFromJSON(out []byte, keys ...string) string {
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return ""
+	}
+	for _, key := range keys {
+		if v, ok := payload[key]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // storeArgsInBead stores args in the bead's description using attached_args field.

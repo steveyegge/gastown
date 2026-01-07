@@ -86,9 +86,9 @@ func TestWrapError(t *testing.T) {
 	b := New("/test")
 
 	tests := []struct {
-		stderr   string
-		wantErr  error
-		wantNil  bool
+		stderr  string
+		wantErr error
+		wantNil bool
 	}{
 		{"not a beads repository", ErrNotARepo, false},
 		{"No .beads directory found", ErrNotARepo, false},
@@ -136,6 +136,13 @@ func TestIntegration(t *testing.T) {
 			t.Skip("no .beads directory found in path")
 		}
 		dir = parent
+	}
+
+	// Integration tests require a local SQLite DB (not just JSONL).
+	// Many clones keep JSONL under .beads/ without initializing a DB.
+	dbMatches, _ := filepath.Glob(filepath.Join(dir, ".beads", "*.db"))
+	if len(dbMatches) == 0 {
+		t.Skip("no beads database found (run 'bd init' to create one)")
 	}
 
 	b := New(dir)
@@ -188,10 +195,10 @@ func TestIntegration(t *testing.T) {
 // TestParseMRFields tests parsing MR fields from issue descriptions.
 func TestParseMRFields(t *testing.T) {
 	tests := []struct {
-		name        string
-		issue       *Issue
-		wantNil     bool
-		wantFields  *MRFields
+		name       string
+		issue      *Issue
+		wantNil    bool
+		wantFields *MRFields
 	}{
 		{
 			name:    "nil issue",
@@ -508,8 +515,8 @@ author: someone
 target: main`,
 			},
 			fields: &MRFields{
-				Branch:     "polecat/Capable/gt-ghi",
-				Target:     "integration/epic",
+				Branch:      "polecat/Capable/gt-ghi",
+				Target:      "integration/epic",
 				CloseReason: "merged",
 			},
 			want: `branch: polecat/Capable/gt-ghi
