@@ -331,14 +331,6 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not verify repo fingerprint: %v\n", style.Dim.Render("⚠"), err)
 	}
 
-	// Register Gas Town custom types (agent, role, rig, convoy, slot).
-	// These types are not built into beads core - they must be registered
-	// before creating agent/role beads. See gt-4ke5e for context.
-	if err := ensureCustomTypes(townPath); err != nil {
-		// Non-fatal but will cause agent bead creation to fail
-		fmt.Printf("   %s Could not register custom types: %v\n", style.Dim.Render("⚠"), err)
-	}
-
 	// Ensure routes.jsonl has an explicit town-level mapping for hq-* beads.
 	// This keeps hq-* operations stable even when invoked from rig worktrees.
 	if err := beads.AppendRoute(townPath, beads.Route{Prefix: "hq-", Path: "."}); err != nil {
