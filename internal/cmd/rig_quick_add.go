@@ -56,8 +56,8 @@ func runRigQuickAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolving path: %w", err)
 	}
 
-	if _, err := workspace.Find(absPath); err == nil {
-		return fmt.Errorf("already part of a Gas Town workspace")
+	if townRoot, err := workspace.Find(absPath); err == nil && townRoot != "" {
+		return fmt.Errorf("already part of a Gas Town workspace: %s", townRoot)
 	}
 
 	gitRoot, err := findGitRoot(absPath)

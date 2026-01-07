@@ -252,15 +252,13 @@ _gastown_hook() {
     if command -v gt &>/dev/null; then
         local detect_output
         detect_output=$(gt rig detect "$repo_root" 2>/dev/null)
-        if [[ -n "$detect_output" ]]; then
-            eval "$detect_output"
+        eval "$detect_output"
+        
+        if [[ -n "$GT_TOWN_ROOT" ]]; then
             (gt rig detect --cache "$repo_root" &>/dev/null &)
-        else
-            unset GT_TOWN_ROOT GT_RIG
-            if [[ -n "$_GASTOWN_OFFER_ADD" ]]; then
-                _gastown_offer_add "$repo_root"
-                unset _GASTOWN_OFFER_ADD
-            fi
+        elif [[ -n "$_GASTOWN_OFFER_ADD" ]]; then
+            _gastown_offer_add "$repo_root"
+            unset _GASTOWN_OFFER_ADD
         fi
     fi
 
