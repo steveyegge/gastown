@@ -235,8 +235,7 @@ jobs:
           git config --global user.email "ci@gastown.test"
 
       - name: Install beads (bd)
-        # Pin to v0.44.0 which includes agent/role types (before type extraction in main)
-        run: go install github.com/steveyegge/beads/cmd/bd@v0.44.0
+        run: go install github.com/steveyegge/beads/cmd/bd@latest
 
       - name: Build gt
         run: go build -v -o gt ./cmd/gt
