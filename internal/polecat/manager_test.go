@@ -2,6 +2,7 @@ package polecat
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -144,6 +145,13 @@ func TestAssigneeID(t *testing.T) {
 func TestGetReturnsWorkingWithoutBeads(t *testing.T) {
 	// When beads is not available, Get should return StateWorking
 	// (assume the polecat is doing something if it exists)
+	//
+	// Skip if bd is installed - the test assumes bd is unavailable, but when bd
+	// is present it queries beads and returns actual state instead of defaulting.
+	if _, err := exec.LookPath("bd"); err == nil {
+		t.Skip("skipping: bd is installed, test requires bd to be unavailable")
+	}
+
 	root := t.TempDir()
 	polecatDir := filepath.Join(root, "polecats", "Test")
 	if err := os.MkdirAll(polecatDir, 0755); err != nil {
