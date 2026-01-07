@@ -1,6 +1,11 @@
 package cmd
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseWispIDFromJSON(t *testing.T) {
 	tests := []struct {
@@ -181,5 +186,160 @@ func TestFormatTrackBeadIDConsumerCompatibility(t *testing.T) {
 					tt.beadID, formatted, parsed, tt.wantOriginalID)
 			}
 		})
+	}
+}
+
+func TestSlingFormulaOnBeadRoutesBDCommandsToTargetRig(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker so workspace.FindFromCwd() succeeds.
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create a rig path that owns gt-* beads, and a routes.jsonl pointing to it.
+	rigDir := filepath.Join(townRoot, "gastown", "mayor", "rig")
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.MkdirAll(rigDir, 0755); err != nil {
+		t.Fatalf("mkdir rigDir: %v", err)
+	}
+	routes := strings.Join([]string{
+		`{"prefix":"gt-","path":"gastown/mayor/rig"}`,
+		`{"prefix":"hq-","path":"."}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(routes), 0644); err != nil {
+		t.Fatalf("write routes.jsonl: %v", err)
+	}
+
+	// Stub bd so we can observe the working directory for cook/wisp/bond.
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	bdPath := filepath.Join(binDir, "bd")
+	bdScript := `#!/bin/sh
+set -e
+echo "$(pwd)|$*" >> "${BD_LOG}"
+if [ "$1" = "--no-daemon" ]; then
+  shift
+fi
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+    ;;
+  formula)
+    # formula show <name>
+    exit 0
+    ;;
+  cook)
+    exit 0
+    ;;
+  mol)
+    sub="$1"
+    shift || true
+    case "$sub" in
+      wisp)
+        echo '{"new_epic_id":"gt-wisp-xyz"}'
+        ;;
+      bond)
+        echo '{"root_id":"gt-wisp-xyz"}'
+        ;;
+    esac
+    ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Ensure we don't leak global flag state across tests.
+	prevOn := slingOnTarget
+	prevVars := slingVars
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	t.Cleanup(func() {
+		slingOnTarget = prevOn
+		slingVars = prevVars
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true
+	slingVars = nil
+	slingOnTarget = "gt-abc123"
+
+	if err := runSling(nil, []string{"mol-review"}); err != nil {
+		t.Fatalf("runSling: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read bd log: %v", err)
+	}
+	logLines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+
+	wantDir := rigDir
+	if resolved, err := filepath.EvalSymlinks(wantDir); err == nil {
+		wantDir = resolved
+	}
+	gotCook := false
+	gotWisp := false
+	gotBond := false
+
+	for _, line := range logLines {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		dir := parts[0]
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			dir = resolved
+		}
+		args := parts[1]
+
+		switch {
+		case strings.Contains(args, " cook "):
+			gotCook = true
+			if dir != wantDir {
+				t.Fatalf("bd cook ran in %q, want %q (args: %q)", dir, wantDir, args)
+			}
+		case strings.Contains(args, " mol wisp "):
+			gotWisp = true
+			if dir != wantDir {
+				t.Fatalf("bd mol wisp ran in %q, want %q (args: %q)", dir, wantDir, args)
+			}
+		case strings.Contains(args, " mol bond "):
+			gotBond = true
+			if dir != wantDir {
+				t.Fatalf("bd mol bond ran in %q, want %q (args: %q)", dir, wantDir, args)
+			}
+		}
+	}
+
+	if !gotCook || !gotWisp || !gotBond {
+		t.Fatalf("missing expected bd commands: cook=%v wisp=%v bond=%v (log: %q)", gotCook, gotWisp, gotBond, string(logBytes))
 	}
 }

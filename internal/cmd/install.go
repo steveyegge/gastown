@@ -339,6 +339,13 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not register custom types: %v\n", style.Dim.Render("⚠"), err)
 	}
 
+	// Ensure routes.jsonl has an explicit town-level mapping for hq-* beads.
+	// This keeps hq-* operations stable even when invoked from rig worktrees.
+	if err := beads.AppendRoute(townPath, beads.Route{Prefix: "hq-", Path: "."}); err != nil {
+		// Non-fatal: routing still works in many contexts, but explicit mapping is preferred.
+		fmt.Printf("   %s Could not update routes.jsonl: %v\n", style.Dim.Render("⚠"), err)
+	}
+
 	return nil
 }
 
