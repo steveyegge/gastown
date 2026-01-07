@@ -255,7 +255,9 @@ gt crew add <name> --rig <rig>  # Create crew workspace
 ```bash
 gt agents                   # List active agents
 gt sling <issue> <rig>      # Assign work to agent
+gt sling <issue> <rig> --agent codex    # Override runtime for this sling/spawn
 gt mayor attach             # Start Mayor session
+gt mayor start --agent gemini           # Run Mayor with a specific agent alias
 gt prime                    # Alternative to mayor attach
 ```
 
@@ -273,6 +275,7 @@ gt convoy add-issue <issue> # Add issue to convoy
 ```bash
 # Set custom agent command
 gt config agent set claude-glm "claude-glm --model glm-4"
+gt config agent set codex-low "codex --thinking low"
 
 # Set default agent
 gt config default-agent claude-glm

@@ -264,11 +264,18 @@ Note: "Swarm" is ephemeral (workers on a convoy's issues). See [Convoys](convoy.
 # Standard workflow: convoy first, then sling
 gt convoy create "Feature X" gt-abc gt-def
 gt sling gt-abc <rig>                    # Assign to polecat
+gt sling gt-abc <rig> --agent codex      # Override runtime for this sling/spawn
 gt sling <proto> --on gt-def <rig>       # With workflow template
 
 # Quick sling (auto-creates convoy)
 gt sling <bead> <rig>                    # Auto-convoy for dashboard visibility
 ```
+
+Agent overrides:
+
+- `gt start --agent <alias>` overrides the Mayor/Deacon runtime for this launch.
+- `gt mayor start|attach|restart --agent <alias>` and `gt deacon start|attach|restart --agent <alias>` do the same.
+- `gt start crew <name> --agent <alias>` and `gt crew at <name> --agent <alias>` override the crew worker runtime.
 
 ### Communication
 
