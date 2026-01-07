@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gas Town - Multi-Agent Orchestrator</title>
+  <link rel="stylesheet" href="css/reset.css">
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/animations.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+</head>
+<body>
+  <!-- Loading Overlay -->
+  <div id="loading-overlay" class="loading-overlay">
+    <div class="loading-content">
+      <div class="loading-spinner"></div>
+      <p class="loading-text">Loading Gas Town...</p>
+    </div>
+  </div>
+
+  <div id="app">
+    <!-- Header -->
+    <header class="header" id="app-header">
+      <div class="header-left">
+        <div class="logo">
+          <span class="logo-icon">🏭</span>
+          <span class="logo-text">GAS TOWN</span>
+        </div>
+        <div class="town-name" id="town-name">Loading...</div>
+      </div>
+      <div class="header-center">
+        <div class="nav-tabs">
+          <button class="nav-tab active" data-view="dashboard" data-tooltip="System overview - health, metrics, and quick actions.">
+            <span class="material-icons">dashboard</span>
+            Overview
+          </button>
+          <button class="nav-tab" data-view="convoys" data-tooltip="Groups of related work items. Track progress across multiple tasks.">
+            <span class="material-icons">local_shipping</span>
+            Convoys
+          </button>
+          <button class="nav-tab" data-view="work" data-tooltip="Individual tasks (beads) and their completion status.">
+            <span class="material-icons">task_alt</span>
+            Work
+          </button>
+          <button class="nav-tab" data-view="agents" data-tooltip="Worker agents: Mayor, Witness, Refinery, and Polecats.">
+            <span class="material-icons">groups</span>
+            Agents
+          </button>
+          <button class="nav-tab" data-view="rigs" data-tooltip="Git projects with their agents and GitHub integration.">
+            <span class="material-icons">folder_special</span>
+            Rigs
+          </button>
+          <button class="nav-tab" data-view="prs" data-tooltip="GitHub Pull Requests across all connected repositories.">
+            <span class="material-icons">merge_type</span>
+            PRs
+          </button>
+          <button class="nav-tab" data-view="formulas" data-tooltip="Workflow templates for repeatable tasks.">
+            <span class="material-icons">science</span>
+            Formulas
+          </button>
+          <button class="nav-tab" data-view="issues" data-tooltip="GitHub Issues across connected repositories.">
+            <span class="material-icons">bug_report</span>
+            Issues
+          </button>
+          <button class="nav-tab" data-view="mail" data-tooltip="Messages between agents and the human overseer.">
+            <span class="material-icons">mail</span>
+            Mail
+            <span class="badge hidden" id="mail-badge">0</span>
+          </button>
+          <button class="nav-tab" data-view="health" data-tooltip="System health check - verify Gas Town configuration.">
+            <span class="material-icons">health_and_safety</span>
+            Health
+          </button>
+        </div>
+      </div>
+      <div class="header-right">
+        <button class="icon-btn" id="help-btn" title="Help & Guide" data-modal-open="help">
+          <span class="material-icons">help_outline</span>
+        </button>
+        <button class="icon-btn" id="theme-toggle" title="Toggle theme">
+          <span class="material-icons">dark_mode</span>
+        </button>
+        <button class="icon-btn" id="refresh-btn" title="Refresh">
+          <span class="material-icons">refresh</span>
+        </button>
+        <div class="connection-status" id="connection-status" data-tooltip="Real-time WebSocket connection to Gas Town server">
+          <span class="status-dot"></span>
+          <span class="status-text">Connecting...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Sidebar (Agent Tree) -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <h2>Agents</h2>
+          <button class="icon-btn-sm" id="collapse-sidebar">
+            <span class="material-icons">chevron_left</span>
+          </button>
+        </div>
+        <div class="agent-tree" id="agent-tree">
+          <!-- Populated by JS -->
+        </div>
+      </aside>
+
+      <!-- Primary Content -->
+      <section class="content">
+        <!-- Dashboard View -->
+        <div class="view active" id="view-dashboard">
+          <div class="view-header">
+            <h1>System Overview</h1>
+            <div class="view-actions">
+              <button class="btn btn-secondary" id="dashboard-refresh">
+                <span class="material-icons">refresh</span>
+                Refresh
+              </button>
+            </div>
+          </div>
+          <div class="dashboard-container" id="dashboard-container">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Convoy View -->
+        <div class="view" id="view-convoys">
+          <div class="view-header">
+            <h1 id="convoy-view-title">Active Convoys</h1>
+            <div class="view-filters">
+              <button class="btn btn-sm btn-secondary filter-active" id="convoy-filter-active" title="Show active convoys only">
+                <span class="material-icons">pending</span> Active
+              </button>
+              <button class="btn btn-sm btn-ghost" id="convoy-filter-all" title="Show all convoys including completed">
+                <span class="material-icons">history</span> All History
+              </button>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-secondary" id="new-bead-btn" data-modal-open="new-bead" data-tooltip="Create a new issue (bead) to track work">
+                <span class="material-icons">add_circle</span>
+                New Bead
+              </button>
+              <button class="btn btn-secondary" id="sling-btn" data-modal-open="sling" data-tooltip="Assign work to a polecat worker agent">
+                <span class="material-icons">send</span>
+                Sling
+              </button>
+              <button class="btn btn-primary" id="new-convoy-btn" data-modal-open="new-convoy" data-tooltip="Create a group of related issues to track together">
+                <span class="material-icons">add</span>
+                New Convoy
+              </button>
+            </div>
+          </div>
+          <div class="convoy-list" id="convoy-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Work View (Beads/Tasks) -->
+        <div class="view" id="view-work">
+          <div class="view-header">
+            <h1 id="work-view-title">All Work</h1>
+            <div class="view-filters">
+              <button class="btn btn-sm btn-ghost" id="work-filter-all" title="All beads">
+                <span class="material-icons">list</span> All
+              </button>
+              <button class="btn btn-sm btn-ghost" id="work-filter-open" title="Open tasks">
+                <span class="material-icons">pending</span> Open
+              </button>
+              <button class="btn btn-sm btn-secondary filter-active" id="work-filter-closed" title="Completed tasks">
+                <span class="material-icons">check_circle</span> Completed
+              </button>
+            </div>
+            <div class="view-actions">
+              <button class="btn btn-primary" id="new-bead-btn-work" data-modal-open="new-bead">
+                <span class="material-icons">add</span>
+                New Task
+              </button>
+            </div>
+          </div>
+          <div class="work-list" id="work-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Agents View -->
+        <div class="view" id="view-agents">
+          <div class="view-header">
+            <h1>All Agents</h1>
+            <div class="view-actions">
+              <select class="filter-select" id="agent-filter">
+                <option value="all">All Agents</option>
+                <option value="running">Running</option>
+                <option value="idle">Idle</option>
+                <option value="working">Working</option>
+              </select>
+            </div>
+          </div>
+          <div class="agent-grid" id="agent-grid">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Rigs View -->
+        <div class="view" id="view-rigs">
+          <div class="view-header">
+            <h1>Rigs</h1>
+            <div class="view-actions">
+              <button class="btn btn-primary" id="new-rig-btn" data-modal-open="new-rig">
+                <span class="material-icons">add</span>
+                Add Rig
+              </button>
+            </div>
+          </div>
+          <div class="rig-list" id="rig-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Pull Requests View -->
+        <div class="view" id="view-prs">
+          <div class="view-header">
+            <h1>Pull Requests</h1>
+            <div class="view-actions">
+              <div class="filter-group">
+                <button class="pr-state-tab active" data-state="open">Open</button>
+                <button class="pr-state-tab" data-state="merged">Merged</button>
+                <button class="pr-state-tab" data-state="closed">Closed</button>
+                <button class="pr-state-tab" data-state="all">All</button>
+              </div>
+              <button class="btn btn-sm btn-icon" id="pr-refresh" title="Refresh">
+                <span class="material-icons">refresh</span>
+              </button>
+            </div>
+          </div>
+          <div class="pr-list" id="pr-list-container">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Formulas View -->
+        <div class="view" id="view-formulas">
+          <div class="view-header">
+            <h1>Formulas</h1>
+            <div class="view-actions">
+              <button class="btn btn-sm btn-icon" id="formula-refresh" title="Refresh">
+                <span class="material-icons">refresh</span>
+              </button>
+              <button class="btn btn-primary" id="new-formula-btn">
+                <span class="material-icons">add</span>
+                New Formula
+              </button>
+            </div>
+          </div>
+          <div class="formula-list" id="formula-list-container">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- GitHub Issues View -->
+        <div class="view" id="view-issues">
+          <div class="view-header">
+            <h1>GitHub Issues</h1>
+            <div class="view-actions">
+              <div class="filter-group">
+                <button class="issue-state-tab active" data-state="open">Open</button>
+                <button class="issue-state-tab" data-state="closed">Closed</button>
+                <button class="issue-state-tab" data-state="all">All</button>
+              </div>
+              <button class="btn btn-sm btn-icon" id="issue-refresh" title="Refresh">
+                <span class="material-icons">refresh</span>
+              </button>
+            </div>
+          </div>
+          <div class="issue-list" id="issue-list-container">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Mail View -->
+        <div class="view" id="view-mail">
+          <div class="view-header">
+            <h1 id="mail-view-title">My Inbox</h1>
+            <div class="view-actions">
+              <div class="filter-group">
+                <button class="btn btn-secondary filter-active" id="mail-filter-mine">
+                  <span class="material-icons">inbox</span>
+                  My Inbox
+                </button>
+                <button class="btn btn-ghost" id="mail-filter-all">
+                  <span class="material-icons">forum</span>
+                  All Mail
+                </button>
+              </div>
+              <button class="btn btn-secondary" id="compose-mail-btn" data-modal-open="mail-compose">
+                <span class="material-icons">edit</span>
+                Compose
+              </button>
+            </div>
+          </div>
+          <div class="mail-list" id="mail-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Health Check View -->
+        <div class="view" id="view-health">
+          <div class="view-header">
+            <h1>System Health</h1>
+            <div class="view-actions">
+              <button class="btn btn-secondary" id="health-refresh">
+                <span class="material-icons">refresh</span>
+                Run Doctor
+              </button>
+            </div>
+          </div>
+          <div class="health-check-container" id="health-check-container">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Activity Feed -->
+      <aside class="activity-feed" id="activity-feed">
+        <div class="feed-header">
+          <h2>Activity</h2>
+          <button class="icon-btn-sm" id="clear-feed">
+            <span class="material-icons">clear_all</span>
+          </button>
+        </div>
+        <div class="feed-list" id="feed-list">
+          <!-- Populated by JS -->
+        </div>
+      </aside>
+    </main>
+
+    <!-- Status Bar -->
+    <footer class="status-bar">
+      <div class="status-left">
+        <span class="hook-status" id="hook-status" data-tooltip="Work currently 'hooked' to an agent. On wake, agents run what's on their hook.">
+          <span class="material-icons">anchor</span>
+          <span class="hook-text">No work hooked</span>
+        </span>
+      </div>
+      <div class="status-center">
+        <span id="status-message">Ready</span>
+      </div>
+      <div class="status-right">
+        <span class="keyboard-hint">Press <kbd>?</kbd> for help</span>
+      </div>
+    </footer>
+
+    <!-- Modals -->
+    <div class="modal-overlay hidden" id="modal-overlay">
+      <!-- New Convoy Modal -->
+      <div class="modal hidden" id="new-convoy-modal">
+        <div class="modal-header">
+          <h2>Create Convoy</h2>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <form class="modal-body" id="convoy-form">
+          <div class="form-group">
+            <label for="convoy-name">Convoy Name</label>
+            <input type="text" id="convoy-name" name="name" placeholder="e.g., Deploy v2.0" required>
+          </div>
+          <div class="form-group">
+            <label for="convoy-issues">Tracked Issues</label>
+            <textarea id="convoy-issues" name="issues" placeholder="Enter issue IDs (one per line)&#10;e.g., gt-123&#10;bd-456" rows="4"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="convoy-notify">Notify on completion</label>
+            <select id="convoy-notify" name="notify">
+              <option value="">None</option>
+              <option value="mayor/">Mayor</option>
+              <option value="human">Human Overseer</option>
+            </select>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+            <button type="submit" class="btn btn-primary">Create Convoy</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- New Bead Modal -->
+      <div class="modal hidden" id="new-bead-modal">
+        <div class="modal-header">
+          <h2>Create Bead</h2>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <form class="modal-body" id="new-bead-form">
+          <div class="form-group">
+            <label for="bead-title">Title</label>
+            <input type="text" id="bead-title" name="title" placeholder="e.g., Fix login bug, Add dark mode" required>
+          </div>
+          <div class="form-group">
+            <label for="bead-description">Description (optional)</label>
+            <textarea id="bead-description" name="description" placeholder="Describe what needs to be done..." rows="4"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="bead-priority">Priority</label>
+            <select id="bead-priority" name="priority">
+              <option value="normal">Normal</option>
+              <option value="low">Low</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="bead-labels">Labels (comma-separated)</label>
+            <input type="text" id="bead-labels" name="labels" placeholder="e.g., bug, enhancement, docs">
+          </div>
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="bead-sling-now" name="sling_now" value="true">
+              Sling immediately after creation
+            </label>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+            <button type="submit" class="btn btn-primary">
+              <span class="material-icons">add_circle</span>
+              Create Bead
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Sling Modal -->
+      <div class="modal hidden" id="sling-modal">
+        <div class="modal-header">
+          <h2>Sling Work</h2>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <form class="modal-body" id="sling-form">
+          <div class="form-group">
+            <label for="sling-bead">Issue or Formula</label>
+            <input type="text" id="sling-bead" name="bead" placeholder="e.g., gt-123 or shiny-feature" required>
+          </div>
+          <div class="form-group">
+            <label for="sling-target">Target</label>
+            <select id="sling-target" name="target" required>
+              <option value="">Select target...</option>
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="sling-quality">Quality</label>
+            <select id="sling-quality" name="quality">
+              <option value="shiny">Shiny (default)</option>
+              <option value="basic">Basic</option>
+              <option value="chrome">Chrome</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="sling-args">Instructions (optional)</label>
+            <textarea id="sling-args" name="molecule" placeholder="Additional instructions for the worker" rows="3"></textarea>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+            <button type="submit" class="btn btn-primary">Sling</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Compose Mail Modal -->
+      <div class="modal hidden" id="mail-compose-modal">
+        <div class="modal-header">
+          <h2>Compose Message</h2>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <form class="modal-body" id="compose-form">
+          <div class="form-group">
+            <label for="mail-to">To</label>
+            <select id="mail-to" name="to" required>
+              <option value="">Select recipient...</option>
+              <!-- Populated dynamically from agents -->
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="mail-subject">Subject</label>
+            <input type="text" id="mail-subject" name="subject" placeholder="Subject" required>
+          </div>
+          <div class="form-group">
+            <label for="mail-message">Message</label>
+            <textarea id="mail-message" name="message" placeholder="Your message..." rows="6" required></textarea>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+            <button type="submit" class="btn btn-primary">Send</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Add Rig Modal -->
+      <div class="modal hidden" id="new-rig-modal">
+        <div class="modal-header">
+          <h2>
+            <span class="material-icons">folder_special</span>
+            Add Rig
+          </h2>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <form class="modal-body" id="new-rig-form">
+          <!-- GitHub Repo Picker -->
+          <div class="form-group">
+            <label>Pick from GitHub</label>
+            <div class="github-repo-picker">
+              <button type="button" class="btn btn-secondary btn-block" id="github-repo-picker-btn">
+                <span class="material-icons">cloud_download</span>
+                <span class="btn-text">Load My Repositories</span>
+              </button>
+              <div class="github-repo-list hidden" id="github-repo-list">
+                <input type="text" class="github-repo-search" id="github-repo-search" placeholder="Search repos...">
+                <div class="github-repo-items" id="github-repo-items">
+                  <!-- Populated by JS -->
+                </div>
+              </div>
+            </div>
+            <span class="form-hint">Or enter details manually below</span>
+          </div>
+          <div class="form-divider">
+            <span>or enter manually</span>
+          </div>
+          <div class="form-group">
+            <label for="rig-name">Rig Name</label>
+            <input type="text" id="rig-name" name="name" placeholder="e.g., my-project" required>
+            <span class="form-hint">A short name for this rig (used in paths)</span>
+          </div>
+          <div class="form-group">
+            <label for="rig-url">Repository Path</label>
+            <input type="text" id="rig-url" name="url" placeholder="e.g., ~/projects/my-project" required>
+            <span class="form-hint">Local path or Git URL to the project repository</span>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+            <button type="submit" class="btn btn-primary">
+              <span class="material-icons">add</span>
+              Add Rig
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Help/Glossary Modal -->
+      <div class="modal modal-lg hidden" id="help-modal">
+        <div class="modal-header">
+          <h2><span class="material-icons">help_outline</span> Gas Town Guide</h2>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <div class="modal-body help-content">
+          <div class="help-tabs">
+            <button class="help-tab active" data-tab="concepts">Concepts</button>
+            <button class="help-tab" data-tab="roles">Roles</button>
+            <button class="help-tab" data-tab="workflow">Workflow</button>
+            <button class="help-tab" data-tab="shortcuts">Shortcuts</button>
+          </div>
+
+          <div class="help-panel active" id="help-concepts">
+            <div class="glossary-grid">
+              <div class="glossary-item">
+                <div class="glossary-term">
+                  <span class="material-icons">home</span>
+                  Town
+                </div>
+                <div class="glossary-def">Your workspace directory (e.g., ~/gt/). Contains all rigs, agents, and configuration.</div>
+              </div>
+              <div class="glossary-item">
+                <div class="glossary-term">
+                  <span class="material-icons">folder_special</span>
+                  Rig
+                </div>
+                <div class="glossary-def">A git project container with its own agents. Each rig has a Witness (monitor) and optional Refinery (merge queue).</div>
+              </div>
+              <div class="glossary-item">
+                <div class="glossary-term">
+                  <span class="material-icons">local_shipping</span>
+                  Convoy
+                </div>
+                <div class="glossary-def">A group of related work items (issues/beads). Convoys track progress across multiple tasks.</div>
+              </div>
+              <div class="glossary-item">
+                <div class="glossary-term">
+                  <span class="material-icons">send</span>
+                  Sling
+                </div>
+                <div class="glossary-def">Assign work to a worker agent. "Sling" a bead/issue to a polecat to start work.</div>
+              </div>
+              <div class="glossary-item">
+                <div class="glossary-term">
+                  <span class="material-icons">anchor</span>
+                  Hook
+                </div>
+                <div class="glossary-def">Where work "hangs" on an agent. On wake, agents run what's on their hook. Work survives crashes.</div>
+              </div>
+              <div class="glossary-item">
+                <div class="glossary-term">
+                  <span class="material-icons">bubble_chart</span>
+                  Bead
+                </div>
+                <div class="glossary-def">A work item in the git-backed issue tracker. Beads persist in your repo and track all work state.</div>
+              </div>
+              <div class="glossary-item">
+                <div class="glossary-term">
+                  <span class="material-icons">science</span>
+                  Formula / Molecule
+                </div>
+                <div class="glossary-def">Workflow templates. Cook a formula into a molecule, then sling it. Molecules survive agent restarts.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="help-panel" id="help-roles">
+            <div class="roles-grid">
+              <div class="role-card role-mayor">
+                <div class="role-header">
+                  <span class="role-icon">👔</span>
+                  <h4>Mayor</h4>
+                </div>
+                <p>Global coordinator for cross-rig work. Dispatches tasks, handles escalations, manages priorities across all projects.</p>
+              </div>
+              <div class="role-card role-deacon">
+                <div class="role-header">
+                  <span class="role-icon">⚙️</span>
+                  <h4>Deacon</h4>
+                </div>
+                <p>Daemon process manager. Handles agent lifecycle, plugin execution, and system-level coordination.</p>
+              </div>
+              <div class="role-card role-witness">
+                <div class="role-header">
+                  <span class="role-icon">👁️</span>
+                  <h4>Witness</h4>
+                </div>
+                <p>Per-rig monitor. Watches polecats, detects stuck workers, handles lifecycle events. One per project.</p>
+              </div>
+              <div class="role-card role-refinery">
+                <div class="role-header">
+                  <span class="role-icon">🔧</span>
+                  <h4>Refinery</h4>
+                </div>
+                <p>Merge queue processor. Reviews PRs, runs integration tests, manages the code review pipeline.</p>
+              </div>
+              <div class="role-card role-polecat">
+                <div class="role-header">
+                  <span class="role-icon">🐾</span>
+                  <h4>Polecat</h4>
+                </div>
+                <p>Ephemeral worker agent. Spawns, executes work on its hook, then disappears. Multiple per rig.</p>
+              </div>
+              <div class="role-card">
+                <div class="role-header">
+                  <span class="role-icon">👤</span>
+                  <h4>Overseer (You)</h4>
+                </div>
+                <p>Human operator. Sets strategy, reviews output, handles escalations. Uses this GUI to monitor and direct work.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="help-panel" id="help-workflow">
+            <div class="workflow-steps">
+              <div class="workflow-step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                  <h4>Create a Convoy</h4>
+                  <p>Group related issues into a convoy for tracking. Give it a name and add issue IDs.</p>
+                </div>
+              </div>
+              <div class="workflow-arrow">→</div>
+              <div class="workflow-step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                  <h4>Sling Work</h4>
+                  <p>Assign issues to worker agents (polecats). Select the target rig and quality level.</p>
+                </div>
+              </div>
+              <div class="workflow-arrow">→</div>
+              <div class="workflow-step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                  <h4>Monitor Progress</h4>
+                  <p>Watch the convoy dashboard. Workers will update status as they complete tasks.</p>
+                </div>
+              </div>
+              <div class="workflow-arrow">→</div>
+              <div class="workflow-step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                  <h4>Review & Merge</h4>
+                  <p>When work completes, Refinery handles PRs. Escalate to Mayor if issues arise.</p>
+                </div>
+              </div>
+            </div>
+            <div class="workflow-tip">
+              <span class="material-icons">lightbulb</span>
+              <strong>Pro Tip:</strong> Use formulas for repeatable workflows. Cook once, sling many times!
+            </div>
+          </div>
+
+          <div class="help-panel" id="help-shortcuts">
+            <div class="shortcuts-grid">
+              <div class="shortcut-group">
+                <h4>Navigation</h4>
+                <div class="shortcut"><kbd>1</kbd> Convoys view</div>
+                <div class="shortcut"><kbd>2</kbd> Agents view</div>
+                <div class="shortcut"><kbd>3</kbd> Mail view</div>
+              </div>
+              <div class="shortcut-group">
+                <h4>Actions</h4>
+                <div class="shortcut"><kbd>Ctrl</kbd>+<kbd>N</kbd> New convoy</div>
+                <div class="shortcut"><kbd>Ctrl</kbd>+<kbd>R</kbd> Refresh</div>
+                <div class="shortcut"><kbd>?</kbd> This help</div>
+              </div>
+              <div class="shortcut-group">
+                <h4>Modals</h4>
+                <div class="shortcut"><kbd>Esc</kbd> Close modal</div>
+              </div>
+            </div>
+            <div class="help-actions">
+              <button class="btn btn-secondary" onclick="window.gastown.startOnboarding(); document.getElementById('modal-overlay').classList.add('hidden');">
+                <span class="material-icons">rocket_launch</span>
+                Restart Setup Wizard
+              </button>
+              <button class="btn btn-secondary" onclick="window.gastown.startTutorial(); document.getElementById('modal-overlay').classList.add('hidden');">
+                <span class="material-icons">school</span>
+                Show Tutorial
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mail Detail Modal -->
+      <div class="modal modal-lg hidden" id="mail-detail-modal">
+        <div class="modal-header">
+          <h2>
+            <span class="material-icons">mail</span>
+            <span id="mail-detail-subject">Message</span>
+          </h2>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="mail-detail-meta">
+            <div class="mail-detail-row">
+              <span class="mail-detail-label">From:</span>
+              <span id="mail-detail-from" class="mail-detail-value">-</span>
+            </div>
+            <div class="mail-detail-row">
+              <span class="mail-detail-label">To:</span>
+              <span id="mail-detail-to" class="mail-detail-value">-</span>
+            </div>
+            <div class="mail-detail-row">
+              <span class="mail-detail-label">Time:</span>
+              <span id="mail-detail-time" class="mail-detail-value">-</span>
+            </div>
+          </div>
+          <div class="mail-detail-body">
+            <pre id="mail-detail-body"></pre>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-modal-close>Close</button>
+          <button class="btn btn-primary" id="mail-reply-btn">
+            <span class="material-icons">reply</span>
+            Reply
+          </button>
+        </div>
+      </div>
+
+      <!-- New Formula Modal -->
+      <div class="modal hidden" id="new-formula-modal">
+        <div class="modal-header">
+          <h2>Create Formula</h2>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <form class="modal-body" id="new-formula-form">
+          <div class="form-group">
+            <label for="formula-name">Formula Name</label>
+            <input type="text" id="formula-name" name="name" placeholder="e.g., bug-fix, new-feature" required>
+          </div>
+          <div class="form-group">
+            <label for="formula-description">Description (optional)</label>
+            <input type="text" id="formula-description" name="description" placeholder="What this formula does...">
+          </div>
+          <div class="form-group">
+            <label for="formula-template">Template</label>
+            <textarea id="formula-template" name="template" placeholder="The work template (instructions for workers)..." rows="6" required></textarea>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+            <button type="submit" class="btn btn-primary">
+              <span class="material-icons">science</span>
+              Create Formula
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Use Formula Modal -->
+      <div class="modal hidden" id="use-formula-modal">
+        <div class="modal-header">
+          <h2>Use Formula</h2>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <form class="modal-body" id="use-formula-form">
+          <div class="form-group">
+            <label for="use-formula-name">Formula</label>
+            <input type="text" id="use-formula-name" name="name" readonly>
+          </div>
+          <div class="form-group">
+            <label for="use-formula-target">Target</label>
+            <select id="use-formula-target" name="target" required>
+              <option value="">Select target...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="use-formula-args">Arguments (optional)</label>
+            <textarea id="use-formula-args" name="args" placeholder="Additional arguments for the formula..." rows="3"></textarea>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+            <button type="submit" class="btn btn-primary">
+              <span class="material-icons">play_arrow</span>
+              Use Formula
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Agent Peek Modal -->
+      <div class="modal modal-lg hidden" id="peek-modal">
+        <div class="modal-header">
+          <h2>
+            <span class="material-icons">visibility</span>
+            <span id="peek-agent-name">Agent Output</span>
+          </h2>
+          <div class="peek-controls">
+            <button class="btn btn-sm btn-secondary" id="peek-refresh" title="Refresh output">
+              <span class="material-icons">refresh</span>
+            </button>
+            <button class="btn btn-sm btn-secondary" id="peek-transcript" title="View full transcript">
+              <span class="material-icons">article</span>
+              Transcript
+            </button>
+            <label class="peek-auto-refresh">
+              <input type="checkbox" id="peek-auto-refresh-toggle">
+              Auto-refresh
+            </label>
+          </div>
+          <button class="modal-close" data-modal-close>
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="peek-status" id="peek-status">
+            <span class="status-indicator"></span>
+            <span class="status-text">Loading...</span>
+          </div>
+          <div class="peek-output" id="peek-output">
+            <pre class="output-content"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+  </div>
+
+  <!-- Scripts -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

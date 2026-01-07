@@ -1,0 +1,156 @@
+/* CSS Custom Properties - Gas Town Theme */
+
+:root {
+  /* === Dark Theme (Default) === */
+
+  /* Backgrounds */
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-elevated: #30363d;
+  --bg-hover: #1f2428;
+
+  /* Text */
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --text-inverse: #0d1117;
+
+  /* Borders */
+  --border-default: #30363d;
+  --border-muted: #21262d;
+  --border-accent: #388bfd;
+
+  /* Status Colors (Industrial/Mechanical) */
+  --status-running: #3fb950;
+  --status-working: #d29922;
+  --status-done: #a371f7;
+  --status-stuck: #f85149;
+  --status-idle: #6e7681;
+  --status-dead: #da3633;
+
+  /* Accent Colors */
+  --accent-primary: #58a6ff;
+  --accent-secondary: #a371f7;
+  --accent-success: #3fb950;
+  --accent-warning: #d29922;
+  --accent-danger: #f85149;
+
+  /* Event Type Colors */
+  --event-create: #3fb950;
+  --event-update: #58a6ff;
+  --event-complete: #a371f7;
+  --event-fail: #f85149;
+  --event-delete: #6e7681;
+  --event-mail: #58a6ff;
+  --event-escalation: #d29922;
+
+  /* Role Colors */
+  --role-mayor: #58a6ff;
+  --role-deacon: #a371f7;
+  --role-witness: #8b5cf6;
+  --role-refinery: #0d9488;
+  --role-polecat: #d29922;
+  --role-crew: #3fb950;
+  --role-dog: #6e7681;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 12px rgba(88, 166, 255, 0.3);
+
+  /* Spacing Scale */
+  --space-xxs: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 2rem;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+  --transition-slow: 400ms ease;
+
+  /* Z-Index Scale */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 300;
+  --z-toast: 400;
+  --z-tooltip: 9999;
+
+  /* Layout */
+  --header-height: 56px;
+  --sidebar-width: 280px;
+  --feed-width: 320px;
+  --status-bar-height: 32px;
+}
+
+/* === Light Theme === */
+[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #eaeef2;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f3f4f6;
+
+  --text-primary: #1f2328;
+  --text-secondary: #57606a;
+  --text-muted: #8b949e;
+  --text-inverse: #ffffff;
+
+  --border-default: #d0d7de;
+  --border-muted: #eaeef2;
+  --border-accent: #0969da;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* === Scrollbar Styling === */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-default) var(--bg-secondary);
+}

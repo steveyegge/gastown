@@ -1,0 +1,28 @@
+{
+  "name": "gastown-gui",
+  "version": "0.1.0",
+  "description": "Web GUI for Gas Town multi-agent orchestrator",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js --dev",
+    "test": "PORT=5678 vitest run",
+    "test:unit": "PORT=5678 vitest run --config vitest.unit.config.js",
+    "test:e2e": "PORT=5678 vitest run test/e2e.test.js",
+    "test:watch": "PORT=5678 vitest watch",
+    "test:ui": "PORT=5678 vitest run --ui"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@vitest/ui": "^4.0.16",
+    "puppeteer": "^24.34.0",
+    "vitest": "^4.0.16"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
