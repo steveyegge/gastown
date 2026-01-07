@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -439,7 +440,7 @@ func (d *Daemon) ensureRefineriesRunning() {
 // ensureRefineryRunning ensures the refinery for a specific rig is running.
 // Discover, don't track: uses Manager.Start() which checks tmux directly (gt-zecmc).
 func (d *Daemon) ensureRefineryRunning(rigName string) {
-// Check rig operational state before auto-starting
+	// Check rig operational state before auto-starting
 	if operational, reason := d.isRigOperational(rigName); !operational {
 		d.logger.Printf("Skipping refinery auto-start for %s: %s", rigName, reason)
 		return
@@ -697,18 +698,35 @@ func (d *Daemon) checkPolecatSessionHealth() {
 func (d *Daemon) checkRigPolecatHealth(rigName string) {
 	// Get polecat directories for this rig
 	polecatsDir := filepath.Join(d.config.TownRoot, rigName, "polecats")
-	entries, err := os.ReadDir(polecatsDir)
+	polecats, err := listPolecatWorktrees(polecatsDir)
 	if err != nil {
 		return // No polecats directory - rig might not have polecats
 	}
 
+	for _, polecatName := range polecats {
+		d.checkPolecatHealth(rigName, polecatName)
+	}
+}
+
+func listPolecatWorktrees(polecatsDir string) ([]string, error) {
+	entries, err := os.ReadDir(polecatsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	polecats := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		polecatName := entry.Name()
-		d.checkPolecatHealth(rigName, polecatName)
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		polecats = append(polecats, name)
 	}
+
+	return polecats, nil
 }
 
 // checkPolecatHealth checks a single polecat's session health.

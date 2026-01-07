@@ -879,6 +879,18 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 }
 
 func TestBuildAgentStartupCommand(t *testing.T) {
+	// BuildAgentStartupCommand auto-detects town root from cwd when rigPath is empty.
+	// Use a temp directory to ensure we exercise the fallback default config path.
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpWD := t.TempDir()
+	if err := os.Chdir(tmpWD); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
 	// Test without rig config (uses defaults)
 	cmd := BuildAgentStartupCommand("witness", "gastown/witness", "", "")
 

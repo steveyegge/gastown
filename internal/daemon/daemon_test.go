@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -203,6 +204,33 @@ func TestSaveLoadState_Roundtrip(t *testing.T) {
 	// Time comparison with truncation to handle JSON serialization
 	if !loaded.StartedAt.Truncate(time.Second).Equal(original.StartedAt) {
 		t.Errorf("StartedAt mismatch: got %v, want %v", loaded.StartedAt, original.StartedAt)
+	}
+}
+
+func TestListPolecatWorktrees_SkipsHiddenDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+	polecatsDir := filepath.Join(tmpDir, "some-rig", "polecats")
+
+	if err := os.MkdirAll(filepath.Join(polecatsDir, ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(polecatsDir, "furiosa"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(polecatsDir, "not-a-dir.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	polecats, err := listPolecatWorktrees(polecatsDir)
+	if err != nil {
+		t.Fatalf("listPolecatWorktrees returned error: %v", err)
+	}
+
+	if slices.Contains(polecats, ".claude") {
+		t.Fatalf("expected hidden dir .claude to be ignored, got %v", polecats)
+	}
+	if !slices.Contains(polecats, "furiosa") {
+		t.Fatalf("expected furiosa to be included, got %v", polecats)
 	}
 }
 
