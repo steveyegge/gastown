@@ -101,21 +101,21 @@ const ONBOARDING_STEPS = [
       <div class="onboard-form">
         <p class="onboard-explain">A <strong>rig</strong> is a project container. It connects your GitHub repo to Gas Town so agents can work on it.</p>
         <div class="form-group">
-          <label for="onboard-rig-name">Project Name</label>
-          <input type="text" id="onboard-rig-name" placeholder="e.g., my-app, backend, website" required autocomplete="off">
+          <label for="rig-name">Project Name</label>
+          <input type="text" id="rig-name" placeholder="e.g., my-app, backend, website" required>
           <span class="form-hint">Short name for your project (lowercase, no spaces)</span>
         </div>
         <div class="form-group">
-          <label for="onboard-rig-url">GitHub URL</label>
-          <input type="text" id="onboard-rig-url" placeholder="https://github.com/you/repo.git" required autocomplete="off">
+          <label for="rig-url">GitHub URL</label>
+          <input type="text" id="rig-url" placeholder="https://github.com/you/repo.git" required>
           <span class="form-hint">Full URL to your git repository</span>
         </div>
         <div class="onboard-action-result hidden"></div>
       </div>
     `,
     validate: () => {
-      const name = document.getElementById('onboard-rig-name')?.value?.trim();
-      const url = document.getElementById('onboard-rig-url')?.value?.trim();
+      const name = document.getElementById('rig-name')?.value?.trim();
+      const url = document.getElementById('rig-url')?.value?.trim();
       if (!name) return { valid: false, error: 'Please enter a project name' };
       if (!url) return { valid: false, error: 'Please enter a GitHub URL' };
       if (!/^[a-z0-9-]+$/.test(name)) return { valid: false, error: 'Name must be lowercase letters, numbers, and hyphens only' };
@@ -123,8 +123,8 @@ const ONBOARDING_STEPS = [
       return { valid: true };
     },
     action: async () => {
-      const name = document.getElementById('onboard-rig-name').value.trim();
-      const url = document.getElementById('onboard-rig-url').value.trim();
+      const name = document.getElementById('rig-name').value.trim();
+      const url = document.getElementById('rig-url').value.trim();
       return await api.addRig(name, url);
     },
   },
