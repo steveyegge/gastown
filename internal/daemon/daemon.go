@@ -295,41 +295,36 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 func (d *Daemon) ensureDeaconRunning() {
 	deaconSession := d.getDeaconSessionName()
 
-	// Check if tmux session exists and Claude is running (observable reality)
-	hasSession, sessionErr := d.tmux.HasSession(deaconSession)
-	if sessionErr == nil && hasSession {
-		if d.tmux.IsClaudeRunning(deaconSession) {
-			// Deacon is running - nothing to do
-			return
-		}
-		// Session exists but Claude not running - zombie session, kill it
-		d.logger.Println("Deacon session exists but Claude not running, killing zombie session...")
-		if err := d.tmux.KillSession(deaconSession); err != nil {
-			d.logger.Printf("Warning: failed to kill zombie Deacon session: %v", err)
-		}
-		// Fall through to restart
+	// Check if session exists and handle zombies
+	healthy, zombieKilled, err := d.tmux.EnsureSessionClear(deaconSession)
+	if err != nil {
+		d.logger.Printf("Warning: failed to check Deacon session: %v", err)
+	}
+	if healthy {
+		return // Deacon is running - nothing to do
+	}
+	if zombieKilled {
+		d.logger.Println("Deacon session was zombie (Claude dead), killed it")
 	}
 
 	// Deacon not running - start it
 	d.logger.Println("Deacon not running, starting...")
 
 	// Create session in deacon directory (ensures correct CLAUDE.md is loaded)
-	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
 	deaconDir := filepath.Join(d.config.TownRoot, "deacon")
-	sessionName := d.getDeaconSessionName()
-	if err := d.tmux.EnsureSessionFresh(sessionName, deaconDir); err != nil {
+	if err := d.tmux.NewSession(deaconSession, deaconDir); err != nil {
 		d.logger.Printf("Error creating Deacon session: %v", err)
 		return
 	}
 
 	// Set environment (non-fatal: session works without these)
-	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", "deacon")
-	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", "deacon")
+	_ = d.tmux.SetEnvironment(deaconSession, "GT_ROLE", "deacon")
+	_ = d.tmux.SetEnvironment(deaconSession, "BD_ACTOR", "deacon")
 
 	// Launch Claude directly (no shell respawn loop)
 	// The daemon will detect if Claude exits and restart it on next heartbeat
 	// Export GT_ROLE and BD_ACTOR so Claude inherits them (tmux SetEnvironment doesn't export to processes)
-	if err := d.tmux.SendKeys(sessionName, config.BuildAgentStartupCommand("deacon", "deacon", "", "")); err != nil {
+	if err := d.tmux.SendKeys(deaconSession, config.BuildAgentStartupCommand("deacon", "deacon", "", "")); err != nil {
 		d.logger.Printf("Error launching Claude in Deacon session: %v", err)
 		return
 	}

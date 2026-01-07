@@ -948,7 +948,7 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 	t := tmux.NewTmux()
 	sessionID := crewSessionName(rigName, crewName)
 
-	healthy, err := t.EnsureSessionClear(sessionID)
+	healthy, _, err := t.EnsureSessionClear(sessionID)
 	if err != nil {
 		return err
 	}

@@ -250,7 +250,7 @@ func ensureDaemon(townRoot string) error {
 // ensureSession starts a Claude session if not running.
 // Handles zombie sessions (tmux alive but Claude dead) by killing and recreating.
 func ensureSession(t *tmux.Tmux, sessionName, workDir, role string) error {
-	healthy, err := t.EnsureSessionClear(sessionName)
+	healthy, _, err := t.EnsureSessionClear(sessionName)
 	if err != nil {
 		return err
 	}
@@ -421,7 +421,7 @@ func startCrewFromSettings(t *tmux.Tmux, townRoot, rigName string) ([]string, ma
 		sessionName := fmt.Sprintf("gt-%s-crew-%s", rigName, crewName)
 
 		// Check for existing session, handle zombies
-		healthy, err := t.EnsureSessionClear(sessionName)
+		healthy, _, err := t.EnsureSessionClear(sessionName)
 		if err != nil {
 			errors[crewName] = err
 			continue

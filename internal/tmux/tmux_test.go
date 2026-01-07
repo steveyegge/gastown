@@ -390,31 +390,31 @@ func ensureSessionClearWithOps(
 	hasSession func(string) (bool, error),
 	isClaudeRunning func(string) bool,
 	killSession func(string) error,
-) (healthy bool, err error) {
+) (healthy, zombieKilled bool, err error) {
 	exists, err := hasSession(name)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	if !exists {
-		return false, nil
+		return false, false, nil
 	}
 
 	if isClaudeRunning(name) {
-		return true, nil
+		return true, false, nil
 	}
 
 	if err := killSession(name); err != nil {
-		return false, err
+		return false, false, err
 	}
-	return false, nil
+	return false, true, nil
 }
 
 func TestEnsureSessionClear_NoExistingSession(t *testing.T) {
 	mock := newMockTmuxOps()
 	// No session added - simulates non-existent session
 
-	healthy, err := ensureSessionClearWithOps(
+	healthy, zombieKilled, err := ensureSessionClearWithOps(
 		"test-session",
 		mock.hasSession,
 		mock.isClaudeRunning,
@@ -427,6 +427,9 @@ func TestEnsureSessionClear_NoExistingSession(t *testing.T) {
 	if healthy {
 		t.Error("expected healthy=false when no session exists")
 	}
+	if zombieKilled {
+		t.Error("expected zombieKilled=false when no session exists")
+	}
 	if mock.wasKillCalled("test-session") {
 		t.Error("KillSession should not be called when session doesn't exist")
 	}
@@ -436,7 +439,7 @@ func TestEnsureSessionClear_ZombieSession(t *testing.T) {
 	mock := newMockTmuxOps()
 	mock.addSession("test-session", false) // exists but Claude not running (zombie)
 
-	healthy, err := ensureSessionClearWithOps(
+	healthy, zombieKilled, err := ensureSessionClearWithOps(
 		"test-session",
 		mock.hasSession,
 		mock.isClaudeRunning,
@@ -449,6 +452,9 @@ func TestEnsureSessionClear_ZombieSession(t *testing.T) {
 	if healthy {
 		t.Error("expected healthy=false for zombie session")
 	}
+	if !zombieKilled {
+		t.Error("expected zombieKilled=true for zombie session")
+	}
 	if !mock.wasKillCalled("test-session") {
 		t.Error("KillSession should be called for zombie session")
 	}
@@ -458,7 +464,7 @@ func TestEnsureSessionClear_HealthySession(t *testing.T) {
 	mock := newMockTmuxOps()
 	mock.addSession("test-session", true) // exists and Claude is running (healthy)
 
-	healthy, err := ensureSessionClearWithOps(
+	healthy, zombieKilled, err := ensureSessionClearWithOps(
 		"test-session",
 		mock.hasSession,
 		mock.isClaudeRunning,
@@ -471,6 +477,9 @@ func TestEnsureSessionClear_HealthySession(t *testing.T) {
 	if !healthy {
 		t.Error("expected healthy=true for healthy session")
 	}
+	if zombieKilled {
+		t.Error("expected zombieKilled=false for healthy session")
+	}
 	if mock.wasKillCalled("test-session") {
 		t.Error("KillSession should NOT be called for healthy session")
 	}
@@ -480,7 +489,7 @@ func TestEnsureSessionClear_HasSessionError(t *testing.T) {
 	mock := newMockTmuxOps()
 	mock.setHasError("test-session", errors.New("tmux error"))
 
-	healthy, err := ensureSessionClearWithOps(
+	healthy, zombieKilled, err := ensureSessionClearWithOps(
 		"test-session",
 		mock.hasSession,
 		mock.isClaudeRunning,
@@ -493,6 +502,9 @@ func TestEnsureSessionClear_HasSessionError(t *testing.T) {
 	if healthy {
 		t.Error("expected healthy=false on error")
 	}
+	if zombieKilled {
+		t.Error("expected zombieKilled=false on error")
+	}
 }
 
 func TestEnsureSessionClear_KillSessionError(t *testing.T) {
@@ -500,7 +512,7 @@ func TestEnsureSessionClear_KillSessionError(t *testing.T) {
 	mock.addSession("test-session", false) // zombie
 	mock.setKillError("test-session", errors.New("kill failed"))
 
-	healthy, err := ensureSessionClearWithOps(
+	healthy, zombieKilled, err := ensureSessionClearWithOps(
 		"test-session",
 		mock.hasSession,
 		mock.isClaudeRunning,
@@ -512,6 +524,9 @@ func TestEnsureSessionClear_KillSessionError(t *testing.T) {
 	}
 	if healthy {
 		t.Error("expected healthy=false on error")
+	}
+	if zombieKilled {
+		t.Error("expected zombieKilled=false on error")
 	}
 }
 

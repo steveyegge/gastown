@@ -80,28 +80,29 @@ func (t *Tmux) NewSession(name, workDir string) error {
 // Use this when you need to do custom setup between zombie detection and session creation.
 //
 // Returns:
-//   - (true, nil) if a healthy session exists (Claude running) - caller should skip creation
-//   - (false, nil) if no session exists or zombie was killed - caller can create new session
-//   - (false, err) on error
-func (t *Tmux) EnsureSessionClear(name string) (healthy bool, err error) {
+//   - (true, false, nil) if a healthy session exists (Claude running) - caller should skip creation
+//   - (false, false, nil) if no session exists - caller can create new session
+//   - (false, true, nil) if zombie was killed - caller can create new session
+//   - (false, false, err) on error
+func (t *Tmux) EnsureSessionClear(name string) (healthy, zombieKilled bool, err error) {
 	exists, err := t.HasSession(name)
 	if err != nil {
-		return false, fmt.Errorf("checking session: %w", err)
+		return false, false, fmt.Errorf("checking session: %w", err)
 	}
 
 	if !exists {
-		return false, nil // No session, clear to create
+		return false, false, nil // No session, clear to create
 	}
 
-	if t.IsClaudeRunning(name) {
-		return true, nil // Healthy session exists
+	if t.IsAgentRunning(name) {
+		return true, false, nil // Healthy session exists
 	}
 
 	// Zombie - kill it
 	if err := t.KillSession(name); err != nil {
-		return false, fmt.Errorf("killing zombie session: %w", err)
+		return false, false, fmt.Errorf("killing zombie session: %w", err)
 	}
-	return false, nil // Was zombie, now clear to create
+	return false, true, nil // Was zombie, now clear to create
 }
 
 // EnsureSessionFresh ensures a session is available and healthy.
@@ -114,7 +115,7 @@ func (t *Tmux) EnsureSessionClear(name string) (healthy bool, err error) {
 //
 // Returns nil if session is healthy or was created successfully.
 func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
-	healthy, err := t.EnsureSessionClear(name)
+	healthy, _, err := t.EnsureSessionClear(name)
 	if err != nil {
 		return err
 	}
