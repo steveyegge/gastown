@@ -127,6 +127,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewIdentityCollisionCheck())
 	d.Register(doctor.NewLinkedPaneCheck())
 	d.Register(doctor.NewThemeCheck())
+	d.Register(doctor.NewEnvVarsCheck())
 
 	// Patrol system checks
 	d.Register(doctor.NewPatrolMoleculesExistCheck())
