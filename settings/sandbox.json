@@ -1,9 +1,9 @@
 {
-  "_comment": "Example sandbox configuration - copy to settings/sandbox.json to enable",
+  "_comment": "Sandbox configuration",
 
   "backend": "local",
 
-  "_comment_daytona": "To enable Daytona sandboxes for polecats, set backend to 'daytona' and configure below",
+  "_comment_daytona": "Daytona sandbox configuration. To enable for polecats, set agent_backends.polecat to 'daytona'",
   "daytona": {
     "api_key_env": "DAYTONA_API_KEY",
     "anthropic_api_key_env": "ANTHROPIC_API_KEY",
