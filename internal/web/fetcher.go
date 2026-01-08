@@ -15,11 +15,13 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/activity"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // LiveConvoyFetcher fetches convoy data from beads.
 type LiveConvoyFetcher struct {
+	townRoot  string
 	townBeads string
 }
 
@@ -31,6 +33,7 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 	}
 
 	return &LiveConvoyFetcher{
+		townRoot:  townRoot,
 		townBeads: filepath.Join(townRoot, ".beads"),
 	}, nil
 }
@@ -556,14 +559,8 @@ func calculateWorkStatus(completed, total int, activityColor string) string {
 
 // FetchMergeQueue fetches open PRs from configured repos.
 func (f *LiveConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
-	// Repos to query for PRs
-	repos := []struct {
-		Full  string // Full repo path for gh CLI
-		Short string // Short name for display
-	}{
-		{"michaellady/roxas", "roxas"},
-		{"michaellady/gastown", "gastown"},
-	}
+	// Discover repos from the rigs registry
+	repos := f.discoverGitHubRepos()
 
 	var result []MergeQueueRow
 
@@ -577,6 +574,71 @@ func (f *LiveConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
 	}
 
 	return result, nil
+}
+
+// repoInfo holds GitHub repo information for PR fetching.
+type repoInfo struct {
+	Full  string // Full repo path for gh CLI (owner/repo)
+	Short string // Short name for display (rig name)
+}
+
+// discoverGitHubRepos loads the rigs registry and extracts GitHub repos.
+func (f *LiveConvoyFetcher) discoverGitHubRepos() []repoInfo {
+	rigsPath := filepath.Join(f.townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsPath)
+	if err != nil {
+		return nil
+	}
+
+	var repos []repoInfo
+	for rigName, entry := range rigsConfig.Rigs {
+		// Parse GitHub repo from git URL
+		ownerRepo := parseGitHubRepo(entry.GitURL)
+		if ownerRepo == "" {
+			// Not a GitHub URL (e.g., file://, local path)
+			continue
+		}
+		repos = append(repos, repoInfo{
+			Full:  ownerRepo,
+			Short: rigName,
+		})
+	}
+
+	return repos
+}
+
+// parseGitHubRepo extracts owner/repo from various git URL formats.
+// Returns empty string if not a GitHub URL.
+// Supported formats:
+//   - git@github.com:owner/repo.git
+//   - https://github.com/owner/repo.git
+//   - https://github.com/owner/repo
+//   - ssh://git@github.com/owner/repo.git
+func parseGitHubRepo(gitURL string) string {
+	// Skip non-GitHub URLs
+	if strings.HasPrefix(gitURL, "file://") || !strings.Contains(gitURL, "github.com") {
+		return ""
+	}
+
+	// SSH format: git@github.com:owner/repo.git
+	sshPattern := regexp.MustCompile(`git@github\.com:([^/]+)/([^/]+?)(?:\.git)?$`)
+	if matches := sshPattern.FindStringSubmatch(gitURL); len(matches) == 3 {
+		return matches[1] + "/" + matches[2]
+	}
+
+	// HTTPS format: https://github.com/owner/repo.git or https://github.com/owner/repo
+	httpsPattern := regexp.MustCompile(`https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$`)
+	if matches := httpsPattern.FindStringSubmatch(gitURL); len(matches) == 3 {
+		return matches[1] + "/" + matches[2]
+	}
+
+	// SSH with ssh:// prefix: ssh://git@github.com/owner/repo.git
+	sshPrefixPattern := regexp.MustCompile(`ssh://git@github\.com/([^/]+)/([^/]+?)(?:\.git)?$`)
+	if matches := sshPrefixPattern.FindStringSubmatch(gitURL); len(matches) == 3 {
+		return matches[1] + "/" + matches[2]
+	}
+
+	return ""
 }
 
 // prResponse represents the JSON response from gh pr list.
@@ -594,7 +656,7 @@ type prResponse struct {
 
 // fetchPRsForRepo fetches open PRs for a single repo.
 func (f *LiveConvoyFetcher) fetchPRsForRepo(repoFull, repoShort string) ([]MergeQueueRow, error) {
-	// #nosec G204 -- gh is a trusted CLI, repo is from hardcoded list
+	// #nosec G204 -- gh is a trusted CLI, repo is from rigs registry
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", repoFull,
 		"--state", "open",

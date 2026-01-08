@@ -415,3 +415,66 @@ func TestParseActivityTimestamp(t *testing.T) {
 		})
 	}
 }
+
+func TestParseGitHubRepo(t *testing.T) {
+	tests := []struct {
+		name   string
+		gitURL string
+		want   string
+	}{
+		{
+			name:   "SSH format with .git",
+			gitURL: "git@github.com:owner/repo.git",
+			want:   "owner/repo",
+		},
+		{
+			name:   "SSH format without .git",
+			gitURL: "git@github.com:owner/repo",
+			want:   "owner/repo",
+		},
+		{
+			name:   "HTTPS format with .git",
+			gitURL: "https://github.com/owner/repo.git",
+			want:   "owner/repo",
+		},
+		{
+			name:   "HTTPS format without .git",
+			gitURL: "https://github.com/owner/repo",
+			want:   "owner/repo",
+		},
+		{
+			name:   "SSH with ssh:// prefix",
+			gitURL: "ssh://git@github.com/owner/repo.git",
+			want:   "owner/repo",
+		},
+		{
+			name:   "file:// URL is not GitHub",
+			gitURL: "file:///Users/test/repo",
+			want:   "",
+		},
+		{
+			name:   "local path is not GitHub",
+			gitURL: "/Users/test/repo",
+			want:   "",
+		},
+		{
+			name:   "GitLab URL is not GitHub",
+			gitURL: "git@gitlab.com:owner/repo.git",
+			want:   "",
+		},
+		{
+			name:   "empty string",
+			gitURL: "",
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseGitHubRepo(tt.gitURL)
+			if got != tt.want {
+				t.Errorf("parseGitHubRepo(%q) = %q, want %q", tt.gitURL, got, tt.want)
+			}
+		})
+	}
+}
