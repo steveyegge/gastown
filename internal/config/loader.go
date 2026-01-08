@@ -1062,20 +1062,28 @@ func findTownRootFromCwd() (string, error) {
 // envVars is a map of environment variable names to values.
 // rigPath is optional - if empty, tries to detect town root from cwd.
 // prompt is optional - if provided, appended as the initial prompt.
+// GT_ROOT is automatically added to envVars if town root can be determined.
 func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) string {
 	var rc *RuntimeConfig
+	var townRoot string
 	if rigPath != "" {
 		// Derive town root from rig path
-		townRoot := filepath.Dir(rigPath)
+		townRoot = filepath.Dir(rigPath)
 		rc = ResolveAgentConfig(townRoot, rigPath)
 	} else {
 		// Try to detect town root from cwd for town-level agents (mayor, deacon)
-		townRoot, err := findTownRootFromCwd()
+		var err error
+		townRoot, err = findTownRootFromCwd()
 		if err != nil {
 			rc = DefaultRuntimeConfig()
 		} else {
 			rc = ResolveAgentConfig(townRoot, "")
 		}
+	}
+
+	// Add GT_ROOT if we found the town root and it's not already set
+	if townRoot != "" && envVars["GT_ROOT"] == "" {
+		envVars["GT_ROOT"] = townRoot
 	}
 
 	// Build environment export prefix
@@ -1104,18 +1112,21 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 
 // BuildStartupCommandWithAgentOverride builds a startup command like BuildStartupCommand,
 // but uses agentOverride if non-empty.
+// GT_ROOT is automatically added to envVars if town root can be determined.
 func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride string) (string, error) {
 	var rc *RuntimeConfig
+	var townRoot string
 
 	if rigPath != "" {
-		townRoot := filepath.Dir(rigPath)
+		townRoot = filepath.Dir(rigPath)
 		var err error
 		rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
 		if err != nil {
 			return "", err
 		}
 	} else {
-		townRoot, err := findTownRootFromCwd()
+		var err error
+		townRoot, err = findTownRootFromCwd()
 		if err != nil {
 			rc = DefaultRuntimeConfig()
 		} else {
@@ -1125,6 +1136,11 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 				return "", resolveErr
 			}
 		}
+	}
+
+	// Add GT_ROOT if we found the town root and it's not already set
+	if townRoot != "" && envVars["GT_ROOT"] == "" {
+		envVars["GT_ROOT"] = townRoot
 	}
 
 	// Build environment export prefix
