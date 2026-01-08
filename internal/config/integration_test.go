@@ -259,25 +259,36 @@ func writeTownJSON(t *testing.T, path string, data interface{}) {
 	}
 }
 
-// testTmuxSessionWithStubAgent tests that a tmux session runs the stub agent.
+func pollForOutput(t *testing.T, sessionName, expected string, timeout time.Duration) (string, bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		output := captureTmuxPane(t, sessionName, 50)
+		if strings.Contains(output, expected) {
+			return output, true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return captureTmuxPane(t, sessionName, 50), false
+}
+
 func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName string) {
 	t.Helper()
 
-	sessionName := fmt.Sprintf("gt-test-%d", time.Now().UnixNano())
+	sessionName := fmt.Sprintf("gt-test-pid%d-%d", os.Getpid(), time.Now().UnixNano())
 	workDir := tmpDir
 
-	// Cleanup session on exit
+	exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+
 	defer func() {
 		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
 	}()
 
-	// Create tmux session
 	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-c", workDir)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
 
-	// Set environment variables
 	envVars := map[string]string{
 		"GT_ROLE":    "polecat",
 		"GT_POLECAT": "test-polecat",
@@ -291,53 +302,39 @@ func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName s
 		}
 	}
 
-	// Send the stub agent command
 	agentCmd := fmt.Sprintf("%s --test-mode --stub", stubAgentPath)
 	cmd = exec.Command("tmux", "send-keys", "-t", sessionName, agentCmd, "Enter")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to send keys: %v", err)
 	}
 
-	// Wait for agent to start
-	time.Sleep(2 * time.Second)
-
-	// Capture pane output
-	output := captureTmuxPane(t, sessionName, 50)
-
-	// Verify stub agent started
-	if !strings.Contains(output, "STUB_AGENT_STARTED") {
+	output, found := pollForOutput(t, sessionName, "STUB_AGENT_STARTED", 5*time.Second)
+	if !found {
 		t.Errorf("Expected STUB_AGENT_STARTED in output, got:\n%s", output)
+		return
 	}
 
-	// Verify environment variables were visible to agent
 	if !strings.Contains(output, "GT_ROLE: polecat") {
 		t.Logf("Warning: GT_ROLE not visible in agent output (tmux env may not propagate to subshell)")
 	}
 
-	// Send a question and verify response
 	cmd = exec.Command("tmux", "send-keys", "-t", sessionName, "ping", "Enter")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to send ping: %v", err)
 	}
 
-	time.Sleep(1 * time.Second)
-
-	output = captureTmuxPane(t, sessionName, 50)
-	if !strings.Contains(output, "STUB_AGENT_ANSWER: pong") {
+	output, found = pollForOutput(t, sessionName, "STUB_AGENT_ANSWER: pong", 3*time.Second)
+	if !found {
 		t.Errorf("Expected 'pong' response, got:\n%s", output)
 	}
 
-	// Send exit command
 	cmd = exec.Command("tmux", "send-keys", "-t", sessionName, "exit", "Enter")
 	if err := cmd.Run(); err != nil {
 		t.Logf("Warning: failed to send exit: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
-
-	// Final capture to verify clean exit
-	output = captureTmuxPane(t, sessionName, 50)
-	if !strings.Contains(output, "STUB_AGENT_EXITING") {
+	output, found = pollForOutput(t, sessionName, "STUB_AGENT_EXITING", 2*time.Second)
+	if !found {
 		t.Logf("Note: Agent may have exited before capture. Output:\n%s", output)
 	}
 

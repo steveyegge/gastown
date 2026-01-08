@@ -88,9 +88,9 @@ func TestWrapError(t *testing.T) {
 	b := New("/test")
 
 	tests := []struct {
-		stderr   string
-		wantErr  error
-		wantNil  bool
+		stderr  string
+		wantErr error
+		wantNil bool
 	}{
 		{"not a beads repository", ErrNotARepo, false},
 		{"No .beads directory found", ErrNotARepo, false},
@@ -127,7 +127,6 @@ func TestIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Walk up to find .beads
 	dir := cwd
 	for {
 		if _, err := os.Stat(filepath.Join(dir, ".beads")); err == nil {
@@ -138,6 +137,11 @@ func TestIntegration(t *testing.T) {
 			t.Skip("no .beads directory found in path")
 		}
 		dir = parent
+	}
+
+	dbPath := filepath.Join(dir, ".beads", "beads.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Skip("no beads.db found (JSONL-only repo)")
 	}
 
 	b := New(dir)
@@ -201,10 +205,10 @@ func TestIntegration(t *testing.T) {
 // TestParseMRFields tests parsing MR fields from issue descriptions.
 func TestParseMRFields(t *testing.T) {
 	tests := []struct {
-		name        string
-		issue       *Issue
-		wantNil     bool
-		wantFields  *MRFields
+		name       string
+		issue      *Issue
+		wantNil    bool
+		wantFields *MRFields
 	}{
 		{
 			name:    "nil issue",
@@ -521,8 +525,8 @@ author: someone
 target: main`,
 			},
 			fields: &MRFields{
-				Branch:     "polecat/Capable/gt-ghi",
-				Target:     "integration/epic",
+				Branch:      "polecat/Capable/gt-ghi",
+				Target:      "integration/epic",
 				CloseReason: "merged",
 			},
 			want: `branch: polecat/Capable/gt-ghi
@@ -1032,10 +1036,10 @@ func TestParseAgentBeadID(t *testing.T) {
 		// Parseable but not valid agent roles (IsAgentSessionBead will reject)
 		{"gt-abc123", "", "abc123", "", true}, // Parses as town-level but not valid role
 		// Other prefixes (bd-, hq-)
-		{"bd-mayor", "", "mayor", "", true},                               // bd prefix town-level
-		{"bd-beads-witness", "beads", "witness", "", true},                // bd prefix rig-level singleton
-		{"bd-beads-polecat-pearl", "beads", "polecat", "pearl", true},     // bd prefix rig-level named
-		{"hq-mayor", "", "mayor", "", true},                               // hq prefix town-level
+		{"bd-mayor", "", "mayor", "", true},                           // bd prefix town-level
+		{"bd-beads-witness", "beads", "witness", "", true},            // bd prefix rig-level singleton
+		{"bd-beads-polecat-pearl", "beads", "polecat", "pearl", true}, // bd prefix rig-level named
+		{"hq-mayor", "", "mayor", "", true},                           // hq prefix town-level
 		// Truly invalid patterns
 		{"x-mayor", "", "", "", false},    // Prefix too short (1 char)
 		{"abcd-mayor", "", "", "", false}, // Prefix too long (4 chars)

@@ -28,6 +28,7 @@ func TestGetRoleConfigForIdentity_PrefersTownRoleBead(t *testing.T) {
 
 	townRoot := t.TempDir()
 	runBd(t, townRoot, "init", "--quiet", "--prefix", "hq")
+	runBd(t, townRoot, "config", "set", "types.custom", "agent,role,rig,convoy,event")
 
 	// Create canonical role bead.
 	runBd(t, townRoot, "create",
@@ -61,6 +62,7 @@ func TestGetRoleConfigForIdentity_FallsBackToLegacyRoleBead(t *testing.T) {
 
 	townRoot := t.TempDir()
 	runBd(t, townRoot, "init", "--quiet", "--prefix", "gt")
+	runBd(t, townRoot, "config", "set", "types.custom", "agent,role,rig,convoy,event")
 
 	// Only legacy role bead exists.
 	runBd(t, townRoot, "create",
