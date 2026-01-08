@@ -311,6 +311,99 @@
             vertical-align: middle;
         }
 
+        /* Step progress badge */
+        .step-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 500;
+            background: var(--border);
+            color: var(--text-primary);
+            margin-left: 8px;
+        }
+
+        .step-badge.has-progress {
+            background: rgba(74, 222, 128, 0.2);
+            color: var(--green);
+        }
+
+        /* Tracked issues expandable section */
+        .tracked-issues {
+            display: none;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            margin: 8px 0;
+            padding: 8px 12px;
+        }
+
+        .tracked-issues.expanded {
+            display: block;
+        }
+
+        .tracked-issue-row {
+            display: flex;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.875rem;
+        }
+
+        .tracked-issue-row:last-child {
+            border-bottom: none;
+        }
+
+        .tracked-issue-id {
+            min-width: 80px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .tracked-issue-title {
+            flex: 1;
+            color: var(--text-primary);
+            margin-left: 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .tracked-issue-status {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+
+        .tracked-issue-status.status-closed {
+            background: var(--green);
+            color: var(--bg-dark);
+        }
+
+        .tracked-issue-status.status-hooked,
+        .tracked-issue-status.status-in_progress {
+            background: var(--yellow);
+            color: var(--bg-dark);
+        }
+
+        .tracked-issue-status.status-open {
+            background: var(--text-secondary);
+            color: var(--bg-dark);
+        }
+
+        .expand-toggle {
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            margin-left: 8px;
+        }
+
+        .expand-toggle:hover {
+            color: var(--text-primary);
+        }
+
         /* htmx loading indicator */
         .htmx-request .htmx-indicator {
             opacity: 1;
@@ -474,28 +567,49 @@
                 </tr>
             </thead>
             <tbody>
-                {{range .Convoys}}
-                <tr class="{{workStatusClass .WorkStatus}}">
+                {{range $idx, $convoy := .Convoys}}
+                <tr class="{{workStatusClass $convoy.WorkStatus}}">
                     <td>
-                        <span class="work-status">{{.WorkStatus}}</span>
+                        <span class="work-status">{{$convoy.WorkStatus}}</span>
                     </td>
                     <td>
-                        <span class="convoy-id">{{.ID}}</span>
-                        <span class="convoy-title">{{.Title}}</span>
+                        <span class="convoy-id">{{$convoy.ID}}</span>
+                        <span class="convoy-title">{{$convoy.Title}}</span>
+                        {{if $convoy.TrackedIssues}}
+                        <span class="expand-toggle" onclick="toggleTrackedIssues('tracked-{{$idx}}')">[{{len $convoy.TrackedIssues}} issues ▼]</span>
+                        {{end}}
                     </td>
                     <td class="progress">
-                        {{.Progress}}
-                        {{if .Total}}
+                        {{$convoy.Progress}}
+                        {{if $convoy.Total}}
                         <div class="progress-bar">
-                            <div class="progress-fill" style="width: {{progressPercent .Completed .Total}}%;"></div>
+                            <div class="progress-fill" style="width: {{progressPercent $convoy.Completed $convoy.Total}}%;"></div>
                         </div>
                         {{end}}
                     </td>
-                    <td class="{{activityClass .LastActivity}}">
+                    <td class="{{activityClass $convoy.LastActivity}}">
                         <span class="activity-dot"></span>
-                        {{.LastActivity.FormattedAge}}
+                        {{$convoy.LastActivity.FormattedAge}}
                     </td>
                 </tr>
+                {{if $convoy.TrackedIssues}}
+                <tr>
+                    <td colspan="4" style="padding: 0;">
+                        <div id="tracked-{{$idx}}" class="tracked-issues">
+                            {{range $convoy.TrackedIssues}}
+                            <div class="tracked-issue-row">
+                                <span class="tracked-issue-id">{{.ID}}</span>
+                                <span class="tracked-issue-title">{{.Title}}</span>
+                                {{if .StepProgress}}
+                                <span class="step-badge has-progress">[Step {{.StepProgress}}{{if .CurrentStep}}: {{.CurrentStep}}{{end}}]</span>
+                                {{end}}
+                                <span class="tracked-issue-status status-{{.Status}}">{{.Status}}</span>
+                            </div>
+                            {{end}}
+                        </div>
+                    </td>
+                </tr>
+                {{end}}
                 {{end}}
             </tbody>
         </table>
@@ -592,5 +706,13 @@
         </table>
         {{end}}
     </div>
+    <script>
+        function toggleTrackedIssues(id) {
+            var el = document.getElementById(id);
+            if (el) {
+                el.classList.toggle('expanded');
+            }
+        }
+    </script>
 </body>
 </html>

@@ -131,12 +131,21 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 		// Get tracked issues for expandable view
 		row.TrackedIssues = make([]TrackedIssue, len(tracked))
 		for i, t := range tracked {
-			row.TrackedIssues[i] = TrackedIssue{
-				ID:       t.ID,
-				Title:    t.Title,
-				Status:   t.Status,
-				Assignee: t.Assignee,
+			ti := TrackedIssue{
+				ID:             t.ID,
+				Title:          t.Title,
+				Status:         t.Status,
+				Assignee:       t.Assignee,
+				MoleculeID:     t.MoleculeID,
+				CurrentStep:    t.CurrentStep,
+				TotalSteps:     t.TotalSteps,
+				CompletedSteps: t.CompletedSteps,
 			}
+			// Format step progress string if molecule exists
+			if t.TotalSteps > 0 {
+				ti.StepProgress = fmt.Sprintf("%d/%d", t.CompletedSteps, t.TotalSteps)
+			}
+			row.TrackedIssues[i] = ti
 		}
 
 		rows = append(rows, row)
@@ -147,12 +156,16 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 
 // trackedIssueInfo holds info about an issue being tracked by a convoy.
 type trackedIssueInfo struct {
-	ID           string
-	Title        string
-	Status       string
-	Assignee     string
-	LastActivity time.Time
-	UpdatedAt    time.Time // Fallback for activity when no assignee
+	ID             string
+	Title          string
+	Status         string
+	Assignee       string
+	LastActivity   time.Time
+	UpdatedAt      time.Time // Fallback for activity when no assignee
+	MoleculeID     string    // Attached molecule ID (if any)
+	CurrentStep    string    // Title of current step (in_progress or first ready)
+	TotalSteps     int       // Total steps in the molecule
+	CompletedSteps int       // Completed steps in the molecule
 }
 
 // getTrackedIssues fetches tracked issues for a convoy.
@@ -198,6 +211,16 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 	// Get worker activity from tmux sessions based on assignees
 	workers := f.getWorkersFromAssignees(details)
 
+	// Get molecule status for each unique assignee
+	moleculeStatus := make(map[string]*moleculeStatusJSON)
+	for _, detail := range details {
+		if detail != nil && detail.Assignee != "" {
+			if _, exists := moleculeStatus[detail.Assignee]; !exists {
+				moleculeStatus[detail.Assignee] = f.getMoleculeStatusForAssignee(detail.Assignee)
+			}
+		}
+	}
+
 	// Build result
 	result := make([]trackedIssueInfo, 0, len(issueIDs))
 	for _, id := range issueIDs {
@@ -208,6 +231,16 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 			info.Status = d.Status
 			info.Assignee = d.Assignee
 			info.UpdatedAt = d.UpdatedAt
+
+			// Add molecule info if assignee has an attached molecule
+			if molStatus, hasMol := moleculeStatus[d.Assignee]; hasMol && molStatus != nil {
+				info.MoleculeID = molStatus.AttachedMolecule
+				if molStatus.Progress != nil {
+					info.TotalSteps = molStatus.Progress.TotalSteps
+					info.CompletedSteps = molStatus.Progress.DoneSteps
+					info.CurrentStep = f.getMoleculeCurrentStep(molStatus.Progress)
+				}
+			}
 		} else {
 			info.Title = "(external)"
 			info.Status = "unknown"
@@ -322,6 +355,83 @@ func (f *LiveConvoyFetcher) getWorkersFromAssignees(details map[string]*issueDet
 	}
 
 	return result
+}
+
+// moleculeStatusJSON represents the JSON output from 'gt mol status --json'.
+type moleculeStatusJSON struct {
+	AttachedMolecule string `json:"attached_molecule"`
+	Progress         *struct {
+		TotalSteps int      `json:"total_steps"`
+		DoneSteps  int      `json:"done_steps"`
+		InProgress int      `json:"in_progress_steps"`
+		ReadySteps []string `json:"ready_steps"`
+	} `json:"progress"`
+}
+
+// getMoleculeStatusForAssignee queries molecule status for an assignee.
+// Returns molecule info if the assignee has an attached molecule with progress.
+func (f *LiveConvoyFetcher) getMoleculeStatusForAssignee(assignee string) *moleculeStatusJSON {
+	if assignee == "" {
+		return nil
+	}
+
+	// Query gt mol status for the assignee
+	// #nosec G204 -- gt is a trusted internal tool, assignee is from beads data
+	cmd := exec.Command("gt", "mol", "status", assignee, "--json")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+
+	var status moleculeStatusJSON
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		return nil
+	}
+
+	// Only return if there's an attached molecule with progress
+	if status.AttachedMolecule == "" || status.Progress == nil {
+		return nil
+	}
+
+	return &status
+}
+
+// getMoleculeCurrentStep fetches the title of the current step for a molecule.
+// Returns the first in-progress or first ready step title.
+func (f *LiveConvoyFetcher) getMoleculeCurrentStep(progress *struct {
+	TotalSteps int      `json:"total_steps"`
+	DoneSteps  int      `json:"done_steps"`
+	InProgress int      `json:"in_progress_steps"`
+	ReadySteps []string `json:"ready_steps"`
+}) string {
+	if progress == nil {
+		return ""
+	}
+
+	// If there are ready steps, get the title of the first one
+	if len(progress.ReadySteps) > 0 {
+		stepID := progress.ReadySteps[0]
+		// Query bd show for step title
+		// #nosec G204 -- bd is a trusted internal tool
+		cmd := exec.Command("bd", "--allow-stale", "show", stepID, "--json")
+		cmd.Dir = f.townBeads
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		if err := cmd.Run(); err != nil {
+			return stepID // Fall back to just the ID
+		}
+
+		var steps []struct {
+			Title string `json:"title"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &steps); err != nil || len(steps) == 0 {
+			return stepID
+		}
+		return steps[0].Title
+	}
+
+	return ""
 }
 
 // getSessionActivityForAssignee looks up tmux session activity for an assignee.

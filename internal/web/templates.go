@@ -67,10 +67,15 @@ type ConvoyRow struct {
 
 // TrackedIssue represents an issue tracked by a convoy.
 type TrackedIssue struct {
-	ID       string
-	Title    string
-	Status   string
-	Assignee string
+	ID             string
+	Title          string
+	Status         string
+	Assignee       string
+	MoleculeID     string // Attached molecule ID (if any)
+	CurrentStep    string // Title of current step (in_progress or first ready)
+	StepProgress   string // Progress string like "3/7"
+	TotalSteps     int    // Total steps in the molecule
+	CompletedSteps int    // Completed steps in the molecule
 }
 
 // LoadTemplates loads and parses all HTML templates.
