@@ -87,6 +87,7 @@ func (m *Manager) Start(agentOverride string) error {
 	// Set environment variables (non-fatal: session works without these)
 	_ = t.SetEnvironment(sessionID, "GT_ROLE", "deacon")
 	_ = t.SetEnvironment(sessionID, "BD_ACTOR", "deacon")
+	_ = t.SetEnvironment(sessionID, "GT_ROOT", m.townRoot)
 
 	// Apply Deacon theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.DeaconTheme()

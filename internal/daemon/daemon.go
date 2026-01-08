@@ -325,6 +325,7 @@ func (d *Daemon) ensureDeaconRunning() {
 
 	// Set environment (non-fatal: session works without these)
 	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", "deacon")
+	_ = d.tmux.SetEnvironment(sessionName, "GT_ROOT", d.config.TownRoot)
 	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", "deacon")
 
 	// Launch Claude directly (no shell respawn loop)
@@ -801,6 +802,7 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 
 	// Set environment variables
 	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", "polecat")
+	_ = d.tmux.SetEnvironment(sessionName, "GT_ROOT", d.config.TownRoot)
 	_ = d.tmux.SetEnvironment(sessionName, "GT_RIG", rigName)
 	_ = d.tmux.SetEnvironment(sessionName, "GT_POLECAT", polecatName)
 

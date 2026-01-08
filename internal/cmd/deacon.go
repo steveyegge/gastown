@@ -359,6 +359,7 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	// Set environment (non-fatal: session works without these)
 	_ = t.SetEnvironment(sessionName, "GT_ROLE", "deacon")
 	_ = t.SetEnvironment(sessionName, "BD_ACTOR", "deacon")
+	_ = t.SetEnvironment(sessionName, "GT_ROOT", townRoot)
 
 	// Apply Deacon theme (non-fatal: theming failure doesn't affect operation)
 	// Note: ConfigureGasTownSession includes cycle bindings

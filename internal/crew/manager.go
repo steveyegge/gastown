@@ -484,6 +484,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	_ = t.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
 	_ = t.SetEnvironment(sessionID, "GT_CREW", name)
 	_ = t.SetEnvironment(sessionID, "GT_ROLE", "crew")
+	_ = t.SetEnvironment(sessionID, "GT_ROOT", filepath.Dir(m.rig.Path))
 
 	// Set CLAUDE_CONFIG_DIR for account selection (non-fatal)
 	if opts.ClaudeConfigDir != "" {

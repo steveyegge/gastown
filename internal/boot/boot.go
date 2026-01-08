@@ -192,6 +192,7 @@ func (b *Boot) spawnTmux() error {
 
 	// Set environment
 	_ = b.tmux.SetEnvironment(SessionName, "GT_ROLE", "boot")
+	_ = b.tmux.SetEnvironment(SessionName, "GT_ROOT", b.townRoot)
 	_ = b.tmux.SetEnvironment(SessionName, "BD_ACTOR", "deacon-boot")
 
 	// Launch Claude with environment exported inline and initial triage prompt
@@ -218,6 +219,7 @@ func (b *Boot) spawnDegraded() error {
 	cmd.Dir = b.deaconDir
 	cmd.Env = append(os.Environ(),
 		"GT_ROLE=boot",
+		"GT_ROOT="+b.townRoot,
 		"BD_ACTOR=deacon-boot",
 		"GT_DEGRADED=true",
 	)

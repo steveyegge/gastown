@@ -478,8 +478,9 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 // setSessionEnvironment sets environment variables for the tmux session.
 // Uses role bead config if available, falls back to hardcoded defaults.
 func (d *Daemon) setSessionEnvironment(sessionName, identity string, config *beads.RoleConfig, parsed *ParsedIdentity) {
-	// Always set GT_ROLE
+	// Always set GT_ROLE and GT_ROOT
 	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", identity)
+	_ = d.tmux.SetEnvironment(sessionName, "GT_ROOT", d.config.TownRoot)
 
 	// BD_ACTOR uses slashes instead of dashes for path-like identity
 	bdActor := identityToBDActor(identity)

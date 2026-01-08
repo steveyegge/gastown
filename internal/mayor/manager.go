@@ -85,6 +85,7 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Set environment variables (non-fatal: session works without these)
 	_ = t.SetEnvironment(sessionID, "GT_ROLE", "mayor")
+	_ = t.SetEnvironment(sessionID, "GT_ROOT", m.townRoot)
 	_ = t.SetEnvironment(sessionID, "BD_ACTOR", "mayor")
 
 	// Apply Mayor theming (non-fatal: theming failure doesn't affect operation)

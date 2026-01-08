@@ -179,7 +179,9 @@ func (m *Manager) Start(foreground bool) error {
 
 	// Set environment variables (non-fatal: session works without these)
 	bdActor := fmt.Sprintf("%s/refinery", m.rig.Name)
+	townRoot := filepath.Dir(m.rig.Path)
 	_ = t.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
+	_ = t.SetEnvironment(sessionID, "GT_ROOT", townRoot)
 	_ = t.SetEnvironment(sessionID, "GT_REFINERY", "1")
 	_ = t.SetEnvironment(sessionID, "GT_ROLE", "refinery")
 	_ = t.SetEnvironment(sessionID, "BD_ACTOR", bdActor)

@@ -136,6 +136,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		_ = t.SetEnvironment(sessionID, "GT_ROLE", "crew")
 		_ = t.SetEnvironment(sessionID, "GT_RIG", r.Name)
 		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
+		_ = t.SetEnvironment(sessionID, "GT_ROOT", townRoot)
 
 		// Set CLAUDE_CONFIG_DIR for account selection (non-fatal)
 		if claudeConfigDir != "" {
