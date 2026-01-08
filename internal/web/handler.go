@@ -52,10 +52,17 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		polecats = nil
 	}
 
+	// Calculate total cost from all polecat sessions
+	var totalCost float64
+	for _, p := range polecats {
+		totalCost += p.SessionCost
+	}
+
 	data := ConvoyData{
 		Convoys:    convoys,
 		MergeQueue: mergeQueue,
 		Polecats:   polecats,
+		TotalCost:  totalCost,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

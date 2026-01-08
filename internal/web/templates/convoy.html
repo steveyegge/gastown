@@ -427,6 +427,30 @@
         .polecat-row.htmx-request {
             opacity: 0.7;
         }
+
+        /* Cost colors */
+        .cost-green {
+            color: var(--green);
+        }
+
+        .cost-yellow {
+            color: var(--yellow);
+        }
+
+        .cost-red {
+            color: var(--red);
+        }
+
+        .session-cost {
+            font-variant-numeric: tabular-nums;
+            font-weight: 500;
+        }
+
+        .total-cost {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-left: 16px;
+        }
     </style>
 </head>
 <body>
@@ -533,12 +557,13 @@
         {{end}}
 
         {{if .Polecats}}
-        <h2 class="section-header">🐾 Polecat Workers</h2>
+        <h2 class="section-header">🐾 Polecat Workers<span class="total-cost">Total: {{formatCost .TotalCost}}</span></h2>
         <table class="convoy-table">
             <thead>
                 <tr>
                     <th>Polecat</th>
                     <th>Rig</th>
+                    <th>Cost</th>
                     <th>Last Activity</th>
                     <th>Status</th>
                 </tr>
@@ -555,6 +580,7 @@
                         <span class="click-hint">▸ details</span>
                     </td>
                     <td>{{.Rig}}</td>
+                    <td class="session-cost {{costClass .SessionCost}}">{{formatCost .SessionCost}}</td>
                     <td class="{{activityClass .LastActivity}}">
                         <span class="activity-dot"></span>
                         {{.LastActivity.FormattedAge}}

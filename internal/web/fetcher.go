@@ -606,6 +606,9 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 	// Pre-fetch merge queue count to determine refinery idle status
 	mergeQueueCount := f.getMergeQueueCount()
 
+	// Pre-fetch session costs for all sessions
+	sessionCosts := f.getSessionCosts()
+
 	var polecats []PolecatRow
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 
@@ -655,16 +658,52 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 			statusHint = f.getPolecatStatusHint(sessionName)
 		}
 
+		// Look up session cost
+		cost := sessionCosts[sessionName]
+
 		polecats = append(polecats, PolecatRow{
 			Name:         polecat,
 			Rig:          rig,
 			SessionID:    sessionName,
 			LastActivity: activity.Calculate(activityTime),
 			StatusHint:   statusHint,
+			SessionCost:  cost,
 		})
 	}
 
 	return polecats, nil
+}
+
+// getSessionCosts fetches costs for all sessions from 'gt costs --json'.
+// Returns a map of session name to cost in USD.
+func (f *LiveConvoyFetcher) getSessionCosts() map[string]float64 {
+	result := make(map[string]float64)
+
+	// #nosec G204 -- gt is a trusted internal tool
+	cmd := exec.Command("gt", "costs", "--json")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return result
+	}
+
+	var costsResp struct {
+		Sessions []struct {
+			Session string  `json:"session"`
+			CostUSD float64 `json:"cost_usd"`
+		} `json:"sessions"`
+	}
+
+	if err := json.Unmarshal(stdout.Bytes(), &costsResp); err != nil {
+		return result
+	}
+
+	for _, s := range costsResp.Sessions {
+		result[s.Session] = s.CostUSD
+	}
+
+	return result
 }
 
 // getPolecatStatusHint captures the last non-empty line from a polecat's pane.

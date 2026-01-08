@@ -3,6 +3,7 @@ package web
 
 import (
 	"embed"
+	"fmt"
 	"html/template"
 	"io/fs"
 
@@ -17,6 +18,7 @@ type ConvoyData struct {
 	Convoys    []ConvoyRow
 	MergeQueue []MergeQueueRow
 	Polecats   []PolecatRow
+	TotalCost  float64 // Total cost across all polecat sessions
 }
 
 // PolecatRow represents a polecat worker in the dashboard.
@@ -26,6 +28,7 @@ type PolecatRow struct {
 	SessionID    string        // e.g., "gt-roxas-dag"
 	LastActivity activity.Info // Colored activity display
 	StatusHint   string        // Last line from pane (optional)
+	SessionCost  float64       // Cost in USD for this session
 }
 
 // PolecatDetailData holds detailed info about a polecat for the detail view.
@@ -78,6 +81,8 @@ func LoadTemplates() (*template.Template, error) {
 		"statusClass":     statusClass,
 		"workStatusClass": workStatusClass,
 		"progressPercent": progressPercent,
+		"costClass":       costClass,
+		"formatCost":      formatCost,
 	}
 
 	// Get the templates subdirectory
@@ -145,4 +150,24 @@ func progressPercent(completed, total int) int {
 		return 0
 	}
 	return (completed * 100) / total
+}
+
+// costClass returns the CSS class for cost coloring.
+// Green: <$1, Yellow: $1-5, Red: >$5
+func costClass(cost float64) string {
+	if cost < 1.0 {
+		return "cost-green"
+	}
+	if cost <= 5.0 {
+		return "cost-yellow"
+	}
+	return "cost-red"
+}
+
+// formatCost formats a cost as a string with dollar sign.
+func formatCost(cost float64) string {
+	if cost < 0.01 {
+		return "$0.00"
+	}
+	return fmt.Sprintf("$%.2f", cost)
 }
