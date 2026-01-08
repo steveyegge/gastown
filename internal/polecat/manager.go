@@ -241,6 +241,13 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
+	// Copy overlay files from .runtime/overlay/ to polecat root.
+	// This allows services to have .env and other config files at their root.
+	if err := m.copyOverlay(polecatPath); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
+	}
+
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
@@ -470,6 +477,11 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Set up shared beads
 	if err := m.setupSharedBeads(polecatPath); err != nil {
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Copy overlay files from .runtime/overlay/ to polecat root.
+	if err := m.copyOverlay(polecatPath); err != nil {
+		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
 	// NOTE: Slash commands inherited from town level - no per-workspace copies needed.
@@ -777,6 +789,62 @@ func (m *Manager) setupSharedBeads(polecatPath string) error {
 	redirectPath := filepath.Join(polecatBeadsDir, "redirect")
 	if err := os.WriteFile(redirectPath, []byte(redirectContent), 0644); err != nil {
 		return fmt.Errorf("creating redirect file: %w", err)
+	}
+
+	return nil
+}
+
+// copyOverlay copies files from <rig>/.runtime/overlay/ to the worktree root.
+// This allows storing gitignored files (like .env) that services need at their root.
+// The overlay is copied non-recursively - only files, not subdirectories.
+//
+// Structure:
+//
+//	rig/
+//	  .runtime/
+//	    overlay/
+//	      .env          <- Copied to polecat root
+//	      config.json    <- Copied to polecat root
+//	  polecats/
+//	    <name>/
+//	      .env          <- Copied from overlay
+//	      config.json    <- Copied from overlay
+func (m *Manager) copyOverlay(polecatPath string) error {
+	overlayDir := filepath.Join(m.rig.Path, ".runtime", "overlay")
+
+	// Check if overlay directory exists
+	entries, err := os.ReadDir(overlayDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No overlay directory - not an error, just nothing to copy
+			return nil
+		}
+		return fmt.Errorf("reading overlay dir: %w", err)
+	}
+
+	// Copy each file (not directories) from overlay to polecat root
+	for _, entry := range entries {
+		if entry.IsDir() {
+			// Skip subdirectories - only copy files at overlay root
+			continue
+		}
+
+		srcPath := filepath.Join(overlayDir, entry.Name())
+		dstPath := filepath.Join(polecatPath, entry.Name())
+
+		// Read source file
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			// Log warning but continue - don't fail spawn for overlay issues
+			fmt.Printf("Warning: could not read overlay file %s: %v\n", entry.Name(), err)
+			continue
+		}
+
+		// Write to destination
+		if err := os.WriteFile(dstPath, data, 0644); err != nil {
+			fmt.Printf("Warning: could not write overlay file %s: %v\n", entry.Name(), err)
+			continue
+		}
 	}
 
 	return nil
