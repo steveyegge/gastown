@@ -60,6 +60,20 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating convoy handler: %w", err)
 	}
 
+	// Set up routing
+	mux := http.NewServeMux()
+	mux.Handle("/", handler)
+	mux.HandleFunc("/polecat/", func(w http.ResponseWriter, r *http.Request) {
+		// Parse /polecat/{rig}/{name} from URL path
+		path := r.URL.Path[len("/polecat/"):]
+		parts := splitPath(path)
+		if len(parts) != 2 {
+			http.Error(w, "Invalid polecat path, expected /polecat/{rig}/{name}", http.StatusBadRequest)
+			return
+		}
+		handler.ServePolecatDetail(w, r, parts[0], parts[1])
+	})
+
 	// Build the URL
 	url := fmt.Sprintf("http://localhost:%d", dashboardPort)
 
@@ -74,13 +88,37 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", dashboardPort),
-		Handler:           handler,
+		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 	return server.ListenAndServe()
+}
+
+// splitPath splits a URL path into its components, filtering empty strings.
+func splitPath(path string) []string {
+	var parts []string
+	for _, p := range splitBySlash(path) {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return parts
+}
+
+// splitBySlash splits a string by "/" without using strings package.
+func splitBySlash(s string) []string {
+	var result []string
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == '/' {
+			result = append(result, s[start:i])
+			start = i + 1
+		}
+	}
+	return result
 }
 
 // openBrowser opens the specified URL in the default browser.

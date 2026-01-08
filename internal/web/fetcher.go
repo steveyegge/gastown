@@ -753,3 +753,99 @@ func parseActivityTimestamp(s string) (int64, bool) {
 	}
 	return unix, true
 }
+
+// FetchPolecatDetail fetches detailed information about a specific polecat.
+func (f *LiveConvoyFetcher) FetchPolecatDetail(rig, name string) (*PolecatDetailData, error) {
+	sessionName := fmt.Sprintf("gt-%s-%s", rig, name)
+
+	// Get session activity
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}",
+		"-f", fmt.Sprintf("#{==:#{session_name},%s}", sessionName))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("session not found: %s", sessionName)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	if output == "" {
+		return nil, fmt.Errorf("session not found: %s", sessionName)
+	}
+
+	// Parse activity timestamp
+	parts := strings.Split(output, "|")
+	var activityInfo activity.Info
+	if len(parts) >= 2 {
+		var activityUnix int64
+		if _, err := fmt.Sscanf(parts[1], "%d", &activityUnix); err == nil && activityUnix > 0 {
+			activityTime := time.Unix(activityUnix, 0)
+			activityInfo = activity.Calculate(activityTime)
+		}
+	}
+
+	// Get pane output (last 20 lines)
+	paneOutput := f.getPolecatPaneOutput(sessionName, 20)
+
+	// Get hooked work
+	hookedWork := f.getPolecatHookedWork(rig, name)
+
+	return &PolecatDetailData{
+		Name:         name,
+		Rig:          rig,
+		SessionID:    sessionName,
+		LastActivity: activityInfo,
+		HookedWork:   hookedWork,
+		PaneOutput:   paneOutput,
+	}, nil
+}
+
+// getPolecatPaneOutput captures the last n lines from a polecat's pane.
+func (f *LiveConvoyFetcher) getPolecatPaneOutput(sessionName string, lines int) string {
+	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-J")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+
+	allLines := strings.Split(stdout.String(), "\n")
+
+	// Filter out empty lines from the end and get last n non-empty lines
+	var nonEmptyLines []string
+	for i := len(allLines) - 1; i >= 0 && len(nonEmptyLines) < lines; i-- {
+		line := strings.TrimRight(allLines[i], " \t\r")
+		if line != "" {
+			nonEmptyLines = append([]string{line}, nonEmptyLines...)
+		}
+	}
+
+	return strings.Join(nonEmptyLines, "\n")
+}
+
+// getPolecatHookedWork returns the hooked work ID for a polecat if any.
+func (f *LiveConvoyFetcher) getPolecatHookedWork(rig, name string) string {
+	assignee := fmt.Sprintf("%s/polecats/%s", rig, name)
+
+	// Query bd for hooked issues assigned to this polecat
+	cmd := exec.Command("bd", "list", "--status=hooked", "--json")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+
+	var issues []struct {
+		ID       string `json:"id"`
+		Assignee string `json:"assignee"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return ""
+	}
+
+	for _, issue := range issues {
+		if issue.Assignee == assignee {
+			return issue.ID
+		}
+	}
+	return ""
+}

@@ -10,6 +10,7 @@ type ConvoyFetcher interface {
 	FetchConvoys() ([]ConvoyRow, error)
 	FetchMergeQueue() ([]MergeQueueRow, error)
 	FetchPolecats() ([]PolecatRow, error)
+	FetchPolecatDetail(rig, name string) (*PolecatDetailData, error)
 }
 
 // ConvoyHandler handles HTTP requests for the convoy dashboard.
@@ -60,6 +61,22 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if err := h.template.ExecuteTemplate(w, "convoy.html", data); err != nil {
+		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+		return
+	}
+}
+
+// ServePolecatDetail handles GET /polecat/{rig}/{name} requests.
+func (h *ConvoyHandler) ServePolecatDetail(w http.ResponseWriter, r *http.Request, rig, name string) {
+	detail, err := h.fetcher.FetchPolecatDetail(rig, name)
+	if err != nil {
+		http.Error(w, "Polecat not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if err := h.template.ExecuteTemplate(w, "polecat_detail.html", detail); err != nil {
 		http.Error(w, "Failed to render template", http.StatusInternalServerError)
 		return
 	}

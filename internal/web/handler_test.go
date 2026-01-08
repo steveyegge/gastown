@@ -35,6 +35,23 @@ func (m *MockConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 	return m.Polecats, nil
 }
 
+func (m *MockConvoyFetcher) FetchPolecatDetail(rig, name string) (*PolecatDetailData, error) {
+	// Return a mock detail for testing
+	for _, p := range m.Polecats {
+		if p.Rig == rig && p.Name == name {
+			return &PolecatDetailData{
+				Name:         p.Name,
+				Rig:          p.Rig,
+				SessionID:    p.SessionID,
+				LastActivity: p.LastActivity,
+				HookedWork:   "",
+				PaneOutput:   "mock pane output",
+			}, nil
+		}
+	}
+	return nil, errors.New("polecat not found")
+}
+
 func TestConvoyHandler_RendersTemplate(t *testing.T) {
 	mock := &MockConvoyFetcher{
 		Convoys: []ConvoyRow{
@@ -962,6 +979,10 @@ func (m *MockConvoyFetcherWithErrors) FetchMergeQueue() ([]MergeQueueRow, error)
 
 func (m *MockConvoyFetcherWithErrors) FetchPolecats() ([]PolecatRow, error) {
 	return nil, m.PolecatsError
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchPolecatDetail(rig, name string) (*PolecatDetailData, error) {
+	return nil, errors.New("polecat not found")
 }
 
 func TestConvoyHandler_NonFatalErrors(t *testing.T) {

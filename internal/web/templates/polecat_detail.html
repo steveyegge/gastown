@@ -1,0 +1,35 @@
+<tr class="polecat-detail" id="polecat-detail-{{.Name}}">
+    <td colspan="4">
+        <div class="polecat-detail-content">
+            <div class="polecat-detail-header">
+                <span class="polecat-detail-title">{{.Name}} @ {{.Rig}}</span>
+                <span class="polecat-detail-close" onclick="this.closest('tr').remove()">✕ Close</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+                <div class="detail-section">
+                    <div class="detail-label">Session</div>
+                    <div class="detail-value">{{.SessionID}}</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Activity</div>
+                    <div class="detail-value {{activityClass .LastActivity}}">
+                        <span class="activity-dot"></span>
+                        {{.LastActivity.FormattedAge}}
+                    </div>
+                </div>
+                {{if .HookedWork}}
+                <div class="detail-section">
+                    <div class="detail-label">Hooked Work</div>
+                    <div class="detail-value">{{.HookedWork}}</div>
+                </div>
+                {{end}}
+            </div>
+            {{if .PaneOutput}}
+            <div class="detail-section">
+                <div class="detail-label">Terminal Output (last lines)</div>
+                <div class="pane-output">{{.PaneOutput}}</div>
+            </div>
+            {{end}}
+        </div>
+    </td>
+</tr>

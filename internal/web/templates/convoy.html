@@ -320,6 +320,113 @@
             opacity: 0;
             transition: opacity 200ms ease-in;
         }
+
+        /* Clickable polecat rows */
+        .polecat-row {
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .polecat-row:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .polecat-row .click-hint {
+            opacity: 0;
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            transition: opacity 0.15s ease;
+            margin-left: 8px;
+        }
+
+        .polecat-row:hover .click-hint {
+            opacity: 1;
+        }
+
+        /* Polecat detail expansion */
+        .polecat-detail {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .polecat-detail td {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .polecat-detail-content {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .polecat-detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .polecat-detail-title {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .polecat-detail-close {
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+
+        .polecat-detail-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+        }
+
+        .detail-section {
+            padding: 8px 0;
+        }
+
+        .detail-label {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 4px;
+        }
+
+        .detail-value {
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+
+        .detail-value a {
+            color: var(--green);
+            text-decoration: none;
+        }
+
+        .detail-value a:hover {
+            text-decoration: underline;
+        }
+
+        .pane-output {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 12px;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        /* htmx loading state for rows */
+        .polecat-row.htmx-request {
+            opacity: 0.7;
+        }
     </style>
 </head>
 <body>
@@ -436,11 +543,16 @@
                     <th>Status</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody id="polecat-tbody">
                 {{range .Polecats}}
-                <tr>
+                <tr class="polecat-row"
+                    hx-get="/polecat/{{.Rig}}/{{.Name}}"
+                    hx-target="this"
+                    hx-swap="afterend"
+                    hx-trigger="click">
                     <td>
                         <span class="convoy-id">{{.Name}}</span>
+                        <span class="click-hint">▸ details</span>
                     </td>
                     <td>{{.Rig}}</td>
                     <td class="{{activityClass .LastActivity}}">

@@ -28,6 +28,16 @@ type PolecatRow struct {
 	StatusHint   string        // Last line from pane (optional)
 }
 
+// PolecatDetailData holds detailed info about a polecat for the detail view.
+type PolecatDetailData struct {
+	Name         string        // e.g., "dag", "nux"
+	Rig          string        // e.g., "roxas", "gastown"
+	SessionID    string        // e.g., "gt-roxas-dag"
+	LastActivity activity.Info // Colored activity display
+	HookedWork   string        // ID of currently hooked issue (optional)
+	PaneOutput   string        // Last lines from tmux pane
+}
+
 // MergeQueueRow represents a PR in the merge queue.
 type MergeQueueRow struct {
 	Number     int
