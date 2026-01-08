@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/config"
@@ -20,8 +21,12 @@ import (
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/feed"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/refinery"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/wisp"
+	"github.com/steveyegge/gastown/internal/witness"
 )
 
 // Daemon is the town-level background service.
@@ -70,18 +75,19 @@ func (d *Daemon) Run() error {
 	// Acquire exclusive lock to prevent multiple daemons from running.
 	// This prevents the TOCTOU race condition where multiple concurrent starts
 	// can all pass the IsRunning() check before any writes the PID file.
+	// Uses gofrs/flock for cross-platform compatibility (Unix + Windows).
 	lockFile := filepath.Join(d.config.TownRoot, "daemon", "daemon.lock")
-	lock, err := os.OpenFile(lockFile, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		return fmt.Errorf("opening lock file: %w", err)
-	}
-	defer lock.Close()
+	fileLock := flock.New(lockFile)
 
 	// Try to acquire exclusive lock (non-blocking)
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	locked, err := fileLock.TryLock()
+	if err != nil {
+		return fmt.Errorf("acquiring lock: %w", err)
+	}
+	if !locked {
 		return fmt.Errorf("daemon already running (lock held by another process)")
 	}
-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = fileLock.Unlock() }()
 
 	// Write PID file
 	if err := os.WriteFile(d.config.PidFile, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
@@ -184,9 +190,10 @@ func (d *Daemon) heartbeat(state *State) {
 	// 4. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 5. Check for stale agents (timeout fallback)
-	// Agents that report "running" but haven't updated in too long are marked dead
-	d.checkStaleAgents()
+	// 5. Stale agent check REMOVED (gt-zecmc)
+	// Was: d.checkStaleAgents() - marked agents "dead" based on bead update time.
+	// This violated "discover, don't track" - agent liveness is observable from tmux.
+	// The daemon now checks tmux directly in ensureXxxRunning() functions.
 
 	// 6. Check for GUPP violations (agents with work-on-hook not progressing)
 	d.checkGUPPViolations()
@@ -283,51 +290,28 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 }
 
 // ensureDeaconRunning ensures the Deacon is running.
-// ZFC-compliant: trusts agent bead state, with tmux health check fallback.
+// Discover, don't track: checks tmux directly instead of bead state (gt-zecmc).
 // The Deacon is the system's heartbeat - it must always be running.
 func (d *Daemon) ensureDeaconRunning() {
-	// Check agent bead state (ZFC: trust what agent reports)
-	beadState, beadErr := d.getAgentBeadState(d.getDeaconSessionName())
-	if beadErr == nil {
-		if beadState == "running" || beadState == "working" {
-			// Agent reports it's running - trust it
-			// Timeout fallback for stale state is in lifecycle.go
+	deaconSession := d.getDeaconSessionName()
+
+	// Check if tmux session exists and Claude is running (observable reality)
+	hasSession, sessionErr := d.tmux.HasSession(deaconSession)
+	if sessionErr == nil && hasSession {
+		if d.tmux.IsClaudeRunning(deaconSession) {
+			// Deacon is running - nothing to do
 			return
 		}
-
-		// CIRCUIT BREAKER: If agent is marked "dead" by checkStaleAgents(),
-		// force-kill the session and restart. This handles stuck agents that
-		// are still alive (zombie Claude sessions that haven't updated their bead).
-		if beadState == "dead" {
-			d.logger.Println("Deacon is marked dead (circuit breaker triggered), forcing restart...")
-			deaconSession := d.getDeaconSessionName()
-			hasSession, _ := d.tmux.HasSession(deaconSession)
-			if hasSession {
-				if err := d.tmux.KillSession(deaconSession); err != nil {
-					d.logger.Printf("Warning: failed to kill dead Deacon session: %v", err)
-				}
-			}
-			// Fall through to restart
+		// Session exists but Claude not running - zombie session, kill it
+		d.logger.Println("Deacon session exists but Claude not running, killing zombie session...")
+		if err := d.tmux.KillSession(deaconSession); err != nil {
+			d.logger.Printf("Warning: failed to kill zombie Deacon session: %v", err)
 		}
+		// Fall through to restart
 	}
 
-	// Agent bead check failed or state is not running/working.
-	// FALLBACK: Check if tmux session is actually healthy before attempting restart.
-	// This prevents killing healthy sessions when bead state is stale or unreadable.
-	// Skip this check if agent was marked dead (we already handled that above).
-	if beadState != "dead" {
-		deaconSession := d.getDeaconSessionName()
-		hasSession, sessionErr := d.tmux.HasSession(deaconSession)
-		if sessionErr == nil && hasSession {
-			if d.tmux.IsClaudeRunning(deaconSession) {
-				d.logger.Println("Deacon session healthy (Claude running), skipping restart despite stale bead")
-				return
-			}
-		}
-	}
-
-	// Agent not running (or bead not found) AND session is not healthy - start it
-	d.logger.Println("Deacon not running per agent bead, starting...")
+	// Deacon not running - start it
+	d.logger.Println("Deacon not running, starting...")
 
 	// Create session in deacon directory (ensures correct CLAUDE.md is loaded)
 	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
@@ -414,76 +398,29 @@ func (d *Daemon) ensureWitnessesRunning() {
 }
 
 // ensureWitnessRunning ensures the witness for a specific rig is running.
+// Discover, don't track: uses Manager.Start() which checks tmux directly (gt-zecmc).
 func (d *Daemon) ensureWitnessRunning(rigName string) {
-	agentID := beads.WitnessBeadID(rigName)
-	sessionName := "gt-" + rigName + "-witness"
-
-	// Check agent bead state (ZFC: trust what agent reports)
-	beadState, beadErr := d.getAgentBeadState(agentID)
-	if beadErr == nil {
-		if beadState == "running" || beadState == "working" {
-			// Agent reports it's running - trust it
-			return
-		}
-
-		// CIRCUIT BREAKER: If agent is marked "dead" by checkStaleAgents(),
-		// force-kill the session and restart. This handles stuck agents that
-		// are still alive (zombie Claude sessions that haven't updated their bead).
-		if beadState == "dead" {
-			d.logger.Printf("Witness for %s is marked dead (circuit breaker triggered), forcing restart...", rigName)
-			hasSession, _ := d.tmux.HasSession(sessionName)
-			if hasSession {
-				if err := d.tmux.KillSession(sessionName); err != nil {
-					d.logger.Printf("Warning: failed to kill dead witness session for %s: %v", rigName, err)
-				}
-			}
-			// Fall through to restart
-		}
-	}
-
-	// Agent bead check failed or state is not running/working.
-	// FALLBACK: Check if tmux session is actually healthy before attempting restart.
-	// This prevents killing healthy sessions when bead state is stale or unreadable.
-	// Skip this check if agent was marked dead (we already handled that above).
-	if beadState != "dead" {
-		hasSession, sessionErr := d.tmux.HasSession(sessionName)
-		if sessionErr == nil && hasSession {
-			// Session exists - check if Claude is actually running in it
-			if d.tmux.IsClaudeRunning(sessionName) {
-				// Session is healthy - don't restart it
-				// The bead state may be stale; agent will update it on next activity
-				d.logger.Printf("Witness for %s session healthy (Claude running), skipping restart despite stale bead", rigName)
-				return
-			}
-		}
-	}
-
-	// Agent not running (or bead not found) AND session is not healthy - start it
-	d.logger.Printf("Witness for %s not running per agent bead, starting...", rigName)
-
-	// Create session in witness directory
-	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
-	witnessDir := filepath.Join(d.config.TownRoot, rigName, "witness")
-	if err := d.tmux.EnsureSessionFresh(sessionName, witnessDir); err != nil {
-		d.logger.Printf("Error creating witness session for %s: %v", rigName, err)
+	// Check rig operational state before auto-starting
+	if operational, reason := d.isRigOperational(rigName); !operational {
+		d.logger.Printf("Skipping witness auto-start for %s: %s", rigName, reason)
 		return
 	}
 
-	// Set environment
-	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", "witness")
-	_ = d.tmux.SetEnvironment(sessionName, "GT_RIG", rigName)
-	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", rigName+"-witness")
-
-	// Launch Claude
-	bdActor := fmt.Sprintf("%s/witness", rigName)
-	envVars := map[string]string{
-		"GT_ROLE":         "witness",
-		"GT_RIG":          rigName,
-		"BD_ACTOR":        bdActor,
-		"GIT_AUTHOR_NAME": bdActor,
+	// Manager.Start() handles: zombie detection, session creation, env vars, theming,
+	// WaitForClaudeReady, and crucially - startup/propulsion nudges (GUPP).
+	// It returns ErrAlreadyRunning if Claude is already running in tmux.
+	r := &rig.Rig{
+		Name: rigName,
+		Path: filepath.Join(d.config.TownRoot, rigName),
 	}
-	if err := d.tmux.SendKeys(sessionName, config.BuildStartupCommand(envVars, "", "")); err != nil {
-		d.logger.Printf("Error launching Claude in witness session for %s: %v", rigName, err)
+	mgr := witness.NewManager(r)
+
+	if err := mgr.Start(false); err != nil {
+		if err == witness.ErrAlreadyRunning {
+			// Already running - nothing to do
+			return
+		}
+		d.logger.Printf("Error starting witness for %s: %v", rigName, err)
 		return
 	}
 
@@ -500,101 +437,31 @@ func (d *Daemon) ensureRefineriesRunning() {
 }
 
 // ensureRefineryRunning ensures the refinery for a specific rig is running.
+// Discover, don't track: uses Manager.Start() which checks tmux directly (gt-zecmc).
 func (d *Daemon) ensureRefineryRunning(rigName string) {
-	agentID := beads.RefineryBeadID(rigName)
-	sessionName := "gt-" + rigName + "-refinery"
+// Check rig operational state before auto-starting
+	if operational, reason := d.isRigOperational(rigName); !operational {
+		d.logger.Printf("Skipping refinery auto-start for %s: %s", rigName, reason)
+		return
+	}
 
-	// Check agent bead state (ZFC: trust what agent reports)
-	beadState, beadErr := d.getAgentBeadState(agentID)
-	if beadErr == nil {
-		if beadState == "running" || beadState == "working" {
-			// Agent reports it's running - trust it
+	// Manager.Start() handles: zombie detection, session creation, env vars, theming,
+	// WaitForClaudeReady, and crucially - startup/propulsion nudges (GUPP).
+	// It returns ErrAlreadyRunning if Claude is already running in tmux.
+	r := &rig.Rig{
+		Name: rigName,
+		Path: filepath.Join(d.config.TownRoot, rigName),
+	}
+	mgr := refinery.NewManager(r)
+
+	if err := mgr.Start(false); err != nil {
+		if err == refinery.ErrAlreadyRunning {
+			// Already running - nothing to do
 			return
 		}
-
-		// CIRCUIT BREAKER: If agent is marked "dead" by checkStaleAgents(),
-		// force-kill the session and restart. This handles stuck agents that
-		// are still alive (zombie Claude sessions that haven't updated their bead).
-		if beadState == "dead" {
-			d.logger.Printf("Refinery for %s is marked dead (circuit breaker triggered), forcing restart...", rigName)
-			hasSession, _ := d.tmux.HasSession(sessionName)
-			if hasSession {
-				if err := d.tmux.KillSession(sessionName); err != nil {
-					d.logger.Printf("Warning: failed to kill dead refinery session for %s: %v", rigName, err)
-				}
-			}
-			// Fall through to restart
-		}
-	}
-
-	// Agent bead check failed or state is not running/working.
-	// FALLBACK: Check if tmux session is actually healthy before attempting restart.
-	// This prevents killing healthy sessions when bead state is stale or unreadable.
-	// Skip this check if agent was marked dead (we already handled that above).
-	if beadState != "dead" {
-		hasSession, sessionErr := d.tmux.HasSession(sessionName)
-		if sessionErr == nil && hasSession {
-			// Session exists - check if Claude is actually running in it
-			if d.tmux.IsClaudeRunning(sessionName) {
-				// Session is healthy - don't restart it
-				// The bead state may be stale; agent will update it on next activity
-				d.logger.Printf("Refinery for %s session healthy (Claude running), skipping restart despite stale bead", rigName)
-				return
-			}
-		}
-	}
-
-	// Agent not running (or bead not found) AND session is not healthy - start it
-	d.logger.Printf("Refinery for %s not running per agent bead, starting...", rigName)
-
-	// Determine working directory
-	rigPath := filepath.Join(d.config.TownRoot, rigName)
-	refineryDir := filepath.Join(rigPath, "refinery", "rig")
-	if _, err := os.Stat(refineryDir); os.IsNotExist(err) {
-		// Fall back to rig path if refinery/rig doesn't exist
-		refineryDir = rigPath
-	}
-
-	// Create session in refinery directory
-	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
-	if err := d.tmux.EnsureSessionFresh(sessionName, refineryDir); err != nil {
-		d.logger.Printf("Error creating refinery session for %s: %v", rigName, err)
+		d.logger.Printf("Error starting refinery for %s: %v", rigName, err)
 		return
 	}
-
-	// Set environment
-	bdActor := fmt.Sprintf("%s/refinery", rigName)
-	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", "refinery")
-	_ = d.tmux.SetEnvironment(sessionName, "GT_RIG", rigName)
-	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
-
-	// Set beads environment
-	beadsDir := filepath.Join(rigPath, "mayor", "rig", ".beads")
-	_ = d.tmux.SetEnvironment(sessionName, "BEADS_DIR", beadsDir)
-	_ = d.tmux.SetEnvironment(sessionName, "BEADS_NO_DAEMON", "1")
-	_ = d.tmux.SetEnvironment(sessionName, "BEADS_AGENT_NAME", bdActor)
-
-	// Apply theming (non-fatal)
-	theme := tmux.AssignTheme(rigName)
-	_ = d.tmux.ConfigureGasTownSession(sessionName, theme, rigName, "refinery", "refinery")
-
-	// Launch Claude with environment exported inline
-	envVars := map[string]string{
-		"GT_ROLE":         "refinery",
-		"GT_RIG":          rigName,
-		"BD_ACTOR":        bdActor,
-		"GIT_AUTHOR_NAME": bdActor,
-	}
-	if err := d.tmux.SendKeys(sessionName, config.BuildStartupCommand(envVars, "", "")); err != nil {
-		d.logger.Printf("Error launching Claude in refinery session for %s: %v", rigName, err)
-		return
-	}
-
-	// Wait for Claude to start, then accept bypass permissions warning if it appears.
-	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal - Claude might still start
-	}
-	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
 
 	d.logger.Printf("Refinery session for %s started successfully", rigName)
 }
@@ -619,6 +486,44 @@ func (d *Daemon) getKnownRigs() []string {
 		rigs = append(rigs, name)
 	}
 	return rigs
+}
+
+// isRigOperational checks if a rig is in an operational state.
+// Returns true if the rig can have agents auto-started.
+// Returns false (with reason) if the rig is parked, docked, or has auto_restart blocked/disabled.
+func (d *Daemon) isRigOperational(rigName string) (bool, string) {
+	cfg := wisp.NewConfig(d.config.TownRoot, rigName)
+
+	// Warn if wisp config is missing - parked/docked state may have been lost
+	if _, err := os.Stat(cfg.ConfigPath()); os.IsNotExist(err) {
+		d.logger.Printf("Warning: no wisp config for %s - parked state may have been lost", rigName)
+	}
+
+	// Check rig status - parked and docked rigs should not have agents auto-started
+	status := cfg.GetString("status")
+	switch status {
+	case "parked":
+		return false, "rig is parked"
+	case "docked":
+		return false, "rig is docked"
+	}
+
+	// Check auto_restart config
+	// If explicitly blocked (nil), auto-restart is disabled
+	if cfg.IsBlocked("auto_restart") {
+		return false, "auto_restart is blocked"
+	}
+
+	// If explicitly set to false, auto-restart is disabled
+	// Note: GetBool returns false for unset keys, so we need to check if it's explicitly set
+	val := cfg.Get("auto_restart")
+	if val != nil {
+		if autoRestart, ok := val.(bool); ok && !autoRestart {
+			return false, "auto_restart is disabled"
+		}
+	}
+
+	return true, ""
 }
 
 // triggerPendingSpawns polls pending polecat spawns and triggers those that are ready.
@@ -854,6 +759,11 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 
 // restartPolecatSession restarts a crashed polecat session.
 func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string) error {
+	// Check rig operational state before auto-restarting
+	if operational, reason := d.isRigOperational(rigName); !operational {
+		return fmt.Errorf("cannot restart polecat: %s", reason)
+	}
+
 	// Determine working directory
 	workDir := filepath.Join(d.config.TownRoot, rigName, "polecats", polecatName)
 
@@ -893,7 +803,9 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	_ = d.tmux.SetPaneDiedHook(sessionName, agentID)
 
 	// Launch Claude with environment exported inline
-	startCmd := config.BuildPolecatStartupCommand(rigName, polecatName, "", "")
+	// Pass rigPath so rig agent settings are honored (not town-level defaults)
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
+	startCmd := config.BuildPolecatStartupCommand(rigName, polecatName, rigPath, "")
 	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
 		return fmt.Errorf("sending startup command: %w", err)
 	}

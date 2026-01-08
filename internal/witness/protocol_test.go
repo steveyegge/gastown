@@ -16,6 +16,8 @@ func TestClassifyMessage(t *testing.T) {
 		{"HELP: Git conflict", ProtoHelp},
 		{"MERGED nux", ProtoMerged},
 		{"MERGED valkyrie", ProtoMerged},
+		{"MERGE_FAILED nux", ProtoMergeFailed},
+		{"MERGE_FAILED ace", ProtoMergeFailed},
 		{"🤝 HANDOFF: Patrol context", ProtoHandoff},
 		{"🤝HANDOFF: No space", ProtoHandoff},
 		{"SWARM_START", ProtoSwarmStart},
@@ -154,6 +156,65 @@ func TestParseMerged_InvalidSubject(t *testing.T) {
 	_, err := ParseMerged("Not merged", "body")
 	if err == nil {
 		t.Error("ParseMerged() expected error for invalid subject")
+	}
+}
+
+func TestParseMergeFailed(t *testing.T) {
+	subject := "MERGE_FAILED nux"
+	body := `Branch: feature-nux
+Issue: gt-abc123
+FailureType: tests
+Error: unit tests failed with 3 errors`
+
+	payload, err := ParseMergeFailed(subject, body)
+	if err != nil {
+		t.Fatalf("ParseMergeFailed() error = %v", err)
+	}
+
+	if payload.PolecatName != "nux" {
+		t.Errorf("PolecatName = %q, want %q", payload.PolecatName, "nux")
+	}
+	if payload.Branch != "feature-nux" {
+		t.Errorf("Branch = %q, want %q", payload.Branch, "feature-nux")
+	}
+	if payload.IssueID != "gt-abc123" {
+		t.Errorf("IssueID = %q, want %q", payload.IssueID, "gt-abc123")
+	}
+	if payload.FailureType != "tests" {
+		t.Errorf("FailureType = %q, want %q", payload.FailureType, "tests")
+	}
+	if payload.Error != "unit tests failed with 3 errors" {
+		t.Errorf("Error = %q, want %q", payload.Error, "unit tests failed with 3 errors")
+	}
+	if payload.FailedAt.IsZero() {
+		t.Error("FailedAt should not be zero")
+	}
+}
+
+func TestParseMergeFailed_MinimalBody(t *testing.T) {
+	subject := "MERGE_FAILED ace"
+	body := "FailureType: build"
+
+	payload, err := ParseMergeFailed(subject, body)
+	if err != nil {
+		t.Fatalf("ParseMergeFailed() error = %v", err)
+	}
+
+	if payload.PolecatName != "ace" {
+		t.Errorf("PolecatName = %q, want %q", payload.PolecatName, "ace")
+	}
+	if payload.FailureType != "build" {
+		t.Errorf("FailureType = %q, want %q", payload.FailureType, "build")
+	}
+	if payload.Branch != "" {
+		t.Errorf("Branch = %q, want empty", payload.Branch)
+	}
+}
+
+func TestParseMergeFailed_InvalidSubject(t *testing.T) {
+	_, err := ParseMergeFailed("Not a merge failed", "body")
+	if err == nil {
+		t.Error("ParseMergeFailed() expected error for invalid subject")
 	}
 }
 

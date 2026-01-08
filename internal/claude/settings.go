@@ -27,7 +27,7 @@ const (
 // RoleTypeFor returns the RoleType for a given role name.
 func RoleTypeFor(role string) RoleType {
 	switch role {
-	case "polecat", "witness", "refinery":
+	case "polecat", "witness", "refinery", "deacon":
 		return Autonomous
 	default:
 		return Interactive
@@ -35,8 +35,8 @@ func RoleTypeFor(role string) RoleType {
 }
 
 // EnsureSettings ensures .claude/settings.json exists in the given directory.
-// If the file doesn't exist, it copies the appropriate template based on role type.
-// If the file already exists, it's left unchanged.
+// For worktrees, we use sparse checkout to exclude source repo's .claude/ directory,
+// so our settings.json is the only one Claude Code sees.
 func EnsureSettings(workDir string, roleType RoleType) error {
 	claudeDir := filepath.Join(workDir, ".claude")
 	settingsPath := filepath.Join(claudeDir, "settings.json")

@@ -71,15 +71,162 @@ func ResolveBeadsDir(workDir string) string {
 		return beadsDir
 	}
 
-	// Detect redirect chains: check if resolved path also has a redirect
-	resolvedRedirect := filepath.Join(resolved, "redirect")
-	if _, err := os.Stat(resolvedRedirect); err == nil {
-		fmt.Fprintf(os.Stderr, "Warning: redirect chain detected: %s -> %s (which also has a redirect)\n", beadsDir, resolved)
-		// Don't follow chains - just return the first resolved path
-		// The target's redirect is likely errant and should be removed
+	// Follow redirect chains (e.g., crew/.beads -> rig/.beads -> mayor/rig/.beads)
+	// This is intentional for the rig-level redirect architecture.
+	// Limit depth to prevent infinite loops from misconfigured redirects.
+	return resolveBeadsDirWithDepth(resolved, 3)
+}
+
+// resolveBeadsDirWithDepth follows redirect chains with a depth limit.
+func resolveBeadsDirWithDepth(beadsDir string, maxDepth int) string {
+	if maxDepth <= 0 {
+		fmt.Fprintf(os.Stderr, "Warning: redirect chain too deep at %s, stopping\n", beadsDir)
+		return beadsDir
 	}
 
-	return resolved
+	redirectPath := filepath.Join(beadsDir, "redirect")
+	data, err := os.ReadFile(redirectPath) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		// No redirect, this is the final destination
+		return beadsDir
+	}
+
+	redirectTarget := strings.TrimSpace(string(data))
+	if redirectTarget == "" {
+		return beadsDir
+	}
+
+	// Resolve relative to parent of beadsDir (the workDir)
+	workDir := filepath.Dir(beadsDir)
+	resolved := filepath.Clean(filepath.Join(workDir, redirectTarget))
+
+	// Detect circular redirect
+	if resolved == beadsDir {
+		fmt.Fprintf(os.Stderr, "Warning: circular redirect detected in %s, stopping\n", redirectPath)
+		return beadsDir
+	}
+
+	// Recursively follow
+	return resolveBeadsDirWithDepth(resolved, maxDepth-1)
+}
+
+// cleanBeadsRuntimeFiles removes gitignored runtime files from a .beads directory
+// while preserving tracked files (formulas/, README.md, config.yaml, .gitignore).
+// This is safe to call even if the directory doesn't exist.
+func cleanBeadsRuntimeFiles(beadsDir string) error {
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+		return nil // Nothing to clean
+	}
+
+	// Runtime files/patterns that are gitignored and safe to remove
+	runtimePatterns := []string{
+		// SQLite databases
+		"*.db", "*.db-*", "*.db?*",
+		// Daemon runtime
+		"daemon.lock", "daemon.log", "daemon.pid", "bd.sock",
+		// Sync state
+		"sync-state.json", "last-touched", "metadata.json",
+		// Version tracking
+		".local_version",
+		// Redirect file (we're about to recreate it)
+		"redirect",
+		// Merge artifacts
+		"beads.base.*", "beads.left.*", "beads.right.*",
+		// JSONL files (tracked but will be redirected, safe to remove in worktrees)
+		"issues.jsonl", "interactions.jsonl",
+		// Runtime directories
+		"mq",
+	}
+
+	for _, pattern := range runtimePatterns {
+		matches, err := filepath.Glob(filepath.Join(beadsDir, pattern))
+		if err != nil {
+			continue // Invalid pattern, skip
+		}
+		for _, match := range matches {
+			os.RemoveAll(match) // Best effort, ignore errors
+		}
+	}
+
+	return nil
+}
+
+// SetupRedirect creates a .beads/redirect file for a worktree to point to the rig's shared beads.
+// This is used by crew, polecats, and refinery worktrees to share the rig's beads database.
+//
+// Parameters:
+//   - townRoot: the town root directory (e.g., ~/gt)
+//   - worktreePath: the worktree directory (e.g., <rig>/crew/<name> or <rig>/refinery/rig)
+//
+// The function:
+//  1. Computes the relative path from worktree to rig-level .beads
+//  2. Cleans up runtime files (preserving tracked files like formulas/)
+//  3. Creates the redirect file
+//
+// Safety: This function refuses to create redirects in the canonical beads location
+// (mayor/rig) to prevent circular redirect chains.
+func SetupRedirect(townRoot, worktreePath string) error {
+	// Get rig root from worktree path
+	// worktreePath = <town>/<rig>/crew/<name> or <town>/<rig>/refinery/rig etc.
+	relPath, err := filepath.Rel(townRoot, worktreePath)
+	if err != nil {
+		return fmt.Errorf("computing relative path: %w", err)
+	}
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+	if len(parts) < 2 {
+		return fmt.Errorf("invalid worktree path: must be at least 2 levels deep from town root")
+	}
+
+	// Safety check: prevent creating redirect in canonical beads location (mayor/rig)
+	// This would create a circular redirect chain since rig/.beads redirects to mayor/rig/.beads
+	if len(parts) >= 2 && parts[1] == "mayor" {
+		return fmt.Errorf("cannot create redirect in canonical beads location (mayor/rig)")
+	}
+
+	rigRoot := filepath.Join(townRoot, parts[0])
+	rigBeadsPath := filepath.Join(rigRoot, ".beads")
+
+	if _, err := os.Stat(rigBeadsPath); os.IsNotExist(err) {
+		return fmt.Errorf("no rig .beads found at %s", rigBeadsPath)
+	}
+
+	// Clean up runtime files in .beads/ but preserve tracked files (formulas/, README.md, etc.)
+	worktreeBeadsDir := filepath.Join(worktreePath, ".beads")
+	if err := cleanBeadsRuntimeFiles(worktreeBeadsDir); err != nil {
+		return fmt.Errorf("cleaning runtime files: %w", err)
+	}
+
+	// Create .beads directory if it doesn't exist
+	if err := os.MkdirAll(worktreeBeadsDir, 0755); err != nil {
+		return fmt.Errorf("creating .beads dir: %w", err)
+	}
+
+	// Compute relative path from worktree to rig root
+	// e.g., crew/<name> (depth 2) -> ../../.beads
+	//       refinery/rig (depth 2) -> ../../.beads
+	depth := len(parts) - 1 // subtract 1 for rig name itself
+	redirectPath := strings.Repeat("../", depth) + ".beads"
+
+	// Check if rig-level beads has a redirect (tracked beads case).
+	// If so, redirect directly to the final destination to avoid chains.
+	// The bd CLI doesn't support redirect chains, so we must skip intermediate hops.
+	rigRedirectPath := filepath.Join(rigBeadsPath, "redirect")
+	if data, err := os.ReadFile(rigRedirectPath); err == nil {
+		rigRedirectTarget := strings.TrimSpace(string(data))
+		if rigRedirectTarget != "" {
+			// Rig has redirect (e.g., "mayor/rig/.beads" for tracked beads).
+			// Redirect worktree directly to the final destination.
+			redirectPath = strings.Repeat("../", depth) + rigRedirectTarget
+		}
+	}
+
+	// Create redirect file
+	redirectFile := filepath.Join(worktreeBeadsDir, "redirect")
+	if err := os.WriteFile(redirectFile, []byte(redirectPath+"\n"), 0644); err != nil {
+		return fmt.Errorf("creating redirect file: %w", err)
+	}
+
+	return nil
 }
 
 // Issue represents a beads issue.
@@ -368,6 +515,13 @@ func setEnv(env []string, key, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
+}
+
+// Run executes a bd command and returns stdout.
+// This is a public wrapper around the internal run method for cases where
+// callers need to run arbitrary bd commands.
+func (b *Beads) Run(args ...string) ([]byte, error) {
+	return b.run(args...)
 }
 
 // wrapError wraps bd errors with context.
@@ -1157,6 +1311,38 @@ func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) erro
 	return nil
 }
 
+// SetHookBead sets the hook_bead slot on an agent bead.
+// This is a convenience wrapper that only sets the hook without changing agent_state.
+// Per gt-zecmc: agent_state ("running", "dead", "idle") is observable from tmux
+// and should not be recorded in beads ("discover, don't track" principle).
+func (b *Beads) SetHookBead(agentBeadID, hookBeadID string) error {
+	// Set the hook using bd slot set
+	// This updates the hook_bead column directly in SQLite
+	_, err := b.run("slot", "set", agentBeadID, "hook", hookBeadID)
+	if err != nil {
+		// If slot is already occupied, clear it first then retry
+		errStr := err.Error()
+		if strings.Contains(errStr, "already occupied") {
+			_, _ = b.run("slot", "clear", agentBeadID, "hook")
+			_, err = b.run("slot", "set", agentBeadID, "hook", hookBeadID)
+		}
+		if err != nil {
+			return fmt.Errorf("setting hook: %w", err)
+		}
+	}
+	return nil
+}
+
+// ClearHookBead clears the hook_bead slot on an agent bead.
+// Used when work is complete or unslung.
+func (b *Beads) ClearHookBead(agentBeadID string) error {
+	_, err := b.run("slot", "clear", agentBeadID, "hook")
+	if err != nil {
+		return fmt.Errorf("clearing hook: %w", err)
+	}
+	return nil
+}
+
 // UpdateAgentCleanupStatus updates the cleanup_status field in an agent bead.
 // This is called by the polecat to self-report its git state (ZFC compliance).
 // Valid statuses: clean, has_uncommitted, has_stash, has_unpushed
@@ -1753,4 +1939,114 @@ func (b *Beads) MergeSlotEnsureExists() (string, error) {
 	}
 
 	return status.ID, nil
+}
+
+// ===== Rig Identity Beads =====
+
+// RigFields contains the fields specific to rig identity beads.
+type RigFields struct {
+	Repo   string // Git URL for the rig's repository
+	Prefix string // Beads prefix for this rig (e.g., "gt", "bd")
+	State  string // Operational state: active, archived, maintenance
+}
+
+// FormatRigDescription formats the description field for a rig identity bead.
+func FormatRigDescription(name string, fields *RigFields) string {
+	if fields == nil {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("Rig identity bead for %s.", name))
+	lines = append(lines, "")
+
+	if fields.Repo != "" {
+		lines = append(lines, fmt.Sprintf("repo: %s", fields.Repo))
+	}
+	if fields.Prefix != "" {
+		lines = append(lines, fmt.Sprintf("prefix: %s", fields.Prefix))
+	}
+	if fields.State != "" {
+		lines = append(lines, fmt.Sprintf("state: %s", fields.State))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// ParseRigFields extracts rig fields from an issue's description.
+func ParseRigFields(description string) *RigFields {
+	fields := &RigFields{}
+
+	for _, line := range strings.Split(description, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		colonIdx := strings.Index(line, ":")
+		if colonIdx == -1 {
+			continue
+		}
+
+		key := strings.TrimSpace(line[:colonIdx])
+		value := strings.TrimSpace(line[colonIdx+1:])
+		if value == "null" || value == "" {
+			value = ""
+		}
+
+		switch strings.ToLower(key) {
+		case "repo":
+			fields.Repo = value
+		case "prefix":
+			fields.Prefix = value
+		case "state":
+			fields.State = value
+		}
+	}
+
+	return fields
+}
+
+// CreateRigBead creates a rig identity bead for tracking rig metadata.
+// The ID format is: <prefix>-rig-<name> (e.g., gt-rig-gastown)
+// Use RigBeadID() helper to generate correct IDs.
+// The created_by field is populated from BD_ACTOR env var for provenance tracking.
+func (b *Beads) CreateRigBead(id, title string, fields *RigFields) (*Issue, error) {
+	description := FormatRigDescription(title, fields)
+
+	args := []string{"create", "--json",
+		"--id=" + id,
+		"--type=rig",
+		"--title=" + title,
+		"--description=" + description,
+	}
+
+	// Default actor from BD_ACTOR env var for provenance tracking
+	if actor := os.Getenv("BD_ACTOR"); actor != "" {
+		args = append(args, "--actor="+actor)
+	}
+
+	out, err := b.run(args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var issue Issue
+	if err := json.Unmarshal(out, &issue); err != nil {
+		return nil, fmt.Errorf("parsing bd create output: %w", err)
+	}
+
+	return &issue, nil
+}
+
+// RigBeadIDWithPrefix generates a rig identity bead ID using the specified prefix.
+// Format: <prefix>-rig-<name> (e.g., gt-rig-gastown)
+func RigBeadIDWithPrefix(prefix, name string) string {
+	return fmt.Sprintf("%s-rig-%s", prefix, name)
+}
+
+// RigBeadID generates a rig identity bead ID using "gt" prefix.
+// For non-gastown rigs, use RigBeadIDWithPrefix with the rig's configured prefix.
+func RigBeadID(name string) string {
+	return RigBeadIDWithPrefix("gt", name)
 }

@@ -30,9 +30,10 @@ func createTestGitRepo(t *testing.T, name string) string {
 		t.Fatalf("mkdir repo: %v", err)
 	}
 
-	// Initialize git repo
+	// Initialize git repo with explicit main branch
+	// (system default may vary, causing checkout failures)
 	cmds := [][]string{
-		{"git", "init"},
+		{"git", "init", "--initial-branch=main"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test User"},
 	}
@@ -252,6 +253,40 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 		t.Errorf("refinery/rig/.git not found: %v", err)
 	} else if info.IsDir() {
 		t.Errorf("refinery/rig/.git should be a file (worktree), not a directory")
+	}
+
+	// Verify Claude settings are created in correct locations (outside git repos).
+	// Settings in parent directories are inherited by agents via directory traversal,
+	// without polluting the source repos.
+	expectedSettings := []struct {
+		path string
+		desc string
+	}{
+		{filepath.Join(rigPath, "witness", ".claude", "settings.json"), "witness/.claude/settings.json"},
+		{filepath.Join(rigPath, "refinery", ".claude", "settings.json"), "refinery/.claude/settings.json"},
+		{filepath.Join(rigPath, "crew", ".claude", "settings.json"), "crew/.claude/settings.json"},
+		{filepath.Join(rigPath, "polecats", ".claude", "settings.json"), "polecats/.claude/settings.json"},
+	}
+
+	for _, s := range expectedSettings {
+		if _, err := os.Stat(s.path); err != nil {
+			t.Errorf("%s not found: %v", s.desc, err)
+		}
+	}
+
+	// Verify settings are NOT created inside source repos (these would be wrong)
+	wrongLocations := []struct {
+		path string
+		desc string
+	}{
+		{filepath.Join(rigPath, "witness", "rig", ".claude", "settings.json"), "witness/rig/.claude (inside source repo)"},
+		{filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.json"), "refinery/rig/.claude (inside source repo)"},
+	}
+
+	for _, w := range wrongLocations {
+		if _, err := os.Stat(w.path); err == nil {
+			t.Errorf("%s should NOT exist (settings would pollute source repo)", w.desc)
+		}
 	}
 }
 

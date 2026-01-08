@@ -95,3 +95,66 @@ func TestRenderAgentDetails_UsesRigPrefix(t *testing.T) {
 		t.Fatalf("output %q does not contain rig-prefixed bead ID", output)
 	}
 }
+
+func TestRunStatusWatch_RejectsZeroInterval(t *testing.T) {
+	oldInterval := statusInterval
+	oldWatch := statusWatch
+	defer func() {
+		statusInterval = oldInterval
+		statusWatch = oldWatch
+	}()
+
+	statusInterval = 0
+	statusWatch = true
+
+	err := runStatusWatch(nil, nil)
+	if err == nil {
+		t.Fatal("expected error for zero interval, got nil")
+	}
+	if !strings.Contains(err.Error(), "positive") {
+		t.Errorf("error %q should mention 'positive'", err.Error())
+	}
+}
+
+func TestRunStatusWatch_RejectsNegativeInterval(t *testing.T) {
+	oldInterval := statusInterval
+	oldWatch := statusWatch
+	defer func() {
+		statusInterval = oldInterval
+		statusWatch = oldWatch
+	}()
+
+	statusInterval = -5
+	statusWatch = true
+
+	err := runStatusWatch(nil, nil)
+	if err == nil {
+		t.Fatal("expected error for negative interval, got nil")
+	}
+	if !strings.Contains(err.Error(), "positive") {
+		t.Errorf("error %q should mention 'positive'", err.Error())
+	}
+}
+
+func TestRunStatusWatch_RejectsJSONCombo(t *testing.T) {
+	oldJSON := statusJSON
+	oldWatch := statusWatch
+	oldInterval := statusInterval
+	defer func() {
+		statusJSON = oldJSON
+		statusWatch = oldWatch
+		statusInterval = oldInterval
+	}()
+
+	statusJSON = true
+	statusWatch = true
+	statusInterval = 2
+
+	err := runStatusWatch(nil, nil)
+	if err == nil {
+		t.Fatal("expected error for --json + --watch, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot be used together") {
+		t.Errorf("error %q should mention 'cannot be used together'", err.Error())
+	}
+}

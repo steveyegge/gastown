@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,26 +14,31 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
-	startAll             bool
-	startCrewRig         string
-	startCrewAccount     string
-	shutdownGraceful     bool
-	shutdownWait         int
-	shutdownAll          bool
-	shutdownForce        bool
-	shutdownYes          bool
-	shutdownPolecatsOnly bool
-	shutdownNuclear      bool
+	startAll               bool
+	startAgentOverride     string
+	startCrewRig           string
+	startCrewAccount       string
+	startCrewAgentOverride string
+	shutdownGraceful       bool
+	shutdownWait           int
+	shutdownAll            bool
+	shutdownForce          bool
+	shutdownYes            bool
+	shutdownPolecatsOnly   bool
+	shutdownNuclear        bool
 )
 
 var startCmd = &cobra.Command{
@@ -103,9 +109,11 @@ Examples:
 func init() {
 	startCmd.Flags().BoolVarP(&startAll, "all", "a", false,
 		"Also start Witnesses and Refineries for all rigs")
+	startCmd.Flags().StringVar(&startAgentOverride, "agent", "", "Agent alias to run Mayor/Deacon with (overrides town default)")
 
 	startCrewCmd.Flags().StringVar(&startCrewRig, "rig", "", "Rig to use")
 	startCrewCmd.Flags().StringVar(&startCrewAccount, "account", "", "Claude Code account handle to use")
+	startCrewCmd.Flags().StringVar(&startCrewAgentOverride, "agent", "", "Agent alias to run crew worker with (overrides rig/town default)")
 	startCmd.AddCommand(startCrewCmd)
 
 	shutdownCmd.Flags().BoolVarP(&shutdownGraceful, "graceful", "g", false,
@@ -145,12 +153,16 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	if err := config.EnsureDaemonPatrolConfig(townRoot); err != nil {
+		fmt.Printf("  %s Could not ensure daemon config: %v\n", style.Dim.Render("○"), err)
+	}
+
 	t := tmux.NewTmux()
 
 	fmt.Printf("Starting Gas Town from %s\n\n", style.Dim.Render(townRoot))
 
 	// Start core agents (Mayor and Deacon)
-	if err := startCoreAgents(t); err != nil {
+	if err := startCoreAgents(townRoot, startAgentOverride); err != nil {
 		return err
 	}
 
@@ -176,33 +188,29 @@ func runStart(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// startCoreAgents starts Mayor and Deacon sessions.
-func startCoreAgents(t *tmux.Tmux) error {
-	// Get session names
-	mayorSession := getMayorSessionName()
-	deaconSession := getDeaconSessionName()
-
+// startCoreAgents starts Mayor and Deacon sessions using the Manager pattern.
+func startCoreAgents(townRoot string, agentOverride string) error {
 	// Start Mayor first (so Deacon sees it as up)
-	mayorRunning, _ := t.HasSession(mayorSession)
-	if mayorRunning {
-		fmt.Printf("  %s Mayor already running\n", style.Dim.Render("○"))
-	} else {
-		fmt.Printf("  %s Starting Mayor...\n", style.Bold.Render("→"))
-		if err := startMayorSession(t, mayorSession); err != nil {
+	mayorMgr := mayor.NewManager(townRoot)
+	if err := mayorMgr.Start(agentOverride); err != nil {
+		if err == mayor.ErrAlreadyRunning {
+			fmt.Printf("  %s Mayor already running\n", style.Dim.Render("○"))
+		} else {
 			return fmt.Errorf("starting Mayor: %w", err)
 		}
+	} else {
 		fmt.Printf("  %s Mayor started\n", style.Bold.Render("✓"))
 	}
 
 	// Start Deacon (health monitor)
-	deaconRunning, _ := t.HasSession(deaconSession)
-	if deaconRunning {
-		fmt.Printf("  %s Deacon already running\n", style.Dim.Render("○"))
-	} else {
-		fmt.Printf("  %s Starting Deacon...\n", style.Bold.Render("→"))
-		if err := startDeaconSession(t, deaconSession); err != nil {
+	deaconMgr := deacon.NewManager(townRoot)
+	if err := deaconMgr.Start(); err != nil {
+		if err == deacon.ErrAlreadyRunning {
+			fmt.Printf("  %s Deacon already running\n", style.Dim.Render("○"))
+		} else {
 			return fmt.Errorf("starting Deacon: %w", err)
 		}
+	} else {
 		fmt.Printf("  %s Deacon started\n", style.Bold.Render("✓"))
 	}
 
@@ -225,10 +233,14 @@ func startRigAgents(t *tmux.Tmux, townRoot string) {
 		if witnessRunning {
 			fmt.Printf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
 		} else {
-			created, err := ensureWitnessSession(r.Name, r)
-			if err != nil {
-				fmt.Printf("  %s %s witness failed: %v\n", style.Dim.Render("○"), r.Name, err)
-			} else if created {
+			witMgr := witness.NewManager(r)
+			if err := witMgr.Start(false); err != nil {
+				if err == witness.ErrAlreadyRunning {
+					fmt.Printf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
+				} else {
+					fmt.Printf("  %s %s witness failed: %v\n", style.Dim.Render("○"), r.Name, err)
+				}
+			} else {
 				fmt.Printf("  %s %s witness started\n", style.Bold.Render("✓"), r.Name)
 			}
 		}
@@ -263,7 +275,21 @@ func startConfiguredCrew(t *tmux.Tmux, townRoot string) {
 		for _, crewName := range crewToStart {
 			sessionID := crewSessionName(r.Name, crewName)
 			if running, _ := t.HasSession(sessionID); running {
-				fmt.Printf("  %s %s/%s already running\n", style.Dim.Render("○"), r.Name, crewName)
+				// Session exists - check if Claude is still running
+				agentCfg := config.ResolveAgentConfig(townRoot, r.Path)
+				if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
+					// Claude has exited, restart it
+					fmt.Printf("  %s %s/%s session exists, restarting Claude...\n", style.Dim.Render("○"), r.Name, crewName)
+					claudeCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, "gt prime")
+					if err := t.SendKeys(sessionID, claudeCmd); err != nil {
+						fmt.Printf("  %s %s/%s restart failed: %v\n", style.Dim.Render("○"), r.Name, crewName, err)
+					} else {
+						fmt.Printf("  %s %s/%s Claude restarted\n", style.Bold.Render("✓"), r.Name, crewName)
+						startedAny = true
+					}
+				} else {
+					fmt.Printf("  %s %s/%s already running\n", style.Dim.Render("○"), r.Name, crewName)
+				}
 			} else {
 				if err := startCrewMember(r.Name, crewName, townRoot); err != nil {
 					fmt.Printf("  %s %s/%s failed: %v\n", style.Dim.Render("○"), r.Name, crewName, err)
@@ -317,8 +343,10 @@ func ensureRefinerySession(rigName string, r *rig.Rig) (bool, error) {
 		refineryRigDir = r.Path
 	}
 
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(refineryRigDir, "refinery"); err != nil {
+	// Ensure Claude settings exist in refinery/ (not refinery/rig/) so we don't
+	// write into the source repo. Claude walks up the tree to find settings.
+	refineryParentDir := filepath.Join(r.Path, "refinery")
+	if err := claude.EnsureSettingsForRole(refineryParentDir, "refinery"); err != nil {
 		return false, fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
@@ -345,7 +373,7 @@ func ensureRefinerySession(rigName string, r *rig.Rig) (bool, error) {
 
 	// Launch Claude directly (no respawn loop - daemon handles restart)
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	if err := t.SendKeys(sessionName, config.BuildAgentStartupCommand("refinery", bdActor, "", "")); err != nil {
+	if err := t.SendKeys(sessionName, config.BuildAgentStartupCommand("refinery", bdActor, r.Path, "")); err != nil {
 		return false, fmt.Errorf("sending command: %w", err)
 	}
 
@@ -735,25 +763,6 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 	crewGit := git.NewGit(r.Path)
 	crewMgr := crew.NewManager(r, crewGit)
 
-	// Check if crew exists, create if not
-	worker, err := crewMgr.Get(name)
-	if err == crew.ErrCrewNotFound {
-		fmt.Printf("Creating crew workspace %s in %s...\n", name, rigName)
-		worker, err = crewMgr.Add(name, false) // No feature branch for crew
-		if err != nil {
-			return fmt.Errorf("creating crew workspace: %w", err)
-		}
-		fmt.Printf("%s Created crew workspace: %s/%s\n",
-			style.Bold.Render("✓"), rigName, name)
-	} else if err != nil {
-		return fmt.Errorf("getting crew worker: %w", err)
-	} else {
-		fmt.Printf("Crew workspace %s/%s exists\n", rigName, name)
-	}
-
-	// Ensure crew workspace is on default branch
-	ensureDefaultBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", rigName, name), r.Path)
-
 	// Resolve account for Claude config
 	accountsPath := constants.MayorAccountsPath(townRoot)
 	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, startCrewAccount)
@@ -764,58 +773,18 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
 
-	// Check if session exists
-	t := tmux.NewTmux()
-	sessionID := crewSessionName(rigName, name)
-	hasSession, err := t.HasSession(sessionID)
+	// Use manager's Start() method - handles workspace creation, settings, and session
+	err = crewMgr.Start(name, crew.StartOptions{
+		Account:         startCrewAccount,
+		ClaudeConfigDir: claudeConfigDir,
+	})
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
-	}
-
-	if hasSession {
-		// Session exists - check if Claude is still running
-		if !t.IsClaudeRunning(sessionID) {
-			// Claude has exited, restart it with "gt prime" as initial prompt
-			fmt.Printf("Session exists, restarting Claude...\n")
-			claudeCmd := config.BuildCrewStartupCommand(rigName, name, r.Path, "gt prime")
-			if err := t.SendKeys(sessionID, claudeCmd); err != nil {
-				return fmt.Errorf("restarting claude: %w", err)
-			}
+		if errors.Is(err, crew.ErrSessionRunning) {
+			fmt.Printf("%s Session already running: %s\n", style.Dim.Render("○"), crewMgr.SessionName(name))
 		} else {
-			fmt.Printf("%s Session already running: %s\n", style.Dim.Render("○"), sessionID)
+			return err
 		}
 	} else {
-		// Create new session
-		if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
-			return fmt.Errorf("creating session: %w", err)
-		}
-
-		// Set environment (non-fatal: session works without these)
-		_ = t.SetEnvironment(sessionID, "GT_RIG", rigName)
-		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
-
-		// Set CLAUDE_CONFIG_DIR for account selection (non-fatal)
-		if claudeConfigDir != "" {
-			_ = t.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", claudeConfigDir)
-		}
-
-		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
-		// Note: ConfigureGasTownSession includes cycle bindings
-		theme := getThemeForRig(rigName)
-		_ = t.ConfigureGasTownSession(sessionID, theme, rigName, name, "crew")
-
-		// Wait for shell to be ready after session creation
-		if err := t.WaitForShellReady(sessionID, constants.ShellReadyTimeout); err != nil {
-			return fmt.Errorf("waiting for shell: %w", err)
-		}
-
-		// Start claude with skip permissions and proper env vars for seance
-		// Pass "gt prime" as initial prompt so context is loaded immediately
-		claudeCmd := config.BuildCrewStartupCommand(rigName, name, r.Path, "gt prime")
-		if err := t.SendKeys(sessionID, claudeCmd); err != nil {
-			return fmt.Errorf("starting claude: %w", err)
-		}
-
 		fmt.Printf("%s Started crew workspace: %s/%s\n",
 			style.Bold.Render("✓"), rigName, name)
 	}
@@ -889,54 +858,14 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 		return fmt.Errorf("rig '%s' not found", rigName)
 	}
 
-	// Create crew manager
+	// Create crew manager and use Start() method
 	crewGit := git.NewGit(r.Path)
 	crewMgr := crew.NewManager(r, crewGit)
 
-	// Check if crew exists, create if not
-	worker, err := crewMgr.Get(crewName)
-	if err == crew.ErrCrewNotFound {
-		worker, err = crewMgr.Add(crewName, false)
-		if err != nil {
-			return fmt.Errorf("creating crew workspace: %w", err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("getting crew worker: %w", err)
-	}
-
-	// Ensure crew workspace is on default branch
-	ensureDefaultBranch(worker.ClonePath, fmt.Sprintf("Crew workspace %s/%s", rigName, crewName), r.Path)
-
-	// Create tmux session
-	t := tmux.NewTmux()
-	sessionID := crewSessionName(rigName, crewName)
-
-	if err := t.NewSession(sessionID, worker.ClonePath); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment (non-fatal: session works without these)
-	_ = t.SetEnvironment(sessionID, "GT_RIG", rigName)
-	_ = t.SetEnvironment(sessionID, "GT_CREW", crewName)
-
-	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
-	theme := getThemeForRig(rigName)
-	_ = t.ConfigureGasTownSession(sessionID, theme, rigName, crewName, "crew")
-
-	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
-	_ = t.SetCrewCycleBindings(sessionID)
-
-	// Wait for shell to be ready
-	if err := t.WaitForShellReady(sessionID, constants.ShellReadyTimeout); err != nil {
-		return fmt.Errorf("waiting for shell: %w", err)
-	}
-
-	// Start claude with proper env vars for seance
-	// Pass "gt prime" as initial prompt so context is loaded immediately
-	// (SessionStart hook fires, then Claude processes "gt prime" as first user message)
-	claudeCmd := config.BuildCrewStartupCommand(rigName, crewName, r.Path, "gt prime")
-	if err := t.SendKeys(sessionID, claudeCmd); err != nil {
-		return fmt.Errorf("starting claude: %w", err)
+	// Start handles workspace creation, settings, and session all in one
+	err = crewMgr.Start(crewName, crew.StartOptions{})
+	if err != nil && !errors.Is(err, crew.ErrSessionRunning) {
+		return err
 	}
 
 	return nil

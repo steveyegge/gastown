@@ -87,7 +87,7 @@ func detectAgentBeadID() (string, error) {
 		return "", fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
 	}
 
-	beadID := buildAgentBeadID(identity, roleCtx.Role)
+	beadID := buildAgentBeadID(identity, roleCtx.Role, townRoot)
 	if beadID == "" {
 		return "", fmt.Errorf("cannot build agent bead ID for identity: %s", identity)
 	}

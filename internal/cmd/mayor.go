@@ -1,23 +1,13 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
-
-// getMayorSessionName returns the Mayor session name.
-func getMayorSessionName() string {
-	return session.MayorSessionName()
-}
 
 var mayorCmd = &cobra.Command{
 	Use:     "mayor",
@@ -30,6 +20,8 @@ var mayorCmd = &cobra.Command{
 The Mayor is the global coordinator for Gas Town, running as a persistent
 tmux session. Use the subcommands to start, stop, attach, and check status.`,
 }
+
+var mayorAgentOverride string
 
 var mayorStartCmd = &cobra.Command{
 	Use:   "start",
@@ -84,24 +76,38 @@ func init() {
 	mayorCmd.AddCommand(mayorStatusCmd)
 	mayorCmd.AddCommand(mayorRestartCmd)
 
+	mayorStartCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
+	mayorAttachCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
+	mayorRestartCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
+
 	rootCmd.AddCommand(mayorCmd)
 }
 
-func runMayorStart(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
-	sessionName := getMayorSessionName()
-
-	// Check if session already exists
-	running, err := t.HasSession(sessionName)
+// getMayorManager returns a mayor manager for the current workspace.
+func getMayorManager() (*mayor.Manager, error) {
+	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+		return nil, fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
-	if running {
-		return fmt.Errorf("Mayor session already running. Attach with: gt mayor attach")
+	return mayor.NewManager(townRoot), nil
+}
+
+// getMayorSessionName returns the Mayor session name.
+func getMayorSessionName() string {
+	return mayor.SessionName()
+}
+
+func runMayorStart(cmd *cobra.Command, args []string) error {
+	mgr, err := getMayorManager()
+	if err != nil {
+		return err
 	}
 
-	if err := startMayorSession(t, sessionName); err != nil {
+	fmt.Println("Starting Mayor session...")
+	if err := mgr.Start(mayorAgentOverride); err != nil {
+		if err == mayor.ErrAlreadyRunning {
+			return fmt.Errorf("Mayor session already running. Attach with: gt mayor attach")
+		}
 		return err
 	}
 
@@ -112,83 +118,18 @@ func runMayorStart(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// startMayorSession creates and initializes the Mayor tmux session.
-func startMayorSession(t *tmux.Tmux, sessionName string) error {
-	// Find workspace root
-	townRoot, err := workspace.FindFromCwdOrError()
-	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-
-	// Create session in workspace root
-	fmt.Println("Starting Mayor session...")
-	if err := t.NewSession(sessionName, townRoot); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment (non-fatal: session works without these)
-	_ = t.SetEnvironment(sessionName, "GT_ROLE", "mayor")
-	_ = t.SetEnvironment(sessionName, "BD_ACTOR", "mayor")
-
-	// Apply Mayor theme (non-fatal: theming failure doesn't affect operation)
-	// Note: ConfigureGasTownSession includes cycle bindings
-	theme := tmux.MayorTheme()
-	_ = t.ConfigureGasTownSession(sessionName, theme, "", "Mayor", "coordinator")
-
-	// Launch Claude - the startup hook handles 'gt prime' automatically
-	// Use SendKeysDelayed to allow shell initialization after NewSession
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	// Mayor uses default runtime config (empty rigPath) since it's not rig-specific
-	claudeCmd := config.BuildAgentStartupCommand("mayor", "mayor", "", "")
-	if err := t.SendKeysDelayed(sessionName, claudeCmd, 200); err != nil {
-		return fmt.Errorf("sending command: %w", err)
-	}
-
-	// Wait for Claude to start (non-fatal)
-	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal
-	}
-	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	_ = session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
-		Recipient: "mayor",
-		Sender:    "human",
-		Topic:     "cold-start",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous coordination.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionName, session.PropulsionNudgeForRole("mayor", townRoot)) // Non-fatal
-
-	return nil
-}
-
 func runMayorStop(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
-	sessionName := getMayorSessionName()
-
-	// Check if session exists
-	running, err := t.HasSession(sessionName)
+	mgr, err := getMayorManager()
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
-	}
-	if !running {
-		return errors.New("Mayor session is not running")
+		return err
 	}
 
 	fmt.Println("Stopping Mayor session...")
-
-	// Try graceful shutdown first (best-effort interrupt)
-	_ = t.SendKeysRaw(sessionName, "C-c")
-	time.Sleep(100 * time.Millisecond)
-
-	// Kill the session
-	if err := t.KillSession(sessionName); err != nil {
-		return fmt.Errorf("killing session: %w", err)
+	if err := mgr.Stop(); err != nil {
+		if err == mayor.ErrNotRunning {
+			return fmt.Errorf("Mayor session is not running")
+		}
+		return err
 	}
 
 	fmt.Printf("%s Mayor session stopped.\n", style.Bold.Render("✓"))
@@ -196,84 +137,68 @@ func runMayorStop(cmd *cobra.Command, args []string) error {
 }
 
 func runMayorAttach(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
+	mgr, err := getMayorManager()
+	if err != nil {
+		return err
+	}
 
-	sessionName := getMayorSessionName()
-
-	// Check if session exists
-	running, err := t.HasSession(sessionName)
+	running, err := mgr.IsRunning()
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}
 	if !running {
 		// Auto-start if not running
 		fmt.Println("Mayor session not running, starting...")
-		if err := startMayorSession(t, sessionName); err != nil {
+		if err := mgr.Start(mayorAgentOverride); err != nil {
 			return err
 		}
 	}
 
 	// Use shared attach helper (smart: links if inside tmux, attaches if outside)
-	return attachToTmuxSession(sessionName)
+	return attachToTmuxSession(mgr.SessionName())
 }
 
 func runMayorStatus(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
-	sessionName := getMayorSessionName()
-
-	running, err := t.HasSession(sessionName)
+	mgr, err := getMayorManager()
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+		return err
 	}
 
-	if running {
-		// Get session info for more details
-		info, err := t.GetSessionInfo(sessionName)
-		if err == nil {
-			status := "detached"
-			if info.Attached {
-				status = "attached"
-			}
+	info, err := mgr.Status()
+	if err != nil {
+		if err == mayor.ErrNotRunning {
 			fmt.Printf("%s Mayor session is %s\n",
-				style.Bold.Render("●"),
-				style.Bold.Render("running"))
-			fmt.Printf("  Status: %s\n", status)
-			fmt.Printf("  Created: %s\n", info.Created)
-			fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt mayor attach"))
-		} else {
-			fmt.Printf("%s Mayor session is %s\n",
-				style.Bold.Render("●"),
-				style.Bold.Render("running"))
+				style.Dim.Render("○"),
+				"not running")
+			fmt.Printf("\nStart with: %s\n", style.Dim.Render("gt mayor start"))
+			return nil
 		}
-	} else {
-		fmt.Printf("%s Mayor session is %s\n",
-			style.Dim.Render("○"),
-			"not running")
-		fmt.Printf("\nStart with: %s\n", style.Dim.Render("gt mayor start"))
+		return fmt.Errorf("checking status: %w", err)
 	}
+
+	status := "detached"
+	if info.Attached {
+		status = "attached"
+	}
+	fmt.Printf("%s Mayor session is %s\n",
+		style.Bold.Render("●"),
+		style.Bold.Render("running"))
+	fmt.Printf("  Status: %s\n", status)
+	fmt.Printf("  Created: %s\n", info.Created)
+	fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt mayor attach"))
 
 	return nil
 }
 
 func runMayorRestart(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
-	sessionName := getMayorSessionName()
-
-	running, err := t.HasSession(sessionName)
+	mgr, err := getMayorManager()
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+		return err
 	}
 
-	if running {
-		// Stop the current session (best-effort interrupt before kill)
-		fmt.Println("Stopping Mayor session...")
-		_ = t.SendKeysRaw(sessionName, "C-c")
-		time.Sleep(100 * time.Millisecond)
-		if err := t.KillSession(sessionName); err != nil {
-			return fmt.Errorf("killing session: %w", err)
-		}
+	// Stop if running (ignore not-running error)
+	if err := mgr.Stop(); err != nil && err != mayor.ErrNotRunning {
+		return fmt.Errorf("stopping session: %w", err)
 	}
 
 	// Start fresh

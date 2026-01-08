@@ -16,7 +16,9 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/mrqueue"
+	"github.com/steveyegge/gastown/internal/protocol"
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
@@ -80,6 +82,7 @@ type Engineer struct {
 	workDir     string
 	output      io.Writer // Output destination for user-facing messages
 	eventLogger *mrqueue.EventLogger
+	router      *mail.Router // Mail router for sending protocol messages
 
 	// stopCh is used for graceful shutdown
 	stopCh chan struct{}
@@ -100,6 +103,7 @@ func NewEngineer(r *rig.Rig) *Engineer {
 		workDir:     r.Path,
 		output:      os.Stdout,
 		eventLogger: mrqueue.NewEventLoggerFromRig(r.Path),
+		router:      mail.NewRouter(r.Path),
 		stopCh:      make(chan struct{}),
 	}
 }
@@ -230,12 +234,19 @@ func (e *Engineer) ProcessMR(ctx context.Context, mr *beads.Issue) ProcessResult
 // doMerge performs the actual git merge operation.
 // This is the core merge logic shared by ProcessMR and ProcessMRFromQueue.
 func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue string) ProcessResult {
-	// Step 1: Fetch the source branch from origin
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Fetching branch %s from origin...\n", branch)
-	if err := e.git.FetchBranch("origin", branch); err != nil {
+	// Step 1: Verify source branch exists locally (shared .repo.git with polecats)
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking local branch %s...\n", branch)
+	exists, err := e.git.BranchExists(branch)
+	if err != nil {
 		return ProcessResult{
 			Success: false,
-			Error:   fmt.Sprintf("failed to fetch branch %s: %v", branch, err),
+			Error:   fmt.Sprintf("failed to check branch %s: %v", branch, err),
+		}
+	}
+	if !exists {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("branch %s not found locally", branch),
 		}
 	}
 
@@ -254,10 +265,9 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: pull from origin/%s: %v (continuing)\n", target, err)
 	}
 
-	// Step 3: Check for merge conflicts
+	// Step 3: Check for merge conflicts (using local branch)
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking for conflicts...\n")
-	remoteBranch := "origin/" + branch
-	conflicts, err := e.git.CheckConflicts(remoteBranch, target)
+	conflicts, err := e.git.CheckConflicts(branch, target)
 	if err != nil {
 		return ProcessResult{
 			Success:  false,
@@ -293,7 +303,7 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		mergeMsg = fmt.Sprintf("Merge %s into %s (%s)", branch, target, sourceIssue)
 	}
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging with message: %s\n", mergeMsg)
-	if err := e.git.MergeNoFF(remoteBranch, mergeMsg); err != nil {
+	if err := e.git.MergeNoFF(branch, mergeMsg); err != nil {
 		if errors.Is(err, git.ErrMergeConflict) {
 			_ = e.git.AbortMerge()
 			return ProcessResult{
@@ -560,6 +570,21 @@ func (e *Engineer) handleFailureFromQueue(mr *mrqueue.MR, result ProcessResult) 
 	// Emit merge_failed event
 	if err := e.eventLogger.LogMergeFailed(mr, result.Error); err != nil {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to log merge_failed event: %v\n", err)
+	}
+
+	// Notify Witness of the failure so polecat can be alerted
+	// Determine failure type from result
+	failureType := "build"
+	if result.Conflict {
+		failureType = "conflict"
+	} else if result.TestsFailed {
+		failureType = "tests"
+	}
+	msg := protocol.NewMergeFailedMessage(e.rig.Name, mr.Worker, mr.Branch, mr.SourceIssue, mr.Target, failureType, result.Error)
+	if err := e.router.Send(msg); err != nil {
+		fmt.Fprintf(e.output, "[Engineer] Warning: failed to send MERGE_FAILED to witness: %v\n", err)
+	} else {
+		fmt.Fprintf(e.output, "[Engineer] Notified witness of merge failure for %s\n", mr.Worker)
 	}
 
 	// If this was a conflict, create a conflict-resolution task for dispatch

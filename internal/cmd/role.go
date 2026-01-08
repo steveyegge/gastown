@@ -270,7 +270,7 @@ func (info RoleInfo) ActorString() string {
 func getRoleHome(role Role, rig, polecat, townRoot string) string {
 	switch role {
 	case RoleMayor:
-		return townRoot
+		return filepath.Join(townRoot, "mayor")
 	case RoleDeacon:
 		return filepath.Join(townRoot, "deacon")
 	case RoleWitness:
@@ -423,7 +423,7 @@ func runRoleList(cmd *cobra.Command, args []string) error {
 		name Role
 		desc string
 	}{
-		{RoleMayor, "Global coordinator at town root"},
+		{RoleMayor, "Global coordinator at mayor/"},
 		{RoleDeacon, "Background supervisor daemon"},
 		{RoleWitness, "Per-rig polecat lifecycle manager"},
 		{RoleRefinery, "Per-rig merge queue processor"},

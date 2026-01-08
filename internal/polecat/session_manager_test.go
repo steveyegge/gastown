@@ -1,4 +1,4 @@
-package session
+package polecat
 
 import (
 	"os"
@@ -15,7 +15,7 @@ func TestSessionName(t *testing.T) {
 		Name:     "gastown",
 		Polecats: []string{"Toast"},
 	}
-	m := NewManager(tmux.NewTmux(), r)
+	m := NewSessionManager(tmux.NewTmux(), r)
 
 	name := m.SessionName("Toast")
 	if name != "gt-gastown-Toast" {
@@ -23,13 +23,13 @@ func TestSessionName(t *testing.T) {
 	}
 }
 
-func TestPolecatDir(t *testing.T) {
+func TestSessionManagerPolecatDir(t *testing.T) {
 	r := &rig.Rig{
 		Name:     "gastown",
 		Path:     "/home/user/ai/gastown",
 		Polecats: []string{"Toast"},
 	}
-	m := NewManager(tmux.NewTmux(), r)
+	m := NewSessionManager(tmux.NewTmux(), r)
 
 	dir := m.polecatDir("Toast")
 	expected := "/home/user/ai/gastown/polecats/Toast"
@@ -52,7 +52,7 @@ func TestHasPolecat(t *testing.T) {
 		Path:     root,
 		Polecats: []string{"Toast", "Cheedo"},
 	}
-	m := NewManager(tmux.NewTmux(), r)
+	m := NewSessionManager(tmux.NewTmux(), r)
 
 	if !m.hasPolecat("Toast") {
 		t.Error("expected hasPolecat(Toast) = true")
@@ -70,9 +70,9 @@ func TestStartPolecatNotFound(t *testing.T) {
 		Name:     "gastown",
 		Polecats: []string{"Toast"},
 	}
-	m := NewManager(tmux.NewTmux(), r)
+	m := NewSessionManager(tmux.NewTmux(), r)
 
-	err := m.Start("Unknown", StartOptions{})
+	err := m.Start("Unknown", SessionStartOptions{})
 	if err == nil {
 		t.Error("expected error for unknown polecat")
 	}
@@ -83,7 +83,7 @@ func TestIsRunningNoSession(t *testing.T) {
 		Name:     "gastown",
 		Polecats: []string{"Toast"},
 	}
-	m := NewManager(tmux.NewTmux(), r)
+	m := NewSessionManager(tmux.NewTmux(), r)
 
 	running, err := m.IsRunning("Toast")
 	if err != nil {
@@ -94,12 +94,12 @@ func TestIsRunningNoSession(t *testing.T) {
 	}
 }
 
-func TestListEmpty(t *testing.T) {
+func TestSessionManagerListEmpty(t *testing.T) {
 	r := &rig.Rig{
 		Name:     "test-rig-unlikely-name",
 		Polecats: []string{},
 	}
-	m := NewManager(tmux.NewTmux(), r)
+	m := NewSessionManager(tmux.NewTmux(), r)
 
 	infos, err := m.List()
 	if err != nil {
@@ -115,7 +115,7 @@ func TestStopNotFound(t *testing.T) {
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
 	}
-	m := NewManager(tmux.NewTmux(), r)
+	m := NewSessionManager(tmux.NewTmux(), r)
 
 	err := m.Stop("Toast", false)
 	if err != ErrSessionNotFound {
@@ -128,7 +128,7 @@ func TestCaptureNotFound(t *testing.T) {
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
 	}
-	m := NewManager(tmux.NewTmux(), r)
+	m := NewSessionManager(tmux.NewTmux(), r)
 
 	_, err := m.Capture("Toast", 50)
 	if err != ErrSessionNotFound {
@@ -141,7 +141,7 @@ func TestInjectNotFound(t *testing.T) {
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
 	}
-	m := NewManager(tmux.NewTmux(), r)
+	m := NewSessionManager(tmux.NewTmux(), r)
 
 	err := m.Inject("Toast", "hello")
 	if err != ErrSessionNotFound {

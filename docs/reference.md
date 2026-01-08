@@ -7,24 +7,38 @@ Technical reference for Gas Town internals. Read the README first.
 ```
 ~/gt/                           Town root
 ├── .beads/                     Town-level beads (hq-* prefix)
-├── mayor/                      Mayor config
-│   └── town.json
+├── mayor/                      Mayor agent home (town coordinator)
+│   ├── town.json               Town configuration
+│   ├── CLAUDE.md               Mayor context (on disk)
+│   └── .claude/settings.json   Mayor Claude settings
+├── deacon/                     Deacon agent home (background supervisor)
+│   └── .claude/settings.json   Deacon settings (context via gt prime)
 └── <rig>/                      Project container (NOT a git clone)
     ├── config.json             Rig identity
     ├── .beads/ → mayor/rig/.beads
     ├── .repo.git/              Bare repo (shared by worktrees)
     ├── mayor/rig/              Mayor's clone (canonical beads)
-    ├── refinery/rig/           Worktree on main
-    ├── witness/                No clone (monitors only)
-    ├── crew/<name>/            Human workspaces
-    └── polecats/<name>/        Worker worktrees
+    │   └── CLAUDE.md           Per-rig mayor context (on disk)
+    ├── witness/                Witness agent home (monitors only)
+    │   └── .claude/settings.json  (context via gt prime)
+    ├── refinery/               Refinery settings parent
+    │   ├── .claude/settings.json
+    │   └── rig/                Worktree on main
+    │       └── CLAUDE.md       Refinery context (on disk)
+    ├── crew/                   Crew settings parent (shared)
+    │   ├── .claude/settings.json  (context via gt prime)
+    │   └── <name>/rig/         Human workspaces
+    └── polecats/               Polecat settings parent (shared)
+        ├── .claude/settings.json  (context via gt prime)
+        └── <name>/rig/         Worker worktrees
 ```
 
 **Key points:**
 
 - Rig root is a container, not a clone
 - `.repo.git/` is bare - refinery and polecats are worktrees
-- Mayor clone holds canonical `.beads/`, others inherit via redirect
+- Per-rig `mayor/rig/` holds canonical `.beads/`, others inherit via redirect
+- Settings placed in parent dirs (not git clones) for upward traversal
 
 ## Beads Routing
 
@@ -204,6 +218,123 @@ gt mol step done <step>      # Complete a molecule step
 | `GT_RIG` | Rig name for rig-level agents |
 | `GT_POLECAT` | Polecat name (for polecats only) |
 
+## Agent Working Directories and Settings
+
+Each agent runs in a specific working directory and has its own Claude settings.
+Understanding this hierarchy is essential for proper configuration.
+
+### Working Directories by Role
+
+| Role | Working Directory | Notes |
+|------|-------------------|-------|
+| **Mayor** | `~/gt/mayor/` | Town-level coordinator, isolated from rigs |
+| **Deacon** | `~/gt/deacon/` | Background supervisor daemon |
+| **Witness** | `~/gt/<rig>/witness/` | No git clone, monitors polecats only |
+| **Refinery** | `~/gt/<rig>/refinery/rig/` | Worktree on main branch |
+| **Crew** | `~/gt/<rig>/crew/<name>/rig/` | Persistent human workspace clone |
+| **Polecat** | `~/gt/<rig>/polecats/<name>/rig/` | Ephemeral worker worktree |
+
+Note: The per-rig `<rig>/mayor/rig/` directory is NOT a working directory—it's
+a git clone that holds the canonical `.beads/` database for that rig.
+
+### Settings File Locations
+
+Claude Code searches for `.claude/settings.json` starting from the working
+directory and traversing upward. Settings are placed in **parent directories**
+(not inside git clones) so they're found via directory traversal without
+polluting source repositories:
+
+```
+~/gt/
+├── mayor/.claude/settings.json          # Mayor settings
+├── deacon/.claude/settings.json         # Deacon settings
+└── <rig>/
+    ├── witness/.claude/settings.json    # Witness settings (no rig/ subdir)
+    ├── refinery/.claude/settings.json   # Found by refinery/rig/ via traversal
+    ├── crew/.claude/settings.json       # Shared by all crew/<name>/rig/
+    └── polecats/.claude/settings.json   # Shared by all polecats/<name>/rig/
+```
+
+**Why parent directories?** Agents working in git clones (like `refinery/rig/`)
+would pollute the source repo if settings were placed there. By putting settings
+one level up, Claude finds them via upward traversal, and all workers of the
+same type share the same settings.
+
+### CLAUDE.md Locations
+
+Role context is delivered via CLAUDE.md files or ephemeral injection:
+
+| Role | CLAUDE.md Location | Method |
+|------|-------------------|--------|
+| **Mayor** | `~/gt/mayor/CLAUDE.md` | On disk |
+| **Deacon** | (none) | Injected via `gt prime` at SessionStart |
+| **Witness** | (none) | Injected via `gt prime` at SessionStart |
+| **Refinery** | `<rig>/refinery/rig/CLAUDE.md` | On disk (inside worktree) |
+| **Crew** | (none) | Injected via `gt prime` at SessionStart |
+| **Polecat** | (none) | Injected via `gt prime` at SessionStart |
+
+Additionally, each rig has `<rig>/mayor/rig/CLAUDE.md` for the per-rig mayor clone
+(used for beads operations, not a running agent).
+
+**Why ephemeral injection?** Writing CLAUDE.md into git clones would:
+1. Pollute source repos when agents commit/push
+2. Leak Gas Town internals into project history
+3. Conflict with project-specific CLAUDE.md files
+
+The `gt prime` command runs at SessionStart hook and injects context without
+persisting it to disk.
+
+### Sparse Checkout (Source Repo Isolation)
+
+When agents work on source repositories that have their own Claude Code configuration,
+Gas Town uses git sparse checkout to exclude all context files:
+
+```bash
+# Automatically configured for worktrees - excludes:
+# - .claude/       : settings, rules, agents, commands
+# - CLAUDE.md      : primary context file
+# - CLAUDE.local.md: personal context file
+# - .mcp.json      : MCP server configuration
+git sparse-checkout set --no-cone '/*' '!/.claude/' '!/CLAUDE.md' '!/CLAUDE.local.md' '!/.mcp.json'
+```
+
+This ensures agents use Gas Town's context, not the source repo's instructions.
+
+**Doctor check**: `gt doctor` verifies sparse checkout is configured correctly.
+Run `gt doctor --fix` to update legacy configurations missing the newer patterns.
+
+### Settings Inheritance
+
+Claude Code's settings search order (first match wins):
+
+1. `.claude/settings.json` in current working directory
+2. `.claude/settings.json` in parent directories (traversing up)
+3. `~/.claude/settings.json` (user global settings)
+
+Gas Town places settings at each agent's working directory root, so agents
+find their role-specific settings before reaching any parent or global config.
+
+### Settings Templates
+
+Gas Town uses two settings templates based on role type:
+
+| Type | Roles | Key Difference |
+|------|-------|----------------|
+| **Interactive** | Mayor, Crew | Mail injected on `UserPromptSubmit` hook |
+| **Autonomous** | Polecat, Witness, Refinery, Deacon | Mail injected on `SessionStart` hook |
+
+Autonomous agents may start without user input, so they need mail checked
+at session start. Interactive agents wait for user prompts.
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| Agent using wrong settings | Check `gt doctor`, verify sparse checkout |
+| Settings not found | Ensure `.claude/settings.json` exists at role home |
+| Source repo settings leaking | Run `gt doctor --fix` to configure sparse checkout |
+| Mayor settings affecting polecats | Mayor should run in `mayor/`, not town root |
+
 ## CLI Reference
 
 ### Town Management
@@ -264,11 +395,18 @@ Note: "Swarm" is ephemeral (workers on a convoy's issues). See [Convoys](convoy.
 # Standard workflow: convoy first, then sling
 gt convoy create "Feature X" gt-abc gt-def
 gt sling gt-abc <rig>                    # Assign to polecat
-gt sling gt-def <rig> --molecule=<proto> # With workflow template
+gt sling gt-abc <rig> --agent codex      # Override runtime for this sling/spawn
+gt sling <proto> --on gt-def <rig>       # With workflow template
 
 # Quick sling (auto-creates convoy)
 gt sling <bead> <rig>                    # Auto-convoy for dashboard visibility
 ```
+
+Agent overrides:
+
+- `gt start --agent <alias>` overrides the Mayor/Deacon runtime for this launch.
+- `gt mayor start|attach|restart --agent <alias>` and `gt deacon start|attach|restart --agent <alias>` do the same.
+- `gt start crew <name> --agent <alias>` and `gt crew at <name> --agent <alias>` override the crew worker runtime.
 
 ### Communication
 

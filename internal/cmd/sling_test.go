@@ -2,6 +2,58 @@ package cmd
 
 import "testing"
 
+func TestParseWispIDFromJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		json    string
+		wantID  string
+		wantErr bool
+	}{
+		{
+			name:   "new_epic_id",
+			json:   `{"new_epic_id":"gt-wisp-abc","created":7,"phase":"vapor"}`,
+			wantID: "gt-wisp-abc",
+		},
+		{
+			name:   "root_id legacy",
+			json:   `{"root_id":"gt-wisp-legacy"}`,
+			wantID: "gt-wisp-legacy",
+		},
+		{
+			name:   "result_id forward compat",
+			json:   `{"result_id":"gt-wisp-result"}`,
+			wantID: "gt-wisp-result",
+		},
+		{
+			name:   "precedence prefers new_epic_id",
+			json:   `{"root_id":"gt-wisp-legacy","new_epic_id":"gt-wisp-new"}`,
+			wantID: "gt-wisp-new",
+		},
+		{
+			name:    "missing id keys",
+			json:    `{"created":7,"phase":"vapor"}`,
+			wantErr: true,
+		},
+		{
+			name:    "invalid JSON",
+			json:    `{"new_epic_id":`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, err := parseWispIDFromJSON([]byte(tt.json))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseWispIDFromJSON() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if gotID != tt.wantID {
+				t.Fatalf("parseWispIDFromJSON() id = %q, want %q", gotID, tt.wantID)
+			}
+		})
+	}
+}
+
 func TestFormatTrackBeadID(t *testing.T) {
 	tests := []struct {
 		name     string

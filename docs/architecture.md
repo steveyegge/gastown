@@ -84,29 +84,43 @@ Each agent bead references its role bead via the `role_bead` field.
 │   └── town.json               Town configuration
 └── <rig>/                      Project container (NOT a git clone)
     ├── config.json             Rig identity and beads prefix
-    ├── .beads/ → mayor/rig/.beads  Symlink to canonical beads
-    ├── .repo.git/              Bare repo (shared by worktrees)
-    ├── mayor/rig/              Mayor's clone (canonical beads)
-    ├── refinery/rig/           Worktree on main
+    ├── mayor/rig/              Canonical clone (beads live here)
+    │   └── .beads/             Rig-level beads database
+    ├── refinery/rig/           Worktree from mayor/rig
     ├── witness/                No clone (monitors only)
-    ├── crew/<name>/            Human workspaces
-    └── polecats/<name>/        Worker worktrees
+    ├── crew/<name>/            Human workspaces (full clones)
+    └── polecats/<name>/        Worker worktrees from mayor/rig
 ```
+
+### Worktree Architecture
+
+Polecats and refinery are git worktrees, not full clones. This enables fast spawning
+and shared object storage. The worktree base is `mayor/rig`:
+
+```go
+// From polecat/manager.go - worktrees are based on mayor/rig
+git worktree add -b polecat/<name>-<timestamp> polecats/<name>
+```
+
+Crew workspaces (`crew/<name>/`) are full git clones for human developers who need
+independent repos. Polecats are ephemeral and benefit from worktree efficiency.
 
 ## Beads Routing
 
-The `routes.jsonl` file maps issue ID prefixes to their storage locations:
+The `routes.jsonl` file maps issue ID prefixes to rig locations (relative to town root):
 
 ```jsonl
-{"prefix":"hq","path":"/Users/stevey/gt/.beads"}
-{"prefix":"gt","path":"/Users/stevey/gt/gastown/mayor/rig/.beads"}
+{"prefix":"hq-","path":"."}
+{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"bd-","path":"beads/mayor/rig"}
 ```
 
+Routes point to `mayor/rig` because that's where the canonical `.beads/` lives.
 This enables transparent cross-rig beads operations:
 
 ```bash
-bd show hq-mayor    # Routes to town beads
-bd show gt-xyz      # Routes to gastown rig beads
+bd show hq-mayor    # Routes to town beads (~/.gt/.beads)
+bd show gt-xyz      # Routes to gastown/mayor/rig/.beads
 ```
 
 ## See Also

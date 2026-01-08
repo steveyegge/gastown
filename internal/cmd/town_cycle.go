@@ -6,7 +6,6 @@ import (
 	"sort"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // townCycleSession is the --session flag for town next/prev commands.
@@ -22,18 +21,13 @@ func getTownLevelSessions() []string {
 }
 
 // isTownLevelSession checks if the given session name is a town-level session.
+// Town-level sessions (Mayor, Deacon) use the "hq-" prefix, so we can identify
+// them by name alone without requiring workspace context. This is critical for
+// tmux run-shell which may execute from outside the workspace directory.
 func isTownLevelSession(sessionName string) bool {
-	townRoot, err := workspace.FindFromCwd()
-	if err != nil || townRoot == "" {
-		return false
-	}
-	townName, err := workspace.GetTownName(townRoot)
-	if err != nil {
-		return false
-	}
-	mayorSession := getMayorSessionName()
-	deaconSession := getDeaconSessionName()
-	_ = townName // used for session name generation
+	// Town-level sessions are identified by their fixed names
+	mayorSession := getMayorSessionName()  // "hq-mayor"
+	deaconSession := getDeaconSessionName() // "hq-deacon"
 	return sessionName == mayorSession || sessionName == deaconSession
 }
 

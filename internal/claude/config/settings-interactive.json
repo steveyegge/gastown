@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "gt prime && gt nudge deacon session-started"
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime && gt nudge deacon session-started"
           }
         ]
       }
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "gt prime"
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime"
           }
         ]
       }
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "gt mail check --inject"
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt mail check --inject"
           }
         ]
       }
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "gt costs record"
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt costs record"
           }
         ]
       }

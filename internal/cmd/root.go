@@ -16,6 +16,30 @@ var rootCmd = &cobra.Command{
 
 It coordinates agent spawning, work distribution, and communication
 across distributed teams of AI agents working on shared codebases.`,
+	PersistentPreRunE: checkBeadsDependency,
+}
+
+// Commands that don't require beads to be installed/checked.
+// These are basic utility commands that should work without beads.
+var beadsExemptCommands = map[string]bool{
+	"version":    true,
+	"help":       true,
+	"completion": true,
+}
+
+// checkBeadsDependency verifies beads meets minimum version requirements.
+// Skips check for exempt commands (version, help, completion).
+func checkBeadsDependency(cmd *cobra.Command, args []string) error {
+	// Get the root command name being run
+	cmdName := cmd.Name()
+
+	// Skip check for exempt commands
+	if beadsExemptCommands[cmdName] {
+		return nil
+	}
+
+	// Check beads version
+	return CheckBeadsVersion()
 }
 
 // Execute runs the root command and returns an exit code.

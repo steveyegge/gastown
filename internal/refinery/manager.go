@@ -1,13 +1,11 @@
 package refinery
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,19 +14,21 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/mrqueue"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
 var (
-	ErrNotRunning    = errors.New("refinery not running")
+	ErrNotRunning     = errors.New("refinery not running")
 	ErrAlreadyRunning = errors.New("refinery already running")
-	ErrNoQueue       = errors.New("no items in queue")
+	ErrNoQueue        = errors.New("no items in queue")
 )
 
 // Manager handles refinery lifecycle and queue operations.
@@ -58,8 +58,8 @@ func (m *Manager) stateFile() string {
 	return filepath.Join(m.rig.Path, ".runtime", "refinery.json")
 }
 
-// sessionName returns the tmux session name for this refinery.
-func (m *Manager) sessionName() string {
+// SessionName returns the tmux session name for this refinery.
+func (m *Manager) SessionName() string {
 	return fmt.Sprintf("gt-%s-refinery", m.rig.Name)
 }
 
@@ -111,7 +111,7 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	t := tmux.NewTmux()
-	sessionID := m.sessionName()
+	sessionID := m.SessionName()
 
 	if foreground {
 		// In foreground mode, we're likely running inside the tmux session
@@ -138,7 +138,9 @@ func (m *Manager) Start(foreground bool) error {
 	running, _ := t.HasSession(sessionID)
 	if running {
 		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		townRoot := filepath.Dir(m.rig.Path)
+		agentCfg := config.ResolveAgentConfig(townRoot, m.rig.Path)
+		if t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 			// Healthy - Claude is running
 			return ErrAlreadyRunning
 		}
@@ -164,8 +166,10 @@ func (m *Manager) Start(foreground bool) error {
 		refineryRigDir = m.workDir
 	}
 
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(refineryRigDir, "refinery"); err != nil {
+	// Ensure Claude settings exist in refinery/ (not refinery/rig/) so we don't
+	// write into the source repo. Claude walks up the tree to find settings.
+	refineryParentDir := filepath.Join(m.rig.Path, "refinery")
+	if err := claude.EnsureSettingsForRole(refineryParentDir, "refinery"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
@@ -181,7 +185,8 @@ func (m *Manager) Start(foreground bool) error {
 	_ = t.SetEnvironment(sessionID, "BD_ACTOR", bdActor)
 
 	// Set beads environment - refinery uses rig-level beads (non-fatal)
-	beadsDir := filepath.Join(m.rig.Path, "mayor", "rig", ".beads")
+	// Use ResolveBeadsDir to handle both tracked (mayor/rig) and local beads
+	beadsDir := beads.ResolveBeadsDir(m.rig.Path)
 	_ = t.SetEnvironment(sessionID, "BEADS_DIR", beadsDir)
 	_ = t.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1")
 	_ = t.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/refinery", m.rig.Name))
@@ -204,12 +209,37 @@ func (m *Manager) Start(foreground bool) error {
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
 	// Restarts are handled by daemon via LIFECYCLE mail, not shell loops
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	command := config.BuildAgentStartupCommand("refinery", bdActor, "", "")
+	command := config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
 	if err := t.SendKeys(sessionID, command); err != nil {
 		// Clean up the session on failure (best-effort cleanup)
 		_ = t.KillSession(sessionID)
 		return fmt.Errorf("starting Claude agent: %w", err)
 	}
+
+	// Wait for Claude to start and show its prompt (non-fatal)
+	// WaitForClaudeReady waits for "> " prompt, more reliable than just checking node is running
+	if err := t.WaitForClaudeReady(sessionID, constants.ClaudeStartTimeout); err != nil {
+		// Non-fatal - try to continue anyway
+	}
+
+	// Accept bypass permissions warning dialog if it appears.
+	_ = t.AcceptBypassPermissionsWarning(sessionID)
+
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Inject startup nudge for predecessor discovery via /resume
+	address := fmt.Sprintf("%s/refinery", m.rig.Name)
+	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
+		Recipient: address,
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}) // Non-fatal
+
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Send the propulsion nudge to trigger autonomous patrol execution.
+	// Wait for beacon to be fully processed (needs to be separate prompt)
+	time.Sleep(2 * time.Second)
+	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("refinery", refineryRigDir)) // Non-fatal
 
 	return nil
 }
@@ -223,7 +253,7 @@ func (m *Manager) Stop() error {
 
 	// Check if tmux session exists
 	t := tmux.NewTmux()
-	sessionID := m.sessionName()
+	sessionID := m.SessionName()
 	sessionRunning, _ := t.HasSession(sessionID)
 
 	// If neither state nor session indicates running, it's not running
@@ -489,56 +519,7 @@ func (m *Manager) runTests(testCmd string) error {
 		return nil
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...) //nolint:gosec // G204: testCmd is from trusted rig config
-	cmd.Dir = m.workDir
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %s", err, strings.TrimSpace(stderr.String()))
-	}
-
-	return nil
-}
-
-// gitRun executes a git command.
-func (m *Manager) gitRun(args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = m.workDir
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg != "" {
-			return fmt.Errorf("%s", errMsg)
-		}
-		return err
-	}
-
-	return nil
-}
-
-// gitOutput executes a git command and returns stdout.
-func (m *Manager) gitOutput(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = m.workDir
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg != "" {
-			return "", fmt.Errorf("%s", errMsg)
-		}
-		return "", err
-	}
-
-	return strings.TrimSpace(stdout.String()), nil
+	return util.ExecRun(m.workDir, parts[0], parts[1:]...)
 }
 
 // getMergeConfig loads the merge configuration from disk.
@@ -579,7 +560,7 @@ func (m *Manager) pushWithRetry(targetBranch string, config MergeConfig) error {
 			delay *= 2 // Exponential backoff
 		}
 
-		err := m.gitRun("push", "origin", targetBranch)
+		err := util.ExecRun(m.workDir, "git", "push", "origin", targetBranch)
 		if err == nil {
 			return nil // Success
 		}
@@ -588,7 +569,6 @@ func (m *Manager) pushWithRetry(targetBranch string, config MergeConfig) error {
 
 	return fmt.Errorf("push failed after %d retries: %v", config.PushRetryCount, lastErr)
 }
-
 
 // formatAge formats a duration since the given time.
 func formatAge(t time.Time) string {
@@ -610,8 +590,8 @@ func formatAge(t time.Time) string {
 func (m *Manager) notifyWorkerConflict(mr *MergeRequest) {
 	router := mail.NewRouter(m.workDir)
 	msg := &mail.Message{
-		From: fmt.Sprintf("%s/refinery", m.rig.Name),
-		To:   fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
+		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
+		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
 		Subject: "Merge conflict - rebase required",
 		Body: fmt.Sprintf(`Your branch %s has conflicts with %s.
 
@@ -631,8 +611,8 @@ Then the Refinery will retry the merge.`,
 func (m *Manager) notifyWorkerMerged(mr *MergeRequest) {
 	router := mail.NewRouter(m.workDir)
 	msg := &mail.Message{
-		From: fmt.Sprintf("%s/refinery", m.rig.Name),
-		To:   fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
+		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
+		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
 		Subject: "Work merged successfully",
 		Body: fmt.Sprintf(`Your branch %s has been merged to %s.
 

@@ -8,8 +8,8 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
@@ -111,8 +111,8 @@ func runStop(cmd *cobra.Command, args []string) error {
 	stopped := 0
 
 	for _, r := range rigs {
-		mgr := session.NewManager(t, r)
-		infos, err := mgr.List()
+		polecatMgr := polecat.NewSessionManager(t, r)
+		infos, err := polecatMgr.List()
 		if err != nil {
 			continue
 		}
@@ -125,10 +125,10 @@ func runStop(cmd *cobra.Command, args []string) error {
 			}
 
 			// Capture output before stopping (best effort)
-			output, _ := mgr.Capture(info.Polecat, 50)
+			output, _ := polecatMgr.Capture(info.Polecat, 50)
 
 			// Stop the session
-			err := mgr.Stop(info.Polecat, force)
+			err := polecatMgr.Stop(info.Polecat, force)
 			if err != nil {
 				result.Success = false
 				result.Error = err.Error()

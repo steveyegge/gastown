@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/suggest"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -224,16 +224,16 @@ func parseAddress(addr string) (rigName, polecatName string, err error) {
 }
 
 // getSessionManager creates a session manager for the given rig.
-func getSessionManager(rigName string) (*session.Manager, *rig.Rig, error) {
+func getSessionManager(rigName string) (*polecat.SessionManager, *rig.Rig, error) {
 	_, r, err := getRig(rigName)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	t := tmux.NewTmux()
-	mgr := session.NewManager(t, r)
+	polecatMgr := polecat.NewSessionManager(t, r)
 
-	return mgr, r, nil
+	return polecatMgr, r, nil
 }
 
 func runSessionStart(cmd *cobra.Command, args []string) error {
@@ -242,7 +242,7 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	mgr, r, err := getSessionManager(rigName)
+	polecatMgr, r, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -261,12 +261,12 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%s", suggest.FormatSuggestion("Polecat", polecatName, suggestions, hint))
 	}
 
-	opts := session.StartOptions{
+	opts := polecat.SessionStartOptions{
 		Issue: sessionIssue,
 	}
 
 	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
-	if err := mgr.Start(polecatName, opts); err != nil {
+	if err := polecatMgr.Start(polecatName, opts); err != nil {
 		return fmt.Errorf("starting session: %w", err)
 	}
 
@@ -290,7 +290,7 @@ func runSessionStop(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	mgr, _, err := getSessionManager(rigName)
+	polecatMgr, _, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -300,7 +300,7 @@ func runSessionStop(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("Stopping session for %s/%s...\n", rigName, polecatName)
 	}
-	if err := mgr.Stop(polecatName, sessionForce); err != nil {
+	if err := polecatMgr.Stop(polecatName, sessionForce); err != nil {
 		return fmt.Errorf("stopping session: %w", err)
 	}
 
@@ -326,13 +326,13 @@ func runSessionAttach(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	mgr, _, err := getSessionManager(rigName)
+	polecatMgr, _, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
 
 	// Attach (this replaces the process)
-	return mgr.Attach(polecatName)
+	return polecatMgr.Attach(polecatName)
 }
 
 // SessionListItem represents a session in list output.
@@ -381,8 +381,8 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 	var allSessions []SessionListItem
 
 	for _, r := range rigs {
-		mgr := session.NewManager(t, r)
-		infos, err := mgr.List()
+		polecatMgr := polecat.NewSessionManager(t, r)
+		infos, err := polecatMgr.List()
 		if err != nil {
 			continue
 		}
@@ -428,7 +428,7 @@ func runSessionCapture(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	mgr, _, err := getSessionManager(rigName)
+	polecatMgr, _, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -446,7 +446,7 @@ func runSessionCapture(cmd *cobra.Command, args []string) error {
 		lines = n
 	}
 
-	output, err := mgr.Capture(polecatName, lines)
+	output, err := polecatMgr.Capture(polecatName, lines)
 	if err != nil {
 		return fmt.Errorf("capturing output: %w", err)
 	}
@@ -475,12 +475,12 @@ func runSessionInject(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no message provided (use -m or -f)")
 	}
 
-	mgr, _, err := getSessionManager(rigName)
+	polecatMgr, _, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
 
-	if err := mgr.Inject(polecatName, message); err != nil {
+	if err := polecatMgr.Inject(polecatName, message); err != nil {
 		return fmt.Errorf("injecting message: %w", err)
 	}
 
@@ -495,13 +495,13 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	mgr, _, err := getSessionManager(rigName)
+	polecatMgr, _, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
 
 	// Check if running
-	running, err := mgr.IsRunning(polecatName)
+	running, err := polecatMgr.IsRunning(polecatName)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}
@@ -513,15 +513,15 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("Stopping session for %s/%s...\n", rigName, polecatName)
 		}
-		if err := mgr.Stop(polecatName, sessionForce); err != nil {
+		if err := polecatMgr.Stop(polecatName, sessionForce); err != nil {
 			return fmt.Errorf("stopping session: %w", err)
 		}
 	}
 
 	// Start fresh session
 	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
-	opts := session.StartOptions{}
-	if err := mgr.Start(polecatName, opts); err != nil {
+	opts := polecat.SessionStartOptions{}
+	if err := polecatMgr.Start(polecatName, opts); err != nil {
 		return fmt.Errorf("starting session: %w", err)
 	}
 
@@ -537,13 +537,13 @@ func runSessionStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	mgr, _, err := getSessionManager(rigName)
+	polecatMgr, _, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
 
 	// Get session info
-	info, err := mgr.Status(polecatName)
+	info, err := polecatMgr.Status(polecatName)
 	if err != nil {
 		return fmt.Errorf("getting status: %w", err)
 	}

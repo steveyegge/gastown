@@ -23,7 +23,7 @@ ifeq ($(shell uname),Darwin)
 endif
 
 install: build
-	cp $(BUILD_DIR)/$(BINARY) ~/bin/$(BINARY)
+	cp $(BUILD_DIR)/$(BINARY) ~/.local/bin/$(BINARY)
 
 clean:
 	rm -f $(BUILD_DIR)/$(BINARY)

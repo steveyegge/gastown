@@ -52,6 +52,143 @@ func TestGetPrefixForRig_NoRoutesFile(t *testing.T) {
 	}
 }
 
+func TestExtractPrefix(t *testing.T) {
+	tests := []struct {
+		beadID   string
+		expected string
+	}{
+		{"ap-qtsup.16", "ap-"},
+		{"hq-cv-abc", "hq-"},
+		{"gt-mol-xyz", "gt-"},
+		{"bd-123", "bd-"},
+		{"", ""},
+		{"nohyphen", ""},
+		{"-startswithhyphen", ""}, // Leading hyphen = invalid prefix
+		{"-", ""},                 // Just hyphen = invalid
+		{"a-", "a-"},              // Trailing hyphen is valid
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.beadID, func(t *testing.T) {
+			result := ExtractPrefix(tc.beadID)
+			if result != tc.expected {
+				t.Errorf("ExtractPrefix(%q) = %q, want %q", tc.beadID, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestGetRigPathForPrefix(t *testing.T) {
+	// Create a temporary directory with routes.jsonl
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix": "ap-", "path": "ai_platform/mayor/rig"}
+{"prefix": "gt-", "path": "gastown/mayor/rig"}
+{"prefix": "hq-", "path": "."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		prefix   string
+		expected string
+	}{
+		{"ap-", filepath.Join(tmpDir, "ai_platform/mayor/rig")},
+		{"gt-", filepath.Join(tmpDir, "gastown/mayor/rig")},
+		{"hq-", tmpDir}, // Town-level beads return townRoot
+		{"unknown-", ""}, // Unknown prefix returns empty
+		{"", ""},         // Empty prefix returns empty
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.prefix, func(t *testing.T) {
+			result := GetRigPathForPrefix(tmpDir, tc.prefix)
+			if result != tc.expected {
+				t.Errorf("GetRigPathForPrefix(%q, %q) = %q, want %q", tmpDir, tc.prefix, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestGetRigPathForPrefix_NoRoutesFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	// No routes.jsonl file
+
+	result := GetRigPathForPrefix(tmpDir, "ap-")
+	if result != "" {
+		t.Errorf("Expected empty string when no routes file, got %q", result)
+	}
+}
+
+func TestResolveHookDir(t *testing.T) {
+	// Create a temporary directory with routes.jsonl
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix": "ap-", "path": "ai_platform/mayor/rig"}
+{"prefix": "hq-", "path": "."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		beadID      string
+		hookWorkDir string
+		expected    string
+	}{
+		{
+			name:        "prefix resolution takes precedence over hookWorkDir",
+			beadID:      "ap-test",
+			hookWorkDir: "/custom/path",
+			expected:    filepath.Join(tmpDir, "ai_platform/mayor/rig"),
+		},
+		{
+			name:        "resolves rig path from prefix",
+			beadID:      "ap-test",
+			hookWorkDir: "",
+			expected:    filepath.Join(tmpDir, "ai_platform/mayor/rig"),
+		},
+		{
+			name:        "town-level bead returns townRoot",
+			beadID:      "hq-test",
+			hookWorkDir: "",
+			expected:    tmpDir,
+		},
+		{
+			name:        "unknown prefix uses hookWorkDir as fallback",
+			beadID:      "xx-unknown",
+			hookWorkDir: "/fallback/path",
+			expected:    "/fallback/path",
+		},
+		{
+			name:        "unknown prefix without hookWorkDir falls back to townRoot",
+			beadID:      "xx-unknown",
+			hookWorkDir: "",
+			expected:    tmpDir,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ResolveHookDir(tmpDir, tc.beadID, tc.hookWorkDir)
+			if result != tc.expected {
+				t.Errorf("ResolveHookDir(%q, %q, %q) = %q, want %q",
+					tmpDir, tc.beadID, tc.hookWorkDir, result, tc.expected)
+			}
+		})
+	}
+}
+
 func TestAgentBeadIDsWithPrefix(t *testing.T) {
 	tests := []struct {
 		name     string

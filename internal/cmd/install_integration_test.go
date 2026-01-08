@@ -61,9 +61,18 @@ func TestInstallCreatesCorrectStructure(t *testing.T) {
 		t.Errorf("rigs.json should be empty, got %d rigs", len(rigsConfig.Rigs))
 	}
 
-	// Verify CLAUDE.md exists
-	claudePath := filepath.Join(hqPath, "CLAUDE.md")
-	assertFileExists(t, claudePath, "CLAUDE.md")
+	// Verify CLAUDE.md exists in mayor/ (not town root, to avoid inheritance pollution)
+	claudePath := filepath.Join(hqPath, "mayor", "CLAUDE.md")
+	assertFileExists(t, claudePath, "mayor/CLAUDE.md")
+
+	// Verify Claude settings exist in mayor/.claude/ (not town root/.claude/)
+	// Mayor settings go here to avoid polluting child workspaces via directory traversal
+	mayorSettingsPath := filepath.Join(hqPath, "mayor", ".claude", "settings.json")
+	assertFileExists(t, mayorSettingsPath, "mayor/.claude/settings.json")
+
+	// Verify deacon settings exist in deacon/.claude/
+	deaconSettingsPath := filepath.Join(hqPath, "deacon", ".claude", "settings.json")
+	assertFileExists(t, deaconSettingsPath, "deacon/.claude/settings.json")
 }
 
 // TestInstallBeadsHasCorrectPrefix validates that beads is initialized

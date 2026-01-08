@@ -443,6 +443,73 @@ func TestBeadsRemoveRoute(t *testing.T) {
 	}
 }
 
+// TestSlingCrossRigRoutingResolution verifies that sling can resolve rig paths
+// for cross-rig bead hooking using ExtractPrefix and GetRigPathForPrefix.
+// This is the fix for https://github.com/steveyegge/gastown/issues/148
+func TestSlingCrossRigRoutingResolution(t *testing.T) {
+	townRoot := setupRoutingTestTown(t)
+
+	tests := []struct {
+		beadID       string
+		expectedPath string // Relative to townRoot, or "." for town-level
+	}{
+		{"gt-mol-abc", "gastown/mayor/rig"},
+		{"tr-task-xyz", "testrig/mayor/rig"},
+		{"hq-cv-123", "."}, // Town-level beads
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.beadID, func(t *testing.T) {
+			// Step 1: Extract prefix from bead ID
+			prefix := beads.ExtractPrefix(tc.beadID)
+			if prefix == "" {
+				t.Fatalf("ExtractPrefix(%q) returned empty", tc.beadID)
+			}
+
+			// Step 2: Resolve rig path from prefix
+			rigPath := beads.GetRigPathForPrefix(townRoot, prefix)
+			if rigPath == "" {
+				t.Fatalf("GetRigPathForPrefix(%q, %q) returned empty", townRoot, prefix)
+			}
+
+			// Step 3: Verify the path is correct
+			var expectedFull string
+			if tc.expectedPath == "." {
+				expectedFull = townRoot
+			} else {
+				expectedFull = filepath.Join(townRoot, tc.expectedPath)
+			}
+
+			if rigPath != expectedFull {
+				t.Errorf("GetRigPathForPrefix resolved to %q, want %q", rigPath, expectedFull)
+			}
+
+			// Step 4: Verify the .beads directory exists at that path
+			beadsDir := filepath.Join(rigPath, ".beads")
+			if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+				t.Errorf(".beads directory doesn't exist at resolved path: %s", beadsDir)
+			}
+		})
+	}
+}
+
+// TestSlingCrossRigUnknownPrefix verifies behavior for unknown prefixes.
+func TestSlingCrossRigUnknownPrefix(t *testing.T) {
+	townRoot := setupRoutingTestTown(t)
+
+	// An unknown prefix should return empty string
+	unknownBeadID := "xx-unknown-123"
+	prefix := beads.ExtractPrefix(unknownBeadID)
+	if prefix != "xx-" {
+		t.Fatalf("ExtractPrefix(%q) = %q, want %q", unknownBeadID, prefix, "xx-")
+	}
+
+	rigPath := beads.GetRigPathForPrefix(townRoot, prefix)
+	if rigPath != "" {
+		t.Errorf("GetRigPathForPrefix for unknown prefix returned %q, want empty", rigPath)
+	}
+}
+
 // TestBeadsGetPrefixForRig verifies prefix lookup by rig name.
 func TestBeadsGetPrefixForRig(t *testing.T) {
 	tmpDir := t.TempDir()

@@ -19,6 +19,7 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/lock"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
@@ -146,10 +147,14 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ensure beads redirect exists for worktree-based roles
-	ensureBeadsRedirect(ctx)
+	// Skip if there's a role/location mismatch to avoid creating bad redirects
+	if !roleInfo.Mismatch {
+		ensureBeadsRedirect(ctx)
+	}
 
-	// Report agent state as running (ZFC: agents self-report state)
-	reportAgentState(ctx, "running")
+	// NOTE: reportAgentState("running") removed (gt-zecmc)
+	// Agent liveness is observable from tmux - no need to record it in bead.
+	// "Discover, don't track" principle: reality is truth, state is derived.
 
 	// Emit session_start event for seance discovery
 	emitSessionEvent(ctx)
@@ -308,12 +313,22 @@ func outputPrimeContext(ctx RoleContext) error {
 	// Get town name for session names
 	townName, _ := workspace.GetTownName(ctx.TownRoot)
 
+	// Get default branch from rig config (default to "main" if not set)
+	defaultBranch := "main"
+	if ctx.Rig != "" && ctx.TownRoot != "" {
+		rigPath := filepath.Join(ctx.TownRoot, ctx.Rig)
+		if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
+			defaultBranch = rigCfg.DefaultBranch
+		}
+	}
+
 	data := templates.RoleData{
 		Role:          roleName,
 		RigName:       ctx.Rig,
 		TownRoot:      ctx.TownRoot,
 		TownName:      townName,
 		WorkDir:       ctx.WorkDir,
+		DefaultBranch: defaultBranch,
 		Polecat:       ctx.Polecat,
 		MayorSession:  session.MayorSessionName(),
 		DeaconSession: session.DeaconSessionName(),
@@ -360,7 +375,7 @@ func outputMayorContext(ctx RoleContext) {
 	fmt.Println("- `gt mail inbox` - Check your messages")
 	fmt.Println("- `gt mail read <id>` - Read a specific message")
 	fmt.Println("- `gt status` - Show overall town status")
-	fmt.Println("- `gt rigs` - List all rigs")
+	fmt.Println("- `gt rig list` - List all rigs")
 	fmt.Println("- `bd ready` - Issues ready to work")
 	fmt.Println()
 	fmt.Println("## Hookable Mail")
@@ -894,11 +909,12 @@ func showMoleculeProgress(b *beads.Beads, rootID string) {
 
 // outputDeaconPatrolContext shows patrol molecule status for the Deacon.
 // Deacon uses wisps (Wisp:true issues in main .beads/) for patrol cycles.
+// Deacon is a town-level role, so it uses town root beads (not rig beads).
 func outputDeaconPatrolContext(ctx RoleContext) {
 	cfg := PatrolConfig{
 		RoleName:        "deacon",
 		PatrolMolName:   "mol-deacon-patrol",
-		BeadsDir:        ctx.WorkDir,
+		BeadsDir:        ctx.TownRoot, // Town-level role uses town root beads
 		Assignee:        "deacon",
 		HeaderEmoji:     "🔄",
 		HeaderTitle:     "Patrol Status (Wisp-based)",
@@ -1174,89 +1190,9 @@ func acquireIdentityLock(ctx RoleContext) error {
 	return nil
 }
 
-// reportAgentState updates the agent bead to report the agent's current state.
-// This implements ZFC-compliant self-reporting of agent state.
-// Agents call this on startup (running) and shutdown (stopped).
-// For crew workers, creates the agent bead if it doesn't exist.
-func reportAgentState(ctx RoleContext, state string) {
-	agentBeadID := getAgentBeadID(ctx)
-	if agentBeadID == "" {
-		return
-	}
-
-	// Use the beads API directly to update agent state
-	// This is more reliable than shelling out to bd
-	bd := beads.New(ctx.WorkDir)
-
-	// Check if agent bead exists, create if needed (especially for crew workers)
-	if _, err := bd.Show(agentBeadID); err != nil {
-		// Agent bead doesn't exist - create it
-		fields := getAgentFields(ctx, state)
-		if fields != nil {
-			_, createErr := bd.CreateAgentBead(agentBeadID, agentBeadID, fields)
-			if createErr != nil {
-				// Silently ignore - beads might not be configured
-				return
-			}
-			// Bead created with initial state, no need to update
-			return
-		}
-	}
-
-	// Update existing agent bead state
-	if err := bd.UpdateAgentState(agentBeadID, state, nil); err != nil {
-		// Silently ignore errors - don't fail prime if state reporting fails
-		return
-	}
-}
-
-// getAgentFields returns the AgentFields for creating a new agent bead.
-func getAgentFields(ctx RoleContext, state string) *beads.AgentFields {
-	switch ctx.Role {
-	case RoleCrew:
-		return &beads.AgentFields{
-			RoleType:   "crew",
-			Rig:        ctx.Rig,
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("crew"),
-		}
-	case RolePolecat:
-		return &beads.AgentFields{
-			RoleType:   "polecat",
-			Rig:        ctx.Rig,
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("polecat"),
-		}
-	case RoleMayor:
-		return &beads.AgentFields{
-			RoleType:   "mayor",
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("mayor"),
-		}
-	case RoleDeacon:
-		return &beads.AgentFields{
-			RoleType:   "deacon",
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("deacon"),
-		}
-	case RoleWitness:
-		return &beads.AgentFields{
-			RoleType:   "witness",
-			Rig:        ctx.Rig,
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("witness"),
-		}
-	case RoleRefinery:
-		return &beads.AgentFields{
-			RoleType:   "refinery",
-			Rig:        ctx.Rig,
-			AgentState: state,
-			RoleBead:   beads.RoleBeadIDTown("refinery"),
-		}
-	default:
-		return nil
-	}
-}
+// NOTE: reportAgentState() and getAgentFields() were removed in gt-zecmc.
+// Agent liveness is now discovered from tmux, not recorded in beads.
+// "Discover, don't track" principle: observable state should not be recorded.
 
 // getAgentBeadID returns the agent bead ID for the current role.
 // Town-level agents (mayor, deacon) use hq- prefix; rig-scoped agents use the rig's prefix.
@@ -1298,103 +1234,22 @@ func getAgentBeadID(ctx RoleContext) string {
 
 // ensureBeadsRedirect ensures the .beads/redirect file exists for worktree-based roles.
 // This handles cases where git clean or other operations delete the redirect file.
-//
-// IMPORTANT: This function includes safety checks to prevent creating redirects in
-// the canonical beads location (mayor/rig/.beads), which would cause circular redirects.
+// Uses the shared SetupRedirect helper which handles both tracked and local beads.
 func ensureBeadsRedirect(ctx RoleContext) {
-	// Only applies to crew and polecat roles (they use shared beads)
-	if ctx.Role != RoleCrew && ctx.Role != RolePolecat {
-		return
-	}
-
-	// Get the rig root (parent of crew/ or polecats/)
-	relPath, err := filepath.Rel(ctx.TownRoot, ctx.WorkDir)
-	if err != nil {
-		return
-	}
-	parts := strings.Split(filepath.ToSlash(relPath), "/")
-	if len(parts) < 1 {
-		return
-	}
-	rigRoot := filepath.Join(ctx.TownRoot, parts[0])
-
-	// SAFETY CHECK: Prevent creating redirect in canonical beads location
-	// If workDir is inside mayor/rig/, we should NOT create a redirect there
-	// This prevents circular redirects like mayor/rig/.beads/redirect -> ../../mayor/rig/.beads
-	mayorRigPath := filepath.Join(rigRoot, "mayor", "rig")
-	workDirAbs, _ := filepath.Abs(ctx.WorkDir)
-	mayorRigPathAbs, _ := filepath.Abs(mayorRigPath)
-	if strings.HasPrefix(workDirAbs, mayorRigPathAbs) {
-		// We're inside mayor/rig/ - this is not a polecat/crew worker location
-		// Role detection may be wrong (e.g., GT_ROLE env var mismatch)
-		// Do NOT create a redirect here
+	// Only applies to worktree-based roles that use shared beads
+	if ctx.Role != RoleCrew && ctx.Role != RolePolecat && ctx.Role != RoleRefinery {
 		return
 	}
 
 	// Check if redirect already exists
-	beadsDir := filepath.Join(ctx.WorkDir, ".beads")
-	redirectPath := filepath.Join(beadsDir, "redirect")
-
+	redirectPath := filepath.Join(ctx.WorkDir, ".beads", "redirect")
 	if _, err := os.Stat(redirectPath); err == nil {
 		// Redirect exists, nothing to do
 		return
 	}
 
-	// Determine the correct redirect path based on role and rig structure
-	var redirectContent string
-
-	// Check for shared beads locations in order of preference:
-	// 1. rig/mayor/rig/.beads/ (if mayor rig clone exists)
-	// 2. rig/.beads/ (rig root beads)
-	mayorRigBeads := filepath.Join(rigRoot, "mayor", "rig", ".beads")
-	rigRootBeads := filepath.Join(rigRoot, ".beads")
-
-	if _, err := os.Stat(mayorRigBeads); err == nil {
-		// Use mayor/rig/.beads
-		if ctx.Role == RoleCrew {
-			// crew/<name>/.beads -> ../../mayor/rig/.beads
-			redirectContent = "../../mayor/rig/.beads"
-		} else {
-			// polecats/<name>/.beads -> ../../mayor/rig/.beads
-			redirectContent = "../../mayor/rig/.beads"
-		}
-	} else if _, err := os.Stat(rigRootBeads); err == nil {
-		// Use rig root .beads
-		if ctx.Role == RoleCrew {
-			// crew/<name>/.beads -> ../../.beads
-			redirectContent = "../../.beads"
-		} else {
-			// polecats/<name>/.beads -> ../../.beads
-			redirectContent = "../../.beads"
-		}
-	} else {
-		// No shared beads found, nothing to redirect to
-		return
-	}
-
-	// SAFETY CHECK: Verify the redirect won't be circular
-	// Resolve the redirect target and check it's not the same as our beads dir
-	resolvedTarget := filepath.Join(ctx.WorkDir, redirectContent)
-	resolvedTarget = filepath.Clean(resolvedTarget)
-	if resolvedTarget == beadsDir {
-		// Would create circular redirect - don't do it
-		return
-	}
-
-	// Create .beads directory if needed
-	if err := os.MkdirAll(beadsDir, 0755); err != nil {
-		// Silently fail - not critical
-		return
-	}
-
-	// Write redirect file
-	if err := os.WriteFile(redirectPath, []byte(redirectContent+"\n"), 0644); err != nil {
-		// Silently fail - not critical
-		return
-	}
-
-	// Note: We don't print a message here to avoid cluttering prime output
-	// The redirect is silently restored
+	// Use shared helper - silently ignore errors during prime
+	_ = beads.SetupRedirect(ctx.TownRoot, ctx.WorkDir)
 }
 
 // checkPendingEscalations queries for open escalation beads and displays them prominently.

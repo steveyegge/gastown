@@ -226,14 +226,14 @@ and submits your branch to the merge queue. The Witness handles the rest.
 
 > **Work is NOT landed until it's on `main` OR in the Refinery MQ.**
 
-Your branch sitting on origin is NOT landed. You must run `gt done` to submit it
-to the merge queue. Without this step:
+Your local branch is NOT landed. You must run `gt done` to submit it to the
+merge queue. Without this step:
 - Your work is invisible to other agents
 - The branch will go stale as main diverges
 - Merge conflicts will compound over time
 - Work can be lost if your polecat is recycled
 
-**Branch → `gt done` → MR in queue → Refinery merges → LANDED**
+**Local branch → `gt done` → MR in queue → Refinery merges → LANDED**
 
 ## If You're Stuck
 

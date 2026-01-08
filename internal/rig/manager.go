@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/templates"
@@ -62,13 +63,14 @@ func NewManager(townRoot string, rigsConfig *config.RigsConfig, g *git.Git) *Man
 }
 
 // DiscoverRigs returns all rigs registered in the workspace.
+// Rigs that fail to load are logged to stderr and skipped; partial results are returned.
 func (m *Manager) DiscoverRigs() ([]*Rig, error) {
 	var rigs []*Rig
 
 	for name, entry := range m.config.Rigs {
 		rig, err := m.loadRig(name, entry)
 		if err != nil {
-			// Log error but continue with other rigs
+			fmt.Fprintf(os.Stderr, "Warning: failed to load rig %q: %v\n", name, err)
 			continue
 		}
 		rigs = append(rigs, rig)
@@ -366,6 +368,14 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
 	}
 
+	// Initialize beads at rig level BEFORE creating worktrees.
+	// This ensures rig/.beads exists so worktree redirects can point to it.
+	fmt.Printf("  Initializing beads database...\n")
+	if err := m.initBeads(rigPath, opts.BeadsPrefix); err != nil {
+		return nil, fmt.Errorf("initializing beads: %w", err)
+	}
+	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
+
 	// Create refinery as worktree from bare repo on default branch.
 	// Refinery needs to see polecat branches (shared .repo.git) and merges them.
 	// Being on the default branch allows direct merge workflow.
@@ -378,14 +388,13 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("creating refinery worktree: %w", err)
 	}
 	fmt.Printf("   ✓ Created refinery worktree\n")
+	// Set up beads redirect for refinery (points to rig-level .beads)
+	if err := beads.SetupRedirect(m.townRoot, refineryRigPath); err != nil {
+		fmt.Printf("  Warning: Could not set up refinery beads redirect: %v\n", err)
+	}
 	// Create refinery CLAUDE.md (overrides any from cloned repo)
 	if err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating refinery CLAUDE.md: %w", err)
-	}
-	// Create refinery hooks for patrol triggering (at refinery/ level, not rig/)
-	refineryPath := filepath.Dir(refineryRigPath)
-	if err := m.createPatrolHooks(refineryPath); err != nil {
-		fmt.Printf("  Warning: Could not create refinery hooks: %v\n", err)
 	}
 
 	// Create empty crew directory with README (crew members added via gt crew add)
@@ -421,16 +430,32 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	if err := os.MkdirAll(witnessPath, 0755); err != nil {
 		return nil, fmt.Errorf("creating witness dir: %w", err)
 	}
-	// Create witness hooks for patrol triggering
-	if err := m.createPatrolHooks(witnessPath); err != nil {
-		fmt.Printf("  Warning: Could not create witness hooks: %v\n", err)
-	}
 
 	// Create polecats directory (empty)
 	polecatsPath := filepath.Join(rigPath, "polecats")
 	if err := os.MkdirAll(polecatsPath, 0755); err != nil {
 		return nil, fmt.Errorf("creating polecats dir: %w", err)
 	}
+
+	// Install Claude settings for all agent directories.
+	// Settings are placed in parent directories (not inside git repos) so Claude
+	// finds them via directory traversal without polluting source repos.
+	fmt.Printf("  Installing Claude settings...\n")
+	settingsRoles := []struct {
+		dir  string
+		role string
+	}{
+		{witnessPath, "witness"},
+		{filepath.Join(rigPath, "refinery"), "refinery"},
+		{crewPath, "crew"},
+		{polecatsPath, "polecat"},
+	}
+	for _, sr := range settingsRoles {
+		if err := claude.EnsureSettingsForRole(sr.dir, sr.role); err != nil {
+			fmt.Fprintf(os.Stderr, "  Warning: Could not create %s settings: %v\n", sr.role, err)
+		}
+	}
+	fmt.Printf("   ✓ Installed Claude settings\n")
 
 	// Initialize beads at rig level
 	fmt.Printf("  Initializing beads database...\n")
@@ -443,19 +468,19 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
 	if err := m.initAgentBeads(rigPath, opts.Name, opts.BeadsPrefix); err != nil {
 		// Non-fatal: log warning but continue
-		fmt.Printf("  Warning: Could not create agent beads: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  Warning: Could not create agent beads: %v\n", err)
 	}
 
 	// Seed patrol molecules for this rig
 	if err := m.seedPatrolMolecules(rigPath); err != nil {
 		// Non-fatal: log warning but continue
-		fmt.Printf("  Warning: Could not seed patrol molecules: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  Warning: Could not seed patrol molecules: %v\n", err)
 	}
 
 	// Create plugin directories
 	if err := m.createPluginDirectories(rigPath); err != nil {
 		// Non-fatal: log warning but continue
-		fmt.Printf("  Warning: Could not create plugin directories: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  Warning: Could not create plugin directories: %v\n", err)
 	}
 
 	// Register in town config
@@ -507,6 +532,23 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	}
 
 	beadsDir := filepath.Join(rigPath, ".beads")
+	mayorRigBeads := filepath.Join(rigPath, "mayor", "rig", ".beads")
+
+	// Check if source repo has tracked .beads/ (cloned into mayor/rig).
+	// If so, create a redirect file instead of a new database.
+	if _, err := os.Stat(mayorRigBeads); err == nil {
+		// Tracked beads exist - create redirect to mayor/rig/.beads
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			return err
+		}
+		redirectPath := filepath.Join(beadsDir, "redirect")
+		if err := os.WriteFile(redirectPath, []byte("mayor/rig/.beads\n"), 0644); err != nil {
+			return fmt.Errorf("creating redirect file: %w", err)
+		}
+		return nil
+	}
+
+	// No tracked beads - create local database
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		return err
 	}
@@ -546,6 +588,15 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	// Ignore errors - fingerprint is optional for functionality
 	_, _ = migrateCmd.CombinedOutput()
 
+	// Add route from rig beads to town beads for cross-database resolution.
+	// This allows rig beads to resolve hq-* prefixed beads (role beads, etc.)
+	// that are stored in town beads.
+	townRoute := beads.Route{Prefix: "hq-", Path: ".."}
+	if err := beads.AppendRouteToDir(beadsDir, townRoute); err != nil {
+		// Non-fatal: role slot set will fail but agent beads still work
+		fmt.Printf("   ⚠ Could not add route to town beads: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -555,14 +606,16 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 // Town-level agents (Mayor, Deacon) are created by gt install in town beads.
 // Role beads are also created by gt install with hq- prefix.
 //
-// Format: <prefix>-<rig>-<role> (e.g., gt-gastown-witness)
+// Rig-level agents (Witness, Refinery) are created here in rig beads with rig prefix.
+// Format: <prefix>-<rig>-<role> (e.g., pi-pixelforge-witness)
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
-func (m *Manager) initAgentBeads(_, rigName, _ string) error { // rigPath and prefix unused until Phase 2
-	// TEMPORARY (gt-4r1ph): Currently all agent beads go in town beads.
-	// After Phase 2, only Mayor/Deacon will be here; Witness/Refinery go to rig beads.
-	townBeadsDir := filepath.Join(m.townRoot, ".beads")
-	bd := beads.NewWithBeadsDir(m.townRoot, townBeadsDir)
+func (m *Manager) initAgentBeads(rigPath, rigName, prefix string) error {
+	// Rig-level agents go in rig beads with rig prefix (per docs/architecture.md).
+	// Town-level agents (Mayor, Deacon) are created by gt install in town beads.
+	// Use ResolveBeadsDir to follow redirect files for tracked beads.
+	rigBeadsDir := beads.ResolveBeadsDir(rigPath)
+	bd := beads.NewWithBeadsDir(rigPath, rigBeadsDir)
 
 	// Define rig-level agents to create
 	type agentDef struct {
@@ -572,17 +625,17 @@ func (m *Manager) initAgentBeads(_, rigName, _ string) error { // rigPath and pr
 		desc     string
 	}
 
-	// Create rig-specific agents using gt prefix (agents stored in town beads).
-	// Format: gt-<rig>-<role> (e.g., gt-gastown-witness)
+	// Create rig-specific agents using rig prefix in rig beads.
+	// Format: <prefix>-<rig>-<role> (e.g., pi-pixelforge-witness)
 	agents := []agentDef{
 		{
-			id:       beads.WitnessBeadID(rigName),
+			id:       beads.WitnessBeadIDWithPrefix(prefix, rigName),
 			roleType: "witness",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
 		},
 		{
-			id:       beads.RefineryBeadID(rigName),
+			id:       beads.RefineryBeadIDWithPrefix(prefix, rigName),
 			roleType: "refinery",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
@@ -791,12 +844,22 @@ func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName 
 	// Get town name for session names
 	townName, _ := workspace.GetTownName(m.townRoot)
 
+	// Get default branch from rig config (default to "main" if not set)
+	defaultBranch := "main"
+	if rigName != "" {
+		rigPath := filepath.Join(m.townRoot, rigName)
+		if rigCfg, err := LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
+			defaultBranch = rigCfg.DefaultBranch
+		}
+	}
+
 	data := templates.RoleData{
 		Role:          role,
 		RigName:       rigName,
 		TownRoot:      m.townRoot,
 		TownName:      townName,
 		WorkDir:       workspacePath,
+		DefaultBranch: defaultBranch,
 		Polecat:       workerName, // Used for crew member name as well
 		MayorSession:  fmt.Sprintf("gt-%s-mayor", townName),
 		DeaconSession: fmt.Sprintf("gt-%s-deacon", townName),
@@ -809,58 +872,6 @@ func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName 
 
 	claudePath := filepath.Join(workspacePath, "CLAUDE.md")
 	return os.WriteFile(claudePath, []byte(content), 0644)
-}
-
-// createPatrolHooks creates .claude/settings.json with hooks for patrol roles.
-// These hooks trigger gt prime on session start and inject mail, enabling
-// autonomous patrol execution for Witness and Refinery roles.
-func (m *Manager) createPatrolHooks(workspacePath string) error {
-	claudeDir := filepath.Join(workspacePath, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
-		return fmt.Errorf("creating .claude dir: %w", err)
-	}
-
-	// Standard patrol hooks - same as deacon
-	hooksJSON := `{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt prime && gt mail check --inject"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt prime"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt mail check --inject"
-          }
-        ]
-      }
-    ]
-  }
-}
-`
-	settingsPath := filepath.Join(claudeDir, "settings.json")
-	return os.WriteFile(settingsPath, []byte(hooksJSON), 0600)
 }
 
 // seedPatrolMolecules creates patrol molecule prototypes in the rig's beads database.
@@ -966,7 +977,10 @@ See docs/deacon-plugins.md for full documentation.
 		return fmt.Errorf("creating rig plugins directory: %w", err)
 	}
 
-	// Add plugins/ to rig .gitignore
+	// Add plugins/ and .repo.git/ to rig .gitignore
 	gitignorePath := filepath.Join(rigPath, ".gitignore")
-	return m.ensureGitignoreEntry(gitignorePath, "plugins/")
+	if err := m.ensureGitignoreEntry(gitignorePath, "plugins/"); err != nil {
+		return err
+	}
+	return m.ensureGitignoreEntry(gitignorePath, ".repo.git/")
 }

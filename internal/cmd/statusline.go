@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -181,31 +182,76 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		}
 	}
 
-	// Count polecats and rigs
-	// Polecats: only actual polecats (not witnesses, refineries, deacon, crew)
-	// Rigs: only registered rigs with active sessions
+	// Track per-rig status for LED indicators
+	type rigStatus struct {
+		hasWitness  bool
+		hasRefinery bool
+	}
+	rigStatuses := make(map[string]*rigStatus)
+
+	// Initialize for all registered rigs
+	for rigName := range registeredRigs {
+		rigStatuses[rigName] = &rigStatus{}
+	}
+
+	// Count polecats and track rig witness/refinery status
 	polecatCount := 0
-	rigs := make(map[string]bool)
 	for _, s := range sessions {
 		agent := categorizeSession(s)
 		if agent == nil {
 			continue
 		}
-		// Count rigs from any rig-level agent, but only if registered
 		if agent.Rig != "" && registeredRigs[agent.Rig] {
-			rigs[agent.Rig] = true
-		}
-		// Count only polecats for polecat count (in registered rigs)
-		if agent.Type == AgentPolecat && registeredRigs[agent.Rig] {
-			polecatCount++
+			if rigStatuses[agent.Rig] == nil {
+				rigStatuses[agent.Rig] = &rigStatus{}
+			}
+			switch agent.Type {
+			case AgentWitness:
+				rigStatuses[agent.Rig].hasWitness = true
+			case AgentRefinery:
+				rigStatuses[agent.Rig].hasRefinery = true
+			case AgentPolecat:
+				polecatCount++
+			}
 		}
 	}
-	rigCount := len(rigs)
 
 	// Build status
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%d 😺", polecatCount))
-	parts = append(parts, fmt.Sprintf("%d rigs", rigCount))
+
+	// Build rig status display with LED indicators
+	// 🟢 = both witness and refinery running (fully active)
+	// 🟡 = one of witness/refinery running (partially active)
+	// ⚫ = neither running (inactive)
+	var rigParts []string
+	var rigNames []string
+	for rigName := range rigStatuses {
+		rigNames = append(rigNames, rigName)
+	}
+	sort.Strings(rigNames)
+
+	for _, rigName := range rigNames {
+		status := rigStatuses[rigName]
+		var led string
+
+		// Check if rig is parked or docked
+		opState, _ := getRigOperationalState(townRoot, rigName)
+		if opState == "PARKED" || opState == "DOCKED" {
+			led = "⏸️" // Parked/docked - intentionally offline
+		} else if status.hasWitness && status.hasRefinery {
+			led = "🟢" // Both running - fully active
+		} else if status.hasWitness || status.hasRefinery {
+			led = "🟡" // One running - partially active
+		} else {
+			led = "⚫" // Neither running - inactive
+		}
+		rigParts = append(rigParts, led+rigName)
+	}
+
+	if len(rigParts) > 0 {
+		parts = append(parts, strings.Join(rigParts, " "))
+	}
 
 	// Priority 1: Check for hooked work (town beads for mayor)
 	hookedWork := ""
