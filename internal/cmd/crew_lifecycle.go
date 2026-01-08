@@ -236,9 +236,10 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 
 	// Use manager's Start() with refresh options
 	err = crewMgr.Start(name, crew.StartOptions{
-		KillExisting: true,      // Kill old session if running
-		Topic:        "refresh", // Startup nudge topic
-		Interactive:  true,      // No --dangerously-skip-permissions
+		KillExisting:  true,             // Kill old session if running
+		Topic:         "refresh",        // Startup nudge topic
+		Interactive:   true,             // No --dangerously-skip-permissions
+		AgentOverride: crewAgentOverride,
 	})
 	if err != nil {
 		return fmt.Errorf("starting crew session: %w", err)
@@ -346,8 +347,9 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 		// Use manager's Start() with restart options
 		// Start() will create workspace if needed (idempotent)
 		err = crewMgr.Start(name, crew.StartOptions{
-			KillExisting: true,     // Kill old session if running
-			Topic:        "restart", // Startup nudge topic
+			KillExisting:  true,             // Kill old session if running
+			Topic:         "restart",        // Startup nudge topic
+			AgentOverride: crewAgentOverride,
 		})
 		if err != nil {
 			fmt.Printf("Error restarting %s: %v\n", arg, err)
@@ -425,8 +427,9 @@ func runCrewRestartAll() error {
 
 		// Use manager's Start() with restart options
 		err = crewMgr.Start(agent.AgentName, crew.StartOptions{
-			KillExisting: true,     // Kill old session if running
-			Topic:        "restart", // Startup nudge topic
+			KillExisting:  true,             // Kill old session if running
+			Topic:         "restart",        // Startup nudge topic
+			AgentOverride: crewAgentOverride,
 		})
 		if err != nil {
 			failed++

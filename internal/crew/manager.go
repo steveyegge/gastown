@@ -50,6 +50,9 @@ type StartOptions struct {
 
 	// Interactive removes --dangerously-skip-permissions for interactive/refresh mode.
 	Interactive bool
+
+	// AgentOverride specifies an alternate agent alias (e.g., for testing).
+	AgentOverride string
 }
 
 // validateCrewName checks that a crew name is safe and valid.
@@ -514,7 +517,11 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 
 	// Start claude with environment exports and beacon as initial prompt
 	// SessionStart hook handles context loading (gt prime --hook)
-	claudeCmd := config.BuildCrewStartupCommand(m.rig.Name, name, m.rig.Path, beacon)
+	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
+	if err != nil {
+		_ = t.KillSession(sessionID)
+		return fmt.Errorf("building startup command: %w", err)
+	}
 
 	// For interactive/refresh mode, remove --dangerously-skip-permissions
 	if opts.Interactive {

@@ -204,7 +204,7 @@ func startCoreAgents(townRoot string, agentOverride string) error {
 
 	// Start Deacon (health monitor)
 	deaconMgr := deacon.NewManager(townRoot)
-	if err := deaconMgr.Start(); err != nil {
+	if err := deaconMgr.Start(agentOverride); err != nil {
 		if err == deacon.ErrAlreadyRunning {
 			fmt.Printf("  %s Deacon already running\n", style.Dim.Render("○"))
 		} else {
@@ -777,6 +777,7 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 	err = crewMgr.Start(name, crew.StartOptions{
 		Account:         startCrewAccount,
 		ClaudeConfigDir: claudeConfigDir,
+		AgentOverride:   startCrewAgentOverride,
 	})
 	if err != nil {
 		if errors.Is(err, crew.ErrSessionRunning) {
