@@ -495,12 +495,33 @@ type GitCheckoutRequest struct {
 
 // GitStatus represents the status of a git repository.
 type GitStatus struct {
-	CurrentBranch string   `json:"currentBranch"`
-	Ahead         int      `json:"ahead"`
-	Behind        int      `json:"behind"`
-	Staged        []string `json:"staged"`
-	Unstaged      []string `json:"unstaged"`
-	Untracked     []string `json:"untracked"`
+	CurrentBranch   string          `json:"currentBranch"`
+	Ahead           int             `json:"ahead"`
+	Behind          int             `json:"behind"`
+	BranchPublished bool            `json:"branchPublished"`
+	FileStatus      []GitFileStatus `json:"fileStatus"`
+}
+
+// FileStatus represents the git status of a file.
+type FileStatus string
+
+const (
+	FileStatusUnmodified        FileStatus = "Unmodified"
+	FileStatusUntracked         FileStatus = "Untracked"
+	FileStatusModified          FileStatus = "Modified"
+	FileStatusAdded             FileStatus = "Added"
+	FileStatusDeleted           FileStatus = "Deleted"
+	FileStatusRenamed           FileStatus = "Renamed"
+	FileStatusCopied            FileStatus = "Copied"
+	FileStatusUpdatedButUnmerged FileStatus = "Updated but unmerged"
+)
+
+// GitFileStatus represents the status of a file in a git repository.
+type GitFileStatus struct {
+	Name     string     `json:"name"`
+	Staging  FileStatus `json:"staging"`  // Status in staging area
+	Worktree FileStatus `json:"worktree"` // Status in working tree
+	Extra    string     `json:"extra,omitempty"`
 }
 
 // GitPullPushRequest represents a request to pull or push changes.
@@ -508,6 +529,37 @@ type GitPullPushRequest struct {
 	Path     string `json:"path"`
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
+}
+
+// GitAddRequest represents a request to stage files.
+type GitAddRequest struct {
+	Path  string   `json:"path"`
+	Files []string `json:"files"`
+}
+
+// GitCommitRequest represents a request to commit changes.
+type GitCommitRequest struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
+	Author  string `json:"author"`
+	Email   string `json:"email"`
+}
+
+// GitBranchRequest represents a request to create or delete a branch.
+type GitBranchRequest struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+}
+
+// GitBranch represents a git branch.
+type GitBranch struct {
+	Name      string `json:"name"`
+	IsCurrent bool   `json:"isCurrent,omitempty"`
+}
+
+// GitBranchesResponse represents the response from listing branches.
+type GitBranchesResponse struct {
+	Branches []string `json:"branches"`
 }
 
 // --- Git API Methods ---
@@ -561,6 +613,67 @@ func (c *Client) GitPull(ctx context.Context, sandboxID string, req *GitPullPush
 func (c *Client) GitPush(ctx context.Context, sandboxID string, req *GitPullPushRequest) error {
 	path := fmt.Sprintf("/%s/git/push", sandboxID)
 	resp, err := c.doToolboxRequest(ctx, http.MethodPost, path, req)
+	if err != nil {
+		return err
+	}
+	return parseResponse(resp, nil)
+}
+
+// GitAdd stages files for the next commit.
+func (c *Client) GitAdd(ctx context.Context, sandboxID string, req *GitAddRequest) error {
+	path := fmt.Sprintf("/%s/git/add", sandboxID)
+	resp, err := c.doToolboxRequest(ctx, http.MethodPost, path, req)
+	if err != nil {
+		return err
+	}
+	return parseResponse(resp, nil)
+}
+
+// GitCommit commits staged changes.
+func (c *Client) GitCommit(ctx context.Context, sandboxID string, req *GitCommitRequest) error {
+	path := fmt.Sprintf("/%s/git/commit", sandboxID)
+	resp, err := c.doToolboxRequest(ctx, http.MethodPost, path, req)
+	if err != nil {
+		return err
+	}
+	return parseResponse(resp, nil)
+}
+
+// GitBranches lists all branches in a repository.
+func (c *Client) GitBranches(ctx context.Context, sandboxID, repoPath string) ([]GitBranch, error) {
+	path := fmt.Sprintf("/%s/git/branches?path=%s", sandboxID, url.QueryEscape(repoPath))
+	resp, err := c.doToolboxRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response GitBranchesResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	// Convert string slice to GitBranch slice
+	branches := make([]GitBranch, len(response.Branches))
+	for i, name := range response.Branches {
+		branches[i] = GitBranch{Name: name}
+	}
+	return branches, nil
+}
+
+// GitCreateBranch creates a new branch.
+func (c *Client) GitCreateBranch(ctx context.Context, sandboxID string, req *GitBranchRequest) error {
+	path := fmt.Sprintf("/%s/git/branches", sandboxID)
+	resp, err := c.doToolboxRequest(ctx, http.MethodPost, path, req)
+	if err != nil {
+		return err
+	}
+	return parseResponse(resp, nil)
+}
+
+// GitDeleteBranch deletes a branch.
+func (c *Client) GitDeleteBranch(ctx context.Context, sandboxID string, req *GitBranchRequest) error {
+	path := fmt.Sprintf("/%s/git/branches", sandboxID)
+	resp, err := c.doToolboxRequest(ctx, http.MethodDelete, path, req)
 	if err != nil {
 		return err
 	}
