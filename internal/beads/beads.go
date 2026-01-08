@@ -269,9 +269,10 @@ type Issue struct {
 	Labels      []string `json:"labels,omitempty"`
 
 	// Agent bead slots (type=agent only)
-	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
-	RoleBead   string `json:"role_bead,omitempty"`   // Role definition bead (shared)
-	AgentState string `json:"agent_state,omitempty"` // Agent lifecycle state (spawning, working, done, stuck)
+	HookBead      string `json:"hook_bead,omitempty"`      // Current work attached to agent's hook
+	RoleBead      string `json:"role_bead,omitempty"`      // Role definition bead (shared)
+	AgentState    string `json:"agent_state,omitempty"`    // Agent lifecycle state (spawning, working, done, stuck)
+	StatusMessage string `json:"status_message,omitempty"` // Human-readable status of what agent is doing
 
 	// Counts from list output
 	DependencyCount int `json:"dependency_count,omitempty"`
@@ -1006,6 +1007,7 @@ type AgentFields struct {
 	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
 	ActiveMR          string // Currently active merge request bead ID (for traceability)
 	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
+	StatusMessage     string // Human-readable status: what the agent is currently doing
 }
 
 // Notification level constants
@@ -1064,6 +1066,12 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, "notification_level: null")
 	}
 
+	if fields.StatusMessage != "" {
+		lines = append(lines, fmt.Sprintf("status_message: %s", fields.StatusMessage))
+	} else {
+		lines = append(lines, "status_message: null")
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -1105,6 +1113,8 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.ActiveMR = value
 		case "notification_level":
 			fields.NotificationLevel = value
+		case "status_message":
+			fields.StatusMessage = value
 		}
 	}
 
@@ -1299,6 +1309,26 @@ func (b *Beads) UpdateAgentNotificationLevel(id string, level string) error {
 	// Parse existing fields
 	fields := ParseAgentFields(issue.Description)
 	fields.NotificationLevel = level
+
+	// Format new description
+	description := FormatAgentDescription(issue.Title, fields)
+
+	return b.Update(id, UpdateOptions{Description: &description})
+}
+
+// UpdateAgentStatusMessage updates the status_message field in an agent bead.
+// This is a human-readable message describing what the agent is currently doing.
+// Pass empty string to clear the status message.
+func (b *Beads) UpdateAgentStatusMessage(id string, message string) error {
+	// First get current issue to preserve other fields
+	issue, err := b.Show(id)
+	if err != nil {
+		return err
+	}
+
+	// Parse existing fields
+	fields := ParseAgentFields(issue.Description)
+	fields.StatusMessage = message
 
 	// Format new description
 	description := FormatAgentDescription(issue.Title, fields)

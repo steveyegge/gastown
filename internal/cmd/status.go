@@ -75,17 +75,18 @@ type OverseerInfo struct {
 
 // AgentRuntime represents the runtime state of an agent.
 type AgentRuntime struct {
-	Name         string `json:"name"`                    // Display name (e.g., "mayor", "witness")
-	Address      string `json:"address"`                 // Full address (e.g., "greenplace/witness")
-	Session      string `json:"session"`                 // tmux session name
-	Role         string `json:"role"`                    // Role type
-	Running      bool   `json:"running"`                 // Is tmux session running?
-	HasWork      bool   `json:"has_work"`                // Has pinned work?
-	WorkTitle    string `json:"work_title,omitempty"`    // Title of pinned work
-	HookBead     string `json:"hook_bead,omitempty"`     // Pinned bead ID from agent bead
-	State        string `json:"state,omitempty"`         // Agent state from agent bead
-	UnreadMail   int    `json:"unread_mail"`             // Number of unread messages
-	FirstSubject string `json:"first_subject,omitempty"` // Subject of first unread message
+	Name          string `json:"name"`                     // Display name (e.g., "mayor", "witness")
+	Address       string `json:"address"`                  // Full address (e.g., "greenplace/witness")
+	Session       string `json:"session"`                  // tmux session name
+	Role          string `json:"role"`                     // Role type
+	Running       bool   `json:"running"`                  // Is tmux session running?
+	HasWork       bool   `json:"has_work"`                 // Has pinned work?
+	WorkTitle     string `json:"work_title,omitempty"`     // Title of pinned work
+	HookBead      string `json:"hook_bead,omitempty"`      // Pinned bead ID from agent bead
+	State         string `json:"state,omitempty"`          // Agent state from agent bead
+	StatusMessage string `json:"status_message,omitempty"` // Human-readable status of what agent is doing
+	UnreadMail    int    `json:"unread_mail"`              // Number of unread messages
+	FirstSubject  string `json:"first_subject,omitempty"`  // Subject of first unread message
 }
 
 // RigStatus represents status of a single rig.
@@ -672,7 +673,12 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 
 	fmt.Printf("%s  hook: %s\n", indent, hookStr)
 
-	// Line 3: Mail (if any unread)
+	// Line 3: Status message (what agent is currently doing)
+	if agent.StatusMessage != "" {
+		fmt.Printf("%s  status: %s\n", indent, style.Info.Render(agent.StatusMessage))
+	}
+
+	// Line 4: Mail (if any unread)
 	if agent.UnreadMail > 0 {
 		mailStr := fmt.Sprintf("📬 %d unread", agent.UnreadMail)
 		if agent.FirstSubject != "" {
@@ -751,7 +757,13 @@ func renderAgentCompactWithSuffix(agent AgentRuntime, indent string, hooks []Age
 		}
 	}
 
-	// Build hook suffix
+	// Build status message suffix (what the agent is currently doing)
+	statusMsgSuffix := ""
+	if agent.StatusMessage != "" {
+		statusMsgSuffix = style.Info.Render(" " + truncateWithEllipsis(agent.StatusMessage, 25))
+	}
+
+	// Build hook suffix (what issue they're working on)
 	hookSuffix := ""
 	if hookBead != "" {
 		if hookTitle != "" {
@@ -769,8 +781,8 @@ func renderAgentCompactWithSuffix(agent AgentRuntime, indent string, hooks []Age
 		mailSuffix = fmt.Sprintf(" 📬%d", agent.UnreadMail)
 	}
 
-	// Print single line: name + status + hook + mail + suffix
-	fmt.Printf("%s%-12s %s%s%s%s\n", indent, agent.Name, statusIndicator, hookSuffix, mailSuffix, suffix)
+	// Print single line: name + status + statusMsg + hook + mail + suffix
+	fmt.Printf("%s%-12s %s%s%s%s%s\n", indent, agent.Name, statusIndicator, statusMsgSuffix, hookSuffix, mailSuffix, suffix)
 }
 
 // renderAgentCompact renders a single-line agent status
@@ -791,7 +803,13 @@ func renderAgentCompact(agent AgentRuntime, indent string, hooks []AgentHookInfo
 		}
 	}
 
-	// Build hook suffix
+	// Build status message suffix (what the agent is currently doing)
+	statusMsgSuffix := ""
+	if agent.StatusMessage != "" {
+		statusMsgSuffix = style.Info.Render(" " + truncateWithEllipsis(agent.StatusMessage, 25))
+	}
+
+	// Build hook suffix (what issue they're working on)
 	hookSuffix := ""
 	if hookBead != "" {
 		if hookTitle != "" {
@@ -809,8 +827,8 @@ func renderAgentCompact(agent AgentRuntime, indent string, hooks []AgentHookInfo
 		mailSuffix = fmt.Sprintf(" 📬%d", agent.UnreadMail)
 	}
 
-	// Print single line: name + status + hook + mail
-	fmt.Printf("%s%-12s %s%s%s\n", indent, agent.Name, statusIndicator, hookSuffix, mailSuffix)
+	// Print single line: name + status + statusMsg + hook + mail
+	fmt.Printf("%s%-12s %s%s%s%s\n", indent, agent.Name, statusIndicator, statusMsgSuffix, hookSuffix, mailSuffix)
 }
 
 // buildStatusIndicator creates the visual status indicator for an agent.
@@ -961,6 +979,7 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 				// HookBead column is authoritative (cleared by unsling)
 				agent.HookBead = issue.HookBead
 				agent.State = issue.AgentState
+				agent.StatusMessage = issue.StatusMessage
 				if agent.HookBead != "" {
 					agent.HasWork = true
 					// Get hook title from preloaded map
@@ -969,10 +988,15 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 					}
 				}
 				// Fallback to description for legacy beads without SQLite columns
-				if agent.State == "" {
+				if agent.State == "" || agent.StatusMessage == "" {
 					fields := beads.ParseAgentFields(issue.Description)
 					if fields != nil {
-						agent.State = fields.AgentState
+						if agent.State == "" {
+							agent.State = fields.AgentState
+						}
+						if agent.StatusMessage == "" {
+							agent.StatusMessage = fields.StatusMessage
+						}
 					}
 				}
 			}
@@ -1101,6 +1125,7 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 				// HookBead column is authoritative (cleared by unsling)
 				agent.HookBead = issue.HookBead
 				agent.State = issue.AgentState
+				agent.StatusMessage = issue.StatusMessage
 				if agent.HookBead != "" {
 					agent.HasWork = true
 					// Get hook title from preloaded map
@@ -1109,10 +1134,15 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 					}
 				}
 				// Fallback to description for legacy beads without SQLite columns
-				if agent.State == "" {
+				if agent.State == "" || agent.StatusMessage == "" {
 					fields := beads.ParseAgentFields(issue.Description)
 					if fields != nil {
-						agent.State = fields.AgentState
+						if agent.State == "" {
+							agent.State = fields.AgentState
+						}
+						if agent.StatusMessage == "" {
+							agent.StatusMessage = fields.StatusMessage
+						}
 					}
 				}
 			}
