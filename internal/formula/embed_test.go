@@ -532,3 +532,217 @@ func TestCheckFormulaHealth_NewFormula(t *testing.T) {
 		t.Errorf("OK = %d, want 0", report.OK)
 	}
 }
+
+// TestCheckFormulaHealth_Untracked tests detection of files that exist but aren't
+// in .installed.json and don't match embedded (e.g., from older gt version).
+func TestCheckFormulaHealth_Untracked(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Get embedded formulas
+	embedded, err := getEmbeddedFormulas()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create formulas directory without .installed.json
+	formulasDir := filepath.Join(tmpDir, ".beads", "formulas")
+	if err := os.MkdirAll(formulasDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write formula files with different content (simulating older version)
+	for name := range embedded {
+		oldContent := []byte("# old version of " + name + "\n[molecule]\nid = \"test\"\n")
+		if err := os.WriteFile(filepath.Join(formulasDir, name), oldContent, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Check health - all should be "untracked" (not "modified" since not tracked)
+	report, err := CheckFormulaHealth(tmpDir)
+	if err != nil {
+		t.Fatalf("CheckFormulaHealth() error: %v", err)
+	}
+
+	if report.Untracked != len(embedded) {
+		t.Errorf("Untracked = %d, want %d", report.Untracked, len(embedded))
+	}
+	if report.Modified != 0 {
+		t.Errorf("Modified = %d, want 0 (untracked files shouldn't be marked as modified)", report.Modified)
+	}
+	if report.OK != 0 {
+		t.Errorf("OK = %d, want 0", report.OK)
+	}
+
+	// Verify all formulas have status "untracked"
+	for _, f := range report.Formulas {
+		if f.Status != "untracked" {
+			t.Errorf("formula %s status = %q, want %q", f.Name, f.Status, "untracked")
+		}
+	}
+}
+
+// TestUpdateFormulas_UpdatesUntracked tests that untracked files get updated.
+func TestUpdateFormulas_UpdatesUntracked(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Get embedded formulas
+	embedded, err := getEmbeddedFormulas()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create formulas directory without .installed.json
+	formulasDir := filepath.Join(tmpDir, ".beads", "formulas")
+	if err := os.MkdirAll(formulasDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write formula files with different content (simulating older version)
+	for name := range embedded {
+		oldContent := []byte("# old version of " + name + "\n[molecule]\nid = \"test\"\n")
+		if err := os.WriteFile(filepath.Join(formulasDir, name), oldContent, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Run update - should update all untracked formulas
+	updated, skipped, reinstalled, err := UpdateFormulas(tmpDir)
+	if err != nil {
+		t.Fatalf("UpdateFormulas() error: %v", err)
+	}
+
+	// All untracked files should be updated (counted as "updated", not "reinstalled")
+	if updated != len(embedded) {
+		t.Errorf("updated = %d, want %d", updated, len(embedded))
+	}
+	if skipped != 0 {
+		t.Errorf("skipped = %d, want 0", skipped)
+	}
+	if reinstalled != 0 {
+		t.Errorf("reinstalled = %d, want 0", reinstalled)
+	}
+
+	// Verify files now match embedded
+	for name, expectedHash := range embedded {
+		content, err := os.ReadFile(filepath.Join(formulasDir, name))
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		actualHash := computeHash(content)
+		if actualHash != expectedHash {
+			t.Errorf("%s hash mismatch after update", name)
+		}
+	}
+
+	// Verify .installed.json was created with correct hashes
+	installed, err := loadInstalledRecord(formulasDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, expectedHash := range embedded {
+		if installed.Formulas[name] != expectedHash {
+			t.Errorf(".installed.json hash for %s = %q, want %q",
+				name, installed.Formulas[name], expectedHash)
+		}
+	}
+
+	// Re-run health check - should be all OK now
+	report, err := CheckFormulaHealth(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OK != len(embedded) {
+		t.Errorf("after update, OK = %d, want %d", report.OK, len(embedded))
+	}
+	if report.Untracked != 0 {
+		t.Errorf("after update, Untracked = %d, want 0", report.Untracked)
+	}
+}
+
+// TestCheckFormulaHealth_MixedScenarios tests a mix of OK, untracked, and modified.
+func TestCheckFormulaHealth_MixedScenarios(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Get embedded formulas
+	embedded, err := getEmbeddedFormulas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(embedded) < 3 {
+		t.Skip("need at least 3 formulas for this test")
+	}
+
+	formulasDir := filepath.Join(tmpDir, ".beads", "formulas")
+	if err := os.MkdirAll(formulasDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Prepare installed record with only some formulas tracked
+	installed := &InstalledRecord{Formulas: make(map[string]string)}
+
+	i := 0
+	var okFormula, untrackedFormula, modifiedFormula string
+	for name := range embedded {
+		switch i {
+		case 0:
+			// First formula: write matching content, track it -> should be OK
+			okFormula = name
+			content, _ := formulasFS.ReadFile("formulas/" + name)
+			if err := os.WriteFile(filepath.Join(formulasDir, name), content, 0644); err != nil {
+				t.Fatal(err)
+			}
+			installed.Formulas[name] = computeHash(content)
+
+		case 1:
+			// Second formula: write old content, don't track -> should be untracked
+			untrackedFormula = name
+			oldContent := []byte("# untracked old version\n[molecule]\nid = \"test\"\n")
+			if err := os.WriteFile(filepath.Join(formulasDir, name), oldContent, 0644); err != nil {
+				t.Fatal(err)
+			}
+			// Don't add to installed record
+
+		case 2:
+			// Third formula: write different content, track with original hash -> should be modified
+			modifiedFormula = name
+			originalContent, _ := formulasFS.ReadFile("formulas/" + name)
+			originalHash := computeHash(originalContent)
+			modifiedContent := []byte("# user modified version\n[molecule]\nid = \"custom\"\n")
+			if err := os.WriteFile(filepath.Join(formulasDir, name), modifiedContent, 0644); err != nil {
+				t.Fatal(err)
+			}
+			installed.Formulas[name] = originalHash // Track with original hash
+		}
+		i++
+		if i >= 3 {
+			break
+		}
+	}
+
+	if err := saveInstalledRecord(formulasDir, installed); err != nil {
+		t.Fatal(err)
+	}
+
+	// Check health
+	report, err := CheckFormulaHealth(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Find status of each test formula
+	statusMap := make(map[string]string)
+	for _, f := range report.Formulas {
+		statusMap[f.Name] = f.Status
+	}
+
+	if statusMap[okFormula] != "ok" {
+		t.Errorf("formula %s status = %q, want %q", okFormula, statusMap[okFormula], "ok")
+	}
+	if statusMap[untrackedFormula] != "untracked" {
+		t.Errorf("formula %s status = %q, want %q", untrackedFormula, statusMap[untrackedFormula], "untracked")
+	}
+	if statusMap[modifiedFormula] != "modified" {
+		t.Errorf("formula %s status = %q, want %q", modifiedFormula, statusMap[modifiedFormula], "modified")
+	}
+}

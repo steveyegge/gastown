@@ -38,7 +38,7 @@ func (c *FormulaCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// All good
-	if report.Outdated == 0 && report.Missing == 0 && report.Modified == 0 && report.New == 0 {
+	if report.Outdated == 0 && report.Missing == 0 && report.Modified == 0 && report.New == 0 && report.Untracked == 0 {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
@@ -63,6 +63,9 @@ func (c *FormulaCheck) Run(ctx *CheckContext) *CheckResult {
 		case "new":
 			details = append(details, fmt.Sprintf("  %s: new formula available", f.Name))
 			needsFix = true
+		case "untracked":
+			details = append(details, fmt.Sprintf("  %s: untracked (will update)", f.Name))
+			needsFix = true
 		}
 	}
 
@@ -82,6 +85,9 @@ func (c *FormulaCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 	if report.New > 0 {
 		parts = append(parts, fmt.Sprintf("%d new", report.New))
+	}
+	if report.Untracked > 0 {
+		parts = append(parts, fmt.Sprintf("%d untracked", report.Untracked))
 	}
 	if report.Modified > 0 {
 		parts = append(parts, fmt.Sprintf("%d modified", report.Modified))
