@@ -1157,3 +1157,149 @@ func TestConvoyHandler_Routing(t *testing.T) {
 		t.Errorf("GET /feed Content-Type = %q, want text/event-stream", ct2)
 	}
 }
+
+// =============================================================================
+// Tests for groupPolecatsByRig function
+// =============================================================================
+
+func TestGroupPolecatsByRig_Empty(t *testing.T) {
+	result := groupPolecatsByRig(nil)
+	if result != nil {
+		t.Errorf("Expected nil for empty input, got %v", result)
+	}
+
+	result = groupPolecatsByRig([]PolecatRow{})
+	if result != nil {
+		t.Errorf("Expected nil for empty slice, got %v", result)
+	}
+}
+
+func TestGroupPolecatsByRig_SingleRig(t *testing.T) {
+	polecats := []PolecatRow{
+		{Name: "nux", Rig: "gastown"},
+		{Name: "dag", Rig: "gastown"},
+		{Name: "ace", Rig: "gastown"},
+	}
+
+	result := groupPolecatsByRig(polecats)
+
+	if len(result) != 1 {
+		t.Fatalf("Expected 1 rig group, got %d", len(result))
+	}
+
+	if result[0].Name != "gastown" {
+		t.Errorf("Expected rig name 'gastown', got %q", result[0].Name)
+	}
+
+	if len(result[0].Polecats) != 3 {
+		t.Errorf("Expected 3 polecats, got %d", len(result[0].Polecats))
+	}
+
+	// Check polecats are sorted by name
+	names := []string{result[0].Polecats[0].Name, result[0].Polecats[1].Name, result[0].Polecats[2].Name}
+	expectedNames := []string{"ace", "dag", "nux"}
+	for i, name := range names {
+		if name != expectedNames[i] {
+			t.Errorf("Expected polecat %d to be %q, got %q", i, expectedNames[i], name)
+		}
+	}
+}
+
+func TestGroupPolecatsByRig_MultipleRigs(t *testing.T) {
+	polecats := []PolecatRow{
+		{Name: "nux", Rig: "gastown"},
+		{Name: "ace", Rig: "heyhey"},
+		{Name: "dag", Rig: "gastown"},
+		{Name: "toast", Rig: "heyhey"},
+		{Name: "keeper", Rig: "zephyr"},
+	}
+
+	result := groupPolecatsByRig(polecats)
+
+	if len(result) != 3 {
+		t.Fatalf("Expected 3 rig groups, got %d", len(result))
+	}
+
+	// Check rigs are sorted alphabetically
+	expectedRigs := []string{"gastown", "heyhey", "zephyr"}
+	for i, rig := range result {
+		if rig.Name != expectedRigs[i] {
+			t.Errorf("Expected rig %d to be %q, got %q", i, expectedRigs[i], rig.Name)
+		}
+	}
+
+	// Check gastown polecats
+	if len(result[0].Polecats) != 2 {
+		t.Errorf("Expected 2 polecats in gastown, got %d", len(result[0].Polecats))
+	}
+	if result[0].Polecats[0].Name != "dag" || result[0].Polecats[1].Name != "nux" {
+		t.Error("Gastown polecats should be sorted: dag, nux")
+	}
+
+	// Check heyhey polecats
+	if len(result[1].Polecats) != 2 {
+		t.Errorf("Expected 2 polecats in heyhey, got %d", len(result[1].Polecats))
+	}
+	if result[1].Polecats[0].Name != "ace" || result[1].Polecats[1].Name != "toast" {
+		t.Error("Heyhey polecats should be sorted: ace, toast")
+	}
+
+	// Check zephyr polecats
+	if len(result[2].Polecats) != 1 {
+		t.Errorf("Expected 1 polecat in zephyr, got %d", len(result[2].Polecats))
+	}
+	if result[2].Polecats[0].Name != "keeper" {
+		t.Errorf("Expected keeper in zephyr, got %q", result[2].Polecats[0].Name)
+	}
+}
+
+func TestE2E_Server_RigGroupedPolecats(t *testing.T) {
+	mock := &MockConvoyFetcher{
+		Polecats: []PolecatRow{
+			{Name: "nux", Rig: "gastown", SessionID: "gt-gastown-nux", LastActivity: activity.Calculate(time.Now())},
+			{Name: "dag", Rig: "gastown", SessionID: "gt-gastown-dag", LastActivity: activity.Calculate(time.Now())},
+			{Name: "ace", Rig: "heyhey", SessionID: "gt-heyhey-ace", LastActivity: activity.Calculate(time.Now())},
+		},
+	}
+
+	handler, err := NewConvoyHandler(mock)
+	if err != nil {
+		t.Fatalf("NewConvoyHandler() error = %v", err)
+	}
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatalf("HTTP GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	body := string(bodyBytes)
+
+	// Check rig group headers are present
+	if !strings.Contains(body, "gastown/") {
+		t.Error("Should contain gastown/ rig header")
+	}
+	if !strings.Contains(body, "heyhey/") {
+		t.Error("Should contain heyhey/ rig header")
+	}
+
+	// Check worker counts
+	if !strings.Contains(body, "(2 workers)") {
+		t.Error("Gastown should show (2 workers)")
+	}
+	if !strings.Contains(body, "(1 workers)") {
+		t.Error("Heyhey should show (1 workers)")
+	}
+
+	// Check rig-group class is present (CSS styling)
+	if !strings.Contains(body, "rig-group") {
+		t.Error("Should contain rig-group CSS class")
+	}
+	if !strings.Contains(body, "rig-header") {
+		t.Error("Should contain rig-header CSS class")
+	}
+}

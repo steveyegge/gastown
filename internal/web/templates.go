@@ -18,7 +18,14 @@ type ConvoyData struct {
 	Convoys    []ConvoyRow
 	MergeQueue []MergeQueueRow
 	Polecats   []PolecatRow
-	TotalCost  float64 // Total cost across all polecat sessions
+	TotalCost  float64    // Total cost across all polecat sessions
+	RigGroups  []RigGroup // Polecats grouped by rig for progressive disclosure
+}
+
+// RigGroup represents a rig with its nested polecats for the dashboard.
+type RigGroup struct {
+	Name     string       // Rig name (e.g., "gastown", "heyhey")
+	Polecats []PolecatRow // Polecats in this rig
 }
 
 // PolecatRow represents a polecat worker in the dashboard.

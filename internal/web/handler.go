@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"sort"
 )
 
 // ConvoyFetcher defines the interface for fetching convoy data.
@@ -77,11 +78,15 @@ func (h *ConvoyHandler) serveConvoyDashboard(w http.ResponseWriter, r *http.Requ
 		totalCost += p.SessionCost
 	}
 
+	// Group polecats by rig for progressive disclosure view
+	rigGroups := groupPolecatsByRig(polecats)
+
 	data := ConvoyData{
 		Convoys:    convoys,
 		MergeQueue: mergeQueue,
 		Polecats:   polecats,
 		TotalCost:  totalCost,
+		RigGroups:  rigGroups,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -165,4 +170,45 @@ func (h *ConvoyHandler) serveFeed(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// groupPolecatsByRig groups polecats by their rig for progressive disclosure display.
+// Returns a sorted slice of RigGroups, with rigs sorted alphabetically and
+// polecats within each rig sorted by name.
+func groupPolecatsByRig(polecats []PolecatRow) []RigGroup {
+	if len(polecats) == 0 {
+		return nil
+	}
+
+	// Group polecats by rig
+	rigMap := make(map[string][]PolecatRow)
+	for _, p := range polecats {
+		rigMap[p.Rig] = append(rigMap[p.Rig], p)
+	}
+
+	// Sort polecats within each rig by name
+	for rig := range rigMap {
+		rigPolecats := rigMap[rig]
+		sort.Slice(rigPolecats, func(i, j int) bool {
+			return rigPolecats[i].Name < rigPolecats[j].Name
+		})
+		rigMap[rig] = rigPolecats
+	}
+
+	// Build sorted slice of RigGroups
+	rigNames := make([]string, 0, len(rigMap))
+	for rig := range rigMap {
+		rigNames = append(rigNames, rig)
+	}
+	sort.Strings(rigNames)
+
+	groups := make([]RigGroup, 0, len(rigNames))
+	for _, rig := range rigNames {
+		groups = append(groups, RigGroup{
+			Name:     rig,
+			Polecats: rigMap[rig],
+		})
+	}
+
+	return groups
 }

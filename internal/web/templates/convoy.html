@@ -414,7 +414,7 @@
             transition: opacity 200ms ease-in;
         }
 
-        /* Clickable polecat rows */
+/* Clickable polecat rows */
         .polecat-row {
             cursor: pointer;
             transition: background 0.15s ease;
@@ -544,6 +544,38 @@
             font-size: 0.875rem;
             margin-left: 16px;
         }
+
+        /* Rig-grouped polecat styles */
+        .rig-group {
+            margin-bottom: 24px;
+        }
+
+        .rig-header {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-dark);
+            border-radius: 8px 8px 0 0;
+            border: 1px solid var(--border);
+            border-bottom: none;
+        }
+
+        .rig-name {
+            font-weight: 600;
+            font-size: 1rem;
+            color: var(--text-primary);
+        }
+
+        .rig-count {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .polecat-table {
+            border-radius: 0 0 8px 8px;
+            margin-top: 0;
+        }
     </style>
 </head>
 <body>
@@ -670,40 +702,46 @@
         </div>
         {{end}}
 
-        {{if .Polecats}}
+{{if .RigGroups}}
         <h2 class="section-header">🐾 Polecat Workers<span class="total-cost">Total: {{formatCost .TotalCost}}</span></h2>
-        <table class="convoy-table">
-            <thead>
-                <tr>
-                    <th>Polecat</th>
-                    <th>Rig</th>
-                    <th>Cost</th>
-                    <th>Last Activity</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody id="polecat-tbody">
-                {{range .Polecats}}
-                <tr class="polecat-row"
-                    hx-get="/polecat/{{.Rig}}/{{.Name}}"
-                    hx-target="this"
-                    hx-swap="afterend"
-                    hx-trigger="click">
-                    <td>
-                        <span class="convoy-id">{{.Name}}</span>
-                        <span class="click-hint">▸ details</span>
-                    </td>
-                    <td>{{.Rig}}</td>
-                    <td class="session-cost {{costClass .SessionCost}}">{{formatCost .SessionCost}}</td>
-                    <td class="{{activityClass .LastActivity}}">
-                        <span class="activity-dot"></span>
-                        {{.LastActivity.FormattedAge}}
-                    </td>
-                    <td class="status-hint">{{.StatusHint}}</td>
-                </tr>
-                {{end}}
-            </tbody>
-        </table>
+        {{range .RigGroups}}
+        <div class="rig-group">
+            <div class="rig-header">
+                <span class="rig-name">{{.Name}}/</span>
+                <span class="rig-count">({{len .Polecats}} workers)</span>
+            </div>
+            <table class="convoy-table polecat-table">
+                <thead>
+                    <tr>
+                        <th>Polecat</th>
+                        <th>Cost</th>
+                        <th>Last Activity</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Polecats}}
+                    <tr class="polecat-row"
+                        hx-get="/polecat/{{.Rig}}/{{.Name}}"
+                        hx-target="this"
+                        hx-swap="afterend"
+                        hx-trigger="click">
+                        <td>
+                            <span class="convoy-id">{{.Name}}</span>
+                            <span class="click-hint">▸ details</span>
+                        </td>
+                        <td class="session-cost {{costClass .SessionCost}}">{{formatCost .SessionCost}}</td>
+                        <td class="{{activityClass .LastActivity}}">
+                            <span class="activity-dot"></span>
+                            {{.LastActivity.FormattedAge}}
+                        </td>
+                        <td class="status-hint">{{.StatusHint}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{end}}
         {{end}}
     </div>
     <script>
