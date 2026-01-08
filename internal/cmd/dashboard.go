@@ -29,10 +29,21 @@ The dashboard shows real-time convoy status with:
 - Last activity indicator (green/yellow/red)
 - Auto-refresh every 30 seconds via htmx
 
+Endpoints:
+  /        Convoy dashboard (HTML)
+  /feed    Server-Sent Events (SSE) stream of real-time activity
+           Streams events from .events.jsonl and bd activity
+
 Example:
   gt dashboard              # Start on default port 8080
   gt dashboard --port 3000  # Start on port 3000
-  gt dashboard --open       # Start and open browser`,
+  gt dashboard --open       # Start and open browser
+
+SSE Feed usage:
+  curl -N http://localhost:8080/feed
+  # Or in JavaScript:
+  const es = new EventSource('http://localhost:8080/feed');
+  es.onmessage = e => console.log(JSON.parse(e.data));`,
 	RunE: runDashboard,
 }
 
@@ -44,7 +55,8 @@ func init() {
 
 func runDashboard(cmd *cobra.Command, args []string) error {
 	// Verify we're in a workspace
-	if _, err := workspace.FindFromCwdOrError(); err != nil {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
@@ -59,6 +71,9 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("creating convoy handler: %w", err)
 	}
+
+	// Set town root for SSE feed endpoint
+	handler.SetTownRoot(townRoot)
 
 	// Set up routing
 	mux := http.NewServeMux()

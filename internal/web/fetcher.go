@@ -1,12 +1,17 @@
 package web
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/activity"
@@ -887,4 +892,462 @@ func (f *LiveConvoyFetcher) getPolecatHookedWork(rig, name string) string {
 		}
 	}
 	return ""
+}
+
+// FeedEvent represents an event for the SSE feed.
+type FeedEvent struct {
+	ID        string    `json:"id"`
+	Time      time.Time `json:"time"`
+	Type      string    `json:"type"`
+	Actor     string    `json:"actor"`
+	Target    string    `json:"target,omitempty"`
+	Message   string    `json:"message"`
+	Rig       string    `json:"rig,omitempty"`
+	Raw       string    `json:"raw,omitempty"`
+}
+
+// ActivityWatcher combines events from .events.jsonl and bd activity.
+type ActivityWatcher struct {
+	townRoot string
+	events   chan FeedEvent
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+
+	// Deduplication: track recent event keys
+	mu         sync.Mutex
+	recentKeys map[string]time.Time
+}
+
+// NewActivityWatcher creates a new activity watcher.
+func NewActivityWatcher(townRoot string) (*ActivityWatcher, error) {
+	if townRoot == "" {
+		var err error
+		townRoot, err = workspace.FindFromCwdOrError()
+		if err != nil {
+			return nil, fmt.Errorf("not in a Gas Town workspace: %w", err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	w := &ActivityWatcher{
+		townRoot:   townRoot,
+		events:     make(chan FeedEvent, 100),
+		cancel:     cancel,
+		recentKeys: make(map[string]time.Time),
+	}
+
+	// Start tailing .events.jsonl
+	w.wg.Add(1)
+	go w.tailEventsFile(ctx)
+
+	// Start tailing bd activity
+	w.wg.Add(1)
+	go w.tailBdActivity(ctx)
+
+	// Start deduplication cleanup goroutine
+	w.wg.Add(1)
+	go w.cleanupDedup(ctx)
+
+	return w, nil
+}
+
+// Events returns the event channel.
+func (w *ActivityWatcher) Events() <-chan FeedEvent {
+	return w.events
+}
+
+// Close stops the watcher.
+func (w *ActivityWatcher) Close() error {
+	w.cancel()
+	w.wg.Wait()
+	close(w.events)
+	return nil
+}
+
+// tailEventsFile tails ~/gt/.events.jsonl for new events.
+func (w *ActivityWatcher) tailEventsFile(ctx context.Context) {
+	defer w.wg.Done()
+
+	eventsPath := filepath.Join(w.townRoot, ".events.jsonl")
+	file, err := os.Open(eventsPath)
+	if err != nil {
+		// File might not exist yet - that's ok
+		return
+	}
+	defer file.Close()
+
+	// Seek to end for live tailing
+	_, _ = file.Seek(0, 2)
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	scanner := bufio.NewScanner(file)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for scanner.Scan() {
+				line := scanner.Text()
+				if event := w.parseGtEventLine(line); event != nil {
+					if w.dedupEvent(event) {
+						select {
+						case w.events <- *event:
+						default:
+							// Drop if channel full
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// GtEventJSON is the structure of events in .events.jsonl.
+type GtEventJSON struct {
+	Timestamp  string                 `json:"ts"`
+	Source     string                 `json:"source"`
+	Type       string                 `json:"type"`
+	Actor      string                 `json:"actor"`
+	Payload    map[string]interface{} `json:"payload"`
+	Visibility string                 `json:"visibility"`
+}
+
+// parseGtEventLine parses a line from .events.jsonl.
+func (w *ActivityWatcher) parseGtEventLine(line string) *FeedEvent {
+	if strings.TrimSpace(line) == "" {
+		return nil
+	}
+
+	var ge GtEventJSON
+	if err := json.Unmarshal([]byte(line), &ge); err != nil {
+		return nil
+	}
+
+	// Only show feed-visible events
+	if ge.Visibility != "feed" && ge.Visibility != "both" {
+		return nil
+	}
+
+	t, err := time.Parse(time.RFC3339, ge.Timestamp)
+	if err != nil {
+		t = time.Now()
+	}
+
+	// Extract rig from payload or actor
+	rig := ""
+	if ge.Payload != nil {
+		if r, ok := ge.Payload["rig"].(string); ok {
+			rig = r
+		}
+	}
+	if rig == "" && ge.Actor != "" {
+		parts := strings.Split(ge.Actor, "/")
+		if len(parts) > 0 && parts[0] != "mayor" && parts[0] != "deacon" {
+			rig = parts[0]
+		}
+	}
+
+	// Build message from event type and payload
+	message := w.buildEventMessage(ge.Type, ge.Payload)
+
+	target := ""
+	if ge.Payload != nil {
+		if b, ok := ge.Payload["bead"].(string); ok {
+			target = b
+		}
+	}
+
+	return &FeedEvent{
+		ID:      fmt.Sprintf("gt-%s-%d", ge.Type, t.UnixNano()),
+		Time:    t,
+		Type:    ge.Type,
+		Actor:   ge.Actor,
+		Target:  target,
+		Message: message,
+		Rig:     rig,
+		Raw:     line,
+	}
+}
+
+// buildEventMessage creates a human-readable message from event type and payload.
+func (w *ActivityWatcher) buildEventMessage(eventType string, payload map[string]interface{}) string {
+	getString := func(key string) string {
+		if payload == nil {
+			return ""
+		}
+		if v, ok := payload[key].(string); ok {
+			return v
+		}
+		return ""
+	}
+
+	switch eventType {
+	case "sling":
+		bead := getString("bead")
+		target := getString("target")
+		if bead != "" && target != "" {
+			return fmt.Sprintf("slung %s to %s", bead, target)
+		}
+		return "work slung"
+
+	case "hook":
+		bead := getString("bead")
+		if bead != "" {
+			return fmt.Sprintf("hooked %s", bead)
+		}
+		return "bead hooked"
+
+	case "handoff":
+		subject := getString("subject")
+		if subject != "" {
+			return fmt.Sprintf("handoff: %s", subject)
+		}
+		return "session handoff"
+
+	case "done":
+		bead := getString("bead")
+		if bead != "" {
+			return fmt.Sprintf("done: %s", bead)
+		}
+		return "work done"
+
+	case "mail":
+		subject := getString("subject")
+		to := getString("to")
+		if subject != "" {
+			if to != "" {
+				return fmt.Sprintf("→ %s: %s", to, subject)
+			}
+			return subject
+		}
+		return "mail sent"
+
+	case "patrol_started", "patrol_complete":
+		if msg := getString("message"); msg != "" {
+			return msg
+		}
+		return eventType
+
+	case "polecat_nudged":
+		polecat := getString("polecat")
+		reason := getString("reason")
+		if polecat != "" {
+			if reason != "" {
+				return fmt.Sprintf("nudged %s: %s", polecat, reason)
+			}
+			return fmt.Sprintf("nudged %s", polecat)
+		}
+		return "polecat nudged"
+
+	case "merged":
+		worker := getString("worker")
+		if worker != "" {
+			return fmt.Sprintf("merged work from %s", worker)
+		}
+		return "merged"
+
+	case "merge_failed":
+		reason := getString("reason")
+		if reason != "" {
+			return fmt.Sprintf("merge failed: %s", reason)
+		}
+		return "merge failed"
+
+	default:
+		if msg := getString("message"); msg != "" {
+			return msg
+		}
+		return eventType
+	}
+}
+
+// tailBdActivity tails bd activity --follow for beads events.
+func (w *ActivityWatcher) tailBdActivity(ctx context.Context) {
+	defer w.wg.Done()
+
+	// Find beads directory
+	beadsDir := filepath.Join(w.townRoot, ".beads")
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+		// Try rig-level beads
+		// For now, just use town-level
+		return
+	}
+
+	cmd := exec.CommandContext(ctx, "bd", "activity", "--follow")
+	cmd.Dir = w.townRoot
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		return
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		line := scanner.Text()
+		if event := w.parseBdActivityLine(line); event != nil {
+			if w.dedupEvent(event) {
+				select {
+				case w.events <- *event:
+				default:
+					// Drop if channel full
+				}
+			}
+		}
+	}
+
+	_ = cmd.Wait()
+}
+
+// bd activity line pattern: [HH:MM:SS] SYMBOL BEAD_ID action · description
+var bdActivityPattern = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\]\s+([+→✓✗⊘📌])\s+(\S+)?\s*(\w+)?\s*·?\s*(.*)$`)
+
+// parseBdActivityLine parses a line from bd activity output.
+func (w *ActivityWatcher) parseBdActivityLine(line string) *FeedEvent {
+	matches := bdActivityPattern.FindStringSubmatch(line)
+	if matches == nil {
+		return w.parseSimpleBdLine(line)
+	}
+
+	timeStr := matches[1]
+	symbol := matches[2]
+	beadID := matches[3]
+	action := matches[4]
+	message := matches[5]
+
+	// Parse time (assume today)
+	now := time.Now()
+	t, err := time.Parse("15:04:05", timeStr)
+	if err != nil {
+		t = now
+	} else {
+		t = time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, now.Location())
+	}
+
+	// Map symbol to event type
+	eventType := "update"
+	switch symbol {
+	case "+":
+		eventType = "create"
+	case "→":
+		eventType = "update"
+	case "✓":
+		eventType = "complete"
+	case "✗":
+		eventType = "fail"
+	case "⊘":
+		eventType = "delete"
+	case "📌":
+		eventType = "pin"
+	}
+
+	return &FeedEvent{
+		ID:      fmt.Sprintf("bd-%s-%d", beadID, t.UnixNano()),
+		Time:    t,
+		Type:    eventType,
+		Target:  beadID,
+		Message: strings.TrimSpace(action + " " + message),
+		Raw:     line,
+	}
+}
+
+// parseSimpleBdLine handles lines that don't match the full pattern.
+func (w *ActivityWatcher) parseSimpleBdLine(line string) *FeedEvent {
+	if strings.TrimSpace(line) == "" {
+		return nil
+	}
+
+	// Try to extract timestamp
+	var t time.Time
+	if len(line) > 10 && line[0] == '[' {
+		if idx := strings.Index(line, "]"); idx > 0 {
+			timeStr := line[1:idx]
+			now := time.Now()
+			if parsed, err := time.Parse("15:04:05", timeStr); err == nil {
+				t = time.Date(now.Year(), now.Month(), now.Day(),
+					parsed.Hour(), parsed.Minute(), parsed.Second(), 0, now.Location())
+			}
+		}
+	}
+
+	if t.IsZero() {
+		t = time.Now()
+	}
+
+	return &FeedEvent{
+		ID:      fmt.Sprintf("bd-raw-%d", t.UnixNano()),
+		Time:    t,
+		Type:    "update",
+		Message: line,
+		Raw:     line,
+	}
+}
+
+// dedupEvent checks if an event is a duplicate. Returns true if event should be sent.
+func (w *ActivityWatcher) dedupEvent(event *FeedEvent) bool {
+	// Create a dedup key based on type, target, and message
+	key := fmt.Sprintf("%s:%s:%s", event.Type, event.Target, event.Message)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if lastSeen, ok := w.recentKeys[key]; ok {
+		// Duplicate if seen within 2 seconds
+		if time.Since(lastSeen) < 2*time.Second {
+			return false
+		}
+	}
+
+	w.recentKeys[key] = time.Now()
+	return true
+}
+
+// cleanupDedup periodically cleans up old dedup entries.
+func (w *ActivityWatcher) cleanupDedup(ctx context.Context) {
+	defer w.wg.Done()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.mu.Lock()
+			cutoff := time.Now().Add(-30 * time.Second)
+			for key, ts := range w.recentKeys {
+				if ts.Before(cutoff) {
+					delete(w.recentKeys, key)
+				}
+			}
+			w.mu.Unlock()
+		}
+	}
+}
+
+// WatchActivity is a convenience function that creates a watcher and returns its event channel.
+func WatchActivity() (<-chan FeedEvent, func(), error) {
+	watcher, err := NewActivityWatcher("")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cleanup := func() {
+		_ = watcher.Close()
+	}
+
+	return watcher.Events(), cleanup, nil
 }
