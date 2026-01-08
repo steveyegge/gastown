@@ -511,7 +511,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 // This enables no-tmux mode where agents discover args via gt prime / bd show.
 func storeArgsInBead(beadID, args string) error {
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
+	showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -720,8 +720,12 @@ func sessionToAgentID(sessionName string) string {
 // verifyBeadExists checks that the bead exists using bd show.
 // Uses bd's native prefix-based routing via routes.jsonl - do NOT set BEADS_DIR
 // as that overrides routing and breaks resolution of rig-level beads.
+//
+// Uses --no-daemon with --allow-stale to avoid daemon socket timing issues
+// while still finding beads when database is out of sync with JSONL.
+// For existence checks, stale data is acceptable - we just need to know it exists.
 func verifyBeadExists(beadID string) error {
-	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
+	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
 	// Run from town root so bd can find routes.jsonl for prefix-based routing.
 	// Do NOT set BEADS_DIR - that overrides routing and breaks rig bead resolution.
 	if townRoot, err := workspace.FindFromCwd(); err == nil {
@@ -742,8 +746,9 @@ type beadInfo struct {
 
 // getBeadInfo returns status and assignee for a bead.
 // Uses bd's native prefix-based routing via routes.jsonl.
+// Uses --no-daemon with --allow-stale for consistency with verifyBeadExists.
 func getBeadInfo(beadID string) (*beadInfo, error) {
-	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
+	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
 	// Run from town root so bd can find routes.jsonl for prefix-based routing.
 	if townRoot, err := workspace.FindFromCwd(); err == nil {
 		cmd.Dir = townRoot
@@ -814,15 +819,16 @@ func resolveSelfTarget() (agentID string, pane string, hookRoot string, err erro
 
 // verifyFormulaExists checks that the formula exists using bd formula show.
 // Formulas are TOML files (.formula.toml).
+// Uses --no-daemon with --allow-stale for consistency with verifyBeadExists.
 func verifyFormulaExists(formulaName string) error {
 	// Try bd formula show (handles all formula file formats)
-	cmd := exec.Command("bd", "--no-daemon", "formula", "show", formulaName)
+	cmd := exec.Command("bd", "--no-daemon", "formula", "show", formulaName, "--allow-stale")
 	if err := cmd.Run(); err == nil {
 		return nil
 	}
 
 	// Try with mol- prefix
-	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "mol-"+formulaName)
+	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "mol-"+formulaName, "--allow-stale")
 	if err := cmd.Run(); err == nil {
 		return nil
 	}

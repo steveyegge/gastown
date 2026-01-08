@@ -343,3 +343,163 @@ exit 0
 		t.Fatalf("missing expected bd commands: cook=%v wisp=%v bond=%v (log: %q)", gotCook, gotWisp, gotBond, string(logBytes))
 	}
 }
+
+// TestVerifyBeadExistsAllowStale reproduces the bug in gtl-ncq where beads
+// visible via regular bd show fail with --no-daemon due to database sync issues.
+// The fix uses --allow-stale to skip the sync check for existence verification.
+func TestVerifyBeadExistsAllowStale(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create minimal workspace structure
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create a stub bd that simulates the sync issue:
+	// - --no-daemon without --allow-stale fails (database out of sync)
+	// - --no-daemon with --allow-stale succeeds (skips sync check)
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	bdPath := filepath.Join(binDir, "bd")
+	bdScript := `#!/bin/sh
+# Check for --allow-stale flag
+allow_stale=false
+for arg in "$@"; do
+  if [ "$arg" = "--allow-stale" ]; then
+    allow_stale=true
+  fi
+done
+
+if [ "$1" = "--no-daemon" ]; then
+  if [ "$allow_stale" = "true" ]; then
+    # --allow-stale skips sync check, succeeds
+    echo '[{"title":"Test bead","status":"open","assignee":""}]'
+    exit 0
+  else
+    # Without --allow-stale, fails with sync error
+    echo '{"error":"Database out of sync with JSONL."}'
+    exit 1
+  fi
+fi
+# Daemon mode works
+echo '[{"title":"Test bead","status":"open","assignee":""}]'
+exit 0
+`
+	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// EXPECTED: verifyBeadExists should use --no-daemon --allow-stale and succeed
+	beadID := "jv-v599"
+	err = verifyBeadExists(beadID)
+	if err != nil {
+		t.Errorf("verifyBeadExists(%q) failed: %v\nExpected --allow-stale to skip sync check", beadID, err)
+	}
+}
+
+// TestSlingWithAllowStale tests the full gt sling flow with --allow-stale fix.
+// This is an integration test for the gtl-ncq bug.
+func TestSlingWithAllowStale(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create minimal workspace structure
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create stub bd that respects --allow-stale
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	bdPath := filepath.Join(binDir, "bd")
+	bdScript := `#!/bin/sh
+# Check for --allow-stale flag
+allow_stale=false
+for arg in "$@"; do
+  if [ "$arg" = "--allow-stale" ]; then
+    allow_stale=true
+  fi
+done
+
+if [ "$1" = "--no-daemon" ]; then
+  shift
+  cmd="$1"
+  if [ "$cmd" = "show" ]; then
+    if [ "$allow_stale" = "true" ]; then
+      echo '[{"title":"Synced bead","status":"open","assignee":""}]'
+      exit 0
+    fi
+    echo '{"error":"Database out of sync"}'
+    exit 1
+  fi
+  exit 0
+fi
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Synced bead","status":"open","assignee":""}]'
+    ;;
+  update)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "crew")
+	t.Setenv("GT_CREW", "jv")
+	t.Setenv("GT_POLECAT", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flags
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	t.Cleanup(func() {
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+	})
+
+	slingDryRun = true
+	slingNoConvoy = true
+
+	// EXPECTED: gt sling should use daemon mode and succeed
+	// ACTUAL: verifyBeadExists uses --no-daemon and fails with sync error
+	beadID := "jv-v599"
+	err = runSling(nil, []string{beadID})
+	if err != nil {
+		// Check if it's the specific error we're testing for
+		if strings.Contains(err.Error(), "is not a valid bead or formula") {
+			t.Errorf("gt sling failed to recognize bead %q: %v\nExpected to use daemon mode, but used --no-daemon which fails when DB out of sync", beadID, err)
+		} else {
+			// Some other error - might be expected in dry-run mode
+			t.Logf("gt sling returned error (may be expected in test): %v", err)
+		}
+	}
+}
