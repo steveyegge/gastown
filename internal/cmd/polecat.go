@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -316,6 +317,7 @@ type PolecatListItem struct {
 	State          polecat.State `json:"state"`
 	Issue          string        `json:"issue,omitempty"`
 	SessionRunning bool          `json:"session_running"`
+	LastActivity   time.Time     `json:"last_activity,omitempty"`
 }
 
 // getPolecatManager creates a polecat manager for the given rig.
@@ -370,15 +372,42 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 
 		for _, p := range polecats {
 			running, _ := polecatMgr.IsRunning(p.Name)
-			allPolecats = append(allPolecats, PolecatListItem{
+			item := PolecatListItem{
 				Rig:            r.Name,
 				Name:           p.Name,
 				State:          p.State,
 				Issue:          p.Issue,
 				SessionRunning: running,
-			})
+			}
+			// Get last activity time if session is running
+			if running {
+				if sessInfo, err := polecatMgr.Status(p.Name); err == nil && sessInfo != nil {
+					item.LastActivity = sessInfo.LastActivity
+				}
+			}
+			allPolecats = append(allPolecats, item)
 		}
 	}
+
+	// Sort polecats by most recent activity first
+	// Polecats with activity are sorted descending by time,
+	// polecats without activity (zero time) are sorted to the end
+	sort.Slice(allPolecats, func(i, j int) bool {
+		iZero := allPolecats[i].LastActivity.IsZero()
+		jZero := allPolecats[j].LastActivity.IsZero()
+		if iZero && jZero {
+			// Both have no activity - sort by name for stability
+			return allPolecats[i].Name < allPolecats[j].Name
+		}
+		if iZero {
+			return false // i has no activity, sort after j
+		}
+		if jZero {
+			return true // j has no activity, sort after i
+		}
+		// Both have activity - sort by most recent first
+		return allPolecats[i].LastActivity.After(allPolecats[j].LastActivity)
+	})
 
 	// Output
 	if polecatListJSON {
