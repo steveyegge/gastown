@@ -10,9 +10,9 @@
     "auto_stop_minutes": 15,
     "auto_archive_minutes": 10080,
     "auto_delete_minutes": -1,
-    "snapshot": "",
+    "snapshot": "daytona-medium",
     "snapshot_has_claude_code": false,
-    "target": ""
+    "target": "us"
   },
 
   "local": {

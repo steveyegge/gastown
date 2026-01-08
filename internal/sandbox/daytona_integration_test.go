@@ -31,6 +31,96 @@ func TestDaytonaBackendAvailable(t *testing.T) {
 	t.Log("Daytona backend is available")
 }
 
+// TestDaytonaWithConfigFile tests creating a sandbox using settings from sandbox.json.
+func TestDaytonaWithConfigFile(t *testing.T) {
+	skipIfNoAPIKey(t)
+
+	// Find the project root (where settings/sandbox.json is)
+	// Start from current dir and walk up to find settings/sandbox.json
+	projectRoot := findProjectRoot(t)
+	t.Logf("Using project root: %s", projectRoot)
+
+	// Load config from settings/sandbox.json
+	config, err := LoadConfig(projectRoot)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	t.Logf("Loaded config - Backend: %s", config.Backend)
+	if config.Daytona != nil {
+		t.Logf("Daytona config - Snapshot: %q, SnapshotHasClaudeCode: %t, Target: %s, AutoStop: %d, AutoArchive: %d, AutoDelete: %d",
+			config.Daytona.Snapshot,
+			config.Daytona.SnapshotHasClaudeCode,
+			config.Daytona.Target,
+			config.Daytona.AutoStopMinutes,
+			config.Daytona.AutoArchiveMinutes,
+			config.Daytona.AutoDeleteMinutes)
+	} else {
+		t.Log("No Daytona config section found")
+	}
+
+	// Create backend with loaded config
+	backend := NewDaytonaBackend(config.Daytona)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Create a sandbox - should use snapshot from config
+	t.Log("Creating sandbox with config settings...")
+	session, err := backend.Create(ctx, CreateOptions{
+		Name:    "gastown-config-test-" + time.Now().Format("20060102-150405"),
+		WorkDir: "/home/daytona",
+	})
+	if err != nil {
+		t.Fatalf("Failed to create sandbox: %v", err)
+	}
+	t.Logf("Created sandbox: %s (sandbox ID: %s)", session.ID, session.Metadata[MetaSandboxID])
+
+	// Clean up
+	defer func() {
+		t.Log("Destroying sandbox...")
+		if err := backend.Destroy(ctx, session); err != nil {
+			t.Errorf("Failed to destroy sandbox: %v", err)
+		}
+	}()
+
+	// Verify sandbox is running
+	running, err := backend.IsRunning(ctx, session)
+	if err != nil {
+		t.Fatalf("Failed to check if running: %v", err)
+	}
+	if !running {
+		t.Fatal("Sandbox should be running after create")
+	}
+	t.Log("Sandbox is running")
+}
+
+// findProjectRoot walks up from current directory to find settings/sandbox.json
+func findProjectRoot(t *testing.T) string {
+	t.Helper()
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+
+	// Walk up looking for settings/sandbox.json
+	dir := cwd
+	for {
+		configPath := filepath.Join(dir, "settings", "sandbox.json")
+		if _, err := os.Stat(configPath); err == nil {
+			return dir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached root without finding config
+			t.Fatalf("Could not find settings/sandbox.json starting from %s", cwd)
+		}
+		dir = parent
+	}
+}
+
 // TestDaytonaSandboxLifecycle tests the full sandbox lifecycle.
 func TestDaytonaSandboxLifecycle(t *testing.T) {
 	skipIfNoAPIKey(t)

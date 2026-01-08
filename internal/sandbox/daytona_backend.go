@@ -94,32 +94,23 @@ func (b *DaytonaBackend) Create(ctx context.Context, opts CreateOptions) (*Sessi
 	}
 
 	// Use snapshot if configured
-	// Note: Resources cannot be specified when using a snapshot
 	if b.config.Snapshot != "" {
 		req.Snapshot = b.config.Snapshot
-	} else if b.config.Image != "" {
-		req.Snapshot = b.config.Image
-	} else {
-		// Only apply resource configuration when NOT using a snapshot
-		if b.config.Resources != nil {
-			req.CPU = b.config.Resources.CPU
-			req.Memory = b.config.Resources.MemoryMB / 1024 // API expects GB
-			req.Disk = b.config.Resources.DiskGB
-		}
 	}
 
-	// Set target region if configured
-	if b.config.Region != "" {
-		req.Target = b.config.Region
+	// Set target location (us, eu)
+	if b.config.Target != "" {
+		req.Target = b.config.Target
 	}
 
-	// Set auto-stop/delete intervals
-	if b.config.AutoStopMinutes > 0 {
-		req.AutoStopInterval = b.config.AutoStopMinutes
-	}
-	if b.config.AutoDeleteMinutes > 0 {
-		req.AutoDeleteInterval = b.config.AutoDeleteMinutes
-	}
+	// Set auto-stop/archive/delete intervals
+	// These are always passed - 0 and negative values have specific meanings:
+	// - auto_stop: 0 = disabled
+	// - auto_archive: 0 = use maximum interval
+	// - auto_delete: -1 = disabled, 0 = delete immediately
+	req.AutoStopInterval = b.config.AutoStopMinutes
+	req.AutoArchiveInterval = b.config.AutoArchiveMinutes
+	req.AutoDeleteInterval = b.config.AutoDeleteMinutes
 
 	// Create the sandbox
 	sandbox, err := b.client.CreateSandbox(ctx, req)
@@ -135,10 +126,10 @@ func (b *DaytonaBackend) Create(ctx context.Context, opts CreateOptions) (*Sessi
 		return nil, fmt.Errorf("waiting for sandbox to start: %w", err)
 	}
 
-	// If no snapshot with Claude Code, install it
-	if b.config.Snapshot == "" {
+	// Install Claude Code if not already in snapshot
+	if !b.config.SnapshotHasClaudeCode {
 		if err := b.installClaudeCode(ctx, sandbox.ID); err != nil {
-			// Non-fatal warning - snapshot should have it pre-installed
+			// Non-fatal warning
 			fmt.Printf("Warning: could not install Claude Code: %v\n", err)
 		}
 	}

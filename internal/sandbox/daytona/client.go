@@ -506,13 +506,13 @@ type GitStatus struct {
 type FileStatus string
 
 const (
-	FileStatusUnmodified        FileStatus = "Unmodified"
-	FileStatusUntracked         FileStatus = "Untracked"
-	FileStatusModified          FileStatus = "Modified"
-	FileStatusAdded             FileStatus = "Added"
-	FileStatusDeleted           FileStatus = "Deleted"
-	FileStatusRenamed           FileStatus = "Renamed"
-	FileStatusCopied            FileStatus = "Copied"
+	FileStatusUnmodified         FileStatus = "Unmodified"
+	FileStatusUntracked          FileStatus = "Untracked"
+	FileStatusModified           FileStatus = "Modified"
+	FileStatusAdded              FileStatus = "Added"
+	FileStatusDeleted            FileStatus = "Deleted"
+	FileStatusRenamed            FileStatus = "Renamed"
+	FileStatusCopied             FileStatus = "Copied"
 	FileStatusUpdatedButUnmerged FileStatus = "Updated but unmerged"
 )
 

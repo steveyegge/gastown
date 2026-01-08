@@ -36,66 +36,35 @@ type DaytonaConfig struct {
 	// Default: "DAYTONA_API_KEY"
 	APIKeyEnv string `json:"api_key_env,omitempty"`
 
-	// Region is the Daytona region to use.
-	// Default: region from Daytona CLI config
-	Region string `json:"region,omitempty"`
-
-	// Snapshot is the pre-built snapshot ID to use for sandboxes.
-	// Should have Claude Code pre-installed for faster startup.
-	// If empty, sandboxes are created from the default image.
-	Snapshot string `json:"snapshot,omitempty"`
-
-	// Image is the base image to use if Snapshot is not specified.
-	// Default: Daytona's default image
-	Image string `json:"image,omitempty"`
-
-	// Resources specifies sandbox resource limits.
-	Resources *ResourceConfig `json:"resources,omitempty"`
-
-	// Pool configures sandbox pooling for faster startup.
-	Pool *PoolConfig `json:"pool,omitempty"`
-
 	// AnthropicAPIKeyEnv is the env var for the Anthropic API key to pass to sandboxes.
 	// Default: "ANTHROPIC_API_KEY"
 	AnthropicAPIKeyEnv string `json:"anthropic_api_key_env,omitempty"`
 
 	// AutoStopMinutes is how long a sandbox can be idle before auto-stopping.
-	// Default: 30
+	// Default: 15. Set to 0 to disable auto-stop.
 	AutoStopMinutes int `json:"auto_stop_minutes,omitempty"`
 
+	// AutoArchiveMinutes is how long a stopped sandbox is kept before archiving.
+	// Default: 10080 (7 days). Set to 0 to use maximum interval.
+	AutoArchiveMinutes int `json:"auto_archive_minutes,omitempty"`
+
 	// AutoDeleteMinutes is how long a stopped sandbox is kept before deletion.
-	// Default: 60
+	// Default: -1 (disabled). Set to 0 to delete immediately upon stopping.
 	AutoDeleteMinutes int `json:"auto_delete_minutes,omitempty"`
-}
 
-// ResourceConfig specifies sandbox resource limits.
-type ResourceConfig struct {
-	// CPU is the number of CPU cores.
-	// Default: 2
-	CPU int `json:"cpu,omitempty"`
+	// Snapshot is the pre-built snapshot ID to use for sandboxes.
+	// If empty, sandboxes are created from the default image.
+	Snapshot string `json:"snapshot,omitempty"`
 
-	// MemoryMB is the memory limit in megabytes.
-	// Default: 4096
-	MemoryMB int `json:"memory_mb,omitempty"`
-
-	// DiskGB is the disk size in gigabytes.
-	// Default: 20
-	DiskGB int `json:"disk_gb,omitempty"`
-}
-
-// PoolConfig configures sandbox pooling.
-type PoolConfig struct {
-	// Enabled controls whether pooling is active.
+	// SnapshotHasClaudeCode indicates whether the snapshot already has Claude Code installed.
+	// When true, skips Claude Code installation during sandbox creation.
 	// Default: false
-	Enabled bool `json:"enabled,omitempty"`
+	SnapshotHasClaudeCode bool `json:"snapshot_has_claude_code,omitempty"`
 
-	// MinWarm is the minimum number of pre-warmed sandboxes to maintain.
-	// Default: 0
-	MinWarm int `json:"min_warm,omitempty"`
-
-	// MaxActive is the maximum number of active sandboxes.
-	// Default: 20
-	MaxActive int `json:"max_active,omitempty"`
+	// Target is the target location where the sandbox runs.
+	// Available values: "us", "eu"
+	// Default: "" (uses Daytona's default)
+	Target string `json:"target,omitempty"`
 }
 
 // LocalConfig contains local backend-specific settings.
@@ -114,19 +83,14 @@ func DefaultConfig() *Config {
 }
 
 // DefaultDaytonaConfig returns a DaytonaConfig with sensible defaults.
+// Daytona defaults: auto_stop=15min, auto_archive=7days(10080min), auto_delete=disabled(-1)
 func DefaultDaytonaConfig() *DaytonaConfig {
 	return &DaytonaConfig{
 		APIKeyEnv:          "DAYTONA_API_KEY",
 		AnthropicAPIKeyEnv: "ANTHROPIC_API_KEY",
-		AutoStopMinutes:    30,
-		AutoDeleteMinutes:  60,
-		// Resources and Snapshot are left nil for basic sandbox creation.
-		// Set them explicitly in config if custom resources are needed.
-		Pool: &PoolConfig{
-			Enabled:   false,
-			MinWarm:   0,
-			MaxActive: 20,
-		},
+		AutoStopMinutes:    15,
+		AutoArchiveMinutes: 10080, // 7 days
+		AutoDeleteMinutes:  -1,    // disabled
 	}
 }
 
