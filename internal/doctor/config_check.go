@@ -267,8 +267,9 @@ func (c *SettingsCheck) findRigs(townRoot string) []string {
 	return findAllRigs(townRoot)
 }
 
-// SessionHookCheck verifies settings.json files use session-start.sh for proper
-// session_id passthrough. Without this wrapper, gt seance cannot discover sessions.
+// SessionHookCheck verifies settings.json files use proper session_id passthrough.
+// Valid options: session-start.sh wrapper OR 'gt prime --hook'.
+// Without proper config, gt seance cannot discover sessions.
 type SessionHookCheck struct {
 	BaseCheck
 }
@@ -278,12 +279,12 @@ func NewSessionHookCheck() *SessionHookCheck {
 	return &SessionHookCheck{
 		BaseCheck: BaseCheck{
 			CheckName:        "session-hooks",
-			CheckDescription: "Check that settings.json hooks use session-start.sh",
+			CheckDescription: "Check that settings.json hooks use session-start.sh or --hook flag",
 		},
 	}
 }
 
-// Run checks if all settings.json files use session-start.sh wrapper.
+// Run checks if all settings.json files use session-start.sh or --hook flag.
 func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 	var issues []string
 	var checked int
@@ -307,7 +308,7 @@ func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: fmt.Sprintf("All %d settings.json file(s) use session-start.sh", checked),
+			Message: fmt.Sprintf("All %d settings.json file(s) use proper session_id passthrough", checked),
 		}
 	}
 
@@ -316,7 +317,7 @@ func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 		Status:  StatusWarning,
 		Message: fmt.Sprintf("%d hook issue(s) found across settings.json files", len(issues)),
 		Details: issues,
-		FixHint: "Update SessionStart/PreCompact hooks to use 'bash ~/.claude/hooks/session-start.sh' for session_id passthrough",
+		FixHint: "Update hooks to use 'gt prime --hook' or 'bash ~/.claude/hooks/session-start.sh' for session_id passthrough",
 	}
 }
 
@@ -334,22 +335,22 @@ func (c *SessionHookCheck) checkSettingsFile(path string) []string {
 	// Check for SessionStart hooks
 	if strings.Contains(content, "SessionStart") {
 		if !c.usesSessionStartScript(content, "SessionStart") {
-			problems = append(problems, "SessionStart uses bare 'gt prime' (missing session_id passthrough)")
+			problems = append(problems, "SessionStart uses bare 'gt prime' - add --hook flag or use session-start.sh")
 		}
 	}
 
 	// Check for PreCompact hooks
 	if strings.Contains(content, "PreCompact") {
 		if !c.usesSessionStartScript(content, "PreCompact") {
-			problems = append(problems, "PreCompact uses bare 'gt prime' (missing session_id passthrough)")
+			problems = append(problems, "PreCompact uses bare 'gt prime' - add --hook flag or use session-start.sh")
 		}
 	}
 
 	return problems
 }
 
-// usesSessionStartScript checks if the hook configuration uses session-start.sh.
-// Returns true if the hook is properly configured or if no hook is configured.
+// usesSessionStartScript checks if the hook configuration handles session_id properly.
+// Valid: session-start.sh wrapper OR 'gt prime --hook'. Returns true if properly configured.
 func (c *SessionHookCheck) usesSessionStartScript(content, hookType string) bool {
 	// Find the hook section - look for the hook type followed by its configuration
 	// This is a simple heuristic - we look for "gt prime" without session-start.sh
@@ -382,10 +383,15 @@ func (c *SessionHookCheck) usesSessionStartScript(content, hookType string) bool
 		return true // Uses the wrapper script
 	}
 
-	// Check if it uses bare 'gt prime' without the wrapper
-	// Patterns to detect: "gt prime", "'gt prime'", "gt prime\""
+	// Check if it uses 'gt prime --hook' which handles session_id via stdin
 	if strings.Contains(section, "gt prime") {
-		return false // Uses bare gt prime without session-start.sh
+		// gt prime --hook is valid - it reads session_id from stdin JSON
+		// Must match --hook as complete flag, not substring (e.g., --hookup)
+		if containsFlag(section, "--hook") {
+			return true
+		}
+		// Bare 'gt prime' without --hook doesn't get session_id
+		return false
 	}
 
 	// No gt prime or session-start.sh found - might be a different hook configuration
@@ -503,4 +509,17 @@ func findAllRigs(townRoot string) []string {
 	}
 
 	return rigs
+}
+
+func containsFlag(s, flag string) bool {
+	idx := strings.Index(s, flag)
+	if idx == -1 {
+		return false
+	}
+	end := idx + len(flag)
+	if end >= len(s) {
+		return true
+	}
+	next := s[end]
+	return next == '"' || next == ' ' || next == '\'' || next == '\n' || next == '\t'
 }
