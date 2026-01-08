@@ -8,6 +8,7 @@ import (
 	"io/fs"
 
 	"github.com/steveyegge/gastown/internal/activity"
+	"github.com/steveyegge/gastown/internal/status"
 )
 
 //go:embed templates/*.html
@@ -33,7 +34,8 @@ type PolecatRow struct {
 	Name         string        // e.g., "dag", "nux"
 	Rig          string        // e.g., "roxas", "gastown"
 	SessionID    string        // e.g., "gt-roxas-dag"
-	LastActivity activity.Info // Colored activity display
+	LastActivity activity.Info // Colored activity display (legacy)
+	WorkerStatus status.Status // Multi-signal 7-state status
 	StatusHint   string        // Last line from pane (optional)
 	SessionCost  float64       // Cost in USD for this session
 }
@@ -89,12 +91,15 @@ type TrackedIssue struct {
 func LoadTemplates() (*template.Template, error) {
 	// Define template functions
 	funcMap := template.FuncMap{
-		"activityClass":   activityClass,
-		"statusClass":     statusClass,
-		"workStatusClass": workStatusClass,
-		"progressPercent": progressPercent,
-		"costClass":       costClass,
-		"formatCost":      formatCost,
+		"activityClass":     activityClass,
+		"statusClass":       statusClass,
+		"workStatusClass":   workStatusClass,
+		"workerStatusClass": workerStatusClass,
+		"workerStatusLabel": workerStatusLabel,
+		"workerStatusIcon":  workerStatusIcon,
+		"progressPercent":   progressPercent,
+		"costClass":         costClass,
+		"formatCost":        formatCost,
 	}
 
 	// Get the templates subdirectory
@@ -182,4 +187,19 @@ func formatCost(cost float64) string {
 		return "$0.00"
 	}
 	return fmt.Sprintf("$%.2f", cost)
+}
+
+// workerStatusClass returns the CSS class for a worker status.
+func workerStatusClass(s status.Status) string {
+	return s.State.ColorClass()
+}
+
+// workerStatusLabel returns the human-readable label for a worker status.
+func workerStatusLabel(s status.Status) string {
+	return s.State.Label()
+}
+
+// workerStatusIcon returns the emoji icon for a worker status.
+func workerStatusIcon(s status.Status) string {
+	return s.State.Icon()
 }

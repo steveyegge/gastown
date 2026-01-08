@@ -16,13 +16,15 @@ import (
 
 	"github.com/steveyegge/gastown/internal/activity"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/status"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // LiveConvoyFetcher fetches convoy data from beads.
 type LiveConvoyFetcher struct {
-	townRoot  string
-	townBeads string
+	townRoot        string
+	townBeads       string
+	statusCollector *status.Collector
 }
 
 // NewLiveConvoyFetcher creates a fetcher for the current workspace.
@@ -33,8 +35,9 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 	}
 
 	return &LiveConvoyFetcher{
-		townRoot:  townRoot,
-		townBeads: filepath.Join(townRoot, ".beads"),
+		townRoot:        townRoot,
+		townBeads:       filepath.Join(townRoot, ".beads"),
+		statusCollector: status.NewCollector(townRoot),
 	}, nil
 }
 
@@ -770,6 +773,7 @@ func determineColorClass(ciStatus, mergeable string) string {
 }
 
 // FetchPolecats fetches all running polecat and refinery sessions with activity data.
+// Uses multi-signal status detection (git commits, beads updates, session activity).
 func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 	// Query all tmux sessions with window_activity for more accurate timing
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}")
@@ -785,6 +789,9 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 
 	// Pre-fetch session costs for all sessions
 	sessionCosts := f.getSessionCosts()
+
+	// Pre-fetch assigned issues to get issue IDs for workers
+	workerIssues := f.getWorkerAssignedIssues()
 
 	var polecats []PolecatRow
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -820,7 +827,7 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 			continue
 		}
 
-		// Parse activity timestamp
+		// Parse activity timestamp for legacy activity.Info
 		var activityUnix int64
 		if _, err := fmt.Sscanf(parts[1], "%d", &activityUnix); err != nil || activityUnix == 0 {
 			continue
@@ -838,11 +845,28 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		// Look up session cost
 		cost := sessionCosts[sessionName]
 
+		// Build worker info for multi-signal status detection
+		assignee := fmt.Sprintf("%s/polecats/%s", rig, polecat)
+		workerInfo := status.WorkerInfo{
+			Rig:          rig,
+			Name:         polecat,
+			WorktreePath: status.WorktreePathForPolecat(f.townRoot, rig, polecat),
+		}
+
+		// Get assigned issue ID if available
+		if issueID, ok := workerIssues[assignee]; ok {
+			workerInfo.IssueID = issueID
+		}
+
+		// Collect signals and compute multi-signal status
+		workerStatus := status.Compute(f.statusCollector.CollectSignals(workerInfo))
+
 		polecats = append(polecats, PolecatRow{
 			Name:         polecat,
 			Rig:          rig,
 			SessionID:    sessionName,
 			LastActivity: activity.Calculate(activityTime),
+			WorkerStatus: workerStatus,
 			StatusHint:   statusHint,
 			SessionCost:  cost,
 		})
@@ -878,6 +902,43 @@ func (f *LiveConvoyFetcher) getSessionCosts() map[string]float64 {
 
 	for _, s := range costsResp.Sessions {
 		result[s.Session] = s.CostUSD
+	}
+
+	return result
+}
+
+// getWorkerAssignedIssues fetches the mapping of worker assignees to their assigned issue IDs.
+// Returns a map from assignee (e.g., "gastown/polecats/angharad") to issue ID.
+func (f *LiveConvoyFetcher) getWorkerAssignedIssues() map[string]string {
+	result := make(map[string]string)
+
+	// Query for all issues with status in_progress or hooked (active work)
+	// These represent issues currently being worked on by polecats
+	for _, status := range []string{"in_progress", "hooked"} {
+		listArgs := []string{"list", "--status=" + status, "--json"}
+		listCmd := exec.Command("bd", listArgs...)
+		listCmd.Dir = f.townBeads
+
+		var stdout bytes.Buffer
+		listCmd.Stdout = &stdout
+
+		if err := listCmd.Run(); err != nil {
+			continue
+		}
+
+		var issues []struct {
+			ID       string `json:"id"`
+			Assignee string `json:"assignee"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+			continue
+		}
+
+		for _, issue := range issues {
+			if issue.Assignee != "" {
+				result[issue.Assignee] = issue.ID
+			}
+		}
 	}
 
 	return result
