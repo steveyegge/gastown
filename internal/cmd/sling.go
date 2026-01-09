@@ -213,16 +213,23 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 		// Try as bead first
 		if err := verifyBeadExists(firstArg); err == nil {
-			// It's a bead
+			// It's a verified bead
 			beadID = firstArg
 		} else {
-			// Not a bead - try as standalone formula
+			// Not a verified bead - try as standalone formula
 			if err := verifyFormulaExists(firstArg); err == nil {
 				// Standalone formula mode: gt sling <formula> [target]
 				return runSlingFormula(args)
 			}
-			// Neither bead nor formula
-			return fmt.Errorf("'%s' is not a valid bead or formula", firstArg)
+			// Not a formula either - check if it looks like a bead ID (routing issue workaround).
+			// Accept it and let the actual bd update fail later if the bead doesn't exist.
+			// This fixes: gt sling bd-ka761 beads/crew/dave failing with 'not a valid bead or formula'
+			if looksLikeBeadID(firstArg) {
+				beadID = firstArg
+			} else {
+				// Neither bead nor formula
+				return fmt.Errorf("'%s' is not a valid bead or formula", firstArg)
+			}
 		}
 	}
 

@@ -503,3 +503,55 @@ exit 0
 		}
 	}
 }
+
+// TestLooksLikeBeadID tests the bead ID pattern recognition function.
+// This ensures gt sling accepts bead IDs even when routing-based verification fails.
+// Fixes: gt sling bd-ka761 failing with 'not a valid bead or formula'
+//
+// Note: looksLikeBeadID is a fallback check in sling. The actual sling flow is:
+// 1. Try verifyBeadExists (routing-based lookup)
+// 2. Try verifyFormulaExists (formula check)
+// 3. Fall back to looksLikeBeadID pattern match
+// So "mol-release" matches the pattern but won't be treated as bead in practice
+// because it would be caught by formula verification first.
+func TestLooksLikeBeadID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		// Valid bead IDs - should return true
+		{"gt-abc123", true},
+		{"bd-ka761", true},
+		{"hq-cv-abc", true},
+		{"ap-qtsup.16", true},
+		{"beads-xyz", true},
+		{"jv-v599", true},
+		{"gt-9e8s5", true},
+		{"hq-00gyg", true},
+
+		// Short prefixes that match pattern (but may be formulas in practice)
+		{"mol-release", true},    // 3-char prefix matches pattern (formula check runs first in sling)
+		{"mol-abc123", true},     // 3-char prefix matches pattern
+
+		// Non-bead strings - should return false
+		{"formula-name", false},  // "formula" is 7 chars (> 5)
+		{"mayor", false},         // no hyphen
+		{"gastown", false},       // no hyphen
+		{"deacon/dogs", false},   // contains slash
+		{"", false},              // empty
+		{"-abc", false},          // starts with hyphen
+		{"GT-abc", false},        // uppercase prefix
+		{"123-abc", false},       // numeric prefix
+		{"a-", false},            // nothing after hyphen
+		{"aaaaaa-b", false},      // prefix too long (6 chars)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := looksLikeBeadID(tt.input)
+			if got != tt.want {
+				t.Errorf("looksLikeBeadID(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}

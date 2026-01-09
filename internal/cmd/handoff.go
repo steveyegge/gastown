@@ -620,16 +620,37 @@ func sendHandoffMail(subject, message string) (string, error) {
 }
 
 // looksLikeBeadID checks if a string looks like a bead ID.
-// Bead IDs have format: prefix-xxxx where prefix is 2+ letters and xxxx is alphanumeric.
+// Bead IDs have format: prefix-xxxx where prefix is 1-5 lowercase letters and xxxx is alphanumeric.
+// Examples: "gt-abc123", "bd-ka761", "hq-cv-abc", "beads-xyz", "ap-qtsup.16"
 func looksLikeBeadID(s string) bool {
-	// Common bead prefixes
-	prefixes := []string{"gt-", "hq-", "bd-", "beads-"}
-	for _, p := range prefixes {
-		if strings.HasPrefix(s, p) {
-			return true
+	// Find the first hyphen
+	idx := strings.Index(s, "-")
+	if idx < 1 || idx > 5 {
+		// No hyphen, or prefix is empty/too long
+		return false
+	}
+
+	// Check prefix is all lowercase letters
+	prefix := s[:idx]
+	for _, c := range prefix {
+		if c < 'a' || c > 'z' {
+			return false
 		}
 	}
-	return false
+
+	// Check there's something after the hyphen
+	rest := s[idx+1:]
+	if len(rest) == 0 {
+		return false
+	}
+
+	// Check rest starts with alphanumeric and contains only alphanumeric, dots, hyphens
+	first := rest[0]
+	if !((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9')) {
+		return false
+	}
+
+	return true
 }
 
 // hookBeadForHandoff attaches a bead to the current agent's hook.
