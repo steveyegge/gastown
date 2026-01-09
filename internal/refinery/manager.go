@@ -162,8 +162,9 @@ func (m *Manager) Start(foreground bool) error {
 	// Working directory is the refinery worktree (shares .git with mayor/polecats)
 	refineryRigDir := filepath.Join(m.rig.Path, "refinery", "rig")
 	if _, err := os.Stat(refineryRigDir); os.IsNotExist(err) {
-		// Fall back to rig path if refinery/rig doesn't exist
-		refineryRigDir = m.workDir
+		// Fall back to mayor/rig (legacy architecture) - ensures we use project git, not town git.
+		// Using rig.Path directly would find town's .git with rig-named remotes instead of "origin".
+		refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
 	}
 
 	// Ensure runtime settings exist in refinery/ (not refinery/rig/) so we don't

@@ -94,13 +94,21 @@ func NewEngineer(r *rig.Rig) *Engineer {
 	// Override target branch with rig's configured default branch
 	cfg.TargetBranch = r.DefaultBranch()
 
+	// Determine the git working directory for refinery operations.
+	// Prefer refinery/rig worktree, fall back to mayor/rig (legacy architecture).
+	// Using rig.Path directly would find town's .git with rig-named remotes instead of "origin".
+	gitDir := filepath.Join(r.Path, "refinery", "rig")
+	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		gitDir = filepath.Join(r.Path, "mayor", "rig")
+	}
+
 	return &Engineer{
 		rig:         r,
 		beads:       beads.New(r.Path),
 		mrQueue:     mrqueue.New(r.Path),
-		git:         git.NewGit(r.Path),
+		git:         git.NewGit(gitDir),
 		config:      cfg,
-		workDir:     r.Path,
+		workDir:     gitDir,
 		output:      os.Stdout,
 		eventLogger: mrqueue.NewEventLoggerFromRig(r.Path),
 		router:      mail.NewRouter(r.Path),
