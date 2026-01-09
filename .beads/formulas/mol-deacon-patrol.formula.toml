@@ -23,7 +23,7 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 5
+version = 6
 
 [[steps]]
 id = "inbox-check"
@@ -149,6 +149,49 @@ After closing a gate, the Waiters field contains mail addresses to notify.
 Send a brief notification to each waiter that the gate has cleared."""
 
 [[steps]]
+id = "dispatch-gated-molecules"
+title = "Dispatch molecules with resolved gates"
+needs = ["gate-evaluation"]
+description = """
+Find molecules blocked on gates that have now closed and dispatch them.
+
+This completes the async resume cycle without explicit waiter tracking.
+The molecule state IS the waiter - patrol discovers reality each cycle.
+
+**Step 1: Find gate-ready molecules**
+```bash
+bd mol ready --gated --json
+```
+
+This returns molecules where:
+- Status is in_progress
+- Current step has a gate dependency
+- The gate bead is now closed
+- No polecat currently has it hooked
+
+**Step 2: For each ready molecule, dispatch to the appropriate rig**
+```bash
+# Determine target rig from molecule metadata
+bd mol show <mol-id> --json
+# Look for rig field or infer from prefix
+
+# Dispatch to that rig's polecat pool
+gt sling <mol-id> <rig>/polecats
+```
+
+**Step 3: Log dispatch**
+Note which molecules were dispatched for observability:
+```bash
+# Molecule <mol-id> dispatched to <rig>/polecats (gate <gate-id> cleared)
+```
+
+**If no gate-ready molecules:**
+Skip - nothing to dispatch. Gates haven't closed yet or molecules
+already have active polecats working on them.
+
+**Exit criteria:** All gate-ready molecules dispatched to polecats."""
+
+[[steps]]
 id = "check-convoy-completion"
 title = "Check convoy completion"
 needs = ["inbox-check"]
@@ -258,7 +301,7 @@ Keep notifications brief and actionable. The recipient can run bd show for detai
 [[steps]]
 id = "health-scan"
 title = "Check Witness and Refinery health"
-needs = ["trigger-pending-spawns", "gate-evaluation", "fire-notifications"]
+needs = ["trigger-pending-spawns", "dispatch-gated-molecules", "fire-notifications"]
 description = """
 Check Witness and Refinery health for each rig.
 
@@ -521,9 +564,47 @@ Skip dispatch - system is healthy.
 **Exit criteria:** Session GC dispatched to dog (if needed)."""
 
 [[steps]]
+id = "costs-digest"
+title = "Aggregate daily costs"
+needs = ["session-gc"]
+description = """
+**DAILY DIGEST** - Aggregate yesterday's session cost wisps.
+
+Session costs are recorded as ephemeral wisps (not exported to JSONL) to avoid
+log-in-database pollution. This step aggregates them into a permanent daily
+"Cost Report YYYY-MM-DD" bead for audit purposes.
+
+**Step 1: Check if digest is needed**
+```bash
+# Preview yesterday's costs (dry run)
+gt costs digest --yesterday --dry-run
+```
+
+If output shows "No session cost wisps found", skip to Step 3.
+
+**Step 2: Create the digest**
+```bash
+gt costs digest --yesterday
+```
+
+This:
+- Queries all session.ended wisps from yesterday
+- Creates a single "Cost Report YYYY-MM-DD" bead with aggregated data
+- Deletes the source wisps
+
+**Step 3: Verify**
+The digest appears in `gt costs --week` queries.
+Daily digests preserve audit trail without per-session pollution.
+
+**Timing**: Run once per morning patrol cycle. The --yesterday flag ensures
+we don't try to digest today's incomplete data.
+
+**Exit criteria:** Yesterday's costs digested (or no wisps to digest)."""
+
+[[steps]]
 id = "log-maintenance"
 title = "Rotate logs and prune state"
-needs = ["session-gc"]
+needs = ["costs-digest"]
 description = """
 Maintain daemon logs and state files.
 
