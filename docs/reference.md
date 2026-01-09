@@ -206,17 +206,60 @@ gt mol step done <step>      # Complete a molecule step
 
 ## Environment Variables
 
+Gas Town sets environment variables for each agent session via `config.AgentEnv()`.
+These are set in tmux session environment when agents are spawned.
+
+### Core Variables (All Agents)
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `GT_ROLE` | Agent role type | `mayor`, `witness`, `polecat`, `crew` |
+| `GT_ROOT` | Town root directory | `/home/user/gt` |
+| `BD_ACTOR` | Agent identity for attribution | `gastown/polecats/toast` |
+| `GIT_AUTHOR_NAME` | Commit attribution (same as BD_ACTOR) | `gastown/polecats/toast` |
+| `BEADS_DIR` | Beads database location | `/home/user/gt/gastown/.beads` |
+
+### Rig-Level Variables
+
+| Variable | Purpose | Roles |
+|----------|---------|-------|
+| `GT_RIG` | Rig name | witness, refinery, polecat, crew |
+| `GT_POLECAT` | Polecat worker name | polecat only |
+| `GT_CREW` | Crew worker name | crew only |
+| `BEADS_AGENT_NAME` | Agent name for beads operations | polecat, crew |
+| `BEADS_NO_DAEMON` | Disable beads daemon (isolated context) | polecat, crew |
+
+### Other Variables
+
 | Variable | Purpose |
 |----------|---------|
-| `BD_ACTOR` | Agent identity for attribution (see [identity.md](identity.md)) |
-| `BEADS_DIR` | Point to shared beads database |
-| `BEADS_NO_DAEMON` | Required for worktree polecats |
-| `GIT_AUTHOR_NAME` | Set to BD_ACTOR for commit attribution |
-| `GIT_AUTHOR_EMAIL` | Workspace owner email |
-| `GT_TOWN_ROOT` | Override town root detection |
-| `GT_ROLE` | Agent role type (mayor, polecat, etc.) |
-| `GT_RIG` | Rig name for rig-level agents |
-| `GT_POLECAT` | Polecat name (for polecats only) |
+| `GIT_AUTHOR_EMAIL` | Workspace owner email (from git config) |
+| `GT_TOWN_ROOT` | Override town root detection (manual use) |
+| `CLAUDE_RUNTIME_CONFIG_DIR` | Custom Claude settings directory |
+
+### Environment by Role
+
+| Role | Key Variables |
+|------|---------------|
+| **Mayor** | `GT_ROLE=mayor`, `BD_ACTOR=mayor` |
+| **Deacon** | `GT_ROLE=deacon`, `BD_ACTOR=deacon` |
+| **Boot** | `GT_ROLE=boot`, `BD_ACTOR=deacon-boot` |
+| **Witness** | `GT_ROLE=witness`, `GT_RIG=<rig>`, `BD_ACTOR=<rig>/witness` |
+| **Refinery** | `GT_ROLE=refinery`, `GT_RIG=<rig>`, `BD_ACTOR=<rig>/refinery` |
+| **Polecat** | `GT_ROLE=polecat`, `GT_RIG=<rig>`, `GT_POLECAT=<name>`, `BD_ACTOR=<rig>/polecats/<name>` |
+| **Crew** | `GT_ROLE=crew`, `GT_RIG=<rig>`, `GT_CREW=<name>`, `BD_ACTOR=<rig>/crew/<name>` |
+
+### Doctor Check
+
+The `gt doctor` command verifies that running tmux sessions have correct
+environment variables. Mismatches are reported as warnings:
+
+```
+⚠ env-vars: Found 3 env var mismatch(es) across 1 session(s)
+    hq-mayor: missing GT_ROOT (expected "/home/user/gt")
+```
+
+Fix by restarting sessions: `gt shutdown && gt up`
 
 ## Agent Working Directories and Settings
 

@@ -88,15 +88,37 @@ All events include actor attribution:
 
 ## Environment Setup
 
-The daemon sets these automatically when spawning agents:
+Gas Town uses a centralized `config.AgentEnv()` function to set environment
+variables consistently across all agent spawn paths (managers, daemon, boot).
+
+### Example: Polecat Environment
 
 ```bash
-# Set by daemon for polecat 'toast' in rig 'gastown'
-export BD_ACTOR="gastown/polecats/toast"
-export GIT_AUTHOR_NAME="gastown/polecats/toast"
+# Set automatically for polecat 'toast' in rig 'gastown'
 export GT_ROLE="polecat"
 export GT_RIG="gastown"
 export GT_POLECAT="toast"
+export BD_ACTOR="gastown/polecats/toast"
+export GIT_AUTHOR_NAME="gastown/polecats/toast"
+export GT_ROOT="/home/user/gt"
+export BEADS_DIR="/home/user/gt/gastown/.beads"
+export BEADS_AGENT_NAME="gastown/toast"
+export BEADS_NO_DAEMON="1"  # Polecats use isolated beads context
+```
+
+### Example: Crew Environment
+
+```bash
+# Set automatically for crew member 'joe' in rig 'gastown'
+export GT_ROLE="crew"
+export GT_RIG="gastown"
+export GT_CREW="joe"
+export BD_ACTOR="gastown/crew/joe"
+export GIT_AUTHOR_NAME="gastown/crew/joe"
+export GT_ROOT="/home/user/gt"
+export BEADS_DIR="/home/user/gt/gastown/.beads"
+export BEADS_AGENT_NAME="gastown/joe"
+export BEADS_NO_DAEMON="1"  # Crew uses isolated beads context
 ```
 
 ### Manual Override
@@ -107,6 +129,9 @@ For local testing or debugging:
 export BD_ACTOR="gastown/crew/debug"
 bd create --title="Test issue"  # Will show created_by: gastown/crew/debug
 ```
+
+See [reference.md](reference.md#environment-variables) for the complete
+environment variable reference.
 
 ## Identity Parsing
 
