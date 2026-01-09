@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/version"
 )
 
 // Version information - set at build time via ldflags
@@ -28,9 +29,9 @@ var versionCmd = &cobra.Command{
 		branch := resolveBranch()
 
 		if commit != "" && branch != "" {
-			fmt.Printf("gt version %s (%s: %s@%s)\n", Version, Build, branch, shortCommit(commit))
+			fmt.Printf("gt version %s (%s: %s@%s)\n", Version, Build, branch, version.ShortCommit(commit))
 		} else if commit != "" {
-			fmt.Printf("gt version %s (%s: %s)\n", Version, Build, shortCommit(commit))
+			fmt.Printf("gt version %s (%s: %s)\n", Version, Build, version.ShortCommit(commit))
 		} else {
 			fmt.Printf("gt version %s (%s)\n", Version, Build)
 		}
@@ -39,6 +40,11 @@ var versionCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
+
+	// Pass the build-time commit to the version package for stale binary checks
+	if Commit != "" {
+		version.SetCommit(Commit)
+	}
 }
 
 func resolveCommitHash() string {
@@ -55,13 +61,6 @@ func resolveCommitHash() string {
 	}
 
 	return ""
-}
-
-func shortCommit(hash string) string {
-	if len(hash) > 12 {
-		return hash[:12]
-	}
-	return hash
 }
 
 func resolveBranch() string {

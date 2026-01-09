@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/version"
 )
 
 var infoCmd = &cobra.Command{
@@ -39,7 +40,7 @@ Examples:
 		}
 
 		if commit := resolveCommitHash(); commit != "" {
-			info["commit"] = shortCommit(commit)
+			info["commit"] = version.ShortCommit(commit)
 		}
 		if branch := resolveBranch(); branch != "" {
 			info["branch"] = branch

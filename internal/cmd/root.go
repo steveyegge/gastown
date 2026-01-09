@@ -3,9 +3,12 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/version"
 )
 
 var rootCmd = &cobra.Command{
@@ -38,8 +41,50 @@ func checkBeadsDependency(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Check for stale binary (warning only, doesn't block)
+	checkStaleBinaryWarning()
+
 	// Check beads version
 	return CheckBeadsVersion()
+}
+
+// staleBinaryWarned tracks if we've already warned about stale binary in this session.
+// We use an environment variable since the binary restarts on each command.
+var staleBinaryWarned = os.Getenv("GT_STALE_WARNED") == "1"
+
+// checkStaleBinaryWarning checks if the installed binary is stale and prints a warning.
+// This is a non-blocking check - errors are silently ignored.
+func checkStaleBinaryWarning() {
+	// Only warn once per shell session
+	if staleBinaryWarned {
+		return
+	}
+
+	repoRoot, err := version.GetRepoRoot()
+	if err != nil {
+		// Can't find repo - silently skip (might be running from non-dev environment)
+		return
+	}
+
+	info := version.CheckStaleBinary(repoRoot)
+	if info.Error != nil {
+		// Check failed - silently skip
+		return
+	}
+
+	if info.IsStale {
+		staleBinaryWarned = true
+		os.Setenv("GT_STALE_WARNED", "1")
+
+		msg := fmt.Sprintf("gt binary is stale (built from %s, repo at %s)",
+			version.ShortCommit(info.BinaryCommit), version.ShortCommit(info.RepoCommit))
+		if info.CommitsBehind > 0 {
+			msg = fmt.Sprintf("gt binary is %d commits behind (built from %s, repo at %s)",
+				info.CommitsBehind, version.ShortCommit(info.BinaryCommit), version.ShortCommit(info.RepoCommit))
+		}
+		fmt.Fprintf(os.Stderr, "%s %s\n", style.WarningPrefix, msg)
+		fmt.Fprintf(os.Stderr, "    %s Run 'gt install' to update\n", style.ArrowPrefix)
+	}
 }
 
 // Execute runs the root command and returns an exit code.

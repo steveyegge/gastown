@@ -33,6 +33,7 @@ Workspace checks:
   - mayor-exists             Check mayor/ directory structure
 
 Infrastructure checks:
+  - stale-binary             Check if gt binary is up to date with repo
   - daemon                   Check if daemon is running (fixable)
   - repo-fingerprint         Check database has valid repo fingerprint (fixable)
   - boot-health              Check Boot watchdog health (vet mode)
@@ -111,6 +112,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewGlobalStateCheck())
 
 	// Register built-in checks
+	d.Register(doctor.NewStaleBinaryCheck())
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewDaemonCheck())
 	d.Register(doctor.NewRepoFingerprintCheck())
