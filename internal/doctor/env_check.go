@@ -2,8 +2,10 @@ package doctor
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -95,8 +97,22 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Get expected env vars based on role
-		expected := config.AgentEnvSimple(string(identity.Role), identity.Rig, identity.Name)
+		// Get expected env vars based on role, emulating real call sites
+		// Town-level roles use TownRoot for beads, rig-level roles use rig path
+		var beadsDir string
+		if identity.Rig != "" {
+			rigPath := filepath.Join(ctx.TownRoot, identity.Rig)
+			beadsDir = beads.ResolveBeadsDir(rigPath)
+		} else {
+			beadsDir = beads.ResolveBeadsDir(ctx.TownRoot)
+		}
+		expected := config.AgentEnv(config.AgentEnvConfig{
+			Role:      string(identity.Role),
+			Rig:       identity.Rig,
+			AgentName: identity.Name,
+			TownRoot:  ctx.TownRoot,
+			BeadsDir:  beadsDir,
+		})
 
 		// Get actual tmux env vars
 		actual, err := reader.GetAllEnvironment(sess)

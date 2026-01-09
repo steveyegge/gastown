@@ -36,12 +36,40 @@ func (m *mockEnvReader) GetAllEnvironment(session string) (map[string]string, er
 	return map[string]string{}, nil
 }
 
+// testTownRoot is the town root used in tests.
+// Tests use this fixed path so expected values match what the check generates.
+const testTownRoot = "/town"
+
+// expectedEnv generates expected env vars matching what the check generates.
+// For town-level roles (mayor, deacon), beadsDir is /town/.beads
+// For rig-level roles, beadsDir is /town/rigName/.beads
+func expectedEnv(role, rig, agentName string) map[string]string {
+	var beadsDir string
+	if rig != "" {
+		beadsDir = testTownRoot + "/" + rig + "/.beads"
+	} else {
+		beadsDir = testTownRoot + "/.beads"
+	}
+	return config.AgentEnv(config.AgentEnvConfig{
+		Role:      role,
+		Rig:       rig,
+		AgentName: agentName,
+		TownRoot:  testTownRoot,
+		BeadsDir:  beadsDir,
+	})
+}
+
+// testCtx returns a CheckContext with the test town root.
+func testCtx() *CheckContext {
+	return &CheckContext{TownRoot: testTownRoot}
+}
+
 func TestEnvVarsCheck_NoSessions(t *testing.T) {
 	reader := &mockEnvReader{
 		sessions: []string{},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
@@ -56,7 +84,7 @@ func TestEnvVarsCheck_ListSessionsError(t *testing.T) {
 		listErr: errors.New("tmux not running"),
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	// No tmux server is valid (Gas Town can be down)
 	if result.Status != StatusOK {
@@ -72,7 +100,7 @@ func TestEnvVarsCheck_NonGasTownSessions(t *testing.T) {
 		sessions: []string{"other-session", "my-dev"},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
@@ -83,7 +111,7 @@ func TestEnvVarsCheck_NonGasTownSessions(t *testing.T) {
 }
 
 func TestEnvVarsCheck_MayorCorrect(t *testing.T) {
-	expected := config.AgentEnvSimple("mayor", "", "")
+	expected := expectedEnv("mayor", "", "")
 	reader := &mockEnvReader{
 		sessions: []string{"hq-mayor"},
 		sessionEnvs: map[string]map[string]string{
@@ -91,7 +119,7 @@ func TestEnvVarsCheck_MayorCorrect(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
@@ -106,7 +134,7 @@ func TestEnvVarsCheck_MayorMissing(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusWarning {
 		t.Errorf("Status = %v, want StatusWarning", result.Status)
@@ -114,7 +142,7 @@ func TestEnvVarsCheck_MayorMissing(t *testing.T) {
 }
 
 func TestEnvVarsCheck_WitnessCorrect(t *testing.T) {
-	expected := config.AgentEnvSimple("witness", "myrig", "")
+	expected := expectedEnv("witness", "myrig", "")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-myrig-witness"},
 		sessionEnvs: map[string]map[string]string{
@@ -122,7 +150,7 @@ func TestEnvVarsCheck_WitnessCorrect(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
@@ -140,7 +168,7 @@ func TestEnvVarsCheck_WitnessMismatch(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusWarning {
 		t.Errorf("Status = %v, want StatusWarning", result.Status)
@@ -148,7 +176,7 @@ func TestEnvVarsCheck_WitnessMismatch(t *testing.T) {
 }
 
 func TestEnvVarsCheck_RefineryCorrect(t *testing.T) {
-	expected := config.AgentEnvSimple("refinery", "myrig", "")
+	expected := expectedEnv("refinery", "myrig", "")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-myrig-refinery"},
 		sessionEnvs: map[string]map[string]string{
@@ -156,7 +184,7 @@ func TestEnvVarsCheck_RefineryCorrect(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
@@ -164,7 +192,7 @@ func TestEnvVarsCheck_RefineryCorrect(t *testing.T) {
 }
 
 func TestEnvVarsCheck_PolecatCorrect(t *testing.T) {
-	expected := config.AgentEnvSimple("polecat", "myrig", "Toast")
+	expected := expectedEnv("polecat", "myrig", "Toast")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-myrig-Toast"},
 		sessionEnvs: map[string]map[string]string{
@@ -172,7 +200,7 @@ func TestEnvVarsCheck_PolecatCorrect(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
@@ -190,7 +218,7 @@ func TestEnvVarsCheck_PolecatMissing(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusWarning {
 		t.Errorf("Status = %v, want StatusWarning", result.Status)
@@ -198,7 +226,7 @@ func TestEnvVarsCheck_PolecatMissing(t *testing.T) {
 }
 
 func TestEnvVarsCheck_CrewCorrect(t *testing.T) {
-	expected := config.AgentEnvSimple("crew", "myrig", "worker1")
+	expected := expectedEnv("crew", "myrig", "worker1")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-myrig-crew-worker1"},
 		sessionEnvs: map[string]map[string]string{
@@ -206,7 +234,7 @@ func TestEnvVarsCheck_CrewCorrect(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
@@ -214,9 +242,9 @@ func TestEnvVarsCheck_CrewCorrect(t *testing.T) {
 }
 
 func TestEnvVarsCheck_MultipleSessions(t *testing.T) {
-	mayorEnv := config.AgentEnvSimple("mayor", "", "")
-	witnessEnv := config.AgentEnvSimple("witness", "rig1", "")
-	polecatEnv := config.AgentEnvSimple("polecat", "rig1", "Toast")
+	mayorEnv := expectedEnv("mayor", "", "")
+	witnessEnv := expectedEnv("witness", "rig1", "")
+	polecatEnv := expectedEnv("polecat", "rig1", "Toast")
 
 	reader := &mockEnvReader{
 		sessions: []string{"hq-mayor", "gt-rig1-witness", "gt-rig1-Toast"},
@@ -227,7 +255,7 @@ func TestEnvVarsCheck_MultipleSessions(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
@@ -238,7 +266,7 @@ func TestEnvVarsCheck_MultipleSessions(t *testing.T) {
 }
 
 func TestEnvVarsCheck_MixedCorrectAndMismatch(t *testing.T) {
-	mayorEnv := config.AgentEnvSimple("mayor", "", "")
+	mayorEnv := expectedEnv("mayor", "", "")
 
 	reader := &mockEnvReader{
 		sessions: []string{"hq-mayor", "gt-rig1-witness"},
@@ -251,7 +279,7 @@ func TestEnvVarsCheck_MixedCorrectAndMismatch(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusWarning {
 		t.Errorf("Status = %v, want StatusWarning", result.Status)
@@ -259,7 +287,7 @@ func TestEnvVarsCheck_MixedCorrectAndMismatch(t *testing.T) {
 }
 
 func TestEnvVarsCheck_DeaconCorrect(t *testing.T) {
-	expected := config.AgentEnvSimple("deacon", "", "")
+	expected := expectedEnv("deacon", "", "")
 	reader := &mockEnvReader{
 		sessions: []string{"hq-deacon"},
 		sessionEnvs: map[string]map[string]string{
@@ -267,7 +295,7 @@ func TestEnvVarsCheck_DeaconCorrect(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
@@ -282,7 +310,7 @@ func TestEnvVarsCheck_DeaconMissing(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusWarning {
 		t.Errorf("Status = %v, want StatusWarning", result.Status)
@@ -297,7 +325,7 @@ func TestEnvVarsCheck_GetEnvError(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusWarning {
 		t.Errorf("Status = %v, want StatusWarning", result.Status)
@@ -306,7 +334,7 @@ func TestEnvVarsCheck_GetEnvError(t *testing.T) {
 
 func TestEnvVarsCheck_HyphenatedRig(t *testing.T) {
 	// Test rig name with hyphens: "foo-bar"
-	expected := config.AgentEnvSimple("witness", "foo-bar", "")
+	expected := expectedEnv("witness", "foo-bar", "")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-foo-bar-witness"},
 		sessionEnvs: map[string]map[string]string{
@@ -314,7 +342,7 @@ func TestEnvVarsCheck_HyphenatedRig(t *testing.T) {
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(&CheckContext{})
+	result := check.Run(testCtx())
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
