@@ -258,25 +258,34 @@ func TestEnvVarsCheck_MixedCorrectAndMismatch(t *testing.T) {
 	}
 }
 
-func TestEnvVarsCheck_DeaconSkipped(t *testing.T) {
-	// Deacon should be skipped - it doesn't use standard env vars
+func TestEnvVarsCheck_DeaconCorrect(t *testing.T) {
+	expected := config.AgentEnvSimple("deacon", "", "")
 	reader := &mockEnvReader{
 		sessions: []string{"hq-deacon"},
 		sessionEnvs: map[string]map[string]string{
-			"hq-deacon": {}, // Empty - but should be skipped
+			"hq-deacon": expected,
 		},
 	}
 	check := NewEnvVarsCheckWithReader(reader)
 	result := check.Run(&CheckContext{})
 
-	// With only deacon (skipped), checkedCount=0, so should show "No Gas Town sessions"
-	// Actually no - the session exists but is skipped. Let me check the logic...
-	// The check filters to gt-* and hq-* first, then skips deacon. With deacon skipped,
-	// checkedCount stays 0, but gtSessions has 1 entry.
-	// Looking at the code, after skipping deacon, checkedCount=0 and mismatches is empty,
-	// so it returns OK with "All 0 session(s) have correct environment variables"
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
+	}
+}
+
+func TestEnvVarsCheck_DeaconMissing(t *testing.T) {
+	reader := &mockEnvReader{
+		sessions: []string{"hq-deacon"},
+		sessionEnvs: map[string]map[string]string{
+			"hq-deacon": {}, // Missing all env vars
+		},
+	}
+	check := NewEnvVarsCheckWithReader(reader)
+	result := check.Run(&CheckContext{})
+
+	if result.Status != StatusWarning {
+		t.Errorf("Status = %v, want StatusWarning", result.Status)
 	}
 }
 

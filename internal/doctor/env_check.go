@@ -95,11 +95,6 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Skip deacon - it doesn't use the standard env vars
-		if identity.Role == session.RoleDeacon {
-			continue
-		}
-
 		// Get expected env vars based on role
 		expected := config.AgentEnvSimple(string(identity.Role), identity.Rig, identity.Name)
 
