@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/boot"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -43,6 +44,14 @@ func StopTownSession(t *tmux.Tmux, ts TownSession, force bool) (bool, error) {
 		_ = t.SendKeysRaw(ts.SessionID, "C-c")
 		time.Sleep(100 * time.Millisecond)
 	}
+
+	// Log pre-death event for crash investigation (before killing)
+	reason := "user shutdown"
+	if force {
+		reason = "forced shutdown"
+	}
+	_ = events.LogFeed(events.TypeSessionDeath, ts.SessionID,
+		events.SessionDeathPayload(ts.SessionID, ts.Name, reason, "gt down"))
 
 	// Kill the session
 	if err := t.KillSession(ts.SessionID); err != nil {

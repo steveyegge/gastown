@@ -36,6 +36,10 @@ const (
 	EventPolecatNudged  EventType = "polecat_nudged"
 	EventEscalationSent EventType = "escalation_sent"
 	EventPatrolComplete EventType = "patrol_complete"
+
+	// Session death events (for crash investigation)
+	EventSessionDeath EventType = "session_death" // Session terminated (with reason)
+	EventMassDeath    EventType = "mass_death"    // Multiple sessions died in short window
 )
 
 // Event represents a single agent lifecycle event.
@@ -187,6 +191,18 @@ func formatLogLine(e Event) string {
 			detail = fmt.Sprintf("patrol complete (%s)", e.Context)
 		} else {
 			detail = "patrol complete"
+		}
+	case EventSessionDeath:
+		if e.Context != "" {
+			detail = fmt.Sprintf("session terminated (%s)", e.Context)
+		} else {
+			detail = "session terminated"
+		}
+	case EventMassDeath:
+		if e.Context != "" {
+			detail = fmt.Sprintf("MASS SESSION DEATH (%s)", e.Context)
+		} else {
+			detail = "MASS SESSION DEATH"
 		}
 	default:
 		detail = string(e.Type)

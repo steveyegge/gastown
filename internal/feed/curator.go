@@ -346,6 +346,28 @@ func (c *Curator) generateSummary(event *events.Event) string {
 		}
 		return "Merge failed"
 
+	case events.TypeSessionDeath:
+		session, _ := event.Payload["session"].(string)
+		reason, _ := event.Payload["reason"].(string)
+		if session != "" && reason != "" {
+			return fmt.Sprintf("Session %s terminated: %s", session, reason)
+		}
+		if session != "" {
+			return fmt.Sprintf("Session %s terminated", session)
+		}
+		return "Session terminated"
+
+	case events.TypeMassDeath:
+		count, _ := event.Payload["count"].(float64) // JSON numbers are float64
+		possibleCause, _ := event.Payload["possible_cause"].(string)
+		if count > 0 && possibleCause != "" {
+			return fmt.Sprintf("MASS DEATH: %d sessions died - %s", int(count), possibleCause)
+		}
+		if count > 0 {
+			return fmt.Sprintf("MASS DEATH: %d sessions died simultaneously", int(count))
+		}
+		return "Multiple sessions died simultaneously"
+
 	default:
 		return fmt.Sprintf("%s: %s", event.Actor, event.Type)
 	}
