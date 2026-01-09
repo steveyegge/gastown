@@ -333,6 +333,12 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 		}
 	}
 
+	// Clean up build artifacts before removing worktree.
+	// This reclaims disk space from node_modules, .next, etc. that can accumulate
+	// across many polecats (each Next.js app's node_modules is ~500MB+).
+	// Non-fatal: continue with removal even if cleanup fails.
+	_ = m.cleanupBuildArtifacts(polecatPath)
+
 	// Get repo base to remove the worktree properly
 	repoGit, err := m.repoBase()
 	if err != nil {
@@ -723,6 +729,66 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 func (m *Manager) setupSharedBeads(polecatPath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
 	return beads.SetupRedirect(townRoot, polecatPath)
+}
+
+// cleanupBuildArtifacts removes large build artifacts from a polecat worktree before removal.
+// This is critical for disk space management - each polecat's node_modules can be 500MB+,
+// and with many polecats this quickly fills the disk.
+//
+// Artifacts cleaned:
+//   - node_modules/  (npm/yarn/pnpm dependencies, typically 200-800MB per project)
+//   - .next/         (Next.js build cache)
+//   - .turbo/        (Turborepo cache)
+//   - dist/          (common build output)
+//   - build/         (common build output)
+//
+// This runs BEFORE worktree removal so the heavy directories are deleted explicitly
+// rather than relying on recursive removal of the entire worktree.
+//
+// Best practice: Projects should use pnpm with a shared store to minimize disk usage
+// across polecats. See: https://pnpm.io/motivation#saving-disk-space
+func (m *Manager) cleanupBuildArtifacts(polecatPath string) error {
+	// List of directories to clean up (relative to worktree root)
+	// These are typically the largest non-source directories in JS/TS projects
+	artifactDirs := []string{
+		"node_modules",
+		".next",
+		".turbo",
+		"dist",
+		"build",
+	}
+
+	var lastErr error
+	for _, dir := range artifactDirs {
+		artifactPath := filepath.Join(polecatPath, dir)
+		if _, err := os.Stat(artifactPath); err == nil {
+			// Directory exists - remove it
+			if err := os.RemoveAll(artifactPath); err != nil {
+				lastErr = err
+				// Continue trying other directories
+			}
+		}
+	}
+
+	// Also clean nested node_modules in monorepos (packages/*/node_modules, apps/*/node_modules)
+	// This catches pnpm/yarn workspaces and Turborepo setups
+	for _, pattern := range []string{"packages", "apps"} {
+		packagesDir := filepath.Join(polecatPath, pattern)
+		if entries, err := os.ReadDir(packagesDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					nestedModules := filepath.Join(packagesDir, entry.Name(), "node_modules")
+					if _, err := os.Stat(nestedModules); err == nil {
+						if err := os.RemoveAll(nestedModules); err != nil {
+							lastErr = err
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return lastErr
 }
 
 // CleanupStaleBranches removes orphaned polecat branches that are no longer in use.
