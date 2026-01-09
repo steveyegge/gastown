@@ -182,13 +182,14 @@ type RigConfig struct {
 
 // RigSettings represents per-rig behavioral configuration (settings/config.json).
 type RigSettings struct {
-	Type       string            `json:"type"`                  // "rig-settings"
-	Version    int               `json:"version"`               // schema version
-	MergeQueue *MergeQueueConfig `json:"merge_queue,omitempty"` // merge queue settings
-	Theme      *ThemeConfig      `json:"theme,omitempty"`       // tmux theme settings
-	Namepool   *NamepoolConfig   `json:"namepool,omitempty"`    // polecat name pool settings
-	Crew       *CrewConfig       `json:"crew,omitempty"`        // crew startup settings
-	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
+	Type         string               `json:"type"`                   // "rig-settings"
+	Version      int                  `json:"version"`                // schema version
+	MergeQueue   *MergeQueueConfig    `json:"merge_queue,omitempty"`  // merge queue settings
+	Theme        *ThemeConfig         `json:"theme,omitempty"`        // tmux theme settings
+	Namepool     *NamepoolConfig      `json:"namepool,omitempty"`     // polecat name pool settings
+	BranchNaming *BranchNamingConfig  `json:"branch_naming,omitempty"` // branch naming settings
+	Crew         *CrewConfig          `json:"crew,omitempty"`         // crew startup settings
+	Runtime      *RuntimeConfig       `json:"runtime,omitempty"`      // LLM runtime settings (deprecated: use Agent)
 
 	// Agent selects which agent preset to use for this rig.
 	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp")
@@ -677,6 +678,27 @@ func DefaultNamepoolConfig() *NamepoolConfig {
 	return &NamepoolConfig{
 		Style:              "mad-max",
 		MaxBeforeNumbering: 50,
+	}
+}
+
+// BranchNamingConfig represents branch naming settings for a rig.
+type BranchNamingConfig struct {
+	// PolecatBranchTemplate is the pattern for polecat work branch names.
+	// Supports variables: {name}, {timestamp}, {rig}
+	// - {name}: Polecat name (e.g., "Toast")
+	// - {timestamp}: Base36 Unix milliseconds (e.g., "1gvp7k5")
+	// - {rig}: Rig name (e.g., "gastown")
+	// Default: "polecat/{name}-{timestamp}"
+	PolecatBranchTemplate string `json:"polecat_branch_template,omitempty"`
+}
+
+// DefaultPolecatBranchTemplate is the default pattern for polecat branch names.
+const DefaultPolecatBranchTemplate = "polecat/{name}-{timestamp}"
+
+// DefaultBranchNamingConfig returns a BranchNamingConfig with sensible defaults.
+func DefaultBranchNamingConfig() *BranchNamingConfig {
+	return &BranchNamingConfig{
+		PolecatBranchTemplate: DefaultPolecatBranchTemplate,
 	}
 }
 

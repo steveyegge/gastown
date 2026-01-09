@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -41,10 +40,11 @@ func (e *UncommittedWorkError) Unwrap() error {
 
 // Manager handles polecat lifecycle.
 type Manager struct {
-	rig      *rig.Rig
-	git      *git.Git
-	beads    *beads.Beads
-	namePool *NamePool
+	rig            *rig.Rig
+	git            *git.Git
+	beads          *beads.Beads
+	namePool       *NamePool
+	branchTemplate string // polecat branch naming template
 }
 
 // NewManager creates a new polecat manager.
@@ -55,31 +55,42 @@ func NewManager(r *rig.Rig, g *git.Git) *Manager {
 	resolvedBeads := beads.ResolveBeadsDir(r.Path)
 	beadsPath := filepath.Dir(resolvedBeads) // Get the directory containing .beads
 
-	// Try to load rig settings for namepool config
+	// Try to load rig settings for namepool and branch naming config
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
 	var pool *NamePool
+	branchTemplate := config.DefaultPolecatBranchTemplate
 
 	settings, err := config.LoadRigSettings(settingsPath)
-	if err == nil && settings.Namepool != nil {
-		// Use configured namepool settings
-		pool = NewNamePoolWithConfig(
-			r.Path,
-			r.Name,
-			settings.Namepool.Style,
-			settings.Namepool.Names,
-			settings.Namepool.MaxBeforeNumbering,
-		)
-	} else {
+	if err == nil {
+		// Load namepool settings
+		if settings.Namepool != nil {
+			// Use configured namepool settings
+			pool = NewNamePoolWithConfig(
+				r.Path,
+				r.Name,
+				settings.Namepool.Style,
+				settings.Namepool.Names,
+				settings.Namepool.MaxBeforeNumbering,
+			)
+		}
+		// Load branch naming settings
+		if settings.BranchNaming != nil && settings.BranchNaming.PolecatBranchTemplate != "" {
+			branchTemplate = settings.BranchNaming.PolecatBranchTemplate
+		}
+	}
+
+	if pool == nil {
 		// Use defaults
 		pool = NewNamePool(r.Path, r.Name)
 	}
 	_ = pool.Load() // non-fatal: state file may not exist for new rigs
 
 	return &Manager{
-		rig:      r,
-		git:      g,
-		beads:    beads.New(beadsPath),
-		namePool: pool,
+		rig:            r,
+		git:            g,
+		beads:          beads.New(beadsPath),
+		namePool:       pool,
+		branchTemplate: branchTemplate,
 	}
 }
 
@@ -244,9 +255,9 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	polecatDir := m.polecatDir(name)
 	clonePath := filepath.Join(polecatDir, m.rig.Name)
 
-	// Unique branch per run - prevents drift from stale branches
-	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
-	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
+	// Build branch name from configurable template
+	// Default: "polecat/{name}-{timestamp}" with base36 timestamp for shorter names
+	branchName := BuildPolecatBranchName(m.branchTemplate, name, m.rig.Name)
 
 	// Create polecat directory (polecats/<name>/)
 	if err := os.MkdirAll(polecatDir, 0755); err != nil {
@@ -523,8 +534,8 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Create fresh worktree with unique branch name, starting from origin's default branch
 	// Old branches are left behind - they're ephemeral (never pushed to origin)
 	// and will be cleaned up by garbage collection
-	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
-	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
+	// Build branch name from configurable template
+	branchName := BuildPolecatBranchName(m.branchTemplate, name, m.rig.Name)
 	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
