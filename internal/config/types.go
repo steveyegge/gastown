@@ -180,6 +180,13 @@ type RigConfig struct {
 	Beads     *BeadsConfig `json:"beads,omitempty"`
 }
 
+// WorkflowConfig represents workflow settings for a rig.
+type WorkflowConfig struct {
+	// DefaultFormula is the formula to use when `gt formula run` is called without arguments.
+	// If empty, no default is set and a formula name must be provided.
+	DefaultFormula string `json:"default_formula,omitempty"`
+}
+
 // RigSettings represents per-rig behavioral configuration (settings/config.json).
 type RigSettings struct {
 	Type       string            `json:"type"`                  // "rig-settings"
@@ -188,6 +195,7 @@ type RigSettings struct {
 	Theme      *ThemeConfig      `json:"theme,omitempty"`       // tmux theme settings
 	Namepool   *NamepoolConfig   `json:"namepool,omitempty"`    // polecat name pool settings
 	Crew       *CrewConfig       `json:"crew,omitempty"`        // crew startup settings
+	Workflow   *WorkflowConfig   `json:"workflow,omitempty"`    // workflow settings
 	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
 
 	// Agent selects which agent preset to use for this rig.
