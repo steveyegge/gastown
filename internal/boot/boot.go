@@ -223,11 +223,15 @@ func (b *Boot) spawnDegraded() error {
 	// This performs the triage logic without a full Claude session
 	cmd := exec.Command("gt", "boot", "triage", "--degraded")
 	cmd.Dir = b.deaconDir
-	cmd.Env = append(os.Environ(),
-		"GT_ROLE=boot",
-		"BD_ACTOR=deacon-boot",
-		"GT_DEGRADED=true",
-	)
+
+	// Use centralized AgentEnv for consistency with tmux mode
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:     "boot",
+		TownRoot: b.townRoot,
+		BeadsDir: beads.ResolveBeadsDir(b.townRoot),
+	})
+	cmd.Env = config.EnvForExecCommand(envVars)
+	cmd.Env = append(cmd.Env, "GT_DEGRADED=true")
 
 	// Run async - don't wait for completion
 	return cmd.Start()
