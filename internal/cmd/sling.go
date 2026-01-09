@@ -279,7 +279,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 				// First, check if there's an idle polecat we can reuse (when --start is set)
 				var usedIdlePolecat bool
 				if slingStart {
-					idlePolecat, idleErr := FindIdlePolecat(rigName)
+					idlePolecat, idleErr := FindIdlePolecat(rigName, FindIdlePolecatOptions{})
 					if idleErr == nil && idlePolecat != nil {
 						// Found an idle polecat - start its session instead of spawning new
 						fmt.Printf("Found idle polecat '%s' in rig '%s' (--start)\n", idlePolecat.Name, rigName)
@@ -297,7 +297,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 					}
 				} else {
 					// Check for idle polecats to warn user
-					idlePolecat, idleErr := FindIdlePolecat(rigName)
+					idlePolecat, idleErr := FindIdlePolecat(rigName, FindIdlePolecatOptions{})
 					if idleErr == nil && idlePolecat != nil {
 						fmt.Printf("%s Idle polecat '%s' exists in rig '%s'\n", style.Dim.Render("⚠"), idlePolecat.Name, rigName)
 						fmt.Printf("%s Use --start to reuse existing polecats instead of spawning new ones\n", style.Dim.Render("  Hint:"))
@@ -941,7 +941,7 @@ func runSlingFormula(args []string) error {
 				// First, check if there's an idle polecat we can reuse (when --start is set)
 				var usedIdlePolecat bool
 				if slingStart {
-					idlePolecat, idleErr := FindIdlePolecat(rigName)
+					idlePolecat, idleErr := FindIdlePolecat(rigName, FindIdlePolecatOptions{})
 					if idleErr == nil && idlePolecat != nil {
 						// Found an idle polecat - start its session instead of spawning new
 						fmt.Printf("Found idle polecat '%s' in rig '%s' (--start)\n", idlePolecat.Name, rigName)
@@ -958,7 +958,7 @@ func runSlingFormula(args []string) error {
 					}
 				} else {
 					// Check for idle polecats to warn user
-					idlePolecat, idleErr := FindIdlePolecat(rigName)
+					idlePolecat, idleErr := FindIdlePolecat(rigName, FindIdlePolecatOptions{})
 					if idleErr == nil && idlePolecat != nil {
 						fmt.Printf("%s Idle polecat '%s' exists in rig '%s'\n", style.Dim.Render("⚠"), idlePolecat.Name, rigName)
 						fmt.Printf("%s Use --start to reuse existing polecats instead of spawning new ones\n", style.Dim.Render("  Hint:"))
