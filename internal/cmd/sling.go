@@ -92,6 +92,7 @@ Spawning Options (when target is a rig):
   gt sling gp-abc greenplace --naked                # No-tmux (manual start)
   gt sling gp-abc greenplace --force                # Ignore unread mail
   gt sling gp-abc greenplace --account work         # Use specific Claude account
+  gt sling gp-abc greenplace --start                # Reuse idle polecat (auto-start)
 
 Natural Language Args:
   gt sling gt-abc --args "patch release"
@@ -139,6 +140,7 @@ var (
 	slingAccount  string // --account: Claude Code account handle to use
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
+	slingStart    bool   // --start: auto-start idle polecat sessions
 )
 
 func init() {
@@ -156,6 +158,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
 	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
+	slingCmd.Flags().BoolVar(&slingStart, "start", false, "Auto-start idle polecat sessions (reuse existing polecats)")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -260,9 +263,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
-			// Check if target is a rig name (auto-spawn polecat)
+			// Check if target is a rig name (auto-spawn polecat or reuse idle polecat)
 			if slingDryRun {
 				// Dry run - just indicate what would happen
+				if slingStart {
+					fmt.Printf("Would check for idle polecats in rig '%s' (--start)\n", rigName)
+				}
 				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
 				if slingNaked {
 					fmt.Printf("  --naked: would skip tmux session\n")
@@ -270,26 +276,57 @@ func runSling(cmd *cobra.Command, args []string) error {
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
 				targetPane = "<new-pane>"
 			} else {
-				// Spawn a fresh polecat in the rig
-				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
-				spawnOpts := SlingSpawnOptions{
-					Force:    slingForce,
-					Naked:    slingNaked,
-					Account:  slingAccount,
-					Create:   slingCreate,
-					HookBead: beadID, // Set atomically at spawn time
-					Agent:    slingAgent,
-				}
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-				if spawnErr != nil {
-					return fmt.Errorf("spawning polecat: %w", spawnErr)
-				}
-				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
-				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
+				// First, check if there's an idle polecat we can reuse (when --start is set)
+				var usedIdlePolecat bool
+				if slingStart {
+					idlePolecat, idleErr := FindIdlePolecat(rigName)
+					if idleErr == nil && idlePolecat != nil {
+						// Found an idle polecat - start its session instead of spawning new
+						fmt.Printf("Found idle polecat '%s' in rig '%s' (--start)\n", idlePolecat.Name, rigName)
+						pane, startErr := StartPolecatSession(rigName, idlePolecat.Name, idlePolecat.ClonePath, slingAccount, slingAgent)
+						if startErr != nil {
+							return fmt.Errorf("starting idle polecat session: %w", startErr)
+						}
+						targetAgent = fmt.Sprintf("%s/polecats/%s", rigName, idlePolecat.Name)
+						targetPane = pane
+						hookWorkDir = idlePolecat.ClonePath
+						usedIdlePolecat = true
 
-				// Wake witness and refinery to monitor the new polecat
-				wakeRigAgents(rigName)
+						// Wake witness and refinery to monitor the polecat
+						wakeRigAgents(rigName)
+					}
+				} else {
+					// Check for idle polecats to warn user
+					idlePolecat, idleErr := FindIdlePolecat(rigName)
+					if idleErr == nil && idlePolecat != nil {
+						fmt.Printf("%s Idle polecat '%s' exists in rig '%s'\n", style.Dim.Render("⚠"), idlePolecat.Name, rigName)
+						fmt.Printf("%s Use --start to reuse existing polecats instead of spawning new ones\n", style.Dim.Render("  Hint:"))
+					}
+				}
+
+				// If we didn't reuse an idle polecat, spawn a fresh one
+				if !usedIdlePolecat {
+					// Spawn a fresh polecat in the rig
+					fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
+					spawnOpts := SlingSpawnOptions{
+						Force:    slingForce,
+						Naked:    slingNaked,
+						Account:  slingAccount,
+						Create:   slingCreate,
+						HookBead: beadID, // Set atomically at spawn time
+						Agent:    slingAgent,
+					}
+					spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
+					if spawnErr != nil {
+						return fmt.Errorf("spawning polecat: %w", spawnErr)
+					}
+					targetAgent = spawnInfo.AgentID()
+					targetPane = spawnInfo.Pane
+					hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
+
+					// Wake witness and refinery to monitor the new polecat
+					wakeRigAgents(rigName)
+				}
 			}
 		} else {
 			// Slinging to an existing agent
@@ -888,9 +925,12 @@ func runSlingFormula(args []string) error {
 				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
-			// Check if target is a rig name (auto-spawn polecat)
+			// Check if target is a rig name (auto-spawn polecat or reuse idle polecat)
 			if slingDryRun {
 				// Dry run - just indicate what would happen
+				if slingStart {
+					fmt.Printf("Would check for idle polecats in rig '%s' (--start)\n", rigName)
+				}
 				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
 				if slingNaked {
 					fmt.Printf("  --naked: would skip tmux session\n")
@@ -898,24 +938,54 @@ func runSlingFormula(args []string) error {
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
 				targetPane = "<new-pane>"
 			} else {
-				// Spawn a fresh polecat in the rig
-				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
-				spawnOpts := SlingSpawnOptions{
-					Force:   slingForce,
-					Naked:   slingNaked,
-					Account: slingAccount,
-					Create:  slingCreate,
-					Agent:   slingAgent,
-				}
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-				if spawnErr != nil {
-					return fmt.Errorf("spawning polecat: %w", spawnErr)
-				}
-				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
+				// First, check if there's an idle polecat we can reuse (when --start is set)
+				var usedIdlePolecat bool
+				if slingStart {
+					idlePolecat, idleErr := FindIdlePolecat(rigName)
+					if idleErr == nil && idlePolecat != nil {
+						// Found an idle polecat - start its session instead of spawning new
+						fmt.Printf("Found idle polecat '%s' in rig '%s' (--start)\n", idlePolecat.Name, rigName)
+						pane, startErr := StartPolecatSession(rigName, idlePolecat.Name, idlePolecat.ClonePath, slingAccount, slingAgent)
+						if startErr != nil {
+							return fmt.Errorf("starting idle polecat session: %w", startErr)
+						}
+						targetAgent = fmt.Sprintf("%s/polecats/%s", rigName, idlePolecat.Name)
+						targetPane = pane
+						usedIdlePolecat = true
 
-				// Wake witness and refinery to monitor the new polecat
-				wakeRigAgents(rigName)
+						// Wake witness and refinery to monitor the polecat
+						wakeRigAgents(rigName)
+					}
+				} else {
+					// Check for idle polecats to warn user
+					idlePolecat, idleErr := FindIdlePolecat(rigName)
+					if idleErr == nil && idlePolecat != nil {
+						fmt.Printf("%s Idle polecat '%s' exists in rig '%s'\n", style.Dim.Render("⚠"), idlePolecat.Name, rigName)
+						fmt.Printf("%s Use --start to reuse existing polecats instead of spawning new ones\n", style.Dim.Render("  Hint:"))
+					}
+				}
+
+				// If we didn't reuse an idle polecat, spawn a fresh one
+				if !usedIdlePolecat {
+					// Spawn a fresh polecat in the rig
+					fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
+					spawnOpts := SlingSpawnOptions{
+						Force:   slingForce,
+						Naked:   slingNaked,
+						Account: slingAccount,
+						Create:  slingCreate,
+						Agent:   slingAgent,
+					}
+					spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
+					if spawnErr != nil {
+						return fmt.Errorf("spawning polecat: %w", spawnErr)
+					}
+					targetAgent = spawnInfo.AgentID()
+					targetPane = spawnInfo.Pane
+
+					// Wake witness and refinery to monitor the new polecat
+					wakeRigAgents(rigName)
+				}
 			}
 		} else {
 			// Slinging to an existing agent
