@@ -523,6 +523,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		TownRoot:         townRoot,
 		BeadsDir:         beads.ResolveBeadsDir(m.rig.Path),
 		RuntimeConfigDir: opts.ClaudeConfigDir,
+		BeadsNoDaemon:    true,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)

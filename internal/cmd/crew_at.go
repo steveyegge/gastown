@@ -146,6 +146,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			TownRoot:         townRoot,
 			BeadsDir:         beads.ResolveBeadsDir(r.Path),
 			RuntimeConfigDir: claudeConfigDir,
+			BeadsNoDaemon:    true,
 		})
 		for k, v := range envVars {
 			_ = t.SetEnvironment(sessionID, k, v)
