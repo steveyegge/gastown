@@ -487,18 +487,31 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 }
 
 // setSessionEnvironment sets environment variables for the tmux session.
-// Uses role bead config if available, falls back to hardcoded defaults.
-func (d *Daemon) setSessionEnvironment(sessionName, identity string, config *beads.RoleConfig, parsed *ParsedIdentity) {
-	// Always set GT_ROLE
-	_ = d.tmux.SetEnvironment(sessionName, "GT_ROLE", identity)
+// Uses centralized AgentEnv for consistency, plus role bead custom env vars if available.
+func (d *Daemon) setSessionEnvironment(sessionName, identity string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
+	// Determine beads dir based on role type
+	var beadsPath string
+	if parsed.RigName != "" {
+		beadsPath = filepath.Join(d.config.TownRoot, parsed.RigName)
+	} else {
+		beadsPath = d.config.TownRoot
+	}
 
-	// BD_ACTOR uses slashes instead of dashes for path-like identity
-	bdActor := identityToBDActor(identity)
-	_ = d.tmux.SetEnvironment(sessionName, "BD_ACTOR", bdActor)
+	// Use centralized AgentEnv for base environment variables
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:      parsed.RoleType,
+		Rig:       parsed.RigName,
+		AgentName: parsed.AgentName,
+		TownRoot:  d.config.TownRoot,
+		BeadsDir:  beads.ResolveBeadsDir(beadsPath),
+	})
+	for k, v := range envVars {
+		_ = d.tmux.SetEnvironment(sessionName, k, v)
+	}
 
-	// Set any custom env vars from role config
-	if config != nil {
-		for k, v := range config.EnvVars {
+	// Set any custom env vars from role config (bead-defined overrides)
+	if roleConfig != nil {
+		for k, v := range roleConfig.EnvVars {
 			expanded := beads.ExpandRolePattern(v, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)
 			_ = d.tmux.SetEnvironment(sessionName, k, expanded)
 		}

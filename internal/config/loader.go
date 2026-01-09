@@ -1170,45 +1170,6 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	return cmd, nil
 }
 
-// RoleEnvVars returns the canonical environment variables for a role.
-// This is the single source of truth for role identity env vars.
-// The role parameter should be one of: "mayor", "deacon", "witness", "refinery", "polecat", "crew".
-// For rig-specific roles, rig must be provided.
-// For polecat/crew, polecatOrCrew must be the polecat or crew member name.
-func RoleEnvVars(role, rig, polecatOrCrew string) map[string]string {
-	envVars := map[string]string{
-		"GT_ROLE": role,
-	}
-
-	switch role {
-	case "mayor":
-		envVars["BD_ACTOR"] = "mayor"
-		envVars["GIT_AUTHOR_NAME"] = "mayor"
-	case "deacon":
-		envVars["BD_ACTOR"] = "deacon"
-		envVars["GIT_AUTHOR_NAME"] = "deacon"
-	case "witness":
-		envVars["GT_RIG"] = rig
-		envVars["BD_ACTOR"] = fmt.Sprintf("%s/witness", rig)
-		envVars["GIT_AUTHOR_NAME"] = fmt.Sprintf("%s/witness", rig)
-	case "refinery":
-		envVars["GT_RIG"] = rig
-		envVars["BD_ACTOR"] = fmt.Sprintf("%s/refinery", rig)
-		envVars["GIT_AUTHOR_NAME"] = fmt.Sprintf("%s/refinery", rig)
-	case "polecat":
-		envVars["GT_RIG"] = rig
-		envVars["GT_POLECAT"] = polecatOrCrew
-		envVars["BD_ACTOR"] = fmt.Sprintf("%s/polecats/%s", rig, polecatOrCrew)
-		envVars["GIT_AUTHOR_NAME"] = polecatOrCrew
-	case "crew":
-		envVars["GT_RIG"] = rig
-		envVars["GT_CREW"] = polecatOrCrew
-		envVars["BD_ACTOR"] = fmt.Sprintf("%s/crew/%s", rig, polecatOrCrew)
-		envVars["GIT_AUTHOR_NAME"] = polecatOrCrew
-	}
-
-	return envVars
-}
 
 // BuildAgentStartupCommand is a convenience function for starting agent sessions.
 // It sets standard environment variables (GT_ROLE, BD_ACTOR, GIT_AUTHOR_NAME)
@@ -1235,23 +1196,23 @@ func BuildAgentStartupCommandWithAgentOverride(role, bdActor, rigPath, prompt, a
 // BuildPolecatStartupCommand builds the startup command for a polecat.
 // Sets GT_ROLE, GT_RIG, GT_POLECAT, BD_ACTOR, and GIT_AUTHOR_NAME.
 func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) string {
-	return BuildStartupCommand(RoleEnvVars("polecat", rigName, polecatName), rigPath, prompt)
+	return BuildStartupCommand(AgentEnvSimple("polecat", rigName, polecatName), rigPath, prompt)
 }
 
 // BuildPolecatStartupCommandWithAgentOverride is like BuildPolecatStartupCommand, but uses agentOverride if non-empty.
 func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, prompt, agentOverride string) (string, error) {
-	return BuildStartupCommandWithAgentOverride(RoleEnvVars("polecat", rigName, polecatName), rigPath, prompt, agentOverride)
+	return BuildStartupCommandWithAgentOverride(AgentEnvSimple("polecat", rigName, polecatName), rigPath, prompt, agentOverride)
 }
 
 // BuildCrewStartupCommand builds the startup command for a crew member.
 // Sets GT_ROLE, GT_RIG, GT_CREW, BD_ACTOR, and GIT_AUTHOR_NAME.
 func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
-	return BuildStartupCommand(RoleEnvVars("crew", rigName, crewName), rigPath, prompt)
+	return BuildStartupCommand(AgentEnvSimple("crew", rigName, crewName), rigPath, prompt)
 }
 
 // BuildCrewStartupCommandWithAgentOverride is like BuildCrewStartupCommand, but uses agentOverride if non-empty.
 func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt, agentOverride string) (string, error) {
-	return BuildStartupCommandWithAgentOverride(RoleEnvVars("crew", rigName, crewName), rigPath, prompt, agentOverride)
+	return BuildStartupCommandWithAgentOverride(AgentEnvSimple("crew", rigName, crewName), rigPath, prompt, agentOverride)
 }
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.

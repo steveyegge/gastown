@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/agent"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -164,8 +165,14 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	// Set environment variables (non-fatal: session works without these)
-	// Use shared RoleEnvVars for consistency across all role startup paths
-	envVars := config.RoleEnvVars("witness", m.rig.Name, "")
+	// Use centralized AgentEnv for consistency across all role startup paths
+	townRoot := filepath.Dir(m.rig.Path)
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:     "witness",
+		Rig:      m.rig.Name,
+		TownRoot: townRoot,
+		BeadsDir: beads.ResolveBeadsDir(m.rig.Path),
+	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
 	}
