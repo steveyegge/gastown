@@ -17,7 +17,7 @@
 	merge = refs/heads/polecat/cheedo-mk78ard5
 [user]
 	email = test@test.com
-	name = Test User
+	name = Test
 [merge "beads"]
 	driver = bd merge %A %O %A %B
 	name = bd JSONL merge driver
