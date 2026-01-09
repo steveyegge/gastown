@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -532,4 +533,115 @@ func containsFlag(s, flag string) bool {
 	}
 	next := s[end]
 	return next == '"' || next == ' ' || next == '\'' || next == '\n' || next == '\t'
+}
+
+// CustomTypesCheck verifies Gas Town custom types are registered with beads.
+type CustomTypesCheck struct {
+	FixableCheck
+	missingTypes []string // Cached during Run for use in Fix
+	townRoot     string   // Cached during Run for use in Fix
+}
+
+// NewCustomTypesCheck creates a new custom types check.
+func NewCustomTypesCheck() *CustomTypesCheck {
+	return &CustomTypesCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "beads-custom-types",
+				CheckDescription: "Check that Gas Town custom types are registered with beads",
+			},
+		},
+	}
+}
+
+// Run checks if custom types are properly configured.
+func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
+	// Check if bd command is available
+	if _, err := exec.LookPath("bd"); err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "beads not installed (skipped)",
+		}
+	}
+
+	// Check if .beads directory exists at town level
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No beads database (skipped)",
+		}
+	}
+
+	// Get current custom types configuration
+	cmd := exec.Command("bd", "config", "get", "types.custom")
+	cmd.Dir = ctx.TownRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// If config key doesn't exist, types are not configured
+		c.townRoot = ctx.TownRoot
+		c.missingTypes = constants.BeadsCustomTypesList()
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: "Custom types not configured",
+			Details: []string{
+				"Gas Town custom types (agent, role, rig, convoy, slot) are not registered",
+				"This may cause bead creation/validation errors",
+			},
+			FixHint: "Run 'gt doctor --fix' or 'bd config set types.custom \"" + constants.BeadsCustomTypes + "\"'",
+		}
+	}
+
+	// Parse configured types
+	configuredTypes := strings.TrimSpace(string(output))
+	configuredSet := make(map[string]bool)
+	for _, t := range strings.Split(configuredTypes, ",") {
+		configuredSet[strings.TrimSpace(t)] = true
+	}
+
+	// Check for missing required types
+	var missing []string
+	for _, required := range constants.BeadsCustomTypesList() {
+		if !configuredSet[required] {
+			missing = append(missing, required)
+		}
+	}
+
+	if len(missing) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "All custom types registered",
+		}
+	}
+
+	// Cache for Fix
+	c.townRoot = ctx.TownRoot
+	c.missingTypes = missing
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d custom type(s) missing", len(missing)),
+		Details: []string{
+			fmt.Sprintf("Missing types: %s", strings.Join(missing, ", ")),
+			fmt.Sprintf("Configured: %s", configuredTypes),
+			fmt.Sprintf("Required: %s", constants.BeadsCustomTypes),
+		},
+		FixHint: "Run 'gt doctor --fix' to register missing types",
+	}
+}
+
+// Fix registers the missing custom types.
+func (c *CustomTypesCheck) Fix(ctx *CheckContext) error {
+	cmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	cmd.Dir = c.townRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
 }

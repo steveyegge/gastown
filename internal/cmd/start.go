@@ -19,6 +19,7 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/witness"
@@ -277,7 +278,14 @@ func startConfiguredCrew(t *tmux.Tmux, townRoot string) {
 				if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 					// Claude has exited, restart it
 					fmt.Printf("  %s %s/%s session exists, restarting Claude...\n", style.Dim.Render("○"), r.Name, crewName)
-					claudeCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, "gt prime")
+					// Build startup beacon for predecessor discovery via /resume
+					address := fmt.Sprintf("%s/crew/%s", r.Name, crewName)
+					beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+						Recipient: address,
+						Sender:    "human",
+						Topic:     "restart",
+					})
+					claudeCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, beacon)
 					if err := t.SendKeys(sessionID, claudeCmd); err != nil {
 						fmt.Printf("  %s %s/%s restart failed: %v\n", style.Dim.Render("○"), r.Name, crewName, err)
 					} else {

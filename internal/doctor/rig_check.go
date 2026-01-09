@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // RigIsGitRepoCheck verifies the rig has a valid mayor/rig git clone.
@@ -1046,7 +1047,7 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 		} else {
 			_ = output // bd init succeeded
 			// Configure custom types for Gas Town (beads v0.46.0+)
-			configCmd := exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,event")
+			configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 			configCmd.Dir = rigPath
 			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
 		}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/deps"
@@ -344,10 +345,9 @@ func initTownBeads(townPath string) error {
 		}
 	}
 
-	// Configure custom types for Gas Town (agent, role, rig, convoy).
+	// Configure custom types for Gas Town (agent, role, rig, convoy, slot).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
-	customTypes := "agent,role,rig,convoy,event"
-	configCmd := exec.Command("bd", "config", "set", "types.custom", customTypes)
+	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	configCmd.Dir = townPath
 	if configOutput, configErr := configCmd.CombinedOutput(); configErr != nil {
 		// Non-fatal: older beads versions don't need this, newer ones do
@@ -390,7 +390,7 @@ func ensureRepoFingerprint(beadsPath string) error {
 // Gas Town needs custom types: agent, role, rig, convoy, slot.
 // This is idempotent - safe to call multiple times.
 func ensureCustomTypes(beadsPath string) error {
-	cmd := exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,slot")
+	cmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	cmd.Dir = beadsPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {

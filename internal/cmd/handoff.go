@@ -340,19 +340,29 @@ func buildRestartCommand(sessionName string) (string, error) {
 		return "", err
 	}
 
-	// Determine GT_ROLE and BD_ACTOR values for this session
-	gtRole := sessionToGTRole(sessionName)
+	// Parse the session name to get the identity (used for GT_ROLE and beacon)
+	identity, err := session.ParseSessionName(sessionName)
+	if err != nil {
+		return "", fmt.Errorf("cannot parse session name %q: %w", sessionName, err)
+	}
+	gtRole := identity.GTRole()
+
+	// Build startup beacon for predecessor discovery via /resume
+	// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+	// The SessionStart hook handles context injection (gt prime --hook)
+	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		Recipient: identity.Address(),
+		Sender:    "self",
+		Topic:     "handoff",
+	})
 
 	// For respawn-pane, we:
 	// 1. cd to the right directory (role's canonical home)
 	// 2. export GT_ROLE and BD_ACTOR so role detection works correctly
 	// 3. export Claude-related env vars (not inherited by fresh shell)
-	// 4. run claude with "gt prime" as initial prompt (triggers GUPP)
+	// 4. run claude with the startup beacon (triggers immediate context loading)
 	// Use exec to ensure clean process replacement.
-	// IMPORTANT: Passing "gt prime" as argument injects it as the first prompt,
-	// which triggers the agent to execute immediately. Without this, agents
-	// wait for user input despite all GUPP prompting in hooks.
-	runtimeCmd := config.GetRuntimeCommandWithPrompt("", "gt prime")
+	runtimeCmd := config.GetRuntimeCommandWithPrompt("", beacon)
 
 	// Build environment exports - role vars first, then Claude vars
 	var exports []string

@@ -13,6 +13,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/templates"
@@ -365,7 +366,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 					fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
 				}
 				// Configure custom types for Gas Town (beads v0.46.0+)
-				configCmd := exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,event")
+				configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 				configCmd.Dir = mayorRigPath
 				_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
 			}
@@ -600,7 +601,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 
 	// Configure custom types for Gas Town (agent, role, rig, convoy).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
-	configCmd := exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,event")
+	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	configCmd.Dir = rigPath
 	configCmd.Env = filteredEnv
 	// Ignore errors - older beads versions don't need this
@@ -624,7 +625,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		fmt.Printf("   ⚠ Could not add route to town beads: %v\n", err)
 	}
 
-	typesCmd := exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,slot")
+	typesCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	typesCmd.Dir = rigPath
 	typesCmd.Env = filteredEnv
 	_, _ = typesCmd.CombinedOutput()
