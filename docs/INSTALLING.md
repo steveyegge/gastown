@@ -17,7 +17,9 @@ Complete setup guide for Gas Town multi-agent orchestrator.
 | Tool | Version | Check | Install |
 |------|---------|-------|---------|
 | **tmux** | 3.0+ | `tmux -V` | See below |
-| **Claude Code** | latest | `claude --version` | See [claude.ai/claude-code](https://claude.ai/claude-code) |
+| **Claude Code** (default) | latest | `claude --version` | See [claude.ai/claude-code](https://claude.ai/claude-code) |
+| **Codex CLI** (optional) | latest | `codex --version` | See [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli) |
+| **OpenCode CLI** (optional) | latest | `opencode --version` | See [opencode.ai](https://opencode.ai) |
 
 ## Installing Prerequisites
 
@@ -130,22 +132,46 @@ gt doctor              # Run health checks
 gt status              # Show workspace status
 ```
 
+### Step 5: Configure Agents (Optional)
+
+Gas Town supports built-in runtimes (`claude`, `gemini`, `codex`) plus custom agent aliases.
+
+```bash
+# List available agents
+gt config agent list
+
+# Create an alias (aliases can encode model/thinking flags)
+gt config agent set codex-low "codex --thinking low"
+gt config agent set claude-haiku "claude --model haiku --dangerously-skip-permissions"
+
+# Set the town default agent (used when a rig doesn't specify one)
+gt config default-agent codex-low
+```
+
+You can also override the agent per command without changing defaults:
+
+```bash
+gt start --agent codex-low
+gt sling issue-123 myproject --agent claude-haiku
+```
+
 ## Minimal Mode vs Full Stack Mode
 
 Gas Town supports two operational modes:
 
 ### Minimal Mode (No Daemon)
 
-Run individual Claude Code instances manually. Gas Town only tracks state.
+Run individual runtime instances manually. Gas Town only tracks state.
 
 ```bash
 # Create and assign work
 gt convoy create "Fix bugs" issue-123
 gt sling issue-123 myproject
 
-# Run Claude manually
+# Run runtime manually
 cd ~/gt/myproject/polecats/<worker>
-claude --resume
+claude --resume          # Claude Code
+# or: codex              # Codex CLI
 
 # Check progress
 gt convoy list

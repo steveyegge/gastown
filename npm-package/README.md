@@ -23,7 +23,7 @@ gt init
 gt status
 
 # List rigs
-gt rigs
+gt rig list
 ```
 
 ## Supported Platforms

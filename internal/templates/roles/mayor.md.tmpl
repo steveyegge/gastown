@@ -188,16 +188,38 @@ bd show hq-abc      # Routes to town beads
 
 ### Status
 - `gt status` - Overall town status
-- `gt rigs` - List all rigs
+- `gt rig list` - List all rigs
 - `gt polecat list [rig]` - List polecats in a rig
 
 ### Work Management
 - `gt convoy list` - Dashboard of active work (primary view)
 - `gt convoy status <id>` - Detailed convoy progress
 - `gt convoy create "name" <issues>` - Create convoy for batch work
-- `gt sling <bead> <rig>` - Assign work to polecat (auto-creates convoy)
+- `gt sling <bead> <rig>` - Spawn polecat with work (see below)
 - `bd ready` - Issues ready to work (no blockers)
 - `bd list --status=open` - All open issues
+
+### Polecat Operations
+
+**To spawn a polecat with work (the normal flow):**
+```bash
+gt sling <bead-id> <rig>        # Spawns polecat, hooks work, starts session
+gt sling mi-xyz missioncontrol  # Example: spawns in missioncontrol rig
+```
+
+This is THE command for dispatching work. It:
+1. Allocates a fresh polecat name from the pool
+2. Creates the git worktree
+3. Starts the tmux session
+4. Hooks the bead to the polecat
+5. Nudges the polecat to start working
+
+**There is NO `gt polecat spawn` command.** Use `gt sling`.
+
+**Other polecat commands:**
+- `gt polecat list` - List polecats in current rig
+- `gt polecat nuke <rig>/<name> --force` - Kill session + remove worktree
+- `gt polecat status <rig>/<name>` - Show polecat status
 
 ### Delegation
 Prefer delegating to Refineries, not directly to polecats:

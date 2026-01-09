@@ -2,19 +2,17 @@ package mail
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/runtime"
 )
 
 // timeNow is a function that returns the current time. It can be overridden in tests.
@@ -112,9 +110,12 @@ func (m *Mailbox) listBeads() ([]*Message, error) {
 // listFromDir queries messages from a beads directory.
 // Returns messages where identity is the assignee OR a CC recipient.
 // Includes both open and hooked messages (hooked = auto-assigned handoff mail).
-func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) { //nolint:unparam // error return kept for future use
+// If all queries fail, returns the last error encountered.
+func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) {
 	seen := make(map[string]bool)
 	var messages []*Message
+	var lastErr error
+	anySucceeded := false
 
 	// Get all identity variants to query (handles legacy vs normalized formats)
 	identities := m.identityVariants()
@@ -123,7 +124,10 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) { //nolint:un
 	for _, identity := range identities {
 		for _, status := range []string{"open", "hooked"} {
 			msgs, err := m.queryMessages(beadsDir, "--assignee", identity, status)
-			if err == nil {
+			if err != nil {
+				lastErr = err
+			} else {
+				anySucceeded = true
 				for _, msg := range msgs {
 					if !seen[msg.ID] {
 						seen[msg.ID] = true
@@ -137,7 +141,10 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) { //nolint:un
 	// Query for CC'd messages (open only)
 	for _, identity := range identities {
 		ccMsgs, err := m.queryMessages(beadsDir, "--label", "cc:"+identity, "open")
-		if err == nil {
+		if err != nil {
+			lastErr = err
+		} else {
+			anySucceeded = true
 			for _, msg := range ccMsgs {
 				if !seen[msg.ID] {
 					seen[msg.ID] = true
@@ -145,6 +152,11 @@ func (m *Mailbox) listFromDir(beadsDir string) ([]*Message, error) { //nolint:un
 				}
 			}
 		}
+	}
+
+	// If ALL queries failed, return the last error
+	if !anySucceeded && lastErr != nil {
+		return nil, fmt.Errorf("all mailbox queries failed: %w", lastErr)
 	}
 
 	return messages, nil
@@ -168,34 +180,23 @@ func (m *Mailbox) identityVariants() []string {
 
 // queryMessages runs a bd list query with the given filter flag and value.
 func (m *Mailbox) queryMessages(beadsDir, filterFlag, filterValue, status string) ([]*Message, error) {
-	cmd := exec.Command("bd", "list",
+	args := []string{"list",
 		"--type", "message",
 		filterFlag, filterValue,
 		"--status", status,
 		"--json",
-	)
-	cmd.Dir = m.workDir
-	cmd.Env = append(cmd.Environ(),
-		"BEADS_DIR="+beadsDir,
-	)
+	}
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg != "" {
-			return nil, errors.New(errMsg)
-		}
+	stdout, err := runBdCommand(args, m.workDir, beadsDir)
+	if err != nil {
 		return nil, err
 	}
 
 	// Parse JSON output
 	var beadsMsgs []BeadsMessage
-	if err := json.Unmarshal(stdout.Bytes(), &beadsMsgs); err != nil {
+	if err := json.Unmarshal(stdout, &beadsMsgs); err != nil {
 		// Empty inbox returns empty array or nothing
-		if len(stdout.Bytes()) == 0 || stdout.String() == "null" {
+		if len(stdout) == 0 || string(stdout) == "null" {
 			return nil, nil
 		}
 		return nil, err
@@ -281,28 +282,19 @@ func (m *Mailbox) getBeads(id string) (*Message, error) {
 
 // getFromDir retrieves a message from a beads directory.
 func (m *Mailbox) getFromDir(id, beadsDir string) (*Message, error) {
-	cmd := exec.Command("bd", "show", id, "--json")
-	cmd.Dir = m.workDir
-	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
+	args := []string{"show", id, "--json"}
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if strings.Contains(errMsg, "not found") {
+	stdout, err := runBdCommand(args, m.workDir, beadsDir)
+	if err != nil {
+		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return nil, ErrMessageNotFound
-		}
-		if errMsg != "" {
-			return nil, errors.New(errMsg)
 		}
 		return nil, err
 	}
 
 	// bd show --json returns an array
 	var bms []BeadsMessage
-	if err := json.Unmarshal(stdout.Bytes(), &bms); err != nil {
+	if err := json.Unmarshal(stdout, &bms); err != nil {
 		return nil, err
 	}
 	if len(bms) == 0 {
@@ -343,23 +335,14 @@ func (m *Mailbox) markReadBeads(id string) error {
 func (m *Mailbox) closeInDir(id, beadsDir string) error {
 	args := []string{"close", id}
 	// Pass session ID for work attribution if available
-	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 		args = append(args, "--session="+sessionID)
 	}
-	cmd := exec.Command("bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
-	cmd.Dir = m.workDir
-	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if strings.Contains(errMsg, "not found") {
+	_, err := runBdCommand(args, m.workDir, beadsDir)
+	if err != nil {
+		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return ErrMessageNotFound
-		}
-		if errMsg != "" {
-			return errors.New(errMsg)
 		}
 		return err
 	}
@@ -397,20 +380,12 @@ func (m *Mailbox) MarkUnread(id string) error {
 }
 
 func (m *Mailbox) markUnreadBeads(id string) error {
-	cmd := exec.Command("bd", "reopen", id)
-	cmd.Dir = m.workDir
-	cmd.Env = append(cmd.Environ(), "BEADS_DIR="+m.beadsDir)
+	args := []string{"reopen", id}
 
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if strings.Contains(errMsg, "not found") {
+	_, err := runBdCommand(args, m.workDir, m.beadsDir)
+	if err != nil {
+		if bdErr, ok := err.(*bdError); ok && bdErr.ContainsError("not found") {
 			return ErrMessageNotFound
-		}
-		if errMsg != "" {
-			return errors.New(errMsg)
 		}
 		return err
 	}
@@ -799,29 +774,16 @@ func (m *Mailbox) ListByThread(threadID string) ([]*Message, error) {
 }
 
 func (m *Mailbox) listByThreadBeads(threadID string) ([]*Message, error) {
-	// bd message thread <thread-id> --json
-	cmd := exec.Command("bd", "message", "thread", threadID, "--json")
-	cmd.Dir = m.workDir
-	cmd.Env = append(cmd.Environ(),
-		"BD_IDENTITY="+m.identity,
-		"BEADS_DIR="+m.beadsDir,
-	)
+	args := []string{"message", "thread", threadID, "--json"}
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg != "" {
-			return nil, errors.New(errMsg)
-		}
+	stdout, err := runBdCommand(args, m.workDir, m.beadsDir, "BD_IDENTITY="+m.identity)
+	if err != nil {
 		return nil, err
 	}
 
 	var beadsMsgs []BeadsMessage
-	if err := json.Unmarshal(stdout.Bytes(), &beadsMsgs); err != nil {
-		if len(stdout.Bytes()) == 0 || stdout.String() == "null" {
+	if err := json.Unmarshal(stdout, &beadsMsgs); err != nil {
+		if len(stdout) == 0 || string(stdout) == "null" {
 			return nil, nil
 		}
 		return nil, err

@@ -246,19 +246,45 @@ Process mail in your inbox-check mol step - the mol tells you exactly how.
 
 ---
 
-## 🔄 Session Cycling
+## 🔄 Context Management
 
-When your context fills up or after processing many requests:
+**Heuristic**: Hand off after **15 patrol loops** without major incident, OR
+**immediately** after any extraordinary action.
 
+**Extraordinary actions** (trigger immediate handoff):
+- Processing a LIFECYCLE:Shutdown request for a polecat
+- Handling a recovery escalation (unpushed work detected)
+- Filing an escalation to Mayor
+- Resolving a stuck polecat (3+ nudge attempts)
+- Any action that consumes significant context
+
+**Rationale**: Keep context short so there's headroom if something big comes up.
+A fresh Witness with empty context can handle emergencies better than one with
+14 patrols of routine checks filling its window.
+
+**At loop-or-exit step:**
+1. Read `state.json` for `patrol_count` and `extraordinary_action`
+2. If `extraordinary_action == true` → hand off immediately
+3. If `patrol_count >= 15` → hand off
+4. Otherwise → increment `patrol_count`, save state, create new wisp
+
+**Handoff command:** `gt handoff -s "Witness cycle" -m "Completed N patrols, no incidents"`
+
+---
+
+## Handoff (Wisp-Based)
+
+For patrol work, **no explicit handoff is needed**:
+- Patrol is idempotent - running it again is harmless
+- Wisps are ephemeral - a crashed patrol just disappears
+- New session creates a fresh wisp
+
+If you have important context to pass along (rare for patrol), use mail:
 ```bash
-gt handoff -s "Witness cycle" -m "
-Active polecats: <list>
-Pending actions: <list>
-Notes: <anything important>
-"
+gt mail send {{ .RigName }}/witness -s "🤝 HANDOFF: ..." -m "Context for next session"
 ```
 
-This sends handoff mail, respawns fresh. Your next instance picks up from your hook.
+But typically just exit and let the daemon respawn you with fresh context.
 
 ---
 

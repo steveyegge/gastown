@@ -106,7 +106,6 @@ bd close <step-id>          # Mark step complete
 git status                  # Check working tree
 git add <files>             # Stage changes
 git commit -m "msg (issue)" # Commit with issue reference
-git push                    # Push your branch
 ```
 
 ### Communication
@@ -149,15 +148,13 @@ When your work is done, follow this EXACT checklist:
 
 ```
 [ ] 1. Tests pass:        go test ./...
-[ ] 2. COMMIT changes:    git add <files> && git commit -m "msg (issue-id)"
-[ ] 3. Push branch:       git push -u origin HEAD
-[ ] 4. Close issue:       bd close <issue> --reason "..."
-[ ] 5. Sync beads:        bd sync
-[ ] 6. Exit session:      gt done --exit
+[ ] 2. Commit changes:    git add <files> && git commit -m "msg (issue-id)"
+[ ] 3. Sync beads:        bd sync
+[ ] 4. Exit session:      gt done --exit
 ```
 
-**CRITICAL**: You MUST commit and push BEFORE running `gt done --exit`.
-If you skip the commit, your work will be lost!
+**Note**: No push needed - your branch stays local. Refinery accesses it
+via shared .repo.git and merges to main.
 
 The `gt done --exit` command:
 - Creates a merge request bead
@@ -165,18 +162,28 @@ The `gt done --exit` command:
 - Exits your session immediately (no idle waiting)
 - Witness handles cleanup, Refinery merges your branch
 
+### No PRs in Maintainer Repos
+
+If the remote origin is `steveyegge/beads` or `steveyegge/gastown`:
+- **NEVER create GitHub PRs** - you have direct push access
+- Polecats: use `gt done` → Refinery merges to main
+- Crew workers: push directly to main
+
+PRs are for external contributors submitting to repos they don't own.
+Check `git remote -v` if unsure about repo ownership.
+
 ### The Landing Rule
 
 > **Work is NOT landed until it's on `main` OR in the Refinery MQ.**
 
-Your branch sitting on origin is NOT landed. You must run `gt done` to submit it
-to the merge queue. Without this step:
+Your local branch is NOT landed. You must run `gt done` to submit it to the
+merge queue. Without this step:
 - Your work is invisible to other agents
 - The branch will go stale as main diverges
 - Merge conflicts will compound over time
 - Work can be lost if your polecat is recycled
 
-**Branch → `gt done` → MR in queue → Refinery merges → LANDED**
+**Local branch → `gt done` → MR in queue → Refinery merges → LANDED**
 
 ---
 

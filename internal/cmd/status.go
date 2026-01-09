@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -19,10 +22,14 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
+	"golang.org/x/term"
 )
 
 var statusJSON bool
 var statusFast bool
+var statusWatch bool
+var statusInterval int
+var statusVerbose bool
 
 var statusCmd = &cobra.Command{
 	Use:     "status",
@@ -33,13 +40,17 @@ var statusCmd = &cobra.Command{
 
 Shows town name, registered rigs, active polecats, and witness status.
 
-Use --fast to skip mail lookups for faster execution.`,
+Use --fast to skip mail lookups for faster execution.
+Use --watch to continuously refresh status at regular intervals.`,
 	RunE: runStatus,
 }
 
 func init() {
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Output as JSON")
 	statusCmd.Flags().BoolVar(&statusFast, "fast", false, "Skip mail lookups for faster execution")
+	statusCmd.Flags().BoolVarP(&statusWatch, "watch", "w", false, "Watch mode: refresh status continuously")
+	statusCmd.Flags().IntVarP(&statusInterval, "interval", "n", 2, "Refresh interval in seconds")
+	statusCmd.Flags().BoolVarP(&statusVerbose, "verbose", "v", false, "Show detailed multi-line output per agent")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -120,6 +131,58 @@ type StatusSum struct {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
+	if statusWatch {
+		return runStatusWatch(cmd, args)
+	}
+	return runStatusOnce(cmd, args)
+}
+
+func runStatusWatch(cmd *cobra.Command, args []string) error {
+	if statusJSON {
+		return fmt.Errorf("--json and --watch cannot be used together")
+	}
+	if statusInterval <= 0 {
+		return fmt.Errorf("interval must be positive, got %d", statusInterval)
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+
+	ticker := time.NewTicker(time.Duration(statusInterval) * time.Second)
+	defer ticker.Stop()
+
+	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+
+	for {
+		if isTTY {
+			fmt.Print("\033[H\033[2J") // ANSI: cursor home + clear screen
+		}
+
+		timestamp := time.Now().Format("15:04:05")
+		header := fmt.Sprintf("[%s] gt status --watch (every %ds, Ctrl+C to stop)", timestamp, statusInterval)
+		if isTTY {
+			fmt.Printf("%s\n\n", style.Dim.Render(header))
+		} else {
+			fmt.Printf("%s\n\n", header)
+		}
+
+		if err := runStatusOnce(cmd, args); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+
+		select {
+		case <-sigChan:
+			if isTTY {
+				fmt.Println("\nStopped.")
+			}
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func runStatusOnce(_ *cobra.Command, _ []string) error {
 	// Find town root
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -395,8 +458,16 @@ func outputStatusText(status TownStatus) error {
 		if icon == "" {
 			icon = roleIcons[agent.Name]
 		}
-		fmt.Printf("%s %s\n", icon, style.Bold.Render(capitalizeFirst(agent.Name)))
-		renderAgentDetails(agent, "   ", nil, status.Location)
+		if statusVerbose {
+			fmt.Printf("%s %s\n", icon, style.Bold.Render(capitalizeFirst(agent.Name)))
+			renderAgentDetails(agent, "   ", nil, status.Location)
+			fmt.Println()
+		} else {
+			// Compact: icon + name on one line
+			renderAgentCompact(agent, icon+" ", nil, status.Location)
+		}
+	}
+	if !statusVerbose && len(status.Agents) > 0 {
 		fmt.Println()
 	}
 
@@ -427,73 +498,86 @@ func outputStatusText(status TownStatus) error {
 
 		// Witness
 		if len(witnesses) > 0 {
-			fmt.Printf("%s %s\n", roleIcons["witness"], style.Bold.Render("Witness"))
-			for _, agent := range witnesses {
-				renderAgentDetails(agent, "   ", r.Hooks, status.Location)
+			if statusVerbose {
+				fmt.Printf("%s %s\n", roleIcons["witness"], style.Bold.Render("Witness"))
+				for _, agent := range witnesses {
+					renderAgentDetails(agent, "   ", r.Hooks, status.Location)
+				}
+				fmt.Println()
+			} else {
+				for _, agent := range witnesses {
+					renderAgentCompact(agent, roleIcons["witness"]+" ", r.Hooks, status.Location)
+				}
 			}
-			fmt.Println()
 		}
 
 		// Refinery
 		if len(refineries) > 0 {
-			fmt.Printf("%s %s\n", roleIcons["refinery"], style.Bold.Render("Refinery"))
-			for _, agent := range refineries {
-				renderAgentDetails(agent, "   ", r.Hooks, status.Location)
-			}
-			// MQ summary (shown under refinery)
-			if r.MQ != nil {
-				mqParts := []string{}
-				if r.MQ.Pending > 0 {
-					mqParts = append(mqParts, fmt.Sprintf("%d pending", r.MQ.Pending))
+			if statusVerbose {
+				fmt.Printf("%s %s\n", roleIcons["refinery"], style.Bold.Render("Refinery"))
+				for _, agent := range refineries {
+					renderAgentDetails(agent, "   ", r.Hooks, status.Location)
 				}
-				if r.MQ.InFlight > 0 {
-					mqParts = append(mqParts, style.Warning.Render(fmt.Sprintf("%d in-flight", r.MQ.InFlight)))
-				}
-				if r.MQ.Blocked > 0 {
-					mqParts = append(mqParts, style.Dim.Render(fmt.Sprintf("%d blocked", r.MQ.Blocked)))
-				}
-				if len(mqParts) > 0 {
-					// Add state indicator
-					stateIcon := "○" // idle
-					switch r.MQ.State {
-					case "processing":
-						stateIcon = style.Success.Render("●")
-					case "blocked":
-						stateIcon = style.Error.Render("○")
+				// MQ summary (shown under refinery)
+				if r.MQ != nil {
+					mqStr := formatMQSummary(r.MQ)
+					if mqStr != "" {
+						fmt.Printf("   MQ: %s\n", mqStr)
 					}
-					// Add health warning if stale
-					healthSuffix := ""
-					if r.MQ.Health == "stale" {
-						healthSuffix = style.Error.Render(" [stale]")
+				}
+				fmt.Println()
+			} else {
+				for _, agent := range refineries {
+					// Compact: include MQ on same line if present
+					mqSuffix := ""
+					if r.MQ != nil {
+						mqStr := formatMQSummaryCompact(r.MQ)
+						if mqStr != "" {
+							mqSuffix = "  " + mqStr
+						}
 					}
-					fmt.Printf("   MQ: %s %s%s\n", stateIcon, strings.Join(mqParts, ", "), healthSuffix)
+					renderAgentCompactWithSuffix(agent, roleIcons["refinery"]+" ", r.Hooks, status.Location, mqSuffix)
 				}
 			}
-			fmt.Println()
 		}
 
 		// Crew
 		if len(crews) > 0 {
-			fmt.Printf("%s %s (%d)\n", roleIcons["crew"], style.Bold.Render("Crew"), len(crews))
-			for _, agent := range crews {
-				renderAgentDetails(agent, "   ", r.Hooks, status.Location)
+			if statusVerbose {
+				fmt.Printf("%s %s (%d)\n", roleIcons["crew"], style.Bold.Render("Crew"), len(crews))
+				for _, agent := range crews {
+					renderAgentDetails(agent, "   ", r.Hooks, status.Location)
+				}
+				fmt.Println()
+			} else {
+				fmt.Printf("%s %s (%d)\n", roleIcons["crew"], style.Bold.Render("Crew"), len(crews))
+				for _, agent := range crews {
+					renderAgentCompact(agent, "   ", r.Hooks, status.Location)
+				}
 			}
-			fmt.Println()
 		}
 
 		// Polecats
 		if len(polecats) > 0 {
-			fmt.Printf("%s %s (%d)\n", roleIcons["polecat"], style.Bold.Render("Polecats"), len(polecats))
-			for _, agent := range polecats {
-				renderAgentDetails(agent, "   ", r.Hooks, status.Location)
+			if statusVerbose {
+				fmt.Printf("%s %s (%d)\n", roleIcons["polecat"], style.Bold.Render("Polecats"), len(polecats))
+				for _, agent := range polecats {
+					renderAgentDetails(agent, "   ", r.Hooks, status.Location)
+				}
+				fmt.Println()
+			} else {
+				fmt.Printf("%s %s (%d)\n", roleIcons["polecat"], style.Bold.Render("Polecats"), len(polecats))
+				for _, agent := range polecats {
+					renderAgentCompact(agent, "   ", r.Hooks, status.Location)
+				}
 			}
-			fmt.Println()
 		}
 
 		// No agents
 		if len(witnesses) == 0 && len(refineries) == 0 && len(crews) == 0 && len(polecats) == 0 {
-			fmt.Printf("   %s\n\n", style.Dim.Render("(no agents)"))
+			fmt.Printf("   %s\n", style.Dim.Render("(no agents)"))
 		}
+		fmt.Println()
 	}
 
 	return nil
@@ -502,40 +586,34 @@ func outputStatusText(status TownStatus) error {
 // renderAgentDetails renders full agent bead details
 func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo, townRoot string) { //nolint:unparam // indent kept for future customization
 	// Line 1: Agent bead ID + status
-	// Reconcile bead state with tmux session state to surface mismatches
-	// States: "running" (active), "idle" (waiting), "stopped", "dead", etc.
-	beadState := agent.State
+	// Per gt-zecmc: derive status from tmux (observable reality), not bead state.
+	// "Discover, don't track" - agent liveness is observable from tmux session.
 	sessionExists := agent.Running
-
-	// "idle" is a normal operational state (running but waiting for work)
-	// Treat it the same as "running" for reconciliation purposes
-	beadSaysRunning := beadState == "running" || beadState == "idle" || beadState == ""
 
 	var statusStr string
 	var stateInfo string
 
-	switch {
-	case beadSaysRunning && sessionExists:
-		// Normal running state - session exists and bead agrees
+	if sessionExists {
 		statusStr = style.Success.Render("running")
-	case beadSaysRunning && !sessionExists:
-		// Bead thinks running but session is gone - stale bead state
-		statusStr = style.Error.Render("running")
-		stateInfo = style.Warning.Render(" [dead]")
-	case !beadSaysRunning && sessionExists:
-		// Session exists but bead says stopped/dead - mismatch!
-		// This is the key case: tmux says alive, bead says dead/stopped
-		statusStr = style.Success.Render("running")
-		stateInfo = style.Warning.Render(" [bead: " + beadState + "]")
-	default:
-		// Both agree: stopped
+	} else {
 		statusStr = style.Error.Render("stopped")
 	}
 
-	// Add agent state info if not already shown and state is interesting
-	// Skip "idle" and "running" as they're normal operational states
-	if stateInfo == "" && beadState != "" && beadState != "idle" && beadState != "running" {
+	// Show non-observable states that represent intentional agent decisions.
+	// These can't be discovered from tmux and are legitimately recorded in beads.
+	beadState := agent.State
+	switch beadState {
+	case "stuck":
+		// Agent escalated - needs help
+		stateInfo = style.Warning.Render(" [stuck]")
+	case "awaiting-gate":
+		// Agent waiting for external trigger (phase gate)
+		stateInfo = style.Dim.Render(" [awaiting-gate]")
+	case "muted", "paused", "degraded":
+		// Other intentional non-observable states
 		stateInfo = style.Dim.Render(fmt.Sprintf(" [%s]", beadState))
+	// Ignore observable states: "running", "idle", "dead", "done", "stopped", ""
+	// These should be derived from tmux, not bead.
 	}
 
 	// Build agent bead ID using canonical naming: prefix-rig-role-name
@@ -545,8 +623,8 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 		addr := strings.TrimSuffix(agent.Address, "/") // Remove trailing slash for global agents
 		parts := strings.Split(addr, "/")
 		if len(parts) == 1 {
-			// Global agent: mayor/, deacon/ → gt-mayor, gt-deacon
-			agentBeadID = beads.AgentBeadID("", parts[0], "")
+			// Global agent: mayor/, deacon/ → hq-mayor, hq-deacon
+			agentBeadID = beads.AgentBeadIDWithPrefix(beads.TownBeadsPrefix, "", parts[0], "")
 		} else if len(parts) >= 2 {
 			rig := parts[0]
 			prefix := beads.GetPrefixForRig(townRoot, rig)
@@ -602,6 +680,166 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 		}
 		fmt.Printf("%s  mail: %s\n", indent, mailStr)
 	}
+}
+
+// formatMQSummary formats the MQ status for verbose display
+func formatMQSummary(mq *MQSummary) string {
+	if mq == nil {
+		return ""
+	}
+	mqParts := []string{}
+	if mq.Pending > 0 {
+		mqParts = append(mqParts, fmt.Sprintf("%d pending", mq.Pending))
+	}
+	if mq.InFlight > 0 {
+		mqParts = append(mqParts, style.Warning.Render(fmt.Sprintf("%d in-flight", mq.InFlight)))
+	}
+	if mq.Blocked > 0 {
+		mqParts = append(mqParts, style.Dim.Render(fmt.Sprintf("%d blocked", mq.Blocked)))
+	}
+	if len(mqParts) == 0 {
+		return ""
+	}
+	// Add state indicator
+	stateIcon := "○" // idle
+	switch mq.State {
+	case "processing":
+		stateIcon = style.Success.Render("●")
+	case "blocked":
+		stateIcon = style.Error.Render("○")
+	}
+	// Add health warning if stale
+	healthSuffix := ""
+	if mq.Health == "stale" {
+		healthSuffix = style.Error.Render(" [stale]")
+	}
+	return fmt.Sprintf("%s %s%s", stateIcon, strings.Join(mqParts, ", "), healthSuffix)
+}
+
+// formatMQSummaryCompact formats MQ status for compact single-line display
+func formatMQSummaryCompact(mq *MQSummary) string {
+	if mq == nil {
+		return ""
+	}
+	// Very compact: "MQ:12" or "MQ:12 [stale]"
+	total := mq.Pending + mq.InFlight + mq.Blocked
+	if total == 0 {
+		return ""
+	}
+	healthSuffix := ""
+	if mq.Health == "stale" {
+		healthSuffix = style.Error.Render("[stale]")
+	}
+	return fmt.Sprintf("MQ:%d%s", total, healthSuffix)
+}
+
+// renderAgentCompactWithSuffix renders a single-line agent status with an extra suffix
+func renderAgentCompactWithSuffix(agent AgentRuntime, indent string, hooks []AgentHookInfo, _ string, suffix string) {
+	// Build status indicator (gt-zecmc: use tmux state, not bead state)
+	statusIndicator := buildStatusIndicator(agent)
+
+	// Get hook info
+	hookBead := agent.HookBead
+	hookTitle := agent.WorkTitle
+	if hookBead == "" && hooks != nil {
+		for _, h := range hooks {
+			if h.Agent == agent.Address && h.HasWork {
+				hookBead = h.Molecule
+				hookTitle = h.Title
+				break
+			}
+		}
+	}
+
+	// Build hook suffix
+	hookSuffix := ""
+	if hookBead != "" {
+		if hookTitle != "" {
+			hookSuffix = style.Dim.Render(" → ") + truncateWithEllipsis(hookTitle, 30)
+		} else {
+			hookSuffix = style.Dim.Render(" → ") + hookBead
+		}
+	} else if hookTitle != "" {
+		hookSuffix = style.Dim.Render(" → ") + truncateWithEllipsis(hookTitle, 30)
+	}
+
+	// Mail indicator
+	mailSuffix := ""
+	if agent.UnreadMail > 0 {
+		mailSuffix = fmt.Sprintf(" 📬%d", agent.UnreadMail)
+	}
+
+	// Print single line: name + status + hook + mail + suffix
+	fmt.Printf("%s%-12s %s%s%s%s\n", indent, agent.Name, statusIndicator, hookSuffix, mailSuffix, suffix)
+}
+
+// renderAgentCompact renders a single-line agent status
+func renderAgentCompact(agent AgentRuntime, indent string, hooks []AgentHookInfo, _ string) {
+	// Build status indicator (gt-zecmc: use tmux state, not bead state)
+	statusIndicator := buildStatusIndicator(agent)
+
+	// Get hook info
+	hookBead := agent.HookBead
+	hookTitle := agent.WorkTitle
+	if hookBead == "" && hooks != nil {
+		for _, h := range hooks {
+			if h.Agent == agent.Address && h.HasWork {
+				hookBead = h.Molecule
+				hookTitle = h.Title
+				break
+			}
+		}
+	}
+
+	// Build hook suffix
+	hookSuffix := ""
+	if hookBead != "" {
+		if hookTitle != "" {
+			hookSuffix = style.Dim.Render(" → ") + truncateWithEllipsis(hookTitle, 30)
+		} else {
+			hookSuffix = style.Dim.Render(" → ") + hookBead
+		}
+	} else if hookTitle != "" {
+		hookSuffix = style.Dim.Render(" → ") + truncateWithEllipsis(hookTitle, 30)
+	}
+
+	// Mail indicator
+	mailSuffix := ""
+	if agent.UnreadMail > 0 {
+		mailSuffix = fmt.Sprintf(" 📬%d", agent.UnreadMail)
+	}
+
+	// Print single line: name + status + hook + mail
+	fmt.Printf("%s%-12s %s%s%s\n", indent, agent.Name, statusIndicator, hookSuffix, mailSuffix)
+}
+
+// buildStatusIndicator creates the visual status indicator for an agent.
+// Per gt-zecmc: uses tmux state (observable reality), not bead state.
+// Non-observable states (stuck, awaiting-gate, muted, etc.) are shown as suffixes.
+func buildStatusIndicator(agent AgentRuntime) string {
+	sessionExists := agent.Running
+
+	// Base indicator from tmux state
+	var indicator string
+	if sessionExists {
+		indicator = style.Success.Render("●")
+	} else {
+		indicator = style.Error.Render("○")
+	}
+
+	// Add non-observable state suffix if present
+	beadState := agent.State
+	switch beadState {
+	case "stuck":
+		indicator += style.Warning.Render(" stuck")
+	case "awaiting-gate":
+		indicator += style.Dim.Render(" gate")
+	case "muted", "paused", "degraded":
+		indicator += style.Dim.Render(" " + beadState)
+	// Ignore observable states: running, idle, dead, done, stopped, ""
+	}
+
+	return indicator
 }
 
 // formatHookInfo formats the hook bead and title for display

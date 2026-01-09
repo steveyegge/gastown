@@ -159,9 +159,9 @@ func TestDoneBeadsInitBothCodePaths(t *testing.T) {
 }
 
 // TestDoneRedirectChain verifies behavior with chained redirects.
-// ResolveBeadsDir follows exactly one level of redirect by design - it does NOT
-// follow chains transitively. This is intentional: chains typically indicate
-// misconfiguration (e.g., a redirect file that shouldn't exist).
+// ResolveBeadsDir follows chains up to depth 3 as a safety net for legacy configs.
+// SetupRedirect avoids creating chains (bd CLI doesn't support them), but if
+// chains exist we follow them to the final destination.
 func TestDoneRedirectChain(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -189,14 +189,15 @@ func TestDoneRedirectChain(t *testing.T) {
 		t.Fatalf("write worktree redirect: %v", err)
 	}
 
-	// ResolveBeadsDir follows exactly one level - stops at intermediate
-	// (A warning is printed about the chain, but intermediate is returned)
+	// ResolveBeadsDir follows chains up to depth 3 as a safety net.
+	// Note: SetupRedirect avoids creating chains (bd CLI doesn't support them),
+	// but if chains exist from legacy configs, we follow them to the final destination.
 	resolved := beads.ResolveBeadsDir(worktreeDir)
 
-	// Should resolve to intermediate (one level), NOT canonical (two levels)
-	if resolved != intermediateBeadsDir {
-		t.Errorf("ResolveBeadsDir should follow one level only: got %s, want %s",
-			resolved, intermediateBeadsDir)
+	// Should resolve to canonical (follows the full chain)
+	if resolved != canonicalBeadsDir {
+		t.Errorf("ResolveBeadsDir should follow chain to final destination: got %s, want %s",
+			resolved, canonicalBeadsDir)
 	}
 }
 

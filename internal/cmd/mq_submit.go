@@ -90,17 +90,6 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
 	}
 
-	// CRITICAL: Verify branch is pushed before creating MR bead
-	// This prevents work loss when MR is created but commits aren't on remote.
-	// See: gt-2hwi9 (Polecats not pushing before signaling done)
-	pushed, unpushedCount, err := g.BranchPushedToRemote(branch, "origin")
-	if err != nil {
-		return fmt.Errorf("checking if branch is pushed: %w", err)
-	}
-	if !pushed {
-		return fmt.Errorf("branch has %d unpushed commit(s); run 'git push -u origin %s' first", unpushedCount, branch)
-	}
-
 	// Parse branch info
 	info := parseBranchName(branch)
 

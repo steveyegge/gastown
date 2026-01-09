@@ -21,12 +21,18 @@ const (
 	AgentGemini AgentPreset = "gemini"
 	// AgentCodex is OpenAI Codex.
 	AgentCodex AgentPreset = "codex"
+	// AgentCursor is Cursor Agent.
+	AgentCursor AgentPreset = "cursor"
+	// AgentAuggie is Auggie CLI.
+	AgentAuggie AgentPreset = "auggie"
+	// AgentAmp is Sourcegraph AMP.
+	AgentAmp AgentPreset = "amp"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
 // This extends the basic RuntimeConfig with agent-specific metadata.
 type AgentPresetInfo struct {
-	// Name is the preset identifier (e.g., "claude", "gemini", "codex").
+	// Name is the preset identifier (e.g., "claude", "gemini", "codex", "cursor", "auggie", "amp").
 	Name AgentPreset `json:"name"`
 
 	// Command is the CLI binary to invoke.
@@ -34,6 +40,11 @@ type AgentPresetInfo struct {
 
 	// Args are the default command-line arguments for autonomous mode.
 	Args []string `json:"args"`
+
+	// ProcessNames are the process names to look for when detecting if the agent is running.
+	// Used by tmux.IsAgentRunning to check pane_current_command.
+	// E.g., ["node"] for Claude, ["cursor-agent"] for Cursor.
+	ProcessNames []string `json:"process_names,omitempty"`
 
 	// SessionIDEnv is the environment variable for session ID.
 	// Used for resuming sessions across restarts.
@@ -91,6 +102,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentClaude,
 		Command:             "claude",
 		Args:                []string{"--dangerously-skip-permissions"},
+		ProcessNames:        []string{"node"}, // Claude runs as Node.js
 		SessionIDEnv:        "CLAUDE_SESSION_ID",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
@@ -102,6 +114,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentGemini,
 		Command:             "gemini",
 		Args:                []string{"--approval-mode", "yolo"},
+		ProcessNames:        []string{"gemini"}, // Gemini CLI binary
 		SessionIDEnv:        "GEMINI_SESSION_ID",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
@@ -116,6 +129,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentCodex,
 		Command:             "codex",
 		Args:                []string{"--yolo"},
+		ProcessNames:        []string{"codex"}, // Codex CLI binary
 		SessionIDEnv:        "", // Codex captures from JSONL output
 		ResumeFlag:          "resume",
 		ResumeStyle:         "subcommand",
@@ -125,6 +139,43 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			Subcommand: "exec",
 			OutputFlag: "--json",
 		},
+	},
+	AgentCursor: {
+		Name:                AgentCursor,
+		Command:             "cursor-agent",
+		Args:                []string{"-f"}, // Force mode (YOLO equivalent), -p requires prompt
+		ProcessNames:        []string{"cursor-agent"},
+		SessionIDEnv:        "", // Uses --resume with chatId directly
+		ResumeFlag:          "--resume",
+		ResumeStyle:         "flag",
+		SupportsHooks:       false, // TODO: verify hooks support
+		SupportsForkSession: false,
+		NonInteractive: &NonInteractiveConfig{
+			PromptFlag: "-p",
+			OutputFlag: "--output-format json",
+		},
+	},
+	AgentAuggie: {
+		Name:                AgentAuggie,
+		Command:             "auggie",
+		Args:                []string{"--allow-indexing"},
+		ProcessNames:        []string{"auggie"},
+		SessionIDEnv:        "",
+		ResumeFlag:          "--resume",
+		ResumeStyle:         "flag",
+		SupportsHooks:       false,
+		SupportsForkSession: false,
+	},
+	AgentAmp: {
+		Name:                AgentAmp,
+		Command:             "amp",
+		Args:                []string{"--dangerously-allow-all", "--no-ide"},
+		ProcessNames:        []string{"amp"},
+		SessionIDEnv:        "",
+		ResumeFlag:          "threads continue",
+		ResumeStyle:         "subcommand", // 'amp threads continue <threadId>'
+		SupportsHooks:       false,
+		SupportsForkSession: false,
 	},
 }
 
@@ -164,16 +215,11 @@ func ensureRegistry() {
 	initRegistryLocked()
 }
 
-// LoadAgentRegistry loads agent definitions from a JSON file and merges with built-ins.
-// User-defined agents override built-in presets with the same name.
-// This function caches loaded paths to avoid redundant file reads.
-func LoadAgentRegistry(path string) error {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-
+// loadAgentRegistryFromPath loads agent definitions from a JSON file and merges with built-ins.
+// Caller must hold registryMu write lock.
+func loadAgentRegistryFromPathLocked(path string) error {
 	initRegistryLocked()
 
-	// Check if already loaded from this path
 	if loadedPaths[path] {
 		return nil
 	}
@@ -181,8 +227,8 @@ func LoadAgentRegistry(path string) error {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from config
 	if err != nil {
 		if os.IsNotExist(err) {
-			loadedPaths[path] = true // Mark as "loaded" (no file)
-			return nil               // No custom config, use built-ins only
+			loadedPaths[path] = true
+			return nil
 		}
 		return err
 	}
@@ -192,7 +238,6 @@ func LoadAgentRegistry(path string) error {
 		return err
 	}
 
-	// Merge user-defined agents (override built-ins)
 	for name, preset := range userRegistry.Agents {
 		preset.Name = AgentPreset(name)
 		globalRegistry.Agents[name] = preset
@@ -202,10 +247,39 @@ func LoadAgentRegistry(path string) error {
 	return nil
 }
 
+// LoadAgentRegistry loads agent definitions from a JSON file and merges with built-ins.
+// User-defined agents override built-in presets with the same name.
+// This function caches loaded paths to avoid redundant file reads.
+func LoadAgentRegistry(path string) error {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	return loadAgentRegistryFromPathLocked(path)
+}
+
 // DefaultAgentRegistryPath returns the default path for agent registry.
 // Located alongside other town settings.
 func DefaultAgentRegistryPath(townRoot string) string {
 	return filepath.Join(townRoot, "settings", "agents.json")
+}
+
+// DefaultRigAgentRegistryPath returns the default path for rig-level agent registry.
+// Located in <rig>/settings/agents.json.
+func DefaultRigAgentRegistryPath(rigPath string) string {
+	return filepath.Join(rigPath, "settings", "agents.json")
+}
+
+// RigAgentRegistryPath returns the path for rig-level agent registry.
+// Alias for DefaultRigAgentRegistryPath for consistency with other path functions.
+func RigAgentRegistryPath(rigPath string) string {
+	return DefaultRigAgentRegistryPath(rigPath)
+}
+
+// LoadRigAgentRegistry loads agent definitions from a rig-level JSON file and merges with built-ins.
+// This function works similarly to LoadAgentRegistry but for rig-level configurations.
+func LoadRigAgentRegistry(path string) error {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	return loadAgentRegistryFromPathLocked(path)
 }
 
 // GetAgentPreset returns the preset info for a given agent name.
@@ -303,6 +377,18 @@ func GetSessionIDEnvVar(agentName string) string {
 		return ""
 	}
 	return info.SessionIDEnv
+}
+
+// GetProcessNames returns the process names used to detect if an agent is running.
+// Used by tmux.IsAgentRunning to check pane_current_command.
+// Returns ["node"] for Claude (default) if agent is not found or has no ProcessNames.
+func GetProcessNames(agentName string) []string {
+	info := GetAgentPresetByName(agentName)
+	if info == nil || len(info.ProcessNames) == 0 {
+		// Default to Claude's process name for backwards compatibility
+		return []string{"node"}
+	}
+	return info.ProcessNames
 }
 
 // MergeWithPreset applies preset defaults to a RuntimeConfig.

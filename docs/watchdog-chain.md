@@ -82,11 +82,11 @@ The daemon runs a heartbeat tick every 3 minutes:
 func (d *Daemon) heartbeatTick() {
     d.ensureBootRunning()           // 1. Spawn Boot for triage
     d.checkDeaconHeartbeat()        // 2. Belt-and-suspenders fallback
-    d.ensureWitnessesRunning()      // 3. Witness health
-    d.triggerPendingSpawns()        // 4. Bootstrap polecats
-    d.processLifecycleRequests()    // 5. Cycle/restart requests
-    d.checkStaleAgents()            // 6. Timeout detection
-    // ... more checks
+    d.ensureWitnessesRunning()      // 3. Witness health (checks tmux directly)
+    d.ensureRefineriesRunning()     // 4. Refinery health (checks tmux directly)
+    d.triggerPendingSpawns()        // 5. Bootstrap polecats
+    d.processLifecycleRequests()    // 6. Cycle/restart requests
+    // Agent state derived from tmux, not recorded in beads (gt-zecmc)
 }
 ```
 
@@ -190,7 +190,7 @@ Multiple layers ensure recovery:
 
 1. **Boot triage** - Intelligent observation, first line
 2. **Daemon checkDeaconHeartbeat()** - Belt-and-suspenders if Boot fails
-3. **Daemon checkStaleAgents()** - Timeout-based detection
+3. **Tmux-based discovery** - Daemon checks tmux sessions directly (no bead state)
 4. **Human escalation** - Mail to overseer for unrecoverable states
 
 ## State Files
@@ -239,9 +239,11 @@ gt deacon health-check
 
 ### Status Shows Wrong State
 
-**Symptom**: `gt status` shows "stopped" for running agents
-**Cause**: Bead state and tmux state diverged
-**Fix**: Reconcile with `gt sync-status` or restart agent
+**Symptom**: `gt status` shows wrong state for agents
+**Cause**: Previously bead state and tmux state could diverge
+**Fix**: As of gt-zecmc, status derives state from tmux directly (no bead state for
+observable conditions like running/stopped). Non-observable states (stuck, awaiting-gate)
+are still stored in beads.
 
 ## Design Decision: Keep Separation
 
@@ -284,7 +286,7 @@ The separation is correct; these bugs need fixing:
 
 1. **Session confusion** (gt-sgzsb): Boot spawns in wrong session
 2. **Zombie blocking** (gt-j1i0r): Daemon can't kill zombie sessions
-3. **Status mismatch** (gt-doih4): Bead vs tmux state divergence
+3. ~~**Status mismatch** (gt-doih4): Bead vs tmux state divergence~~ → FIXED in gt-zecmc
 4. **Ensure semantics** (gt-ekc5u): Start should kill zombies first
 
 ## Summary

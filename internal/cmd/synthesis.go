@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/formula"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -322,7 +323,7 @@ func runSynthesisClose(cmd *cobra.Command, args []string) error {
 
 	// Close the convoy
 	closeArgs := []string{"close", convoyID, "--reason=synthesis complete"}
-	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 		closeArgs = append(closeArgs, "--session="+sessionID)
 	}
 	closeCmd := exec.Command("bd", closeArgs...)

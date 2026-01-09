@@ -105,12 +105,14 @@ func discoverHooks(townRoot string) ([]HookInfo, error) {
 	var hooks []HookInfo
 
 	// Scan known locations for .claude/settings.json
+	// NOTE: Mayor settings are at ~/gt/mayor/.claude/, NOT ~/gt/.claude/
+	// Settings at town root would pollute all child workspaces.
 	locations := []struct {
 		path  string
 		agent string
 	}{
 		{filepath.Join(townRoot, "mayor", ".claude", "settings.json"), "mayor/"},
-		{filepath.Join(townRoot, ".claude", "settings.json"), "town-root"},
+		{filepath.Join(townRoot, "deacon", ".claude", "settings.json"), "deacon/"},
 	}
 
 	// Scan rigs
@@ -137,7 +139,7 @@ func discoverHooks(townRoot string) ([]HookInfo, error) {
 		polecatsDir := filepath.Join(rigPath, "polecats")
 		if polecats, err := os.ReadDir(polecatsDir); err == nil {
 			for _, p := range polecats {
-				if p.IsDir() {
+				if p.IsDir() && !strings.HasPrefix(p.Name(), ".") {
 					locations = append(locations, struct {
 						path  string
 						agent string

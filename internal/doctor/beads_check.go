@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -224,4 +225,211 @@ func (c *PrefixConflictCheck) Run(ctx *CheckContext) *CheckResult {
 		Details: details,
 		FixHint: "Use 'bd rename-prefix <new-prefix>' in one of the conflicting rigs to resolve",
 	}
+}
+
+// PrefixMismatchCheck detects when rigs.json has a different prefix than what
+// routes.jsonl actually uses for a rig. This can happen when:
+// - deriveBeadsPrefix() generates a different prefix than what's in the beads DB
+// - Someone manually edited rigs.json with the wrong prefix
+// - The beads were initialized before auto-derive existed with a different prefix
+type PrefixMismatchCheck struct {
+	FixableCheck
+}
+
+// NewPrefixMismatchCheck creates a new prefix mismatch check.
+func NewPrefixMismatchCheck() *PrefixMismatchCheck {
+	return &PrefixMismatchCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "prefix-mismatch",
+				CheckDescription: "Check for prefix mismatches between rigs.json and routes.jsonl",
+			},
+		},
+	}
+}
+
+// Run checks for prefix mismatches between rigs.json and routes.jsonl.
+func (c *PrefixMismatchCheck) Run(ctx *CheckContext) *CheckResult {
+	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
+
+	// Load routes.jsonl
+	routes, err := beads.LoadRoutes(beadsDir)
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not load routes.jsonl: %v", err),
+		}
+	}
+	if len(routes) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No routes configured (nothing to check)",
+		}
+	}
+
+	// Load rigs.json
+	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
+	rigsConfig, err := loadRigsConfig(rigsPath)
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No rigs.json found (nothing to check)",
+		}
+	}
+
+	// Build map of route path -> prefix from routes.jsonl
+	routePrefixByPath := make(map[string]string)
+	for _, r := range routes {
+		// Normalize: strip trailing hyphen from prefix for comparison
+		prefix := strings.TrimSuffix(r.Prefix, "-")
+		routePrefixByPath[r.Path] = prefix
+	}
+
+	// Check each rig in rigs.json against routes.jsonl
+	var mismatches []string
+	mismatchData := make(map[string][2]string) // rigName -> [rigsJsonPrefix, routesPrefix]
+
+	for rigName, rigEntry := range rigsConfig.Rigs {
+		// Skip rigs without beads config
+		if rigEntry.BeadsConfig == nil || rigEntry.BeadsConfig.Prefix == "" {
+			continue
+		}
+
+		rigsJsonPrefix := rigEntry.BeadsConfig.Prefix
+		expectedPath := rigName + "/mayor/rig"
+
+		// Find the route for this rig
+		routePrefix, hasRoute := routePrefixByPath[expectedPath]
+		if !hasRoute {
+			// No route for this rig - routes-config check handles this
+			continue
+		}
+
+		// Compare prefixes (both should be without trailing hyphen)
+		if rigsJsonPrefix != routePrefix {
+			mismatches = append(mismatches, rigName)
+			mismatchData[rigName] = [2]string{rigsJsonPrefix, routePrefix}
+		}
+	}
+
+	if len(mismatches) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No prefix mismatches found",
+		}
+	}
+
+	// Build details
+	var details []string
+	for _, rigName := range mismatches {
+		data := mismatchData[rigName]
+		details = append(details, fmt.Sprintf("Rig '%s': rigs.json says '%s', routes.jsonl uses '%s'",
+			rigName, data[0], data[1]))
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d prefix mismatch(es) between rigs.json and routes.jsonl", len(mismatches)),
+		Details: details,
+		FixHint: "Run 'gt doctor --fix' to update rigs.json with correct prefixes",
+	}
+}
+
+// Fix updates rigs.json to match the prefixes in routes.jsonl.
+func (c *PrefixMismatchCheck) Fix(ctx *CheckContext) error {
+	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
+
+	// Load routes.jsonl
+	routes, err := beads.LoadRoutes(beadsDir)
+	if err != nil || len(routes) == 0 {
+		return nil // Nothing to fix
+	}
+
+	// Load rigs.json
+	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
+	rigsConfig, err := loadRigsConfig(rigsPath)
+	if err != nil {
+		return nil // Nothing to fix
+	}
+
+	// Build map of route path -> prefix from routes.jsonl
+	routePrefixByPath := make(map[string]string)
+	for _, r := range routes {
+		prefix := strings.TrimSuffix(r.Prefix, "-")
+		routePrefixByPath[r.Path] = prefix
+	}
+
+	// Update each rig's prefix to match routes.jsonl
+	modified := false
+	for rigName, rigEntry := range rigsConfig.Rigs {
+		expectedPath := rigName + "/mayor/rig"
+		routePrefix, hasRoute := routePrefixByPath[expectedPath]
+		if !hasRoute {
+			continue
+		}
+
+		// Ensure BeadsConfig exists
+		if rigEntry.BeadsConfig == nil {
+			rigEntry.BeadsConfig = &rigsConfigBeadsConfig{}
+		}
+
+		if rigEntry.BeadsConfig.Prefix != routePrefix {
+			rigEntry.BeadsConfig.Prefix = routePrefix
+			rigsConfig.Rigs[rigName] = rigEntry
+			modified = true
+		}
+	}
+
+	if modified {
+		return saveRigsConfig(rigsPath, rigsConfig)
+	}
+
+	return nil
+}
+
+// rigsConfigEntry is a local type for loading rigs.json without importing config package
+// to avoid circular dependencies and keep the check self-contained.
+type rigsConfigEntry struct {
+	GitURL      string                 `json:"git_url"`
+	LocalRepo   string                 `json:"local_repo,omitempty"`
+	AddedAt     string                 `json:"added_at"` // Keep as string to preserve format
+	BeadsConfig *rigsConfigBeadsConfig `json:"beads,omitempty"`
+}
+
+type rigsConfigBeadsConfig struct {
+	Repo   string `json:"repo"`
+	Prefix string `json:"prefix"`
+}
+
+type rigsConfigFile struct {
+	Version int                         `json:"version"`
+	Rigs    map[string]rigsConfigEntry  `json:"rigs"`
+}
+
+func loadRigsConfig(path string) (*rigsConfigFile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg rigsConfigFile
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+func saveRigsConfig(path string, cfg *rigsConfigFile) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0644)
 }

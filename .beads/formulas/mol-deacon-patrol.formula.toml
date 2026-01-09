@@ -23,7 +23,7 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 4
+version = 6
 
 [[steps]]
 id = "inbox-check"
@@ -149,6 +149,49 @@ After closing a gate, the Waiters field contains mail addresses to notify.
 Send a brief notification to each waiter that the gate has cleared."""
 
 [[steps]]
+id = "dispatch-gated-molecules"
+title = "Dispatch molecules with resolved gates"
+needs = ["gate-evaluation"]
+description = """
+Find molecules blocked on gates that have now closed and dispatch them.
+
+This completes the async resume cycle without explicit waiter tracking.
+The molecule state IS the waiter - patrol discovers reality each cycle.
+
+**Step 1: Find gate-ready molecules**
+```bash
+bd mol ready --gated --json
+```
+
+This returns molecules where:
+- Status is in_progress
+- Current step has a gate dependency
+- The gate bead is now closed
+- No polecat currently has it hooked
+
+**Step 2: For each ready molecule, dispatch to the appropriate rig**
+```bash
+# Determine target rig from molecule metadata
+bd mol show <mol-id> --json
+# Look for rig field or infer from prefix
+
+# Dispatch to that rig's polecat pool
+gt sling <mol-id> <rig>/polecats
+```
+
+**Step 3: Log dispatch**
+Note which molecules were dispatched for observability:
+```bash
+# Molecule <mol-id> dispatched to <rig>/polecats (gate <gate-id> cleared)
+```
+
+**If no gate-ready molecules:**
+Skip - nothing to dispatch. Gates haven't closed yet or molecules
+already have active polecats working on them.
+
+**Exit criteria:** All gate-ready molecules dispatched to polecats."""
+
+[[steps]]
 id = "check-convoy-completion"
 title = "Check convoy completion"
 needs = ["inbox-check"]
@@ -258,7 +301,7 @@ Keep notifications brief and actionable. The recipient can run bd show for detai
 [[steps]]
 id = "health-scan"
 title = "Check Witness and Refinery health"
-needs = ["trigger-pending-spawns", "gate-evaluation", "fire-notifications"]
+needs = ["trigger-pending-spawns", "dispatch-gated-molecules", "fire-notifications"]
 description = """
 Check Witness and Refinery health for each rig.
 
@@ -342,14 +385,21 @@ Reset unresponsive_cycles to 0 when component responds normally."""
 
 [[steps]]
 id = "zombie-scan"
-title = "Backup check for zombie polecats"
+title = "Detect zombie polecats (NO KILL AUTHORITY)"
 needs = ["health-scan"]
 description = """
-Defense-in-depth check for zombie polecats that Witness should have cleaned.
+Defense-in-depth DETECTION of zombie polecats that Witness should have cleaned.
+
+**⚠️ CRITICAL: The Deacon has NO kill authority.**
+
+These are workers with context, mid-task progress, unsaved state. Every kill
+destroys work. File the warrant and let Boot handle interrogation and execution.
+You do NOT have kill authority.
 
 **Why this exists:**
-The Witness is responsible for nuking polecats after they complete work (via POLECAT_DONE).
-This step provides backup detection in case the Witness fails to clean up.
+The Witness is responsible for cleaning up polecats after they complete work.
+This step provides backup DETECTION in case the Witness fails to clean up.
+Detection only - Boot handles termination.
 
 **Zombie criteria:**
 - State: idle or done (no active work assigned)
@@ -357,26 +407,34 @@ This step provides backup detection in case the Witness fails to clean up.
 - No hooked work (nothing pending for this polecat)
 - Last activity: older than 10 minutes
 
-**Run the zombie scan:**
+**Run the zombie scan (DRY RUN ONLY):**
 ```bash
 gt deacon zombie-scan --dry-run
 ```
 
+**NEVER run:**
+- `gt deacon zombie-scan` (without --dry-run)
+- `tmux kill-session`
+- `gt polecat nuke`
+- Any command that terminates a session
+
 **If zombies detected:**
 1. Review the output to confirm they are truly abandoned
-2. Run without --dry-run to nuke them:
+2. File a death warrant for each detected zombie:
    ```bash
-   gt deacon zombie-scan
+   gt warrant file <polecat> --reason "Zombie detected: no session, no hook, idle >10m"
    ```
-3. This will:
-   - Nuke each zombie polecat
-   - Notify the Mayor about Witness failure
-   - Log the cleanup action
+3. Boot will handle interrogation and execution
+4. Notify the Mayor about Witness failure:
+   ```bash
+   gt mail send mayor/ -s "Witness cleanup failure" \
+     -m "Filed death warrant for <polecat>. Witness failed to clean up."
+   ```
 
 **If no zombies:**
 No action needed - Witness is doing its job.
 
-**Note:** This is a backup mechanism. If you frequently find zombies,
+**Note:** This is a backup mechanism. If you frequently detect zombies,
 investigate why the Witness isn't cleaning up properly."""
 
 [[steps]]
@@ -506,9 +564,47 @@ Skip dispatch - system is healthy.
 **Exit criteria:** Session GC dispatched to dog (if needed)."""
 
 [[steps]]
+id = "costs-digest"
+title = "Aggregate daily costs"
+needs = ["session-gc"]
+description = """
+**DAILY DIGEST** - Aggregate yesterday's session cost wisps.
+
+Session costs are recorded as ephemeral wisps (not exported to JSONL) to avoid
+log-in-database pollution. This step aggregates them into a permanent daily
+"Cost Report YYYY-MM-DD" bead for audit purposes.
+
+**Step 1: Check if digest is needed**
+```bash
+# Preview yesterday's costs (dry run)
+gt costs digest --yesterday --dry-run
+```
+
+If output shows "No session cost wisps found", skip to Step 3.
+
+**Step 2: Create the digest**
+```bash
+gt costs digest --yesterday
+```
+
+This:
+- Queries all session.ended wisps from yesterday
+- Creates a single "Cost Report YYYY-MM-DD" bead with aggregated data
+- Deletes the source wisps
+
+**Step 3: Verify**
+The digest appears in `gt costs --week` queries.
+Daily digests preserve audit trail without per-session pollution.
+
+**Timing**: Run once per morning patrol cycle. The --yesterday flag ensures
+we don't try to digest today's incomplete data.
+
+**Exit criteria:** Yesterday's costs digested (or no wisps to digest)."""
+
+[[steps]]
 id = "log-maintenance"
 title = "Rotate logs and prune state"
-needs = ["session-gc"]
+needs = ["costs-digest"]
 description = """
 Maintain daemon logs and state files.
 

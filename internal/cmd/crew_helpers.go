@@ -122,7 +122,7 @@ func detectCrewFromCwd() (*crewDetection, error) {
 	// Look for pattern: <rig>/crew/<name>/...
 	// Minimum: rig, crew, name = 3 parts
 	if len(parts) < 3 {
-		return nil, fmt.Errorf("not in a crew workspace (path too short)")
+		return nil, fmt.Errorf("not inside a crew workspace - specify the crew name or cd into a crew directory (e.g., gastown/crew/max)")
 	}
 
 	rigName := parts[0]
@@ -137,7 +137,7 @@ func detectCrewFromCwd() (*crewDetection, error) {
 	}, nil
 }
 
-// isShellCommand checks if the command is a shell (meaning Claude has exited).
+// isShellCommand checks if the command is a shell (meaning the runtime has exited).
 func isShellCommand(cmd string) bool {
 	shells := constants.SupportedShells
 	for _, shell := range shells {
@@ -168,6 +168,29 @@ func execAgent(cfg *config.RuntimeConfig, prompt string) error {
 		args = append(args, prompt)
 	}
 	return syscall.Exec(agentPath, args, os.Environ())
+}
+
+// execRuntime execs the runtime CLI, replacing the current process.
+// Used when we're already in the target session and just need to start the runtime.
+// If prompt is provided, it's passed according to the runtime's prompt mode.
+func execRuntime(prompt, rigPath, configDir string) error {
+	runtimeConfig := config.LoadRuntimeConfig(rigPath)
+	args := runtimeConfig.BuildArgsWithPrompt(prompt)
+	if len(args) == 0 {
+		return fmt.Errorf("runtime command not configured")
+	}
+
+	binPath, err := exec.LookPath(args[0])
+	if err != nil {
+		return fmt.Errorf("runtime command not found: %w", err)
+	}
+
+	env := os.Environ()
+	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && configDir != "" {
+		env = append(env, fmt.Sprintf("%s=%s", runtimeConfig.Session.ConfigDirEnv, configDir))
+	}
+
+	return syscall.Exec(binPath, args, env)
 }
 
 // isInTmuxSession checks if we're currently inside the target tmux session.

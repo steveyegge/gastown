@@ -10,8 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/claude"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -21,7 +27,33 @@ var (
 	ErrCrewNotFound    = errors.New("crew worker not found")
 	ErrHasChanges      = errors.New("crew worker has uncommitted changes")
 	ErrInvalidCrewName = errors.New("invalid crew name")
+	ErrSessionRunning  = errors.New("session already running")
+	ErrSessionNotFound = errors.New("session not found")
 )
+
+// StartOptions configures crew session startup.
+type StartOptions struct {
+	// Account specifies the account handle to use (overrides default).
+	Account string
+
+	// ClaudeConfigDir is resolved CLAUDE_CONFIG_DIR for the account.
+	// If set, this is injected as an environment variable.
+	ClaudeConfigDir string
+
+	// KillExisting kills any existing session before starting (for restart operations).
+	// If false and a session is running, Start() returns ErrSessionRunning.
+	KillExisting bool
+
+	// Topic is the startup nudge topic (e.g., "start", "restart", "refresh").
+	// Defaults to "start" if empty.
+	Topic string
+
+	// Interactive removes --dangerously-skip-permissions for interactive/refresh mode.
+	Interactive bool
+
+	// AgentOverride specifies an alternate agent alias (e.g., for testing).
+	AgentOverride string
+}
 
 // validateCrewName checks that a crew name is safe and valid.
 // Rejects path traversal attempts and characters that break agent ID parsing.
@@ -140,6 +172,13 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	if err := m.setupSharedBeads(crewPath); err != nil {
 		// Non-fatal - crew can still work, warn but don't fail
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Copy overlay files from .runtime/overlay/ to crew root.
+	// This allows services to have .env and other config files at their root.
+	if err := rig.CopyOverlay(m.rig.Path, crewPath); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
@@ -381,50 +420,151 @@ type PristineResult struct {
 
 // setupSharedBeads creates a redirect file so the crew worker uses the rig's shared .beads database.
 // This eliminates the need for git sync between crew clones - all crew members share one database.
-//
-// Structure:
-//
-//	rig/
-//	  mayor/rig/.beads/     <- Shared database (the canonical location)
-//	  crew/
-//	    <name>/
-//	      .beads/
-//	        redirect        <- Contains "../../mayor/rig/.beads"
 func (m *Manager) setupSharedBeads(crewPath string) error {
-	// The shared beads database is at rig/mayor/rig/.beads/
-	// Crew clones are at rig/crew/<name>/
-	// So the relative path is ../../mayor/rig/.beads
-	sharedBeadsPath := filepath.Join(m.rig.Path, "mayor", "rig", ".beads")
+	townRoot := filepath.Dir(m.rig.Path)
+	return beads.SetupRedirect(townRoot, crewPath)
+}
 
-	// Verify the shared beads exists
-	if _, err := os.Stat(sharedBeadsPath); os.IsNotExist(err) {
-		// Fall back to rig root .beads if mayor/rig doesn't exist
-		sharedBeadsPath = filepath.Join(m.rig.Path, ".beads")
-		if _, err := os.Stat(sharedBeadsPath); os.IsNotExist(err) {
-			return fmt.Errorf("no shared beads database found")
+// SessionName returns the tmux session name for a crew member.
+func (m *Manager) SessionName(name string) string {
+	return fmt.Sprintf("gt-%s-crew-%s", m.rig.Name, name)
+}
+
+// Start creates and starts a tmux session for a crew member.
+// If the crew member doesn't exist, it will be created first.
+func (m *Manager) Start(name string, opts StartOptions) error {
+	if err := validateCrewName(name); err != nil {
+		return err
+	}
+
+	// Get or create the crew worker
+	worker, err := m.Get(name)
+	if err == ErrCrewNotFound {
+		worker, err = m.Add(name, false) // No feature branch for crew
+		if err != nil {
+			return fmt.Errorf("creating crew workspace: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("getting crew worker: %w", err)
+	}
+
+	t := tmux.NewTmux()
+	sessionID := m.SessionName(name)
+
+	// Check if session already exists
+	running, err := t.HasSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if running {
+		if opts.KillExisting {
+			// Restart mode - kill existing session
+			if err := t.KillSession(sessionID); err != nil {
+				return fmt.Errorf("killing existing session: %w", err)
+			}
+		} else {
+			// Normal start - session exists, check if Claude is actually running
+			if t.IsClaudeRunning(sessionID) {
+				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
+			}
+			// Zombie session - kill and recreate
+			if err := t.KillSession(sessionID); err != nil {
+				return fmt.Errorf("killing zombie session: %w", err)
+			}
 		}
 	}
 
-	// Create crew's .beads directory
-	crewBeadsDir := filepath.Join(crewPath, ".beads")
-	if err := os.MkdirAll(crewBeadsDir, 0755); err != nil {
-		return fmt.Errorf("creating crew .beads dir: %w", err)
+	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
+	// write into the source repo. Claude walks up the tree to find settings.
+	// All crew members share the same settings file.
+	crewBaseDir := filepath.Join(m.rig.Path, "crew")
+	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
+		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
-	// Calculate relative path from crew/.beads/ to shared beads
-	// crew/<name>/.beads/ -> ../../mayor/rig/.beads or ../../.beads
-	var redirectContent string
-	if _, err := os.Stat(filepath.Join(m.rig.Path, "mayor", "rig", ".beads")); err == nil {
-		redirectContent = "../../mayor/rig/.beads\n"
-	} else {
-		redirectContent = "../../.beads\n"
+	// Build the startup beacon for predecessor discovery via /resume
+	// Pass it as Claude's initial prompt - processed when Claude is ready
+	address := fmt.Sprintf("%s/crew/%s", m.rig.Name, name)
+	topic := opts.Topic
+	if topic == "" {
+		topic = "start"
+	}
+	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		Recipient: address,
+		Sender:    "human",
+		Topic:     topic,
+	})
+
+	// Build startup command first
+	// SessionStart hook handles context loading (gt prime --hook)
+	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
+	if err != nil {
+		return fmt.Errorf("building startup command: %w", err)
 	}
 
-	// Create redirect file
-	redirectPath := filepath.Join(crewBeadsDir, "redirect")
-	if err := os.WriteFile(redirectPath, []byte(redirectContent), 0644); err != nil {
-		return fmt.Errorf("creating redirect file: %w", err)
+	// For interactive/refresh mode, remove --dangerously-skip-permissions
+	if opts.Interactive {
+		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
+	}
+
+	// Create session with command directly to avoid send-keys race condition.
+	// See: https://github.com/anthropics/gastown/issues/280
+	if err := t.NewSessionWithCommand(sessionID, worker.ClonePath, claudeCmd); err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	// Set environment variables (non-fatal: session works without these)
+	_ = t.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
+	_ = t.SetEnvironment(sessionID, "GT_CREW", name)
+	_ = t.SetEnvironment(sessionID, "GT_ROLE", "crew")
+
+	// Set CLAUDE_CONFIG_DIR for account selection (non-fatal)
+	if opts.ClaudeConfigDir != "" {
+		_ = t.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", opts.ClaudeConfigDir)
+	}
+
+	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
+	theme := tmux.AssignTheme(m.rig.Name)
+	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, name, "crew")
+
+	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
+	_ = t.SetCrewCycleBindings(sessionID)
+
+	// Wait for Claude to start (non-fatal: session continues even if this times out)
+	_ = t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout)
+
+	return nil
+}
+
+// Stop terminates a crew member's tmux session.
+func (m *Manager) Stop(name string) error {
+	if err := validateCrewName(name); err != nil {
+		return err
+	}
+
+	t := tmux.NewTmux()
+	sessionID := m.SessionName(name)
+
+	// Check if session exists
+	running, err := t.HasSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !running {
+		return ErrSessionNotFound
+	}
+
+	// Kill the session
+	if err := t.KillSession(sessionID); err != nil {
+		return fmt.Errorf("killing session: %w", err)
 	}
 
 	return nil
+}
+
+// IsRunning checks if a crew member's session is active.
+func (m *Manager) IsRunning(name string) (bool, error) {
+	t := tmux.NewTmux()
+	sessionID := m.SessionName(name)
+	return t.HasSession(sessionID)
 }

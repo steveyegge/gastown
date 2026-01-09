@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -260,6 +261,11 @@ func TestEnsureSessionFresh_ZombieSession(t *testing.T) {
 		t.Skip("session unexpectedly has Claude running - can't test zombie case")
 	}
 
+	// Verify generic agent check also treats it as not running (shell session)
+	if tm.IsAgentRunning(sessionName) {
+		t.Fatalf("expected IsAgentRunning(%q) to be false for a fresh shell session", sessionName)
+	}
+
 	// EnsureSessionFresh should kill the zombie and create fresh session
 	// This should NOT error with "session already exists"
 	if err := tm.EnsureSessionFresh(sessionName, ""); err != nil {
@@ -302,5 +308,155 @@ func TestEnsureSessionFresh_IdempotentOnZombie(t *testing.T) {
 	}
 	if !has {
 		t.Error("expected session to exist after multiple EnsureSessionFresh calls")
+	}
+}
+
+func TestIsAgentRunning(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-agent-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session (will run default shell)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Get the current pane command (should be bash/zsh/etc)
+	cmd, err := tm.GetPaneCommand(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneCommand: %v", err)
+	}
+
+	tests := []struct {
+		name         string
+		processNames []string
+		wantRunning  bool
+	}{
+		{
+			name:         "empty process list",
+			processNames: []string{},
+			wantRunning:  false,
+		},
+		{
+			name:         "matching shell process",
+			processNames: []string{cmd}, // Current shell
+			wantRunning:  true,
+		},
+		{
+			name:         "claude agent (node) - not running",
+			processNames: []string{"node"},
+			wantRunning:  cmd == "node", // Only true if shell happens to be node
+		},
+		{
+			name:         "gemini agent - not running",
+			processNames: []string{"gemini"},
+			wantRunning:  cmd == "gemini",
+		},
+		{
+			name:         "cursor agent - not running",
+			processNames: []string{"cursor-agent"},
+			wantRunning:  cmd == "cursor-agent",
+		},
+		{
+			name:         "multiple process names with match",
+			processNames: []string{"nonexistent", cmd, "also-nonexistent"},
+			wantRunning:  true,
+		},
+		{
+			name:         "multiple process names without match",
+			processNames: []string{"nonexistent1", "nonexistent2"},
+			wantRunning:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tm.IsAgentRunning(sessionName, tt.processNames...)
+			if got != tt.wantRunning {
+				t.Errorf("IsAgentRunning(%q, %v) = %v, want %v (current cmd: %q)",
+					sessionName, tt.processNames, got, tt.wantRunning, cmd)
+			}
+		})
+	}
+}
+
+func TestIsAgentRunning_NonexistentSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// IsAgentRunning on nonexistent session should return false, not error
+	got := tm.IsAgentRunning("nonexistent-session-xyz", "node", "gemini", "cursor-agent")
+	if got {
+		t.Error("IsAgentRunning on nonexistent session should return false")
+	}
+}
+
+func TestIsClaudeRunning(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-claude-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session (will run default shell, not Claude)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// IsClaudeRunning should be false (shell is running, not node/claude)
+	cmd, _ := tm.GetPaneCommand(sessionName)
+	wantRunning := cmd == "node" || cmd == "claude"
+
+	if got := tm.IsClaudeRunning(sessionName); got != wantRunning {
+		t.Errorf("IsClaudeRunning() = %v, want %v (pane cmd: %q)", got, wantRunning, cmd)
+	}
+}
+
+func TestIsClaudeRunning_VersionPattern(t *testing.T) {
+	// Test the version pattern regex matching directly
+	// Since we can't easily mock the pane command, test the pattern logic
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		{"node", true},
+		{"claude", true},
+		{"2.0.76", true},
+		{"1.2.3", true},
+		{"10.20.30", true},
+		{"bash", false},
+		{"zsh", false},
+		{"", false},
+		{"v2.0.76", false}, // version with 'v' prefix shouldn't match
+		{"2.0", false},     // incomplete version
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			// Check if it matches node/claude directly
+			isKnownCmd := tt.cmd == "node" || tt.cmd == "claude"
+			// Check version pattern
+			matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+`, tt.cmd)
+
+			got := isKnownCmd || matched
+			if got != tt.want {
+				t.Errorf("IsClaudeRunning logic for %q = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
 	}
 }

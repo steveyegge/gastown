@@ -15,7 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/swarm"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -528,7 +528,7 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 	Title string `json:"title"`
 }) error { //nolint:unparam // error return kept for future use
 	t := tmux.NewTmux()
-	sessMgr := session.NewManager(t, r)
+	polecatSessMgr := polecat.NewSessionManager(t, r)
 	polecatGit := git.NewGit(r.Path)
 	polecatMgr := polecat.NewManager(r, polecatGit)
 
@@ -556,12 +556,12 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 		}
 
 		// Check if already running
-		running, _ := sessMgr.IsRunning(worker)
+		running, _ := polecatSessMgr.IsRunning(worker)
 		if running {
 			fmt.Printf("  %s already running, injecting task...\n", worker)
 		} else {
 			fmt.Printf("  Starting %s...\n", worker)
-			if err := sessMgr.Start(worker, session.StartOptions{}); err != nil {
+			if err := polecatSessMgr.Start(worker, polecat.SessionStartOptions{}); err != nil {
 				style.PrintWarning("  couldn't start %s: %v", worker, err)
 				continue
 			}
@@ -572,7 +572,7 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 		// Inject work assignment
 		context := fmt.Sprintf("[SWARM] You are part of swarm %s.\n\nAssigned task: %s\nTitle: %s\n\nWork on this task. When complete, commit and signal DONE.",
 			swarmID, task.ID, task.Title)
-		if err := sessMgr.Inject(worker, context); err != nil {
+		if err := polecatSessMgr.Inject(worker, context); err != nil {
 			style.PrintWarning("  couldn't inject to %s: %v", worker, err)
 		} else {
 			fmt.Printf("  %s → %s ✓\n", worker, task.ID)
@@ -809,7 +809,7 @@ func runSwarmLand(cmd *cobra.Command, args []string) error {
 
 	// Close the swarm epic in beads
 	closeArgs := []string{"close", swarmID, "--reason", "Swarm landed to main"}
-	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 		closeArgs = append(closeArgs, "--session="+sessionID)
 	}
 	closeCmd := exec.Command("bd", closeArgs...)
@@ -868,7 +868,7 @@ func runSwarmCancel(cmd *cobra.Command, args []string) error {
 
 	// Close the swarm epic in beads with canceled reason
 	closeArgs := []string{"close", swarmID, "--reason", "Swarm canceled"}
-	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 		closeArgs = append(closeArgs, "--session="+sessionID)
 	}
 	closeCmd := exec.Command("bd", closeArgs...)

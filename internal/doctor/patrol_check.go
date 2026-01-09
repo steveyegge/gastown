@@ -145,34 +145,36 @@ func getPatrolMoleculeDesc(title string) string {
 
 // PatrolHooksWiredCheck verifies that hooks trigger patrol execution.
 type PatrolHooksWiredCheck struct {
-	BaseCheck
+	FixableCheck
 }
 
 // NewPatrolHooksWiredCheck creates a new patrol hooks wired check.
 func NewPatrolHooksWiredCheck() *PatrolHooksWiredCheck {
 	return &PatrolHooksWiredCheck{
-		BaseCheck: BaseCheck{
-			CheckName:        "patrol-hooks-wired",
-			CheckDescription: "Check if hooks trigger patrol execution",
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "patrol-hooks-wired",
+				CheckDescription: "Check if hooks trigger patrol execution",
+			},
 		},
 	}
 }
 
 // Run checks if patrol hooks are wired.
 func (c *PatrolHooksWiredCheck) Run(ctx *CheckContext) *CheckResult {
-	// Check for daemon config which manages patrols
-	daemonConfigPath := filepath.Join(ctx.TownRoot, "mayor", "daemon.json")
+	daemonConfigPath := config.DaemonPatrolConfigPath(ctx.TownRoot)
+	relPath, _ := filepath.Rel(ctx.TownRoot, daemonConfigPath)
+
 	if _, err := os.Stat(daemonConfigPath); os.IsNotExist(err) {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusWarning,
-			Message: "Daemon config not found",
-			FixHint: "Run 'gt daemon start' to start the daemon",
+			Message: fmt.Sprintf("%s not found", relPath),
+			FixHint: "Run 'gt doctor --fix' to create default config, or 'gt daemon start' to start the daemon",
 		}
 	}
 
-	// Check daemon config for patrol configuration
-	data, err := os.ReadFile(daemonConfigPath)
+	cfg, err := config.LoadDaemonPatrolConfig(daemonConfigPath)
 	if err != nil {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -182,46 +184,33 @@ func (c *PatrolHooksWiredCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	var config map[string]interface{}
-	if err := json.Unmarshal(data, &config); err != nil {
+	if len(cfg.Patrols) > 0 {
 		return &CheckResult{
 			Name:    c.Name(),
-			Status:  StatusWarning,
-			Message: "Invalid daemon config format",
-			Details: []string{err.Error()},
+			Status:  StatusOK,
+			Message: fmt.Sprintf("Daemon configured with %d patrol(s)", len(cfg.Patrols)),
 		}
 	}
 
-	// Check for patrol entries
-	if patrols, ok := config["patrols"]; ok {
-		if patrolMap, ok := patrols.(map[string]interface{}); ok && len(patrolMap) > 0 {
-			return &CheckResult{
-				Name:    c.Name(),
-				Status:  StatusOK,
-				Message: fmt.Sprintf("Daemon configured with %d patrol(s)", len(patrolMap)),
-			}
-		}
-	}
-
-	// Check if heartbeat is enabled (triggers deacon patrol)
-	if heartbeat, ok := config["heartbeat"]; ok {
-		if hb, ok := heartbeat.(map[string]interface{}); ok {
-			if enabled, ok := hb["enabled"].(bool); ok && enabled {
-				return &CheckResult{
-					Name:    c.Name(),
-					Status:  StatusOK,
-					Message: "Daemon heartbeat enabled (triggers patrols)",
-				}
-			}
+	if cfg.Heartbeat != nil && cfg.Heartbeat.Enabled {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "Daemon heartbeat enabled (triggers patrols)",
 		}
 	}
 
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusWarning,
-		Message: "Patrol hooks not configured in daemon",
-		FixHint: "Configure patrols in mayor/daemon.json or run 'gt daemon start'",
+		Message: fmt.Sprintf("Configure patrols in %s or run 'gt daemon start'", relPath),
+		FixHint: "Run 'gt doctor --fix' to create default config",
 	}
+}
+
+// Fix creates the daemon patrol config with defaults.
+func (c *PatrolHooksWiredCheck) Fix(ctx *CheckContext) error {
+	return config.EnsureDaemonPatrolConfig(ctx.TownRoot)
 }
 
 // PatrolNotStuckCheck detects wisps that have been in_progress too long.

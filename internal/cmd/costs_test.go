@@ -62,6 +62,20 @@ func TestDeriveSessionName(t *testing.T) {
 			expected: "gt-ai-deacon",
 		},
 		{
+			name: "mayor session without GT_TOWN",
+			envVars: map[string]string{
+				"GT_ROLE": "mayor",
+			},
+			expected: "gt-mayor",
+		},
+		{
+			name: "deacon session without GT_TOWN",
+			envVars: map[string]string{
+				"GT_ROLE": "deacon",
+			},
+			expected: "gt-deacon",
+		},
+		{
 			name:     "no env vars",
 			envVars:  map[string]string{},
 			expected: "",

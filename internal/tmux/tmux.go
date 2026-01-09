@@ -7,16 +7,18 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
 // Common errors
 var (
-	ErrNoServer       = errors.New("no tmux server running")
-	ErrSessionExists  = errors.New("session already exists")
+	ErrNoServer        = errors.New("no tmux server running")
+	ErrSessionExists   = errors.New("session already exists")
 	ErrSessionNotFound = errors.New("session not found")
 )
 
@@ -76,6 +78,22 @@ func (t *Tmux) NewSession(name, workDir string) error {
 	return err
 }
 
+// NewSessionWithCommand creates a new detached tmux session that immediately runs a command.
+// Unlike NewSession + SendKeys, this avoids race conditions where the shell isn't ready
+// or the command arrives before the shell prompt. The command runs directly as the
+// initial process of the pane.
+// See: https://github.com/anthropics/gastown/issues/280
+func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
+	args := []string{"new-session", "-d", "-s", name}
+	if workDir != "" {
+		args = append(args, "-c", workDir)
+	}
+	// Add the command as the last argument - tmux runs it as the pane's initial process
+	args = append(args, command)
+	_, err := t.run(args...)
+	return err
+}
+
 // EnsureSessionFresh ensures a session is available and healthy.
 // If the session exists but is a zombie (Claude not running), it kills the session first.
 // This prevents "session already exists" errors when trying to restart dead agents.
@@ -94,7 +112,7 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 
 	if exists {
 		// Session exists - check if it's a zombie
-		if !t.IsClaudeRunning(name) {
+		if !t.IsAgentRunning(name) {
 			// Zombie session: tmux alive but Claude dead
 			// Kill it so we can create a fresh one
 			if err := t.KillSession(name); err != nil {
@@ -390,8 +408,9 @@ func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
 
 // FindSessionByWorkDir finds tmux sessions where the pane's current working directory
 // matches or is under the target directory. Returns session names that match.
-// If checkClaude is true, only returns sessions that have Claude (node) running.
-func (t *Tmux) FindSessionByWorkDir(targetDir string, checkClaude bool) ([]string, error) {
+// If processNames is provided, only returns sessions that match those processes.
+// If processNames is nil or empty, returns all sessions matching the directory.
+func (t *Tmux) FindSessionByWorkDir(targetDir string, processNames []string) ([]string, error) {
 	sessions, err := t.ListSessions()
 	if err != nil {
 		return nil, err
@@ -410,14 +429,13 @@ func (t *Tmux) FindSessionByWorkDir(targetDir string, checkClaude bool) ([]strin
 
 		// Check if workdir matches target (exact match or subdir)
 		if workDir == targetDir || strings.HasPrefix(workDir, targetDir+"/") {
-			if checkClaude {
-				// Only include if Claude is running
-				if t.IsClaudeRunning(session) {
+			if len(processNames) > 0 {
+				if t.IsRuntimeRunning(session, processNames) {
 					matches = append(matches, session)
 				}
-			} else {
-				matches = append(matches, session)
+				continue
 			}
+			matches = append(matches, session)
 		}
 	}
 
@@ -526,15 +544,68 @@ Run: gt mail inbox
 	return t.SendKeys(session, banner)
 }
 
-// IsClaudeRunning checks if Claude appears to be running in the session.
-// Only trusts the pane command - UI markers in scrollback cause false positives.
-func (t *Tmux) IsClaudeRunning(session string) bool {
-	// Check pane command - Claude runs as node
+// IsAgentRunning checks if an agent appears to be running in the session.
+//
+// If expectedPaneCommands is non-empty, the pane's current command must match one of them.
+// If expectedPaneCommands is empty, any non-shell command counts as "agent running".
+func (t *Tmux) IsAgentRunning(session string, expectedPaneCommands ...string) bool {
 	cmd, err := t.GetPaneCommand(session)
 	if err != nil {
 		return false
 	}
-	return cmd == "node"
+
+	if len(expectedPaneCommands) > 0 {
+		for _, expected := range expectedPaneCommands {
+			if expected != "" && cmd == expected {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Fallback: any non-shell command counts as running.
+	for _, shell := range constants.SupportedShells {
+		if cmd == shell {
+			return false
+		}
+	}
+	return cmd != ""
+}
+
+// IsClaudeRunning checks if Claude appears to be running in the session.
+// Only trusts the pane command - UI markers in scrollback cause false positives.
+// Claude can report as "node", "claude", or a version number like "2.0.76".
+func (t *Tmux) IsClaudeRunning(session string) bool {
+	// Check for known command names first
+	if t.IsAgentRunning(session, "node", "claude") {
+		return true
+	}
+	// Check for version pattern (e.g., "2.0.76") - Claude Code shows version as pane command
+	cmd, err := t.GetPaneCommand(session)
+	if err != nil {
+		return false
+	}
+	matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+`, cmd)
+	return matched
+}
+
+// IsRuntimeRunning checks if a runtime appears to be running in the session.
+// Only trusts the pane command - UI markers in scrollback cause false positives.
+// This is the runtime-config-aware version of IsAgentRunning.
+func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
+	if len(processNames) == 0 {
+		return false
+	}
+	cmd, err := t.GetPaneCommand(session)
+	if err != nil {
+		return false
+	}
+	for _, name := range processNames {
+		if cmd == name {
+			return true
+		}
+	}
+	return false
 }
 
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.
@@ -585,28 +656,46 @@ func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for shell")
 }
 
-// WaitForClaudeReady polls until Claude's prompt indicator appears in the pane.
-// Claude is ready when we see "> " at the start of a line (the input prompt).
-// This is more reliable than just checking if node is running.
+// WaitForRuntimeReady polls until the runtime's prompt indicator appears in the pane.
+// Runtime is ready when we see the configured prompt prefix at the start of a line.
 //
 // IMPORTANT: Bootstrap vs Steady-State Observation
 //
-// This function uses regex to detect Claude's prompt - a ZFC violation.
+// This function uses regex to detect runtime prompts - a ZFC violation.
 // ZFC (Zero False Commands) principle: AI should observe AI, not regex.
 //
 // Bootstrap (acceptable):
-//   During cold startup when no AI agent is running, the daemon uses this
-//   function to get the Deacon online. Regex is acceptable here.
+//
+//	During cold startup when no AI agent is running, the daemon uses this
+//	function to get the Deacon online. Regex is acceptable here.
 //
 // Steady-State (use AI observation instead):
-//   Once any AI agent is running, observation should be AI-to-AI:
-//   - Deacon starting polecats → use 'gt deacon pending' + AI analysis
-//   - Deacon restarting → Mayor watches via 'gt peek'
-//   - Mayor restarting → Deacon watches via 'gt peek'
+//
+//	Once any AI agent is running, observation should be AI-to-AI:
+//	- Deacon starting polecats → use 'gt deacon pending' + AI analysis
+//	- Deacon restarting → Mayor watches via 'gt peek'
+//	- Mayor restarting → Deacon watches via 'gt peek'
 //
 // See: gt deacon pending (ZFC-compliant AI observation)
 // See: gt deacon trigger-pending (bootstrap mode, regex-based)
-func (t *Tmux) WaitForClaudeReady(session string, timeout time.Duration) error {
+func (t *Tmux) WaitForRuntimeReady(session string, rc *config.RuntimeConfig, timeout time.Duration) error {
+	if rc == nil || rc.Tmux == nil {
+		return nil
+	}
+
+	if rc.Tmux.ReadyPromptPrefix == "" {
+		if rc.Tmux.ReadyDelayMs <= 0 {
+			return nil
+		}
+		// Fallback to fixed delay when prompt detection is unavailable.
+		delay := time.Duration(rc.Tmux.ReadyDelayMs) * time.Millisecond
+		if delay > timeout {
+			delay = timeout
+		}
+		time.Sleep(delay)
+		return nil
+	}
+
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		// Capture last few lines of the pane
@@ -615,16 +704,17 @@ func (t *Tmux) WaitForClaudeReady(session string, timeout time.Duration) error {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		// Look for Claude's prompt indicator "> " at start of line
+		// Look for runtime prompt indicator at start of line
 		for _, line := range lines {
 			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "> ") || trimmed == ">" {
+			prefix := strings.TrimSpace(rc.Tmux.ReadyPromptPrefix)
+			if strings.HasPrefix(trimmed, rc.Tmux.ReadyPromptPrefix) || (prefix != "" && trimmed == prefix) {
 				return nil
 			}
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for Claude prompt")
+	return fmt.Errorf("timeout waiting for runtime prompt")
 }
 
 // GetSessionInfo returns detailed information about a session.
@@ -754,7 +844,18 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.SetCycleBindings(session); err != nil {
 		return fmt.Errorf("setting cycle bindings: %w", err)
 	}
+	if err := t.EnableMouseMode(session); err != nil {
+		return fmt.Errorf("enabling mouse mode: %w", err)
+	}
 	return nil
+}
+
+// EnableMouseMode enables mouse support for a tmux session.
+// This allows clicking to select panes/windows, scrolling with mouse wheel,
+// and dragging to resize panes. Hold Shift for native terminal text selection.
+func (t *Tmux) EnableMouseMode(session string) error {
+	_, err := t.run("set-option", "-t", session, "mouse", "on")
+	return err
 }
 
 // IsInsideTmux checks if the current process is running inside a tmux session.
@@ -821,7 +922,7 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // - Crew sessions: All crew members in the same rig
 //
 // IMPORTANT: These bindings are conditional - they only run gt cycle for
-// Gas Town sessions (those starting with "gt-"). For non-GT sessions,
+// Gas Town sessions (those starting with "gt-" or "hq-"). For non-GT sessions,
 // the default tmux behavior (next-window/previous-window) is preserved.
 // See: https://github.com/steveyegge/gastown/issues/13
 //
@@ -830,16 +931,16 @@ func (t *Tmux) SetTownCycleBindings(session string) error {
 // resolution time (when the key is pressed), giving us the correct session.
 func (t *Tmux) SetCycleBindings(session string) error {
 	// C-b n → gt cycle next for GT sessions, next-window otherwise
-	// The if-shell checks if session name starts with "gt-"
+	// The if-shell checks if session name starts with "gt-" or "hq-"
 	if _, err := t.run("bind-key", "-T", "prefix", "n",
-		"if-shell", "echo '#{session_name}' | grep -q '^gt-'",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
 		"run-shell 'gt cycle next --session #{session_name}'",
 		"next-window"); err != nil {
 		return err
 	}
 	// C-b p → gt cycle prev for GT sessions, previous-window otherwise
 	if _, err := t.run("bind-key", "-T", "prefix", "p",
-		"if-shell", "echo '#{session_name}' | grep -q '^gt-'",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
 		"run-shell 'gt cycle prev --session #{session_name}'",
 		"previous-window"); err != nil {
 		return err
@@ -852,12 +953,12 @@ func (t *Tmux) SetCycleBindings(session string) error {
 // Uses `gt feed --window` which handles both creation and switching.
 //
 // IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
-// (those starting with "gt-"). For non-GT sessions, a help message is shown.
+// (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
 // See: https://github.com/steveyegge/gastown/issues/13
 func (t *Tmux) SetFeedBinding(session string) error {
 	// C-b a → gt feed --window for GT sessions, help message otherwise
 	_, err := t.run("bind-key", "-T", "prefix", "a",
-		"if-shell", "echo '#{session_name}' | grep -q '^gt-'",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
 		"run-shell 'gt feed --window'",
 		"display-message 'C-b a is for Gas Town sessions only'")
 	return err

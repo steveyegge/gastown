@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -28,8 +29,14 @@ import (
 //   - "gastown/crew/max" -> "gt-gastown-crew-max"
 //
 // If role is unknown, it tries to infer from the identity string.
-func buildAgentBeadID(identity string, role Role) string {
+// townRoot is needed to look up the rig's configured prefix.
+func buildAgentBeadID(identity string, role Role, townRoot string) string {
 	parts := strings.Split(identity, "/")
+
+	// Helper to get prefix for a rig
+	getPrefix := func(rig string) string {
+		return config.GetRigPrefix(townRoot, rig)
+	}
 
 	// If role is unknown or empty, try to infer from identity
 	if role == RoleUnknown || role == Role("") {
@@ -39,18 +46,18 @@ func buildAgentBeadID(identity string, role Role) string {
 		case identity == "deacon":
 			return beads.DeaconBeadIDTown()
 		case len(parts) == 2 && parts[1] == "witness":
-			return beads.WitnessBeadID(parts[0])
+			return beads.WitnessBeadIDWithPrefix(getPrefix(parts[0]), parts[0])
 		case len(parts) == 2 && parts[1] == "refinery":
-			return beads.RefineryBeadID(parts[0])
+			return beads.RefineryBeadIDWithPrefix(getPrefix(parts[0]), parts[0])
 		case len(parts) == 2:
 			// Assume rig/name is a polecat
-			return beads.PolecatBeadID(parts[0], parts[1])
+			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[1])
 		case len(parts) == 3 && parts[1] == "crew":
 			// rig/crew/name - crew member
-			return beads.CrewBeadID(parts[0], parts[2])
+			return beads.CrewBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
 		case len(parts) == 3 && parts[1] == "polecats":
 			// rig/polecats/name - explicit polecat
-			return beads.PolecatBeadID(parts[0], parts[2])
+			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
 		default:
 			return ""
 		}
@@ -63,26 +70,26 @@ func buildAgentBeadID(identity string, role Role) string {
 		return beads.DeaconBeadIDTown()
 	case RoleWitness:
 		if len(parts) >= 1 {
-			return beads.WitnessBeadID(parts[0])
+			return beads.WitnessBeadIDWithPrefix(getPrefix(parts[0]), parts[0])
 		}
 		return ""
 	case RoleRefinery:
 		if len(parts) >= 1 {
-			return beads.RefineryBeadID(parts[0])
+			return beads.RefineryBeadIDWithPrefix(getPrefix(parts[0]), parts[0])
 		}
 		return ""
 	case RolePolecat:
 		// Handle both 2-part (rig/name) and 3-part (rig/polecats/name) formats
 		if len(parts) == 3 && parts[1] == "polecats" {
-			return beads.PolecatBeadID(parts[0], parts[2])
+			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
 		}
 		if len(parts) >= 2 {
-			return beads.PolecatBeadID(parts[0], parts[1])
+			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[1])
 		}
 		return ""
 	case RoleCrew:
 		if len(parts) >= 3 && parts[1] == "crew" {
-			return beads.CrewBeadID(parts[0], parts[2])
+			return beads.CrewBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
 		}
 		return ""
 	default:
@@ -318,7 +325,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 
 	// Try to find agent bead and read hook slot
 	// This is the preferred method - agent beads have a hook_bead field
-	agentBeadID := buildAgentBeadID(target, roleCtx.Role)
+	agentBeadID := buildAgentBeadID(target, roleCtx.Role, townRoot)
 	var hookBead *beads.Issue
 
 	if agentBeadID != "" {

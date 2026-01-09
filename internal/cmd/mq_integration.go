@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,6 +16,141 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// Integration branch template constants
+const defaultIntegrationBranchTemplate = "integration/{epic}"
+
+// invalidBranchCharsRegex matches characters that are invalid in git branch names.
+// Git branch names cannot contain: ~ ^ : \ space, .., @{, or end with .lock
+var invalidBranchCharsRegex = regexp.MustCompile(`[~^:\s\\]|\.\.|\.\.|@\{`)
+
+// buildIntegrationBranchName expands an integration branch template with variables.
+// Variables supported:
+//   - {epic}: Full epic ID (e.g., "RA-123")
+//   - {prefix}: Epic prefix before first hyphen (e.g., "RA")
+//   - {user}: Git user.name (e.g., "klauern")
+//
+// If template is empty, uses defaultIntegrationBranchTemplate.
+func buildIntegrationBranchName(template, epicID string) string {
+	if template == "" {
+		template = defaultIntegrationBranchTemplate
+	}
+
+	result := template
+	result = strings.ReplaceAll(result, "{epic}", epicID)
+	result = strings.ReplaceAll(result, "{prefix}", extractEpicPrefix(epicID))
+
+	// Git user (optional - leaves placeholder if not available)
+	if user := getGitUserName(); user != "" {
+		result = strings.ReplaceAll(result, "{user}", user)
+	}
+
+	return result
+}
+
+// extractEpicPrefix extracts the prefix from an epic ID (before the first hyphen).
+// Examples: "RA-123" -> "RA", "PROJ-456" -> "PROJ", "abc" -> "abc"
+func extractEpicPrefix(epicID string) string {
+	if idx := strings.Index(epicID, "-"); idx > 0 {
+		return epicID[:idx]
+	}
+	return epicID
+}
+
+// getGitUserName returns the git user.name config value, or empty if not set.
+func getGitUserName() string {
+	cmd := exec.Command("git", "config", "user.name")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// validateBranchName checks if a branch name is valid for git.
+// Returns an error if the branch name contains invalid characters.
+func validateBranchName(branchName string) error {
+	if branchName == "" {
+		return fmt.Errorf("branch name cannot be empty")
+	}
+
+	// Check for invalid characters
+	if invalidBranchCharsRegex.MatchString(branchName) {
+		return fmt.Errorf("branch name %q contains invalid characters (~ ^ : \\ space, .., or @{)", branchName)
+	}
+
+	// Check for .lock suffix
+	if strings.HasSuffix(branchName, ".lock") {
+		return fmt.Errorf("branch name %q cannot end with .lock", branchName)
+	}
+
+	// Check for leading/trailing slashes or dots
+	if strings.HasPrefix(branchName, "/") || strings.HasSuffix(branchName, "/") {
+		return fmt.Errorf("branch name %q cannot start or end with /", branchName)
+	}
+	if strings.HasPrefix(branchName, ".") || strings.HasSuffix(branchName, ".") {
+		return fmt.Errorf("branch name %q cannot start or end with .", branchName)
+	}
+
+	// Check for consecutive slashes
+	if strings.Contains(branchName, "//") {
+		return fmt.Errorf("branch name %q cannot contain consecutive slashes", branchName)
+	}
+
+	return nil
+}
+
+// getIntegrationBranchField extracts the integration_branch field from an epic's description.
+// Returns empty string if the field is not found.
+func getIntegrationBranchField(description string) string {
+	if description == "" {
+		return ""
+	}
+
+	lines := strings.Split(description, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(trimmed), "integration_branch:") {
+			value := strings.TrimPrefix(trimmed, "integration_branch:")
+			value = strings.TrimPrefix(value, "Integration_branch:")
+			value = strings.TrimPrefix(value, "INTEGRATION_BRANCH:")
+			// Handle case variations
+			for _, prefix := range []string{"integration_branch:", "Integration_branch:", "INTEGRATION_BRANCH:"} {
+				if strings.HasPrefix(trimmed, prefix) {
+					value = strings.TrimPrefix(trimmed, prefix)
+					break
+				}
+			}
+			// Re-parse properly - the prefix removal above is messy
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	return ""
+}
+
+// getIntegrationBranchTemplate returns the integration branch template to use.
+// Priority: CLI flag > rig config > default
+func getIntegrationBranchTemplate(rigPath, cliOverride string) string {
+	if cliOverride != "" {
+		return cliOverride
+	}
+
+	// Try to load rig settings
+	settingsPath := filepath.Join(rigPath, "settings", "config.json")
+	settings, err := config.LoadRigSettings(settingsPath)
+	if err != nil {
+		return defaultIntegrationBranchTemplate
+	}
+
+	if settings.MergeQueue != nil && settings.MergeQueue.IntegrationBranchTemplate != "" {
+		return settings.MergeQueue.IntegrationBranchTemplate
+	}
+
+	return defaultIntegrationBranchTemplate
+}
 
 // IntegrationStatusOutput is the JSON output structure for integration status.
 type IntegrationStatusOutput struct {
@@ -66,8 +202,14 @@ func runMqIntegrationCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'%s' is a %s, not an epic", epicID, epic.Type)
 	}
 
-	// Build integration branch name
-	branchName := "integration/" + epicID
+	// Build integration branch name from template
+	template := getIntegrationBranchTemplate(r.Path, mqIntegrationCreateBranch)
+	branchName := buildIntegrationBranchName(template, epicID)
+
+	// Validate the branch name
+	if err := validateBranchName(branchName); err != nil {
+		return fmt.Errorf("invalid branch name: %w", err)
+	}
 
 	// Initialize git for the rig
 	g := git.NewGit(r.Path)
@@ -185,9 +327,6 @@ func runMqIntegrationLand(cmd *cobra.Command, args []string) error {
 	bd := beads.New(r.Path)
 	g := git.NewGit(r.Path)
 
-	// Build integration branch name
-	branchName := "integration/" + epicID
-
 	// Show what we're about to do
 	if mqIntegrationLandDryRun {
 		fmt.Printf("%s Dry run - no changes will be made\n\n", style.Bold.Render("🔍"))
@@ -204,6 +343,13 @@ func runMqIntegrationLand(cmd *cobra.Command, args []string) error {
 
 	if epic.Type != "epic" {
 		return fmt.Errorf("'%s' is a %s, not an epic", epicID, epic.Type)
+	}
+
+	// Get integration branch name from epic metadata (stored at create time)
+	// Fall back to default template for backward compatibility with old epics
+	branchName := getIntegrationBranchField(epic.Description)
+	if branchName == "" {
+		branchName = buildIntegrationBranchName(defaultIntegrationBranchTemplate, epicID)
 	}
 
 	fmt.Printf("Landing integration branch for epic: %s\n", epicID)
@@ -455,8 +601,21 @@ func runMqIntegrationStatus(cmd *cobra.Command, args []string) error {
 	// Initialize beads for the rig
 	bd := beads.New(r.Path)
 
-	// Build integration branch name
-	branchName := "integration/" + epicID
+	// Fetch epic to get stored branch name
+	epic, err := bd.Show(epicID)
+	if err != nil {
+		if err == beads.ErrNotFound {
+			return fmt.Errorf("epic '%s' not found", epicID)
+		}
+		return fmt.Errorf("fetching epic: %w", err)
+	}
+
+	// Get integration branch name from epic metadata (stored at create time)
+	// Fall back to default template for backward compatibility with old epics
+	branchName := getIntegrationBranchField(epic.Description)
+	if branchName == "" {
+		branchName = buildIntegrationBranchName(defaultIntegrationBranchTemplate, epicID)
+	}
 
 	// Initialize git for the rig
 	g := git.NewGit(r.Path)
@@ -492,8 +651,8 @@ func runMqIntegrationStatus(cmd *cobra.Command, args []string) error {
 		aheadCount = 0 // Non-fatal
 	}
 
-	// Query for MRs targeting this integration branch
-	targetBranch := "integration/" + epicID
+	// Query for MRs targeting this integration branch (use resolved name)
+	targetBranch := branchName
 
 	// Get all merge-request issues
 	allMRs, err := bd.List(beads.ListOptions{

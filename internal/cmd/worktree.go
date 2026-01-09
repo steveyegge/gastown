@@ -113,7 +113,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	// Verify target rig exists
 	_, targetRigInfo, err := getRig(targetRig)
 	if err != nil {
-		return fmt.Errorf("rig '%s' not found - run 'gt rigs' to see available rigs", targetRig)
+		return fmt.Errorf("rig '%s' not found - run 'gt rig list' to see available rigs", targetRig)
 	}
 
 	// Compute worktree path: ~/gt/<target-rig>/crew/<source-rig>-<name>/
@@ -305,7 +305,7 @@ func runWorktreeRemove(cmd *cobra.Command, args []string) error {
 	// Verify target rig exists
 	_, targetRigInfo, err := getRig(targetRig)
 	if err != nil {
-		return fmt.Errorf("rig '%s' not found - run 'gt rigs' to see available rigs", targetRig)
+		return fmt.Errorf("rig '%s' not found - run 'gt rig list' to see available rigs", targetRig)
 	}
 
 	// Compute worktree path: ~/gt/<target-rig>/crew/<source-rig>-<name>/

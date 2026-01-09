@@ -47,6 +47,9 @@ var (
 
 	// Integration status flags
 	mqIntegrationStatusJSON bool
+
+	// Integration create flags
+	mqIntegrationCreateBranch string
 )
 
 var mqCmd = &cobra.Command{
@@ -190,18 +193,31 @@ var mqIntegrationCreateCmd = &cobra.Command{
 	Short: "Create an integration branch for an epic",
 	Long: `Create an integration branch for batch work on an epic.
 
-Creates a branch named integration/<epic-id> from main and pushes it
-to origin. Future MRs for this epic's children can target this branch.
+Creates a branch from main and pushes it to origin. Future MRs for this
+epic's children can target this branch.
+
+Branch naming:
+  Default: integration/<epic-id>
+  Config:  Set merge_queue.integration_branch_template in rig settings
+  Override: Use --branch flag for one-off customization
+
+Template variables:
+  {epic}   - Full epic ID (e.g., "RA-123")
+  {prefix} - Epic prefix before first hyphen (e.g., "RA")
+  {user}   - Git user.name (e.g., "klauern")
 
 Actions:
   1. Verify epic exists
-  2. Create branch integration/<epic-id> from main
+  2. Create branch from main (using template or --branch)
   3. Push to origin
-  4. Store integration branch info in epic metadata
+  4. Store actual branch name in epic metadata
 
-Example:
+Examples:
   gt mq integration create gt-auth-epic
-  # Creates integration/gt-auth-epic from main`,
+  # Creates integration/gt-auth-epic (default)
+
+  gt mq integration create RA-123 --branch "klauern/PROJ-1234/{epic}"
+  # Creates klauern/PROJ-1234/RA-123`,
 	Args: cobra.ExactArgs(1),
 	RunE: runMqIntegrationCreate,
 }
@@ -287,6 +303,7 @@ func init() {
 	mqCmd.AddCommand(mqStatusCmd)
 
 	// Integration branch subcommands
+	mqIntegrationCreateCmd.Flags().StringVar(&mqIntegrationCreateBranch, "branch", "", "Override branch name template (supports {epic}, {prefix}, {user})")
 	mqIntegrationCmd.AddCommand(mqIntegrationCreateCmd)
 
 	// Integration land flags

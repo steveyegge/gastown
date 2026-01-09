@@ -48,7 +48,7 @@ gt deacon start
 ```
 
 ## Verify
-1. Session exists: `tmux has-session -t gt-deacon 2>/dev/null`
+1. Session exists: `tmux has-session -t hq-deacon 2>/dev/null`
 2. Not stalled: `gt peek deacon/` does NOT show \"> Try\" prompt
 3. Heartbeat fresh: `deacon/heartbeat.json` modified < 2 min ago
 

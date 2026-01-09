@@ -27,7 +27,7 @@ Observe the current system state to inform triage decisions.
 **Step 1: Check Deacon state**
 ```bash
 # Is Deacon session alive?
-tmux has-session -t gt-deacon 2>/dev/null && echo "alive" || echo "dead"
+tmux has-session -t hq-deacon 2>/dev/null && echo "alive" || echo "dead"
 
 # If alive, what's the pane output showing?
 gt peek deacon --lines 20
@@ -125,7 +125,7 @@ gt nudge deacon "Boot check-in: you have pending work"
 **WAKE**
 ```bash
 # Send escape to break any tool waiting
-tmux send-keys -t gt-deacon Escape
+tmux send-keys -t hq-deacon Escape
 
 # Brief pause
 sleep 1

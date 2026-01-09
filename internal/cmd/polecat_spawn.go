@@ -12,7 +12,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -39,6 +38,7 @@ type SlingSpawnOptions struct {
 	Account  string // Claude Code account handle to use
 	Create   bool   // Create polecat if it doesn't exist (currently always true for sling)
 	HookBead string // Bead ID to set as hook_bead at spawn time (atomic assignment)
+	Agent    string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -122,8 +122,11 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		fmt.Printf("Polecat created. Agent must be started manually.\n\n")
 		fmt.Printf("To start the agent:\n")
 		fmt.Printf("  cd %s\n", polecatObj.ClonePath)
-		// Use rig's configured agent command
-		agentCmd := config.ResolveAgentConfig(townRoot, r.Path).BuildCommand()
+		// Use rig's configured agent command, unless overridden.
+		agentCmd, err := config.GetRuntimeCommandWithAgentOverride(r.Path, opts.Agent)
+		if err != nil {
+			return nil, err
+		}
 		fmt.Printf("  %s\n\n", agentCmd)
 		fmt.Printf("Agent will discover work via gt prime on startup.\n")
 
@@ -136,7 +139,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		}, nil
 	}
 
-	// Resolve account for Claude config
+	// Resolve account for runtime config
 	accountsPath := constants.MayorAccountsPath(townRoot)
 	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, opts.Account)
 	if err != nil {
@@ -148,22 +151,29 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 
 	// Start session
 	t := tmux.NewTmux()
-	sessMgr := session.NewManager(t, r)
+	polecatSessMgr := polecat.NewSessionManager(t, r)
 
 	// Check if already running
-	running, _ := sessMgr.IsRunning(polecatName)
+	running, _ := polecatSessMgr.IsRunning(polecatName)
 	if !running {
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
-		startOpts := session.StartOptions{
-			ClaudeConfigDir: claudeConfigDir,
+		startOpts := polecat.SessionStartOptions{
+			RuntimeConfigDir: claudeConfigDir,
 		}
-		if err := sessMgr.Start(polecatName, startOpts); err != nil {
+		if opts.Agent != "" {
+			cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, r.Path, "", opts.Agent)
+			if err != nil {
+				return nil, err
+			}
+			startOpts.Command = cmd
+		}
+		if err := polecatSessMgr.Start(polecatName, startOpts); err != nil {
 			return nil, fmt.Errorf("starting session: %w", err)
 		}
 	}
 
 	// Get session name and pane
-	sessionName := sessMgr.SessionName(polecatName)
+	sessionName := polecatSessMgr.SessionName(polecatName)
 	pane, err := getSessionPane(sessionName)
 	if err != nil {
 		return nil, fmt.Errorf("getting pane for %s: %w", sessionName, err)
@@ -217,4 +227,146 @@ func IsRigName(target string) (string, bool) {
 	}
 
 	return target, true
+}
+
+// IdlePolecatInfo contains information about an idle (existing but not running) polecat.
+type IdlePolecatInfo struct {
+	Name      string // Polecat name
+	ClonePath string // Path to polecat's git worktree
+	Session   string // Tmux session name (for starting)
+}
+
+// FindIdlePolecat looks for an existing polecat that is not currently running.
+// Returns the first idle polecat found, or nil if all polecats are running or none exist.
+// This enables reusing polecats instead of always spawning new ones.
+func FindIdlePolecat(rigName string) (*IdlePolecatInfo, error) {
+	// Find workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return nil, fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load rig config
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading rigs config: %w", err)
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+	r, err := rigMgr.GetRig(rigName)
+	if err != nil {
+		return nil, fmt.Errorf("rig '%s' not found", rigName)
+	}
+
+	// Get polecat manager
+	polecatGit := git.NewGit(r.Path)
+	polecatMgr := polecat.NewManager(r, polecatGit)
+
+	// List all polecats
+	polecats, err := polecatMgr.List()
+	if err != nil {
+		return nil, fmt.Errorf("listing polecats: %w", err)
+	}
+
+	// Check each polecat for an idle one (exists but no active session)
+	t := tmux.NewTmux()
+	for _, p := range polecats {
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, p.Name)
+		running, err := t.HasSession(sessionName)
+		if err != nil || running {
+			continue // Session active or error checking, skip
+		}
+
+		// Found an idle polecat
+		return &IdlePolecatInfo{
+			Name:      p.Name,
+			ClonePath: p.ClonePath,
+			Session:   sessionName,
+		}, nil
+	}
+
+	// No idle polecats found
+	return nil, nil
+}
+
+// StartPolecatSession starts an existing polecat's tmux session.
+// This is used when --start flag is provided and an idle polecat is found.
+// Returns the pane ID for nudging, or an error if startup fails.
+func StartPolecatSession(rigName, polecatName, clonePath string, account string, agentOverride string) (string, error) {
+	// Find workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return "", fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load rig to get path and config
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return "", fmt.Errorf("loading rigs config: %w", err)
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+	r, err := rigMgr.GetRig(rigName)
+	if err != nil {
+		return "", fmt.Errorf("rig '%s' not found", rigName)
+	}
+
+	// Resolve account for Claude config
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, account)
+	if err != nil {
+		return "", fmt.Errorf("resolving account: %w", err)
+	}
+	if accountHandle != "" {
+		fmt.Printf("Using account: %s\n", accountHandle)
+	}
+
+	// Start session
+	t := tmux.NewTmux()
+	polecatSessMgr := polecat.NewSessionManager(t, r)
+
+	sessionName := polecatSessMgr.SessionName(polecatName)
+
+	// Check if already running (idempotent)
+	running, _ := polecatSessMgr.IsRunning(polecatName)
+	if running {
+		fmt.Printf("Session already running for %s/%s\n", rigName, polecatName)
+		pane, err := getSessionPane(sessionName)
+		if err != nil {
+			return "", fmt.Errorf("getting pane for %s: %w", sessionName, err)
+		}
+		return pane, nil
+	}
+
+	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
+	startOpts := polecat.SessionStartOptions{
+		ClaudeConfigDir: claudeConfigDir,
+	}
+	if agentOverride != "" {
+		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, r.Path, "", agentOverride)
+		if err != nil {
+			return "", err
+		}
+		startOpts.Command = cmd
+	}
+	if err := polecatSessMgr.Start(polecatName, startOpts); err != nil {
+		return "", fmt.Errorf("starting session: %w", err)
+	}
+
+	// Get pane for nudging
+	pane, err := getSessionPane(sessionName)
+	if err != nil {
+		return "", fmt.Errorf("getting pane for %s: %w", sessionName, err)
+	}
+
+	fmt.Printf("%s Polecat %s session started\n", style.Bold.Render("✓"), polecatName)
+
+	// Log spawn event to activity feed
+	_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
+
+	return pane, nil
 }

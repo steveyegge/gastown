@@ -6,7 +6,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -22,43 +24,63 @@ type CrewListItem struct {
 }
 
 func runCrewList(cmd *cobra.Command, args []string) error {
-	crewMgr, r, err := getCrewManager(crewRig)
-	if err != nil {
-		return err
+	if crewListAll && crewRig != "" {
+		return fmt.Errorf("cannot use --all with --rig")
 	}
 
-	workers, err := crewMgr.List()
-	if err != nil {
-		return fmt.Errorf("listing crew workers: %w", err)
-	}
-
-	if len(workers) == 0 {
-		fmt.Println("No crew workspaces found.")
-		return nil
+	var rigs []*rig.Rig
+	if crewListAll {
+		allRigs, _, err := getAllRigs()
+		if err != nil {
+			return err
+		}
+		rigs = allRigs
+	} else {
+		_, r, err := getCrewManager(crewRig)
+		if err != nil {
+			return err
+		}
+		rigs = []*rig.Rig{r}
 	}
 
 	// Check session and git status for each worker
 	t := tmux.NewTmux()
 	var items []CrewListItem
 
-	for _, w := range workers {
-		sessionID := crewSessionName(r.Name, w.Name)
-		hasSession, _ := t.HasSession(sessionID)
+	for _, r := range rigs {
+		crewGit := git.NewGit(r.Path)
+		crewMgr := crew.NewManager(r, crewGit)
 
-		crewGit := git.NewGit(w.ClonePath)
-		gitClean := true
-		if status, err := crewGit.Status(); err == nil {
-			gitClean = status.Clean
+		workers, err := crewMgr.List()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to list crew workers in %s: %v\n", r.Name, err)
+			continue
 		}
 
-		items = append(items, CrewListItem{
-			Name:       w.Name,
-			Rig:        r.Name,
-			Branch:     w.Branch,
-			Path:       w.ClonePath,
-			HasSession: hasSession,
-			GitClean:   gitClean,
-		})
+		for _, w := range workers {
+			sessionID := crewSessionName(r.Name, w.Name)
+			hasSession, _ := t.HasSession(sessionID)
+
+			workerGit := git.NewGit(w.ClonePath)
+			gitClean := true
+			if status, err := workerGit.Status(); err == nil {
+				gitClean = status.Clean
+			}
+
+			items = append(items, CrewListItem{
+				Name:       w.Name,
+				Rig:        r.Name,
+				Branch:     w.Branch,
+				Path:       w.ClonePath,
+				HasSession: hasSession,
+				GitClean:   gitClean,
+			})
+		}
+	}
+
+	if len(items) == 0 {
+		fmt.Println("No crew workspaces found.")
+		return nil
 	}
 
 	if crewJSON {

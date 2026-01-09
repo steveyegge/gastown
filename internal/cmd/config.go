@@ -153,7 +153,7 @@ func runConfigAgentList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Collect all agents
-	builtInAgents := []string{"claude", "gemini", "codex"}
+	builtInAgents := config.ListAgentPresets()
 	customAgents := make(map[string]*config.RuntimeConfig)
 	if townSettings.Agents != nil {
 		for name, runtime := range townSettings.Agents {
@@ -330,7 +330,7 @@ func runConfigAgentSet(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Agent '%s' set to: %s\n", style.Bold.Render(name), commandLine)
 
 	// Check if this overrides a built-in
-	builtInAgents := []string{"claude", "gemini", "codex"}
+	builtInAgents := config.ListAgentPresets()
 	for _, builtin := range builtInAgents {
 		if name == builtin {
 			fmt.Printf("\n%s\n", style.Dim.Render("(overriding built-in '"+builtin+"' preset)"))
@@ -350,7 +350,7 @@ func runConfigAgentRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if trying to remove built-in
-	builtInAgents := []string{"claude", "gemini", "codex"}
+	builtInAgents := config.ListAgentPresets()
 	for _, builtin := range builtInAgents {
 		if name == builtin {
 			return fmt.Errorf("cannot remove built-in agent '%s' (use 'gt config agent set' to override it)", name)
@@ -415,7 +415,7 @@ func runConfigDefaultAgent(cmd *cobra.Command, args []string) error {
 
 	// Verify agent exists
 	isValid := false
-	builtInAgents := []string{"claude", "gemini", "codex"}
+	builtInAgents := config.ListAgentPresets()
 	for _, builtin := range builtInAgents {
 		if name == builtin {
 			isValid = true

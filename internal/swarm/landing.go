@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/mail"
-	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -59,12 +59,12 @@ func (m *Manager) ExecuteLanding(swarmID string, config LandingConfig) (*Landing
 
 	// Phase 1: Stop all polecat sessions
 	t := tmux.NewTmux()
-	sessMgr := session.NewManager(t, m.rig)
+	polecatMgr := polecat.NewSessionManager(t, m.rig)
 
 	for _, worker := range swarm.Workers {
-		running, _ := sessMgr.IsRunning(worker)
+		running, _ := polecatMgr.IsRunning(worker)
 		if running {
-			err := sessMgr.Stop(worker, config.ForceKill)
+			err := polecatMgr.Stop(worker, config.ForceKill)
 			if err != nil {
 				// Continue anyway
 			} else {

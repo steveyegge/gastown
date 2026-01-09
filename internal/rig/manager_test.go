@@ -3,6 +3,7 @@ package rig
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,6 +56,10 @@ func createTestRig(t *testing.T, root, name string) {
 			t.Fatalf("mkdir polecat: %v", err)
 		}
 	}
+	// Create a shared support dir that should not be treated as a polecat worktree.
+	if err := os.MkdirAll(filepath.Join(polecatsDir, ".claude"), 0755); err != nil {
+		t.Fatalf("mkdir polecats/.claude: %v", err)
+	}
 }
 
 func TestDiscoverRigs(t *testing.T) {
@@ -83,6 +88,9 @@ func TestDiscoverRigs(t *testing.T) {
 	}
 	if len(rig.Polecats) != 2 {
 		t.Errorf("Polecats count = %d, want 2", len(rig.Polecats))
+	}
+	if slices.Contains(rig.Polecats, ".claude") {
+		t.Errorf("expected polecats/.claude to be ignored, got %v", rig.Polecats)
 	}
 	if !rig.HasWitness {
 		t.Error("expected HasWitness = true")
@@ -430,17 +438,17 @@ func TestIsValidBeadsPrefix(t *testing.T) {
 		{"a-b-c", true},
 
 		// Invalid prefixes
-		{"", false},                    // empty
-		{"1abc", false},                // starts with number
-		{"-abc", false},                // starts with hyphen
-		{"abc def", false},             // contains space
-		{"abc;ls", false},              // shell injection attempt
-		{"$(whoami)", false},           // command substitution
-		{"`id`", false},                // backtick command
-		{"abc|cat", false},             // pipe
-		{"../etc/passwd", false},       // path traversal
+		{"", false},                      // empty
+		{"1abc", false},                  // starts with number
+		{"-abc", false},                  // starts with hyphen
+		{"abc def", false},               // contains space
+		{"abc;ls", false},                // shell injection attempt
+		{"$(whoami)", false},             // command substitution
+		{"`id`", false},                  // backtick command
+		{"abc|cat", false},               // pipe
+		{"../etc/passwd", false},         // path traversal
 		{"aaaaaaaaaaaaaaaaaaaaa", false}, // too long (21 chars, >20 limit)
-		{"valid-but-with-$var", false}, // variable reference
+		{"valid-but-with-$var", false},   // variable reference
 	}
 
 	for _, tt := range tests {
@@ -473,6 +481,97 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "invalid beads prefix") {
 				t.Errorf("initBeads(%q) error = %q, want error containing 'invalid beads prefix'", prefix, err.Error())
+			}
+		})
+	}
+}
+
+func TestDeriveBeadsPrefix(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		// Compound words with common suffixes should split
+		{"gastown", "gt"},       // gas + town
+		{"nashville", "nv"},     // nash + ville
+		{"bridgeport", "bp"},    // bridge + port
+		{"someplace", "sp"},     // some + place
+		{"greenland", "gl"},     // green + land
+		{"springfield", "sf"},   // spring + field
+		{"hollywood", "hw"},     // holly + wood
+		{"oxford", "of"},        // ox + ford
+
+		// Hyphenated names
+		{"my-project", "mp"},
+		{"gas-town", "gt"},
+		{"some-long-name", "sln"},
+
+		// Underscored names
+		{"my_project", "mp"},
+
+		// Short single words (use the whole name)
+		{"foo", "foo"},
+		{"bar", "bar"},
+		{"ab", "ab"},
+
+		// Longer single words without known suffixes (first 2 chars)
+		{"myrig", "my"},
+		{"awesome", "aw"},
+		{"coolrig", "co"},
+
+		// With language suffixes stripped
+		{"myproject-py", "my"},
+		{"myproject-go", "my"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deriveBeadsPrefix(tt.name)
+			if got != tt.want {
+				t.Errorf("deriveBeadsPrefix(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSplitCompoundWord(t *testing.T) {
+	tests := []struct {
+		word string
+		want []string
+	}{
+		// Known suffixes
+		{"gastown", []string{"gas", "town"}},
+		{"nashville", []string{"nash", "ville"}},
+		{"bridgeport", []string{"bridge", "port"}},
+		{"someplace", []string{"some", "place"}},
+		{"greenland", []string{"green", "land"}},
+		{"springfield", []string{"spring", "field"}},
+		{"hollywood", []string{"holly", "wood"}},
+		{"oxford", []string{"ox", "ford"}},
+
+		// Just the suffix (should not split)
+		{"town", []string{"town"}},
+		{"ville", []string{"ville"}},
+
+		// No known suffix
+		{"myrig", []string{"myrig"}},
+		{"awesome", []string{"awesome"}},
+
+		// Empty prefix would result (should not split)
+		// Note: "town" itself shouldn't split to ["", "town"]
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.word, func(t *testing.T) {
+			got := splitCompoundWord(tt.word)
+			if len(got) != len(tt.want) {
+				t.Errorf("splitCompoundWord(%q) = %v, want %v", tt.word, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("splitCompoundWord(%q)[%d] = %q, want %q", tt.word, i, got[i], tt.want[i])
+				}
 			}
 		})
 	}

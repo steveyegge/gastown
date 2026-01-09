@@ -17,9 +17,9 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -366,12 +366,16 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	// - Otherwise route to rig root (where initBeads creates the database)
 	// The conditional routing is necessary because initBeads creates the database at
 	// "<rig>/.beads", while repos with tracked beads have their database at mayor/rig/.beads.
+	var beadsWorkDir string
 	if newRig.Config.Prefix != "" {
 		routePath := name
 		mayorRigBeads := filepath.Join(townRoot, name, "mayor", "rig", ".beads")
 		if _, err := os.Stat(mayorRigBeads); err == nil {
 			// Source repo has .beads/ tracked - route to mayor/rig
 			routePath = name + "/mayor/rig"
+			beadsWorkDir = filepath.Join(townRoot, name, "mayor", "rig")
+		} else {
+			beadsWorkDir = filepath.Join(townRoot, name)
 		}
 		route := beads.Route{
 			Prefix: newRig.Config.Prefix + "-",
@@ -380,6 +384,23 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		if err := beads.AppendRoute(townRoot, route); err != nil {
 			// Non-fatal: routing will still work, just not from town root
 			fmt.Printf("  %s Could not update routes.jsonl: %v\n", style.Warning.Render("!"), err)
+		}
+	}
+
+	// Create rig identity bead
+	if newRig.Config.Prefix != "" && beadsWorkDir != "" {
+		bd := beads.New(beadsWorkDir)
+		rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
+		fields := &beads.RigFields{
+			Repo:   gitURL,
+			Prefix: newRig.Config.Prefix,
+			State:  "active",
+		}
+		if _, err := bd.CreateRigBead(rigBeadID, name, fields); err != nil {
+			// Non-fatal: rig is functional without the identity bead
+			fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
+		} else {
+			fmt.Printf("  Created rig identity bead: %s\n", rigBeadID)
 		}
 	}
 
@@ -737,15 +758,14 @@ func runRigBoot(cmd *cobra.Command, args []string) error {
 		skipped = append(skipped, "witness (already running)")
 	} else {
 		fmt.Printf("  Starting witness...\n")
-		// Use ensureWitnessSession to create tmux session (same as gt witness start)
-		created, err := ensureWitnessSession(rigName, r)
-		if err != nil {
-			return fmt.Errorf("starting witness: %w", err)
-		}
-		if created {
-			// Update manager state to reflect running session
-			witMgr := witness.NewManager(r)
-			_ = witMgr.Start() // non-fatal: state file update
+		witMgr := witness.NewManager(r)
+		if err := witMgr.Start(false); err != nil {
+			if err == witness.ErrAlreadyRunning {
+				skipped = append(skipped, "witness (already running)")
+			} else {
+				return fmt.Errorf("starting witness: %w", err)
+			}
+		} else {
 			started = append(started, "witness")
 		}
 	}
@@ -818,13 +838,15 @@ func runRigStart(cmd *cobra.Command, args []string) error {
 			skipped = append(skipped, "witness")
 		} else {
 			fmt.Printf("  Starting witness...\n")
-			created, err := ensureWitnessSession(rigName, r)
-			if err != nil {
-				fmt.Printf("  %s Failed to start witness: %v\n", style.Warning.Render("⚠"), err)
-				hasError = true
-			} else if created {
-				witMgr := witness.NewManager(r)
-				_ = witMgr.Start()
+			witMgr := witness.NewManager(r)
+			if err := witMgr.Start(false); err != nil {
+				if err == witness.ErrAlreadyRunning {
+					skipped = append(skipped, "witness")
+				} else {
+					fmt.Printf("  %s Failed to start witness: %v\n", style.Warning.Render("⚠"), err)
+					hasError = true
+				}
+			} else {
 				started = append(started, "witness")
 			}
 		}
@@ -935,11 +957,11 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 
 	// 1. Stop all polecat sessions
 	t := tmux.NewTmux()
-	sessMgr := session.NewManager(t, r)
-	infos, err := sessMgr.List()
+	polecatMgr := polecat.NewSessionManager(t, r)
+	infos, err := polecatMgr.List()
 	if err == nil && len(infos) > 0 {
 		fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
-		if err := sessMgr.StopAll(rigShutdownForce); err != nil {
+		if err := polecatMgr.StopAll(rigShutdownForce); err != nil {
 			errors = append(errors, fmt.Sprintf("polecat sessions: %v", err))
 		}
 	}
@@ -1025,6 +1047,17 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 
 	// Header
 	fmt.Printf("%s\n", style.Bold.Render(rigName))
+
+	// Operational state
+	opState, opSource := getRigOperationalState(townRoot, rigName)
+	if opState == "OPERATIONAL" {
+		fmt.Printf("  Status: %s\n", style.Success.Render(opState))
+	} else if opState == "PARKED" {
+		fmt.Printf("  Status: %s (%s)\n", style.Warning.Render(opState), opSource)
+	} else if opState == "DOCKED" {
+		fmt.Printf("  Status: %s (%s)\n", style.Dim.Render(opState), opSource)
+	}
+
 	fmt.Printf("  Path: %s\n", r.Path)
 	if r.Config != nil && r.Config.Prefix != "" {
 		fmt.Printf("  Beads prefix: %s-\n", r.Config.Prefix)
@@ -1201,11 +1234,11 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 
 		// 1. Stop all polecat sessions
 		t := tmux.NewTmux()
-		sessMgr := session.NewManager(t, r)
-		infos, err := sessMgr.List()
+		polecatMgr := polecat.NewSessionManager(t, r)
+		infos, err := polecatMgr.List()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
-			if err := sessMgr.StopAll(rigStopForce); err != nil {
+			if err := polecatMgr.StopAll(rigStopForce); err != nil {
 				errors = append(errors, fmt.Sprintf("polecat sessions: %v", err))
 			}
 		}
@@ -1334,11 +1367,11 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Stopping...\n")
 
 		// 1. Stop all polecat sessions
-		sessMgr := session.NewManager(t, r)
-		infos, err := sessMgr.List()
+		polecatMgr := polecat.NewSessionManager(t, r)
+		infos, err := polecatMgr.List()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("    Stopping %d polecat session(s)...\n", len(infos))
-			if err := sessMgr.StopAll(rigRestartForce); err != nil {
+			if err := polecatMgr.StopAll(rigRestartForce); err != nil {
 				stopErrors = append(stopErrors, fmt.Sprintf("polecat sessions: %v", err))
 			}
 		}
@@ -1385,12 +1418,14 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 			skipped = append(skipped, "witness")
 		} else {
 			fmt.Printf("    Starting witness...\n")
-			created, err := ensureWitnessSession(rigName, r)
-			if err != nil {
-				fmt.Printf("    %s Failed to start witness: %v\n", style.Warning.Render("⚠"), err)
-				startErrors = append(startErrors, fmt.Sprintf("witness: %v", err))
-			} else if created {
-				_ = witMgr.Start()
+			if err := witMgr.Start(false); err != nil {
+				if err == witness.ErrAlreadyRunning {
+					skipped = append(skipped, "witness")
+				} else {
+					fmt.Printf("    %s Failed to start witness: %v\n", style.Warning.Render("⚠"), err)
+					startErrors = append(startErrors, fmt.Sprintf("witness: %v", err))
+				}
+			} else {
 				started = append(started, "witness")
 			}
 		}
@@ -1447,4 +1482,49 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// getRigOperationalState returns the operational state and source for a rig.
+// It checks the wisp layer first (local/ephemeral), then rig bead labels (global).
+// Returns state ("OPERATIONAL", "PARKED", or "DOCKED") and source ("local", "global - synced", or "default").
+func getRigOperationalState(townRoot, rigName string) (state string, source string) {
+	// Check wisp layer first (local/ephemeral overrides)
+	wispConfig := wisp.NewConfig(townRoot, rigName)
+	if status := wispConfig.GetString("status"); status != "" {
+		switch strings.ToLower(status) {
+		case "parked":
+			return "PARKED", "local"
+		case "docked":
+			return "DOCKED", "local"
+		}
+	}
+
+	// Check rig bead labels (global/synced)
+	// Rig identity bead ID: <prefix>-rig-<name>
+	// Look for status:docked or status:parked labels
+	rigPath := filepath.Join(townRoot, rigName)
+	rigBeadsDir := beads.ResolveBeadsDir(rigPath)
+	bd := beads.NewWithBeadsDir(rigPath, rigBeadsDir)
+
+	// Try to find the rig identity bead
+	// Convention: <prefix>-rig-<rigName>
+	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.Beads != nil {
+		rigBeadID := fmt.Sprintf("%s-rig-%s", rigCfg.Beads.Prefix, rigName)
+		if issue, err := bd.Show(rigBeadID); err == nil {
+			for _, label := range issue.Labels {
+				if strings.HasPrefix(label, "status:") {
+					statusValue := strings.TrimPrefix(label, "status:")
+					switch strings.ToLower(statusValue) {
+					case "docked":
+						return "DOCKED", "global - synced"
+					case "parked":
+						return "PARKED", "global - synced"
+					}
+				}
+			}
+		}
+	}
+
+	// Default: operational
+	return "OPERATIONAL", "default"
 }

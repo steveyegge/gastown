@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -195,15 +196,17 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 			continue
 		}
 
-		// Check if Claude is ready (non-blocking poll)
-		err = t.WaitForClaudeReady(ps.Session, timeout)
+		// Check if runtime is ready (non-blocking poll)
+		rigPath := filepath.Join(townRoot, ps.Rig)
+		runtimeConfig := config.LoadRuntimeConfig(rigPath)
+		err = t.WaitForRuntimeReady(ps.Session, runtimeConfig, timeout)
 		if err != nil {
 			// Not ready yet - keep in pending
 			remaining = append(remaining, ps)
 			continue
 		}
 
-		// Claude is ready - send trigger
+		// Runtime is ready - send trigger
 		triggerMsg := "Begin."
 		if err := t.NudgeSession(ps.Session, triggerMsg); err != nil {
 			result.Error = fmt.Errorf("nudging session: %w", err)

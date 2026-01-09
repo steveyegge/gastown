@@ -109,7 +109,7 @@ not by Go code. This follows the Zero Friction Control (ZFC) principle.
 **Example: Handling a Conflict**
 ```bash
 git checkout -b temp origin/polecat/rictus-12345
-git rebase origin/main
+git rebase origin/{{ .DefaultBranch }}
 # If conflict:
 git status                    # See what conflicted
 # DECISION: Can I resolve it? Is it trivial?
@@ -225,8 +225,8 @@ If queue empty, skip to context-check step.
 
 **process-branch**: Pick next branch, rebase on main
 ```bash
-git checkout -b temp origin/polecat/<worker>
-git rebase origin/main
+git checkout -b temp polecat/<worker>    # Local branch (shared via .repo.git)
+git rebase origin/{{ .DefaultBranch }}
 ```
 If conflicts unresolvable: notify polecat, skip to loop-check.
 
@@ -251,11 +251,11 @@ GATE: Cannot proceed to merge without fix OR bead filed
 
 **merge-push**: Merge to main and push immediately
 ```bash
-git checkout main
+git checkout {{ .DefaultBranch }}
 git merge --ff-only temp
-git push origin main
+git push origin {{ .DefaultBranch }}
 git branch -d temp
-git push origin --delete polecat/<worker>
+git branch -d polecat/<worker>           # Delete local polecat branch
 ```
 
 **loop-check**: More branches? Return to process-branch.
@@ -340,8 +340,8 @@ gt mail send {{ .RigName }}/<worker> -s "Rebase needed" \
 
 ### Git Operations
 - `git fetch origin` - Fetch all remote branches
-- `git rebase origin/main` - Rebase on current main
-- `git push origin main` - Push merged changes
+- `git rebase origin/{{ .DefaultBranch }}` - Rebase on current main
+- `git push origin {{ .DefaultBranch }}` - Push merged changes
 
 **IMPORTANT**: The merge queue source of truth is `gt mq list {{ .RigName }}`, NOT git branches.
 Do NOT use `git branch -r | grep polecat` or `git ls-remote | grep polecat` to check for work.

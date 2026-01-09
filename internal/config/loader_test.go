@@ -778,11 +778,17 @@ func TestMessagingConfigPath(t *testing.T) {
 
 func TestRuntimeConfigDefaults(t *testing.T) {
 	rc := DefaultRuntimeConfig()
+	if rc.Provider != "claude" {
+		t.Errorf("Provider = %q, want %q", rc.Provider, "claude")
+	}
 	if rc.Command != "claude" {
 		t.Errorf("Command = %q, want %q", rc.Command, "claude")
 	}
 	if len(rc.Args) != 1 || rc.Args[0] != "--dangerously-skip-permissions" {
 		t.Errorf("Args = %v, want [--dangerously-skip-permissions]", rc.Args)
+	}
+	if rc.Session == nil || rc.Session.SessionIDEnv != "CLAUDE_SESSION_ID" {
+		t.Errorf("SessionIDEnv = %q, want %q", rc.Session.SessionIDEnv, "CLAUDE_SESSION_ID")
 	}
 }
 
@@ -879,6 +885,18 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 }
 
 func TestBuildAgentStartupCommand(t *testing.T) {
+	// BuildAgentStartupCommand auto-detects town root from cwd when rigPath is empty.
+	// Use a temp directory to ensure we exercise the fallback default config path.
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpWD := t.TempDir()
+	if err := os.Chdir(tmpWD); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
 	// Test without rig config (uses defaults)
 	cmd := BuildAgentStartupCommand("witness", "gastown/witness", "", "")
 
@@ -931,6 +949,256 @@ func TestBuildCrewStartupCommand(t *testing.T) {
 	}
 }
 
+func TestResolveAgentConfigWithOverride(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Town settings: default agent is gemini, plus a custom alias.
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "gemini"
+	townSettings.Agents["claude-haiku"] = &RuntimeConfig{
+		Command: "claude",
+		Args:    []string{"--model", "haiku", "--dangerously-skip-permissions"},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Rig settings: prefer codex unless overridden.
+	rigSettings := NewRigSettings()
+	rigSettings.Agent = "codex"
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	t.Run("no override uses rig agent", func(t *testing.T) {
+		rc, name, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "")
+		if err != nil {
+			t.Fatalf("ResolveAgentConfigWithOverride: %v", err)
+		}
+		if name != "codex" {
+			t.Fatalf("name = %q, want %q", name, "codex")
+		}
+		if rc.Command != "codex" {
+			t.Fatalf("rc.Command = %q, want %q", rc.Command, "codex")
+		}
+	})
+
+	t.Run("override uses built-in preset", func(t *testing.T) {
+		rc, name, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "gemini")
+		if err != nil {
+			t.Fatalf("ResolveAgentConfigWithOverride: %v", err)
+		}
+		if name != "gemini" {
+			t.Fatalf("name = %q, want %q", name, "gemini")
+		}
+		if rc.Command != "gemini" {
+			t.Fatalf("rc.Command = %q, want %q", rc.Command, "gemini")
+		}
+	})
+
+	t.Run("override uses custom agent alias", func(t *testing.T) {
+		rc, name, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "claude-haiku")
+		if err != nil {
+			t.Fatalf("ResolveAgentConfigWithOverride: %v", err)
+		}
+		if name != "claude-haiku" {
+			t.Fatalf("name = %q, want %q", name, "claude-haiku")
+		}
+		if rc.Command != "claude" {
+			t.Fatalf("rc.Command = %q, want %q", rc.Command, "claude")
+		}
+		if got := rc.BuildCommand(); got != "claude --model haiku --dangerously-skip-permissions" {
+			t.Fatalf("BuildCommand() = %q, want %q", got, "claude --model haiku --dangerously-skip-permissions")
+		}
+	})
+
+	t.Run("unknown override errors", func(t *testing.T) {
+		_, _, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "nope-not-an-agent")
+		if err == nil {
+			t.Fatal("expected error for unknown agent override")
+		}
+	})
+}
+
+func TestBuildPolecatStartupCommandWithAgentOverride(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// The rig settings file must exist for resolver calls that load it.
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildPolecatStartupCommandWithAgentOverride("testrig", "toast", rigPath, "", "gemini")
+	if err != nil {
+		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
+	}
+	if !strings.Contains(cmd, "GT_ROLE=polecat") {
+		t.Fatalf("expected GT_ROLE export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_RIG=testrig") {
+		t.Fatalf("expected GT_RIG export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_POLECAT=toast") {
+		t.Fatalf("expected GT_POLECAT export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "gemini --approval-mode yolo") {
+		t.Fatalf("expected gemini command in output: %q", cmd)
+	}
+}
+
+func TestBuildAgentStartupCommandWithAgentOverride(t *testing.T) {
+	townRoot := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "town.json"), []byte("{}"), 0600); err != nil {
+		t.Fatalf("WriteFile town.json: %v", err)
+	}
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "gemini"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	originalWd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(originalWd) })
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	t.Run("empty override uses default agent", func(t *testing.T) {
+		cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", "", "")
+		if err != nil {
+			t.Fatalf("BuildAgentStartupCommandWithAgentOverride: %v", err)
+		}
+		if !strings.Contains(cmd, "GT_ROLE=mayor") {
+			t.Fatalf("expected GT_ROLE export in command: %q", cmd)
+		}
+		if !strings.Contains(cmd, "BD_ACTOR=mayor") {
+			t.Fatalf("expected BD_ACTOR export in command: %q", cmd)
+		}
+		if !strings.Contains(cmd, "gemini --approval-mode yolo") {
+			t.Fatalf("expected gemini command in output: %q", cmd)
+		}
+	})
+
+	t.Run("override switches agent", func(t *testing.T) {
+		cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", "", "codex")
+		if err != nil {
+			t.Fatalf("BuildAgentStartupCommandWithAgentOverride: %v", err)
+		}
+		if !strings.Contains(cmd, "codex") {
+			t.Fatalf("expected codex command in output: %q", cmd)
+		}
+	})
+}
+
+func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildCrewStartupCommandWithAgentOverride("testrig", "max", rigPath, "gt prime", "gemini")
+	if err != nil {
+		t.Fatalf("BuildCrewStartupCommandWithAgentOverride: %v", err)
+	}
+	if !strings.Contains(cmd, "GT_ROLE=crew") {
+		t.Fatalf("expected GT_ROLE export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_RIG=testrig") {
+		t.Fatalf("expected GT_RIG export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_CREW=max") {
+		t.Fatalf("expected GT_CREW export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "BD_ACTOR=testrig/crew/max") {
+		t.Fatalf("expected BD_ACTOR export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "gemini --approval-mode yolo") {
+		t.Fatalf("expected gemini command in output: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "gemini"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rigSettings := NewRigSettings()
+	rigSettings.Agent = "codex"
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "witness"}, rigPath, "")
+	if !strings.Contains(cmd, "codex") {
+		t.Fatalf("expected rig agent (codex) in command: %q", cmd)
+	}
+	if strings.Contains(cmd, "gemini --approval-mode yolo") {
+		t.Fatalf("did not expect town default agent in command: %q", cmd)
+	}
+}
+
+func TestGetRuntimeCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "gemini"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rigSettings := NewRigSettings()
+	rigSettings.Agent = "codex"
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := GetRuntimeCommand(rigPath)
+	if !strings.HasPrefix(cmd, "codex") {
+		t.Fatalf("GetRuntimeCommand() = %q, want prefix %q", cmd, "codex")
+	}
+}
+
+func TestExpectedPaneCommands(t *testing.T) {
+	t.Run("claude maps to node", func(t *testing.T) {
+		got := ExpectedPaneCommands(&RuntimeConfig{Command: "claude"})
+		if len(got) != 1 || got[0] != "node" {
+			t.Fatalf("ExpectedPaneCommands(claude) = %v, want %v", got, []string{"node"})
+		}
+	})
+
+	t.Run("codex maps to executable", func(t *testing.T) {
+		got := ExpectedPaneCommands(&RuntimeConfig{Command: "codex"})
+		if len(got) != 1 || got[0] != "codex" {
+			t.Fatalf("ExpectedPaneCommands(codex) = %v, want %v", got, []string{"codex"})
+		}
+	})
+}
+
 func TestLoadRuntimeConfigFromSettings(t *testing.T) {
 	// Create temp rig with custom runtime config
 	dir := t.TempDir()
@@ -968,6 +1236,214 @@ func TestLoadRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	rc := LoadRuntimeConfig("/nonexistent/path")
 	if rc.Command != "claude" {
 		t.Errorf("Command = %q, want %q (default)", rc.Command, "claude")
+	}
+}
+
+func TestDaemonPatrolConfigRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mayor", "daemon.json")
+
+	original := NewDaemonPatrolConfig()
+	original.Patrols["custom"] = PatrolConfig{
+		Enabled:  true,
+		Interval: "10m",
+		Agent:    "custom-agent",
+	}
+
+	if err := SaveDaemonPatrolConfig(path, original); err != nil {
+		t.Fatalf("SaveDaemonPatrolConfig: %v", err)
+	}
+
+	loaded, err := LoadDaemonPatrolConfig(path)
+	if err != nil {
+		t.Fatalf("LoadDaemonPatrolConfig: %v", err)
+	}
+
+	if loaded.Type != "daemon-patrol-config" {
+		t.Errorf("Type = %q, want 'daemon-patrol-config'", loaded.Type)
+	}
+	if loaded.Version != CurrentDaemonPatrolConfigVersion {
+		t.Errorf("Version = %d, want %d", loaded.Version, CurrentDaemonPatrolConfigVersion)
+	}
+	if loaded.Heartbeat == nil || !loaded.Heartbeat.Enabled {
+		t.Error("Heartbeat not preserved")
+	}
+	if len(loaded.Patrols) != 4 {
+		t.Errorf("Patrols count = %d, want 4", len(loaded.Patrols))
+	}
+	if custom, ok := loaded.Patrols["custom"]; !ok || custom.Agent != "custom-agent" {
+		t.Error("custom patrol not preserved")
+	}
+}
+
+func TestDaemonPatrolConfigValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *DaemonPatrolConfig
+		wantErr bool
+	}{
+		{
+			name:    "valid default config",
+			config:  NewDaemonPatrolConfig(),
+			wantErr: false,
+		},
+		{
+			name: "valid minimal config",
+			config: &DaemonPatrolConfig{
+				Type:    "daemon-patrol-config",
+				Version: 1,
+			},
+			wantErr: false,
+		},
+		{
+			name: "wrong type",
+			config: &DaemonPatrolConfig{
+				Type:    "wrong",
+				Version: 1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "future version rejected",
+			config: &DaemonPatrolConfig{
+				Type:    "daemon-patrol-config",
+				Version: 999,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDaemonPatrolConfig(tt.config)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateDaemonPatrolConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadDaemonPatrolConfigNotFound(t *testing.T) {
+	_, err := LoadDaemonPatrolConfig("/nonexistent/path.json")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestDaemonPatrolConfigPath(t *testing.T) {
+	tests := []struct {
+		townRoot string
+		expected string
+	}{
+		{"/home/user/gt", "/home/user/gt/mayor/daemon.json"},
+		{"/var/lib/gastown", "/var/lib/gastown/mayor/daemon.json"},
+		{"/tmp/test-workspace", "/tmp/test-workspace/mayor/daemon.json"},
+		{"~/gt", "~/gt/mayor/daemon.json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.townRoot, func(t *testing.T) {
+			path := DaemonPatrolConfigPath(tt.townRoot)
+			if path != tt.expected {
+				t.Errorf("DaemonPatrolConfigPath(%q) = %q, want %q", tt.townRoot, path, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEnsureDaemonPatrolConfig(t *testing.T) {
+	t.Run("creates config if missing", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "mayor"), 0755); err != nil {
+			t.Fatalf("creating mayor dir: %v", err)
+		}
+
+		err := EnsureDaemonPatrolConfig(dir)
+		if err != nil {
+			t.Fatalf("EnsureDaemonPatrolConfig: %v", err)
+		}
+
+		path := DaemonPatrolConfigPath(dir)
+		loaded, err := LoadDaemonPatrolConfig(path)
+		if err != nil {
+			t.Fatalf("LoadDaemonPatrolConfig: %v", err)
+		}
+		if loaded.Type != "daemon-patrol-config" {
+			t.Errorf("Type = %q, want 'daemon-patrol-config'", loaded.Type)
+		}
+		if len(loaded.Patrols) != 3 {
+			t.Errorf("Patrols count = %d, want 3 (deacon, witness, refinery)", len(loaded.Patrols))
+		}
+	})
+
+	t.Run("preserves existing config", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "mayor", "daemon.json")
+
+		existing := &DaemonPatrolConfig{
+			Type:    "daemon-patrol-config",
+			Version: 1,
+			Patrols: map[string]PatrolConfig{
+				"custom-only": {Enabled: true, Agent: "custom"},
+			},
+		}
+		if err := SaveDaemonPatrolConfig(path, existing); err != nil {
+			t.Fatalf("SaveDaemonPatrolConfig: %v", err)
+		}
+
+		err := EnsureDaemonPatrolConfig(dir)
+		if err != nil {
+			t.Fatalf("EnsureDaemonPatrolConfig: %v", err)
+		}
+
+		loaded, err := LoadDaemonPatrolConfig(path)
+		if err != nil {
+			t.Fatalf("LoadDaemonPatrolConfig: %v", err)
+		}
+		if len(loaded.Patrols) != 1 {
+			t.Errorf("Patrols count = %d, want 1 (should preserve existing)", len(loaded.Patrols))
+		}
+		if _, ok := loaded.Patrols["custom-only"]; !ok {
+			t.Error("existing custom patrol was overwritten")
+		}
+	})
+
+}
+
+func TestNewDaemonPatrolConfig(t *testing.T) {
+	cfg := NewDaemonPatrolConfig()
+
+	if cfg.Type != "daemon-patrol-config" {
+		t.Errorf("Type = %q, want 'daemon-patrol-config'", cfg.Type)
+	}
+	if cfg.Version != CurrentDaemonPatrolConfigVersion {
+		t.Errorf("Version = %d, want %d", cfg.Version, CurrentDaemonPatrolConfigVersion)
+	}
+	if cfg.Heartbeat == nil {
+		t.Fatal("Heartbeat is nil")
+	}
+	if !cfg.Heartbeat.Enabled {
+		t.Error("Heartbeat.Enabled should be true by default")
+	}
+	if cfg.Heartbeat.Interval != "3m" {
+		t.Errorf("Heartbeat.Interval = %q, want '3m'", cfg.Heartbeat.Interval)
+	}
+	if len(cfg.Patrols) != 3 {
+		t.Errorf("Patrols count = %d, want 3", len(cfg.Patrols))
+	}
+
+	for _, name := range []string{"deacon", "witness", "refinery"} {
+		patrol, ok := cfg.Patrols[name]
+		if !ok {
+			t.Errorf("missing %s patrol", name)
+			continue
+		}
+		if !patrol.Enabled {
+			t.Errorf("%s patrol should be enabled by default", name)
+		}
+		if patrol.Agent != name {
+			t.Errorf("%s patrol Agent = %q, want %q", name, patrol.Agent, name)
+		}
 	}
 }
 
@@ -1099,4 +1575,95 @@ func TestSaveTownSettings(t *testing.T) {
 			t.Errorf("Agents count = %d, want %d", len(loaded.Agents), len(original.Agents))
 		}
 	})
+}
+
+// TestLookupAgentConfigWithRigSettings verifies that lookupAgentConfig checks
+// rig-level agents first, then town-level agents, then built-ins.
+func TestLookupAgentConfigWithRigSettings(t *testing.T) {
+	tests := []struct {
+		name            string
+		rigSettings     *RigSettings
+		townSettings    *TownSettings
+		expectedCommand string
+		expectedFrom    string
+	}{
+		{
+			name: "rig-custom-agent",
+			rigSettings: &RigSettings{
+				Agent: "default-rig-agent",
+				Agents: map[string]*RuntimeConfig{
+					"rig-custom-agent": {
+						Command: "custom-rig-cmd",
+						Args:    []string{"--rig-flag"},
+					},
+				},
+			},
+			townSettings: &TownSettings{
+				Agents: map[string]*RuntimeConfig{
+					"town-custom-agent": {
+						Command: "custom-town-cmd",
+						Args:    []string{"--town-flag"},
+					},
+				},
+			},
+			expectedCommand: "custom-rig-cmd",
+			expectedFrom:    "rig",
+		},
+		{
+			name: "town-custom-agent",
+			rigSettings: &RigSettings{
+				Agents: map[string]*RuntimeConfig{
+					"other-rig-agent": {
+						Command: "other-rig-cmd",
+					},
+				},
+			},
+			townSettings: &TownSettings{
+				Agents: map[string]*RuntimeConfig{
+					"town-custom-agent": {
+						Command: "custom-town-cmd",
+						Args:    []string{"--town-flag"},
+					},
+				},
+			},
+			expectedCommand: "custom-town-cmd",
+			expectedFrom:    "town",
+		},
+		{
+			name:            "unknown-agent",
+			rigSettings:     nil,
+			townSettings:    nil,
+			expectedCommand: "claude",
+			expectedFrom:    "builtin",
+		},
+		{
+			name: "claude",
+			rigSettings: &RigSettings{
+				Agent: "claude",
+			},
+			townSettings: &TownSettings{
+				Agents: map[string]*RuntimeConfig{
+					"claude": {
+						Command: "custom-claude",
+					},
+				},
+			},
+			expectedCommand: "custom-claude",
+			expectedFrom:    "town",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rc := lookupAgentConfig(tt.name, tt.townSettings, tt.rigSettings)
+
+			if rc == nil {
+				t.Errorf("lookupAgentConfig(%s) returned nil", tt.name)
+			}
+
+			if rc.Command != tt.expectedCommand {
+				t.Errorf("lookupAgentConfig(%s).Command = %s, want %s", tt.name, rc.Command, tt.expectedCommand)
+			}
+		})
+	}
 }
