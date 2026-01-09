@@ -23,7 +23,7 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 7
+version = 6
 
 [[steps]]
 id = "inbox-check"
@@ -149,51 +149,9 @@ After closing a gate, the Waiters field contains mail addresses to notify.
 Send a brief notification to each waiter that the gate has cleared."""
 
 [[steps]]
-id = "github-gate-check"
-title = "Check GitHub CI gates"
-needs = ["inbox-check"]
-description = """
-Discover and evaluate GitHub CI gates.
-
-GitHub gates (await_type: gh:run, gh:pr) require checking external CI status.
-This step discovers new gates from GitHub activity and evaluates pending ones.
-
-**Step 1: Discover new GitHub gates**
-```bash
-bd gate discover
-```
-
-This scans for GitHub CI gates that should be created based on:
-- Active PRs with required CI checks
-- Workflow runs that molecules are waiting on
-
-**Step 2: Evaluate pending GitHub gates**
-```bash
-bd gate check --type=gh
-```
-
-For each GitHub gate, this checks:
-- gh:run gates: Has the workflow run completed? Did it succeed?
-- gh:pr gates: Has the PR been merged/closed?
-
-Gates that pass their condition are automatically closed.
-
-**Step 3: Report closures**
-For any gates that were just closed, log the result:
-```bash
-# Gate <id> closed: GitHub CI passed
-# Gate <id> closed: PR merged
-```
-
-**If no GitHub gates exist:**
-Skip - nothing to check.
-
-**Exit criteria:** All GitHub gates evaluated, passing gates closed."""
-
-[[steps]]
 id = "dispatch-gated-molecules"
 title = "Dispatch molecules with resolved gates"
-needs = ["gate-evaluation", "github-gate-check"]
+needs = ["gate-evaluation"]
 description = """
 Find molecules blocked on gates that have now closed and dispatch them.
 
