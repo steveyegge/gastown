@@ -90,6 +90,38 @@ func TestAgentEnv_Refinery(t *testing.T) {
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
 }
 
+func TestAgentEnv_Deacon(t *testing.T) {
+	env := AgentEnv(AgentEnvConfig{
+		Role:     "deacon",
+		TownRoot: "/town",
+		BeadsDir: "/town/.beads",
+	})
+
+	assertEnv(t, env, "GT_ROLE", "deacon")
+	assertEnv(t, env, "BD_ACTOR", "deacon")
+	assertEnv(t, env, "GIT_AUTHOR_NAME", "deacon")
+	assertEnv(t, env, "GT_ROOT", "/town")
+	assertEnv(t, env, "BEADS_DIR", "/town/.beads")
+	assertNotSet(t, env, "GT_RIG")
+	assertNotSet(t, env, "BEADS_NO_DAEMON")
+}
+
+func TestAgentEnv_Boot(t *testing.T) {
+	env := AgentEnv(AgentEnvConfig{
+		Role:     "boot",
+		TownRoot: "/town",
+		BeadsDir: "/town/.beads",
+	})
+
+	assertEnv(t, env, "GT_ROLE", "boot")
+	assertEnv(t, env, "BD_ACTOR", "deacon-boot")
+	assertEnv(t, env, "GIT_AUTHOR_NAME", "boot")
+	assertEnv(t, env, "GT_ROOT", "/town")
+	assertEnv(t, env, "BEADS_DIR", "/town/.beads")
+	assertNotSet(t, env, "GT_RIG")
+	assertNotSet(t, env, "BEADS_NO_DAEMON")
+}
+
 func TestAgentEnv_WithRuntimeConfigDir(t *testing.T) {
 	env := AgentEnv(AgentEnvConfig{
 		Role:             "polecat",
