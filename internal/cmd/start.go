@@ -235,7 +235,7 @@ func startRigAgents(t *tmux.Tmux, townRoot string) {
 			fmt.Printf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
 		} else {
 			witMgr := witness.NewManager(r)
-			if err := witMgr.Start(false); err != nil {
+			if err := witMgr.Start(false, ""); err != nil {
 				if err == witness.ErrAlreadyRunning {
 					fmt.Printf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
 				} else {
