@@ -3,7 +3,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -234,12 +236,30 @@ type IdlePolecatInfo struct {
 	Name      string // Polecat name
 	ClonePath string // Path to polecat's git worktree
 	Session   string // Tmux session name (for starting)
+	CreatedAt int64  // Unix timestamp when polecat was created (for sorting)
+	Clean     bool   // True if git state is clean (no uncommitted changes)
+}
+
+// StartPreference defines how to select from multiple idle polecats.
+type StartPreference string
+
+const (
+	PreferenceAny      StartPreference = "any"      // First found (default, fastest)
+	PreferenceNewest   StartPreference = "newest"   // Most recently created
+	PreferenceOldest   StartPreference = "oldest"   // Least recently created
+	PreferenceCleanest StartPreference = "cleanest" // Cleanest git state
+)
+
+// FindIdlePolecatOptions configures how idle polecats are selected.
+type FindIdlePolecatOptions struct {
+	SpecificName string          // Exact polecat name to find (empty = any)
+	Preference   StartPreference // Selection preference when multiple idle exist
 }
 
 // FindIdlePolecat looks for an existing polecat that is not currently running.
-// Returns the first idle polecat found, or nil if all polecats are running or none exist.
+// Returns the first idle polecat found matching the criteria, or nil if none exist.
 // This enables reusing polecats instead of always spawning new ones.
-func FindIdlePolecat(rigName string) (*IdlePolecatInfo, error) {
+func FindIdlePolecat(rigName string, opts FindIdlePolecatOptions) (*IdlePolecatInfo, error) {
 	// Find workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -270,25 +290,83 @@ func FindIdlePolecat(rigName string) (*IdlePolecatInfo, error) {
 		return nil, fmt.Errorf("listing polecats: %w", err)
 	}
 
-	// Check each polecat for an idle one (exists but no active session)
+	// Collect idle polecats with metadata
+	var idlePolecats []*IdlePolecatInfo
 	t := tmux.NewTmux()
+
 	for _, p := range polecats {
+		// If specific name requested, skip non-matching
+		if opts.SpecificName != "" && !strings.EqualFold(p.Name, opts.SpecificName) {
+			continue
+		}
+
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, p.Name)
 		running, err := t.HasSession(sessionName)
 		if err != nil || running {
 			continue // Session active or error checking, skip
 		}
 
-		// Found an idle polecat
-		return &IdlePolecatInfo{
+		// Check git state for cleanliness
+		pGit := git.NewGit(p.ClonePath)
+		workStatus, checkErr := pGit.CheckUncommittedWork()
+		clean := checkErr == nil && workStatus.Clean()
+
+		// Get creation time from worktree metadata
+		var createdAt int64
+		if stat, statErr := os.Stat(p.ClonePath); statErr == nil {
+			createdAt = stat.ModTime().Unix()
+		}
+
+		idlePolecats = append(idlePolecats, &IdlePolecatInfo{
 			Name:      p.Name,
 			ClonePath: p.ClonePath,
 			Session:   sessionName,
-		}, nil
+			CreatedAt: createdAt,
+			Clean:     clean,
+		})
 	}
 
 	// No idle polecats found
-	return nil, nil
+	if len(idlePolecats) == 0 {
+		// If specific name was requested, provide a helpful error
+		if opts.SpecificName != "" {
+			return nil, fmt.Errorf("polecat '%s' not found or already running in rig '%s'", opts.SpecificName, rigName)
+		}
+		return nil, nil
+	}
+
+	// Select based on preference
+	var selected *IdlePolecatInfo
+	switch opts.Preference {
+	case PreferenceNewest:
+		// Sort by creation time descending (newest first)
+		sort.Slice(idlePolecats, func(i, j int) bool {
+			return idlePolecats[i].CreatedAt > idlePolecats[j].CreatedAt
+		})
+		selected = idlePolecats[0]
+	case PreferenceOldest:
+		// Sort by creation time ascending (oldest first)
+		sort.Slice(idlePolecats, func(i, j int) bool {
+			return idlePolecats[i].CreatedAt < idlePolecats[j].CreatedAt
+		})
+		selected = idlePolecats[0]
+	case PreferenceCleanest:
+		// Prioritize clean git state
+		for _, p := range idlePolecats {
+			if p.Clean {
+				selected = p
+				break
+			}
+		}
+		// Fallback to first if none are clean
+		if selected == nil {
+			selected = idlePolecats[0]
+		}
+	default: // PreferenceAny
+		selected = idlePolecats[0]
+	}
+
+	return selected, nil
 }
 
 // StartPolecatSession starts an existing polecat's tmux session.
@@ -365,8 +443,10 @@ func StartPolecatSession(rigName, polecatName, clonePath string, account string,
 
 	fmt.Printf("%s Polecat %s session started\n", style.Bold.Render("✓"), polecatName)
 
-	// Log spawn event to activity feed
-	_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
+	// Log spawn event to activity feed (reuse type indicates idle polecat was used)
+	payload := events.SpawnPayload(rigName, polecatName)
+	payload["reuse"] = "true"
+	_ = events.LogFeed(events.TypeSpawn, "gt", payload)
 
 	return pane, nil
 }
