@@ -497,6 +497,28 @@ func (t *Tmux) GetEnvironment(session, key string) (string, error) {
 	return parts[1], nil
 }
 
+// GetAllEnvironment returns all environment variables for a session.
+func (t *Tmux) GetAllEnvironment(session string) (map[string]string, error) {
+	out, err := t.run("show-environment", "-t", session)
+	if err != nil {
+		return nil, err
+	}
+
+	env := make(map[string]string)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "-") {
+			// Skip empty lines and unset markers (lines starting with -)
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			env[parts[0]] = parts[1]
+		}
+	}
+	return env, nil
+}
+
 // RenameSession renames a session.
 func (t *Tmux) RenameSession(oldName, newName string) error {
 	_, err := t.run("rename-session", "-t", oldName, newName)
