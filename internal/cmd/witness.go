@@ -15,8 +15,8 @@ import (
 
 // Witness command flags
 var (
-	witnessForeground bool
-	witnessStatusJSON bool
+	witnessForeground    bool
+	witnessStatusJSON    bool
 	witnessAgentOverride string
 )
 
@@ -42,6 +42,7 @@ states and takes action to keep work flowing.
 
 Examples:
   gt witness start greenplace
+  gt witness start greenplace --agent codex
   gt witness start greenplace --foreground`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWitnessStart,
@@ -103,6 +104,7 @@ Examples:
 func init() {
 	// Start flags
 	witnessStartCmd.Flags().BoolVar(&witnessForeground, "foreground", false, "Run in foreground (default: background)")
+	witnessStartCmd.Flags().StringVar(&witnessAgentOverride, "agent", "", "Agent alias to run the Witness with (overrides town default)")
 
 	// Status flags
 	witnessStatusCmd.Flags().BoolVar(&witnessStatusJSON, "json", false, "Output as JSON")
@@ -141,7 +143,7 @@ func runWitnessStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Starting witness for %s...\n", rigName)
 
-	if err := mgr.Start(witnessForeground, ""); err != nil {
+	if err := mgr.Start(witnessForeground, witnessAgentOverride); err != nil {
 		if err == witness.ErrAlreadyRunning {
 			fmt.Printf("%s Witness is already running\n", style.Dim.Render("⚠"))
 			fmt.Printf("  %s\n", style.Dim.Render("Use 'gt witness attach' to connect"))
