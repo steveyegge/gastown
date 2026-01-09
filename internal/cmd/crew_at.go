@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
@@ -138,13 +139,17 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		}
 
 		// Set environment (non-fatal: session works without these)
-		_ = t.SetEnvironment(sessionID, "GT_ROLE", "crew")
-		_ = t.SetEnvironment(sessionID, "GT_RIG", r.Name)
-		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
-
-		// Set runtime config dir for account selection (non-fatal)
-		if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {
-			_ = t.SetEnvironment(sessionID, runtimeConfig.Session.ConfigDirEnv, claudeConfigDir)
+		// Use centralized AgentEnv for consistency across all role startup paths
+		envVars := config.AgentEnv(config.AgentEnvConfig{
+			Role:             "crew",
+			Rig:              r.Name,
+			AgentName:        name,
+			TownRoot:         townRoot,
+			BeadsDir:         beads.ResolveBeadsDir(r.Path),
+			RuntimeConfigDir: claudeConfigDir,
+		})
+		for k, v := range envVars {
+			_ = t.SetEnvironment(sessionID, k, v)
 		}
 
 		// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)

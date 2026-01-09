@@ -514,13 +514,18 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	}
 
 	// Set environment variables (non-fatal: session works without these)
-	_ = t.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
-	_ = t.SetEnvironment(sessionID, "GT_CREW", name)
-	_ = t.SetEnvironment(sessionID, "GT_ROLE", "crew")
-
-	// Set CLAUDE_CONFIG_DIR for account selection (non-fatal)
-	if opts.ClaudeConfigDir != "" {
-		_ = t.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", opts.ClaudeConfigDir)
+	// Use centralized AgentEnv for consistency across all role startup paths
+	townRoot := filepath.Dir(m.rig.Path)
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:             "crew",
+		Rig:              m.rig.Name,
+		AgentName:        name,
+		TownRoot:         townRoot,
+		BeadsDir:         beads.ResolveBeadsDir(m.rig.Path),
+		RuntimeConfigDir: opts.ClaudeConfigDir,
+	})
+	for k, v := range envVars {
+		_ = t.SetEnvironment(sessionID, k, v)
 	}
 
 	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)

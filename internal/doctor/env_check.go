@@ -101,7 +101,7 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 
 		// Get expected env vars based on role
-		expected := config.RoleEnvVars(string(identity.Role), identity.Rig, identity.Name)
+		expected := config.AgentEnvSimple(string(identity.Role), identity.Rig, identity.Name)
 
 		// Get actual tmux env vars
 		actual, err := reader.GetAllEnvironment(sess)

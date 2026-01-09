@@ -186,20 +186,20 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}
 
 	// Set environment (non-fatal: session works without these)
-	debugSession("SetEnvironment GT_RIG", m.tmux.SetEnvironment(sessionID, "GT_RIG", m.rig.Name))
-	debugSession("SetEnvironment GT_POLECAT", m.tmux.SetEnvironment(sessionID, "GT_POLECAT", polecat))
-
-	// Set runtime config dir for account selection (non-fatal)
-	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
-		debugSession("SetEnvironment "+runtimeConfig.Session.ConfigDirEnv, m.tmux.SetEnvironment(sessionID, runtimeConfig.Session.ConfigDirEnv, opts.RuntimeConfigDir))
+	// Use centralized AgentEnv for consistency across all role startup paths
+	townRoot := filepath.Dir(m.rig.Path)
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:             "polecat",
+		Rig:              m.rig.Name,
+		AgentName:        polecat,
+		TownRoot:         townRoot,
+		BeadsDir:         beads.ResolveBeadsDir(m.rig.Path),
+		RuntimeConfigDir: opts.RuntimeConfigDir,
+		BeadsNoDaemon:    true,
+	})
+	for k, v := range envVars {
+		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
 	}
-
-	// Set beads environment for worktree polecats (non-fatal)
-	// Use ResolveBeadsDir to follow redirects for repos with tracked beads
-	beadsDir := beads.ResolveBeadsDir(m.rig.Path)
-	debugSession("SetEnvironment BEADS_DIR", m.tmux.SetEnvironment(sessionID, "BEADS_DIR", beadsDir))
-	debugSession("SetEnvironment BEADS_NO_DAEMON", m.tmux.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1"))
-	debugSession("SetEnvironment BEADS_AGENT_NAME", m.tmux.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/%s", m.rig.Name, polecat)))
 
 	// Hook the issue to the polecat if provided via --issue flag
 	if opts.Issue != "" {

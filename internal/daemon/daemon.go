@@ -847,8 +847,8 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	}
 
 	// Set environment variables
-	// Use shared RoleEnvVars for consistency across all role startup paths
-	envVars := config.RoleEnvVars("polecat", rigName, polecatName)
+	// Use centralized AgentEnvSimple for consistency across all role startup paths
+	envVars := config.AgentEnvSimple("polecat", rigName, polecatName)
 
 	// Add polecat-specific beads configuration
 	// Use ResolveBeadsDir to follow redirects for repos with tracked beads

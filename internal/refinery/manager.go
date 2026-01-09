@@ -186,18 +186,18 @@ func (m *Manager) Start(foreground bool) error {
 	}
 
 	// Set environment variables (non-fatal: session works without these)
-	// Use shared RoleEnvVars for consistency across all role startup paths
-	envVars := config.RoleEnvVars("refinery", m.rig.Name, "")
+	// Use centralized AgentEnv for consistency across all role startup paths
+	townRoot := filepath.Dir(m.rig.Path)
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:          "refinery",
+		Rig:           m.rig.Name,
+		TownRoot:      townRoot,
+		BeadsDir:      beads.ResolveBeadsDir(m.rig.Path),
+		BeadsNoDaemon: true,
+	})
 
 	// Add refinery-specific flag
 	envVars["GT_REFINERY"] = "1"
-
-	// Add beads environment - refinery uses rig-level beads
-	// Use ResolveBeadsDir to handle both tracked (mayor/rig) and local beads
-	beadsDir := beads.ResolveBeadsDir(m.rig.Path)
-	envVars["BEADS_DIR"] = beadsDir
-	envVars["BEADS_NO_DAEMON"] = "1"
-	envVars["BEADS_AGENT_NAME"] = envVars["BD_ACTOR"]
 
 	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
 	for k, v := range envVars {

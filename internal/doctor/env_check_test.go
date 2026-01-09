@@ -83,7 +83,7 @@ func TestEnvVarsCheck_NonGasTownSessions(t *testing.T) {
 }
 
 func TestEnvVarsCheck_MayorCorrect(t *testing.T) {
-	expected := config.RoleEnvVars("mayor", "", "")
+	expected := config.AgentEnvSimple("mayor", "", "")
 	reader := &mockEnvReader{
 		sessions: []string{"hq-mayor"},
 		sessionEnvs: map[string]map[string]string{
@@ -114,7 +114,7 @@ func TestEnvVarsCheck_MayorMissing(t *testing.T) {
 }
 
 func TestEnvVarsCheck_WitnessCorrect(t *testing.T) {
-	expected := config.RoleEnvVars("witness", "myrig", "")
+	expected := config.AgentEnvSimple("witness", "myrig", "")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-myrig-witness"},
 		sessionEnvs: map[string]map[string]string{
@@ -148,7 +148,7 @@ func TestEnvVarsCheck_WitnessMismatch(t *testing.T) {
 }
 
 func TestEnvVarsCheck_RefineryCorrect(t *testing.T) {
-	expected := config.RoleEnvVars("refinery", "myrig", "")
+	expected := config.AgentEnvSimple("refinery", "myrig", "")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-myrig-refinery"},
 		sessionEnvs: map[string]map[string]string{
@@ -164,7 +164,7 @@ func TestEnvVarsCheck_RefineryCorrect(t *testing.T) {
 }
 
 func TestEnvVarsCheck_PolecatCorrect(t *testing.T) {
-	expected := config.RoleEnvVars("polecat", "myrig", "Toast")
+	expected := config.AgentEnvSimple("polecat", "myrig", "Toast")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-myrig-Toast"},
 		sessionEnvs: map[string]map[string]string{
@@ -198,7 +198,7 @@ func TestEnvVarsCheck_PolecatMissing(t *testing.T) {
 }
 
 func TestEnvVarsCheck_CrewCorrect(t *testing.T) {
-	expected := config.RoleEnvVars("crew", "myrig", "worker1")
+	expected := config.AgentEnvSimple("crew", "myrig", "worker1")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-myrig-crew-worker1"},
 		sessionEnvs: map[string]map[string]string{
@@ -214,9 +214,9 @@ func TestEnvVarsCheck_CrewCorrect(t *testing.T) {
 }
 
 func TestEnvVarsCheck_MultipleSessions(t *testing.T) {
-	mayorEnv := config.RoleEnvVars("mayor", "", "")
-	witnessEnv := config.RoleEnvVars("witness", "rig1", "")
-	polecatEnv := config.RoleEnvVars("polecat", "rig1", "Toast")
+	mayorEnv := config.AgentEnvSimple("mayor", "", "")
+	witnessEnv := config.AgentEnvSimple("witness", "rig1", "")
+	polecatEnv := config.AgentEnvSimple("polecat", "rig1", "Toast")
 
 	reader := &mockEnvReader{
 		sessions: []string{"hq-mayor", "gt-rig1-witness", "gt-rig1-Toast"},
@@ -238,7 +238,7 @@ func TestEnvVarsCheck_MultipleSessions(t *testing.T) {
 }
 
 func TestEnvVarsCheck_MixedCorrectAndMismatch(t *testing.T) {
-	mayorEnv := config.RoleEnvVars("mayor", "", "")
+	mayorEnv := config.AgentEnvSimple("mayor", "", "")
 
 	reader := &mockEnvReader{
 		sessions: []string{"hq-mayor", "gt-rig1-witness"},
@@ -297,7 +297,7 @@ func TestEnvVarsCheck_GetEnvError(t *testing.T) {
 
 func TestEnvVarsCheck_HyphenatedRig(t *testing.T) {
 	// Test rig name with hyphens: "foo-bar"
-	expected := config.RoleEnvVars("witness", "foo-bar", "")
+	expected := config.AgentEnvSimple("witness", "foo-bar", "")
 	reader := &mockEnvReader{
 		sessions: []string{"gt-foo-bar-witness"},
 		sessionEnvs: map[string]map[string]string{
