@@ -136,6 +136,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--id=" + id,
 		"--title=" + title,
 		"--description=" + description,
+		"--type=agent",
 		"--labels=gt:agent",
 	}
 
