@@ -191,6 +191,20 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 			})
 		}
 
+		// Check AGENTS.md is minimal at rig level (bootstrap pointer, not full context)
+		agentsMdPath := filepath.Join(rigPath, "AGENTS.md")
+		if fileExists(agentsMdPath) {
+			lines := c.countLines(agentsMdPath)
+			if lines > 20 {
+				issues = append(issues, primingIssue{
+					location:    rigName,
+					issueType:   "large_agents_md",
+					description: fmt.Sprintf("AGENTS.md has %d lines (should be <20 for bootstrap pointer)", lines),
+					fixable:     false, // Requires manual review
+				})
+			}
+		}
+
 		// Check witness priming
 		witnessPath := filepath.Join(rigPath, "witness")
 		if dirExists(witnessPath) {
