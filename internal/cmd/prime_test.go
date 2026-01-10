@@ -4,11 +4,61 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/beads"
 )
+
+// findRepoBinary finds a gt binary built from the current repo.
+//
+// IMPORTANT: This function intentionally does NOT fall back to system PATH.
+// Using exec.LookPath("gt") to find a system-installed binary causes test
+// failures when the installed binary is older than the source being tested.
+// For example, if a new flag like --state is added, tests will fail with
+// "unknown flag: --state" because the system binary doesn't have that flag.
+//
+// The binary must be built before running tests. CI does this with:
+//   go build -v ./cmd/gt
+//
+// Locally, run:
+//   go build -o gt ./cmd/gt
+//
+// TODO: Consider auto-building the binary in TestMain if not found, or
+// refactoring tests to use cobra command execution directly instead of
+// shelling out to the binary.
+func findRepoBinary(t *testing.T) string {
+	t.Helper()
+
+	// Get the repo root by walking up from the current file
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Skip("WARNING: Could not determine repo root - skipping binary test")
+	}
+
+	// Walk up from internal/cmd/prime_test.go to find repo root
+	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(currentFile)))
+
+	// Check common locations for repo-built binary
+	candidates := []string{
+		filepath.Join(repoRoot, "gt"),           // repo root (go build -o gt ./cmd/gt)
+		filepath.Join(repoRoot, "build", "gt"),  // build directory
+		filepath.Join(repoRoot, "bin", "gt"),    // bin directory
+	}
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	// DO NOT fall back to exec.LookPath("gt") - that finds system binaries
+	// which may be outdated and cause confusing test failures.
+	t.Skip("WARNING: No repo-built gt binary found. Run 'go build -o gt ./cmd/gt' first. " +
+		"NOT using system gt binary to avoid version mismatch issues.")
+	return ""
+}
 
 func writeTestRoutes(t *testing.T, townRoot string, routes []beads.Route) {
 	t.Helper()
@@ -99,11 +149,9 @@ func TestGetAgentBeadID_UsesRigPrefix(t *testing.T) {
 }
 
 func TestPrimeFlagCombinations(t *testing.T) {
-	// Find the gt binary - we need to test CLI flag validation
-	gtBin, err := exec.LookPath("gt")
-	if err != nil {
-		t.Skip("gt binary not found in PATH")
-	}
+	// Find repo-built gt binary - do NOT use system PATH
+	// See findRepoBinary() comments for why this matters
+	gtBin := findRepoBinary(t)
 
 	cases := []struct {
 		name      string
