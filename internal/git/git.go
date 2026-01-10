@@ -11,7 +11,63 @@ import (
 	"strings"
 )
 
-// Common errors
+// GitError contains raw output from a git command for agent observation.
+// ZFC: Callers observe the raw output and decide what to do.
+// The error interface methods provide human-readable messages, but agents
+// should use Stdout/Stderr for programmatic observation.
+type GitError struct {
+	Command string // The git command that failed (e.g., "merge", "push")
+	Args    []string
+	Stdout  string // Raw stdout output
+	Stderr  string // Raw stderr output
+	Err     error  // Underlying error (e.g., exit code)
+}
+
+func (e *GitError) Error() string {
+	if e.Stderr != "" {
+		return fmt.Sprintf("git %s: %s", e.Command, e.Stderr)
+	}
+	return fmt.Sprintf("git %s: %v", e.Command, e.Err)
+}
+
+func (e *GitError) Unwrap() error {
+	return e.Err
+}
+
+// HasConflict returns true if the error output indicates a merge conflict.
+// Deprecated: This exists for backwards compatibility. Agents should observe
+// Stderr directly and make their own decisions (ZFC principle).
+func (e *GitError) HasConflict() bool {
+	return strings.Contains(e.Stderr, "CONFLICT") ||
+		strings.Contains(e.Stderr, "Merge conflict") ||
+		strings.Contains(e.Stdout, "CONFLICT")
+}
+
+// HasAuthFailure returns true if the error output indicates authentication failure.
+// Deprecated: This exists for backwards compatibility. Agents should observe
+// Stderr directly and make their own decisions (ZFC principle).
+func (e *GitError) HasAuthFailure() bool {
+	return strings.Contains(e.Stderr, "Authentication failed") ||
+		strings.Contains(e.Stderr, "could not read Username")
+}
+
+// IsNotARepo returns true if the error indicates the path is not a git repository.
+// Deprecated: This exists for backwards compatibility. Agents should observe
+// Stderr directly and make their own decisions (ZFC principle).
+func (e *GitError) IsNotARepo() bool {
+	return strings.Contains(e.Stderr, "not a git repository")
+}
+
+// HasRebaseConflict returns true if the error indicates a rebase conflict.
+// Deprecated: This exists for backwards compatibility. Agents should observe
+// Stderr directly and make their own decisions (ZFC principle).
+func (e *GitError) HasRebaseConflict() bool {
+	return strings.Contains(e.Stderr, "needs merge") ||
+		strings.Contains(e.Stderr, "rebase in progress")
+}
+
+// Common errors - deprecated, kept for backwards compatibility.
+// ZFC: These should not be used; observe GitError.Stderr instead.
 var (
 	ErrNotARepo       = errors.New("not a git repository")
 	ErrMergeConflict  = errors.New("merge conflict")
@@ -66,43 +122,48 @@ func (g *Git) run(args ...string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		return "", g.wrapError(err, stderr.String(), args)
+		return "", g.wrapError(err, stdout.String(), stderr.String(), args)
 	}
 
 	return strings.TrimSpace(stdout.String()), nil
 }
 
 // wrapError wraps git errors with context.
-func (g *Git) wrapError(err error, stderr string, args []string) error {
+// ZFC: Returns GitError with raw output for agent observation.
+// Does not detect or interpret error types - agents should observe and decide.
+func (g *Git) wrapError(err error, stdout, stderr string, args []string) error {
+	stdout = strings.TrimSpace(stdout)
 	stderr = strings.TrimSpace(stderr)
 
-	// Detect specific error types
-	if strings.Contains(stderr, "not a git repository") {
-		return ErrNotARepo
+	// Determine command name (first arg, or first non-flag arg)
+	command := ""
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			command = arg
+			break
+		}
 	}
-	if strings.Contains(stderr, "CONFLICT") || strings.Contains(stderr, "Merge conflict") {
-		return ErrMergeConflict
-	}
-	if strings.Contains(stderr, "Authentication failed") || strings.Contains(stderr, "could not read Username") {
-		return ErrAuthFailure
-	}
-	if strings.Contains(stderr, "needs merge") || strings.Contains(stderr, "rebase in progress") {
-		return ErrRebaseConflict
+	if command == "" && len(args) > 0 {
+		command = args[0]
 	}
 
-	if stderr != "" {
-		return fmt.Errorf("git %s: %s", args[0], stderr)
+	return &GitError{
+		Command: command,
+		Args:    args,
+		Stdout:  stdout,
+		Stderr:  stderr,
+		Err:     err,
 	}
-	return fmt.Errorf("git %s: %w", args[0], err)
 }
 
 // Clone clones a repository to the destination.
 func (g *Git) Clone(url, dest string) error {
 	cmd := exec.Command("git", "clone", url, dest)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stderr.String(), []string{"clone", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", url})
 	}
 	// Configure hooks path for Gas Town clones
 	if err := configureHooksPath(dest); err != nil {
@@ -116,10 +177,11 @@ func (g *Git) Clone(url, dest string) error {
 // This saves disk by sharing objects without changing remotes.
 func (g *Git) CloneWithReference(url, dest, reference string) error {
 	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, dest)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stderr.String(), []string{"clone", "--reference-if-able", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--reference-if-able", url})
 	}
 	// Configure hooks path for Gas Town clones
 	if err := configureHooksPath(dest); err != nil {
@@ -133,10 +195,11 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 // This is used for the shared repo architecture where all worktrees share a single git database.
 func (g *Git) CloneBare(url, dest string) error {
 	cmd := exec.Command("git", "clone", "--bare", url, dest)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stderr.String(), []string{"clone", "--bare", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--bare", url})
 	}
 	// Configure refspec so worktrees can fetch and see origin/* refs
 	return configureRefspec(dest)
@@ -179,10 +242,11 @@ func configureRefspec(repoPath string) error {
 // CloneBareWithReference clones a bare repository using a local repo as an object reference.
 func (g *Git) CloneBareWithReference(url, dest, reference string) error {
 	cmd := exec.Command("git", "clone", "--bare", "--reference-if-able", reference, url, dest)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stderr.String(), []string{"clone", "--bare", "--reference-if-able", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--bare", "--reference-if-able", url})
 	}
 	// Configure refspec so worktrees can fetch and see origin/* refs
 	return configureRefspec(dest)
@@ -414,8 +478,8 @@ func (g *Git) CheckConflicts(source, target string) ([]string, error) {
 			return conflicts, nil
 		}
 
-		// Check if it's a conflict error from wrapper
-		if errors.Is(mergeErr, ErrMergeConflict) {
+		// ZFC: Check if the error output indicates a conflict
+		if gitErr, ok := mergeErr.(*GitError); ok && gitErr.HasConflict() {
 			_ = g.AbortMerge() // best-effort cleanup
 			return conflicts, nil
 		}
@@ -432,7 +496,7 @@ func (g *Git) CheckConflicts(source, target string) ([]string, error) {
 }
 
 // runMergeCheck runs a git merge command and returns error info from both stdout and stderr.
-// This is needed because git merge outputs CONFLICT info to stdout.
+// ZFC: Returns GitError with raw output for agent observation.
 func (g *Git) runMergeCheck(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = g.workDir
@@ -443,13 +507,8 @@ func (g *Git) runMergeCheck(args ...string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		// Check stdout for CONFLICT message (git sends it there)
-		stdoutStr := stdout.String()
-		if strings.Contains(stdoutStr, "CONFLICT") {
-			return "", ErrMergeConflict
-		}
-		// Fall back to stderr check
-		return "", g.wrapError(err, stderr.String(), args)
+		// ZFC: Return raw output for observation, don't interpret CONFLICT
+		return "", g.wrapError(err, stdout.String(), stderr.String(), args)
 	}
 
 	return strings.TrimSpace(stdout.String()), nil

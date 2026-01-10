@@ -12,9 +12,32 @@ import (
 var (
 	ErrBranchExists     = errors.New("branch already exists")
 	ErrBranchNotFound   = errors.New("branch not found")
-	ErrMergeConflict    = errors.New("merge conflict")
 	ErrNotOnIntegration = errors.New("not on integration branch")
 )
+
+// SwarmGitError contains raw output from a git command for observation.
+// ZFC: Callers observe the raw output and decide what to do.
+type SwarmGitError struct {
+	Command string
+	Stdout  string
+	Stderr  string
+	Err     error
+}
+
+func (e *SwarmGitError) Error() string {
+	if e.Stderr != "" {
+		return fmt.Sprintf("%s: %s", e.Command, e.Stderr)
+	}
+	return fmt.Sprintf("%s: %v", e.Command, e.Err)
+}
+
+// HasConflict returns true if the error output indicates a merge conflict.
+// Deprecated: Agents should observe Stderr directly (ZFC principle).
+func (e *SwarmGitError) HasConflict() bool {
+	return strings.Contains(e.Stderr, "CONFLICT") ||
+		strings.Contains(e.Stderr, "Merge conflict") ||
+		strings.Contains(e.Stdout, "CONFLICT")
+}
 
 // CreateIntegrationBranch creates the integration branch for a swarm.
 // The branch is created from the swarm's BaseCommit and pushed to origin.
@@ -69,10 +92,9 @@ func (m *Manager) MergeToIntegration(swarmID, workerBranch string) error {
 		fmt.Sprintf("Merge %s into %s", workerBranch, swarm.Integration),
 		workerBranch)
 	if err != nil {
-		// Check if it's a merge conflict
-		if strings.Contains(err.Error(), "CONFLICT") ||
-			strings.Contains(err.Error(), "Merge conflict") {
-			return ErrMergeConflict
+		// ZFC: Check for conflict via SwarmGitError method
+		if gitErr, ok := err.(*SwarmGitError); ok && gitErr.HasConflict() {
+			return gitErr // Return the error with raw output for observation
 		}
 		return fmt.Errorf("merging: %w", err)
 	}
@@ -105,8 +127,9 @@ func (m *Manager) LandToMain(swarmID string) error {
 		fmt.Sprintf("Land swarm %s", swarmID),
 		swarm.Integration)
 	if err != nil {
-		if strings.Contains(err.Error(), "CONFLICT") {
-			return ErrMergeConflict
+		// ZFC: Check for conflict via SwarmGitError method
+		if gitErr, ok := err.(*SwarmGitError); ok && gitErr.HasConflict() {
+			return gitErr // Return the error with raw output for observation
 		}
 		return fmt.Errorf("merging to %s: %w", swarm.TargetBranch, err)
 	}
@@ -185,19 +208,34 @@ func (m *Manager) getCurrentBranch() (string, error) {
 }
 
 // gitRun executes a git command.
+// ZFC: Returns SwarmGitError with raw output for agent observation.
 func (m *Manager) gitRun(args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = m.gitDir
 
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg != "" {
-			return fmt.Errorf("%s: %s", args[0], errMsg)
+		// Determine command name
+		command := ""
+		for _, arg := range args {
+			if !strings.HasPrefix(arg, "-") {
+				command = arg
+				break
+			}
 		}
-		return fmt.Errorf("%s: %w", args[0], err)
+		if command == "" && len(args) > 0 {
+			command = args[0]
+		}
+
+		return &SwarmGitError{
+			Command: command,
+			Stdout:  strings.TrimSpace(stdout.String()),
+			Stderr:  strings.TrimSpace(stderr.String()),
+			Err:     err,
+		}
 	}
 
 	return nil

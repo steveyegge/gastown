@@ -214,8 +214,10 @@ func TestNotARepo(t *testing.T) {
 	g := NewGit(dir)
 
 	_, err := g.CurrentBranch()
-	if err != ErrNotARepo {
-		t.Errorf("expected ErrNotARepo, got %v", err)
+	// ZFC: Check for not-a-repo via GitError method instead of sentinel error
+	gitErr, ok := err.(*GitError)
+	if !ok || !gitErr.IsNotARepo() {
+		t.Errorf("expected GitError with IsNotARepo(), got %v", err)
 	}
 }
 

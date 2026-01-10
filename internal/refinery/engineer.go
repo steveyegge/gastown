@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -312,7 +311,8 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 	}
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging with message: %s\n", mergeMsg)
 	if err := e.git.MergeNoFF(branch, mergeMsg); err != nil {
-		if errors.Is(err, git.ErrMergeConflict) {
+		// ZFC: Check for conflict via GitError method instead of sentinel error
+		if gitErr, ok := err.(*git.GitError); ok && gitErr.HasConflict() {
 			_ = e.git.AbortMerge()
 			return ProcessResult{
 				Success:  false,
