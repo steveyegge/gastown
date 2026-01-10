@@ -16,7 +16,6 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -114,14 +113,15 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 
 	if foreground {
 		// Foreground mode is deprecated - patrol logic moved to mol-witness-patrol
-		if w.State == StateRunning && w.PID > 0 && util.ProcessExists(w.PID) {
+		// Just check tmux session (no PID inference per ZFC)
+		if running, _ := t.HasSession(sessionID); running && t.IsClaudeRunning(sessionID) {
 			return ErrAlreadyRunning
 		}
 
 		now := time.Now()
 		w.State = StateRunning
 		w.StartedAt = &now
-		w.PID = os.Getpid()
+		w.PID = 0 // No longer track PID (ZFC)
 		w.MonitoredPolecats = m.rig.Polecats
 
 		return m.saveState(w)
@@ -141,10 +141,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		}
 	}
 
-	// Also check via PID for backwards compatibility
-	if w.State == StateRunning && w.PID > 0 && util.ProcessExists(w.PID) {
-		return ErrAlreadyRunning
-	}
+	// Note: No PID check per ZFC - tmux session is the source of truth
 
 	// Working directory
 	witnessDir := m.witnessDir()
@@ -320,13 +317,7 @@ func (m *Manager) Stop() error {
 		_ = t.KillSession(sessionID)
 	}
 
-	// If we have a PID and it's a different process, try to stop it gracefully
-	if w.PID > 0 && w.PID != os.Getpid() && util.ProcessExists(w.PID) {
-		// Send SIGTERM (best-effort graceful stop)
-		if proc, err := os.FindProcess(w.PID); err == nil {
-			_ = proc.Signal(os.Interrupt)
-		}
-	}
+	// Note: No PID-based stop per ZFC - tmux session kill is sufficient
 
 	w.State = StateStopped
 	w.PID = 0

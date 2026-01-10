@@ -114,9 +114,10 @@ func (m *Manager) Start(foreground bool) error {
 	sessionID := m.SessionName()
 
 	if foreground {
-		// In foreground mode, we're likely running inside the tmux session
-		// that background mode created. Only check PID to avoid self-detection.
-		if ref.State == StateRunning && ref.PID > 0 && util.ProcessExists(ref.PID) {
+		// In foreground mode, check tmux session (no PID inference per ZFC)
+		townRoot := filepath.Dir(m.rig.Path)
+		agentCfg := config.ResolveAgentConfig(townRoot, m.rig.Path)
+		if running, _ := t.HasSession(sessionID); running && t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 			return ErrAlreadyRunning
 		}
 
@@ -124,7 +125,7 @@ func (m *Manager) Start(foreground bool) error {
 		now := time.Now()
 		ref.State = StateRunning
 		ref.StartedAt = &now
-		ref.PID = os.Getpid()
+		ref.PID = 0 // No longer track PID (ZFC)
 
 		if err := m.saveState(ref); err != nil {
 			return err
@@ -151,10 +152,7 @@ func (m *Manager) Start(foreground bool) error {
 		}
 	}
 
-	// Also check via PID for backwards compatibility
-	if ref.State == StateRunning && ref.PID > 0 && util.ProcessExists(ref.PID) {
-		return ErrAlreadyRunning
-	}
+	// Note: No PID check per ZFC - tmux session is the source of truth
 
 	// Background mode: spawn a Claude agent in a tmux session
 	// The Claude agent handles MR processing using git commands and beads
@@ -270,13 +268,7 @@ func (m *Manager) Stop() error {
 		_ = t.KillSession(sessionID)
 	}
 
-	// If we have a PID and it's a different process, try to stop it gracefully
-	if ref.PID > 0 && ref.PID != os.Getpid() && util.ProcessExists(ref.PID) {
-		// Send SIGTERM (best-effort graceful stop)
-		if proc, err := os.FindProcess(ref.PID); err == nil {
-			_ = proc.Signal(os.Interrupt)
-		}
-	}
+	// Note: No PID-based stop per ZFC - tmux session kill is sufficient
 
 	ref.State = StateStopped
 	ref.PID = 0
