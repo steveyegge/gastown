@@ -58,6 +58,7 @@ var (
 	doneExit          bool
 	donePhaseComplete bool
 	doneGate          string
+	doneCleanupStatus string
 )
 
 // Valid exit types for gt done
@@ -75,6 +76,7 @@ func init() {
 	doneCmd.Flags().BoolVar(&doneExit, "exit", false, "Exit Claude session after MR submission (self-terminate)")
 	doneCmd.Flags().BoolVar(&donePhaseComplete, "phase-complete", false, "Signal phase complete - await gate before continuing")
 	doneCmd.Flags().StringVar(&doneGate, "gate", "", "Gate bead ID to wait on (with --phase-complete)")
+	doneCmd.Flags().StringVar(&doneCleanupStatus, "cleanup-status", "", "Git cleanup status: clean, uncommitted, unpushed, stash, unknown (ZFC: agent-observed)")
 
 	rootCmd.AddCommand(doneCmd)
 }
@@ -428,13 +430,14 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 	}
 
 	// ZFC #10: Self-report cleanup status
-	// Compute git state and report so Witness can decide removal safety
-	cleanupStatus := computeCleanupStatus(cwd)
-	if cleanupStatus != polecat.CleanupUnknown {
-		if err := bd.UpdateAgentCleanupStatus(agentBeadID, string(cleanupStatus)); err != nil {
-			// Log warning instead of silent ignore
-			fmt.Fprintf(os.Stderr, "Warning: couldn't update agent %s cleanup status: %v\n", agentBeadID, err)
-			return
+	// Agent observes git state and passes cleanup status via --cleanup-status flag
+	if doneCleanupStatus != "" {
+		cleanupStatus := parseCleanupStatus(doneCleanupStatus)
+		if cleanupStatus != polecat.CleanupUnknown {
+			if err := bd.UpdateAgentCleanupStatus(agentBeadID, string(cleanupStatus)); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: couldn't update agent %s cleanup status: %v\n", agentBeadID, err)
+				return
+			}
 		}
 	}
 }
@@ -460,25 +463,19 @@ func getDispatcherFromBead(cwd, issueID string) string {
 	return fields.DispatchedBy
 }
 
-// computeCleanupStatus checks git state and returns the cleanup status.
-// Returns the most critical issue: has_unpushed > has_stash > has_uncommitted > clean
-func computeCleanupStatus(cwd string) polecat.CleanupStatus {
-	g := git.NewGit(cwd)
-	status, err := g.CheckUncommittedWork()
-	if err != nil {
-		// If we can't check, report unknown - Witness should be cautious
+// parseCleanupStatus converts a string flag value to a CleanupStatus.
+// ZFC: Agent observes git state and passes the appropriate status.
+func parseCleanupStatus(s string) polecat.CleanupStatus {
+	switch strings.ToLower(s) {
+	case "clean":
+		return polecat.CleanupClean
+	case "uncommitted", "has_uncommitted":
+		return polecat.CleanupUncommitted
+	case "stash", "has_stash":
+		return polecat.CleanupStash
+	case "unpushed", "has_unpushed":
+		return polecat.CleanupUnpushed
+	default:
 		return polecat.CleanupUnknown
 	}
-
-	// Check in priority order (most critical first)
-	if status.UnpushedCommits > 0 {
-		return polecat.CleanupUnpushed
-	}
-	if status.StashCount > 0 {
-		return polecat.CleanupStash
-	}
-	if status.HasUncommittedChanges {
-		return polecat.CleanupUncommitted
-	}
-	return polecat.CleanupClean
 }

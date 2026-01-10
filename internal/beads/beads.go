@@ -15,10 +15,10 @@ import (
 )
 
 // Common errors
+// ZFC: Only define errors that don't require stderr parsing for decisions.
+// ErrNotARepo and ErrSyncConflict were removed - agents should handle these directly.
 var (
 	ErrNotInstalled = errors.New("bd not installed: run 'pip install beads-cli' or see https://github.com/anthropics/beads")
-	ErrNotARepo     = errors.New("not a beads repository (no .beads directory found)")
-	ErrSyncConflict = errors.New("beads sync conflict")
 	ErrNotFound     = errors.New("issue not found")
 )
 
@@ -431,6 +431,9 @@ func (b *Beads) Run(args ...string) ([]byte, error) {
 }
 
 // wrapError wraps bd errors with context.
+// ZFC: Avoid parsing stderr to make decisions. Transport errors to agents instead.
+// Exception: ErrNotInstalled (exec.ErrNotFound) and ErrNotFound (issue lookup) are
+// acceptable as they enable basic error handling without decision-making.
 func (b *Beads) wrapError(err error, stderr string, args []string) error {
 	stderr = strings.TrimSpace(stderr)
 
@@ -439,15 +442,7 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 		return ErrNotInstalled
 	}
 
-	// Detect specific error types from stderr
-	if strings.Contains(stderr, "not a beads repository") ||
-		strings.Contains(stderr, "No .beads directory") ||
-		strings.Contains(stderr, ".beads") && strings.Contains(stderr, "not found") {
-		return ErrNotARepo
-	}
-	if strings.Contains(stderr, "sync conflict") || strings.Contains(stderr, "CONFLICT") {
-		return ErrSyncConflict
-	}
+	// ErrNotFound is widely used for issue lookups - acceptable exception
 	if strings.Contains(stderr, "not found") || strings.Contains(stderr, "Issue not found") {
 		return ErrNotFound
 	}
@@ -1005,9 +1000,11 @@ func (b *Beads) Stats() (string, error) {
 }
 
 // IsBeadsRepo checks if the working directory is a beads repository.
+// ZFC: Check file existence directly instead of parsing bd errors.
 func (b *Beads) IsBeadsRepo() bool {
-	_, err := b.run("list", "--limit=1")
-	return err == nil || !errors.Is(err, ErrNotARepo)
+	beadsDir := ResolveBeadsDir(b.workDir)
+	info, err := os.Stat(beadsDir)
+	return err == nil && info.IsDir()
 }
 
 // AgentFields holds structured fields for agent beads.
