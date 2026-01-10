@@ -6,7 +6,9 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -483,4 +485,39 @@ func RenderTypeForStatus(issueType, status string) string {
 // RenderClosedLine renders an entire line in the closed/dimmed style
 func RenderClosedLine(line string) string {
 	return StatusClosedStyle.Render(line)
+}
+
+// === Utility Functions ===
+
+// RelativeTime formats a time.Time as a human-readable relative duration.
+// Examples: "2h ago", "5m ago", "3d ago", "just now"
+func RelativeTime(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	default:
+		return fmt.Sprintf("%dw ago", int(d.Hours()/(24*7)))
+	}
+}
+
+// ShortenPath replaces home directory prefix with ~
+func ShortenPath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if strings.HasPrefix(path, home) {
+		return "~" + path[len(home):]
+	}
+	return path
 }

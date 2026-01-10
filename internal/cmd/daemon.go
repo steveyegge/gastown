@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/daemon"
-	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/ui"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -65,8 +65,15 @@ var daemonRunCmd = &cobra.Command{
 	RunE:   runDaemonRun,
 }
 
+var daemonRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the daemon",
+	Long:  `Stop and start the daemon. Useful after upgrading gt.`,
+	RunE:  runDaemonRestart,
+}
+
 var (
-	daemonLogLines int
+	daemonLogLines  int
 	daemonLogFollow bool
 )
 
@@ -75,6 +82,7 @@ func init() {
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
+	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonRunCmd)
 
 	daemonLogsCmd.Flags().IntVarP(&daemonLogLines, "lines", "n", 50, "Number of lines to show")
@@ -134,11 +142,11 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	// failing to acquire the lock, and the PID file would have a different PID.
 	if pid != daemonCmd.Process.Pid {
 		// Another daemon won the race - that's fine, report it
-		fmt.Printf("%s Daemon already running (PID %d)\n", style.Bold.Render("●"), pid)
+		fmt.Printf("%s Daemon already running (PID %d)\n", ui.RenderWarnIcon(), pid)
 		return nil
 	}
 
-	fmt.Printf("%s Daemon started (PID %d)\n", style.Bold.Render("✓"), pid)
+	fmt.Printf("%s Daemon started (PID %d, v%s)\n", ui.RenderPassIcon(), pid, Version)
 	return nil
 }
 
@@ -160,7 +168,7 @@ func runDaemonStop(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("stopping daemon: %w", err)
 	}
 
-	fmt.Printf("%s Daemon stopped (was PID %d)\n", style.Bold.Render("✓"), pid)
+	fmt.Printf("%s Daemon stopped (was PID %d)\n", ui.RenderPassIcon(), pid)
 	return nil
 }
 
@@ -176,36 +184,49 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	if running {
-		fmt.Printf("%s Daemon is %s (PID %d)\n",
-			style.Bold.Render("●"),
-			style.Bold.Render("running"),
-			pid)
-
 		// Load state for more details
 		state, err := daemon.LoadState(townRoot)
-		if err == nil && !state.StartedAt.IsZero() {
-			fmt.Printf("  Started: %s\n", state.StartedAt.Format("2006-01-02 15:04:05"))
-			if !state.LastHeartbeat.IsZero() {
-				fmt.Printf("  Last heartbeat: %s (#%d)\n",
-					state.LastHeartbeat.Format("15:04:05"),
-					state.HeartbeatCount)
-			}
 
-			// Check if binary is newer than process
+		// Header line with semantic styling
+		fmt.Printf("%s Daemon running (PID %d, v%s)\n",
+			ui.RenderPassIcon(), pid, Version)
+		fmt.Println()
+
+		// Details with aligned labels
+		fmt.Printf("  Workspace:  %s\n", ui.ShortenPath(townRoot))
+
+		if err == nil && !state.StartedAt.IsZero() {
+			fmt.Printf("  Started:    %s (%s)\n",
+				state.StartedAt.Format("2006-01-02 15:04:05"),
+				ui.RelativeTime(state.StartedAt))
+
+			if !state.LastHeartbeat.IsZero() {
+				fmt.Printf("  Heartbeat:  #%d (%s)\n",
+					state.HeartbeatCount,
+					ui.RelativeTime(state.LastHeartbeat))
+			}
+		}
+
+		// Log file location (shortened path)
+		logFile := filepath.Join(townRoot, "daemon", "daemon.log")
+		fmt.Printf("  Log:        %s\n", ui.ShortenPath(logFile))
+
+		// Check if binary is newer than process (version mismatch warning)
+		if err == nil && !state.StartedAt.IsZero() {
 			if binaryModTime, err := getBinaryModTime(); err == nil {
-				fmt.Printf("  Binary: %s\n", binaryModTime.Format("2006-01-02 15:04:05"))
 				if binaryModTime.After(state.StartedAt) {
-					fmt.Printf("  %s Binary is newer than process - consider '%s'\n",
-						style.Bold.Render("⚠"),
-						style.Dim.Render("gt daemon stop && gt daemon start"))
+					fmt.Println()
+					fmt.Printf("  %s Binary updated since daemon start\n", ui.RenderWarnIcon())
+					fmt.Printf("    Run: %s\n", ui.RenderMuted("gt daemon restart"))
 				}
 			}
 		}
 	} else {
-		fmt.Printf("%s Daemon is %s\n",
-			style.Dim.Render("○"),
-			"not running")
-		fmt.Printf("\nStart with: %s\n", style.Dim.Render("gt daemon start"))
+		fmt.Printf("%s Daemon not running\n", ui.RenderMuted("○"))
+		fmt.Println()
+		fmt.Printf("  Workspace:  %s\n", ui.ShortenPath(townRoot))
+		fmt.Println()
+		fmt.Printf("  Start with: %s\n", ui.RenderMuted("gt daemon start"))
 	}
 
 	return nil
@@ -264,4 +285,64 @@ func runDaemonRun(cmd *cobra.Command, args []string) error {
 	}
 
 	return d.Run()
+}
+
+func runDaemonRestart(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Check if running and stop if so
+	running, pid, err := daemon.IsRunning(townRoot)
+	if err != nil {
+		return fmt.Errorf("checking daemon status: %w", err)
+	}
+
+	if running {
+		fmt.Printf("Stopping daemon (PID %d)...\n", pid)
+		if err := daemon.StopDaemon(townRoot); err != nil {
+			return fmt.Errorf("stopping daemon: %w", err)
+		}
+		// Brief pause to ensure clean shutdown
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// Start the daemon
+	fmt.Println("Starting daemon...")
+	gtPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("finding executable: %w", err)
+	}
+
+	daemonProc := exec.Command(gtPath, "daemon", "run")
+	daemonProc.Dir = townRoot
+	daemonProc.Stdin = nil
+	daemonProc.Stdout = nil
+	daemonProc.Stderr = nil
+
+	if err := daemonProc.Start(); err != nil {
+		return fmt.Errorf("starting daemon: %w", err)
+	}
+
+	// Wait for it to initialize
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify it started
+	running, newPid, err := daemon.IsRunning(townRoot)
+	if err != nil {
+		return fmt.Errorf("checking daemon status: %w", err)
+	}
+	if !running {
+		return fmt.Errorf("daemon failed to start (check logs with 'gt daemon logs')")
+	}
+
+	if pid > 0 {
+		fmt.Printf("%s Daemon restarted (PID %d → %d, v%s)\n",
+			ui.RenderPassIcon(), pid, newPid, Version)
+	} else {
+		fmt.Printf("%s Daemon started (PID %d, v%s)\n",
+			ui.RenderPassIcon(), newPid, Version)
+	}
+	return nil
 }
