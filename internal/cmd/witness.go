@@ -18,6 +18,7 @@ var (
 	witnessForeground    bool
 	witnessStatusJSON    bool
 	witnessAgentOverride string
+	witnessEnvOverrides  []string
 )
 
 var witnessCmd = &cobra.Command{
@@ -43,6 +44,7 @@ states and takes action to keep work flowing.
 Examples:
   gt witness start greenplace
   gt witness start greenplace --agent codex
+  gt witness start greenplace --env ANTHROPIC_MODEL=claude-3-haiku
   gt witness start greenplace --foreground`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWitnessStart,
@@ -96,7 +98,8 @@ Stops the current session (if running) and starts a fresh one.
 
 Examples:
   gt witness restart greenplace
-  gt witness restart greenplace --agent codex`,
+  gt witness restart greenplace --agent codex
+  gt witness restart greenplace --env ANTHROPIC_MODEL=claude-3-haiku`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWitnessRestart,
 }
@@ -105,12 +108,14 @@ func init() {
 	// Start flags
 	witnessStartCmd.Flags().BoolVar(&witnessForeground, "foreground", false, "Run in foreground (default: background)")
 	witnessStartCmd.Flags().StringVar(&witnessAgentOverride, "agent", "", "Agent alias to run the Witness with (overrides town default)")
+	witnessStartCmd.Flags().StringArrayVar(&witnessEnvOverrides, "env", nil, "Environment variable override (KEY=VALUE, can be repeated)")
 
 	// Status flags
 	witnessStatusCmd.Flags().BoolVar(&witnessStatusJSON, "json", false, "Output as JSON")
 
 	// Restart flags
 	witnessRestartCmd.Flags().StringVar(&witnessAgentOverride, "agent", "", "Agent alias to run the Witness with (overrides town default)")
+	witnessRestartCmd.Flags().StringArrayVar(&witnessEnvOverrides, "env", nil, "Environment variable override (KEY=VALUE, can be repeated)")
 
 	// Add subcommands
 	witnessCmd.AddCommand(witnessStartCmd)
@@ -143,7 +148,7 @@ func runWitnessStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Starting witness for %s...\n", rigName)
 
-	if err := mgr.Start(witnessForeground, witnessAgentOverride); err != nil {
+	if err := mgr.Start(witnessForeground, witnessAgentOverride, witnessEnvOverrides); err != nil {
 		if err == witness.ErrAlreadyRunning {
 			fmt.Printf("%s Witness is already running\n", style.Dim.Render("⚠"))
 			fmt.Printf("  %s\n", style.Dim.Render("Use 'gt witness attach' to connect"))
@@ -296,7 +301,7 @@ func runWitnessAttach(cmd *cobra.Command, args []string) error {
 	sessionName := witnessSessionName(rigName)
 
 	// Ensure session exists (creates if needed)
-	if err := mgr.Start(false, ""); err != nil && err != witness.ErrAlreadyRunning {
+	if err := mgr.Start(false, "", nil); err != nil && err != witness.ErrAlreadyRunning {
 		return err
 	} else if err == nil {
 		fmt.Printf("Started witness session for %s\n", rigName)
@@ -329,7 +334,7 @@ func runWitnessRestart(cmd *cobra.Command, args []string) error {
 	_ = mgr.Stop()
 
 	// Start fresh
-	if err := mgr.Start(false, witnessAgentOverride); err != nil {
+	if err := mgr.Start(false, witnessAgentOverride, witnessEnvOverrides); err != nil {
 		return fmt.Errorf("starting witness: %w", err)
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/agent"
@@ -101,7 +102,8 @@ func (m *Manager) witnessDir() string {
 // If foreground is true, only updates state (no tmux session - deprecated).
 // Otherwise, spawns a Claude agent in a tmux session.
 // agentOverride optionally specifies a different agent alias to use.
-func (m *Manager) Start(foreground bool, agentOverride string) error {
+// envOverrides are KEY=VALUE pairs that override all other env var sources.
+func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []string) error {
 	w, err := m.loadState()
 	if err != nil {
 		return err
@@ -159,19 +161,6 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "witness",
-		Rig:      m.rig.Name,
-		TownRoot: townRoot,
-		BeadsDir: beads.ResolveBeadsDir(m.rig.Path),
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
-	}
-
 	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.AssignTheme(m.rig.Name)
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "witness", "witness")
@@ -183,9 +172,27 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	}
 
 	townRoot := m.townRoot()
+
+	// Set environment variables (non-fatal: session works without these)
+	// Use centralized AgentEnv for consistency across all role startup paths
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:     "witness",
+		Rig:      m.rig.Name,
+		TownRoot: townRoot,
+		BeadsDir: beads.ResolveBeadsDir(m.rig.Path),
+	})
+	for k, v := range envVars {
+		_ = t.SetEnvironment(sessionID, k, v)
+	}
 	// Apply role config env vars if present (non-fatal).
 	for key, value := range roleConfigEnvVars(roleConfig, townRoot, m.rig.Name) {
 		_ = t.SetEnvironment(sessionID, key, value)
+	}
+	// Apply CLI env overrides (highest priority, non-fatal).
+	for _, override := range envOverrides {
+		if key, value, ok := strings.Cut(override, "="); ok {
+			_ = t.SetEnvironment(sessionID, key, value)
+		}
 	}
 
 	// Update state to running
