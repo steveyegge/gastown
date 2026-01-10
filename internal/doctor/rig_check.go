@@ -749,8 +749,8 @@ func (c *PolecatClonesValidCheck) Run(ctx *CheckContext) *CheckResult {
 		branchOutput, err := cmd.Output()
 		if err == nil {
 			branch := strings.TrimSpace(string(branchOutput))
-			if !strings.HasPrefix(branch, "polecat/") {
-				warnings = append(warnings, fmt.Sprintf("%s: on branch '%s' (expected polecat/*)", polecatName, branch))
+			if !strings.HasPrefix(branch, constants.BranchPolecatPrefix) {
+				warnings = append(warnings, fmt.Sprintf("%s: on branch '%s' (expected %s*)", polecatName, branch, constants.BranchPolecatPrefix))
 			}
 		}
 

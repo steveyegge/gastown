@@ -663,7 +663,7 @@ func (m *Manager) FindMR(idOrBranch string) (*MergeRequest, error) {
 		if item.MR.Branch == idOrBranch {
 			return item.MR, nil
 		}
-		if "polecat/"+idOrBranch == item.MR.Branch {
+		if constants.BranchPolecatPrefix+idOrBranch == item.MR.Branch {
 			return item.MR, nil
 		}
 		// Match by worker name (partial match for convenience)

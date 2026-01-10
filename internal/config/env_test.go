@@ -5,6 +5,7 @@ import (
 )
 
 func TestAgentEnv_Mayor(t *testing.T) {
+	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
 		Role:     "mayor",
 		TownRoot: "/town",
@@ -21,6 +22,7 @@ func TestAgentEnv_Mayor(t *testing.T) {
 }
 
 func TestAgentEnv_Witness(t *testing.T) {
+	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
 		Role:     "witness",
 		Rig:      "myrig",
@@ -37,6 +39,7 @@ func TestAgentEnv_Witness(t *testing.T) {
 }
 
 func TestAgentEnv_Polecat(t *testing.T) {
+	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
 		Role:          "polecat",
 		Rig:           "myrig",
@@ -56,6 +59,7 @@ func TestAgentEnv_Polecat(t *testing.T) {
 }
 
 func TestAgentEnv_Crew(t *testing.T) {
+	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
 		Role:          "crew",
 		Rig:           "myrig",
@@ -75,6 +79,7 @@ func TestAgentEnv_Crew(t *testing.T) {
 }
 
 func TestAgentEnv_Refinery(t *testing.T) {
+	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
 		Role:          "refinery",
 		Rig:           "myrig",
@@ -91,6 +96,7 @@ func TestAgentEnv_Refinery(t *testing.T) {
 }
 
 func TestAgentEnv_Deacon(t *testing.T) {
+	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
 		Role:     "deacon",
 		TownRoot: "/town",
@@ -107,6 +113,7 @@ func TestAgentEnv_Deacon(t *testing.T) {
 }
 
 func TestAgentEnv_Boot(t *testing.T) {
+	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
 		Role:     "boot",
 		TownRoot: "/town",
@@ -123,6 +130,7 @@ func TestAgentEnv_Boot(t *testing.T) {
 }
 
 func TestAgentEnv_WithRuntimeConfigDir(t *testing.T) {
+	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
 		Role:             "polecat",
 		Rig:              "myrig",
@@ -136,6 +144,7 @@ func TestAgentEnv_WithRuntimeConfigDir(t *testing.T) {
 }
 
 func TestAgentEnv_WithoutRuntimeConfigDir(t *testing.T) {
+	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{
 		Role:      "polecat",
 		Rig:       "myrig",
@@ -148,6 +157,7 @@ func TestAgentEnv_WithoutRuntimeConfigDir(t *testing.T) {
 }
 
 func TestAgentEnvSimple(t *testing.T) {
+	t.Parallel()
 	env := AgentEnvSimple("polecat", "myrig", "Toast")
 
 	assertEnv(t, env, "GT_ROLE", "polecat")
@@ -159,6 +169,7 @@ func TestAgentEnvSimple(t *testing.T) {
 }
 
 func TestExportPrefix(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		env      map[string]string
@@ -196,6 +207,7 @@ func TestExportPrefix(t *testing.T) {
 }
 
 func TestBuildStartupCommandWithEnv(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		env      map[string]string
@@ -237,6 +249,7 @@ func TestBuildStartupCommandWithEnv(t *testing.T) {
 }
 
 func TestMergeEnv(t *testing.T) {
+	t.Parallel()
 	a := map[string]string{"A": "1", "B": "2"}
 	b := map[string]string{"B": "override", "C": "3"}
 
@@ -248,6 +261,7 @@ func TestMergeEnv(t *testing.T) {
 }
 
 func TestFilterEnv(t *testing.T) {
+	t.Parallel()
 	env := map[string]string{"A": "1", "B": "2", "C": "3"}
 
 	result := FilterEnv(env, "A", "C")
@@ -258,6 +272,7 @@ func TestFilterEnv(t *testing.T) {
 }
 
 func TestWithoutEnv(t *testing.T) {
+	t.Parallel()
 	env := map[string]string{"A": "1", "B": "2", "C": "3"}
 
 	result := WithoutEnv(env, "B")
@@ -268,6 +283,7 @@ func TestWithoutEnv(t *testing.T) {
 }
 
 func TestEnvToSlice(t *testing.T) {
+	t.Parallel()
 	env := map[string]string{"A": "1", "B": "2"}
 
 	result := EnvToSlice(env)

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 	"golang.org/x/text/cases"
@@ -92,16 +93,19 @@ Examples:
 }
 
 var formulaRunCmd = &cobra.Command{
-	Use:   "run <name>",
+	Use:   "run [name]",
 	Short: "Execute a formula",
 	Long: `Execute a formula by pouring it and dispatching work.
 
 This command:
-  1. Looks up the formula by name
+  1. Looks up the formula by name (or uses default from rig config)
   2. Pours it to create a molecule (or uses existing proto)
   3. Dispatches the molecule to available workers
 
 For PR-based workflows, use --pr to specify the GitHub PR number.
+
+If no formula name is provided, uses the default formula configured in
+the rig's settings/config.json under workflow.default_formula.
 
 Options:
   --pr=N      Run formula on GitHub PR #N
@@ -110,10 +114,11 @@ Options:
 
 Examples:
   gt formula run shiny                    # Run formula in current rig
+  gt formula run                          # Run default formula from rig config
   gt formula run shiny --pr=123           # Run on PR #123
   gt formula run security-audit --rig=beads  # Run in specific rig
   gt formula run release --dry-run        # Preview execution`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runFormulaRun,
 }
 
@@ -193,7 +198,51 @@ func runFormulaShow(cmd *cobra.Command, args []string) error {
 // For convoy-type formulas, it creates a convoy bead, creates leg beads,
 // and slings each leg to a separate polecat with leg-specific prompts.
 func runFormulaRun(cmd *cobra.Command, args []string) error {
-	formulaName := args[0]
+	// Determine target rig first (needed for default formula lookup)
+	targetRig := formulaRunRig
+	var rigPath string
+	if targetRig == "" {
+		// Try to detect from current directory
+		townRoot, err := workspace.FindFromCwd()
+		if err == nil && townRoot != "" {
+			rigName, r, rigErr := findCurrentRig(townRoot)
+			if rigErr == nil && rigName != "" {
+				targetRig = rigName
+				if r != nil {
+					rigPath = r.Path
+				}
+			}
+			// If we still don't have a target rig but have townRoot, use gastown
+			if targetRig == "" {
+				targetRig = "gastown"
+				rigPath = filepath.Join(townRoot, "gastown")
+			}
+		} else {
+			// No town root found, fall back to gastown without rigPath
+			targetRig = "gastown"
+		}
+	} else {
+		// If rig specified, construct path
+		townRoot, err := workspace.FindFromCwd()
+		if err == nil && townRoot != "" {
+			rigPath = filepath.Join(townRoot, targetRig)
+		}
+	}
+
+	// Get formula name from args or default
+	var formulaName string
+	if len(args) > 0 {
+		formulaName = args[0]
+	} else {
+		// Try to get default formula from rig config
+		if rigPath != "" {
+			formulaName = config.GetDefaultFormula(rigPath)
+		}
+		if formulaName == "" {
+			return fmt.Errorf("no formula specified and no default formula configured\n\nTo set a default formula, add to your rig's settings/config.json:\n  \"workflow\": {\n    \"default_formula\": \"<formula-name>\"\n  }")
+		}
+		fmt.Printf("%s Using default formula: %s\n", style.Dim.Render("Note:"), formulaName)
+	}
 
 	// Find the formula file
 	formulaPath, err := findFormulaFile(formulaName)
@@ -205,22 +254,6 @@ func runFormulaRun(cmd *cobra.Command, args []string) error {
 	f, err := parseFormulaFile(formulaPath)
 	if err != nil {
 		return fmt.Errorf("parsing formula: %w", err)
-	}
-
-	// Determine target rig
-	targetRig := formulaRunRig
-	if targetRig == "" {
-		// Try to detect from current directory
-		townRoot, err := workspace.FindFromCwd()
-		if err == nil && townRoot != "" {
-			rigName, _, rigErr := findCurrentRig(townRoot)
-			if rigErr == nil && rigName != "" {
-				targetRig = rigName
-			}
-		}
-		if targetRig == "" {
-			targetRig = "gastown" // Default
-		}
 	}
 
 	// Handle dry-run mode

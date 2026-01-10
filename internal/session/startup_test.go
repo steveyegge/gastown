@@ -54,6 +54,9 @@ func TestFormatStartupNudge(t *testing.T) {
 				"gastown/witness",
 				"<- self",
 				"handoff",
+				"Check your hook and mail", // handoff includes explicit instructions
+				"gt hook",
+				"gt mail inbox",
 			},
 		},
 		{

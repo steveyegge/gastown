@@ -71,6 +71,11 @@ const (
 
 	// FileAccountsJSON is the accounts configuration file in mayor/.
 	FileAccountsJSON = "accounts.json"
+
+	// FileHandoffMarker is the marker file indicating a handoff just occurred.
+	// Written by gt handoff before respawn, cleared by gt prime after detection.
+	// This prevents the handoff loop bug where agents re-run /handoff from context.
+	FileHandoffMarker = "handoff_to_successor"
 )
 
 // Beads configuration constants.

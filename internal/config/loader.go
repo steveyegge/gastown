@@ -1227,6 +1227,21 @@ func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 	return []string{filepath.Base(rc.Command)}
 }
 
+// GetDefaultFormula returns the default formula for a rig from settings/config.json.
+// Returns empty string if no default is configured.
+// rigPath is the path to the rig directory (e.g., ~/gt/gastown).
+func GetDefaultFormula(rigPath string) string {
+	settingsPath := RigSettingsPath(rigPath)
+	settings, err := LoadRigSettings(settingsPath)
+	if err != nil {
+		return ""
+	}
+	if settings.Workflow == nil {
+		return ""
+	}
+	return settings.Workflow.DefaultFormula
+}
+
 // GetRigPrefix returns the beads prefix for a rig from rigs.json.
 // Falls back to "gt" if the rig isn't found or has no prefix configured.
 // townRoot is the path to the town directory (e.g., ~/gt).

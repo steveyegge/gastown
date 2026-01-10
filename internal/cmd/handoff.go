@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -190,6 +191,16 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	if err := t.ClearHistory(pane); err != nil {
 		// Non-fatal - continue with respawn even if clear fails
 		style.PrintWarning("could not clear history: %v", err)
+	}
+
+	// Write handoff marker for successor detection (prevents handoff loop bug).
+	// The marker is cleared by gt prime after it outputs the warning.
+	// This tells the new session "you're post-handoff, don't re-run /handoff"
+	if cwd, err := os.Getwd(); err == nil {
+		runtimeDir := filepath.Join(cwd, constants.DirRuntime)
+		_ = os.MkdirAll(runtimeDir, 0755)
+		markerPath := filepath.Join(runtimeDir, constants.FileHandoffMarker)
+		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
 	}
 
 	// Use exec to respawn the pane - this kills us and restarts

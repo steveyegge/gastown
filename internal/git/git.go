@@ -3,7 +3,6 @@ package git
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,13 +10,28 @@ import (
 	"strings"
 )
 
-// Common errors
-var (
-	ErrNotARepo       = errors.New("not a git repository")
-	ErrMergeConflict  = errors.New("merge conflict")
-	ErrAuthFailure    = errors.New("authentication failed")
-	ErrRebaseConflict = errors.New("rebase conflict")
-)
+// GitError contains raw output from a git command for agent observation.
+// ZFC: Callers observe the raw output and decide what to do.
+// The error interface methods provide human-readable messages, but agents
+// should use Stdout/Stderr for programmatic observation.
+type GitError struct {
+	Command string // The git command that failed (e.g., "merge", "push")
+	Args    []string
+	Stdout  string // Raw stdout output
+	Stderr  string // Raw stderr output
+	Err     error  // Underlying error (e.g., exit code)
+}
+
+func (e *GitError) Error() string {
+	if e.Stderr != "" {
+		return fmt.Sprintf("git %s: %s", e.Command, e.Stderr)
+	}
+	return fmt.Sprintf("git %s: %v", e.Command, e.Err)
+}
+
+func (e *GitError) Unwrap() error {
+	return e.Err
+}
 
 // Git wraps git operations for a working directory.
 type Git struct {
@@ -66,43 +80,48 @@ func (g *Git) run(args ...string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		return "", g.wrapError(err, stderr.String(), args)
+		return "", g.wrapError(err, stdout.String(), stderr.String(), args)
 	}
 
 	return strings.TrimSpace(stdout.String()), nil
 }
 
 // wrapError wraps git errors with context.
-func (g *Git) wrapError(err error, stderr string, args []string) error {
+// ZFC: Returns GitError with raw output for agent observation.
+// Does not detect or interpret error types - agents should observe and decide.
+func (g *Git) wrapError(err error, stdout, stderr string, args []string) error {
+	stdout = strings.TrimSpace(stdout)
 	stderr = strings.TrimSpace(stderr)
 
-	// Detect specific error types
-	if strings.Contains(stderr, "not a git repository") {
-		return ErrNotARepo
+	// Determine command name (first arg, or first non-flag arg)
+	command := ""
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			command = arg
+			break
+		}
 	}
-	if strings.Contains(stderr, "CONFLICT") || strings.Contains(stderr, "Merge conflict") {
-		return ErrMergeConflict
-	}
-	if strings.Contains(stderr, "Authentication failed") || strings.Contains(stderr, "could not read Username") {
-		return ErrAuthFailure
-	}
-	if strings.Contains(stderr, "needs merge") || strings.Contains(stderr, "rebase in progress") {
-		return ErrRebaseConflict
+	if command == "" && len(args) > 0 {
+		command = args[0]
 	}
 
-	if stderr != "" {
-		return fmt.Errorf("git %s: %s", args[0], stderr)
+	return &GitError{
+		Command: command,
+		Args:    args,
+		Stdout:  stdout,
+		Stderr:  stderr,
+		Err:     err,
 	}
-	return fmt.Errorf("git %s: %w", args[0], err)
 }
 
 // Clone clones a repository to the destination.
 func (g *Git) Clone(url, dest string) error {
 	cmd := exec.Command("git", "clone", url, dest)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stderr.String(), []string{"clone", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", url})
 	}
 	// Configure hooks path for Gas Town clones
 	if err := configureHooksPath(dest); err != nil {
@@ -116,10 +135,11 @@ func (g *Git) Clone(url, dest string) error {
 // This saves disk by sharing objects without changing remotes.
 func (g *Git) CloneWithReference(url, dest, reference string) error {
 	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, dest)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stderr.String(), []string{"clone", "--reference-if-able", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--reference-if-able", url})
 	}
 	// Configure hooks path for Gas Town clones
 	if err := configureHooksPath(dest); err != nil {
@@ -133,10 +153,11 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 // This is used for the shared repo architecture where all worktrees share a single git database.
 func (g *Git) CloneBare(url, dest string) error {
 	cmd := exec.Command("git", "clone", "--bare", url, dest)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stderr.String(), []string{"clone", "--bare", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--bare", url})
 	}
 	// Configure refspec so worktrees can fetch and see origin/* refs
 	return configureRefspec(dest)
@@ -179,10 +200,11 @@ func configureRefspec(repoPath string) error {
 // CloneBareWithReference clones a bare repository using a local repo as an object reference.
 func (g *Git) CloneBareWithReference(url, dest, reference string) error {
 	cmd := exec.Command("git", "clone", "--bare", "--reference-if-able", reference, url, dest)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stderr.String(), []string{"clone", "--bare", "--reference-if-able", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--bare", "--reference-if-able", url})
 	}
 	// Configure refspec so worktrees can fetch and see origin/* refs
 	return configureRefspec(dest)
@@ -406,21 +428,16 @@ func (g *Git) CheckConflicts(source, target string) ([]string, error) {
 	_, mergeErr := g.runMergeCheck("merge", "--no-commit", "--no-ff", source)
 
 	if mergeErr != nil {
-		// Check if there are unmerged files (indicates conflict)
-		conflicts, err := g.getConflictingFiles()
+		// ZFC: Use git's porcelain output to detect conflicts instead of parsing stderr.
+		// GetConflictingFiles() uses `git diff --diff-filter=U` which is the proper way.
+		conflicts, err := g.GetConflictingFiles()
 		if err == nil && len(conflicts) > 0 {
 			// Abort the test merge (best-effort cleanup)
 			_ = g.AbortMerge()
 			return conflicts, nil
 		}
 
-		// Check if it's a conflict error from wrapper
-		if errors.Is(mergeErr, ErrMergeConflict) {
-			_ = g.AbortMerge() // best-effort cleanup
-			return conflicts, nil
-		}
-
-		// Some other merge error (best-effort cleanup)
+		// No unmerged files detected - this is some other merge error
 		_ = g.AbortMerge()
 		return nil, mergeErr
 	}
@@ -432,7 +449,7 @@ func (g *Git) CheckConflicts(source, target string) ([]string, error) {
 }
 
 // runMergeCheck runs a git merge command and returns error info from both stdout and stderr.
-// This is needed because git merge outputs CONFLICT info to stdout.
+// ZFC: Returns GitError with raw output for agent observation.
 func (g *Git) runMergeCheck(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = g.workDir
@@ -443,20 +460,17 @@ func (g *Git) runMergeCheck(args ...string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		// Check stdout for CONFLICT message (git sends it there)
-		stdoutStr := stdout.String()
-		if strings.Contains(stdoutStr, "CONFLICT") {
-			return "", ErrMergeConflict
-		}
-		// Fall back to stderr check
-		return "", g.wrapError(err, stderr.String(), args)
+		// ZFC: Return raw output for observation, don't interpret CONFLICT
+		return "", g.wrapError(err, stdout.String(), stderr.String(), args)
 	}
 
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// getConflictingFiles returns the list of files with merge conflicts.
-func (g *Git) getConflictingFiles() ([]string, error) {
+// GetConflictingFiles returns the list of files with merge conflicts.
+// ZFC: Uses git's porcelain output (diff --diff-filter=U) instead of parsing stderr.
+// This is the proper way to detect conflicts without violating ZFC.
+func (g *Git) GetConflictingFiles() ([]string, error) {
 	// git diff --name-only --diff-filter=U shows unmerged files
 	out, err := g.run("diff", "--name-only", "--diff-filter=U")
 	if err != nil {

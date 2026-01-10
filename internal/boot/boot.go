@@ -23,14 +23,11 @@ import (
 // to return true when only Boot is running.
 const SessionName = "gt-boot"
 
-// MarkerFileName is the file that indicates Boot is currently running.
+// MarkerFileName is the lock file for Boot startup coordination.
 const MarkerFileName = ".boot-running"
 
 // StatusFileName stores Boot's last execution status.
 const StatusFileName = ".boot-status.json"
-
-// DefaultMarkerTTL is how long a marker is considered valid before it's stale.
-const DefaultMarkerTTL = 5 * time.Minute
 
 // Status represents Boot's execution status.
 type Status struct {
@@ -78,22 +75,9 @@ func (b *Boot) statusPath() string {
 }
 
 // IsRunning checks if Boot is currently running.
-// Returns true if marker exists and isn't stale, false otherwise.
+// Queries tmux directly for observable reality (ZFC principle).
 func (b *Boot) IsRunning() bool {
-	info, err := os.Stat(b.markerPath())
-	if err != nil {
-		return false
-	}
-
-	// Check if marker is stale (older than TTL)
-	age := time.Since(info.ModTime())
-	if age > DefaultMarkerTTL {
-		// Stale marker - clean it up
-		_ = os.Remove(b.markerPath())
-		return false
-	}
-
-	return true
+	return b.IsSessionAlive()
 }
 
 // IsSessionAlive checks if the Boot tmux session exists.
@@ -106,7 +90,7 @@ func (b *Boot) IsSessionAlive() bool {
 // Returns error if Boot is already running.
 func (b *Boot) AcquireLock() error {
 	if b.IsRunning() {
-		return fmt.Errorf("boot is already running (marker exists)")
+		return fmt.Errorf("boot is already running (session exists)")
 	}
 
 	if err := b.EnsureDir(); err != nil {

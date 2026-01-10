@@ -2,9 +2,7 @@
 package polecat
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,6 +13,7 @@ import (
 )
 
 // PendingSpawn represents a polecat that has been spawned but not yet triggered.
+// This is discovered from POLECAT_STARTED messages in the Deacon inbox (ZFC).
 type PendingSpawn struct {
 	// Rig is the rig name (e.g., "gastown")
 	Rig string `json:"rig"`
@@ -28,52 +27,18 @@ type PendingSpawn struct {
 	// Issue is the assigned issue ID
 	Issue string `json:"issue"`
 
-	// SpawnedAt is when the spawn was detected
+	// SpawnedAt is when the spawn was detected (from mail timestamp)
 	SpawnedAt time.Time `json:"spawned_at"`
 
 	// MailID is the ID of the POLECAT_STARTED message
 	MailID string `json:"mail_id"`
+
+	// mailbox is kept for archiving after trigger (not serialized)
+	mailbox *mail.Mailbox `json:"-"`
 }
 
-// PendingFile returns the path to the pending spawns file.
-func PendingFile(townRoot string) string {
-	return filepath.Join(townRoot, "spawn", "pending.json")
-}
-
-// LoadPending loads the pending spawns from disk.
-func LoadPending(townRoot string) ([]*PendingSpawn, error) {
-	path := PendingFile(townRoot)
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	var pending []*PendingSpawn
-	if err := json.Unmarshal(data, &pending); err != nil {
-		return nil, err
-	}
-	return pending, nil
-}
-
-// SavePending saves the pending spawns to disk.
-func SavePending(townRoot string, pending []*PendingSpawn) error {
-	path := PendingFile(townRoot)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(pending, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
-// CheckInboxForSpawns reads the Deacon's inbox for POLECAT_STARTED messages
-// and adds them to the pending list.
+// CheckInboxForSpawns discovers pending spawns from POLECAT_STARTED messages
+// in the Deacon's inbox. Uses mail as source of truth (ZFC principle).
 func CheckInboxForSpawns(townRoot string) ([]*PendingSpawn, error) {
 	// Get Deacon's mailbox
 	router := mail.NewRouter(townRoot)
@@ -82,32 +47,17 @@ func CheckInboxForSpawns(townRoot string) ([]*PendingSpawn, error) {
 		return nil, fmt.Errorf("getting deacon mailbox: %w", err)
 	}
 
-	// Get unread messages
-	messages, err := mailbox.ListUnread()
+	// Get all messages (both read and unread - we track by archival status)
+	messages, err := mailbox.List()
 	if err != nil {
-		return nil, fmt.Errorf("listing unread: %w", err)
+		return nil, fmt.Errorf("listing messages: %w", err)
 	}
 
-	// Load existing pending
-	pending, err := LoadPending(townRoot)
-	if err != nil {
-		return nil, fmt.Errorf("loading pending: %w", err)
-	}
-
-	// Track existing by mail ID to avoid duplicates
-	existing := make(map[string]bool)
-	for _, p := range pending {
-		existing[p.MailID] = true
-	}
+	var pending []*PendingSpawn
 
 	// Look for POLECAT_STARTED messages
 	for _, msg := range messages {
 		if !strings.HasPrefix(msg.Subject, "POLECAT_STARTED ") {
-			continue
-		}
-
-		// Skip if already tracked
-		if existing[msg.ID] {
 			continue
 		}
 
@@ -138,17 +88,9 @@ func CheckInboxForSpawns(townRoot string) ([]*PendingSpawn, error) {
 			Issue:     issue,
 			SpawnedAt: msg.Timestamp,
 			MailID:    msg.ID,
+			mailbox:   mailbox,
 		}
 		pending = append(pending, ps)
-		existing[msg.ID] = true
-
-		// Mark message as read (non-fatal: message tracking)
-		_ = mailbox.MarkRead(msg.ID)
-	}
-
-	// Save updated pending list
-	if err := SavePending(townRoot, pending); err != nil {
-		return nil, fmt.Errorf("saving pending: %w", err)
 	}
 
 	return pending, nil
@@ -162,11 +104,11 @@ type TriggerResult struct {
 }
 
 // TriggerPendingSpawns polls each pending spawn and triggers when ready.
-// Returns the spawns that were successfully triggered.
+// Archives mail after successful trigger (ZFC: mail is source of truth).
 func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResult, error) {
-	pending, err := LoadPending(townRoot)
+	pending, err := CheckInboxForSpawns(townRoot)
 	if err != nil {
-		return nil, fmt.Errorf("loading pending: %w", err)
+		return nil, fmt.Errorf("checking inbox: %w", err)
 	}
 
 	if len(pending) == 0 {
@@ -175,23 +117,24 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 
 	t := tmux.NewTmux()
 	var results []TriggerResult
-	var remaining []*PendingSpawn
 
 	for _, ps := range pending {
 		result := TriggerResult{Spawn: ps}
 
-		// Check if session still exists
+		// Check if session still exists (ZFC: query tmux directly)
 		running, err := t.HasSession(ps.Session)
 		if err != nil {
 			result.Error = fmt.Errorf("checking session: %w", err)
 			results = append(results, result)
-			remaining = append(remaining, ps)
 			continue
 		}
 
 		if !running {
-			// Session gone - remove from pending
+			// Session gone - archive the mail (spawn is dead)
 			result.Error = fmt.Errorf("session no longer exists")
+			if ps.mailbox != nil {
+				_ = ps.mailbox.Archive(ps.MailID)
+			}
 			results = append(results, result)
 			continue
 		}
@@ -201,8 +144,7 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 		runtimeConfig := config.LoadRuntimeConfig(rigPath)
 		err = t.WaitForRuntimeReady(ps.Session, runtimeConfig, timeout)
 		if err != nil {
-			// Not ready yet - keep in pending
-			remaining = append(remaining, ps)
+			// Not ready yet - leave mail in inbox for next poll
 			continue
 		}
 
@@ -211,46 +153,38 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 		if err := t.NudgeSession(ps.Session, triggerMsg); err != nil {
 			result.Error = fmt.Errorf("nudging session: %w", err)
 			results = append(results, result)
-			remaining = append(remaining, ps)
 			continue
 		}
 
-		// Successfully triggered
+		// Successfully triggered - archive the mail
 		result.Triggered = true
+		if ps.mailbox != nil {
+			_ = ps.mailbox.Archive(ps.MailID)
+		}
 		results = append(results, result)
-	}
-
-	// Save remaining (untriggered) spawns
-	if err := SavePending(townRoot, remaining); err != nil {
-		return results, fmt.Errorf("saving remaining: %w", err)
 	}
 
 	return results, nil
 }
 
-// PruneStalePending removes pending spawns older than the given age.
-// Spawns that are too old likely had their sessions die.
+// PruneStalePending archives POLECAT_STARTED messages older than the given age.
+// Old spawns likely had their sessions die without triggering.
 func PruneStalePending(townRoot string, maxAge time.Duration) (int, error) {
-	pending, err := LoadPending(townRoot)
+	pending, err := CheckInboxForSpawns(townRoot)
 	if err != nil {
 		return 0, err
 	}
 
 	cutoff := time.Now().Add(-maxAge)
-	var remaining []*PendingSpawn
 	pruned := 0
 
 	for _, ps := range pending {
 		if ps.SpawnedAt.Before(cutoff) {
+			// Archive stale spawn message
+			if ps.mailbox != nil {
+				_ = ps.mailbox.Archive(ps.MailID)
+			}
 			pruned++
-		} else {
-			remaining = append(remaining, ps)
-		}
-	}
-
-	if pruned > 0 {
-		if err := SavePending(townRoot, remaining); err != nil {
-			return pruned, err
 		}
 	}
 

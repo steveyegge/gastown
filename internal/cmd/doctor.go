@@ -161,6 +161,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewLegacyGastownCheck())
 	d.Register(doctor.NewClaudeSettingsCheck())
 
+	// Priming subsystem check
+	d.Register(doctor.NewPrimingCheck())
+
 	// Crew workspace checks
 	d.Register(doctor.NewCrewStateCheck())
 	d.Register(doctor.NewCrewWorktreeCheck())

@@ -13,7 +13,6 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -172,6 +171,14 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	if err := m.setupSharedBeads(crewPath); err != nil {
 		// Non-fatal - crew can still work, warn but don't fail
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Provision PRIME.md with Gas Town context for this worker.
+	// This is the fallback if SessionStart hook fails - ensures crew workers
+	// always have GUPP and essential Gas Town context.
+	if err := beads.ProvisionPrimeMDForWorktree(crewPath); err != nil {
+		// Non-fatal - crew can still work via hook, warn but don't fail
+		fmt.Printf("Warning: could not provision PRIME.md: %v\n", err)
 	}
 
 	// Copy overlay files from .runtime/overlay/ to crew root.
@@ -536,8 +543,10 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
 	_ = t.SetCrewCycleBindings(sessionID)
 
-	// Wait for Claude to start (non-fatal: session continues even if this times out)
-	_ = t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout)
+	// Note: We intentionally don't wait for Claude to start here.
+	// The session is created in detached mode, and blocking for 60 seconds
+	// serves no purpose. If the caller needs to know when Claude is ready,
+	// they can check with IsClaudeRunning().
 
 	return nil
 }

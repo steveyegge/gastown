@@ -15,245 +15,12 @@ import (
 )
 
 // Common errors
+// ZFC: Only define errors that don't require stderr parsing for decisions.
+// ErrNotARepo and ErrSyncConflict were removed - agents should handle these directly.
 var (
 	ErrNotInstalled = errors.New("bd not installed: run 'pip install beads-cli' or see https://github.com/anthropics/beads")
-	ErrNotARepo     = errors.New("not a beads repository (no .beads directory found)")
-	ErrSyncConflict = errors.New("beads sync conflict")
 	ErrNotFound     = errors.New("issue not found")
 )
-
-// ResolveBeadsDir returns the actual beads directory, following any redirect.
-// If workDir/.beads/redirect exists, it reads the redirect path and resolves it
-// relative to workDir (not the .beads directory). Otherwise, returns workDir/.beads.
-//
-// This is essential for crew workers and polecats that use shared beads via redirect.
-// The redirect file contains a relative path like "../../mayor/rig/.beads".
-//
-// Example: if we're at crew/max/ and .beads/redirect contains "../../mayor/rig/.beads",
-// the redirect is resolved from crew/max/ (not crew/max/.beads/), giving us
-// mayor/rig/.beads at the rig root level.
-//
-// Circular redirect detection: If the resolved path equals the original beads directory,
-// this indicates an errant redirect file that should be removed. The function logs a
-// warning and returns the original beads directory.
-func ResolveBeadsDir(workDir string) string {
-	beadsDir := filepath.Join(workDir, ".beads")
-	redirectPath := filepath.Join(beadsDir, "redirect")
-
-	// Check for redirect file
-	data, err := os.ReadFile(redirectPath) //nolint:gosec // G304: path is constructed internally
-	if err != nil {
-		// No redirect, use local .beads
-		return beadsDir
-	}
-
-	// Read and clean the redirect path
-	redirectTarget := strings.TrimSpace(string(data))
-	if redirectTarget == "" {
-		return beadsDir
-	}
-
-	// Resolve relative to workDir (the redirect is written from the perspective
-	// of being inside workDir, not inside workDir/.beads)
-	// e.g., redirect contains "../../mayor/rig/.beads"
-	// from crew/max/, this resolves to mayor/rig/.beads
-	resolved := filepath.Join(workDir, redirectTarget)
-
-	// Clean the path to resolve .. components
-	resolved = filepath.Clean(resolved)
-
-	// Detect circular redirects: if resolved path equals original beads dir,
-	// this is an errant redirect file (e.g., redirect in mayor/rig/.beads pointing to itself)
-	if resolved == beadsDir {
-		fmt.Fprintf(os.Stderr, "Warning: circular redirect detected in %s (points to itself), ignoring redirect\n", redirectPath)
-		// Remove the errant redirect file to prevent future warnings
-		if err := os.Remove(redirectPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not remove errant redirect file: %v\n", err)
-		}
-		return beadsDir
-	}
-
-	// Follow redirect chains (e.g., crew/.beads -> rig/.beads -> mayor/rig/.beads)
-	// This is intentional for the rig-level redirect architecture.
-	// Limit depth to prevent infinite loops from misconfigured redirects.
-	return resolveBeadsDirWithDepth(resolved, 3)
-}
-
-// resolveBeadsDirWithDepth follows redirect chains with a depth limit.
-func resolveBeadsDirWithDepth(beadsDir string, maxDepth int) string {
-	if maxDepth <= 0 {
-		fmt.Fprintf(os.Stderr, "Warning: redirect chain too deep at %s, stopping\n", beadsDir)
-		return beadsDir
-	}
-
-	redirectPath := filepath.Join(beadsDir, "redirect")
-	data, err := os.ReadFile(redirectPath) //nolint:gosec // G304: path is constructed internally
-	if err != nil {
-		// No redirect, this is the final destination
-		return beadsDir
-	}
-
-	redirectTarget := strings.TrimSpace(string(data))
-	if redirectTarget == "" {
-		return beadsDir
-	}
-
-	// Resolve relative to parent of beadsDir (the workDir)
-	workDir := filepath.Dir(beadsDir)
-	resolved := filepath.Clean(filepath.Join(workDir, redirectTarget))
-
-	// Detect circular redirect
-	if resolved == beadsDir {
-		fmt.Fprintf(os.Stderr, "Warning: circular redirect detected in %s, stopping\n", redirectPath)
-		return beadsDir
-	}
-
-	// Recursively follow
-	return resolveBeadsDirWithDepth(resolved, maxDepth-1)
-}
-
-// cleanBeadsRuntimeFiles removes gitignored runtime files from a .beads directory
-// while preserving tracked files (formulas/, README.md, config.yaml, .gitignore).
-// This is safe to call even if the directory doesn't exist.
-func cleanBeadsRuntimeFiles(beadsDir string) error {
-	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
-		return nil // Nothing to clean
-	}
-
-	// Runtime files/patterns that are gitignored and safe to remove
-	runtimePatterns := []string{
-		// SQLite databases
-		"*.db", "*.db-*", "*.db?*",
-		// Daemon runtime
-		"daemon.lock", "daemon.log", "daemon.pid", "bd.sock",
-		// Sync state
-		"sync-state.json", "last-touched", "metadata.json",
-		// Version tracking
-		".local_version",
-		// Redirect file (we're about to recreate it)
-		"redirect",
-		// Merge artifacts
-		"beads.base.*", "beads.left.*", "beads.right.*",
-		// JSONL files (tracked but will be redirected, safe to remove in worktrees)
-		"issues.jsonl", "interactions.jsonl",
-		// Runtime directories
-		"mq",
-	}
-
-	var firstErr error
-	for _, pattern := range runtimePatterns {
-		matches, err := filepath.Glob(filepath.Join(beadsDir, pattern))
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		for _, match := range matches {
-			if err := os.RemoveAll(match); err != nil && firstErr == nil {
-				firstErr = err
-			}
-		}
-	}
-
-	return firstErr
-}
-
-// SetupRedirect creates a .beads/redirect file for a worktree to point to the rig's shared beads.
-// This is used by crew, polecats, and refinery worktrees to share the rig's beads database.
-//
-// Parameters:
-//   - townRoot: the town root directory (e.g., ~/gt)
-//   - worktreePath: the worktree directory (e.g., <rig>/crew/<name> or <rig>/refinery/rig)
-//
-// The function:
-//  1. Computes the relative path from worktree to rig-level .beads
-//  2. Cleans up runtime files (preserving tracked files like formulas/)
-//  3. Creates the redirect file
-//
-// Safety: This function refuses to create redirects in the canonical beads location
-// (mayor/rig) to prevent circular redirect chains.
-func SetupRedirect(townRoot, worktreePath string) error {
-	// Get rig root from worktree path
-	// worktreePath = <town>/<rig>/crew/<name> or <town>/<rig>/refinery/rig etc.
-	relPath, err := filepath.Rel(townRoot, worktreePath)
-	if err != nil {
-		return fmt.Errorf("computing relative path: %w", err)
-	}
-	parts := strings.Split(filepath.ToSlash(relPath), "/")
-	if len(parts) < 2 {
-		return fmt.Errorf("invalid worktree path: must be at least 2 levels deep from town root")
-	}
-
-	// Safety check: prevent creating redirect in canonical beads location (mayor/rig)
-	// This would create a circular redirect chain since rig/.beads redirects to mayor/rig/.beads
-	if len(parts) >= 2 && parts[1] == "mayor" {
-		return fmt.Errorf("cannot create redirect in canonical beads location (mayor/rig)")
-	}
-
-	rigRoot := filepath.Join(townRoot, parts[0])
-	rigBeadsPath := filepath.Join(rigRoot, ".beads")
-	mayorBeadsPath := filepath.Join(rigRoot, "mayor", "rig", ".beads")
-
-	// Check rig-level .beads first, fall back to mayor/rig/.beads (tracked beads architecture)
-	usesMayorFallback := false
-	if _, err := os.Stat(rigBeadsPath); os.IsNotExist(err) {
-		// No rig/.beads - check for mayor/rig/.beads (tracked beads architecture)
-		if _, err := os.Stat(mayorBeadsPath); os.IsNotExist(err) {
-			return fmt.Errorf("no beads found at %s or %s", rigBeadsPath, mayorBeadsPath)
-		}
-		// Using mayor fallback - warn user to run bd doctor
-		fmt.Fprintf(os.Stderr, "Warning: rig .beads not found at %s, using %s\n", rigBeadsPath, mayorBeadsPath)
-		fmt.Fprintf(os.Stderr, "  Run 'bd doctor' to fix rig beads configuration\n")
-		usesMayorFallback = true
-	}
-
-	// Clean up runtime files in .beads/ but preserve tracked files (formulas/, README.md, etc.)
-	worktreeBeadsDir := filepath.Join(worktreePath, ".beads")
-	if err := cleanBeadsRuntimeFiles(worktreeBeadsDir); err != nil {
-		return fmt.Errorf("cleaning runtime files: %w", err)
-	}
-
-	// Create .beads directory if it doesn't exist
-	if err := os.MkdirAll(worktreeBeadsDir, 0755); err != nil {
-		return fmt.Errorf("creating .beads dir: %w", err)
-	}
-
-	// Compute relative path from worktree to rig root
-	// e.g., crew/<name> (depth 2) -> ../../.beads
-	//       refinery/rig (depth 2) -> ../../.beads
-	depth := len(parts) - 1 // subtract 1 for rig name itself
-	upPath := strings.Repeat("../", depth)
-
-	var redirectPath string
-	if usesMayorFallback {
-		// Direct redirect to mayor/rig/.beads since rig/.beads doesn't exist
-		redirectPath = upPath + "mayor/rig/.beads"
-	} else {
-		redirectPath = upPath + ".beads"
-
-		// Check if rig-level beads has a redirect (tracked beads case).
-		// If so, redirect directly to the final destination to avoid chains.
-		// The bd CLI doesn't support redirect chains, so we must skip intermediate hops.
-		rigRedirectPath := filepath.Join(rigBeadsPath, "redirect")
-		if data, err := os.ReadFile(rigRedirectPath); err == nil {
-			rigRedirectTarget := strings.TrimSpace(string(data))
-			if rigRedirectTarget != "" {
-				// Rig has redirect (e.g., "mayor/rig/.beads" for tracked beads).
-				// Redirect worktree directly to the final destination.
-				redirectPath = upPath + rigRedirectTarget
-			}
-		}
-	}
-
-	// Create redirect file
-	redirectFile := filepath.Join(worktreeBeadsDir, "redirect")
-	if err := os.WriteFile(redirectFile, []byte(redirectPath+"\n"), 0644); err != nil {
-		return fmt.Errorf("creating redirect file: %w", err)
-	}
-
-	return nil
-}
 
 // Issue represents a beads issue.
 type Issue struct {
@@ -298,46 +65,6 @@ type IssueDep struct {
 	Priority       int    `json:"priority"`
 	Type           string `json:"issue_type"`
 	DependencyType string `json:"dependency_type,omitempty"`
-}
-
-// Delegation represents a work delegation relationship between work units.
-// Delegation links a parent work unit to a child work unit, tracking who
-// delegated the work and to whom, along with any terms of the delegation.
-// This enables work distribution with credit cascade - work flows down,
-// validation and credit flow up.
-type Delegation struct {
-	// Parent is the work unit ID that delegated the work
-	Parent string `json:"parent"`
-
-	// Child is the work unit ID that received the delegated work
-	Child string `json:"child"`
-
-	// DelegatedBy is the entity (hop:// URI or actor string) that delegated
-	DelegatedBy string `json:"delegated_by"`
-
-	// DelegatedTo is the entity (hop:// URI or actor string) receiving delegation
-	DelegatedTo string `json:"delegated_to"`
-
-	// Terms contains optional conditions of the delegation
-	Terms *DelegationTerms `json:"terms,omitempty"`
-
-	// CreatedAt is when the delegation was created
-	CreatedAt string `json:"created_at,omitempty"`
-}
-
-// DelegationTerms holds optional terms/conditions for a delegation.
-type DelegationTerms struct {
-	// Portion describes what part of the parent work is delegated
-	Portion string `json:"portion,omitempty"`
-
-	// Deadline is the expected completion date
-	Deadline string `json:"deadline,omitempty"`
-
-	// AcceptanceCriteria describes what constitutes completion
-	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
-
-	// CreditShare is the percentage of credit that flows to the delegate (0-100)
-	CreditShare int `json:"credit_share,omitempty"`
 }
 
 // ListOptions specifies filters for listing issues.
@@ -431,6 +158,9 @@ func (b *Beads) Run(args ...string) ([]byte, error) {
 }
 
 // wrapError wraps bd errors with context.
+// ZFC: Avoid parsing stderr to make decisions. Transport errors to agents instead.
+// Exception: ErrNotInstalled (exec.ErrNotFound) and ErrNotFound (issue lookup) are
+// acceptable as they enable basic error handling without decision-making.
 func (b *Beads) wrapError(err error, stderr string, args []string) error {
 	stderr = strings.TrimSpace(stderr)
 
@@ -439,15 +169,7 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 		return ErrNotInstalled
 	}
 
-	// Detect specific error types from stderr
-	if strings.Contains(stderr, "not a beads repository") ||
-		strings.Contains(stderr, "No .beads directory") ||
-		strings.Contains(stderr, ".beads") && strings.Contains(stderr, "not found") {
-		return ErrNotARepo
-	}
-	if strings.Contains(stderr, "sync conflict") || strings.Contains(stderr, "CONFLICT") {
-		return ErrSyncConflict
-	}
+	// ErrNotFound is widely used for issue lookups - acceptable exception
 	if strings.Contains(stderr, "not found") || strings.Contains(stderr, "Issue not found") {
 		return ErrNotFound
 	}
@@ -619,27 +341,6 @@ func (b *Beads) ShowMultiple(ids []string) (map[string]*Issue, error) {
 	return result, nil
 }
 
-// ListAgentBeads returns all agent beads in a single query.
-// Returns a map of agent bead ID to Issue.
-func (b *Beads) ListAgentBeads() (map[string]*Issue, error) {
-	out, err := b.run("list", "--label=gt:agent", "--json")
-	if err != nil {
-		return nil, err
-	}
-
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
-	}
-
-	result := make(map[string]*Issue, len(issues))
-	for _, issue := range issues {
-		result[issue.ID] = issue
-	}
-
-	return result, nil
-}
-
 // Blocked returns issues that are blocked by dependencies.
 func (b *Beads) Blocked() ([]*Issue, error) {
 	out, err := b.run("blocked", "--json")
@@ -666,7 +367,7 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	}
 	// Type is deprecated: convert to gt:<type> label
 	if opts.Type != "" {
-		args = append(args, "--add-label=gt:"+opts.Type)
+		args = append(args, "--labels=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {
 		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
@@ -710,7 +411,7 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	}
 	// Type is deprecated: convert to gt:<type> label
 	if opts.Type != "" {
-		args = append(args, "--add-label=gt:"+opts.Type)
+		args = append(args, "--labels=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {
 		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
@@ -852,118 +553,6 @@ func (b *Beads) RemoveDependency(issue, dependsOn string) error {
 	return err
 }
 
-// AddDelegation creates a delegation relationship from parent to child work unit.
-// The delegation tracks who delegated (delegatedBy) and who received (delegatedTo),
-// along with optional terms. Delegations enable credit cascade - when child work
-// is completed, credit flows up to the parent work unit and its delegator.
-//
-// Note: This is stored as metadata on the child issue until bd CLI has native
-// delegation support. Once bd supports `bd delegate add`, this will be updated.
-func (b *Beads) AddDelegation(d *Delegation) error {
-	if d.Parent == "" || d.Child == "" {
-		return fmt.Errorf("delegation requires both parent and child work unit IDs")
-	}
-	if d.DelegatedBy == "" || d.DelegatedTo == "" {
-		return fmt.Errorf("delegation requires both delegated_by and delegated_to entities")
-	}
-
-	// Store delegation as JSON in the child issue's delegated_from slot
-	delegationJSON, err := json.Marshal(d)
-	if err != nil {
-		return fmt.Errorf("marshaling delegation: %w", err)
-	}
-
-	// Set the delegated_from slot on the child issue
-	_, err = b.run("slot", "set", d.Child, "delegated_from", string(delegationJSON))
-	if err != nil {
-		return fmt.Errorf("setting delegation slot: %w", err)
-	}
-
-	// Also add a dependency so child blocks parent (work must complete before parent can close)
-	if err := b.AddDependency(d.Parent, d.Child); err != nil {
-		// Log but don't fail - the delegation is still recorded
-		fmt.Printf("Warning: could not add blocking dependency for delegation: %v\n", err)
-	}
-
-	return nil
-}
-
-// RemoveDelegation removes a delegation relationship.
-func (b *Beads) RemoveDelegation(parent, child string) error {
-	// Clear the delegated_from slot on the child
-	_, err := b.run("slot", "clear", child, "delegated_from")
-	if err != nil {
-		return fmt.Errorf("clearing delegation slot: %w", err)
-	}
-
-	// Also remove the blocking dependency
-	if err := b.RemoveDependency(parent, child); err != nil {
-		// Log but don't fail
-		fmt.Printf("Warning: could not remove blocking dependency: %v\n", err)
-	}
-
-	return nil
-}
-
-// GetDelegation retrieves the delegation information for a child work unit.
-// Returns nil if the issue has no delegation.
-func (b *Beads) GetDelegation(child string) (*Delegation, error) {
-	// Get the issue to read its slot
-	issue, err := b.Show(child)
-	if err != nil {
-		return nil, fmt.Errorf("getting issue: %w", err)
-	}
-
-	// The slot would be in the description or a separate field
-	// For now, we'll need to parse from the bd slot get command
-	out, err := b.run("slot", "get", child, "delegated_from")
-	if err != nil {
-		// No delegation slot means no delegation
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no slot") {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("getting delegation slot: %w", err)
-	}
-
-	slotValue := strings.TrimSpace(string(out))
-	if slotValue == "" || slotValue == "null" {
-		return nil, nil
-	}
-
-	var delegation Delegation
-	if err := json.Unmarshal([]byte(slotValue), &delegation); err != nil {
-		return nil, fmt.Errorf("parsing delegation: %w", err)
-	}
-
-	// Keep issue reference for context (not used currently but available)
-	_ = issue
-
-	return &delegation, nil
-}
-
-// ListDelegationsFrom returns all delegations from a parent work unit.
-// This searches for issues that have delegated_from pointing to the parent.
-func (b *Beads) ListDelegationsFrom(parent string) ([]*Delegation, error) {
-	// List all issues that depend on this parent (delegated work blocks parent)
-	issues, err := b.List(ListOptions{Status: "all"})
-	if err != nil {
-		return nil, fmt.Errorf("listing issues: %w", err)
-	}
-
-	var delegations []*Delegation
-	for _, issue := range issues {
-		d, err := b.GetDelegation(issue.ID)
-		if err != nil {
-			continue // Skip issues with errors
-		}
-		if d != nil && d.Parent == parent {
-			delegations = append(delegations, d)
-		}
-	}
-
-	return delegations, nil
-}
-
 // Sync syncs beads with remote.
 func (b *Beads) Sync() error {
 	_, err := b.run("sync")
@@ -976,8 +565,8 @@ func (b *Beads) SyncFromMain() error {
 	return err
 }
 
-// SyncStatus returns the sync status without performing a sync.
-func (b *Beads) SyncStatus() (*SyncStatus, error) {
+// GetSyncStatus returns the sync status without performing a sync.
+func (b *Beads) GetSyncStatus() (*SyncStatus, error) {
 	out, err := b.run("sync", "--status", "--json")
 	if err != nil {
 		// If sync branch doesn't exist, return empty status
@@ -1005,971 +594,93 @@ func (b *Beads) Stats() (string, error) {
 }
 
 // IsBeadsRepo checks if the working directory is a beads repository.
+// ZFC: Check file existence directly instead of parsing bd errors.
 func (b *Beads) IsBeadsRepo() bool {
-	_, err := b.run("list", "--limit=1")
-	return err == nil || !errors.Is(err, ErrNotARepo)
+	beadsDir := ResolveBeadsDir(b.workDir)
+	info, err := os.Stat(beadsDir)
+	return err == nil && info.IsDir()
 }
 
-// AgentFields holds structured fields for agent beads.
-// These are stored as "key: value" lines in the description.
-type AgentFields struct {
-	RoleType          string // polecat, witness, refinery, deacon, mayor
-	Rig               string // Rig name (empty for global agents like mayor/deacon)
-	AgentState        string // spawning, working, done, stuck
-	HookBead          string // Currently pinned work bead ID
-	RoleBead          string // Role definition bead ID (canonical location; may not exist yet)
-	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
-	ActiveMR          string // Currently active merge request bead ID (for traceability)
-	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
-}
+// primeContent is the Gas Town PRIME.md content that provides essential context
+// for crew workers. This is the fallback if the SessionStart hook fails.
+const primeContent = `# Gas Town Worker Context
 
-// Notification level constants
-const (
-	NotifyVerbose = "verbose" // All notifications (mail, convoy events, etc.)
-	NotifyNormal  = "normal"  // Important events only (default)
-	NotifyMuted   = "muted"   // Silent/DND mode - batch for later
-)
+> **Context Recovery**: Run ` + "`gt prime`" + ` for full context after compaction or new session.
 
-// FormatAgentDescription creates a description string from agent fields.
-func FormatAgentDescription(title string, fields *AgentFields) string {
-	if fields == nil {
-		return title
-	}
+## The Propulsion Principle (GUPP)
 
-	var lines []string
-	lines = append(lines, title)
-	lines = append(lines, "")
-	lines = append(lines, fmt.Sprintf("role_type: %s", fields.RoleType))
+**If you find work on your hook, YOU RUN IT.**
 
-	if fields.Rig != "" {
-		lines = append(lines, fmt.Sprintf("rig: %s", fields.Rig))
-	} else {
-		lines = append(lines, "rig: null")
-	}
+No confirmation. No waiting. No announcements. The hook having work IS the assignment.
+This is physics, not politeness. Gas Town is a steam engine - you are a piston.
 
-	lines = append(lines, fmt.Sprintf("agent_state: %s", fields.AgentState))
+**Failure mode we're preventing:**
+- Agent starts with work on hook
+- Agent announces itself and waits for human to say "ok go"
+- Human is AFK / trusting the engine to run
+- Work sits idle. The whole system stalls.
 
-	if fields.HookBead != "" {
-		lines = append(lines, fmt.Sprintf("hook_bead: %s", fields.HookBead))
-	} else {
-		lines = append(lines, "hook_bead: null")
-	}
+## Startup Protocol
 
-	if fields.RoleBead != "" {
-		lines = append(lines, fmt.Sprintf("role_bead: %s", fields.RoleBead))
-	} else {
-		lines = append(lines, "role_bead: null")
-	}
+1. Check your hook: ` + "`gt mol status`" + `
+2. If work is hooked → EXECUTE (no announcement, no waiting)
+3. If hook empty → Check mail: ` + "`gt mail inbox`" + `
+4. Still nothing? Wait for user instructions
 
-	if fields.CleanupStatus != "" {
-		lines = append(lines, fmt.Sprintf("cleanup_status: %s", fields.CleanupStatus))
-	} else {
-		lines = append(lines, "cleanup_status: null")
-	}
+## Key Commands
 
-	if fields.ActiveMR != "" {
-		lines = append(lines, fmt.Sprintf("active_mr: %s", fields.ActiveMR))
-	} else {
-		lines = append(lines, "active_mr: null")
-	}
+- ` + "`gt prime`" + ` - Get full role context (run after compaction)
+- ` + "`gt mol status`" + ` - Check your hooked work
+- ` + "`gt mail inbox`" + ` - Check for messages
+- ` + "`bd ready`" + ` - Find available work (no blockers)
+- ` + "`bd sync`" + ` - Sync beads changes
 
-	if fields.NotificationLevel != "" {
-		lines = append(lines, fmt.Sprintf("notification_level: %s", fields.NotificationLevel))
-	} else {
-		lines = append(lines, "notification_level: null")
-	}
+## Session Close Protocol
 
-	return strings.Join(lines, "\n")
-}
+Before saying "done":
+1. git status (check what changed)
+2. git add <files> (stage code changes)
+3. bd sync (commit beads changes)
+4. git commit -m "..." (commit code)
+5. bd sync (commit any new beads changes)
+6. git push (push to remote)
 
-// ParseAgentFields extracts agent fields from an issue's description.
-func ParseAgentFields(description string) *AgentFields {
-	fields := &AgentFields{}
+**Work is not done until pushed.**
+`
 
-	for _, line := range strings.Split(description, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		colonIdx := strings.Index(line, ":")
-		if colonIdx == -1 {
-			continue
-		}
-
-		key := strings.TrimSpace(line[:colonIdx])
-		value := strings.TrimSpace(line[colonIdx+1:])
-		if value == "null" || value == "" {
-			value = ""
-		}
-
-		switch strings.ToLower(key) {
-		case "role_type":
-			fields.RoleType = value
-		case "rig":
-			fields.Rig = value
-		case "agent_state":
-			fields.AgentState = value
-		case "hook_bead":
-			fields.HookBead = value
-		case "role_bead":
-			fields.RoleBead = value
-		case "cleanup_status":
-			fields.CleanupStatus = value
-		case "active_mr":
-			fields.ActiveMR = value
-		case "notification_level":
-			fields.NotificationLevel = value
-		}
-	}
-
-	return fields
-}
-
-// CreateAgentBead creates an agent bead for tracking agent lifecycle.
-// The ID format is: <prefix>-<rig>-<role>-<name> (e.g., gt-gastown-polecat-Toast)
-// Use AgentBeadID() helper to generate correct IDs.
-// The created_by field is populated from BD_ACTOR env var for provenance tracking.
-func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, error) {
-	description := FormatAgentDescription(title, fields)
-
-	args := []string{"create", "--json",
-		"--id=" + id,
-		"--title=" + title,
-		"--description=" + description,
-		"--add-label=gt:agent",
-	}
-
-	// Default actor from BD_ACTOR env var for provenance tracking
-	if actor := os.Getenv("BD_ACTOR"); actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
-	if err != nil {
-		return nil, err
-	}
-
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
-	}
-
-	// Set the role slot if specified (this is the authoritative storage)
-	if fields != nil && fields.RoleBead != "" {
-		if _, err := b.run("slot", "set", id, "role", fields.RoleBead); err != nil {
-			// Non-fatal: warn but continue
-			fmt.Printf("Warning: could not set role slot: %v\n", err)
-		}
-	}
-
-	// Set the hook slot if specified (this is the authoritative storage)
-	// This fixes the slot inconsistency bug where bead status is 'hooked' but
-	// agent's hook slot is empty. See mi-619.
-	if fields != nil && fields.HookBead != "" {
-		if _, err := b.run("slot", "set", id, "hook", fields.HookBead); err != nil {
-			// Non-fatal: warn but continue - description text has the backup
-			fmt.Printf("Warning: could not set hook slot: %v\n", err)
-		}
-	}
-
-	return &issue, nil
-}
-
-// UpdateAgentState updates the agent_state field in an agent bead.
-// Optionally updates hook_bead if provided.
+// ProvisionPrimeMD writes the Gas Town PRIME.md file to the specified beads directory.
+// This provides essential Gas Town context (GUPP, startup protocol) as a fallback
+// if the SessionStart hook fails. The PRIME.md is read by bd prime.
 //
-// IMPORTANT: This function uses the proper bd commands to update agent fields:
-// - `bd agent state` for agent_state (uses SQLite column directly)
-// - `bd slot set/clear` for hook_bead (uses SQLite column directly)
-//
-// This ensures consistency with `bd slot show` and other beads commands.
-// Previously, this function embedded these fields in the description text,
-// which caused inconsistencies with bd slot commands (see GH #gt-9v52).
-func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) error {
-	// Update agent state using bd agent state command
-	// This updates the agent_state column directly in SQLite
-	_, err := b.run("agent", "state", id, state)
-	if err != nil {
-		return fmt.Errorf("updating agent state: %w", err)
+// The beadsDir should be the actual beads directory (after following any redirect).
+// Returns nil if PRIME.md already exists (idempotent).
+func ProvisionPrimeMD(beadsDir string) error {
+	primePath := filepath.Join(beadsDir, "PRIME.md")
+
+	// Check if already exists - don't overwrite customizations
+	if _, err := os.Stat(primePath); err == nil {
+		return nil // Already exists, don't overwrite
 	}
 
-	// Update hook_bead if provided
-	if hookBead != nil {
-		if *hookBead != "" {
-			// Set the hook using bd slot set
-			// This updates the hook_bead column directly in SQLite
-			_, err = b.run("slot", "set", id, "hook", *hookBead)
-			if err != nil {
-				// If slot is already occupied, clear it first then retry
-				// This handles re-slinging scenarios where we're updating the hook
-				errStr := err.Error()
-				if strings.Contains(errStr, "already occupied") {
-					_, _ = b.run("slot", "clear", id, "hook")
-					_, err = b.run("slot", "set", id, "hook", *hookBead)
-				}
-				if err != nil {
-					return fmt.Errorf("setting hook: %w", err)
-				}
-			}
-		} else {
-			// Clear the hook
-			_, err = b.run("slot", "clear", id, "hook")
-			if err != nil {
-				return fmt.Errorf("clearing hook: %w", err)
-			}
-		}
+	// Create .beads directory if it doesn't exist
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		return fmt.Errorf("creating beads dir: %w", err)
+	}
+
+	// Write PRIME.md
+	if err := os.WriteFile(primePath, []byte(primeContent), 0644); err != nil {
+		return fmt.Errorf("writing PRIME.md: %w", err)
 	}
 
 	return nil
 }
 
-// SetHookBead sets the hook_bead slot on an agent bead.
-// This is a convenience wrapper that only sets the hook without changing agent_state.
-// Per gt-zecmc: agent_state ("running", "dead", "idle") is observable from tmux
-// and should not be recorded in beads ("discover, don't track" principle).
-func (b *Beads) SetHookBead(agentBeadID, hookBeadID string) error {
-	// Set the hook using bd slot set
-	// This updates the hook_bead column directly in SQLite
-	_, err := b.run("slot", "set", agentBeadID, "hook", hookBeadID)
-	if err != nil {
-		// If slot is already occupied, clear it first then retry
-		errStr := err.Error()
-		if strings.Contains(errStr, "already occupied") {
-			_, _ = b.run("slot", "clear", agentBeadID, "hook")
-			_, err = b.run("slot", "set", agentBeadID, "hook", hookBeadID)
-		}
-		if err != nil {
-			return fmt.Errorf("setting hook: %w", err)
-		}
-	}
-	return nil
-}
-
-// ClearHookBead clears the hook_bead slot on an agent bead.
-// Used when work is complete or unslung.
-func (b *Beads) ClearHookBead(agentBeadID string) error {
-	_, err := b.run("slot", "clear", agentBeadID, "hook")
-	if err != nil {
-		return fmt.Errorf("clearing hook: %w", err)
-	}
-	return nil
-}
-
-// UpdateAgentCleanupStatus updates the cleanup_status field in an agent bead.
-// This is called by the polecat to self-report its git state (ZFC compliance).
-// Valid statuses: clean, has_uncommitted, has_stash, has_unpushed
-func (b *Beads) UpdateAgentCleanupStatus(id string, cleanupStatus string) error {
-	// First get current issue to preserve other fields
-	issue, err := b.Show(id)
-	if err != nil {
-		return err
-	}
-
-	// Parse existing fields
-	fields := ParseAgentFields(issue.Description)
-	fields.CleanupStatus = cleanupStatus
-
-	// Format new description
-	description := FormatAgentDescription(issue.Title, fields)
-
-	return b.Update(id, UpdateOptions{Description: &description})
-}
-
-// UpdateAgentActiveMR updates the active_mr field in an agent bead.
-// This links the agent to their current merge request for traceability.
-// Pass empty string to clear the field (e.g., after merge completes).
-func (b *Beads) UpdateAgentActiveMR(id string, activeMR string) error {
-	// First get current issue to preserve other fields
-	issue, err := b.Show(id)
-	if err != nil {
-		return err
-	}
-
-	// Parse existing fields
-	fields := ParseAgentFields(issue.Description)
-	fields.ActiveMR = activeMR
-
-	// Format new description
-	description := FormatAgentDescription(issue.Title, fields)
-
-	return b.Update(id, UpdateOptions{Description: &description})
-}
-
-// UpdateAgentNotificationLevel updates the notification_level field in an agent bead.
-// Valid levels: verbose, normal, muted (DND mode).
-// Pass empty string to reset to default (normal).
-func (b *Beads) UpdateAgentNotificationLevel(id string, level string) error {
-	// Validate level
-	if level != "" && level != NotifyVerbose && level != NotifyNormal && level != NotifyMuted {
-		return fmt.Errorf("invalid notification level %q: must be verbose, normal, or muted", level)
-	}
-
-	// First get current issue to preserve other fields
-	issue, err := b.Show(id)
-	if err != nil {
-		return err
-	}
-
-	// Parse existing fields
-	fields := ParseAgentFields(issue.Description)
-	fields.NotificationLevel = level
-
-	// Format new description
-	description := FormatAgentDescription(issue.Title, fields)
-
-	return b.Update(id, UpdateOptions{Description: &description})
-}
-
-// GetAgentNotificationLevel returns the notification level for an agent.
-// Returns "normal" if not set (the default).
-func (b *Beads) GetAgentNotificationLevel(id string) (string, error) {
-	_, fields, err := b.GetAgentBead(id)
-	if err != nil {
-		return "", err
-	}
-	if fields == nil {
-		return NotifyNormal, nil
-	}
-	if fields.NotificationLevel == "" {
-		return NotifyNormal, nil
-	}
-	return fields.NotificationLevel, nil
-}
-
-// DeleteAgentBead permanently deletes an agent bead.
-// Uses --hard --force for immediate permanent deletion (no tombstone).
-func (b *Beads) DeleteAgentBead(id string) error {
-	_, err := b.run("delete", id, "--hard", "--force")
-	return err
-}
-
-// GetAgentBead retrieves an agent bead by ID.
-// Returns nil if not found.
-func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
-	issue, err := b.Show(id)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, nil, nil
-		}
-		return nil, nil, err
-	}
-
-	if !HasLabel(issue, "gt:agent") {
-		return nil, nil, fmt.Errorf("issue %s is not an agent bead (missing gt:agent label)", id)
-	}
-
-	fields := ParseAgentFields(issue.Description)
-	return issue, fields, nil
-}
-
-// Agent bead ID naming convention:
-//   prefix-rig-role-name
-//
-// Examples:
-//   - gt-mayor (town-level, no rig)
-//   - gt-deacon (town-level, no rig)
-//   - gt-gastown-witness (rig-level singleton)
-//   - gt-gastown-refinery (rig-level singleton)
-//   - gt-gastown-crew-max (rig-level named agent)
-//   - gt-gastown-polecat-Toast (rig-level named agent)
-
-// AgentBeadIDWithPrefix generates an agent bead ID using the specified prefix.
-// The prefix should NOT include the hyphen (e.g., "gt", "bd", not "gt-", "bd-").
-// For town-level agents (mayor, deacon), pass empty rig and name.
-// For rig-level singletons (witness, refinery), pass empty name.
-// For named agents (crew, polecat), pass all three.
-func AgentBeadIDWithPrefix(prefix, rig, role, name string) string {
-	if rig == "" {
-		// Town-level agent: prefix-mayor, prefix-deacon
-		return prefix + "-" + role
-	}
-	if name == "" {
-		// Rig-level singleton: prefix-rig-witness, prefix-rig-refinery
-		return prefix + "-" + rig + "-" + role
-	}
-	// Rig-level named agent: prefix-rig-role-name
-	return prefix + "-" + rig + "-" + role + "-" + name
-}
-
-// AgentBeadID generates the canonical agent bead ID using "gt" prefix.
-// For non-gastown rigs, use AgentBeadIDWithPrefix with the rig's configured prefix.
-func AgentBeadID(rig, role, name string) string {
-	return AgentBeadIDWithPrefix("gt", rig, role, name)
-}
-
-// MayorBeadID returns the Mayor agent bead ID.
-//
-// Deprecated: Use MayorBeadIDTown() for town-level beads (hq- prefix).
-// This function returns "gt-mayor" which is for rig-level storage.
-// Town-level agents like Mayor should use the hq- prefix.
-func MayorBeadID() string {
-	return "gt-mayor"
-}
-
-// DeaconBeadID returns the Deacon agent bead ID.
-//
-// Deprecated: Use DeaconBeadIDTown() for town-level beads (hq- prefix).
-// This function returns "gt-deacon" which is for rig-level storage.
-// Town-level agents like Deacon should use the hq- prefix.
-func DeaconBeadID() string {
-	return "gt-deacon"
-}
-
-// DogBeadID returns a Dog agent bead ID.
-// Dogs are town-level agents, so they follow the pattern: gt-dog-<name>
-// Deprecated: Use DogBeadIDTown() for town-level beads with hq- prefix.
-// Dogs are town-level agents and should use hq-dog-<name>, not gt-dog-<name>.
-func DogBeadID(name string) string {
-	return "gt-dog-" + name
-}
-
-// DogRoleBeadID returns the Dog role bead ID.
-func DogRoleBeadID() string {
-	return RoleBeadID("dog")
-}
-
-// CreateDogAgentBead creates an agent bead for a dog.
-// Dogs use a different schema than other agents - they use labels for metadata.
-// Returns the created issue or an error.
-func (b *Beads) CreateDogAgentBead(name, location string) (*Issue, error) {
-	title := fmt.Sprintf("Dog: %s", name)
-	labels := []string{
-		"gt:agent",
-		"role_type:dog",
-		"rig:town",
-		"location:" + location,
-	}
-
-	args := []string{
-		"create", "--json",
-		"--role-type=dog",
-		"--title=" + title,
-		"--labels=" + strings.Join(labels, ","),
-	}
-
-	// Default actor from BD_ACTOR env var for provenance tracking
-	if actor := os.Getenv("BD_ACTOR"); actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
-	if err != nil {
-		return nil, err
-	}
-
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
-	}
-
-	return &issue, nil
-}
-
-// FindDogAgentBead finds the agent bead for a dog by name.
-// Searches for agent beads with role_type:dog and matching title.
-// Returns nil if not found.
-func (b *Beads) FindDogAgentBead(name string) (*Issue, error) {
-	// List all agent beads and filter by role_type:dog label
-	issues, err := b.List(ListOptions{
-		Label:    "gt:agent",
-		Status:   "all",
-		Priority: -1, // No priority filter
-	})
-	if err != nil {
-		return nil, fmt.Errorf("listing agents: %w", err)
-	}
-
-	expectedTitle := fmt.Sprintf("Dog: %s", name)
-	for _, issue := range issues {
-		// Check title match and role_type:dog label
-		if issue.Title == expectedTitle {
-			for _, label := range issue.Labels {
-				if label == "role_type:dog" {
-					return issue, nil
-				}
-			}
-		}
-	}
-
-	return nil, nil
-}
-
-// DeleteDogAgentBead finds and deletes the agent bead for a dog.
-// Returns nil if the bead doesn't exist (idempotent).
-func (b *Beads) DeleteDogAgentBead(name string) error {
-	issue, err := b.FindDogAgentBead(name)
-	if err != nil {
-		return fmt.Errorf("finding dog bead: %w", err)
-	}
-	if issue == nil {
-		return nil // Already doesn't exist - idempotent
-	}
-
-	err = b.DeleteAgentBead(issue.ID)
-	if err != nil {
-		return fmt.Errorf("deleting bead %s: %w", issue.ID, err)
-	}
-	return nil
-}
-
-// WitnessBeadIDWithPrefix returns the Witness agent bead ID for a rig using the specified prefix.
-func WitnessBeadIDWithPrefix(prefix, rig string) string {
-	return AgentBeadIDWithPrefix(prefix, rig, "witness", "")
-}
-
-// WitnessBeadID returns the Witness agent bead ID for a rig using "gt" prefix.
-func WitnessBeadID(rig string) string {
-	return WitnessBeadIDWithPrefix("gt", rig)
-}
-
-// RefineryBeadIDWithPrefix returns the Refinery agent bead ID for a rig using the specified prefix.
-func RefineryBeadIDWithPrefix(prefix, rig string) string {
-	return AgentBeadIDWithPrefix(prefix, rig, "refinery", "")
-}
-
-// RefineryBeadID returns the Refinery agent bead ID for a rig using "gt" prefix.
-func RefineryBeadID(rig string) string {
-	return RefineryBeadIDWithPrefix("gt", rig)
-}
-
-// CrewBeadIDWithPrefix returns a Crew worker agent bead ID using the specified prefix.
-func CrewBeadIDWithPrefix(prefix, rig, name string) string {
-	return AgentBeadIDWithPrefix(prefix, rig, "crew", name)
-}
-
-// CrewBeadID returns a Crew worker agent bead ID using "gt" prefix.
-func CrewBeadID(rig, name string) string {
-	return CrewBeadIDWithPrefix("gt", rig, name)
-}
-
-// PolecatBeadIDWithPrefix returns a Polecat agent bead ID using the specified prefix.
-func PolecatBeadIDWithPrefix(prefix, rig, name string) string {
-	return AgentBeadIDWithPrefix(prefix, rig, "polecat", name)
-}
-
-// PolecatBeadID returns a Polecat agent bead ID using "gt" prefix.
-func PolecatBeadID(rig, name string) string {
-	return PolecatBeadIDWithPrefix("gt", rig, name)
-}
-
-// ParseAgentBeadID parses an agent bead ID into its components.
-// Returns rig, role, name, and whether parsing succeeded.
-// For town-level agents, rig will be empty.
-// For singletons, name will be empty.
-// Accepts any valid prefix (e.g., "gt-", "bd-"), not just "gt-".
-func ParseAgentBeadID(id string) (rig, role, name string, ok bool) {
-	// Find the prefix (everything before the first hyphen)
-	// Valid prefixes are 2-3 characters (e.g., "gt", "bd", "hq")
-	hyphenIdx := strings.Index(id, "-")
-	if hyphenIdx < 2 || hyphenIdx > 3 {
-		return "", "", "", false
-	}
-
-	rest := id[hyphenIdx+1:]
-	parts := strings.Split(rest, "-")
-
-	switch len(parts) {
-	case 1:
-		// Town-level: gt-mayor, bd-deacon
-		return "", parts[0], "", true
-	case 2:
-		// Could be rig-level singleton (gt-gastown-witness) or
-		// town-level named (gt-dog-alpha for dogs)
-		if parts[0] == "dog" {
-			// Dogs are town-level named agents: gt-dog-<name>
-			return "", "dog", parts[1], true
-		}
-		// Rig-level singleton: gt-gastown-witness
-		return parts[0], parts[1], "", true
-	case 3:
-		// Rig-level named: gt-gastown-crew-max, bd-beads-polecat-pearl
-		return parts[0], parts[1], parts[2], true
-	default:
-		// Handle names with hyphens: gt-gastown-polecat-my-agent-name
-		// or gt-dog-my-agent-name
-		if len(parts) >= 3 {
-			if parts[0] == "dog" {
-				// Dog with hyphenated name: gt-dog-my-dog-name
-				return "", "dog", strings.Join(parts[1:], "-"), true
-			}
-			return parts[0], parts[1], strings.Join(parts[2:], "-"), true
-		}
-		return "", "", "", false
-	}
-}
-
-// IsAgentSessionBead returns true if the bead ID represents an agent session molecule.
-// Agent session beads follow patterns like gt-mayor, bd-beads-witness, gt-gastown-crew-joe.
-// Supports any valid prefix (e.g., "gt-", "bd-"), not just "gt-".
-// These are used to track agent state and update frequently, which can create noise.
-func IsAgentSessionBead(beadID string) bool {
-	_, role, _, ok := ParseAgentBeadID(beadID)
-	if !ok {
-		return false
-	}
-	// Known agent roles
-	switch role {
-	case "mayor", "deacon", "witness", "refinery", "crew", "polecat", "dog":
-		return true
-	default:
-		return false
-	}
-}
-
-// Role bead ID naming convention:
-// Role beads are stored in town beads (~/.beads/) with hq- prefix.
-//
-// Canonical format: hq-<role>-role
-//
-// Examples:
-//   - hq-mayor-role
-//   - hq-deacon-role
-//   - hq-witness-role
-//   - hq-refinery-role
-//   - hq-crew-role
-//   - hq-polecat-role
-//
-// Use RoleBeadIDTown() to get canonical role bead IDs.
-// The legacy RoleBeadID() function returns gt-<role>-role for backward compatibility.
-
-// RoleBeadID returns the role bead ID for a given role type.
-// Role beads define lifecycle configuration for each agent type.
-// Deprecated: Use RoleBeadIDTown() for town-level beads with hq- prefix.
-// Role beads are global templates and should use hq-<role>-role, not gt-<role>-role.
-func RoleBeadID(roleType string) string {
-	return "gt-" + roleType + "-role"
-}
-
-// MayorRoleBeadID returns the Mayor role bead ID.
-func MayorRoleBeadID() string {
-	return RoleBeadID("mayor")
-}
-
-// DeaconRoleBeadID returns the Deacon role bead ID.
-func DeaconRoleBeadID() string {
-	return RoleBeadID("deacon")
-}
-
-// WitnessRoleBeadID returns the Witness role bead ID.
-func WitnessRoleBeadID() string {
-	return RoleBeadID("witness")
-}
-
-// RefineryRoleBeadID returns the Refinery role bead ID.
-func RefineryRoleBeadID() string {
-	return RoleBeadID("refinery")
-}
-
-// CrewRoleBeadID returns the Crew role bead ID.
-func CrewRoleBeadID() string {
-	return RoleBeadID("crew")
-}
-
-// PolecatRoleBeadID returns the Polecat role bead ID.
-func PolecatRoleBeadID() string {
-	return RoleBeadID("polecat")
-}
-
-// GetRoleConfig looks up a role bead and returns its parsed RoleConfig.
-// Returns nil, nil if the role bead doesn't exist or has no config.
-func (b *Beads) GetRoleConfig(roleBeadID string) (*RoleConfig, error) {
-	issue, err := b.Show(roleBeadID)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	if !HasLabel(issue, "gt:role") {
-		return nil, fmt.Errorf("bead %s is not a role bead (missing gt:role label)", roleBeadID)
-	}
-
-	return ParseRoleConfig(issue.Description), nil
-}
-
-// HasLabel checks if an issue has a specific label.
-func HasLabel(issue *Issue, label string) bool {
-	for _, l := range issue.Labels {
-		if l == label {
-			return true
-		}
-	}
-	return false
-}
-
-// FindMRForBranch searches for an existing merge-request bead for the given branch.
-// Returns the MR bead if found, nil if not found.
-// This enables idempotent `gt done` - if an MR already exists, we skip creation.
-func (b *Beads) FindMRForBranch(branch string) (*Issue, error) {
-	// List all merge-request beads (open status only - closed MRs are already processed)
-	issues, err := b.List(ListOptions{
-		Status: "open",
-		Label:  "gt:merge-request",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Search for one matching this branch
-	// MR description format: "branch: <branch>\ntarget: ..."
-	branchPrefix := "branch: " + branch + "\n"
-	for _, issue := range issues {
-		if strings.HasPrefix(issue.Description, branchPrefix) {
-			return issue, nil
-		}
-	}
-
-	return nil, nil
-}
-
-// AddGateWaiter registers an agent as a waiter on a gate bead.
-// When the gate closes, the waiter will receive a wake notification via gt gate wake.
-// The waiter is typically the polecat's address (e.g., "gastown/polecats/Toast").
-func (b *Beads) AddGateWaiter(gateID, waiter string) error {
-	// Use bd gate add-waiter to register the waiter on the gate
-	// This adds the waiter to the gate's native waiters field
-	_, err := b.run("gate", "add-waiter", gateID, waiter)
-	if err != nil {
-		return fmt.Errorf("adding gate waiter: %w", err)
-	}
-	return nil
-}
-
-// ===== Merge Slot Functions (serialized conflict resolution) =====
-
-// MergeSlotStatus represents the result of checking a merge slot.
-type MergeSlotStatus struct {
-	ID        string   `json:"id"`
-	Available bool     `json:"available"`
-	Holder    string   `json:"holder,omitempty"`
-	Waiters   []string `json:"waiters,omitempty"`
-	Error     string   `json:"error,omitempty"`
-}
-
-// MergeSlotCreate creates the merge slot bead for the current rig.
-// The slot is used for serialized conflict resolution in the merge queue.
-// Returns the slot ID if successful.
-func (b *Beads) MergeSlotCreate() (string, error) {
-	out, err := b.run("merge-slot", "create", "--json")
-	if err != nil {
-		return "", fmt.Errorf("creating merge slot: %w", err)
-	}
-
-	var result struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(out, &result); err != nil {
-		return "", fmt.Errorf("parsing merge-slot create output: %w", err)
-	}
-
-	return result.ID, nil
-}
-
-// MergeSlotCheck checks the availability of the merge slot.
-// Returns the current status including holder and waiters if held.
-func (b *Beads) MergeSlotCheck() (*MergeSlotStatus, error) {
-	out, err := b.run("merge-slot", "check", "--json")
-	if err != nil {
-		// Check if slot doesn't exist
-		if strings.Contains(err.Error(), "not found") {
-			return &MergeSlotStatus{Error: "not found"}, nil
-		}
-		return nil, fmt.Errorf("checking merge slot: %w", err)
-	}
-
-	var status MergeSlotStatus
-	if err := json.Unmarshal(out, &status); err != nil {
-		return nil, fmt.Errorf("parsing merge-slot check output: %w", err)
-	}
-
-	return &status, nil
-}
-
-// MergeSlotAcquire attempts to acquire the merge slot for exclusive access.
-// If holder is empty, defaults to BD_ACTOR environment variable.
-// If addWaiter is true and the slot is held, the requester is added to the waiters queue.
-// Returns the acquisition result.
-func (b *Beads) MergeSlotAcquire(holder string, addWaiter bool) (*MergeSlotStatus, error) {
-	args := []string{"merge-slot", "acquire", "--json"}
-	if holder != "" {
-		args = append(args, "--holder="+holder)
-	}
-	if addWaiter {
-		args = append(args, "--wait")
-	}
-
-	out, err := b.run(args...)
-	if err != nil {
-		// Parse the output even on error - it may contain useful info
-		var status MergeSlotStatus
-		if jsonErr := json.Unmarshal(out, &status); jsonErr == nil {
-			return &status, nil
-		}
-		return nil, fmt.Errorf("acquiring merge slot: %w", err)
-	}
-
-	var status MergeSlotStatus
-	if err := json.Unmarshal(out, &status); err != nil {
-		return nil, fmt.Errorf("parsing merge-slot acquire output: %w", err)
-	}
-
-	return &status, nil
-}
-
-// MergeSlotRelease releases the merge slot after conflict resolution completes.
-// If holder is provided, it verifies the slot is held by that holder before releasing.
-func (b *Beads) MergeSlotRelease(holder string) error {
-	args := []string{"merge-slot", "release", "--json"}
-	if holder != "" {
-		args = append(args, "--holder="+holder)
-	}
-
-	out, err := b.run(args...)
-	if err != nil {
-		return fmt.Errorf("releasing merge slot: %w", err)
-	}
-
-	var result struct {
-		Released bool   `json:"released"`
-		Error    string `json:"error,omitempty"`
-	}
-	if err := json.Unmarshal(out, &result); err != nil {
-		return fmt.Errorf("parsing merge-slot release output: %w", err)
-	}
-
-	if !result.Released && result.Error != "" {
-		return fmt.Errorf("slot release failed: %s", result.Error)
-	}
-
-	return nil
-}
-
-// MergeSlotEnsureExists creates the merge slot if it doesn't exist.
-// This is idempotent - safe to call multiple times.
-func (b *Beads) MergeSlotEnsureExists() (string, error) {
-	// Check if slot exists first
-	status, err := b.MergeSlotCheck()
-	if err != nil {
-		return "", err
-	}
-
-	if status.Error == "not found" {
-		// Create it
-		return b.MergeSlotCreate()
-	}
-
-	return status.ID, nil
-}
-
-// ===== Rig Identity Beads =====
-
-// RigFields contains the fields specific to rig identity beads.
-type RigFields struct {
-	Repo   string // Git URL for the rig's repository
-	Prefix string // Beads prefix for this rig (e.g., "gt", "bd")
-	State  string // Operational state: active, archived, maintenance
-}
-
-// FormatRigDescription formats the description field for a rig identity bead.
-func FormatRigDescription(name string, fields *RigFields) string {
-	if fields == nil {
-		return ""
-	}
-
-	var lines []string
-	lines = append(lines, fmt.Sprintf("Rig identity bead for %s.", name))
-	lines = append(lines, "")
-
-	if fields.Repo != "" {
-		lines = append(lines, fmt.Sprintf("repo: %s", fields.Repo))
-	}
-	if fields.Prefix != "" {
-		lines = append(lines, fmt.Sprintf("prefix: %s", fields.Prefix))
-	}
-	if fields.State != "" {
-		lines = append(lines, fmt.Sprintf("state: %s", fields.State))
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-// ParseRigFields extracts rig fields from an issue's description.
-func ParseRigFields(description string) *RigFields {
-	fields := &RigFields{}
-
-	for _, line := range strings.Split(description, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		colonIdx := strings.Index(line, ":")
-		if colonIdx == -1 {
-			continue
-		}
-
-		key := strings.TrimSpace(line[:colonIdx])
-		value := strings.TrimSpace(line[colonIdx+1:])
-		if value == "null" || value == "" {
-			value = ""
-		}
-
-		switch strings.ToLower(key) {
-		case "repo":
-			fields.Repo = value
-		case "prefix":
-			fields.Prefix = value
-		case "state":
-			fields.State = value
-		}
-	}
-
-	return fields
-}
-
-// CreateRigBead creates a rig identity bead for tracking rig metadata.
-// The ID format is: <prefix>-rig-<name> (e.g., gt-rig-gastown)
-// Use RigBeadID() helper to generate correct IDs.
-// The created_by field is populated from BD_ACTOR env var for provenance tracking.
-func (b *Beads) CreateRigBead(id, title string, fields *RigFields) (*Issue, error) {
-	description := FormatRigDescription(title, fields)
-
-	args := []string{"create", "--json",
-		"--id=" + id,
-		"--title=" + title,
-		"--description=" + description,
-		"--add-label=gt:rig",
-	}
-
-	// Default actor from BD_ACTOR env var for provenance tracking
-	if actor := os.Getenv("BD_ACTOR"); actor != "" {
-		args = append(args, "--actor="+actor)
-	}
-
-	out, err := b.run(args...)
-	if err != nil {
-		return nil, err
-	}
-
-	var issue Issue
-	if err := json.Unmarshal(out, &issue); err != nil {
-		return nil, fmt.Errorf("parsing bd create output: %w", err)
-	}
-
-	return &issue, nil
-}
-
-// RigBeadIDWithPrefix generates a rig identity bead ID using the specified prefix.
-// Format: <prefix>-rig-<name> (e.g., gt-rig-gastown)
-func RigBeadIDWithPrefix(prefix, name string) string {
-	return fmt.Sprintf("%s-rig-%s", prefix, name)
-}
-
-// RigBeadID generates a rig identity bead ID using "gt" prefix.
-// For non-gastown rigs, use RigBeadIDWithPrefix with the rig's configured prefix.
-func RigBeadID(name string) string {
-	return RigBeadIDWithPrefix("gt", name)
+// ProvisionPrimeMDForWorktree provisions PRIME.md for a worktree by following its redirect.
+// This is the main entry point for crew/polecat provisioning.
+func ProvisionPrimeMDForWorktree(worktreePath string) error {
+	// Resolve the beads directory (follows redirect chain)
+	beadsDir := ResolveBeadsDir(worktreePath)
+
+	// Provision PRIME.md in the target directory
+	return ProvisionPrimeMD(beadsDir)
 }

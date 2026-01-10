@@ -84,6 +84,8 @@ func TestIsBeadsRepo(t *testing.T) {
 }
 
 // TestWrapError tests error wrapping.
+// ZFC: Only test ErrNotFound detection. ErrNotARepo and ErrSyncConflict
+// were removed as per ZFC - agents should handle those errors directly.
 func TestWrapError(t *testing.T) {
 	b := New("/test")
 
@@ -92,11 +94,6 @@ func TestWrapError(t *testing.T) {
 		wantErr error
 		wantNil bool
 	}{
-		{"not a beads repository", ErrNotARepo, false},
-		{"No .beads directory found", ErrNotARepo, false},
-		{".beads directory not found", ErrNotARepo, false},
-		{"sync conflict detected", ErrSyncConflict, false},
-		{"CONFLICT in file.md", ErrSyncConflict, false},
 		{"Issue not found: gt-xyz", ErrNotFound, false},
 		{"gt-xyz not found", ErrNotFound, false},
 	}

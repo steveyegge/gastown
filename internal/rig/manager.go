@@ -386,6 +386,15 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}
 	fmt.Printf("   ✓ Initialized beads (prefix: %s)\n", opts.BeadsPrefix)
 
+	// Provision PRIME.md with Gas Town context for all workers in this rig.
+	// This is the fallback if SessionStart hook fails - ensures ALL workers
+	// (crew, polecats, refinery, witness) have GUPP and essential Gas Town context.
+	// PRIME.md is read by bd prime and output to the agent.
+	rigBeadsPath := filepath.Join(rigPath, ".beads")
+	if err := beads.ProvisionPrimeMD(rigBeadsPath); err != nil {
+		fmt.Printf("  Warning: Could not provision PRIME.md: %v\n", err)
+	}
+
 	// Create refinery as worktree from bare repo on default branch.
 	// Refinery needs to see polecat branches (shared .repo.git) and merges them.
 	// Being on the default branch allows direct merge workflow.
