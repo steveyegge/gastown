@@ -603,6 +603,14 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 	fmt.Println(style.Bold.Render("🚀 AUTONOMOUS MODE - Work on hook triggers immediate execution"))
 	fmt.Println()
 
+	// Check if the hooked bead is already closed (someone closed it externally)
+	if status.PinnedBead.Status == "closed" {
+		fmt.Printf("%s Hooked bead %s is already closed!\n", style.Bold.Render("⚠"), status.PinnedBead.ID)
+		fmt.Printf("   Title: %s\n", status.PinnedBead.Title)
+		fmt.Printf("   This work was completed elsewhere. Clear your hook with: gt unsling\n")
+		return nil
+	}
+
 	// Check if this is a mail bead - display mail-specific format
 	if status.PinnedBead.Type == "message" {
 		sender := extractMailSender(status.PinnedBead.Labels)
