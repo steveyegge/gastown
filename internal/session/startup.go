@@ -75,5 +75,11 @@ func FormatStartupNudge(cfg StartupNudgeConfig) string {
 			"4. If nothing hooked → wait for instructions"
 	}
 
+	// For assigned, work is already on the hook - just tell them to run it
+	// This prevents the "helpful assistant" exploration pattern (see PRIMING.md)
+	if cfg.Topic == "assigned" {
+		beacon += "\n\nWork is on your hook. Run `gt hook` now and begin immediately."
+	}
+
 	return beacon
 }
