@@ -133,6 +133,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	description := FormatAgentDescription(title, fields)
 
 	args := []string{"create", "--json",
+		"--type=agent",
 		"--id=" + id,
 		"--title=" + title,
 		"--description=" + description,
