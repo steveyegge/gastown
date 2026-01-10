@@ -46,7 +46,7 @@ var installCmd = &cobra.Command{
 
 QUICK START
 ───────────
-  1. Create HQ:        gt install ~/gt --shell
+  1. Create HQ:        gt install --shell
   2. Add a project:    gt rig add myproject https://github.com/user/repo
   3. Join the crew:    gt crew add yourname --rig myproject
   4. Start working:    cd ~/gt/myproject/crew/yourname && gt attach
@@ -98,11 +98,11 @@ NEXT STEPS AFTER INSTALL
   gt status                   See what's running
 
 Examples:
-  gt install ~/gt                              # Create HQ at ~/gt
-  gt install ~/gt --shell                      # Recommended: also add shell integration
-  gt install . --name my-workspace             # Initialize current dir
-  gt install ~/gt --git                        # Also init git with .gitignore
-  gt install ~/gt --github=user/repo           # Create private GitHub repo`,
+  gt install                                   # Create HQ at ~/gt (default)
+  gt install --shell                           # Recommended: also add shell integration
+  gt install ~/workspace                       # Create HQ at custom location
+  gt install --git                             # Also init git with .gitignore
+  gt install --github=user/repo                # Create private GitHub repo`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInstall,
 }
@@ -122,19 +122,19 @@ func init() {
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
-	// Determine target path
-	targetPath := "."
-	if len(args) > 0 {
-		targetPath = args[0]
+	// Determine target path - default to ~/gt if not specified
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("getting home directory: %w", err)
 	}
 
-	// Expand ~ and resolve to absolute path
-	if targetPath[0] == '~' {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("getting home directory: %w", err)
+	targetPath := filepath.Join(home, "gt") // Default: ~/gt
+	if len(args) > 0 {
+		targetPath = args[0]
+		// Expand ~ if provided
+		if len(targetPath) > 0 && targetPath[0] == '~' {
+			targetPath = filepath.Join(home, targetPath[1:])
 		}
-		targetPath = filepath.Join(home, targetPath[1:])
 	}
 
 	absPath, err := filepath.Abs(targetPath)
