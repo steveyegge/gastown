@@ -261,11 +261,19 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("finding repo base: %w", err)
 	}
 
+	// Determine the start point for the new worktree
+	// Use origin/<default-branch> to ensure we start from the rig's configured branch
+	defaultBranch := "main"
+	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
+
 	// Always create fresh branch - unique name guarantees no collision
-	// git worktree add -b polecat/<name>-<timestamp> <path>
+	// git worktree add -b polecat/<name>-<timestamp> <path> <startpoint>
 	// Worktree goes in polecats/<name>/<rigname>/ for LLM ergonomics
-	if err := repoGit.WorktreeAdd(clonePath, branchName); err != nil {
-		return nil, fmt.Errorf("creating worktree: %w", err)
+	if err := repoGit.WorktreeAddFromRef(clonePath, branchName, startPoint); err != nil {
+		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 
 	// NOTE: We intentionally do NOT write to CLAUDE.md here.

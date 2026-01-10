@@ -10,6 +10,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/rig"
 )
 
 // Common errors
@@ -134,12 +135,20 @@ func (m *Manager) createRigWorktree(dogPath, dogName, rigName string) (string, e
 		return "", fmt.Errorf("finding repo base for %s: %w", rigName, err)
 	}
 
+	// Determine the start point for the new worktree
+	// Use origin/<default-branch> to ensure we start from the rig's configured branch
+	defaultBranch := "main"
+	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
+
 	// Unique branch per dog-rig combination
 	branchName := fmt.Sprintf("dog/%s-%s-%d", dogName, rigName, time.Now().UnixMilli())
 
-	// Create worktree with new branch
-	if err := repoGit.WorktreeAdd(worktreePath, branchName); err != nil {
-		return "", fmt.Errorf("creating worktree: %w", err)
+	// Create worktree with new branch from default branch
+	if err := repoGit.WorktreeAddFromRef(worktreePath, branchName, startPoint); err != nil {
+		return "", fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 
 	return worktreePath, nil
