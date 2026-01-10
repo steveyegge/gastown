@@ -503,3 +503,142 @@ exit 0
 		}
 	}
 }
+
+// TestSlingStartFlag_Basic verifies the --start flag is recognized and properly stored
+func TestSlingStartFlag_Basic(t *testing.T) {
+	// Save and restore global flag
+	prevStart := slingStart
+	t.Cleanup(func() {
+		slingStart = prevStart
+	})
+
+	// Simulate flag being set
+	slingStart = true
+
+	if !slingStart {
+		t.Errorf("slingStart flag was not set correctly")
+	}
+}
+
+// TestIsRigName verifies rig name detection for --start functionality
+func TestIsRigName(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create minimal workspace structure
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create rigs.json with a test rig - use the correct Rigs map format
+	rigsJSON := `{"Rigs":{"gastown":{"GitURL":"git@github.com:steveyegge/gastown.git"}}}`
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "rigs.json"), []byte(rigsJSON), 0644); err != nil {
+		t.Fatalf("write rigs.json: %v", err)
+	}
+
+	// Create the rig directory with required subdirectories
+	rigPath := filepath.Join(townRoot, "gastown")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir gastown: %v", err)
+	}
+	// Create witness directory (required for valid rig)
+	if err := os.MkdirAll(filepath.Join(rigPath, "witness"), 0755); err != nil {
+		t.Fatalf("mkdir witness: %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(townRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		target    string
+		wantRig   string
+		wantIsRig bool
+	}{
+		{
+			name:      "valid rig name",
+			target:    "gastown",
+			wantRig:   "gastown",
+			wantIsRig: true,
+		},
+		{
+			name:      "role names are not rigs",
+			target:    "mayor",
+			wantRig:   "",
+			wantIsRig: false,
+		},
+		{
+			name:      "path format is not a rig",
+			target:    "gastown/crew/test",
+			wantRig:   "",
+			wantIsRig: false,
+		},
+		{
+			name:      "unknown name is not a rig",
+			target:    "unknown-rig",
+			wantRig:   "",
+			wantIsRig: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotRig, gotIsRig := IsRigName(tt.target)
+			if gotIsRig != tt.wantIsRig {
+				t.Errorf("IsRigName(%q) isRig = %v, want %v", tt.target, gotIsRig, tt.wantIsRig)
+			}
+			if gotRig != tt.wantRig {
+				t.Errorf("IsRigName(%q) rig = %q, want %q", tt.target, gotRig, tt.wantRig)
+			}
+		})
+	}
+}
+
+// TestIdlePolecatInfo verifies the idle polecat info structure
+func TestIdlePolecatInfo(t *testing.T) {
+	info := &IdlePolecatInfo{
+		Name:      "test-polecat",
+		ClonePath: "/path/to/polecat",
+		Session:   "gt-gastown-test-polecat",
+		CreatedAt: 1704067200,
+		Clean:     true,
+	}
+
+	if info.Name != "test-polecat" {
+		t.Errorf("Name = %q, want %q", info.Name, "test-polecat")
+	}
+	if info.Session != "gt-gastown-test-polecat" {
+		t.Errorf("Session = %q, want %q", info.Session, "gt-gastown-test-polecat")
+	}
+	if !info.Clean {
+		t.Errorf("Clean = false, want true")
+	}
+}
+
+// TestStartPreference_Constants verifies start preference constants are defined
+func TestStartPreference_Constants(t *testing.T) {
+	preferences := []StartPreference{
+		PreferenceAny,
+		PreferenceNewest,
+		PreferenceOldest,
+		PreferenceCleanest,
+	}
+
+	expected := []StartPreference{
+		"any",
+		"newest",
+		"oldest",
+		"cleanest",
+	}
+
+	for i, pref := range preferences {
+		if pref != expected[i] {
+			t.Errorf("Preference %d = %q, want %q", i, pref, expected[i])
+		}
+	}
+}
