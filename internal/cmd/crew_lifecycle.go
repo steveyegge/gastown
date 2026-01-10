@@ -1,15 +1,18 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -300,28 +303,73 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Start each crew member
+	// Resolve account config once for all crew members
+	townRoot, _ := workspace.Find(r.Path)
+	if townRoot == "" {
+		townRoot = filepath.Dir(r.Path)
+	}
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	claudeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, crewAccount)
+
+	// Build start options (shared across all crew members)
+	opts := crew.StartOptions{
+		Account:         crewAccount,
+		ClaudeConfigDir: claudeConfigDir,
+		AgentOverride:   crewAgentOverride,
+	}
+
+	// Start each crew member in parallel
+	type result struct {
+		name    string
+		err     error
+		skipped bool // true if session was already running
+	}
+	results := make(chan result, len(crewNames))
+	var wg sync.WaitGroup
+
+	fmt.Printf("Starting %d crew member(s) in %s...\n", len(crewNames), rigName)
+
+	for _, name := range crewNames {
+		wg.Add(1)
+		go func(crewName string) {
+			defer wg.Done()
+			err := crewMgr.Start(crewName, opts)
+			skipped := errors.Is(err, crew.ErrSessionRunning)
+			if skipped {
+				err = nil // Not an error, just already running
+			}
+			results <- result{name: crewName, err: err, skipped: skipped}
+		}(name)
+	}
+
+	// Wait for all goroutines to complete
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
 	var lastErr error
 	startedCount := 0
-	for _, name := range crewNames {
-		// Set the start.go flags before calling runStartCrew
-		startCrewRig = rigName
-		startCrewAccount = crewAccount
-		startCrewAgentOverride = crewAgentOverride
-
-		// Use rig/name format for runStartCrew
-		fullName := rigName + "/" + name
-		if err := runStartCrew(cmd, []string{fullName}); err != nil {
-			fmt.Printf("Error starting %s/%s: %v\n", rigName, name, err)
-			lastErr = err
+	skippedCount := 0
+	for res := range results {
+		if res.err != nil {
+			fmt.Printf("  %s %s/%s: %v\n", style.ErrorPrefix, rigName, res.name, res.err)
+			lastErr = res.err
+		} else if res.skipped {
+			fmt.Printf("  %s %s/%s: already running\n", style.Dim.Render("○"), rigName, res.name)
+			skippedCount++
 		} else {
+			fmt.Printf("  %s %s/%s: started\n", style.SuccessPrefix, rigName, res.name)
 			startedCount++
 		}
 	}
 
-	if startedCount > 0 {
-		fmt.Printf("\n%s Started %d crew member(s) in %s\n",
-			style.Bold.Render("✓"), startedCount, r.Name)
+	// Summary
+	fmt.Println()
+	if startedCount > 0 || skippedCount > 0 {
+		fmt.Printf("%s Started %d, skipped %d (already running) in %s\n",
+			style.Bold.Render("✓"), startedCount, skippedCount, r.Name)
 	}
 
 	return lastErr
