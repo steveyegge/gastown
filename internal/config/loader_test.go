@@ -1577,6 +1577,44 @@ func TestSaveTownSettings(t *testing.T) {
 	})
 }
 
+func TestGetDefaultFormula(t *testing.T) {
+	t.Run("returns empty string for nonexistent rig", func(t *testing.T) {
+		result := GetDefaultFormula("/nonexistent/path")
+		if result != "" {
+			t.Errorf("GetDefaultFormula() = %q, want empty string", result)
+		}
+	})
+
+	t.Run("returns empty string when no workflow config", func(t *testing.T) {
+		dir := t.TempDir()
+		settings := NewRigSettings()
+		if err := SaveRigSettings(RigSettingsPath(dir), settings); err != nil {
+			t.Fatalf("SaveRigSettings: %v", err)
+		}
+
+		result := GetDefaultFormula(dir)
+		if result != "" {
+			t.Errorf("GetDefaultFormula() = %q, want empty string", result)
+		}
+	})
+
+	t.Run("returns default formula when configured", func(t *testing.T) {
+		dir := t.TempDir()
+		settings := NewRigSettings()
+		settings.Workflow = &WorkflowConfig{
+			DefaultFormula: "shiny",
+		}
+		if err := SaveRigSettings(RigSettingsPath(dir), settings); err != nil {
+			t.Fatalf("SaveRigSettings: %v", err)
+		}
+
+		result := GetDefaultFormula(dir)
+		if result != "shiny" {
+			t.Errorf("GetDefaultFormula() = %q, want %q", result, "shiny")
+		}
+	})
+}
+
 // TestLookupAgentConfigWithRigSettings verifies that lookupAgentConfig checks
 // rig-level agents first, then town-level agents, then built-ins.
 func TestLookupAgentConfigWithRigSettings(t *testing.T) {

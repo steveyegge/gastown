@@ -212,9 +212,14 @@ func runFormulaRun(cmd *cobra.Command, args []string) error {
 					rigPath = r.Path
 				}
 			}
-		}
-		if targetRig == "" {
-			targetRig = "gastown" // Default
+			// If we still don't have a target rig but have townRoot, use gastown
+			if targetRig == "" {
+				targetRig = "gastown"
+				rigPath = filepath.Join(townRoot, "gastown")
+			}
+		} else {
+			// No town root found, fall back to gastown without rigPath
+			targetRig = "gastown"
 		}
 	} else {
 		// If rig specified, construct path
