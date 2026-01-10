@@ -666,7 +666,7 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	}
 	// Type is deprecated: convert to gt:<type> label
 	if opts.Type != "" {
-		args = append(args, "--add-label=gt:"+opts.Type)
+		args = append(args, "--labels=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {
 		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
@@ -710,7 +710,7 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	}
 	// Type is deprecated: convert to gt:<type> label
 	if opts.Type != "" {
-		args = append(args, "--add-label=gt:"+opts.Type)
+		args = append(args, "--labels=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {
 		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
@@ -1137,7 +1137,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--id=" + id,
 		"--title=" + title,
 		"--description=" + description,
-		"--add-label=gt:agent",
+		"--labels=gt:agent",
 	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking
@@ -1941,7 +1941,7 @@ func (b *Beads) CreateRigBead(id, title string, fields *RigFields) (*Issue, erro
 		"--id=" + id,
 		"--title=" + title,
 		"--description=" + description,
-		"--add-label=gt:rig",
+		"--labels=gt:rig",
 	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking

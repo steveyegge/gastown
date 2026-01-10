@@ -748,7 +748,7 @@ func (d *Daemon) checkGUPPViolations() {
 // checkRigGUPPViolations checks polecats in a specific rig for GUPP violations.
 func (d *Daemon) checkRigGUPPViolations(rigName string) {
 	// List polecat agent beads for this rig
-	// Pattern: gt-polecat-<rig>-<name>
+	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
 	cmd := exec.Command("bd", "list", "--type=agent", "--json")
 	cmd.Dir = d.config.TownRoot
 
@@ -770,7 +770,10 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 		return
 	}
 
-	prefix := "gt-polecat-" + rigName + "-"
+	// Use the rig's configured prefix (e.g., "gt" for gastown, "bd" for beads)
+	rigPrefix := config.GetRigPrefix(d.config.TownRoot, rigName)
+	// Pattern: <prefix>-<rig>-polecat-<name>
+	prefix := rigPrefix + "-" + rigName + "-polecat-"
 	for _, agent := range agents {
 		// Only check polecats for this rig
 		if !strings.HasPrefix(agent.ID, prefix) {
@@ -784,7 +787,7 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 		}
 
 		// Per gt-zecmc: derive running state from tmux, not agent_state
-		// Extract polecat name from agent ID (gt-polecat-<rig>-<name> -> <name>)
+		// Extract polecat name from agent ID (<prefix>-<rig>-polecat-<name> -> <name>)
 		polecatName := strings.TrimPrefix(agent.ID, prefix)
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
@@ -860,7 +863,10 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 		return
 	}
 
-	prefix := "gt-polecat-" + rigName + "-"
+	// Use the rig's configured prefix (e.g., "gt" for gastown, "bd" for beads)
+	rigPrefix := config.GetRigPrefix(d.config.TownRoot, rigName)
+	// Pattern: <prefix>-<rig>-polecat-<name>
+	prefix := rigPrefix + "-" + rigName + "-polecat-"
 	for _, agent := range agents {
 		// Only check polecats for this rig
 		if !strings.HasPrefix(agent.ID, prefix) {
@@ -890,21 +896,15 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 }
 
 // extractRigFromAgentID extracts the rig name from a polecat agent ID.
-// Example: gt-polecat-gastown-max → gastown
+// Example: gt-gastown-polecat-max → gastown
 func (d *Daemon) extractRigFromAgentID(agentID string) string {
-	// Pattern: gt-polecat-<rig>-<name>
-	if !strings.HasPrefix(agentID, "gt-polecat-") {
+	// Use the beads package helper to correctly parse agent bead IDs.
+	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
+	rig, role, _, ok := beads.ParseAgentBeadID(agentID)
+	if !ok || role != "polecat" {
 		return ""
 	}
-
-	rest := strings.TrimPrefix(agentID, "gt-polecat-")
-	// Find the rig name (everything before the last dash)
-	lastDash := strings.LastIndex(rest, "-")
-	if lastDash == -1 {
-		return ""
-	}
-
-	return rest[:lastDash]
+	return rig
 }
 
 // notifyWitnessOfOrphanedWork sends a mail to the rig's witness about orphaned work.
