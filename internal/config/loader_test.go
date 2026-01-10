@@ -9,6 +9,7 @@ import (
 )
 
 func TestTownConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mayor", "town.json")
 
@@ -37,6 +38,7 @@ func TestTownConfigRoundTrip(t *testing.T) {
 }
 
 func TestRigsConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mayor", "rigs.json")
 
@@ -81,6 +83,7 @@ func TestRigsConfigRoundTrip(t *testing.T) {
 }
 
 func TestLoadTownConfigNotFound(t *testing.T) {
+	t.Parallel()
 	_, err := LoadTownConfig("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
@@ -88,6 +91,7 @@ func TestLoadTownConfigNotFound(t *testing.T) {
 }
 
 func TestValidationErrors(t *testing.T) {
+	t.Parallel()
 	// Missing name
 	tc := &TownConfig{Type: "town", Version: 1}
 	if err := validateTownConfig(tc); err == nil {
@@ -102,6 +106,7 @@ func TestValidationErrors(t *testing.T) {
 }
 
 func TestRigConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 
@@ -140,6 +145,7 @@ func TestRigConfigRoundTrip(t *testing.T) {
 }
 
 func TestRigSettingsRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings", "config.json")
 
@@ -169,6 +175,7 @@ func TestRigSettingsRoundTrip(t *testing.T) {
 }
 
 func TestRigSettingsWithCustomMergeQueue(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 
@@ -214,6 +221,7 @@ func TestRigSettingsWithCustomMergeQueue(t *testing.T) {
 }
 
 func TestRigConfigValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		config  *RigConfig
@@ -258,6 +266,7 @@ func TestRigConfigValidation(t *testing.T) {
 }
 
 func TestRigSettingsValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		settings *RigSettings
@@ -323,6 +332,7 @@ func TestRigSettingsValidation(t *testing.T) {
 }
 
 func TestDefaultMergeQueueConfig(t *testing.T) {
+	t.Parallel()
 	cfg := DefaultMergeQueueConfig()
 
 	if !cfg.Enabled {
@@ -358,6 +368,7 @@ func TestDefaultMergeQueueConfig(t *testing.T) {
 }
 
 func TestLoadRigConfigNotFound(t *testing.T) {
+	t.Parallel()
 	_, err := LoadRigConfig("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
@@ -365,6 +376,7 @@ func TestLoadRigConfigNotFound(t *testing.T) {
 }
 
 func TestLoadRigSettingsNotFound(t *testing.T) {
+	t.Parallel()
 	_, err := LoadRigSettings("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
@@ -372,6 +384,7 @@ func TestLoadRigSettingsNotFound(t *testing.T) {
 }
 
 func TestMayorConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mayor", "config.json")
 
@@ -403,6 +416,7 @@ func TestMayorConfigRoundTrip(t *testing.T) {
 }
 
 func TestLoadMayorConfigNotFound(t *testing.T) {
+	t.Parallel()
 	_, err := LoadMayorConfig("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
@@ -410,6 +424,7 @@ func TestLoadMayorConfigNotFound(t *testing.T) {
 }
 
 func TestAccountsConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mayor", "accounts.json")
 
@@ -463,6 +478,7 @@ func TestAccountsConfigRoundTrip(t *testing.T) {
 }
 
 func TestAccountsConfigValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		config  *AccountsConfig
@@ -518,6 +534,7 @@ func TestAccountsConfigValidation(t *testing.T) {
 }
 
 func TestLoadAccountsConfigNotFound(t *testing.T) {
+	t.Parallel()
 	_, err := LoadAccountsConfig("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
@@ -525,6 +542,7 @@ func TestLoadAccountsConfigNotFound(t *testing.T) {
 }
 
 func TestMessagingConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config", "messaging.json")
 
@@ -595,6 +613,7 @@ func TestMessagingConfigRoundTrip(t *testing.T) {
 }
 
 func TestMessagingConfigValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		config  *MessagingConfig
@@ -716,6 +735,7 @@ func TestMessagingConfigValidation(t *testing.T) {
 }
 
 func TestLoadMessagingConfigNotFound(t *testing.T) {
+	t.Parallel()
 	_, err := LoadMessagingConfig("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
@@ -723,6 +743,7 @@ func TestLoadMessagingConfigNotFound(t *testing.T) {
 }
 
 func TestLoadMessagingConfigMalformedJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "messaging.json")
 
@@ -738,6 +759,7 @@ func TestLoadMessagingConfigMalformedJSON(t *testing.T) {
 }
 
 func TestLoadOrCreateMessagingConfig(t *testing.T) {
+	t.Parallel()
 	// Test creating default when not found
 	config, err := LoadOrCreateMessagingConfig("/nonexistent/path.json")
 	if err != nil {
@@ -769,6 +791,7 @@ func TestLoadOrCreateMessagingConfig(t *testing.T) {
 }
 
 func TestMessagingConfigPath(t *testing.T) {
+	t.Parallel()
 	path := MessagingConfigPath("/home/user/gt")
 	expected := "/home/user/gt/config/messaging.json"
 	if path != expected {
@@ -777,6 +800,7 @@ func TestMessagingConfigPath(t *testing.T) {
 }
 
 func TestRuntimeConfigDefaults(t *testing.T) {
+	t.Parallel()
 	rc := DefaultRuntimeConfig()
 	if rc.Provider != "claude" {
 		t.Errorf("Provider = %q, want %q", rc.Provider, "claude")
@@ -793,6 +817,7 @@ func TestRuntimeConfigDefaults(t *testing.T) {
 }
 
 func TestRuntimeConfigBuildCommand(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		rc   *RuntimeConfig
@@ -836,6 +861,7 @@ func TestRuntimeConfigBuildCommand(t *testing.T) {
 }
 
 func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		rc     *RuntimeConfig
@@ -916,6 +942,7 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 }
 
 func TestBuildPolecatStartupCommand(t *testing.T) {
+	t.Parallel()
 	cmd := BuildPolecatStartupCommand("gastown", "toast", "", "")
 
 	if !strings.Contains(cmd, "GT_ROLE=polecat") {
@@ -933,6 +960,7 @@ func TestBuildPolecatStartupCommand(t *testing.T) {
 }
 
 func TestBuildCrewStartupCommand(t *testing.T) {
+	t.Parallel()
 	cmd := BuildCrewStartupCommand("gastown", "max", "", "")
 
 	if !strings.Contains(cmd, "GT_ROLE=crew") {
@@ -950,6 +978,7 @@ func TestBuildCrewStartupCommand(t *testing.T) {
 }
 
 func TestResolveAgentConfigWithOverride(t *testing.T) {
+	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
 
@@ -1022,6 +1051,7 @@ func TestResolveAgentConfigWithOverride(t *testing.T) {
 }
 
 func TestBuildPolecatStartupCommandWithAgentOverride(t *testing.T) {
+	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
 
@@ -1103,6 +1133,7 @@ func TestBuildAgentStartupCommandWithAgentOverride(t *testing.T) {
 }
 
 func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
+	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
 
@@ -1137,6 +1168,7 @@ func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
 }
 
 func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
+	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
 
@@ -1162,6 +1194,7 @@ func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 }
 
 func TestGetRuntimeCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
+	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
 
@@ -1184,6 +1217,7 @@ func TestGetRuntimeCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 }
 
 func TestExpectedPaneCommands(t *testing.T) {
+	t.Parallel()
 	t.Run("claude maps to node", func(t *testing.T) {
 		got := ExpectedPaneCommands(&RuntimeConfig{Command: "claude"})
 		if len(got) != 1 || got[0] != "node" {
@@ -1200,6 +1234,7 @@ func TestExpectedPaneCommands(t *testing.T) {
 }
 
 func TestLoadRuntimeConfigFromSettings(t *testing.T) {
+	t.Parallel()
 	// Create temp rig with custom runtime config
 	dir := t.TempDir()
 	settingsDir := filepath.Join(dir, "settings")
@@ -1232,6 +1267,7 @@ func TestLoadRuntimeConfigFromSettings(t *testing.T) {
 }
 
 func TestLoadRuntimeConfigFallsBackToDefaults(t *testing.T) {
+	t.Parallel()
 	// Non-existent path should use defaults
 	rc := LoadRuntimeConfig("/nonexistent/path")
 	if rc.Command != "claude" {
@@ -1240,6 +1276,7 @@ func TestLoadRuntimeConfigFallsBackToDefaults(t *testing.T) {
 }
 
 func TestDaemonPatrolConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mayor", "daemon.json")
 
@@ -1277,6 +1314,7 @@ func TestDaemonPatrolConfigRoundTrip(t *testing.T) {
 }
 
 func TestDaemonPatrolConfigValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		config  *DaemonPatrolConfig
@@ -1324,6 +1362,7 @@ func TestDaemonPatrolConfigValidation(t *testing.T) {
 }
 
 func TestLoadDaemonPatrolConfigNotFound(t *testing.T) {
+	t.Parallel()
 	_, err := LoadDaemonPatrolConfig("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
@@ -1331,6 +1370,7 @@ func TestLoadDaemonPatrolConfigNotFound(t *testing.T) {
 }
 
 func TestDaemonPatrolConfigPath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		townRoot string
 		expected string
@@ -1352,6 +1392,7 @@ func TestDaemonPatrolConfigPath(t *testing.T) {
 }
 
 func TestEnsureDaemonPatrolConfig(t *testing.T) {
+	t.Parallel()
 	t.Run("creates config if missing", func(t *testing.T) {
 		dir := t.TempDir()
 		if err := os.MkdirAll(filepath.Join(dir, "mayor"), 0755); err != nil {
@@ -1411,6 +1452,7 @@ func TestEnsureDaemonPatrolConfig(t *testing.T) {
 }
 
 func TestNewDaemonPatrolConfig(t *testing.T) {
+	t.Parallel()
 	cfg := NewDaemonPatrolConfig()
 
 	if cfg.Type != "daemon-patrol-config" {
@@ -1448,6 +1490,7 @@ func TestNewDaemonPatrolConfig(t *testing.T) {
 }
 
 func TestSaveTownSettings(t *testing.T) {
+	t.Parallel()
 	t.Run("saves valid town settings", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		settingsPath := filepath.Join(tmpDir, "settings", "config.json")
@@ -1578,6 +1621,7 @@ func TestSaveTownSettings(t *testing.T) {
 }
 
 func TestGetDefaultFormula(t *testing.T) {
+	t.Parallel()
 	t.Run("returns empty string for nonexistent rig", func(t *testing.T) {
 		result := GetDefaultFormula("/nonexistent/path")
 		if result != "" {
@@ -1618,6 +1662,7 @@ func TestGetDefaultFormula(t *testing.T) {
 // TestLookupAgentConfigWithRigSettings verifies that lookupAgentConfig checks
 // rig-level agents first, then town-level agents, then built-ins.
 func TestLookupAgentConfigWithRigSettings(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		rigSettings     *RigSettings

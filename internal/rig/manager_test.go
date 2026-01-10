@@ -63,6 +63,7 @@ func createTestRig(t *testing.T, root, name string) {
 }
 
 func TestDiscoverRigs(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 
 	// Create test rig
@@ -101,6 +102,7 @@ func TestDiscoverRigs(t *testing.T) {
 }
 
 func TestGetRig(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 
 	createTestRig(t, root, "test-rig")
@@ -121,6 +123,7 @@ func TestGetRig(t *testing.T) {
 }
 
 func TestGetRigNotFound(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -131,6 +134,7 @@ func TestGetRigNotFound(t *testing.T) {
 }
 
 func TestRigExists(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	rigsConfig.Rigs["exists"] = config.RigEntry{}
 
@@ -145,6 +149,7 @@ func TestRigExists(t *testing.T) {
 }
 
 func TestRemoveRig(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	rigsConfig.Rigs["to-remove"] = config.RigEntry{}
 
@@ -160,6 +165,7 @@ func TestRemoveRig(t *testing.T) {
 }
 
 func TestRemoveRigNotFound(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -170,6 +176,7 @@ func TestRemoveRigNotFound(t *testing.T) {
 }
 
 func TestAddRig_RejectsInvalidNames(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -201,6 +208,7 @@ func TestAddRig_RejectsInvalidNames(t *testing.T) {
 }
 
 func TestListRigNames(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	rigsConfig.Rigs["rig1"] = config.RigEntry{}
 	rigsConfig.Rigs["rig2"] = config.RigEntry{}
@@ -214,6 +222,7 @@ func TestListRigNames(t *testing.T) {
 }
 
 func TestRigSummary(t *testing.T) {
+	t.Parallel()
 	rig := &Rig{
 		Name:        "test",
 		Polecats:    []string{"a", "b", "c"},
@@ -238,6 +247,7 @@ func TestRigSummary(t *testing.T) {
 }
 
 func TestEnsureGitignoreEntry_AddsEntry(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -254,6 +264,7 @@ func TestEnsureGitignoreEntry_AddsEntry(t *testing.T) {
 }
 
 func TestEnsureGitignoreEntry_DoesNotDuplicate(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -275,6 +286,7 @@ func TestEnsureGitignoreEntry_DoesNotDuplicate(t *testing.T) {
 }
 
 func TestEnsureGitignoreEntry_AppendsToExisting(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -297,6 +309,7 @@ func TestEnsureGitignoreEntry_AppendsToExisting(t *testing.T) {
 }
 
 func TestInitBeadsWritesConfigOnFailure(t *testing.T) {
+	// Cannot use t.Parallel() due to t.Setenv
 	rigPath := t.TempDir()
 	beadsDir := filepath.Join(rigPath, ".beads")
 
@@ -332,6 +345,7 @@ exit 1
 }
 
 func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
+	// Cannot use t.Parallel() due to t.Setenv
 	// Rig-level agent beads (witness, refinery) are stored in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
 	// This test verifies that rig agent beads are created in the rig directory,
@@ -420,6 +434,7 @@ esac
 }
 
 func TestIsValidBeadsPrefix(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		prefix string
 		want   bool
@@ -462,6 +477,7 @@ func TestIsValidBeadsPrefix(t *testing.T) {
 }
 
 func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
+	t.Parallel()
 	rigPath := t.TempDir()
 	manager := &Manager{}
 
@@ -487,6 +503,7 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 }
 
 func TestDeriveBeadsPrefix(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		want string
@@ -535,6 +552,7 @@ func TestDeriveBeadsPrefix(t *testing.T) {
 }
 
 func TestSplitCompoundWord(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		word string
 		want []string
