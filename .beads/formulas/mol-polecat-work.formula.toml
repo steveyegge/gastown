@@ -87,9 +87,63 @@ Question: <what you need clarified>"
 **Exit criteria:** You understand the work and can begin implementation."""
 
 [[steps]]
+id = "determine-automation-home"
+title = "Determine automation home"
+needs = ["load-context"]
+description = """
+Before implementing, determine WHERE automation code belongs.
+
+This prevents defaulting to /scripts when better homes exist.
+
+**Decision Tree:**
+
+```
+Is this automation triggered on a schedule?
+├─ YES → Deacon plugin (town-level scheduled tasks)
+│        Location: hq/plugins/deacon/
+│        Example: nightly cleanup, periodic sync, health checks
+│
+└─ NO → Does it need multiple coordinated steps?
+        ├─ YES → Formula (multi-step workflow)
+        │        Location: .beads/formulas/
+        │        Example: release process, code review, onboarding
+        │
+        └─ NO → Is it triggered by rig-level events?
+                ├─ YES → Witness or Refinery hook
+                │        Location: Witness hooks for monitoring/triage
+                │                  Refinery hooks for merge-queue events
+                │        Example: PR opened, tests failed, merge complete
+                │
+                └─ NO → /scripts (one-off utilities)
+                        Location: scripts/ or cmd/
+                        Example: data migration, one-time setup
+```
+
+**Quick Reference:**
+
+| Automation Type | Home | When to Use |
+|-----------------|------|-------------|
+| Deacon plugin | hq/plugins/deacon/ | Scheduled, town-wide, recurring |
+| Formula | .beads/formulas/ | Multi-step workflow, molecule-driven |
+| Witness hook | Witness config | Rig events: PR, issue, test triggers |
+| Refinery hook | Refinery config | Merge queue events |
+| Script | scripts/ or cmd/ | One-off, manual invocation |
+
+**If unsure:**
+- Scheduled → Deacon
+- Multi-step → Formula
+- Event-driven → Witness/Refinery hooks
+- Everything else → Script
+
+**Document your decision:**
+Note in your commit message or issue which home you chose and why.
+
+**Exit criteria:** You know where the automation code should live."""
+
+[[steps]]
 id = "branch-setup"
 title = "Set up working branch"
-needs = ["load-context"]
+needs = ["determine-automation-home"]
 description = """
 Ensure you're on a clean feature branch ready for work.
 
