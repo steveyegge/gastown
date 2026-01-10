@@ -47,9 +47,10 @@ var installCmd = &cobra.Command{
 QUICK START
 ───────────
   1. Create HQ:        gt install --shell
-  2. Add a project:    gt rig add myproject https://github.com/user/repo
-  3. Join the crew:    gt crew add yourname --rig myproject
-  4. Start working:    cd ~/gt/myproject/crew/yourname && gt attach
+  2. Enter HQ:         cd ~/gt
+  3. Add a project:    gt rig add myproject https://github.com/user/repo
+  4. Join the crew:    gt crew add yourname --rig myproject
+  5. Start working:    cd myproject/crew/yourname && gt attach
 
 ARCHITECTURE
 ────────────
@@ -92,10 +93,13 @@ WHAT THIS COMMAND CREATES
 
 NEXT STEPS AFTER INSTALL
 ────────────────────────
-  gt rig add <name> <url>     Add a project to manage
-  gt crew add <name>          Create your workspace in a rig
-  gt start                    Start the Mayor daemon
-  gt status                   See what's running
+All gt commands must be run from inside the HQ directory:
+
+  cd ~/gt                           Enter the HQ first!
+  gt rig add <name> <url>           Add a project to manage
+  gt crew add <name> --rig <rig>    Create your workspace in a rig
+  gt start                          Start the Mayor daemon
+  gt status                         See what's running
 
 Examples:
   gt install                                   # Create HQ at ~/gt (default)
@@ -352,8 +356,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n%s HQ created successfully!\n", style.Bold.Render("✓"))
 	fmt.Println()
-	fmt.Println("Next steps:")
+	fmt.Println("Next steps (run from inside HQ):")
+	fmt.Println()
 	step := 1
+	// Show cd step if not already in the target directory
+	cwd, _ := os.Getwd()
+	if cwd != absPath {
+		fmt.Printf("  %d. Enter HQ: %s\n", step, style.Dim.Render(fmt.Sprintf("cd %s", absPath)))
+		step++
+	}
 	if !installGit && installGitHub == "" {
 		fmt.Printf("  %d. Initialize git: %s\n", step, style.Dim.Render("gt git-init"))
 		step++
@@ -363,6 +374,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %d. (Optional) Configure agents: %s\n", step, style.Dim.Render("gt config agent list"))
 	step++
 	fmt.Printf("  %d. Enter the Mayor's office: %s\n", step, style.Dim.Render("gt mayor attach"))
+	fmt.Println()
+	fmt.Printf("%s All gt commands must be run from inside the HQ directory.\n", style.Dim.Render("Note:"))
 
 	return nil
 }
