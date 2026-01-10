@@ -158,6 +158,24 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		style.PrintWarning("Creating HQ inside existing workspace at %s", existingRoot)
 	}
 
+	// Check if target is inside an existing git repo (not recommended)
+	// HQ should typically be a standalone directory, not inside a project repo
+	if isInsideGitRepo(absPath) && !installForce {
+		fmt.Println()
+		style.PrintWarning("Target is inside an existing git repository")
+		fmt.Println()
+		fmt.Println("  Gas Town HQ is typically installed in a standalone directory (e.g., ~/gt)")
+		fmt.Println("  that contains clones of your projects as 'rigs'.")
+		fmt.Println()
+		fmt.Println("  Installing inside an existing repo will mix gastown infrastructure")
+		fmt.Println("  (mayor/, .beads/, crew/) with your project's code.")
+		fmt.Println()
+		fmt.Println("  Recommended: gt install ~/gt --shell")
+		fmt.Println()
+		fmt.Println("  Use --force to install here anyway.")
+		return fmt.Errorf("refusing to install inside git repo without --force")
+	}
+
 	// Ensure beads (bd) is available before proceeding
 	if !installNoBeads {
 		if err := deps.EnsureBeads(true); err != nil {
@@ -463,6 +481,29 @@ func detectExistingBeadsPrefix(path string) string {
 		}
 	}
 	return ""
+}
+
+// isInsideGitRepo checks if the given path is inside a git repository.
+// It walks up the directory tree looking for a .git directory.
+func isInsideGitRepo(path string) bool {
+	// Walk up directory tree looking for .git
+	current := path
+	for {
+		gitDir := filepath.Join(current, ".git")
+		if info, err := os.Stat(gitDir); err == nil {
+			// .git can be a directory (normal repo) or file (worktree/submodule)
+			if info.IsDir() || info.Mode().IsRegular() {
+				return true
+			}
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			// Reached filesystem root
+			return false
+		}
+		current = parent
+	}
 }
 
 // extractPrefixFromError extracts the actual prefix from a beads error message.
