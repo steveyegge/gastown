@@ -46,7 +46,7 @@ func Remove() error {
 	}
 
 	hookPath := filepath.Join(state.ConfigDir(), "shell-hook.sh")
-	os.Remove(hookPath)
+	_ = os.Remove(hookPath) // Best effort cleanup, error not critical
 
 	return nil
 }
@@ -97,7 +97,7 @@ func addToRCFile(path string) error {
 
 	if len(data) > 0 {
 		backupPath := path + ".gastown-backup"
-		os.WriteFile(backupPath, data, 0644)
+		_ = os.WriteFile(backupPath, data, 0644) // Best effort backup, error not critical
 	}
 
 	return os.WriteFile(path, []byte(content+block), 0644)
