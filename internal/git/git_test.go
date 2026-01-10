@@ -214,10 +214,16 @@ func TestNotARepo(t *testing.T) {
 	g := NewGit(dir)
 
 	_, err := g.CurrentBranch()
-	// ZFC: Check for not-a-repo via GitError method instead of sentinel error
+	// ZFC: Check for GitError with raw stderr for agent observation.
+	// Agents decide what "not a git repository" means, not Go code.
 	gitErr, ok := err.(*GitError)
-	if !ok || !gitErr.IsNotARepo() {
-		t.Errorf("expected GitError with IsNotARepo(), got %v", err)
+	if !ok {
+		t.Errorf("expected GitError, got %T: %v", err, err)
+		return
+	}
+	// Verify raw stderr is available for agent observation
+	if gitErr.Stderr == "" {
+		t.Errorf("expected GitError with Stderr, got empty stderr")
 	}
 }
 

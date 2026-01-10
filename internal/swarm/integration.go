@@ -31,14 +31,6 @@ func (e *SwarmGitError) Error() string {
 	return fmt.Sprintf("%s: %v", e.Command, e.Err)
 }
 
-// HasConflict returns true if the error output indicates a merge conflict.
-// Deprecated: Agents should observe Stderr directly (ZFC principle).
-func (e *SwarmGitError) HasConflict() bool {
-	return strings.Contains(e.Stderr, "CONFLICT") ||
-		strings.Contains(e.Stderr, "Merge conflict") ||
-		strings.Contains(e.Stdout, "CONFLICT")
-}
-
 // CreateIntegrationBranch creates the integration branch for a swarm.
 // The branch is created from the swarm's BaseCommit and pushed to origin.
 func (m *Manager) CreateIntegrationBranch(swarmID string) error {
@@ -92,9 +84,11 @@ func (m *Manager) MergeToIntegration(swarmID, workerBranch string) error {
 		fmt.Sprintf("Merge %s into %s", workerBranch, swarm.Integration),
 		workerBranch)
 	if err != nil {
-		// ZFC: Check for conflict via SwarmGitError method
-		if gitErr, ok := err.(*SwarmGitError); ok && gitErr.HasConflict() {
-			return gitErr // Return the error with raw output for observation
+		// ZFC: Use git's porcelain output to detect conflicts instead of parsing stderr.
+		conflicts, conflictErr := m.getConflictingFiles()
+		if conflictErr == nil && len(conflicts) > 0 {
+			// Return the original error with raw output for observation
+			return err
 		}
 		return fmt.Errorf("merging: %w", err)
 	}
@@ -127,9 +121,11 @@ func (m *Manager) LandToMain(swarmID string) error {
 		fmt.Sprintf("Land swarm %s", swarmID),
 		swarm.Integration)
 	if err != nil {
-		// ZFC: Check for conflict via SwarmGitError method
-		if gitErr, ok := err.(*SwarmGitError); ok && gitErr.HasConflict() {
-			return gitErr // Return the error with raw output for observation
+		// ZFC: Use git's porcelain output to detect conflicts instead of parsing stderr.
+		conflicts, conflictErr := m.getConflictingFiles()
+		if conflictErr == nil && len(conflicts) > 0 {
+			// Return the original error with raw output for observation
+			return err
 		}
 		return fmt.Errorf("merging to %s: %w", swarm.TargetBranch, err)
 	}
@@ -205,6 +201,34 @@ func (m *Manager) getCurrentBranch() (string, error) {
 	}
 
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// getConflictingFiles returns the list of files with merge conflicts.
+// ZFC: Uses git's porcelain output (diff --diff-filter=U) instead of parsing stderr.
+func (m *Manager) getConflictingFiles() ([]string, error) {
+	cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	cmd.Dir = m.gitDir
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+
+	out := strings.TrimSpace(stdout.String())
+	if out == "" {
+		return nil, nil
+	}
+
+	files := strings.Split(out, "\n")
+	var result []string
+	for _, f := range files {
+		if f != "" {
+			result = append(result, f)
+		}
+	}
+	return result, nil
 }
 
 // gitRun executes a git command.

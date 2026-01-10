@@ -3,7 +3,6 @@ package git
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,47 +32,6 @@ func (e *GitError) Error() string {
 func (e *GitError) Unwrap() error {
 	return e.Err
 }
-
-// HasConflict returns true if the error output indicates a merge conflict.
-// Deprecated: This exists for backwards compatibility. Agents should observe
-// Stderr directly and make their own decisions (ZFC principle).
-func (e *GitError) HasConflict() bool {
-	return strings.Contains(e.Stderr, "CONFLICT") ||
-		strings.Contains(e.Stderr, "Merge conflict") ||
-		strings.Contains(e.Stdout, "CONFLICT")
-}
-
-// HasAuthFailure returns true if the error output indicates authentication failure.
-// Deprecated: This exists for backwards compatibility. Agents should observe
-// Stderr directly and make their own decisions (ZFC principle).
-func (e *GitError) HasAuthFailure() bool {
-	return strings.Contains(e.Stderr, "Authentication failed") ||
-		strings.Contains(e.Stderr, "could not read Username")
-}
-
-// IsNotARepo returns true if the error indicates the path is not a git repository.
-// Deprecated: This exists for backwards compatibility. Agents should observe
-// Stderr directly and make their own decisions (ZFC principle).
-func (e *GitError) IsNotARepo() bool {
-	return strings.Contains(e.Stderr, "not a git repository")
-}
-
-// HasRebaseConflict returns true if the error indicates a rebase conflict.
-// Deprecated: This exists for backwards compatibility. Agents should observe
-// Stderr directly and make their own decisions (ZFC principle).
-func (e *GitError) HasRebaseConflict() bool {
-	return strings.Contains(e.Stderr, "needs merge") ||
-		strings.Contains(e.Stderr, "rebase in progress")
-}
-
-// Common errors - deprecated, kept for backwards compatibility.
-// ZFC: These should not be used; observe GitError.Stderr instead.
-var (
-	ErrNotARepo       = errors.New("not a git repository")
-	ErrMergeConflict  = errors.New("merge conflict")
-	ErrAuthFailure    = errors.New("authentication failed")
-	ErrRebaseConflict = errors.New("rebase conflict")
-)
 
 // Git wraps git operations for a working directory.
 type Git struct {
@@ -470,21 +428,16 @@ func (g *Git) CheckConflicts(source, target string) ([]string, error) {
 	_, mergeErr := g.runMergeCheck("merge", "--no-commit", "--no-ff", source)
 
 	if mergeErr != nil {
-		// Check if there are unmerged files (indicates conflict)
-		conflicts, err := g.getConflictingFiles()
+		// ZFC: Use git's porcelain output to detect conflicts instead of parsing stderr.
+		// GetConflictingFiles() uses `git diff --diff-filter=U` which is the proper way.
+		conflicts, err := g.GetConflictingFiles()
 		if err == nil && len(conflicts) > 0 {
 			// Abort the test merge (best-effort cleanup)
 			_ = g.AbortMerge()
 			return conflicts, nil
 		}
 
-		// ZFC: Check if the error output indicates a conflict
-		if gitErr, ok := mergeErr.(*GitError); ok && gitErr.HasConflict() {
-			_ = g.AbortMerge() // best-effort cleanup
-			return conflicts, nil
-		}
-
-		// Some other merge error (best-effort cleanup)
+		// No unmerged files detected - this is some other merge error
 		_ = g.AbortMerge()
 		return nil, mergeErr
 	}
@@ -514,8 +467,10 @@ func (g *Git) runMergeCheck(args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// getConflictingFiles returns the list of files with merge conflicts.
-func (g *Git) getConflictingFiles() ([]string, error) {
+// GetConflictingFiles returns the list of files with merge conflicts.
+// ZFC: Uses git's porcelain output (diff --diff-filter=U) instead of parsing stderr.
+// This is the proper way to detect conflicts without violating ZFC.
+func (g *Git) GetConflictingFiles() ([]string, error) {
 	// git diff --name-only --diff-filter=U shows unmerged files
 	out, err := g.run("diff", "--name-only", "--diff-filter=U")
 	if err != nil {
