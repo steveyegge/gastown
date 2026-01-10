@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -22,6 +23,7 @@ tmux session. Use the subcommands to start, stop, attach, and check status.`,
 }
 
 var mayorAgentOverride string
+var mayorPrompt string
 
 var mayorStartCmd = &cobra.Command{
 	Use:   "start",
@@ -49,8 +51,28 @@ var mayorAttachCmd = &cobra.Command{
 	Long: `Attach to the running Mayor tmux session.
 
 Attaches the current terminal to the Mayor's tmux session.
-Detach with Ctrl-B D.`,
+Detach with Ctrl-B D.
+
+Use --prompt to send a message to the Mayor before attaching:
+  gt mayor attach --prompt "Please check the status of all rigs"`,
 	RunE: runMayorAttach,
+}
+
+var mayorPromptCmd = &cobra.Command{
+	Use:   "prompt <message>",
+	Short: "Send a prompt to the Mayor without attaching",
+	Long: `Send a prompt to the running Mayor session without opening tmux.
+
+This allows you to deliver instructions to the Mayor that will be visible
+when you next attach. The prompt is sent via tmux send-keys to the session.
+
+Examples:
+  gt mayor prompt "Please summarize the current work status"
+  gt mayor prompt "Check mail and respond to any urgent requests"
+
+The Mayor must be running. Use 'gt mayor start' first if needed.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runMayorPrompt,
 }
 
 var mayorStatusCmd = &cobra.Command{
@@ -73,12 +95,16 @@ func init() {
 	mayorCmd.AddCommand(mayorStartCmd)
 	mayorCmd.AddCommand(mayorStopCmd)
 	mayorCmd.AddCommand(mayorAttachCmd)
+	mayorCmd.AddCommand(mayorPromptCmd)
 	mayorCmd.AddCommand(mayorStatusCmd)
 	mayorCmd.AddCommand(mayorRestartCmd)
 
 	mayorStartCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
+	mayorStartCmd.Flags().StringVarP(&mayorPrompt, "prompt", "p", "", "Initial prompt to send after startup")
 	mayorAttachCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
+	mayorAttachCmd.Flags().StringVarP(&mayorPrompt, "prompt", "p", "", "Prompt to send before attaching")
 	mayorRestartCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
+	mayorRestartCmd.Flags().StringVarP(&mayorPrompt, "prompt", "p", "", "Initial prompt to send after restart")
 
 	rootCmd.AddCommand(mayorCmd)
 }
@@ -104,16 +130,22 @@ func runMayorStart(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Starting Mayor session...")
-	if err := mgr.Start(mayorAgentOverride); err != nil {
+	if err := mgr.StartWithPrompt(mayorAgentOverride, mayorPrompt); err != nil {
 		if err == mayor.ErrAlreadyRunning {
 			return fmt.Errorf("Mayor session already running. Attach with: gt mayor attach")
 		}
 		return err
 	}
 
-	fmt.Printf("%s Mayor session started. Attach with: %s\n",
-		style.Bold.Render("✓"),
-		style.Dim.Render("gt mayor attach"))
+	if mayorPrompt != "" {
+		fmt.Printf("%s Mayor session started with prompt. Attach with: %s\n",
+			style.Bold.Render("✓"),
+			style.Dim.Render("gt mayor attach"))
+	} else {
+		fmt.Printf("%s Mayor session started. Attach with: %s\n",
+			style.Bold.Render("✓"),
+			style.Dim.Render("gt mayor attach"))
+	}
 
 	return nil
 }
@@ -149,13 +181,47 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 	if !running {
 		// Auto-start if not running
 		fmt.Println("Mayor session not running, starting...")
-		if err := mgr.Start(mayorAgentOverride); err != nil {
+		if err := mgr.StartWithPrompt(mayorAgentOverride, mayorPrompt); err != nil {
 			return err
 		}
+	} else if mayorPrompt != "" {
+		// Session already running - send prompt before attaching
+		// This is the key feature: inject prompt deterministically before attach
+		t := tmux.NewTmux()
+		if err := t.NudgeSession(mgr.SessionName(), mayorPrompt); err != nil {
+			return fmt.Errorf("sending prompt: %w", err)
+		}
+		fmt.Printf("%s Prompt sent to Mayor\n", style.Bold.Render("✓"))
 	}
 
 	// Use shared attach helper (smart: links if inside tmux, attaches if outside)
 	return attachToTmuxSession(mgr.SessionName())
+}
+
+// runMayorPrompt sends a prompt to the Mayor without attaching.
+// This enables prompt injection without opening tmux - the prompt is visible on attach.
+func runMayorPrompt(cmd *cobra.Command, args []string) error {
+	mgr, err := getMayorManager()
+	if err != nil {
+		return err
+	}
+
+	running, err := mgr.IsRunning()
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !running {
+		return fmt.Errorf("Mayor session is not running. Start with: gt mayor start")
+	}
+
+	prompt := args[0]
+	t := tmux.NewTmux()
+	if err := t.NudgeSession(mgr.SessionName(), prompt); err != nil {
+		return fmt.Errorf("sending prompt: %w", err)
+	}
+
+	fmt.Printf("%s Prompt sent to Mayor (visible on attach)\n", style.Bold.Render("✓"))
+	return nil
 }
 
 func runMayorStatus(cmd *cobra.Command, args []string) error {
@@ -201,6 +267,6 @@ func runMayorRestart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("stopping session: %w", err)
 	}
 
-	// Start fresh
+	// Start fresh with optional prompt
 	return runMayorStart(cmd, args)
 }

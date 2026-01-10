@@ -1,3 +1,23 @@
+// Package mayor manages the Mayor tmux session lifecycle.
+//
+// # Prompt Injection Before Attach
+//
+// The Mayor supports deterministic prompt injection before tmux attach via
+// the following mechanisms:
+//
+//  1. gt mayor start --prompt "..." - Sends prompt after startup sequence
+//  2. gt mayor attach --prompt "..." - Sends prompt to running session, then attaches
+//  3. gt mayor prompt "..." - Sends prompt without attaching (standalone command)
+//
+// All methods use tmux.NudgeSession which sends keystrokes via tmux send-keys
+// with proper debouncing and Enter handling. The prompt is visible when the
+// user attaches to the session.
+//
+// This enables automation use cases where prompts need to be delivered to
+// the Mayor without opening an interactive tmux session.
+//
+// Security: Prompt content is not logged unless explicitly enabled. No shell
+// injection is possible as NudgeSession uses tmux's literal mode (-l).
 package mayor
 
 import (
@@ -52,6 +72,14 @@ func (m *Manager) mayorDir() string {
 // Start starts the mayor session.
 // agentOverride optionally specifies a different agent alias to use.
 func (m *Manager) Start(agentOverride string) error {
+	return m.StartWithPrompt(agentOverride, "")
+}
+
+// StartWithPrompt starts the mayor session with an optional initial prompt.
+// agentOverride optionally specifies a different agent alias to use.
+// prompt, if non-empty, is sent to the session after startup via NudgeSession.
+// This enables deterministic prompt injection before tmux attach.
+func (m *Manager) StartWithPrompt(agentOverride, prompt string) error {
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
@@ -131,6 +159,14 @@ func (m *Manager) Start(agentOverride string) error {
 	// Wait for beacon to be fully processed (needs to be separate prompt)
 	time.Sleep(2 * time.Second)
 	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("mayor", mayorDir)) // Non-fatal
+
+	// If a custom prompt was provided, send it after startup is complete.
+	// This enables deterministic prompt injection before tmux attach.
+	// The prompt becomes visible when the user attaches to the session.
+	if prompt != "" {
+		time.Sleep(1 * time.Second) // Allow propulsion nudge to be processed first
+		_ = t.NudgeSession(sessionID, prompt) // Non-fatal
+	}
 
 	return nil
 }
