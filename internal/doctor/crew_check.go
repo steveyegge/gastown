@@ -32,6 +32,7 @@ func NewCrewStateCheck() *CrewStateCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "crew-state",
 				CheckDescription: "Validate crew worker state.json files",
+				CheckCategory:    CategoryCleanup,
 			},
 		},
 	}
@@ -239,6 +240,7 @@ func NewCrewWorktreeCheck() *CrewWorktreeCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "crew-worktrees",
 				CheckDescription: "Detect stale cross-rig worktrees in crew directories",
+				CheckCategory:    CategoryCleanup,
 			},
 		},
 	}

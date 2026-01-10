@@ -20,6 +20,7 @@ func NewBdDaemonCheck() *BdDaemonCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "bd-daemon",
 				CheckDescription: "Check if bd (beads) daemon is running",
+				CheckCategory:    CategoryInfrastructure,
 			},
 		},
 	}

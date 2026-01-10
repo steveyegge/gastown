@@ -21,6 +21,7 @@ func NewPreCheckoutHookCheck() *PreCheckoutHookCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "pre-checkout-hook",
 				CheckDescription: "Verify pre-checkout hook prevents branch switches",
+				CheckCategory:    CategoryHooks,
 			},
 		},
 	}

@@ -23,6 +23,7 @@ func NewRigBeadsCheck() *RigBeadsCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "rig-beads-exist",
 				CheckDescription: "Verify rig identity beads exist for all rigs",
+				CheckCategory:    CategoryRig,
 			},
 		},
 	}

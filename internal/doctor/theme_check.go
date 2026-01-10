@@ -20,6 +20,7 @@ func NewThemeCheck() *ThemeCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "themes",
 				CheckDescription: "Check tmux session theme configuration",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}

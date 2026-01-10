@@ -23,6 +23,7 @@ func NewBranchCheck() *BranchCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "persistent-role-branches",
 				CheckDescription: "Detect persistent roles not on main branch",
+				CheckCategory:    CategoryCleanup,
 			},
 		},
 	}
@@ -213,6 +214,7 @@ func NewBeadsSyncOrphanCheck() *BeadsSyncOrphanCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "beads-sync-orphans",
 			CheckDescription: "Detect orphaned code on beads-sync branch",
+			CheckCategory:    CategoryCleanup,
 		},
 	}
 }
@@ -338,6 +340,7 @@ func NewCloneDivergenceCheck() *CloneDivergenceCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "clone-divergence",
 			CheckDescription: "Detect emergency divergence between git clones",
+			CheckCategory:    CategoryCleanup,
 		},
 	}
 }

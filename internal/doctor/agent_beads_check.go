@@ -28,6 +28,7 @@ func NewAgentBeadsCheck() *AgentBeadsCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "agent-beads-exist",
 				CheckDescription: "Verify agent beads exist for all agents",
+				CheckCategory:    CategoryRig,
 			},
 		},
 	}

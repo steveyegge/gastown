@@ -42,6 +42,7 @@ func NewEnvVarsCheck() *EnvVarsCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "env-vars",
 			CheckDescription: "Verify tmux session environment variables match expected values",
+			CheckCategory:    CategoryConfig,
 		},
 	}
 }

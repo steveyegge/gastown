@@ -26,6 +26,7 @@ func NewBeadsDatabaseCheck() *BeadsDatabaseCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "beads-database",
 				CheckDescription: "Verify beads database is properly initialized",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}
@@ -176,6 +177,7 @@ func NewPrefixConflictCheck() *PrefixConflictCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "prefix-conflict",
 			CheckDescription: "Check for duplicate beads prefixes across rigs",
+			CheckCategory:    CategoryConfig,
 		},
 	}
 }
@@ -243,6 +245,7 @@ func NewPrefixMismatchCheck() *PrefixMismatchCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "prefix-mismatch",
 				CheckDescription: "Check for prefix mismatches between rigs.json and routes.jsonl",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}

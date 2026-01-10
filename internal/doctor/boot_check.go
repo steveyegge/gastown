@@ -20,6 +20,7 @@ func NewBootHealthCheck() *BootHealthCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "boot-health",
 			CheckDescription: "Check Boot watchdog health (the vet checks on the dog)",
+			CheckCategory:    CategoryInfrastructure,
 		},
 	}
 }

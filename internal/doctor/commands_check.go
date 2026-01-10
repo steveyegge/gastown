@@ -22,6 +22,7 @@ func NewCommandsCheck() *CommandsCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "commands-provisioned",
 				CheckDescription: "Check .claude/commands/ is provisioned at town level",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}

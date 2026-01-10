@@ -27,6 +27,7 @@ func NewOrphanSessionCheck() *OrphanSessionCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "orphan-sessions",
 				CheckDescription: "Detect orphaned tmux sessions",
+				CheckCategory:    CategoryCleanup,
 			},
 		},
 	}
@@ -244,6 +245,7 @@ func NewOrphanProcessCheck() *OrphanProcessCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "orphan-processes",
 			CheckDescription: "Detect runtime processes outside tmux",
+			CheckCategory:    CategoryCleanup,
 		},
 	}
 }

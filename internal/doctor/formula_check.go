@@ -21,6 +21,7 @@ func NewFormulaCheck() *FormulaCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "formulas",
 				CheckDescription: "Check embedded formulas are up-to-date",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}

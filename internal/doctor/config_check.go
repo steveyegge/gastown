@@ -24,6 +24,7 @@ func NewSettingsCheck() *SettingsCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "rig-settings",
 				CheckDescription: "Check that rigs have settings/ directory",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}
@@ -105,6 +106,7 @@ func NewRuntimeGitignoreCheck() *RuntimeGitignoreCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "runtime-gitignore",
 			CheckDescription: "Check that .runtime/ directories are gitignored",
+			CheckCategory:    CategoryConfig,
 		},
 	}
 }
@@ -194,6 +196,7 @@ func NewLegacyGastownCheck() *LegacyGastownCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "legacy-gastown",
 				CheckDescription: "Check for old .gastown/ directories that should be migrated",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}
@@ -281,6 +284,7 @@ func NewSessionHookCheck() *SessionHookCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "session-hooks",
 			CheckDescription: "Check that settings.json hooks use session-start.sh or --hook flag",
+			CheckCategory:    CategoryConfig,
 		},
 	}
 }
@@ -549,6 +553,7 @@ func NewCustomTypesCheck() *CustomTypesCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "beads-custom-types",
 				CheckDescription: "Check that Gas Town custom types are registered with beads",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}

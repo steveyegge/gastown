@@ -20,6 +20,7 @@ func NewTownGitCheck() *TownGitCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "town-git",
 			CheckDescription: "Verify town root is under version control",
+			CheckCategory:    CategoryCore,
 		},
 	}
 }

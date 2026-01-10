@@ -50,6 +50,7 @@ func NewClaudeSettingsCheck() *ClaudeSettingsCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "claude-settings",
 				CheckDescription: "Verify Claude settings.json files match expected templates",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}

@@ -23,6 +23,7 @@ func NewLinkedPaneCheck() *LinkedPaneCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "linked-panes",
 				CheckDescription: "Detect tmux sessions sharing panes (causes crosstalk)",
+				CheckCategory:    CategoryInfrastructure,
 			},
 		},
 	}

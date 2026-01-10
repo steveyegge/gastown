@@ -21,6 +21,7 @@ func NewTownRootBranchCheck() *TownRootBranchCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "town-root-branch",
 				CheckDescription: "Verify town root is on main branch",
+				CheckCategory:    CategoryCore,
 			},
 		},
 	}

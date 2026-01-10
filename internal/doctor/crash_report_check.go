@@ -31,6 +31,7 @@ func NewCrashReportCheck() *CrashReportCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "crash-reports",
 			CheckDescription: "Check for recent macOS crash reports (tmux, Claude)",
+			CheckCategory:    CategoryCleanup,
 		},
 	}
 }

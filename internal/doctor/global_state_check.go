@@ -21,6 +21,7 @@ func NewGlobalStateCheck() *GlobalStateCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "global-state",
 			CheckDescription: "Validates Gas Town global state and shell integration",
+			CheckCategory:    CategoryCore,
 		},
 	}
 }

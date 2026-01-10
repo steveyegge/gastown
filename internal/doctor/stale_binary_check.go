@@ -18,6 +18,7 @@ func NewStaleBinaryCheck() *StaleBinaryCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "stale-binary",
 				CheckDescription: "Check if gt binary is up to date with repo",
+				CheckCategory:    CategoryInfrastructure,
 			},
 		},
 	}
