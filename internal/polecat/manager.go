@@ -282,6 +282,18 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 
+	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
+	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
+	agentsMDPath := filepath.Join(clonePath, "AGENTS.md")
+	if _, err := os.Stat(agentsMDPath); os.IsNotExist(err) {
+		srcPath := filepath.Join(m.rig.Path, "mayor", "rig", "AGENTS.md")
+		if srcData, readErr := os.ReadFile(srcPath); readErr == nil {
+			if writeErr := os.WriteFile(agentsMDPath, srcData, 0644); writeErr != nil {
+				fmt.Printf("Warning: could not copy AGENTS.md: %v\n", writeErr)
+			}
+		}
+	}
+
 	// NOTE: We intentionally do NOT write to CLAUDE.md here.
 	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
 	// Writing to CLAUDE.md would overwrite project instructions and could leak
@@ -552,6 +564,18 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
 	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
+	}
+
+	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
+	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
+	agentsMDPath := filepath.Join(newClonePath, "AGENTS.md")
+	if _, err := os.Stat(agentsMDPath); os.IsNotExist(err) {
+		srcPath := filepath.Join(m.rig.Path, "mayor", "rig", "AGENTS.md")
+		if srcData, readErr := os.ReadFile(srcPath); readErr == nil {
+			if writeErr := os.WriteFile(agentsMDPath, srcData, 0644); writeErr != nil {
+				fmt.Printf("Warning: could not copy AGENTS.md: %v\n", writeErr)
+			}
+		}
 	}
 
 	// NOTE: We intentionally do NOT write to CLAUDE.md here.
