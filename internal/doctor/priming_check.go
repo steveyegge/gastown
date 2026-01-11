@@ -111,7 +111,7 @@ func (c *PrimingCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // checkAgentPriming checks priming configuration for a specific agent.
-func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, agentType string) []primingIssue {
+func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, _ string) []primingIssue { // agentType unused but kept for future use
 	var issues []primingIssue
 
 	agentPath := filepath.Join(townRoot, agentDir)

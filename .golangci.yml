@@ -1,11 +1,9 @@
-version: "2"
-
 run:
   timeout: 5m
   tests: false
 
 linters:
-  default: 'none'
+  disable-all: true
   enable:
     - errcheck
     - gosec
@@ -13,69 +11,67 @@ linters:
     - unconvert
     - unparam
 
-  settings:
-    errcheck:
-      exclude-functions:
-        - (*database/sql.DB).Close
-        - (*database/sql.Rows).Close
-        - (*database/sql.Tx).Rollback
-        - (*database/sql.Stmt).Close
-        - (*database/sql.Conn).Close
-        - (*os.File).Close
-        - (os).RemoveAll
-        - (os).Remove
-        - (os).Setenv
-        - (os).Unsetenv
-        - (os).Chdir
-        - (os).MkdirAll
-        - (fmt).Sscanf
-        # fmt.Fprintf/Fprintln errors are typically safe to ignore for logging
-        - fmt.Fprintf
-        - fmt.Fprintln
-        - (fmt).Fprintf
-        - (fmt).Fprintln
-    misspell:
-      locale: US
-
-  exclusions:
-    rules:
-      # G304: File inclusion via variable in tests is safe (test data)
-      - path: '_test\.go'
-        linters:
-          - gosec
-        text: "G304"
-      # G304: Config/state file loading uses constructed paths, not user input
-      # All internal packages read files from constructed paths, not user input
-      - path: 'internal/'
-        linters:
-          - gosec
-        text: "G304"
-      # G306: File permissions 0644 in tests are acceptable (test fixtures)
-      - path: '_test\.go'
-        linters:
-          - gosec
-        text: "G306"
-      # G302/G306: Non-sensitive operational files (state, config, logs) can use 0644
-      # Internal packages write non-sensitive operational data files
-      - path: 'internal/'
-        linters:
-          - gosec
-        text: "G306|G302"
-      # G302/G306: Directory/file permissions 0700/0750 are acceptable
-      - linters:
-          - gosec
-        text: "G302.*0700|G301.*0750"
-      # G204: Safe subprocess launches with validated arguments (internal tools)
-      # All internal packages use subprocess calls for trusted internal tools
-      - path: 'internal/'
-        linters:
-          - gosec
-        text: 'G204'
-      # errcheck: Ignore unchecked errors in test files for common cleanup patterns
-      - path: '_test\.go'
-        linters:
-          - errcheck
-        text: "Error return value of .*(Close|Rollback|RemoveAll|Setenv|Unsetenv|Chdir|MkdirAll|Remove|Write).* is not checked"
+linters-settings:
+  errcheck:
+    exclude-functions:
+      - (*database/sql.DB).Close
+      - (*database/sql.Rows).Close
+      - (*database/sql.Tx).Rollback
+      - (*database/sql.Stmt).Close
+      - (*database/sql.Conn).Close
+      - (*os.File).Close
+      - (os).RemoveAll
+      - (os).Remove
+      - (os).Setenv
+      - (os).Unsetenv
+      - (os).Chdir
+      - (os).MkdirAll
+      - (fmt).Sscanf
+      # fmt.Fprintf/Fprintln errors are typically safe to ignore for logging
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - (fmt).Fprintf
+      - (fmt).Fprintln
+  misspell:
+    locale: US
 
 issues:
   uniq-by-line: true
+  exclude-rules:
+    # G304: File inclusion via variable in tests is safe (test data)
+    - path: '_test\.go'
+      linters:
+        - gosec
+      text: "G304"
+    # G304: Config/state file loading uses constructed paths, not user input
+    # All internal packages read files from constructed paths, not user input
+    - path: 'internal/'
+      linters:
+        - gosec
+      text: "G304"
+    # G306: File permissions 0644 in tests are acceptable (test fixtures)
+    - path: '_test\.go'
+      linters:
+        - gosec
+      text: "G306"
+    # G302/G306: Non-sensitive operational files (state, config, logs) can use 0644
+    # Internal packages write non-sensitive operational data files
+    - path: 'internal/'
+      linters:
+        - gosec
+      text: "G306|G302"
+    # G302/G306: Directory/file permissions 0700/0750 are acceptable
+    - linters:
+        - gosec
+      text: "G302.*0700|G301.*0750"
+    # G204: Safe subprocess launches with validated arguments (internal tools)
+    # All internal packages use subprocess calls for trusted internal tools
+    - path: 'internal/'
+      linters:
+        - gosec
+      text: 'G204'
+    # errcheck: Ignore unchecked errors in test files for common cleanup patterns
+    - path: '_test\.go'
+      linters:
+        - errcheck
+      text: "Error return value of .*(Close|Rollback|RemoveAll|Setenv|Unsetenv|Chdir|MkdirAll|Remove|Write).* is not checked"

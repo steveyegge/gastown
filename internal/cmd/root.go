@@ -100,7 +100,7 @@ func warnIfTownRootOffMain() {
 // checkBeadsDependency verifies beads meets minimum version requirements.
 // Skips check for exempt commands (version, help, completion).
 // Deprecated: Use persistentPreRun instead, which calls CheckBeadsVersion.
-func checkBeadsDependency(cmd *cobra.Command, args []string) error {
+func checkBeadsDependency(cmd *cobra.Command, _ []string) error { // args unused - using cmd.Name() instead
 	// Get the root command name being run
 	cmdName := cmd.Name()
 
