@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -501,8 +502,16 @@ func handlePullMain(townRoot string, msg *mail.Message, dryRun bool) (string, er
 		rigName = parts[0]
 	}
 
-	// Extract target branch from body
+	// Get default branch from rig config, falling back to "main"
 	targetBranch := "main"
+	if rigName != "" {
+		rigPath := filepath.Join(townRoot, rigName)
+		if cfg, err := rig.LoadRigConfig(rigPath); err == nil && cfg.DefaultBranch != "" {
+			targetBranch = cfg.DefaultBranch
+		}
+	}
+
+	// Override with explicit target from mail body if present
 	for _, line := range strings.Split(msg.Body, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "Target:") {
