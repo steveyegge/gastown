@@ -27,7 +27,7 @@ needs = ["review"]
 title = "Test {{feature}}"
 
 [[steps]]
-description = "Submit for merge. Final check: git status, git diff. Commit with clear message. Push and create PR."
+description = "Submit for merge. Final check: git status, git diff. Commit with clear message. Follow your role's git workflow for landing code."
 id = "submit"
 needs = ["test"]
 title = "Submit for merge"
