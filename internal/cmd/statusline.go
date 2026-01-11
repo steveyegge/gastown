@@ -286,11 +286,12 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		AgentWitness:  "👁️",
 		AgentRefinery: "🏭",
 		AgentDeacon:   "⛪",
+		AgentCrew:     "👷",
 	}
 
 	// Initialize health tracker for all agent types (always show all types)
 	healthByType := make(map[AgentType]*sessionHealth)
-	for _, agentType := range []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon} {
+	for _, agentType := range []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon, AgentCrew} {
 		healthByType[agentType] = &sessionHealth{
 			icon: agentIcons[agentType],
 		}
@@ -307,8 +308,8 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 			continue
 		}
 
-		// Skip mayor and crew (not tracked)
-		if agent.Type == AgentMayor || agent.Type == AgentCrew {
+		// Skip mayor (viewer of statusline, not tracked)
+		if agent.Type == AgentMayor {
 			continue
 		}
 
@@ -330,7 +331,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	// Add per-agent-type health in consistent order
 	// Format: 😺1/10 (1 working out of 10 total, 9 idle inferred)
 	// Always show all agent types, even when count is 0
-	agentOrder := []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon}
+	agentOrder := []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon, AgentCrew}
 	var agentParts []string
 	for _, agentType := range agentOrder {
 		health := healthByType[agentType]
