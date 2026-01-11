@@ -250,10 +250,13 @@ func runDown(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  • %s\n", r)
 			}
 			fmt.Println()
-			fmt.Printf("This may indicate systemd/launchd is managing bd.\n")
+			fmt.Printf("Possible causes:\n")
+			fmt.Printf("  • systemd/launchd is managing bd or gt daemon\n")
+			fmt.Printf("  • Another process restarted services\n")
 			fmt.Printf("Check with:\n")
-			fmt.Printf("  %s\n", style.Dim.Render("systemctl status bd-daemon  # Linux"))
-			fmt.Printf("  %s\n", style.Dim.Render("launchctl list | grep bd    # macOS"))
+			fmt.Printf("  %s\n", style.Dim.Render("gt status                 # Check Gas Town status"))
+			fmt.Printf("  %s\n", style.Dim.Render("systemctl status bd-daemon # Linux"))
+			fmt.Printf("  %s\n", style.Dim.Render("launchctl list | grep bd   # macOS"))
 			allOK = false
 		}
 	}
