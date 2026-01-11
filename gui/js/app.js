@@ -1008,13 +1008,33 @@ mayorViewBtn.addEventListener('click', () => {
 
 mayorOutputClose.addEventListener('click', hideMayorOutput);
 
-// Close panel when clicking outside
-document.addEventListener('click', (e) => {
-  if (mayorOutputPanel.style.display !== 'none' &&
-      !mayorOutputPanel.contains(e.target) &&
-      !mayorViewBtn.contains(e.target)) {
-    hideMayorOutput();
-  }
+// Make panel draggable by header
+const mayorOutputHeader = document.querySelector('.mayor-output-header');
+let isDragging = false;
+let dragOffsetX = 0;
+let dragOffsetY = 0;
+
+mayorOutputHeader.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.mayor-output-close')) return; // Don't drag when clicking close
+  isDragging = true;
+  const rect = mayorOutputPanel.getBoundingClientRect();
+  dragOffsetX = e.clientX - rect.left;
+  dragOffsetY = e.clientY - rect.top;
+  mayorOutputPanel.style.transform = 'none'; // Remove centering transform
+  mayorOutputPanel.style.left = rect.left + 'px';
+  mayorOutputPanel.style.top = rect.top + 'px';
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  const x = Math.max(0, Math.min(window.innerWidth - 100, e.clientX - dragOffsetX));
+  const y = Math.max(0, Math.min(window.innerHeight - 50, e.clientY - dragOffsetY));
+  mayorOutputPanel.style.left = x + 'px';
+  mayorOutputPanel.style.top = y + 'px';
+});
+
+document.addEventListener('mouseup', () => {
+  isDragging = false;
 });
 
 // Initialize on DOM ready
