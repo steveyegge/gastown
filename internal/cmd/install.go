@@ -109,6 +109,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	// Check if already a workspace
 	if isWS, _ := workspace.IsWorkspace(absPath); isWS && !installForce {
+		// If only --wrappers is requested in existing town, just install wrappers and exit
+		if installWrappers {
+			if err := wrappers.Install(); err != nil {
+				return fmt.Errorf("installing wrapper scripts: %w", err)
+			}
+			fmt.Printf("✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+			return nil
+		}
 		return fmt.Errorf("directory is already a Gas Town HQ (use --force to reinitialize)")
 	}
 
