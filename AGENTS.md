@@ -1,9 +1,9 @@
 # Agent Instructions
 
-See **CLAUDE.md** for complete agent context and instructions.
+This project uses **bd** (beads) for issue tracking.
 
-This file exists for compatibility with tools that look for AGENTS.md.
+Run `bd onboard` to get started and see your tasks.
 
-> **Recovery**: Run `gt prime` after compaction, clear, or new session
+## Session End
 
-Full context is injected by `gt prime` at session start.
+Run `bd sync` before ending your session to commit beads changes.
