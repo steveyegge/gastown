@@ -3,6 +3,7 @@ package beads
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,19 +84,16 @@ func TestIsBeadsRepo(t *testing.T) {
 }
 
 // TestWrapError tests error wrapping.
+// ZFC: Only test ErrNotFound detection. ErrNotARepo and ErrSyncConflict
+// were removed as per ZFC - agents should handle those errors directly.
 func TestWrapError(t *testing.T) {
 	b := New("/test")
 
 	tests := []struct {
-		stderr   string
-		wantErr  error
-		wantNil  bool
+		stderr  string
+		wantErr error
+		wantNil bool
 	}{
-		{"not a beads repository", ErrNotARepo, false},
-		{"No .beads directory found", ErrNotARepo, false},
-		{".beads directory not found", ErrNotARepo, false},
-		{"sync conflict detected", ErrSyncConflict, false},
-		{"CONFLICT in file.md", ErrSyncConflict, false},
 		{"Issue not found: gt-xyz", ErrNotFound, false},
 		{"gt-xyz not found", ErrNotFound, false},
 	}
@@ -126,7 +124,6 @@ func TestIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Walk up to find .beads
 	dir := cwd
 	for {
 		if _, err := os.Stat(filepath.Join(dir, ".beads")); err == nil {
@@ -139,25 +136,29 @@ func TestIntegration(t *testing.T) {
 		dir = parent
 	}
 
-	if os.Getenv("BEADS_NO_DB") == "true" || os.Getenv("BD_NO_DB") == "true" {
-		t.Skip("beads no-db mode enabled; skipping integration test")
-	}
-
-	dbPath := os.Getenv("BEADS_DB")
-	if dbPath == "" {
-		dbPath = filepath.Join(dir, ".beads", "beads.db")
-	}
+	// Resolve the actual beads directory (following redirect if present)
+	// In multi-worktree setups, worktrees have .beads/redirect pointing to
+	// the canonical beads location (e.g., mayor/rig/.beads)
+	beadsDir := ResolveBeadsDir(dir)
+	dbPath := filepath.Join(beadsDir, "beads.db")
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		t.Skip("no beads.db found (JSONL-only repo)")
 	}
 
-	// Ensure DB is in sync with JSONL to avoid stale-data failures.
-	syncCmd := Command(dir, "--no-daemon", "sync", "--import-only")
-	if err := syncCmd.Run(); err != nil {
-		t.Skipf("bd sync --import-only failed: %v", err)
-	}
-
 	b := New(dir)
+
+	// Sync database with JSONL before testing to avoid "Database out of sync" errors.
+	// This can happen when JSONL is updated (e.g., by git pull) but the SQLite database
+	// hasn't been imported yet. Running sync --import-only ensures we test against
+	// consistent data and prevents flaky test failures.
+	// We use --allow-stale to handle cases where the daemon is actively writing and
+	// the staleness check would otherwise fail spuriously.
+	syncCmd := exec.Command("bd", "--no-daemon", "--allow-stale", "sync", "--import-only")
+	syncCmd.Dir = dir
+	if err := syncCmd.Run(); err != nil {
+		// If sync fails (e.g., no database exists), just log and continue
+		t.Logf("bd sync --import-only failed (may not have db): %v", err)
+	}
 
 	// Test List
 	t.Run("List", func(t *testing.T) {
@@ -207,10 +208,10 @@ func TestIntegration(t *testing.T) {
 // TestParseMRFields tests parsing MR fields from issue descriptions.
 func TestParseMRFields(t *testing.T) {
 	tests := []struct {
-		name        string
-		issue       *Issue
-		wantNil     bool
-		wantFields  *MRFields
+		name       string
+		issue      *Issue
+		wantNil    bool
+		wantFields *MRFields
 	}{
 		{
 			name:    "nil issue",
@@ -527,8 +528,8 @@ author: someone
 target: main`,
 			},
 			fields: &MRFields{
-				Branch:     "polecat/Capable/gt-ghi",
-				Target:     "integration/epic",
+				Branch:      "polecat/Capable/gt-ghi",
+				Target:      "integration/epic",
 				CloseReason: "merged",
 			},
 			want: `branch: polecat/Capable/gt-ghi
@@ -1038,10 +1039,10 @@ func TestParseAgentBeadID(t *testing.T) {
 		// Parseable but not valid agent roles (IsAgentSessionBead will reject)
 		{"gt-abc123", "", "abc123", "", true}, // Parses as town-level but not valid role
 		// Other prefixes (bd-, hq-)
-		{"bd-mayor", "", "mayor", "", true},                               // bd prefix town-level
-		{"bd-beads-witness", "beads", "witness", "", true},                // bd prefix rig-level singleton
-		{"bd-beads-polecat-pearl", "beads", "polecat", "pearl", true},     // bd prefix rig-level named
-		{"hq-mayor", "", "mayor", "", true},                               // hq prefix town-level
+		{"bd-mayor", "", "mayor", "", true},                           // bd prefix town-level
+		{"bd-beads-witness", "beads", "witness", "", true},            // bd prefix rig-level singleton
+		{"bd-beads-polecat-pearl", "beads", "polecat", "pearl", true}, // bd prefix rig-level named
+		{"hq-mayor", "", "mayor", "", true},                           // hq prefix town-level
 		// Truly invalid patterns
 		{"x-mayor", "", "", "", false},    // Prefix too short (1 char)
 		{"abcd-mayor", "", "", "", false}, // Prefix too long (4 chars)
@@ -1747,7 +1748,7 @@ func TestSetupRedirect(t *testing.T) {
 		rigRoot := filepath.Join(townRoot, "testrig")
 		crewPath := filepath.Join(rigRoot, "crew", "max")
 
-		// No rig/.beads created
+		// No rig/.beads or mayor/rig/.beads created
 		if err := os.MkdirAll(crewPath, 0755); err != nil {
 			t.Fatalf("mkdir crew: %v", err)
 		}
@@ -1755,6 +1756,46 @@ func TestSetupRedirect(t *testing.T) {
 		err := SetupRedirect(townRoot, crewPath)
 		if err == nil {
 			t.Error("SetupRedirect should fail if rig .beads missing")
+		}
+	})
+
+	t.Run("crew worktree with mayor/rig beads only", func(t *testing.T) {
+		// Setup: no rig/.beads, only mayor/rig/.beads exists
+		// This is the tracked beads architecture where rig root has no .beads directory
+		townRoot := t.TempDir()
+		rigRoot := filepath.Join(townRoot, "testrig")
+		mayorRigBeads := filepath.Join(rigRoot, "mayor", "rig", ".beads")
+		crewPath := filepath.Join(rigRoot, "crew", "max")
+
+		// Create only mayor/rig/.beads (no rig/.beads)
+		if err := os.MkdirAll(mayorRigBeads, 0755); err != nil {
+			t.Fatalf("mkdir mayor/rig beads: %v", err)
+		}
+		if err := os.MkdirAll(crewPath, 0755); err != nil {
+			t.Fatalf("mkdir crew: %v", err)
+		}
+
+		// Run SetupRedirect - should succeed and point to mayor/rig/.beads
+		if err := SetupRedirect(townRoot, crewPath); err != nil {
+			t.Fatalf("SetupRedirect failed: %v", err)
+		}
+
+		// Verify redirect points to mayor/rig/.beads
+		redirectPath := filepath.Join(crewPath, ".beads", "redirect")
+		content, err := os.ReadFile(redirectPath)
+		if err != nil {
+			t.Fatalf("read redirect: %v", err)
+		}
+
+		want := "../../mayor/rig/.beads\n"
+		if string(content) != want {
+			t.Errorf("redirect content = %q, want %q", string(content), want)
+		}
+
+		// Verify redirect resolves correctly
+		resolved := ResolveBeadsDir(crewPath)
+		if resolved != mayorRigBeads {
+			t.Errorf("resolved = %q, want %q", resolved, mayorRigBeads)
 		}
 	})
 }

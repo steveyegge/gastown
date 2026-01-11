@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -91,10 +92,6 @@ func init() {
 type RoleContext = RoleInfo
 
 func runPrime(cmd *cobra.Command, args []string) error {
-	if !state.IsEnabled() {
-		return nil
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting current directory: %w", err)
@@ -658,6 +655,11 @@ func outputStartupDirective(ctx RoleContext) {
 		fmt.Println("   - If attachment found → **RUN IT** (no human input needed)")
 		fmt.Println("   - If no attachment → await user instruction")
 	case RoleDeacon:
+		// Skip startup protocol if paused - the pause message was already shown
+		paused, _, _ := deacon.IsPaused(ctx.TownRoot)
+		if paused {
+			return
+		}
 		fmt.Println()
 		fmt.Println("---")
 		fmt.Println()
@@ -968,6 +970,13 @@ func showMoleculeProgress(b *beads.Beads, rootID string) {
 // Deacon uses wisps (Wisp:true issues in main .beads/) for patrol cycles.
 // Deacon is a town-level role, so it uses town root beads (not rig beads).
 func outputDeaconPatrolContext(ctx RoleContext) {
+	// Check if Deacon is paused - if so, output PAUSED message and skip patrol context
+	paused, state, err := deacon.IsPaused(ctx.TownRoot)
+	if err == nil && paused {
+		outputDeaconPausedMessage(state)
+		return
+	}
+
 	cfg := PatrolConfig{
 		RoleName:        "deacon",
 		PatrolMolName:   "mol-deacon-patrol",
@@ -985,6 +994,32 @@ func outputDeaconPatrolContext(ctx RoleContext) {
 		},
 	}
 	outputPatrolContext(cfg)
+}
+
+// outputDeaconPausedMessage outputs a prominent PAUSED message for the Deacon.
+// When paused, the Deacon must not perform any patrol actions.
+func outputDeaconPausedMessage(state *deacon.PauseState) {
+	fmt.Println()
+	fmt.Printf("%s\n\n", style.Bold.Render("## ⏸️  DEACON PAUSED"))
+	fmt.Println("You are paused and must NOT perform any patrol actions.")
+	fmt.Println()
+	if state.Reason != "" {
+		fmt.Printf("Reason: %s\n", state.Reason)
+	}
+	fmt.Printf("Paused at: %s\n", state.PausedAt.Format(time.RFC3339))
+	if state.PausedBy != "" {
+		fmt.Printf("Paused by: %s\n", state.PausedBy)
+	}
+	fmt.Println()
+	fmt.Println("Wait for human to run `gt deacon resume` before working.")
+	fmt.Println()
+	fmt.Println("**DO NOT:**")
+	fmt.Println("- Create patrol molecules")
+	fmt.Println("- Run heartbeats")
+	fmt.Println("- Check agent health")
+	fmt.Println("- Take any autonomous actions")
+	fmt.Println()
+	fmt.Println("You may respond to direct human questions.")
 }
 
 // outputWitnessPatrolContext shows patrol molecule status for the Witness.

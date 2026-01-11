@@ -83,7 +83,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	// 2. Deacon (Claude agent)
 	deaconMgr := deacon.NewManager(townRoot)
-	if err := deaconMgr.Start(); err != nil {
+	if err := deaconMgr.Start(""); err != nil {
 		if err == deacon.ErrAlreadyRunning {
 			printStatus("Deacon", true, deaconMgr.SessionName())
 		} else {
@@ -449,6 +449,9 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 

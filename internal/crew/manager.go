@@ -49,6 +49,9 @@ type StartOptions struct {
 
 	// Interactive removes --dangerously-skip-permissions for interactive/refresh mode.
 	Interactive bool
+
+	// AgentOverride specifies an alternate agent alias (e.g., for testing).
+	AgentOverride string
 }
 
 // validateCrewName checks that a crew name is safe and valid.

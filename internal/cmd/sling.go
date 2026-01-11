@@ -394,8 +394,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if formulaName != "" {
 		fmt.Printf("  Instantiating formula %s...\n", formulaName)
 
+		// Route bd mutations (cook/wisp/bond) to the correct beads context for the target bead.
+		// Some bd mol commands don't support prefix routing, so we must run them from the
+		// rig directory that owns the bead's database.
+		formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
+
 		// Step 1: Cook the formula (ensures proto exists)
 		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
+		cookCmd.Dir = formulaWorkDir
 		cookCmd.Stderr = os.Stderr
 		if err := cookCmd.Run(); err != nil {
 			return fmt.Errorf("cooking formula %s: %w", formulaName, err)
@@ -405,6 +411,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		featureVar := fmt.Sprintf("feature=%s", info.Title)
 		wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--json"}
 		wispCmd := exec.Command("bd", wispArgs...)
+		wispCmd.Dir = formulaWorkDir
 		wispCmd.Stderr = os.Stderr
 		wispOut, err := wispCmd.Output()
 		if err != nil {
@@ -422,6 +429,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		// Use --no-daemon for mol bond (requires direct database access)
 		bondArgs := []string{"--no-daemon", "mol", "bond", wispRootID, beadID, "--json"}
 		bondCmd := exec.Command("bd", bondArgs...)
+		bondCmd.Dir = formulaWorkDir
 		bondCmd.Stderr = os.Stderr
 		bondOut, err := bondCmd.Output()
 		if err != nil {
