@@ -67,6 +67,7 @@ var (
 	convoyListStatus   string
 	convoyListAll      bool
 	convoyListTree     bool
+	convoyListTimestamp bool
 	convoyInteractive  bool
 	convoyStrandedJSON bool
 )
@@ -148,6 +149,7 @@ Examples:
   gt convoy list --all        # All convoys (open + closed)
   gt convoy list --status=closed  # Recently landed
   gt convoy list --tree       # Show convoy + child status tree
+  gt convoy list --timestamp  # Show timestamps (default: on)
   gt convoy list --json`,
 	RunE: runConvoyList,
 }
@@ -213,6 +215,7 @@ func init() {
 	convoyListCmd.Flags().StringVar(&convoyListStatus, "status", "", "Filter by status (open, closed)")
 	convoyListCmd.Flags().BoolVar(&convoyListAll, "all", false, "Show all convoys (open and closed)")
 	convoyListCmd.Flags().BoolVar(&convoyListTree, "tree", false, "Show convoy + child status tree")
+	convoyListCmd.Flags().BoolVar(&convoyListTimestamp, "timestamp", true, "Show timestamps")
 
 	// Interactive TUI flag (on parent command)
 	convoyCmd.Flags().BoolVarP(&convoyInteractive, "interactive", "i", false, "Interactive tree view")
@@ -803,9 +806,9 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 	fmt.Printf("🚚 %s %s\n\n", style.Bold.Render(convoy.ID+":"), convoy.Title)
 	fmt.Printf("  Status:    %s\n", formatConvoyStatus(convoy.Status))
 	fmt.Printf("  Progress:  %d/%d completed\n", completed, len(tracked))
-	fmt.Printf("  Created:   %s\n", convoy.CreatedAt)
+	fmt.Printf("  Created:   %s\n", formatFullTimestamp(convoy.CreatedAt))
 	if convoy.ClosedAt != "" {
-		fmt.Printf("  Closed:    %s\n", convoy.ClosedAt)
+		fmt.Printf("  Closed:    %s\n", formatFullTimestamp(convoy.ClosedAt))
 	}
 
 	if len(tracked) > 0 {
@@ -940,7 +943,14 @@ func runConvoyList(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s\n\n", style.Bold.Render("Convoys"))
 	for i, c := range convoys {
 		status := formatConvoyStatus(c.Status)
-		fmt.Printf("  %d. 🚚 %s: %s %s\n", i+1, c.ID, c.Title, status)
+		line := fmt.Sprintf("  %d. 🚚 %s: %s %s", i+1, c.ID, c.Title, status)
+		if convoyListTimestamp && c.CreatedAt != "" {
+			ts := formatConvoyTimestamp(c.CreatedAt)
+			if ts != "" {
+				line += " " + ts
+			}
+		}
+		fmt.Println(line)
 	}
 	fmt.Printf("\nUse 'gt convoy status <id>' or 'gt convoy status <n>' for detailed view.\n")
 
@@ -1013,6 +1023,102 @@ func formatConvoyStatus(status string) string {
 	default:
 		return status
 	}
+}
+
+// formatConvoyTimestamp formats a timestamp for compact display.
+// Handles both RFC3339 and YYYY-MM-DD HH:MM:SS formats.
+// Returns just the relative time in parens, e.g., "(2h)"
+func formatConvoyTimestamp(ts string) string {
+	if ts == "" {
+		return ""
+	}
+
+	// Try RFC3339 first
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		// Try SQLite datetime format
+		t, err = time.Parse("2006-01-02 15:04:05", ts)
+		if err != nil {
+			return "" // Unparseable, skip
+		}
+	}
+
+	age := time.Since(t)
+	relative := formatRelativeTime(age)
+	if relative != "" {
+		return style.Dim.Render(fmt.Sprintf("(%s)", relative))
+	}
+	return ""
+}
+
+// formatFullTimestamp formats a timestamp for detailed display.
+// Returns absolute time with relative time, e.g., "Jan 5 15:04 (2h ago)"
+func formatFullTimestamp(ts string) string {
+	if ts == "" {
+		return ""
+	}
+
+	// Try RFC3339 first
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		// Try SQLite datetime format
+		t, err = time.Parse("2006-01-02 15:04:05", ts)
+		if err != nil {
+			return ts // Return original if unparseable
+		}
+	}
+
+	// Format: "Mon Jan 2 15:04" + relative time
+	age := time.Since(t)
+	relative := formatRelativeTimeWithSuffix(age)
+
+	base := t.Format("Jan 2 15:04")
+	if relative != "" {
+		return fmt.Sprintf("%s %s", base, style.Dim.Render(relative))
+	}
+	return base
+}
+
+// formatRelativeTime converts a duration to a short relative string like "2h" or "3d"
+func formatRelativeTime(d time.Duration) string {
+	if d < 0 {
+		return ""
+	}
+	if d < time.Minute {
+		return "<1m"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	if d < 7*24*time.Hour {
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+	// For older items, show date without time
+	return ""
+}
+
+// formatRelativeTimeWithSuffix converts a duration to a relative string with "ago" suffix
+func formatRelativeTimeWithSuffix(d time.Duration) string {
+	if d < 0 {
+		return ""
+	}
+	if d < time.Minute {
+		return "<1m ago"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	if d < 7*24*time.Hour {
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+	// For older items, show full date
+	return ""
 }
 
 // trackedIssueInfo holds info about an issue being tracked by a convoy.
