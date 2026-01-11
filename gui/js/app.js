@@ -856,6 +856,41 @@ document.getElementById('refresh-btn').addEventListener('click', () => {
   showToast('Refreshing...', 'info', 1000);
 });
 
+// Mayor command bar
+const mayorInput = document.getElementById('mayor-command-input');
+const mayorSendBtn = document.getElementById('mayor-command-send');
+
+async function sendToMayor() {
+  const message = mayorInput.value.trim();
+  if (!message) return;
+
+  mayorSendBtn.disabled = true;
+  mayorSendBtn.innerHTML = '<span class="material-icons spinning">sync</span>';
+
+  try {
+    const result = await api.nudge('mayor', message);
+    if (result.success) {
+      showToast('Sent to Mayor: ' + message.substring(0, 40) + (message.length > 40 ? '...' : ''), 'success');
+      mayorInput.value = '';
+    } else {
+      showToast('Failed: ' + (result.error || 'Unknown error'), 'error');
+    }
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  } finally {
+    mayorSendBtn.disabled = false;
+    mayorSendBtn.innerHTML = '<span class="material-icons">send</span>';
+  }
+}
+
+mayorSendBtn.addEventListener('click', sendToMayor);
+mayorInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendToMayor();
+  }
+});
+
 // Initialize on DOM ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);

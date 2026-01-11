@@ -57,6 +57,68 @@ body {
   border-radius: var(--radius-md);
 }
 
+/* Mayor Command Bar */
+.mayor-command-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xs) var(--space-sm);
+  min-width: 280px;
+  transition: all var(--transition-fast);
+}
+
+.mayor-command-bar:focus-within {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+.mayor-command-bar .command-icon {
+  color: #a855f7;
+  font-size: 20px;
+}
+
+.mayor-command-bar input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.mayor-command-bar input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.command-send-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xs);
+  background: var(--accent-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  color: white;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.command-send-btn:hover {
+  background: #4a90e2;
+}
+
+.command-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.command-send-btn .material-icons {
+  font-size: 18px;
+}
+
 .header-center {
   display: flex;
   align-items: center;

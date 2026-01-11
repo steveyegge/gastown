@@ -755,6 +755,31 @@ app.post('/api/mail/:id/unread', async (req, res) => {
   }
 });
 
+// ============= Nudge API =============
+
+// Send a message to Mayor (or other agent)
+app.post('/api/nudge', async (req, res) => {
+  const { target, message } = req.body;
+
+  if (!message) {
+    return res.status(400).json({ error: 'Message is required' });
+  }
+
+  // Default to mayor if no target specified
+  const nudgeTarget = target || 'mayor';
+
+  try {
+    const result = await executeGT(['nudge', nudgeTarget, message], { timeout: 10000 });
+    if (result.success) {
+      res.json({ success: true, target: nudgeTarget, message });
+    } else {
+      res.status(500).json({ error: result.error || 'Failed to send message' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============= Beads API =============
 
 // Create a new bead (issue)
