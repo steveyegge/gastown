@@ -267,10 +267,13 @@ This is a convenience command that automatically:
 - Sets the reply-to field to the original message
 - Prefixes the subject with "Re: " (if not already present)
 - Sends to the original sender
+- Appends local time (HH:MM TZ) for coordination
 
 Examples:
   gt mail reply msg-abc123 -m "Thanks, working on it now"
-  gt mail reply msg-abc123 -s "Custom subject" -m "Reply body"`,
+  gt mail reply msg-abc123 -s "Custom subject" -m "Reply body"
+
+Your local time will be appended to the reply for timezone coordination.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runMailReply,
 }
