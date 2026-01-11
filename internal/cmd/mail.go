@@ -153,6 +153,7 @@ var mailReadCmd = &cobra.Command{
 	Long: `Read a specific message and mark it as read.
 
 The message ID can be found from 'gt mail inbox'.`,
+	Aliases: []string{"show"},
 	Args: cobra.ExactArgs(1),
 	RunE: runMailRead,
 }
