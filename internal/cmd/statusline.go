@@ -19,6 +19,27 @@ var (
 	statusLineSession string
 )
 
+// rigAbbreviations maps rig names to their abbreviations for the statusline.
+var rigAbbreviations = map[string]string{
+	"design_forge":  "df",
+	"gastown":       "gt",
+	"mediaforge":    "mf",
+	"mt5optimizer":  "mt",
+	"opencode":      "oc",
+	"pod_automation": "pa",
+	"promptforge":   "pf",
+	"autoaffiliate": "aa",
+}
+
+// abbreviateRigName returns the abbreviated form of a rig name if one exists,
+// otherwise returns the original name.
+func abbreviateRigName(rigName string) string {
+	if abbr, ok := rigAbbreviations[rigName]; ok {
+		return abbr
+	}
+	return rigName
+}
+
 var statusLineCmd = &cobra.Command{
 	Use:    "status-line",
 	Short:  "Output status line content for tmux (internal use)",
@@ -85,12 +106,13 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue string) error {
 	// Determine agent type and identity
 	var icon, identity string
+	abbrRigName := abbreviateRigName(rigName)
 	if polecat != "" {
 		icon = AgentTypeIcons[AgentPolecat]
-		identity = fmt.Sprintf("%s/%s", rigName, polecat)
+		identity = fmt.Sprintf("%s/%s", abbrRigName, polecat)
 	} else if crew != "" {
 		icon = AgentTypeIcons[AgentCrew]
-		identity = fmt.Sprintf("%s/crew/%s", rigName, crew)
+		identity = fmt.Sprintf("%s/crew/%s", abbrRigName, crew)
 	}
 
 	// Get pane's working directory to find workspace
@@ -402,18 +424,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 				led = "⚫" // Operational but nothing running
 			}
 		}
-
-		// Show polecat count if > 0
-		// All icons get 1 space, Park gets 2
-		space := " "
-		if led == "🅿️" {
-			space = "  "
-		}
-		display := led + space + rig.name
-		if status.polecatCount > 0 {
-			display += fmt.Sprintf("(%d)", status.polecatCount)
-		}
-		rigParts = append(rigParts, display)
+		rigParts = append(rigParts, led+abbreviateRigName(rigName))
 	}
 
 	if len(rigParts) > 0 {
@@ -556,7 +567,7 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 		}
 	}
 
-	identity := fmt.Sprintf("%s/witness", rigName)
+	identity := fmt.Sprintf("%s/witness", abbreviateRigName(rigName))
 
 	// Build status
 	var parts []string
@@ -641,7 +652,7 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 		}
 	}
 
-	identity := fmt.Sprintf("%s/refinery", rigName)
+	identity := fmt.Sprintf("%s/refinery", abbreviateRigName(rigName))
 
 	// Build status
 	var parts []string
