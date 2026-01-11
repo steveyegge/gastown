@@ -308,7 +308,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func createMayorCLAUDEmd(mayorDir, townRoot string) error {
+func createMayorCLAUDEmd(mayorDir, _ string) error {
 	// Create a minimal bootstrap pointer instead of full context.
 	// Full context is injected ephemerally by `gt prime` at session start.
 	// This keeps the on-disk file small (<30 lines) per priming architecture.

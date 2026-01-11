@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -113,12 +114,20 @@ func runMailReply(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Build reply body with local timestamp
+	body := mailReplyMessage
+	if body != "" {
+		// Append local time (HH:MM TZ) for coordination
+		timestamp := formatLocalTimestamp()
+		body = fmt.Sprintf("%s\n\n%s", body, style.Dim.Render(timestamp))
+	}
+
 	// Create reply message
 	reply := &mail.Message{
 		From:     from,
 		To:       original.From, // Reply to sender
 		Subject:  subject,
-		Body:     mailReplyMessage,
+		Body:     body,
 		Type:     mail.TypeReply,
 		Priority: mail.PriorityNormal,
 		ReplyTo:  msgID,
@@ -142,4 +151,16 @@ func runMailReply(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// formatLocalTimestamp returns the local time in "HH:MM TZ" format.
+// The timezone abbreviation is derived from the local timezone.
+// Examples: "14:32 PST", "09:15 UTC", "22:45 EST"
+func formatLocalTimestamp() string {
+	now := time.Now()
+	// Get local timezone name (ignoring offset, we use the abbreviation)
+	tzName, _ := now.Zone()
+	// Format time as HH:MM
+	timeStr := now.Format("15:04")
+	return fmt.Sprintf("%s %s", timeStr, tzName)
 }
