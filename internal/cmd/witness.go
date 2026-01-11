@@ -28,8 +28,12 @@ var witnessCmd = &cobra.Command{
 	RunE:    requireSubcommand,
 	Long: `Manage the Witness monitoring agent for a rig.
 
-The Witness monitors polecats for stuck/idle state, nudges polecats
-that seem blocked, and reports status to the mayor.`,
+The Witness monitors polecats for stuck states and orphaned sandboxes,
+nudges polecats that seem blocked, and reports status to the mayor.
+
+In the self-cleaning model, polecats nuke themselves after work completion.
+The Witness handles edge cases: crashed sessions, orphaned worktrees, and
+stuck polecats that need intervention.`,
 }
 
 var witnessStartCmd = &cobra.Command{
@@ -38,8 +42,12 @@ var witnessStartCmd = &cobra.Command{
 	Short:   "Start the witness",
 	Long: `Start the Witness for a rig.
 
-Launches the monitoring agent which watches polecats for stuck or idle
-states and takes action to keep work flowing.
+Launches the monitoring agent which watches for stuck polecats and orphaned
+sandboxes, taking action to keep work flowing.
+
+Self-Cleaning Model: Polecats nuke themselves after work. The Witness handles
+crash recovery (restart with hooked work) and orphan cleanup (nuke abandoned
+sandboxes). There is no "idle" state - polecats either have work or don't exist.
 
 Examples:
   gt witness start greenplace
