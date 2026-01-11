@@ -23,7 +23,7 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 8
+version = 9
 
 [[steps]]
 id = "inbox-check"
@@ -226,9 +226,51 @@ bd close <convoy-id> --reason "All tracked issues completed"
 **Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues). Use full IDs when checking."""
 
 [[steps]]
+id = "feed-stranded-convoys"
+title = "Feed stranded convoys"
+needs = ["check-convoy-completion"]
+description = """
+Detect and feed stranded convoys to resume progress.
+
+A convoy becomes stranded when its current batch of issues completes but the
+next batch is never dispatched. This causes the convoy to stall indefinitely.
+
+**Step 1: Detect stranded convoys**
+```bash
+gt convoy stranded --json
+```
+
+This returns convoys where:
+- The convoy is open (in progress)
+- All currently assigned issues are closed
+- No polecats are actively working on convoy issues
+- The next batch has not been dispatched
+
+**Step 2: For each stranded convoy, dispatch a feeder dog**
+```bash
+# Dispatch mol-convoy-feed to an idle dog
+gt sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
+```
+
+The mol-convoy-feed formula handles:
+- Finding the next batch of issues in the convoy synthesis
+- Dispatching those issues to the appropriate rig/polecats
+- Updating the convoy's current batch tracker
+
+**Step 3: If no stranded convoys**
+Skip - all convoys are progressing normally.
+
+**Why this exists:**
+When Mayor creates a convoy, it dispatches the first batch immediately. However,
+subsequent batches require explicit feeding. Without this step, convoys stall
+after the first batch completes.
+
+**Exit criteria:** All stranded convoys have feeder dogs dispatched."""
+
+[[steps]]
 id = "resolve-external-deps"
 title = "Resolve external dependencies"
-needs = ["check-convoy-completion"]
+needs = ["feed-stranded-convoys"]
 description = """
 Resolve external dependencies across rigs.
 
