@@ -759,7 +759,7 @@ func runRigBoot(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("  Starting witness...\n")
 		witMgr := witness.NewManager(r)
-		if err := witMgr.Start(false); err != nil {
+		if err := witMgr.Start(false, "", nil); err != nil {
 			if err == witness.ErrAlreadyRunning {
 				skipped = append(skipped, "witness (already running)")
 			} else {
@@ -839,7 +839,7 @@ func runRigStart(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("  Starting witness...\n")
 			witMgr := witness.NewManager(r)
-			if err := witMgr.Start(false); err != nil {
+			if err := witMgr.Start(false, "", nil); err != nil {
 				if err == witness.ErrAlreadyRunning {
 					skipped = append(skipped, "witness")
 				} else {
@@ -1418,7 +1418,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 			skipped = append(skipped, "witness")
 		} else {
 			fmt.Printf("    Starting witness...\n")
-			if err := witMgr.Start(false); err != nil {
+			if err := witMgr.Start(false, "", nil); err != nil {
 				if err == witness.ErrAlreadyRunning {
 					skipped = append(skipped, "witness")
 				} else {

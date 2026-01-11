@@ -139,7 +139,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		}, nil
 	}
 
-	// Resolve account for Claude config
+	// Resolve account for runtime config
 	accountsPath := constants.MayorAccountsPath(townRoot)
 	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, opts.Account)
 	if err != nil {
@@ -158,7 +158,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	if !running {
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 		startOpts := polecat.SessionStartOptions{
-			ClaudeConfigDir: claudeConfigDir,
+			RuntimeConfigDir: claudeConfigDir,
 		}
 		if opts.Agent != "" {
 			cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, r.Path, "", opts.Agent)

@@ -3,9 +3,14 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/version"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var rootCmd = &cobra.Command{
@@ -16,7 +21,7 @@ var rootCmd = &cobra.Command{
 
 It coordinates agent spawning, work distribution, and communication
 across distributed teams of AI agents working on shared codebases.`,
-	PersistentPreRunE: checkBeadsDependency,
+	PersistentPreRunE: persistentPreRun,
 }
 
 // Commands that don't require beads to be installed/checked.
@@ -27,8 +32,74 @@ var beadsExemptCommands = map[string]bool{
 	"completion": true,
 }
 
+// Commands exempt from the town root branch warning.
+// These are commands that help fix the problem or are diagnostic.
+var branchCheckExemptCommands = map[string]bool{
+	"version":    true,
+	"help":       true,
+	"completion": true,
+	"doctor":     true, // Used to fix the problem
+	"install":    true, // Initial setup
+	"git-init":   true, // Git setup
+}
+
+// persistentPreRun runs before every command.
+func persistentPreRun(cmd *cobra.Command, args []string) error {
+	// Get the root command name being run
+	cmdName := cmd.Name()
+
+	// Check town root branch (warning only, non-blocking)
+	if !branchCheckExemptCommands[cmdName] {
+		warnIfTownRootOffMain()
+	}
+
+	// Skip beads check for exempt commands
+	if beadsExemptCommands[cmdName] {
+		return nil
+	}
+
+	// Check beads version
+	return CheckBeadsVersion()
+}
+
+// warnIfTownRootOffMain prints a warning if the town root is not on main branch.
+// This is a non-blocking warning to help catch accidental branch switches.
+func warnIfTownRootOffMain() {
+	// Find town root (silently - don't error if not in workspace)
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return
+	}
+
+	// Check if it's a git repo
+	gitDir := townRoot + "/.git"
+	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		return
+	}
+
+	// Get current branch
+	gitCmd := exec.Command("git", "branch", "--show-current")
+	gitCmd.Dir = townRoot
+	out, err := gitCmd.Output()
+	if err != nil {
+		return
+	}
+
+	branch := strings.TrimSpace(string(out))
+	if branch == "" || branch == "main" || branch == "master" {
+		return
+	}
+
+	// Town root is on wrong branch - warn the user
+	fmt.Fprintf(os.Stderr, "\n%s Town root is on branch '%s' (should be 'main')\n",
+		style.Bold.Render("⚠️  WARNING:"), branch)
+	fmt.Fprintf(os.Stderr, "   This can cause gt commands to fail. Run: %s\n\n",
+		style.Dim.Render("gt doctor --fix"))
+}
+
 // checkBeadsDependency verifies beads meets minimum version requirements.
 // Skips check for exempt commands (version, help, completion).
+// Deprecated: Use persistentPreRun instead, which calls CheckBeadsVersion.
 func checkBeadsDependency(cmd *cobra.Command, args []string) error {
 	// Get the root command name being run
 	cmdName := cmd.Name()
@@ -38,8 +109,50 @@ func checkBeadsDependency(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Check for stale binary (warning only, doesn't block)
+	checkStaleBinaryWarning()
+
 	// Check beads version
 	return CheckBeadsVersion()
+}
+
+// staleBinaryWarned tracks if we've already warned about stale binary in this session.
+// We use an environment variable since the binary restarts on each command.
+var staleBinaryWarned = os.Getenv("GT_STALE_WARNED") == "1"
+
+// checkStaleBinaryWarning checks if the installed binary is stale and prints a warning.
+// This is a non-blocking check - errors are silently ignored.
+func checkStaleBinaryWarning() {
+	// Only warn once per shell session
+	if staleBinaryWarned {
+		return
+	}
+
+	repoRoot, err := version.GetRepoRoot()
+	if err != nil {
+		// Can't find repo - silently skip (might be running from non-dev environment)
+		return
+	}
+
+	info := version.CheckStaleBinary(repoRoot)
+	if info.Error != nil {
+		// Check failed - silently skip
+		return
+	}
+
+	if info.IsStale {
+		staleBinaryWarned = true
+		os.Setenv("GT_STALE_WARNED", "1")
+
+		msg := fmt.Sprintf("gt binary is stale (built from %s, repo at %s)",
+			version.ShortCommit(info.BinaryCommit), version.ShortCommit(info.RepoCommit))
+		if info.CommitsBehind > 0 {
+			msg = fmt.Sprintf("gt binary is %d commits behind (built from %s, repo at %s)",
+				info.CommitsBehind, version.ShortCommit(info.BinaryCommit), version.ShortCommit(info.RepoCommit))
+		}
+		fmt.Fprintf(os.Stderr, "%s %s\n", style.WarningPrefix, msg)
+		fmt.Fprintf(os.Stderr, "    %s Run 'gt install' to update\n", style.ArrowPrefix)
+	}
 }
 
 // Execute runs the root command and returns an exit code.

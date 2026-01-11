@@ -23,6 +23,7 @@ func NewRoutesCheck() *RoutesCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "routes-config",
 				CheckDescription: "Check beads routing configuration",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}

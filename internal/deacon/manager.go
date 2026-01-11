@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -49,8 +50,9 @@ func (m *Manager) deaconDir() string {
 }
 
 // Start starts the deacon session.
-// The deacon runs in a respawn loop for automatic recovery.
-func (m *Manager) Start() error {
+// agentOverride allows specifying an alternate agent alias (e.g., for testing).
+// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat.
+func (m *Manager) Start(agentOverride string) error {
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
@@ -78,34 +80,35 @@ func (m *Manager) Start() error {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
-	// Create new tmux session
-	if err := t.NewSession(sessionID, deaconDir); err != nil {
+	// Build startup command first
+	// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "deacon", "", "", agentOverride)
+	if err != nil {
+		return fmt.Errorf("building startup command: %w", err)
+	}
+
+	// Create session with command directly to avoid send-keys race condition.
+	// See: https://github.com/anthropics/gastown/issues/280
+	if err := t.NewSessionWithCommand(sessionID, deaconDir, startupCmd); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
 	// Set environment variables (non-fatal: session works without these)
-	_ = t.SetEnvironment(sessionID, "GT_ROLE", "deacon")
-	_ = t.SetEnvironment(sessionID, "BD_ACTOR", "deacon")
+	// Use centralized AgentEnv for consistency across all role startup paths
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:     "deacon",
+		TownRoot: m.townRoot,
+		BeadsDir: beads.ResolveBeadsDir(m.townRoot),
+	})
+	for k, v := range envVars {
+		_ = t.SetEnvironment(sessionID, k, v)
+	}
 
 	// Apply Deacon theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.DeaconTheme()
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Deacon", "health-check")
 
-	// Launch Claude in a respawn loop for automatic recovery
-	// The respawn loop ensures the deacon restarts if Claude crashes
-	runtimeCmd := config.GetRuntimeCommand("")
-	respawnCmd := fmt.Sprintf(
-		`export GT_ROLE=deacon BD_ACTOR=deacon GIT_AUTHOR_NAME=deacon && while true; do echo "⛪ Starting Deacon session..."; %s; echo ""; echo "Deacon exited. Restarting in 2s... (Ctrl-C to stop)"; sleep 2; done`,
-		runtimeCmd,
-	)
-
-	if err := t.SendKeysDelayed(sessionID, respawnCmd, 200); err != nil {
-		_ = t.KillSession(sessionID) // best-effort cleanup
-		return fmt.Errorf("starting Claude agent: %w", err)
-	}
-
 	// Wait for Claude to start (non-fatal)
-	// Note: Deacon respawn loop makes this tricky - Claude restarts multiple times
 	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal - try to continue anyway
 	}
@@ -115,8 +118,18 @@ func (m *Manager) Start() error {
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Note: Deacon doesn't get startup nudge due to respawn loop complexity
-	// The deacon uses its own patrol pattern defined in its CLAUDE.md/prime
+	// Inject startup nudge for predecessor discovery via /resume
+	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}) // Non-fatal
+
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Send the propulsion nudge to trigger autonomous patrol execution.
+	// Wait for beacon to be fully processed (needs to be separate prompt)
+	time.Sleep(2 * time.Second)
+	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("deacon", deaconDir)) // Non-fatal
 
 	return nil
 }

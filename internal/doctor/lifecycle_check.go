@@ -27,6 +27,7 @@ func NewLifecycleHygieneCheck() *LifecycleHygieneCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "lifecycle-hygiene",
 				CheckDescription: "Check for stale lifecycle messages",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}

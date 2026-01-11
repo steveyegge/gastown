@@ -50,6 +50,10 @@ const (
 	TypeSessionStart = "session_start"
 	TypeSessionEnd   = "session_end"
 
+	// Session death events (for crash investigation)
+	TypeSessionDeath = "session_death" // Feed-visible session termination
+	TypeMassDeath    = "mass_death"    // Multiple sessions died in short window
+
 	// Witness patrol events
 	TypePatrolStarted   = "patrol_started"
 	TypePolecatChecked  = "polecat_checked"
@@ -272,6 +276,37 @@ func HaltPayload(services []string) map[string]interface{} {
 	return map[string]interface{}{
 		"services": services,
 	}
+}
+
+// SessionDeathPayload creates a payload for session death events.
+// session: tmux session name that died
+// agent: Gas Town agent identity (e.g., "gastown/polecats/Toast")
+// reason: why the session was killed (e.g., "zombie cleanup", "user request", "doctor fix")
+// caller: what initiated the kill (e.g., "daemon", "doctor", "gt down")
+func SessionDeathPayload(session, agent, reason, caller string) map[string]interface{} {
+	return map[string]interface{}{
+		"session": session,
+		"agent":   agent,
+		"reason":  reason,
+		"caller":  caller,
+	}
+}
+
+// MassDeathPayload creates a payload for mass death events.
+// count: number of sessions that died
+// window: time window in which deaths occurred (e.g., "5s")
+// sessions: list of session names that died
+// possibleCause: suspected cause if known
+func MassDeathPayload(count int, window string, sessions []string, possibleCause string) map[string]interface{} {
+	p := map[string]interface{}{
+		"count":    count,
+		"window":   window,
+		"sessions": sessions,
+	}
+	if possibleCause != "" {
+		p["possible_cause"] = possibleCause
+	}
+	return p
 }
 
 // SessionPayload creates a payload for session start/end events.

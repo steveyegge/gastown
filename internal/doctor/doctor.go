@@ -27,6 +27,11 @@ func (d *Doctor) Checks() []Check {
 	return d.checks
 }
 
+// categoryGetter interface for checks that provide a category
+type categoryGetter interface {
+	Category() string
+}
+
 // Run executes all registered checks and returns a report.
 func (d *Doctor) Run(ctx *CheckContext) *Report {
 	report := NewReport()
@@ -36,6 +41,10 @@ func (d *Doctor) Run(ctx *CheckContext) *Report {
 		// Ensure check name is populated
 		if result.Name == "" {
 			result.Name = check.Name()
+		}
+		// Set category from check if available
+		if cg, ok := check.(categoryGetter); ok && result.Category == "" {
+			result.Category = cg.Category()
 		}
 		report.Add(result)
 	}
@@ -53,6 +62,10 @@ func (d *Doctor) Fix(ctx *CheckContext) *Report {
 		if result.Name == "" {
 			result.Name = check.Name()
 		}
+		// Set category from check if available
+		if cg, ok := check.(categoryGetter); ok && result.Category == "" {
+			result.Category = cg.Category()
+		}
 
 		// Attempt fix if check failed and is fixable
 		if result.Status != StatusOK && check.CanFix() {
@@ -62,6 +75,10 @@ func (d *Doctor) Fix(ctx *CheckContext) *Report {
 				result = check.Run(ctx)
 				if result.Name == "" {
 					result.Name = check.Name()
+				}
+				// Set category again after re-run
+				if cg, ok := check.(categoryGetter); ok && result.Category == "" {
+					result.Category = cg.Category()
 				}
 				// Update message to indicate fix was applied
 				if result.Status == StatusOK {
@@ -84,6 +101,12 @@ func (d *Doctor) Fix(ctx *CheckContext) *Report {
 type BaseCheck struct {
 	CheckName        string
 	CheckDescription string
+	CheckCategory    string // Category for grouping (e.g., CategoryCore)
+}
+
+// Category returns the check's category for grouping in output.
+func (b *BaseCheck) Category() string {
+	return b.CheckCategory
 }
 
 // Name returns the check name.

@@ -23,6 +23,7 @@ func NewBranchCheck() *BranchCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "persistent-role-branches",
 				CheckDescription: "Detect persistent roles not on main branch",
+				CheckCategory:    CategoryCleanup,
 			},
 		},
 	}
@@ -213,6 +214,7 @@ func NewBeadsSyncOrphanCheck() *BeadsSyncOrphanCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "beads-sync-orphans",
 			CheckDescription: "Detect orphaned code on beads-sync branch",
+			CheckCategory:    CategoryCleanup,
 		},
 	}
 }
@@ -338,6 +340,7 @@ func NewCloneDivergenceCheck() *CloneDivergenceCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "clone-divergence",
 			CheckDescription: "Detect emergency divergence between git clones",
+			CheckCategory:    CategoryCleanup,
 		},
 	}
 }
@@ -468,12 +471,20 @@ func (c *CloneDivergenceCheck) findAllClones(townRoot string) []string {
 			}
 		}
 
-		// Add polecats
+		// Add polecats (handle both new and old structures)
+		// New structure: polecats/<name>/<rigname>/
+		// Old structure: polecats/<name>/
+		rigName := entry.Name()
 		polecatsPath := filepath.Join(rigPath, "polecats")
 		if polecatEntries, err := os.ReadDir(polecatsPath); err == nil {
 			for _, polecat := range polecatEntries {
 				if polecat.IsDir() && !strings.HasPrefix(polecat.Name(), ".") {
-					path := filepath.Join(polecatsPath, polecat.Name())
+					// Try new structure first
+					path := filepath.Join(polecatsPath, polecat.Name(), rigName)
+					if !c.isGitRepo(path) {
+						// Fall back to old structure
+						path = filepath.Join(polecatsPath, polecat.Name())
+					}
 					if c.isGitRepo(path) {
 						clones = append(clones, path)
 					}

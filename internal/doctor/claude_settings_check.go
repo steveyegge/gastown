@@ -49,6 +49,7 @@ func NewClaudeSettingsCheck() *ClaudeSettingsCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "claude-settings",
 				CheckDescription: "Verify Claude settings.json files match expected templates",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}
@@ -287,15 +288,23 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 				if !pcEntry.IsDir() || pcEntry.Name() == ".claude" {
 					continue
 				}
-				pcWrongSettings := filepath.Join(polecatsDir, pcEntry.Name(), ".claude", "settings.json")
-				if fileExists(pcWrongSettings) {
-					files = append(files, staleSettingsInfo{
-						path:          pcWrongSettings,
-						agentType:     "polecat",
-						rigName:       rigName,
-						sessionName:   fmt.Sprintf("gt-%s-%s", rigName, pcEntry.Name()),
-						wrongLocation: true,
-					})
+				// Check for wrong settings in both structures:
+				// Old structure: polecats/<name>/.claude/settings.json
+				// New structure: polecats/<name>/<rigname>/.claude/settings.json
+				wrongPaths := []string{
+					filepath.Join(polecatsDir, pcEntry.Name(), ".claude", "settings.json"),
+					filepath.Join(polecatsDir, pcEntry.Name(), rigName, ".claude", "settings.json"),
+				}
+				for _, pcWrongSettings := range wrongPaths {
+					if fileExists(pcWrongSettings) {
+						files = append(files, staleSettingsInfo{
+							path:          pcWrongSettings,
+							agentType:     "polecat",
+							rigName:       rigName,
+							sessionName:   fmt.Sprintf("gt-%s-%s", rigName, pcEntry.Name()),
+							wrongLocation: true,
+						})
+					}
 				}
 			}
 		}

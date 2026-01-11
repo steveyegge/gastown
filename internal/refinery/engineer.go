@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -94,13 +93,21 @@ func NewEngineer(r *rig.Rig) *Engineer {
 	// Override target branch with rig's configured default branch
 	cfg.TargetBranch = r.DefaultBranch()
 
+	// Determine the git working directory for refinery operations.
+	// Prefer refinery/rig worktree, fall back to mayor/rig (legacy architecture).
+	// Using rig.Path directly would find town's .git with rig-named remotes instead of "origin".
+	gitDir := filepath.Join(r.Path, "refinery", "rig")
+	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		gitDir = filepath.Join(r.Path, "mayor", "rig")
+	}
+
 	return &Engineer{
 		rig:         r,
 		beads:       beads.New(r.Path),
 		mrQueue:     mrqueue.New(r.Path),
-		git:         git.NewGit(r.Path),
+		git:         git.NewGit(gitDir),
 		config:      cfg,
-		workDir:     r.Path,
+		workDir:     gitDir,
 		output:      os.Stdout,
 		eventLogger: mrqueue.NewEventLoggerFromRig(r.Path),
 		router:      mail.NewRouter(r.Path),
@@ -304,7 +311,10 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 	}
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging with message: %s\n", mergeMsg)
 	if err := e.git.MergeNoFF(branch, mergeMsg); err != nil {
-		if errors.Is(err, git.ErrMergeConflict) {
+		// ZFC: Use git's porcelain output to detect conflicts instead of parsing stderr.
+		// GetConflictingFiles() uses `git diff --diff-filter=U` which is proper.
+		conflicts, conflictErr := e.git.GetConflictingFiles()
+		if conflictErr == nil && len(conflicts) > 0 {
 			_ = e.git.AbortMerge()
 			return ProcessResult{
 				Success:  false,

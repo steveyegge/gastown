@@ -1,18 +1,22 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
@@ -163,7 +167,7 @@ func runCrewRemove(cmd *cobra.Command, args []string) error {
 		} else {
 			// Default: CLOSE the agent bead (preserves CV history)
 			closeArgs := []string{"close", agentBeadID, "--reason=Crew workspace removed"}
-			if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+			if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 				closeArgs = append(closeArgs, "--session="+sessionID)
 			}
 			closeCmd := exec.Command("bd", closeArgs...)
@@ -236,9 +240,10 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 
 	// Use manager's Start() with refresh options
 	err = crewMgr.Start(name, crew.StartOptions{
-		KillExisting: true,      // Kill old session if running
-		Topic:        "refresh", // Startup nudge topic
-		Interactive:  true,      // No --dangerously-skip-permissions
+		KillExisting:  true,      // Kill old session if running
+		Topic:         "refresh", // Startup nudge topic
+		Interactive:   true,      // No --dangerously-skip-permissions
+		AgentOverride: crewAgentOverride,
 	})
 	if err != nil {
 		return fmt.Errorf("starting crew session: %w", err)
@@ -252,8 +257,9 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 }
 
 // runCrewStart starts crew workers in a rig.
-// args[0] is the rig name (optional if inferrable from cwd)
-// args[1:] are crew member names (optional - defaults to all if not specified)
+// If first arg is a valid rig name, it's used as the rig; otherwise rig is inferred from cwd.
+// Remaining args (or all args if rig is inferred) are crew member names.
+// Defaults to all crew members if no names specified.
 func runCrewStart(cmd *cobra.Command, args []string) error {
 	var rigName string
 	var crewNames []string
@@ -262,8 +268,16 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		// No args - infer rig from cwd
 		rigName = "" // getCrewManager will infer from cwd
 	} else {
-		rigName = args[0]
-		crewNames = args[1:]
+		// Check if first arg is a valid rig name
+		if _, _, err := getRig(args[0]); err == nil {
+			// First arg is a rig name
+			rigName = args[0]
+			crewNames = args[1:]
+		} else {
+			// First arg is not a rig - infer rig from cwd and treat all args as crew names
+			rigName = "" // getCrewManager will infer from cwd
+			crewNames = args
+		}
 	}
 
 	// Get the rig manager and rig (infers from cwd if rigName is empty)
@@ -289,28 +303,73 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Start each crew member
+	// Resolve account config once for all crew members
+	townRoot, _ := workspace.Find(r.Path)
+	if townRoot == "" {
+		townRoot = filepath.Dir(r.Path)
+	}
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	claudeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, crewAccount)
+
+	// Build start options (shared across all crew members)
+	opts := crew.StartOptions{
+		Account:         crewAccount,
+		ClaudeConfigDir: claudeConfigDir,
+		AgentOverride:   crewAgentOverride,
+	}
+
+	// Start each crew member in parallel
+	type result struct {
+		name    string
+		err     error
+		skipped bool // true if session was already running
+	}
+	results := make(chan result, len(crewNames))
+	var wg sync.WaitGroup
+
+	fmt.Printf("Starting %d crew member(s) in %s...\n", len(crewNames), rigName)
+
+	for _, name := range crewNames {
+		wg.Add(1)
+		go func(crewName string) {
+			defer wg.Done()
+			err := crewMgr.Start(crewName, opts)
+			skipped := errors.Is(err, crew.ErrSessionRunning)
+			if skipped {
+				err = nil // Not an error, just already running
+			}
+			results <- result{name: crewName, err: err, skipped: skipped}
+		}(name)
+	}
+
+	// Wait for all goroutines to complete
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
 	var lastErr error
 	startedCount := 0
-	for _, name := range crewNames {
-		// Set the start.go flags before calling runStartCrew
-		startCrewRig = rigName
-		startCrewAccount = crewAccount
-		startCrewAgentOverride = crewAgentOverride
-
-		// Use rig/name format for runStartCrew
-		fullName := rigName + "/" + name
-		if err := runStartCrew(cmd, []string{fullName}); err != nil {
-			fmt.Printf("Error starting %s/%s: %v\n", rigName, name, err)
-			lastErr = err
+	skippedCount := 0
+	for res := range results {
+		if res.err != nil {
+			fmt.Printf("  %s %s/%s: %v\n", style.ErrorPrefix, rigName, res.name, res.err)
+			lastErr = res.err
+		} else if res.skipped {
+			fmt.Printf("  %s %s/%s: already running\n", style.Dim.Render("○"), rigName, res.name)
+			skippedCount++
 		} else {
+			fmt.Printf("  %s %s/%s: started\n", style.SuccessPrefix, rigName, res.name)
 			startedCount++
 		}
 	}
 
-	if startedCount > 0 {
-		fmt.Printf("\n%s Started %d crew member(s) in %s\n",
-			style.Bold.Render("✓"), startedCount, r.Name)
+	// Summary
+	fmt.Println()
+	if startedCount > 0 || skippedCount > 0 {
+		fmt.Printf("%s Started %d, skipped %d (already running) in %s\n",
+			style.Bold.Render("✓"), startedCount, skippedCount, r.Name)
 	}
 
 	return lastErr
@@ -346,8 +405,9 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 		// Use manager's Start() with restart options
 		// Start() will create workspace if needed (idempotent)
 		err = crewMgr.Start(name, crew.StartOptions{
-			KillExisting: true,     // Kill old session if running
-			Topic:        "restart", // Startup nudge topic
+			KillExisting:  true,      // Kill old session if running
+			Topic:         "restart", // Startup nudge topic
+			AgentOverride: crewAgentOverride,
 		})
 		if err != nil {
 			fmt.Printf("Error restarting %s: %v\n", arg, err)
@@ -425,8 +485,9 @@ func runCrewRestartAll() error {
 
 		// Use manager's Start() with restart options
 		err = crewMgr.Start(agent.AgentName, crew.StartOptions{
-			KillExisting: true,     // Kill old session if running
-			Topic:        "restart", // Startup nudge topic
+			KillExisting:  true,      // Kill old session if running
+			Topic:         "restart", // Startup nudge topic
+			AgentOverride: crewAgentOverride,
 		})
 		if err != nil {
 			failed++

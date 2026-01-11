@@ -219,8 +219,32 @@ When all steps are done, the molecule gets squashed automatically when you run `
 
 ## Before Signaling Done
 
-Run `gt done` when your work is complete. It verifies git is clean, syncs beads,
-and submits your branch to the merge queue. The Witness handles the rest.
+> ⚠️ **CRITICAL**: Work is NOT complete until you run `gt done`
+
+### Pre-Submission Checklist
+
+```bash
+git status              # Must be clean (no uncommitted changes)
+git log --oneline -3    # Verify your commits are present
+```
+
+Then submit: **`gt done`**
+
+This single command verifies git is clean, syncs beads, and submits your branch
+to the merge queue. The Witness handles the rest.
+
+**Note:** Do NOT manually close the root issue with `bd close`. The Refinery
+closes it after successful merge. This enables conflict-resolution retries.
+
+### No PRs in Maintainer Repos
+
+If the remote origin is `steveyegge/beads` or `steveyegge/gastown`:
+- **NEVER create GitHub PRs** - you have direct push access
+- Polecats: use `gt done` → Refinery merges to main
+- Crew workers: push directly to main
+
+PRs are for external contributors submitting to repos they don't own.
+Check `git remote -v` if unsure about repo ownership.
 
 ### The Landing Rule
 

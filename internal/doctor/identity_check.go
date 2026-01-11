@@ -9,19 +9,19 @@ import (
 )
 
 // IdentityCollisionCheck checks for agent identity collisions and stale locks.
-type IdentityCollisionCheck struct{}
+type IdentityCollisionCheck struct {
+	BaseCheck
+}
 
 // NewIdentityCollisionCheck creates a new identity collision check.
 func NewIdentityCollisionCheck() *IdentityCollisionCheck {
-	return &IdentityCollisionCheck{}
-}
-
-func (c *IdentityCollisionCheck) Name() string {
-	return "identity-collision"
-}
-
-func (c *IdentityCollisionCheck) Description() string {
-	return "Check for agent identity collisions and stale locks"
+	return &IdentityCollisionCheck{
+		BaseCheck: BaseCheck{
+			CheckName:        "identity-collision",
+			CheckDescription: "Check for agent identity collisions and stale locks",
+			CheckCategory:    CategoryInfrastructure,
+		},
+	}
 }
 
 func (c *IdentityCollisionCheck) CanFix() bool {

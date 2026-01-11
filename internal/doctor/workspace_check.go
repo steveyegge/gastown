@@ -18,6 +18,7 @@ func NewTownConfigExistsCheck() *TownConfigExistsCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "town-config-exists",
 			CheckDescription: "Check that mayor/town.json exists",
+			CheckCategory:    CategoryCore,
 		},
 	}
 }
@@ -53,6 +54,7 @@ func NewTownConfigValidCheck() *TownConfigValidCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "town-config-valid",
 			CheckDescription: "Check that mayor/town.json is valid with required fields",
+			CheckCategory:    CategoryCore,
 		},
 	}
 }
@@ -130,6 +132,7 @@ func NewRigsRegistryExistsCheck() *RigsRegistryExistsCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "rigs-registry-exists",
 				CheckDescription: "Check that mayor/rigs.json exists",
+				CheckCategory:    CategoryCore,
 			},
 		},
 	}
@@ -188,6 +191,7 @@ func NewRigsRegistryValidCheck() *RigsRegistryValidCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "rigs-registry-valid",
 				CheckDescription: "Check that registered rigs exist on disk",
+				CheckCategory:    CategoryCore,
 			},
 		},
 	}
@@ -320,6 +324,7 @@ func NewMayorExistsCheck() *MayorExistsCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "mayor-exists",
 			CheckDescription: "Check that mayor/ directory exists with required files",
+			CheckCategory:    CategoryCore,
 		},
 	}
 }

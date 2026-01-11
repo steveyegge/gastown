@@ -118,7 +118,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 
 		mgr := witness.NewManager(r)
-		if err := mgr.Start(false); err != nil {
+		if err := mgr.Start(false, "", nil); err != nil {
 			if err == witness.ErrAlreadyRunning {
 				printStatus(fmt.Sprintf("Witness (%s)", rigName), true, mgr.SessionName())
 			} else {

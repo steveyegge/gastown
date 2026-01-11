@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -172,7 +173,7 @@ func runHook(_ *cobra.Command, args []string) error {
 					// Close completed molecule bead (use bd close --force for pinned)
 					closeArgs := []string{"close", existing.ID, "--force",
 						"--reason=Auto-replaced by gt hook (molecule complete)"}
-					if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+					if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 						closeArgs = append(closeArgs, "--session="+sessionID)
 					}
 					closeCmd := exec.Command("bd", closeArgs...)

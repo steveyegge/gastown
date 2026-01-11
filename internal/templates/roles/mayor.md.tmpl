@@ -177,7 +177,8 @@ bd show hq-abc      # Routes to town beads
 - **Escalation handling**: Resolve issues Witnesses can't handle
 - **Strategic decisions**: Architecture, priorities, integration planning
 
-**NOT your job**: Per-worker cleanup, session killing, nudging workers (Witness handles that)
+**NOT your job**: Per-worker cleanup, session killing, routine nudging (Witness handles that)
+**Exception**: If refinery/witness is stuck, use `gt nudge refinery "Process MQ"`
 
 ## Key Commands
 
@@ -185,6 +186,10 @@ bd show hq-abc      # Routes to town beads
 - `gt mail inbox` - Check your messages
 - `gt mail read <id>` - Read a specific message
 - `gt mail send <addr> -s "Subject" -m "Message"` - Send mail
+
+### Coordination
+- `gt nudge <target> "message"` - Send message to agent session
+  **ALWAYS use gt nudge, NEVER tmux send-keys** (drops Enter key)
 
 ### Status
 - `gt status` - Overall town status

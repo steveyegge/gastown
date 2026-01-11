@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/swarm"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -808,7 +809,7 @@ func runSwarmLand(cmd *cobra.Command, args []string) error {
 
 	// Close the swarm epic in beads
 	closeArgs := []string{"close", swarmID, "--reason", "Swarm landed to main"}
-	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 		closeArgs = append(closeArgs, "--session="+sessionID)
 	}
 	closeCmd := exec.Command("bd", closeArgs...)
@@ -867,7 +868,7 @@ func runSwarmCancel(cmd *cobra.Command, args []string) error {
 
 	// Close the swarm epic in beads with canceled reason
 	closeArgs := []string{"close", swarmID, "--reason", "Swarm canceled"}
-	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 		closeArgs = append(closeArgs, "--session="+sessionID)
 	}
 	closeCmd := exec.Command("bd", closeArgs...)

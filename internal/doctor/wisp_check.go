@@ -28,6 +28,7 @@ func NewWispGCCheck() *WispGCCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "wisp-gc",
 				CheckDescription: "Detect and clean orphaned wisps (>1h old)",
+				CheckCategory:    CategoryCleanup,
 			},
 		},
 		threshold:     1 * time.Hour,

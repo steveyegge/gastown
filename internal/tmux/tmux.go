@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
@@ -72,6 +73,22 @@ func (t *Tmux) NewSession(name, workDir string) error {
 	if workDir != "" {
 		args = append(args, "-c", workDir)
 	}
+	_, err := t.run(args...)
+	return err
+}
+
+// NewSessionWithCommand creates a new detached tmux session that immediately runs a command.
+// Unlike NewSession + SendKeys, this avoids race conditions where the shell isn't ready
+// or the command arrives before the shell prompt. The command runs directly as the
+// initial process of the pane.
+// See: https://github.com/anthropics/gastown/issues/280
+func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
+	args := []string{"new-session", "-d", "-s", name}
+	if workDir != "" {
+		args = append(args, "-c", workDir)
+	}
+	// Add the command as the last argument - tmux runs it as the pane's initial process
+	args = append(args, command)
 	_, err := t.run(args...)
 	return err
 }
@@ -390,8 +407,9 @@ func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
 
 // FindSessionByWorkDir finds tmux sessions where the pane's current working directory
 // matches or is under the target directory. Returns session names that match.
-// If requireAgentRunning is true, only returns sessions that have some non-shell command running.
-func (t *Tmux) FindSessionByWorkDir(targetDir string, requireAgentRunning bool) ([]string, error) {
+// If processNames is provided, only returns sessions that match those processes.
+// If processNames is nil or empty, returns all sessions matching the directory.
+func (t *Tmux) FindSessionByWorkDir(targetDir string, processNames []string) ([]string, error) {
 	sessions, err := t.ListSessions()
 	if err != nil {
 		return nil, err
@@ -410,14 +428,13 @@ func (t *Tmux) FindSessionByWorkDir(targetDir string, requireAgentRunning bool) 
 
 		// Check if workdir matches target (exact match or subdir)
 		if workDir == targetDir || strings.HasPrefix(workDir, targetDir+"/") {
-			if requireAgentRunning {
-				// Only include if an agent appears to be running
-				if t.IsAgentRunning(session) {
+			if len(processNames) > 0 {
+				if t.IsRuntimeRunning(session, processNames) {
 					matches = append(matches, session)
 				}
-			} else {
-				matches = append(matches, session)
+				continue
 			}
+			matches = append(matches, session)
 		}
 	}
 
@@ -477,6 +494,28 @@ func (t *Tmux) GetEnvironment(session, key string) (string, error) {
 		return "", nil
 	}
 	return parts[1], nil
+}
+
+// GetAllEnvironment returns all environment variables for a session.
+func (t *Tmux) GetAllEnvironment(session string) (map[string]string, error) {
+	out, err := t.run("show-environment", "-t", session)
+	if err != nil {
+		return nil, err
+	}
+
+	env := make(map[string]string)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "-") {
+			// Skip empty lines and unset markers (lines starting with -)
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			env[parts[0]] = parts[1]
+		}
+	}
+	return env, nil
 }
 
 // RenameSession renames a session.
@@ -561,6 +600,25 @@ func (t *Tmux) IsClaudeRunning(session string) bool {
 	return t.IsAgentRunning(session, "node")
 }
 
+// IsRuntimeRunning checks if a runtime appears to be running in the session.
+// Only trusts the pane command - UI markers in scrollback cause false positives.
+// This is the runtime-config-aware version of IsAgentRunning.
+func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
+	if len(processNames) == 0 {
+		return false
+	}
+	cmd, err := t.GetPaneCommand(session)
+	if err != nil {
+		return false
+	}
+	for _, name := range processNames {
+		if cmd == name {
+			return true
+		}
+	}
+	return false
+}
+
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.
 // Useful for waiting until a shell has started a new process (e.g., claude).
 // Returns nil when a non-excluded command is detected, or error on timeout.
@@ -609,13 +667,12 @@ func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for shell")
 }
 
-// WaitForClaudeReady polls until Claude's prompt indicator appears in the pane.
-// Claude is ready when we see "> " at the start of a line (the input prompt).
-// This is more reliable than just checking if node is running.
+// WaitForRuntimeReady polls until the runtime's prompt indicator appears in the pane.
+// Runtime is ready when we see the configured prompt prefix at the start of a line.
 //
 // IMPORTANT: Bootstrap vs Steady-State Observation
 //
-// This function uses regex to detect Claude's prompt - a ZFC violation.
+// This function uses regex to detect runtime prompts - a ZFC violation.
 // ZFC (Zero False Commands) principle: AI should observe AI, not regex.
 //
 // Bootstrap (acceptable):
@@ -632,7 +689,24 @@ func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
 //
 // See: gt deacon pending (ZFC-compliant AI observation)
 // See: gt deacon trigger-pending (bootstrap mode, regex-based)
-func (t *Tmux) WaitForClaudeReady(session string, timeout time.Duration) error {
+func (t *Tmux) WaitForRuntimeReady(session string, rc *config.RuntimeConfig, timeout time.Duration) error {
+	if rc == nil || rc.Tmux == nil {
+		return nil
+	}
+
+	if rc.Tmux.ReadyPromptPrefix == "" {
+		if rc.Tmux.ReadyDelayMs <= 0 {
+			return nil
+		}
+		// Fallback to fixed delay when prompt detection is unavailable.
+		delay := time.Duration(rc.Tmux.ReadyDelayMs) * time.Millisecond
+		if delay > timeout {
+			delay = timeout
+		}
+		time.Sleep(delay)
+		return nil
+	}
+
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		// Capture last few lines of the pane
@@ -641,16 +715,17 @@ func (t *Tmux) WaitForClaudeReady(session string, timeout time.Duration) error {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		// Look for Claude's prompt indicator "> " at start of line
+		// Look for runtime prompt indicator at start of line
 		for _, line := range lines {
 			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "> ") || trimmed == ">" {
+			prefix := strings.TrimSpace(rc.Tmux.ReadyPromptPrefix)
+			if strings.HasPrefix(trimmed, rc.Tmux.ReadyPromptPrefix) || (prefix != "" && trimmed == prefix) {
 				return nil
 			}
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for Claude prompt")
+	return fmt.Errorf("timeout waiting for runtime prompt")
 }
 
 // GetSessionInfo returns detailed information about a session.
@@ -780,7 +855,18 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.SetCycleBindings(session); err != nil {
 		return fmt.Errorf("setting cycle bindings: %w", err)
 	}
+	if err := t.EnableMouseMode(session); err != nil {
+		return fmt.Errorf("enabling mouse mode: %w", err)
+	}
 	return nil
+}
+
+// EnableMouseMode enables mouse support for a tmux session.
+// This allows clicking to select panes/windows, scrolling with mouse wheel,
+// and dragging to resize panes. Hold Shift for native terminal text selection.
+func (t *Tmux) EnableMouseMode(session string) error {
+	_, err := t.run("set-option", "-t", session, "mouse", "on")
+	return err
 }
 
 // IsInsideTmux checks if the current process is running inside a tmux session.

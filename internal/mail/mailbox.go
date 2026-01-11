@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/runtime"
 )
 
 // timeNow is a function that returns the current time. It can be overridden in tests.
@@ -334,7 +335,7 @@ func (m *Mailbox) markReadBeads(id string) error {
 func (m *Mailbox) closeInDir(id, beadsDir string) error {
 	args := []string{"close", id}
 	// Pass session ID for work attribution if available
-	if sessionID := os.Getenv("CLAUDE_SESSION_ID"); sessionID != "" {
+	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 		args = append(args, "--session="+sessionID)
 	}
 

@@ -71,7 +71,25 @@ const (
 
 	// FileAccountsJSON is the accounts configuration file in mayor/.
 	FileAccountsJSON = "accounts.json"
+
+	// FileHandoffMarker is the marker file indicating a handoff just occurred.
+	// Written by gt handoff before respawn, cleared by gt prime after detection.
+	// This prevents the handoff loop bug where agents re-run /handoff from context.
+	FileHandoffMarker = "handoff_to_successor"
 )
+
+// Beads configuration constants.
+const (
+	// BeadsCustomTypes is the comma-separated list of custom issue types that
+	// Gas Town registers with beads. These types were extracted from beads core
+	// in v0.46.0 and now require explicit configuration.
+	BeadsCustomTypes = "agent,role,rig,convoy,slot"
+)
+
+// BeadsCustomTypesList returns the custom types as a slice.
+func BeadsCustomTypesList() []string {
+	return []string{"agent", "role", "rig", "convoy", "slot"}
+}
 
 // Git branch names.
 const (

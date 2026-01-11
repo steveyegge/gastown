@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -112,7 +113,7 @@ var deaconTriggerPendingCmd = &cobra.Command{
 
 ⚠️  BOOTSTRAP MODE ONLY - Uses regex detection (ZFC violation acceptable).
 
-This command uses WaitForClaudeReady (regex) to detect when Claude is ready.
+This command uses WaitForRuntimeReady (regex) to detect when the runtime is ready.
 This is appropriate for daemon bootstrap when no AI is available.
 
 In steady-state, the Deacon should use AI-based observation instead:
@@ -319,8 +320,15 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	}
 
 	// Set environment (non-fatal: session works without these)
-	_ = t.SetEnvironment(sessionName, "GT_ROLE", "deacon")
-	_ = t.SetEnvironment(sessionName, "BD_ACTOR", "deacon")
+	// Use centralized AgentEnv for consistency across all role startup paths
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:     "deacon",
+		TownRoot: townRoot,
+		BeadsDir: beads.ResolveBeadsDir(townRoot),
+	})
+	for k, v := range envVars {
+		_ = t.SetEnvironment(sessionName, k, v)
+	}
 
 	// Apply Deacon theme (non-fatal: theming failure doesn't affect operation)
 	// Note: ConfigureGasTownSession includes cycle bindings
@@ -344,6 +352,9 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		// Non-fatal
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
+
+	runtimeConfig := config.LoadRuntimeConfig("")
+	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
 
 	// Inject startup nudge for predecessor discovery via /resume
 	_ = session.StartupNudge(t, sessionName, session.StartupNudgeConfig{

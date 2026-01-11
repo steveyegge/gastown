@@ -528,6 +528,25 @@ type RoleConfig struct {
 	// EnvVars are additional environment variables to set in the session.
 	// Stored as "key=value" pairs.
 	EnvVars map[string]string
+
+	// Health check thresholds - per ZFC, agents control their own stuck detection.
+	// These allow the Deacon's patrol config to be agent-defined rather than hardcoded.
+
+	// PingTimeout is how long to wait for a health check response.
+	// Format: duration string (e.g., "30s", "1m"). Default: 30s.
+	PingTimeout string
+
+	// ConsecutiveFailures is how many failed health checks before force-kill.
+	// Default: 3.
+	ConsecutiveFailures int
+
+	// KillCooldown is the minimum time between force-kills of the same agent.
+	// Format: duration string (e.g., "5m", "10m"). Default: 5m.
+	KillCooldown string
+
+	// StuckThreshold is how long a wisp can be in_progress before considered stuck.
+	// Format: duration string (e.g., "1h", "30m"). Default: 1h.
+	StuckThreshold string
 }
 
 // ParseRoleConfig extracts RoleConfig from a role bead's description.
@@ -576,6 +595,21 @@ func ParseRoleConfig(description string) *RoleConfig {
 				config.EnvVars[envKey] = envVal
 				hasFields = true
 			}
+		// Health check threshold fields (ZFC: agent-controlled)
+		case "ping_timeout", "ping-timeout", "pingtimeout":
+			config.PingTimeout = value
+			hasFields = true
+		case "consecutive_failures", "consecutive-failures", "consecutivefailures":
+			if n, err := parseIntValue(value); err == nil {
+				config.ConsecutiveFailures = n
+				hasFields = true
+			}
+		case "kill_cooldown", "kill-cooldown", "killcooldown":
+			config.KillCooldown = value
+			hasFields = true
+		case "stuck_threshold", "stuck-threshold", "stuckthreshold":
+			config.StuckThreshold = value
+			hasFields = true
 		}
 	}
 
@@ -583,6 +617,13 @@ func ParseRoleConfig(description string) *RoleConfig {
 		return nil
 	}
 	return config
+}
+
+// parseIntValue parses an integer from a string value.
+func parseIntValue(s string) (int, error) {
+	var n int
+	_, err := fmt.Sscanf(s, "%d", &n)
+	return n, err
 }
 
 // FormatRoleConfig formats RoleConfig as a string suitable for a role bead description.

@@ -3,7 +3,6 @@ package doctor
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/boot"
@@ -21,6 +20,7 @@ func NewBootHealthCheck() *BootHealthCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "boot-health",
 			CheckDescription: "Check Boot watchdog health (the vet checks on the dog)",
+			CheckCategory:    CategoryInfrastructure,
 		},
 	}
 }
@@ -84,24 +84,9 @@ func (c *BootHealthCheck) Run(ctx *CheckContext) *CheckResult {
 		details = append(details, "No previous run recorded")
 	}
 
-	// Check 4: Marker file freshness (stale marker indicates crash)
-	markerPath := filepath.Join(bootDir, boot.MarkerFileName)
-	if info, err := os.Stat(markerPath); err == nil {
-		age := time.Since(info.ModTime())
-		if age > boot.DefaultMarkerTTL {
-			return &CheckResult{
-				Name:    c.Name(),
-				Status:  StatusWarning,
-				Message: "Boot marker is stale (possible crash)",
-				Details: []string{
-					fmt.Sprintf("Marker age: %s", age.Round(time.Second)),
-					fmt.Sprintf("TTL: %s", boot.DefaultMarkerTTL),
-				},
-				FixHint: "Stale marker will be cleaned on next daemon tick",
-			}
-		}
-		// Marker exists and is fresh - Boot is currently running
-		details = append(details, fmt.Sprintf("Currently running (marker age: %s)", age.Round(time.Second)))
+	// Check 4: Currently running (uses tmux session state per ZFC principle)
+	if sessionAlive {
+		details = append(details, "Currently running (tmux session active)")
 	}
 
 	// All checks passed

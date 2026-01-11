@@ -7,9 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.3] - 2026-01-08
+## [0.2.4] - 2026-01-10
+
+Priming subsystem overhaul and Zero Framework Cognition (ZFC) improvements.
+
+### Added
+
+#### Priming Subsystem
+- **PRIME.md provisioning** - Auto-provision PRIME.md at rig level so all workers inherit Gas Town context (GUPP, hooks, propulsion) (#hq-5z76w)
+- **Post-handoff detection** - `gt prime` detects handoff marker and outputs "HANDOFF COMPLETE" warning to prevent handoff loop bug (#hq-ukjrr)
+- **Priming health checks** - `gt doctor` validates priming subsystem: SessionStart hook, gt prime command, PRIME.md presence, CLAUDE.md size (#hq-5scnt)
+- **`gt prime --dry-run`** - Preview priming without side effects
+- **`gt prime --state`** - Output session state (normal, post-handoff, crash-recovery, autonomous)
+- **`gt prime --explain`** - Add [EXPLAIN] tags for debugging priming decisions
+
+#### Formula & Configuration
+- **Rig-level default formulas** - Configure default formula at rig level (#297)
+- **Witness --agent/--env overrides** - Override agent and environment variables for witness (#293, #294)
+
+#### Developer Experience
+- **UX system import** - Comprehensive UX system from beads (#311)
+- **Explicit handoff instructions** - Clearer nudge message for handoff recipients
+
+### Fixed
+
+#### Zero Framework Cognition (ZFC)
+- **Query tmux directly** - Remove marker TTL, query tmux for agent state
+- **Remove PID-based detection** - Agent liveness from tmux, not PIDs
+- **Agent-controlled thresholds** - Stuck detection moved to agent config
+- **Remove pending.json tracking** - Eliminated anti-pattern
+- **Derive state from files** - ZFC state from filesystem, not memory cache
+- **Remove Go-side computation** - No stderr parsing violations
+
+#### Hooks & Beads
+- **Cross-level hook visibility** - Hooked beads visible to mayor/deacon (#aeb4c0d)
+- **Warn on closed hooked bead** - Alert when hooked bead already closed (#2f50a59)
+- **Correct agent bead ID format** - Fix bd create flags for agent beads (#c4fcdd8)
+
+#### Formula
+- **rigPath fallback** - Set rigPath when falling back to gastown default (#afb944f)
+
+#### Doctor
+- **Full AgentEnv for env-vars check** - Use complete environment for validation (#ce231a3)
+
+### Changed
+
+- **Refactored beads/mail modules** - Split large files into focused modules for maintainability
+
+## [0.2.3] - 2026-01-09
 
 Worker safety release - prevents accidental termination of active agents.
+
+> **Note**: The Deacon safety improvements are believed to be correct but have not
+> yet been extensively tested in production. We recommend running with
+> `gt deacon pause` initially and monitoring behavior before enabling full patrol.
+> Please report any issues. A 0.3.0 release will follow once these changes are
+> battle-tested.
 
 ### Critical Safety Improvements
 

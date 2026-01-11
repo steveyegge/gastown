@@ -48,7 +48,9 @@ func Remove() error {
 	wrappers := []string{"gt-codex", "gt-opencode"}
 	for _, name := range wrappers {
 		destPath := filepath.Join(binDir, name)
-		os.Remove(destPath)
+		if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("removing %s: %w", name, err)
+		}
 	}
 
 	return nil

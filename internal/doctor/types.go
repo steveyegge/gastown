@@ -4,11 +4,33 @@ package doctor
 import (
 	"fmt"
 	"io"
-	"strings"
+	"slices"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/ui"
 )
+
+// Category constants for grouping checks
+const (
+	CategoryCore          = "Core"
+	CategoryInfrastructure = "Infrastructure"
+	CategoryRig           = "Rig"
+	CategoryPatrol        = "Patrol"
+	CategoryConfig        = "Configuration"
+	CategoryCleanup       = "Cleanup"
+	CategoryHooks         = "Hooks"
+)
+
+// CategoryOrder defines the display order for categories
+var CategoryOrder = []string{
+	CategoryCore,
+	CategoryInfrastructure,
+	CategoryRig,
+	CategoryPatrol,
+	CategoryConfig,
+	CategoryCleanup,
+	CategoryHooks,
+}
 
 // CheckStatus represents the result status of a health check.
 type CheckStatus int
@@ -55,11 +77,12 @@ func (ctx *CheckContext) RigPath() string {
 
 // CheckResult represents the outcome of a health check.
 type CheckResult struct {
-	Name    string      // Check name
-	Status  CheckStatus // Result status
-	Message string      // Primary result message
-	Details []string    // Additional information
-	FixHint string      // Suggestion if not auto-fixable
+	Name     string      // Check name
+	Status   CheckStatus // Result status
+	Message  string      // Primary result message
+	Details  []string    // Additional information
+	FixHint  string      // Suggestion if not auto-fixable
+	Category string      // Category for grouping (e.g., CategoryCore)
 }
 
 // Check defines the interface for a health check.
@@ -135,59 +158,132 @@ func (r *Report) IsHealthy() bool {
 }
 
 // Print outputs the report to the given writer.
+// Matches bd doctor UX: grouped by category, semantic icons, warnings section.
 func (r *Report) Print(w io.Writer, verbose bool) {
-	// Print individual check results
+	// Print header with version placeholder (caller should set via PrintWithVersion)
+	_, _ = fmt.Fprintln(w)
+
+	// Group checks by category
+	checksByCategory := make(map[string][]*CheckResult)
 	for _, check := range r.Checks {
-		r.printCheck(w, check, verbose)
+		cat := check.Category
+		if cat == "" {
+			cat = "Other"
+		}
+		checksByCategory[cat] = append(checksByCategory[cat], check)
 	}
 
-	// Print summary (output errors non-actionable)
-	_, _ = fmt.Fprintln(w)
+	// Track warnings/errors for summary section
+	var warnings []*CheckResult
+
+	// Print checks by category in defined order
+	for _, category := range CategoryOrder {
+		checks, exists := checksByCategory[category]
+		if !exists || len(checks) == 0 {
+			continue
+		}
+
+		// Print category header
+		_, _ = fmt.Fprintln(w, ui.RenderCategory(category))
+
+		// Print each check in this category
+		for _, check := range checks {
+			r.printCheck(w, check, verbose)
+			if check.Status != StatusOK {
+				warnings = append(warnings, check)
+			}
+		}
+		_, _ = fmt.Fprintln(w)
+	}
+
+	// Print any checks without a category
+	if otherChecks, exists := checksByCategory["Other"]; exists && len(otherChecks) > 0 {
+		_, _ = fmt.Fprintln(w, ui.RenderCategory("Other"))
+		for _, check := range otherChecks {
+			r.printCheck(w, check, verbose)
+			if check.Status != StatusOK {
+				warnings = append(warnings, check)
+			}
+		}
+		_, _ = fmt.Fprintln(w)
+	}
+
+	// Print separator and summary
+	_, _ = fmt.Fprintln(w, ui.RenderSeparator())
 	r.printSummary(w)
+
+	// Print warnings/errors section with fixes
+	r.printWarningsSection(w, warnings)
 }
 
-// printCheck outputs a single check result (output errors non-actionable).
+// printCheck outputs a single check result with semantic styling.
 func (r *Report) printCheck(w io.Writer, check *CheckResult, verbose bool) {
-	var prefix string
+	var statusIcon string
 	switch check.Status {
 	case StatusOK:
-		prefix = style.SuccessPrefix
+		statusIcon = ui.RenderPassIcon()
 	case StatusWarning:
-		prefix = style.WarningPrefix
+		statusIcon = ui.RenderWarnIcon()
 	case StatusError:
-		prefix = style.ErrorPrefix
+		statusIcon = ui.RenderFailIcon()
 	}
 
-	_, _ = fmt.Fprintf(w, "%s %s: %s\n", prefix, check.Name, check.Message)
+	// Print check line: icon + name + muted message
+	_, _ = fmt.Fprintf(w, "  %s  %s", statusIcon, check.Name)
+	if check.Message != "" {
+		_, _ = fmt.Fprintf(w, "%s", ui.RenderMuted(" "+check.Message))
+	}
+	_, _ = fmt.Fprintln(w)
 
-	// Print details in verbose mode or for non-OK results
+	// Print details in verbose mode or for non-OK results (with tree connector)
 	if len(check.Details) > 0 && (verbose || check.Status != StatusOK) {
 		for _, detail := range check.Details {
-			_, _ = fmt.Fprintf(w, "    %s\n", detail)
+			_, _ = fmt.Fprintf(w, "     %s%s\n", ui.MutedStyle.Render(ui.TreeLast), ui.RenderMuted(detail))
 		}
-	}
-
-	// Print fix hint for errors/warnings
-	if check.FixHint != "" && check.Status != StatusOK {
-		_, _ = fmt.Fprintf(w, "    %s %s\n", style.ArrowPrefix, check.FixHint)
 	}
 }
 
-// printSummary outputs the summary line (output errors non-actionable).
+// printSummary outputs the summary line with semantic icons.
 func (r *Report) printSummary(w io.Writer) {
-	parts := []string{
-		fmt.Sprintf("%d checks", r.Summary.Total),
+	summary := fmt.Sprintf("%s %d passed  %s %d warnings  %s %d failed",
+		ui.RenderPassIcon(), r.Summary.OK,
+		ui.RenderWarnIcon(), r.Summary.Warnings,
+		ui.RenderFailIcon(), r.Summary.Errors,
+	)
+	_, _ = fmt.Fprintln(w, summary)
+}
+
+// printWarningsSection outputs numbered warnings/errors sorted by severity.
+func (r *Report) printWarningsSection(w io.Writer, warnings []*CheckResult) {
+	if len(warnings) == 0 {
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, ui.RenderPass(ui.IconPass+" All checks passed"))
+		return
 	}
 
-	if r.Summary.OK > 0 {
-		parts = append(parts, style.Success.Render(fmt.Sprintf("%d passed", r.Summary.OK)))
-	}
-	if r.Summary.Warnings > 0 {
-		parts = append(parts, style.Warning.Render(fmt.Sprintf("%d warnings", r.Summary.Warnings)))
-	}
-	if r.Summary.Errors > 0 {
-		parts = append(parts, style.Error.Render(fmt.Sprintf("%d errors", r.Summary.Errors)))
-	}
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, ui.RenderWarn(ui.IconWarn+"  WARNINGS"))
 
-	_, _ = fmt.Fprintln(w, strings.Join(parts, ", "))
+	// Sort by severity: errors first, then warnings
+	slices.SortStableFunc(warnings, func(a, b *CheckResult) int {
+		if a.Status == StatusError && b.Status != StatusError {
+			return -1
+		}
+		if a.Status != StatusError && b.Status == StatusError {
+			return 1
+		}
+		return 0
+	})
+
+	for i, check := range warnings {
+		line := fmt.Sprintf("%s: %s", check.Name, check.Message)
+		if check.Status == StatusError {
+			_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderFailIcon(), ui.RenderFail(fmt.Sprintf("%d.", i+1)), ui.RenderFail(line))
+		} else {
+			_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderWarnIcon(), ui.RenderWarn(fmt.Sprintf("%d.", i+1)), line)
+		}
+		if check.FixHint != "" {
+			_, _ = fmt.Fprintf(w, "        %s%s\n", ui.MutedStyle.Render(ui.TreeLast), check.FixHint)
+		}
+	}
 }

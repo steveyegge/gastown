@@ -77,6 +77,8 @@ Work tracking units. Bundle multiple issues/tasks that get assigned to agents.
 
 Git-backed issue tracking system that stores work state as structured data.
 
+> **New to Gas Town?** See the [Glossary](docs/glossary.md) for a complete guide to terminology and concepts.
+
 ## Installation
 
 ### Prerequisites
@@ -85,7 +87,8 @@ Git-backed issue tracking system that stores work state as structured data.
 - **Git 2.25+** - for worktree support
 - **beads (bd) 0.44.0+** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads) (required for custom type support)
 - **tmux 3.0+** - recommended for full experience
-- **Claude Code CLI** - [claude.ai/code](https://claude.ai/code)
+- **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
+- **Codex CLI** (optional runtime) - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
 
 ### Setup
 
@@ -180,6 +183,18 @@ gt convoy create "Auth System" issue-101 issue-102 --notify
 gt convoy list
 ```
 
+### Minimal Mode (No Tmux)
+
+Run individual runtime instances manually. Gas Town just tracks state.
+
+```bash
+gt convoy create "Fix bugs" issue-123  # Create convoy (sling auto-creates if skipped)
+gt sling issue-123 myproject           # Assign to worker
+claude --resume                        # Agent reads mail, runs work (Claude)
+# or: codex                            # Start Codex in the workspace
+gt convoy list                         # Check progress
+```
+
 ### Beads Formula Workflow
 
 **Best for:** Predefined, repeatable processes
@@ -258,6 +273,30 @@ gt sling bug-101 myproject/my-agent
 gt convoy show
 ```
 
+## Runtime Configuration
+
+Gas Town supports multiple AI coding runtimes. Per-rig runtime settings are in `settings/config.json`.
+
+```json
+{
+  "runtime": {
+    "provider": "codex",
+    "command": "codex",
+    "args": [],
+    "prompt_mode": "none"
+  }
+}
+```
+
+**Notes:**
+
+- Claude uses hooks in `.claude/settings.json` for mail injection and startup.
+- For Codex, set `project_doc_fallback_filenames = ["CLAUDE.md"]` in
+  `~/.codex/config.toml` so role instructions are picked up.
+- For runtimes without hooks (e.g., Codex), Gas Town sends a startup fallback
+  after the session is ready: `gt prime`, optional `gt mail check --inject`
+  for autonomous roles, and `gt nudge deacon session-started`.
+
 ## Key Commands
 
 ### Workspace Management
@@ -311,6 +350,10 @@ bd cook <formula>           # Execute formula
 bd mol pour <formula>       # Create trackable instance
 bd mol list                 # List active instances
 ```
+
+## Cooking Formulas
+
+Gas Town includes built-in formulas for common workflows. See `.beads/formulas/` for available recipes.
 
 ## Dashboard
 

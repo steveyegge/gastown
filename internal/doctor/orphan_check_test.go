@@ -59,7 +59,7 @@ func TestOrphanProcessCheck_MessageContent(t *testing.T) {
 	// Verify the check description is correct
 	check := NewOrphanProcessCheck()
 
-	expectedDesc := "Detect Claude processes outside tmux"
+	expectedDesc := "Detect runtime processes outside tmux"
 	if check.Description() != expectedDesc {
 		t.Errorf("expected description %q, got %q", expectedDesc, check.Description())
 	}

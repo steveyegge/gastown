@@ -3,6 +3,7 @@ package witness
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -760,8 +761,14 @@ func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 		defaultBranch = rigCfg.DefaultBranch
 	}
 
-	// Construct polecat path: <townRoot>/<rigName>/polecats/<polecatName>
-	polecatPath := filepath.Join(townRoot, rigName, "polecats", polecatName)
+	// Construct polecat path, handling both new and old structures
+	// New structure: polecats/<name>/<rigname>/
+	// Old structure: polecats/<name>/
+	polecatPath := filepath.Join(townRoot, rigName, "polecats", polecatName, rigName)
+	if _, err := os.Stat(polecatPath); os.IsNotExist(err) {
+		// Fall back to old structure
+		polecatPath = filepath.Join(townRoot, rigName, "polecats", polecatName)
+	}
 
 	// Get git for the polecat worktree
 	g := git.NewGit(polecatPath)

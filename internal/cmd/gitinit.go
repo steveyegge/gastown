@@ -267,6 +267,11 @@ func InitGitForHarness(hqRoot string, github string, private bool) error {
 		fmt.Printf("   ✓ Git repository already exists\n")
 	}
 
+	// Install pre-checkout hook to prevent accidental branch switches
+	if err := InstallPreCheckoutHook(hqRoot); err != nil {
+		fmt.Printf("   %s Could not install pre-checkout hook: %v\n", style.Dim.Render("⚠"), err)
+	}
+
 	// Create GitHub repo if requested
 	if github != "" {
 		if err := createGitHubRepo(hqRoot, github, private); err != nil {
@@ -275,4 +280,103 @@ func InitGitForHarness(hqRoot string, github string, private bool) error {
 	}
 
 	return nil
+}
+
+// PreCheckoutHookScript is the git pre-checkout hook that prevents accidental
+// branch switches in the town root. The town root should always stay on main.
+const PreCheckoutHookScript = `#!/bin/bash
+# Gas Town pre-checkout hook
+# Prevents accidental branch switches in the town root (HQ).
+# The town root must stay on main to avoid breaking gt commands.
+
+# Only check branch checkouts (not file checkouts)
+# $3 is 1 for file checkout, 0 for branch checkout
+if [ "$3" = "1" ]; then
+    exit 0
+fi
+
+# Get the target branch name
+TARGET_BRANCH=$(git rev-parse --abbrev-ref "$2" 2>/dev/null)
+
+# Allow checkout to main or master
+if [ "$TARGET_BRANCH" = "main" ] || [ "$TARGET_BRANCH" = "master" ]; then
+    exit 0
+fi
+
+# Get current branch
+CURRENT_BRANCH=$(git branch --show-current)
+
+# If already not on main, allow (might be fixing the situation)
+if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "master" ]; then
+    exit 0
+fi
+
+# Block the checkout with a warning
+echo ""
+echo "⚠️  BLOCKED: Town root must stay on main branch"
+echo ""
+echo "   You're trying to switch from '$CURRENT_BRANCH' to '$TARGET_BRANCH'"
+echo "   in the Gas Town HQ directory."
+echo ""
+echo "   The town root (~/gt) should always be on main. Switching branches"
+echo "   can break gt commands (missing rigs.json, wrong configs, etc.)."
+echo ""
+echo "   If you really need to switch branches, you can:"
+echo "   1. Temporarily rename .git/hooks/pre-checkout"
+echo "   2. Do your work"
+echo "   3. Switch back to main"
+echo "   4. Restore the hook"
+echo ""
+exit 1
+`
+
+// InstallPreCheckoutHook installs the pre-checkout hook in the town root.
+// This prevents accidental branch switches that can break gt commands.
+func InstallPreCheckoutHook(hqRoot string) error {
+	hooksDir := filepath.Join(hqRoot, ".git", "hooks")
+
+	// Ensure hooks directory exists
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		return fmt.Errorf("creating hooks directory: %w", err)
+	}
+
+	hookPath := filepath.Join(hooksDir, "pre-checkout")
+
+	// Check if hook already exists
+	if _, err := os.Stat(hookPath); err == nil {
+		// Read existing hook to see if it's ours
+		content, err := os.ReadFile(hookPath)
+		if err != nil {
+			return fmt.Errorf("reading existing hook: %w", err)
+		}
+
+		if strings.Contains(string(content), "Gas Town pre-checkout hook") {
+			fmt.Printf("   ✓ Pre-checkout hook already installed\n")
+			return nil
+		}
+
+		// There's an existing hook that's not ours - don't overwrite
+		fmt.Printf("   %s Pre-checkout hook exists but is not Gas Town's (skipping)\n", style.Dim.Render("⚠"))
+		return nil
+	}
+
+	// Install the hook
+	if err := os.WriteFile(hookPath, []byte(PreCheckoutHookScript), 0755); err != nil {
+		return fmt.Errorf("writing hook: %w", err)
+	}
+
+	fmt.Printf("   ✓ Installed pre-checkout hook (prevents accidental branch switches)\n")
+	return nil
+}
+
+// IsPreCheckoutHookInstalled checks if the Gas Town pre-checkout hook is installed.
+func IsPreCheckoutHookInstalled(hqRoot string) bool {
+	hookPath := filepath.Join(hqRoot, ".git", "hooks", "pre-checkout")
+
+	content, err := os.ReadFile(hookPath)
+	if err != nil {
+		return false
+	}
+
+	return strings.Contains(string(content), "Gas Town pre-checkout hook")
 }

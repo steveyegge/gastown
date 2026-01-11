@@ -42,6 +42,7 @@ func NewRepoFingerprintCheck() *RepoFingerprintCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "repo-fingerprint",
 				CheckDescription: "Verify beads database has valid repository fingerprint",
+				CheckCategory:    CategoryInfrastructure,
 			},
 		},
 	}

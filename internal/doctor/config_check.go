@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -23,6 +24,7 @@ func NewSettingsCheck() *SettingsCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "rig-settings",
 				CheckDescription: "Check that rigs have settings/ directory",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}
@@ -104,6 +106,7 @@ func NewRuntimeGitignoreCheck() *RuntimeGitignoreCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "runtime-gitignore",
 			CheckDescription: "Check that .runtime/ directories are gitignored",
+			CheckCategory:    CategoryConfig,
 		},
 	}
 }
@@ -193,6 +196,7 @@ func NewLegacyGastownCheck() *LegacyGastownCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "legacy-gastown",
 				CheckDescription: "Check for old .gastown/ directories that should be migrated",
+				CheckCategory:    CategoryConfig,
 			},
 		},
 	}
@@ -267,8 +271,9 @@ func (c *SettingsCheck) findRigs(townRoot string) []string {
 	return findAllRigs(townRoot)
 }
 
-// SessionHookCheck verifies settings.json files use session-start.sh for proper
-// session_id passthrough. Without this wrapper, gt seance cannot discover sessions.
+// SessionHookCheck verifies settings.json files use proper session_id passthrough.
+// Valid options: session-start.sh wrapper OR 'gt prime --hook'.
+// Without proper config, gt seance cannot discover sessions.
 type SessionHookCheck struct {
 	BaseCheck
 }
@@ -278,12 +283,13 @@ func NewSessionHookCheck() *SessionHookCheck {
 	return &SessionHookCheck{
 		BaseCheck: BaseCheck{
 			CheckName:        "session-hooks",
-			CheckDescription: "Check that settings.json hooks use session-start.sh",
+			CheckDescription: "Check that settings.json hooks use session-start.sh or --hook flag",
+			CheckCategory:    CategoryConfig,
 		},
 	}
 }
 
-// Run checks if all settings.json files use session-start.sh wrapper.
+// Run checks if all settings.json files use session-start.sh or --hook flag.
 func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 	var issues []string
 	var checked int
@@ -307,7 +313,7 @@ func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: fmt.Sprintf("All %d settings.json file(s) use session-start.sh", checked),
+			Message: fmt.Sprintf("All %d settings.json file(s) use proper session_id passthrough", checked),
 		}
 	}
 
@@ -316,7 +322,7 @@ func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 		Status:  StatusWarning,
 		Message: fmt.Sprintf("%d hook issue(s) found across settings.json files", len(issues)),
 		Details: issues,
-		FixHint: "Update SessionStart/PreCompact hooks to use 'bash ~/.claude/hooks/session-start.sh' for session_id passthrough",
+		FixHint: "Update hooks to use 'gt prime --hook' or 'bash ~/.claude/hooks/session-start.sh' for session_id passthrough",
 	}
 }
 
@@ -334,22 +340,22 @@ func (c *SessionHookCheck) checkSettingsFile(path string) []string {
 	// Check for SessionStart hooks
 	if strings.Contains(content, "SessionStart") {
 		if !c.usesSessionStartScript(content, "SessionStart") {
-			problems = append(problems, "SessionStart uses bare 'gt prime' (missing session_id passthrough)")
+			problems = append(problems, "SessionStart uses bare 'gt prime' - add --hook flag or use session-start.sh")
 		}
 	}
 
 	// Check for PreCompact hooks
 	if strings.Contains(content, "PreCompact") {
 		if !c.usesSessionStartScript(content, "PreCompact") {
-			problems = append(problems, "PreCompact uses bare 'gt prime' (missing session_id passthrough)")
+			problems = append(problems, "PreCompact uses bare 'gt prime' - add --hook flag or use session-start.sh")
 		}
 	}
 
 	return problems
 }
 
-// usesSessionStartScript checks if the hook configuration uses session-start.sh.
-// Returns true if the hook is properly configured or if no hook is configured.
+// usesSessionStartScript checks if the hook configuration handles session_id properly.
+// Valid: session-start.sh wrapper OR 'gt prime --hook'. Returns true if properly configured.
 func (c *SessionHookCheck) usesSessionStartScript(content, hookType string) bool {
 	// Find the hook section - look for the hook type followed by its configuration
 	// This is a simple heuristic - we look for "gt prime" without session-start.sh
@@ -382,10 +388,15 @@ func (c *SessionHookCheck) usesSessionStartScript(content, hookType string) bool
 		return true // Uses the wrapper script
 	}
 
-	// Check if it uses bare 'gt prime' without the wrapper
-	// Patterns to detect: "gt prime", "'gt prime'", "gt prime\""
+	// Check if it uses 'gt prime --hook' which handles session_id via stdin
 	if strings.Contains(section, "gt prime") {
-		return false // Uses bare gt prime without session-start.sh
+		// gt prime --hook is valid - it reads session_id from stdin JSON
+		// Must match --hook as complete flag, not substring (e.g., --hookup)
+		if containsFlag(section, "--hook") {
+			return true
+		}
+		// Bare 'gt prime' without --hook doesn't get session_id
+		return false
 	}
 
 	// No gt prime or session-start.sh found - might be a different hook configuration
@@ -454,14 +465,24 @@ func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 			}
 		}
 
-		// Polecats
+		// Polecats (handle both new and old structures)
+		// New structure: polecats/<name>/<rigname>/.claude/settings.json
+		// Old structure: polecats/<name>/.claude/settings.json
+		rigName := filepath.Base(rig)
 		polecatsPath := filepath.Join(rig, "polecats")
 		if polecatEntries, err := os.ReadDir(polecatsPath); err == nil {
 			for _, polecat := range polecatEntries {
 				if polecat.IsDir() && !strings.HasPrefix(polecat.Name(), ".") {
-					polecatSettings := filepath.Join(polecatsPath, polecat.Name(), ".claude", "settings.json")
+					// Try new structure first
+					polecatSettings := filepath.Join(polecatsPath, polecat.Name(), rigName, ".claude", "settings.json")
 					if _, err := os.Stat(polecatSettings); err == nil {
 						files = append(files, polecatSettings)
+					} else {
+						// Fall back to old structure
+						polecatSettings = filepath.Join(polecatsPath, polecat.Name(), ".claude", "settings.json")
+						if _, err := os.Stat(polecatSettings); err == nil {
+							files = append(files, polecatSettings)
+						}
 					}
 				}
 			}
@@ -503,4 +524,129 @@ func findAllRigs(townRoot string) []string {
 	}
 
 	return rigs
+}
+
+func containsFlag(s, flag string) bool {
+	idx := strings.Index(s, flag)
+	if idx == -1 {
+		return false
+	}
+	end := idx + len(flag)
+	if end >= len(s) {
+		return true
+	}
+	next := s[end]
+	return next == '"' || next == ' ' || next == '\'' || next == '\n' || next == '\t'
+}
+
+// CustomTypesCheck verifies Gas Town custom types are registered with beads.
+type CustomTypesCheck struct {
+	FixableCheck
+	missingTypes []string // Cached during Run for use in Fix
+	townRoot     string   // Cached during Run for use in Fix
+}
+
+// NewCustomTypesCheck creates a new custom types check.
+func NewCustomTypesCheck() *CustomTypesCheck {
+	return &CustomTypesCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "beads-custom-types",
+				CheckDescription: "Check that Gas Town custom types are registered with beads",
+				CheckCategory:    CategoryConfig,
+			},
+		},
+	}
+}
+
+// Run checks if custom types are properly configured.
+func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
+	// Check if bd command is available
+	if _, err := exec.LookPath("bd"); err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "beads not installed (skipped)",
+		}
+	}
+
+	// Check if .beads directory exists at town level
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No beads database (skipped)",
+		}
+	}
+
+	// Get current custom types configuration
+	cmd := exec.Command("bd", "config", "get", "types.custom")
+	cmd.Dir = ctx.TownRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// If config key doesn't exist, types are not configured
+		c.townRoot = ctx.TownRoot
+		c.missingTypes = constants.BeadsCustomTypesList()
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: "Custom types not configured",
+			Details: []string{
+				"Gas Town custom types (agent, role, rig, convoy, slot) are not registered",
+				"This may cause bead creation/validation errors",
+			},
+			FixHint: "Run 'gt doctor --fix' or 'bd config set types.custom \"" + constants.BeadsCustomTypes + "\"'",
+		}
+	}
+
+	// Parse configured types
+	configuredTypes := strings.TrimSpace(string(output))
+	configuredSet := make(map[string]bool)
+	for _, t := range strings.Split(configuredTypes, ",") {
+		configuredSet[strings.TrimSpace(t)] = true
+	}
+
+	// Check for missing required types
+	var missing []string
+	for _, required := range constants.BeadsCustomTypesList() {
+		if !configuredSet[required] {
+			missing = append(missing, required)
+		}
+	}
+
+	if len(missing) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "All custom types registered",
+		}
+	}
+
+	// Cache for Fix
+	c.townRoot = ctx.TownRoot
+	c.missingTypes = missing
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d custom type(s) missing", len(missing)),
+		Details: []string{
+			fmt.Sprintf("Missing types: %s", strings.Join(missing, ", ")),
+			fmt.Sprintf("Configured: %s", configuredTypes),
+			fmt.Sprintf("Required: %s", constants.BeadsCustomTypes),
+		},
+		FixHint: "Run 'gt doctor --fix' to register missing types",
+	}
+}
+
+// Fix registers the missing custom types.
+func (c *CustomTypesCheck) Fix(ctx *CheckContext) error {
+	cmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	cmd.Dir = c.townRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
 }

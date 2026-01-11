@@ -48,10 +48,10 @@ func (b *Beads) GetOrCreateHandoffBead(role string) (*Issue, error) {
 		return existing, nil
 	}
 
-	// Create new handoff bead
+	// Create new handoff bead (type is deprecated, uses gt:task label via backward compat)
 	issue, err := b.Create(CreateOptions{
 		Title:       HandoffBeadTitle(role),
-		Type:        "task",
+		Type:        "task", // Converted to gt:task label by Create()
 		Priority:    2,
 		Description: "", // Empty until first handoff
 		Actor:       role,
@@ -107,7 +107,7 @@ func (b *Beads) ClearMail(reason string) (*ClearMailResult, error) {
 	// List all open messages
 	issues, err := b.List(ListOptions{
 		Status:   "open",
-		Type:     "message",
+		Label:    "gt:message",
 		Priority: -1,
 	})
 	if err != nil {

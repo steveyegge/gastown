@@ -219,8 +219,12 @@ func TestReport_Print(t *testing.T) {
 	if !bytes.Contains(buf.Bytes(), []byte("TestCheck")) {
 		t.Error("Output should contain check name")
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("2 checks")) {
-		t.Error("Output should contain summary")
+	// New summary format: "✓ N passed  ⚠ N warnings  ✖ N failed"
+	if !bytes.Contains(buf.Bytes(), []byte("1 passed")) {
+		t.Error("Output should contain summary with passed count")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("1 warnings")) {
+		t.Error("Output should contain summary with warnings count")
 	}
 }
 

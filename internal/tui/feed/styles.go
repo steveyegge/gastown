@@ -4,17 +4,18 @@ package feed
 import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/ui"
 )
 
-// Color palette
+// Color palette using Ayu theme colors from ui package
 var (
-	colorPrimary   = lipgloss.Color("12")  // Blue
-	colorSuccess   = lipgloss.Color("10")  // Green
-	colorWarning   = lipgloss.Color("11")  // Yellow
-	colorError     = lipgloss.Color("9")   // Red
-	colorDim       = lipgloss.Color("8")   // Gray
-	colorHighlight = lipgloss.Color("14")  // Cyan
-	colorAccent    = lipgloss.Color("13")  // Magenta
+	colorPrimary   = ui.ColorAccent // Blue
+	colorSuccess   = ui.ColorPass   // Green
+	colorWarning   = ui.ColorWarn   // Yellow
+	colorError     = ui.ColorFail   // Red
+	colorDim       = ui.ColorMuted  // Gray
+	colorHighlight = lipgloss.AdaptiveColor{Light: "#59c2ff", Dark: "#59c2ff"} // Cyan (Ayu)
+	colorAccent    = lipgloss.AdaptiveColor{Light: "#d2a6ff", Dark: "#d2a6ff"} // Purple (Ayu)
 )
 
 // Styles for the feed TUI

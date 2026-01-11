@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
@@ -32,7 +33,7 @@ func parseBranchName(branch string) branchInfo {
 	info := branchInfo{Branch: branch}
 
 	// Try polecat/<worker>/<issue> format
-	if strings.HasPrefix(branch, "polecat/") {
+	if strings.HasPrefix(branch, constants.BranchPolecatPrefix) {
 		parts := strings.SplitN(branch, "/", 3)
 		if len(parts) == 3 {
 			info.Worker = parts[1]

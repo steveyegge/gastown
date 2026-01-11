@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -21,16 +23,17 @@ const (
 // This is the canonical struct for role detection - used by both GetRole()
 // and detectRole() functions.
 type RoleInfo struct {
-	Role       Role   `json:"role"`
-	Source     string `json:"source"` // "env", "cwd", or "explicit"
-	Home       string `json:"home"`
-	Rig        string `json:"rig,omitempty"`
-	Polecat    string `json:"polecat,omitempty"`
-	EnvRole    string `json:"env_role,omitempty"`    // Value of GT_ROLE if set
-	CwdRole    Role   `json:"cwd_role,omitempty"`    // Role detected from cwd
-	Mismatch   bool   `json:"mismatch,omitempty"`    // True if env != cwd detection
-	TownRoot   string `json:"town_root,omitempty"`
-	WorkDir    string `json:"work_dir,omitempty"`    // Current working directory
+	Role          Role   `json:"role"`
+	Source        string `json:"source"` // "env", "cwd", or "explicit"
+	Home          string `json:"home"`
+	Rig           string `json:"rig,omitempty"`
+	Polecat       string `json:"polecat,omitempty"`
+	EnvRole       string `json:"env_role,omitempty"`    // Value of GT_ROLE if set
+	CwdRole       Role   `json:"cwd_role,omitempty"`    // Role detected from cwd
+	Mismatch      bool   `json:"mismatch,omitempty"`    // True if env != cwd detection
+	EnvIncomplete bool   `json:"env_incomplete,omitempty"` // True if env was set but missing rig/polecat, filled from cwd
+	TownRoot      string `json:"town_root,omitempty"`
+	WorkDir       string `json:"work_dir,omitempty"`    // Current working directory
 }
 
 var roleCmd = &cobra.Command{
@@ -86,14 +89,18 @@ var roleListCmd = &cobra.Command{
 var roleEnvCmd = &cobra.Command{
 	Use:   "env",
 	Short: "Print export statements for current role",
-	Long: `Print shell export statements to set GT_ROLE and GT_ROLE_HOME.
+	Long: `Print shell export statements for the current role.
 
-Usage:
-  eval $(gt role env)    # Set role env vars in current shell`,
+Role is determined from GT_ROLE environment variable or current working directory.
+This is a read-only command that displays the current role's env vars.
+
+Examples:
+  eval $(gt role env)    # Export current role's env vars
+  gt role env            # View what would be exported`,
 	RunE: runRoleEnv,
 }
 
-// Flags
+// Flags for role home command
 var (
 	roleRig     string
 	rolePolecat string
@@ -107,7 +114,7 @@ func init() {
 	roleCmd.AddCommand(roleListCmd)
 	roleCmd.AddCommand(roleEnvCmd)
 
-	// Add --rig flag to home command for witness/refinery/polecat
+	// Add --rig and --polecat flags to home command for overrides
 	roleHomeCmd.Flags().StringVar(&roleRig, "rig", "", "Rig name (required for rig-specific roles)")
 	roleHomeCmd.Flags().StringVar(&rolePolecat, "polecat", "", "Polecat/crew member name")
 }
@@ -168,6 +175,20 @@ func GetRoleWithContext(cwd, townRoot string) (RoleInfo, error) {
 			} else if envPolecat := os.Getenv("GT_POLECAT"); envPolecat != "" {
 				info.Polecat = envPolecat
 			}
+		}
+
+		// If env is incomplete (missing rig/polecat for roles that need them),
+		// fill gaps from cwd detection and mark as incomplete
+		needsRig := parsedRole == RoleWitness || parsedRole == RoleRefinery || parsedRole == RolePolecat || parsedRole == RoleCrew
+		needsPolecat := parsedRole == RolePolecat || parsedRole == RoleCrew
+
+		if needsRig && info.Rig == "" && cwdCtx.Rig != "" {
+			info.Rig = cwdCtx.Rig
+			info.EnvIncomplete = true
+		}
+		if needsPolecat && info.Polecat == "" && cwdCtx.Polecat != "" {
+			info.Polecat = cwdCtx.Polecat
+			info.EnvIncomplete = true
 		}
 
 		// Check for mismatch with cwd detection
@@ -277,7 +298,7 @@ func getRoleHome(role Role, rig, polecat, townRoot string) string {
 		if rig == "" {
 			return ""
 		}
-		return filepath.Join(townRoot, rig, "witness", "rig")
+		return filepath.Join(townRoot, rig, "witness")
 	case RoleRefinery:
 		if rig == "" {
 			return ""
@@ -287,12 +308,12 @@ func getRoleHome(role Role, rig, polecat, townRoot string) string {
 		if rig == "" || polecat == "" {
 			return ""
 		}
-		return filepath.Join(townRoot, rig, "polecats", polecat)
+		return filepath.Join(townRoot, rig, "polecats", polecat, "rig")
 	case RoleCrew:
 		if rig == "" || polecat == "" {
 			return ""
 		}
-		return filepath.Join(townRoot, rig, "crew", polecat)
+		return filepath.Join(townRoot, rig, "crew", polecat, "rig")
 	default:
 		return ""
 	}
@@ -335,6 +356,11 @@ func runRoleShow(cmd *cobra.Command, args []string) error {
 }
 
 func runRoleHome(cmd *cobra.Command, args []string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return fmt.Errorf("finding workspace: %w", err)
@@ -343,34 +369,39 @@ func runRoleHome(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace")
 	}
 
-	var role Role
-	var rig, polecat string
+	// Validate flag combinations: --polecat requires --rig to prevent strange merges
+	if rolePolecat != "" && roleRig == "" {
+		return fmt.Errorf("--polecat requires --rig to be specified")
+	}
 
+	// Start with current role detection (from env vars or cwd)
+	info, err := GetRole()
+	if err != nil {
+		return err
+	}
+	role := info.Role
+	rig := info.Rig
+	polecat := info.Polecat
+
+	// Apply overrides from arguments/flags
 	if len(args) > 0 {
-		// Explicit role provided
-		role, rig, polecat = parseRoleString(args[0])
-
-		// Override with flags if provided
-		if roleRig != "" {
-			rig = roleRig
-		}
-		if rolePolecat != "" {
-			polecat = rolePolecat
-		}
-	} else {
-		// Use current role
-		info, err := GetRole()
-		if err != nil {
-			return err
-		}
-		role = info.Role
-		rig = info.Rig
-		polecat = info.Polecat
+		role, _, _ = parseRoleString(args[0])
+	}
+	if roleRig != "" {
+		rig = roleRig
+	}
+	if rolePolecat != "" {
+		polecat = rolePolecat
 	}
 
 	home := getRoleHome(role, rig, polecat, townRoot)
 	if home == "" {
 		return fmt.Errorf("cannot determine home for role %s (rig=%q, polecat=%q)", role, rig, polecat)
+	}
+
+	// Warn if computed home doesn't match cwd
+	if home != cwd && !strings.HasPrefix(cwd, home) {
+		fmt.Fprintf(os.Stderr, "⚠️  Warning: cwd (%s) is not within role home (%s)\n", cwd, home)
 	}
 
 	fmt.Println(home)
@@ -440,33 +471,52 @@ func runRoleList(cmd *cobra.Command, args []string) error {
 }
 
 func runRoleEnv(cmd *cobra.Command, args []string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding workspace: %w", err)
+	}
+	if townRoot == "" {
+		return fmt.Errorf("not in a Gas Town workspace")
+	}
+
+	// Get current role (read-only - from env vars or cwd)
 	info, err := GetRole()
 	if err != nil {
 		return err
 	}
 
-	// Build the role string for GT_ROLE
-	var roleStr string
-	switch info.Role {
-	case RoleMayor:
-		roleStr = "mayor"
-	case RoleDeacon:
-		roleStr = "deacon"
-	case RoleWitness:
-		roleStr = fmt.Sprintf("%s/witness", info.Rig)
-	case RoleRefinery:
-		roleStr = fmt.Sprintf("%s/refinery", info.Rig)
-	case RolePolecat:
-		roleStr = fmt.Sprintf("%s/polecats/%s", info.Rig, info.Polecat)
-	case RoleCrew:
-		roleStr = fmt.Sprintf("%s/crew/%s", info.Rig, info.Polecat)
-	default:
-		roleStr = string(info.Role)
+	home := getRoleHome(info.Role, info.Rig, info.Polecat, townRoot)
+	if home == "" {
+		return fmt.Errorf("cannot determine home for role %s (rig=%q, polecat=%q)", info.Role, info.Rig, info.Polecat)
 	}
 
-	fmt.Printf("export %s=%s\n", EnvGTRole, roleStr)
-	if info.Home != "" {
-		fmt.Printf("export %s=%s\n", EnvGTRoleHome, info.Home)
+	// Warn if env was incomplete and we filled from cwd
+	if info.EnvIncomplete {
+		fmt.Fprintf(os.Stderr, "⚠️  Warning: env vars incomplete, filled from cwd\n")
+	}
+
+	// Warn if computed home doesn't match cwd
+	if home != cwd && !strings.HasPrefix(cwd, home) {
+		fmt.Fprintf(os.Stderr, "⚠️  Warning: cwd (%s) is not within role home (%s)\n", cwd, home)
+	}
+
+	// Get canonical env vars from shared source of truth
+	envVars := config.AgentEnvSimple(string(info.Role), info.Rig, info.Polecat)
+	envVars[EnvGTRoleHome] = home
+
+	// Output in sorted order for consistent output
+	keys := make([]string, 0, len(envVars))
+	for k := range envVars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Printf("export %s=%s\n", k, envVars[k])
 	}
 
 	return nil

@@ -162,6 +162,16 @@ The `gt done --exit` command:
 - Exits your session immediately (no idle waiting)
 - Witness handles cleanup, Refinery merges your branch
 
+### No PRs in Maintainer Repos
+
+If the remote origin is `steveyegge/beads` or `steveyegge/gastown`:
+- **NEVER create GitHub PRs** - you have direct push access
+- Polecats: use `gt done` → Refinery merges to main
+- Crew workers: push directly to main
+
+PRs are for external contributors submitting to repos they don't own.
+Check `git remote -v` if unsure about repo ownership.
+
 ### The Landing Rule
 
 > **Work is NOT landed until it's on `main` OR in the Refinery MQ.**

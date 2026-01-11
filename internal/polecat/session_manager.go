@@ -5,15 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -59,9 +60,9 @@ type SessionStartOptions struct {
 	// Account specifies the account handle to use (overrides default).
 	Account string
 
-	// ClaudeConfigDir is resolved CLAUDE_CONFIG_DIR for the account.
+	// RuntimeConfigDir is resolved config directory for the runtime account.
 	// If set, this is injected as an environment variable.
-	ClaudeConfigDir string
+	RuntimeConfigDir string
 }
 
 // SessionInfo contains information about a running polecat session.
@@ -96,9 +97,34 @@ func (m *SessionManager) SessionName(polecat string) string {
 	return fmt.Sprintf("gt-%s-%s", m.rig.Name, polecat)
 }
 
-// polecatDir returns the working directory for a polecat.
+// polecatDir returns the parent directory for a polecat.
+// This is polecats/<name>/ - the polecat's home directory.
 func (m *SessionManager) polecatDir(polecat string) string {
 	return filepath.Join(m.rig.Path, "polecats", polecat)
+}
+
+// clonePath returns the path where the git worktree lives.
+// New structure: polecats/<name>/<rigname>/ - gives LLMs recognizable repo context.
+// Falls back to old structure: polecats/<name>/ for backward compatibility.
+func (m *SessionManager) clonePath(polecat string) string {
+	// New structure: polecats/<name>/<rigname>/
+	newPath := filepath.Join(m.rig.Path, "polecats", polecat, m.rig.Name)
+	if info, err := os.Stat(newPath); err == nil && info.IsDir() {
+		return newPath
+	}
+
+	// Old structure: polecats/<name>/ (backward compat)
+	oldPath := filepath.Join(m.rig.Path, "polecats", polecat)
+	if info, err := os.Stat(oldPath); err == nil && info.IsDir() {
+		// Check if this is actually a git worktree (has .git file or dir)
+		gitPath := filepath.Join(oldPath, ".git")
+		if _, err := os.Stat(gitPath); err == nil {
+			return oldPath
+		}
+	}
+
+	// Default to new structure for new polecats
+	return newPath
 }
 
 // hasPolecat checks if the polecat exists in this rig.
@@ -131,36 +157,49 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Determine working directory
 	workDir := opts.WorkDir
 	if workDir == "" {
-		workDir = m.polecatDir(polecat)
+		workDir = m.clonePath(polecat)
 	}
 
-	// Ensure Claude settings exist in polecats/ (not polecats/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
+	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
+
+	// Ensure runtime settings exist in polecats/ (not polecats/<name>/) so we don't
+	// write into the source repo. Runtime walks up the tree to find settings.
 	polecatsDir := filepath.Join(m.rig.Path, "polecats")
-	if err := claude.EnsureSettingsForRole(polecatsDir, "polecat"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	if err := runtime.EnsureSettingsForRole(polecatsDir, "polecat", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Create session
-	if err := m.tmux.NewSession(sessionID, workDir); err != nil {
+	// Build startup command first
+	command := opts.Command
+	if command == "" {
+		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
+	}
+	// Prepend runtime config dir env if needed
+	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
+		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
+	}
+
+	// Create session with command directly to avoid send-keys race condition.
+	// See: https://github.com/anthropics/gastown/issues/280
+	if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
 	// Set environment (non-fatal: session works without these)
-	debugSession("SetEnvironment GT_RIG", m.tmux.SetEnvironment(sessionID, "GT_RIG", m.rig.Name))
-	debugSession("SetEnvironment GT_POLECAT", m.tmux.SetEnvironment(sessionID, "GT_POLECAT", polecat))
-
-	// Set CLAUDE_CONFIG_DIR for account selection (non-fatal)
-	if opts.ClaudeConfigDir != "" {
-		debugSession("SetEnvironment CLAUDE_CONFIG_DIR", m.tmux.SetEnvironment(sessionID, "CLAUDE_CONFIG_DIR", opts.ClaudeConfigDir))
-	}
-
-	// Set beads environment for worktree polecats (non-fatal)
+	// Use centralized AgentEnv for consistency across all role startup paths
 	townRoot := filepath.Dir(m.rig.Path)
-	beadsDir := filepath.Join(townRoot, ".beads")
-	debugSession("SetEnvironment BEADS_DIR", m.tmux.SetEnvironment(sessionID, "BEADS_DIR", beadsDir))
-	debugSession("SetEnvironment BEADS_NO_DAEMON", m.tmux.SetEnvironment(sessionID, "BEADS_NO_DAEMON", "1"))
-	debugSession("SetEnvironment BEADS_AGENT_NAME", m.tmux.SetEnvironment(sessionID, "BEADS_AGENT_NAME", fmt.Sprintf("%s/%s", m.rig.Name, polecat)))
+	envVars := config.AgentEnv(config.AgentEnvConfig{
+		Role:             "polecat",
+		Rig:              m.rig.Name,
+		AgentName:        polecat,
+		TownRoot:         townRoot,
+		BeadsDir:         beads.ResolveBeadsDir(m.rig.Path),
+		RuntimeConfigDir: opts.RuntimeConfigDir,
+		BeadsNoDaemon:    true,
+	})
+	for k, v := range envVars {
+		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
+	}
 
 	// Hook the issue to the polecat if provided via --issue flag
 	if opts.Issue != "" {
@@ -178,23 +217,15 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	agentID := fmt.Sprintf("%s/%s", m.rig.Name, polecat)
 	debugSession("SetPaneDiedHook", m.tmux.SetPaneDiedHook(sessionID, agentID))
 
-	// Send initial command with env vars exported inline
-	command := opts.Command
-	if command == "" {
-		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
-	}
-	if err := m.tmux.SendKeys(sessionID, command); err != nil {
-		return fmt.Errorf("sending command: %w", err)
-	}
-
 	// Wait for Claude to start (non-fatal)
 	debugSession("WaitForCommand", m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout))
 
 	// Accept bypass permissions warning dialog if it appears
 	debugSession("AcceptBypassPermissionsWarning", m.tmux.AcceptBypassPermissionsWarning(sessionID))
 
-	// Wait for Claude to be fully ready
-	time.Sleep(8 * time.Second)
+	// Wait for runtime to be fully ready at the prompt (not just started)
+	runtime.SleepForReadyDelay(runtimeConfig)
+	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)
 
 	// Inject startup nudge for predecessor discovery via /resume
 	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
@@ -246,9 +277,9 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 }
 
 // syncBeads runs bd sync in the given directory.
-// Uses beads.Command wrapper to ensure proper BEADS_DIR/BEADS_JSONL env vars.
 func (m *SessionManager) syncBeads(workDir string) error {
-	cmd := beads.Command(workDir, "sync")
+	cmd := exec.Command("bd", "sync")
+	cmd.Dir = workDir
 	return cmd.Run()
 }
 
@@ -419,11 +450,9 @@ func (m *SessionManager) StopAll(force bool) error {
 }
 
 // hookIssue pins an issue to a polecat's hook using bd update.
-// This makes the work visible via 'gt hook' when the session starts.
-// Uses beads.Command wrapper to ensure proper BEADS_DIR/BEADS_JSONL env vars.
 func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
-	// Use bd update to set status=hooked and assign to the polecat
-	cmd := beads.Command(workDir, "update", issueID, "--status=hooked", "--assignee="+agentID)
+	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID) //nolint:gosec
+	cmd.Dir = workDir
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("bd update failed: %w", err)

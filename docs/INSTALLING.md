@@ -17,7 +17,9 @@ Complete setup guide for Gas Town multi-agent orchestrator.
 | Tool | Version | Check | Install |
 |------|---------|-------|---------|
 | **tmux** | 3.0+ | `tmux -V` | See below |
-| **Claude Code** | latest | `claude --version` | See [claude.ai/claude-code](https://claude.ai/claude-code) |
+| **Claude Code** (default) | latest | `claude --version` | See [claude.ai/claude-code](https://claude.ai/claude-code) |
+| **Codex CLI** (optional) | latest | `codex --version` | See [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli) |
+| **OpenCode CLI** (optional) | latest | `opencode --version` | See [opencode.ai](https://opencode.ai) |
 
 ## Installing Prerequisites
 
@@ -159,16 +161,17 @@ Gas Town supports two operational modes:
 
 ### Minimal Mode (No Daemon)
 
-Run individual Claude Code instances manually. Gas Town only tracks state.
+Run individual runtime instances manually. Gas Town only tracks state.
 
 ```bash
 # Create and assign work
 gt convoy create "Fix bugs" issue-123
 gt sling issue-123 myproject
 
-# Run Claude manually
+# Run runtime manually
 cd ~/gt/myproject/polecats/<worker>
-claude --resume
+claude --resume          # Claude Code
+# or: codex              # Codex CLI
 
 # Check progress
 gt convoy list

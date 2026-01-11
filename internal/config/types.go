@@ -2,6 +2,7 @@
 package config
 
 import (
+	"path/filepath"
 	"os"
 	"strings"
 	"time"
@@ -179,6 +180,13 @@ type RigConfig struct {
 	Beads     *BeadsConfig `json:"beads,omitempty"`
 }
 
+// WorkflowConfig represents workflow settings for a rig.
+type WorkflowConfig struct {
+	// DefaultFormula is the formula to use when `gt formula run` is called without arguments.
+	// If empty, no default is set and a formula name must be provided.
+	DefaultFormula string `json:"default_formula,omitempty"`
+}
+
 // RigSettings represents per-rig behavioral configuration (settings/config.json).
 type RigSettings struct {
 	Type       string            `json:"type"`                  // "rig-settings"
@@ -187,6 +195,7 @@ type RigSettings struct {
 	Theme      *ThemeConfig      `json:"theme,omitempty"`       // tmux theme settings
 	Namepool   *NamepoolConfig   `json:"namepool,omitempty"`    // polecat name pool settings
 	Crew       *CrewConfig       `json:"crew,omitempty"`        // crew startup settings
+	Workflow   *WorkflowConfig   `json:"workflow,omitempty"`    // workflow settings
 	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
 
 	// Agent selects which agent preset to use for this rig.
@@ -220,6 +229,10 @@ type CrewConfig struct {
 // This allows switching between different LLM backends (claude, aider, etc.)
 // without modifying startup code.
 type RuntimeConfig struct {
+	// Provider selects runtime-specific defaults and integration behavior.
+	// Known values: "claude", "codex", "generic". Default: "claude".
+	Provider string `json:"provider,omitempty"`
+
 	// Command is the CLI command to invoke (e.g., "claude", "aider").
 	// Default: "claude"
 	Command string `json:"command,omitempty"`
@@ -233,33 +246,78 @@ type RuntimeConfig struct {
 	// For claude, this is passed as the prompt argument.
 	// Empty by default (hooks handle context).
 	InitialPrompt string `json:"initial_prompt,omitempty"`
+
+	// PromptMode controls how prompts are passed to the runtime.
+	// Supported values: "arg" (append prompt arg), "none" (ignore prompt).
+	// Default: "arg" for claude/generic, "none" for codex.
+	PromptMode string `json:"prompt_mode,omitempty"`
+
+	// Session config controls environment integration for runtime session IDs.
+	Session *RuntimeSessionConfig `json:"session,omitempty"`
+
+	// Hooks config controls runtime hook installation (if supported).
+	Hooks *RuntimeHooksConfig `json:"hooks,omitempty"`
+
+	// Tmux config controls process detection and readiness heuristics.
+	Tmux *RuntimeTmuxConfig `json:"tmux,omitempty"`
+
+	// Instructions controls the per-workspace instruction file name.
+	Instructions *RuntimeInstructionsConfig `json:"instructions,omitempty"`
+}
+
+// RuntimeSessionConfig configures how Gas Town discovers runtime session IDs.
+type RuntimeSessionConfig struct {
+	// SessionIDEnv is the environment variable set by the runtime to identify a session.
+	// Default: "CLAUDE_SESSION_ID" for claude, empty for codex/generic.
+	SessionIDEnv string `json:"session_id_env,omitempty"`
+
+	// ConfigDirEnv is the environment variable that selects a runtime account/config dir.
+	// Default: "CLAUDE_CONFIG_DIR" for claude, empty for codex/generic.
+	ConfigDirEnv string `json:"config_dir_env,omitempty"`
+}
+
+// RuntimeHooksConfig configures runtime hook installation.
+type RuntimeHooksConfig struct {
+	// Provider controls which hook templates to install: "claude", "opencode", or "none".
+	Provider string `json:"provider,omitempty"`
+
+	// Dir is the settings directory (e.g., ".claude").
+	Dir string `json:"dir,omitempty"`
+
+	// SettingsFile is the settings file name (e.g., "settings.json").
+	SettingsFile string `json:"settings_file,omitempty"`
+}
+
+// RuntimeTmuxConfig controls tmux heuristics for detecting runtime readiness.
+type RuntimeTmuxConfig struct {
+	// ProcessNames are tmux pane commands that indicate the runtime is running.
+	ProcessNames []string `json:"process_names,omitempty"`
+
+	// ReadyPromptPrefix is the prompt prefix to detect readiness (e.g., "> ").
+	ReadyPromptPrefix string `json:"ready_prompt_prefix,omitempty"`
+
+	// ReadyDelayMs is a fixed delay used when prompt detection is unavailable.
+	ReadyDelayMs int `json:"ready_delay_ms,omitempty"`
+}
+
+// RuntimeInstructionsConfig controls the name of the role instruction file.
+type RuntimeInstructionsConfig struct {
+	// File is the instruction filename (e.g., "CLAUDE.md", "AGENTS.md").
+	File string `json:"file,omitempty"`
 }
 
 // DefaultRuntimeConfig returns a RuntimeConfig with sensible defaults.
 func DefaultRuntimeConfig() *RuntimeConfig {
-	return &RuntimeConfig{
-		Command: "claude",
-		Args:    []string{"--dangerously-skip-permissions"},
-	}
+	return normalizeRuntimeConfig(&RuntimeConfig{Provider: "claude"})
 }
 
 // BuildCommand returns the full command line string.
 // For use with tmux SendKeys.
 func (rc *RuntimeConfig) BuildCommand() string {
-	if rc == nil {
-		return DefaultRuntimeConfig().BuildCommand()
-	}
+	resolved := normalizeRuntimeConfig(rc)
 
-	cmd := rc.Command
-	if cmd == "" {
-		cmd = "claude"
-	}
-
-	// Build args
-	args := rc.Args
-	if args == nil {
-		args = []string{"--dangerously-skip-permissions"}
-	}
+	cmd := resolved.Command
+	args := resolved.Args
 
 	// Combine command and args
 	if len(args) > 0 {
@@ -272,20 +330,231 @@ func (rc *RuntimeConfig) BuildCommand() string {
 // If the config has an InitialPrompt, it's appended as a quoted argument.
 // If prompt is provided, it overrides the config's InitialPrompt.
 func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
-	base := rc.BuildCommand()
+	resolved := normalizeRuntimeConfig(rc)
+	base := resolved.BuildCommand()
 
 	// Use provided prompt or fall back to config
 	p := prompt
-	if p == "" && rc != nil {
-		p = rc.InitialPrompt
+	if p == "" {
+		p = resolved.InitialPrompt
 	}
 
-	if p == "" {
+	if p == "" || resolved.PromptMode == "none" {
 		return base
 	}
 
 	// Quote the prompt for shell safety
 	return base + " " + quoteForShell(p)
+}
+
+// BuildArgsWithPrompt returns the runtime command and args suitable for exec.
+func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
+	resolved := normalizeRuntimeConfig(rc)
+	args := append([]string{resolved.Command}, resolved.Args...)
+
+	p := prompt
+	if p == "" {
+		p = resolved.InitialPrompt
+	}
+
+	if p != "" && resolved.PromptMode != "none" {
+		args = append(args, p)
+	}
+
+	return args
+}
+
+func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
+	if rc == nil {
+		rc = &RuntimeConfig{}
+	}
+
+	if rc.Provider == "" {
+		rc.Provider = "claude"
+	}
+
+	if rc.Command == "" {
+		rc.Command = defaultRuntimeCommand(rc.Provider)
+	}
+
+	if rc.Args == nil {
+		rc.Args = defaultRuntimeArgs(rc.Provider)
+	}
+
+	if rc.PromptMode == "" {
+		rc.PromptMode = defaultPromptMode(rc.Provider)
+	}
+
+	if rc.Session == nil {
+		rc.Session = &RuntimeSessionConfig{}
+	}
+
+	if rc.Session.SessionIDEnv == "" {
+		rc.Session.SessionIDEnv = defaultSessionIDEnv(rc.Provider)
+	}
+
+	if rc.Session.ConfigDirEnv == "" {
+		rc.Session.ConfigDirEnv = defaultConfigDirEnv(rc.Provider)
+	}
+
+	if rc.Hooks == nil {
+		rc.Hooks = &RuntimeHooksConfig{}
+	}
+
+	if rc.Hooks.Provider == "" {
+		rc.Hooks.Provider = defaultHooksProvider(rc.Provider)
+	}
+
+	if rc.Hooks.Dir == "" {
+		rc.Hooks.Dir = defaultHooksDir(rc.Provider)
+	}
+
+	if rc.Hooks.SettingsFile == "" {
+		rc.Hooks.SettingsFile = defaultHooksFile(rc.Provider)
+	}
+
+	if rc.Tmux == nil {
+		rc.Tmux = &RuntimeTmuxConfig{}
+	}
+
+	if rc.Tmux.ProcessNames == nil {
+		rc.Tmux.ProcessNames = defaultProcessNames(rc.Provider, rc.Command)
+	}
+
+	if rc.Tmux.ReadyPromptPrefix == "" {
+		rc.Tmux.ReadyPromptPrefix = defaultReadyPromptPrefix(rc.Provider)
+	}
+
+	if rc.Tmux.ReadyDelayMs == 0 {
+		rc.Tmux.ReadyDelayMs = defaultReadyDelayMs(rc.Provider)
+	}
+
+	if rc.Instructions == nil {
+		rc.Instructions = &RuntimeInstructionsConfig{}
+	}
+
+	if rc.Instructions.File == "" {
+		rc.Instructions.File = defaultInstructionsFile(rc.Provider)
+	}
+
+	return rc
+}
+
+func defaultRuntimeCommand(provider string) string {
+	switch provider {
+	case "codex":
+		return "codex"
+	case "opencode":
+		return "opencode"
+	case "generic":
+		return ""
+	default:
+		return "claude"
+	}
+}
+
+func defaultRuntimeArgs(provider string) []string {
+	switch provider {
+	case "claude":
+		return []string{"--dangerously-skip-permissions"}
+	default:
+		return nil
+	}
+}
+
+func defaultPromptMode(provider string) string {
+	switch provider {
+	case "codex":
+		return "none"
+	case "opencode":
+		return "none"
+	default:
+		return "arg"
+	}
+}
+
+func defaultSessionIDEnv(provider string) string {
+	if provider == "claude" {
+		return "CLAUDE_SESSION_ID"
+	}
+	return ""
+}
+
+func defaultConfigDirEnv(provider string) string {
+	if provider == "claude" {
+		return "CLAUDE_CONFIG_DIR"
+	}
+	return ""
+}
+
+func defaultHooksProvider(provider string) string {
+	switch provider {
+	case "claude":
+		return "claude"
+	case "opencode":
+		return "opencode"
+	default:
+		return "none"
+	}
+}
+
+func defaultHooksDir(provider string) string {
+	switch provider {
+	case "claude":
+		return ".claude"
+	case "opencode":
+		return ".opencode/plugin"
+	default:
+		return ""
+	}
+}
+
+func defaultHooksFile(provider string) string {
+	switch provider {
+	case "claude":
+		return "settings.json"
+	case "opencode":
+		return "gastown.js"
+	default:
+		return ""
+	}
+}
+
+func defaultProcessNames(provider, command string) []string {
+	if provider == "claude" {
+		return []string{"node"}
+	}
+	if command != "" {
+		return []string{filepath.Base(command)}
+	}
+	return nil
+}
+
+func defaultReadyPromptPrefix(provider string) string {
+	if provider == "claude" {
+		return "> "
+	}
+	return ""
+}
+
+func defaultReadyDelayMs(provider string) int {
+	if provider == "claude" {
+		return 10000
+	}
+	if provider == "codex" {
+		return 3000
+	}
+	return 0
+}
+
+func defaultInstructionsFile(provider string) string {
+	if provider == "codex" {
+		return "AGENTS.md"
+	}
+	if provider == "opencode" {
+		return "AGENTS.md"
+	}
+	return "CLAUDE.md"
 }
 
 // quoteForShell quotes a string for safe shell usage.
@@ -343,6 +612,14 @@ type MergeQueueConfig struct {
 
 	// IntegrationBranches enables integration branch workflow for epics.
 	IntegrationBranches bool `json:"integration_branches"`
+
+	// IntegrationBranchTemplate is the pattern for integration branch names.
+	// Supports variables: {epic}, {prefix}, {user}
+	// - {epic}: Full epic ID (e.g., "RA-123")
+	// - {prefix}: Epic prefix before first hyphen (e.g., "RA")
+	// - {user}: Git user.name (e.g., "klauern")
+	// Default: "integration/{epic}"
+	IntegrationBranchTemplate string `json:"integration_branch_template,omitempty"`
 
 	// OnConflict specifies conflict resolution strategy: "assign_back" or "auto_rebase".
 	OnConflict string `json:"on_conflict"`

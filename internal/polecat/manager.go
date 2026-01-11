@@ -1,3 +1,5 @@
+// Liftoff test: 2026-01-09T14:30:00
+
 package polecat
 
 import (
@@ -177,9 +179,34 @@ func (m *Manager) repoBase() (*git.Git, error) {
 	return git.NewGit(mayorPath), nil
 }
 
-// polecatDir returns the directory for a polecat.
+// polecatDir returns the parent directory for a polecat.
+// This is polecats/<name>/ - the polecat's home directory.
 func (m *Manager) polecatDir(name string) string {
 	return filepath.Join(m.rig.Path, "polecats", name)
+}
+
+// clonePath returns the path where the git worktree lives.
+// New structure: polecats/<name>/<rigname>/ - gives LLMs recognizable repo context.
+// Falls back to old structure: polecats/<name>/ for backward compatibility.
+func (m *Manager) clonePath(name string) string {
+	// New structure: polecats/<name>/<rigname>/
+	newPath := filepath.Join(m.rig.Path, "polecats", name, m.rig.Name)
+	if info, err := os.Stat(newPath); err == nil && info.IsDir() {
+		return newPath
+	}
+
+	// Old structure: polecats/<name>/ (backward compat)
+	oldPath := filepath.Join(m.rig.Path, "polecats", name)
+	if info, err := os.Stat(oldPath); err == nil && info.IsDir() {
+		// Check if this is actually a git worktree (has .git file or dir)
+		gitPath := filepath.Join(oldPath, ".git")
+		if _, err := os.Stat(gitPath); err == nil {
+			return oldPath
+		}
+	}
+
+	// Default to new structure for new polecats
+	return newPath
 }
 
 // exists checks if a polecat exists.
@@ -213,15 +240,18 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, ErrPolecatExists
 	}
 
-	polecatPath := m.polecatDir(name)
+	// New structure: polecats/<name>/<rigname>/ for LLM ergonomics
+	// The polecat's home dir is polecats/<name>/, worktree is polecats/<name>/<rigname>/
+	polecatDir := m.polecatDir(name)
+	clonePath := filepath.Join(polecatDir, m.rig.Name)
+
 	// Unique branch per run - prevents drift from stale branches
 	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
 	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
 
-	// Create polecats directory if needed
-	polecatsDir := filepath.Join(m.rig.Path, "polecats")
-	if err := os.MkdirAll(polecatsDir, 0755); err != nil {
-		return nil, fmt.Errorf("creating polecats dir: %w", err)
+	// Create polecat directory (polecats/<name>/)
+	if err := os.MkdirAll(polecatDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating polecat dir: %w", err)
 	}
 
 	// Get the repo base (bare repo or mayor/rig)
@@ -232,7 +262,8 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 
 	// Always create fresh branch - unique name guarantees no collision
 	// git worktree add -b polecat/<name>-<timestamp> <path>
-	if err := repoGit.WorktreeAdd(polecatPath, branchName); err != nil {
+	// Worktree goes in polecats/<name>/<rigname>/ for LLM ergonomics
+	if err := repoGit.WorktreeAdd(clonePath, branchName); err != nil {
 		return nil, fmt.Errorf("creating worktree: %w", err)
 	}
 
@@ -243,10 +274,25 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 
 	// Set up shared beads: polecat uses rig's .beads via redirect file.
 	// This eliminates git sync overhead - all polecats share one database.
-	if err := m.setupSharedBeads(polecatPath); err != nil {
+	if err := m.setupSharedBeads(clonePath); err != nil {
 		// Non-fatal - polecat can still work with local beads
 		// Log warning but don't fail the spawn
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Provision PRIME.md with Gas Town context for this worker.
+	// This is the fallback if SessionStart hook fails - ensures polecats
+	// always have GUPP and essential Gas Town context.
+	if err := beads.ProvisionPrimeMDForWorktree(clonePath); err != nil {
+		// Non-fatal - polecat can still work via hook, warn but don't fail
+		fmt.Printf("Warning: could not provision PRIME.md: %v\n", err)
+	}
+
+	// Copy overlay files from .runtime/overlay/ to polecat root.
+	// This allows services to have .env and other config files at their root.
+	if err := rig.CopyOverlay(m.rig.Path, clonePath); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
@@ -275,7 +321,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		Name:      name,
 		Rig:       m.rig.Name,
 		State:     StateWorking, // Transient model: polecat spawns with work
-		ClonePath: polecatPath,
+		ClonePath: clonePath,
 		Branch:    branchName,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -302,7 +348,10 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 		return ErrPolecatNotFound
 	}
 
-	polecatPath := m.polecatDir(name)
+	// Clone path is where the git worktree lives (new or old structure)
+	clonePath := m.clonePath(name)
+	// Polecat dir is the parent directory (polecats/<name>/)
+	polecatDir := m.polecatDir(name)
 
 	// Check for uncommitted work unless bypassed
 	if !nuclear {
@@ -317,7 +366,7 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 			}
 		} else {
 			// Fallback path: Check git directly (for polecats that haven't reported yet)
-			polecatGit := git.NewGit(polecatPath)
+			polecatGit := git.NewGit(clonePath)
 			status, err := polecatGit.CheckUncommittedWork()
 			if err == nil && !status.Clean() {
 				// For backward compatibility: force only bypasses uncommitted changes, not stashes/unpushed
@@ -337,16 +386,22 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 	repoGit, err := m.repoBase()
 	if err != nil {
 		// Fall back to direct removal if repo base not found
-		return os.RemoveAll(polecatPath)
+		return os.RemoveAll(polecatDir)
 	}
 
 	// Try to remove as a worktree first (use force flag for worktree removal too)
-	if err := repoGit.WorktreeRemove(polecatPath, force); err != nil {
+	if err := repoGit.WorktreeRemove(clonePath, force); err != nil {
 		// Fall back to direct removal if worktree removal fails
 		// (e.g., if this is an old-style clone, not a worktree)
-		if removeErr := os.RemoveAll(polecatPath); removeErr != nil {
-			return fmt.Errorf("removing polecat dir: %w", removeErr)
+		if removeErr := os.RemoveAll(clonePath); removeErr != nil {
+			return fmt.Errorf("removing clone path: %w", removeErr)
 		}
+	}
+
+	// Also remove the parent polecat directory if it's now empty
+	// (for new structure: polecats/<name>/ contains only polecats/<name>/<rigname>/)
+	if polecatDir != clonePath {
+		_ = os.Remove(polecatDir) // Non-fatal: only removes if empty
 	}
 
 	// Prune any stale worktree entries (non-fatal: cleanup only)
@@ -411,13 +466,19 @@ func (m *Manager) RepairWorktree(name string, force bool) (*Polecat, error) {
 // RepairWorktreeWithOptions repairs a stale polecat and creates a fresh worktree with options.
 // This is NOT for normal operation - see RepairWorktree for context.
 // Allows setting hook_bead atomically at repair time.
+// After repair, uses new structure: polecats/<name>/<rigname>/
 func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOptions) (*Polecat, error) {
 	if !m.exists(name) {
 		return nil, ErrPolecatNotFound
 	}
 
-	polecatPath := m.polecatDir(name)
-	polecatGit := git.NewGit(polecatPath)
+	// Get the old clone path (may be old or new structure)
+	oldClonePath := m.clonePath(name)
+	polecatGit := git.NewGit(oldClonePath)
+
+	// New clone path uses new structure
+	polecatDir := m.polecatDir(name)
+	newClonePath := filepath.Join(polecatDir, m.rig.Name)
 
 	// Get the repo base (bare repo or mayor/rig)
 	repoGit, err := m.repoBase()
@@ -441,11 +502,11 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		}
 	}
 
-	// Remove the worktree (use force for git worktree removal)
-	if err := repoGit.WorktreeRemove(polecatPath, true); err != nil {
+	// Remove the old worktree (use force for git worktree removal)
+	if err := repoGit.WorktreeRemove(oldClonePath, true); err != nil {
 		// Fall back to direct removal
-		if removeErr := os.RemoveAll(polecatPath); removeErr != nil {
-			return nil, fmt.Errorf("removing polecat dir: %w", removeErr)
+		if removeErr := os.RemoveAll(oldClonePath); removeErr != nil {
+			return nil, fmt.Errorf("removing old clone path: %w", removeErr)
 		}
 	}
 
@@ -454,6 +515,11 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 
 	// Fetch latest from origin to ensure we have fresh commits (non-fatal: may be offline)
 	_ = repoGit.Fetch("origin")
+
+	// Ensure polecat directory exists for new structure
+	if err := os.MkdirAll(polecatDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating polecat dir: %w", err)
+	}
 
 	// Determine the start point for the new worktree
 	// Use origin/<default-branch> to ensure we start from latest fetched commits
@@ -468,7 +534,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// and will be cleaned up by garbage collection
 	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
 	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
-	if err := repoGit.WorktreeAddFromRef(polecatPath, branchName, startPoint); err != nil {
+	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
 
@@ -476,8 +542,13 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
 
 	// Set up shared beads
-	if err := m.setupSharedBeads(polecatPath); err != nil {
+	if err := m.setupSharedBeads(newClonePath); err != nil {
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Copy overlay files from .runtime/overlay/ to polecat root.
+	if err := rig.CopyOverlay(m.rig.Path, newClonePath); err != nil {
+		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
 	// NOTE: Slash commands inherited from town level - no per-workspace copies needed.
@@ -501,15 +572,16 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		Name:      name,
 		Rig:       m.rig.Name,
 		State:     StateWorking,
-		ClonePath: polecatPath,
+		ClonePath: newClonePath,
 		Branch:    branchName,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}, nil
 }
 
-// ReconcilePool syncs pool state with existing polecat directories.
-// This should be called to recover from crashes or stale state.
+// ReconcilePool derives pool InUse state from existing polecat directories.
+// This implements ZFC: InUse is discovered from filesystem, not tracked separately.
+// Called before each allocation to ensure InUse reflects reality.
 func (m *Manager) ReconcilePool() {
 	polecats, err := m.List()
 	if err != nil {
@@ -522,7 +594,7 @@ func (m *Manager) ReconcilePool() {
 	}
 
 	m.namePool.Reconcile(names)
-	_ = m.namePool.Save() // non-fatal: state file update
+	// Note: No Save() needed - InUse is transient state, only OverflowNext is persisted
 }
 
 // PoolStatus returns information about the name pool.
@@ -674,10 +746,12 @@ func (m *Manager) ClearIssue(name string) error {
 // Transient polecats should always have work; no work means ready for Witness cleanup.
 // We don't interpret issue status (ZFC: Go is transport, not decision-maker).
 func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
-	polecatPath := m.polecatDir(name)
+	// Use clonePath which handles both new (polecats/<name>/<rigname>/)
+	// and old (polecats/<name>/) structures
+	clonePath := m.clonePath(name)
 
 	// Get actual branch from worktree (branches are now timestamped)
-	polecatGit := git.NewGit(polecatPath)
+	polecatGit := git.NewGit(clonePath)
 	branchName, err := polecatGit.CurrentBranch()
 	if err != nil {
 		// Fall back to old format if we can't read the branch
@@ -694,7 +768,7 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 			Name:      name,
 			Rig:       m.rig.Name,
 			State:     StateWorking,
-			ClonePath: polecatPath,
+			ClonePath: clonePath,
 			Branch:    branchName,
 		}, nil
 	}
@@ -712,7 +786,7 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		Name:      name,
 		Rig:       m.rig.Name,
 		State:     state,
-		ClonePath: polecatPath,
+		ClonePath: clonePath,
 		Branch:    branchName,
 		Issue:     issueID,
 	}, nil
@@ -720,9 +794,9 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.
 // This eliminates the need for git sync between polecat clones - all polecats share one database.
-func (m *Manager) setupSharedBeads(polecatPath string) error {
+func (m *Manager) setupSharedBeads(clonePath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
-	return beads.SetupRedirect(townRoot, polecatPath)
+	return beads.SetupRedirect(townRoot, clonePath)
 }
 
 // CleanupStaleBranches removes orphaned polecat branches that are no longer in use.

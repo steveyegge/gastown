@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/runtime"
 )
 
 // Filename is the checkpoint file name within the polecat directory.
@@ -84,7 +86,7 @@ func Write(polecatDir string, cp *Checkpoint) error {
 
 	// Set session ID from environment if available
 	if cp.SessionID == "" {
-		cp.SessionID = os.Getenv("CLAUDE_SESSION_ID")
+		cp.SessionID = runtime.SessionIDFromEnv()
 		if cp.SessionID == "" {
 			cp.SessionID = fmt.Sprintf("pid-%d", os.Getpid())
 		}

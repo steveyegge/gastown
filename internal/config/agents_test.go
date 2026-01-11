@@ -9,6 +9,7 @@ import (
 )
 
 func TestBuiltinPresets(t *testing.T) {
+	t.Parallel()
 	// Ensure all built-in presets are accessible
 	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
 
@@ -31,6 +32,7 @@ func TestBuiltinPresets(t *testing.T) {
 }
 
 func TestGetAgentPresetByName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		want    AgentPreset
@@ -64,6 +66,7 @@ func TestGetAgentPresetByName(t *testing.T) {
 }
 
 func TestRuntimeConfigFromPreset(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		preset      AgentPreset
 		wantCommand string
@@ -88,6 +91,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 }
 
 func TestIsKnownPreset(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		want bool
@@ -168,6 +172,7 @@ func TestLoadAgentRegistry(t *testing.T) {
 }
 
 func TestAgentPresetYOLOFlags(t *testing.T) {
+	t.Parallel()
 	// Verify YOLO flags are set correctly for each E2E tested agent
 	tests := []struct {
 		preset  AgentPreset
@@ -200,6 +205,7 @@ func TestAgentPresetYOLOFlags(t *testing.T) {
 }
 
 func TestMergeWithPreset(t *testing.T) {
+	t.Parallel()
 	// Test that user config overrides preset defaults
 	userConfig := &RuntimeConfig{
 		Command: "/custom/claude",
@@ -234,6 +240,7 @@ func TestMergeWithPreset(t *testing.T) {
 }
 
 func TestBuildResumeCommand(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		agentName string
@@ -297,6 +304,7 @@ func TestBuildResumeCommand(t *testing.T) {
 }
 
 func TestSupportsSessionResume(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		agentName string
 		want      bool
@@ -320,6 +328,7 @@ func TestSupportsSessionResume(t *testing.T) {
 }
 
 func TestGetSessionIDEnvVar(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		agentName string
 		want      string
@@ -343,6 +352,7 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 }
 
 func TestGetProcessNames(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		agentName string
 		want      []string
@@ -373,6 +383,7 @@ func TestGetProcessNames(t *testing.T) {
 }
 
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
+	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
 	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
 	presets := ListAgentPresets()
@@ -399,6 +410,7 @@ func TestListAgentPresetsMatchesConstants(t *testing.T) {
 }
 
 func TestAgentCommandGeneration(t *testing.T) {
+	t.Parallel()
 	// Test full command line generation for each agent
 	tests := []struct {
 		preset       AgentPreset
@@ -467,6 +479,7 @@ func TestAgentCommandGeneration(t *testing.T) {
 }
 
 func TestCursorAgentPreset(t *testing.T) {
+	t.Parallel()
 	// Verify cursor agent preset is correctly configured
 	info := GetAgentPreset(AgentCursor)
 	if info == nil {
@@ -509,6 +522,7 @@ func TestCursorAgentPreset(t *testing.T) {
 
 // TestDefaultRigAgentRegistryPath verifies that the default rig agent registry path is constructed correctly.
 func TestDefaultRigAgentRegistryPath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		rigPath      string
 		expectedPath string

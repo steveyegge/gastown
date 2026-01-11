@@ -28,6 +28,7 @@ func NewPatrolMoleculesExistCheck() *PatrolMoleculesExistCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "patrol-molecules-exist",
 				CheckDescription: "Check if patrol molecules exist for each rig",
+				CheckCategory:    CategoryPatrol,
 			},
 		},
 	}
@@ -155,6 +156,7 @@ func NewPatrolHooksWiredCheck() *PatrolHooksWiredCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "patrol-hooks-wired",
 				CheckDescription: "Check if hooks trigger patrol execution",
+				CheckCategory:    CategoryPatrol,
 			},
 		},
 	}
@@ -219,19 +221,41 @@ type PatrolNotStuckCheck struct {
 	stuckThreshold time.Duration
 }
 
+// DefaultStuckThreshold is the fallback when no role bead config exists.
+// Per ZFC: "Let agents decide thresholds. 'Stuck' is a judgment call."
+const DefaultStuckThreshold = 1 * time.Hour
+
 // NewPatrolNotStuckCheck creates a new patrol not stuck check.
 func NewPatrolNotStuckCheck() *PatrolNotStuckCheck {
 	return &PatrolNotStuckCheck{
 		BaseCheck: BaseCheck{
 			CheckName:        "patrol-not-stuck",
 			CheckDescription: "Check for stuck patrol wisps (>1h in_progress)",
+			CheckCategory:    CategoryPatrol,
 		},
-		stuckThreshold: 1 * time.Hour,
+		stuckThreshold: DefaultStuckThreshold,
 	}
+}
+
+// loadStuckThreshold loads the stuck threshold from the Deacon's role bead.
+// Returns the default if no config exists.
+func loadStuckThreshold(townRoot string) time.Duration {
+	bd := beads.NewWithBeadsDir(townRoot, beads.ResolveBeadsDir(townRoot))
+	roleConfig, err := bd.GetRoleConfig(beads.RoleBeadIDTown("deacon"))
+	if err != nil || roleConfig == nil || roleConfig.StuckThreshold == "" {
+		return DefaultStuckThreshold
+	}
+	if d, err := time.ParseDuration(roleConfig.StuckThreshold); err == nil {
+		return d
+	}
+	return DefaultStuckThreshold
 }
 
 // Run checks for stuck patrol wisps.
 func (c *PatrolNotStuckCheck) Run(ctx *CheckContext) *CheckResult {
+	// Load threshold from role bead (ZFC: agent-controlled)
+	c.stuckThreshold = loadStuckThreshold(ctx.TownRoot)
+
 	rigs, err := discoverRigs(ctx.TownRoot)
 	if err != nil {
 		return &CheckResult{
@@ -261,11 +285,12 @@ func (c *PatrolNotStuckCheck) Run(ctx *CheckContext) *CheckResult {
 		stuckWisps = append(stuckWisps, stuck...)
 	}
 
+	thresholdStr := c.stuckThreshold.String()
 	if len(stuckWisps) > 0 {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("%d stuck patrol wisp(s) found (>1h)", len(stuckWisps)),
+			Message: fmt.Sprintf("%d stuck patrol wisp(s) found (>%s)", len(stuckWisps), thresholdStr),
 			Details: stuckWisps,
 			FixHint: "Manual review required - wisps may need to be burned or sessions restarted",
 		}
@@ -329,6 +354,7 @@ func NewPatrolPluginsAccessibleCheck() *PatrolPluginsAccessibleCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "patrol-plugins-accessible",
 				CheckDescription: "Check if plugin directories exist and are readable",
+				CheckCategory:    CategoryPatrol,
 			},
 		},
 	}
@@ -398,6 +424,7 @@ func NewPatrolRolesHavePromptsCheck() *PatrolRolesHavePromptsCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "patrol-roles-have-prompts",
 				CheckDescription: "Check if internal/templates/roles/*.md.tmpl exist for each patrol role",
+				CheckCategory:    CategoryPatrol,
 			},
 		},
 	}

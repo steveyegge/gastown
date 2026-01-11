@@ -3,6 +3,7 @@ package rig
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,9 +56,14 @@ func createTestRig(t *testing.T, root, name string) {
 			t.Fatalf("mkdir polecat: %v", err)
 		}
 	}
+	// Create a shared support dir that should not be treated as a polecat worktree.
+	if err := os.MkdirAll(filepath.Join(polecatsDir, ".claude"), 0755); err != nil {
+		t.Fatalf("mkdir polecats/.claude: %v", err)
+	}
 }
 
 func TestDiscoverRigs(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 
 	// Create test rig
@@ -84,6 +90,9 @@ func TestDiscoverRigs(t *testing.T) {
 	if len(rig.Polecats) != 2 {
 		t.Errorf("Polecats count = %d, want 2", len(rig.Polecats))
 	}
+	if slices.Contains(rig.Polecats, ".claude") {
+		t.Errorf("expected polecats/.claude to be ignored, got %v", rig.Polecats)
+	}
 	if !rig.HasWitness {
 		t.Error("expected HasWitness = true")
 	}
@@ -93,6 +102,7 @@ func TestDiscoverRigs(t *testing.T) {
 }
 
 func TestGetRig(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 
 	createTestRig(t, root, "test-rig")
@@ -113,6 +123,7 @@ func TestGetRig(t *testing.T) {
 }
 
 func TestGetRigNotFound(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -123,6 +134,7 @@ func TestGetRigNotFound(t *testing.T) {
 }
 
 func TestRigExists(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	rigsConfig.Rigs["exists"] = config.RigEntry{}
 
@@ -137,6 +149,7 @@ func TestRigExists(t *testing.T) {
 }
 
 func TestRemoveRig(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	rigsConfig.Rigs["to-remove"] = config.RigEntry{}
 
@@ -152,6 +165,7 @@ func TestRemoveRig(t *testing.T) {
 }
 
 func TestRemoveRigNotFound(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -162,6 +176,7 @@ func TestRemoveRigNotFound(t *testing.T) {
 }
 
 func TestAddRig_RejectsInvalidNames(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -193,6 +208,7 @@ func TestAddRig_RejectsInvalidNames(t *testing.T) {
 }
 
 func TestListRigNames(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	rigsConfig.Rigs["rig1"] = config.RigEntry{}
 	rigsConfig.Rigs["rig2"] = config.RigEntry{}
@@ -206,6 +222,7 @@ func TestListRigNames(t *testing.T) {
 }
 
 func TestRigSummary(t *testing.T) {
+	t.Parallel()
 	rig := &Rig{
 		Name:        "test",
 		Polecats:    []string{"a", "b", "c"},
@@ -230,6 +247,7 @@ func TestRigSummary(t *testing.T) {
 }
 
 func TestEnsureGitignoreEntry_AddsEntry(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -246,6 +264,7 @@ func TestEnsureGitignoreEntry_AddsEntry(t *testing.T) {
 }
 
 func TestEnsureGitignoreEntry_DoesNotDuplicate(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -267,6 +286,7 @@ func TestEnsureGitignoreEntry_DoesNotDuplicate(t *testing.T) {
 }
 
 func TestEnsureGitignoreEntry_AppendsToExisting(t *testing.T) {
+	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -289,6 +309,7 @@ func TestEnsureGitignoreEntry_AppendsToExisting(t *testing.T) {
 }
 
 func TestInitBeadsWritesConfigOnFailure(t *testing.T) {
+	// Cannot use t.Parallel() due to t.Setenv
 	rigPath := t.TempDir()
 	beadsDir := filepath.Join(rigPath, ".beads")
 
@@ -324,6 +345,7 @@ exit 1
 }
 
 func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
+	// Cannot use t.Parallel() due to t.Setenv
 	// Rig-level agent beads (witness, refinery) are stored in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
 	// This test verifies that rig agent beads are created in the rig directory,
@@ -412,6 +434,7 @@ esac
 }
 
 func TestIsValidBeadsPrefix(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		prefix string
 		want   bool
@@ -430,17 +453,17 @@ func TestIsValidBeadsPrefix(t *testing.T) {
 		{"a-b-c", true},
 
 		// Invalid prefixes
-		{"", false},                    // empty
-		{"1abc", false},                // starts with number
-		{"-abc", false},                // starts with hyphen
-		{"abc def", false},             // contains space
-		{"abc;ls", false},              // shell injection attempt
-		{"$(whoami)", false},           // command substitution
-		{"`id`", false},                // backtick command
-		{"abc|cat", false},             // pipe
-		{"../etc/passwd", false},       // path traversal
+		{"", false},                      // empty
+		{"1abc", false},                  // starts with number
+		{"-abc", false},                  // starts with hyphen
+		{"abc def", false},               // contains space
+		{"abc;ls", false},                // shell injection attempt
+		{"$(whoami)", false},             // command substitution
+		{"`id`", false},                  // backtick command
+		{"abc|cat", false},               // pipe
+		{"../etc/passwd", false},         // path traversal
 		{"aaaaaaaaaaaaaaaaaaaaa", false}, // too long (21 chars, >20 limit)
-		{"valid-but-with-$var", false}, // variable reference
+		{"valid-but-with-$var", false},   // variable reference
 	}
 
 	for _, tt := range tests {
@@ -454,6 +477,7 @@ func TestIsValidBeadsPrefix(t *testing.T) {
 }
 
 func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
+	t.Parallel()
 	rigPath := t.TempDir()
 	manager := &Manager{}
 
@@ -473,6 +497,99 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "invalid beads prefix") {
 				t.Errorf("initBeads(%q) error = %q, want error containing 'invalid beads prefix'", prefix, err.Error())
+			}
+		})
+	}
+}
+
+func TestDeriveBeadsPrefix(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		want string
+	}{
+		// Compound words with common suffixes should split
+		{"gastown", "gt"},       // gas + town
+		{"nashville", "nv"},     // nash + ville
+		{"bridgeport", "bp"},    // bridge + port
+		{"someplace", "sp"},     // some + place
+		{"greenland", "gl"},     // green + land
+		{"springfield", "sf"},   // spring + field
+		{"hollywood", "hw"},     // holly + wood
+		{"oxford", "of"},        // ox + ford
+
+		// Hyphenated names
+		{"my-project", "mp"},
+		{"gas-town", "gt"},
+		{"some-long-name", "sln"},
+
+		// Underscored names
+		{"my_project", "mp"},
+
+		// Short single words (use the whole name)
+		{"foo", "foo"},
+		{"bar", "bar"},
+		{"ab", "ab"},
+
+		// Longer single words without known suffixes (first 2 chars)
+		{"myrig", "my"},
+		{"awesome", "aw"},
+		{"coolrig", "co"},
+
+		// With language suffixes stripped
+		{"myproject-py", "my"},
+		{"myproject-go", "my"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deriveBeadsPrefix(tt.name)
+			if got != tt.want {
+				t.Errorf("deriveBeadsPrefix(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSplitCompoundWord(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		word string
+		want []string
+	}{
+		// Known suffixes
+		{"gastown", []string{"gas", "town"}},
+		{"nashville", []string{"nash", "ville"}},
+		{"bridgeport", []string{"bridge", "port"}},
+		{"someplace", []string{"some", "place"}},
+		{"greenland", []string{"green", "land"}},
+		{"springfield", []string{"spring", "field"}},
+		{"hollywood", []string{"holly", "wood"}},
+		{"oxford", []string{"ox", "ford"}},
+
+		// Just the suffix (should not split)
+		{"town", []string{"town"}},
+		{"ville", []string{"ville"}},
+
+		// No known suffix
+		{"myrig", []string{"myrig"}},
+		{"awesome", []string{"awesome"}},
+
+		// Empty prefix would result (should not split)
+		// Note: "town" itself shouldn't split to ["", "town"]
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.word, func(t *testing.T) {
+			got := splitCompoundWord(tt.word)
+			if len(got) != len(tt.want) {
+				t.Errorf("splitCompoundWord(%q) = %v, want %v", tt.word, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("splitCompoundWord(%q)[%d] = %q, want %q", tt.word, i, got[i], tt.want[i])
+				}
 			}
 		})
 	}

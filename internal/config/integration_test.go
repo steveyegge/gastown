@@ -25,6 +25,7 @@ import (
 // 3. Verifies that BuildPolecatStartupCommand uses the custom agent
 // 4. Optionally spawns a tmux session and verifies output (if tmux available)
 func TestRigLevelCustomAgentIntegration(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Create the stub agent script
@@ -308,7 +309,7 @@ func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName s
 		t.Fatalf("Failed to send keys: %v", err)
 	}
 
-	output, found := pollForOutput(t, sessionName, "STUB_AGENT_STARTED", 12*time.Second)
+	output, found := pollForOutput(t, sessionName, "STUB_AGENT_STARTED", 5*time.Second)
 	if !found {
 		t.Skipf("stub agent output not detected; tmux capture unreliable. Output:\n%s", output)
 	}
@@ -322,7 +323,7 @@ func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName s
 		t.Fatalf("Failed to send ping: %v", err)
 	}
 
-	output, found = pollForOutput(t, sessionName, "STUB_AGENT_ANSWER: pong", 6*time.Second)
+	output, found = pollForOutput(t, sessionName, "STUB_AGENT_ANSWER: pong", 3*time.Second)
 	if !found {
 		t.Errorf("Expected 'pong' response, got:\n%s", output)
 	}
@@ -332,7 +333,7 @@ func testTmuxSessionWithStubAgent(t *testing.T, tmpDir, stubAgentPath, rigName s
 		t.Logf("Warning: failed to send exit: %v", err)
 	}
 
-	output, found = pollForOutput(t, sessionName, "STUB_AGENT_EXITING", 3*time.Second)
+	output, found = pollForOutput(t, sessionName, "STUB_AGENT_EXITING", 2*time.Second)
 	if !found {
 		t.Logf("Note: Agent may have exited before capture. Output:\n%s", output)
 	}
@@ -371,6 +372,7 @@ func waitForTmuxOutputContains(t *testing.T, sessionName, needle string, timeout
 
 // TestRigAgentOverridesTownAgent verifies rig agents take precedence over town agents.
 func TestRigAgentOverridesTownAgent(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	townRoot := filepath.Join(tmpDir, "town")

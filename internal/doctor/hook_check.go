@@ -32,6 +32,7 @@ func NewHookAttachmentValidCheck() *HookAttachmentValidCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "hook-attachment-valid",
 				CheckDescription: "Verify attached molecules exist and are not closed",
+				CheckCategory:    CategoryHooks,
 			},
 		},
 	}
@@ -207,6 +208,7 @@ func NewHookSingletonCheck() *HookSingletonCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "hook-singleton",
 				CheckDescription: "Ensure each agent has at most one handoff bead",
+				CheckCategory:    CategoryHooks,
 			},
 		},
 	}
@@ -346,6 +348,7 @@ func NewOrphanedAttachmentsCheck() *OrphanedAttachmentsCheck {
 		BaseCheck: BaseCheck{
 			CheckName:        "orphaned-attachments",
 			CheckDescription: "Detect handoff beads for non-existent agents",
+			CheckCategory:    CategoryHooks,
 		},
 	}
 }

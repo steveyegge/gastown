@@ -222,10 +222,17 @@ instructions immediately. Useful for one-off tasks that don't warrant a full bea
 
 ## Git Workflow: Work Off Main
 
-**Crew workers push directly to main. No feature branches. NEVER create PRs.**
+**Crew workers push directly to main. No feature branches.**
 
-PRs are for external contributors submitting changes for review. As crew, you have
-direct commit access - use it. If you create a PR, you're adding unnecessary overhead.
+### No PRs in Maintainer Repos
+
+If the remote origin is `steveyegge/beads` or `steveyegge/gastown`:
+- **NEVER create GitHub PRs** - you have direct push access
+- Crew workers: push directly to main
+- Polecats: use `gt done` → Refinery merges to main
+
+PRs are for external contributors submitting to repos they don't own.
+Check `git remote -v` if unsure about repo ownership.
 
 ### The Landing Rule
 

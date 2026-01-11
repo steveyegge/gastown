@@ -25,6 +25,8 @@ func TestFormatStartupNudge(t *testing.T) {
 				"gastown/crew/gus",
 				"<- deacon",
 				"assigned:gt-abc12",
+				"Work is on your hook", // assigned includes actionable instructions
+				"gt hook",
 			},
 		},
 		{
@@ -54,6 +56,9 @@ func TestFormatStartupNudge(t *testing.T) {
 				"gastown/witness",
 				"<- self",
 				"handoff",
+				"Check your hook and mail", // handoff includes explicit instructions
+				"gt hook",
+				"gt mail inbox",
 			},
 		},
 		{

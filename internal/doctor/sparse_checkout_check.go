@@ -26,6 +26,7 @@ func NewSparseCheckoutCheck() *SparseCheckoutCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "sparse-checkout",
 				CheckDescription: "Verify sparse checkout excludes Claude context files (.claude/, CLAUDE.md, etc.)",
+				CheckCategory:    CategoryRig,
 			},
 		},
 	}

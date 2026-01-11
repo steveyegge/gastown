@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mayor"
@@ -234,7 +235,7 @@ func startRigAgents(t *tmux.Tmux, townRoot string) {
 			fmt.Printf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
 		} else {
 			witMgr := witness.NewManager(r)
-			if err := witMgr.Start(false); err != nil {
+			if err := witMgr.Start(false, "", nil); err != nil {
 				if err == witness.ErrAlreadyRunning {
 					fmt.Printf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
 				} else {
@@ -280,7 +281,14 @@ func startConfiguredCrew(t *tmux.Tmux, townRoot string) {
 				if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 					// Claude has exited, restart it
 					fmt.Printf("  %s %s/%s session exists, restarting Claude...\n", style.Dim.Render("○"), r.Name, crewName)
-					claudeCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, "gt prime")
+					// Build startup beacon for predecessor discovery via /resume
+					address := fmt.Sprintf("%s/crew/%s", r.Name, crewName)
+					beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+						Recipient: address,
+						Sender:    "human",
+						Topic:     "restart",
+					})
+					claudeCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, beacon)
 					if err := t.SendKeys(sessionID, claudeCmd); err != nil {
 						fmt.Printf("  %s %s/%s restart failed: %v\n", style.Dim.Render("○"), r.Name, crewName, err)
 					} else {
@@ -548,6 +556,12 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 		cleanupPolecats(townRoot)
 	}
 
+	// Phase 6: Stop the daemon
+	fmt.Printf("\nPhase 6: Stopping daemon...\n")
+	if townRoot != "" {
+		stopDaemonIfRunning(townRoot)
+	}
+
 	fmt.Println()
 	fmt.Printf("%s Graceful shutdown complete (%d sessions stopped)\n", style.Bold.Render("✓"), stopped)
 	return nil
@@ -565,6 +579,13 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 		fmt.Println()
 		fmt.Println("Cleaning up polecats...")
 		cleanupPolecats(townRoot)
+	}
+
+	// Stop the daemon
+	if townRoot != "" {
+		fmt.Println()
+		fmt.Println("Stopping daemon...")
+		stopDaemonIfRunning(townRoot)
 	}
 
 	fmt.Println()
@@ -713,6 +734,21 @@ func cleanupPolecats(townRoot string) {
 		fmt.Printf("  Cleaned: %d, Skipped: %d\n", totalCleaned, totalSkipped)
 	} else {
 		fmt.Printf("  %s No polecats to clean up\n", style.Dim.Render("○"))
+	}
+}
+
+// stopDaemonIfRunning stops the daemon if it is running.
+// This prevents the daemon from restarting agents after shutdown.
+func stopDaemonIfRunning(townRoot string) {
+	running, _, _ := daemon.IsRunning(townRoot)
+	if running {
+		if err := daemon.StopDaemon(townRoot); err != nil {
+			fmt.Printf("  %s Daemon: %s\n", style.Dim.Render("○"), err.Error())
+		} else {
+			fmt.Printf("  %s Daemon stopped\n", style.Bold.Render("✓"))
+		}
+	} else {
+		fmt.Printf("  %s Daemon not running\n", style.Dim.Render("○"))
 	}
 }
 

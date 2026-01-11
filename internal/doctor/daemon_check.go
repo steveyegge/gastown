@@ -20,6 +20,7 @@ func NewDaemonCheck() *DaemonCheck {
 			BaseCheck: BaseCheck{
 				CheckName:        "daemon",
 				CheckDescription: "Check if Gas Town daemon is running",
+				CheckCategory:    CategoryInfrastructure,
 			},
 		},
 	}

@@ -11,11 +11,11 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/formula"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/shell"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -309,14 +309,23 @@ func runInstall(cmd *cobra.Command, args []string) error {
 }
 
 func createMayorCLAUDEmd(mayorDir, townRoot string) error {
-	townName, _ := workspace.GetTownName(townRoot)
-	return templates.CreateMayorCLAUDEmd(
-		mayorDir,
-		townRoot,
-		townName,
-		session.MayorSessionName(),
-		session.DeaconSessionName(),
-	)
+	// Create a minimal bootstrap pointer instead of full context.
+	// Full context is injected ephemerally by `gt prime` at session start.
+	// This keeps the on-disk file small (<30 lines) per priming architecture.
+	bootstrap := `# Mayor Context
+
+> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+
+Full context is injected by ` + "`gt prime`" + ` at session start.
+
+## Quick Reference
+
+- Check mail: ` + "`gt mail inbox`" + `
+- Check rigs: ` + "`gt rig list`" + `
+- Start patrol: ` + "`gt patrol start`" + `
+`
+	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
+	return os.WriteFile(claudePath, []byte(bootstrap), 0644)
 }
 
 func writeJSON(path string, data interface{}) error {
@@ -344,12 +353,28 @@ func initTownBeads(townPath string) error {
 		}
 	}
 
+	// Configure custom types for Gas Town (agent, role, rig, convoy, slot).
+	// These were extracted from beads core in v0.46.0 and now require explicit config.
+	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	configCmd.Dir = townPath
+	if configOutput, configErr := configCmd.CombinedOutput(); configErr != nil {
+		// Non-fatal: older beads versions don't need this, newer ones do
+		fmt.Printf("   %s Could not set custom types: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(configOutput)))
+	}
+
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
 	// Without fingerprint, the bd daemon fails to start silently.
 	if err := ensureRepoFingerprint(townPath); err != nil {
 		// Non-fatal: fingerprint is optional for functionality, just daemon optimization
 		fmt.Printf("   %s Could not verify repo fingerprint: %v\n", style.Dim.Render("⚠"), err)
+	}
+
+	// Ensure routes.jsonl has an explicit town-level mapping for hq-* beads.
+	// This keeps hq-* operations stable even when invoked from rig worktrees.
+	if err := beads.AppendRoute(townPath, beads.Route{Prefix: "hq-", Path: "."}); err != nil {
+		// Non-fatal: routing still works in many contexts, but explicit mapping is preferred.
+		fmt.Printf("   %s Could not update routes.jsonl: %v\n", style.Dim.Render("⚠"), err)
 	}
 
 	return nil
@@ -364,6 +389,20 @@ func ensureRepoFingerprint(beadsPath string) error {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bd migrate --update-repo-id: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// ensureCustomTypes registers Gas Town custom issue types with beads.
+// Beads core only supports built-in types (bug, feature, task, etc.).
+// Gas Town needs custom types: agent, role, rig, convoy, slot.
+// This is idempotent - safe to call multiple times.
+func ensureCustomTypes(beadsPath string) error {
+	cmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	cmd.Dir = beadsPath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
 }
@@ -388,6 +427,13 @@ func ensureRepoFingerprint(beadsPath string) error {
 // agents can function without their role bead existing.
 func initTownAgentBeads(townPath string) error {
 	bd := beads.New(townPath)
+
+	// bd init doesn't enable "custom" issue types by default, but Gas Town uses
+	// agent/role beads during install and runtime. Ensure these types are enabled
+	// before attempting to create any town-level system beads.
+	if err := ensureBeadsCustomTypes(townPath, []string{"agent", "role", "rig", "convoy", "slot"}); err != nil {
+		return err
+	}
 
 	// Role beads (global templates)
 	roleDefs := []struct {
@@ -505,5 +551,19 @@ func initTownAgentBeads(townPath string) error {
 		fmt.Printf("   ✓ Created agent bead: %s\n", agent.id)
 	}
 
+	return nil
+}
+
+func ensureBeadsCustomTypes(workDir string, types []string) error {
+	if len(types) == 0 {
+		return nil
+	}
+
+	cmd := exec.Command("bd", "config", "set", "types.custom", strings.Join(types, ","))
+	cmd.Dir = workDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd config set types.custom failed: %s", strings.TrimSpace(string(output)))
+	}
 	return nil
 }
