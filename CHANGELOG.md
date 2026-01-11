@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`gt mail mark-read`** - Mark messages as read without opening them (desire path)
+- **`gt down --polecats`** - Shut down polecats without affecting other components
+- **Self-cleaning polecat model** - Polecats self-nuke on completion, witness tracks leases
+- **`gt prime --state` validation** - Flag exclusivity checks for cleaner CLI
+
+### Changed
+- **Removed `gt stop`** - Use `gt down --polecats` instead (cleaner semantics)
+- **Policy-neutral templates** - crew.md.tmpl checks remote origin for PR policy
+- **Refactored prime.go** - Split 1833-line file into logical modules
+
+### Fixed
+- **Polecat re-spawn** - CreateOrReopenAgentBead handles polecat lifecycle correctly (#333)
+- **Vim mode compatibility** - tmux sends Escape before Enter for vim users
+- **Worktree default branch** - Uses rig's configured default branch (#325)
+- **Agent bead type** - Sets --type=agent when creating agent beads
+- **Bootstrap priming** - Reduced AGENTS.md to bootstrap pointer, fixed CLAUDE.md templates
+
+### Documentation
+- Updated witness help text for self-cleaning model
+- Updated daemon comments for self-cleaning model
+- Policy-aware PR guidance in crew template
+
 ## [0.2.4] - 2026-01-10
 
 Priming subsystem overhaul and Zero Framework Cognition (ZFC) improvements.
