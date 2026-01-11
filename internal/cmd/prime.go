@@ -81,6 +81,11 @@ func init() {
 type RoleContext = RoleInfo
 
 func runPrime(cmd *cobra.Command, args []string) error {
+	// Validate flag combinations: --state is exclusive
+	if primeState && (primeHookMode || primeDryRun || primeExplain) {
+		return fmt.Errorf("--state cannot be combined with other flags")
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting current directory: %w", err)
