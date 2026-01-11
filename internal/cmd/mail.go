@@ -191,6 +191,38 @@ Examples:
 	RunE: runMailArchive,
 }
 
+var mailMarkReadCmd = &cobra.Command{
+	Use:   "mark-read <message-id> [message-id...]",
+	Short: "Mark messages as read without archiving",
+	Long: `Mark one or more messages as read without removing them from inbox.
+
+This adds a 'read' label to the message, which is reflected in the inbox display.
+The message remains in your inbox (unlike archive which closes/removes it).
+
+Use case: You've read a message but want to keep it visible in your inbox
+for reference or follow-up.
+
+Examples:
+  gt mail mark-read hq-abc123
+  gt mail mark-read hq-abc123 hq-def456`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runMailMarkRead,
+}
+
+var mailMarkUnreadCmd = &cobra.Command{
+	Use:   "mark-unread <message-id> [message-id...]",
+	Short: "Mark messages as unread",
+	Long: `Mark one or more messages as unread.
+
+This removes the 'read' label from the message.
+
+Examples:
+  gt mail mark-unread hq-abc123
+  gt mail mark-unread hq-abc123 hq-def456`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runMailMarkUnread,
+}
+
 var mailCheckCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Check for new mail (for hooks)",
@@ -438,6 +470,8 @@ func init() {
 	mailCmd.AddCommand(mailPeekCmd)
 	mailCmd.AddCommand(mailDeleteCmd)
 	mailCmd.AddCommand(mailArchiveCmd)
+	mailCmd.AddCommand(mailMarkReadCmd)
+	mailCmd.AddCommand(mailMarkUnreadCmd)
 	mailCmd.AddCommand(mailCheckCmd)
 	mailCmd.AddCommand(mailThreadCmd)
 	mailCmd.AddCommand(mailReplyCmd)

@@ -256,7 +256,7 @@ func (bm *BeadsMessage) ToMessage() *Message {
 		Subject:   bm.Title,
 		Body:      bm.Description,
 		Timestamp: bm.CreatedAt,
-		Read:      bm.Status == "closed",
+		Read:      bm.Status == "closed" || bm.HasLabel("read"),
 		Priority:  priority,
 		Type:      msgType,
 		ThreadID:  bm.threadID,
@@ -264,6 +264,16 @@ func (bm *BeadsMessage) ToMessage() *Message {
 		Wisp:      bm.Wisp,
 		CC:        ccAddrs,
 	}
+}
+
+// HasLabel checks if the message has a specific label.
+func (bm *BeadsMessage) HasLabel(label string) bool {
+	for _, l := range bm.Labels {
+		if l == label {
+			return true
+		}
+	}
+	return false
 }
 
 // PriorityToBeads converts a GGT Priority to beads priority integer.

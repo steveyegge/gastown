@@ -292,6 +292,98 @@ func runMailArchive(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runMailMarkRead(cmd *cobra.Command, args []string) error {
+	// Determine which inbox
+	address := detectSender()
+
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Get mailbox
+	router := mail.NewRouter(workDir)
+	mailbox, err := router.GetMailbox(address)
+	if err != nil {
+		return fmt.Errorf("getting mailbox: %w", err)
+	}
+
+	// Mark all specified messages as read
+	marked := 0
+	var errors []string
+	for _, msgID := range args {
+		if err := mailbox.MarkReadOnly(msgID); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", msgID, err))
+		} else {
+			marked++
+		}
+	}
+
+	// Report results
+	if len(errors) > 0 {
+		fmt.Printf("%s Marked %d/%d messages as read\n",
+			style.Bold.Render("⚠"), marked, len(args))
+		for _, e := range errors {
+			fmt.Printf("  Error: %s\n", e)
+		}
+		return fmt.Errorf("failed to mark %d messages", len(errors))
+	}
+
+	if len(args) == 1 {
+		fmt.Printf("%s Message marked as read\n", style.Bold.Render("✓"))
+	} else {
+		fmt.Printf("%s Marked %d messages as read\n", style.Bold.Render("✓"), marked)
+	}
+	return nil
+}
+
+func runMailMarkUnread(cmd *cobra.Command, args []string) error {
+	// Determine which inbox
+	address := detectSender()
+
+	// All mail uses town beads (two-level architecture)
+	workDir, err := findMailWorkDir()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Get mailbox
+	router := mail.NewRouter(workDir)
+	mailbox, err := router.GetMailbox(address)
+	if err != nil {
+		return fmt.Errorf("getting mailbox: %w", err)
+	}
+
+	// Mark all specified messages as unread
+	marked := 0
+	var errors []string
+	for _, msgID := range args {
+		if err := mailbox.MarkUnreadOnly(msgID); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", msgID, err))
+		} else {
+			marked++
+		}
+	}
+
+	// Report results
+	if len(errors) > 0 {
+		fmt.Printf("%s Marked %d/%d messages as unread\n",
+			style.Bold.Render("⚠"), marked, len(args))
+		for _, e := range errors {
+			fmt.Printf("  Error: %s\n", e)
+		}
+		return fmt.Errorf("failed to mark %d messages", len(errors))
+	}
+
+	if len(args) == 1 {
+		fmt.Printf("%s Message marked as unread\n", style.Bold.Render("✓"))
+	} else {
+		fmt.Printf("%s Marked %d messages as unread\n", style.Bold.Render("✓"), marked)
+	}
+	return nil
+}
+
 func runMailClear(cmd *cobra.Command, args []string) error {
 	// Determine which inbox to clear (target arg or auto-detect)
 	address := ""
