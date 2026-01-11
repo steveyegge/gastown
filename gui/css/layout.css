@@ -144,19 +144,19 @@ body {
 
 /* Mayor Output Panel */
 .mayor-output-panel {
-  position: absolute;
+  position: fixed;
   top: calc(var(--header-height) + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 700px;
-  max-width: 90vw;
-  max-height: 400px;
+  right: 16px;
+  width: 500px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - var(--header-height) - 32px);
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-lg);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: var(--z-modal);
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .mayor-output-header {
@@ -190,9 +190,11 @@ body {
 }
 
 .mayor-output-content {
+  flex: 1;
   padding: var(--space-md);
-  max-height: 340px;
   overflow-y: auto;
+  min-height: 200px;
+  max-height: 500px;
 }
 
 .mayor-output-content pre {
@@ -203,6 +205,11 @@ body {
   word-break: break-word;
   color: var(--text-secondary);
   margin: 0;
+}
+
+/* Resize handle for panel */
+.mayor-output-panel::-webkit-resizer {
+  background: var(--border-primary);
 }
 
 .header-center {
