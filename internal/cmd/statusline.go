@@ -145,7 +145,7 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 		if icon != "" {
 			parts = append(parts, fmt.Sprintf("%s 🪝 %s", icon, hookedWork))
 		} else {
-			parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
+			parts = append(parts, fmt.Sprintf("🪝%s", hookedWork))
 		}
 	} else if currentWork != "" {
 		// Fall back to current work (in_progress)
@@ -163,9 +163,9 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 		unread, subject := getMailPreviewWithRoot(identity, 45, townRoot)
 		if unread > 0 {
 			if subject != "" {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%s", subject))
 			} else {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%d", unread))
 			}
 		}
 	}
@@ -337,8 +337,8 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		health := healthByType[agentType]
 		// Always show all agent types (no continue for total == 0)
 
-		// Show working/total format (e.g., "1/10 😺" = 1 working, 10 total)
-		agentParts = append(agentParts, fmt.Sprintf("%d/%d %s", health.working, health.total, health.icon))
+		// Show working/total format (e.g., "1/10😺" = 1 working, 10 total)
+		agentParts = append(agentParts, fmt.Sprintf("%d/%d%s", health.working, health.total, health.icon))
 	}
 	if len(agentParts) > 0 {
 		parts = append(parts, "active: "+strings.Join(agentParts, " "))
@@ -461,15 +461,15 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		hookedWork = getHookedWork("mayor", 40, townRoot)
 	}
 	if hookedWork != "" {
-		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
+		parts = append(parts, fmt.Sprintf("🪝%s", hookedWork))
 	} else if townRoot != "" {
 		// Priority 2: Fall back to mail preview
 		unread, subject := getMailPreviewWithRoot("mayor/", 45, townRoot)
 		if unread > 0 {
 			if subject != "" {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%s", subject))
 			} else {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%d", unread))
 			}
 		}
 	}
@@ -526,7 +526,7 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 	// Build status
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%d rigs", rigCount))
-	parts = append(parts, fmt.Sprintf("%d 😺", polecatCount))
+	parts = append(parts, fmt.Sprintf("%d😺", polecatCount))
 
 	// Priority 1: Check for hooked work (town beads for deacon)
 	hookedWork := ""
@@ -534,15 +534,15 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 		hookedWork = getHookedWork("deacon", 35, townRoot)
 	}
 	if hookedWork != "" {
-		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
+		parts = append(parts, fmt.Sprintf("🪝%s", hookedWork))
 	} else if townRoot != "" {
 		// Priority 2: Fall back to mail preview
 		unread, subject := getMailPreviewWithRoot("deacon/", 40, townRoot)
 		if unread > 0 {
 			if subject != "" {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%s", subject))
 			} else {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%d", unread))
 			}
 		}
 	}
@@ -595,7 +595,7 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 
 	// Build status
 	var parts []string
-	parts = append(parts, fmt.Sprintf("%d 😺", polecatCount))
+	parts = append(parts, fmt.Sprintf("%d😺", polecatCount))
 	if crewCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d crew", crewCount))
 	}
@@ -607,15 +607,15 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 		hookedWork = getHookedWork(identity, 30, rigBeadsDir)
 	}
 	if hookedWork != "" {
-		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
+		parts = append(parts, fmt.Sprintf("🪝%s", hookedWork))
 	} else if townRoot != "" {
 		// Priority 2: Fall back to mail preview
 		unread, subject := getMailPreviewWithRoot(identity, 35, townRoot)
 		if unread > 0 {
 			if subject != "" {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%s", subject))
 			} else {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%d", unread))
 			}
 		}
 	}
@@ -698,15 +698,15 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 		hookedWork = getHookedWork(identity, 25, rigBeadsDir)
 	}
 	if hookedWork != "" {
-		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
+		parts = append(parts, fmt.Sprintf("🪝%s", hookedWork))
 	} else if townRoot != "" {
 		// Priority 2: Fall back to mail preview
 		unread, subject := getMailPreviewWithRoot(identity, 30, townRoot)
 		if unread > 0 {
 			if subject != "" {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%s", subject))
 			} else {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%d", unread))
 			}
 		}
 	}
