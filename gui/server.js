@@ -203,6 +203,38 @@ function validateRigAndName(req, res) {
   return true;
 }
 
+// Check if a specific tmux session is running
+async function isSessionRunning(sessionName) {
+  try {
+    const { stdout } = await execFileAsync('tmux', ['has-session', '-t', sessionName]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Mayor message history (in-memory, last 100 messages)
+const mayorMessageHistory = [];
+const MAX_MESSAGE_HISTORY = 100;
+
+function addMayorMessage(target, message, status, response = null) {
+  const entry = {
+    id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
+    timestamp: new Date().toISOString(),
+    target,
+    message,
+    status, // 'sent', 'failed', 'auto-started'
+    response
+  };
+  mayorMessageHistory.unshift(entry);
+  if (mayorMessageHistory.length > MAX_MESSAGE_HISTORY) {
+    mayorMessageHistory.pop();
+  }
+  // Broadcast to connected clients
+  broadcast({ type: 'mayor_message', data: entry });
+  return entry;
+}
+
 // Get running tmux sessions for polecats
 async function getRunningPolecats() {
   try {
@@ -762,7 +794,7 @@ app.post('/api/mail/:id/unread', async (req, res) => {
 
 // Send a message to Mayor (or other agent)
 app.post('/api/nudge', async (req, res) => {
-  const { target, message } = req.body;
+  const { target, message, autoStart = true } = req.body;
 
   if (!message) {
     return res.status(400).json({ error: 'Message is required' });
@@ -770,17 +802,78 @@ app.post('/api/nudge', async (req, res) => {
 
   // Default to mayor if no target specified
   const nudgeTarget = target || 'mayor';
+  const sessionName = `gt-${nudgeTarget}`;
 
   try {
+    // Check if target session is running
+    const isRunning = await isSessionRunning(sessionName);
+    let wasAutoStarted = false;
+
+    if (!isRunning) {
+      console.log(`[Nudge] Session ${sessionName} not running`);
+
+      // Auto-start Mayor if requested
+      if (nudgeTarget === 'mayor' && autoStart) {
+        console.log(`[Nudge] Auto-starting Mayor...`);
+        const startResult = await executeGT(['mayor', 'up'], { timeout: 30000 });
+
+        if (!startResult.success) {
+          const entry = addMayorMessage(nudgeTarget, message, 'failed', 'Failed to auto-start Mayor');
+          return res.status(500).json({
+            error: 'Mayor not running and failed to auto-start',
+            details: startResult.error,
+            messageId: entry.id
+          });
+        }
+
+        wasAutoStarted = true;
+        console.log(`[Nudge] Mayor auto-started successfully`);
+
+        // Wait a moment for Mayor to initialize
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Broadcast that Mayor was started
+        broadcast({ type: 'service_started', data: { service: 'mayor', autoStarted: true } });
+      } else if (!isRunning) {
+        const entry = addMayorMessage(nudgeTarget, message, 'failed', `Session ${sessionName} not running`);
+        return res.status(400).json({
+          error: `${nudgeTarget} is not running`,
+          hint: nudgeTarget === 'mayor' ? 'Set autoStart: true to start Mayor automatically' : `Start the ${nudgeTarget} service first`,
+          messageId: entry.id
+        });
+      }
+    }
+
+    // Send the nudge
     const result = await executeGT(['nudge', nudgeTarget, message], { timeout: 10000 });
+
     if (result.success) {
-      res.json({ success: true, target: nudgeTarget, message });
+      const status = wasAutoStarted ? 'auto-started' : 'sent';
+      const entry = addMayorMessage(nudgeTarget, message, status);
+      res.json({
+        success: true,
+        target: nudgeTarget,
+        message,
+        wasAutoStarted,
+        messageId: entry.id
+      });
     } else {
-      res.status(500).json({ error: result.error || 'Failed to send message' });
+      const entry = addMayorMessage(nudgeTarget, message, 'failed', result.error);
+      res.status(500).json({
+        error: result.error || 'Failed to send message',
+        messageId: entry.id
+      });
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const entry = addMayorMessage(nudgeTarget, message, 'failed', err.message);
+    res.status(500).json({ error: err.message, messageId: entry.id });
   }
+});
+
+// Get Mayor message history
+app.get('/api/mayor/messages', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, MAX_MESSAGE_HISTORY);
+  res.json(mayorMessageHistory.slice(0, limit));
 });
 
 // ============= Beads API =============
@@ -1064,17 +1157,6 @@ app.get('/api/bead/:beadId/links', async (req, res) => {
   } catch (err) {
     console.error('[Links] Error:', err);
     res.json(links);
-  }
-});
-
-// Nudge agent
-app.post('/api/nudge', async (req, res) => {
-  const { target, message } = req.body;
-  const result = await executeGT(['nudge', target, '-m', message]);
-  if (result.success) {
-    res.json({ success: true });
-  } else {
-    res.status(500).json({ error: result.error });
   }
 });
 
