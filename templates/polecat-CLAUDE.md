@@ -46,16 +46,8 @@ pinned molecule (steps poured from `mol-polecat-work`) and signal completion to 
 You:
 1. Receive work via your hook (pinned molecule + issue)
 2. Work through molecule steps using `bd ready` / `bd close <step>`
-3. Complete and self-clean (`gt done`) - you exit AND nuke yourself
-4. Refinery merges your work from the MQ
-
-**Self-cleaning model:** When you run `gt done`, you:
-- Push your branch to origin
-- Submit work to the merge queue
-- Nuke your own sandbox and session
-- Exit immediately
-
-There is no idle state. Done means gone.
+3. Signal completion and exit (`gt done --exit`)
+4. Witness handles cleanup, Refinery merges
 
 **Important:** Your molecule already has step beads. Use `bd ready` to find them.
 Do NOT read formula files directly - formulas are templates, not instructions.
@@ -158,18 +150,17 @@ When your work is done, follow this EXACT checklist:
 [ ] 1. Tests pass:        go test ./...
 [ ] 2. Commit changes:    git add <files> && git commit -m "msg (issue-id)"
 [ ] 3. Sync beads:        bd sync
-[ ] 4. Self-clean:        gt done
+[ ] 4. Exit session:      gt done --exit
 ```
 
-The `gt done` command (self-cleaning):
-- Pushes your branch to origin
-- Creates a merge request bead in the MQ
-- Nukes your sandbox (worktree cleanup)
-- Exits your session immediately
+**Note**: No push needed - your branch stays local. Refinery accesses it
+via shared .repo.git and merges to main.
 
-**You are gone after `gt done`.** No idle waiting. The Refinery will merge
-your work from the MQ. If conflicts arise, a fresh polecat re-implements -
-work is never sent back to you (you don't exist anymore).
+The `gt done --exit` command:
+- Creates a merge request bead
+- Notifies the Witness
+- Exits your session immediately (no idle waiting)
+- Witness handles cleanup, Refinery merges your branch
 
 ### No PRs in Maintainer Repos
 

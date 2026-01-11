@@ -5,35 +5,8 @@
 ## Overview
 
 Polecats have three distinct lifecycle layers that operate independently. Confusing
-these layers leads to bugs like "idle polecats" and misunderstanding when
+these layers leads to heresies like "idle polecats" and misunderstanding when
 recycling occurs.
-
-## The Self-Cleaning Polecat Model
-
-**Polecats are responsible for their own cleanup.** When a polecat completes its
-work unit, it:
-
-1. Signals completion via `gt done`
-2. Exits its session immediately (no idle waiting)
-3. Requests its own nuke (self-delete)
-
-This removes dependency on the Witness/Deacon for cleanup and ensures polecats
-never sit idle. The simple model: **sandbox dies with session**.
-
-### Why Self-Cleaning?
-
-- **No idle polecats** - There's no state where a polecat exists without work
-- **Reduced watchdog overhead** - Deacon doesn't need to patrol for zombies
-- **Faster turnover** - Resources freed immediately on completion
-- **Simpler mental model** - Done means gone
-
-### What About Pending Merges?
-
-The Refinery owns the merge queue. Once `gt done` submits work:
-- The branch is pushed to origin
-- Work exists in the MQ, not in the polecat
-- If rebase fails, Refinery re-implements on new baseline (fresh polecat)
-- The original polecat is already gone - no sending work "back"
 
 ## The Three Layers
 
@@ -119,23 +92,19 @@ The slot:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  gt done (self-cleaning)                    │
-│  → Push branch to origin                                   │
-│  → Submit work to merge queue (MR bead)                    │
-│  → Request self-nuke (sandbox + session cleanup)           │
-│  → Exit immediately                                        │
-│                                                             │
-│  Work now lives in MQ, not in polecat.                     │
-│  Polecat is GONE. No idle state.                           │
+│                        gt done                              │
+│  → Polecat signals completion to Witness                   │
+│  → Session exits (no idle waiting)                         │
+│  → Witness receives POLECAT_DONE event                     │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   Refinery: merge queue                     │
-│  → Rebase and merge to main                                │
-│  → Close the issue                                         │
-│  → If conflict: spawn FRESH polecat to re-implement        │
-│    (never send work back to original polecat - it's gone)  │
+│               Witness: gt polecat nuke                      │
+│  → Verify work landed (merged or in MQ)                    │
+│  → Delete sandbox (remove worktree)                        │
+│  → Kill tmux session                                       │
+│  → Release slot back to pool                               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -241,40 +210,13 @@ All except `gt done` result in continued work. Only `gt done` signals completion
 The Witness monitors polecats but does NOT:
 - Force session cycles (polecats self-manage via handoff)
 - Interrupt mid-step (unless truly stuck)
-- Nuke polecats (polecats self-nuke via `gt done`)
+- Recycle sandboxes between steps
 
 The Witness DOES:
 - Respawn crashed sessions
 - Nudge stuck polecats
+- Nuke completed polecats (after verification)
 - Handle escalations
-- Clean up orphaned polecats (crash before `gt done`)
-
-## Polecat Identity
-
-**Key insight:** Polecat *identity* is long-lived; only sessions and sandboxes are ephemeral.
-
-In the HOP model, every entity has a chain (CV) that tracks:
-- What work they've done
-- Success/failure rates
-- Skills demonstrated
-- Quality metrics
-
-The polecat *name* (Toast, Shadow, etc.) is a slot from a pool - truly ephemeral.
-But the *agent identity* that executes as that polecat accumulates a work history.
-
-```
-POLECAT IDENTITY (persistent)     SESSION (ephemeral)     SANDBOX (ephemeral)
-├── CV chain                      ├── Claude instance     ├── Git worktree
-├── Work history                  ├── Context window      ├── Branch
-├── Skills demonstrated           └── Dies on handoff     └── Dies on gt done
-└── Credit for work                   or gt done
-```
-
-This distinction matters for:
-- **Attribution** - Who gets credit for the work?
-- **Skill routing** - Which agent is best for this task?
-- **Cost accounting** - Who pays for inference?
-- **Federation** - Agents having their own chains in a distributed world
 
 ## Related Documentation
 

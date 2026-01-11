@@ -1,29 +1,26 @@
 description = """
-Full polecat work lifecycle from assignment through completion.
+Full polecat work lifecycle from assignment through MR submission.
 
 This molecule guides a polecat through a complete work assignment. Each step
 has clear entry/exit criteria and specific commands to run. A polecat can
 crash after any step and resume from the last completed step.
 
-## Polecat Contract (Self-Cleaning Model)
+## Polecat Contract (Ephemeral Model)
 
-You are a self-cleaning worker. You:
+You are an ephemeral worker. You:
 1. Receive work via your hook (pinned molecule + issue)
 2. Work through molecule steps using `bd ready` / `bd close <step>`
-3. Complete and self-clean via `gt done` (submit + nuke yourself)
-4. You are GONE - Refinery merges from MQ
-
-**Self-cleaning:** When you run `gt done`, you push your work, submit to MQ,
-nuke your sandbox, and exit. There is no idle state. Done means gone.
+3. Submit to merge queue via `gt done`
+4. Become recyclable - Refinery handles the rest
 
 **Important:** This formula defines the template. Your molecule already has step
 beads created from it. Use `bd ready` to find them - do NOT read this file directly.
 
 **You do NOT:**
-- Push directly to main (Refinery merges from MQ)
+- Push directly to main (Refinery merges)
 - Close your own issue (Refinery closes after merge)
-- Wait for merge (you're gone after `gt done`)
-- Handle rebase conflicts (Refinery spawns fresh polecats for that)
+- Wait for merge (you're done at MR submission)
+- Handle rebase conflicts (Refinery dispatches fresh polecats for that)
 
 ## Variables
 
@@ -410,23 +407,30 @@ bd sync
 
 [[steps]]
 id = "submit-and-exit"
-title = "Submit work and self-clean"
+title = "Submit to merge queue and exit"
 needs = ["prepare-for-review"]
 description = """
-Submit your work and clean up. You cease to exist after this step.
+Submit your work to the merge queue. You become recyclable after this.
 
-**Self-Cleaning Model:**
-Once you run `gt done`, you're gone. The command:
-1. Pushes your branch to origin
-2. Creates an MR bead in the merge queue
-3. Nukes your sandbox (worktree removal)
-4. Exits your session immediately
+**Ephemeral Polecat Model:**
+Once you submit, you're done. The Refinery will:
+1. Process your merge request
+2. Handle rebasing (mechanical rebases done automatically)
+3. Close your issue after successful merge
+4. Create conflict-resolution tasks if needed (fresh polecat handles those)
 
-**Run gt done:**
+**1. Submit with gt done:**
 ```bash
 gt done
 ```
 
+This single command:
+- Creates an MR bead in the merge queue
+- Notifies the Witness (POLECAT_DONE)
+- Updates your agent state to 'done'
+- Reports cleanup status (ZFC compliance)
+
+**2. Verify submission:**
 You should see output like:
 ```
 ✓ Work submitted to merge queue
@@ -434,19 +438,20 @@ You should see output like:
   Source: polecat/<name>
   Target: main
   Issue: {{issue}}
-✓ Sandbox nuked
-✓ Session exiting
 ```
 
-**What happens next (not your concern):**
-- Refinery processes your MR from the queue
-- Refinery rebases and merges to main
-- Refinery closes the issue
-- If conflicts: Refinery spawns a FRESH polecat to re-implement
+**3. You're recyclable:**
+Your work is in the queue. The Witness knows you're done.
+Your sandbox can be cleaned up - all work is pushed to origin.
 
-You are NOT involved in any of that. You're gone. Done means gone.
+If you have context remaining, you may:
+- Pick up new work from `bd ready`
+- Or use `gt handoff` to cycle to a fresh session
 
-**Exit criteria:** Work submitted, sandbox nuked, session exited."""
+If the Refinery needs conflict resolution, it will dispatch a fresh polecat.
+You do NOT need to wait around.
+
+**Exit criteria:** MR submitted, Witness notified, polecat recyclable."""
 
 [vars]
 [vars.issue]
