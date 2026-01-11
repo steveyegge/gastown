@@ -43,12 +43,17 @@ func TestFindWithPrimaryMarker(t *testing.T) {
 	}
 }
 
-func TestFindWithSecondaryMarker(t *testing.T) {
-	// Create temp workspace with just mayor/ directory
+func TestFindWithLegacyMarker(t *testing.T) {
+	// Create temp workspace with legacy marker (mayor/rigs.json)
 	root := realPath(t, t.TempDir())
 	mayorDir := filepath.Join(root, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
+	}
+	// Create legacy marker (rigs.json)
+	rigsFile := filepath.Join(mayorDir, "rigs.json")
+	if err := os.WriteFile(rigsFile, []byte(`{"rigs":{}}`), 0644); err != nil {
+		t.Fatalf("write: %v", err)
 	}
 
 	// Create nested directory
@@ -64,6 +69,24 @@ func TestFindWithSecondaryMarker(t *testing.T) {
 	}
 	if found != root {
 		t.Errorf("Find = %q, want %q", found, root)
+	}
+}
+
+func TestFindNotWorkspaceWithJustMayorDir(t *testing.T) {
+	// Create temp dir with just mayor/ directory (NOT a workspace)
+	root := realPath(t, t.TempDir())
+	mayorDir := filepath.Join(root, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Find should NOT find this as a workspace
+	found, err := Find(root)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if found != "" {
+		t.Errorf("Find = %q, want empty (just mayor/ dir should not be a workspace)", found)
 	}
 }
 

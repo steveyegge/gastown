@@ -18,16 +18,18 @@ var ErrNotFound = errors.New("not in a Gas Town workspace")
 const (
 	// PrimaryMarker is the main config file that identifies a workspace.
 	// The town.json file lives in mayor/ along with other mayor config.
+	// This is the REQUIRED marker - a directory with just "mayor/" is NOT
+	// enough to be considered a workspace (could be any project with that folder).
 	PrimaryMarker = "mayor/town.json"
 
-	// SecondaryMarker is an alternative indicator at the town level.
-	// Note: This can match rig-level mayors too, so we continue searching
-	// upward after finding this to look for primary markers.
-	SecondaryMarker = "mayor"
+	// LegacyMarker supports older workspaces that may not have town.json yet.
+	// Only used as fallback if mayor/rigs.json exists (gastown-specific file).
+	LegacyMarker = "mayor/rigs.json"
 )
 
 // Find locates the town root by walking up from the given directory.
-// It prefers mayor/town.json over mayor/ directory as workspace marker.
+// It requires mayor/town.json (or legacy mayor/rigs.json) to identify a workspace.
+// A directory with just "mayor/" is NOT considered a workspace.
 // When in a worktree path (polecats/ or crew/), continues to outermost workspace.
 // Does not resolve symlinks to stay consistent with os.Getwd().
 func Find(startDir string) (string, error) {
@@ -37,10 +39,11 @@ func Find(startDir string) (string, error) {
 	}
 
 	inWorktree := isInWorktreePath(absDir)
-	var primaryMatch, secondaryMatch string
+	var primaryMatch, legacyMatch string
 
 	current := absDir
 	for {
+		// Check for primary marker (mayor/town.json)
 		if _, err := os.Stat(filepath.Join(current, PrimaryMarker)); err == nil {
 			if !inWorktree {
 				return current, nil
@@ -48,9 +51,10 @@ func Find(startDir string) (string, error) {
 			primaryMatch = current
 		}
 
-		if secondaryMatch == "" {
-			if info, err := os.Stat(filepath.Join(current, SecondaryMarker)); err == nil && info.IsDir() {
-				secondaryMatch = current
+		// Check for legacy marker (mayor/rigs.json) - older workspaces
+		if legacyMatch == "" {
+			if _, err := os.Stat(filepath.Join(current, LegacyMarker)); err == nil {
+				legacyMatch = current
 			}
 		}
 
@@ -59,7 +63,7 @@ func Find(startDir string) (string, error) {
 			if primaryMatch != "" {
 				return primaryMatch, nil
 			}
-			return secondaryMatch, nil
+			return legacyMatch, nil
 		}
 		current = parent
 	}
@@ -102,7 +106,8 @@ func FindFromCwdOrError() (string, error) {
 
 // IsWorkspace checks if the given directory is a Gas Town workspace root.
 // A directory is a workspace if it has a primary marker (mayor/town.json)
-// or a secondary marker (mayor/ directory).
+// or a legacy marker (mayor/rigs.json). Just having a mayor/ directory
+// is NOT enough - that could be any project.
 func IsWorkspace(dir string) (bool, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
@@ -115,10 +120,9 @@ func IsWorkspace(dir string) (bool, error) {
 		return true, nil
 	}
 
-	// Check for secondary marker (mayor/ directory)
-	secondaryPath := filepath.Join(absDir, SecondaryMarker)
-	info, err := os.Stat(secondaryPath)
-	if err == nil && info.IsDir() {
+	// Check for legacy marker (mayor/rigs.json)
+	legacyPath := filepath.Join(absDir, LegacyMarker)
+	if _, err := os.Stat(legacyPath); err == nil {
 		return true, nil
 	}
 

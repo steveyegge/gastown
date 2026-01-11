@@ -43,25 +43,69 @@ var installCmd = &cobra.Command{
 	Short:   "Create a new Gas Town HQ (workspace)",
 	Long: `Create a new Gas Town HQ at the specified path.
 
-The HQ (headquarters) is the top-level directory where Gas Town is installed -
-the root of your workspace where all rigs and agents live. It contains:
-  - CLAUDE.md            Mayor role context (Mayor runs from HQ root)
+QUICK START
+───────────
+  1. Create HQ:        gt install --shell
+  2. Enter HQ:         cd ~/gt
+  3. Add a project:    gt rig add myproject https://github.com/user/repo
+  4. Join the crew:    gt crew add yourname --rig myproject
+  5. Start working:    cd myproject/crew/yourname && gt attach
+
+ARCHITECTURE
+────────────
+Gas Town is a multi-agent workspace manager. After setup, your HQ looks like:
+
+  ~/gt/                          ← HQ (town root)
+  ├── CLAUDE.md                  ← Mayor's role context
+  ├── mayor/                     ← Town-level coordination
+  │   └── rigs.json              ← Registry of all projects
+  ├── .beads/                    ← Town-level issue tracking (hq-* prefix)
+  │
+  └── myproject/                 ← A "rig" (project container)
+      ├── config.json            ← Rig configuration
+      ├── .beads/                ← Rig-level issues (project prefix)
+      ├── .repo.git/             ← Shared bare repo
+      │
+      ├── mayor/rig/             ← Mayor's working clone
+      ├── refinery/rig/          ← Refinery reviews PRs here
+      ├── witness/               ← Witness monitors this rig
+      ├── polecats/              ← AI workers (spawned on demand)
+      │   └── polecat-1/rig/     ← Each polecat has its own clone
+      └── crew/                  ← Human workspaces
+          └── yourname/          ← Your personal workspace
+
+AGENTS
+──────
+  Mayor      Coordinates work across all rigs, delegates to Witness
+  Witness    Monitors a rig, triages issues, spawns polecats
+  Refinery   Reviews PRs, runs CI, merges approved changes
+  Polecats   AI workers that implement features/fixes (ephemeral)
+  Crew       Human developers with persistent workspaces
+
+Each agent runs in its own tmux session with isolated git worktree.
+
+WHAT THIS COMMAND CREATES
+─────────────────────────
+  - CLAUDE.md            Mayor role context
   - mayor/               Mayor config, state, and rig registry
-  - .beads/              Town-level beads DB (hq-* prefix for mayor mail)
+  - .beads/              Town-level beads DB (hq-* prefix)
 
-If path is omitted, uses the current directory.
+NEXT STEPS AFTER INSTALL
+────────────────────────
+All gt commands must be run from inside the HQ directory:
 
-See docs/hq.md for advanced HQ configurations including beads
-redirects, multi-system setups, and HQ templates.
+  cd ~/gt                           Enter the HQ first!
+  gt rig add <name> <url>           Add a project to manage
+  gt crew add <name> --rig <rig>    Create your workspace in a rig
+  gt start                          Start the Mayor daemon
+  gt status                         See what's running
 
 Examples:
-  gt install ~/gt                              # Create HQ at ~/gt
-  gt install . --name my-workspace             # Initialize current dir
-  gt install ~/gt --no-beads                   # Skip .beads/ initialization
-  gt install ~/gt --git                        # Also init git with .gitignore
-  gt install ~/gt --github=user/repo           # Create private GitHub repo (default)
-  gt install ~/gt --github=user/repo --public  # Create public GitHub repo
-  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)`,
+  gt install                                   # Create HQ at ~/gt (default)
+  gt install --shell                           # Recommended: also add shell integration
+  gt install ~/workspace                       # Create HQ at custom location
+  gt install --git                             # Also init git with .gitignore
+  gt install --github=user/repo                # Create private GitHub repo`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInstall,
 }
@@ -81,19 +125,19 @@ func init() {
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
-	// Determine target path
-	targetPath := "."
-	if len(args) > 0 {
-		targetPath = args[0]
+	// Determine target path - default to ~/gt if not specified
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("getting home directory: %w", err)
 	}
 
-	// Expand ~ and resolve to absolute path
-	if targetPath[0] == '~' {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("getting home directory: %w", err)
+	targetPath := filepath.Join(home, "gt") // Default: ~/gt
+	if len(args) > 0 {
+		targetPath = args[0]
+		// Expand ~ if provided
+		if len(targetPath) > 0 && targetPath[0] == '~' {
+			targetPath = filepath.Join(home, targetPath[1:])
 		}
-		targetPath = filepath.Join(home, targetPath[1:])
 	}
 
 	absPath, err := filepath.Abs(targetPath)
@@ -115,6 +159,24 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Check if inside an existing workspace
 	if existingRoot, _ := workspace.Find(absPath); existingRoot != "" && existingRoot != absPath {
 		style.PrintWarning("Creating HQ inside existing workspace at %s", existingRoot)
+	}
+
+	// Check if target is inside an existing git repo (not recommended)
+	// HQ should typically be a standalone directory, not inside a project repo
+	if isInsideGitRepo(absPath) && !installForce {
+		fmt.Println()
+		style.PrintWarning("Target is inside an existing git repository")
+		fmt.Println()
+		fmt.Println("  Gas Town HQ is typically installed in a standalone directory (e.g., ~/gt)")
+		fmt.Println("  that contains clones of your projects as 'rigs'.")
+		fmt.Println()
+		fmt.Println("  Installing inside an existing repo will mix gastown infrastructure")
+		fmt.Println("  (mayor/, .beads/, crew/) with your project's code.")
+		fmt.Println()
+		fmt.Println("  Recommended: gt install ~/gt --shell")
+		fmt.Println()
+		fmt.Println("  Use --force to install here anyway.")
+		return fmt.Errorf("refusing to install inside git repo without --force")
 	}
 
 	// Ensure beads (bd) is available before proceeding
@@ -229,7 +291,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if err := initTownBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Initialized .beads/ (town-level beads with hq- prefix)\n")
+			fmt.Printf("   ✓ Initialized .beads/ (town-level beads)\n")
 
 			// Provision embedded formulas to .beads/formulas/
 			if count, err := formula.ProvisionFormulas(absPath); err != nil {
@@ -293,8 +355,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n%s HQ created successfully!\n", style.Bold.Render("✓"))
 	fmt.Println()
-	fmt.Println("Next steps:")
+	fmt.Println("Next steps (run from inside HQ):")
+	fmt.Println()
 	step := 1
+	// Show cd step if not already in the target directory
+	cwd, _ := os.Getwd()
+	if cwd != absPath {
+		fmt.Printf("  %d. Enter HQ: %s\n", step, style.Dim.Render(fmt.Sprintf("cd %s", absPath)))
+		step++
+	}
 	if !installGit && installGitHub == "" {
 		fmt.Printf("  %d. Initialize git: %s\n", step, style.Dim.Render("gt git-init"))
 		step++
@@ -304,6 +373,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %d. (Optional) Configure agents: %s\n", step, style.Dim.Render("gt config agent list"))
 	step++
 	fmt.Printf("  %d. Enter the Mayor's office: %s\n", step, style.Dim.Render("gt mayor attach"))
+	fmt.Println()
+	fmt.Printf("%s All gt commands must be run from inside the HQ directory.\n", style.Dim.Render("Note:"))
 
 	return nil
 }
@@ -338,9 +409,21 @@ func writeJSON(path string, data interface{}) error {
 
 // initTownBeads initializes town-level beads database using bd init.
 // Town beads use the "hq-" prefix for mayor mail and cross-rig coordination.
+// If the directory already has beads with a different prefix, we use that
+// prefix instead to allow coexistence with existing beads users.
 func initTownBeads(townPath string) error {
-	// Run: bd init --prefix hq
-	cmd := exec.Command("bd", "init", "--prefix", "hq")
+	// Check if beads already exists with a different prefix
+	existingPrefix := detectExistingBeadsPrefix(townPath)
+	usePrefix := "hq"
+
+	if existingPrefix != "" && existingPrefix != "hq" {
+		// Existing beads found - use that prefix for compatibility
+		fmt.Printf("   ℹ Found existing beads with prefix '%s' - using for compatibility\n", existingPrefix)
+		usePrefix = existingPrefix
+	}
+
+	// Run: bd init --prefix <prefix>
+	cmd := exec.Command("bd", "init", "--prefix", usePrefix)
 	cmd.Dir = townPath
 
 	output, err := cmd.CombinedOutput()
@@ -348,6 +431,14 @@ func initTownBeads(townPath string) error {
 		// Check if beads is already initialized
 		if strings.Contains(string(output), "already initialized") {
 			// Already initialized - still need to ensure fingerprint exists
+		} else if strings.Contains(string(output), "database uses") {
+			// Prefix mismatch - extract actual prefix and retry
+			// Error format: "database uses 'X' but you specified 'Y'"
+			if actual := extractPrefixFromError(string(output)); actual != "" {
+				fmt.Printf("   ℹ Detected existing beads prefix '%s' - adapting\n", actual)
+				usePrefix = actual
+				// Don't retry init - just proceed with existing database
+			}
 		} else {
 			return fmt.Errorf("bd init failed: %s", strings.TrimSpace(string(output)))
 		}
@@ -370,14 +461,84 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not verify repo fingerprint: %v\n", style.Dim.Render("⚠"), err)
 	}
 
-	// Ensure routes.jsonl has an explicit town-level mapping for hq-* beads.
-	// This keeps hq-* operations stable even when invoked from rig worktrees.
-	if err := beads.AppendRoute(townPath, beads.Route{Prefix: "hq-", Path: "."}); err != nil {
+	// Ensure routes.jsonl has an explicit town-level mapping for the prefix.
+	// This keeps operations stable even when invoked from rig worktrees.
+	if err := beads.AppendRoute(townPath, beads.Route{Prefix: usePrefix + "-", Path: "."}); err != nil {
 		// Non-fatal: routing still works in many contexts, but explicit mapping is preferred.
 		fmt.Printf("   %s Could not update routes.jsonl: %v\n", style.Dim.Render("⚠"), err)
 	}
 
 	return nil
+}
+
+// detectExistingBeadsPrefix checks if a directory has an existing beads database
+// and returns its prefix. Returns empty string if no beads or can't determine prefix.
+func detectExistingBeadsPrefix(path string) string {
+	configPath := filepath.Join(path, ".beads", "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+
+	// Parse YAML for issue-prefix or prefix field
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "issue-prefix:") {
+			prefix := strings.TrimPrefix(line, "issue-prefix:")
+			prefix = strings.TrimSpace(prefix)
+			prefix = strings.Trim(prefix, "\"'")
+			if prefix != "" {
+				return prefix
+			}
+		}
+		if strings.HasPrefix(line, "prefix:") {
+			prefix := strings.TrimPrefix(line, "prefix:")
+			prefix = strings.TrimSpace(prefix)
+			prefix = strings.Trim(prefix, "\"'")
+			if prefix != "" {
+				return prefix
+			}
+		}
+	}
+	return ""
+}
+
+// isInsideGitRepo checks if the given path is inside a git repository.
+// It walks up the directory tree looking for a .git directory.
+func isInsideGitRepo(path string) bool {
+	// Walk up directory tree looking for .git
+	current := path
+	for {
+		gitDir := filepath.Join(current, ".git")
+		if info, err := os.Stat(gitDir); err == nil {
+			// .git can be a directory (normal repo) or file (worktree/submodule)
+			if info.IsDir() || info.Mode().IsRegular() {
+				return true
+			}
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			// Reached filesystem root
+			return false
+		}
+		current = parent
+	}
+}
+
+// extractPrefixFromError extracts the actual prefix from a beads error message.
+// Error format: "database uses 'X' but you specified 'Y'"
+func extractPrefixFromError(errMsg string) string {
+	// Look for pattern: database uses 'X'
+	if idx := strings.Index(errMsg, "database uses '"); idx != -1 {
+		start := idx + len("database uses '")
+		end := strings.Index(errMsg[start:], "'")
+		if end != -1 {
+			return errMsg[start : start+end]
+		}
+	}
+	return ""
 }
 
 // ensureRepoFingerprint runs bd migrate --update-repo-id to ensure the database
