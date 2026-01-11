@@ -1265,3 +1265,226 @@ func GetRigPrefix(townRoot, rigName string) string {
 	prefix := entry.BeadsConfig.Prefix
 	return strings.TrimSuffix(prefix, "-")
 }
+
+// ResolveRoleModelFlags returns the model flags for a given role.
+// Resolution order:
+//  1. Rig-level RoleModels (for rig-level roles)
+//  2. Town-level RoleModels (fallback)
+//  3. Empty string (no additional flags)
+//
+// townRoot is the path to the town directory.
+// rigPath is the path to the rig directory (empty for town-level roles).
+// role is one of: "mayor", "deacon", "witness", "refinery", "polecat", "crew"
+func ResolveRoleModelFlags(townRoot, rigPath, role string) string {
+	// Load town settings
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	// For town-level roles (mayor, deacon), only check town settings
+	if TownLevelRoles[role] {
+		if townSettings.RoleModels != nil {
+			if flags, ok := townSettings.RoleModels[role]; ok {
+				return flags
+			}
+		}
+		return ""
+	}
+
+	// For rig-level roles, check rig settings first, then town
+	if rigPath != "" {
+		rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath))
+		if err == nil && rigSettings != nil && rigSettings.RoleModels != nil {
+			if flags, ok := rigSettings.RoleModels[role]; ok {
+				return flags
+			}
+		}
+	}
+
+	// Fall back to town-level defaults
+	if townSettings.RoleModels != nil {
+		if flags, ok := townSettings.RoleModels[role]; ok {
+			return flags
+		}
+	}
+
+	return ""
+}
+
+// ResolveAgentConfigForRole resolves the full agent configuration for a role.
+// This combines:
+//  1. Base agent config (from existing ResolveAgentConfig)
+//  2. Role-specific model flags (from RoleModels)
+//
+// The role model flags are appended to the Args slice.
+func ResolveAgentConfigForRole(townRoot, rigPath, role, agentOverride string) (*RuntimeConfig, string, error) {
+	// Get base agent config
+	var rc *RuntimeConfig
+	var agentName string
+	var err error
+
+	if agentOverride != "" {
+		rc, agentName, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
+	} else {
+		rc = ResolveAgentConfig(townRoot, rigPath)
+		agentName = "" // No override, use default
+		err = nil
+	}
+
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Get role-specific model flags
+	modelFlags := ResolveRoleModelFlags(townRoot, rigPath, role)
+
+	// If no role-specific flags, return as-is
+	if modelFlags == "" {
+		return rc, agentName, nil
+	}
+
+	// Create a copy with appended flags
+	result := &RuntimeConfig{
+		Provider:      rc.Provider,
+		Command:       rc.Command,
+		Args:          make([]string, len(rc.Args)),
+		InitialPrompt: rc.InitialPrompt,
+		PromptMode:    rc.PromptMode,
+		Session:       rc.Session,
+		Hooks:         rc.Hooks,
+		Tmux:          rc.Tmux,
+		Instructions:  rc.Instructions,
+	}
+	copy(result.Args, rc.Args)
+
+	// Parse and append model flags
+	extraArgs := strings.Fields(modelFlags)
+	result.Args = append(result.Args, extraArgs...)
+
+	return result, agentName, nil
+}
+
+// BuildAgentStartupCommandForRole builds the startup command with role-specific model config.
+func BuildAgentStartupCommandForRole(role, bdActor, rigPath, prompt string) string {
+	townRoot := ""
+	if rigPath != "" {
+		townRoot = filepath.Dir(rigPath)
+	} else {
+		var err error
+		townRoot, err = findTownRootFromCwd()
+		if err != nil {
+			townRoot = ""
+		}
+	}
+
+	rc, _, _ := ResolveAgentConfigForRole(townRoot, rigPath, role, "")
+	if rc == nil {
+		rc = DefaultRuntimeConfig()
+	}
+
+	envVars := map[string]string{
+		"GT_ROLE":         role,
+		"BD_ACTOR":        bdActor,
+		"GIT_AUTHOR_NAME": bdActor,
+	}
+
+	return buildStartupCommandWithRuntimeConfig(envVars, rc, townRoot, prompt)
+}
+
+// BuildAgentStartupCommandForRoleWithOverride is like BuildAgentStartupCommandForRole
+// but uses agentOverride if non-empty.
+func BuildAgentStartupCommandForRoleWithOverride(role, bdActor, rigPath, prompt, agentOverride string) (string, error) {
+	townRoot := ""
+	if rigPath != "" {
+		townRoot = filepath.Dir(rigPath)
+	} else {
+		var err error
+		townRoot, err = findTownRootFromCwd()
+		if err != nil {
+			townRoot = ""
+		}
+	}
+
+	rc, _, err := ResolveAgentConfigForRole(townRoot, rigPath, role, agentOverride)
+	if err != nil {
+		return "", err
+	}
+	if rc == nil {
+		rc = DefaultRuntimeConfig()
+	}
+
+	envVars := map[string]string{
+		"GT_ROLE":         role,
+		"BD_ACTOR":        bdActor,
+		"GIT_AUTHOR_NAME": bdActor,
+	}
+
+	return buildStartupCommandWithRuntimeConfig(envVars, rc, townRoot, prompt), nil
+}
+
+// buildStartupCommandWithRuntimeConfig builds the command using a pre-resolved RuntimeConfig.
+func buildStartupCommandWithRuntimeConfig(envVars map[string]string, rc *RuntimeConfig, townRoot, prompt string) string {
+	// Copy env vars
+	resolvedEnv := make(map[string]string, len(envVars)+2)
+	for k, v := range envVars {
+		resolvedEnv[k] = v
+	}
+
+	// Add GT_ROOT
+	if townRoot != "" {
+		resolvedEnv["GT_ROOT"] = townRoot
+	}
+
+	// Add session ID env if configured
+	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
+		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
+	}
+
+	// Build export prefix
+	var exports []string
+	for k, v := range resolvedEnv {
+		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+	}
+	sort.Strings(exports)
+
+	var cmd string
+	if len(exports) > 0 {
+		cmd = "export " + strings.Join(exports, " ") + " && "
+	}
+
+	// Add runtime command
+	if prompt != "" {
+		cmd += rc.BuildCommandWithPrompt(prompt)
+	} else {
+		cmd += rc.BuildCommand()
+	}
+
+	return cmd
+}
+
+// BuildPolecatStartupCommandForRole builds the startup command for a polecat with role-specific model config.
+func BuildPolecatStartupCommandForRole(rigName, polecatName, rigPath, prompt string) string {
+	bdActor := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+	return BuildAgentStartupCommandForRole(RolePolecat, bdActor, rigPath, prompt)
+}
+
+// BuildPolecatStartupCommandForRoleWithOverride is like BuildPolecatStartupCommandForRole
+// but uses agentOverride if non-empty.
+func BuildPolecatStartupCommandForRoleWithOverride(rigName, polecatName, rigPath, prompt, agentOverride string) (string, error) {
+	bdActor := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+	return BuildAgentStartupCommandForRoleWithOverride(RolePolecat, bdActor, rigPath, prompt, agentOverride)
+}
+
+// BuildCrewStartupCommandForRole builds the startup command for a crew member with role-specific model config.
+func BuildCrewStartupCommandForRole(rigName, crewName, rigPath, prompt string) string {
+	bdActor := fmt.Sprintf("%s/crew/%s", rigName, crewName)
+	return BuildAgentStartupCommandForRole(RoleCrew, bdActor, rigPath, prompt)
+}
+
+// BuildCrewStartupCommandForRoleWithOverride is like BuildCrewStartupCommandForRole
+// but uses agentOverride if non-empty.
+func BuildCrewStartupCommandForRoleWithOverride(rigName, crewName, rigPath, prompt, agentOverride string) (string, error) {
+	bdActor := fmt.Sprintf("%s/crew/%s", rigName, crewName)
+	return BuildAgentStartupCommandForRoleWithOverride(RoleCrew, bdActor, rigPath, prompt, agentOverride)
+}

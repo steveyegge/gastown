@@ -49,6 +49,29 @@ type TownSettings struct {
 	// Values override or extend the built-in presets.
 	// Example: {"gemini": {"command": "/custom/path/to/gemini"}}
 	Agents map[string]*RuntimeConfig `json:"agents,omitempty"`
+
+	// RoleModels defines per-role model flags for different agent roles.
+	// Keys are role names: "mayor", "deacon", "witness", "refinery", "polecat", "crew"
+	// Values are additional CLI flags to append (e.g., "--model opus", "--model sonnet")
+	// These are town-level defaults that apply to all rigs unless overridden.
+	RoleModels map[string]string `json:"role_models,omitempty"`
+}
+
+// Role constants for RoleModels configuration.
+const (
+	RoleMayor    = "mayor"
+	RoleDeacon   = "deacon"
+	RoleWitness  = "witness"
+	RoleRefinery = "refinery"
+	RolePolecat  = "polecat"
+	RoleCrew     = "crew"
+)
+
+// TownLevelRoles are roles that run at town level (not per-rig).
+// These roles can only have their model configured in TownSettings.
+var TownLevelRoles = map[string]bool{
+	RoleMayor:  true,
+	RoleDeacon: true,
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -209,6 +232,13 @@ type RigSettings struct {
 	// Similar to TownSettings.Agents but applies to this rig only.
 	// Allows per-rig custom agents for polecats and crew members.
 	Agents map[string]*RuntimeConfig `json:"agents,omitempty"`
+
+	// RoleModels defines per-role model flags for this rig's agents.
+	// Keys are role names: "witness", "refinery", "polecat", "crew"
+	// Values are additional CLI flags to append (e.g., "--model opus")
+	// Overrides town-level RoleModels for this rig.
+	// Note: "mayor" and "deacon" are town-level roles - use TownSettings for those.
+	RoleModels map[string]string `json:"role_models,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.
