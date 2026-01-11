@@ -77,27 +77,6 @@ Work tracking units. Bundle multiple issues/tasks that get assigned to agents.
 
 Git-backed issue tracking system that stores work state as structured data.
 
-### Issue IDs 🔢
-
-Gas Town uses [Beads](https://github.com/steveyegge/beads) for issue tracking, which generates **short random IDs** - not sequential numbers like GitHub issues.
-
-```
-gt-x7k2m    ← Gas Town issue (gt prefix)
-bd-9np4q    ← Beads issue (bd prefix)
-myproj-abc3 ← Your project (custom prefix)
-```
-
-The prefix comes from your project's Beads configuration. Find yours with `bd config get prefix`.
-
-**Common commands:**
-```bash
-bd list                    # List all issues
-bd show gt-x7k2m           # Show issue details
-bd ready                   # Issues ready for work
-```
-
-> **Note:** These are Beads IDs, not GitHub issue numbers. GitHub issue #309 might have Beads ID `gt-uzx2c`.
-
 > **New to Gas Town?** See the [Glossary](docs/glossary.md) for a complete guide to terminology and concepts.
 
 ## Installation
@@ -163,10 +142,10 @@ sequenceDiagram
 gt mayor attach
 
 # 2. In Mayor session, create a convoy
-gt convoy create "Feature X" gt-x7k2m gt-9np4q --notify --human
+gt convoy create "Feature X" issue-123 issue-456 --notify --human
 
 # 3. Assign work to an agent
-gt sling gt-x7k2m myproject
+gt sling issue-123 myproject
 
 # 4. Track progress
 gt convoy list
@@ -198,7 +177,7 @@ flowchart LR
 gt mayor attach
 
 # In Mayor, create convoy and let it orchestrate
-gt convoy create "Auth System" gt-a3k7x gt-b2m9y --notify
+gt convoy create "Auth System" issue-101 issue-102 --notify
 
 # Track progress
 gt convoy list
@@ -209,8 +188,8 @@ gt convoy list
 Run individual runtime instances manually. Gas Town just tracks state.
 
 ```bash
-gt convoy create "Fix bugs" gt-f4n8p   # Create convoy (sling auto-creates if skipped)
-gt sling gt-f4n8p myproject            # Assign to worker
+gt convoy create "Fix bugs" issue-123  # Create convoy (sling auto-creates if skipped)
+gt sling issue-123 myproject           # Assign to worker
 claude --resume                        # Agent reads mail, runs work (Claude)
 # or: codex                            # Start Codex in the workspace
 gt convoy list                         # Check progress
@@ -285,10 +264,10 @@ bd mol pour release --var version=1.2.0
 gt convoy create "Bug Fixes" --human
 
 # Add issues
-gt convoy add-issue gt-c5p2q gt-d8r3s
+gt convoy add-issue bug-101 bug-102
 
 # Assign to specific agents
-gt sling gt-c5p2q myproject/my-agent
+gt sling bug-101 myproject/my-agent
 
 # Check status
 gt convoy show
@@ -337,7 +316,7 @@ gt sling <issue> <rig>      # Assign work to agent
 gt sling <issue> <rig> --agent cursor   # Override runtime for this sling/spawn
 gt mayor attach             # Start Mayor session
 gt mayor start --agent auggie           # Run Mayor with a specific agent alias
-gt prime                    # Alternative to mayor attach
+gt prime                    # Context recovery (run inside existing session)
 ```
 
 **Built-in agent presets**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
