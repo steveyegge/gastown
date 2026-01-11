@@ -182,10 +182,12 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		}
 	}
 
-	// Track per-rig status for LED indicators
+	// Track per-rig status for LED indicators and sorting
 	type rigStatus struct {
-		hasWitness  bool
-		hasRefinery bool
+		hasWitness   bool
+		hasRefinery  bool
+		polecatCount int
+		opState      string // "OPERATIONAL", "PARKED", or "DOCKED"
 	}
 	rigStatuses := make(map[string]*rigStatus)
 
@@ -212,7 +214,18 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 				rigStatuses[agent.Rig].hasRefinery = true
 			case AgentPolecat:
 				polecatCount++
+				rigStatuses[agent.Rig].polecatCount++
 			}
+		}
+	}
+
+	// Get operational state for each rig
+	for rigName, status := range rigStatuses {
+		opState, _ := getRigOperationalState(townRoot, rigName)
+		if opState == "PARKED" || opState == "DOCKED" {
+			status.opState = opState
+		} else {
+			status.opState = "OPERATIONAL"
 		}
 	}
 
@@ -223,30 +236,96 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	// Build rig status display with LED indicators
 	// 🟢 = both witness and refinery running (fully active)
 	// 🟡 = one of witness/refinery running (partially active)
-	// ⚫ = neither running (inactive)
-	var rigParts []string
-	var rigNames []string
-	for rigName := range rigStatuses {
-		rigNames = append(rigNames, rigName)
-	}
-	sort.Strings(rigNames)
+	// 🅿️ = parked (nothing running, intentionally paused)
+	// 🛑 = docked (nothing running, global shutdown)
+	// ⚫ = operational but nothing running (unexpected state)
 
-	for _, rigName := range rigNames {
-		status := rigStatuses[rigName]
+	// Create sortable rig list
+	type rigInfo struct {
+		name   string
+		status *rigStatus
+	}
+	var rigs []rigInfo
+	for rigName, status := range rigStatuses {
+		rigs = append(rigs, rigInfo{name: rigName, status: status})
+	}
+
+	// Sort by: 1) running state, 2) polecat count (desc), 3) operational state, 4) alphabetical
+	sort.Slice(rigs, func(i, j int) bool {
+		isRunningI := rigs[i].status.hasWitness || rigs[i].status.hasRefinery
+		isRunningJ := rigs[j].status.hasWitness || rigs[j].status.hasRefinery
+
+		// Primary sort: running rigs before non-running rigs
+		if isRunningI != isRunningJ {
+			return isRunningI
+		}
+
+		// Secondary sort: polecat count (descending)
+		if rigs[i].status.polecatCount != rigs[j].status.polecatCount {
+			return rigs[i].status.polecatCount > rigs[j].status.polecatCount
+		}
+
+		// Tertiary sort: operational state (for non-running rigs: OPERATIONAL < PARKED < DOCKED)
+		stateOrder := map[string]int{"OPERATIONAL": 0, "PARKED": 1, "DOCKED": 2}
+		stateI := stateOrder[rigs[i].status.opState]
+		stateJ := stateOrder[rigs[j].status.opState]
+		if stateI != stateJ {
+			return stateI < stateJ
+		}
+
+		// Quaternary sort: alphabetical
+		return rigs[i].name < rigs[j].name
+	})
+
+	// Build display with group separators
+	var rigParts []string
+	var lastGroup string
+	for _, rig := range rigs {
+		isRunning := rig.status.hasWitness || rig.status.hasRefinery
+		var currentGroup string
+		if isRunning {
+			currentGroup = "running"
+		} else {
+			currentGroup = "idle-" + rig.status.opState
+		}
+
+		// Add separator when group changes (running -> non-running, or different opStates within non-running)
+		if lastGroup != "" && lastGroup != currentGroup {
+			rigParts = append(rigParts, "|")
+		}
+		lastGroup = currentGroup
+
+		status := rig.status
 		var led string
 
-		// Check if rig is parked or docked
-		opState, _ := getRigOperationalState(townRoot, rigName)
-		if opState == "PARKED" || opState == "DOCKED" {
-			led = "⏸️" // Parked/docked - intentionally offline
-		} else if status.hasWitness && status.hasRefinery {
+		// Check if processes are running first (regardless of operational state)
+		if status.hasWitness && status.hasRefinery {
 			led = "🟢" // Both running - fully active
 		} else if status.hasWitness || status.hasRefinery {
 			led = "🟡" // One running - partially active
 		} else {
-			led = "⚫" // Neither running - inactive
+			// Nothing running - show operational state
+			switch status.opState {
+			case "PARKED":
+				led = "🅿️" // Parked - intentionally paused
+			case "DOCKED":
+				led = "🛑" // Docked - global shutdown
+			default:
+				led = "⚫" // Operational but nothing running
+			}
 		}
-		rigParts = append(rigParts, led+rigName)
+
+		// Show polecat count if > 0
+		// All icons get 1 space, Park gets 2
+		space := " "
+		if led == "🅿️" {
+			space = "  "
+		}
+		display := led + space + rig.name
+		if status.polecatCount > 0 {
+			display += fmt.Sprintf("(%d)", status.polecatCount)
+		}
+		rigParts = append(rigParts, display)
 	}
 
 	if len(rigParts) > 0 {
