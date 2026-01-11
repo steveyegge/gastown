@@ -126,6 +126,10 @@ export const api = {
     return this.get(`/api/mayor/messages?limit=${limit}`);
   },
 
+  getMayorOutput(lines = 100) {
+    return this.get(`/api/mayor/output?lines=${lines}`);
+  },
+
   // === Beads ===
   createBead(title, options = {}) {
     return this.post('/api/beads', {

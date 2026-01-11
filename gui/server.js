@@ -1213,6 +1213,31 @@ app.get('/api/agents', async (req, res) => {
   }
 });
 
+// Get Mayor output (tmux buffer)
+app.get('/api/mayor/output', async (req, res) => {
+  const lines = parseInt(req.query.lines) || 100;
+  const sessionName = 'gt-mayor';
+
+  try {
+    const output = await getPolecatOutput(sessionName, lines);
+    const isRunning = await isSessionRunning(sessionName);
+
+    if (output !== null) {
+      res.json({
+        session: sessionName,
+        output,
+        running: isRunning,
+        // Include recent messages sent to Mayor for context
+        recentMessages: mayorMessageHistory.slice(0, 10)
+      });
+    } else {
+      res.json({ session: sessionName, output: null, running: isRunning, recentMessages: [] });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get polecat output (what they're working on)
 app.get('/api/polecat/:rig/:name/output', async (req, res) => {
   if (!validateRigAndName(req, res)) return;
