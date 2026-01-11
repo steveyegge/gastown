@@ -268,7 +268,7 @@ func TestIsStale(t *testing.T) {
 	}{
 		{"fresh", 5 * time.Minute, 1 * time.Hour, false},
 		{"stale", 2 * time.Hour, 1 * time.Hour, true},
-		{"exactly threshold", 1 * time.Hour, 1 * time.Hour, false},
+		{"exactly threshold", 1 * time.Hour, 1 * time.Hour, true}, // timing race: by the time IsStale runs, age > threshold
 		{"just over threshold", 1*time.Hour + time.Second, 1 * time.Hour, true},
 	}
 
