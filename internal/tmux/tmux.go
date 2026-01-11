@@ -860,50 +860,50 @@ var roleIcons = map[string]string{
 	"health-check": constants.EmojiDeacon,
 }
 
-// SetStatusFormat configures the left side of the status bar.
+// SetStatusFormat configures the right side of the status bar.
 // Shows compact identity: icon + minimal context
 func (t *Tmux) SetStatusFormat(session, rig, worker, role string) error {
 	// Get icon for role (empty string if not found)
 	icon := roleIcons[role]
 
 	// Compact format - icon already identifies role
-	// Mayor: 🎩 Mayor
-	// Crew:  👷 gastown/crew/max (full path)
-	// Polecat: 😺 gastown/Toast
-	var left string
+	// Mayor: Mayor 🎩
+	// Crew:  gastown/crew/max 👷
+	// Polecat: gastown/Toast 😺
+	var right string
 	if rig == "" {
 		// Town-level agent (Mayor, Deacon)
-		left = fmt.Sprintf("%s %s ", icon, worker)
+		right = fmt.Sprintf("%s %s ", worker, icon)
 	} else if role == "crew" {
 		// Crew member - show full path: rig/crew/name
-		left = fmt.Sprintf("%s %s/crew/%s ", icon, rig, worker)
+		right = fmt.Sprintf("%s/crew/%s %s ", rig, worker, icon)
 	} else {
 		// Rig-level agent - show rig/worker
-		left = fmt.Sprintf("%s %s/%s ", icon, rig, worker)
+		right = fmt.Sprintf("%s/%s %s ", rig, worker, icon)
 	}
 
-	if _, err := t.run("set-option", "-t", session, "status-left-length", "25"); err != nil {
+	if _, err := t.run("set-option", "-t", session, "status-right-length", "25"); err != nil {
 		return err
 	}
-	_, err := t.run("set-option", "-t", session, "status-left", left)
+	_, err := t.run("set-option", "-t", session, "status-right", right)
 	return err
 }
 
-// SetDynamicStatus configures the right side with dynamic content.
+// SetDynamicStatus configures the left side with dynamic content.
 // Uses a shell command that tmux calls periodically to get current status.
 func (t *Tmux) SetDynamicStatus(session string) error {
 	// tmux calls this command every status-interval seconds
 	// gt status-line reads env vars and mail to build the status
-	right := fmt.Sprintf(`#(gt status-line --session=%s 2>/dev/null) %%H:%%M`, session)
+	left := fmt.Sprintf(`#(gt status-line --session=%s 2>/dev/null)`, session)
 
-	if _, err := t.run("set-option", "-t", session, "status-right-length", "80"); err != nil {
+	if _, err := t.run("set-option", "-t", session, "status-left-length", "150"); err != nil {
 		return err
 	}
 	// Set faster refresh for more responsive status
 	if _, err := t.run("set-option", "-t", session, "status-interval", "5"); err != nil {
 		return err
 	}
-	_, err := t.run("set-option", "-t", session, "status-right", right)
+	_, err := t.run("set-option", "-t", session, "status-left", left)
 	return err
 }
 
