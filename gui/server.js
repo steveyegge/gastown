@@ -159,6 +159,9 @@ app.use('/js', express.static(path.join(__dirname, 'js')));
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
+app.get('/favicon.ico', (req, res) => {
+  res.sendFile(path.join(__dirname, 'assets', 'favicon.ico'));
+});
 
 // Store connected WebSocket clients
 const clients = new Set();
