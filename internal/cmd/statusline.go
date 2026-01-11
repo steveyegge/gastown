@@ -216,9 +216,76 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		}
 	}
 
+	// Track per-agent-type health (working/idle counts)
+	type sessionHealth struct {
+		icon    string
+		total   int
+		working int
+		idle    int
+	}
+
+	// Agent type icons
+	agentIcons := map[AgentType]string{
+		AgentPolecat:  "😺",
+		AgentWitness:  "👁️",
+		AgentRefinery: "🏭",
+		AgentDeacon:   "⛪",
+	}
+
+	// Initialize health tracker for all agent types (always show all types)
+	healthByType := make(map[AgentType]*sessionHealth)
+	for _, agentType := range []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon} {
+		healthByType[agentType] = &sessionHealth{
+			icon: agentIcons[agentType],
+		}
+	}
+
+	for _, s := range sessions {
+		// Skip non-Gas Town sessions
+		if !strings.HasPrefix(s, "gt-") && !strings.HasPrefix(s, "hq-") {
+			continue
+		}
+
+		agent := categorizeSession(s)
+		if agent == nil {
+			continue
+		}
+
+		// Skip mayor and crew (not tracked)
+		if agent.Type == AgentMayor || agent.Type == AgentCrew {
+			continue
+		}
+
+		healthByType[agent.Type].total++
+
+		// Detect working state (✻ = working, ❯ = idle)
+		state := getSessionState(t, s)
+		if state == "working" {
+			healthByType[agent.Type].working++
+		} else if state == "idle" {
+			healthByType[agent.Type].idle++
+		}
+		// dead sessions counted in total but not working/idle
+	}
+
 	// Build status
 	var parts []string
-	parts = append(parts, fmt.Sprintf("%d 😺", polecatCount))
+
+	// Add per-agent-type health in consistent order
+	// Format: 😺1/10 (1 working out of 10 total, 9 idle inferred)
+	// Always show all agent types, even when count is 0
+	agentOrder := []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon}
+	var agentParts []string
+	for _, agentType := range agentOrder {
+		health := healthByType[agentType]
+		// Always show all agent types (no continue for total == 0)
+
+		// Show working/total format (e.g., "1/10 😺" = 1 working, 10 total)
+		agentParts = append(agentParts, fmt.Sprintf("%d/%d %s", health.working, health.total, health.icon))
+	}
+	if len(agentParts) > 0 {
+		parts = append(parts, "active: "+strings.Join(agentParts, " "))
+	}
 
 	// Build rig status display with LED indicators
 	// 🟢 = both witness and refinery running (fully active)
@@ -511,6 +578,51 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 
 	fmt.Print(strings.Join(parts, " | ") + " |")
 	return nil
+}
+
+// getSessionState detects the state of a Claude Code session by capturing pane content.
+// Returns "working" if Claude is active (✻ symbol present), "idle" if prompt is visible,
+// or "unknown" if the state cannot be determined.
+func getSessionState(t *tmux.Tmux, session string) string {
+	// Capture last few lines of the pane
+	lines, err := t.CapturePaneLines(session, 5)
+	if err != nil || len(lines) == 0 {
+		return "unknown"
+	}
+
+	// Check last visible line for state indicators
+	lastLine := strings.TrimSpace(lines[len(lines)-1])
+
+	// ✻ indicates Claude is working (varies: Incubating, Symbioting, Shenaniganing, etc.)
+	if strings.Contains(lastLine, "✻") || strings.Contains(lastLine, "✻") {
+		return "working"
+	}
+
+	// ❯ prompt indicates Claude is idle, waiting for input
+	if strings.HasSuffix(lastLine, "❯") || strings.HasSuffix(lastLine, "❯") {
+		return "idle"
+	}
+
+	// Check second-to-last line as well (prompt might be on previous line)
+	if len(lines) >= 2 {
+		prevLine := strings.TrimSpace(lines[len(lines)-2])
+		if strings.HasSuffix(prevLine, "❯") || strings.HasSuffix(prevLine, "❯") {
+			return "idle"
+		}
+		if strings.Contains(prevLine, "✻") || strings.Contains(prevLine, "✻") {
+			return "working"
+		}
+	}
+
+	// Check all lines for working indicator (in case it's not near the end)
+	for _, line := range lines {
+		if strings.Contains(line, "✻") || strings.Contains(line, "✻") {
+			return "working"
+		}
+	}
+
+	// Default to unknown if we can't determine state
+	return "unknown"
 }
 
 // getUnreadMailCount returns unread mail count for an identity.
