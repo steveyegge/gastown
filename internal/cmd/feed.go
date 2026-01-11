@@ -30,7 +30,7 @@ var (
 func init() {
 	rootCmd.AddCommand(feedCmd)
 
-	feedCmd.Flags().BoolVarP(&feedFollow, "follow", "f", false, "Stream events in real-time (default when no other flags)")
+	feedCmd.Flags().BoolVarP(&feedFollow, "follow", "f", false, "Stream events in real-time (default for TUI/window modes)")
 	feedCmd.Flags().BoolVar(&feedNoFollow, "no-follow", false, "Show events once and exit")
 	feedCmd.Flags().IntVarP(&feedLimit, "limit", "n", 100, "Maximum number of events to show")
 	feedCmd.Flags().StringVar(&feedSince, "since", "", "Show events since duration (e.g., 5m, 1h, 30s)")
@@ -59,6 +59,7 @@ The feed combines multiple event sources:
   - Convoy status: In-progress and recently-landed convoys (refreshes every 10s)
 
 Use --plain for simple text output (wraps bd activity only).
+Plain mode defaults to --no-follow for scriptability; use -f to stream.
 
 Tmux Integration:
   Use --window to open the feed in a dedicated tmux window named 'feed'.
@@ -125,11 +126,10 @@ func runFeed(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Build bd activity command (without argv[0] for buildFeedCommand)
-	bdArgs := buildFeedArgs()
-
 	// Handle --window mode: open in dedicated tmux window
+	// Window mode always follows (it's meant to be a persistent window)
 	if feedWindow {
+		bdArgs := buildFeedArgs(true) // default to follow in window mode
 		return runFeedInWindow(workDir, bdArgs)
 	}
 
@@ -141,17 +141,28 @@ func runFeed(cmd *cobra.Command, args []string) error {
 	}
 
 	// Plain mode: exec bd activity directly
+	// Default to --no-follow so command terminates (user can't quit interactively)
+	bdArgs := buildFeedArgs(false) // default to no-follow in plain mode
 	return runFeedDirect(workDir, bdArgs)
 }
 
 // buildFeedArgs builds the bd activity arguments based on flags.
-func buildFeedArgs() []string {
+// The shouldFollowByDefault parameter controls the default behavior:
+// - true: follow mode (for TUI where user can quit with 'q')
+// - false: no-follow mode (for plain/non-interactive where cmd should exit)
+func buildFeedArgs(shouldFollowByDefault bool) []string {
 	var args []string
 
-	// Default to follow mode unless --no-follow set
-	shouldFollow := !feedNoFollow
+	// Determine follow behavior:
+	// - Explicit --follow always enables follow
+	// - Explicit --no-follow always disables follow
+	// - Otherwise use the provided default
+	shouldFollow := shouldFollowByDefault
 	if feedFollow {
 		shouldFollow = true
+	}
+	if feedNoFollow {
+		shouldFollow = false
 	}
 
 	if shouldFollow {
