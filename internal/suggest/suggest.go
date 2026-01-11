@@ -7,6 +7,42 @@ import (
 	"unicode"
 )
 
+// Scoring weights for similarity calculation.
+// Higher values indicate stronger signal for a match.
+const (
+	// ScoreExactMatch is awarded when two strings are identical.
+	ScoreExactMatch = 1000
+
+	// ScorePrefixWeight is the per-character bonus for matching prefixes.
+	// Prefix matches are weighted highly as users often type the start of commands.
+	ScorePrefixWeight = 20
+
+	// ScoreContainsFullWeight is awarded per character when the search term
+	// is fully contained within the candidate.
+	ScoreContainsFullWeight = 15
+
+	// ScoreSuffixWeight is the per-character bonus for matching suffixes.
+	ScoreSuffixWeight = 10
+
+	// ScoreContainsPartialWeight is awarded per character when the candidate
+	// is contained within the search term.
+	ScoreContainsPartialWeight = 10
+
+	// ScoreDistanceWeight is the per-character bonus for close Levenshtein distance.
+	// Applied when edit distance is at most half the longer string's length.
+	ScoreDistanceWeight = 5
+
+	// ScoreCommonCharsWeight is the per-character bonus for shared characters.
+	ScoreCommonCharsWeight = 2
+
+	// LengthDiffThreshold is the length difference above which a penalty applies.
+	LengthDiffThreshold = 5
+
+	// LengthDiffPenalty is the per-character penalty for length differences
+	// exceeding LengthDiffThreshold.
+	LengthDiffPenalty = 2
+)
+
 // Match represents a potential match with its score.
 type Match struct {
 	Value string
@@ -55,7 +91,7 @@ func FindSimilar(target string, candidates []string, maxResults int) []string {
 // - Common substring matching
 func similarity(a, b string) int {
 	if a == b {
-		return 1000 // Exact match
+		return ScoreExactMatch
 	}
 
 	score := 0
@@ -63,20 +99,20 @@ func similarity(a, b string) int {
 	// Prefix matching - high value
 	prefixLen := commonPrefixLength(a, b)
 	if prefixLen > 0 {
-		score += prefixLen * 20
+		score += prefixLen * ScorePrefixWeight
 	}
 
 	// Suffix matching
 	suffixLen := commonSuffixLength(a, b)
 	if suffixLen > 0 {
-		score += suffixLen * 10
+		score += suffixLen * ScoreSuffixWeight
 	}
 
 	// Contains matching
 	if strings.Contains(b, a) {
-		score += len(a) * 15
+		score += len(a) * ScoreContainsFullWeight
 	} else if strings.Contains(a, b) {
-		score += len(b) * 10
+		score += len(b) * ScoreContainsPartialWeight
 	}
 
 	// Levenshtein distance for close matches
@@ -84,19 +120,19 @@ func similarity(a, b string) int {
 	maxLen := max(len(a), len(b))
 	if maxLen > 0 && dist <= maxLen/2 {
 		// Closer distance = higher score
-		score += (maxLen - dist) * 5
+		score += (maxLen - dist) * ScoreDistanceWeight
 	}
 
 	// Common characters bonus (order-independent)
 	common := commonChars(a, b)
 	if common > 0 {
-		score += common * 2
+		score += common * ScoreCommonCharsWeight
 	}
 
 	// Penalize very different lengths
 	lenDiff := abs(len(a) - len(b))
-	if lenDiff > 5 {
-		score -= lenDiff * 2
+	if lenDiff > LengthDiffThreshold {
+		score -= lenDiff * LengthDiffPenalty
 	}
 
 	return score
