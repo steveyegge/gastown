@@ -30,6 +30,13 @@ func GenerateMRID(prefix, branch string) string {
 // GenerateMRIDWithTime generates a merge request ID using a specific timestamp.
 // This is primarily useful for testing to ensure deterministic output.
 // Note: Without randomness, two calls with identical inputs will produce the same ID.
+//
+// Parameters:
+//   - prefix: The project prefix (e.g., "gt" for gastown, "bd" for beads)
+//   - branch: The source branch name (e.g., "polecat/Nux/gt-xyz")
+//   - timestamp: The time to use for ID generation instead of time.Now()
+//
+// Returns a string in the format "<prefix>-mr-<6-char-hash>"
 func GenerateMRIDWithTime(prefix, branch string, timestamp time.Time) string {
 	return generateMRIDInternal(prefix, branch, timestamp, nil)
 }
