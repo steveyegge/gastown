@@ -307,11 +307,12 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
-	// Create agent bead for ZFC compliance (self-report state).
+	// Create or reopen agent bead for ZFC compliance (self-report state).
 	// State starts as "spawning" - will be updated to "working" when Claude starts.
 	// HookBead is set atomically at creation time if provided (avoids cross-beads routing issues).
+	// Uses CreateOrReopenAgentBead to handle re-spawning with same name (GH #332).
 	agentID := m.agentBeadID(name)
-	_, err = m.beads.CreateAgentBead(agentID, agentID, &beads.AgentFields{
+	_, err = m.beads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
@@ -562,9 +563,10 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 
 	// NOTE: Slash commands inherited from town level - no per-workspace copies needed.
 
-	// Create fresh agent bead for ZFC compliance
+	// Create or reopen agent bead for ZFC compliance
 	// HookBead is set atomically at recreation time if provided.
-	_, err = m.beads.CreateAgentBead(agentID, agentID, &beads.AgentFields{
+	// Uses CreateOrReopenAgentBead to handle re-spawning with same name (GH #332).
+	_, err = m.beads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",

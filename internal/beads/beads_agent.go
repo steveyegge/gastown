@@ -176,6 +176,67 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	return &issue, nil
 }
 
+// CreateOrReopenAgentBead creates an agent bead or reopens an existing one.
+// This handles the case where a polecat is nuked and re-spawned with the same name:
+// the old agent bead exists as a tombstone, so we reopen and update it instead of
+// failing with a UNIQUE constraint error.
+//
+// The function:
+// 1. Tries to create the agent bead
+// 2. If UNIQUE constraint fails, reopens the existing bead and updates its fields
+func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (*Issue, error) {
+	// First try to create the bead
+	issue, err := b.CreateAgentBead(id, title, fields)
+	if err == nil {
+		return issue, nil
+	}
+
+	// Check if it's a UNIQUE constraint error
+	if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		return nil, err
+	}
+
+	// The bead already exists (likely a tombstone from a previous nuked polecat)
+	// Reopen it and update its fields
+	if _, reopenErr := b.run("reopen", id, "--reason=re-spawning agent"); reopenErr != nil {
+		// If reopen fails, the bead might already be open - continue with update
+		if !strings.Contains(reopenErr.Error(), "already open") {
+			return nil, fmt.Errorf("reopening existing agent bead: %w (original error: %v)", reopenErr, err)
+		}
+	}
+
+	// Update the bead with new fields
+	description := FormatAgentDescription(title, fields)
+	updateOpts := UpdateOptions{
+		Title:       &title,
+		Description: &description,
+	}
+	if err := b.Update(id, updateOpts); err != nil {
+		return nil, fmt.Errorf("updating reopened agent bead: %w", err)
+	}
+
+	// Set the role slot if specified
+	if fields != nil && fields.RoleBead != "" {
+		if _, err := b.run("slot", "set", id, "role", fields.RoleBead); err != nil {
+			// Non-fatal: warn but continue
+			fmt.Printf("Warning: could not set role slot: %v\n", err)
+		}
+	}
+
+	// Set the hook slot if specified
+	if fields != nil && fields.HookBead != "" {
+		// Clear any existing hook first, then set new one
+		_, _ = b.run("slot", "clear", id, "hook")
+		if _, err := b.run("slot", "set", id, "hook", fields.HookBead); err != nil {
+			// Non-fatal: warn but continue
+			fmt.Printf("Warning: could not set hook slot: %v\n", err)
+		}
+	}
+
+	// Return the updated bead
+	return b.Show(id)
+}
+
 // UpdateAgentState updates the agent_state field in an agent bead.
 // Optionally updates hook_bead if provided.
 //
