@@ -261,6 +261,10 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("finding repo base: %w", err)
 	}
 
+	// Fetch latest from origin to ensure worktree has latest files
+	// (non-fatal: may be offline, but important for AGENTS.md etc)
+	_ = repoGit.Fetch("origin")
+
 	// Determine the start point for the new worktree
 	// Use origin/<default-branch> to ensure we start from the rig's configured branch
 	defaultBranch := "main"
