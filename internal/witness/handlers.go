@@ -687,7 +687,9 @@ type NukePolecatResult struct {
 }
 
 // AutoNukeIfClean checks if a polecat is safe to nuke and nukes it if so.
-// This is used for idle polecats with no pending MR - they can be nuked immediately.
+// This is used for orphaned polecats (no hooked work, no pending MR).
+// With the self-cleaning model, polecats should self-nuke on completion.
+// An orphan is likely from a crash before gt done completed.
 // Returns whether the nuke was performed and any error.
 func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
 	result := &NukePolecatResult{}
