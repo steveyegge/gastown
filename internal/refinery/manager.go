@@ -173,9 +173,25 @@ func (m *Manager) Start(foreground bool) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
+	// Resolve account for runtime config (use default account if configured)
+	townRoot := filepath.Dir(m.rig.Path)
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, "")
+	if err != nil {
+		// Non-fatal: continue without account config
+		_, _ = fmt.Fprintf(m.output, "Warning: could not resolve account: %v\n", err)
+	}
+	if accountHandle != "" {
+		_, _ = fmt.Fprintf(m.output, "Using account: %s\n", accountHandle)
+	}
+
 	// Build startup command first
 	bdActor := fmt.Sprintf("%s/refinery", m.rig.Name)
 	command := config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
+	// Prepend runtime config dir env if needed (for account selection)
+	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {
+		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: claudeConfigDir})
+	}
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
@@ -185,13 +201,13 @@ func (m *Manager) Start(foreground bool) error {
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:          "refinery",
-		Rig:           m.rig.Name,
-		TownRoot:      townRoot,
-		BeadsDir:      beads.ResolveBeadsDir(m.rig.Path),
-		BeadsNoDaemon: true,
+		Role:             "refinery",
+		Rig:              m.rig.Name,
+		TownRoot:         townRoot,
+		BeadsDir:         beads.ResolveBeadsDir(m.rig.Path),
+		RuntimeConfigDir: claudeConfigDir,
+		BeadsNoDaemon:    true,
 	})
 
 	// Add refinery-specific flag
