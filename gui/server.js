@@ -1666,7 +1666,7 @@ app.post('/api/service/:name/up', async (req, res) => {
   console.log(`[Service] Starting ${name}...`);
 
   try {
-    const result = await executeGT([name, 'up'], { timeout: 30000 });
+    const result = await executeGT([name, 'start'], { timeout: 30000 });
 
     if (result.success) {
       broadcast({ type: 'service_started', data: { service: name } });
@@ -1737,7 +1737,7 @@ app.post('/api/service/:name/restart', async (req, res) => {
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Start
-    const result = await executeGT([name, 'up'], { timeout: 30000 });
+    const result = await executeGT([name, 'start'], { timeout: 30000 });
 
     if (result.success) {
       broadcast({ type: 'service_restarted', data: { service: name } });
