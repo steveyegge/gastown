@@ -27,7 +27,7 @@ This is a convenience command for polecats that:
 1. Submits the current branch to the merge queue
 2. Auto-detects issue ID from branch name
 3. Notifies the Witness with the exit outcome
-4. Optionally exits the Claude session (--exit flag)
+4. Exits the Claude session (polecats don't stay alive after completion)
 
 Exit statuses:
   COMPLETED      - Work done, MR submitted (default)
@@ -42,8 +42,7 @@ Phase handoff workflow:
   resolves.
 
 Examples:
-  gt done                              # Submit branch, notify COMPLETED
-  gt done --exit                       # Submit and exit Claude session
+  gt done                              # Submit branch, notify COMPLETED, exit session
   gt done --issue gt-abc               # Explicit issue ID
   gt done --status ESCALATED           # Signal blocker, skip MR
   gt done --status DEFERRED            # Pause work, skip MR
@@ -55,7 +54,6 @@ var (
 	doneIssue         string
 	donePriority      int
 	doneStatus        string
-	doneExit          bool
 	donePhaseComplete bool
 	doneGate          string
 	doneCleanupStatus string
@@ -73,7 +71,6 @@ func init() {
 	doneCmd.Flags().StringVar(&doneIssue, "issue", "", "Source issue ID (default: parse from branch name)")
 	doneCmd.Flags().IntVarP(&donePriority, "priority", "p", -1, "Override priority (0-4, default: inherit from issue)")
 	doneCmd.Flags().StringVar(&doneStatus, "status", ExitCompleted, "Exit status: COMPLETED, ESCALATED, or DEFERRED")
-	doneCmd.Flags().BoolVar(&doneExit, "exit", false, "Exit Claude session after MR submission (self-terminate)")
 	doneCmd.Flags().BoolVar(&donePhaseComplete, "phase-complete", false, "Signal phase complete - await gate before continuing")
 	doneCmd.Flags().StringVar(&doneGate, "gate", "", "Gate bead ID to wait on (with --phase-complete)")
 	doneCmd.Flags().StringVar(&doneCleanupStatus, "cleanup-status", "", "Git cleanup status: clean, uncommitted, unpushed, stash, unknown (ZFC: agent-observed)")
@@ -346,16 +343,14 @@ func runDone(cmd *cobra.Command, args []string) error {
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
 
-	// Handle session self-termination if requested
-	if doneExit {
-		fmt.Println()
-		fmt.Printf("%s Session self-terminating (--exit flag)\n", style.Bold.Render("→"))
-		fmt.Printf("  Witness will handle worktree cleanup.\n")
-		fmt.Printf("  Goodbye!\n")
-		os.Exit(0)
-	}
+	// Always exit session - polecats don't stay alive after completion
+	fmt.Println()
+	fmt.Printf("%s Session exiting (done means gone)\n", style.Bold.Render("→"))
+	fmt.Printf("  Witness will handle worktree cleanup.\n")
+	fmt.Printf("  Goodbye!\n")
+	os.Exit(0)
 
-	return nil
+	return nil // unreachable, but keeps compiler happy
 }
 
 // updateAgentStateOnDone clears the agent's hook and reports cleanup status.
