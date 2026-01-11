@@ -8,20 +8,34 @@ import { AGENT_TYPES, getAgentConfig, formatAgentName } from '../shared/agent-ty
 
 // Event type configuration (uses shared agent colors where applicable)
 const EVENT_CONFIG = {
-  convoy_created: { icon: 'add_circle', color: '#22c55e', label: 'Convoy Created' },
+  // Convoy events
+  convoy_created: { icon: 'local_shipping', color: '#22c55e', label: 'Convoy Created' },
   convoy_updated: { icon: 'update', color: '#3b82f6', label: 'Convoy Updated' },
   convoy_complete: { icon: 'check_circle', color: '#22c55e', label: 'Convoy Complete' },
-  work_slung: { icon: 'send', color: '#a855f7', label: 'Work Dispatched' },
+  // Work events
+  work_slung: { icon: 'send', color: '#a855f7', label: 'Work Slung' },
   work_complete: { icon: 'task_alt', color: '#22c55e', label: 'Work Complete' },
   work_failed: { icon: 'error', color: '#ef4444', label: 'Work Failed' },
+  // Agent events
   agent_spawned: { icon: 'person_add', color: AGENT_TYPES.polecat.color, label: 'Agent Spawned' },
   agent_despawned: { icon: 'person_remove', color: '#6b7280', label: 'Agent Despawned' },
-  bead_created: { icon: 'bubble_chart', color: '#f59e0b', label: 'Bead Created' },
-  bead_updated: { icon: 'edit', color: '#3b82f6', label: 'Bead Updated' },
+  agent_nudged: { icon: 'notifications_active', color: '#f59e0b', label: 'Agent Nudged' },
+  // Bead/Issue events
+  bead_created: { icon: 'add_circle', color: '#f59e0b', label: 'Issue Created' },
+  bead_updated: { icon: 'edit', color: '#3b82f6', label: 'Issue Updated' },
+  bead_deleted: { icon: 'delete', color: '#6b7280', label: 'Issue Deleted' },
+  bead_pinned: { icon: 'push_pin', color: '#ec4899', label: 'Issue Pinned' },
+  // GT workflow events
+  patrol_started: { icon: 'visibility', color: '#8b5cf6', label: 'Patrol Started' },
+  handoff: { icon: 'swap_horiz', color: '#06b6d4', label: 'Handoff' },
+  merge_started: { icon: 'merge_type', color: '#f59e0b', label: 'Merge Started' },
+  // Mail events
   mail: { icon: 'mail', color: '#ec4899', label: 'Mail Sent' },
   mail_received: { icon: 'mail', color: '#ec4899', label: 'Mail Received' },
+  // Mayor events
   mayor_message: { icon: 'assistant', color: '#a855f7', label: 'Mayor Message' },
   mayor_started: { icon: 'play_circle', color: '#22c55e', label: 'Mayor Started' },
+  // System events
   system: { icon: 'info', color: '#6b7280', label: 'System' },
   error: { icon: 'error_outline', color: '#ef4444', label: 'Error' },
 };

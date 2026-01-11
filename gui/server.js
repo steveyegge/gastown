@@ -2177,7 +2177,8 @@ function startActivityStream() {
 
   console.log('[WS] Starting activity stream...');
 
-  activityProcess = spawn('bd', ['activity', '--follow'], {
+  // Use gt feed for comprehensive activity (beads + gt events + convoys)
+  activityProcess = spawn('gt', ['feed', '--plain', '--follow'], {
     cwd: GT_ROOT
   });
 
@@ -2205,30 +2206,43 @@ function startActivityStream() {
   });
 }
 
-// Parse activity line from bd activity output
-// Format: [HH:MM:SS] SYMBOL BEAD_ID action · description
+// Parse activity line from gt feed output
+// Format: [HH:MM:SS] SYMBOL TARGET action · description
 function parseActivityLine(line) {
-  const match = line.match(/^\[(\d{2}:\d{2}:\d{2})\]\s+([+\u2192\u2713\u2717\u2298\ud83d\udccc])\s+(\S+)\s+(.+)$/u);
+  // Match various unicode symbols used by gt feed
+  const match = line.match(/^\[(\d{2}:\d{2}:\d{2})\]\s+(.+?)\s+(\S+)\s+(.+)$/u);
   if (!match) return null;
 
   const [, time, symbol, target, rest] = match;
   const [action, ...descParts] = rest.split(' · ');
 
+  // Map symbols to event types (beads + gt events)
   const typeMap = {
-    '+': 'create',
-    '\u2192': 'update',   // →
-    '\u2713': 'complete', // ✓
-    '\u2717': 'fail',     // ✗
-    '\u2298': 'delete',   // ⊘
-    '\ud83d\udccc': 'pin' // 📌
+    '+': 'bead_created',
+    '→': 'bead_updated',
+    '✓': 'work_complete',
+    '✗': 'work_failed',
+    '⊘': 'bead_deleted',
+    '📌': 'bead_pinned',
+    '🦉': 'patrol_started',
+    '⚡': 'agent_nudged',
+    '🎯': 'work_slung',
+    '🤝': 'handoff',
+    '⚙': 'merge_started',
+    '🚀': 'convoy_created',
+    '📦': 'convoy_updated',
   };
 
+  const eventType = typeMap[symbol.trim()] || 'system';
+
   return {
+    id: `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
     time,
-    type: typeMap[symbol] || 'unknown',
+    type: eventType,
     target,
     action: action.trim(),
     message: descParts.join(' · ').trim(),
+    summary: `${action.trim()}${descParts.length ? ': ' + descParts.join(' · ').trim() : ''}`,
     timestamp: new Date().toISOString()
   };
 }
