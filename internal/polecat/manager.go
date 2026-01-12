@@ -261,6 +261,10 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("finding repo base: %w", err)
 	}
 
+	// Fetch latest from origin to ensure worktree has latest files
+	// (non-fatal: may be offline, but important for AGENTS.md etc)
+	_ = repoGit.Fetch("origin")
+
 	// Determine the start point for the new worktree
 	// Use origin/<default-branch> to ensure we start from the rig's configured branch
 	defaultBranch := "main"
@@ -274,6 +278,18 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// Worktree goes in polecats/<name>/<rigname>/ for LLM ergonomics
 	if err := repoGit.WorktreeAddFromRef(clonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
+	}
+
+	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
+	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
+	agentsMDPath := filepath.Join(clonePath, "AGENTS.md")
+	if _, err := os.Stat(agentsMDPath); os.IsNotExist(err) {
+		srcPath := filepath.Join(m.rig.Path, "mayor", "rig", "AGENTS.md")
+		if srcData, readErr := os.ReadFile(srcPath); readErr == nil {
+			if writeErr := os.WriteFile(agentsMDPath, srcData, 0644); writeErr != nil {
+				fmt.Printf("Warning: could not copy AGENTS.md: %v\n", writeErr)
+			}
+		}
 	}
 
 	// NOTE: We intentionally do NOT write to CLAUDE.md here.
@@ -546,6 +562,18 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
 	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
+	}
+
+	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
+	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
+	agentsMDPath := filepath.Join(newClonePath, "AGENTS.md")
+	if _, err := os.Stat(agentsMDPath); os.IsNotExist(err) {
+		srcPath := filepath.Join(m.rig.Path, "mayor", "rig", "AGENTS.md")
+		if srcData, readErr := os.ReadFile(srcPath); readErr == nil {
+			if writeErr := os.WriteFile(agentsMDPath, srcData, 0644); writeErr != nil {
+				fmt.Printf("Warning: could not copy AGENTS.md: %v\n", writeErr)
+			}
+		}
 	}
 
 	// NOTE: We intentionally do NOT write to CLAUDE.md here.

@@ -279,3 +279,156 @@ func TestClearIssueWithoutAssignment(t *testing.T) {
 // We no longer write CLAUDE.md to worktrees - Gas Town context is injected
 // ephemerally via SessionStart hook (gt prime) to prevent leaking internal
 // architecture into project repos.
+
+func TestAddWithOptions_HasAgentsMD(t *testing.T) {
+	// This test verifies that AGENTS.md exists in polecat worktrees after creation.
+	// AGENTS.md is critical for polecats to "land the plane" properly.
+
+	root := t.TempDir()
+
+	// Create mayor/rig directory structure (this acts as repo base when no .repo.git)
+	mayorRig := filepath.Join(root, "mayor", "rig")
+	if err := os.MkdirAll(mayorRig, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Initialize git repo in mayor/rig
+	cmd := exec.Command("git", "init")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+
+	// Create AGENTS.md with test content
+	agentsMDContent := []byte("# AGENTS.md\n\nTest content for polecats.\n")
+	agentsMDPath := filepath.Join(mayorRig, "AGENTS.md")
+	if err := os.WriteFile(agentsMDPath, agentsMDContent, 0644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	// Commit AGENTS.md so it's part of the repo
+	mayorGit := git.NewGit(mayorRig)
+	if err := mayorGit.Add("AGENTS.md"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := mayorGit.Commit("Add AGENTS.md"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	// AddWithOptions needs origin/main to exist. Add self as origin and fetch.
+	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	if err := mayorGit.Fetch("origin"); err != nil {
+		t.Fatalf("git fetch: %v", err)
+	}
+
+	// Create rig pointing to root
+	r := &rig.Rig{
+		Name: "rig",
+		Path: root,
+	}
+	m := NewManager(r, git.NewGit(root))
+
+	// Create polecat via AddWithOptions
+	polecat, err := m.AddWithOptions("TestAgent", AddOptions{})
+	if err != nil {
+		t.Fatalf("AddWithOptions: %v", err)
+	}
+
+	// Verify AGENTS.md exists in the worktree
+	worktreeAgentsMD := filepath.Join(polecat.ClonePath, "AGENTS.md")
+	if _, err := os.Stat(worktreeAgentsMD); os.IsNotExist(err) {
+		t.Errorf("AGENTS.md does not exist in worktree at %s", worktreeAgentsMD)
+	}
+
+	// Verify content matches
+	content, err := os.ReadFile(worktreeAgentsMD)
+	if err != nil {
+		t.Fatalf("read worktree AGENTS.md: %v", err)
+	}
+	if string(content) != string(agentsMDContent) {
+		t.Errorf("AGENTS.md content = %q, want %q", string(content), string(agentsMDContent))
+	}
+}
+
+func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
+	// This test verifies the fallback: if AGENTS.md is not in git,
+	// it should be copied from mayor/rig.
+
+	root := t.TempDir()
+
+	// Create mayor/rig directory structure
+	mayorRig := filepath.Join(root, "mayor", "rig")
+	if err := os.MkdirAll(mayorRig, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Initialize git repo in mayor/rig WITHOUT AGENTS.md in git
+	cmd := exec.Command("git", "init")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+
+	// Create a dummy file and commit (repo needs at least one commit)
+	dummyPath := filepath.Join(mayorRig, "README.md")
+	if err := os.WriteFile(dummyPath, []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write README.md: %v", err)
+	}
+	mayorGit := git.NewGit(mayorRig)
+	if err := mayorGit.Add("README.md"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := mayorGit.Commit("Initial commit"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	// AddWithOptions needs origin/main to exist. Add self as origin and fetch.
+	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	if err := mayorGit.Fetch("origin"); err != nil {
+		t.Fatalf("git fetch: %v", err)
+	}
+
+	// Now create AGENTS.md in mayor/rig (but NOT committed to git)
+	// This simulates the fallback scenario
+	agentsMDContent := []byte("# AGENTS.md\n\nFallback content.\n")
+	agentsMDPath := filepath.Join(mayorRig, "AGENTS.md")
+	if err := os.WriteFile(agentsMDPath, agentsMDContent, 0644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	// Create rig pointing to root
+	r := &rig.Rig{
+		Name: "rig",
+		Path: root,
+	}
+	m := NewManager(r, git.NewGit(root))
+
+	// Create polecat via AddWithOptions
+	polecat, err := m.AddWithOptions("TestFallback", AddOptions{})
+	if err != nil {
+		t.Fatalf("AddWithOptions: %v", err)
+	}
+
+	// Verify AGENTS.md exists in the worktree (via fallback copy)
+	worktreeAgentsMD := filepath.Join(polecat.ClonePath, "AGENTS.md")
+	if _, err := os.Stat(worktreeAgentsMD); os.IsNotExist(err) {
+		t.Errorf("AGENTS.md does not exist in worktree (fallback failed) at %s", worktreeAgentsMD)
+	}
+
+	// Verify content matches the fallback source
+	content, err := os.ReadFile(worktreeAgentsMD)
+	if err != nil {
+		t.Fatalf("read worktree AGENTS.md: %v", err)
+	}
+	if string(content) != string(agentsMDContent) {
+		t.Errorf("AGENTS.md content = %q, want %q", string(content), string(agentsMDContent))
+	}
+}
