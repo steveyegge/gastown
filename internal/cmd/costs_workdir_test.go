@@ -188,10 +188,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	}
 
 	// Call querySessionEvents - this should find events from ALL locations
-	entries, err := querySessionEvents()
-	if err != nil {
-		t.Fatalf("querySessionEvents failed: %v", err)
-	}
+	entries := querySessionEvents()
 
 	t.Logf("querySessionEvents returned %d entries", len(entries))
 
