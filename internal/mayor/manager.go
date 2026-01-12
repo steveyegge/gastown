@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -109,15 +110,19 @@ func (m *Manager) Start(agentOverride string) error {
 	theme := tmux.MayorTheme()
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Mayor", "coordinator")
 
-	// Wait for Claude to start (non-fatal)
-	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+	// Wait for Claude to start and show its prompt (non-fatal)
+	// WaitForRuntimeReady polls for the "> " prompt, ensuring Claude is ready for input
+	runtimeConfig := config.LoadRuntimeConfig("")
+	if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal - try to continue anyway
 	}
 
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
-	time.Sleep(constants.ShutdownNotifyDelay)
+	// Wait for runtime to be fully ready
+	runtime.SleepForReadyDelay(runtimeConfig)
+	_ = runtime.RunStartupFallback(t, sessionID, "mayor", runtimeConfig)
 
 	// Inject startup nudge for predecessor discovery via /resume
 	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{

@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -335,7 +336,7 @@ func (d *Daemon) identityToSession(identity string) string {
 // Uses role bead config if available, falls back to hardcoded defaults.
 func (d *Daemon) restartSession(sessionName, identity string) error {
 	// Get role config for this identity
-	config, parsed, err := d.getRoleConfigForIdentity(identity)
+	roleConfig, parsed, err := d.getRoleConfigForIdentity(identity)
 	if err != nil {
 		return fmt.Errorf("parsing identity: %w", err)
 	}
@@ -350,13 +351,13 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	}
 
 	// Determine working directory
-	workDir := d.getWorkDir(config, parsed)
+	workDir := d.getWorkDir(roleConfig, parsed)
 	if workDir == "" {
 		return fmt.Errorf("cannot determine working directory for %s", identity)
 	}
 
 	// Determine if pre-sync is needed
-	needsPreSync := d.getNeedsPreSync(config, parsed)
+	needsPreSync := d.getNeedsPreSync(roleConfig, parsed)
 
 	// Pre-sync workspace for agents with git worktrees
 	if needsPreSync {
@@ -371,24 +372,34 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	}
 
 	// Set environment variables
-	d.setSessionEnvironment(sessionName, config, parsed)
+	d.setSessionEnvironment(sessionName, roleConfig, parsed)
 
 	// Apply theme (non-fatal: theming failure doesn't affect operation)
 	d.applySessionTheme(sessionName, parsed)
 
 	// Get and send startup command
-	startCmd := d.getStartCommand(config, parsed)
+	startCmd := d.getStartCommand(roleConfig, parsed)
 	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
 		return fmt.Errorf("sending startup command: %w", err)
 	}
 
-	// Wait for Claude to start, then accept bypass permissions warning if it appears.
-	// This ensures automated role starts aren't blocked by the warning dialog.
-	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+	// Wait for Claude to start and show its prompt (non-fatal)
+	// WaitForRuntimeReady polls for the "> " prompt, ensuring Claude is ready for input
+	rigPath := ""
+	if parsed.RigName != "" {
+		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
+	}
+	runtimeConfig := config.LoadRuntimeConfig(rigPath)
+	if err := d.tmux.WaitForRuntimeReady(sessionName, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal - Claude might still start
 	}
+
+	// Accept bypass permissions warning dialog if it appears.
 	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
-	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Wait for runtime to be fully ready
+	runtime.SleepForReadyDelay(runtimeConfig)
+	_ = runtime.RunStartupFallback(d.tmux, sessionName, parsed.RoleType, runtimeConfig)
 
 	// GUPP: Gas Town Universal Propulsion Principle
 	// Send startup nudge for predecessor discovery via /resume
