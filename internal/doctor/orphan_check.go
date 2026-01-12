@@ -261,6 +261,120 @@ func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, may
 // distinguish user sessions from orphaned Gas Town processes.
 type OrphanProcessCheck struct {
 	BaseCheck
+	processLister ProcessLister
+}
+
+// ProcessLister abstracts process listing for testing.
+type ProcessLister interface {
+	// ListTmuxServerPIDs returns PIDs of tmux server processes.
+	ListTmuxServerPIDs() ([]int, error)
+	// ListPanePIDs returns PIDs of shells inside tmux panes.
+	ListPanePIDs() ([]int, error)
+	// ListRuntimeProcesses returns info about running runtime CLI processes.
+	ListRuntimeProcesses() ([]processInfo, error)
+	// GetParentPID returns the parent PID of a given process.
+	GetParentPID(pid int) (int, error)
+}
+
+// realProcessLister implements ProcessLister using actual system commands.
+type realProcessLister struct{}
+
+func (r *realProcessLister) ListTmuxServerPIDs() ([]int, error) {
+	var pids []int
+	// Find tmux server processes using ps.
+	// Match "tmux", "tmux: server", or paths ending in /tmux.
+	// On Linux, long-running tmux servers show as "tmux: server" in comm field.
+	out, err := exec.Command("sh", "-c", `ps ax -o pid,comm | awk '$2 == "tmux" || $2 ~ /^tmux:/ || $2 ~ /\/tmux$/ { print $1 }'`).Output()
+	if err != nil {
+		return pids, nil // No tmux server running
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		var pid int
+		if _, err := fmt.Sscanf(line, "%d", &pid); err == nil {
+			pids = append(pids, pid)
+		}
+	}
+	return pids, nil
+}
+
+func (r *realProcessLister) ListPanePIDs() ([]int, error) {
+	var pids []int
+	t := tmux.NewTmux()
+	sessions, _ := t.ListSessions()
+	for _, session := range sessions {
+		out, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_pid}").Output()
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			var pid int
+			if _, err := fmt.Sscanf(line, "%d", &pid); err == nil {
+				pids = append(pids, pid)
+			}
+		}
+	}
+	return pids, nil
+}
+
+func (r *realProcessLister) ListRuntimeProcesses() ([]processInfo, error) {
+	var procs []processInfo
+
+	// Use ps with args to get full command line (needed to check for Gas Town signature)
+	out, err := exec.Command("ps", "-eo", "pid,ppid,args").Output()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+
+		// Extract command name (without path)
+		cmd := fields[2]
+		if idx := strings.LastIndex(cmd, "/"); idx >= 0 {
+			cmd = cmd[idx+1:]
+		}
+
+		// Only match claude/codex processes, not tmux or other launchers
+		// (tmux command line may contain --dangerously-skip-permissions as part of the launched command)
+		if cmd != "claude" && cmd != "claude-code" && cmd != "codex" {
+			continue
+		}
+
+		// Get full args
+		args := strings.Join(fields[2:], " ")
+
+		// Only match Gas Town Claude processes (have --dangerously-skip-permissions)
+		// This excludes user's personal Claude sessions
+		if !strings.Contains(args, "--dangerously-skip-permissions") {
+			continue
+		}
+
+		var pid, ppid int
+		if _, err := fmt.Sscanf(fields[0], "%d", &pid); err != nil {
+			continue
+		}
+		if _, err := fmt.Sscanf(fields[1], "%d", &ppid); err != nil {
+			continue
+		}
+
+		procs = append(procs, processInfo{pid: pid, ppid: ppid, cmd: args})
+	}
+	return procs, nil
+}
+
+func (r *realProcessLister) GetParentPID(pid int) (int, error) {
+	out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", pid), "-o", "ppid=").Output() //nolint:gosec // G204: PID is numeric
+	if err != nil {
+		return 0, err
+	}
+	var ppid int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &ppid); err != nil {
+		return 0, err
+	}
+	return ppid, nil
 }
 
 // NewOrphanProcessCheck creates a new orphan process check.
@@ -271,7 +385,15 @@ func NewOrphanProcessCheck() *OrphanProcessCheck {
 			CheckDescription: "Detect runtime processes outside tmux",
 			CheckCategory:    CategoryCleanup,
 		},
+		processLister: &realProcessLister{},
 	}
+}
+
+// NewOrphanProcessCheckWithProcessLister creates a check with a custom process lister (for testing).
+func NewOrphanProcessCheckWithProcessLister(lister ProcessLister) *OrphanProcessCheck {
+	check := NewOrphanProcessCheck()
+	check.processLister = lister
+	return check
 }
 
 // Run checks for runtime processes running outside tmux.
@@ -288,7 +410,7 @@ func (c *OrphanProcessCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Find runtime processes
-	runtimeProcs, err := c.findRuntimeProcesses()
+	runtimeProcs, err := c.processLister.ListRuntimeProcesses()
 	if err != nil {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -349,99 +471,27 @@ type processInfo struct {
 
 // getTmuxSessionPIDs returns PIDs of all tmux server processes and pane shell PIDs.
 func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //nolint:unparam // error return kept for future use
-	// Get tmux server PID and all pane PIDs
 	pids := make(map[int]bool)
 
-	// Find tmux server processes using ps instead of pgrep.
-	// pgrep -x tmux is unreliable on macOS - it often misses the actual server.
-	// We use ps with awk to find processes where comm is exactly "tmux".
-	out, err := exec.Command("sh", "-c", `ps ax -o pid,comm | awk '$2 == "tmux" || $2 ~ /\/tmux$/ { print $1 }'`).Output()
+	// Get tmux server PIDs
+	serverPIDs, err := c.processLister.ListTmuxServerPIDs()
 	if err != nil {
-		// No tmux server running
 		return pids, nil
 	}
-
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		var pid int
-		if _, err := fmt.Sscanf(line, "%d", &pid); err == nil {
-			pids[pid] = true
-		}
+	for _, pid := range serverPIDs {
+		pids[pid] = true
 	}
 
-	// Also get shell PIDs inside tmux panes
-	t := tmux.NewTmux()
-	sessions, _ := t.ListSessions()
-	for _, session := range sessions {
-		// Get pane PIDs for this session
-		out, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_pid}").Output()
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			var pid int
-			if _, err := fmt.Sscanf(line, "%d", &pid); err == nil {
-				pids[pid] = true
-			}
-		}
+	// Get shell PIDs inside tmux panes
+	panePIDs, err := c.processLister.ListPanePIDs()
+	if err != nil {
+		return pids, nil
+	}
+	for _, pid := range panePIDs {
+		pids[pid] = true
 	}
 
 	return pids, nil
-}
-
-// findRuntimeProcesses finds Gas Town Claude processes (those with --dangerously-skip-permissions).
-// Only detects processes started by Gas Town, not user's personal Claude sessions.
-func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
-	var procs []processInfo
-
-	// Use ps with args to get full command line (needed to check for Gas Town signature)
-	out, err := exec.Command("ps", "-eo", "pid,ppid,args").Output()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-
-		// Extract command name (without path)
-		cmd := fields[2]
-		if idx := strings.LastIndex(cmd, "/"); idx >= 0 {
-			cmd = cmd[idx+1:]
-		}
-
-		// Only match claude/codex processes, not tmux or other launchers
-		// (tmux command line may contain --dangerously-skip-permissions as part of the launched command)
-		if cmd != "claude" && cmd != "claude-code" && cmd != "codex" {
-			continue
-		}
-
-		// Get full args
-		args := strings.Join(fields[2:], " ")
-
-		// Only match Gas Town Claude processes (have --dangerously-skip-permissions)
-		// This excludes user's personal Claude sessions
-		if !strings.Contains(args, "--dangerously-skip-permissions") {
-			continue
-		}
-
-		var pid, ppid int
-		if _, err := fmt.Sscanf(fields[0], "%d", &pid); err != nil {
-			continue
-		}
-		if _, err := fmt.Sscanf(fields[1], "%d", &ppid); err != nil {
-			continue
-		}
-
-		procs = append(procs, processInfo{
-			pid:  pid,
-			ppid: ppid,
-			cmd:  args,
-		})
-	}
-
-	return procs, nil
 }
 
 // isOrphanProcess checks if a runtime process is orphaned.
@@ -460,13 +510,8 @@ func (c *OrphanProcessCheck) isOrphanProcess(proc processInfo, tmuxPIDs map[int]
 		}
 
 		// Get parent's parent
-		out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", currentPPID), "-o", "ppid=").Output() //nolint:gosec // G204: PID is numeric from internal state
+		nextPPID, err := c.processLister.GetParentPID(currentPPID)
 		if err != nil {
-			break
-		}
-
-		var nextPPID int
-		if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &nextPPID); err != nil {
 			break
 		}
 		currentPPID = nextPPID
