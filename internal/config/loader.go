@@ -994,6 +994,22 @@ func ResolveRoleAgentName(role, townRoot, rigPath string) (agentName string, isR
 	return "claude", false
 }
 
+// ShouldIncludeProjectClaudeFiles returns whether project Claude files (.claude/, CLAUDE.md, etc.)
+// should be included in worktrees/clones instead of being excluded via sparse checkout.
+// Resolution order: rig setting > town setting > false (default).
+func ShouldIncludeProjectClaudeFiles(rigSettings *RigSettings, townSettings *TownSettings) bool {
+	// Rig-level setting takes precedence if explicitly set
+	if rigSettings != nil && rigSettings.IncludeProjectClaudeFiles != nil {
+		return *rigSettings.IncludeProjectClaudeFiles
+	}
+	// Fall back to town-level setting
+	if townSettings != nil {
+		return townSettings.IncludeProjectClaudeFiles
+	}
+	// Default: exclude project files (current behavior for backward compatibility)
+	return false
+}
+
 // lookupAgentConfig looks up an agent by name.
 // Checks rig-level custom agents first, then town's custom agents, then built-in presets from agents.go.
 func lookupAgentConfig(name string, townSettings *TownSettings, rigSettings *RigSettings) *RuntimeConfig {

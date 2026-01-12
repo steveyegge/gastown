@@ -78,7 +78,7 @@ func TestCloneWithReferenceCreatesAlternates(t *testing.T) {
 	_ = exec.Command("git", "-C", src, "commit", "-m", "initial").Run()
 
 	g := NewGit(tmp)
-	if err := g.CloneWithReference(src, dst, src); err != nil {
+	if err := g.CloneWithReference(src, dst, src, false); err != nil {
 		t.Fatalf("CloneWithReference: %v", err)
 	}
 
@@ -469,7 +469,7 @@ func TestCloneBareHasOriginRefs(t *testing.T) {
 	// Verify WorktreeAddFromRef succeeds with origin/main
 	// This is what polecat creation does
 	worktreePath := filepath.Join(tmp, "worktree")
-	if err := bareGit.WorktreeAddFromRef(worktreePath, "test-branch", originMain); err != nil {
+	if err := bareGit.WorktreeAddFromRef(worktreePath, "test-branch", originMain, false); err != nil {
 		t.Errorf("WorktreeAddFromRef(%q) failed: %v", originMain, err)
 	}
 

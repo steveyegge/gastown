@@ -153,7 +153,8 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	// Create the worktree on main branch
 	// Use WorktreeAddExistingForce because main may already be checked out
 	// in other worktrees (e.g., mayor/rig). This is safe for cross-rig work.
-	if err := g.WorktreeAddExistingForce(worktreePath, "main"); err != nil {
+	// Cross-rig worktrees use default sparse checkout behavior (exclude Claude files)
+	if err := g.WorktreeAddExistingForce(worktreePath, "main", false); err != nil {
 		return fmt.Errorf("creating worktree: %w", err)
 	}
 

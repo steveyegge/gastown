@@ -321,16 +321,17 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := os.MkdirAll(filepath.Dir(mayorRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating mayor dir: %w", err)
 	}
+	// Mayor/rig is Gas Town infrastructure - always use sparse checkout to exclude project Claude files
 	if localRepo != "" {
-		if err := m.git.CloneWithReference(opts.GitURL, mayorRigPath, localRepo); err != nil {
+		if err := m.git.CloneWithReference(opts.GitURL, mayorRigPath, localRepo, false); err != nil {
 			fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
 			_ = os.RemoveAll(mayorRigPath)
-			if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+			if err := m.git.Clone(opts.GitURL, mayorRigPath, false); err != nil {
 				return nil, fmt.Errorf("cloning for mayor: %w", err)
 			}
 		}
 	} else {
-		if err := m.git.Clone(opts.GitURL, mayorRigPath); err != nil {
+		if err := m.git.Clone(opts.GitURL, mayorRigPath, false); err != nil {
 			return nil, fmt.Errorf("cloning for mayor: %w", err)
 		}
 	}
@@ -413,7 +414,8 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := os.MkdirAll(filepath.Dir(refineryRigPath), 0755); err != nil {
 		return nil, fmt.Errorf("creating refinery dir: %w", err)
 	}
-	if err := bareGit.WorktreeAddExisting(refineryRigPath, defaultBranch); err != nil {
+	// Refinery is Gas Town infrastructure - always use sparse checkout to exclude project Claude files
+	if err := bareGit.WorktreeAddExisting(refineryRigPath, defaultBranch, false); err != nil {
 		return nil, fmt.Errorf("creating refinery worktree: %w", err)
 	}
 	fmt.Printf("   ✓ Created refinery worktree\n")

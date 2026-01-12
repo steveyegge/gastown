@@ -43,10 +43,12 @@ func (e *UncommittedWorkError) Unwrap() error {
 
 // Manager handles polecat lifecycle.
 type Manager struct {
-	rig      *rig.Rig
-	git      *git.Git
-	beads    *beads.Beads
-	namePool *NamePool
+	rig          *rig.Rig
+	git          *git.Git
+	beads        *beads.Beads
+	namePool     *NamePool
+	rigSettings  *config.RigSettings
+	townSettings *config.TownSettings
 }
 
 // NewManager creates a new polecat manager.
@@ -57,31 +59,42 @@ func NewManager(r *rig.Rig, g *git.Git) *Manager {
 	resolvedBeads := beads.ResolveBeadsDir(r.Path)
 	beadsPath := filepath.Dir(resolvedBeads) // Get the directory containing .beads
 
-	// Try to load rig settings for namepool config
+	// Try to load rig settings for namepool config and include_project_claude_files
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
 	var pool *NamePool
+	var rigSettings *config.RigSettings
 
 	settings, err := config.LoadRigSettings(settingsPath)
-	if err == nil && settings.Namepool != nil {
-		// Use configured namepool settings
-		pool = NewNamePoolWithConfig(
-			r.Path,
-			r.Name,
-			settings.Namepool.Style,
-			settings.Namepool.Names,
-			settings.Namepool.MaxBeforeNumbering,
-		)
-	} else {
+	if err == nil {
+		rigSettings = settings
+		if settings.Namepool != nil {
+			// Use configured namepool settings
+			pool = NewNamePoolWithConfig(
+				r.Path,
+				r.Name,
+				settings.Namepool.Style,
+				settings.Namepool.Names,
+				settings.Namepool.MaxBeforeNumbering,
+			)
+		}
+	}
+	if pool == nil {
 		// Use defaults
 		pool = NewNamePool(r.Path, r.Name)
 	}
 	_ = pool.Load() // non-fatal: state file may not exist for new rigs
 
+	// Try to load town settings for include_project_claude_files fallback
+	townRoot := filepath.Dir(r.Path)
+	townSettings, _ := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot))
+
 	return &Manager{
-		rig:      r,
-		git:      g,
-		beads:    beads.NewWithBeadsDir(beadsPath, resolvedBeads),
-		namePool: pool,
+		rig:          r,
+		git:          g,
+		beads:        beads.NewWithBeadsDir(beadsPath, resolvedBeads),
+		namePool:     pool,
+		rigSettings:  rigSettings,
+		townSettings: townSettings,
 	}
 }
 
@@ -278,7 +291,9 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// Always create fresh branch - unique name guarantees no collision
 	// git worktree add -b polecat/<name>-<timestamp> <path> <startpoint>
 	// Worktree goes in polecats/<name>/<rigname>/ for LLM ergonomics
-	if err := repoGit.WorktreeAddFromRef(clonePath, branchName, startPoint); err != nil {
+	// Skip sparse checkout if include_project_claude_files is enabled
+	skipSparseCheckout := config.ShouldIncludeProjectClaudeFiles(m.rigSettings, m.townSettings)
+	if err := repoGit.WorktreeAddFromRef(clonePath, branchName, startPoint, skipSparseCheckout); err != nil {
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 
@@ -561,8 +576,10 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Old branches are left behind - they're ephemeral (never pushed to origin)
 	// and will be cleaned up by garbage collection
 	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
+	// Skip sparse checkout if include_project_claude_files is enabled
 	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
-	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint); err != nil {
+	skipSparseCheckout := config.ShouldIncludeProjectClaudeFiles(m.rigSettings, m.townSettings)
+	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint, skipSparseCheckout); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
 

@@ -147,7 +147,8 @@ func (m *Manager) createRigWorktree(dogPath, dogName, rigName string) (string, e
 	branchName := fmt.Sprintf("dog/%s-%s-%d", dogName, rigName, time.Now().UnixMilli())
 
 	// Create worktree with new branch from default branch
-	if err := repoGit.WorktreeAddFromRef(worktreePath, branchName, startPoint); err != nil {
+	// Dog worktrees use default sparse checkout behavior (exclude Claude files)
+	if err := repoGit.WorktreeAddFromRef(worktreePath, branchName, startPoint, false); err != nil {
 		return "", fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 

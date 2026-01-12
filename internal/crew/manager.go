@@ -80,15 +80,26 @@ func validateCrewName(name string) error {
 
 // Manager handles crew worker lifecycle.
 type Manager struct {
-	rig *rig.Rig
-	git *git.Git
+	rig          *rig.Rig
+	git          *git.Git
+	rigSettings  *config.RigSettings
+	townSettings *config.TownSettings
 }
 
 // NewManager creates a new crew manager.
 func NewManager(r *rig.Rig, g *git.Git) *Manager {
+	// Load rig and town settings for include_project_claude_files
+	settingsPath := filepath.Join(r.Path, "settings", "config.json")
+	rigSettings, _ := config.LoadRigSettings(settingsPath)
+
+	townRoot := filepath.Dir(r.Path)
+	townSettings, _ := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot))
+
 	return &Manager{
-		rig: r,
-		git: g,
+		rig:          r,
+		git:          g,
+		rigSettings:  rigSettings,
+		townSettings: townSettings,
 	}
 }
 
@@ -131,15 +142,17 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	}
 
 	// Clone the rig repo
+	// Skip sparse checkout if include_project_claude_files is enabled
+	skipSparseCheckout := config.ShouldIncludeProjectClaudeFiles(m.rigSettings, m.townSettings)
 	if m.rig.LocalRepo != "" {
-		if err := m.git.CloneWithReference(m.rig.GitURL, crewPath, m.rig.LocalRepo); err != nil {
+		if err := m.git.CloneWithReference(m.rig.GitURL, crewPath, m.rig.LocalRepo, skipSparseCheckout); err != nil {
 			fmt.Printf("Warning: could not clone with local repo reference: %v\n", err)
-			if err := m.git.Clone(m.rig.GitURL, crewPath); err != nil {
+			if err := m.git.Clone(m.rig.GitURL, crewPath, skipSparseCheckout); err != nil {
 				return nil, fmt.Errorf("cloning rig: %w", err)
 			}
 		}
 	} else {
-		if err := m.git.Clone(m.rig.GitURL, crewPath); err != nil {
+		if err := m.git.Clone(m.rig.GitURL, crewPath, skipSparseCheckout); err != nil {
 			return nil, fmt.Errorf("cloning rig: %w", err)
 		}
 	}

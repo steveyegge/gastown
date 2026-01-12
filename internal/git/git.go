@@ -115,7 +115,8 @@ func (g *Git) wrapError(err error, stdout, stderr string, args []string) error {
 }
 
 // Clone clones a repository to the destination.
-func (g *Git) Clone(url, dest string) error {
+// If skipSparseCheckout is true, project Claude files (.claude/, CLAUDE.md, etc.) are preserved.
+func (g *Git) Clone(url, dest string, skipSparseCheckout bool) error {
 	cmd := exec.Command("git", "clone", url, dest)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -127,13 +128,17 @@ func (g *Git) Clone(url, dest string) error {
 	if err := configureHooksPath(dest); err != nil {
 		return err
 	}
-	// Configure sparse checkout to exclude .claude/ from source repo
-	return ConfigureSparseCheckout(dest)
+	// Configure sparse checkout to exclude .claude/ from source repo (unless skipped)
+	if !skipSparseCheckout {
+		return ConfigureSparseCheckout(dest)
+	}
+	return nil
 }
 
 // CloneWithReference clones a repository using a local repo as an object reference.
 // This saves disk by sharing objects without changing remotes.
-func (g *Git) CloneWithReference(url, dest, reference string) error {
+// If skipSparseCheckout is true, project Claude files (.claude/, CLAUDE.md, etc.) are preserved.
+func (g *Git) CloneWithReference(url, dest, reference string, skipSparseCheckout bool) error {
 	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, dest)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -145,8 +150,11 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 	if err := configureHooksPath(dest); err != nil {
 		return err
 	}
-	// Configure sparse checkout to exclude .claude/ from source repo
-	return ConfigureSparseCheckout(dest)
+	// Configure sparse checkout to exclude .claude/ from source repo (unless skipped)
+	if !skipSparseCheckout {
+		return ConfigureSparseCheckout(dest)
+	}
+	return nil
 }
 
 // CloneBare clones a repository as a bare repo (no working directory).
@@ -598,50 +606,65 @@ func (g *Git) IsAncestor(ancestor, descendant string) (bool, error) {
 
 // WorktreeAdd creates a new worktree at the given path with a new branch.
 // The new branch is created from the current HEAD.
-// Sparse checkout is enabled to exclude .claude/ from source repos.
-func (g *Git) WorktreeAdd(path, branch string) error {
+// If skipSparseCheckout is true, project Claude files (.claude/, CLAUDE.md, etc.) are preserved.
+func (g *Git) WorktreeAdd(path, branch string, skipSparseCheckout bool) error {
 	if _, err := g.run("worktree", "add", "-b", branch, path); err != nil {
 		return err
 	}
-	return ConfigureSparseCheckout(path)
+	if !skipSparseCheckout {
+		return ConfigureSparseCheckout(path)
+	}
+	return nil
 }
 
 // WorktreeAddFromRef creates a new worktree at the given path with a new branch
 // starting from the specified ref (e.g., "origin/main").
-// Sparse checkout is enabled to exclude .claude/ from source repos.
-func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
+// If skipSparseCheckout is true, project Claude files (.claude/, CLAUDE.md, etc.) are preserved.
+func (g *Git) WorktreeAddFromRef(path, branch, startPoint string, skipSparseCheckout bool) error {
 	if _, err := g.run("worktree", "add", "-b", branch, path, startPoint); err != nil {
 		return err
 	}
-	return ConfigureSparseCheckout(path)
+	if !skipSparseCheckout {
+		return ConfigureSparseCheckout(path)
+	}
+	return nil
 }
 
 // WorktreeAddDetached creates a new worktree at the given path with a detached HEAD.
-// Sparse checkout is enabled to exclude .claude/ from source repos.
-func (g *Git) WorktreeAddDetached(path, ref string) error {
+// If skipSparseCheckout is true, project Claude files (.claude/, CLAUDE.md, etc.) are preserved.
+func (g *Git) WorktreeAddDetached(path, ref string, skipSparseCheckout bool) error {
 	if _, err := g.run("worktree", "add", "--detach", path, ref); err != nil {
 		return err
 	}
-	return ConfigureSparseCheckout(path)
+	if !skipSparseCheckout {
+		return ConfigureSparseCheckout(path)
+	}
+	return nil
 }
 
 // WorktreeAddExisting creates a new worktree at the given path for an existing branch.
-// Sparse checkout is enabled to exclude .claude/ from source repos.
-func (g *Git) WorktreeAddExisting(path, branch string) error {
+// If skipSparseCheckout is true, project Claude files (.claude/, CLAUDE.md, etc.) are preserved.
+func (g *Git) WorktreeAddExisting(path, branch string, skipSparseCheckout bool) error {
 	if _, err := g.run("worktree", "add", path, branch); err != nil {
 		return err
 	}
-	return ConfigureSparseCheckout(path)
+	if !skipSparseCheckout {
+		return ConfigureSparseCheckout(path)
+	}
+	return nil
 }
 
 // WorktreeAddExistingForce creates a new worktree even if the branch is already checked out elsewhere.
 // This is useful for cross-rig worktrees where multiple clones need to be on main.
-// Sparse checkout is enabled to exclude .claude/ from source repos.
-func (g *Git) WorktreeAddExistingForce(path, branch string) error {
+// If skipSparseCheckout is true, project Claude files (.claude/, CLAUDE.md, etc.) are preserved.
+func (g *Git) WorktreeAddExistingForce(path, branch string, skipSparseCheckout bool) error {
 	if _, err := g.run("worktree", "add", "--force", path, branch); err != nil {
 		return err
 	}
-	return ConfigureSparseCheckout(path)
+	if !skipSparseCheckout {
+		return ConfigureSparseCheckout(path)
+	}
+	return nil
 }
 
 // ConfigureSparseCheckout sets up sparse checkout for a clone or worktree to exclude .claude/.

@@ -56,6 +56,13 @@ type TownSettings struct {
 	// This allows cost optimization by using different models for different roles.
 	// Example: {"mayor": "claude-opus", "witness": "claude-haiku", "polecat": "claude-sonnet"}
 	RoleAgents map[string]string `json:"role_agents,omitempty"`
+
+	// IncludeProjectClaudeFiles controls whether project Claude files (.claude/, CLAUDE.md, etc.)
+	// are included in worktrees and clones. When false (default), these files are excluded via
+	// sparse checkout to prevent source repo instructions from interfering with Gas Town context.
+	// When true, project Claude files are preserved, allowing agents to access project-specific
+	// instructions, commands, and MCP configuration.
+	IncludeProjectClaudeFiles bool `json:"include_project_claude_files,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -224,6 +231,11 @@ type RigSettings struct {
 	// Overrides TownSettings.RoleAgents for this specific rig.
 	// Example: {"witness": "claude-haiku", "polecat": "claude-sonnet"}
 	RoleAgents map[string]string `json:"role_agents,omitempty"`
+
+	// IncludeProjectClaudeFiles overrides the town-level setting for this rig.
+	// When nil, uses town setting. When non-nil, uses this value.
+	// See TownSettings.IncludeProjectClaudeFiles for details.
+	IncludeProjectClaudeFiles *bool `json:"include_project_claude_files,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.

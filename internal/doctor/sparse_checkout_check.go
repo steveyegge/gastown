@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 )
 
@@ -40,6 +41,22 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 			Name:    c.Name(),
 			Status:  StatusError,
 			Message: "No rig specified",
+		}
+	}
+
+	// Check if include_project_claude_files is enabled - if so, skip this check
+	rigSettingsPath := filepath.Join(c.rigPath, "settings", "config.json")
+	rigSettings, _ := config.LoadRigSettings(rigSettingsPath)
+
+	townSettingsPath := config.TownSettingsPath(ctx.TownRoot)
+	townSettings, _ := config.LoadOrCreateTownSettings(townSettingsPath)
+
+	if config.ShouldIncludeProjectClaudeFiles(rigSettings, townSettings) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "Sparse checkout disabled (include_project_claude_files enabled)",
+			Details: []string{"Project Claude files (.claude/, CLAUDE.md, etc.) are intentionally included"},
 		}
 	}
 
