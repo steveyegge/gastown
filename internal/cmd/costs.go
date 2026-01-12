@@ -6,15 +6,18 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
@@ -275,10 +278,7 @@ func runCostsFromLedger() error {
 	} else {
 		// No time filter: query both digests and legacy session.ended events
 		// (for backwards compatibility during migration)
-		entries, err = querySessionEvents()
-		if err != nil {
-			return fmt.Errorf("querying session events: %w", err)
-		}
+		entries = querySessionEvents()
 	}
 
 	if len(entries) == 0 {
@@ -353,7 +353,62 @@ type EventListItem struct {
 }
 
 // querySessionEvents queries beads for session.ended events and converts them to CostEntry.
-func querySessionEvents() ([]CostEntry, error) {
+// It queries both town-level beads and all rig-level beads to find all session events.
+// Errors from individual locations are logged (if verbose) but don't fail the query.
+func querySessionEvents() []CostEntry {
+	// Discover town root for cwd-based bd discovery
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		// Not in a Gas Town workspace - return empty list
+		return nil
+	}
+
+	// Collect all beads locations to query
+	beadsLocations := []string{townRoot}
+
+	// Load rigs to find all rig beads locations
+	rigsConfigPath := filepath.Join(townRoot, constants.DirMayor, constants.FileRigsJSON)
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err == nil && rigsConfig != nil {
+		for rigName := range rigsConfig.Rigs {
+			rigPath := filepath.Join(townRoot, rigName)
+			// Verify rig has a beads database
+			rigBeadsPath := filepath.Join(rigPath, constants.DirBeads)
+			if _, statErr := os.Stat(rigBeadsPath); statErr == nil {
+				beadsLocations = append(beadsLocations, rigPath)
+			}
+		}
+	}
+
+	// Query each beads location and merge results
+	var allEntries []CostEntry
+	seenIDs := make(map[string]bool)
+
+	for _, location := range beadsLocations {
+		entries, err := querySessionEventsFromLocation(location)
+		if err != nil {
+			// Log but continue with other locations
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] query from %s failed: %v\n", location, err)
+			}
+			continue
+		}
+
+		// Deduplicate by event ID (use SessionID as key)
+		for _, entry := range entries {
+			key := entry.SessionID + entry.EndedAt.String()
+			if !seenIDs[key] {
+				seenIDs[key] = true
+				allEntries = append(allEntries, entry)
+			}
+		}
+	}
+
+	return allEntries
+}
+
+// querySessionEventsFromLocation queries a single beads location for session.ended events.
+func querySessionEventsFromLocation(location string) ([]CostEntry, error) {
 	// Step 1: Get list of event IDs
 	listArgs := []string{
 		"list",
@@ -364,6 +419,7 @@ func querySessionEvents() ([]CostEntry, error) {
 	}
 
 	listCmd := exec.Command("bd", listArgs...)
+	listCmd.Dir = location
 	listOutput, err := listCmd.Output()
 	if err != nil {
 		// If bd fails (e.g., no beads database), return empty list
@@ -387,6 +443,7 @@ func querySessionEvents() ([]CostEntry, error) {
 	}
 
 	showCmd := exec.Command("bd", showArgs...)
+	showCmd.Dir = location
 	showOutput, err := showCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("showing events: %w", err)

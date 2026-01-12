@@ -1750,3 +1750,207 @@ func TestLookupAgentConfigWithRigSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveRoleAgentConfig(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Create town settings with role-specific agents
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		"mayor":   "claude", // mayor uses default claude
+		"witness": "gemini", // witness uses gemini
+		"polecat": "codex",  // polecats use codex
+	}
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"claude-haiku": {
+			Command: "claude",
+			Args:    []string{"--model", "haiku", "--dangerously-skip-permissions"},
+		},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create rig settings that override some roles
+	rigSettings := NewRigSettings()
+	rigSettings.Agent = "gemini" // default for this rig
+	rigSettings.RoleAgents = map[string]string{
+		"witness": "claude-haiku", // override witness to use haiku
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	t.Run("rig RoleAgents overrides town RoleAgents", func(t *testing.T) {
+		rc := ResolveRoleAgentConfig("witness", townRoot, rigPath)
+		// Should get claude-haiku from rig's RoleAgents
+		if rc.Command != "claude" {
+			t.Errorf("Command = %q, want %q", rc.Command, "claude")
+		}
+		cmd := rc.BuildCommand()
+		if !strings.Contains(cmd, "--model haiku") {
+			t.Errorf("BuildCommand() = %q, should contain --model haiku", cmd)
+		}
+	})
+
+	t.Run("town RoleAgents used when rig has no override", func(t *testing.T) {
+		rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
+		// Should get codex from town's RoleAgents (rig doesn't override polecat)
+		if rc.Command != "codex" {
+			t.Errorf("Command = %q, want %q", rc.Command, "codex")
+		}
+	})
+
+	t.Run("falls back to default agent when role not in RoleAgents", func(t *testing.T) {
+		rc := ResolveRoleAgentConfig("crew", townRoot, rigPath)
+		// crew is not in any RoleAgents, should use rig's default agent (gemini)
+		if rc.Command != "gemini" {
+			t.Errorf("Command = %q, want %q", rc.Command, "gemini")
+		}
+	})
+
+	t.Run("town-level role (no rigPath) uses town RoleAgents", func(t *testing.T) {
+		rc := ResolveRoleAgentConfig("mayor", townRoot, "")
+		// mayor is in town's RoleAgents
+		if rc.Command != "claude" {
+			t.Errorf("Command = %q, want %q", rc.Command, "claude")
+		}
+	})
+}
+
+func TestResolveRoleAgentName(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Create town settings with role-specific agents
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		"witness": "gemini",
+		"polecat": "codex",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create rig settings
+	rigSettings := NewRigSettings()
+	rigSettings.Agent = "amp"
+	rigSettings.RoleAgents = map[string]string{
+		"witness": "cursor", // override witness
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	t.Run("rig role-specific agent", func(t *testing.T) {
+		name, isRoleSpecific := ResolveRoleAgentName("witness", townRoot, rigPath)
+		if name != "cursor" {
+			t.Errorf("name = %q, want %q", name, "cursor")
+		}
+		if !isRoleSpecific {
+			t.Error("isRoleSpecific = false, want true")
+		}
+	})
+
+	t.Run("town role-specific agent", func(t *testing.T) {
+		name, isRoleSpecific := ResolveRoleAgentName("polecat", townRoot, rigPath)
+		if name != "codex" {
+			t.Errorf("name = %q, want %q", name, "codex")
+		}
+		if !isRoleSpecific {
+			t.Error("isRoleSpecific = false, want true")
+		}
+	})
+
+	t.Run("falls back to rig default agent", func(t *testing.T) {
+		name, isRoleSpecific := ResolveRoleAgentName("crew", townRoot, rigPath)
+		if name != "amp" {
+			t.Errorf("name = %q, want %q", name, "amp")
+		}
+		if isRoleSpecific {
+			t.Error("isRoleSpecific = true, want false")
+		}
+	})
+
+	t.Run("falls back to town default agent when no rig path", func(t *testing.T) {
+		name, isRoleSpecific := ResolveRoleAgentName("refinery", townRoot, "")
+		if name != "claude" {
+			t.Errorf("name = %q, want %q", name, "claude")
+		}
+		if isRoleSpecific {
+			t.Error("isRoleSpecific = true, want false")
+		}
+	})
+}
+
+func TestRoleAgentsRoundTrip(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	townSettingsPath := filepath.Join(dir, "settings", "config.json")
+	rigSettingsPath := filepath.Join(dir, "rig", "settings", "config.json")
+
+	// Test TownSettings with RoleAgents
+	t.Run("town settings with role_agents", func(t *testing.T) {
+		original := NewTownSettings()
+		original.RoleAgents = map[string]string{
+			"mayor":   "claude-opus",
+			"witness": "claude-haiku",
+			"polecat": "claude-sonnet",
+		}
+
+		if err := SaveTownSettings(townSettingsPath, original); err != nil {
+			t.Fatalf("SaveTownSettings: %v", err)
+		}
+
+		loaded, err := LoadOrCreateTownSettings(townSettingsPath)
+		if err != nil {
+			t.Fatalf("LoadOrCreateTownSettings: %v", err)
+		}
+
+		if len(loaded.RoleAgents) != 3 {
+			t.Errorf("RoleAgents count = %d, want 3", len(loaded.RoleAgents))
+		}
+		if loaded.RoleAgents["mayor"] != "claude-opus" {
+			t.Errorf("RoleAgents[mayor] = %q, want %q", loaded.RoleAgents["mayor"], "claude-opus")
+		}
+		if loaded.RoleAgents["witness"] != "claude-haiku" {
+			t.Errorf("RoleAgents[witness] = %q, want %q", loaded.RoleAgents["witness"], "claude-haiku")
+		}
+		if loaded.RoleAgents["polecat"] != "claude-sonnet" {
+			t.Errorf("RoleAgents[polecat] = %q, want %q", loaded.RoleAgents["polecat"], "claude-sonnet")
+		}
+	})
+
+	// Test RigSettings with RoleAgents
+	t.Run("rig settings with role_agents", func(t *testing.T) {
+		original := NewRigSettings()
+		original.RoleAgents = map[string]string{
+			"witness": "gemini",
+			"crew":    "codex",
+		}
+
+		if err := SaveRigSettings(rigSettingsPath, original); err != nil {
+			t.Fatalf("SaveRigSettings: %v", err)
+		}
+
+		loaded, err := LoadRigSettings(rigSettingsPath)
+		if err != nil {
+			t.Fatalf("LoadRigSettings: %v", err)
+		}
+
+		if len(loaded.RoleAgents) != 2 {
+			t.Errorf("RoleAgents count = %d, want 2", len(loaded.RoleAgents))
+		}
+		if loaded.RoleAgents["witness"] != "gemini" {
+			t.Errorf("RoleAgents[witness] = %q, want %q", loaded.RoleAgents["witness"], "gemini")
+		}
+		if loaded.RoleAgents["crew"] != "codex" {
+			t.Errorf("RoleAgents[crew] = %q, want %q", loaded.RoleAgents["crew"], "codex")
+		}
+	})
+}

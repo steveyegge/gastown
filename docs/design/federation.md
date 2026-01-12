@@ -1,5 +1,7 @@
 # Federation Architecture
 
+> **Status: Design spec - not yet implemented**
+
 > Multi-workspace coordination for Gas Town and Beads
 
 ## Overview
@@ -100,7 +102,7 @@ Distribute work across workspaces:
 
 ## Agent Provenance
 
-Every agent operation is attributed. See [identity.md](identity.md) for the
+Every agent operation is attributed. See [identity.md](../concepts/identity.md) for the
 complete BD_ACTOR format convention.
 
 ### Git Commits

@@ -471,7 +471,7 @@ gt convoy list --all                    # Include landed convoys
 gt convoy list --status=closed          # Only landed convoys
 ```
 
-Note: "Swarm" is ephemeral (workers on a convoy's issues). See [Convoys](convoy.md).
+Note: "Swarm" is ephemeral (workers on a convoy's issues). See [Convoys](concepts/convoy.md).
 
 ### Work Assignment
 
@@ -510,7 +510,7 @@ gt escalate -s HIGH "msg"        # Important blocker
 gt escalate -s MEDIUM "msg" -m "Details..."
 ```
 
-See [escalation.md](escalation.md) for full protocol.
+See [escalation.md](design/escalation.md) for full protocol.
 
 ### Sessions
 
@@ -611,4 +611,4 @@ bd mol bond mol-security-scan $PATROL_ID --var scope="$SCOPE"
 
 **Nondeterministic idempotence**: Any worker can continue any molecule. Steps are atomic checkpoints in beads.
 
-**Convoy tracking**: Convoys track batched work across rigs. A "swarm" is ephemeral - just the workers currently on a convoy's issues. See [Convoys](convoy.md) for details.
+**Convoy tracking**: Convoys track batched work across rigs. A "swarm" is ephemeral - just the workers currently on a convoy's issues. See [Convoys](concepts/convoy.md) for details.

@@ -34,7 +34,6 @@ func (s *SpawnedPolecatInfo) AgentID() string {
 // SlingSpawnOptions contains options for spawning a polecat via sling.
 type SlingSpawnOptions struct {
 	Force    bool   // Force spawn even if polecat has uncommitted work
-	Naked    bool   // No-tmux mode: skip session creation
 	Account  string // Claude Code account handle to use
 	Create   bool   // Create polecat if it doesn't exist (currently always true for sling)
 	HookBead string // Bead ID to set as hook_bead at spawn time (atomic assignment)
@@ -113,30 +112,6 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	polecatObj, err := polecatMgr.Get(polecatName)
 	if err != nil {
 		return nil, fmt.Errorf("getting polecat after creation: %w", err)
-	}
-
-	// Handle naked mode (no-tmux)
-	if opts.Naked {
-		fmt.Println()
-		fmt.Printf("%s\n", style.Bold.Render("🔧 NO-TMUX MODE (--naked)"))
-		fmt.Printf("Polecat created. Agent must be started manually.\n\n")
-		fmt.Printf("To start the agent:\n")
-		fmt.Printf("  cd %s\n", polecatObj.ClonePath)
-		// Use rig's configured agent command, unless overridden.
-		agentCmd, err := config.GetRuntimeCommandWithAgentOverride(r.Path, opts.Agent)
-		if err != nil {
-			return nil, err
-		}
-		fmt.Printf("  %s\n\n", agentCmd)
-		fmt.Printf("Agent will discover work via gt prime on startup.\n")
-
-		return &SpawnedPolecatInfo{
-			RigName:     rigName,
-			PolecatName: polecatName,
-			ClonePath:   polecatObj.ClonePath,
-			SessionName: "", // No session in naked mode
-			Pane:        "", // No pane in naked mode
-		}, nil
 	}
 
 	// Resolve account for runtime config

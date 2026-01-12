@@ -27,7 +27,7 @@ These roles manage the Gas Town system itself:
 | Role | Description | Lifecycle |
 |------|-------------|-----------|
 | **Mayor** | Global coordinator at mayor/ | Singleton, persistent |
-| **Deacon** | Background supervisor daemon ([watchdog chain](watchdog-chain.md)) | Singleton, persistent |
+| **Deacon** | Background supervisor daemon ([watchdog chain](design/watchdog-chain.md)) | Singleton, persistent |
 | **Witness** | Per-rig polecat lifecycle manager | One per rig, persistent |
 | **Refinery** | Per-rig merge queue processor | One per rig, persistent |
 
@@ -37,7 +37,7 @@ These roles do actual project work:
 
 | Role | Description | Lifecycle |
 |------|-------------|-----------|
-| **Polecat** | Ephemeral worker with own worktree | Transient, Witness-managed ([details](polecat-lifecycle.md)) |
+| **Polecat** | Ephemeral worker with own worktree | Transient, Witness-managed ([details](concepts/polecat-lifecycle.md)) |
 | **Crew** | Persistent worker with own clone | Long-lived, user-managed |
 | **Dog** | Deacon helper for infrastructure tasks | Ephemeral, Deacon-managed |
 
@@ -64,7 +64,7 @@ gt convoy list
 - Historical record of completed work (`gt convoy list --all`)
 
 The "swarm" is ephemeral - just the workers currently assigned to a convoy's issues.
-When issues close, the convoy lands. See [Convoys](convoy.md) for details.
+When issues close, the convoy lands. See [Convoys](concepts/convoy.md) for details.
 
 ## Crew vs Polecats
 

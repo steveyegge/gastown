@@ -109,6 +109,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	// Check if already a workspace
 	if isWS, _ := workspace.IsWorkspace(absPath); isWS && !installForce {
+		// If only --wrappers is requested in existing town, just install wrappers and exit
+		if installWrappers {
+			if err := wrappers.Install(); err != nil {
+				return fmt.Errorf("installing wrapper scripts: %w", err)
+			}
+			fmt.Printf("✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+			return nil
+		}
 		return fmt.Errorf("directory is already a Gas Town HQ (use --force to reinitialize)")
 	}
 
@@ -308,7 +316,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func createMayorCLAUDEmd(mayorDir, townRoot string) error {
+func createMayorCLAUDEmd(mayorDir, _ string) error {
 	// Create a minimal bootstrap pointer instead of full context.
 	// Full context is injected ephemerally by `gt prime` at session start.
 	// This keeps the on-disk file small (<30 lines) per priming architecture.
@@ -368,6 +376,17 @@ func initTownBeads(townPath string) error {
 	if err := ensureRepoFingerprint(townPath); err != nil {
 		// Non-fatal: fingerprint is optional for functionality, just daemon optimization
 		fmt.Printf("   %s Could not verify repo fingerprint: %v\n", style.Dim.Render("⚠"), err)
+	}
+
+	// Ensure issues.jsonl exists BEFORE creating routes.jsonl.
+	// bd init creates beads.db but not issues.jsonl in SQLite mode.
+	// If routes.jsonl is created first, bd's auto-export will write issues to routes.jsonl,
+	// corrupting it. Creating an empty issues.jsonl prevents this.
+	issuesJSONL := filepath.Join(townPath, ".beads", "issues.jsonl")
+	if _, err := os.Stat(issuesJSONL); os.IsNotExist(err) {
+		if err := os.WriteFile(issuesJSONL, []byte{}, 0644); err != nil {
+			fmt.Printf("   %s Could not create issues.jsonl: %v\n", style.Dim.Render("⚠"), err)
+		}
 	}
 
 	// Ensure routes.jsonl has an explicit town-level mapping for hq-* beads.
@@ -435,70 +454,28 @@ func initTownAgentBeads(townPath string) error {
 		return err
 	}
 
-	// Role beads (global templates)
-	roleDefs := []struct {
-		id    string
-		title string
-		desc  string
-	}{
-		{
-			id:    beads.MayorRoleBeadIDTown(),
-			title: "Mayor Role",
-			desc:  "Role definition for Mayor agents. Global coordinator for cross-rig work.",
-		},
-		{
-			id:    beads.DeaconRoleBeadIDTown(),
-			title: "Deacon Role",
-			desc:  "Role definition for Deacon agents. Daemon beacon for heartbeats and monitoring.",
-		},
-		{
-			id:    beads.DogRoleBeadIDTown(),
-			title: "Dog Role",
-			desc:  "Role definition for Dog agents. Town-level workers for cross-rig tasks.",
-		},
-		{
-			id:    beads.WitnessRoleBeadIDTown(),
-			title: "Witness Role",
-			desc:  "Role definition for Witness agents. Per-rig worker monitor with progressive nudging.",
-		},
-		{
-			id:    beads.RefineryRoleBeadIDTown(),
-			title: "Refinery Role",
-			desc:  "Role definition for Refinery agents. Merge queue processor with verification gates.",
-		},
-		{
-			id:    beads.PolecatRoleBeadIDTown(),
-			title: "Polecat Role",
-			desc:  "Role definition for Polecat agents. Ephemeral workers for batch work dispatch.",
-		},
-		{
-			id:    beads.CrewRoleBeadIDTown(),
-			title: "Crew Role",
-			desc:  "Role definition for Crew agents. Persistent user-managed workspaces.",
-		},
-	}
-
-	for _, role := range roleDefs {
+	// Role beads (global templates) - use shared definitions from beads package
+	for _, role := range beads.AllRoleBeadDefs() {
 		// Check if already exists
-		if _, err := bd.Show(role.id); err == nil {
+		if _, err := bd.Show(role.ID); err == nil {
 			continue // Already exists
 		}
 
-		// Create role bead using bd create --type=role
-		cmd := exec.Command("bd", "create",
-			"--type=role",
-			"--id="+role.id,
-			"--title="+role.title,
-			"--description="+role.desc,
-		)
-		cmd.Dir = townPath
-		if output, err := cmd.CombinedOutput(); err != nil {
+		// Create role bead using the beads API
+		// CreateWithID with Type: "role" automatically adds gt:role label
+		_, err := bd.CreateWithID(role.ID, beads.CreateOptions{
+			Title:       role.Title,
+			Type:        "role",
+			Description: role.Desc,
+			Priority:    -1, // No priority
+		})
+		if err != nil {
 			// Log but continue - role beads are optional
-			fmt.Printf("   %s Could not create role bead %s: %s\n",
-				style.Dim.Render("⚠"), role.id, strings.TrimSpace(string(output)))
+			fmt.Printf("   %s Could not create role bead %s: %v\n",
+				style.Dim.Render("⚠"), role.ID, err)
 			continue
 		}
-		fmt.Printf("   ✓ Created role bead: %s\n", role.id)
+		fmt.Printf("   ✓ Created role bead: %s\n", role.ID)
 	}
 
 	// Town-level agent beads

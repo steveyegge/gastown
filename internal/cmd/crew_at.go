@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -17,6 +18,13 @@ import (
 
 func runCrewAt(cmd *cobra.Command, args []string) error {
 	var name string
+
+	// Debug mode: --debug flag or GT_DEBUG env var
+	debug := crewDebug || os.Getenv("GT_DEBUG") != ""
+	if debug {
+		cwd, _ := os.Getwd()
+		fmt.Printf("[DEBUG] runCrewAt: args=%v, crewRig=%q, cwd=%q\n", args, crewRig, cwd)
+	}
 
 	// Determine crew name: from arg, or auto-detect from cwd
 	if len(args) > 0 {
@@ -51,6 +59,10 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			crewRig = detected.rigName
 		}
 		fmt.Printf("Detected crew workspace: %s/%s\n", detected.rigName, name)
+	}
+
+	if debug {
+		fmt.Printf("[DEBUG] after detection: name=%q, crewRig=%q\n", name, crewRig)
 	}
 
 	crewMgr, r, err := getCrewManager(crewRig)
@@ -96,9 +108,15 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	// Check if session exists
 	t := tmux.NewTmux()
 	sessionID := crewSessionName(r.Name, name)
+	if debug {
+		fmt.Printf("[DEBUG] sessionID=%q (r.Name=%q, name=%q)\n", sessionID, r.Name, name)
+	}
 	hasSession, err := t.HasSession(sessionID)
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
+	}
+	if debug {
+		fmt.Printf("[DEBUG] hasSession=%v\n", hasSession)
 	}
 
 	// Before creating a new session, check if there's already a runtime session
@@ -258,8 +276,12 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	}
 
 	// If inside tmux (but different session), don't switch - just inform user
-	if tmux.IsInsideTmux() {
-		fmt.Printf("Started %s/%s. Use C-b s to switch.\n", r.Name, name)
+	insideTmux := tmux.IsInsideTmux()
+	if debug {
+		fmt.Printf("[DEBUG] tmux.IsInsideTmux()=%v\n", insideTmux)
+	}
+	if insideTmux {
+		fmt.Printf("Session %s ready. Use C-b s to switch.\n", sessionID)
 		return nil
 	}
 
@@ -269,6 +291,10 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Attach to session
+	// Attach to session - show which session we're attaching to
+	fmt.Printf("Attaching to %s...\n", sessionID)
+	if debug {
+		fmt.Printf("[DEBUG] calling attachToTmuxSession(%q)\n", sessionID)
+	}
 	return attachToTmuxSession(sessionID)
 }

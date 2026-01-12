@@ -194,6 +194,12 @@ func configureRefspec(repoPath string) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("configuring refspec: %s", strings.TrimSpace(stderr.String()))
 	}
+	// Fetch to populate refs/remotes/origin/* so worktrees can use origin/main
+	fetchCmd := exec.Command("git", "-C", repoPath, "fetch", "origin")
+	fetchCmd.Stderr = &stderr
+	if err := fetchCmd.Run(); err != nil {
+		return fmt.Errorf("fetching origin: %s", strings.TrimSpace(stderr.String()))
+	}
 	return nil
 }
 

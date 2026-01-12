@@ -17,7 +17,21 @@ import (
 // the expected Gas Town session naming patterns.
 type OrphanSessionCheck struct {
 	FixableCheck
+	sessionLister  SessionLister
 	orphanSessions []string // Cached during Run for use in Fix
+}
+
+// SessionLister abstracts tmux session listing for testing.
+type SessionLister interface {
+	ListSessions() ([]string, error)
+}
+
+type realSessionLister struct {
+	t *tmux.Tmux
+}
+
+func (r *realSessionLister) ListSessions() ([]string, error) {
+	return r.t.ListSessions()
 }
 
 // NewOrphanSessionCheck creates a new orphan session check.
@@ -33,11 +47,21 @@ func NewOrphanSessionCheck() *OrphanSessionCheck {
 	}
 }
 
+// NewOrphanSessionCheckWithSessionLister creates a check with a custom session lister (for testing).
+func NewOrphanSessionCheckWithSessionLister(lister SessionLister) *OrphanSessionCheck {
+	check := NewOrphanSessionCheck()
+	check.sessionLister = lister
+	return check
+}
+
 // Run checks for orphaned Gas Town tmux sessions.
 func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
-	t := tmux.NewTmux()
+	lister := c.sessionLister
+	if lister == nil {
+		lister = &realSessionLister{t: tmux.NewTmux()}
+	}
 
-	sessions, err := t.ListSessions()
+	sessions, err := lister.ListSessions()
 	if err != nil {
 		return &CheckResult{
 			Name:    c.Name(),

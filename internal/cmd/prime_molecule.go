@@ -44,6 +44,12 @@ func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 		fmt.Printf("  Check status with: bd mol current %s\n", moleculeID)
 		return
 	}
+	// Handle bd --no-daemon exit 0 bug: empty stdout means not found
+	if stdout.Len() == 0 {
+		fmt.Println(style.Bold.Render("→ PROPULSION PRINCIPLE: Work is on your hook. RUN IT."))
+		fmt.Println("  Begin working on this molecule immediately.")
+		return
+	}
 
 	// Parse JSON output - it's an array with one element
 	var outputs []MoleculeCurrentOutput

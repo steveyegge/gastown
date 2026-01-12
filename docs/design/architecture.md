@@ -125,6 +125,6 @@ bd show gt-xyz      # Routes to gastown/mayor/rig/.beads
 
 ## See Also
 
-- [reference.md](reference.md) - Command reference
-- [molecules.md](molecules.md) - Workflow molecules
-- [identity.md](identity.md) - Agent identity and BD_ACTOR
+- [reference.md](../reference.md) - Command reference
+- [molecules.md](../concepts/molecules.md) - Workflow molecules
+- [identity.md](../concepts/identity.md) - Agent identity and BD_ACTOR

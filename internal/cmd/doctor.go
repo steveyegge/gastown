@@ -126,11 +126,13 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewBootHealthCheck())
 	d.Register(doctor.NewBeadsDatabaseCheck())
 	d.Register(doctor.NewCustomTypesCheck())
+	d.Register(doctor.NewRoleLabelCheck())
 	d.Register(doctor.NewFormulaCheck())
 	d.Register(doctor.NewBdDaemonCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
 	d.Register(doctor.NewPrefixMismatchCheck())
 	d.Register(doctor.NewRoutesCheck())
+	d.Register(doctor.NewRigRoutesJSONLCheck())
 	d.Register(doctor.NewOrphanSessionCheck())
 	d.Register(doctor.NewOrphanProcessCheck())
 	d.Register(doctor.NewWispGCCheck())
@@ -151,6 +153,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewPatrolRolesHavePromptsCheck())
 	d.Register(doctor.NewAgentBeadsCheck())
 	d.Register(doctor.NewRigBeadsCheck())
+	d.Register(doctor.NewRoleBeadsCheck())
 
 	// NOTE: StaleAttachmentsCheck removed - staleness detection belongs in Deacon molecule
 

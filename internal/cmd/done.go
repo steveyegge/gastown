@@ -119,6 +119,35 @@ func runDone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting current branch: %w", err)
 	}
 
+	// Auto-detect cleanup status if not explicitly provided
+	// This prevents premature polecat cleanup by ensuring witness knows git state
+	if doneCleanupStatus == "" {
+		workStatus, err := g.CheckUncommittedWork()
+		if err != nil {
+			style.PrintWarning("could not auto-detect cleanup status: %v", err)
+		} else {
+			switch {
+			case workStatus.HasUncommittedChanges:
+				doneCleanupStatus = "uncommitted"
+			case workStatus.StashCount > 0:
+				doneCleanupStatus = "stash"
+			default:
+				// CheckUncommittedWork.UnpushedCommits doesn't work for branches
+				// without upstream tracking (common for polecats). Use the more
+				// robust BranchPushedToRemote which compares against origin/main.
+				pushed, unpushedCount, err := g.BranchPushedToRemote(branch, "origin")
+				if err != nil {
+					style.PrintWarning("could not check if branch is pushed: %v", err)
+					doneCleanupStatus = "unpushed" // err on side of caution
+				} else if !pushed || unpushedCount > 0 {
+					doneCleanupStatus = "unpushed"
+				} else {
+					doneCleanupStatus = "clean"
+				}
+			}
+		}
+	}
+
 	// Parse branch info
 	info := parseBranchName(branch)
 
@@ -409,7 +438,18 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 	// BUG FIX (gt-vwjz6): Close hooked beads before clearing the hook.
 	// Previously, the agent's hook_bead slot was cleared but the hooked bead itself
 	// stayed status=hooked forever. Now we close the hooked bead before clearing.
-	if agentBead, err := bd.Show(agentBeadID); err == nil && agentBead.HookBead != "" {
+	//
+	// BUG FIX (hq-i26n2): Check if agent bead exists before clearing hook.
+	// Old polecats may not have identity beads, so ClearHookBead would fail.
+	// gt done must be resilient - missing agent bead is not an error.
+	agentBead, err := bd.Show(agentBeadID)
+	if err != nil {
+		// Agent bead doesn't exist - nothing to clear, that's fine
+		// This happens for polecats created before identity beads existed
+		return
+	}
+
+	if agentBead.HookBead != "" {
 		hookedBeadID := agentBead.HookBead
 		// Only close if the hooked bead exists and is still in "hooked" status
 		if hookedBead, err := bd.Show(hookedBeadID); err == nil && hookedBead.Status == beads.StatusHooked {

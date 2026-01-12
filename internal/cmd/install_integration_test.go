@@ -250,6 +250,61 @@ func TestInstallFormulasProvisioned(t *testing.T) {
 	}
 }
 
+// TestInstallWrappersInExistingTown validates that --wrappers works in an
+// existing town without requiring --force or recreating HQ structure.
+func TestInstallWrappersInExistingTown(t *testing.T) {
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+	binDir := filepath.Join(tmpDir, "bin")
+
+	// Create bin directory for wrappers
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("failed to create bin dir: %v", err)
+	}
+
+	gtBinary := buildGT(t)
+
+	// First: create HQ without wrappers
+	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("first install failed: %v\nOutput: %s", err, output)
+	}
+
+	// Verify town.json exists (proves HQ was created)
+	townPath := filepath.Join(hqPath, "mayor", "town.json")
+	assertFileExists(t, townPath, "mayor/town.json")
+
+	// Get modification time of town.json before wrapper install
+	townInfo, err := os.Stat(townPath)
+	if err != nil {
+		t.Fatalf("failed to stat town.json: %v", err)
+	}
+	townModBefore := townInfo.ModTime()
+
+	// Second: install --wrappers in same directory (should not recreate HQ)
+	cmd = exec.Command(gtBinary, "install", hqPath, "--wrappers")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install --wrappers in existing town failed: %v\nOutput: %s", err, output)
+	}
+
+	// Verify town.json was NOT modified (HQ was not recreated)
+	townInfo, err = os.Stat(townPath)
+	if err != nil {
+		t.Fatalf("failed to stat town.json after wrapper install: %v", err)
+	}
+	if townInfo.ModTime() != townModBefore {
+		t.Errorf("town.json was modified during --wrappers install, HQ should not be recreated")
+	}
+
+	// Verify output mentions wrapper installation
+	if !strings.Contains(string(output), "gt-codex") && !strings.Contains(string(output), "gt-opencode") {
+		t.Errorf("expected output to mention wrappers, got: %s", output)
+	}
+}
+
 // TestInstallNoBeadsFlag validates that --no-beads skips beads initialization.
 func TestInstallNoBeadsFlag(t *testing.T) {
 	tmpDir := t.TempDir()

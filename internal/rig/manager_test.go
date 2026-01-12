@@ -33,6 +33,23 @@ func writeFakeBD(t *testing.T, script string) string {
 	return binDir
 }
 
+func assertBeadsDirLog(t *testing.T, logPath, want string) {
+	t.Helper()
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading beads dir log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
+		t.Fatalf("expected beads dir log entries, got none")
+	}
+	for _, line := range lines {
+		if line != want {
+			t.Fatalf("BEADS_DIR = %q, want %q", line, want)
+		}
+	}
+}
+
 func createTestRig(t *testing.T, root, name string) {
 	t.Helper()
 
@@ -63,7 +80,6 @@ func createTestRig(t *testing.T, root, name string) {
 }
 
 func TestDiscoverRigs(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 
 	// Create test rig
@@ -102,7 +118,6 @@ func TestDiscoverRigs(t *testing.T) {
 }
 
 func TestGetRig(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 
 	createTestRig(t, root, "test-rig")
@@ -123,7 +138,6 @@ func TestGetRig(t *testing.T) {
 }
 
 func TestGetRigNotFound(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -134,7 +148,6 @@ func TestGetRigNotFound(t *testing.T) {
 }
 
 func TestRigExists(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	rigsConfig.Rigs["exists"] = config.RigEntry{}
 
@@ -149,7 +162,6 @@ func TestRigExists(t *testing.T) {
 }
 
 func TestRemoveRig(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	rigsConfig.Rigs["to-remove"] = config.RigEntry{}
 
@@ -165,7 +177,6 @@ func TestRemoveRig(t *testing.T) {
 }
 
 func TestRemoveRigNotFound(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -176,7 +187,6 @@ func TestRemoveRigNotFound(t *testing.T) {
 }
 
 func TestAddRig_RejectsInvalidNames(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -208,7 +218,6 @@ func TestAddRig_RejectsInvalidNames(t *testing.T) {
 }
 
 func TestListRigNames(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	rigsConfig.Rigs["rig1"] = config.RigEntry{}
 	rigsConfig.Rigs["rig2"] = config.RigEntry{}
@@ -222,7 +231,6 @@ func TestListRigNames(t *testing.T) {
 }
 
 func TestRigSummary(t *testing.T) {
-	t.Parallel()
 	rig := &Rig{
 		Name:        "test",
 		Polecats:    []string{"a", "b", "c"},
@@ -247,7 +255,6 @@ func TestRigSummary(t *testing.T) {
 }
 
 func TestEnsureGitignoreEntry_AddsEntry(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -264,7 +271,6 @@ func TestEnsureGitignoreEntry_AddsEntry(t *testing.T) {
 }
 
 func TestEnsureGitignoreEntry_DoesNotDuplicate(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -286,7 +292,6 @@ func TestEnsureGitignoreEntry_DoesNotDuplicate(t *testing.T) {
 }
 
 func TestEnsureGitignoreEntry_AppendsToExisting(t *testing.T) {
-	t.Parallel()
 	root, rigsConfig := setupTestTown(t)
 	manager := NewManager(root, rigsConfig, git.NewGit(root))
 
@@ -308,13 +313,98 @@ func TestEnsureGitignoreEntry_AppendsToExisting(t *testing.T) {
 	}
 }
 
-func TestInitBeadsWritesConfigOnFailure(t *testing.T) {
+func TestInitBeads_TrackedBeads_CreatesRedirect(t *testing.T) {
+	t.Parallel()
+	// When the cloned repo has tracked beads (mayor/rig/.beads exists),
+	// initBeads should create a redirect file at <rig>/.beads/redirect
+	// pointing to mayor/rig/.beads instead of creating a local database.
+	rigPath := t.TempDir()
+
+	// Simulate tracked beads in the cloned repo
+	mayorBeadsDir := filepath.Join(rigPath, "mayor", "rig", ".beads")
+	if err := os.MkdirAll(mayorBeadsDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor beads: %v", err)
+	}
+	// Create a config file to simulate a real beads directory
+	if err := os.WriteFile(filepath.Join(mayorBeadsDir, "config.yaml"), []byte("prefix: gt\n"), 0644); err != nil {
+		t.Fatalf("write mayor config: %v", err)
+	}
+
+	manager := &Manager{}
+	if err := manager.initBeads(rigPath, "gt"); err != nil {
+		t.Fatalf("initBeads: %v", err)
+	}
+
+	// Verify redirect file was created
+	redirectPath := filepath.Join(rigPath, ".beads", "redirect")
+	content, err := os.ReadFile(redirectPath)
+	if err != nil {
+		t.Fatalf("reading redirect file: %v", err)
+	}
+
+	expected := "mayor/rig/.beads\n"
+	if string(content) != expected {
+		t.Errorf("redirect content = %q, want %q", string(content), expected)
+	}
+
+	// Verify no local database was created (no config.yaml at rig level)
+	rigConfigPath := filepath.Join(rigPath, ".beads", "config.yaml")
+	if _, err := os.Stat(rigConfigPath); !os.IsNotExist(err) {
+		t.Errorf("expected no config.yaml at rig level when using redirect, but it exists")
+	}
+}
+
+func TestInitBeads_LocalBeads_CreatesDatabase(t *testing.T) {
 	// Cannot use t.Parallel() due to t.Setenv
+	// When the cloned repo does NOT have tracked beads (no mayor/rig/.beads),
+	// initBeads should create a local database at <rig>/.beads/
+	rigPath := t.TempDir()
+
+	// Create mayor/rig directory but WITHOUT .beads (no tracked beads)
+	mayorRigDir := filepath.Join(rigPath, "mayor", "rig")
+	if err := os.MkdirAll(mayorRigDir, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Use fake bd that succeeds
+	script := `#!/usr/bin/env bash
+set -e
+if [[ "$1" == "init" ]]; then
+  # Simulate successful bd init
+  exit 0
+fi
+exit 0
+`
+	binDir := writeFakeBD(t, script)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	manager := &Manager{}
+	if err := manager.initBeads(rigPath, "gt"); err != nil {
+		t.Fatalf("initBeads: %v", err)
+	}
+
+	// Verify NO redirect file was created
+	redirectPath := filepath.Join(rigPath, ".beads", "redirect")
+	if _, err := os.Stat(redirectPath); !os.IsNotExist(err) {
+		t.Errorf("expected no redirect file for local beads, but it exists")
+	}
+
+	// Verify .beads directory was created
+	beadsDir := filepath.Join(rigPath, ".beads")
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+		t.Errorf("expected .beads directory to be created")
+	}
+}
+
+func TestInitBeadsWritesConfigOnFailure(t *testing.T) {
 	rigPath := t.TempDir()
 	beadsDir := filepath.Join(rigPath, ".beads")
 
 	script := `#!/usr/bin/env bash
 set -e
+if [[ -n "$BEADS_DIR_LOG" ]]; then
+  echo "${BEADS_DIR:-<unset>}" >> "$BEADS_DIR_LOG"
+fi
 cmd="$1"
 shift
 if [[ "$cmd" == "init" ]]; then
@@ -326,8 +416,9 @@ exit 1
 `
 
 	binDir := writeFakeBD(t, script)
+	beadsDirLog := filepath.Join(t.TempDir(), "beads-dir.log")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("EXPECT_BEADS_DIR", beadsDir)
+	t.Setenv("BEADS_DIR_LOG", beadsDirLog)
 
 	manager := &Manager{}
 	if err := manager.initBeads(rigPath, "gt"); err != nil {
@@ -342,14 +433,14 @@ exit 1
 	if string(config) != "prefix: gt\n" {
 		t.Fatalf("config.yaml = %q, want %q", string(config), "prefix: gt\n")
 	}
+	assertBeadsDirLog(t, beadsDirLog, beadsDir)
 }
 
 func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
-	// Cannot use t.Parallel() due to t.Setenv
 	// Rig-level agent beads (witness, refinery) are stored in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
 	// This test verifies that rig agent beads are created in the rig directory,
-	// without an explicit BEADS_DIR override (uses cwd-based discovery).
+	// using the resolved rig beads directory for BEADS_DIR.
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrip")
 	rigBeadsDir := filepath.Join(rigPath, ".beads")
@@ -363,6 +454,9 @@ func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
 
 	script := `#!/usr/bin/env bash
 set -e
+if [[ -n "$BEADS_DIR_LOG" ]]; then
+  echo "${BEADS_DIR:-<unset>}" >> "$BEADS_DIR_LOG"
+fi
 if [[ "$1" == "--no-daemon" ]]; then
   shift
 fi
@@ -398,8 +492,10 @@ esac
 
 	binDir := writeFakeBD(t, script)
 	agentLog := filepath.Join(t.TempDir(), "agents.log")
+	beadsDirLog := filepath.Join(t.TempDir(), "beads-dir.log")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("AGENT_LOG", agentLog)
+	t.Setenv("BEADS_DIR_LOG", beadsDirLog)
 	t.Setenv("BEADS_DIR", "") // Clear any existing BEADS_DIR
 
 	manager := &Manager{townRoot: townRoot}
@@ -431,10 +527,10 @@ esac
 			t.Errorf("expected agent %s was not created", id)
 		}
 	}
+	assertBeadsDirLog(t, beadsDirLog, rigBeadsDir)
 }
 
 func TestIsValidBeadsPrefix(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		prefix string
 		want   bool
@@ -477,7 +573,6 @@ func TestIsValidBeadsPrefix(t *testing.T) {
 }
 
 func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
-	t.Parallel()
 	rigPath := t.TempDir()
 	manager := &Manager{}
 
@@ -503,7 +598,6 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 }
 
 func TestDeriveBeadsPrefix(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name string
 		want string
@@ -552,7 +646,6 @@ func TestDeriveBeadsPrefix(t *testing.T) {
 }
 
 func TestSplitCompoundWord(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		word string
 		want []string

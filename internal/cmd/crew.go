@@ -21,6 +21,7 @@ var (
 	crewAll           bool
 	crewListAll       bool
 	crewDryRun        bool
+	crewDebug         bool
 )
 
 var crewCmd = &cobra.Command{
@@ -333,6 +334,7 @@ func init() {
 	crewAtCmd.Flags().BoolVarP(&crewDetached, "detached", "d", false, "Start session without attaching")
 	crewAtCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use (overrides default)")
 	crewAtCmd.Flags().StringVar(&crewAgentOverride, "agent", "", "Agent alias to run crew worker with (overrides rig/town default)")
+	crewAtCmd.Flags().BoolVar(&crewDebug, "debug", false, "Show debug output for troubleshooting")
 
 	crewRemoveCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use")
 	crewRemoveCmd.Flags().BoolVar(&crewForce, "force", false, "Force remove (skip safety checks)")

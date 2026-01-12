@@ -92,3 +92,54 @@ func HasLabel(issue *Issue, label string) bool {
 	}
 	return false
 }
+
+// RoleBeadDef defines a role bead's metadata.
+// Used by gt install and gt doctor to create missing role beads.
+type RoleBeadDef struct {
+	ID    string // e.g., "hq-witness-role"
+	Title string // e.g., "Witness Role"
+	Desc  string // Description of the role
+}
+
+// AllRoleBeadDefs returns all role bead definitions.
+// This is the single source of truth for role beads used by both
+// gt install (initial creation) and gt doctor --fix (repair).
+func AllRoleBeadDefs() []RoleBeadDef {
+	return []RoleBeadDef{
+		{
+			ID:    MayorRoleBeadIDTown(),
+			Title: "Mayor Role",
+			Desc:  "Role definition for Mayor agents. Global coordinator for cross-rig work.",
+		},
+		{
+			ID:    DeaconRoleBeadIDTown(),
+			Title: "Deacon Role",
+			Desc:  "Role definition for Deacon agents. Daemon beacon for heartbeats and monitoring.",
+		},
+		{
+			ID:    DogRoleBeadIDTown(),
+			Title: "Dog Role",
+			Desc:  "Role definition for Dog agents. Town-level workers for cross-rig tasks.",
+		},
+		{
+			ID:    WitnessRoleBeadIDTown(),
+			Title: "Witness Role",
+			Desc:  "Role definition for Witness agents. Per-rig worker monitor with progressive nudging.",
+		},
+		{
+			ID:    RefineryRoleBeadIDTown(),
+			Title: "Refinery Role",
+			Desc:  "Role definition for Refinery agents. Merge queue processor with verification gates.",
+		},
+		{
+			ID:    PolecatRoleBeadIDTown(),
+			Title: "Polecat Role",
+			Desc:  "Role definition for Polecat agents. Ephemeral workers for batch work dispatch.",
+		},
+		{
+			ID:    CrewRoleBeadIDTown(),
+			Title: "Crew Role",
+			Desc:  "Role definition for Crew agents. Persistent user-managed workspaces.",
+		},
+	}
+}

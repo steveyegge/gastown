@@ -205,13 +205,22 @@ steve@example.com                ← global identity (from git author)
 
 **Agents execute. Humans own.** The polecat name in `completed-by: gastown/polecats/toast` is executor attribution. The CV credits the human owner (`steve@example.com`).
 
-### Polecats Are Ephemeral
+### Polecats Have Persistent Identities
 
-Polecats are like K8s pods - ephemeral executors with no persistent identity:
-- Named pool for human convenience (furiosa, nux, slit)
-- Names are transient - reused after cleanup
-- No persistent polecat CV
-- Work credits the human owner
+Polecats have **persistent identities but ephemeral sessions**. Like employees who
+clock in/out: each work session is fresh (new tmux, new worktree), but the identity
+persists across sessions.
+
+- **Identity (persistent)**: Agent bead, CV chain, work history
+- **Session (ephemeral)**: Claude instance, context window
+- **Sandbox (ephemeral)**: Git worktree, branch
+
+Work credits the polecat identity, enabling:
+- Performance tracking per polecat
+- Capability-based routing (send Go work to polecats with Go track records)
+- Model comparison (A/B test different models via different polecats)
+
+See [polecat-lifecycle.md](polecat-lifecycle.md#polecat-identity) for details.
 
 ### Skills Are Derived
 

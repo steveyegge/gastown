@@ -223,4 +223,4 @@ Use rig status for "what's everyone in this rig working on?"
 ## See Also
 
 - [Propulsion Principle](propulsion-principle.md) - Worker execution model
-- [Mail Protocol](mail-protocol.md) - Notification delivery
+- [Mail Protocol](../design/mail-protocol.md) - Notification delivery

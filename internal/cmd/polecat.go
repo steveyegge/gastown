@@ -59,15 +59,19 @@ Examples:
 }
 
 var polecatAddCmd = &cobra.Command{
-	Use:   "add <rig> <name>",
-	Short: "Add a new polecat to a rig",
+	Use:        "add <rig> <name>",
+	Short:      "Add a new polecat to a rig (DEPRECATED)",
+	Deprecated: "use 'gt polecat identity add' instead. This command will be removed in v1.0.",
 	Long: `Add a new polecat to a rig.
+
+DEPRECATED: Use 'gt polecat identity add' instead. This command will be removed in v1.0.
 
 Creates a polecat directory, clones the rig repo, creates a work branch,
 and initializes state.
 
 Example:
-  gt polecat add greenplace Toast`,
+  gt polecat identity add greenplace Toast  # Preferred
+  gt polecat add greenplace Toast           # Deprecated`,
 	Args: cobra.ExactArgs(2),
 	RunE: runPolecatAdd,
 }
@@ -426,6 +430,11 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 }
 
 func runPolecatAdd(cmd *cobra.Command, args []string) error {
+	// Emit deprecation warning
+	fmt.Fprintf(os.Stderr, "%s 'gt polecat add' is deprecated. Use 'gt polecat identity add' instead.\n",
+		style.Warning.Render("Warning:"))
+	fmt.Fprintf(os.Stderr, "         This command will be removed in v1.0.\n\n")
+
 	rigName := args[0]
 	polecatName := args[1]
 

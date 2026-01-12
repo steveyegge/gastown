@@ -154,6 +154,50 @@ gt mol squash                # Squash attached molecule
 gt mol step done <step>      # Complete a molecule step
 ```
 
+## Polecat Workflow
+
+Polecats receive work via their hook - a pinned molecule attached to an issue.
+They execute molecule steps sequentially, closing each step as they complete it.
+
+### Molecule Types for Polecats
+
+| Type | Storage | Use Case |
+|------|---------|----------|
+| **Regular Molecule** | `.beads/` (synced) | Discrete deliverables, audit trail |
+| **Wisp** | `.beads/` (ephemeral) | Patrol cycles, operational loops |
+
+Polecats typically use **regular molecules** because each assignment has audit value.
+Patrol agents (Witness, Refinery, Deacon) use **wisps** to prevent accumulation.
+
+### Hook Management
+
+```bash
+gt hook                        # What's on MY hook?
+gt mol attach-from-mail <id>   # Attach work from mail message
+gt done                        # Signal completion (syncs, submits to MQ, notifies Witness)
+```
+
+### Polecat Workflow Summary
+
+```
+1. Spawn with work on hook
+2. gt hook                 # What's hooked?
+3. bd mol current          # Where am I?
+4. Execute current step
+5. bd close <step> --continue
+6. If more steps: GOTO 3
+7. gt done                 # Signal completion
+```
+
+### Wisp vs Molecule Decision
+
+| Question | Molecule | Wisp |
+|----------|----------|------|
+| Does it need audit trail? | Yes | No |
+| Will it repeat continuously? | No | Yes |
+| Is it discrete deliverable? | Yes | No |
+| Is it operational routine? | No | Yes |
+
 ## Best Practices
 
 1. **Use `--continue` for propulsion** - Keep momentum by auto-advancing

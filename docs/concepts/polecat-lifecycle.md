@@ -278,6 +278,6 @@ This distinction matters for:
 
 ## Related Documentation
 
-- [Understanding Gas Town](understanding-gas-town.md) - Role taxonomy and architecture
-- [Polecat Wisp Architecture](polecat-wisp-architecture.md) - Molecule execution
+- [Overview](../overview.md) - Role taxonomy and architecture
+- [Molecules](molecules.md) - Molecule execution and polecat workflow
 - [Propulsion Principle](propulsion-principle.md) - Why work triggers immediate execution

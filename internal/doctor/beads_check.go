@@ -436,3 +436,141 @@ func saveRigsConfig(path string, cfg *rigsConfigFile) error {
 
 	return os.WriteFile(path, data, 0644)
 }
+
+// beadShower is an interface for fetching bead information.
+// Allows mocking in tests.
+type beadShower interface {
+	Show(id string) (*beads.Issue, error)
+}
+
+// labelAdder is an interface for adding labels to beads.
+// Allows mocking in tests.
+type labelAdder interface {
+	AddLabel(townRoot, id, label string) error
+}
+
+// realLabelAdder implements labelAdder using bd command.
+type realLabelAdder struct{}
+
+func (r *realLabelAdder) AddLabel(townRoot, id, label string) error {
+	cmd := exec.Command("bd", "label", "add", id, label)
+	cmd.Dir = townRoot
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("adding %s label to %s: %s", label, id, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// RoleLabelCheck verifies that role beads have the gt:role label.
+// This label is required for GetRoleConfig to recognize role beads.
+// Role beads created before the label migration may be missing this label.
+type RoleLabelCheck struct {
+	FixableCheck
+	missingLabel []string // Role bead IDs missing gt:role label
+	townRoot     string   // Cached for Fix
+
+	// Injected dependencies for testing
+	beadShower beadShower
+	labelAdder labelAdder
+}
+
+// NewRoleLabelCheck creates a new role label check.
+func NewRoleLabelCheck() *RoleLabelCheck {
+	return &RoleLabelCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "role-bead-labels",
+				CheckDescription: "Check that role beads have gt:role label",
+				CheckCategory:    CategoryConfig,
+			},
+		},
+		labelAdder: &realLabelAdder{},
+	}
+}
+
+// roleBeadIDs returns the list of role bead IDs to check.
+func roleBeadIDs() []string {
+	return []string{
+		beads.MayorRoleBeadIDTown(),
+		beads.DeaconRoleBeadIDTown(),
+		beads.DogRoleBeadIDTown(),
+		beads.WitnessRoleBeadIDTown(),
+		beads.RefineryRoleBeadIDTown(),
+		beads.PolecatRoleBeadIDTown(),
+		beads.CrewRoleBeadIDTown(),
+	}
+}
+
+// Run checks if role beads have the gt:role label.
+func (c *RoleLabelCheck) Run(ctx *CheckContext) *CheckResult {
+	// Check if bd command is available (skip if testing with mock)
+	if c.beadShower == nil {
+		if _, err := exec.LookPath("bd"); err != nil {
+			return &CheckResult{
+				Name:    c.Name(),
+				Status:  StatusOK,
+				Message: "beads not installed (skipped)",
+			}
+		}
+	}
+
+	// Check if .beads directory exists at town level
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No beads database (skipped)",
+		}
+	}
+
+	// Use injected beadShower or create real one
+	shower := c.beadShower
+	if shower == nil {
+		shower = beads.New(ctx.TownRoot)
+	}
+
+	var missingLabel []string
+	for _, roleID := range roleBeadIDs() {
+		issue, err := shower.Show(roleID)
+		if err != nil {
+			// Bead doesn't exist - that's OK, install will create it
+			continue
+		}
+
+		// Check if it has the gt:role label
+		if !beads.HasLabel(issue, "gt:role") {
+			missingLabel = append(missingLabel, roleID)
+		}
+	}
+
+	// Cache for Fix
+	c.missingLabel = missingLabel
+	c.townRoot = ctx.TownRoot
+
+	if len(missingLabel) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "All role beads have gt:role label",
+		}
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d role bead(s) missing gt:role label", len(missingLabel)),
+		Details: missingLabel,
+		FixHint: "Run 'gt doctor --fix' to add missing labels",
+	}
+}
+
+// Fix adds the gt:role label to role beads that are missing it.
+func (c *RoleLabelCheck) Fix(ctx *CheckContext) error {
+	for _, roleID := range c.missingLabel {
+		if err := c.labelAdder.AddLabel(c.townRoot, roleID, "gt:role"); err != nil {
+			return err
+		}
+	}
+	return nil
+}

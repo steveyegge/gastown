@@ -1186,6 +1186,10 @@ func getIssueDetails(issueID string) *issueDetails {
 	if err := showCmd.Run(); err != nil {
 		return nil
 	}
+	// Handle bd --no-daemon exit 0 bug: empty stdout means not found
+	if stdout.Len() == 0 {
+		return nil
+	}
 
 	var issues []struct {
 		ID        string `json:"id"`
