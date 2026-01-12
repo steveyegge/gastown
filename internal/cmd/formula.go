@@ -345,6 +345,14 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 
 	fmt.Printf("%s Created convoy: %s\n", style.Bold.Render("✓"), convoyID)
 
+	// Derive review_id from PR or convoyID
+	reviewID := ""
+	if formulaRunPR > 0 {
+		reviewID = fmt.Sprintf("pr-%d", formulaRunPR)
+	} else {
+		reviewID = strings.TrimPrefix(convoyID, "hq-cv-")
+	}
+
 	// Step 2: Create leg beads and track them
 	legBeads := make(map[string]string) // leg.ID -> bead ID
 	for _, leg := range f.Legs {
@@ -356,6 +364,16 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 			if basePrompt, ok := f.Prompts["base"]; ok {
 				legDesc = fmt.Sprintf("%s\n\n---\nBase Prompt:\n%s", leg.Description, basePrompt)
 			}
+		}
+
+		// Add output_path metadata if output config is available
+		if f.Output != nil && f.Output.Directory != "" && f.Output.LegPattern != "" {
+			// Expand output path template
+			outputPath := filepath.Join(
+				strings.ReplaceAll(f.Output.Directory, "{{review_id}}", reviewID),
+				strings.ReplaceAll(f.Output.LegPattern, "{{leg.id}}", leg.ID),
+			)
+			legDesc = fmt.Sprintf("%s\n\noutput_path: %s", legDesc, outputPath)
 		}
 
 		legArgs := []string{
@@ -487,9 +505,16 @@ type formulaData struct {
 	Name        string
 	Description string
 	Type        string
+	Output      *formulaOutput
 	Legs        []formulaLeg
 	Synthesis   *formulaSynthesis
 	Prompts     map[string]string
+}
+
+type formulaOutput struct {
+	Directory  string
+	LegPattern string
+	Synthesis  string
 }
 
 type formulaLeg struct {
@@ -568,6 +593,9 @@ func parseFormulaFile(path string) (*formulaData, error) {
 	if match := extractTOMLValue(content, "type"); match != "" {
 		f.Type = match
 	}
+
+	// Parse output section
+	f.Output = extractOutput(content)
 
 	// Parse legs (convoy formulas)
 	f.Legs = extractLegs(content)
@@ -711,6 +739,33 @@ func extractPrompts(content string) map[string]string {
 	}
 
 	return prompts
+}
+
+// extractOutput parses [output] section from TOML
+func extractOutput(content string) *formulaOutput {
+	idx := strings.Index(content, "[output]")
+	if idx == -1 {
+		return nil
+	}
+
+	section := content[idx:]
+	// Find where section ends
+	if endIdx := strings.Index(section[1:], "\n["); endIdx != -1 {
+		section = section[:endIdx+1]
+	}
+
+	output := &formulaOutput{
+		Directory:  extractTOMLValue(section, "directory"),
+		LegPattern: extractTOMLValue(section, "leg_pattern"),
+		Synthesis:  extractTOMLValue(section, "synthesis"),
+	}
+
+	// Return nil if no output fields found
+	if output.Directory == "" && output.LegPattern == "" && output.Synthesis == "" {
+		return nil
+	}
+
+	return output
 }
 
 // generateFormulaShortID generates a short random ID (5 lowercase chars)

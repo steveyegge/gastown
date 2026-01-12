@@ -29,7 +29,8 @@ type RigConfig struct {
 	Type          string       `json:"type"`                     // "rig"
 	Version       int          `json:"version"`                  // schema version
 	Name          string       `json:"name"`                     // rig name
-	GitURL        string       `json:"git_url"`                  // repository URL
+	GitURL        string       `json:"git_url"`                  // repository URL (fetch/pull)
+	PushURL       string       `json:"push_url,omitempty"`       // optional push URL (fork for read-only upstreams)
 	LocalRepo     string       `json:"local_repo,omitempty"`     // optional local reference repo
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
@@ -115,6 +116,11 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 		Config:    entry.BeadsConfig,
 	}
 
+	// Read PushURL from rig config if available
+	if rigCfg, err := LoadRigConfig(rigPath); err == nil {
+		rig.PushURL = rigCfg.PushURL
+	}
+
 	// Scan for polecats
 	polecatsDir := filepath.Join(rigPath, "polecats")
 	if entries, err := os.ReadDir(polecatsDir); err == nil {
@@ -164,7 +170,8 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 // AddRigOptions configures rig creation.
 type AddRigOptions struct {
 	Name          string // Rig name (directory name)
-	GitURL        string // Repository URL
+	GitURL        string // Repository URL (fetch/pull)
+	PushURL       string // Optional push URL (fork for read-only upstreams)
 	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
 	LocalRepo     string // Optional local repo for reference clones
 	DefaultBranch string // Default branch (defaults to auto-detected from remote)
@@ -265,6 +272,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		Version:   CurrentRigConfigVersion,
 		Name:      opts.Name,
 		GitURL:    opts.GitURL,
+		PushURL:   opts.PushURL,
 		LocalRepo: localRepo,
 		CreatedAt: time.Now(),
 		Beads: &BeadsConfig{
@@ -295,6 +303,15 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}
 	fmt.Printf("   ✓ Created shared bare repo\n")
 	bareGit := git.NewGitWithDir(bareRepoPath, "")
+
+	// Configure push URL if provided (for read-only upstream repos)
+	// This sets origin's push URL to the fork while keeping fetch URL as upstream
+	if opts.PushURL != "" {
+		if err := bareGit.ConfigurePushURL("origin", opts.PushURL); err != nil {
+			return nil, fmt.Errorf("configuring push URL: %w", err)
+		}
+		fmt.Printf("   ✓ Configured push URL (fork: %s)\n", opts.PushURL)
+	}
 
 	// Determine default branch: use provided value or auto-detect from remote
 	var defaultBranch string
@@ -1008,7 +1025,7 @@ func (m *Manager) createPatrolHooks(workspacePath string, runtimeConfig *config.
         "hooks": [
           {
             "type": "command",
-            "command": "gt prime && gt mail check --inject"
+            "command": "gt prime --hook && gt mail check --inject"
           }
         ]
       }
@@ -1019,7 +1036,7 @@ func (m *Manager) createPatrolHooks(workspacePath string, runtimeConfig *config.
         "hooks": [
           {
             "type": "command",
-            "command": "gt prime"
+            "command": "gt prime --hook"
           }
         ]
       }

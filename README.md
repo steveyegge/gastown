@@ -79,6 +79,10 @@ Git-backed issue tracking system that stores work state as structured data.
 
 > **New to Gas Town?** See the [Glossary](docs/glossary.md) for a complete guide to terminology and concepts.
 
+## Community
+
+Join the [Gas Town Discord server](https://discord.gg/ZbEFb2Yg) for real-time discussion, troubleshooting, and collaboration with other Gas Town users.
+
 ## Installation
 
 ### Prerequisites
