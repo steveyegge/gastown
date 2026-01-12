@@ -112,6 +112,14 @@ func initBeadsDBWithPrefix(t *testing.T, dir, prefix string) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed in %s: %v\n%s", dir, err, output)
 	}
+
+	// Create empty issues.jsonl to prevent bd auto-export from corrupting routes.jsonl.
+	// Without this, bd create writes issue data to routes.jsonl (the first .jsonl file
+	// it finds), corrupting the routing configuration. This mirrors what gt install does.
+	issuesPath := filepath.Join(dir, ".beads", "issues.jsonl")
+	if err := os.WriteFile(issuesPath, []byte(""), 0644); err != nil {
+		t.Fatalf("create issues.jsonl in %s: %v", dir, err)
+	}
 }
 
 func createTestIssue(t *testing.T, dir, title string) *beads.Issue {

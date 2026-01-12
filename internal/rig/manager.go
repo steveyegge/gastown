@@ -635,19 +635,21 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	// Ignore errors - fingerprint is optional for functionality
 	_, _ = migrateCmd.CombinedOutput()
 
-	// Add route from rig beads to town beads for cross-database resolution.
-	// This allows rig beads to resolve hq-* prefixed beads (role beads, etc.)
-	// that are stored in town beads.
-	townRoute := beads.Route{Prefix: "hq-", Path: ".."}
-	if err := beads.AppendRouteToDir(beadsDir, townRoute); err != nil {
-		// Non-fatal: role slot set will fail but agent beads still work
-		fmt.Printf("   ⚠ Could not add route to town beads: %v\n", err)
+	// Ensure issues.jsonl exists to prevent bd auto-export from corrupting other files.
+	// bd init creates beads.db but not issues.jsonl in SQLite mode.
+	// Without issues.jsonl, bd's auto-export might write issues to other .jsonl files.
+	issuesJSONL := filepath.Join(beadsDir, "issues.jsonl")
+	if _, err := os.Stat(issuesJSONL); os.IsNotExist(err) {
+		if err := os.WriteFile(issuesJSONL, []byte{}, 0644); err != nil {
+			// Non-fatal but log it
+			fmt.Printf("   ⚠ Could not create issues.jsonl: %v\n", err)
+		}
 	}
 
-	typesCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
-	typesCmd.Dir = rigPath
-	typesCmd.Env = filteredEnv
-	_, _ = typesCmd.CombinedOutput()
+	// NOTE: We intentionally do NOT create routes.jsonl in rig beads.
+	// bd's routing walks up to find town root (via mayor/town.json) and uses
+	// town-level routes.jsonl for prefix-based routing. Rig-level routes.jsonl
+	// would prevent this walk-up and break cross-rig routing.
 
 	return nil
 }
