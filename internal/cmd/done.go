@@ -550,9 +550,10 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 		return fmt.Errorf("getting polecat manager: %w", err)
 	}
 
-	// Use nuclear=true since we know we just pushed our work
-	// The branch is pushed, MR is created, we're clean
-	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, true); err != nil {
+	// Use nuclear=false to respect cleanup_status safety checks (ZFC #10)
+	// The agent's self-reported cleanup_status will be validated before removal
+	// This prevents accidental work loss if git state doesn't match expectations
+	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, false); err != nil {
 		return fmt.Errorf("removing worktree: %w", err)
 	}
 
