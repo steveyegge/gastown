@@ -882,8 +882,10 @@ func (m *Manager) ClearIssue(name string) error {
 	return nil
 }
 
-// loadFromBeads gets polecat info from beads assignee field.
-// State is simple: issue assigned → working, no issue → done (ready for cleanup).
+// loadFromBeads gets polecat info from beads assignee field and agent bead hook_bead.
+// State is determined by: has assigned issue OR has hook_bead → working, neither → done.
+// This fixes the bug where polecats with newly hooked work show as "done" because
+// the issue assignee hasn't been updated yet.
 // Transient polecats should always have work; no work means ready for Witness cleanup.
 // We don't interpret issue status (ZFC: Go is transport, not decision-maker).
 func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
@@ -921,6 +923,23 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	if issue != nil {
 		issueID = issue.ID
 		state = StateWorking
+	}
+
+	// FIX (hq-50u3h): Also check agent bead's hook_bead field.
+	// If hook_bead is set, the polecat has work waiting and should be "working".
+	// This prevents polecats from showing as "done" when new work is hooked via gt sling.
+	// gt sling sets hook_bead atomically, so this is the reliable signal for pending work.
+	agentBeadID := m.agentBeadID(name)
+	if _, fields, err := m.beads.GetAgentBead(agentBeadID); err == nil && fields != nil {
+		if fields.HookBead != "" {
+			// Polecat has hooked work - should be working, not done
+			state = StateWorking
+			// If issueID is empty, use the hook_bead as the issue reference
+			// This ensures the hooked work is visible in listings
+			if issueID == "" {
+				issueID = fields.HookBead
+			}
+		}
 	}
 
 	return &Polecat{
