@@ -259,6 +259,49 @@ async function getRunningPolecats() {
   }
 }
 
+// Parse GitHub URL to extract owner/repo
+function parseGitHubUrl(url) {
+  if (!url) return null;
+
+  // Handle various GitHub URL formats:
+  // https://github.com/owner/repo
+  // https://github.com/owner/repo.git
+  // git@github.com:owner/repo.git
+  // ssh://git@github.com/owner/repo.git
+
+  let match = url.match(/github\.com[/:]([^/]+)\/([^/.\s]+)/);
+  if (match) {
+    return { owner: match[1], repo: match[2].replace(/\.git$/, '') };
+  }
+  return null;
+}
+
+// Get default branch for a GitHub repo
+async function getDefaultBranch(url) {
+  const parsed = parseGitHubUrl(url);
+  if (!parsed) {
+    console.log(`[GitHub] Could not parse URL: ${url}`);
+    return null;
+  }
+
+  try {
+    // Use gh api to get repo info including default branch
+    const { stdout } = await execFileAsync('gh', [
+      'api', `repos/${parsed.owner}/${parsed.repo}`, '--jq', '.default_branch'
+    ], { timeout: 10000 });
+
+    const branch = String(stdout || '').trim();
+    if (branch) {
+      console.log(`[GitHub] Detected default branch for ${parsed.owner}/${parsed.repo}: ${branch}`);
+      return branch;
+    }
+  } catch (err) {
+    console.warn(`[GitHub] Could not detect default branch for ${url}:`, err.message);
+  }
+
+  return null;
+}
+
 // Get polecat output from tmux (last N lines)
 async function getPolecatOutput(sessionName, lines = 50) {
   try {
@@ -1486,7 +1529,15 @@ app.post('/api/rigs', async (req, res) => {
     return res.status(400).json({ error: 'Name and URL are required' });
   }
 
+  // Detect default branch from GitHub API (handles main vs master)
+  // NOTE: --branch flag requires gt to be rebuilt from source (not in current binary)
+  const defaultBranch = await getDefaultBranch(url);
+  if (defaultBranch) {
+    console.log(`[Rig] Detected default branch: ${defaultBranch} (gt --branch flag pending rebuild)`);
+  }
+
   // Rig operations can take 90+ seconds for large repos
+  // TODO: Pass --branch when gt is rebuilt: ['rig', 'add', name, url, '--branch', defaultBranch]
   const result = await executeGT(['rig', 'add', name, url], { timeout: 120000 });
 
   // Check if rig add actually succeeded (not just "has output")
