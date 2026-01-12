@@ -602,14 +602,7 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Parse configured types, filtering out bd "Note:" messages that may appear in stdout
-	var configuredTypes string
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" && !strings.HasPrefix(line, "Note:") {
-			configuredTypes = line
-			break
-		}
-	}
+	configuredTypes := parseConfigOutput(output)
 	configuredSet := make(map[string]bool)
 	for _, t := range strings.Split(configuredTypes, ",") {
 		configuredSet[strings.TrimSpace(t)] = true
@@ -646,6 +639,18 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 		},
 		FixHint: "Run 'gt doctor --fix' to register missing types",
 	}
+}
+
+// parseConfigOutput extracts the config value from bd output, filtering out
+// informational messages like "Note: ..." that bd may emit to stdout.
+func parseConfigOutput(output []byte) string {
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "Note:") {
+			return line
+		}
+	}
+	return ""
 }
 
 // Fix registers the missing custom types.

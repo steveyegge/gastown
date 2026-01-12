@@ -3,7 +3,10 @@ package doctor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 func TestSessionHookCheck_UsesSessionStartScript(t *testing.T) {
@@ -223,4 +226,91 @@ func TestSessionHookCheck_Run(t *testing.T) {
 			t.Errorf("expected StatusOK when no settings files, got %v", result.Status)
 		}
 	})
+}
+
+func TestParseConfigOutput(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		want   string
+	}{
+		{
+			name:  "simple value",
+			input: "agent,role,rig,convoy,slot\n",
+			want:  "agent,role,rig,convoy,slot",
+		},
+		{
+			name:  "value with trailing newlines",
+			input: "agent,role,rig,convoy,slot\n\n",
+			want:  "agent,role,rig,convoy,slot",
+		},
+		{
+			name:  "Note prefix filtered",
+			input: "Note: No git repository initialized - running without background sync\nagent,role,rig,convoy,slot\n",
+			want:  "agent,role,rig,convoy,slot",
+		},
+		{
+			name:  "multiple Note prefixes filtered",
+			input: "Note: First note\nNote: Second note\nagent,role,rig,convoy,slot\n",
+			want:  "agent,role,rig,convoy,slot",
+		},
+		{
+			name:  "empty output",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "only whitespace",
+			input: "  \n  \n",
+			want:  "",
+		},
+		{
+			name:  "Note with different casing is not filtered",
+			input: "note: lowercase should not match\n",
+			want:  "note: lowercase should not match",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseConfigOutput([]byte(tt.input))
+			if got != tt.want {
+				t.Errorf("parseConfigOutput() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCustomTypesCheck_ParsesOutputWithNotePrefix(t *testing.T) {
+	// This test verifies that CustomTypesCheck correctly parses bd output
+	// that contains "Note:" informational messages before the actual config value.
+	// Without proper filtering, the check would see "Note: ..." as the config value
+	// and incorrectly report all custom types as missing.
+
+	// Test the parsing logic directly - this simulates bd outputting:
+	// "Note: No git repository initialized - running without background sync"
+	// followed by the actual config value
+	output := "Note: No git repository initialized - running without background sync\n" + constants.BeadsCustomTypes + "\n"
+	parsed := parseConfigOutput([]byte(output))
+
+	if parsed != constants.BeadsCustomTypes {
+		t.Errorf("parseConfigOutput failed to filter Note: prefix\ngot: %q\nwant: %q", parsed, constants.BeadsCustomTypes)
+	}
+
+	// Verify that all required types are found in the parsed output
+	configuredSet := make(map[string]bool)
+	for _, typ := range strings.Split(parsed, ",") {
+		configuredSet[strings.TrimSpace(typ)] = true
+	}
+
+	var missing []string
+	for _, required := range constants.BeadsCustomTypesList() {
+		if !configuredSet[required] {
+			missing = append(missing, required)
+		}
+	}
+
+	if len(missing) > 0 {
+		t.Errorf("After parsing, missing types: %v", missing)
+	}
 }
