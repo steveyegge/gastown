@@ -229,9 +229,63 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		}
 	}
 
+	// Track per-agent-type health (working/zombie counts)
+	type agentHealth struct {
+		total   int
+		working int
+	}
+
+	// Initialize health tracker for tracked agent types
+	healthByType := map[AgentType]*agentHealth{
+		AgentPolecat:  {},
+		AgentWitness:  {},
+		AgentRefinery: {},
+		AgentDeacon:   {},
+	}
+
+	for _, s := range sessions {
+		agent := categorizeSession(s)
+		if agent == nil {
+			continue
+		}
+
+		// Skip Mayor (always 1) and Crew (not tracked)
+		if agent.Type == AgentMayor || agent.Type == AgentCrew {
+			continue
+		}
+
+		health := healthByType[agent.Type]
+		if health == nil {
+			continue
+		}
+		health.total++
+
+		// Detect working state via ✻ symbol
+		if isSessionWorking(t, s) {
+			health.working++
+		}
+		// Non-working sessions are zombies (polecats) or idle (persistent agents)
+	}
+
 	// Build status
 	var parts []string
-	parts = append(parts, fmt.Sprintf("%d 😺", polecatCount))
+
+	// Add per-agent-type health in consistent order
+	// Format: "1/10 😺" = 1 working out of 10 total
+	// Only show agent types that have sessions
+	agentOrder := []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon}
+	var agentParts []string
+	for _, agentType := range agentOrder {
+		health := healthByType[agentType]
+		if health.total == 0 {
+			continue
+		}
+		icon := AgentTypeIcons[agentType]
+		agentParts = append(agentParts, fmt.Sprintf("%d/%d %s", health.working, health.total, icon))
+	}
+	if len(agentParts) > 0 {
+		parts = append(parts, strings.Join(agentParts, " "))
+	}
 
 	// Build rig status display with LED indicators
 	// 🟢 = both witness and refinery running (fully active)
@@ -590,6 +644,27 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 
 	fmt.Print(strings.Join(parts, " | ") + " |")
 	return nil
+}
+
+// isSessionWorking detects if a Claude Code session is actively working.
+// Returns true if the ✻ symbol is visible in the pane (indicates Claude is processing).
+// Returns false for idle sessions (showing ❯ prompt) or if state cannot be determined.
+func isSessionWorking(t *tmux.Tmux, session string) bool {
+	// Capture last few lines of the pane
+	lines, err := t.CapturePaneLines(session, 5)
+	if err != nil || len(lines) == 0 {
+		return false
+	}
+
+	// Check all captured lines for the working indicator
+	// ✻ appears in Claude's status line when actively processing
+	for _, line := range lines {
+		if strings.Contains(line, "✻") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // getUnreadMailCount returns unread mail count for an identity.
