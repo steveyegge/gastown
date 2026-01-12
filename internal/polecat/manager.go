@@ -261,6 +261,12 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("finding repo base: %w", err)
 	}
 
+	// Fetch latest from origin to ensure worktree starts from up-to-date code
+	if err := repoGit.Fetch("origin"); err != nil {
+		// Non-fatal - proceed with potentially stale code
+		fmt.Printf("Warning: could not fetch origin: %v\n", err)
+	}
+
 	// Determine the start point for the new worktree
 	// Use origin/<default-branch> to ensure we start from the rig's configured branch
 	defaultBranch := "main"
