@@ -12,9 +12,14 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
+
+// deaconSession is the deacon session name, duplicated here to avoid import cycle with session package.
+const deaconSession = "hq-deacon"
 
 // SessionName is the tmux session name for Boot.
 // Note: We use "gt-boot" instead of "hq-deacon-boot" to avoid tmux prefix
@@ -165,12 +170,22 @@ func (b *Boot) spawnTmux() error {
 		_ = b.tmux.KillSession(SessionName)
 	}
 
-	// Ensure boot directory exists (it should have CLAUDE.md with Boot context)
+	// Ensure boot directory exists
 	if err := b.EnsureDir(); err != nil {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
 
-	// Create new session in boot directory (not deacon dir) so Claude reads Boot's CLAUDE.md
+	// Ensure Claude settings exist for boot role
+	if err := claude.EnsureSettingsForRole(b.bootDir, "boot"); err != nil {
+		return fmt.Errorf("ensuring Claude settings: %w", err)
+	}
+
+	// Create CLAUDE.md with Boot role context
+	if err := templates.CreateBootCLAUDEmd(b.bootDir, b.townRoot, deaconSession); err != nil {
+		return fmt.Errorf("creating Boot CLAUDE.md: %w", err)
+	}
+
+	// Create new session in boot directory so Claude reads Boot's CLAUDE.md
 	if err := b.tmux.NewSession(SessionName, b.bootDir); err != nil {
 		return fmt.Errorf("creating boot session: %w", err)
 	}
