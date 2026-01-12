@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
@@ -72,15 +73,32 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 		routeByPath[r.Path] = r.Prefix
 	}
 
+	var details []string
+	var missingTownRoute bool
+
+	// Check town root route exists (hq- -> .)
+	if _, hasTownRoute := routeByPrefix["hq-"]; !hasTownRoute {
+		missingTownRoute = true
+		details = append(details, "Town root route (hq- -> .) is missing")
+	}
+
 	// Load rigs registry
 	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
 	rigsConfig, err := config.LoadRigsConfig(rigsPath)
 	if err != nil {
-		// No rigs config is fine - just check existing routes are valid
+		// No rigs config - check for missing town route and validate existing routes
+		if missingTownRoute {
+			return &CheckResult{
+				Name:    c.Name(),
+				Status:  StatusWarning,
+				Message: "Town root route is missing",
+				Details: details,
+				FixHint: "Run 'gt doctor --fix' to add missing routes",
+			}
+		}
 		return c.checkRoutesValid(ctx, routes)
 	}
 
-	var details []string
 	var missingRigs []string
 	var invalidRoutes []string
 
@@ -137,22 +155,24 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Determine result
-	if len(missingRigs) > 0 || len(invalidRoutes) > 0 {
+	if missingTownRoute || len(missingRigs) > 0 || len(invalidRoutes) > 0 {
 		status := StatusWarning
-		message := ""
+		var messageParts []string
 
-		if len(missingRigs) > 0 && len(invalidRoutes) > 0 {
-			message = fmt.Sprintf("%d rig(s) missing routes, %d invalid route(s)", len(missingRigs), len(invalidRoutes))
-		} else if len(missingRigs) > 0 {
-			message = fmt.Sprintf("%d rig(s) missing routing entries", len(missingRigs))
-		} else {
-			message = fmt.Sprintf("%d invalid route(s) in routes.jsonl", len(invalidRoutes))
+		if missingTownRoute {
+			messageParts = append(messageParts, "town root route missing")
+		}
+		if len(missingRigs) > 0 {
+			messageParts = append(messageParts, fmt.Sprintf("%d rig(s) missing routes", len(missingRigs)))
+		}
+		if len(invalidRoutes) > 0 {
+			messageParts = append(messageParts, fmt.Sprintf("%d invalid route(s)", len(invalidRoutes)))
 		}
 
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  status,
-			Message: message,
+			Message: strings.Join(messageParts, ", "),
 			Details: details,
 			FixHint: "Run 'gt doctor --fix' to add missing routes",
 		}
@@ -220,16 +240,27 @@ func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 		routeMap[r.Prefix] = true
 	}
 
+	// Ensure town root route exists (hq- -> .)
+	// This is normally created by gt install but may be missing if routes.jsonl was corrupted
+	modified := false
+	if !routeMap["hq-"] {
+		routes = append(routes, beads.Route{Prefix: "hq-", Path: "."})
+		routeMap["hq-"] = true
+		modified = true
+	}
+
 	// Load rigs registry
 	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
 	rigsConfig, err := config.LoadRigsConfig(rigsPath)
 	if err != nil {
-		// No rigs config, nothing to fix
+		// No rigs config - just write town root route if we added it
+		if modified {
+			return beads.WriteRoutes(beadsDir, routes)
+		}
 		return nil
 	}
 
 	// Add missing routes for each rig
-	modified := false
 	for rigName, rigEntry := range rigsConfig.Rigs {
 		prefix := ""
 		if rigEntry.BeadsConfig != nil && rigEntry.BeadsConfig.Prefix != "" {
