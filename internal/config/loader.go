@@ -898,6 +898,102 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 	return lookupAgentConfig(agentName, townSettings, rigSettings), agentName, nil
 }
 
+// ResolveRoleAgentConfig resolves the agent configuration for a specific role.
+// It checks role-specific agent assignments before falling back to the default agent.
+//
+// Resolution order:
+//  1. Rig's RoleAgents[role] - if set, look up that agent
+//  2. Town's RoleAgents[role] - if set, look up that agent
+//  3. Fall back to ResolveAgentConfig (rig's Agent → town's DefaultAgent → "claude")
+//
+// role is one of: "mayor", "deacon", "witness", "refinery", "polecat", "crew".
+// townRoot is the path to the town directory (e.g., ~/gt).
+// rigPath is the path to the rig directory (e.g., ~/gt/gastown), or empty for town-level roles.
+func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
+	// Load rig settings (may be nil for town-level roles like mayor/deacon)
+	var rigSettings *RigSettings
+	if rigPath != "" {
+		var err error
+		rigSettings, err = LoadRigSettings(RigSettingsPath(rigPath))
+		if err != nil {
+			rigSettings = nil
+		}
+	}
+
+	// Load town settings
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	// Load custom agent registries
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+	if rigPath != "" {
+		_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+	}
+
+	// Check rig's RoleAgents first
+	if rigSettings != nil && rigSettings.RoleAgents != nil {
+		if agentName, ok := rigSettings.RoleAgents[role]; ok && agentName != "" {
+			return lookupAgentConfig(agentName, townSettings, rigSettings)
+		}
+	}
+
+	// Check town's RoleAgents
+	if townSettings.RoleAgents != nil {
+		if agentName, ok := townSettings.RoleAgents[role]; ok && agentName != "" {
+			return lookupAgentConfig(agentName, townSettings, rigSettings)
+		}
+	}
+
+	// Fall back to existing resolution (rig's Agent → town's DefaultAgent → "claude")
+	return ResolveAgentConfig(townRoot, rigPath)
+}
+
+// ResolveRoleAgentName returns the agent name that would be used for a specific role.
+// This is useful for logging and diagnostics.
+// Returns the agent name and whether it came from role-specific configuration.
+func ResolveRoleAgentName(role, townRoot, rigPath string) (agentName string, isRoleSpecific bool) {
+	// Load rig settings
+	var rigSettings *RigSettings
+	if rigPath != "" {
+		var err error
+		rigSettings, err = LoadRigSettings(RigSettingsPath(rigPath))
+		if err != nil {
+			rigSettings = nil
+		}
+	}
+
+	// Load town settings
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	// Check rig's RoleAgents first
+	if rigSettings != nil && rigSettings.RoleAgents != nil {
+		if name, ok := rigSettings.RoleAgents[role]; ok && name != "" {
+			return name, true
+		}
+	}
+
+	// Check town's RoleAgents
+	if townSettings.RoleAgents != nil {
+		if name, ok := townSettings.RoleAgents[role]; ok && name != "" {
+			return name, true
+		}
+	}
+
+	// Fall back to existing resolution
+	if rigSettings != nil && rigSettings.Agent != "" {
+		return rigSettings.Agent, false
+	}
+	if townSettings.DefaultAgent != "" {
+		return townSettings.DefaultAgent, false
+	}
+	return "claude", false
+}
+
 // lookupAgentConfig looks up an agent by name.
 // Checks rig-level custom agents first, then town's custom agents, then built-in presets from agents.go.
 func lookupAgentConfig(name string, townSettings *TownSettings, rigSettings *RigSettings) *RuntimeConfig {
