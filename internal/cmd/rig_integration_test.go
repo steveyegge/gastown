@@ -341,6 +341,49 @@ func TestRigAddInitializesBeads(t *testing.T) {
 			t.Errorf("config.yaml doesn't contain expected prefix, got: %s", string(content))
 		}
 	}
+
+	// =========================================================================
+	// IMPORTANT: Verify routes.jsonl does NOT exist in the rig's .beads directory
+	// =========================================================================
+	//
+	// WHY WE DON'T CREATE routes.jsonl IN RIG DIRECTORIES:
+	//
+	// 1. BD'S WALK-UP ROUTING MECHANISM:
+	//    When bd needs to find routing configuration, it walks up the directory
+	//    tree looking for a .beads directory with routes.jsonl. It stops at the
+	//    first routes.jsonl it finds. If a rig has its own routes.jsonl, bd will
+	//    use that and NEVER reach the town-level routes.jsonl, breaking cross-rig
+	//    routing entirely.
+	//
+	// 2. TOWN-LEVEL ROUTING IS THE SOURCE OF TRUTH:
+	//    All routing configuration belongs in the town's .beads/routes.jsonl.
+	//    This single file contains prefix->path mappings for ALL rigs, enabling
+	//    bd to route issue IDs like "tr-123" to the correct rig directory.
+	//
+	// 3. HISTORICAL BUG - BD AUTO-EXPORT CORRUPTION:
+	//    There was a bug where bd's auto-export feature would write issue data
+	//    to routes.jsonl if issues.jsonl didn't exist. This corrupted routing
+	//    config with issue JSON objects. We now create empty issues.jsonl files
+	//    proactively to prevent this, but we also verify routes.jsonl doesn't
+	//    exist as a defense-in-depth measure.
+	//
+	// 4. DOCTOR CHECK EXISTS:
+	//    The "rig-routes-jsonl" doctor check detects and can fix (delete) any
+	//    routes.jsonl files that appear in rig .beads directories.
+	//
+	// If you're modifying rig creation and thinking about adding routes.jsonl
+	// to the rig's .beads directory - DON'T. It will break cross-rig routing.
+	// =========================================================================
+	rigRoutesPath := filepath.Join(beadsDir, "routes.jsonl")
+	if _, err := os.Stat(rigRoutesPath); err == nil {
+		t.Errorf("routes.jsonl should NOT exist in rig .beads directory (breaks bd walk-up routing)")
+	}
+
+	// Verify issues.jsonl DOES exist (prevents bd auto-export corruption)
+	rigIssuesPath := filepath.Join(beadsDir, "issues.jsonl")
+	if _, err := os.Stat(rigIssuesPath); err != nil {
+		t.Errorf("issues.jsonl should exist in rig .beads directory (prevents auto-export corruption): %v", err)
+	}
 }
 
 // TestRigAddUpdatesRoutes verifies that routes.jsonl is updated
