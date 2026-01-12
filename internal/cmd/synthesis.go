@@ -428,13 +428,39 @@ func collectLegOutputs(meta *ConvoyMeta, f *formula.Formula) ([]LegOutput, bool,
 			if output.Status != "closed" {
 				allComplete = false
 			}
+
+			// Try to get output_path from leg bead description
+			if details != nil && details.Description != "" {
+				outputPath := parseOutputPathFromDescription(details.Description)
+				if outputPath != "" {
+					output.FilePath = outputPath
+					// Try to read the file content
+					if content, err := os.ReadFile(outputPath); err == nil {
+						output.Content = string(content)
+						output.HasFile = true
+					}
+				}
+			}
+
 			outputs = append(outputs, output)
 		}
 	}
 
-	// If we have a formula, also try to find output files
+	// If we have a formula, also try to find output files using template (fallback)
 	if f != nil && f.Output != nil && meta.ReviewID != "" {
 		for _, leg := range f.Legs {
+			// Check if we already have this leg's output from description
+			alreadyFound := false
+			for _, out := range outputs {
+				if out.LegID == leg.ID && out.HasFile {
+					alreadyFound = true
+					break
+				}
+			}
+			if alreadyFound {
+				continue
+			}
+
 			// Expand output path template
 			outputPath := expandOutputPath(f.Output.Directory, f.Output.LegPattern,
 				meta.ReviewID, leg.ID)
@@ -479,6 +505,21 @@ func expandOutputPath(directory, pattern, reviewID, legID string) string {
 	file := strings.ReplaceAll(pattern, "{{leg.id}}", legID)
 
 	return filepath.Join(dir, file)
+}
+
+// parseOutputPathFromDescription extracts output_path from a bead's description.
+// Looks for "output_path: <path>" pattern in the description.
+func parseOutputPathFromDescription(description string) string {
+	for _, line := range strings.Split(description, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "output_path:") || strings.HasPrefix(line, "output-path:") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	return ""
 }
 
 // createSynthesisBead creates a bead for the synthesis step.
