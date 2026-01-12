@@ -92,6 +92,10 @@ func formatDays(d time.Duration) string {
 	return formatInt(days) + "d"
 }
 
+// formatInt converts a non-negative integer to its decimal string representation.
+// For single digits (0-9), it uses direct rune conversion for efficiency.
+// For larger numbers, it extracts digits iteratively from least to most significant.
+// This avoids importing strconv for simple integer formatting in the activity package.
 func formatInt(n int) string {
 	if n < 10 {
 		return string(rune('0'+n))

@@ -84,6 +84,13 @@ func RunStartupFallback(t *tmux.Tmux, sessionID, role string, rc *config.Runtime
 	return nil
 }
 
+// isAutonomousRole returns true if the given role should automatically
+// inject mail check on startup. Autonomous roles (polecat, witness,
+// refinery, deacon) operate without human prompting and need mail injection
+// to receive work assignments.
+//
+// Non-autonomous roles (mayor, crew) are human-guided and should not
+// have automatic mail injection to avoid confusion.
 func isAutonomousRole(role string) bool {
 	switch role {
 	case "polecat", "witness", "refinery", "deacon":

@@ -10,6 +10,26 @@
 // Functions in this package write JSON files to .runtime/ or daemon/ directories.
 // These files are used by the daemon to detect agent activity and implement
 // features like exponential backoff during idle periods.
+//
+// # Sentinel Pattern
+//
+// This package uses the nil sentinel pattern for graceful degradation:
+//
+//   - [Read] returns nil when the keepalive file doesn't exist or can't be parsed,
+//     rather than returning an error. This allows callers to treat "no signal"
+//     and "stale signal" uniformly.
+//
+//   - [State.Age] accepts nil receivers and returns a sentinel duration of 365 days,
+//     which is guaranteed to exceed any reasonable staleness threshold. This enables
+//     simple threshold checks without nil guards:
+//
+//     state := keepalive.Read(root)
+//     if state.Age() > 5*time.Minute {
+//     // Agent is idle or keepalive missing - both handled the same way
+//     }
+//
+// The sentinel approach simplifies daemon logic by eliminating error-handling
+// branches for the common case of missing or stale keepalives.
 package keepalive
 
 import (
@@ -76,7 +96,10 @@ func TouchInWorkspace(workspaceRoot, command string) {
 }
 
 // Read returns the current keepalive state for the workspace.
-// Returns nil if the file doesn't exist or can't be read.
+//
+// This function uses the nil sentinel pattern: it returns nil (not an error)
+// when the keepalive file doesn't exist, can't be read, or contains invalid JSON.
+// Callers can safely pass the result to [State.Age] without nil checks.
 func Read(workspaceRoot string) *State {
 	keepalivePath := filepath.Join(workspaceRoot, ".runtime", "keepalive.json")
 
@@ -94,10 +117,21 @@ func Read(workspaceRoot string) *State {
 }
 
 // Age returns how old the keepalive signal is.
-// Returns a very large duration if the state is nil.
+//
+// This method implements the sentinel pattern by accepting nil receivers.
+// When s is nil (indicating no keepalive exists), it returns 365 days—a value
+// guaranteed to exceed any reasonable staleness threshold. This allows callers
+// to write simple threshold checks without nil guards:
+//
+//	if keepalive.Read(root).Age() > 5*time.Minute { ... }
+//
+// The 365-day sentinel was chosen because:
+//   - It exceeds any practical idle timeout (typically seconds to minutes)
+//   - It's semantically "infinitely old" for activity detection purposes
+//   - It avoids magic values like MaxInt64 that could cause overflow issues
 func (s *State) Age() time.Duration {
 	if s == nil {
-		return 24 * time.Hour * 365 // No keepalive
+		return 24 * time.Hour * 365 // Sentinel: treat missing keepalive as maximally stale
 	}
 	return time.Since(s.Timestamp)
 }
