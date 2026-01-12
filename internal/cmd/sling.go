@@ -1547,14 +1547,12 @@ func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error 
 	prefix := config.GetRigPrefix(townRoot, rigName)
 	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
 
-	// Get the beads directory for running bd commands
-	// Use hookWorkDir if provided (polecat's worktree for redirect-based routing)
-	beadsDir := townRoot
-	if hookWorkDir != "" {
-		beadsDir = hookWorkDir
-	}
+	// Resolve the rig directory for running bd commands
+	// Use ResolveHookDir to ensure we run bd from the correct rig directory
+	// (not from the polecat's worktree, which doesn't have a .beads directory)
+	rigDir := beads.ResolveHookDir(townRoot, prefix+"-"+polecatName, hookWorkDir)
 
-	b := beads.New(beadsDir)
+	b := beads.New(rigDir)
 
 	// Check if molecule is already attached (avoid duplicate attach)
 	attachment, err := b.GetAttachment(agentBeadID)
@@ -1566,7 +1564,7 @@ func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error 
 	// Cook the mol-polecat-work formula to ensure the proto exists
 	// This is safe to run multiple times - cooking is idempotent
 	cookCmd := exec.Command("bd", "--no-daemon", "cook", "mol-polecat-work")
-	cookCmd.Dir = beadsDir
+	cookCmd.Dir = rigDir
 	cookCmd.Stderr = os.Stderr
 	if err := cookCmd.Run(); err != nil {
 		return fmt.Errorf("cooking mol-polecat-work formula: %w", err)
