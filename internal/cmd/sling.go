@@ -422,6 +422,15 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
 
+	// Auto-attach mol-polecat-work to polecat agent beads
+	// This ensures polecats have the standard work molecule attached for guidance
+	if strings.Contains(targetAgent, "/polecats/") {
+		if err := attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot); err != nil {
+			// Warn but don't fail - polecat will still work without molecule
+			fmt.Printf("%s Could not attach work molecule: %v\n", style.Dim.Render("Warning:"), err)
+		}
+	}
+
 	// Store dispatcher in bead description (enables completion notification to dispatcher)
 	if err := storeDispatcherInBead(beadID, actor); err != nil {
 		// Warn but don't fail - polecat will still complete work
@@ -1451,6 +1460,11 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		// Update agent bead state
 		updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
 
+		// Auto-attach mol-polecat-work molecule to polecat agent bead
+		if err := attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot); err != nil {
+			fmt.Printf("  %s Could not attach work molecule: %v\n", style.Dim.Render("Warning:"), err)
+		}
+
 		// Store args if provided
 		if slingArgs != "" {
 			if err := storeArgsInBead(beadID, slingArgs); err != nil {
@@ -1512,4 +1526,60 @@ func formatTrackBeadID(beadID string) string {
 	}
 	// Fallback for malformed IDs (single segment)
 	return beadID
+}
+
+// attachPolecatWorkMolecule attaches the mol-polecat-work molecule to a polecat's agent bead.
+// This ensures all polecats have the standard work molecule attached for guidance.
+// The molecule is attached by storing it in the agent bead's description using attachment fields.
+//
+// Per hq-lglmw: gt sling should auto-attach mol-polecat-work when slinging to polecats.
+func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error {
+	// Parse the polecat name from targetAgent (format: "rig/polecats/name")
+	parts := strings.Split(targetAgent, "/")
+	if len(parts) != 3 || parts[1] != "polecats" {
+		return fmt.Errorf("invalid polecat agent format: %s", targetAgent)
+	}
+	rigName := parts[0]
+	polecatName := parts[2]
+
+	// Get the polecat's agent bead ID
+	// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast")
+	prefix := config.GetRigPrefix(townRoot, rigName)
+	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+
+	// Get the beads directory for running bd commands
+	// Use hookWorkDir if provided (polecat's worktree for redirect-based routing)
+	beadsDir := townRoot
+	if hookWorkDir != "" {
+		beadsDir = hookWorkDir
+	}
+
+	b := beads.New(beadsDir)
+
+	// Check if molecule is already attached (avoid duplicate attach)
+	attachment, err := b.GetAttachment(agentBeadID)
+	if err == nil && attachment != nil && attachment.AttachedMolecule != "" {
+		// Already has a molecule attached - skip
+		return nil
+	}
+
+	// Cook the mol-polecat-work formula to ensure the proto exists
+	// This is safe to run multiple times - cooking is idempotent
+	cookCmd := exec.Command("bd", "--no-daemon", "cook", "mol-polecat-work")
+	cookCmd.Dir = beadsDir
+	cookCmd.Stderr = os.Stderr
+	if err := cookCmd.Run(); err != nil {
+		return fmt.Errorf("cooking mol-polecat-work formula: %w", err)
+	}
+
+	// Attach the molecule to the polecat's agent bead
+	// The molecule ID is the formula name "mol-polecat-work"
+	moleculeID := "mol-polecat-work"
+	_, err = b.AttachMolecule(agentBeadID, moleculeID)
+	if err != nil {
+		return fmt.Errorf("attaching molecule %s to %s: %w", moleculeID, agentBeadID, err)
+	}
+
+	fmt.Printf("%s Attached %s to %s\n", style.Bold.Render("✓"), moleculeID, agentBeadID)
+	return nil
 }
