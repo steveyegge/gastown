@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -476,6 +477,38 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// rigListEntry holds rig info for sorting in gt rig list
+type rigListEntry struct {
+	name      string
+	state     string // OPERATIONAL, STOPPED, PARKED, DOCKED
+	statePrio int    // 0=OPERATIONAL, 1=STOPPED, 2=PARKED, 3=DOCKED
+}
+
+// getRigListState determines the display state for a rig in the list.
+// Returns state name and priority (lower = first in list).
+func getRigListState(townRoot, rigName string, t *tmux.Tmux) (state string, priority int) {
+	// Check operational state first (parked/docked override everything)
+	opState, _ := getRigOperationalState(townRoot, rigName)
+	if opState == "PARKED" {
+		return "PARKED", 2
+	}
+	if opState == "DOCKED" {
+		return "DOCKED", 3
+	}
+
+	// Check if witness or refinery sessions are running
+	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
+	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
+
+	witnessRunning, _ := t.HasSession(witnessSession)
+	refineryRunning, _ := t.HasSession(refinerySession)
+
+	if witnessRunning || refineryRunning {
+		return "OPERATIONAL", 0
+	}
+	return "STOPPED", 1
+}
+
 func runRigList(cmd *cobra.Command, args []string) error {
 	// Find workspace
 	townRoot, err := workspace.FindFromCwdOrError()
@@ -500,18 +533,38 @@ func runRigList(cmd *cobra.Command, args []string) error {
 	// Create rig manager to get details
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
+	t := tmux.NewTmux()
+
+	// Collect rig entries with their states
+	var entries []rigListEntry
+	for name := range rigsConfig.Rigs {
+		state, prio := getRigListState(townRoot, name, t)
+		entries = append(entries, rigListEntry{
+			name:      name,
+			state:     state,
+			statePrio: prio,
+		})
+	}
+
+	// Sort by state priority, then alphabetically
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].statePrio != entries[j].statePrio {
+			return entries[i].statePrio < entries[j].statePrio
+		}
+		return entries[i].name < entries[j].name
+	})
 
 	fmt.Printf("Rigs in %s:\n\n", townRoot)
 
-	for name := range rigsConfig.Rigs {
-		r, err := mgr.GetRig(name)
+	for _, entry := range entries {
+		r, err := mgr.GetRig(entry.name)
 		if err != nil {
-			fmt.Printf("  %s %s\n", style.Warning.Render("!"), name)
+			fmt.Printf("  %s %s\n", style.Warning.Render("!"), entry.name)
 			continue
 		}
 
 		summary := r.Summary()
-		fmt.Printf("  %s\n", style.Bold.Render(name))
+		fmt.Printf("  %s\n", style.Bold.Render(entry.name))
 		fmt.Printf("    Polecats: %d  Crew: %d\n", summary.PolecatCount, summary.CrewCount)
 
 		agents := []string{}
