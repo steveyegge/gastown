@@ -49,6 +49,13 @@ type TownSettings struct {
 	// Values override or extend the built-in presets.
 	// Example: {"gemini": {"command": "/custom/path/to/gemini"}}
 	Agents map[string]*RuntimeConfig `json:"agents,omitempty"`
+
+	// RoleAgents maps role names to agent aliases for per-role model selection.
+	// Keys are role names: "mayor", "deacon", "witness", "refinery", "polecat", "crew".
+	// Values are agent names (built-in presets or custom agents defined in Agents).
+	// This allows cost optimization by using different models for different roles.
+	// Example: {"mayor": "claude-opus", "witness": "claude-haiku", "polecat": "claude-sonnet"}
+	RoleAgents map[string]string `json:"role_agents,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -58,6 +65,7 @@ func NewTownSettings() *TownSettings {
 		Version:      CurrentTownSettingsVersion,
 		DefaultAgent: "claude",
 		Agents:       make(map[string]*RuntimeConfig),
+		RoleAgents:   make(map[string]string),
 	}
 }
 
@@ -209,6 +217,13 @@ type RigSettings struct {
 	// Similar to TownSettings.Agents but applies to this rig only.
 	// Allows per-rig custom agents for polecats and crew members.
 	Agents map[string]*RuntimeConfig `json:"agents,omitempty"`
+
+	// RoleAgents maps role names to agent aliases for per-role model selection.
+	// Keys are role names: "witness", "refinery", "polecat", "crew".
+	// Values are agent names (built-in presets or custom agents).
+	// Overrides TownSettings.RoleAgents for this specific rig.
+	// Example: {"witness": "claude-haiku", "polecat": "claude-sonnet"}
+	RoleAgents map[string]string `json:"role_agents,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.

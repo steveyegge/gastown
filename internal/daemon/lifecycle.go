@@ -458,7 +458,7 @@ func (d *Daemon) getNeedsPreSync(config *beads.RoleConfig, parsed *ParsedIdentit
 }
 
 // getStartCommand determines the startup command for an agent.
-// Uses role bead config if available, falls back to hardcoded defaults.
+// Uses role bead config if available, then role-based agent selection, then hardcoded defaults.
 func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIdentity) string {
 	// If role bead has explicit config, use it
 	if roleConfig != nil && roleConfig.StartCommand != "" {
@@ -471,16 +471,33 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
 	}
 
-	// Default command for all agents - use runtime config
-	defaultCmd := "exec " + config.GetRuntimeCommand(rigPath)
-	runtimeConfig := config.LoadRuntimeConfig(rigPath)
+	// Use role-based agent resolution for per-role model selection
+	runtimeConfig := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
+
+	// Build default command using the role-resolved runtime config
+	defaultCmd := "exec " + runtimeConfig.BuildCommand()
 	if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
 		defaultCmd = config.PrependEnv(defaultCmd, map[string]string{"GT_SESSION_ID_ENV": runtimeConfig.Session.SessionIDEnv})
 	}
 
-	// Polecats need environment variables set in the command
+	// Polecats and crew need environment variables set in the command
 	if parsed.RoleType == "polecat" {
-		return config.BuildPolecatStartupCommand(parsed.RigName, parsed.AgentName, rigPath, "")
+		envVars := config.AgentEnvSimple("polecat", parsed.RigName, parsed.AgentName)
+		// Add GT_ROOT and session ID env if available
+		envVars["GT_ROOT"] = d.config.TownRoot
+		if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
+			envVars["GT_SESSION_ID_ENV"] = runtimeConfig.Session.SessionIDEnv
+		}
+		return config.PrependEnv("exec "+runtimeConfig.BuildCommand(), envVars)
+	}
+
+	if parsed.RoleType == "crew" {
+		envVars := config.AgentEnvSimple("crew", parsed.RigName, parsed.AgentName)
+		envVars["GT_ROOT"] = d.config.TownRoot
+		if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
+			envVars["GT_SESSION_ID_ENV"] = runtimeConfig.Session.SessionIDEnv
+		}
+		return config.PrependEnv("exec "+runtimeConfig.BuildCommand(), envVars)
 	}
 
 	return defaultCmd
