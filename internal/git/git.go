@@ -240,6 +240,14 @@ func (g *Git) Pull(remote, branch string) error {
 	return err
 }
 
+// ConfigurePushURL sets the push URL for a remote while keeping the fetch URL.
+// This is useful for read-only upstream repos where you want to push to a fork.
+// Example: ConfigurePushURL("origin", "https://github.com/user/fork.git")
+func (g *Git) ConfigurePushURL(remote, pushURL string) error {
+	_, err := g.run("remote", "set-url", remote, "--push", pushURL)
+	return err
+}
+
 // Push pushes to the remote branch.
 func (g *Git) Push(remote, branch string, force bool) error {
 	args := []string{"push", remote, branch}

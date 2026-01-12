@@ -13,8 +13,12 @@ type Rig struct {
 	// Path is the absolute path to the rig directory.
 	Path string `json:"path"`
 
-	// GitURL is the remote repository URL.
+	// GitURL is the remote repository URL (fetch/pull).
 	GitURL string `json:"git_url"`
+
+	// PushURL is an optional push URL for read-only upstreams.
+	// When set, polecats push here instead of to GitURL (e.g., personal fork).
+	PushURL string `json:"push_url,omitempty"`
 
 	// LocalRepo is an optional local repository used for reference clones.
 	LocalRepo string `json:"local_repo,omitempty"`
