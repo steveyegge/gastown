@@ -313,6 +313,12 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 			continue
 		}
 
+		// Only count rig-specific agents from registered rigs
+		// Town-level agents (deacon) don't have a rig and are always counted
+		if agent.Rig != "" && !registeredRigs[agent.Rig] {
+			continue
+		}
+
 		healthByType[agent.Type].total++
 
 		// Detect working state (✻ = working, ❯ = idle)
