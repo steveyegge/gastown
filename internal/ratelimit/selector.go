@@ -20,6 +20,9 @@ type Selector interface {
 
 	// IsAvailable checks if a profile is available (not cooling down).
 	IsAvailable(profile string) bool
+
+	// SetPolicy configures a role's fallback policy.
+	SetPolicy(role string, policy RolePolicy)
 }
 
 // DefaultSelector implements profile selection with cooldown tracking.
@@ -29,12 +32,19 @@ type DefaultSelector struct {
 	policies  map[string]*RolePolicy
 }
 
-// NewSelector creates a new profile selector with the given policies.
-func NewSelector(policies map[string]*RolePolicy) *DefaultSelector {
+// NewSelector creates a new profile selector.
+func NewSelector() *DefaultSelector {
 	return &DefaultSelector{
 		cooldowns: make(map[string]time.Time),
-		policies:  policies,
+		policies:  make(map[string]*RolePolicy),
 	}
+}
+
+// SetPolicy configures a role's fallback policy.
+func (s *DefaultSelector) SetPolicy(role string, policy RolePolicy) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.policies[role] = &policy
 }
 
 // SelectNext finds the next available profile in the fallback chain.

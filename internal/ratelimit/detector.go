@@ -21,20 +21,28 @@ type Detector interface {
 	// Detect checks if the exit indicates a rate limit.
 	// Returns the event and true if rate limit detected, nil and false otherwise.
 	Detect(exitCode int, stderr string) (*RateLimitEvent, bool)
+
+	// SetAgentInfo configures the agent context for event creation.
+	SetAgentInfo(agentID, profile, provider string)
 }
 
 // DefaultDetector is the standard rate limit detector implementation.
 type DefaultDetector struct {
-	agentID string
-	profile string
+	agentID  string
+	profile  string
+	provider string
 }
 
 // NewDetector creates a new rate limit detector.
-func NewDetector(agentID, profile string) *DefaultDetector {
-	return &DefaultDetector{
-		agentID: agentID,
-		profile: profile,
-	}
+func NewDetector() *DefaultDetector {
+	return &DefaultDetector{}
+}
+
+// SetAgentInfo configures the agent context for event creation.
+func (d *DefaultDetector) SetAgentInfo(agentID, profile, provider string) {
+	d.agentID = agentID
+	d.profile = profile
+	d.provider = provider
 }
 
 // Detect checks if the exit code or stderr indicates a rate limit.
@@ -59,8 +67,11 @@ func (d *DefaultDetector) createEvent(exitCode int, stderr string) *RateLimitEve
 	// Extract error snippet (first meaningful line)
 	snippet := extractErrorSnippet(stderr)
 
-	// Detect provider from error message
-	provider := detectProvider(stderr)
+	// Use provider from SetAgentInfo if set, otherwise detect from stderr
+	provider := d.provider
+	if provider == "" {
+		provider = detectProvider(stderr)
+	}
 
 	return &RateLimitEvent{
 		AgentID:      d.agentID,

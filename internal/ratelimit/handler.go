@@ -9,9 +9,9 @@ import (
 // Handler orchestrates rate limit detection, profile selection, and session swapping.
 // It is the main integration point for the Witness's rate limit handling.
 type Handler struct {
-	detector   *Detector
-	selector   *Selector
-	swapper    *Swapper
+	detector   Detector
+	selector   Selector
+	swapper    Swapper
 	controller SessionController
 }
 
@@ -35,12 +35,13 @@ func NewHandler(controller SessionController, cfg HandlerConfig) *Handler {
 		selector.SetPolicy(role, policy)
 	}
 
-	return &Handler{
+	h := &Handler{
 		detector:   detector,
 		selector:   selector,
 		swapper:    swapper,
 		controller: controller,
 	}
+	return h
 }
 
 // HandleExitResult contains the result of handling a session exit.
@@ -151,7 +152,7 @@ type PolecatExitInfo struct {
 }
 
 // GetSelector returns the profile selector for external configuration.
-func (h *Handler) GetSelector() *Selector {
+func (h *Handler) GetSelector() Selector {
 	return h.selector
 }
 

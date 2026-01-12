@@ -1,9 +1,31 @@
 package ratelimit
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // ExitCodeRateLimit is the exit code Claude Code uses for rate limits.
 const ExitCodeRateLimit = 2
+
+// SessionOps defines the interface for session operations.
+// SessionAdapter implements this interface using real gt infrastructure.
+type SessionOps interface {
+	IsRunning(rigName, polecatName string) (bool, error)
+	Stop(rigName, polecatName string, force bool) error
+	Start(rigName, polecatName, profile string) (string, error)
+	GetHookedWork(rigName, polecatName string) (string, error)
+	HookWork(rigName, polecatName, beadID string) error
+	Nudge(rigName, polecatName, message string) error
+}
+
+// SessionController is an alias for SessionOps used by the Handler.
+type SessionController = SessionOps
+
+// SessionSwapper handles graceful session replacement during rate limit events.
+type SessionSwapper interface {
+	Swap(ctx context.Context, req SwapRequest) (*SwapResult, error)
+}
 
 // RateLimitEvent represents a detected rate limit occurrence.
 type RateLimitEvent struct {
@@ -37,4 +59,13 @@ type SwapResult struct {
 	Success      bool   `json:"success"`
 	NewSessionID string `json:"new_session_id,omitempty"`
 	Error        error  `json:"-"`
+}
+
+// EmitSwapEvent emits a swap event for observability and tracking.
+// This is a placeholder for integration with monitoring/alerting systems.
+func EmitSwapEvent(req SwapRequest, result *SwapResult) {
+	// In a full implementation, this would emit to:
+	// - Metrics/monitoring system
+	// - Event log for audit
+	// - Alert system if swap failed
 }

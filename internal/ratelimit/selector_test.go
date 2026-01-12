@@ -6,13 +6,11 @@ import (
 )
 
 func TestSelector_SelectNext_FirstAvailable(t *testing.T) {
-	policies := map[string]*RolePolicy{
-		"polecat": {
-			FallbackChain:   []string{"anthropic_a", "openai_a", "anthropic_b"},
-			CooldownMinutes: 5,
-		},
-	}
-	s := NewSelector(policies)
+	s := NewSelector()
+	s.SetPolicy("polecat", RolePolicy{
+		FallbackChain:   []string{"anthropic_a", "openai_a", "anthropic_b"},
+		CooldownMinutes: 5,
+	})
 
 	event := &RateLimitEvent{Profile: "anthropic_a"}
 	next, err := s.SelectNext("polecat", "anthropic_a", event)
@@ -25,13 +23,11 @@ func TestSelector_SelectNext_FirstAvailable(t *testing.T) {
 }
 
 func TestSelector_SelectNext_SkipsCoolingDown(t *testing.T) {
-	policies := map[string]*RolePolicy{
-		"polecat": {
-			FallbackChain:   []string{"anthropic_a", "openai_a", "anthropic_b"},
-			CooldownMinutes: 5,
-		},
-	}
-	s := NewSelector(policies)
+	s := NewSelector()
+	s.SetPolicy("polecat", RolePolicy{
+		FallbackChain:   []string{"anthropic_a", "openai_a", "anthropic_b"},
+		CooldownMinutes: 5,
+	})
 
 	// Mark openai_a as cooling down
 	s.MarkCooldown("openai_a", time.Now().Add(10*time.Minute))
@@ -48,13 +44,11 @@ func TestSelector_SelectNext_SkipsCoolingDown(t *testing.T) {
 }
 
 func TestSelector_SelectNext_AllCooling(t *testing.T) {
-	policies := map[string]*RolePolicy{
-		"polecat": {
-			FallbackChain:   []string{"anthropic_a", "openai_a"},
-			CooldownMinutes: 5,
-		},
-	}
-	s := NewSelector(policies)
+	s := NewSelector()
+	s.SetPolicy("polecat", RolePolicy{
+		FallbackChain:   []string{"anthropic_a", "openai_a"},
+		CooldownMinutes: 5,
+	})
 
 	// Mark all other profiles as cooling
 	s.MarkCooldown("openai_a", time.Now().Add(10*time.Minute))
@@ -67,13 +61,11 @@ func TestSelector_SelectNext_AllCooling(t *testing.T) {
 }
 
 func TestSelector_SelectNext_RespectsOrder(t *testing.T) {
-	policies := map[string]*RolePolicy{
-		"polecat": {
-			FallbackChain:   []string{"preferred", "backup1", "backup2"},
-			CooldownMinutes: 5,
-		},
-	}
-	s := NewSelector(policies)
+	s := NewSelector()
+	s.SetPolicy("polecat", RolePolicy{
+		FallbackChain:   []string{"preferred", "backup1", "backup2"},
+		CooldownMinutes: 5,
+	})
 
 	// Current is "preferred", should get "backup1" not "backup2"
 	event := &RateLimitEvent{Profile: "preferred"}
@@ -87,7 +79,7 @@ func TestSelector_SelectNext_RespectsOrder(t *testing.T) {
 }
 
 func TestSelector_IsAvailable(t *testing.T) {
-	s := NewSelector(nil)
+	s := NewSelector()
 
 	// Fresh profile should be available
 	if !s.IsAvailable("test_profile") {
@@ -108,7 +100,7 @@ func TestSelector_IsAvailable(t *testing.T) {
 }
 
 func TestSelector_MarkCooldown(t *testing.T) {
-	s := NewSelector(nil)
+	s := NewSelector()
 
 	future := time.Now().Add(10 * time.Minute)
 	s.MarkCooldown("test_profile", future)
@@ -119,7 +111,7 @@ func TestSelector_MarkCooldown(t *testing.T) {
 }
 
 func TestSelector_ClearCooldown(t *testing.T) {
-	s := NewSelector(nil)
+	s := NewSelector()
 
 	s.MarkCooldown("test_profile", time.Now().Add(10*time.Minute))
 	if s.IsAvailable("test_profile") {
@@ -134,7 +126,7 @@ func TestSelector_ClearCooldown(t *testing.T) {
 
 func TestSelector_DefaultPolicy(t *testing.T) {
 	// No policies defined
-	s := NewSelector(nil)
+	s := NewSelector()
 
 	event := &RateLimitEvent{Profile: "unknown_profile"}
 	_, err := s.SelectNext("unknown_role", "unknown_profile", event)

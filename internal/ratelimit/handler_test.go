@@ -5,6 +5,63 @@ import (
 	"testing"
 )
 
+// MockSessionController implements SessionController for testing.
+type MockSessionController struct {
+	// Tracking fields
+	IsRunningResult  bool
+	StopCalled       bool
+	StartCalled      bool
+	StopError        error
+	StartError       error
+	HookedWork       string
+	NudgedMessage    string
+	StartedOpts      StartedOptions
+	GetHookedWorkErr error
+}
+
+// StartedOptions tracks the options passed to Start.
+type StartedOptions struct {
+	RigName     string
+	PolecatName string
+	Account     string
+}
+
+func (m *MockSessionController) IsRunning(rigName, polecatName string) (bool, error) {
+	return m.IsRunningResult, nil
+}
+
+func (m *MockSessionController) Stop(rigName, polecatName string, force bool) error {
+	m.StopCalled = true
+	return m.StopError
+}
+
+func (m *MockSessionController) Start(rigName, polecatName, profile string) (string, error) {
+	m.StartCalled = true
+	m.StartedOpts = StartedOptions{
+		RigName:     rigName,
+		PolecatName: polecatName,
+		Account:     profile,
+	}
+	if m.StartError != nil {
+		return "", m.StartError
+	}
+	return "test-session-id", nil
+}
+
+func (m *MockSessionController) GetHookedWork(rigName, polecatName string) (string, error) {
+	return m.HookedWork, m.GetHookedWorkErr
+}
+
+func (m *MockSessionController) HookWork(rigName, polecatName, beadID string) error {
+	m.HookedWork = beadID
+	return nil
+}
+
+func (m *MockSessionController) Nudge(rigName, polecatName, message string) error {
+	m.NudgedMessage = message
+	return nil
+}
+
 func TestHandler_DetectsRateLimit_TriggersSwap(t *testing.T) {
 	mock := &MockSessionController{}
 	cfg := HandlerConfig{
@@ -189,7 +246,8 @@ func TestHandler_StderrRateLimit_TriggersSwap(t *testing.T) {
 
 func TestHandler_SwapError_ReturnsError(t *testing.T) {
 	mock := &MockSessionController{
-		StopError: ErrAllProfilesCooling, // Simulate stop failure
+		IsRunningResult: true,                 // Session is running, so Stop will be called
+		StopError:       ErrAllProfilesCooling, // Simulate stop failure
 	}
 	cfg := HandlerConfig{
 		RolePolicies: map[string]RolePolicy{
