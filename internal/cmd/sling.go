@@ -371,7 +371,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		if formulaName != "" {
 			fmt.Printf("Would instantiate formula %s:\n", formulaName)
 			fmt.Printf("  1. bd cook %s\n", formulaName)
-			fmt.Printf("  2. bd mol wisp %s --var feature=\"%s\"\n", formulaName, info.Title)
+			fmt.Printf("  2. bd mol wisp %s --var feature=\"%s\" --var issue=\"%s\"\n", formulaName, info.Title, beadID)
 			fmt.Printf("  3. bd mol bond <wisp-root> %s\n", beadID)
 			fmt.Printf("  4. bd update <compound-root> --status=hooked --assignee=%s\n", targetAgent)
 		} else {
@@ -407,9 +407,10 @@ func runSling(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cooking formula %s: %w", formulaName, err)
 		}
 
-		// Step 2: Create wisp with feature variable from bead title
+		// Step 2: Create wisp with feature and issue variables from bead
 		featureVar := fmt.Sprintf("feature=%s", info.Title)
-		wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--json"}
+		issueVar := fmt.Sprintf("issue=%s", beadID)
+		wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar, "--json"}
 		wispCmd := exec.Command("bd", wispArgs...)
 		wispCmd.Dir = formulaWorkDir
 		wispCmd.Stderr = os.Stderr
