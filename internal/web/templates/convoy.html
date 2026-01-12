@@ -104,40 +104,25 @@
             background: var(--green);
         }
 
-        /* Work status badges */
-        .work-status {
+        /* Status badges (shared base) */
+        .work-status,
+        .ci-status,
+        .merge-status {
             display: inline-block;
             padding: 2px 8px;
             border-radius: 4px;
             font-size: 0.75rem;
             font-weight: 500;
-            text-transform: uppercase;
-        }
-
-        .work-complete .work-status {
-            background: var(--green);
             color: var(--bg-dark);
         }
 
-        .work-active .work-status {
-            background: var(--green);
-            color: var(--bg-dark);
-        }
+        .work-status { text-transform: uppercase; }
 
-        .work-stale .work-status {
-            background: var(--yellow);
-            color: var(--bg-dark);
-        }
-
-        .work-stuck .work-status {
-            background: var(--red);
-            color: var(--bg-dark);
-        }
-
-        .work-waiting .work-status {
-            background: var(--text-secondary);
-            color: var(--bg-dark);
-        }
+        .work-complete .work-status,
+        .work-active .work-status { background: var(--green); }
+        .work-stale .work-status { background: var(--yellow); }
+        .work-stuck .work-status { background: var(--red); }
+        .work-waiting .work-status { background: var(--text-secondary); }
 
         /* Activity colors */
         .activity-dot {
@@ -253,43 +238,9 @@
             background: rgba(248, 113, 113, 0.1);
         }
 
-        .ci-status, .merge-status {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 500;
-        }
-
-        .ci-pass {
-            background: var(--green);
-            color: var(--bg-dark);
-        }
-
-        .ci-fail {
-            background: var(--red);
-            color: var(--bg-dark);
-        }
-
-        .ci-pending {
-            background: var(--yellow);
-            color: var(--bg-dark);
-        }
-
-        .merge-ready {
-            background: var(--green);
-            color: var(--bg-dark);
-        }
-
-        .merge-conflict {
-            background: var(--red);
-            color: var(--bg-dark);
-        }
-
-        .merge-pending {
-            background: var(--yellow);
-            color: var(--bg-dark);
-        }
+        .ci-pass, .merge-ready { background: var(--green); }
+        .ci-fail, .merge-conflict { background: var(--red); }
+        .ci-pending, .merge-pending { background: var(--yellow); }
 
         .pr-link {
             color: var(--text-primary);
@@ -320,10 +271,416 @@
             opacity: 0;
             transition: opacity 200ms ease-in;
         }
+
+        /* Expandable convoy rows */
+        .convoy-row {
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .expand-icon {
+            display: inline-block;
+            width: 16px;
+            margin-right: 8px;
+            font-weight: bold;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
+            font-family: monospace;
+        }
+
+        .convoy-group.expanded .expand-icon {
+            transform: rotate(45deg);
+        }
+
+        .convoy-details {
+            background: var(--bg-dark);
+        }
+
+        .convoy-details > td {
+            padding: 0 !important;
+            border-bottom: 2px solid var(--border);
+        }
+
+        /* Kanban board layout */
+        .kanban-board {
+            display: flex;
+            gap: 16px;
+            padding: 16px;
+            min-height: 120px;
+            overflow-x: auto;
+        }
+
+        .kanban-column {
+            flex: 1;
+            min-width: 180px;
+            max-width: 280px;
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .kanban-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .kanban-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .kanban-status-dot.status-open {
+            background: var(--yellow);
+        }
+
+        .kanban-status-dot.status-in-progress {
+            background: var(--green);
+            box-shadow: 0 0 6px var(--green);
+        }
+
+        .kanban-status-dot.status-closed {
+            background: var(--text-secondary);
+        }
+
+        .kanban-count {
+            margin-left: auto;
+            background: var(--border);
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+        }
+
+        .kanban-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .kanban-card {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px;
+            transition: border-color 0.2s;
+        }
+
+        .kanban-card:hover {
+            border-color: var(--text-secondary);
+        }
+
+        .kanban-card.card-closed {
+            opacity: 0.6;
+        }
+
+        .card-id {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .card-title {
+            font-size: 0.875rem;
+            color: var(--text-primary);
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .card-assignee {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid var(--border);
+        }
+
+        .kanban-empty {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            text-align: center;
+            padding: 16px 8px;
+            font-style: italic;
+        }
+
+        /* Task queue styles */
+        .task-high {
+            background: rgba(248, 113, 113, 0.1);
+        }
+
+        .task-medium {
+            background: rgba(250, 204, 21, 0.05);
+        }
+
+        .priority-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+
+        .priority-critical, .priority-high {
+            background: var(--red);
+            color: var(--bg-dark);
+        }
+
+        .priority-medium {
+            background: var(--yellow);
+            color: var(--bg-dark);
+        }
+
+        .priority-low, .priority-minimal {
+            background: var(--text-secondary);
+            color: var(--bg-dark);
+        }
+
+        .task-title {
+            color: var(--text-primary);
+        }
+
+        .task-assignee {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+        }
+
+        /* Task detail drawer */
+        .drawer-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+            z-index: 100;
+        }
+
+        .drawer-overlay.open {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .task-drawer {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 420px;
+            max-width: 90vw;
+            height: 100vh;
+            background: var(--bg-card);
+            border-left: 1px solid var(--border);
+            transform: translateX(100%);
+            transition: transform 0.2s ease-out;
+            z-index: 101;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .drawer-overlay.open .task-drawer {
+            transform: translateX(0);
+        }
+
+        .drawer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-dark);
+        }
+
+        .drawer-title {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .drawer-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.25rem;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .drawer-close:hover {
+            background: var(--border);
+            color: var(--text-primary);
+        }
+
+        .drawer-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .drawer-field {
+            margin-bottom: 20px;
+        }
+
+        .drawer-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .drawer-value {
+            font-size: 0.875rem;
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        .drawer-id {
+            font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+            background: var(--bg-dark);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+
+        .drawer-meta-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .drawer-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: capitalize;
+        }
+
+        .drawer-status.status-open {
+            background: rgba(250, 204, 21, 0.15);
+            color: var(--yellow);
+        }
+
+        .drawer-status.status-in_progress {
+            background: rgba(74, 222, 128, 0.15);
+            color: var(--green);
+        }
+
+        .drawer-status.status-closed {
+            background: rgba(170, 170, 170, 0.15);
+            color: var(--text-secondary);
+        }
+
+        .drawer-status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .drawer-priority {
+            display: inline-flex;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .drawer-priority.priority-0 { background: rgba(248, 113, 113, 0.2); color: var(--red); }
+        .drawer-priority.priority-1 { background: rgba(248, 113, 113, 0.15); color: var(--red); }
+        .drawer-priority.priority-2 { background: rgba(250, 204, 21, 0.15); color: var(--yellow); }
+        .drawer-priority.priority-3 { background: rgba(170, 170, 170, 0.15); color: var(--text-secondary); }
+        .drawer-priority.priority-4 { background: rgba(170, 170, 170, 0.1); color: var(--text-secondary); }
+
+        .drawer-type {
+            display: inline-flex;
+            padding: 4px 10px;
+            background: var(--bg-dark);
+            border-radius: 4px;
+            font-size: 0.75rem;
+            text-transform: capitalize;
+        }
+
+        .drawer-assignee {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: var(--bg-dark);
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+
+        .drawer-assignee-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
+
+        .drawer-description {
+            background: var(--bg-dark);
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .drawer-timestamps {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .drawer-timestamps span {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .drawer-empty {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        .kanban-card.clickable {
+            cursor: pointer;
+        }
+
+        @media (max-width: 768px) {
+            .task-drawer {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="dashboard" hx-get="/" hx-trigger="every 10s" hx-swap="outerHTML">
+    <div class="dashboard" hx-get="/" hx-trigger="every 10s" hx-swap="outerHTML" hx-select=".dashboard" hx-on::after-settle="restoreExpandedState()">
         <header>
             <h1>🚚 Gas Town Convoys</h1>
             <span class="refresh-info">
@@ -342,10 +699,11 @@
                     <th>Last Activity</th>
                 </tr>
             </thead>
-            <tbody>
-                {{range .Convoys}}
-                <tr class="{{workStatusClass .WorkStatus}}">
+            {{range .Convoys}}
+            <tbody class="convoy-group" data-convoy-id="{{.ID}}">
+                <tr class="convoy-row {{workStatusClass .WorkStatus}}" onclick="toggleConvoy('{{.ID}}')">
                     <td>
+                        <span class="expand-icon" id="icon-{{.ID}}">+</span>
                         <span class="work-status">{{.WorkStatus}}</span>
                     </td>
                     <td>
@@ -365,8 +723,67 @@
                         {{.LastActivity.FormattedAge}}
                     </td>
                 </tr>
-                {{end}}
+                <tr class="convoy-details" id="details-{{.ID}}" style="display: none;">
+                    <td colspan="4">
+                        <div class="kanban-board">
+                            <div class="kanban-column">
+                                <div class="kanban-header">
+                                    <span class="kanban-status-dot status-open"></span>
+                                    Open
+                                    <span class="kanban-count">{{len (issuesByStatus .TrackedIssues "open")}}</span>
+                                </div>
+                                <div class="kanban-cards">
+                                    {{range issuesByStatus .TrackedIssues "open"}}
+                                    <div class="kanban-card clickable" onclick="openTaskDrawer(this)" data-task-id="{{.ID}}" data-task-title="{{.Title}}" data-task-status="open" data-task-assignee="{{.Assignee}}" data-task-description="{{.Description}}" data-task-priority="{{.Priority}}" data-task-type="{{.Type}}" data-task-created="{{.CreatedAt}}" data-task-updated="{{.UpdatedAt}}">
+                                        <div class="card-id">{{.ID}}</div>
+                                        <div class="card-title">{{.Title}}</div>
+                                        {{if .Assignee}}<div class="card-assignee">{{.Assignee}}</div>{{end}}
+                                    </div>
+                                    {{else}}
+                                    <div class="kanban-empty">No issues</div>
+                                    {{end}}
+                                </div>
+                            </div>
+                            <div class="kanban-column">
+                                <div class="kanban-header">
+                                    <span class="kanban-status-dot status-in-progress"></span>
+                                    In Progress
+                                    <span class="kanban-count">{{len (issuesByStatus .TrackedIssues "in_progress")}}</span>
+                                </div>
+                                <div class="kanban-cards">
+                                    {{range issuesByStatus .TrackedIssues "in_progress"}}
+                                    <div class="kanban-card clickable" onclick="openTaskDrawer(this)" data-task-id="{{.ID}}" data-task-title="{{.Title}}" data-task-status="in_progress" data-task-assignee="{{.Assignee}}" data-task-description="{{.Description}}" data-task-priority="{{.Priority}}" data-task-type="{{.Type}}" data-task-created="{{.CreatedAt}}" data-task-updated="{{.UpdatedAt}}">
+                                        <div class="card-id">{{.ID}}</div>
+                                        <div class="card-title">{{.Title}}</div>
+                                        {{if .Assignee}}<div class="card-assignee">{{.Assignee}}</div>{{end}}
+                                    </div>
+                                    {{else}}
+                                    <div class="kanban-empty">No issues</div>
+                                    {{end}}
+                                </div>
+                            </div>
+                            <div class="kanban-column">
+                                <div class="kanban-header">
+                                    <span class="kanban-status-dot status-closed"></span>
+                                    Closed
+                                    <span class="kanban-count">{{len (issuesByStatus .TrackedIssues "closed")}}</span>
+                                </div>
+                                <div class="kanban-cards">
+                                    {{range issuesByStatus .TrackedIssues "closed"}}
+                                    <div class="kanban-card card-closed clickable" onclick="openTaskDrawer(this)" data-task-id="{{.ID}}" data-task-title="{{.Title}}" data-task-status="closed" data-task-assignee="{{.Assignee}}" data-task-description="{{.Description}}" data-task-priority="{{.Priority}}" data-task-type="{{.Type}}" data-task-created="{{.CreatedAt}}" data-task-updated="{{.UpdatedAt}}">
+                                        <div class="card-id">{{.ID}}</div>
+                                        <div class="card-title">{{.Title}}</div>
+                                    </div>
+                                    {{else}}
+                                    <div class="kanban-empty">No issues</div>
+                                    {{end}}
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
             </tbody>
+            {{end}}
         </table>
         {{else}}
         <div class="empty-state">
@@ -425,6 +842,35 @@
         </div>
         {{end}}
 
+        {{if .TaskQueue}}
+        <h2 class="section-header">📋 Task Queue</h2>
+        <table class="convoy-table">
+            <thead>
+                <tr>
+                    <th>Priority</th>
+                    <th>Task</th>
+                    <th>Assignee</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .TaskQueue}}
+                <tr class="{{.ColorClass}}">
+                    <td>
+                        <span class="priority-badge {{priorityClass .Priority}}">{{priorityLabel .Priority}}</span>
+                    </td>
+                    <td>
+                        <span class="convoy-id">{{.ID}}</span>
+                        <span class="task-title">{{.Title}}</span>
+                    </td>
+                    <td class="task-assignee">
+                        {{if .Assignee}}{{.Assignee}}{{else}}<em>Unassigned</em>{{end}}
+                    </td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+        {{end}}
+
         {{if .Polecats}}
         <h2 class="section-header">🐾 Polecat Workers</h2>
         <table class="convoy-table">
@@ -454,5 +900,185 @@
         </table>
         {{end}}
     </div>
+
+    <!-- Task Detail Drawer -->
+    <div class="drawer-overlay" id="drawer-overlay" onclick="closeTaskDrawer()">
+        <div class="task-drawer" onclick="event.stopPropagation()">
+            <div class="drawer-header">
+                <span class="drawer-title">Task Details</span>
+                <button class="drawer-close" onclick="closeTaskDrawer()">&times;</button>
+            </div>
+            <div class="drawer-content">
+                <div class="drawer-field">
+                    <div class="drawer-label">ID</div>
+                    <div class="drawer-value">
+                        <span class="drawer-id" id="drawer-task-id"></span>
+                    </div>
+                </div>
+                <div class="drawer-field">
+                    <div class="drawer-label">Title</div>
+                    <div class="drawer-value" id="drawer-task-title"></div>
+                </div>
+                <div class="drawer-field">
+                    <div class="drawer-label">Status & Priority</div>
+                    <div class="drawer-meta-row">
+                        <span class="drawer-status" id="drawer-task-status">
+                            <span class="drawer-status-dot"></span>
+                            <span id="drawer-status-text"></span>
+                        </span>
+                        <span class="drawer-priority" id="drawer-task-priority"></span>
+                        <span class="drawer-type" id="drawer-task-type"></span>
+                    </div>
+                </div>
+                <div class="drawer-field">
+                    <div class="drawer-label">Assignee</div>
+                    <div class="drawer-value" id="drawer-task-assignee"></div>
+                </div>
+                <div class="drawer-field" id="drawer-description-field">
+                    <div class="drawer-label">Description</div>
+                    <div class="drawer-description" id="drawer-task-description"></div>
+                </div>
+                <div class="drawer-field">
+                    <div class="drawer-label">Timestamps</div>
+                    <div class="drawer-timestamps" id="drawer-task-timestamps"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const STORAGE_KEY = 'expandedConvoys';
+
+        function getExpandedSet() {
+            try {
+                return new Set(JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '[]'));
+            } catch {
+                return new Set();
+            }
+        }
+
+        function saveExpandedSet(set) {
+            sessionStorage.setItem(STORAGE_KEY, JSON.stringify([...set]));
+        }
+
+        function toggleConvoy(convoyId) {
+            const group = document.querySelector(`[data-convoy-id="${convoyId}"]`);
+            const details = document.getElementById(`details-${convoyId}`);
+            const icon = document.getElementById(`icon-${convoyId}`);
+            if (!group || !details || !icon) return;
+
+            const expanded = getExpandedSet();
+            const isExpanded = expanded.has(convoyId);
+
+            if (isExpanded) {
+                expanded.delete(convoyId);
+            } else {
+                expanded.add(convoyId);
+            }
+            saveExpandedSet(expanded);
+
+            group.classList.toggle('expanded', !isExpanded);
+            details.style.display = isExpanded ? 'none' : 'table-row';
+            icon.textContent = isExpanded ? '+' : '-';
+        }
+
+        function restoreExpandedState() {
+            getExpandedSet().forEach(convoyId => {
+                const group = document.querySelector(`[data-convoy-id="${convoyId}"]`);
+                const details = document.getElementById(`details-${convoyId}`);
+                const icon = document.getElementById(`icon-${convoyId}`);
+                if (group && details && icon) {
+                    group.classList.add('expanded');
+                    details.style.display = 'table-row';
+                    icon.textContent = '-';
+                }
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', restoreExpandedState);
+
+        // Task drawer functions
+        const priorityLabels = ['P0 Critical', 'P1 High', 'P2 Medium', 'P3 Low', 'P4 Minimal'];
+
+        function openTaskDrawer(cardElement) {
+            event.stopPropagation();
+
+            const data = cardElement.dataset;
+
+            document.getElementById('drawer-task-id').textContent = data.taskId;
+            document.getElementById('drawer-task-title').textContent = data.taskTitle;
+
+            // Status
+            const statusEl = document.getElementById('drawer-task-status');
+            statusEl.className = 'drawer-status status-' + data.taskStatus;
+            document.getElementById('drawer-status-text').textContent = data.taskStatus.replace('_', ' ');
+
+            // Priority
+            const priorityEl = document.getElementById('drawer-task-priority');
+            const priority = parseInt(data.taskPriority) || 2;
+            priorityEl.className = 'drawer-priority priority-' + priority;
+            priorityEl.textContent = priorityLabels[priority] || 'P' + priority;
+
+            // Type
+            const typeEl = document.getElementById('drawer-task-type');
+            typeEl.textContent = data.taskType || 'task';
+            typeEl.style.display = data.taskType ? 'inline-flex' : 'none';
+
+            // Assignee
+            const assigneeEl = document.getElementById('drawer-task-assignee');
+            if (data.taskAssignee) {
+                const parts = data.taskAssignee.split('/');
+                const name = parts[parts.length - 1];
+                const initial = name.charAt(0).toUpperCase();
+                assigneeEl.innerHTML = `<span class="drawer-assignee"><span class="drawer-assignee-icon">${initial}</span>${name}</span>`;
+            } else {
+                assigneeEl.innerHTML = '<span class="drawer-empty">Unassigned</span>';
+            }
+
+            // Description
+            const descField = document.getElementById('drawer-description-field');
+            const descEl = document.getElementById('drawer-task-description');
+            if (data.taskDescription) {
+                descEl.textContent = data.taskDescription;
+                descField.style.display = 'block';
+            } else {
+                descField.style.display = 'none';
+            }
+
+            // Timestamps
+            const timestampsEl = document.getElementById('drawer-task-timestamps');
+            let timestamps = '';
+            if (data.taskCreated) {
+                timestamps += `<span>Created: ${formatTimestamp(data.taskCreated)}</span>`;
+            }
+            if (data.taskUpdated) {
+                timestamps += `<span>Updated: ${data.taskUpdated}</span>`;
+            }
+            timestampsEl.innerHTML = timestamps || '<span class="drawer-empty">No timestamp data</span>';
+
+            document.getElementById('drawer-overlay').classList.add('open');
+        }
+
+        function closeTaskDrawer() {
+            document.getElementById('drawer-overlay').classList.remove('open');
+        }
+
+        function formatTimestamp(isoString) {
+            if (!isoString) return '';
+            try {
+                const date = new Date(isoString);
+                return date.toLocaleString('en-US', {
+                    year: 'numeric', month: 'short', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                });
+            } catch {
+                return isoString;
+            }
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeTaskDrawer();
+        });
+    </script>
 </body>
 </html>
