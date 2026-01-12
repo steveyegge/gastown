@@ -76,3 +76,63 @@ func TestDirectoryCreation(t *testing.T) {
 		t.Error("expected .runtime directory to be created")
 	}
 }
+
+// Example functions demonstrate keepalive usage patterns.
+
+func ExampleTouchInWorkspace() {
+	// TouchInWorkspace signals agent activity in a specific workspace.
+	// This is the core function - use it when you know the workspace root.
+
+	workspaceRoot := "/path/to/workspace"
+
+	// Signal that "gt status" was run
+	TouchInWorkspace(workspaceRoot, "gt status")
+
+	// Signal a command with arguments
+	TouchInWorkspace(workspaceRoot, "gt sling bd-abc123 ai-platform")
+
+	// All errors are silently ignored (best-effort design).
+	// This is intentional - keepalive failures should never break commands.
+}
+
+func ExampleRead() {
+	// Read retrieves the current keepalive state for a workspace.
+	// Returns nil if no keepalive file exists or it can't be read.
+
+	workspaceRoot := "/path/to/workspace"
+	state := Read(workspaceRoot)
+
+	if state == nil {
+		// No keepalive found - agent may not have run any commands yet
+		return
+	}
+
+	// Access the last command that was run
+	_ = state.LastCommand // e.g., "gt status"
+
+	// Access when the command was run
+	_ = state.Timestamp // time.Time in UTC
+}
+
+func ExampleState_Age() {
+	// Age() returns how long ago the keepalive was updated.
+	// This is useful for detecting idle or stuck agents.
+
+	workspaceRoot := "/path/to/workspace"
+	state := Read(workspaceRoot)
+
+	// Age() is nil-safe - returns ~1 year for nil state
+	age := state.Age()
+
+	// Check if agent was active recently (within 5 minutes)
+	if age < 5*time.Minute {
+		// Agent is active
+		_ = "active"
+	}
+
+	// Check if agent might be stuck (no activity for 30+ minutes)
+	if age > 30*time.Minute {
+		// Agent may need attention
+		_ = "possibly stuck"
+	}
+}
