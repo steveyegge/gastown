@@ -581,9 +581,10 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Get current custom types configuration
+	// Use Output() not CombinedOutput() to avoid capturing bd's stderr messages
 	cmd := exec.Command("bd", "config", "get", "types.custom")
 	cmd.Dir = ctx.TownRoot
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
 		// If config key doesn't exist, types are not configured
 		c.townRoot = ctx.TownRoot
@@ -600,8 +601,15 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Parse configured types
-	configuredTypes := strings.TrimSpace(string(output))
+	// Parse configured types, filtering out bd "Note:" messages that may appear in stdout
+	var configuredTypes string
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "Note:") {
+			configuredTypes = line
+			break
+		}
+	}
 	configuredSet := make(map[string]bool)
 	for _, t := range strings.Split(configuredTypes, ",") {
 		configuredSet[strings.TrimSpace(t)] = true
