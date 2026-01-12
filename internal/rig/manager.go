@@ -82,7 +82,8 @@ type RigConfig struct {
 	Type          string       `json:"type"`                     // "rig"
 	Version       int          `json:"version"`                  // schema version
 	Name          string       `json:"name"`                     // rig name
-	GitURL        string       `json:"git_url"`                  // repository URL
+	GitURL        string       `json:"git_url"`                  // repository URL (fetch/pull)
+	PushURL       string       `json:"push_url,omitempty"`       // optional push URL (fork for read-only upstreams)
 	LocalRepo     string       `json:"local_repo,omitempty"`     // optional local reference repo
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
@@ -163,6 +164,7 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 		Name:      name,
 		Path:      rigPath,
 		GitURL:    entry.GitURL,
+		PushURL:   entry.PushURL,
 		LocalRepo: entry.LocalRepo,
 		Config:    entry.BeadsConfig,
 	}
@@ -216,7 +218,8 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 // AddRigOptions configures rig creation.
 type AddRigOptions struct {
 	Name          string // Rig name (directory name)
-	GitURL        string // Repository URL
+	GitURL        string // Repository URL (fetch/pull)
+	PushURL       string // Optional push URL (fork for read-only upstreams)
 	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
 	LocalRepo     string // Optional local repo for reference clones
 	DefaultBranch string // Default branch (defaults to auto-detected from remote)
@@ -326,6 +329,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		Version:   CurrentRigConfigVersion,
 		Name:      opts.Name,
 		GitURL:    opts.GitURL,
+		PushURL:   opts.PushURL,
 		LocalRepo: localRepo,
 		CreatedAt: time.Now(),
 		Beads: &BeadsConfig{
@@ -364,6 +368,13 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("checking if repository is empty: %w", err)
 	} else if empty {
 		return nil, fmt.Errorf("repository %s is empty (no commits). Push at least one commit before adding it as a rig", opts.GitURL)
+	// Configure push URL if provided (for read-only upstream repos)
+	// This sets origin's push URL to the fork while keeping fetch URL as upstream
+	if opts.PushURL != "" {
+		if err := bareGit.ConfigurePushURL("origin", opts.PushURL); err != nil {
+			return nil, fmt.Errorf("configuring push URL: %w", err)
+		}
+		fmt.Printf("   ✓ Configured push URL (fork: %s)\n", opts.PushURL)
 	}
 
 	// Determine default branch: use provided value or auto-detect from remote
@@ -419,6 +430,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	mayorGit := git.NewGitWithDir("", mayorRigPath)
 	if err := mayorGit.Checkout(defaultBranch); err != nil {
 		return nil, fmt.Errorf("checking out default branch for mayor: %w", err)
+	}
+	// Configure push URL on mayor clone (separate clone, doesn't inherit from bare repo)
+	if opts.PushURL != "" {
+		if err := mayorGit.ConfigurePushURL("origin", opts.PushURL); err != nil {
+			return nil, fmt.Errorf("configuring mayor push URL: %w", err)
+		}
 	}
 	fmt.Printf("   ✓ Created mayor clone\n")
 
@@ -690,6 +707,7 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	// Register in town config
 	m.config.Rigs[opts.Name] = config.RigEntry{
 		GitURL:    opts.GitURL,
+		PushURL:   opts.PushURL,
 		LocalRepo: localRepo,
 		AddedAt:   time.Now(),
 		BeadsConfig: &config.BeadsConfig{
@@ -1236,9 +1254,18 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 		result.BeadsPrefix = opts.BeadsPrefix
 	}
 
+	// Detect push URL from existing repo (adopt preserves existing configuration)
+	pushURL := ""
+	if existingConfig != nil && existingConfig.PushURL != "" {
+		pushURL = existingConfig.PushURL
+	} else {
+		pushURL = m.detectPushURL(rigPath)
+	}
+
 	// Register in town config
 	m.config.Rigs[opts.Name] = config.RigEntry{
 		GitURL:  result.GitURL,
+		PushURL: pushURL,
 		AddedAt: time.Now(),
 		BeadsConfig: &config.BeadsConfig{
 			Prefix: result.BeadsPrefix,
@@ -1246,6 +1273,32 @@ func (m *Manager) RegisterRig(opts RegisterRigOptions) (*RegisterRigResult, erro
 	}
 
 	return result, nil
+}
+
+// detectPushURL attempts to detect a custom push URL from an existing repository.
+// Returns empty string if push URL matches fetch URL (no custom push URL configured).
+func (m *Manager) detectPushURL(rigPath string) string {
+	possiblePaths := []string{
+		rigPath,
+		filepath.Join(rigPath, "mayor", "rig"),
+		filepath.Join(rigPath, "refinery", "rig"),
+	}
+	for _, p := range possiblePaths {
+		g := git.NewGitWithDir(p, "")
+		fetchURL, fetchErr := g.RemoteURL("origin")
+		if fetchErr != nil {
+			continue
+		}
+		pushURL, pushErr := g.GetPushURL("origin")
+		if pushErr != nil || pushURL == "" {
+			continue
+		}
+		// Only return if push URL differs from fetch URL (custom push URL)
+		if strings.TrimSpace(pushURL) != strings.TrimSpace(fetchURL) {
+			return strings.TrimSpace(pushURL)
+		}
+	}
+	return ""
 }
 
 // detectGitURL attempts to detect the git remote URL from an existing repository.

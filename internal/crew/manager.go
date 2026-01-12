@@ -350,6 +350,14 @@ func (m *Manager) syncRemotesFromRig(crewPath string) error {
 				style.PrintWarning("could not update remote %s: %v", remote, setErr)
 			}
 		}
+
+		// Sync push URL if configured (for read-only upstream forks)
+		pushURL, pushErr := rigGit.GetPushURL(remote)
+		if pushErr == nil && pushURL != "" && pushURL != url {
+			if cfgErr := crewGit.ConfigurePushURL(remote, pushURL); cfgErr != nil {
+				fmt.Printf("Warning: could not sync push URL for %s: %v\n", remote, cfgErr)
+			}
+		}
 	}
 
 	return nil

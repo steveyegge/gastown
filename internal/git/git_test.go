@@ -1250,3 +1250,63 @@ func TestPushSubmoduleCommit(t *testing.T) {
 		t.Errorf("expected remote main to be %s, got %s", sha, remoteSHA)
 	}
 }
+
+func TestConfigurePushURL(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Add a remote
+	cmd := exec.Command("git", "remote", "add", "origin", "https://github.com/upstream/repo.git")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("add remote: %v", err)
+	}
+
+	// Configure push URL
+	pushURL := "https://github.com/fork/repo.git"
+	if err := g.ConfigurePushURL("origin", pushURL); err != nil {
+		t.Fatalf("ConfigurePushURL: %v", err)
+	}
+
+	// Verify via GetPushURL
+	got, err := g.GetPushURL("origin")
+	if err != nil {
+		t.Fatalf("GetPushURL: %v", err)
+	}
+	if got != pushURL {
+		t.Errorf("GetPushURL = %q, want %q", got, pushURL)
+	}
+
+	// Verify fetch URL is unchanged
+	fetchCmd := exec.Command("git", "remote", "get-url", "origin")
+	fetchCmd.Dir = dir
+	out, err := fetchCmd.Output()
+	if err != nil {
+		t.Fatalf("get fetch url: %v", err)
+	}
+	fetchURL := strings.TrimSpace(string(out))
+	if fetchURL != "https://github.com/upstream/repo.git" {
+		t.Errorf("fetch URL changed to %q, should be unchanged", fetchURL)
+	}
+}
+
+func TestGetPushURL_NoPushURL(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// Add remote without custom push URL
+	cmd := exec.Command("git", "remote", "add", "origin", "https://github.com/upstream/repo.git")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("add remote: %v", err)
+	}
+
+	// GetPushURL returns fetch URL when no custom push URL is set
+	got, err := g.GetPushURL("origin")
+	if err != nil {
+		t.Fatalf("GetPushURL: %v", err)
+	}
+	if got != "https://github.com/upstream/repo.git" {
+		t.Errorf("GetPushURL = %q, want fetch URL when no push URL configured", got)
+	}
+}

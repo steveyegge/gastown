@@ -294,6 +294,7 @@ var (
 	rigAddPrefix       string
 	rigAddLocalRepo    string
 	rigAddBranch       string
+	rigAddPushURL      string
 	rigAddAdopt        bool
 	rigAddAdoptURL     string
 	rigAddAdoptForce   bool
@@ -352,6 +353,7 @@ func init() {
 	rigAddCmd.Flags().StringVar(&rigAddPrefix, "prefix", "", "Beads issue prefix (default: derived from name)")
 	rigAddCmd.Flags().StringVar(&rigAddLocalRepo, "local-repo", "", "Local repo path to share git objects (optional)")
 	rigAddCmd.Flags().StringVar(&rigAddBranch, "branch", "", "Default branch name (default: auto-detected from remote)")
+	rigAddCmd.Flags().StringVar(&rigAddPushURL, "push-url", "", "Push URL for read-only upstreams (push to fork)")
 	rigAddCmd.Flags().BoolVar(&rigAddAdopt, "adopt", false, "Adopt an existing directory instead of creating new")
 	rigAddCmd.Flags().StringVar(&rigAddAdoptURL, "url", "", "Git remote URL for --adopt (default: auto-detected from origin)")
 	rigAddCmd.Flags().BoolVar(&rigAddAdoptForce, "force", false, "With --adopt, register even if git remote cannot be detected")
@@ -518,6 +520,7 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	newRig, err := mgr.AddRig(rig.AddRigOptions{
 		Name:          name,
 		GitURL:        gitURL,
+		PushURL:       rigAddPushURL,
 		BeadsPrefix:   rigAddPrefix,
 		LocalRepo:     rigAddLocalRepo,
 		DefaultBranch: rigAddBranch,
