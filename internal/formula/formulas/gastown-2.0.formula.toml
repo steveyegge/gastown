@@ -1,0 +1,421 @@
+# Gas Town 2.0: Unified Agent/Skill Architecture + Autonomous Execution
+#
+# Synthesizes five research artifacts into executable work:
+# 1. Agent/skill packages for Gas Town components
+# 2. Full autopilot orchestration with waves
+# 3. Universal formulas (plans -> formulas)
+# 4. /plan -> /formulate rename
+# 5. /crank command for autonomous execution
+#
+# Generated: 2026-01-08
+# Source: Five research documents in .agents/gastown/research/
+
+description = """
+Major Gas Town evolution adding:
+- Component-specific agent definitions (Polecat, Mayor, Witness, Refinery, Crew)
+- Universal formula output from /formulate (renamed from /plan)
+- /crank command for fully autonomous epic execution (ODMCR loop)
+- Wave computation and dispatch in gt CLI
+
+This transforms Gas Town from manual orchestration to fire-and-forget
+autonomous execution with the Propulsion Principle fully realized.
+"""
+
+formula = "gastown-2.0"
+type = "workflow"
+version = 1
+
+[metadata]
+created = "2026-01-08"
+author = "mayor"
+tags = ["gastown", "agents", "skills", "autonomous", "orchestration"]
+sources = [
+    "research/2026-01-08-agent-skill-packages-evaluation.md",
+    "research/2026-01-08-full-autopilot-orchestration.md",
+    "research/2026-01-08-universal-formulas.md",
+    "research/2026-01-08-plan-command-naming.md",
+    "research/2026-01-08-gas-town-autonomous-execution-command.md"
+]
+
+[vars]
+[vars.rig]
+description = "Target rig for Gas Town implementation"
+default = "gastown"
+
+# =============================================================================
+# WAVE 1: FOUNDATION - Agent Definitions + Skill Rename
+# No dependencies - can all run in parallel
+# =============================================================================
+
+[[steps]]
+id = "agent-polecat"
+title = "Create Polecat agent definition"
+description = """
+Create `~/.claude/agents/gastown-polecat.md` with:
+- Model: sonnet
+- Skills: beads, sk-implement
+- Hooks: SessionStart -> `gt prime && gt hook`
+- Permission: auto
+- Constraints: Stay in worktree, file discovered work as beads
+
+**Files affected**:
+- ~/.claude/agents/gastown-polecat.md (new)
+
+**Verification**: Agent frontmatter validates against Claude 2.1.1 schema
+"""
+
+[[steps]]
+id = "agent-mayor"
+title = "Create Mayor agent definition"
+description = """
+Create `~/.claude/agents/gastown-mayor.md` with:
+- Model: opus
+- Skills: beads, sk-gastown, sk-plan, sk-research
+- Hooks: SessionStart -> `gt hook`
+- Permission: default
+- Constraints: Do NOT edit code, dispatch to polecats
+
+**Files affected**:
+- ~/.claude/agents/gastown-mayor.md (new)
+
+**Verification**: Agent loads correctly in ~/gt context
+"""
+
+[[steps]]
+id = "agent-witness"
+title = "Create Witness agent definition"
+description = """
+Create `~/.claude/agents/gastown-witness.md` with:
+- Model: haiku
+- Skills: beads
+- Hooks: SessionStart -> `gt prime`
+- Constraints: Monitor only, no implementation
+
+**Files affected**:
+- ~/.claude/agents/gastown-witness.md (new)
+"""
+
+[[steps]]
+id = "agent-refinery"
+title = "Create Refinery agent definition"
+description = """
+Create `~/.claude/agents/gastown-refinery.md` with:
+- Model: haiku
+- Skills: beads
+- Constraints: Only merge with MERGE_READY signal
+
+**Files affected**:
+- ~/.claude/agents/gastown-refinery.md (new)
+"""
+
+[[steps]]
+id = "agent-crew"
+title = "Create Crew agent definition"
+description = """
+Create `~/.claude/agents/gastown-crew.md` with:
+- Model: sonnet
+- Skills: beads, sk-implement, sk-research, sk-validation-chain
+- Permission: default
+- Constraints: Wait for human direction
+
+**Files affected**:
+- ~/.claude/agents/gastown-crew.md (new)
+"""
+
+[[steps]]
+id = "rename-skill-formulate"
+title = "Rename sk-plan to sk-formulate"
+description = """
+Rename the plan skill to match formula vocabulary:
+1. Copy sk-plan/ to sk-formulate/
+2. Update SKILL.md description and triggers
+3. Update internal references
+4. Add alias for /plan -> /formulate
+
+**Files affected**:
+- ~/.claude/skills/sk-formulate/ (new, from sk-plan)
+- ~/.claude/skills/sk-plan/ (keep as alias initially)
+- ~/.claude/CLAUDE.md (update references)
+
+**Note**: Keep /plan working during transition
+"""
+
+[[steps]]
+id = "rename-command-formulate"
+title = "Create /formulate command"
+description = """
+Create the /formulate command file:
+1. Create ~/.claude/commands/formulate.md
+2. Invoke sk-formulate skill
+3. Add alias from /plan
+
+**Files affected**:
+- ~/.claude/commands/formulate.md (new)
+- ~/.claude/commands/plan.md (update to alias)
+"""
+
+# =============================================================================
+# WAVE 2: INFRASTRUCTURE - Spawn Integration + Formula Output + gt wave
+# Depends on Wave 1 foundation
+# =============================================================================
+
+[[steps]]
+id = "spawn-agent-copy"
+title = "Modify polecat spawn to copy agent definition"
+needs = ["agent-polecat"]
+description = """
+Update polecat_spawn.go to:
+1. Check for ~/.claude/agents/gastown-polecat.md
+2. Create .claude/agents/ in polecat worktree
+3. Copy agent definition to worktree
+
+**Files affected**:
+- ~/gt/gastown/mayor/rig/internal/cmd/polecat_spawn.go
+
+**Verification**:
+```bash
+gt sling gt-test gastown
+tmux capture-pane -t gt-gastown-p-<name> -p | grep "skills"
+```
+Should show beads, sk-implement loaded
+"""
+
+[[steps]]
+id = "formula-output"
+title = "Update sk-formulate to output .formula.toml"
+needs = ["rename-skill-formulate"]
+description = """
+Modify sk-formulate to:
+1. Output .formula.toml alongside .md summary
+2. Generate proper [vars], [[steps]], needs dependencies
+3. Auto-run `bd cook` after generation
+4. Support --immediate flag for direct beads (escape hatch)
+
+**Files affected**:
+- ~/.claude/skills/sk-formulate/SKILL.md
+- ~/.claude/skills/sk-formulate/templates/ (new)
+
+**Output location**: ~/gt/.agents/<rig>/plans/*.formula.toml
+"""
+
+[[steps]]
+id = "gt-wave-command"
+title = "Implement gt wave CLI command"
+needs = ["agent-mayor"]
+description = """
+New Go command in gastown CLI:
+
+```bash
+gt wave <epic-id>
+# 1. Get children of epic
+# 2. Filter to ready (unblocked)
+# 3. Create convoy for wave
+# 4. Dispatch each to polecat
+# 5. Return convoy ID
+```
+
+**Files affected**:
+- ~/gt/gastown/mayor/rig/internal/cmd/wave.go (new)
+- ~/gt/gastown/mayor/rig/cmd/gt/main.go (register command)
+
+**Algorithm**: ComputeReadyWave() from research
+"""
+
+# =============================================================================
+# WAVE 3: ORCHESTRATION - /crank + sk-gastown update
+# Depends on Wave 2 infrastructure
+# =============================================================================
+
+[[steps]]
+id = "sk-crank"
+title = "Create sk-crank skill with ODMCR loop"
+needs = ["gt-wave-command"]
+description = """
+Create the crank skill implementing ODMCR reconciliation:
+
+1. **Observe**: `bd ready --parent=<epic>`
+2. **Dispatch**: `gt wave <epic>` or `gt sling` per issue
+3. **Monitor**: Poll `gt convoy status` (~100 tokens)
+4. **Collect**: Verify completion via `bd show`
+5. **Retry**: Re-dispatch with exponential backoff
+
+**Failure handling**:
+- Polecat stuck: nudge, then re-sling
+- Validation fail: mark BLOCKER, continue others
+- Retries exhausted: mail human, continue epic
+- Context limit: checkpoint, restart, resume
+
+**Files affected**:
+- ~/.claude/skills/sk-crank/SKILL.md (new)
+- ~/.claude/skills/sk-crank/odmcr.md (new)
+- ~/.claude/skills/sk-crank/failure-taxonomy.md (new)
+"""
+
+[[steps]]
+id = "crank-command"
+title = "Create /crank command"
+needs = ["sk-crank"]
+description = """
+Create the /crank command:
+
+```bash
+/crank <epic-id>              # Autonomous execution to completion
+/crank <epic-id> --dry-run    # Preview waves
+/crank <epic-id> --max 8      # Limit polecats
+/crank status                 # Show progress
+/crank stop                   # Graceful stop
+```
+
+**Files affected**:
+- ~/.claude/commands/crank.md (new)
+
+**Key behavior**: NEVER stop for human input, escalate via mail
+"""
+
+[[steps]]
+id = "update-sk-gastown"
+title = "Update sk-gastown to use gt wave"
+needs = ["gt-wave-command"]
+description = """
+Refactor sk-gastown:
+1. Remove manual convoy/sling orchestration
+2. Use `gt wave` for dispatch
+3. Focus on status, peek, utility functions
+4. Defer execution to /crank
+
+**Files affected**:
+- ~/.claude/skills/sk-gastown/SKILL.md
+"""
+
+# =============================================================================
+# WAVE 4: INTEGRATION - Autopilot + Formula Library
+# Depends on Wave 3 orchestration
+# =============================================================================
+
+[[steps]]
+id = "autopilot-formula-support"
+title = "Update /autopilot to accept formula names"
+needs = ["formula-output", "crank-command"]
+description = """
+Modify /autopilot to:
+1. Accept formula name OR epic ID
+2. If formula: auto-cook, auto-pour, then execute
+3. Maintain validation gates (differs from /crank)
+
+**Files affected**:
+- ~/.claude/skills/sk-autopilot/SKILL.md
+- ~/.claude/commands/autopilot.md
+
+**Note**: /autopilot keeps gates; /crank is fully autonomous
+"""
+
+[[steps]]
+id = "formula-library"
+title = "Add formula library discovery"
+needs = ["formula-output"]
+description = """
+Add formula search/list capabilities:
+
+```bash
+bd formula list                    # List available formulas
+bd formula search oauth            # Search by name/tags
+bd formula show <name>             # Display formula details
+bd formula pour <name> --var x=y   # Pour with variables
+```
+
+**Files affected**:
+- ~/gt/gastown/mayor/rig/internal/cmd/formula.go (extend)
+"""
+
+[[steps]]
+id = "e2e-testing"
+title = "End-to-end Gas Town 2.0 testing"
+needs = ["crank-command", "spawn-agent-copy", "autopilot-formula-support"]
+description = """
+Create test epic and validate full pipeline:
+
+1. /formulate creates .formula.toml
+2. bd cook makes proto
+3. bd mol pour creates epic + children
+4. /crank executes autonomously
+5. Polecats spawn with correct agent definition
+6. Epic completes without human intervention
+
+**Files affected**:
+- ~/gt/gastown/mayor/rig/tests/e2e/gastown_2_test.go (new)
+
+**Validation**:
+- Agent skills loaded correctly
+- ODMCR loop handles failures
+- Context stays under 40%
+"""
+
+# =============================================================================
+# WAVE 5: DOCUMENTATION
+# Depends on all implementation complete
+# =============================================================================
+
+[[steps]]
+id = "doc-agents"
+title = "Document agent taxonomy"
+needs = ["spawn-agent-copy"]
+description = """
+Create documentation for Gas Town agent architecture:
+
+1. Agent definition schema
+2. Component-to-agent mapping
+3. Skill assignment rationale
+4. Verification procedures
+
+**Files affected**:
+- ~/gt/gastown/mayor/rig/docs/agents.md (new)
+"""
+
+[[steps]]
+id = "doc-formulas"
+title = "Document universal formula workflow"
+needs = ["formula-output"]
+description = """
+Document the formula-first workflow:
+
+1. /research -> /formulate -> /crank lifecycle
+2. Formula vs Epic distinction
+3. When to use --immediate
+4. Formula library management
+
+**Files affected**:
+- ~/gt/gastown/mayor/rig/docs/formulas.md (extend)
+"""
+
+[[steps]]
+id = "doc-crank"
+title = "Document /crank and ODMCR loop"
+needs = ["crank-command"]
+description = """
+Document autonomous execution:
+
+1. /crank vs /autopilot comparison
+2. ODMCR reconciliation loop
+3. Failure taxonomy and responses
+4. Completion conditions
+
+**Files affected**:
+- ~/gt/gastown/mayor/rig/docs/crank.md (new)
+"""
+
+[[steps]]
+id = "update-claude-md"
+title = "Update CLAUDE.md references"
+needs = ["rename-command-formulate", "crank-command", "doc-agents"]
+description = """
+Update all CLAUDE.md files with new vocabulary:
+
+1. ~/.claude/CLAUDE.md - /formulate, /crank
+2. ~/gt/CLAUDE.md - Mayor agent reference
+3. Command tables, workflow diagrams
+
+**Files affected**:
+- ~/.claude/CLAUDE.md
+- ~/gt/CLAUDE.md
+- ~/.claude/skills/*/SKILL.md (triggers)
+"""
