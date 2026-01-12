@@ -180,6 +180,17 @@ func (m *Manager) repoBase() (*git.Git, error) {
 	return git.NewGit(mayorPath), nil
 }
 
+// resolveDefaultBranch returns the configured default branch for the rig.
+// Falls back to "main" if not configured. This centralizes branch resolution
+// to ensure consistent behavior across Add, Repair, and other operations.
+func (m *Manager) resolveDefaultBranch() string {
+	defaultBranch := "main"
+	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
+		defaultBranch = rigCfg.DefaultBranch
+	}
+	return defaultBranch
+}
+
 // polecatDir returns the parent directory for a polecat.
 // This is polecats/<name>/ - the polecat's home directory.
 func (m *Manager) polecatDir(name string) string {
@@ -267,12 +278,10 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		fmt.Printf("Warning: could not fetch origin: %v\n", err)
 	}
 
-	// Determine the start point for the new worktree
-	// Use origin/<default-branch> to ensure we start from the rig's configured branch
-	defaultBranch := "main"
-	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
-		defaultBranch = rigCfg.DefaultBranch
-	}
+	// Determine start point from rig's configured default branch
+	// This ensures polecats spawn from the correct branch (e.g., feature branch)
+	// instead of whatever HEAD points to (usually main)
+	defaultBranch := m.resolveDefaultBranch()
 	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
 
 	// Always create fresh branch - unique name guarantees no collision
@@ -551,10 +560,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 
 	// Determine the start point for the new worktree
 	// Use origin/<default-branch> to ensure we start from latest fetched commits
-	defaultBranch := "main"
-	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
-		defaultBranch = rigCfg.DefaultBranch
-	}
+	defaultBranch := m.resolveDefaultBranch()
 	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
 
 	// Create fresh worktree with unique branch name, starting from origin's default branch
@@ -923,10 +929,7 @@ func (m *Manager) DetectStalePolecats(threshold int) ([]*StalenessInfo, error) {
 	}
 
 	// Get default branch from rig config
-	defaultBranch := "main"
-	if rigCfg, err := rig.LoadRigConfig(m.rig.Path); err == nil && rigCfg.DefaultBranch != "" {
-		defaultBranch = rigCfg.DefaultBranch
-	}
+	defaultBranch := m.resolveDefaultBranch()
 
 	var results []*StalenessInfo
 	for _, p := range polecats {

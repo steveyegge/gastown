@@ -315,6 +315,13 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		t.Fatalf("git commit: %v", err)
 	}
 
+	// Rename branch to main (git init may create master by default)
+	cmd = exec.Command("git", "branch", "-m", "main")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch -m main: %v\n%s", err, out)
+	}
+
 	// AddWithOptions needs origin/main to exist. Add self as origin and fetch.
 	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
 	cmd.Dir = mayorRig
@@ -384,6 +391,13 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	}
 	if err := mayorGit.Commit("Initial commit"); err != nil {
 		t.Fatalf("git commit: %v", err)
+	}
+
+	// Rename branch to main (git init may create master by default)
+	cmd = exec.Command("git", "branch", "-m", "main")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch -m main: %v\n%s", err, out)
 	}
 
 	// AddWithOptions needs origin/main to exist. Add self as origin and fetch.
