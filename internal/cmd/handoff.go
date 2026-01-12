@@ -444,7 +444,16 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 		return fmt.Sprintf("%s/%s/refinery/rig", townRoot, rig), nil
 
 	default:
-		return "", fmt.Errorf("unknown session type: %s (try specifying role explicitly)", sessionName)
+		// Assume polecat: gt-<rig>-<name> -> <townRoot>/<rig>/polecats/<name>
+		// Use session.ParseSessionName to determine rig and name
+		identity, err := session.ParseSessionName(sessionName)
+		if err != nil {
+			return "", fmt.Errorf("unknown session type: %s (%w)", sessionName, err)
+		}
+		if identity.Role != session.RolePolecat {
+			return "", fmt.Errorf("unknown session type: %s (role %s, try specifying role explicitly)", sessionName, identity.Role)
+		}
+		return fmt.Sprintf("%s/%s/polecats/%s", townRoot, identity.Rig, identity.Name), nil
 	}
 }
 
