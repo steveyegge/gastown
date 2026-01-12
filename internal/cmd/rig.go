@@ -385,6 +385,19 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 			// Non-fatal: routing will still work, just not from town root
 			fmt.Printf("  %s Could not update routes.jsonl: %v\n", style.Warning.Render("!"), err)
 		}
+
+		// Create .beads/redirect file at rig level for prefix routing.
+		// This ensures bd commands can find the canonical beads location.
+		rigBeadsDir := filepath.Join(townRoot, name, ".beads")
+		if _, err := os.Stat(mayorRigBeads); err == nil {
+			// Source repo has tracked beads - create redirect to mayor/rig/.beads
+			if err := os.MkdirAll(rigBeadsDir, 0755); err == nil {
+				redirectPath := filepath.Join(rigBeadsDir, "redirect")
+				if err := os.WriteFile(redirectPath, []byte("mayor/rig/.beads\n"), 0644); err != nil {
+					fmt.Printf("  %s Could not create .beads/redirect: %v\n", style.Warning.Render("!"), err)
+				}
+			}
+		}
 	}
 
 	// Create rig identity bead
