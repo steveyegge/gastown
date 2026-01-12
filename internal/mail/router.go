@@ -863,7 +863,7 @@ func (r *Router) GetMailbox(address string) (*Mailbox, error) {
 }
 
 // notifyRecipient sends a notification to a recipient's tmux session.
-// Uses NudgeSession to add the notification to the agent's conversation history.
+// Uses SendNotificationBanner to display the notification in the message history.
 // Supports mayor/, rig/polecat, and rig/refinery addresses.
 func (r *Router) notifyRecipient(msg *Message) error {
 	sessionID := addressToSessionID(msg.To)
@@ -877,9 +877,8 @@ func (r *Router) notifyRecipient(msg *Message) error {
 		return nil // No active session, skip notification
 	}
 
-	// Send notification to the agent's conversation history
-	notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
-	return r.tmux.NudgeSession(sessionID, notification)
+	// Send notification banner to the agent's message history (not input buffer)
+	return r.tmux.SendNotificationBanner(sessionID, msg.From, msg.Subject)
 }
 
 // addressToSessionID converts a mail address to a tmux session ID.
