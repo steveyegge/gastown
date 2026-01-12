@@ -1364,7 +1364,7 @@ func GetRigPrefix(townRoot, rigName string) string {
 
 // EscalationConfigPath returns the standard path for escalation config in a town.
 func EscalationConfigPath(townRoot string) string {
-	return filepath.Join(townRoot, "config", "escalation.json")
+	return filepath.Join(townRoot, "settings", "escalation.json")
 }
 
 // LoadEscalationConfig loads and validates an escalation configuration file.
@@ -1440,48 +1440,53 @@ func validateEscalationConfig(c *EscalationConfig) error {
 	}
 
 	// Initialize nil maps
-	if c.SeverityRoutes == nil {
-		c.SeverityRoutes = make(map[string]EscalationRoute)
+	if c.Routes == nil {
+		c.Routes = make(map[string][]string)
 	}
 
 	// Validate severity route keys
-	validSeverities := map[string]bool{
-		SeverityCritical: true,
-		SeverityHigh:     true,
-		SeverityNormal:   true,
-		SeverityLow:      true,
-	}
-	for severity := range c.SeverityRoutes {
-		if !validSeverities[severity] {
-			return fmt.Errorf("%w: unknown severity '%s' (valid: critical, high, normal, low)", ErrMissingField, severity)
+	for severity := range c.Routes {
+		if !IsValidSeverity(severity) {
+			return fmt.Errorf("%w: unknown severity '%s' (valid: low, medium, high, critical)", ErrMissingField, severity)
 		}
+	}
+
+	// Validate max_reescalations is non-negative
+	if c.MaxReescalations < 0 {
+		return fmt.Errorf("%w: max_reescalations must be non-negative", ErrMissingField)
 	}
 
 	return nil
 }
 
 // GetStaleThreshold returns the stale threshold as a time.Duration.
-// Returns 1 hour if not configured or invalid.
+// Returns 4 hours if not configured or invalid.
 func (c *EscalationConfig) GetStaleThreshold() time.Duration {
 	if c.StaleThreshold == "" {
-		return time.Hour
+		return 4 * time.Hour
 	}
 	d, err := time.ParseDuration(c.StaleThreshold)
 	if err != nil {
-		return time.Hour
+		return 4 * time.Hour
 	}
 	return d
 }
 
-// GetRouteForSeverity returns the escalation route for a given severity.
-// Falls back to DefaultTarget if no specific route is configured.
-func (c *EscalationConfig) GetRouteForSeverity(severity string) EscalationRoute {
-	if route, ok := c.SeverityRoutes[severity]; ok {
+// GetRouteForSeverity returns the escalation route actions for a given severity.
+// Falls back to ["bead", "mail:mayor"] if no specific route is configured.
+func (c *EscalationConfig) GetRouteForSeverity(severity string) []string {
+	if route, ok := c.Routes[severity]; ok {
 		return route
 	}
-	// Fallback to default target
-	return EscalationRoute{
-		Targets:     []string{c.DefaultTarget},
-		UseExternal: false,
+	// Fallback to default route
+	return []string{"bead", "mail:mayor"}
+}
+
+// GetMaxReescalations returns the maximum number of re-escalations allowed.
+// Returns 2 if not configured.
+func (c *EscalationConfig) GetMaxReescalations() int {
+	if c.MaxReescalations <= 0 {
+		return 2
 	}
+	return c.MaxReescalations
 }

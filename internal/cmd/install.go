@@ -268,6 +268,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Create default escalation config in settings/escalation.json
+	escalationPath := config.EscalationConfigPath(absPath)
+	if err := config.SaveEscalationConfig(escalationPath, config.NewEscalationConfig()); err != nil {
+		fmt.Printf("   %s Could not create escalation config: %v\n", style.Dim.Render("⚠"), err)
+	} else {
+		fmt.Printf("   ✓ Created settings/escalation.json\n")
+	}
+
 	// Provision town-level slash commands (.claude/commands/)
 	// All agents inherit these via Claude's directory traversal - no per-workspace copies needed.
 	if err := templates.ProvisionCommands(absPath); err != nil {

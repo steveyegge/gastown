@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -13,15 +14,20 @@ import (
 // EscalationFields holds structured fields for escalation beads.
 // These are stored as "key: value" lines in the description.
 type EscalationFields struct {
-	Severity     string // critical, high, normal, low
-	Reason       string // Why this was escalated
-	EscalatedBy  string // Agent address that escalated (e.g., "gastown/Toast")
-	EscalatedAt  string // ISO 8601 timestamp
-	AckedBy      string // Agent that acknowledged (empty if not acked)
-	AckedAt      string // When acknowledged (empty if not acked)
-	ClosedBy     string // Agent that closed (empty if not closed)
-	ClosedReason string // Resolution reason (empty if not closed)
-	RelatedBead  string // Optional: related bead ID (task, bug, etc.)
+	Severity           string // critical, high, medium, low
+	Reason             string // Why this was escalated
+	Source             string // Source identifier (e.g., plugin:rebuild-gt, patrol:deacon)
+	EscalatedBy        string // Agent address that escalated (e.g., "gastown/Toast")
+	EscalatedAt        string // ISO 8601 timestamp
+	AckedBy            string // Agent that acknowledged (empty if not acked)
+	AckedAt            string // When acknowledged (empty if not acked)
+	ClosedBy           string // Agent that closed (empty if not closed)
+	ClosedReason       string // Resolution reason (empty if not closed)
+	RelatedBead        string // Optional: related bead ID (task, bug, etc.)
+	OriginalSeverity   string // Original severity before any re-escalation
+	ReescalationCount  int    // Number of times this has been re-escalated
+	LastReescalatedAt  string // When last re-escalated (empty if never)
+	LastReescalatedBy  string // Who last re-escalated (empty if never)
 }
 
 // EscalationState constants for bead status tracking.
@@ -42,6 +48,11 @@ func FormatEscalationDescription(title string, fields *EscalationFields) string 
 	lines = append(lines, "")
 	lines = append(lines, fmt.Sprintf("severity: %s", fields.Severity))
 	lines = append(lines, fmt.Sprintf("reason: %s", fields.Reason))
+	if fields.Source != "" {
+		lines = append(lines, fmt.Sprintf("source: %s", fields.Source))
+	} else {
+		lines = append(lines, "source: null")
+	}
 	lines = append(lines, fmt.Sprintf("escalated_by: %s", fields.EscalatedBy))
 	lines = append(lines, fmt.Sprintf("escalated_at: %s", fields.EscalatedAt))
 
@@ -75,6 +86,24 @@ func FormatEscalationDescription(title string, fields *EscalationFields) string 
 		lines = append(lines, "related_bead: null")
 	}
 
+	// Reescalation fields
+	if fields.OriginalSeverity != "" {
+		lines = append(lines, fmt.Sprintf("original_severity: %s", fields.OriginalSeverity))
+	} else {
+		lines = append(lines, "original_severity: null")
+	}
+	lines = append(lines, fmt.Sprintf("reescalation_count: %d", fields.ReescalationCount))
+	if fields.LastReescalatedAt != "" {
+		lines = append(lines, fmt.Sprintf("last_reescalated_at: %s", fields.LastReescalatedAt))
+	} else {
+		lines = append(lines, "last_reescalated_at: null")
+	}
+	if fields.LastReescalatedBy != "" {
+		lines = append(lines, fmt.Sprintf("last_reescalated_by: %s", fields.LastReescalatedBy))
+	} else {
+		lines = append(lines, "last_reescalated_by: null")
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -104,6 +133,8 @@ func ParseEscalationFields(description string) *EscalationFields {
 			fields.Severity = value
 		case "reason":
 			fields.Reason = value
+		case "source":
+			fields.Source = value
 		case "escalated_by":
 			fields.EscalatedBy = value
 		case "escalated_at":
@@ -118,6 +149,16 @@ func ParseEscalationFields(description string) *EscalationFields {
 			fields.ClosedReason = value
 		case "related_bead":
 			fields.RelatedBead = value
+		case "original_severity":
+			fields.OriginalSeverity = value
+		case "reescalation_count":
+			if n, err := strconv.Atoi(value); err == nil {
+				fields.ReescalationCount = n
+			}
+		case "last_reescalated_at":
+			fields.LastReescalatedAt = value
+		case "last_reescalated_by":
+			fields.LastReescalatedBy = value
 		}
 	}
 
@@ -306,4 +347,95 @@ func (b *Beads) ListStaleEscalations(threshold time.Duration) ([]*Issue, error) 
 	}
 
 	return stale, nil
+}
+
+// ReescalationResult holds the result of a reescalation operation.
+type ReescalationResult struct {
+	ID              string
+	Title           string
+	OldSeverity     string
+	NewSeverity     string
+	ReescalationNum int
+	Skipped         bool
+	SkipReason      string
+}
+
+// ReescalateEscalation bumps the severity of an escalation and updates tracking fields.
+// Returns the new severity if successful, or an error.
+// reescalatedBy should be the identity of the agent/process doing the reescalation.
+// maxReescalations limits how many times an escalation can be bumped (0 = unlimited).
+func (b *Beads) ReescalateEscalation(id, reescalatedBy string, maxReescalations int) (*ReescalationResult, error) {
+	// Get the escalation
+	issue, fields, err := b.GetEscalationBead(id)
+	if err != nil {
+		return nil, err
+	}
+	if issue == nil {
+		return nil, fmt.Errorf("escalation not found: %s", id)
+	}
+
+	result := &ReescalationResult{
+		ID:          id,
+		Title:       issue.Title,
+		OldSeverity: fields.Severity,
+	}
+
+	// Check if already at max reescalations
+	if maxReescalations > 0 && fields.ReescalationCount >= maxReescalations {
+		result.Skipped = true
+		result.SkipReason = fmt.Sprintf("already at max reescalations (%d)", maxReescalations)
+		return result, nil
+	}
+
+	// Check if already at critical (can't bump further)
+	if fields.Severity == "critical" {
+		result.Skipped = true
+		result.SkipReason = "already at critical severity"
+		result.NewSeverity = "critical"
+		return result, nil
+	}
+
+	// Save original severity on first reescalation
+	if fields.OriginalSeverity == "" {
+		fields.OriginalSeverity = fields.Severity
+	}
+
+	// Bump severity
+	newSeverity := bumpSeverity(fields.Severity)
+	fields.Severity = newSeverity
+	fields.ReescalationCount++
+	fields.LastReescalatedAt = time.Now().Format(time.RFC3339)
+	fields.LastReescalatedBy = reescalatedBy
+
+	result.NewSeverity = newSeverity
+	result.ReescalationNum = fields.ReescalationCount
+
+	// Format new description
+	description := FormatEscalationDescription(issue.Title, fields)
+
+	// Update the bead with new description and severity label
+	if err := b.Update(id, UpdateOptions{
+		Description:  &description,
+		AddLabels:    []string{"reescalated", "severity:" + newSeverity},
+		RemoveLabels: []string{"severity:" + result.OldSeverity},
+	}); err != nil {
+		return nil, fmt.Errorf("updating escalation: %w", err)
+	}
+
+	return result, nil
+}
+
+// bumpSeverity returns the next higher severity level.
+// low -> medium -> high -> critical
+func bumpSeverity(severity string) string {
+	switch severity {
+	case "low":
+		return "medium"
+	case "medium":
+		return "high"
+	case "high":
+		return "critical"
+	default:
+		return "critical"
+	}
 }

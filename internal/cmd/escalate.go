@@ -8,6 +8,7 @@ import (
 var (
 	escalateSeverity    string
 	escalateReason      string
+	escalateSource      string
 	escalateRelatedBead string
 	escalateJSON        bool
 	escalateListJSON    bool
@@ -30,30 +31,31 @@ human or mayor attention. Escalations are tracked as beads with gt:escalation la
 SEVERITY LEVELS:
   critical  (P0) Immediate attention required
   high      (P1) Urgent, needs attention soon
-  normal    (P2) Standard escalation (default)
+  medium    (P2) Standard escalation (default)
   low       (P3) Informational, can wait
 
 WORKFLOW:
   1. Agent encounters blocking issue
   2. Runs: gt escalate "Description" --severity high --reason "details"
-  3. Escalation is routed based on config/escalation.json
+  3. Escalation is routed based on settings/escalation.json
   4. Recipient acknowledges with: gt escalate ack <id>
   5. After resolution: gt escalate close <id> --reason "fixed"
 
 CONFIGURATION:
-  Routing is configured in ~/gt/config/escalation.json:
-  - severity_routes: Map severity to notification targets
-  - external_channels: Optional email/SMS for critical issues
-  - stale_threshold: When unacked escalations are flagged
+  Routing is configured in ~/gt/settings/escalation.json:
+  - routes: Map severity to action lists (bead, mail:mayor, email:human, sms:human)
+  - contacts: Human email/SMS for external notifications
+  - stale_threshold: When unacked escalations are re-escalated (default: 4h)
+  - max_reescalations: How many times to bump severity (default: 2)
 
 Examples:
   gt escalate "Build failing" --severity critical --reason "CI blocked"
-  gt escalate "Need API credentials" --severity high
+  gt escalate "Need API credentials" --severity high --source "plugin:rebuild-gt"
   gt escalate "Code review requested" --reason "PR #123 ready"
   gt escalate list                          # Show open escalations
   gt escalate ack hq-abc123                 # Acknowledge
   gt escalate close hq-abc123 --reason "Fixed in commit abc"
-  gt escalate stale                         # Show unacked escalations`,
+  gt escalate stale                         # Re-escalate stale escalations`,
 }
 
 var escalateListCmd = &cobra.Command{
@@ -101,15 +103,23 @@ Examples:
 
 var escalateStaleCmd = &cobra.Command{
 	Use:   "stale",
-	Short: "Show stale unacknowledged escalations",
-	Long: `Show escalations that haven't been acknowledged within the threshold.
+	Short: "Re-escalate stale unacknowledged escalations",
+	Long: `Find and re-escalate escalations that haven't been acknowledged within the threshold.
 
-The threshold is configured in config/escalation.json (default: 1 hour).
-Useful for patrol agents to detect escalations that need attention.
+When run without --dry-run, this command:
+1. Finds escalations older than the stale threshold (default: 4h)
+2. Bumps their severity: low→medium→high→critical
+3. Re-routes them according to the new severity level
+4. Sends mail to the new routing targets
+
+Respects max_reescalations from config (default: 2) to prevent infinite escalation.
+
+The threshold is configured in settings/escalation.json.
 
 Examples:
-  gt escalate stale           # Show stale escalations
-  gt escalate stale --json    # JSON output`,
+  gt escalate stale              # Re-escalate stale escalations
+  gt escalate stale --dry-run    # Show what would be done
+  gt escalate stale --json       # JSON output of results`,
 	RunE: runEscalateStale,
 }
 
@@ -127,8 +137,9 @@ Examples:
 
 func init() {
 	// Main escalate command flags
-	escalateCmd.Flags().StringVarP(&escalateSeverity, "severity", "s", "normal", "Severity level: critical, high, normal, low")
+	escalateCmd.Flags().StringVarP(&escalateSeverity, "severity", "s", "medium", "Severity level: critical, high, medium, low")
 	escalateCmd.Flags().StringVarP(&escalateReason, "reason", "r", "", "Detailed reason for escalation")
+	escalateCmd.Flags().StringVar(&escalateSource, "source", "", "Source identifier (e.g., plugin:rebuild-gt, patrol:deacon)")
 	escalateCmd.Flags().StringVar(&escalateRelatedBead, "related", "", "Related bead ID (task, bug, etc.)")
 	escalateCmd.Flags().BoolVar(&escalateJSON, "json", false, "Output as JSON")
 	escalateCmd.Flags().BoolVarP(&escalateDryRun, "dry-run", "n", false, "Show what would be done without executing")
@@ -143,6 +154,7 @@ func init() {
 
 	// Stale subcommand flags
 	escalateStaleCmd.Flags().BoolVar(&escalateStaleJSON, "json", false, "Output as JSON")
+	escalateStaleCmd.Flags().BoolVarP(&escalateDryRun, "dry-run", "n", false, "Show what would be re-escalated without acting")
 
 	// Show subcommand flags
 	escalateShowCmd.Flags().BoolVar(&escalateJSON, "json", false, "Output as JSON")
