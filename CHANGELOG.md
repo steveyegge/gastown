@@ -7,6 +7,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-01-12
+
+### Added
+
+#### Escalation System
+- **Unified escalation system** - Complete escalation implementation with severity levels, routing, and tracking (gt-i9r20)
+- **Escalation config schema alignment** - Configuration now matches design doc specifications
+
+#### Agent Identity & Management
+- **`gt polecat identity` subcommand group** - Agent bead management commands for polecat lifecycle
+- **AGENTS.md fallback copy** - Polecats automatically copy AGENTS.md from mayor/rig for context bootstrapping
+- **`--debug` flag for `gt crew at`** - Debug mode for crew attachment troubleshooting
+- **Boot role detection in priming** - Proper context injection for boot role agents (#370)
+
+#### Statusline Improvements
+- **Per-agent-type health tracking** - Statusline now shows health status per agent type (#344)
+- **Visual rig grouping** - Rigs sorted by activity with visual grouping in tmux statusline (#337)
+
+#### Mail & Communication
+- **`gt mail show` alias** - Alternative command for reading mail (#340)
+
+#### Developer Experience
+- **`gt stale` command** - Check for stale binaries and version mismatches
+
+### Changed
+
+- **Refactored statusline** - Merged session loops and removed dead code for cleaner implementation
+- **Refactored sling.go** - Split 1560-line file into 7 focused modules for maintainability
+- **Magic numbers extracted** - Suggest package now uses named constants (#353)
+
+### Fixed
+
+#### Configuration & Environment
+- **Empty GT_ROOT/BEADS_DIR not exported** - AgentEnv no longer exports empty environment variables (#385)
+- **Inherited BEADS_DIR prefix mismatch** - Prevent inherited BEADS_DIR from causing prefix mismatches (#321)
+
+#### Beads & Routing
+- **routes.jsonl corruption prevention** - Added protection against routes.jsonl corruption with doctor check for rig-level issues (#377)
+- **Tracked beads init after clone** - Initialize beads database for tracked beads after git clone (#376)
+- **Rig root from BeadsPath()** - Correctly return rig root to respect redirect system
+
+#### Sling & Formula
+- **Feature and issue vars in formula-on-bead mode** - Pass both variables correctly (#382)
+- **Crew member shorthand resolution** - Resolve crew members correctly with shorthand paths
+- **Removed obsolete --naked flag** - Cleanup of deprecated sling option
+
+#### Doctor & Diagnostics
+- **Role beads check with shared definitions** - Doctor now validates role beads using shared role definitions (#378)
+- **Filter bd "Note:" messages** - Custom types check no longer confused by bd informational output (#381)
+
+#### Installation & Setup
+- **gt:role label on role beads** - Role beads now properly labeled during creation (#383)
+- **Fetch origin after refspec config** - Bare clones now fetch after configuring refspec (#384)
+- **Allow --wrappers in existing town** - No longer recreates HQ unnecessarily (#366)
+
+#### Session & Lifecycle
+- **Fallback instructions in start/restart beacons** - Session beacons now include fallback instructions
+- **Handoff recognizes polecat session pattern** - Correctly handles gt-<rig>-<name> session names (#373)
+- **gt done resilient to missing agent beads** - No longer fails when agent beads don't exist
+- **MR beads as ephemeral wisps** - Create MR beads as ephemeral wisps for proper cleanup
+- **Auto-detect cleanup status** - Prevents premature polecat nuke (#361)
+- **Delete remote polecat branches after merge** - Refinery cleans up remote branches (#369)
+
+#### Costs & Events
+- **Query all beads locations for session events** - Cost tracking finds events across locations (#374)
+
+#### Linting & Quality
+- **errcheck and unparam violations resolved** - Fixed linting errors
+- **NudgeSession for all agent notifications** - Mail now uses consistent notification method
+
+### Documentation
+
+- **Polecat three-state model** - Clarified working/stalled/zombie states
+- **Name pool vs polecat pool** - Clarified misconception about pools
+- **Plugin and escalation system designs** - Added design documentation
+- **Documentation reorganization** - Concepts, design, and examples structure
+- **gt prime clarification** - Clarified that gt prime is context recovery, not session start (GH #308)
+- **Formula package documentation** - Comprehensive package docs
+- **Various godoc additions** - GenerateMRIDWithTime, isAutonomousRole, formatInt, nil sentinel pattern
+- **Beads issue ID format** - Clarified format in README (gt-uzx2c)
+- **Stale polecat identity description** - Fixed outdated documentation
+
+### Tests
+
+- **AGENTS.md worktree tests** - Test coverage for AGENTS.md in worktrees
+- **Comprehensive test coverage** - Added tests for 5 packages (#351)
+- **Sling test for bd empty output** - Fixed test for empty output handling
+
+### Deprecated
+
+- **`gt polecat add`** - Added migration warning for deprecated command
+
+### Contributors
+
+Thanks to all contributors for this release:
+- @JeremyKalmus - Various contributions (#364)
+- @boshu2 - Formula package documentation (#343), PR documentation (#352)
+- @sauerdaniel - Polecat mail notification fix (#347)
+- @abhijit360 - Assign model to role (#368)
+- @julianknutsen - Beads path fix (#334)
+
 ## [0.2.5] - 2026-01-11
 
 ### Added
