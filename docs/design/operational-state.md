@@ -67,7 +67,12 @@ Events capture the full history. Labels cache the current state for fast queries
 Labels use `<dimension>:<value>` format:
 - `patrol:muted` / `patrol:active`
 - `mode:degraded` / `mode:normal`
-- `status:idle` / `status:working`
+- `status:idle` / `status:working` (for persistent agents only - see note)
+
+**Note on polecats:** The `status:idle` label does NOT apply to polecats. Polecats
+have no idle state - they're either working, stalled (stopped unexpectedly), or
+zombie (`gt done` failed). This label is for persistent agents like Deacon, Witness,
+and Crew members who can legitimately be idle between tasks.
 
 ### State Change Flow
 

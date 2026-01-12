@@ -3,20 +3,41 @@ package polecat
 
 import "time"
 
-// State represents the current state of a polecat.
-// In the transient model, polecats exist only while working.
+// State represents the current session state of a polecat.
+//
+// IMPORTANT: There is NO idle state. Polecats have three operating conditions:
+//
+//   - Working: Session active, doing assigned work (normal operation)
+//   - Stalled: Session stopped unexpectedly, was never nudged back to life
+//   - Zombie: Session called 'gt done' but cleanup failed - tried to die but couldn't
+//
+// The distinction matters: zombies completed their work; stalled polecats did not.
+// Neither is "idle" - stalled polecats are SUPPOSED to be working, zombies are
+// SUPPOSED to be dead. There is no idle pool where polecats wait for work.
+//
+// Note: These are SESSION states. The polecat IDENTITY (CV chain, mailbox, work
+// history) persists across sessions. A stalled or zombie session doesn't destroy
+// the polecat's identity - it just means the session needs intervention.
+//
+// "Stalled" and "zombie" are detected conditions, not stored states. The Witness
+// detects them through monitoring (tmux state, age in StateDone, etc.).
 type State string
 
 const (
-	// StateWorking means the polecat is actively working on an issue.
+	// StateWorking means the polecat session is actively working on an issue.
 	// This is the initial and primary state for transient polecats.
+	// Working is the ONLY healthy operating state - there is no idle pool.
 	StateWorking State = "working"
 
-	// StateDone means the polecat has completed its assigned work
-	// and is ready for cleanup by the Witness.
+	// StateDone means the polecat has completed its assigned work and called
+	// 'gt done'. This is normally a transient state - the session should exit
+	// immediately after. If a polecat remains in StateDone, it's a "zombie":
+	// the cleanup failed and the session is stuck.
 	StateDone State = "done"
 
-	// StateStuck means the polecat needs assistance.
+	// StateStuck means the polecat has explicitly signaled it needs assistance.
+	// This is an intentional request for help from the polecat itself.
+	// Different from "stalled" (detected externally when session stops working).
 	StateStuck State = "stuck"
 
 	// StateActive is deprecated: use StateWorking.

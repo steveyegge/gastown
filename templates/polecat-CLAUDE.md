@@ -55,7 +55,12 @@ You:
 - Nuke your own sandbox and session
 - Exit immediately
 
-There is no idle state. Done means gone.
+**There is no idle state.** Polecats have exactly three operating states:
+- **Working** - actively doing assigned work (normal)
+- **Stalled** - session stopped mid-work (failure: should be working)
+- **Zombie** - `gt done` failed during cleanup (failure: should be dead)
+
+Done means gone. If `gt done` succeeds, you cease to exist.
 
 **Important:** Your molecule already has step beads. Use `bd ready` to find them.
 Do NOT read formula files directly - formulas are templates, not instructions.
@@ -167,9 +172,10 @@ The `gt done` command (self-cleaning):
 - Nukes your sandbox (worktree cleanup)
 - Exits your session immediately
 
-**You are gone after `gt done`.** No idle waiting. The Refinery will merge
-your work from the MQ. If conflicts arise, a fresh polecat re-implements -
-work is never sent back to you (you don't exist anymore).
+**You are gone after `gt done`.** The session shuts down - there's no idle state
+where you wait for more work. The Refinery will merge your work from the MQ.
+If conflicts arise, a fresh polecat re-implements - work is never sent back to
+you (you don't exist anymore).
 
 ### No PRs in Maintainer Repos
 
@@ -236,8 +242,10 @@ If you forget to handoff:
 - Work continues from hook (molecule state preserved)
 - No work is lost
 
-**The Witness role**: Witness monitors for stuck polecats (long idle on same step)
-but does NOT force recycle between steps. You manage your own session lifecycle.
+**The Witness role**: Witness monitors for stalled polecats (sessions that stopped
+unexpectedly) but does NOT force recycle between steps. You manage your own session
+lifecycle. Note: "stalled" means you stopped when you should be working - it's not
+an idle state.
 
 ---
 

@@ -8,6 +8,27 @@ Polecats have three distinct lifecycle layers that operate independently. Confus
 these layers leads to bugs like "idle polecats" and misunderstanding when
 recycling occurs.
 
+## The Three Operating States
+
+Polecats have exactly three operating states. There is **no idle pool**.
+
+| State | Description | How it happens |
+|-------|-------------|----------------|
+| **Working** | Actively doing assigned work | Normal operation |
+| **Stalled** | Session stopped mid-work | Interrupted, crashed, or timed out without being nudged |
+| **Zombie** | Completed work but failed to die | `gt done` failed during cleanup |
+
+**The key distinction:** Zombies completed their work; stalled polecats did not.
+
+- **Stalled** = supposed to be working, but stopped. The polecat was interrupted or
+  crashed and was never nudged back to life. Work is incomplete.
+- **Zombie** = finished work, tried to exit via `gt done`, but cleanup failed. The
+  session should have shut down but didn't. Work is complete, just stuck in limbo.
+
+There is no "idle" state. Polecats don't wait around between tasks. When work is
+done, `gt done` shuts down the session. If you see a non-working polecat, something
+is broken.
+
 ## The Self-Cleaning Polecat Model
 
 **Polecats are responsible for their own cleanup.** When a polecat completes its
@@ -23,7 +44,7 @@ never sit idle. The simple model: **sandbox dies with session**.
 ### Why Self-Cleaning?
 
 - **No idle polecats** - There's no state where a polecat exists without work
-- **Reduced watchdog overhead** - Deacon doesn't need to patrol for zombies
+- **Reduced watchdog overhead** - Deacon patrols for stalled/zombie polecats, not idle ones
 - **Faster turnover** - Resources freed immediately on completion
 - **Simpler mental model** - Done means gone
 
@@ -158,19 +179,24 @@ during normal operation.
 
 ## Anti-Patterns
 
-### Idle Polecats
+### "Idle" Polecats (They Don't Exist)
 
-**Myth:** Polecats wait between tasks in an idle state.
+**Myth:** Polecats wait between tasks in an idle pool.
 
-**Reality:** Polecats don't exist without work. The lifecycle is:
+**Reality:** There is no idle state. Polecats don't exist without work:
 1. Work assigned → polecat spawned
-2. Work done → polecat nuked
-3. There is no idle state
+2. Work done → `gt done` → session exits → polecat nuked
+3. There is no step 3 where they wait around
 
-If you see a polecat without work, something is broken. Either:
-- The hook was lost (bug)
-- The session crashed before loading context
-- Manual intervention corrupted state
+If you see a non-working polecat, it's in a **failure state**:
+
+| What you see | What it is | What went wrong |
+|--------------|------------|-----------------|
+| Session exists but not working | **Stalled** | Interrupted/crashed, never nudged |
+| Session done but didn't exit | **Zombie** | `gt done` failed during cleanup |
+
+Don't call these "idle" - that implies they're waiting for work. They're not.
+A stalled polecat is *supposed* to be working. A zombie is *supposed* to be dead.
 
 ### Manual State Transitions
 
@@ -192,20 +218,23 @@ gt polecat nuke Toast  # (from Witness, after verification)
 Polecats manage their own session lifecycle. The Witness manages sandbox lifecycle.
 External manipulation bypasses verification.
 
-### Sandboxes Without Work
+### Sandboxes Without Work (Stalled Polecats)
 
-**Anti-pattern:** A sandbox exists but no molecule is hooked.
+**Anti-pattern:** A sandbox exists but no molecule is hooked, or the session isn't running.
 
-This means:
-- The polecat was spawned incorrectly
-- The hook was lost during crash
+This is a **stalled** polecat. It means:
+- The session crashed and wasn't nudged back to life
+- The hook was lost during a crash
 - State corruption occurred
+
+This is NOT an "idle" polecat waiting for work. It's stalled - supposed to be
+working but stopped unexpectedly.
 
 **Recovery:**
 ```bash
 # From Witness:
-gt polecat nuke Toast        # Clean slate
-gt sling gt-abc gastown      # Respawn with work
+gt polecat nuke Toast        # Clean up the stalled polecat
+gt sling gt-abc gastown      # Respawn with fresh polecat
 ```
 
 ### Confusing Session with Sandbox
@@ -244,10 +273,10 @@ The Witness monitors polecats but does NOT:
 - Nuke polecats (polecats self-nuke via `gt done`)
 
 The Witness DOES:
+- Detect and nudge stalled polecats (sessions that stopped unexpectedly)
+- Clean up zombie polecats (sessions where `gt done` failed)
 - Respawn crashed sessions
-- Nudge stuck polecats
-- Handle escalations
-- Clean up orphaned polecats (crash before `gt done`)
+- Handle escalations from stuck polecats (polecats that explicitly asked for help)
 
 ## Polecat Identity
 
