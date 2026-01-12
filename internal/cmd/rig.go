@@ -436,16 +436,16 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 // rigListEntry holds rig info for sorting in gt rig list
 type rigListEntry struct {
 	name        string
-	state       string // OPERATIONAL, STOPPED, PARKED, DOCKED
-	statePrio   int    // 0=OPERATIONAL, 1=STOPPED, 2=PARKED, 3=DOCKED
+	statePrio   int    // sort priority (0=active, 1=partial, 2=stopped, 3=parked, 4=docked)
+	opState     string // operational state from config (OPERATIONAL, PARKED, DOCKED)
 	hasWitness  bool
 	hasRefinery bool
 }
 
 // getRigListState determines the display state for a rig in the list.
-// Returns state name, priority (lower = first in list), and session status.
+// Returns priority (lower = first in list), operational state, and session status.
 // Priority is based on activity (running sessions first), then config state.
-func getRigListState(townRoot, rigName string, t *tmux.Tmux) (state string, priority int, hasWitness, hasRefinery bool) {
+func getRigListState(townRoot, rigName string, t *tmux.Tmux) (priority int, opState string, hasWitness, hasRefinery bool) {
 	// Check if witness or refinery sessions are running
 	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
 	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
@@ -454,7 +454,7 @@ func getRigListState(townRoot, rigName string, t *tmux.Tmux) (state string, prio
 	hasRefinery, _ = t.HasSession(refinerySession)
 
 	// Check operational state from config
-	opState, _ := getRigOperationalState(townRoot, rigName)
+	opState, _ = getRigOperationalState(townRoot, rigName)
 
 	// Priority by activity level:
 	// 0 = both sessions running (fully active)
@@ -463,34 +463,39 @@ func getRigListState(townRoot, rigName string, t *tmux.Tmux) (state string, prio
 	// 3 = no sessions, parked
 	// 4 = no sessions, docked
 	if hasWitness && hasRefinery {
-		return "ACTIVE", 0, hasWitness, hasRefinery
+		return 0, opState, hasWitness, hasRefinery
 	}
 	if hasWitness || hasRefinery {
-		return "PARTIAL", 1, hasWitness, hasRefinery
+		return 1, opState, hasWitness, hasRefinery
 	}
 
 	// No sessions running - sort by config state
 	switch opState {
 	case "PARKED":
-		return "PARKED", 3, hasWitness, hasRefinery
+		return 3, opState, hasWitness, hasRefinery
 	case "DOCKED":
-		return "DOCKED", 4, hasWitness, hasRefinery
+		return 4, opState, hasWitness, hasRefinery
 	default:
-		return "STOPPED", 2, hasWitness, hasRefinery
+		return 2, opState, hasWitness, hasRefinery
 	}
 }
 
-// getRigLED returns the LED indicator for a rig based on its state.
-// Matches the statusline LED indicators.
-func getRigLED(state string, hasWitness, hasRefinery bool) string {
+// GetRigLED returns the LED indicator for a rig based on session and operational state.
+// Used by both rig list and statusline for consistent indicators:
+//   - 🟢 = both witness and refinery running (fully active)
+//   - 🟡 = one session running (partially active)
+//   - ⚫ = nothing running (stopped)
+//   - 🅿️ = parked (intentionally paused)
+//   - 🛑 = docked (global shutdown)
+func GetRigLED(hasWitness, hasRefinery bool, opState string) string {
 	if hasWitness && hasRefinery {
 		return "🟢" // Both running - fully active
 	}
 	if hasWitness || hasRefinery {
 		return "🟡" // One running - partially active
 	}
-	// Nothing running - check state
-	switch state {
+	// Nothing running - check operational state
+	switch opState {
 	case "PARKED":
 		return "🅿️" // Parked - intentionally paused
 	case "DOCKED":
@@ -529,11 +534,11 @@ func runRigList(cmd *cobra.Command, args []string) error {
 	// Collect rig entries with their states
 	var entries []rigListEntry
 	for name := range rigsConfig.Rigs {
-		state, prio, hasWitness, hasRefinery := getRigListState(townRoot, name, t)
+		prio, opState, hasWitness, hasRefinery := getRigListState(townRoot, name, t)
 		entries = append(entries, rigListEntry{
 			name:        name,
-			state:       state,
 			statePrio:   prio,
+			opState:     opState,
 			hasWitness:  hasWitness,
 			hasRefinery: hasRefinery,
 		})
@@ -557,7 +562,7 @@ func runRigList(cmd *cobra.Command, args []string) error {
 		}
 
 		// LED indicator matching statusline
-		led := getRigLED(entry.state, entry.hasWitness, entry.hasRefinery)
+		led := GetRigLED(entry.hasWitness, entry.hasRefinery, entry.opState)
 		// 🅿️ needs extra space for alignment
 		space := " "
 		if led == "🅿️" {
