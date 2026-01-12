@@ -479,34 +479,69 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 
 // rigListEntry holds rig info for sorting in gt rig list
 type rigListEntry struct {
-	name      string
-	state     string // OPERATIONAL, STOPPED, PARKED, DOCKED
-	statePrio int    // 0=OPERATIONAL, 1=STOPPED, 2=PARKED, 3=DOCKED
+	name        string
+	state       string // OPERATIONAL, STOPPED, PARKED, DOCKED
+	statePrio   int    // 0=OPERATIONAL, 1=STOPPED, 2=PARKED, 3=DOCKED
+	hasWitness  bool
+	hasRefinery bool
 }
 
 // getRigListState determines the display state for a rig in the list.
-// Returns state name and priority (lower = first in list).
-func getRigListState(townRoot, rigName string, t *tmux.Tmux) (state string, priority int) {
-	// Check operational state first (parked/docked override everything)
-	opState, _ := getRigOperationalState(townRoot, rigName)
-	if opState == "PARKED" {
-		return "PARKED", 2
-	}
-	if opState == "DOCKED" {
-		return "DOCKED", 3
-	}
-
+// Returns state name, priority (lower = first in list), and session status.
+// Priority is based on activity (running sessions first), then config state.
+func getRigListState(townRoot, rigName string, t *tmux.Tmux) (state string, priority int, hasWitness, hasRefinery bool) {
 	// Check if witness or refinery sessions are running
 	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
 	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
 
-	witnessRunning, _ := t.HasSession(witnessSession)
-	refineryRunning, _ := t.HasSession(refinerySession)
+	hasWitness, _ = t.HasSession(witnessSession)
+	hasRefinery, _ = t.HasSession(refinerySession)
 
-	if witnessRunning || refineryRunning {
-		return "OPERATIONAL", 0
+	// Check operational state from config
+	opState, _ := getRigOperationalState(townRoot, rigName)
+
+	// Priority by activity level:
+	// 0 = both sessions running (fully active)
+	// 1 = one session running (partially active)
+	// 2 = no sessions, operational/stopped
+	// 3 = no sessions, parked
+	// 4 = no sessions, docked
+	if hasWitness && hasRefinery {
+		return "ACTIVE", 0, hasWitness, hasRefinery
 	}
-	return "STOPPED", 1
+	if hasWitness || hasRefinery {
+		return "PARTIAL", 1, hasWitness, hasRefinery
+	}
+
+	// No sessions running - sort by config state
+	switch opState {
+	case "PARKED":
+		return "PARKED", 3, hasWitness, hasRefinery
+	case "DOCKED":
+		return "DOCKED", 4, hasWitness, hasRefinery
+	default:
+		return "STOPPED", 2, hasWitness, hasRefinery
+	}
+}
+
+// getRigLED returns the LED indicator for a rig based on its state.
+// Matches the statusline LED indicators.
+func getRigLED(state string, hasWitness, hasRefinery bool) string {
+	if hasWitness && hasRefinery {
+		return "🟢" // Both running - fully active
+	}
+	if hasWitness || hasRefinery {
+		return "🟡" // One running - partially active
+	}
+	// Nothing running - check state
+	switch state {
+	case "PARKED":
+		return "🅿️" // Parked - intentionally paused
+	case "DOCKED":
+		return "🛑" // Docked - global shutdown
+	default:
+		return "⚫" // Operational but nothing running
+	}
 }
 
 func runRigList(cmd *cobra.Command, args []string) error {
@@ -538,11 +573,13 @@ func runRigList(cmd *cobra.Command, args []string) error {
 	// Collect rig entries with their states
 	var entries []rigListEntry
 	for name := range rigsConfig.Rigs {
-		state, prio := getRigListState(townRoot, name, t)
+		state, prio, hasWitness, hasRefinery := getRigListState(townRoot, name, t)
 		entries = append(entries, rigListEntry{
-			name:      name,
-			state:     state,
-			statePrio: prio,
+			name:        name,
+			state:       state,
+			statePrio:   prio,
+			hasWitness:  hasWitness,
+			hasRefinery: hasRefinery,
 		})
 	}
 
@@ -563,8 +600,16 @@ func runRigList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		// LED indicator matching statusline
+		led := getRigLED(entry.state, entry.hasWitness, entry.hasRefinery)
+		// 🅿️ needs extra space for alignment
+		space := " "
+		if led == "🅿️" {
+			space = "  "
+		}
+
 		summary := r.Summary()
-		fmt.Printf("  %s\n", style.Bold.Render(entry.name))
+		fmt.Printf("  %s%s%s\n", led, space, style.Bold.Render(entry.name))
 		fmt.Printf("    Polecats: %d  Crew: %d\n", summary.PolecatCount, summary.CrewCount)
 
 		agents := []string{}
