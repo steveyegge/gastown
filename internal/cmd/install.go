@@ -492,18 +492,18 @@ func initTownAgentBeads(townPath string) error {
 			continue // Already exists
 		}
 
-		// Create role bead using bd create --type=role
-		cmd := exec.Command("bd", "create",
-			"--type=role",
-			"--id="+role.id,
-			"--title="+role.title,
-			"--description="+role.desc,
-		)
-		cmd.Dir = townPath
-		if output, err := cmd.CombinedOutput(); err != nil {
+		// Create role bead using the beads API
+		// CreateWithID with Type: "role" automatically adds gt:role label
+		_, err := bd.CreateWithID(role.id, beads.CreateOptions{
+			Title:       role.title,
+			Type:        "role",
+			Description: role.desc,
+			Priority:    -1, // No priority
+		})
+		if err != nil {
 			// Log but continue - role beads are optional
-			fmt.Printf("   %s Could not create role bead %s: %s\n",
-				style.Dim.Render("⚠"), role.id, strings.TrimSpace(string(output)))
+			fmt.Printf("   %s Could not create role bead %s: %v\n",
+				style.Dim.Render("⚠"), role.id, err)
 			continue
 		}
 		fmt.Printf("   ✓ Created role bead: %s\n", role.id)
