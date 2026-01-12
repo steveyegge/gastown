@@ -378,6 +378,17 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not verify repo fingerprint: %v\n", style.Dim.Render("⚠"), err)
 	}
 
+	// Ensure issues.jsonl exists BEFORE creating routes.jsonl.
+	// bd init creates beads.db but not issues.jsonl in SQLite mode.
+	// If routes.jsonl is created first, bd's auto-export will write issues to routes.jsonl,
+	// corrupting it. Creating an empty issues.jsonl prevents this.
+	issuesJSONL := filepath.Join(townPath, ".beads", "issues.jsonl")
+	if _, err := os.Stat(issuesJSONL); os.IsNotExist(err) {
+		if err := os.WriteFile(issuesJSONL, []byte{}, 0644); err != nil {
+			fmt.Printf("   %s Could not create issues.jsonl: %v\n", style.Dim.Render("⚠"), err)
+		}
+	}
+
 	// Ensure routes.jsonl has an explicit town-level mapping for hq-* beads.
 	// This keeps hq-* operations stable even when invoked from rig worktrees.
 	if err := beads.AppendRoute(townPath, beads.Route{Prefix: "hq-", Path: "."}); err != nil {
