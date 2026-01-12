@@ -24,6 +24,9 @@ endif
 
 install: build
 	cp $(BUILD_DIR)/$(BINARY) ~/.local/bin/$(BINARY)
+ifeq ($(shell uname),Darwin)
+	@codesign -s - -f ~/.local/bin/$(BINARY) 2>/dev/null || true
+endif
 
 clean:
 	rm -f $(BUILD_DIR)/$(BINARY)
