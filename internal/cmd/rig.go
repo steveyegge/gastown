@@ -552,7 +552,7 @@ func runRigList(cmd *cobra.Command, args []string) error {
 	for _, entry := range entries {
 		r, err := mgr.GetRig(entry.name)
 		if err != nil {
-			fmt.Printf("  %s %s\n", style.Warning.Render("!"), entry.name)
+			fmt.Printf("%s %s\n", style.Warning.Render("!"), entry.name)
 			continue
 		}
 
@@ -565,8 +565,8 @@ func runRigList(cmd *cobra.Command, args []string) error {
 		}
 
 		summary := r.Summary()
-		fmt.Printf("  %s%s%s\n", led, space, style.Bold.Render(entry.name))
-		fmt.Printf("    Polecats: %d  Crew: %d\n", summary.PolecatCount, summary.CrewCount)
+		fmt.Printf("%s%s%s\n", led, space, style.Bold.Render(entry.name))
+		fmt.Printf("   Polecats: %d  Crew: %d\n", summary.PolecatCount, summary.CrewCount)
 
 		agents := []string{}
 		if summary.HasRefinery {
@@ -579,7 +579,7 @@ func runRigList(cmd *cobra.Command, args []string) error {
 			agents = append(agents, "mayor")
 		}
 		if len(agents) > 0 {
-			fmt.Printf("    Agents: %v\n", agents)
+			fmt.Printf("   Agents: %v\n", agents)
 		}
 		fmt.Println()
 	}
