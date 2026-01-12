@@ -460,6 +460,27 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	runtimeCfg := config.ResolveRoleAgentConfig("deacon", deaconTownRoot, "")
 	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeCfg)
 
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Directly execute gt prime to trigger autonomous patrol execution.
+	time.Sleep(2 * time.Second)
+	_ = t.SendKeys(sessionName, "gt prime") // Non-fatal
+
+	// Inject startup nudge for predecessor discovery via /resume
+	time.Sleep(1 * time.Second)
+	if err := session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}); err != nil {
+		style.PrintWarning("failed to send startup nudge: %v", err)
+	}
+
+	// Send propulsion nudge for autonomous patrol execution
+	time.Sleep(2 * time.Second)
+	if err := t.NudgeSession(sessionName, session.PropulsionNudgeForRole("deacon", deaconDir)); err != nil {
+		return fmt.Errorf("sending propulsion nudge: %w", err)
+	}
+
 	return nil
 }
 
