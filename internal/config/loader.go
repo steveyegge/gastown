@@ -1265,3 +1265,127 @@ func GetRigPrefix(townRoot, rigName string) string {
 	prefix := entry.BeadsConfig.Prefix
 	return strings.TrimSuffix(prefix, "-")
 }
+
+// EscalationConfigPath returns the standard path for escalation config in a town.
+func EscalationConfigPath(townRoot string) string {
+	return filepath.Join(townRoot, "config", "escalation.json")
+}
+
+// LoadEscalationConfig loads and validates an escalation configuration file.
+func LoadEscalationConfig(path string) (*EscalationConfig, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally, not from user input
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+		}
+		return nil, fmt.Errorf("reading escalation config: %w", err)
+	}
+
+	var config EscalationConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("parsing escalation config: %w", err)
+	}
+
+	if err := validateEscalationConfig(&config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+// LoadOrCreateEscalationConfig loads the escalation config, creating a default if not found.
+func LoadOrCreateEscalationConfig(path string) (*EscalationConfig, error) {
+	config, err := LoadEscalationConfig(path)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return NewEscalationConfig(), nil
+		}
+		return nil, err
+	}
+	return config, nil
+}
+
+// SaveEscalationConfig saves an escalation configuration to a file.
+func SaveEscalationConfig(path string, config *EscalationConfig) error {
+	if err := validateEscalationConfig(config); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding escalation config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil { //nolint:gosec // G306: escalation config doesn't contain secrets
+		return fmt.Errorf("writing escalation config: %w", err)
+	}
+
+	return nil
+}
+
+// validateEscalationConfig validates an EscalationConfig.
+func validateEscalationConfig(c *EscalationConfig) error {
+	if c.Type != "escalation" && c.Type != "" {
+		return fmt.Errorf("%w: expected type 'escalation', got '%s'", ErrInvalidType, c.Type)
+	}
+	if c.Version > CurrentEscalationVersion {
+		return fmt.Errorf("%w: got %d, max supported %d", ErrInvalidVersion, c.Version, CurrentEscalationVersion)
+	}
+
+	// Validate stale_threshold if specified
+	if c.StaleThreshold != "" {
+		if _, err := time.ParseDuration(c.StaleThreshold); err != nil {
+			return fmt.Errorf("invalid stale_threshold: %w", err)
+		}
+	}
+
+	// Initialize nil maps
+	if c.SeverityRoutes == nil {
+		c.SeverityRoutes = make(map[string]EscalationRoute)
+	}
+
+	// Validate severity route keys
+	validSeverities := map[string]bool{
+		SeverityCritical: true,
+		SeverityHigh:     true,
+		SeverityNormal:   true,
+		SeverityLow:      true,
+	}
+	for severity := range c.SeverityRoutes {
+		if !validSeverities[severity] {
+			return fmt.Errorf("%w: unknown severity '%s' (valid: critical, high, normal, low)", ErrMissingField, severity)
+		}
+	}
+
+	return nil
+}
+
+// GetStaleThreshold returns the stale threshold as a time.Duration.
+// Returns 1 hour if not configured or invalid.
+func (c *EscalationConfig) GetStaleThreshold() time.Duration {
+	if c.StaleThreshold == "" {
+		return time.Hour
+	}
+	d, err := time.ParseDuration(c.StaleThreshold)
+	if err != nil {
+		return time.Hour
+	}
+	return d
+}
+
+// GetRouteForSeverity returns the escalation route for a given severity.
+// Falls back to DefaultTarget if no specific route is configured.
+func (c *EscalationConfig) GetRouteForSeverity(severity string) EscalationRoute {
+	if route, ok := c.SeverityRoutes[severity]; ok {
+		return route
+	}
+	// Fallback to default target
+	return EscalationRoute{
+		Targets:     []string{c.DefaultTarget},
+		UseExternal: false,
+	}
+}

@@ -773,3 +773,109 @@ func NewMessagingConfig() *MessagingConfig {
 		NudgeChannels: make(map[string][]string),
 	}
 }
+
+// EscalationConfig represents the escalation system configuration (config/escalation.json).
+// This defines severity-based routing for escalations to different channels.
+type EscalationConfig struct {
+	Type    string `json:"type"`    // "escalation"
+	Version int    `json:"version"` // schema version
+
+	// Enabled controls whether the escalation system is active.
+	Enabled bool `json:"enabled"`
+
+	// DefaultTarget is the address to send escalations when no severity-specific target is set.
+	// Example: "mayor/"
+	DefaultTarget string `json:"default_target,omitempty"`
+
+	// SeverityRoutes maps severity levels to notification targets.
+	// Keys: "critical", "high", "normal", "low"
+	// Values: EscalationRoute with target addresses and optional external channels
+	SeverityRoutes map[string]EscalationRoute `json:"severity_routes,omitempty"`
+
+	// StaleThreshold is the duration after which an unacknowledged escalation is considered stale.
+	// Format: Go duration string (e.g., "1h", "30m", "24h")
+	// Default: "1h"
+	StaleThreshold string `json:"stale_threshold,omitempty"`
+
+	// ExternalChannels configures optional external notification channels (email, SMS, etc.)
+	ExternalChannels *ExternalChannelsConfig `json:"external_channels,omitempty"`
+}
+
+// EscalationRoute defines where escalations of a given severity are routed.
+type EscalationRoute struct {
+	// Targets are the internal addresses to notify (e.g., "mayor/", "gastown/witness")
+	Targets []string `json:"targets"`
+
+	// UseExternal enables external channel notifications for this severity.
+	// If true, checks ExternalChannels config for enabled channels.
+	UseExternal bool `json:"use_external,omitempty"`
+
+	// Channels overrides which external channels to use for this severity.
+	// If empty and UseExternal is true, uses all enabled channels.
+	// Example: ["email"] to only use email for high severity
+	Channels []string `json:"channels,omitempty"`
+}
+
+// ExternalChannelsConfig configures external notification channels.
+type ExternalChannelsConfig struct {
+	// Email configuration for email notifications
+	Email *EmailChannelConfig `json:"email,omitempty"`
+
+	// SMS configuration for SMS notifications (future)
+	SMS *SMSChannelConfig `json:"sms,omitempty"`
+}
+
+// EmailChannelConfig configures email notifications.
+type EmailChannelConfig struct {
+	Enabled    bool     `json:"enabled"`
+	Recipients []string `json:"recipients,omitempty"` // email addresses
+	SMTPServer string   `json:"smtp_server,omitempty"`
+	FromAddr   string   `json:"from_addr,omitempty"`
+}
+
+// SMSChannelConfig configures SMS notifications (placeholder for future).
+type SMSChannelConfig struct {
+	Enabled    bool     `json:"enabled"`
+	Recipients []string `json:"recipients,omitempty"` // phone numbers
+	Provider   string   `json:"provider,omitempty"`   // twilio, etc.
+}
+
+// CurrentEscalationVersion is the current schema version for EscalationConfig.
+const CurrentEscalationVersion = 1
+
+// Escalation severity level constants.
+const (
+	SeverityCritical = "critical" // P0: immediate attention required
+	SeverityHigh     = "high"     // P1: urgent, needs attention soon
+	SeverityNormal   = "normal"   // P2: standard escalation (default)
+	SeverityLow      = "low"      // P3: informational, can wait
+)
+
+// NewEscalationConfig creates a new EscalationConfig with sensible defaults.
+func NewEscalationConfig() *EscalationConfig {
+	return &EscalationConfig{
+		Type:           "escalation",
+		Version:        CurrentEscalationVersion,
+		Enabled:        true,
+		DefaultTarget:  "mayor/",
+		StaleThreshold: "1h",
+		SeverityRoutes: map[string]EscalationRoute{
+			SeverityCritical: {
+				Targets:     []string{"mayor/"},
+				UseExternal: true, // Critical should notify externally by default
+			},
+			SeverityHigh: {
+				Targets:     []string{"mayor/"},
+				UseExternal: false,
+			},
+			SeverityNormal: {
+				Targets:     []string{"mayor/"},
+				UseExternal: false,
+			},
+			SeverityLow: {
+				Targets:     []string{"mayor/"},
+				UseExternal: false,
+			},
+		},
+	}
+}

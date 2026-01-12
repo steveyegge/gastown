@@ -1,0 +1,309 @@
+// Package beads provides escalation bead management.
+package beads
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+)
+
+// EscalationFields holds structured fields for escalation beads.
+// These are stored as "key: value" lines in the description.
+type EscalationFields struct {
+	Severity     string // critical, high, normal, low
+	Reason       string // Why this was escalated
+	EscalatedBy  string // Agent address that escalated (e.g., "gastown/Toast")
+	EscalatedAt  string // ISO 8601 timestamp
+	AckedBy      string // Agent that acknowledged (empty if not acked)
+	AckedAt      string // When acknowledged (empty if not acked)
+	ClosedBy     string // Agent that closed (empty if not closed)
+	ClosedReason string // Resolution reason (empty if not closed)
+	RelatedBead  string // Optional: related bead ID (task, bug, etc.)
+}
+
+// EscalationState constants for bead status tracking.
+const (
+	EscalationOpen   = "open"   // Unacknowledged
+	EscalationAcked  = "acked"  // Acknowledged but not resolved
+	EscalationClosed = "closed" // Resolved/closed
+)
+
+// FormatEscalationDescription creates a description string from escalation fields.
+func FormatEscalationDescription(title string, fields *EscalationFields) string {
+	if fields == nil {
+		return title
+	}
+
+	var lines []string
+	lines = append(lines, title)
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("severity: %s", fields.Severity))
+	lines = append(lines, fmt.Sprintf("reason: %s", fields.Reason))
+	lines = append(lines, fmt.Sprintf("escalated_by: %s", fields.EscalatedBy))
+	lines = append(lines, fmt.Sprintf("escalated_at: %s", fields.EscalatedAt))
+
+	if fields.AckedBy != "" {
+		lines = append(lines, fmt.Sprintf("acked_by: %s", fields.AckedBy))
+	} else {
+		lines = append(lines, "acked_by: null")
+	}
+
+	if fields.AckedAt != "" {
+		lines = append(lines, fmt.Sprintf("acked_at: %s", fields.AckedAt))
+	} else {
+		lines = append(lines, "acked_at: null")
+	}
+
+	if fields.ClosedBy != "" {
+		lines = append(lines, fmt.Sprintf("closed_by: %s", fields.ClosedBy))
+	} else {
+		lines = append(lines, "closed_by: null")
+	}
+
+	if fields.ClosedReason != "" {
+		lines = append(lines, fmt.Sprintf("closed_reason: %s", fields.ClosedReason))
+	} else {
+		lines = append(lines, "closed_reason: null")
+	}
+
+	if fields.RelatedBead != "" {
+		lines = append(lines, fmt.Sprintf("related_bead: %s", fields.RelatedBead))
+	} else {
+		lines = append(lines, "related_bead: null")
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// ParseEscalationFields extracts escalation fields from an issue's description.
+func ParseEscalationFields(description string) *EscalationFields {
+	fields := &EscalationFields{}
+
+	for _, line := range strings.Split(description, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		colonIdx := strings.Index(line, ":")
+		if colonIdx == -1 {
+			continue
+		}
+
+		key := strings.TrimSpace(line[:colonIdx])
+		value := strings.TrimSpace(line[colonIdx+1:])
+		if value == "null" || value == "" {
+			value = ""
+		}
+
+		switch strings.ToLower(key) {
+		case "severity":
+			fields.Severity = value
+		case "reason":
+			fields.Reason = value
+		case "escalated_by":
+			fields.EscalatedBy = value
+		case "escalated_at":
+			fields.EscalatedAt = value
+		case "acked_by":
+			fields.AckedBy = value
+		case "acked_at":
+			fields.AckedAt = value
+		case "closed_by":
+			fields.ClosedBy = value
+		case "closed_reason":
+			fields.ClosedReason = value
+		case "related_bead":
+			fields.RelatedBead = value
+		}
+	}
+
+	return fields
+}
+
+// CreateEscalationBead creates an escalation bead for tracking escalations.
+// The created_by field is populated from BD_ACTOR env var for provenance tracking.
+func (b *Beads) CreateEscalationBead(title string, fields *EscalationFields) (*Issue, error) {
+	description := FormatEscalationDescription(title, fields)
+
+	args := []string{"create", "--json",
+		"--title=" + title,
+		"--description=" + description,
+		"--type=task",
+		"--labels=gt:escalation",
+	}
+
+	// Add severity as a label for easy filtering
+	if fields != nil && fields.Severity != "" {
+		args = append(args, fmt.Sprintf("--labels=severity:%s", fields.Severity))
+	}
+
+	// Default actor from BD_ACTOR env var for provenance tracking
+	if actor := os.Getenv("BD_ACTOR"); actor != "" {
+		args = append(args, "--actor="+actor)
+	}
+
+	out, err := b.run(args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var issue Issue
+	if err := json.Unmarshal(out, &issue); err != nil {
+		return nil, fmt.Errorf("parsing bd create output: %w", err)
+	}
+
+	return &issue, nil
+}
+
+// AckEscalation acknowledges an escalation bead.
+// Sets acked_by and acked_at fields, adds "acked" label.
+func (b *Beads) AckEscalation(id, ackedBy string) error {
+	// First get current issue to preserve other fields
+	issue, err := b.Show(id)
+	if err != nil {
+		return err
+	}
+
+	// Verify it's an escalation
+	if !HasLabel(issue, "gt:escalation") {
+		return fmt.Errorf("issue %s is not an escalation bead (missing gt:escalation label)", id)
+	}
+
+	// Parse existing fields
+	fields := ParseEscalationFields(issue.Description)
+	fields.AckedBy = ackedBy
+	fields.AckedAt = time.Now().Format(time.RFC3339)
+
+	// Format new description
+	description := FormatEscalationDescription(issue.Title, fields)
+
+	return b.Update(id, UpdateOptions{
+		Description: &description,
+		AddLabels:   []string{"acked"},
+	})
+}
+
+// CloseEscalation closes an escalation bead with a resolution reason.
+// Sets closed_by and closed_reason fields, closes the issue.
+func (b *Beads) CloseEscalation(id, closedBy, reason string) error {
+	// First get current issue to preserve other fields
+	issue, err := b.Show(id)
+	if err != nil {
+		return err
+	}
+
+	// Verify it's an escalation
+	if !HasLabel(issue, "gt:escalation") {
+		return fmt.Errorf("issue %s is not an escalation bead (missing gt:escalation label)", id)
+	}
+
+	// Parse existing fields
+	fields := ParseEscalationFields(issue.Description)
+	fields.ClosedBy = closedBy
+	fields.ClosedReason = reason
+
+	// Format new description
+	description := FormatEscalationDescription(issue.Title, fields)
+
+	// Update description first
+	if err := b.Update(id, UpdateOptions{
+		Description: &description,
+		AddLabels:   []string{"resolved"},
+	}); err != nil {
+		return err
+	}
+
+	// Close the issue
+	_, err = b.run("close", id, "--reason="+reason)
+	return err
+}
+
+// GetEscalationBead retrieves an escalation bead by ID.
+// Returns nil if not found.
+func (b *Beads) GetEscalationBead(id string) (*Issue, *EscalationFields, error) {
+	issue, err := b.Show(id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+
+	if !HasLabel(issue, "gt:escalation") {
+		return nil, nil, fmt.Errorf("issue %s is not an escalation bead (missing gt:escalation label)", id)
+	}
+
+	fields := ParseEscalationFields(issue.Description)
+	return issue, fields, nil
+}
+
+// ListEscalations returns all open escalation beads.
+func (b *Beads) ListEscalations() ([]*Issue, error) {
+	out, err := b.run("list", "--label=gt:escalation", "--status=open", "--json")
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []*Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	}
+
+	return issues, nil
+}
+
+// ListEscalationsBySeverity returns open escalation beads filtered by severity.
+func (b *Beads) ListEscalationsBySeverity(severity string) ([]*Issue, error) {
+	out, err := b.run("list",
+		"--label=gt:escalation",
+		"--label=severity:"+severity,
+		"--status=open",
+		"--json",
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []*Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	}
+
+	return issues, nil
+}
+
+// ListStaleEscalations returns escalations older than the given threshold.
+// threshold is a duration string like "1h" or "30m".
+func (b *Beads) ListStaleEscalations(threshold time.Duration) ([]*Issue, error) {
+	// Get all open escalations
+	escalations, err := b.ListEscalations()
+	if err != nil {
+		return nil, err
+	}
+
+	cutoff := time.Now().Add(-threshold)
+	var stale []*Issue
+
+	for _, issue := range escalations {
+		// Skip acknowledged escalations
+		if HasLabel(issue, "acked") {
+			continue
+		}
+
+		// Check if older than threshold
+		createdAt, err := time.Parse(time.RFC3339, issue.CreatedAt)
+		if err != nil {
+			continue // Skip if can't parse
+		}
+
+		if createdAt.Before(cutoff) {
+			stale = append(stale, issue)
+		}
+	}
+
+	return stale, nil
+}
