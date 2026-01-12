@@ -445,12 +445,20 @@ func (e *Engineer) handleSuccess(mr *beads.Issue, result ProcessResult) {
 		}
 	}
 
-	// 4. Delete source branch if configured (local only - branches never go to origin)
+	// 4. Delete source branch if configured (local and remote)
+	// Since the self-cleaning model (Jan 10), polecats push to origin before gt done,
+	// so we need to clean up both local and remote branches after merge.
 	if e.config.DeleteMergedBranches && mrFields.Branch != "" {
 		if err := e.git.DeleteBranch(mrFields.Branch, true); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete branch %s: %v\n", mrFields.Branch, err)
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete local branch %s: %v\n", mrFields.Branch, err)
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted local branch: %s\n", mrFields.Branch)
+		}
+		// Also delete the remote branch (non-fatal if it doesn't exist)
+		if err := e.git.DeleteRemoteBranch("origin", mrFields.Branch); err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete remote branch %s: %v\n", mrFields.Branch, err)
+		} else {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted remote branch: origin/%s\n", mrFields.Branch)
 		}
 	}
 
