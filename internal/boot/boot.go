@@ -199,11 +199,6 @@ func (b *Boot) spawnTmux() error {
 		return fmt.Errorf("ensuring boot CLAUDE.md: %w", err)
 	}
 
-	// Ensure settings.json exists with autonomous role settings
-	if err := claude.EnsureSettingsForRole(b.bootDir, "boot"); err != nil {
-		return fmt.Errorf("ensuring boot settings: %w", err)
-	}
-
 	// Create new session in boot directory (not deacon dir) so Claude reads Boot's CLAUDE.md
 	if err := b.tmux.NewSession(SessionName, b.bootDir); err != nil {
 		return fmt.Errorf("creating boot session: %w", err)
