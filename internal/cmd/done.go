@@ -438,7 +438,18 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 	// BUG FIX (gt-vwjz6): Close hooked beads before clearing the hook.
 	// Previously, the agent's hook_bead slot was cleared but the hooked bead itself
 	// stayed status=hooked forever. Now we close the hooked bead before clearing.
-	if agentBead, err := bd.Show(agentBeadID); err == nil && agentBead.HookBead != "" {
+	//
+	// BUG FIX (hq-i26n2): Check if agent bead exists before clearing hook.
+	// Old polecats may not have identity beads, so ClearHookBead would fail.
+	// gt done must be resilient - missing agent bead is not an error.
+	agentBead, err := bd.Show(agentBeadID)
+	if err != nil {
+		// Agent bead doesn't exist - nothing to clear, that's fine
+		// This happens for polecats created before identity beads existed
+		return
+	}
+
+	if agentBead.HookBead != "" {
 		hookedBeadID := agentBead.HookBead
 		// Only close if the hooked bead exists and is still in "hooked" status
 		if hookedBead, err := bd.Show(hookedBeadID); err == nil && hookedBead.Status == beads.StatusHooked {
