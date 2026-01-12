@@ -369,18 +369,14 @@ func (t *Tmux) AcceptBypassPermissionsWarning(session string) error {
 		return nil
 	}
 
-	// Press Down to select "Yes, I accept" (option 2)
-	if _, err := t.run("send-keys", "-t", session, "Down"); err != nil {
+	// Press Space to toggle "bypass permissions on" (toggle button)
+	// The dialog shows "⏵⏵ bypass permissions on" which is a toggle
+	if _, err := t.run("send-keys", "-t", session, "Space"); err != nil {
 		return err
 	}
 
-	// Small delay to let selection update
+	// Small delay for toggle to process
 	time.Sleep(200 * time.Millisecond)
-
-	// Press Enter to confirm
-	if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
-		return err
-	}
 
 	return nil
 }
