@@ -79,9 +79,10 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
-	// Build startup command first
+	// Build startup command with initial prompt for propulsion.
+	// The CLI prompt is more reliable than post-startup nudges (which arrive before input is ready).
 	// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", "", agentOverride)
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", "gt prime", agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}
@@ -116,20 +117,9 @@ func (m *Manager) Start(agentOverride string) error {
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
-	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: "deacon",
-		Sender:    "daemon",
-		Topic:     "patrol",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("deacon", deaconDir)) // Non-fatal
+	// Propulsion is handled by the CLI prompt ("gt prime") passed at startup.
+	// No need for post-startup nudges which are unreliable (text arrives before input is ready).
+	// The SessionStart hook also runs "gt prime" as a backup.
 
 	return nil
 }

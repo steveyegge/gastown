@@ -15,7 +15,6 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -180,10 +179,11 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
+	// Build startup command with initial prompt for propulsion.
+	// The CLI prompt is more reliable than post-startup nudges (which arrive before input is ready).
 	command := opts.Command
 	if command == "" {
-		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
+		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "gt prime")
 	}
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
@@ -237,18 +237,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	runtime.SleepForReadyDelay(runtimeConfig)
 	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)
 
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
-	debugSession("StartupNudge", session.StartupNudge(m.tmux, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "witness",
-		Topic:     "assigned",
-		MolID:     opts.Issue,
-	}))
-
-	// GUPP: Send propulsion nudge to trigger autonomous work execution
-	time.Sleep(2 * time.Second)
-	debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
+	// Propulsion is handled by the CLI prompt ("gt prime") passed at startup.
+	// No need for post-startup nudges which are unreliable (text arrives before input is ready).
+	// The SessionStart hook also runs "gt prime" as a backup.
 
 	// Verify session survived startup - if the command crashed, the session may have died.
 	// Without this check, Start() would return success even if the pane died during initialization.
