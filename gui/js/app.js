@@ -41,6 +41,9 @@ const elements = {
   rigList: document.getElementById('rig-list'),
 };
 
+// Initialization guard to prevent double-init
+let isInitialized = false;
+
 // Loading state helpers
 function showLoadingState(container, message = 'Loading...') {
   if (!container) return;
@@ -63,6 +66,13 @@ const views = document.querySelectorAll('.view');
 
 // Initialize application
 async function init() {
+  // Prevent double initialization
+  if (isInitialized) {
+    console.log('[App] Already initialized, skipping');
+    return;
+  }
+  isInitialized = true;
+
   console.log('[App] Initializing Gas Town GUI...');
 
   // Set up navigation
@@ -327,22 +337,35 @@ async function loadInitialData() {
   elements.statusMessage.textContent = 'Loading...';
 
   try {
-    // Load status
-    const status = await api.getStatus();
-    state.setStatus(status);
+    // Load all critical data in parallel using Promise.allSettled
+    // This way a slow/failing request doesn't block others
+    const results = await Promise.allSettled([
+      api.getStatus().then(status => {
+        state.setStatus(status);
+        return status;
+      }),
+      loadConvoys(),
+      loadMayorMessageHistory(),
+      loadDashboard(),
+    ]);
 
-    // Load convoys
-    await loadConvoys();
+    // Check results and log any failures
+    const labels = ['status', 'convoys', 'mayor history', 'dashboard'];
+    results.forEach((result, i) => {
+      if (result.status === 'rejected') {
+        console.error(`[App] Failed to load ${labels[i]}:`, result.reason);
+      }
+    });
 
-    // Load Mayor message history into activity feed
-    await loadMayorMessageHistory();
+    // If status failed, show warning
+    if (results[0].status === 'rejected') {
+      elements.statusMessage.textContent = 'Ready (status unavailable)';
+      showToast('Some data failed to load', 'warning');
+    } else {
+      elements.statusMessage.textContent = 'Ready';
+    }
 
-    // Load dashboard (default view)
-    await loadDashboard();
-
-    elements.statusMessage.textContent = 'Ready';
-
-    // Hide loading overlay
+    // Hide loading overlay once data is ready
     hideLoadingOverlay();
 
     // Background preload of other data (don't await, let it load in background)
@@ -351,7 +374,6 @@ async function loadInitialData() {
     console.error('[App] Failed to load initial data:', err);
     elements.statusMessage.textContent = 'Error loading data';
     showToast('Failed to load data', 'error');
-
     // Hide loading overlay even on error
     hideLoadingOverlay();
   }

@@ -155,7 +155,16 @@ app.use(cors({
 app.use(express.json({ limit: '1mb' }));
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 app.use('/css', express.static(path.join(__dirname, 'css')));
-app.use('/js', express.static(path.join(__dirname, 'js')));
+// Add cache-control headers for JS files to improve load times
+app.use('/js', express.static(path.join(__dirname, 'js'), {
+  maxAge: '1h',
+  setHeaders: (res, filePath) => {
+    // Set cache-control for JS files
+    if (filePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+    }
+  }
+}));
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
