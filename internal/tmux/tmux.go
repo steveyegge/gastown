@@ -253,18 +253,36 @@ type SessionSet struct {
 // GetSessionSet returns a SessionSet containing all current sessions.
 // Call this once at the start of an operation, then use Has() for O(1) checks.
 // This replaces multiple HasSession() calls with a single ListSessions() call.
+//
+// Builds the map directly from tmux output to avoid intermediate slice allocation.
 func (t *Tmux) GetSessionSet() (*SessionSet, error) {
-	sessions, err := t.ListSessions()
+	out, err := t.run("list-sessions", "-F", "#{session_name}")
 	if err != nil {
+		if errors.Is(err, ErrNoServer) {
+			return &SessionSet{sessions: make(map[string]struct{})}, nil
+		}
 		return nil, err
 	}
 
+	// Count newlines to pre-size map (avoids rehashing during insertion)
+	count := strings.Count(out, "\n") + 1
 	set := &SessionSet{
-		sessions: make(map[string]struct{}, len(sessions)),
+		sessions: make(map[string]struct{}, count),
 	}
-	for _, s := range sessions {
-		if s != "" {
-			set.sessions[s] = struct{}{}
+
+	// Parse directly without intermediate slice allocation
+	for len(out) > 0 {
+		idx := strings.IndexByte(out, '\n')
+		var line string
+		if idx >= 0 {
+			line = out[:idx]
+			out = out[idx+1:]
+		} else {
+			line = out
+			out = ""
+		}
+		if line != "" {
+			set.sessions[line] = struct{}{}
 		}
 	}
 	return set, nil
@@ -273,7 +291,7 @@ func (t *Tmux) GetSessionSet() (*SessionSet, error) {
 // Has returns true if the session exists in the set.
 // This is an O(1) lookup - no subprocess is spawned.
 func (s *SessionSet) Has(name string) bool {
-	if s == nil || s.sessions == nil {
+	if s == nil {
 		return false
 	}
 	_, ok := s.sessions[name]
@@ -282,7 +300,7 @@ func (s *SessionSet) Has(name string) bool {
 
 // Names returns all session names in the set.
 func (s *SessionSet) Names() []string {
-	if s == nil || s.sessions == nil {
+	if s == nil || len(s.sessions) == 0 {
 		return nil
 	}
 	names := make([]string, 0, len(s.sessions))
