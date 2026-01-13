@@ -187,40 +187,32 @@ const recoveryHeartbeatInterval = 3 * time.Minute
 func (d *Daemon) heartbeat(state *State) {
 	d.logger.Println("Heartbeat starting (recovery-focused)")
 
-	// 1. Ensure Deacon is running (restart if dead)
-	d.ensureDeaconRunning()
-
-	// 2. Poke Boot for intelligent triage (stuck/nudge/interrupt)
-	// Boot handles nuanced "is Deacon responsive" decisions
+	// 1. Spawn Boot for intelligent triage - Boot decides whether to wake Deacon
+	// Boot is the primary entry point for Deacon management. It observes state
+	// and decides: start, wake, nudge, interrupt, or nothing.
 	d.ensureBootRunning()
 
-	// 3. Direct Deacon heartbeat check (belt-and-suspenders)
-	// Boot may not detect all stuck states; this provides a fallback
-	d.checkDeaconHeartbeat()
-
-	// 4. Ensure Witnesses are running for all rigs (restart if dead)
+	// 2. Ensure Witnesses are running for all rigs (restart if dead)
 	d.ensureWitnessesRunning()
 
-	// 5. Ensure Refineries are running for all rigs (restart if dead)
+	// 3. Ensure Refineries are running for all rigs (restart if dead)
 	d.ensureRefineriesRunning()
 
-	// 6. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
+	// 4. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
 	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
 	// Uses regex-based WaitForRuntimeReady, which is acceptable for daemon bootstrap.
 	d.triggerPendingSpawns()
 
-	// 7. Process lifecycle requests
+	// 5. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 8. (Removed) Stale agent check - violated "discover, don't track"
-
-	// 9. Check for GUPP violations (agents with work-on-hook not progressing)
+	// 6. Check for GUPP violations (agents with work-on-hook not progressing)
 	d.checkGUPPViolations()
 
-	// 10. Check for orphaned work (assigned to dead agents)
+	// 7. Check for orphaned work (assigned to dead agents)
 	d.checkOrphanedWork()
 
-	// 11. Check polecat session health (proactive crash detection)
+	// 8. Check polecat session health (proactive crash detection)
 	// This validates tmux sessions are still alive for polecats with work-on-hook
 	d.checkPolecatSessionHealth()
 
@@ -323,60 +315,6 @@ func (d *Daemon) ensureDeaconRunning() {
 	}
 
 	d.logger.Println("Deacon started successfully")
-}
-
-// checkDeaconHeartbeat checks if the Deacon is making progress.
-// This is a belt-and-suspenders fallback in case Boot doesn't detect stuck states.
-// Uses the heartbeat file that the Deacon updates on each patrol cycle.
-func (d *Daemon) checkDeaconHeartbeat() {
-	hb := deacon.ReadHeartbeat(d.config.TownRoot)
-	if hb == nil {
-		// No heartbeat file - Deacon hasn't started a cycle yet
-		return
-	}
-
-	age := hb.Age()
-
-	// If heartbeat is very stale (>15 min), the Deacon is likely stuck
-	if !hb.ShouldPoke() {
-		// Heartbeat is fresh enough
-		return
-	}
-
-	d.logger.Printf("Deacon heartbeat is stale (%s old), checking session...", age.Round(time.Minute))
-
-	sessionName := d.getDeaconSessionName()
-
-	// Check if session exists
-	hasSession, err := d.tmux.HasSession(sessionName)
-	if err != nil {
-		d.logger.Printf("Error checking Deacon session: %v", err)
-		return
-	}
-
-	if !hasSession {
-		// Session doesn't exist - ensureDeaconRunning already ran earlier
-		// in heartbeat, so Deacon should be starting
-		return
-	}
-
-	// Session exists but heartbeat is stale - Deacon is stuck
-	if age > 30*time.Minute {
-		// Very stuck - restart the session
-		d.logger.Printf("Deacon stuck for %s - restarting session", age.Round(time.Minute))
-		if err := d.tmux.KillSession(sessionName); err != nil {
-			d.logger.Printf("Error killing stuck Deacon: %v", err)
-		}
-		// Reset heartbeat so next heartbeat doesn't immediately kill new session
-		_ = deacon.Touch(d.config.TownRoot)
-		// ensureDeaconRunning will restart on next heartbeat
-	} else {
-		// Stuck but not critically - nudge to wake up
-		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
-		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
-			d.logger.Printf("Error nudging stuck Deacon: %v", err)
-		}
-	}
 }
 
 // ensureWitnessesRunning ensures witnesses are running for all rigs.
