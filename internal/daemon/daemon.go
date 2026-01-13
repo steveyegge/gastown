@@ -432,10 +432,9 @@ func (d *Daemon) getKnownRigs() []string {
 func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 	cfg := wisp.NewConfig(d.config.TownRoot, rigName)
 
-	// Warn if wisp config is missing - parked/docked state may have been lost
-	if _, err := os.Stat(cfg.ConfigPath()); os.IsNotExist(err) {
-		d.logger.Printf("Warning: no wisp config for %s - parked state may have been lost", rigName)
-	}
+	// Note: Wisp config is created lazily (e.g., when parking a rig).
+	// The absence of wisp config is the normal/expected state for rigs that have never been parked.
+	// No need to warn about missing config - it's only created when needed.
 
 	// Check rig status - parked and docked rigs should not have agents auto-started
 	status := cfg.GetString("status")
