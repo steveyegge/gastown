@@ -263,11 +263,64 @@ merge queue. Without this step:
 
 **Local branch → `gt done` → MR in queue → Refinery merges → LANDED**
 
-## If You're Stuck
+## If You're Stuck: Escalate and Move On
 
-1. **File an issue**: `bd create --title="Blocked: <reason>" --type=task`
-2. **Ask for help**: The Witness will see you're not progressing
-3. **Document**: Leave clear notes about what's blocking you
+**CRITICAL**: When blocked, you MUST escalate. Do NOT wait for human input in the session.
+
+### When to Escalate
+
+Escalate when:
+- Requirements are unclear after checking docs
+- You're stuck for >15 minutes on the same problem
+- You found something blocking but outside your scope
+- Tests fail and you can't determine why after 2-3 attempts
+- You need a decision you can't make yourself
+- You need credentials, secrets, or external access
+
+### How to Escalate
+
+**Option 1: `gt escalate` (preferred for blockers)**
+```bash
+# For blocking issues needing human decision
+gt escalate "Brief description of blocker" -s HIGH -m "Details about what you tried and what you need"
+
+# For critical issues
+gt escalate "Critical: <issue>" -s CRITICAL -m "Impact and urgency details"
+```
+
+**Option 2: Mail the Witness**
+```bash
+gt mail send {{ .RigName }}/witness -s "HELP: <brief problem>" -m "Issue: <your-issue>
+Problem: <what's wrong>
+Tried: <what you attempted>
+Question: <what you need>"
+```
+
+**Option 3: Mail the Mayor (cross-rig or strategic)**
+```bash
+gt mail send mayor/ -s "BLOCKED: <topic>" -m "Context and what you need"
+```
+
+### After Escalating
+
+1. If you can continue with other work → continue
+2. If completely blocked → run `gt done --status=ESCALATED` to exit cleanly
+3. Do NOT sit idle waiting for response
+
+### Anti-Pattern: Waiting for Human
+
+**WRONG**:
+```
+"I need to clarify this requirement. Let me wait for the user to respond."
+```
+
+**RIGHT**:
+```bash
+gt escalate "Need clarification on auth flow" -s MEDIUM -m "Should we use JWT or API key? Docs unclear."
+# Then either continue with assumption or exit if truly blocked
+```
+
+The system is designed for async work. Escalate and move on.
 
 ## Gas Town is a Village
 
