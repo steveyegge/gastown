@@ -62,21 +62,21 @@ var agentsCmd = &cobra.Command{
 	Use:     "agents",
 	Aliases: []string{"ag"},
 	GroupID: GroupAgents,
-	Short:   "Switch between Gas Town agent sessions",
-	Long: `Display a popup menu of core Gas Town agent sessions.
+	Short:   "List Gas Town agent sessions",
+	Long: `List all active Gas Town agent sessions to stdout.
 
 Shows Mayor, Deacon, Witnesses, Refineries, and Crew workers.
 Polecats are hidden (use 'gt polecat list' to see them).
 
-The menu appears as a tmux popup for quick session switching.`,
-	RunE: runAgents,
+Use the --menu flag to display an interactive popup menu for quick session switching.`,
+	RunE: runAgentsList,
 }
 
-var agentsListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List agent sessions (no popup)",
-	Long:  `List all agent sessions to stdout without the popup menu.`,
-	RunE:  runAgentsList,
+var agentsMenuCmd = &cobra.Command{
+	Use:   "menu",
+	Short: "Display interactive popup menu",
+	Long:  `Display an interactive tmux popup menu for quick session switching.`,
+	RunE:  runAgentsMenu,
 }
 
 var agentsCheckCmd = &cobra.Command{
@@ -116,10 +116,10 @@ var (
 )
 
 func init() {
-	agentsCmd.PersistentFlags().BoolVarP(&agentsAllFlag, "all", "a", false, "Include polecats in the menu")
+	agentsCmd.PersistentFlags().BoolVarP(&agentsAllFlag, "all", "a", false, "Include polecats in the list/menu")
 	agentsCheckCmd.Flags().BoolVar(&agentsCheckJSON, "json", false, "Output as JSON")
 
-	agentsCmd.AddCommand(agentsListCmd)
+	agentsCmd.AddCommand(agentsMenuCmd)
 	agentsCmd.AddCommand(agentsCheckCmd)
 	agentsCmd.AddCommand(agentsFixCmd)
 	rootCmd.AddCommand(agentsCmd)
@@ -284,7 +284,7 @@ func shortcutKey(index int) string {
 	return ""
 }
 
-func runAgents(cmd *cobra.Command, args []string) error {
+func runAgentsMenu(cmd *cobra.Command, args []string) error {
 	agents, err := getAgentSessions(agentsAllFlag)
 	if err != nil {
 		return fmt.Errorf("listing sessions: %w", err)
