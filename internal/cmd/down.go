@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -452,18 +451,3 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 	return respawned
 }
 
-// isProcessRunning checks if a process with the given PID exists.
-func isProcessRunning(pid int) bool {
-	if pid <= 0 {
-		return false // Invalid PID
-	}
-	err := syscall.Kill(pid, 0)
-	if err == nil {
-		return true
-	}
-	// EPERM means process exists but we don't have permission to signal it
-	if err == syscall.EPERM {
-		return true
-	}
-	return false
-}
