@@ -779,7 +779,7 @@ func runRigBoot(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("  Starting refinery...\n")
 		refMgr := refinery.NewManager(r)
-		if err := refMgr.Start(false); err != nil { // false = background mode
+		if err := refMgr.Start(false, "", nil); err != nil { // false = background mode
 			return fmt.Errorf("starting refinery: %w", err)
 		}
 		started = append(started, "refinery")
@@ -859,7 +859,7 @@ func runRigStart(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("  Starting refinery...\n")
 			refMgr := refinery.NewManager(r)
-			if err := refMgr.Start(false); err != nil {
+			if err := refMgr.Start(false, "", nil); err != nil {
 				fmt.Printf("  %s Failed to start refinery: %v\n", style.Warning.Render("⚠"), err)
 				hasError = true
 			} else {
@@ -1437,7 +1437,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 			skipped = append(skipped, "refinery")
 		} else {
 			fmt.Printf("    Starting refinery...\n")
-			if err := refMgr.Start(false); err != nil {
+			if err := refMgr.Start(false, "", nil); err != nil {
 				fmt.Printf("    %s Failed to start refinery: %v\n", style.Warning.Render("⚠"), err)
 				startErrors = append(startErrors, fmt.Sprintf("refinery: %v", err))
 			} else {

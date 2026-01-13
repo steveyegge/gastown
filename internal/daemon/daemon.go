@@ -443,7 +443,7 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	}
 	mgr := refinery.NewManager(r)
 
-	if err := mgr.Start(false); err != nil {
+	if err := mgr.Start(false, "", nil); err != nil {
 		if err == refinery.ErrAlreadyRunning {
 			// Already running - nothing to do
 			return

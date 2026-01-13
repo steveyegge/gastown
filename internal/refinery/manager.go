@@ -104,7 +104,9 @@ func (m *Manager) Status() (*Refinery, error) {
 // Start starts the refinery.
 // If foreground is true, runs in the current process (blocking) using the Go-based polling loop.
 // Otherwise, spawns a Claude agent in a tmux session to process the merge queue.
-func (m *Manager) Start(foreground bool) error {
+// agentOverride specifies an agent alias to use instead of the town default.
+// envOverrides are KEY=VALUE environment variable overrides.
+func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []string) error {
 	ref, err := m.loadState()
 	if err != nil {
 		return err
@@ -173,9 +175,12 @@ func (m *Manager) Start(foreground bool) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
+	// Build startup command with optional agent override
 	bdActor := fmt.Sprintf("%s/refinery", m.rig.Name)
-	command := config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
+	command, err := config.BuildAgentStartupCommandWithAgentOverride("refinery", bdActor, m.rig.Path, "", agentOverride)
+	if err != nil {
+		return fmt.Errorf("building startup command: %w", err)
+	}
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
@@ -200,6 +205,12 @@ func (m *Manager) Start(foreground bool) error {
 	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
+	}
+	// Apply CLI env overrides (highest priority, non-fatal).
+	for _, override := range envOverrides {
+		if key, value, ok := strings.Cut(override, "="); ok {
+			_ = t.SetEnvironment(sessionID, key, value)
+		}
 	}
 
 	// Apply theme (non-fatal: theming failure doesn't affect operation)

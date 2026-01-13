@@ -16,9 +16,11 @@ import (
 
 // Refinery command flags
 var (
-	refineryForeground bool
-	refineryStatusJSON bool
-	refineryQueueJSON  bool
+	refineryForeground    bool
+	refineryStatusJSON    bool
+	refineryQueueJSON     bool
+	refineryAgentOverride string
+	refineryEnvOverrides  []string
 )
 
 var refineryCmd = &cobra.Command{
@@ -46,6 +48,8 @@ If rig is not specified, infers it from the current directory.
 
 Examples:
   gt refinery start greenplace
+  gt refinery start greenplace --agent new-agent
+  gt refinery start greenplace --env ANTHROPIC_MODEL=claude-3-haiku
   gt refinery start greenplace --foreground
   gt refinery start              # infer rig from cwd`,
 	Args: cobra.MaximumNArgs(1),
@@ -112,6 +116,8 @@ If rig is not specified, infers it from the current directory.
 
 Examples:
   gt refinery restart greenplace
+  gt refinery restart greenplace --agent new-agent
+  gt refinery restart greenplace --env ANTHROPIC_MODEL=claude-3-haiku
   gt refinery restart          # infer rig from cwd`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runRefineryRestart,
@@ -208,6 +214,12 @@ var refineryBlockedJSON bool
 func init() {
 	// Start flags
 	refineryStartCmd.Flags().BoolVar(&refineryForeground, "foreground", false, "Run in foreground (default: background)")
+	refineryStartCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
+	refineryStartCmd.Flags().StringArrayVar(&refineryEnvOverrides, "env", nil, "Environment variable override (KEY=VALUE, can be repeated)")
+
+	// Restart flags
+	refineryRestartCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
+	refineryRestartCmd.Flags().StringArrayVar(&refineryEnvOverrides, "env", nil, "Environment variable override (KEY=VALUE, can be repeated)")
 
 	// Status flags
 	refineryStatusCmd.Flags().BoolVar(&refineryStatusJSON, "json", false, "Output as JSON")
@@ -277,7 +289,7 @@ func runRefineryStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Starting refinery for %s...\n", rigName)
 
-	if err := mgr.Start(refineryForeground); err != nil {
+	if err := mgr.Start(refineryForeground, refineryAgentOverride, refineryEnvOverrides); err != nil {
 		if err == refinery.ErrAlreadyRunning {
 			fmt.Printf("%s Refinery is already running\n", style.Dim.Render("⚠"))
 			return nil
@@ -490,7 +502,7 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 	if !running {
 		// Auto-start if not running
 		fmt.Printf("Refinery not running for %s, starting...\n", rigName)
-		if err := mgr.Start(false); err != nil {
+		if err := mgr.Start(false, "", nil); err != nil {
 			return fmt.Errorf("starting refinery: %w", err)
 		}
 		fmt.Printf("%s Refinery started\n", style.Bold.Render("✓"))
@@ -519,7 +531,7 @@ func runRefineryRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start fresh
-	if err := mgr.Start(false); err != nil {
+	if err := mgr.Start(false, refineryAgentOverride, refineryEnvOverrides); err != nil {
 		return fmt.Errorf("starting refinery: %w", err)
 	}
 
