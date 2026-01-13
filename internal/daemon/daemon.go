@@ -250,10 +250,13 @@ func (d *Daemon) getDeaconSessionName() string {
 func (d *Daemon) ensureBootRunning() {
 	b := boot.New(d.config.TownRoot)
 
-	// Check if Boot is already running (recent marker)
-	if b.IsRunning() {
-		d.logger.Println("Boot already running, skipping spawn")
-		return
+	// Kill any stale Boot session - Boot should run fresh each tick
+	// This ensures Boot doesn't get stuck and fail to manage Deacon
+	if b.IsSessionAlive() {
+		d.logger.Println("Killing stale Boot session for fresh spawn")
+		if err := b.Tmux().KillSession(boot.SessionName); err != nil {
+			d.logger.Printf("Error killing stale Boot session: %v", err)
+		}
 	}
 
 	// Check for degraded mode
