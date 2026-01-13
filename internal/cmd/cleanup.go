@@ -68,14 +68,12 @@ A stale polecat is one that:
 
 var (
 	cleanupDryRun bool
-	cleanupForce  bool
 	cleanupAll    bool
 )
 
 func init() {
 	cleanupOrphansCmd.Flags().BoolVar(&cleanupDryRun, "dry-run", false, "Show what would be done without taking action")
 	cleanupSessionsCmd.Flags().BoolVar(&cleanupDryRun, "dry-run", false, "Show what would be done without taking action")
-	cleanupSessionsCmd.Flags().BoolVar(&cleanupForce, "force", false, "Force cleanup even for running sessions")
 	cleanupStaleCmd.Flags().BoolVar(&cleanupDryRun, "dry-run", false, "Show what would be done without taking action")
 	cleanupStaleCmd.Flags().BoolVar(&cleanupAll, "all", false, "Clean up stale polecats from all rigs")
 
@@ -344,21 +342,27 @@ Action needed: Restart the agent or reassign the work.`,
 }
 
 func extractRigFromAgentID(agentID string) string {
-	// Format: gt-<rig>-polecat-<name> → <rig>
-	parts := strings.Split(agentID, "-")
-	if len(parts) >= 3 {
-		return parts[1]
+	// Format: gt-<rig>-polecat-<name> where name may contain hyphens
+	// Find "-polecat-" and extract rig between "gt-" and "-polecat-"
+	idx := strings.Index(agentID, "-polecat-")
+	if idx == -1 {
+		return ""
 	}
-	return ""
+	// agentID starts with "gt-", so rig is from position 3 to idx
+	if len(agentID) < 3 || agentID[:3] != "gt-" {
+		return ""
+	}
+	return agentID[3:idx]
 }
 
 func extractPolecatNameFromAgentID(agentID string) string {
-	// Format: gt-<rig>-polecat-<name> → <name>
-	parts := strings.Split(agentID, "-")
-	if len(parts) >= 4 && parts[2] == "polecat" {
-		return parts[3]
+	// Format: gt-<rig>-polecat-<name> where name may contain hyphens
+	// Find "-polecat-" and take everything after
+	idx := strings.Index(agentID, "-polecat-")
+	if idx == -1 {
+		return ""
 	}
-	return ""
+	return agentID[idx+9:] // len("-polecat-") = 9
 }
 
 func getKnownRigs(townRoot string) ([]string, error) {
