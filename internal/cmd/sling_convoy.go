@@ -20,6 +20,19 @@ func slingGenerateShortID() string {
 	return strings.ToLower(base32.StdEncoding.EncodeToString(b)[:5])
 }
 
+// escapeSQLString escapes a string for safe use in SQL single-quoted literals.
+// Prevents SQL injection by doubling single quotes (standard SQL escape).
+//
+// This follows the same pattern used in:
+//   - convoy.go (safeConvoyID, safeID)
+//   - daemon/convoy_watcher.go (safeIssueID)
+//   - web/fetcher.go (safeConvoyID)
+//
+// Note: Does not escape LIKE wildcards (%, _) as bead IDs don't contain them.
+func escapeSQLString(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
 // isTrackedByConvoy checks if an issue is already being tracked by a convoy.
 // Returns the convoy ID if tracked, empty string otherwise.
 func isTrackedByConvoy(beadID string) string {
@@ -35,6 +48,8 @@ func isTrackedByConvoy(beadID string) string {
 
 	// Query dependencies where this bead is being tracked
 	// Also check for external reference format: external:rig:issue-id
+	// Escape beadID to prevent SQL injection
+	safeBeadID := escapeSQLString(beadID)
 	query := fmt.Sprintf(`
 		SELECT d.issue_id
 		FROM dependencies d
@@ -43,7 +58,7 @@ func isTrackedByConvoy(beadID string) string {
 		AND i.issue_type = 'convoy'
 		AND (d.depends_on_id = '%s' OR d.depends_on_id LIKE '%%:%s')
 		LIMIT 1
-	`, beadID, beadID)
+	`, safeBeadID, safeBeadID)
 
 	queryCmd := exec.Command("sqlite3", dbPath, query)
 	out, err := queryCmd.Output()

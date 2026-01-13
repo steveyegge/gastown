@@ -652,6 +652,154 @@ exit 0
 	}
 }
 
+// TestEscapeSQLString tests the SQL escaping function that prevents SQL injection.
+func TestEscapeSQLString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// Normal strings - no change
+		{
+			name:     "simple bead ID",
+			input:    "gt-abc123",
+			expected: "gt-abc123",
+		},
+		{
+			name:     "hq bead ID",
+			input:    "hq-cv-xyz789",
+			expected: "hq-cv-xyz789",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+
+		// SQL injection attempts - quotes escaped
+		{
+			name:     "single quote injection",
+			input:    "gt-abc'; DROP TABLE issues; --",
+			expected: "gt-abc''; DROP TABLE issues; --",
+		},
+		{
+			name:     "multiple quotes",
+			input:    "test'''value",
+			expected: "test''''''value",
+		},
+		{
+			name:     "quote at start",
+			input:    "'malicious",
+			expected: "''malicious",
+		},
+		{
+			name:     "quote at end",
+			input:    "value'",
+			expected: "value''",
+		},
+		{
+			name:     "union injection attempt",
+			input:    "' UNION SELECT * FROM users --",
+			expected: "'' UNION SELECT * FROM users --",
+		},
+		{
+			name:     "or 1=1 injection",
+			input:    "' OR '1'='1",
+			expected: "'' OR ''1''=''1",
+		},
+
+		// Edge cases
+		{
+			name:     "only quotes",
+			input:    "'''",
+			expected: "''''''",
+		},
+		{
+			name:     "spaces and quotes",
+			input:    "test ' value ' end",
+			expected: "test '' value '' end",
+		},
+		{
+			name:     "unicode with quote",
+			input:    "日本語'test",
+			expected: "日本語''test",
+		},
+		{
+			name:     "double quotes unchanged",
+			input:    `test"value`,
+			expected: `test"value`,
+		},
+		{
+			name:     "backslash unchanged",
+			input:    `test\value`,
+			expected: `test\value`,
+		},
+		{
+			name:     "null byte in string",
+			input:    "test\x00value",
+			expected: "test\x00value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := escapeSQLString(tt.input)
+			if result != tt.expected {
+				t.Errorf("escapeSQLString(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestEscapeSQLStringInQueryContext tests that escaped strings work correctly
+// when embedded in SQL queries (the actual use case in isTrackedByConvoy).
+func TestEscapeSQLStringInQueryContext(t *testing.T) {
+	tests := []struct {
+		name    string
+		beadID  string
+		wantSafe bool // true if the resulting query is safe
+	}{
+		{
+			name:     "normal bead ID produces safe query",
+			beadID:   "gt-abc123",
+			wantSafe: true,
+		},
+		{
+			name:     "injection attempt is neutralized",
+			beadID:   "gt-abc'; DROP TABLE issues; --",
+			wantSafe: true, // quote is escaped, so injection fails
+		},
+		{
+			name:     "external reference format",
+			beadID:   "external:gt-mol:gt-mol-xyz",
+			wantSafe: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			safe := escapeSQLString(tt.beadID)
+			// Build the query as it would be built in isTrackedByConvoy
+			query := "SELECT d.issue_id FROM dependencies d WHERE d.depends_on_id = '" + safe + "'"
+
+			// A safe query should have balanced quotes after the escaping
+			// Count quotes: should be even (original 2 from query + 2*N from escaped input)
+			quoteCount := 0
+			for _, c := range query {
+				if c == '\'' {
+					quoteCount++
+				}
+			}
+
+			isBalanced := quoteCount%2 == 0
+			if isBalanced != tt.wantSafe {
+				t.Errorf("query safety check failed for beadID %q:\n  escaped: %q\n  query: %s\n  quote count: %d (balanced: %v, want safe: %v)",
+					tt.beadID, safe, query, quoteCount, isBalanced, tt.wantSafe)
+			}
+		})
+	}
+}
+
 // TestLooksLikeBeadID tests the bead ID pattern recognition function.
 // This ensures gt sling accepts bead IDs even when routing-based verification fails.
 // Fixes: gt sling bd-ka761 failing with 'not a valid bead or formula'
