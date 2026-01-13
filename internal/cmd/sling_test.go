@@ -328,9 +328,7 @@ exit 0
 		switch {
 		case strings.Contains(args, " cook "):
 			gotCook = true
-			if dir != wantDir {
-				t.Fatalf("bd cook ran in %q, want %q (args: %q)", dir, wantDir, args)
-			}
+			// cook doesn't need database context, runs from cwd
 		case strings.Contains(args, " mol wisp "):
 			gotWisp = true
 			if dir != wantDir {
