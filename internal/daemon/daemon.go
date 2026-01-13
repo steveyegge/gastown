@@ -875,7 +875,7 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 
 	// Launch Claude with environment exported inline
 	// Pass rigPath so rig agent settings are honored (not town-level defaults)
-	startCmd := config.BuildStartupCommand(envVars, rigPath, "")
+	startCmd := config.BuildStartupCommand(envVars, rigPath, "", "polecat")
 	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
 		return fmt.Errorf("sending startup command: %w", err)
 	}

@@ -1184,7 +1184,7 @@ func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "witness"}, rigPath, "")
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "witness"}, rigPath, "", "witness")
 	if !strings.Contains(cmd, "codex") {
 		t.Fatalf("expected rig agent (codex) in command: %q", cmd)
 	}
