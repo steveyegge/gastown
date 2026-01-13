@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+    "context"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -39,6 +40,13 @@ var (
 
 	// Migrate subcommand flags
 	migrateDryRun bool
+)
+
+const (
+	timeoutTmuxQuery = 5 * time.Second
+	timeoutBdRead    = 30 * time.Second
+	timeoutBdWrite   = 30 * time.Second
+	timeoutBdBatch   = 60 * time.Second
 )
 
 var costsCmd = &cobra.Command{
@@ -418,7 +426,10 @@ func querySessionEventsFromLocation(location string) ([]CostEntry, error) {
 		"--json",
 	}
 
-	listCmd := exec.Command("bd", listArgs...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutBdRead)
+	defer cancel()
+
+	listCmd := exec.CommandContext(ctx, "bd", listArgs...)
 	listCmd.Dir = location
 	listOutput, err := listCmd.Output()
 	if err != nil {
@@ -442,7 +453,10 @@ func querySessionEventsFromLocation(location string) ([]CostEntry, error) {
 		showArgs = append(showArgs, item.ID)
 	}
 
-	showCmd := exec.Command("bd", showArgs...)
+	ctxShow, cancelShow := context.WithTimeout(context.Background(), timeoutBdRead)
+	defer cancelShow()
+
+	showCmd := exec.CommandContext(ctxShow, "bd", showArgs...)
 	showCmd.Dir = location
 	showOutput, err := showCmd.Output()
 	if err != nil {
@@ -502,7 +516,10 @@ func queryDigestBeads(days int) ([]CostEntry, error) {
 		"--json",
 	}
 
-	listCmd := exec.Command("bd", listArgs...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutBdRead)
+	defer cancel()
+
+	listCmd := exec.CommandContext(ctx, "bd", listArgs...)
 	listOutput, err := listCmd.Output()
 	if err != nil {
 		return nil, nil
@@ -523,7 +540,10 @@ func queryDigestBeads(days int) ([]CostEntry, error) {
 		showArgs = append(showArgs, item.ID)
 	}
 
-	showCmd := exec.Command("bd", showArgs...)
+	ctxShow, cancelShow := context.WithTimeout(context.Background(), timeoutBdRead)
+	defer cancelShow()
+
+	showCmd := exec.CommandContext(ctxShow, "bd", showArgs...)
 	showOutput, err := showCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("showing events: %w", err)
@@ -807,7 +827,10 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 	// The bd command will auto-detect the correct rig from cwd.
 
 	// Execute bd create
-	bdCmd := exec.Command("bd", bdArgs...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutBdWrite)
+	defer cancel()
+
+	bdCmd := exec.CommandContext(ctx, "bd", bdArgs...)
 	output, err := bdCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("creating session cost wisp: %w\nOutput: %s", err, string(output))
@@ -818,7 +841,10 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 	// Auto-close session cost wisps immediately after creation.
 	// These are informational records that don't need to stay open.
 	// The wisp data is preserved and queryable until digested.
-	closeCmd := exec.Command("bd", "close", wispID, "--reason=auto-closed session cost wisp")
+	ctxClose, cancelClose := context.WithTimeout(context.Background(), timeoutBdWrite)
+	defer cancelClose()
+
+	closeCmd := exec.CommandContext(ctxClose, "bd", "close", wispID, "--reason=auto-closed session cost wisp")
 	if closeErr := closeCmd.Run(); closeErr != nil {
 		// Non-fatal: wisp was created, just couldn't auto-close
 		fmt.Fprintf(os.Stderr, "warning: could not auto-close session cost wisp %s: %v\n", wispID, closeErr)
@@ -881,7 +907,10 @@ func deriveSessionName() string {
 // Note: We don't check TMUX env var because it may not be inherited when Claude Code
 // runs bash commands, even though we are inside a tmux session.
 func detectCurrentTmuxSession() string {
-	cmd := exec.Command("tmux", "display-message", "-p", "#S")
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutTmuxQuery)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "tmux", "display-message", "-p", "#S")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -1046,7 +1075,10 @@ func runCostsDigest(cmd *cobra.Command, args []string) error {
 // querySessionCostWisps queries ephemeral session.ended events for a target date.
 func querySessionCostWisps(targetDate time.Time) ([]CostEntry, error) {
 	// List all wisps including closed ones
-	listCmd := exec.Command("bd", "mol", "wisp", "list", "--all", "--json")
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutBdRead)
+	defer cancel()
+
+	listCmd := exec.CommandContext(ctx, "bd", "mol", "wisp", "list", "--all", "--json")
 	listOutput, err := listCmd.Output()
 	if err != nil {
 		// No wisps database or command failed
@@ -1071,7 +1103,10 @@ func querySessionCostWisps(targetDate time.Time) ([]CostEntry, error) {
 		showArgs = append(showArgs, wisp.ID)
 	}
 
-	showCmd := exec.Command("bd", showArgs...)
+	ctxShow, cancelShow := context.WithTimeout(context.Background(), timeoutBdRead)
+	defer cancelShow()
+
+	showCmd := exec.CommandContext(ctxShow, "bd", showArgs...)
 	showOutput, err := showCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("showing wisps: %w", err)
@@ -1181,7 +1216,10 @@ func createCostDigestBead(digest CostDigest) (string, error) {
 		"--silent",
 	}
 
-	bdCmd := exec.Command("bd", bdArgs...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutBdWrite)
+	defer cancel()
+
+	bdCmd := exec.CommandContext(ctx, "bd", bdArgs...)
 	output, err := bdCmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("creating digest bead: %w\nOutput: %s", err, string(output))
@@ -1190,7 +1228,10 @@ func createCostDigestBead(digest CostDigest) (string, error) {
 	digestID := strings.TrimSpace(string(output))
 
 	// Auto-close the digest (it's an audit record, not work)
-	closeCmd := exec.Command("bd", "close", digestID, "--reason=daily cost digest")
+	ctxClose, cancelClose := context.WithTimeout(context.Background(), timeoutBdWrite)
+	defer cancelClose()
+
+	closeCmd := exec.CommandContext(ctxClose, "bd", "close", digestID, "--reason=daily cost digest")
 	_ = closeCmd.Run() // Best effort
 
 	return digestID, nil
@@ -1199,7 +1240,10 @@ func createCostDigestBead(digest CostDigest) (string, error) {
 // deleteSessionCostWisps deletes ephemeral session.ended wisps for a target date.
 func deleteSessionCostWisps(targetDate time.Time) (int, error) {
 	// List all wisps
-	listCmd := exec.Command("bd", "mol", "wisp", "list", "--all", "--json")
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutBdRead)
+	defer cancel()
+
+	listCmd := exec.CommandContext(ctx, "bd", "mol", "wisp", "list", "--all", "--json")
 	listOutput, err := listCmd.Output()
 	if err != nil {
 		if costsVerbose {
@@ -1220,7 +1264,10 @@ func deleteSessionCostWisps(targetDate time.Time) (int, error) {
 
 	for _, wisp := range wispList.Wisps {
 		// Get full wisp details to check if it's a session.ended event
-		showCmd := exec.Command("bd", "show", wisp.ID, "--json")
+		ctxShow, cancelShow := context.WithTimeout(context.Background(), timeoutBdRead)
+		defer cancelShow()
+
+		showCmd := exec.CommandContext(ctxShow, "bd", "show", wisp.ID, "--json")
 		showOutput, err := showCmd.Output()
 		if err != nil {
 			if costsVerbose {
@@ -1280,7 +1327,11 @@ func deleteSessionCostWisps(targetDate time.Time) (int, error) {
 
 	// Batch delete all wisps in a single subprocess call
 	burnArgs := append([]string{"mol", "burn", "--force"}, wispIDsToDelete...)
-	burnCmd := exec.Command("bd", burnArgs...)
+
+	ctxBurn, cancelBurn := context.WithTimeout(context.Background(), timeoutBdBatch)
+	defer cancelBurn()
+
+	burnCmd := exec.CommandContext(ctxBurn, "bd", burnArgs...)
 	if burnErr := burnCmd.Run(); burnErr != nil {
 		return 0, fmt.Errorf("batch burn failed: %w", burnErr)
 	}
@@ -1299,7 +1350,10 @@ func runCostsMigrate(cmd *cobra.Command, args []string) error {
 		"--json",
 	}
 
-	listCmd := exec.Command("bd", listArgs...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutBdRead)
+	defer cancel()
+
+	listCmd := exec.CommandContext(ctx, "bd", listArgs...)
 	listOutput, err := listCmd.Output()
 	if err != nil {
 		fmt.Println(style.Dim.Render("No events found or bd command failed"))
@@ -1322,7 +1376,10 @@ func runCostsMigrate(cmd *cobra.Command, args []string) error {
 		showArgs = append(showArgs, item.ID)
 	}
 
-	showCmd := exec.Command("bd", showArgs...)
+	ctxShow, cancelShow := context.WithTimeout(context.Background(), timeoutBdRead)
+	defer cancelShow()
+
+	showCmd := exec.CommandContext(ctxShow, "bd", showArgs...)
 	showOutput, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("showing events: %w", err)
@@ -1367,7 +1424,10 @@ func runCostsMigrate(cmd *cobra.Command, args []string) error {
 	// Close all open session.ended events
 	closedMigrated := 0
 	for _, event := range openEvents {
-		closeCmd := exec.Command("bd", "close", event.ID, "--reason=migrated to wisp architecture")
+		ctxClose, cancelClose := context.WithTimeout(context.Background(), timeoutBdWrite)
+		defer cancelClose()
+
+		closeCmd := exec.CommandContext(ctxClose, "bd", "close", event.ID, "--reason=migrated to wisp architecture")
 		if err := closeCmd.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not close %s: %v\n", event.ID, err)
 			continue
