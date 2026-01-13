@@ -5,10 +5,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// filterGTEnv removes GT_* and BD_* environment variables to isolate test subprocess.
+// This prevents tests from inheriting the parent workspace's Gas Town configuration.
+func filterGTEnv(env []string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, "GT_") || strings.HasPrefix(e, "BD_") {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	return filtered
+}
 
 // TestQuerySessionEvents_FindsEventsFromAllLocations verifies that querySessionEvents
 // finds session.ended events from both town-level and rig-level beads databases.
@@ -31,6 +45,13 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 		t.Skip("bd not installed, skipping integration test")
 	}
 
+	// Skip when running inside a Gas Town workspace - this integration test
+	// creates a separate workspace and the subprocesses can interact with
+	// the parent workspace's daemon, causing hangs.
+	if os.Getenv("GT_TOWN_ROOT") != "" || os.Getenv("BD_ACTOR") != "" {
+		t.Skip("skipping integration test inside Gas Town workspace (use 'go test' outside workspace)")
+	}
+
 	// Create a temporary directory structure
 	tmpDir := t.TempDir()
 	townRoot := filepath.Join(tmpDir, "test-town")
@@ -48,8 +69,10 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	}
 
 	// Use gt install to set up the town
+	// Clear GT environment variables to isolate test from parent workspace
 	gtInstallCmd := exec.Command("gt", "install")
 	gtInstallCmd.Dir = townRoot
+	gtInstallCmd.Env = filterGTEnv(os.Environ())
 	if out, err := gtInstallCmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install: %v\n%s", err, out)
 	}
@@ -88,6 +111,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	// Add rig using gt rig add
 	rigAddCmd := exec.Command("gt", "rig", "add", "testrig", bareRepo, "--prefix=tr")
 	rigAddCmd.Dir = townRoot
+	rigAddCmd.Env = filterGTEnv(os.Environ())
 	if out, err := rigAddCmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt rig add: %v\n%s", err, out)
 	}
@@ -111,6 +135,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 		"--json",
 	)
 	townEventCmd.Dir = townRoot
+	townEventCmd.Env = filterGTEnv(os.Environ())
 	townOut, err := townEventCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("creating town event: %v\n%s", err, townOut)
@@ -127,6 +152,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 		"--json",
 	)
 	rigEventCmd.Dir = rigPath
+	rigEventCmd.Env = filterGTEnv(os.Environ())
 	rigOut, err := rigEventCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("creating rig event: %v\n%s", err, rigOut)
@@ -136,6 +162,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	// Verify events are in separate databases by querying each directly
 	townListCmd := exec.Command("bd", "list", "--type=event", "--all", "--json")
 	townListCmd.Dir = townRoot
+	townListCmd.Env = filterGTEnv(os.Environ())
 	townListOut, err := townListCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("listing town events: %v\n%s", err, townListOut)
@@ -143,6 +170,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 
 	rigListCmd := exec.Command("bd", "list", "--type=event", "--all", "--json")
 	rigListCmd.Dir = rigPath
+	rigListCmd.Env = filterGTEnv(os.Environ())
 	rigListOut, err := rigListCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("listing rig events: %v\n%s", err, rigListOut)

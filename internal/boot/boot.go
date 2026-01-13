@@ -171,8 +171,22 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
 
-	// Create new session in boot directory (not deacon dir) so Claude reads Boot's CLAUDE.md
-	if err := b.tmux.NewSession(SessionName, b.bootDir); err != nil {
+	// Build startup command with optional agent override
+	// The "gt boot triage" prompt tells Boot to immediately start triage (GUPP principle)
+	var startCmd string
+	if agentOverride != "" {
+		var err error
+		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "deacon-boot", "", "gt boot triage", agentOverride)
+		if err != nil {
+			return fmt.Errorf("building startup command with agent override: %w", err)
+		}
+	} else {
+		startCmd = config.BuildAgentStartupCommand("boot", "deacon-boot", "", "gt boot triage")
+	}
+
+	// Create session with command directly to avoid send-keys race condition.
+	// See: https://github.com/anthropics/gastown/issues/280
+	if err := b.tmux.NewSessionWithCommand(SessionName, b.bootDir, startCmd); err != nil {
 		return fmt.Errorf("creating boot session: %w", err)
 	}
 
@@ -184,28 +198,6 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	})
 	for k, v := range envVars {
 		_ = b.tmux.SetEnvironment(SessionName, k, v)
-	}
-
-	// Launch Claude with environment exported inline and initial triage prompt
-	// The "gt boot triage" prompt tells Boot to immediately start triage (GUPP principle)
-	var startCmd string
-	if agentOverride != "" {
-		var err error
-		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "deacon-boot", "", "gt boot triage", agentOverride)
-		if err != nil {
-			_ = b.tmux.KillSession(SessionName)
-			return fmt.Errorf("building startup command with agent override: %w", err)
-		}
-	} else {
-		startCmd = config.BuildAgentStartupCommand("boot", "deacon-boot", "", "gt boot triage")
-	}
-	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
-	if err := b.tmux.WaitForShellReady(SessionName, 5*time.Second); err != nil {
-		_ = b.tmux.KillSession(SessionName)
-		return fmt.Errorf("waiting for shell: %w", err)
-	}
-	if err := b.tmux.SendKeys(SessionName, startCmd); err != nil {
-		return fmt.Errorf("sending startup command: %w", err)
 	}
 
 	return nil
