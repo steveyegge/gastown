@@ -275,7 +275,7 @@ func (d *Daemon) ensureBootRunning() {
 
 	// Spawn Boot in a fresh tmux session
 	d.logger.Println("Spawning Boot for triage...")
-	if err := b.Spawn(); err != nil {
+	if err := b.Spawn(""); err != nil {
 		d.logger.Printf("Error spawning Boot: %v, falling back to direct Deacon check", err)
 		// Fallback: ensure Deacon is running directly
 		d.ensureDeaconRunning()
@@ -452,7 +452,7 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	}
 	mgr := refinery.NewManager(r)
 
-	if err := mgr.Start(false); err != nil {
+	if err := mgr.Start(false, ""); err != nil {
 		if err == refinery.ErrAlreadyRunning {
 			// Already running - nothing to do
 			return

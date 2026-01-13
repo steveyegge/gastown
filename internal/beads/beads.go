@@ -129,8 +129,10 @@ func NewWithBeadsDir(workDir, beadsDir string) *Beads {
 // run executes a bd command and returns stdout.
 func (b *Beads) run(args ...string) ([]byte, error) {
 	// Use --no-daemon for faster read operations (avoids daemon IPC overhead)
-	// The daemon is primarily useful for write coalescing, not reads
-	fullArgs := append([]string{"--no-daemon"}, args...)
+	// The daemon is primarily useful for write coalescing, not reads.
+	// Use --allow-stale to prevent failures when db is out of sync with JSONL
+	// (e.g., after daemon is killed during shutdown before syncing).
+	fullArgs := append([]string{"--no-daemon", "--allow-stale"}, args...)
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 

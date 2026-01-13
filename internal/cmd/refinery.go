@@ -16,9 +16,10 @@ import (
 
 // Refinery command flags
 var (
-	refineryForeground bool
-	refineryStatusJSON bool
-	refineryQueueJSON  bool
+	refineryForeground    bool
+	refineryStatusJSON    bool
+	refineryQueueJSON     bool
+	refineryAgentOverride string
 )
 
 var refineryCmd = &cobra.Command{
@@ -208,6 +209,13 @@ var refineryBlockedJSON bool
 func init() {
 	// Start flags
 	refineryStartCmd.Flags().BoolVar(&refineryForeground, "foreground", false, "Run in foreground (default: background)")
+	refineryStartCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
+
+	// Attach flags
+	refineryAttachCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
+
+	// Restart flags
+	refineryRestartCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
 
 	// Status flags
 	refineryStatusCmd.Flags().BoolVar(&refineryStatusJSON, "json", false, "Output as JSON")
@@ -277,7 +285,7 @@ func runRefineryStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Starting refinery for %s...\n", rigName)
 
-	if err := mgr.Start(refineryForeground); err != nil {
+	if err := mgr.Start(refineryForeground, refineryAgentOverride); err != nil {
 		if err == refinery.ErrAlreadyRunning {
 			fmt.Printf("%s Refinery is already running\n", style.Dim.Render("⚠"))
 			return nil
@@ -490,7 +498,7 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 	if !running {
 		// Auto-start if not running
 		fmt.Printf("Refinery not running for %s, starting...\n", rigName)
-		if err := mgr.Start(false); err != nil {
+		if err := mgr.Start(false, refineryAgentOverride); err != nil {
 			return fmt.Errorf("starting refinery: %w", err)
 		}
 		fmt.Printf("%s Refinery started\n", style.Bold.Render("✓"))
@@ -519,7 +527,7 @@ func runRefineryRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start fresh
-	if err := mgr.Start(false); err != nil {
+	if err := mgr.Start(false, refineryAgentOverride); err != nil {
 		return fmt.Errorf("starting refinery: %w", err)
 	}
 

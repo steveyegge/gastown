@@ -103,7 +103,8 @@ func (m *Manager) Status() (*Refinery, error) {
 // Start starts the refinery.
 // If foreground is true, runs in the current process (blocking) using the Go-based polling loop.
 // Otherwise, spawns a Claude agent in a tmux session to process the merge queue.
-func (m *Manager) Start(foreground bool) error {
+// The agentOverride parameter allows specifying an agent alias to use instead of the town default.
+func (m *Manager) Start(foreground bool, agentOverride string) error {
 	ref, err := m.loadState()
 	if err != nil {
 		return err
@@ -174,7 +175,16 @@ func (m *Manager) Start(foreground bool) error {
 
 	// Build startup command first
 	bdActor := fmt.Sprintf("%s/refinery", m.rig.Name)
-	command := config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
+	var command string
+	if agentOverride != "" {
+		var err error
+		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", bdActor, m.rig.Path, "", agentOverride)
+		if err != nil {
+			return fmt.Errorf("building startup command with agent override: %w", err)
+		}
+	} else {
+		command = config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
+	}
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
@@ -744,9 +754,16 @@ func (m *Manager) RejectMR(idOrBranch string, reason string, notify bool) (*Merg
 		return nil, fmt.Errorf("%w: MR is already closed with reason: %s", ErrClosedImmutable, mr.CloseReason)
 	}
 
-	// Close with rejected reason
+	// Close the bead in storage with the rejection reason
+	b := beads.New(m.rig.BeadsPath())
+	if err := b.CloseWithReason("rejected: "+reason, mr.ID); err != nil {
+		return nil, fmt.Errorf("failed to close MR bead: %w", err)
+	}
+
+	// Update in-memory state for return value
 	if err := mr.Close(CloseReasonRejected); err != nil {
-		return nil, fmt.Errorf("failed to close MR: %w", err)
+		// Non-fatal: bead is already closed, just log
+		_, _ = fmt.Fprintf(m.output, "Warning: failed to update MR state: %v\n", err)
 	}
 	mr.Error = reason
 

@@ -109,9 +109,8 @@ func EnsureBdDaemonHealth(workDir string) string {
 
 // restartBdDaemons restarts all bd daemons.
 func restartBdDaemons() error { //nolint:unparam // error return kept for future use
-	// Stop all daemons first
-	stopCmd := exec.Command("bd", "daemon", "killall")
-	_ = stopCmd.Run() // Ignore errors - daemons might not be running
+	// Stop all daemons first using pkill to avoid auto-start side effects
+	_ = exec.Command("pkill", "-TERM", "-f", "bd daemon").Run()
 
 	// Give time for cleanup
 	time.Sleep(200 * time.Millisecond)
@@ -159,39 +158,20 @@ func StopAllBdProcesses(dryRun, force bool) (int, int, error) {
 }
 
 // CountBdDaemons returns count of running bd daemons.
+// Uses pgrep instead of "bd daemon list" to avoid triggering daemon auto-start
+// during shutdown verification.
 func CountBdDaemons() int {
-	listCmd := exec.Command("bd", "daemon", "list", "--json")
-	output, err := listCmd.Output()
+	// Use pgrep -f with wc -l for cross-platform compatibility
+	// (macOS pgrep doesn't support -c flag)
+	cmd := exec.Command("sh", "-c", "pgrep -f 'bd daemon' 2>/dev/null | wc -l")
+	output, err := cmd.Output()
 	if err != nil {
 		return 0
 	}
-	return parseBdDaemonCount(output)
+	count, _ := strconv.Atoi(strings.TrimSpace(string(output)))
+	return count
 }
 
-// parseBdDaemonCount parses bd daemon list --json output.
-func parseBdDaemonCount(output []byte) int {
-	if len(output) == 0 {
-		return 0
-	}
-
-	var daemons []any
-	if err := json.Unmarshal(output, &daemons); err == nil {
-		return len(daemons)
-	}
-
-	var wrapper struct {
-		Daemons []any `json:"daemons"`
-		Count   int   `json:"count"`
-	}
-	if err := json.Unmarshal(output, &wrapper); err == nil {
-		if wrapper.Count > 0 {
-			return wrapper.Count
-		}
-		return len(wrapper.Daemons)
-	}
-
-	return 0
-}
 
 func stopBdDaemons(force bool) (int, int) {
 	before := CountBdDaemons()
@@ -199,19 +179,11 @@ func stopBdDaemons(force bool) (int, int) {
 		return 0, 0
 	}
 
-	killCmd := exec.Command("bd", "daemon", "killall")
-	_ = killCmd.Run()
-
-	time.Sleep(100 * time.Millisecond)
-
-	after := CountBdDaemons()
-	if after == 0 {
-		return before, 0
-	}
-
+	// Use pkill directly instead of "bd daemon killall" to avoid triggering
+	// daemon auto-start as a side effect of running bd commands.
 	// Note: pkill -f pattern may match unintended processes in rare cases
 	// (e.g., editors with "bd daemon" in file content). This is acceptable
-	// as a fallback when bd daemon killall fails.
+	// given the alternative of respawning daemons during shutdown.
 	if force {
 		_ = exec.Command("pkill", "-9", "-f", "bd daemon").Run()
 	} else {

@@ -65,7 +65,8 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 
 	townBeads := filepath.Join(townRoot, ".beads")
 
-	// Generate convoy ID with cv- prefix
+	// Generate convoy ID with hq-cv- prefix for visual distinction
+	// The hq-cv- prefix is registered in routes during gt install
 	convoyID := fmt.Sprintf("hq-cv-%s", slingGenerateShortID())
 
 	// Create convoy with title "Work: <issue-title>"

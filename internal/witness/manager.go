@@ -153,22 +153,27 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
-	// Create new tmux session
-	if err := t.NewSession(sessionID, witnessDir); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
-	theme := tmux.AssignTheme(m.rig.Name)
-	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "witness", "witness")
-
 	roleConfig, err := m.roleConfig()
 	if err != nil {
-		_ = t.KillSession(sessionID)
 		return err
 	}
 
 	townRoot := m.townRoot()
+
+	// Build startup command first
+	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
+	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
+	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
+	command, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig)
+	if err != nil {
+		return err
+	}
+
+	// Create session with command directly to avoid send-keys race condition.
+	// See: https://github.com/anthropics/gastown/issues/280
+	if err := t.NewSessionWithCommand(sessionID, witnessDir, command); err != nil {
+		return fmt.Errorf("creating tmux session: %w", err)
+	}
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
@@ -192,6 +197,10 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		}
 	}
 
+	// Apply Gas Town theming (non-fatal: theming failure doesn't affect operation)
+	theme := tmux.AssignTheme(m.rig.Name)
+	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "witness", "witness")
+
 	// Update state to running
 	now := time.Now()
 	w.State = StateRunning
@@ -201,26 +210,6 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	if err := m.saveState(w); err != nil {
 		_ = t.KillSession(sessionID) // best-effort cleanup on state save failure
 		return fmt.Errorf("saving state: %w", err)
-	}
-
-	// Launch Claude directly (no shell respawn loop)
-	// Restarts are handled by daemon via LIFECYCLE mail or deacon health-scan
-	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
-	command, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig)
-	if err != nil {
-		_ = t.KillSession(sessionID)
-		return err
-	}
-	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
-	if err := t.WaitForShellReady(sessionID, 5*time.Second); err != nil {
-		_ = t.KillSession(sessionID)
-		return fmt.Errorf("waiting for shell: %w", err)
-	}
-	if err := t.SendKeys(sessionID, command); err != nil {
-		_ = t.KillSession(sessionID) // best-effort cleanup
-		return fmt.Errorf("starting Claude agent: %w", err)
 	}
 
 	// Wait for Claude to start (non-fatal).

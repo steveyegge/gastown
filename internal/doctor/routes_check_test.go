@@ -16,7 +16,7 @@ func TestRoutesCheck_MissingTownRoute(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Create routes.jsonl with only a rig route (no hq- route)
+		// Create routes.jsonl with only a rig route (no hq- or hq-cv- routes)
 		routesPath := filepath.Join(beadsDir, "routes.jsonl")
 		routesContent := `{"prefix": "gt-", "path": "gastown/mayor/rig"}
 `
@@ -37,8 +37,8 @@ func TestRoutesCheck_MissingTownRoute(t *testing.T) {
 			t.Errorf("expected StatusWarning, got %v: %s", result.Status, result.Message)
 		}
 		// When no rigs.json exists, the message comes from the early return path
-		if result.Message != "Town root route is missing" {
-			t.Errorf("expected 'Town root route is missing', got %s", result.Message)
+		if result.Message != "Required town routes are missing" {
+			t.Errorf("expected 'Required town routes are missing', got %s", result.Message)
 		}
 	})
 
@@ -51,9 +51,10 @@ func TestRoutesCheck_MissingTownRoute(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Create routes.jsonl with hq- route
+		// Create routes.jsonl with both hq- and hq-cv- routes
 		routesPath := filepath.Join(beadsDir, "routes.jsonl")
 		routesContent := `{"prefix": "hq-", "path": "."}
+{"prefix": "hq-cv-", "path": "."}
 `
 		if err := os.WriteFile(routesPath, []byte(routesContent), 0644); err != nil {
 			t.Fatal(err)
@@ -103,7 +104,7 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 			t.Fatalf("Fix failed: %v", err)
 		}
 
-		// Verify routes.jsonl now contains hq- route
+		// Verify routes.jsonl now contains both hq- and hq-cv- routes
 		content, err := os.ReadFile(routesPath)
 		if err != nil {
 			t.Fatalf("Failed to read routes.jsonl: %v", err)
@@ -115,6 +116,7 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 
 		contentStr := string(content)
 		if contentStr != `{"prefix":"hq-","path":"."}
+{"prefix":"hq-cv-","path":"."}
 ` {
 			t.Errorf("unexpected routes.jsonl content: %s", contentStr)
 		}
@@ -141,7 +143,7 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Create routes.jsonl with only a rig route (no hq- route)
+		// Create routes.jsonl with only a rig route (no hq- or hq-cv- routes)
 		routesPath := filepath.Join(beadsDir, "routes.jsonl")
 		routesContent := `{"prefix": "my-", "path": "myrig/mayor/rig"}
 `
@@ -162,16 +164,17 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 			t.Fatalf("Fix failed: %v", err)
 		}
 
-		// Verify routes.jsonl now contains both routes
+		// Verify routes.jsonl now contains all routes
 		content, err := os.ReadFile(routesPath)
 		if err != nil {
 			t.Fatalf("Failed to read routes.jsonl: %v", err)
 		}
 
 		contentStr := string(content)
-		// Should have both the original rig route and the new hq- route
+		// Should have the original rig route plus both hq- and hq-cv- routes
 		if contentStr != `{"prefix":"my-","path":"myrig/mayor/rig"}
 {"prefix":"hq-","path":"."}
+{"prefix":"hq-cv-","path":"."}
 ` {
 			t.Errorf("unexpected routes.jsonl content: %s", contentStr)
 		}
@@ -186,9 +189,10 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Create routes.jsonl with hq- route already present
+		// Create routes.jsonl with both hq- and hq-cv- routes already present
 		routesPath := filepath.Join(beadsDir, "routes.jsonl")
 		originalContent := `{"prefix": "hq-", "path": "."}
+{"prefix": "hq-cv-", "path": "."}
 `
 		if err := os.WriteFile(routesPath, []byte(originalContent), 0644); err != nil {
 			t.Fatal(err)
@@ -246,12 +250,12 @@ func TestRoutesCheck_CorruptedRoutesJsonl(t *testing.T) {
 		result := check.Run(ctx)
 
 		// Corrupted/malformed lines are skipped, resulting in empty routes
-		// This triggers the "Town root route is missing" warning
+		// This triggers the "Required town routes are missing" warning
 		if result.Status != StatusWarning {
 			t.Errorf("expected StatusWarning, got %v: %s", result.Status, result.Message)
 		}
-		if result.Message != "Town root route is missing" {
-			t.Errorf("expected 'Town root route is missing', got %s", result.Message)
+		if result.Message != "Required town routes are missing" {
+			t.Errorf("expected 'Required town routes are missing', got %s", result.Message)
 		}
 	})
 
@@ -283,7 +287,7 @@ func TestRoutesCheck_CorruptedRoutesJsonl(t *testing.T) {
 			t.Fatalf("Fix failed: %v", err)
 		}
 
-		// Verify routes.jsonl now contains hq- route
+		// Verify routes.jsonl now contains both hq- and hq-cv- routes
 		content, err := os.ReadFile(routesPath)
 		if err != nil {
 			t.Fatalf("Failed to read routes.jsonl: %v", err)
@@ -291,6 +295,7 @@ func TestRoutesCheck_CorruptedRoutesJsonl(t *testing.T) {
 
 		contentStr := string(content)
 		if contentStr != `{"prefix":"hq-","path":"."}
+{"prefix":"hq-cv-","path":"."}
 ` {
 			t.Errorf("unexpected routes.jsonl content after fix: %s", contentStr)
 		}

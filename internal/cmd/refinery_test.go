@@ -1,0 +1,45 @@
+package cmd
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestRefineryStartAgentFlag(t *testing.T) {
+	flag := refineryStartCmd.Flags().Lookup("agent")
+	if flag == nil {
+		t.Fatal("expected refinery start to define --agent flag")
+	}
+	if flag.DefValue != "" {
+		t.Errorf("expected default agent override to be empty, got %q", flag.DefValue)
+	}
+	if !strings.Contains(flag.Usage, "overrides town default") {
+		t.Errorf("expected --agent usage to mention overrides town default, got %q", flag.Usage)
+	}
+}
+
+func TestRefineryAttachAgentFlag(t *testing.T) {
+	flag := refineryAttachCmd.Flags().Lookup("agent")
+	if flag == nil {
+		t.Fatal("expected refinery attach to define --agent flag")
+	}
+	if flag.DefValue != "" {
+		t.Errorf("expected default agent override to be empty, got %q", flag.DefValue)
+	}
+	if !strings.Contains(flag.Usage, "overrides town default") {
+		t.Errorf("expected --agent usage to mention overrides town default, got %q", flag.Usage)
+	}
+}
+
+func TestRefineryRestartAgentFlag(t *testing.T) {
+	flag := refineryRestartCmd.Flags().Lookup("agent")
+	if flag == nil {
+		t.Fatal("expected refinery restart to define --agent flag")
+	}
+	if flag.DefValue != "" {
+		t.Errorf("expected default agent override to be empty, got %q", flag.DefValue)
+	}
+	if !strings.Contains(flag.Usage, "overrides town default") {
+		t.Errorf("expected --agent usage to mention overrides town default, got %q", flag.Usage)
+	}
+}

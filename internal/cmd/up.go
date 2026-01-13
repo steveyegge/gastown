@@ -140,7 +140,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 
 		mgr := refinery.NewManager(r)
-		if err := mgr.Start(false); err != nil {
+		if err := mgr.Start(false, ""); err != nil {
 			if err == refinery.ErrAlreadyRunning {
 				printStatus(fmt.Sprintf("Refinery (%s)", rigName), true, mgr.SessionName())
 			} else {

@@ -479,27 +479,13 @@ func sessionToGTRole(sessionName string) string {
 
 // detectTownRootFromCwd walks up from the current directory to find the town root.
 func detectTownRootFromCwd() string {
-	cwd, err := os.Getwd()
+	// Use workspace.FindFromCwd which handles both primary (mayor/town.json)
+	// and secondary (mayor/ directory) markers
+	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return ""
 	}
-
-	dir := cwd
-	for {
-		// Check for primary marker (mayor/town.json)
-		markerPath := filepath.Join(dir, "mayor", "town.json")
-		if _, err := os.Stat(markerPath); err == nil {
-			return dir
-		}
-
-		// Move up
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
+	return townRoot
 }
 
 // handoffRemoteSession respawns a different session and optionally switches to it.

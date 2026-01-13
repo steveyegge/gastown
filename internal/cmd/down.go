@@ -387,8 +387,8 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Kill the session
-	return true, t.KillSession(sessionName)
+	// Kill the session (with explicit process termination to prevent orphans)
+	return true, t.KillSessionWithProcesses(sessionName)
 }
 
 // acquireShutdownLock prevents concurrent shutdowns.

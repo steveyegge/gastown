@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	bootStatusJSON bool
-	bootDegraded   bool
+	bootStatusJSON    bool
+	bootDegraded      bool
+	bootAgentOverride string
 )
 
 var bootCmd = &cobra.Command{
@@ -84,6 +85,7 @@ Use --degraded flag when running in degraded mode.`,
 func init() {
 	bootStatusCmd.Flags().BoolVar(&bootStatusJSON, "json", false, "Output as JSON")
 	bootTriageCmd.Flags().BoolVar(&bootDegraded, "degraded", false, "Run in degraded mode (no tmux)")
+	bootSpawnCmd.Flags().StringVar(&bootAgentOverride, "agent", "", "Agent alias to run Boot with (overrides town default)")
 
 	bootCmd.AddCommand(bootStatusCmd)
 	bootCmd.AddCommand(bootSpawnCmd)
@@ -206,7 +208,7 @@ func runBootSpawn(cmd *cobra.Command, args []string) error {
 	}
 
 	// Spawn Boot
-	if err := b.Spawn(); err != nil {
+	if err := b.Spawn(bootAgentOverride); err != nil {
 		status.Error = err.Error()
 		status.CompletedAt = time.Now()
 		status.Running = false

@@ -41,6 +41,9 @@ func TestFormatStartupNudge(t *testing.T) {
 				"deacon",
 				"<- mayor",
 				"cold-start",
+				"Check your hook and mail", // cold-start includes explicit instructions (like handoff)
+				"gt hook",
+				"gt mail inbox",
 			},
 			// No wantNot - timestamp contains ":"
 		},

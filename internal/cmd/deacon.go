@@ -351,9 +351,17 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		style.PrintWarning("Could not create deacon settings: %v", err)
 	}
 
-	// Create session in deacon directory
+	// Build startup command first
+	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "deacon", "", "", agentOverride)
+	if err != nil {
+		return fmt.Errorf("building startup command: %w", err)
+	}
+
+	// Create session with command directly to avoid send-keys race condition.
+	// See: https://github.com/anthropics/gastown/issues/280
 	fmt.Println("Starting Deacon session...")
-	if err := t.NewSession(sessionName, deaconDir); err != nil {
+	if err := t.NewSessionWithCommand(sessionName, deaconDir, startupCmd); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
@@ -372,18 +380,6 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	// Note: ConfigureGasTownSession includes cycle bindings
 	theme := tmux.DeaconTheme()
 	_ = t.ConfigureGasTownSession(sessionName, theme, "", "Deacon", "health-check")
-
-	// Launch Claude directly (no shell respawn loop)
-	// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat
-	// The startup hook handles context loading automatically
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "deacon", "", "", agentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
-	}
-	if err := t.SendKeys(sessionName, startupCmd); err != nil {
-		return fmt.Errorf("sending command: %w", err)
-	}
 
 	// Wait for Claude to start (non-fatal)
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {

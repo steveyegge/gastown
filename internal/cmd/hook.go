@@ -60,9 +60,11 @@ Examples:
 
 // hookShowCmd shows hook status in compact one-line format
 var hookShowCmd = &cobra.Command{
-	Use:   "show <agent>",
+	Use:   "show [agent]",
 	Short: "Show what's on an agent's hook (compact)",
 	Long: `Show what's on any agent's hook in compact one-line format.
+
+With no argument, shows your own hook status (auto-detected from context).
 
 Use cases:
 - Mayor checking what polecats are working on
@@ -71,13 +73,14 @@ Use cases:
 - Quick status overview
 
 Examples:
+  gt hook show                         # What's on MY hook? (auto-detect)
   gt hook show gastown/polecats/nux    # What's nux working on?
   gt hook show gastown/witness         # What's the witness hooked to?
   gt hook show mayor                   # What's the mayor working on?
 
 Output format (one line):
   gastown/polecats/nux: gt-abc123 'Fix the widget bug' [in_progress]`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runHookShow,
 }
 
@@ -265,7 +268,17 @@ func checkPinnedBeadComplete(b *beads.Beads, issue *beads.Issue) (isComplete boo
 
 // runHookShow displays another agent's hook in compact one-line format.
 func runHookShow(cmd *cobra.Command, args []string) error {
-	target := args[0]
+	var target string
+	if len(args) > 0 {
+		target = args[0]
+	} else {
+		// Auto-detect current agent from context
+		agentID, _, _, err := resolveSelfTarget()
+		if err != nil {
+			return fmt.Errorf("auto-detecting agent (use explicit argument): %w", err)
+		}
+		target = agentID
+	}
 
 	// Find beads directory
 	workDir, err := findLocalBeadsDir()
