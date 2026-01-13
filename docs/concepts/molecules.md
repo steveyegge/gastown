@@ -184,7 +184,7 @@ gt done                        # Signal completion (syncs, submits to MQ, notifi
 2. gt hook                 # What's hooked?
 3. bd mol current          # Where am I?
 4. Execute current step
-5. bd close <step> --continue
+5. gt mol step done <step> # Close and auto-advance to next
 6. If more steps: GOTO 3
 7. gt done                 # Signal completion
 ```
@@ -200,7 +200,7 @@ gt done                        # Signal completion (syncs, submits to MQ, notifi
 
 ## Best Practices
 
-1. **Use `--continue` for propulsion** - Keep momentum by auto-advancing
+1. **Use `gt mol step done` for propulsion** - Auto-advances with dependency resolution
 2. **Check progress with `bd mol current`** - Know where you are before resuming
 3. **Squash completed molecules** - Create digests for audit trail
 4. **Burn routine wisps** - Don't accumulate ephemeral patrol data

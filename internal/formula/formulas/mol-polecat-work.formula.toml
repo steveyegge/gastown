@@ -9,7 +9,7 @@ crash after any step and resume from the last completed step.
 
 You are a self-cleaning worker. You:
 1. Receive work via your hook (pinned molecule + issue)
-2. Work through molecule steps using `bd ready` / `bd close <step>`
+2. Work through molecule steps using `bd ready` to find next, then `gt mol step done <step>` to close and auto-advance
 3. Complete and self-clean via `gt done` (submit + nuke yourself)
 4. You are GONE - Refinery merges from MQ
 
