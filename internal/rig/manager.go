@@ -16,7 +16,6 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
-	"github.com/steveyegge/gastown/internal/runtime"
 )
 
 // Common errors
@@ -482,11 +481,9 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		fmt.Printf("  Warning: Could not copy overlay files to refinery: %v\n", err)
 	}
 
-	// Create refinery hooks for patrol triggering (at refinery/ level, not rig/)
-	runtimeConfig := config.LoadRuntimeConfig(rigPath)
-	if err := m.createPatrolHooks(refineryPath, runtimeConfig); err != nil {
-		fmt.Printf("  Warning: Could not create refinery hooks: %v\n", err)
-	}
+	// NOTE: Claude settings are installed by the agent at startup, not here.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
 
 	// Create empty crew directory with README (crew members added via gt crew add)
 	crewPath := filepath.Join(rigPath, "crew")
@@ -525,10 +522,7 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	if err := os.MkdirAll(witnessPath, 0755); err != nil {
 		return nil, fmt.Errorf("creating witness dir: %w", err)
 	}
-	// Create witness hooks for patrol triggering
-	if err := m.createPatrolHooks(witnessPath, runtimeConfig); err != nil {
-		fmt.Printf("  Warning: Could not create witness hooks: %v\n", err)
-	}
+	// NOTE: Claude settings installed by witness agent at startup (not here)
 	// Create witness CLAUDE.md/AGENTS.md at agent level
 	if err := m.createAgentInstructionsMD(witnessPath, "witness", opts.Name); err != nil {
 		return nil, fmt.Errorf("creating witness CLAUDE.md: %w", err)
@@ -544,26 +538,10 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 		return nil, fmt.Errorf("creating polecats CLAUDE.md: %w", err)
 	}
 
-	// Install runtime settings for all agent directories.
-	// Settings are placed in parent directories (not inside git repos) so Claude
-	// finds them via directory traversal without polluting source repos.
-	fmt.Printf("  Installing runtime settings...\n")
-	settingsRoles := []struct {
-		dir  string
-		role string
-	}{
-		{witnessPath, "witness"},
-		{filepath.Join(rigPath, "refinery"), "refinery"},
-		{crewPath, "crew"},
-		{polecatsPath, "polecat"},
-	}
-	for _, sr := range settingsRoles {
-		runtimeConfig := config.ResolveRoleAgentConfig(sr.role, m.townRoot, rigPath)
-		if err := runtime.EnsureSettingsForRole(sr.dir, sr.role, runtimeConfig); err != nil {
-			fmt.Fprintf(os.Stderr, "  Warning: Could not create %s settings: %v\n", sr.role, err)
-		}
-	}
-	fmt.Printf("   ✓ Installed runtime settings\n")
+	// NOTE: Claude settings are installed by each agent in their working directory at startup.
+	// Claude Code does NOT traverse parent directories for settings.json, so installing
+	// settings in parent directories (witness/, crew/, etc.) would be useless.
+	// See: https://github.com/anthropics/claude-code/issues/12962
 
 	// Initialize beads at rig level
 	fmt.Printf("  Initializing beads database...\n")
@@ -1102,65 +1080,6 @@ func (m *Manager) createAgentInstructionsMD(agentPath string, role string, rigNa
 	// (Codex reads AGENTS.md, Claude reads CLAUDE.md)
 	agentsPath := filepath.Join(agentPath, "AGENTS.md")
 	return os.WriteFile(agentsPath, []byte(bootstrap), 0644)
-}
-
-// createPatrolHooks creates .claude/settings.json with hooks for patrol roles.
-// These hooks trigger gt prime on session start and inject mail, enabling
-// autonomous patrol execution for Witness and Refinery roles.
-func (m *Manager) createPatrolHooks(workspacePath string, runtimeConfig *config.RuntimeConfig) error {
-	if runtimeConfig == nil || runtimeConfig.Hooks == nil || runtimeConfig.Hooks.Provider != "claude" {
-		return nil
-	}
-	if runtimeConfig.Hooks.Dir == "" || runtimeConfig.Hooks.SettingsFile == "" {
-		return nil
-	}
-
-	settingsDir := filepath.Join(workspacePath, runtimeConfig.Hooks.Dir)
-	if err := os.MkdirAll(settingsDir, 0755); err != nil {
-		return fmt.Errorf("creating settings dir: %w", err)
-	}
-
-	// Standard patrol hooks - same as deacon
-	hooksJSON := `{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt prime && gt mail check --inject"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt prime"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt mail check --inject"
-          }
-        ]
-      }
-    ]
-  }
-}
-`
-	settingsPath := filepath.Join(settingsDir, runtimeConfig.Hooks.SettingsFile)
-	return os.WriteFile(settingsPath, []byte(hooksJSON), 0600)
 }
 
 // seedPatrolMolecules creates patrol molecule prototypes in the rig's beads database.

@@ -187,10 +187,12 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
-	// Ensure .gitignore has required Gas Town patterns
-	if err := rig.EnsureGitignorePatterns(crewPath); err != nil {
+	// Install runtime settings in the working directory.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	if err := claude.EnsureSettingsForRole(crewPath, "crew"); err != nil {
 		// Non-fatal - log warning but continue
-		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
 	}
 
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
@@ -476,13 +478,12 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		}
 	}
 
-	// Ensure runtime settings exist in crew/ (not crew/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	// All crew members share the same settings file.
-	crewBaseDir := filepath.Join(m.rig.Path, "crew")
+	// Ensure runtime settings exist in the working directory.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(crewBaseDir, "crew", runtimeConfig); err != nil {
+	if err := runtime.EnsureSettingsForRole(worker.ClonePath, "crew", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 

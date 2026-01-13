@@ -306,22 +306,29 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 		t.Errorf("refinery/rig/.git should be a file (worktree), not a directory")
 	}
 
-	// Verify Claude settings are created in correct locations (outside git repos).
-	// Settings in parent directories are inherited by agents via directory traversal,
-	// without polluting the source repos.
-	expectedSettings := []struct {
+	// NOTE: Claude settings are no longer installed by gt rig add.
+	// Claude Code does NOT traverse parent directories for settings.json, only for CLAUDE.md.
+	// Settings are installed by each agent in their working directory at startup time.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	//
+	// Verify settings are NOT created in parent directories (this would be useless)
+	parentSettingsThatShouldNotExist := []struct {
 		path string
 		desc string
 	}{
 		{filepath.Join(rigPath, "witness", ".claude", "settings.json"), "witness/.claude/settings.json"},
+		{filepath.Join(rigPath, "witness", ".claude", "settings.local.json"), "witness/.claude/settings.local.json"},
 		{filepath.Join(rigPath, "refinery", ".claude", "settings.json"), "refinery/.claude/settings.json"},
+		{filepath.Join(rigPath, "refinery", ".claude", "settings.local.json"), "refinery/.claude/settings.local.json"},
 		{filepath.Join(rigPath, "crew", ".claude", "settings.json"), "crew/.claude/settings.json"},
+		{filepath.Join(rigPath, "crew", ".claude", "settings.local.json"), "crew/.claude/settings.local.json"},
 		{filepath.Join(rigPath, "polecats", ".claude", "settings.json"), "polecats/.claude/settings.json"},
+		{filepath.Join(rigPath, "polecats", ".claude", "settings.local.json"), "polecats/.claude/settings.local.json"},
 	}
 
-	for _, s := range expectedSettings {
-		if _, err := os.Stat(s.path); err != nil {
-			t.Errorf("%s not found: %v", s.desc, err)
+	for _, s := range parentSettingsThatShouldNotExist {
+		if _, err := os.Stat(s.path); err == nil {
+			t.Errorf("%s should NOT exist (Claude Code doesn't traverse parent dirs for settings)", s.desc)
 		}
 	}
 
@@ -350,18 +357,20 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 		}
 	}
 
-	// Verify settings are NOT created inside source repos (these would be wrong)
-	wrongLocations := []struct {
+	// NOTE: settings.local.json WILL exist inside working directories (witness/rig/.claude/settings.local.json)
+	// but only after agents start. gt rig add doesn't install settings; agents install them at startup.
+	// The old settings.json filename should never exist (it's been replaced by settings.local.json).
+	staleSettingsThatShouldNotExist := []struct {
 		path string
 		desc string
 	}{
-		{filepath.Join(rigPath, "witness", "rig", ".claude", "settings.json"), "witness/rig/.claude (inside source repo)"},
-		{filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.json"), "refinery/rig/.claude (inside source repo)"},
+		{filepath.Join(rigPath, "witness", "rig", ".claude", "settings.json"), "witness/rig/.claude/settings.json (stale filename)"},
+		{filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.json"), "refinery/rig/.claude/settings.json (stale filename)"},
 	}
 
-	for _, w := range wrongLocations {
+	for _, w := range staleSettingsThatShouldNotExist {
 		if _, err := os.Stat(w.path); err == nil {
-			t.Errorf("%s should NOT exist (settings would pollute source repo)", w.desc)
+			t.Errorf("%s should NOT exist (use settings.local.json instead)", w.desc)
 		}
 	}
 

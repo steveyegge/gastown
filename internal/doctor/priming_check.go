@@ -116,7 +116,7 @@ func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, _ string) []priming
 	var issues []primingIssue
 
 	agentPath := filepath.Join(townRoot, agentDir)
-	settingsPath := filepath.Join(agentPath, ".claude", "settings.json")
+	settingsPath := filepath.Join(agentPath, ".claude", "settings.local.json")
 
 	// Check for SessionStart hook with gt prime
 	if fileExists(settingsPath) {

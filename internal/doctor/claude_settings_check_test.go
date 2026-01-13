@@ -34,7 +34,8 @@ func TestClaudeSettingsCheck_NoSettingsFiles(t *testing.T) {
 	}
 }
 
-// createValidSettings creates a valid settings.json with all required elements.
+// createValidSettings creates a valid settings file with all required elements.
+// The filename should be settings.local.json for valid tests.
 func createValidSettings(t *testing.T, path string) {
 	t.Helper()
 
@@ -47,11 +48,7 @@ func createValidSettings(t *testing.T, path string) {
 					"hooks": []any{
 						map[string]any{
 							"type":    "command",
-							"command": "export PATH=/usr/local/bin:$PATH",
-						},
-						map[string]any{
-							"type":    "command",
-							"command": "gt nudge deacon session-started",
+							"command": "export PATH=/usr/local/bin:$PATH && gt prime --hook && gt nudge deacon session-started",
 						},
 					},
 				},
@@ -179,9 +176,10 @@ func createStaleSettings(t *testing.T, path string, missingElements ...string) {
 func TestClaudeSettingsCheck_ValidMayorSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create valid mayor settings at correct location (mayor/.claude/settings.json)
-	// NOT at town root (.claude/settings.json) which is wrong location
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create valid mayor settings at correct location (mayor/.claude/settings.local.json)
+	// settings.json is now considered stale - only settings.local.json is valid.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.local.json")
 	createValidSettings(t, mayorSettings)
 
 	check := NewClaudeSettingsCheck()
@@ -197,8 +195,8 @@ func TestClaudeSettingsCheck_ValidMayorSettings(t *testing.T) {
 func TestClaudeSettingsCheck_ValidDeaconSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create valid deacon settings
-	deaconSettings := filepath.Join(tmpDir, "deacon", ".claude", "settings.json")
+	// Create valid deacon settings (must be settings.local.json, not settings.json)
+	deaconSettings := filepath.Join(tmpDir, "deacon", ".claude", "settings.local.json")
 	createValidSettings(t, deaconSettings)
 
 	check := NewClaudeSettingsCheck()
@@ -215,8 +213,10 @@ func TestClaudeSettingsCheck_ValidWitnessSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
-	// Create valid witness settings in correct location (witness/.claude/, outside git repo)
-	witnessSettings := filepath.Join(tmpDir, rigName, "witness", ".claude", "settings.json")
+	// Create valid witness settings in correct location (witness/rig/.claude/settings.local.json)
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// Settings must be in the actual working directory (witness/rig/) not the parent.
+	witnessSettings := filepath.Join(tmpDir, rigName, "witness", "rig", ".claude", "settings.local.json")
 	createValidSettings(t, witnessSettings)
 
 	check := NewClaudeSettingsCheck()
@@ -233,8 +233,9 @@ func TestClaudeSettingsCheck_ValidRefinerySettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
-	// Create valid refinery settings in correct location (refinery/.claude/, outside git repo)
-	refinerySettings := filepath.Join(tmpDir, rigName, "refinery", ".claude", "settings.json")
+	// Create valid refinery settings in correct location (refinery/rig/.claude/settings.local.json)
+	// Claude Code does NOT traverse parent directories for settings.json.
+	refinerySettings := filepath.Join(tmpDir, rigName, "refinery", "rig", ".claude", "settings.local.json")
 	createValidSettings(t, refinerySettings)
 
 	check := NewClaudeSettingsCheck()
@@ -251,8 +252,9 @@ func TestClaudeSettingsCheck_ValidCrewSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
-	// Create valid crew settings in correct location (crew/.claude/, shared by all crew)
-	crewSettings := filepath.Join(tmpDir, rigName, "crew", ".claude", "settings.json")
+	// Create valid crew settings in correct location (crew/<name>/.claude/settings.local.json)
+	// Claude Code does NOT traverse parent directories - settings must be in working directory.
+	crewSettings := filepath.Join(tmpDir, rigName, "crew", "worker1", ".claude", "settings.local.json")
 	createValidSettings(t, crewSettings)
 
 	check := NewClaudeSettingsCheck()
@@ -269,8 +271,9 @@ func TestClaudeSettingsCheck_ValidPolecatSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
-	// Create valid polecat settings in correct location (polecats/.claude/, shared by all polecats)
-	pcSettings := filepath.Join(tmpDir, rigName, "polecats", ".claude", "settings.json")
+	// Create valid polecat settings in correct location (polecats/<name>/<rig>/.claude/settings.local.json)
+	// Claude Code does NOT traverse parent directories - settings must be in worktree.
+	pcSettings := filepath.Join(tmpDir, rigName, "polecats", "pc1", rigName, ".claude", "settings.local.json")
 	createValidSettings(t, pcSettings)
 
 	check := NewClaudeSettingsCheck()
@@ -286,8 +289,8 @@ func TestClaudeSettingsCheck_ValidPolecatSettings(t *testing.T) {
 func TestClaudeSettingsCheck_MissingEnabledPlugins(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale mayor settings missing enabledPlugins (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create stale mayor settings missing enabledPlugins (use settings.local.json for content checks)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.local.json")
 	createStaleSettings(t, mayorSettings, "enabledPlugins")
 
 	check := NewClaudeSettingsCheck()
@@ -306,8 +309,8 @@ func TestClaudeSettingsCheck_MissingEnabledPlugins(t *testing.T) {
 func TestClaudeSettingsCheck_MissingHooks(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing hooks entirely (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create stale settings missing hooks entirely (use settings.local.json for content checks)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.local.json")
 	createStaleSettings(t, mayorSettings, "hooks")
 
 	check := NewClaudeSettingsCheck()
@@ -323,8 +326,8 @@ func TestClaudeSettingsCheck_MissingHooks(t *testing.T) {
 func TestClaudeSettingsCheck_MissingPATH(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing PATH export (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create stale settings missing PATH export (use settings.local.json for content checks)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.local.json")
 	createStaleSettings(t, mayorSettings, "PATH")
 
 	check := NewClaudeSettingsCheck()
@@ -350,8 +353,8 @@ func TestClaudeSettingsCheck_MissingPATH(t *testing.T) {
 func TestClaudeSettingsCheck_MissingDeaconNudge(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing deacon nudge (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create stale settings missing deacon nudge (use settings.local.json for content checks)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.local.json")
 	createStaleSettings(t, mayorSettings, "deacon-nudge")
 
 	check := NewClaudeSettingsCheck()
@@ -377,8 +380,8 @@ func TestClaudeSettingsCheck_MissingDeaconNudge(t *testing.T) {
 func TestClaudeSettingsCheck_MissingStopHook(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing Stop hook (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create stale settings missing Stop hook (use settings.local.json for content checks)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.local.json")
 	createStaleSettings(t, mayorSettings, "Stop")
 
 	check := NewClaudeSettingsCheck()
@@ -463,16 +466,18 @@ func TestClaudeSettingsCheck_MultipleStaleFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
-	// Create multiple stale settings files (all at correct locations)
+	// Create multiple stale settings files (all using old settings.json which is now stale)
+	// settings.json is stale even in correct locations - should be settings.local.json
 	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
-	createStaleSettings(t, mayorSettings, "PATH")
+	createValidSettings(t, mayorSettings) // Valid content but stale filename
 
 	deaconSettings := filepath.Join(tmpDir, "deacon", ".claude", "settings.json")
-	createStaleSettings(t, deaconSettings, "Stop")
+	createValidSettings(t, deaconSettings) // Valid content but stale filename
 
-	// Settings inside git repo (witness/rig/.claude/) are wrong location
+	// Settings in wrong location (witness/rig/.claude/settings.json)
+	// This creates BOTH a stale file AND a missing settings.local.json issue
 	witnessWrong := filepath.Join(tmpDir, rigName, "witness", "rig", ".claude", "settings.json")
-	createValidSettings(t, witnessWrong) // Valid content but wrong location
+	createValidSettings(t, witnessWrong) // Valid content but stale filename
 
 	check := NewClaudeSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
@@ -482,16 +487,19 @@ func TestClaudeSettingsCheck_MultipleStaleFiles(t *testing.T) {
 	if result.Status != StatusError {
 		t.Errorf("expected StatusError for multiple stale files, got %v", result.Status)
 	}
-	if !strings.Contains(result.Message, "3 stale") {
-		t.Errorf("expected message about 3 stale files, got %q", result.Message)
+	// 3 stale files + 1 missing settings.local.json = 4 issues
+	// We report both stale settings.json AND missing settings.local.json because
+	// the stale file might have local modifications needing manual review
+	if !strings.Contains(result.Message, "4") {
+		t.Errorf("expected message about 4 issues (3 stale + 1 missing), got %q", result.Message)
 	}
 }
 
 func TestClaudeSettingsCheck_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create invalid JSON file (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create invalid JSON file (use settings.local.json for content validation)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.local.json")
 	if err := os.MkdirAll(filepath.Dir(mayorSettings), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +538,7 @@ func TestClaudeSettingsCheck_FixDeletesStaleFile(t *testing.T) {
 	check := NewClaudeSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
-	// Run to detect
+	// Run to detect - should find both stale file AND missing settings.local.json
 	result := check.Run(ctx)
 	if result.Status != StatusError {
 		t.Fatalf("expected StatusError before fix, got %v", result.Status)
@@ -541,15 +549,27 @@ func TestClaudeSettingsCheck_FixDeletesStaleFile(t *testing.T) {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
-	// Verify file was deleted
+	// Verify stale file was deleted
 	if _, err := os.Stat(wrongSettings); !os.IsNotExist(err) {
 		t.Error("expected wrong location settings to be deleted")
 	}
 
-	// Verify check passes (no settings files means OK)
+	// After fix, the working directory still exists but settings.local.json is missing
+	// This is expected - the user needs to restart agents to create settings.local.json
 	result = check.Run(ctx)
-	if result.Status != StatusOK {
-		t.Errorf("expected StatusOK after fix, got %v", result.Status)
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError after fix (missing settings.local.json), got %v", result.Status)
+	}
+	// Should report missing file now
+	foundMissing := false
+	for _, d := range result.Details {
+		if strings.Contains(d, "missing") {
+			foundMissing = true
+			break
+		}
+	}
+	if !foundMissing {
+		t.Errorf("expected details to mention missing settings.local.json after fix, got %v", result.Details)
 	}
 }
 
@@ -588,16 +608,16 @@ func TestClaudeSettingsCheck_MixedValidAndStale(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
-	// Create valid mayor settings (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create valid mayor settings (settings.local.json in correct location)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.local.json")
 	createValidSettings(t, mayorSettings)
 
-	// Create stale witness settings in correct location (missing PATH)
-	witnessSettings := filepath.Join(tmpDir, rigName, "witness", ".claude", "settings.json")
+	// Create stale witness settings (settings.local.json missing PATH, in correct location)
+	witnessSettings := filepath.Join(tmpDir, rigName, "witness", "rig", ".claude", "settings.local.json")
 	createStaleSettings(t, witnessSettings, "PATH")
 
-	// Create valid refinery settings in correct location
-	refinerySettings := filepath.Join(tmpDir, rigName, "refinery", ".claude", "settings.json")
+	// Create valid refinery settings (settings.local.json in correct location)
+	refinerySettings := filepath.Join(tmpDir, rigName, "refinery", "rig", ".claude", "settings.local.json")
 	createValidSettings(t, refinerySettings)
 
 	check := NewClaudeSettingsCheck()
@@ -1080,5 +1100,338 @@ func TestClaudeSettingsCheck_TownRootSettingsWarnsInsteadOfKilling(t *testing.T)
 	// Verify .claude directory was cleaned up (best-effort)
 	if _, err := os.Stat(staleTownRootDir); !os.IsNotExist(err) {
 		t.Error("expected .claude directory at town root to be deleted")
+	}
+}
+
+// Tests for missing file detection
+// When working directory exists but settings.local.json is missing, the check should
+// report it as a missing file that needs agent restart to create.
+
+func TestClaudeSettingsCheck_MissingWitnessSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create witness working directory but NOT the settings.local.json
+	witnessWorkDir := filepath.Join(tmpDir, rigName, "witness", "rig")
+	if err := os.MkdirAll(witnessWorkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for missing witness settings, got %v", result.Status)
+	}
+
+	// Should mention "missing" and "restart"
+	found := false
+	for _, d := range result.Details {
+		if strings.Contains(d, "missing") && strings.Contains(d, "restart") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected details to mention missing and restart, got %v", result.Details)
+	}
+
+	// Should mention witness agent type
+	foundWitness := false
+	for _, d := range result.Details {
+		if strings.Contains(d, "witness") {
+			foundWitness = true
+			break
+		}
+	}
+	if !foundWitness {
+		t.Errorf("expected details to mention witness, got %v", result.Details)
+	}
+
+	// Verify the staleSettings entry has missingFile set to true
+	if len(check.staleSettings) != 1 {
+		t.Fatalf("expected 1 stale setting, got %d", len(check.staleSettings))
+	}
+	if !check.staleSettings[0].missingFile {
+		t.Error("expected missingFile to be true for missing witness settings")
+	}
+	if check.staleSettings[0].agentType != "witness" {
+		t.Errorf("expected agentType 'witness', got %q", check.staleSettings[0].agentType)
+	}
+}
+
+func TestClaudeSettingsCheck_MissingRefinerySettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create refinery working directory but NOT the settings.local.json
+	refineryWorkDir := filepath.Join(tmpDir, rigName, "refinery", "rig")
+	if err := os.MkdirAll(refineryWorkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for missing refinery settings, got %v", result.Status)
+	}
+
+	// Verify the staleSettings entry has missingFile set to true
+	if len(check.staleSettings) != 1 {
+		t.Fatalf("expected 1 stale setting, got %d", len(check.staleSettings))
+	}
+	if !check.staleSettings[0].missingFile {
+		t.Error("expected missingFile to be true for missing refinery settings")
+	}
+	if check.staleSettings[0].agentType != "refinery" {
+		t.Errorf("expected agentType 'refinery', got %q", check.staleSettings[0].agentType)
+	}
+
+	// Should include hint about restarting agents
+	if !strings.Contains(result.FixHint, "restart") {
+		t.Errorf("expected fix hint to mention restart, got %q", result.FixHint)
+	}
+}
+
+func TestClaudeSettingsCheck_MissingCrewSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create crew worker directory but NOT the settings.local.json
+	crewWorkDir := filepath.Join(tmpDir, rigName, "crew", "worker1")
+	if err := os.MkdirAll(crewWorkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for missing crew settings, got %v", result.Status)
+	}
+
+	// Verify the staleSettings entry has missingFile set to true
+	if len(check.staleSettings) != 1 {
+		t.Fatalf("expected 1 stale setting, got %d", len(check.staleSettings))
+	}
+	if !check.staleSettings[0].missingFile {
+		t.Error("expected missingFile to be true for missing crew settings")
+	}
+	if check.staleSettings[0].agentType != "crew" {
+		t.Errorf("expected agentType 'crew', got %q", check.staleSettings[0].agentType)
+	}
+}
+
+func TestClaudeSettingsCheck_MissingPolecatSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create polecat worktree directory but NOT the settings.local.json
+	polecatWorkDir := filepath.Join(tmpDir, rigName, "polecats", "pc1", rigName)
+	if err := os.MkdirAll(polecatWorkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for missing polecat settings, got %v", result.Status)
+	}
+
+	// Verify the staleSettings entry has missingFile set to true
+	if len(check.staleSettings) != 1 {
+		t.Fatalf("expected 1 stale setting, got %d", len(check.staleSettings))
+	}
+	if !check.staleSettings[0].missingFile {
+		t.Error("expected missingFile to be true for missing polecat settings")
+	}
+	if check.staleSettings[0].agentType != "polecat" {
+		t.Errorf("expected agentType 'polecat', got %q", check.staleSettings[0].agentType)
+	}
+}
+
+func TestClaudeSettingsCheck_MissingMultipleAgentSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create multiple working directories without settings.local.json
+	dirs := []string{
+		filepath.Join(tmpDir, rigName, "witness", "rig"),
+		filepath.Join(tmpDir, rigName, "refinery", "rig"),
+		filepath.Join(tmpDir, rigName, "crew", "worker1"),
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for missing settings, got %v", result.Status)
+	}
+
+	// Should report 3 missing files
+	if len(check.staleSettings) != 3 {
+		t.Errorf("expected 3 stale settings, got %d", len(check.staleSettings))
+	}
+
+	// All should have missingFile set to true
+	for _, sf := range check.staleSettings {
+		if !sf.missingFile {
+			t.Errorf("expected missingFile to be true for %s", sf.path)
+		}
+	}
+
+	// Message should mention multiple agents
+	if !strings.Contains(result.Message, "3") {
+		t.Errorf("expected message to mention 3 agents, got %q", result.Message)
+	}
+}
+
+func TestClaudeSettingsCheck_MixedMissingAndStale(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create witness with valid settings
+	witnessSettings := filepath.Join(tmpDir, rigName, "witness", "rig", ".claude", "settings.local.json")
+	createValidSettings(t, witnessSettings)
+
+	// Create refinery working directory without settings (missing)
+	refineryWorkDir := filepath.Join(tmpDir, rigName, "refinery", "rig")
+	if err := os.MkdirAll(refineryWorkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create stale settings.json (wrong filename) for mayor
+	mayorStaleSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	createValidSettings(t, mayorStaleSettings)
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for mixed issues, got %v", result.Status)
+	}
+
+	// Should have 2 issues: 1 missing (refinery) + 1 stale (mayor settings.json)
+	if len(check.staleSettings) != 2 {
+		t.Errorf("expected 2 stale settings, got %d: %+v", len(check.staleSettings), check.staleSettings)
+	}
+
+	// Verify we have both types
+	var hasMissing, hasStale bool
+	for _, sf := range check.staleSettings {
+		if sf.missingFile {
+			hasMissing = true
+		}
+		if sf.wrongLocation {
+			hasStale = true
+		}
+	}
+	if !hasMissing {
+		t.Error("expected at least one missing file")
+	}
+	if !hasStale {
+		t.Error("expected at least one stale file")
+	}
+}
+
+func TestClaudeSettingsCheck_MissingFileOnlyMessage(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create only missing files (no stale files)
+	witnessWorkDir := filepath.Join(tmpDir, rigName, "witness", "rig")
+	if err := os.MkdirAll(witnessWorkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for missing settings, got %v", result.Status)
+	}
+
+	// When only missing files, message should mention "missing settings"
+	if !strings.Contains(result.Message, "missing") {
+		t.Errorf("expected message to mention 'missing', got %q", result.Message)
+	}
+
+	// Fix hint should mention restart for missing files
+	if !strings.Contains(result.FixHint, "gt up --restart") {
+		t.Errorf("expected fix hint to mention 'gt up --restart', got %q", result.FixHint)
+	}
+}
+
+func TestClaudeSettingsCheck_NoMissingFileWhenDirNotExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create rig directory structure but NOT the witness/rig working directory
+	// This simulates a rig that doesn't have witness set up yet
+	rigDir := filepath.Join(tmpDir, rigName)
+	if err := os.MkdirAll(rigDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// Should be OK - no settings issues if working directory doesn't exist
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when witness working dir doesn't exist, got %v: %s", result.Status, result.Message)
+	}
+}
+
+func TestClaudeSettingsCheck_FixDoesNotDeleteMissingFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+
+	// Create witness working directory but NOT the settings.local.json
+	witnessWorkDir := filepath.Join(tmpDir, rigName, "witness", "rig")
+	if err := os.MkdirAll(witnessWorkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	// Run to detect
+	result := check.Run(ctx)
+	if result.Status != StatusError {
+		t.Fatalf("expected StatusError before fix, got %v", result.Status)
+	}
+
+	// Apply fix - should NOT try to delete a file that doesn't exist
+	// and should NOT error
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix failed unexpectedly: %v", err)
+	}
+
+	// Working directory should still exist
+	if _, err := os.Stat(witnessWorkDir); os.IsNotExist(err) {
+		t.Error("expected working directory to still exist after fix")
 	}
 }
