@@ -35,7 +35,7 @@ func runMailClaim(cmd *cobra.Command, args []string) error {
 	}
 
 	queueCfg, ok := cfg.Queues[queueName]
-	if !ok {
+	if !ok || queueCfg == nil {
 		return fmt.Errorf("unknown queue: %s", queueName)
 	}
 
