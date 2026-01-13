@@ -221,9 +221,17 @@ func (t *Tmux) SendKeys(session, keys string) error {
 // SendKeysDebounced sends keystrokes with a configurable delay before Enter.
 // The debounceMs parameter controls how long to wait after paste before sending Enter.
 // This prevents race conditions where Enter arrives before paste is processed.
+// Commands are wrapped to prevent bash history pollution:
+// - Leading space triggers HISTCONTROL=ignorespace (if configured)
+// - set +o history disables history recording
+// - set -o history re-enables it after the command executes
 func (t *Tmux) SendKeysDebounced(session, keys string, debounceMs int) error {
+	// Wrap command to prevent bash history pollution
+	// Leading space + history disable ensures the command doesn't appear in history
+	wrappedKeys := " set +o history; " + keys + "; set -o history"
+
 	// Send text using literal mode (-l) to handle special chars
-	if _, err := t.run("send-keys", "-t", session, "-l", keys); err != nil {
+	if _, err := t.run("send-keys", "-t", session, "-l", wrappedKeys); err != nil {
 		return err
 	}
 	// Wait for paste to be processed
