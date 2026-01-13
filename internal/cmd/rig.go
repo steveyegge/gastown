@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -432,6 +433,78 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// rigListEntry holds rig info for sorting in gt rig list
+type rigListEntry struct {
+	name        string
+	statePrio   int    // sort priority (0=active, 1=partial, 2=stopped, 3=parked, 4=docked)
+	opState     string // operational state from config (OPERATIONAL, PARKED, DOCKED)
+	hasWitness  bool
+	hasRefinery bool
+}
+
+// getRigListState determines the display state for a rig in the list.
+// Returns priority (lower = first in list), operational state, and session status.
+// Priority is based on activity (running sessions first), then config state.
+func getRigListState(townRoot, rigName string, t *tmux.Tmux) (priority int, opState string, hasWitness, hasRefinery bool) {
+	// Check if witness or refinery sessions are running
+	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
+	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
+
+	hasWitness, _ = t.HasSession(witnessSession)
+	hasRefinery, _ = t.HasSession(refinerySession)
+
+	// Check operational state from config
+	opState, _ = getRigOperationalState(townRoot, rigName)
+
+	// Priority by activity level:
+	// 0 = both sessions running (fully active)
+	// 1 = one session running (partially active)
+	// 2 = no sessions, operational/stopped
+	// 3 = no sessions, parked
+	// 4 = no sessions, docked
+	if hasWitness && hasRefinery {
+		return 0, opState, hasWitness, hasRefinery
+	}
+	if hasWitness || hasRefinery {
+		return 1, opState, hasWitness, hasRefinery
+	}
+
+	// No sessions running - sort by config state
+	switch opState {
+	case "PARKED":
+		return 3, opState, hasWitness, hasRefinery
+	case "DOCKED":
+		return 4, opState, hasWitness, hasRefinery
+	default:
+		return 2, opState, hasWitness, hasRefinery
+	}
+}
+
+// GetRigLED returns the LED indicator for a rig based on session and operational state.
+// Used by both rig list and statusline for consistent indicators:
+//   - 🟢 = both witness and refinery running (fully active)
+//   - 🟡 = one session running (partially active)
+//   - ⚫ = nothing running (stopped)
+//   - 🅿️ = parked (intentionally paused)
+//   - 🛑 = docked (global shutdown)
+func GetRigLED(hasWitness, hasRefinery bool, opState string) string {
+	if hasWitness && hasRefinery {
+		return "🟢" // Both running - fully active
+	}
+	if hasWitness || hasRefinery {
+		return "🟡" // One running - partially active
+	}
+	// Nothing running - check operational state
+	switch opState {
+	case "PARKED":
+		return "🅿️" // Parked - intentionally paused
+	case "DOCKED":
+		return "🛑" // Docked - global shutdown
+	default:
+		return "⚫" // Operational but nothing running
+	}
+}
+
 func runRigList(cmd *cobra.Command, args []string) error {
 	// Find workspace
 	townRoot, err := workspace.FindFromCwdOrError()
@@ -456,19 +529,49 @@ func runRigList(cmd *cobra.Command, args []string) error {
 	// Create rig manager to get details
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
+	t := tmux.NewTmux()
+
+	// Collect rig entries with their states
+	var entries []rigListEntry
+	for name := range rigsConfig.Rigs {
+		prio, opState, hasWitness, hasRefinery := getRigListState(townRoot, name, t)
+		entries = append(entries, rigListEntry{
+			name:        name,
+			statePrio:   prio,
+			opState:     opState,
+			hasWitness:  hasWitness,
+			hasRefinery: hasRefinery,
+		})
+	}
+
+	// Sort by state priority, then alphabetically
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].statePrio != entries[j].statePrio {
+			return entries[i].statePrio < entries[j].statePrio
+		}
+		return entries[i].name < entries[j].name
+	})
 
 	fmt.Printf("Rigs in %s:\n\n", townRoot)
 
-	for name := range rigsConfig.Rigs {
-		r, err := mgr.GetRig(name)
+	for _, entry := range entries {
+		r, err := mgr.GetRig(entry.name)
 		if err != nil {
-			fmt.Printf("  %s %s\n", style.Warning.Render("!"), name)
+			fmt.Printf("%s %s\n", style.Warning.Render("!"), entry.name)
 			continue
 		}
 
+		// LED indicator matching statusline
+		led := GetRigLED(entry.hasWitness, entry.hasRefinery, entry.opState)
+		// 🅿️ needs extra space for alignment
+		space := " "
+		if led == "🅿️" {
+			space = "  "
+		}
+
 		summary := r.Summary()
-		fmt.Printf("  %s\n", style.Bold.Render(name))
-		fmt.Printf("    Polecats: %d  Crew: %d\n", summary.PolecatCount, summary.CrewCount)
+		fmt.Printf("%s%s%s\n", led, space, style.Bold.Render(entry.name))
+		fmt.Printf("   Polecats: %d  Crew: %d\n", summary.PolecatCount, summary.CrewCount)
 
 		agents := []string{}
 		if summary.HasRefinery {
@@ -481,7 +584,7 @@ func runRigList(cmd *cobra.Command, args []string) error {
 			agents = append(agents, "mayor")
 		}
 		if len(agents) > 0 {
-			fmt.Printf("    Agents: %v\n", agents)
+			fmt.Printf("   Agents: %v\n", agents)
 		}
 		fmt.Println()
 	}

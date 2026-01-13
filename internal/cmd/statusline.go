@@ -270,12 +270,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		parts = append(parts, strings.Join(agentParts, " "))
 	}
 
-	// Build rig status display with LED indicators
-	// 🟢 = both witness and refinery running (fully active)
-	// 🟡 = one of witness/refinery running (partially active)
-	// 🅿️ = parked (nothing running, intentionally paused)
-	// 🛑 = docked (nothing running, global shutdown)
-	// ⚫ = operational but nothing running (unexpected state)
+	// Build rig status display with LED indicators (see GetRigLED for definitions)
 
 	// Create sortable rig list
 	type rigInfo struct {
@@ -333,24 +328,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		lastGroup = currentGroup
 
 		status := rig.status
-		var led string
-
-		// Check if processes are running first (regardless of operational state)
-		if status.hasWitness && status.hasRefinery {
-			led = "🟢" // Both running - fully active
-		} else if status.hasWitness || status.hasRefinery {
-			led = "🟡" // One running - partially active
-		} else {
-			// Nothing running - show operational state
-			switch status.opState {
-			case "PARKED":
-				led = "🅿️" // Parked - intentionally paused
-			case "DOCKED":
-				led = "🛑" // Docked - global shutdown
-			default:
-				led = "⚫" // Operational but nothing running
-			}
-		}
+		led := GetRigLED(status.hasWitness, status.hasRefinery, status.opState)
 
 		// Show polecat count if > 0
 		// All icons get 1 space, Park gets 2
