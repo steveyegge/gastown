@@ -32,10 +32,9 @@ var (
 
 // Manager handles refinery lifecycle and queue operations.
 type Manager struct {
-	rig           *rig.Rig
-	workDir       string
-	output        io.Writer // Output destination for user-facing messages
-	agentOverride string    // Optional agent alias override
+	rig     *rig.Rig
+	workDir string
+	output  io.Writer // Output destination for user-facing messages
 }
 
 // NewManager creates a new refinery manager for a rig.
@@ -51,11 +50,6 @@ func NewManager(r *rig.Rig) *Manager {
 // This is useful for testing or redirecting output.
 func (m *Manager) SetOutput(w io.Writer) {
 	m.output = w
-}
-
-// SetAgentOverride sets an agent alias to use instead of the town default.
-func (m *Manager) SetAgentOverride(agent string) {
-	m.agentOverride = agent
 }
 
 // stateFile returns the path to the refinery state file.
@@ -109,7 +103,8 @@ func (m *Manager) Status() (*Refinery, error) {
 // Start starts the refinery.
 // If foreground is true, runs in the current process (blocking) using the Go-based polling loop.
 // Otherwise, spawns a Claude agent in a tmux session to process the merge queue.
-func (m *Manager) Start(foreground bool) error {
+// The agentOverride parameter allows specifying an agent alias to use instead of the town default.
+func (m *Manager) Start(foreground bool, agentOverride string) error {
 	ref, err := m.loadState()
 	if err != nil {
 		return err
@@ -181,9 +176,9 @@ func (m *Manager) Start(foreground bool) error {
 	// Build startup command first
 	bdActor := fmt.Sprintf("%s/refinery", m.rig.Name)
 	var command string
-	if m.agentOverride != "" {
+	if agentOverride != "" {
 		var err error
-		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", bdActor, m.rig.Path, "", m.agentOverride)
+		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", bdActor, m.rig.Path, "", agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}

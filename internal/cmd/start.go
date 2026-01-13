@@ -337,7 +337,7 @@ func startWitnessForRig(r *rig.Rig) string {
 // startRefineryForRig starts the refinery for a single rig and returns a status message.
 func startRefineryForRig(r *rig.Rig) string {
 	refineryMgr := refinery.NewManager(r)
-	if err := refineryMgr.Start(false); err != nil {
+	if err := refineryMgr.Start(false, ""); err != nil {
 		if errors.Is(err, refinery.ErrAlreadyRunning) {
 			return fmt.Sprintf("  %s %s refinery already running\n", style.Dim.Render("○"), r.Name)
 		}

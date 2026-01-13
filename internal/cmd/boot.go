@@ -193,10 +193,6 @@ func runBootSpawn(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if bootAgentOverride != "" {
-		b.SetAgentOverride(bootAgentOverride)
-	}
-
 	if b.IsRunning() {
 		fmt.Println("Boot is already running - skipping spawn")
 		return nil
@@ -212,7 +208,7 @@ func runBootSpawn(cmd *cobra.Command, args []string) error {
 	}
 
 	// Spawn Boot
-	if err := b.Spawn(); err != nil {
+	if err := b.Spawn(bootAgentOverride); err != nil {
 		status.Error = err.Error()
 		status.CompletedAt = time.Now()
 		status.Running = false

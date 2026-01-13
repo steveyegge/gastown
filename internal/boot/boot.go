@@ -41,12 +41,11 @@ type Status struct {
 
 // Boot manages the Boot watchdog lifecycle.
 type Boot struct {
-	townRoot      string
-	bootDir       string // ~/gt/deacon/dogs/boot/
-	deaconDir     string // ~/gt/deacon/
-	tmux          *tmux.Tmux
-	degraded      bool
-	agentOverride string // Optional agent alias override
+	townRoot  string
+	bootDir   string // ~/gt/deacon/dogs/boot/
+	deaconDir string // ~/gt/deacon/
+	tmux      *tmux.Tmux
+	degraded  bool
 }
 
 // New creates a new Boot manager.
@@ -146,7 +145,8 @@ func (b *Boot) LoadStatus() (*Status, error) {
 // Spawn starts Boot in a fresh tmux session.
 // Boot runs the mol-boot-triage molecule and exits when done.
 // In degraded mode (no tmux), it runs in a subprocess.
-func (b *Boot) Spawn() error {
+// The agentOverride parameter allows specifying an agent alias to use instead of the town default.
+func (b *Boot) Spawn(agentOverride string) error {
 	if b.IsRunning() {
 		return fmt.Errorf("boot is already running")
 	}
@@ -156,11 +156,11 @@ func (b *Boot) Spawn() error {
 		return b.spawnDegraded()
 	}
 
-	return b.spawnTmux()
+	return b.spawnTmux(agentOverride)
 }
 
 // spawnTmux spawns Boot in a tmux session.
-func (b *Boot) spawnTmux() error {
+func (b *Boot) spawnTmux(agentOverride string) error {
 	// Kill any stale session first
 	if b.IsSessionAlive() {
 		_ = b.tmux.KillSession(SessionName)
@@ -189,9 +189,9 @@ func (b *Boot) spawnTmux() error {
 	// Launch Claude with environment exported inline and initial triage prompt
 	// The "gt boot triage" prompt tells Boot to immediately start triage (GUPP principle)
 	var startCmd string
-	if b.agentOverride != "" {
+	if agentOverride != "" {
 		var err error
-		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "deacon-boot", "", "gt boot triage", b.agentOverride)
+		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "deacon-boot", "", "gt boot triage", agentOverride)
 		if err != nil {
 			_ = b.tmux.KillSession(SessionName)
 			return fmt.Errorf("building startup command with agent override: %w", err)
@@ -235,11 +235,6 @@ func (b *Boot) spawnDegraded() error {
 // IsDegraded returns whether Boot is in degraded mode.
 func (b *Boot) IsDegraded() bool {
 	return b.degraded
-}
-
-// SetAgentOverride sets an agent alias to use instead of the town default.
-func (b *Boot) SetAgentOverride(agent string) {
-	b.agentOverride = agent
 }
 
 // Dir returns Boot's working directory.
