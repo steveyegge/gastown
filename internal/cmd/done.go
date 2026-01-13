@@ -373,27 +373,23 @@ func runDone(cmd *cobra.Command, args []string) error {
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
 
-	// Self-cleaning: Nuke our own sandbox before exiting (if we're a polecat)
-	// This is the self-cleaning model - polecats clean up after themselves
-	selfNukeAttempted := false
-	if exitType == ExitCompleted {
-		if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
-			selfNukeAttempted = true
-			if err := selfNukePolecat(roleInfo, townRoot); err != nil {
-				// Non-fatal: Witness will clean up if we fail
-				style.PrintWarning("self-nuke failed: %v (Witness will clean up)", err)
-			} else {
-				fmt.Printf("%s Sandbox nuked\n", style.Bold.Render("✓"))
-			}
-		}
-	}
+	// Worktree cleanup is deferred to Witness to prevent hook race condition.
+	// Previously, selfNukePolecat() was called here synchronously, but this
+	// deleted the worktree before Claude's stop hooks could run, causing ENOENT.
+	//
+	// New flow (hq-kot):
+	// 1. gt done signals completion via mail to Witness
+	// 2. gt done exits (os.Exit) - Claude stop hooks run with cwd intact
+	// 3. Witness receives POLECAT_DONE, creates cleanup wisp
+	// 4. When MR merges (MERGED signal), Witness nukes worktree
+	//
+	// This deferred cleanup model ensures stop hooks can enforce verification
+	// gates before the worktree is deleted.
 
 	// Always exit session - polecats don't stay alive after completion
 	fmt.Println()
 	fmt.Printf("%s Session exiting (done means gone)\n", style.Bold.Render("→"))
-	if !selfNukeAttempted {
-		fmt.Printf("  Witness will handle worktree cleanup.\n")
-	}
+	fmt.Printf("  Witness will handle worktree cleanup.\n")
 	fmt.Printf("  Goodbye!\n")
 	os.Exit(0)
 
@@ -533,28 +529,7 @@ func parseCleanupStatus(s string) polecat.CleanupStatus {
 	}
 }
 
-// selfNukePolecat deletes this polecat's worktree (self-cleaning model).
-// Called by polecats when they complete work via `gt done`.
-// This is safe because:
-// 1. Work has been pushed to origin (MR is in queue)
-// 2. We're about to exit anyway
-// 3. Unix allows deleting directories while processes run in them
-func selfNukePolecat(roleInfo RoleInfo, _ string) error {
-	if roleInfo.Role != RolePolecat || roleInfo.Polecat == "" || roleInfo.Rig == "" {
-		return fmt.Errorf("not a polecat: role=%s, polecat=%s, rig=%s", roleInfo.Role, roleInfo.Polecat, roleInfo.Rig)
-	}
-
-	// Get polecat manager using existing helper
-	mgr, _, err := getPolecatManager(roleInfo.Rig)
-	if err != nil {
-		return fmt.Errorf("getting polecat manager: %w", err)
-	}
-
-	// Use nuclear=true since we know we just pushed our work
-	// The branch is pushed, MR is created, we're clean
-	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, true); err != nil {
-		return fmt.Errorf("removing worktree: %w", err)
-	}
-
-	return nil
-}
+// selfNukePolecat was removed in hq-kot fix.
+// Worktree cleanup is now fully deferred to Witness to prevent stop hook race condition.
+// The Witness handles cleanup after receiving POLECAT_DONE and verifying the MR is merged.
+// See HandlePolecatDone and HandleMerged in internal/witness/handlers.go.
