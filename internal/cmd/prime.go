@@ -202,6 +202,9 @@ func runPrime(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Output project-specific context for polecats/crew (from agent bead)
+	outputProjectContext(ctx)
+
 	// Output handoff content if present
 	outputHandoffContent(ctx)
 

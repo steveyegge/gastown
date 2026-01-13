@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"encoding/json"
 
+	"github.com/steveyegge/gastown/internal/projectcontext"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
@@ -340,17 +342,36 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
+	// Witness the project context if include_project_claude_files is enabled
+	var projCtxJSON string
+	if skipSparseCheckout {
+		projCtx, err := projectcontext.Parse(clonePath)
+		if err != nil {
+			// Non-fatal, but log a warning
+			fmt.Printf("Warning: could not parse project context: %v\n", err)
+		}
+		if projCtx != nil {
+			jsonData, err := json.Marshal(projCtx)
+			if err != nil {
+				fmt.Printf("Warning: could not serialize project context to JSON: %v\n", err)
+			} else {
+				projCtxJSON = string(jsonData)
+			}
+		}
+	}
+
 	// Create or reopen agent bead for ZFC compliance (self-report state).
 	// State starts as "spawning" - will be updated to "working" when Claude starts.
 	// HookBead is set atomically at creation time if provided (avoids cross-beads routing issues).
 	// Uses CreateOrReopenAgentBead to handle re-spawning with same name (GH #332).
 	agentID := m.agentBeadID(name)
 	_, err = m.beads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
-		RoleType:   "polecat",
-		Rig:        m.rig.Name,
-		AgentState: "spawning",
-		RoleBead:   beads.RoleBeadIDTown("polecat"),
-		HookBead:   opts.HookBead, // Set atomically at spawn time
+		RoleType:           "polecat",
+		Rig:                m.rig.Name,
+		AgentState:         "spawning",
+		RoleBead:           beads.RoleBeadIDTown("polecat"),
+		HookBead:           opts.HookBead, // Set atomically at spawn time
+		ProjectContextJSON: projCtxJSON,
 	})
 	if err != nil {
 		// Non-fatal - log warning but continue
@@ -610,15 +631,34 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 
 	// NOTE: Slash commands inherited from town level - no per-workspace copies needed.
 
+	// Witness the project context if include_project_claude_files is enabled
+	var projCtxJSON string
+	if skipSparseCheckout {
+		projCtx, err := projectcontext.Parse(newClonePath)
+		if err != nil {
+			// Non-fatal, but log a warning
+			fmt.Printf("Warning: could not parse project context: %v\n", err)
+		}
+		if projCtx != nil {
+			jsonData, err := json.Marshal(projCtx)
+			if err != nil {
+				fmt.Printf("Warning: could not serialize project context to JSON: %v\n", err)
+			} else {
+				projCtxJSON = string(jsonData)
+			}
+		}
+	}
+
 	// Create or reopen agent bead for ZFC compliance
 	// HookBead is set atomically at recreation time if provided.
 	// Uses CreateOrReopenAgentBead to handle re-spawning with same name (GH #332).
 	_, err = m.beads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
-		RoleType:   "polecat",
-		Rig:        m.rig.Name,
-		AgentState: "spawning",
-		RoleBead:   beads.RoleBeadIDTown("polecat"),
-		HookBead:   opts.HookBead, // Set atomically at spawn time
+		RoleType:           "polecat",
+		Rig:                m.rig.Name,
+		AgentState:         "spawning",
+		RoleBead:           beads.RoleBeadIDTown("polecat"),
+		HookBead:           opts.HookBead, // Set atomically at spawn time
+		ProjectContextJSON: projCtxJSON,
 	})
 	if err != nil {
 		fmt.Printf("Warning: could not create agent bead: %v\n", err)

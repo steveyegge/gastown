@@ -1,12 +1,15 @@
 package polecat
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/projectcontext"
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
@@ -292,11 +295,15 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
 
-	// Initialize git repo in mayor/rig
-	cmd := exec.Command("git", "init")
 	cmd.Dir = mayorRig
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
+	}
+
+	cmd = exec.Command("git", "checkout", "-b", "main")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b main: %v\n%s", err, out)
 	}
 
 	// Create AGENTS.md with test content
@@ -313,6 +320,9 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 	}
 	if err := mayorGit.Commit("Add AGENTS.md"); err != nil {
 		t.Fatalf("git commit: %v", err)
+	}
+	if err := mayorGit.Push("origin", "main", false); err != nil {
+		t.Fatalf("git push: %v", err)
 	}
 
 	// AddWithOptions needs origin/main to exist. Add self as origin and fetch.
@@ -345,12 +355,12 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 	}
 
 	// Verify content matches
-	content, err := os.ReadFile(worktreeAgentsMD)
+	readContent, err := os.ReadFile(worktreeAgentsMD)
 	if err != nil {
 		t.Fatalf("read worktree AGENTS.md: %v", err)
 	}
-	if string(content) != string(agentsMDContent) {
-		t.Errorf("AGENTS.md content = %q, want %q", string(content), string(agentsMDContent))
+	if string(readContent) != string(agentsMDContent) {
+		t.Errorf("AGENTS.md content = %q, want %q", string(readContent), string(agentsMDContent))
 	}
 }
 
@@ -373,6 +383,12 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
 
+	cmd = exec.Command("git", "checkout", "-b", "main")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b main: %v\n%s", err, out)
+	}
+
 	// Create a dummy file and commit (repo needs at least one commit)
 	dummyPath := filepath.Join(mayorRig, "README.md")
 	if err := os.WriteFile(dummyPath, []byte("# Test\n"), 0644); err != nil {
@@ -384,6 +400,9 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	}
 	if err := mayorGit.Commit("Initial commit"); err != nil {
 		t.Fatalf("git commit: %v", err)
+	}
+	if err := mayorGit.Push("origin", "main", false); err != nil {
+		t.Fatalf("git push: %v", err)
 	}
 
 	// AddWithOptions needs origin/main to exist. Add self as origin and fetch.
@@ -424,11 +443,106 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	}
 
 	// Verify content matches the fallback source
-	content, err := os.ReadFile(worktreeAgentsMD)
+	readContent, err := os.ReadFile(worktreeAgentsMD)
 	if err != nil {
 		t.Fatalf("read worktree AGENTS.md: %v", err)
 	}
-	if string(content) != string(agentsMDContent) {
-		t.Errorf("AGENTS.md content = %q, want %q", string(content), string(agentsMDContent))
+	if string(readContent) != string(agentsMDContent) {
+		t.Errorf("AGENTS.md content = %q, want %q", string(readContent), string(agentsMDContent))
+	}
+}
+
+func TestAddWithOptions_WithProjectContext(t *testing.T) {
+	// Skip if bd is not installed
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("skipping: bd is not installed")
+	}
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "test-rig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir rig: %v", err)
+	}
+
+	// 1. Configure rig to include project files
+	settingsDir := filepath.Join(rigPath, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("mkdir settings: %v", err)
+	}
+	settingsContent := `{"include_project_claude_files": true}`
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), []byte(settingsContent), 0644); err != nil {
+		t.Fatalf("write settings.json: %v", err)
+	}
+
+	// 2. Set up bare git repo with a CLAUDE.md
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	cmd := exec.Command("git", "init", "--bare")
+	cmd.Dir = bareRepoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+
+	cloneDir := t.TempDir()
+	cmd = exec.Command("git", "clone", bareRepoPath, cloneDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v\n%s", err, out)
+	}
+
+	claudeMDContent := "Guideline from test"
+	if err := os.WriteFile(filepath.Join(cloneDir, "CLAUDE.md"), []byte(claudeMDContent), 0644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
+	}
+	cloneGit := git.NewGit(cloneDir)
+	if err := cloneGit.Add("CLAUDE.md"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := cloneGit.Commit("Add CLAUDE.md"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	if err := cloneGit.Push("origin", "main", false); err != nil {
+		t.Fatalf("git push: %v", err)
+	}
+
+	// 3. Set up beads repo
+	if _, err := exec.LookPath("bd"); err == nil {
+		cmd = exec.Command("bd", "init")
+		cmd.Dir = townRoot
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("bd init: %v\n%s", err, out)
+		}
+	}
+
+
+	// 4. Create manager and add polecat
+	r := &rig.Rig{Name: "test-rig", Path: rigPath}
+	m := NewManager(r, git.NewGit(townRoot))
+
+	polecat, err := m.AddWithOptions("TestWithContext", AddOptions{})
+	if err != nil {
+		t.Fatalf("AddWithOptions: %v", err)
+	}
+
+	// 5. Verify project context in agent bead
+	agentBeadID := m.agentBeadID(polecat.Name)
+	_, fields, err := m.beads.GetAgentBead(agentBeadID)
+	if err != nil {
+		t.Fatalf("GetAgentBead: %v", err)
+	}
+	if fields == nil {
+		t.Fatalf("Agent fields are nil")
+	}
+
+	if fields.ProjectContextJSON == "" {
+		t.Fatalf("ProjectContextJSON is empty")
+	}
+
+	var projCtx projectcontext.ProjectContext
+	if err := json.Unmarshal([]byte(fields.ProjectContextJSON), &projCtx); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	expectedGuidelines := []string{"Guideline from test"}
+	if !reflect.DeepEqual(projCtx.Guidelines, expectedGuidelines) {
+		t.Errorf("Expected guidelines %v, got %v", expectedGuidelines, projCtx.Guidelines)
 	}
 }

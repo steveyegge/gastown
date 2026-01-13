@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
+	"github.com/steveyegge/gastown/internal/projectcontext"
 )
 
 type wispCreateJSON struct {
@@ -193,6 +194,35 @@ func runSlingFormula(args []string) error {
 	for _, v := range slingVars {
 		wispArgs = append(wispArgs, "--var", v)
 	}
+
+	// Inject project context into formula vars
+	agentBeadID := agentIDToBeadID(targetAgent, townRoot)
+	if agentBeadID != "" {
+		b := beads.New(townRoot)
+		_, agentFields, err := b.GetAgentBead(agentBeadID)
+		if err == nil && agentFields != nil && agentFields.ProjectContextJSON != "" {
+			var projCtx projectcontext.ProjectContext
+			if err := json.Unmarshal([]byte(agentFields.ProjectContextJSON), &projCtx); err == nil {
+				if len(projCtx.Guidelines) > 0 {
+					wispArgs = append(wispArgs, "--var", fmt.Sprintf("project_guidelines=%s", strings.Join(projCtx.Guidelines, "\n")))
+				}
+				if len(projCtx.Constraints) > 0 {
+					wispArgs = append(wispArgs, "--var", fmt.Sprintf("project_constraints=%s", strings.Join(projCtx.Constraints, "\n")))
+				}
+				if len(projCtx.Rules) > 0 {
+					wispArgs = append(wispArgs, "--var", fmt.Sprintf("project_rules=%s", strings.Join(projCtx.Rules, "\n")))
+				}
+				if len(projCtx.Skills) > 0 {
+					var skillsSummary []string
+					for _, s := range projCtx.Skills {
+						skillsSummary = append(skillsSummary, fmt.Sprintf("- %s: %s", s.Name, s.Intent))
+					}
+					wispArgs = append(wispArgs, "--var", fmt.Sprintf("project_skills_summary=%s", strings.Join(skillsSummary, "\n")))
+				}
+			}
+		}
+	}
+
 	wispArgs = append(wispArgs, "--json")
 
 	wispCmd := exec.Command("bd", wispArgs...)

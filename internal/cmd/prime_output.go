@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/projectcontext"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -524,4 +526,57 @@ func explain(condition bool, reason string) {
 	if primeExplain && condition {
 		fmt.Printf("\n[EXPLAIN] %s\n", reason)
 	}
+}
+
+// outputProjectContext outputs the project-specific context from the agent bead.
+// This is called for polecats and crew workers to inject interpreted project
+// context (from CLAUDE.md and .claude/) into the molecule context.
+//
+// Per the project context integration spec:
+// - Polecats MUST NOT directly read CLAUDE.md
+// - All project context is interpreted once at spawn time
+// - Context is converted to structured form and stored in the agent bead
+// - This function formats and injects that context via gt prime
+func outputProjectContext(ctx RoleContext) {
+	// Only applies to polecat and crew roles
+	if ctx.Role != RolePolecat && ctx.Role != RoleCrew {
+		return
+	}
+
+	// Get agent bead ID
+	agentBeadID := getAgentBeadID(ctx)
+	if agentBeadID == "" {
+		return
+	}
+
+	// Get the agent bead
+	b := beads.New(ctx.WorkDir)
+	_, fields, err := b.GetAgentBead(agentBeadID)
+	if err != nil || fields == nil {
+		// Silently skip - agent bead might not exist yet
+		return
+	}
+
+	// Check for project context JSON
+	if fields.ProjectContextJSON == "" {
+		return
+	}
+
+	// Parse the JSON into ProjectContext
+	var projCtx projectcontext.ProjectContext
+	if err := json.Unmarshal([]byte(fields.ProjectContextJSON), &projCtx); err != nil {
+		// Silently skip malformed JSON
+		return
+	}
+
+	// Format for molecule injection
+	formatted := projCtx.FormatForMolecule()
+	if formatted == "" {
+		return
+	}
+
+	// Output the project context
+	explain(true, "Project context: extracted from agent bead (parsed at spawn time)")
+	fmt.Println()
+	fmt.Println(formatted)
 }

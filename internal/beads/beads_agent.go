@@ -19,7 +19,8 @@ type AgentFields struct {
 	RoleBead          string // Role definition bead ID (canonical location; may not exist yet)
 	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
 	ActiveMR          string // Currently active merge request bead ID (for traceability)
-	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
+	NotificationLevel  string // DND mode: verbose, normal, muted (default: normal)
+	ProjectContextJSON string // JSON-serialized projectcontext.ProjectContext
 }
 
 // Notification level constants
@@ -78,6 +79,12 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, "notification_level: null")
 	}
 
+	if fields.ProjectContextJSON != "" {
+		lines = append(lines, fmt.Sprintf("project_context_json: %s", fields.ProjectContextJSON))
+	} else {
+		lines = append(lines, "project_context_json: null")
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -119,6 +126,8 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.ActiveMR = value
 		case "notification_level":
 			fields.NotificationLevel = value
+		case "project_context_json":
+			fields.ProjectContextJSON = value
 		}
 	}
 
