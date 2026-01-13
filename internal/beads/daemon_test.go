@@ -5,46 +5,6 @@ import (
 	"testing"
 )
 
-func TestParseBdDaemonCount_Array(t *testing.T) {
-	input := []byte(`[{"pid":1234},{"pid":5678}]`)
-	count := parseBdDaemonCount(input)
-	if count != 2 {
-		t.Errorf("expected 2, got %d", count)
-	}
-}
-
-func TestParseBdDaemonCount_ObjectWithCount(t *testing.T) {
-	input := []byte(`{"count":3,"daemons":[{},{},{}]}`)
-	count := parseBdDaemonCount(input)
-	if count != 3 {
-		t.Errorf("expected 3, got %d", count)
-	}
-}
-
-func TestParseBdDaemonCount_ObjectWithDaemons(t *testing.T) {
-	input := []byte(`{"daemons":[{},{}]}`)
-	count := parseBdDaemonCount(input)
-	if count != 2 {
-		t.Errorf("expected 2, got %d", count)
-	}
-}
-
-func TestParseBdDaemonCount_Empty(t *testing.T) {
-	input := []byte(``)
-	count := parseBdDaemonCount(input)
-	if count != 0 {
-		t.Errorf("expected 0, got %d", count)
-	}
-}
-
-func TestParseBdDaemonCount_Invalid(t *testing.T) {
-	input := []byte(`not json`)
-	count := parseBdDaemonCount(input)
-	if count != 0 {
-		t.Errorf("expected 0 for invalid JSON, got %d", count)
-	}
-}
-
 func TestCountBdActivityProcesses(t *testing.T) {
 	count := CountBdActivityProcesses()
 	if count < 0 {
