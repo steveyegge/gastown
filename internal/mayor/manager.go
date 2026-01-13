@@ -68,7 +68,7 @@ func (m *Manager) Start(agentOverride string) error {
 		}
 	}
 
-	// Ensure mayor directory exists
+	// Ensure mayor directory exists (for Claude settings)
 	mayorDir := m.mayorDir()
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		return fmt.Errorf("creating mayor directory: %w", err)
@@ -79,19 +79,25 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
-	// Build startup command with initial prompt for propulsion.
-	// The CLI prompt is more reliable than post-startup nudges (which arrive before input is ready).
+	// Build startup beacon with explicit instructions (matches gt handoff behavior)
+	// This ensures the agent has clear context immediately, not after nudges arrive
+	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		Recipient: "mayor",
+		Sender:    "human",
+		Topic:     "cold-start",
+	})
+
+	// Build startup command WITH the beacon prompt - the startup hook handles 'gt prime' automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", "gt prime", agentOverride)
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", beacon, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
-	// Create session with command directly to avoid send-keys race condition.
-	// This runs the command as the pane's initial process, avoiding the shell
-	// readiness timing issues that cause "bad pattern" and command-not-found errors.
+	// Create session in townRoot (not mayorDir) to match gt handoff behavior
+	// This ensures Mayor works from the town root where all tools work correctly
 	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, mayorDir, startupCmd); err != nil {
+	if err := t.NewSessionWithCommand(sessionID, m.townRoot, startupCmd); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
@@ -118,9 +124,10 @@ func (m *Manager) Start(agentOverride string) error {
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
-	// Propulsion is handled by the CLI prompt ("gt prime") passed at startup.
-	// No need for post-startup nudges which are unreliable (text arrives before input is ready).
-	// The SessionStart hook also runs "gt prime" as a backup.
+	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Startup beacon with instructions is now included in the initial command,
+	// so no separate nudge needed. The agent starts with full context immediately.
 
 	return nil
 }

@@ -65,9 +65,9 @@ func FormatStartupNudge(cfg StartupNudgeConfig) string {
 	beacon := fmt.Sprintf("[GAS TOWN] %s <- %s • %s • %s",
 		cfg.Recipient, cfg.Sender, timestamp, topic)
 
-	// For handoff, add explicit instructions so the agent knows what to do
+	// For handoff and cold-start, add explicit instructions so the agent knows what to do
 	// even if hooks haven't loaded CLAUDE.md yet
-	if cfg.Topic == "handoff" {
+	if cfg.Topic == "handoff" || cfg.Topic == "cold-start" {
 		beacon += "\n\nCheck your hook and mail, then act on the hook if present:\n" +
 			"1. `gt hook` - shows hooked work (if any)\n" +
 			"2. `gt mail inbox` - check for messages\n" +
