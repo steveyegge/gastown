@@ -44,14 +44,26 @@ Gas Town is designed for AI agents. When making improvements:
 
 ## Iteration Workflow
 
-Before creating a PR, complete 5 improved iterations:
+Before creating a PR, iterate 5 times on your implementation. Each iteration must be a demonstrable IMPROVEMENT over the previous one.
 
-1. **Iter 1**: Get basic functionality working
-2. **Iter 2**: IMPROVE - better error handling, cleaner code
-3. **Iter 3**: IMPROVE - more edge cases, better tests
-4. **Iter 4**: IMPROVE - refactor for clarity, optimize
-5. **Iter 5**: IMPROVE - final polish, perfect tests
+**Iteration Requirements:**
+1. Each iteration must make the code measurably better
+2. Don't just re-run tests - actually improve something
+3. Build and test must pass after each iteration
 
-Each iteration must be demonstrably better than the last. Don't just review - actively improve.
+**Types of Improvements:**
+- **Iter 1**: Basic implementation that works
+- **Iter 2**: Better error handling, edge cases, cleaner code
+- **Iter 3**: More edge cases, better tests, documentation
+- **Iter 4**: Refactor for clarity, optimize hot paths
+- **Iter 5**: Final polish, perfect tests, audit for issues
+
+**After Each Iteration:**
+1. Run `go build ./...` - must pass
+2. Run `go vet ./...` - must pass
+3. Run tests for affected packages - must pass
+4. Briefly note what improved
+
+**Only after all 5 iterations pass** should you create the PR.
 
 After PR creation, wait 2 minutes then check `gh pr checks <number>`. Fix any failures until all pass.
