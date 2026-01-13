@@ -552,3 +552,56 @@ func TestGetAllDescendants(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionSet(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-sessionset-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create a test session
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Get the session set
+	set, err := tm.GetSessionSet()
+	if err != nil {
+		t.Fatalf("GetSessionSet: %v", err)
+	}
+
+	// Test Has() for existing session
+	if !set.Has(sessionName) {
+		t.Errorf("SessionSet.Has(%q) = false, want true", sessionName)
+	}
+
+	// Test Has() for non-existing session
+	if set.Has("nonexistent-session-xyz-12345") {
+		t.Error("SessionSet.Has(nonexistent) = true, want false")
+	}
+
+	// Test nil safety
+	var nilSet *SessionSet
+	if nilSet.Has("anything") {
+		t.Error("nil SessionSet.Has() = true, want false")
+	}
+
+	// Test Names() returns the session
+	names := set.Names()
+	found := false
+	for _, n := range names {
+		if n == sessionName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("SessionSet.Names() doesn't contain %q", sessionName)
+	}
+}

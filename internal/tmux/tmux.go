@@ -244,6 +244,54 @@ func (t *Tmux) ListSessions() ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
+// SessionSet provides O(1) session existence checks by caching session names.
+// Use this when you need to check multiple sessions to avoid N+1 subprocess calls.
+type SessionSet struct {
+	sessions map[string]struct{}
+}
+
+// GetSessionSet returns a SessionSet containing all current sessions.
+// Call this once at the start of an operation, then use Has() for O(1) checks.
+// This replaces multiple HasSession() calls with a single ListSessions() call.
+func (t *Tmux) GetSessionSet() (*SessionSet, error) {
+	sessions, err := t.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	set := &SessionSet{
+		sessions: make(map[string]struct{}, len(sessions)),
+	}
+	for _, s := range sessions {
+		if s != "" {
+			set.sessions[s] = struct{}{}
+		}
+	}
+	return set, nil
+}
+
+// Has returns true if the session exists in the set.
+// This is an O(1) lookup - no subprocess is spawned.
+func (s *SessionSet) Has(name string) bool {
+	if s == nil || s.sessions == nil {
+		return false
+	}
+	_, ok := s.sessions[name]
+	return ok
+}
+
+// Names returns all session names in the set.
+func (s *SessionSet) Names() []string {
+	if s == nil || s.sessions == nil {
+		return nil
+	}
+	names := make([]string, 0, len(s.sessions))
+	for name := range s.sessions {
+		names = append(names, name)
+	}
+	return names
+}
+
 // ListSessionIDs returns a map of session name to session ID.
 // Session IDs are in the format "$N" where N is a number.
 func (t *Tmux) ListSessionIDs() (map[string]string, error) {
