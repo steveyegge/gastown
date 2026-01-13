@@ -87,6 +87,7 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	var mismatches []string
+	var beadsDirWarnings []string
 	checkedCount := 0
 
 	for _, sess := range gtSessions {
@@ -121,6 +122,31 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 			} else if actualVal != expectedVal {
 				mismatches = append(mismatches, fmt.Sprintf("%s: %s=%q (expected %q)", sess, key, actualVal, expectedVal))
 			}
+		}
+
+		// Check for BEADS_DIR - this breaks routing-based lookups
+		if beadsDir, exists := actual["BEADS_DIR"]; exists && beadsDir != "" {
+			beadsDirWarnings = append(beadsDirWarnings, fmt.Sprintf("%s: BEADS_DIR=%q (breaks prefix routing)", sess, beadsDir))
+		}
+	}
+
+	// Check for BEADS_DIR issues first (higher priority warning)
+	if len(beadsDirWarnings) > 0 {
+		details := beadsDirWarnings
+		if len(mismatches) > 0 {
+			details = append(details, "", "Other env var issues:")
+			details = append(details, mismatches...)
+		}
+		details = append(details,
+			"",
+			"BEADS_DIR overrides prefix-based routing and breaks multi-rig lookups.",
+		)
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Found BEADS_DIR set in %d session(s)", len(beadsDirWarnings)),
+			Details: details,
+			FixHint: "Remove BEADS_DIR from session environment: gt shutdown && gt up",
 		}
 	}
 
