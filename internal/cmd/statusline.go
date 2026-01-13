@@ -19,6 +19,27 @@ var (
 	statusLineSession string
 )
 
+// rigAbbreviations maps rig names to their abbreviations for the statusline.
+var rigAbbreviations = map[string]string{
+	"design_forge":  "df",
+	"gastown":       "gt",
+	"mediaforge":    "mf",
+	"mt5optimizer":  "mt",
+	"opencode":      "oc",
+	"pod_automation": "pa",
+	"promptforge":   "pf",
+	"autoaffiliate": "aa",
+}
+
+// abbreviateRigName returns the abbreviated form of a rig name if one exists,
+// otherwise returns the original name.
+func abbreviateRigName(rigName string) string {
+	if abbr, ok := rigAbbreviations[rigName]; ok {
+		return abbr
+	}
+	return rigName
+}
+
 var statusLineCmd = &cobra.Command{
 	Use:    "status-line",
 	Short:  "Output status line content for tmux (internal use)",
@@ -85,12 +106,13 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue string) error {
 	// Determine agent type and identity
 	var icon, identity string
+	abbrRigName := abbreviateRigName(rigName)
 	if polecat != "" {
 		icon = AgentTypeIcons[AgentPolecat]
-		identity = fmt.Sprintf("%s/%s", rigName, polecat)
+		identity = fmt.Sprintf("%s/%s", abbrRigName, polecat)
 	} else if crew != "" {
 		icon = AgentTypeIcons[AgentCrew]
-		identity = fmt.Sprintf("%s/crew/%s", rigName, crew)
+		identity = fmt.Sprintf("%s/crew/%s", abbrRigName, crew)
 	}
 
 	// Get pane's working directory to find workspace
@@ -123,7 +145,7 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 		if icon != "" {
 			parts = append(parts, fmt.Sprintf("%s 🪝 %s", icon, hookedWork))
 		} else {
-			parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
+			parts = append(parts, fmt.Sprintf("🪝%s", hookedWork))
 		}
 	} else if currentWork != "" {
 		// Fall back to current work (in_progress)
@@ -141,9 +163,9 @@ func runWorkerStatusLine(t *tmux.Tmux, session, rigName, polecat, crew, issue st
 		unread, subject := getMailPreviewWithRoot(identity, 45, townRoot)
 		if unread > 0 {
 			if subject != "" {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%s", subject))
 			} else {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%d", unread))
 			}
 		}
 	}
@@ -196,19 +218,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		rigStatuses[rigName] = &rigStatus{}
 	}
 
-	// Track per-agent-type health (working/zombie counts)
-	type agentHealth struct {
-		total   int
-		working int
-	}
-	healthByType := map[AgentType]*agentHealth{
-		AgentPolecat:  {},
-		AgentWitness:  {},
-		AgentRefinery: {},
-		AgentDeacon:   {},
-	}
-
-	// Single pass: track rig status AND agent health
+	// Track rig status in a single pass
 	for _, s := range sessions {
 		agent := categorizeSession(s)
 		if agent == nil {
@@ -229,15 +239,6 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 				rigStatuses[agent.Rig].polecatCount++
 			}
 		}
-
-		// Track agent health (skip Mayor and Crew)
-		if health := healthByType[agent.Type]; health != nil {
-			health.total++
-			// Detect working state via ✻ symbol
-			if isSessionWorking(t, s) {
-				health.working++
-			}
-		}
 	}
 
 	// Get operational state for each rig
@@ -249,33 +250,89 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 			status.opState = "OPERATIONAL"
 		}
 	}
+	// Track per-agent-type health (working/idle counts)
+	type sessionHealth struct {
+		icon    string
+		total   int
+		working int
+		idle    int
+	}
+
+	// Agent type icons
+	agentIcons := map[AgentType]string{
+		AgentPolecat:  "😺",
+		AgentWitness:  "👁️",
+		AgentRefinery: "🏭",
+		AgentDeacon:   "⛪",
+		AgentCrew:     "👷",
+	}
+
+	// Initialize health tracker for all agent types (always show all types)
+	healthByType := make(map[AgentType]*sessionHealth)
+	for _, agentType := range []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon, AgentCrew} {
+		healthByType[agentType] = &sessionHealth{
+			icon: agentIcons[agentType],
+		}
+	}
+
+	for _, s := range sessions {
+		// Skip non-Gas Town sessions
+		if !strings.HasPrefix(s, "gt-") && !strings.HasPrefix(s, "hq-") {
+			continue
+		}
+
+		agent := categorizeSession(s)
+		if agent == nil {
+			continue
+		}
+
+		// Skip mayor (viewer of statusline, not tracked)
+		if agent.Type == AgentMayor {
+			continue
+		}
+
+		// Only count rig-specific agents from registered rigs
+		// Town-level agents (deacon) don't have a rig and are always counted
+		if agent.Rig != "" && !registeredRigs[agent.Rig] {
+			continue
+		}
+
+		healthByType[agent.Type].total++
+
+		// Detect working state (✻ = working, ❯ = idle)
+		state := getSessionState(t, s)
+		if state == "working" {
+			healthByType[agent.Type].working++
+		} else if state == "idle" {
+			healthByType[agent.Type].idle++
+		}
+		// dead sessions counted in total but not working/idle
+	}
 
 	// Build status
 	var parts []string
 
 	// Add per-agent-type health in consistent order
-	// Format: "1/10 😺" = 1 working out of 10 total
-	// Only show agent types that have sessions
-	agentOrder := []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon}
+	// Format: 😺1/10 (1 working out of 10 total, 9 idle inferred)
+	// Always show all agent types, even when count is 0
+	agentOrder := []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon, AgentCrew}
 	var agentParts []string
 	for _, agentType := range agentOrder {
 		health := healthByType[agentType]
-		if health.total == 0 {
-			continue
-		}
-		icon := AgentTypeIcons[agentType]
-		agentParts = append(agentParts, fmt.Sprintf("%d/%d %s", health.working, health.total, icon))
+		// Always show all agent types (no continue for total == 0)
+
+		// Show icon+working/total format (e.g., "😺1/10" = 1 working, 10 total)
+		agentParts = append(agentParts, fmt.Sprintf("%s%d/%d", health.icon, health.working, health.total))
 	}
 	if len(agentParts) > 0 {
-		parts = append(parts, strings.Join(agentParts, " "))
+		parts = append(parts, "active: "+strings.Join(agentParts, " "))
 	}
 
 	// Build rig status display with LED indicators
 	// 🟢 = both witness and refinery running (fully active)
 	// 🟡 = one of witness/refinery running (partially active)
-	// 🅿️ = parked (nothing running, intentionally paused)
-	// 🛑 = docked (nothing running, global shutdown)
-	// ⚫ = operational but nothing running (unexpected state)
+	// ⚫ = neither running (inactive)
+	// ⏸️ = parked or docked (intentionally offline)
 
 	// Create sortable rig list
 	type rigInfo struct {
@@ -287,27 +344,29 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		rigs = append(rigs, rigInfo{name: rigName, status: status})
 	}
 
-	// Sort by: 1) running state, 2) polecat count (desc), 3) operational state, 4) alphabetical
+	// Sort by: 1) operational state (OPERATIONAL first, then PARKED, then DOCKED),
+	//          2) running state (within operational: running before idle),
+	//          3) polecat count (desc), 4) alphabetical
+	// This pushes PARKED and DOCKED rigs to the right.
 	sort.Slice(rigs, func(i, j int) bool {
-		isRunningI := rigs[i].status.hasWitness || rigs[i].status.hasRefinery
-		isRunningJ := rigs[j].status.hasWitness || rigs[j].status.hasRefinery
-
-		// Primary sort: running rigs before non-running rigs
-		if isRunningI != isRunningJ {
-			return isRunningI
-		}
-
-		// Secondary sort: polecat count (descending)
-		if rigs[i].status.polecatCount != rigs[j].status.polecatCount {
-			return rigs[i].status.polecatCount > rigs[j].status.polecatCount
-		}
-
-		// Tertiary sort: operational state (for non-running rigs: OPERATIONAL < PARKED < DOCKED)
+		// Primary sort: operational state (OPERATIONAL < PARKED < DOCKED)
 		stateOrder := map[string]int{"OPERATIONAL": 0, "PARKED": 1, "DOCKED": 2}
 		stateI := stateOrder[rigs[i].status.opState]
 		stateJ := stateOrder[rigs[j].status.opState]
 		if stateI != stateJ {
 			return stateI < stateJ
+		}
+
+		// Secondary sort: running state (within same operational state)
+		isRunningI := rigs[i].status.hasWitness || rigs[i].status.hasRefinery
+		isRunningJ := rigs[j].status.hasWitness || rigs[j].status.hasRefinery
+		if isRunningI != isRunningJ {
+			return isRunningI
+		}
+
+		// Tertiary sort: polecat count (descending)
+		if rigs[i].status.polecatCount != rigs[j].status.polecatCount {
+			return rigs[i].status.polecatCount > rigs[j].status.polecatCount
 		}
 
 		// Quaternary sort: alphabetical
@@ -318,15 +377,10 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	var rigParts []string
 	var lastGroup string
 	for _, rig := range rigs {
-		isRunning := rig.status.hasWitness || rig.status.hasRefinery
-		var currentGroup string
-		if isRunning {
-			currentGroup = "running"
-		} else {
-			currentGroup = "idle-" + rig.status.opState
-		}
+		// Group by operational state (matches new sort order)
+		currentGroup := rig.status.opState
 
-		// Add separator when group changes (running -> non-running, or different opStates within non-running)
+		// Add separator when operational state changes
 		if lastGroup != "" && lastGroup != currentGroup {
 			rigParts = append(rigParts, "|")
 		}
@@ -351,18 +405,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 				led = "⚫" // Operational but nothing running
 			}
 		}
-
-		// Show polecat count if > 0
-		// All icons get 1 space, Park gets 2
-		space := " "
-		if led == "🅿️" {
-			space = "  "
-		}
-		display := led + space + rig.name
-		if status.polecatCount > 0 {
-			display += fmt.Sprintf("(%d)", status.polecatCount)
-		}
-		rigParts = append(rigParts, display)
+		rigParts = append(rigParts, led+abbreviateRigName(rig.name))
 	}
 
 	if len(rigParts) > 0 {
@@ -375,15 +418,15 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		hookedWork = getHookedWork("mayor", 40, townRoot)
 	}
 	if hookedWork != "" {
-		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
+		parts = append(parts, fmt.Sprintf("🪝%s", hookedWork))
 	} else if townRoot != "" {
 		// Priority 2: Fall back to mail preview
 		unread, subject := getMailPreviewWithRoot("mayor/", 45, townRoot)
 		if unread > 0 {
 			if subject != "" {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%s", subject))
 			} else {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%d", unread))
 			}
 		}
 	}
@@ -440,7 +483,7 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 	// Build status
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%d rigs", rigCount))
-	parts = append(parts, fmt.Sprintf("%d 😺", polecatCount))
+	parts = append(parts, fmt.Sprintf("%d😺", polecatCount))
 
 	// Priority 1: Check for hooked work (town beads for deacon)
 	hookedWork := ""
@@ -448,15 +491,15 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 		hookedWork = getHookedWork("deacon", 35, townRoot)
 	}
 	if hookedWork != "" {
-		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
+		parts = append(parts, fmt.Sprintf("🪝%s", hookedWork))
 	} else if townRoot != "" {
 		// Priority 2: Fall back to mail preview
 		unread, subject := getMailPreviewWithRoot("deacon/", 40, townRoot)
 		if unread > 0 {
 			if subject != "" {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%s", subject))
 			} else {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%d", unread))
 			}
 		}
 	}
@@ -505,14 +548,12 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 		}
 	}
 
-	identity := fmt.Sprintf("%s/witness", rigName)
+	identity := fmt.Sprintf("%s/witness", abbreviateRigName(rigName))
 
 	// Build status
 	var parts []string
-	parts = append(parts, fmt.Sprintf("%d 😺", polecatCount))
-	if crewCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d crew", crewCount))
-	}
+	parts = append(parts, fmt.Sprintf("%d😺", polecatCount))
+	parts = append(parts, fmt.Sprintf("%d👷", crewCount))
 
 	// Priority 1: Check for hooked work (rig beads for witness)
 	hookedWork := ""
@@ -521,15 +562,15 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 		hookedWork = getHookedWork(identity, 30, rigBeadsDir)
 	}
 	if hookedWork != "" {
-		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
+		parts = append(parts, fmt.Sprintf("🪝%s", hookedWork))
 	} else if townRoot != "" {
 		// Priority 2: Fall back to mail preview
 		unread, subject := getMailPreviewWithRoot(identity, 35, townRoot)
 		if unread > 0 {
 			if subject != "" {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%s", subject))
 			} else {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%d", unread))
 			}
 		}
 	}
@@ -590,7 +631,7 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 		}
 	}
 
-	identity := fmt.Sprintf("%s/refinery", rigName)
+	identity := fmt.Sprintf("%s/refinery", abbreviateRigName(rigName))
 
 	// Build status
 	var parts []string
@@ -612,15 +653,15 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 		hookedWork = getHookedWork(identity, 25, rigBeadsDir)
 	}
 	if hookedWork != "" {
-		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
+		parts = append(parts, fmt.Sprintf("🪝%s", hookedWork))
 	} else if townRoot != "" {
 		// Priority 2: Fall back to mail preview
 		unread, subject := getMailPreviewWithRoot(identity, 30, townRoot)
 		if unread > 0 {
 			if subject != "" {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %s", subject))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%s", subject))
 			} else {
-				parts = append(parts, fmt.Sprintf("\U0001F4EC %d", unread))
+				parts = append(parts, fmt.Sprintf("\U0001F4EC%d", unread))
 			}
 		}
 	}
@@ -629,25 +670,49 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 	return nil
 }
 
-// isSessionWorking detects if a Claude Code session is actively working.
-// Returns true if the ✻ symbol is visible in the pane (indicates Claude is processing).
-// Returns false for idle sessions (showing ❯ prompt) or if state cannot be determined.
-func isSessionWorking(t *tmux.Tmux, session string) bool {
+// getSessionState detects the state of a Claude Code session by capturing pane content.
+// Returns "working" if Claude is active (✻ symbol present), "idle" if prompt is visible,
+// or "unknown" if the state cannot be determined.
+func getSessionState(t *tmux.Tmux, session string) string {
 	// Capture last few lines of the pane
 	lines, err := t.CapturePaneLines(session, 5)
 	if err != nil || len(lines) == 0 {
-		return false
+		return "unknown"
 	}
 
-	// Check all captured lines for the working indicator
-	// ✻ appears in Claude's status line when actively processing
-	for _, line := range lines {
-		if strings.Contains(line, "✻") {
-			return true
+	// Check last visible line for state indicators
+	lastLine := strings.TrimSpace(lines[len(lines)-1])
+
+	// ✻ indicates Claude is working (varies: Incubating, Symbioting, Shenaniganing, etc.)
+	if strings.Contains(lastLine, "✻") || strings.Contains(lastLine, "✻") {
+		return "working"
+	}
+
+	// ❯ prompt indicates Claude is idle, waiting for input
+	if strings.HasSuffix(lastLine, "❯") || strings.HasSuffix(lastLine, "❯") {
+		return "idle"
+	}
+
+	// Check second-to-last line as well (prompt might be on previous line)
+	if len(lines) >= 2 {
+		prevLine := strings.TrimSpace(lines[len(lines)-2])
+		if strings.HasSuffix(prevLine, "❯") || strings.HasSuffix(prevLine, "❯") {
+			return "idle"
+		}
+		if strings.Contains(prevLine, "✻") || strings.Contains(prevLine, "✻") {
+			return "working"
 		}
 	}
 
-	return false
+	// Check all lines for working indicator (in case it's not near the end)
+	for _, line := range lines {
+		if strings.Contains(line, "✻") || strings.Contains(line, "✻") {
+			return "working"
+		}
+	}
+
+	// Default to unknown if we can't determine state
+	return "unknown"
 }
 
 // getUnreadMailCount returns unread mail count for an identity.

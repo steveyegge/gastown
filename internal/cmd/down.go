@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -27,6 +28,14 @@ import (
 const (
 	shutdownLockFile    = "daemon/shutdown.lock"
 	shutdownLockTimeout = 5 * time.Second
+
+	// shutdownGracePeriod is how long to wait for graceful session termination.
+	// Sessions receive Ctrl-C and have this long to exit cleanly before force kill.
+	// 30 seconds gives Claude time to finish in-progress work and clean up.
+	shutdownGracePeriod = 30 * time.Second
+
+	// shutdownPollInterval is how often to check if a session has exited.
+	shutdownPollInterval = 500 * time.Millisecond
 )
 
 var downCmd = &cobra.Command{
@@ -60,12 +69,13 @@ Use cases:
 }
 
 var (
-	downQuiet    bool
-	downForce    bool
-	downAll      bool
-	downNuke     bool
-	downDryRun   bool
-	downPolecats bool
+	downQuiet     bool
+	downForce     bool
+	downAll       bool
+	downNuke      bool
+	downDryRun    bool
+	downPolecats  bool
+	downTimeout   int  // Graceful shutdown timeout in seconds
 )
 
 func init() {
@@ -75,6 +85,7 @@ func init() {
 	downCmd.Flags().BoolVarP(&downAll, "all", "a", false, "Stop bd daemons/activity and verify shutdown")
 	downCmd.Flags().BoolVar(&downNuke, "nuke", false, "Kill entire tmux server (DESTRUCTIVE - kills non-GT sessions!)")
 	downCmd.Flags().BoolVar(&downDryRun, "dry-run", false, "Preview what would be stopped without taking action")
+	downCmd.Flags().IntVarP(&downTimeout, "timeout", "t", 0, "Graceful shutdown timeout in seconds (default: 10s per session, 0=wait indefinitely)")
 	rootCmd.AddCommand(downCmd)
 }
 
@@ -250,10 +261,13 @@ func runDown(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  • %s\n", r)
 			}
 			fmt.Println()
-			fmt.Printf("This may indicate systemd/launchd is managing bd.\n")
+			fmt.Printf("Possible causes:\n")
+			fmt.Printf("  • systemd/launchd is managing bd or gt daemon\n")
+			fmt.Printf("  • Another process restarted services\n")
 			fmt.Printf("Check with:\n")
-			fmt.Printf("  %s\n", style.Dim.Render("systemctl status bd-daemon  # Linux"))
-			fmt.Printf("  %s\n", style.Dim.Render("launchctl list | grep bd    # macOS"))
+			fmt.Printf("  %s\n", style.Dim.Render("gt status                 # Check Gas Town status"))
+			fmt.Printf("  %s\n", style.Dim.Render("systemctl status bd-daemon # Linux"))
+			fmt.Printf("  %s\n", style.Dim.Render("launchctl list | grep bd   # macOS"))
 			allOK = false
 		}
 	}
@@ -381,13 +395,52 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 		return false, nil // Already stopped
 	}
 
-	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
+	// Try graceful shutdown first (Ctrl-C, then wait for exit)
 	if !downForce {
 		_ = t.SendKeysRaw(sessionName, "C-c")
-		time.Sleep(100 * time.Millisecond)
+
+		// Determine timeout strategy
+		// If timeout is 0, wait indefinitely (check up to 60s total)
+		// Otherwise, use the specified timeout
+		var gracePeriods []time.Duration
+		if downTimeout > 0 {
+			// Use user-specified timeout
+			totalWait := time.Duration(downTimeout) * time.Second
+			if totalWait <= 2*time.Second {
+				gracePeriods = []time.Duration{totalWait}
+			} else if totalWait <= 5*time.Second {
+				gracePeriods = []time.Duration{
+					totalWait / 2,
+					totalWait / 2,
+				}
+			} else {
+				// Split into 3 checks for longer timeouts
+				gracePeriods = []time.Duration{
+					totalWait / 3,
+					totalWait / 3,
+					totalWait / 3,
+				}
+			}
+		} else {
+			// Default: 10s total with exponential backoff
+			gracePeriods = []time.Duration{
+				2 * time.Second,   // First check after 2s
+				3 * time.Second,   // Second check after 3s more
+				5 * time.Second,   // Final check after 5s more (total 10s)
+			}
+		}
+
+		for _, delay := range gracePeriods {
+			time.Sleep(delay)
+			stillRunning, err := t.HasSession(sessionName)
+			if err != nil || !stillRunning {
+				// Session exited gracefully
+				return true, nil
+			}
+		}
 	}
 
-	// Kill the session
+	// Session still running, force kill
 	return true, t.KillSession(sessionName)
 }
 
@@ -449,7 +502,66 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 		}
 	}
 
+	// Check for orphaned Claude/node processes
+	// These can be left behind if tmux sessions were killed but child processes didn't terminate
+	if pids := findOrphanedClaudeProcesses(townRoot); len(pids) > 0 {
+		respawned = append(respawned, fmt.Sprintf("orphaned Claude processes (PIDs: %v)", pids))
+	}
+
 	return respawned
+}
+
+// findOrphanedClaudeProcesses finds Claude/node processes that are running in the
+// town directory but aren't associated with any active tmux session.
+// This can happen when tmux sessions are killed but child processes don't terminate.
+func findOrphanedClaudeProcesses(townRoot string) []int {
+	// Use pgrep to find all claude/node processes
+	cmd := exec.Command("pgrep", "-l", "node")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil // pgrep found no processes or failed
+	}
+
+	var orphaned []int
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Format: "PID command"
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		pidStr := parts[0]
+		var pid int
+		if _, err := fmt.Sscanf(pidStr, "%d", &pid); err != nil {
+			continue
+		}
+
+		// Check if this process is running in the town directory
+		if isProcessInTown(pid, townRoot) {
+			orphaned = append(orphaned, pid)
+		}
+	}
+
+	return orphaned
+}
+
+// isProcessInTown checks if a process is running in the given town directory.
+// Uses ps to check the process's working directory.
+func isProcessInTown(pid int, townRoot string) bool {
+	// Use ps to get the process's working directory
+	cmd := exec.Command("ps", "-o", "command=", "-p", fmt.Sprintf("%d", pid))
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	// Check if the command line includes the town path
+	command := string(output)
+	return strings.Contains(command, townRoot)
 }
 
 // isProcessRunning checks if a process with the given PID exists.

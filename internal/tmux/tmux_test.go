@@ -262,7 +262,7 @@ func TestEnsureSessionFresh_ZombieSession(t *testing.T) {
 	}
 
 	// Verify generic agent check also treats it as not running (shell session)
-	if tm.IsAgentRunning(sessionName) {
+	if running, _ := tm.IsAgentRunning(sessionName); running {
 		t.Fatalf("expected IsAgentRunning(%q) to be false for a fresh shell session", sessionName)
 	}
 
@@ -378,7 +378,7 @@ func TestIsAgentRunning(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tm.IsAgentRunning(sessionName, tt.processNames...)
+			got, _ := tm.IsAgentRunning(sessionName, tt.processNames...)
 			if got != tt.wantRunning {
 				t.Errorf("IsAgentRunning(%q, %v) = %v, want %v (current cmd: %q)",
 					sessionName, tt.processNames, got, tt.wantRunning, cmd)
@@ -395,7 +395,7 @@ func TestIsAgentRunning_NonexistentSession(t *testing.T) {
 	tm := NewTmux()
 
 	// IsAgentRunning on nonexistent session should return false, not error
-	got := tm.IsAgentRunning("nonexistent-session-xyz", "node", "gemini", "cursor-agent")
+	got, _ := tm.IsAgentRunning("nonexistent-session-xyz", "node", "gemini", "cursor-agent")
 	if got {
 		t.Error("IsAgentRunning on nonexistent session should return false")
 	}

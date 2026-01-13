@@ -225,7 +225,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("resolving agent: %w", err)
 		}
-		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
+		if running, _ := t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...); !running {
 			// Runtime has exited, restart it using respawn-pane
 			fmt.Printf("Runtime exited, restarting...\n")
 

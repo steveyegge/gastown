@@ -190,7 +190,7 @@ func runSynthesisStart(cmd *cobra.Command, args []string) error {
 	}
 	if reviewID == "" {
 		// Extract from convoy ID
-		reviewID = strings.TrimPrefix(convoyID, "hq-cv-")
+		reviewID = strings.TrimPrefix(convoyID, "hq-")
 	}
 
 	// Determine target rig
@@ -702,7 +702,7 @@ func TriggerSynthesisIfReady(convoyID, targetRig string) error {
 	legOutputs, _, _ := collectLegOutputs(meta, f)
 	reviewID := meta.ReviewID
 	if reviewID == "" {
-		reviewID = strings.TrimPrefix(convoyID, "hq-cv-")
+		reviewID = strings.TrimPrefix(convoyID, "hq-")
 	}
 
 	synthesisID, err := createSynthesisBead(convoyID, meta, f, legOutputs, reviewID)

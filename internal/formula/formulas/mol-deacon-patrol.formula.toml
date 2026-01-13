@@ -23,7 +23,7 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 8
+version = 9
 
 [[steps]]
 id = "inbox-check"
@@ -226,9 +226,50 @@ bd close <convoy-id> --reason "All tracked issues completed"
 **Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues). Use full IDs when checking."""
 
 [[steps]]
+id = "feed-stranded-convoys"
+title = "Feed stranded convoys"
+needs = ["check-convoy-completion"]
+description = """
+Detect and feed stranded convoys.
+
+A convoy is "stranded" when it has ready issues (open, unblocked, no assignee)
+but no workers are processing them.
+
+**Step 1: Detect stranded convoys**
+```bash
+gt convoy stranded --json
+```
+
+If output is empty or no stranded convoys found, skip to next patrol step.
+
+**Step 2: For each stranded convoy, dispatch feeding dog**
+```bash
+# For each convoy ID from the stranded command:
+gt sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
+```
+
+Use only ONE dog per stranded convoy to avoid thundering herd.
+The dog will: load convoy, find ready issues, dispatch to polecats, report back.
+
+**Step 3: Continue patrol**
+Don't wait for dogs to complete. The patrol continues, dogs work asynchronously.
+Dog completion reports come via mail in next cycle's inbox-check.
+
+**Why this fixes issue #289:**
+- Mayor creates convoys and slings first batch (strategic role)
+- Deacon continuously monitors for stranded state (operational role)
+- Dogs automatically dispatch next batch of ready work (execution role)
+- No Mayor monitoring loop needed - system is autonomous by design
+
+**Idle Town Protocol:**
+If no active work exists in the town, this step will naturally find no stranded
+convoys and skip quickly. The cost is minimal when idle.
+"""
+
+[[steps]]
 id = "resolve-external-deps"
 title = "Resolve external dependencies"
-needs = ["check-convoy-completion"]
+needs = ["feed-stranded-convoys"]
 description = """
 Resolve external dependencies across rigs.
 

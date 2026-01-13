@@ -1751,573 +1751,185 @@ func TestLookupAgentConfigWithRigSettings(t *testing.T) {
 	}
 }
 
-func TestResolveRoleAgentConfig(t *testing.T) {
+// TestResolveAgentNameForRole tests role-based agent name resolution.
+func TestResolveAgentNameForRole(t *testing.T) {
 	t.Parallel()
-	townRoot := t.TempDir()
-	rigPath := filepath.Join(townRoot, "testrig")
-
-	// Create town settings with role-specific agents
-	townSettings := NewTownSettings()
-	townSettings.DefaultAgent = "claude"
-	townSettings.RoleAgents = map[string]string{
-		"mayor":   "claude", // mayor uses default claude
-		"witness": "gemini", // witness uses gemini
-		"polecat": "codex",  // polecats use codex
-	}
-	townSettings.Agents = map[string]*RuntimeConfig{
-		"claude-haiku": {
-			Command: "claude",
-			Args:    []string{"--model", "haiku", "--dangerously-skip-permissions"},
-		},
-	}
-	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
-		t.Fatalf("SaveTownSettings: %v", err)
-	}
-
-	// Create rig settings that override some roles
-	rigSettings := NewRigSettings()
-	rigSettings.Agent = "gemini" // default for this rig
-	rigSettings.RoleAgents = map[string]string{
-		"witness": "claude-haiku", // override witness to use haiku
-	}
-	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
-		t.Fatalf("SaveRigSettings: %v", err)
-	}
-
-	t.Run("rig RoleAgents overrides town RoleAgents", func(t *testing.T) {
-		rc := ResolveRoleAgentConfig("witness", townRoot, rigPath)
-		// Should get claude-haiku from rig's RoleAgents
-		if rc.Command != "claude" {
-			t.Errorf("Command = %q, want %q", rc.Command, "claude")
-		}
-		cmd := rc.BuildCommand()
-		if !strings.Contains(cmd, "--model haiku") {
-			t.Errorf("BuildCommand() = %q, should contain --model haiku", cmd)
-		}
-	})
-
-	t.Run("town RoleAgents used when rig has no override", func(t *testing.T) {
-		rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
-		// Should get codex from town's RoleAgents (rig doesn't override polecat)
-		if rc.Command != "codex" {
-			t.Errorf("Command = %q, want %q", rc.Command, "codex")
-		}
-	})
-
-	t.Run("falls back to default agent when role not in RoleAgents", func(t *testing.T) {
-		rc := ResolveRoleAgentConfig("crew", townRoot, rigPath)
-		// crew is not in any RoleAgents, should use rig's default agent (gemini)
-		if rc.Command != "gemini" {
-			t.Errorf("Command = %q, want %q", rc.Command, "gemini")
-		}
-	})
-
-	t.Run("town-level role (no rigPath) uses town RoleAgents", func(t *testing.T) {
-		rc := ResolveRoleAgentConfig("mayor", townRoot, "")
-		// mayor is in town's RoleAgents
-		if rc.Command != "claude" {
-			t.Errorf("Command = %q, want %q", rc.Command, "claude")
-		}
-	})
-}
-
-func TestResolveRoleAgentName(t *testing.T) {
-	t.Parallel()
-	townRoot := t.TempDir()
-	rigPath := filepath.Join(townRoot, "testrig")
-
-	// Create town settings with role-specific agents
-	townSettings := NewTownSettings()
-	townSettings.DefaultAgent = "claude"
-	townSettings.RoleAgents = map[string]string{
-		"witness": "gemini",
-		"polecat": "codex",
-	}
-	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
-		t.Fatalf("SaveTownSettings: %v", err)
-	}
-
-	// Create rig settings
-	rigSettings := NewRigSettings()
-	rigSettings.Agent = "amp"
-	rigSettings.RoleAgents = map[string]string{
-		"witness": "cursor", // override witness
-	}
-	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
-		t.Fatalf("SaveRigSettings: %v", err)
-	}
-
-	t.Run("rig role-specific agent", func(t *testing.T) {
-		name, isRoleSpecific := ResolveRoleAgentName("witness", townRoot, rigPath)
-		if name != "cursor" {
-			t.Errorf("name = %q, want %q", name, "cursor")
-		}
-		if !isRoleSpecific {
-			t.Error("isRoleSpecific = false, want true")
-		}
-	})
-
-	t.Run("town role-specific agent", func(t *testing.T) {
-		name, isRoleSpecific := ResolveRoleAgentName("polecat", townRoot, rigPath)
-		if name != "codex" {
-			t.Errorf("name = %q, want %q", name, "codex")
-		}
-		if !isRoleSpecific {
-			t.Error("isRoleSpecific = false, want true")
-		}
-	})
-
-	t.Run("falls back to rig default agent", func(t *testing.T) {
-		name, isRoleSpecific := ResolveRoleAgentName("crew", townRoot, rigPath)
-		if name != "amp" {
-			t.Errorf("name = %q, want %q", name, "amp")
-		}
-		if isRoleSpecific {
-			t.Error("isRoleSpecific = true, want false")
-		}
-	})
-
-	t.Run("falls back to town default agent when no rig path", func(t *testing.T) {
-		name, isRoleSpecific := ResolveRoleAgentName("refinery", townRoot, "")
-		if name != "claude" {
-			t.Errorf("name = %q, want %q", name, "claude")
-		}
-		if isRoleSpecific {
-			t.Error("isRoleSpecific = true, want false")
-		}
-	})
-}
-
-func TestRoleAgentsRoundTrip(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	townSettingsPath := filepath.Join(dir, "settings", "config.json")
-	rigSettingsPath := filepath.Join(dir, "rig", "settings", "config.json")
-
-	// Test TownSettings with RoleAgents
-	t.Run("town settings with role_agents", func(t *testing.T) {
-		original := NewTownSettings()
-		original.RoleAgents = map[string]string{
-			"mayor":   "claude-opus",
-			"witness": "claude-haiku",
-			"polecat": "claude-sonnet",
-		}
-
-		if err := SaveTownSettings(townSettingsPath, original); err != nil {
-			t.Fatalf("SaveTownSettings: %v", err)
-		}
-
-		loaded, err := LoadOrCreateTownSettings(townSettingsPath)
-		if err != nil {
-			t.Fatalf("LoadOrCreateTownSettings: %v", err)
-		}
-
-		if len(loaded.RoleAgents) != 3 {
-			t.Errorf("RoleAgents count = %d, want 3", len(loaded.RoleAgents))
-		}
-		if loaded.RoleAgents["mayor"] != "claude-opus" {
-			t.Errorf("RoleAgents[mayor] = %q, want %q", loaded.RoleAgents["mayor"], "claude-opus")
-		}
-		if loaded.RoleAgents["witness"] != "claude-haiku" {
-			t.Errorf("RoleAgents[witness] = %q, want %q", loaded.RoleAgents["witness"], "claude-haiku")
-		}
-		if loaded.RoleAgents["polecat"] != "claude-sonnet" {
-			t.Errorf("RoleAgents[polecat] = %q, want %q", loaded.RoleAgents["polecat"], "claude-sonnet")
-		}
-	})
-
-	// Test RigSettings with RoleAgents
-	t.Run("rig settings with role_agents", func(t *testing.T) {
-		original := NewRigSettings()
-		original.RoleAgents = map[string]string{
-			"witness": "gemini",
-			"crew":    "codex",
-		}
-
-		if err := SaveRigSettings(rigSettingsPath, original); err != nil {
-			t.Fatalf("SaveRigSettings: %v", err)
-		}
-
-		loaded, err := LoadRigSettings(rigSettingsPath)
-		if err != nil {
-			t.Fatalf("LoadRigSettings: %v", err)
-		}
-
-		if len(loaded.RoleAgents) != 2 {
-			t.Errorf("RoleAgents count = %d, want 2", len(loaded.RoleAgents))
-		}
-		if loaded.RoleAgents["witness"] != "gemini" {
-			t.Errorf("RoleAgents[witness] = %q, want %q", loaded.RoleAgents["witness"], "gemini")
-		}
-		if loaded.RoleAgents["crew"] != "codex" {
-			t.Errorf("RoleAgents[crew] = %q, want %q", loaded.RoleAgents["crew"], "codex")
-		}
-	})
-}
-
-// Escalation config tests
-
-func TestEscalationConfigRoundTrip(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "settings", "escalation.json")
-
-	original := &EscalationConfig{
-		Type:    "escalation",
-		Version: CurrentEscalationVersion,
-		Routes: map[string][]string{
-			SeverityLow:      {"bead"},
-			SeverityMedium:   {"bead", "mail:mayor"},
-			SeverityHigh:     {"bead", "mail:mayor", "email:human"},
-			SeverityCritical: {"bead", "mail:mayor", "email:human", "sms:human"},
-		},
-		Contacts: EscalationContacts{
-			HumanEmail: "test@example.com",
-			HumanSMS:   "+15551234567",
-		},
-		StaleThreshold:   "2h",
-		MaxReescalations: 3,
-	}
-
-	if err := SaveEscalationConfig(path, original); err != nil {
-		t.Fatalf("SaveEscalationConfig: %v", err)
-	}
-
-	loaded, err := LoadEscalationConfig(path)
-	if err != nil {
-		t.Fatalf("LoadEscalationConfig: %v", err)
-	}
-
-	if loaded.Type != original.Type {
-		t.Errorf("Type = %q, want %q", loaded.Type, original.Type)
-	}
-	if loaded.Version != original.Version {
-		t.Errorf("Version = %d, want %d", loaded.Version, original.Version)
-	}
-	if loaded.StaleThreshold != original.StaleThreshold {
-		t.Errorf("StaleThreshold = %q, want %q", loaded.StaleThreshold, original.StaleThreshold)
-	}
-	if loaded.MaxReescalations != original.MaxReescalations {
-		t.Errorf("MaxReescalations = %d, want %d", loaded.MaxReescalations, original.MaxReescalations)
-	}
-	if loaded.Contacts.HumanEmail != original.Contacts.HumanEmail {
-		t.Errorf("Contacts.HumanEmail = %q, want %q", loaded.Contacts.HumanEmail, original.Contacts.HumanEmail)
-	}
-	if loaded.Contacts.HumanSMS != original.Contacts.HumanSMS {
-		t.Errorf("Contacts.HumanSMS = %q, want %q", loaded.Contacts.HumanSMS, original.Contacts.HumanSMS)
-	}
-
-	// Check routes
-	for severity, actions := range original.Routes {
-		loadedActions := loaded.Routes[severity]
-		if len(loadedActions) != len(actions) {
-			t.Errorf("Routes[%s] len = %d, want %d", severity, len(loadedActions), len(actions))
-			continue
-		}
-		for i, action := range actions {
-			if loadedActions[i] != action {
-				t.Errorf("Routes[%s][%d] = %q, want %q", severity, i, loadedActions[i], action)
-			}
-		}
-	}
-}
-
-func TestEscalationConfigDefaults(t *testing.T) {
-	t.Parallel()
-
-	cfg := NewEscalationConfig()
-
-	if cfg.Type != "escalation" {
-		t.Errorf("Type = %q, want %q", cfg.Type, "escalation")
-	}
-	if cfg.Version != CurrentEscalationVersion {
-		t.Errorf("Version = %d, want %d", cfg.Version, CurrentEscalationVersion)
-	}
-	if cfg.StaleThreshold != "4h" {
-		t.Errorf("StaleThreshold = %q, want %q", cfg.StaleThreshold, "4h")
-	}
-	if cfg.MaxReescalations != 2 {
-		t.Errorf("MaxReescalations = %d, want %d", cfg.MaxReescalations, 2)
-	}
-
-	// Check default routes
-	if len(cfg.Routes) != 4 {
-		t.Errorf("Routes count = %d, want 4", len(cfg.Routes))
-	}
-	if len(cfg.Routes[SeverityLow]) != 1 || cfg.Routes[SeverityLow][0] != "bead" {
-		t.Errorf("Routes[low] = %v, want [bead]", cfg.Routes[SeverityLow])
-	}
-	if len(cfg.Routes[SeverityCritical]) != 4 {
-		t.Errorf("Routes[critical] len = %d, want 4", len(cfg.Routes[SeverityCritical]))
-	}
-}
-
-func TestEscalationConfigValidation(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
-		name    string
-		config  *EscalationConfig
-		wantErr bool
-		errMsg  string
+		name         string
+		role         string
+		townSettings *TownSettings
+		rigSettings  *RigSettings
+		expected     string
 	}{
 		{
-			name: "valid config",
-			config: &EscalationConfig{
-				Type:    "escalation",
-				Version: 1,
-				Routes: map[string][]string{
-					SeverityLow: {"bead"},
+			name: "rig-role-agent-override",
+			role: "polecat",
+			townSettings: &TownSettings{
+				DefaultAgent: "claude",
+				RoleAgents: map[string]string{
+					"polecat": "gemini",
 				},
 			},
-			wantErr: false,
-		},
-		{
-			name: "invalid type",
-			config: &EscalationConfig{
-				Type:    "wrong-type",
-				Version: 1,
-			},
-			wantErr: true,
-			errMsg:  "invalid config type",
-		},
-		{
-			name: "unsupported version",
-			config: &EscalationConfig{
-				Type:    "escalation",
-				Version: 999,
-			},
-			wantErr: true,
-			errMsg:  "unsupported config version",
-		},
-		{
-			name: "invalid stale threshold",
-			config: &EscalationConfig{
-				Type:           "escalation",
-				Version:        1,
-				StaleThreshold: "not-a-duration",
-			},
-			wantErr: true,
-			errMsg:  "invalid stale_threshold",
-		},
-		{
-			name: "invalid severity key",
-			config: &EscalationConfig{
-				Type:    "escalation",
-				Version: 1,
-				Routes: map[string][]string{
-					"invalid-severity": {"bead"},
+			rigSettings: &RigSettings{
+				RoleAgents: map[string]string{
+					"polecat": "codex",
 				},
 			},
-			wantErr: true,
-			errMsg:  "unknown severity",
+			expected: "codex", // rig override wins
 		},
 		{
-			name: "negative max reescalations",
-			config: &EscalationConfig{
-				Type:             "escalation",
-				Version:          1,
-				MaxReescalations: -1,
+			name: "town-role-agent",
+			role: "polecat",
+			townSettings: &TownSettings{
+				DefaultAgent: "claude",
+				RoleAgents: map[string]string{
+					"polecat": "gemini",
+				},
 			},
-			wantErr: true,
-			errMsg:  "max_reescalations must be non-negative",
+			rigSettings: &RigSettings{
+				// No role_agents for polecat
+			},
+			expected: "gemini",
+		},
+		{
+			name: "fallback-to-rig-agent",
+			role: "polecat",
+			townSettings: &TownSettings{
+				DefaultAgent: "claude",
+				RoleAgents:   map[string]string{},
+			},
+			rigSettings: &RigSettings{
+				Agent: "cursor",
+			},
+			expected: "cursor",
+		},
+		{
+			name: "fallback-to-town-default",
+			role: "crew",
+			townSettings: &TownSettings{
+				DefaultAgent: "gemini",
+				RoleAgents:   map[string]string{},
+			},
+			rigSettings: &RigSettings{
+				// No agent set
+			},
+			expected: "gemini",
+		},
+		{
+			name: "fallback-to-claude",
+			role: "witness",
+			townSettings: &TownSettings{
+				DefaultAgent: "",
+				RoleAgents:   map[string]string{},
+			},
+			rigSettings: &RigSettings{
+				// No agent set
+			},
+			expected: "claude",
+		},
+		{
+			name: "different-roles-different-agents",
+			role: "witness",
+			townSettings: &TownSettings{
+				DefaultAgent: "claude",
+				RoleAgents: map[string]string{
+					"polecat":  "gemini",
+					"crew":     "codex",
+					"witness":  "cursor",
+					"refinery": "auggie",
+				},
+			},
+			rigSettings: &RigSettings{},
+			expected:    "cursor",
+		},
+		{
+			name: "unknown-role-fallback",
+			role: "unknown-role",
+			townSettings: &TownSettings{
+				DefaultAgent: "gemini",
+			},
+			rigSettings: &RigSettings{
+				Agent: "cursor",
+			},
+			expected: "cursor",
+		},
+		{
+			name: "mayor-role-town-level",
+			role: "mayor",
+			townSettings: &TownSettings{
+				DefaultAgent: "claude",
+				RoleAgents: map[string]string{
+					"mayor": "gemini",
+				},
+			},
+			rigSettings: nil, // town-level role
+			expected:    "gemini",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateEscalationConfig(tt.config)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("validateEscalationConfig() expected error containing %q, got nil", tt.errMsg)
-				} else if !strings.Contains(err.Error(), tt.errMsg) {
-					t.Errorf("validateEscalationConfig() error = %v, want error containing %q", err, tt.errMsg)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("validateEscalationConfig() unexpected error: %v", err)
-				}
+			result := resolveAgentNameForRole(tt.role, tt.townSettings, tt.rigSettings)
+			if result != tt.expected {
+				t.Errorf("resolveAgentNameForRole(%q) = %q, want %q", tt.role, result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestEscalationConfigGetStaleThreshold(t *testing.T) {
+// TestBuildPolecatStartupCommandForRole tests role-based startup command building.
+func TestBuildPolecatStartupCommandForRole(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name     string
-		config   *EscalationConfig
-		expected time.Duration
-	}{
-		{
-			name:     "default when empty",
-			config:   &EscalationConfig{},
-			expected: 4 * time.Hour,
+	// Create temp directory for testing
+	tmpDir := t.TempDir()
+	townRoot := tmpDir
+	rigPath := filepath.Join(tmpDir, "testrig")
+
+	// Create town settings with role-based agents
+	townSettings := &TownSettings{
+		Type:         "town-settings",
+		Version:      CurrentTownSettingsVersion,
+		DefaultAgent: "claude",
+		RoleAgents: map[string]string{
+			"polecat": "gemini",
 		},
-		{
-			name: "2 hours",
-			config: &EscalationConfig{
-				StaleThreshold: "2h",
+		Agents: map[string]*RuntimeConfig{
+			"gemini": {
+				Command: "gemini",
+				Args:    []string{"--approval-mode", "yolo"},
 			},
-			expected: 2 * time.Hour,
-		},
-		{
-			name: "30 minutes",
-			config: &EscalationConfig{
-				StaleThreshold: "30m",
-			},
-			expected: 30 * time.Minute,
-		},
-		{
-			name: "invalid duration falls back to default",
-			config: &EscalationConfig{
-				StaleThreshold: "invalid",
-			},
-			expected: 4 * time.Hour,
 		},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.config.GetStaleThreshold()
-			if got != tt.expected {
-				t.Errorf("GetStaleThreshold() = %v, want %v", got, tt.expected)
-			}
-		})
+	townSettingsPath := filepath.Join(townRoot, "settings", "config.json")
+	if err := os.MkdirAll(filepath.Dir(townSettingsPath), 0755); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestEscalationConfigGetRouteForSeverity(t *testing.T) {
-	t.Parallel()
-
-	cfg := &EscalationConfig{
-		Routes: map[string][]string{
-			SeverityLow:    {"bead"},
-			SeverityMedium: {"bead", "mail:mayor"},
-		},
+	if err := SaveTownSettings(townSettingsPath, townSettings); err != nil {
+		t.Fatal(err)
 	}
 
-	tests := []struct {
-		severity string
-		expected []string
-	}{
-		{SeverityLow, []string{"bead"}},
-		{SeverityMedium, []string{"bead", "mail:mayor"}},
-		{SeverityHigh, []string{"bead", "mail:mayor"}},       // fallback for missing
-		{SeverityCritical, []string{"bead", "mail:mayor"}},   // fallback for missing
+	// Create rig directory
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.severity, func(t *testing.T) {
-			got := cfg.GetRouteForSeverity(tt.severity)
-			if len(got) != len(tt.expected) {
-				t.Errorf("GetRouteForSeverity(%s) len = %d, want %d", tt.severity, len(got), len(tt.expected))
-				return
-			}
-			for i, action := range tt.expected {
-				if got[i] != action {
-					t.Errorf("GetRouteForSeverity(%s)[%d] = %q, want %q", tt.severity, i, got[i], action)
-				}
-			}
-		})
-	}
-}
+	// Test that polecat startup command uses gemini
+	cmd := BuildPolecatStartupCommandForRole("testrig", "toast", rigPath, "")
 
-func TestEscalationConfigGetMaxReescalations(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		config   *EscalationConfig
-		expected int
-	}{
-		{
-			name:     "default when zero",
-			config:   &EscalationConfig{},
-			expected: 2,
-		},
-		{
-			name: "custom value",
-			config: &EscalationConfig{
-				MaxReescalations: 5,
-			},
-			expected: 5,
-		},
-		{
-			name: "default when negative (should not happen after validation)",
-			config: &EscalationConfig{
-				MaxReescalations: -1,
-			},
-			expected: 2,
-		},
+	// Should contain gemini command
+	if !strings.Contains(cmd, "gemini") {
+		t.Errorf("BuildPolecatStartupCommandForRole() = %q, want to contain 'gemini'", cmd)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.config.GetMaxReescalations()
-			if got != tt.expected {
-				t.Errorf("GetMaxReescalations() = %d, want %d", got, tt.expected)
-			}
-		})
+	// Should contain the environment variables
+	if !strings.Contains(cmd, "GT_ROLE=polecat") {
+		t.Errorf("BuildPolecatStartupCommandForRole() = %q, want to contain 'GT_ROLE=polecat'", cmd)
 	}
-}
-
-func TestLoadOrCreateEscalationConfig(t *testing.T) {
-	t.Parallel()
-
-	t.Run("creates default when not found", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "settings", "escalation.json")
-
-		cfg, err := LoadOrCreateEscalationConfig(path)
-		if err != nil {
-			t.Fatalf("LoadOrCreateEscalationConfig: %v", err)
-		}
-
-		if cfg.Type != "escalation" {
-			t.Errorf("Type = %q, want %q", cfg.Type, "escalation")
-		}
-		if len(cfg.Routes) != 4 {
-			t.Errorf("Routes count = %d, want 4", len(cfg.Routes))
-		}
-	})
-
-	t.Run("loads existing config", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "settings", "escalation.json")
-
-		// Create a config first
-		original := &EscalationConfig{
-			Type:           "escalation",
-			Version:        1,
-			StaleThreshold: "1h",
-			Routes: map[string][]string{
-				SeverityLow: {"bead"},
-			},
-		}
-		if err := SaveEscalationConfig(path, original); err != nil {
-			t.Fatalf("SaveEscalationConfig: %v", err)
-		}
-
-		// Load it
-		cfg, err := LoadOrCreateEscalationConfig(path)
-		if err != nil {
-			t.Fatalf("LoadOrCreateEscalationConfig: %v", err)
-		}
-
-		if cfg.StaleThreshold != "1h" {
-			t.Errorf("StaleThreshold = %q, want %q", cfg.StaleThreshold, "1h")
-		}
-	})
-}
-
-func TestEscalationConfigPath(t *testing.T) {
-	t.Parallel()
-
-	path := EscalationConfigPath("/home/user/gt")
-	expected := "/home/user/gt/settings/escalation.json"
-	if path != expected {
-		t.Errorf("EscalationConfigPath = %q, want %q", path, expected)
+	if !strings.Contains(cmd, "GT_RIG=testrig") {
+		t.Errorf("BuildPolecatStartupCommandForRole() = %q, want to contain 'GT_RIG=testrig'", cmd)
+	}
+	if !strings.Contains(cmd, "GT_POLECAT=toast") {
+		t.Errorf("BuildPolecatStartupCommandForRole() = %q, want to contain 'GT_POLECAT=toast'", cmd)
 	}
 }

@@ -357,12 +357,30 @@ func startConfiguredCrew(t *tmux.Tmux, rigs []*rig.Rig, townRoot string, mu *syn
 			wg.Add(1)
 			go func(r *rig.Rig, crewName string) {
 				defer wg.Done()
-				msg, started := startOrRestartCrewMember(t, r, crewName, townRoot)
-				mu.Lock()
-				fmt.Print(msg)
-				mu.Unlock()
-				if started {
-					atomic.StoreInt32(&startedAny, 1)
+				sessionID := crewSessionName(r.Name, crewName)
+				if sessionExists, _ := t.HasSession(sessionID); sessionExists {
+					// Session exists - check if Claude is still running
+					agentCfg := config.ResolveAgentConfig(townRoot, r.Path)
+					if running, _ := t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...); !running {
+						// Claude has exited, restart it
+						fmt.Printf("  %s %s/%s session exists, restarting Claude...\n", style.Dim.Render("○"), r.Name, crewName)
+						// Build startup beacon for predecessor discovery via /resume
+						address := fmt.Sprintf("%s/crew/%s", r.Name, crewName)
+						beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+							Recipient: address,
+							Sender:    "human",
+							Topic:     "restart",
+						})
+						claudeCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, beacon)
+						if err := t.SendKeys(sessionID, claudeCmd); err != nil {
+							fmt.Printf("  %s %s/%s restart failed: %v\n", style.Dim.Render("○"), r.Name, crewName, err)
+						} else {
+							fmt.Printf("  %s %s/%s Claude restarted\n", style.Bold.Render("✓"), r.Name, crewName)
+							atomic.AddInt32(&startedAny, 1)
+						}
+					} else {
+						fmt.Printf("  %s %s/%s already running\n", style.Dim.Render("○"), r.Name, crewName)
+					}
 				}
 			}(r, crewName)
 		}
@@ -383,7 +401,7 @@ func startOrRestartCrewMember(t *tmux.Tmux, r *rig.Rig, crewName, townRoot strin
 	if running, _ := t.HasSession(sessionID); running {
 		// Session exists - check if Claude is still running
 		agentCfg := config.ResolveAgentConfig(townRoot, r.Path)
-		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
+		if running, _ := t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...); !running {
 			// Claude has exited, restart it
 			// Build startup beacon for predecessor discovery via /resume
 			address := fmt.Sprintf("%s/crew/%s", r.Name, crewName)

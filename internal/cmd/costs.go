@@ -224,7 +224,7 @@ func runLiveCosts() error {
 		cost := extractCost(content)
 
 		// Check if an agent appears to be running
-		running := t.IsAgentRunning(session)
+		running, _ := t.IsAgentRunning(session)
 
 		costs = append(costs, SessionCost{
 			Session: session,

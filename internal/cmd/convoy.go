@@ -169,8 +169,8 @@ var convoyAddCmd = &cobra.Command{
 If the convoy is closed, it will be automatically reopened.
 
 Examples:
-  gt convoy add hq-cv-abc gt-new-issue
-  gt convoy add hq-cv-abc gt-issue1 gt-issue2 gt-issue3`,
+  gt convoy add hq-abc gt-new-issue
+  gt convoy add hq-abc gt-issue1 gt-issue2 gt-issue3`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: runConvoyAdd,
 }
@@ -308,8 +308,9 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		description += fmt.Sprintf("\nMolecule: %s", convoyMolecule)
 	}
 
-	// Generate convoy ID with cv- prefix
-	convoyID := fmt.Sprintf("hq-cv-%s", generateShortID())
+	// Generate convoy ID with hq- prefix
+	// Convoys are distinguished by type=convoy, not by a special ID prefix
+	convoyID := fmt.Sprintf("hq-%s", generateShortID())
 
 	createArgs := []string{
 		"create",
@@ -856,7 +857,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 
 	convoyID := args[0]
 
-	// Check if it's a numeric shortcut (e.g., "1" instead of "hq-cv-xyz")
+	// Check if it's a numeric shortcut (e.g., "1" instead of "hq-xyz")
 	if n, err := strconv.Atoi(convoyID); err == nil && n > 0 {
 		resolved, err := resolveConvoyNumber(townBeads, n)
 		if err != nil {

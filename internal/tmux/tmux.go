@@ -112,7 +112,7 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 
 	if exists {
 		// Session exists - check if it's a zombie
-		if !t.IsAgentRunning(name) {
+		if running, _ := t.IsAgentRunning(name); !running {
 			// Zombie session: tmux alive but Claude dead
 			// Kill it so we can create a fresh one
 			if err := t.KillSession(name); err != nil {
@@ -617,28 +617,29 @@ Run: gt mail inbox
 //
 // If expectedPaneCommands is non-empty, the pane's current command must match one of them.
 // If expectedPaneCommands is empty, any non-shell command counts as "agent running".
-func (t *Tmux) IsAgentRunning(session string, expectedPaneCommands ...string) bool {
+// Returns the pane command that was checked (for reuse by callers to avoid duplicate subprocess calls).
+func (t *Tmux) IsAgentRunning(session string, expectedPaneCommands ...string) (bool, string) {
 	cmd, err := t.GetPaneCommand(session)
 	if err != nil {
-		return false
+		return false, ""
 	}
 
 	if len(expectedPaneCommands) > 0 {
 		for _, expected := range expectedPaneCommands {
 			if expected != "" && cmd == expected {
-				return true
+				return true, cmd
 			}
 		}
-		return false
+		return false, cmd
 	}
 
 	// Fallback: any non-shell command counts as running.
 	for _, shell := range constants.SupportedShells {
 		if cmd == shell {
-			return false
+			return false, cmd
 		}
 	}
-	return cmd != ""
+	return cmd != "", cmd
 }
 
 // IsClaudeRunning checks if Claude appears to be running in the session.
@@ -646,14 +647,21 @@ func (t *Tmux) IsAgentRunning(session string, expectedPaneCommands ...string) bo
 // Claude can report as "node", "claude", or a version number like "2.0.76".
 // Also checks for child processes when the pane is a shell running claude via "bash -c".
 func (t *Tmux) IsClaudeRunning(session string) bool {
-	// Check for known command names first
-	if t.IsAgentRunning(session, "node", "claude") {
+	// Check for known command names first.
+	// IsAgentRunning returns the command it checked, avoiding a duplicate GetPaneCommand call.
+	running, cmd := t.IsAgentRunning(session, "node", "claude")
+	if running {
 		return true
 	}
 	// Check for version pattern (e.g., "2.0.76") - Claude Code shows version as pane command
-	cmd, err := t.GetPaneCommand(session)
-	if err != nil {
-		return false
+	// Reuse the command from IsAgentRunning to avoid duplicate subprocess call.
+	if cmd == "" {
+		// IsAgentRunning failed, try getting command directly
+		var err error
+		cmd, err = t.GetPaneCommand(session)
+		if err != nil {
+			return false
+		}
 	}
 	matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+`, cmd)
 	if matched {
@@ -860,50 +868,50 @@ var roleIcons = map[string]string{
 	"health-check": constants.EmojiDeacon,
 }
 
-// SetStatusFormat configures the left side of the status bar.
+// SetStatusFormat configures the right side of the status bar.
 // Shows compact identity: icon + minimal context
 func (t *Tmux) SetStatusFormat(session, rig, worker, role string) error {
 	// Get icon for role (empty string if not found)
 	icon := roleIcons[role]
 
 	// Compact format - icon already identifies role
-	// Mayor: 🎩 Mayor
-	// Crew:  👷 gastown/crew/max (full path)
-	// Polecat: 😺 gastown/Toast
-	var left string
+	// Mayor: Mayor 🎩
+	// Crew:  gastown/crew/max 👷
+	// Polecat: gastown/Toast 😺
+	var right string
 	if rig == "" {
 		// Town-level agent (Mayor, Deacon)
-		left = fmt.Sprintf("%s %s ", icon, worker)
+		right = fmt.Sprintf("%s %s ", worker, icon)
 	} else if role == "crew" {
 		// Crew member - show full path: rig/crew/name
-		left = fmt.Sprintf("%s %s/crew/%s ", icon, rig, worker)
+		right = fmt.Sprintf("%s/crew/%s %s ", rig, worker, icon)
 	} else {
 		// Rig-level agent - show rig/worker
-		left = fmt.Sprintf("%s %s/%s ", icon, rig, worker)
+		right = fmt.Sprintf("%s/%s %s ", rig, worker, icon)
 	}
 
-	if _, err := t.run("set-option", "-t", session, "status-left-length", "25"); err != nil {
+	if _, err := t.run("set-option", "-t", session, "status-right-length", "25"); err != nil {
 		return err
 	}
-	_, err := t.run("set-option", "-t", session, "status-left", left)
+	_, err := t.run("set-option", "-t", session, "status-right", right)
 	return err
 }
 
-// SetDynamicStatus configures the right side with dynamic content.
+// SetDynamicStatus configures the left side with dynamic content.
 // Uses a shell command that tmux calls periodically to get current status.
 func (t *Tmux) SetDynamicStatus(session string) error {
 	// tmux calls this command every status-interval seconds
 	// gt status-line reads env vars and mail to build the status
-	right := fmt.Sprintf(`#(gt status-line --session=%s 2>/dev/null) %%H:%%M`, session)
+	left := fmt.Sprintf(`#(gt status-line --session=%s 2>/dev/null)`, session)
 
-	if _, err := t.run("set-option", "-t", session, "status-right-length", "80"); err != nil {
+	if _, err := t.run("set-option", "-t", session, "status-left-length", "150"); err != nil {
 		return err
 	}
 	// Set faster refresh for more responsive status
 	if _, err := t.run("set-option", "-t", session, "status-interval", "5"); err != nil {
 		return err
 	}
-	_, err := t.run("set-option", "-t", session, "status-right", right)
+	_, err := t.run("set-option", "-t", session, "status-left", left)
 	return err
 }
 

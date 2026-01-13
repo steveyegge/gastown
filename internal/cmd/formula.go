@@ -315,7 +315,8 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 	townBeads := filepath.Join(townRoot, ".beads")
 
 	// Step 1: Create convoy bead
-	convoyID := fmt.Sprintf("hq-cv-%s", generateFormulaShortID())
+	// Convoys use hq- prefix (distinguished by type=convoy, not by special prefix)
+	convoyID := fmt.Sprintf("hq-%s", generateFormulaShortID())
 	convoyTitle := fmt.Sprintf("%s: %s", formulaName, f.Description)
 	if len(convoyTitle) > 80 {
 		convoyTitle = convoyTitle[:77] + "..."
@@ -350,7 +351,7 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 	if formulaRunPR > 0 {
 		reviewID = fmt.Sprintf("pr-%d", formulaRunPR)
 	} else {
-		reviewID = strings.TrimPrefix(convoyID, "hq-cv-")
+		reviewID = strings.TrimPrefix(convoyID, "hq-")
 	}
 
 	// Step 2: Create leg beads and track them

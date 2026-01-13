@@ -322,6 +322,13 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
+	// Run setup hooks from .runtime/setup-hooks/.
+	// These hooks can inject local git config, copy secrets, or perform other setup tasks.
+	if err := rig.RunSetupHooks(m.rig.Path, clonePath); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not run setup hooks: %v\n", err)
+	}
+
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 

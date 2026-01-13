@@ -2,6 +2,38 @@ package cmd
 
 import "testing"
 
+func TestAbbreviateRigName(t *testing.T) {
+	tests := []struct {
+		name     string
+		rigName  string
+		wantAbbr string
+	}{
+		// Known rigs should abbreviate
+		{"design_forge", "design_forge", "df"},
+		{"gastown", "gastown", "gt"},
+		{"mediaforge", "mediaforge", "mf"},
+		{"mt5optimizer", "mt5optimizer", "mt"},
+		{"opencode", "opencode", "oc"},
+		{"pod_automation", "pod_automation", "pa"},
+		{"promptforge", "promptforge", "pf"},
+		{"autoaffiliate", "autoaffiliate", "aa"},
+
+		// Unknown rigs should return as-is
+		{"unknown rig", "unknown_rig", "unknown_rig"},
+		{"myrig", "myrig", "myrig"},
+		{"", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := abbreviateRigName(tt.rigName)
+			if got != tt.wantAbbr {
+				t.Errorf("abbreviateRigName(%q) = %q, want %q", tt.rigName, got, tt.wantAbbr)
+			}
+		})
+	}
+}
+
 func TestCategorizeSessionRig(t *testing.T) {
 	tests := []struct {
 		session string

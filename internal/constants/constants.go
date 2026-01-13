@@ -7,7 +7,10 @@ import "time"
 // Timing constants for session management and tmux operations.
 const (
 	// ShutdownNotifyDelay is the pause after sending shutdown notification.
-	ShutdownNotifyDelay = 500 * time.Millisecond
+	// Increased from 500ms to 30s to give Claude agents time to finish
+	// in-flight operations and shut down gracefully. Claude can take 30+ seconds
+	// to start, so it needs adequate time for clean shutdown.
+	ShutdownNotifyDelay = 30 * time.Second
 
 	// ClaudeStartTimeout is how long to wait for Claude to start in a session.
 	// Increased to 60s because Claude can take 30s+ on slower machines.

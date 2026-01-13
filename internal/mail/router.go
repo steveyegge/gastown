@@ -863,7 +863,8 @@ func (r *Router) GetMailbox(address string) (*Mailbox, error) {
 }
 
 // notifyRecipient sends a notification to a recipient's tmux session.
-// Uses NudgeSession to add the notification to the agent's conversation history.
+// For Claude Code sessions, uses NudgeSession to send the message to conversation history.
+// For terminal sessions, uses SendNotificationBanner to display a banner.
 // Supports mayor/, rig/polecat, and rig/refinery addresses.
 func (r *Router) notifyRecipient(msg *Message) error {
 	sessionID := addressToSessionID(msg.To)
@@ -877,9 +878,17 @@ func (r *Router) notifyRecipient(msg *Message) error {
 		return nil // No active session, skip notification
 	}
 
-	// Send notification to the agent's conversation history
-	notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
-	return r.tmux.NudgeSession(sessionID, notification)
+	// Use different notification methods based on session type
+	// Claude Code sessions get a nudged message that appears in conversation history
+	// Terminal sessions get a banner in the terminal
+	if r.tmux.IsClaudeRunning(sessionID) {
+		// Build a notification message that will appear in Claude's message history
+		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
+		return r.tmux.NudgeSession(sessionID, notification)
+	}
+
+	// Send visible notification banner to the terminal
+	return r.tmux.SendNotificationBanner(sessionID, msg.From, msg.Subject)
 }
 
 // addressToSessionID converts a mail address to a tmux session ID.

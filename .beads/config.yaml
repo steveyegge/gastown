@@ -60,10 +60,3 @@
 # - linear.api-key
 # - github.org
 # - github.repo
-sync-branch: beads-sync
-
-# Cross-project dependencies (gt-o3is)
-# Maps project names to paths for external dependency resolution
-# Format: external:<project>:<capability> in bd dep commands
-external_projects:
-  beads: ../../../beads/mayor/rig

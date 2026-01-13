@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -197,11 +196,6 @@ func (b *Boot) spawnTmux() error {
 	// Ensure CLAUDE.md exists with proper Boot context
 	if err := b.EnsureCLAUDEmd(); err != nil {
 		return fmt.Errorf("ensuring boot CLAUDE.md: %w", err)
-	}
-
-	// Ensure settings.json exists with autonomous role settings
-	if err := claude.EnsureSettingsForRole(b.bootDir, "boot"); err != nil {
-		return fmt.Errorf("ensuring boot settings: %w", err)
 	}
 
 	// Create new session in boot directory (not deacon dir) so Claude reads Boot's CLAUDE.md

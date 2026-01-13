@@ -172,7 +172,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// The CLI prompt is more reliable than post-startup nudges (which arrive before input is ready).
 	command := opts.Command
 	if command == "" {
-		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "gt prime")
+		command = config.BuildPolecatStartupCommandForRole(m.rig.Name, polecat, m.rig.Path, "")
 	}
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
