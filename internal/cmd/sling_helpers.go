@@ -241,14 +241,41 @@ func ensureAgentReady(sessionName string) error {
 	if t.IsClaudeRunning(sessionName) {
 		_ = t.AcceptBypassPermissionsWarning(sessionName)
 
-		// PRAGMATIC APPROACH: fixed delay rather than prompt detection.
-		// Claude startup takes ~5-8 seconds on typical machines.
-		time.Sleep(8 * time.Second)
+		// Wait for prompt (e.g. ">") to appear, indicating readiness.
+		// This replaces the fragile fixed 8s sleep with polling.
+		if err := waitForPrompt(t, sessionName, 15*time.Second); err != nil {
+			// If we timed out, just proceed - it might be ready but using a non-standard prompt.
+			// Falling back to "hope it works" is safer than hard failing here.
+			// In debug mode, this would be logged.
+		}
 	} else {
 		time.Sleep(1 * time.Second)
 	}
 
 	return nil
+}
+
+// waitForPrompt polls the pane content until a prompt indicator appears.
+// This ensures the agent is actually interactive before we send commands.
+func waitForPrompt(t *tmux.Tmux, session string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		// Capture the last few lines to check for prompt
+		content, err := t.CapturePane(session, 10)
+		if err != nil {
+			return err
+		}
+
+		// Check for standard prompt indicators
+		// Claude/Node prompts typically end with ">" or "> "
+		trimmed := strings.TrimSpace(content)
+		if strings.HasSuffix(trimmed, ">") || strings.HasSuffix(trimmed, "$") || strings.HasSuffix(trimmed, "%") {
+			return nil
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for prompt")
 }
 
 // detectCloneRoot finds the root of the current git clone.
