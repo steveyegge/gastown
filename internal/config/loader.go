@@ -1150,21 +1150,32 @@ func findTownRootFromCwd() (string, error) {
 // envVars is a map of environment variable names to values.
 // rigPath is optional - if empty, tries to detect town root from cwd.
 // prompt is optional - if provided, appended as the initial prompt.
-func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) string {
+// role is optional - if provided, used for role-specific agent resolution.
+func BuildStartupCommand(envVars map[string]string, rigPath, prompt, role string) string {
 	var rc *RuntimeConfig
 	var townRoot string
+
+	// First, determine townRoot
 	if rigPath != "" {
-		// Derive town root from rig path
 		townRoot = filepath.Dir(rigPath)
-		rc = ResolveAgentConfig(townRoot, rigPath)
 	} else {
-		// Try to detect town root from cwd for town-level agents (mayor, deacon)
 		var err error
 		townRoot, err = findTownRootFromCwd()
 		if err != nil {
+			// If we can't find town, we can't resolve agents, so use default.
 			rc = DefaultRuntimeConfig()
+		}
+	}
+
+	// Resolve agent config only if not already defaulted
+	if rc == nil {
+		if role != "" && townRoot != "" {
+			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
+		} else if townRoot != "" {
+			rc = ResolveAgentConfig(townRoot, rigPath)
 		} else {
-			rc = ResolveAgentConfig(townRoot, "")
+			// Fallback if townRoot still can't be found
+			rc = DefaultRuntimeConfig()
 		}
 	}
 
@@ -1221,33 +1232,49 @@ func PrependEnv(command string, envVars map[string]string) string {
 }
 
 // BuildStartupCommandWithAgentOverride builds a startup command like BuildStartupCommand,
-// but uses agentOverride if non-empty.
-func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride string) (string, error) {
+// but uses agentOverride if non-empty. If role is provided, it is used for resolution.
+func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride, role string) (string, error) {
 	var rc *RuntimeConfig
+	var townRoot string
+	var err error
 
 	if rigPath != "" {
-		townRoot := filepath.Dir(rigPath)
-		var err error
-		rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
-		if err != nil {
-			return "", err
-		}
+		townRoot = filepath.Dir(rigPath)
 	} else {
-		townRoot, err := findTownRootFromCwd()
+		townRoot, err = findTownRootFromCwd()
 		if err != nil {
 			rc = DefaultRuntimeConfig()
+		}
+	}
+
+	if rc == nil {
+		if agentOverride == "" && role != "" {
+			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
 		} else {
 			var resolveErr error
-			rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
+			rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
 			if resolveErr != nil {
 				return "", resolveErr
 			}
 		}
 	}
 
+	// Copy env vars to avoid mutating caller map
+	resolvedEnv := make(map[string]string, len(envVars)+2)
+	for k, v := range envVars {
+		resolvedEnv[k] = v
+	}
+	// Add GT_ROOT so agents can find town-level resources (formulas, etc.)
+	if townRoot != "" {
+		resolvedEnv["GT_ROOT"] = townRoot
+	}
+	if rc != nil && rc.Session != nil && rc.Session.SessionIDEnv != "" {
+		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
+	}
+
 	// Build environment export prefix
 	var exports []string
-	for k, v := range envVars {
+	for k, v := range resolvedEnv {
 		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
 	}
 	sort.Strings(exports)
@@ -1255,6 +1282,10 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	var cmd string
 	if len(exports) > 0 {
 		cmd = "export " + strings.Join(exports, " ") + " && "
+	}
+
+	if rc == nil {
+		rc = DefaultRuntimeConfig()
 	}
 
 	if prompt != "" {
@@ -1276,7 +1307,7 @@ func BuildAgentStartupCommand(role, bdActor, rigPath, prompt string) string {
 		"BD_ACTOR":        bdActor,
 		"GIT_AUTHOR_NAME": bdActor,
 	}
-	return BuildStartupCommand(envVars, rigPath, prompt)
+	return BuildStartupCommand(envVars, rigPath, prompt, role)
 }
 
 // BuildAgentStartupCommandWithAgentOverride is like BuildAgentStartupCommand, but uses agentOverride if non-empty.
@@ -1286,29 +1317,29 @@ func BuildAgentStartupCommandWithAgentOverride(role, bdActor, rigPath, prompt, a
 		"BD_ACTOR":        bdActor,
 		"GIT_AUTHOR_NAME": bdActor,
 	}
-	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride, role)
 }
 
 // BuildPolecatStartupCommand builds the startup command for a polecat.
 // Sets GT_ROLE, GT_RIG, GT_POLECAT, BD_ACTOR, and GIT_AUTHOR_NAME.
 func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) string {
-	return BuildStartupCommand(AgentEnvSimple("polecat", rigName, polecatName), rigPath, prompt)
+	return BuildStartupCommand(AgentEnvSimple("polecat", rigName, polecatName), rigPath, prompt, "polecat")
 }
 
 // BuildPolecatStartupCommandWithAgentOverride is like BuildPolecatStartupCommand, but uses agentOverride if non-empty.
 func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, prompt, agentOverride string) (string, error) {
-	return BuildStartupCommandWithAgentOverride(AgentEnvSimple("polecat", rigName, polecatName), rigPath, prompt, agentOverride)
+	return BuildStartupCommandWithAgentOverride(AgentEnvSimple("polecat", rigName, polecatName), rigPath, prompt, agentOverride, "polecat")
 }
 
 // BuildCrewStartupCommand builds the startup command for a crew member.
 // Sets GT_ROLE, GT_RIG, GT_CREW, BD_ACTOR, and GIT_AUTHOR_NAME.
 func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
-	return BuildStartupCommand(AgentEnvSimple("crew", rigName, crewName), rigPath, prompt)
+	return BuildStartupCommand(AgentEnvSimple("crew", rigName, crewName), rigPath, prompt, "crew")
 }
 
 // BuildCrewStartupCommandWithAgentOverride is like BuildCrewStartupCommand, but uses agentOverride if non-empty.
 func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt, agentOverride string) (string, error) {
-	return BuildStartupCommandWithAgentOverride(AgentEnvSimple("crew", rigName, crewName), rigPath, prompt, agentOverride)
+	return BuildStartupCommandWithAgentOverride(AgentEnvSimple("crew", rigName, crewName), rigPath, prompt, agentOverride, "crew")
 }
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
