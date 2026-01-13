@@ -21,6 +21,7 @@ import (
 var primeHookMode bool
 var primeDryRun bool
 var primeState bool
+var primeStateJSON bool
 var primeExplain bool
 
 // Role represents a detected agent role.
@@ -72,6 +73,8 @@ func init() {
 		"Show what would be injected without side effects (no marker removal, no bd prime, no mail)")
 	primeCmd.Flags().BoolVar(&primeState, "state", false,
 		"Show detected session state only (normal/post-handoff/crash/autonomous)")
+	primeCmd.Flags().BoolVar(&primeStateJSON, "json", false,
+		"Output state as JSON (requires --state)")
 	primeCmd.Flags().BoolVar(&primeExplain, "explain", false,
 		"Show why each section was included")
 	rootCmd.AddCommand(primeCmd)
@@ -82,9 +85,13 @@ func init() {
 type RoleContext = RoleInfo
 
 func runPrime(cmd *cobra.Command, args []string) error {
-	// Validate flag combinations: --state is exclusive
+	// Validate flag combinations: --state is exclusive (except --json)
 	if primeState && (primeHookMode || primeDryRun || primeExplain) {
-		return fmt.Errorf("--state cannot be combined with other flags")
+		return fmt.Errorf("--state cannot be combined with other flags (except --json)")
+	}
+	// --json requires --state
+	if primeStateJSON && !primeState {
+		return fmt.Errorf("--json requires --state")
 	}
 
 	cwd, err := os.Getwd()
@@ -170,7 +177,7 @@ func runPrime(cmd *cobra.Command, args []string) error {
 
 	// --state mode: output state only and exit
 	if primeState {
-		outputState(ctx)
+		outputState(ctx, primeStateJSON)
 		return nil
 	}
 

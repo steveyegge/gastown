@@ -40,6 +40,13 @@ func runCrewStatus(cmd *cobra.Command, args []string) error {
 				crewRig = rig
 			}
 			targetName = crewName
+		} else if crewRig == "" {
+			// Check if single arg (without "/") is a valid rig name
+			// If so, show status for all crew in that rig
+			if _, _, err := getRig(targetName); err == nil {
+				crewRig = targetName
+				targetName = "" // Show all crew in the rig
+			}
 		}
 	}
 

@@ -160,13 +160,18 @@ func TestNamePool_SaveLoad(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	// Use config to set MaxSize from the start (affects OverflowNext initialization)
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, 3)
 
-	// Allocate some names
+	// Exhaust the pool to trigger overflow, which increments OverflowNext
 	pool.Allocate() // furiosa
 	pool.Allocate() // nux
 	pool.Allocate() // slit
-	pool.Release("nux")
+	overflowName, _ := pool.Allocate() // testrig-4 (overflow)
+
+	if overflowName != "testrig-4" {
+		t.Errorf("expected testrig-4 for first overflow, got %s", overflowName)
+	}
 
 	// Save state
 	if err := pool.Save(); err != nil {
@@ -174,20 +179,26 @@ func TestNamePool_SaveLoad(t *testing.T) {
 	}
 
 	// Create new pool and load
-	pool2 := NewNamePool(tmpDir, "testrig")
+	pool2 := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, 3)
 	if err := pool2.Load(); err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
 
-	// Should have furiosa and slit in use
-	if pool2.ActiveCount() != 2 {
-		t.Errorf("expected 2 active, got %d", pool2.ActiveCount())
+	// ZFC: InUse is NOT persisted - it's transient state derived from filesystem.
+	// After Load(), InUse should be empty (0 active).
+	if pool2.ActiveCount() != 0 {
+		t.Errorf("expected 0 active after Load (ZFC: InUse is transient), got %d", pool2.ActiveCount())
 	}
 
-	// Next allocation should be nux (released slot)
-	name, _ := pool2.Allocate()
-	if name != "nux" {
-		t.Errorf("expected nux, got %s", name)
+	// OverflowNext SHOULD persist - it's the one piece of state that can't be derived.
+	// Next overflow should be testrig-5, not testrig-4.
+	pool2.Allocate() // furiosa (InUse empty, so starts from beginning)
+	pool2.Allocate() // nux
+	pool2.Allocate() // slit
+	overflowName2, _ := pool2.Allocate() // Should be testrig-5
+
+	if overflowName2 != "testrig-5" {
+		t.Errorf("expected testrig-5 (OverflowNext persisted), got %s", overflowName2)
 	}
 }
 

@@ -1,57 +1,7 @@
-// Package mrqueue provides merge request queue storage and priority scoring.
-//
-// # MQ Priority Objective Function
-//
-// The merge queue uses a priority scoring function to determine processing order.
-// Higher scores mean higher priority (process first).
-//
-// ## Scoring Formula
-//
-//	score = BaseScore
-//	      + ConvoyAgeWeight * hoursOld(convoy)              // Prevent starvation
-//	      + PriorityWeight * (4 - priority)                 // P0 > P4
-//	      - min(RetryPenalty * retryCount, MaxRetryPenalty) // Prevent thrashing
-//	      + MRAgeWeight * hoursOld(MR)                      // FIFO tiebreaker
-//
-// ## Default Weights
-//
-//	BaseScore:       1000.0  (keeps all scores positive)
-//	ConvoyAgeWeight:   10.0  (10 pts/hour = 240 pts/day)
-//	PriorityWeight:   100.0  (P0=+400, P4=+0)
-//	RetryPenalty:      50.0  (each retry loses 50 pts)
-//	MRAgeWeight:        1.0  (1 pt/hour, minor FIFO factor)
-//	MaxRetryPenalty:  300.0  (caps at 6 retries worth)
-//
-// ## Design Principles
-//
-// 1. Deterministic: same inputs always produce same score (uses explicit Now param)
-//
-// 2. Convoy Starvation Prevention: older convoys escalate in priority. A 48-hour
-//    old P4 convoy will beat a fresh P0 standalone issue (+480 vs +400).
-//
-// 3. Priority Respect: within similar convoy ages, P0 issues beat P4 issues.
-//
-// 4. Thrashing Prevention: MRs that repeatedly fail with conflicts get
-//    deprioritized, giving the repo state time to stabilize.
-//
-// 5. FIFO Fairness: within same convoy/priority/retry state, older MRs go first.
-//
-// ## Example Scores
-//
-//	Fresh P0, no convoy:                    1400 (1000 + 400)
-//	Fresh P4, no convoy:                    1000 (1000 + 0)
-//	Fresh P2, 24h convoy:                   1440 (1000 + 200 + 240)
-//	Fresh P4, 48h convoy:                   1480 (1000 + 0 + 480)
-//	P2, 24h convoy, 3 retries:              1290 (1000 + 200 + 240 - 150)
-//	P0, no convoy, 6+ retries (capped):     1100 (1000 + 400 - 300)
-//
-// ## Tuning
-//
-// All weights are configurable via ScoreConfig. The defaults are designed so:
-//   - A 48-hour convoy beats any standalone priority (starvation prevention)
-//   - Priority differences dominate within same convoy
-//   - Retry penalty is significant but capped (eventual progress guaranteed)
-package mrqueue
+// Package refinery provides the merge queue processing agent.
+// This file contains priority scoring logic for merge requests.
+
+package refinery
 
 import (
 	"time"
@@ -134,13 +84,6 @@ type ScoreInput struct {
 //	      + PriorityWeight * (4 - priority)          // P0=+400, P4=+0
 //	      - min(RetryPenalty * retryCount, MaxRetryPenalty)  // Prevent thrashing
 //	      + MRAgeWeight * hoursOld(MR)               // FIFO tiebreaker
-//
-// Design principles:
-//   - Deterministic: same inputs always produce same score
-//   - Convoy starvation prevention: older convoys escalate in priority
-//   - Priority respect: P0 bugs beat P4 backlog items
-//   - Thrashing prevention: repeated failures get deprioritized
-//   - FIFO fairness: within same convoy/priority, older MRs go first
 func ScoreMR(input ScoreInput, config ScoreConfig) float64 {
 	now := input.Now
 	if now.IsZero() {
@@ -192,12 +135,12 @@ func ScoreMRWithDefaults(input ScoreInput) float64 {
 
 // Score calculates the priority score for this MR using default config.
 // Higher scores mean higher priority (process first).
-func (mr *MR) Score() float64 {
+func (mr *MRInfo) Score() float64 {
 	return mr.ScoreAt(time.Now())
 }
 
 // ScoreAt calculates the priority score at a specific time (for deterministic testing).
-func (mr *MR) ScoreAt(now time.Time) float64 {
+func (mr *MRInfo) ScoreAt(now time.Time) float64 {
 	input := ScoreInput{
 		Priority:        mr.Priority,
 		MRCreatedAt:     mr.CreatedAt,

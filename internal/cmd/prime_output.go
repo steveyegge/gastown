@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -402,8 +403,21 @@ func outputHandoffWarning(prevSession string) {
 }
 
 // outputState outputs only the session state (for --state flag).
-func outputState(ctx RoleContext) {
+// If jsonOutput is true, outputs JSON format instead of key:value.
+func outputState(ctx RoleContext, jsonOutput bool) {
 	state := detectSessionState(ctx)
+
+	if jsonOutput {
+		data, err := json.Marshal(state)
+		if err != nil {
+			// Fall back to plain text on error
+			fmt.Printf("state: %s\n", state.State)
+			fmt.Printf("role: %s\n", state.Role)
+			return
+		}
+		fmt.Println(string(data))
+		return
+	}
 
 	fmt.Printf("state: %s\n", state.State)
 	fmt.Printf("role: %s\n", state.Role)

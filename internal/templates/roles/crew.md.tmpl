@@ -349,6 +349,19 @@ Before ending your session:
     # Or with context: gt handoff -s "Brief" -m "Details"
 ```
 
+## Desire Paths: Improving the Tooling
+
+When a command fails but your guess felt reasonable ("this should have worked"):
+
+1. **Evaluate**: Was your guess a natural extension of the tool's design?
+2. **If yes**: File a bead with `desire-path` label before continuing
+3. **If no**: Your mental model was off - note it and move on
+
+Example: Trying `gt mail hook hq-abc` (expected to hook mail) and getting "unknown command".
+That's a desire path - the syntax makes sense. File it: `bd new -t task "Add gt mail hook alias" -l desire-path`
+
+See `~/gt/docs/AGENT-ERGONOMICS.md` for the full philosophy.
+
 ## Tips
 
 - **You own your workspace**: Unlike polecats, you're not transient. Keep it organized.
@@ -356,6 +369,7 @@ Before ending your session:
 - **Stay in sync**: Pull from upstream regularly to avoid merge conflicts.
 - **Ask for help**: No Witness means no automatic escalation. Reach out proactively.
 - **Clean git state**: Keep `git status` clean before breaks.
+- **Spot desire paths**: When commands fail but "should have worked", file a bead.
 
 Crew member: {{ .Polecat }}
 Rig: {{ .RigName }}

@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/mrqueue"
+	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -260,7 +260,7 @@ func outputJSON(data interface{}) error {
 	return enc.Encode(data)
 }
 
-// calculateMRScore computes the priority score for an MR using the mrqueue scoring function.
+// calculateMRScore computes the priority score for an MR using the refinery scoring function.
 // Higher scores mean higher priority (process first).
 func calculateMRScore(issue *beads.Issue, fields *beads.MRFields, now time.Time) float64 {
 	// Parse MR creation time
@@ -273,7 +273,7 @@ func calculateMRScore(issue *beads.Issue, fields *beads.MRFields, now time.Time)
 	}
 
 	// Build score input
-	input := mrqueue.ScoreInput{
+	input := refinery.ScoreInput{
 		Priority:    issue.Priority,
 		MRCreatedAt: mrCreatedAt,
 		Now:         now,
@@ -291,5 +291,5 @@ func calculateMRScore(issue *beads.Issue, fields *beads.MRFields, now time.Time)
 		}
 	}
 
-	return mrqueue.ScoreMRWithDefaults(input)
+	return refinery.ScoreMRWithDefaults(input)
 }

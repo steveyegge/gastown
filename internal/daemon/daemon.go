@@ -37,12 +37,13 @@ import (
 // This is recovery-focused: normal wake is handled by feed subscription (bd activity --follow).
 // The daemon is the safety net for dead sessions, GUPP violations, and orphaned work.
 type Daemon struct {
-	config  *Config
-	tmux    *tmux.Tmux
-	logger  *log.Logger
-	ctx     context.Context
-	cancel  context.CancelFunc
-	curator *feed.Curator
+	config        *Config
+	tmux          *tmux.Tmux
+	logger        *log.Logger
+	ctx           context.Context
+	cancel        context.CancelFunc
+	curator       *feed.Curator
+	convoyWatcher *ConvoyWatcher
 
 	// Mass death detection: track recent session deaths
 	deathsMu     sync.Mutex
@@ -141,6 +142,14 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Warning: failed to start feed curator: %v", err)
 	} else {
 		d.logger.Println("Feed curator started")
+	}
+
+	// Start convoy watcher for event-driven convoy completion
+	d.convoyWatcher = NewConvoyWatcher(d.config.TownRoot, d.logger.Printf)
+	if err := d.convoyWatcher.Start(); err != nil {
+		d.logger.Printf("Warning: failed to start convoy watcher: %v", err)
+	} else {
+		d.logger.Println("Convoy watcher started")
 	}
 
 	// Initial heartbeat
@@ -577,6 +586,12 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 	if d.curator != nil {
 		d.curator.Stop()
 		d.logger.Println("Feed curator stopped")
+	}
+
+	// Stop convoy watcher
+	if d.convoyWatcher != nil {
+		d.convoyWatcher.Stop()
+		d.logger.Println("Convoy watcher stopped")
 	}
 
 	state.Running = false

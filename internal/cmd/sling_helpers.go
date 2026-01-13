@@ -175,6 +175,11 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 		return fmt.Errorf("no target pane")
 	}
 
+	// Skip nudge during tests to prevent agent self-interruption
+	if os.Getenv("GT_TEST_NO_NUDGE") != "" {
+		return nil
+	}
+
 	// Build the prompt to inject
 	var prompt string
 	if args != "" {

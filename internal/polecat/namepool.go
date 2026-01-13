@@ -84,7 +84,9 @@ type NamePool struct {
 
 	// InUse tracks which pool names are currently in use.
 	// Key is the name itself, value is true if in use.
-	InUse map[string]bool `json:"in_use"`
+	// ZFC: This is transient state derived from filesystem via Reconcile().
+	// Never persist - always discover from existing polecat directories.
+	InUse map[string]bool `json:"-"`
 
 	// OverflowNext is the next overflow sequence number.
 	// Starts at MaxSize+1 and increments.
@@ -168,12 +170,12 @@ func (p *NamePool) Load() error {
 
 	// Note: Theme and CustomNames are NOT loaded from state file.
 	// They are configuration (from settings/config.json), not runtime state.
-	// The state file only persists InUse, OverflowNext, and MaxSize.
+	// The state file only persists OverflowNext and MaxSize.
+	//
+	// ZFC: InUse is NEVER loaded from disk - it's transient state derived
+	// from filesystem via Reconcile(). Always start with empty map.
+	p.InUse = make(map[string]bool)
 
-	p.InUse = loaded.InUse
-	if p.InUse == nil {
-		p.InUse = make(map[string]bool)
-	}
 	p.OverflowNext = loaded.OverflowNext
 	if p.OverflowNext < p.MaxSize+1 {
 		p.OverflowNext = p.MaxSize + 1

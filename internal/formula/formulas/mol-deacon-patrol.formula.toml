@@ -500,9 +500,73 @@ gt dog status <name>
 **Exit criteria:** Pool has at least 1 idle dog."""
 
 [[steps]]
+id = "dog-health-check"
+title = "Check for stuck dogs"
+needs = ["dog-pool-maintenance"]
+description = """
+Check for dogs that have been working too long (stuck).
+
+Dogs dispatched via `gt dog dispatch --plugin` are marked as "working" with
+a work description like "plugin:rebuild-gt". If a dog hangs, crashes, or
+takes too long, it needs intervention.
+
+**Step 1: List working dogs**
+```bash
+gt dog list --json
+# Filter for state: "working"
+```
+
+**Step 2: Check work duration**
+For each working dog:
+```bash
+gt dog status <name> --json
+# Check: work_started_at, current_work
+```
+
+Compare against timeout:
+- If plugin has [execution] timeout in plugin.md, use that
+- Default timeout: 10 minutes for infrastructure tasks
+
+**Duration calculation:**
+```
+stuck_threshold = plugin_timeout or 10m
+duration = now - work_started_at
+is_stuck = duration > stuck_threshold
+```
+
+**Step 3: Handle stuck dogs**
+
+For dogs working > timeout:
+```bash
+# Option A: File death warrant (Boot handles termination)
+gt warrant file deacon/dogs/<name> --reason "Stuck: working on <work> for <duration>"
+
+# Option B: Force clear work and notify
+gt dog clear <name> --force
+gt mail send deacon/ -s "DOG_TIMEOUT <name>" -m "Dog <name> timed out on <work> after <duration>"
+```
+
+**Decision matrix:**
+
+| Duration over timeout | Action |
+|----------------------|--------|
+| < 2x timeout | Log warning, check next cycle |
+| 2x - 5x timeout | File death warrant |
+| > 5x timeout | Force clear + escalate to Mayor |
+
+**Step 4: Track chronic failures**
+If same dog gets stuck repeatedly:
+```bash
+gt mail send mayor/ -s "Dog <name> chronic failures" \
+  -m "Dog has timed out N times in last 24h. Consider removing from pool."
+```
+
+**Exit criteria:** All stuck dogs handled (warrant filed or cleared)."""
+
+[[steps]]
 id = "orphan-check"
 title = "Detect abandoned work"
-needs = ["dog-pool-maintenance"]
+needs = ["dog-health-check"]
 description = """
 **DETECT ONLY** - Check for orphaned state and dispatch to dog if found.
 
