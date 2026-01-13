@@ -230,8 +230,10 @@ func runHook(_ *cobra.Command, args []string) error {
 	fmt.Printf("  Use 'gt handoff' to restart with this work\n")
 	fmt.Printf("  Use 'gt hook' to see hook status\n")
 
-	// Log hook event to activity feed
-	_ = events.LogFeed(events.TypeHook, agentID, events.HookPayload(beadID))
+	// Log hook event to activity feed (non-fatal)
+	if err := events.LogFeed(events.TypeHook, agentID, events.HookPayload(beadID)); err != nil {
+		fmt.Fprintf(os.Stderr, "%s Warning: failed to log hook event: %v\n", style.Dim.Render("⚠"), err)
+	}
 
 	return nil
 }
