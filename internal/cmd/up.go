@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/daemon"
@@ -34,6 +35,7 @@ This is the idempotent "boot" command for Gas Town. It ensures all
 infrastructure agents are running:
 
   • Daemon     - Go background process that pokes agents
+  • Boot       - Watchdog that triages Deacon health (the dog)
   • Deacon     - Health orchestrator (monitors Mayor/Witnesses)
   • Mayor      - Global work coordinator
   • Witnesses  - Per-rig polecat managers
@@ -97,7 +99,20 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 2. Deacon (Claude agent)
+	// 2. Boot (the dog - watchdog that triages Deacon health)
+	bootMgr := boot.New(townRoot)
+	if bootMgr.IsRunning() {
+		printStatus("Boot", true, boot.SessionName)
+	} else {
+		if err := bootMgr.Spawn(); err != nil {
+			printStatus("Boot", false, err.Error())
+			allOK = false
+		} else {
+			printStatus("Boot", true, boot.SessionName)
+		}
+	}
+
+	// 3. Deacon (Claude agent)
 	deaconMgr := deacon.NewManager(townRoot)
 	if err := deaconMgr.Start(""); err != nil {
 		if err == deacon.ErrAlreadyRunning {
@@ -110,7 +125,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 		printStatus("Deacon", true, deaconMgr.SessionName())
 	}
 
-	// 3. Mayor (Claude agent)
+	// 4. Mayor (Claude agent)
 	mayorMgr := mayor.NewManager(townRoot)
 	if err := mayorMgr.Start(""); err != nil {
 		if err == mayor.ErrAlreadyRunning {
@@ -123,7 +138,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 		printStatus("Mayor", true, mayorMgr.SessionName())
 	}
 
-	// 4. Witnesses (one per rig)
+	// 5. Witnesses (one per rig)
 	for _, rigName := range rigs {
 		_, r, err := getRig(rigName)
 		if err != nil {
@@ -145,7 +160,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 5. Refineries (one per rig)
+	// 6. Refineries (one per rig)
 	for _, rigName := range rigs {
 		_, r, err := getRig(rigName)
 		if err != nil {
@@ -167,7 +182,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 6. Crew (if --restore)
+	// 7. Crew (if --restore)
 	if upRestore {
 		for _, rigName := range rigs {
 			crewStarted, crewErrors := startCrewFromSettings(townRoot, rigName)
@@ -180,7 +195,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// 7. Polecats with pinned work (if --restore)
+		// 8. Polecats with pinned work (if --restore)
 		for _, rigName := range rigs {
 			polecatsStarted, polecatErrors := startPolecatsWithWork(townRoot, rigName)
 			for _, name := range polecatsStarted {
@@ -197,7 +212,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	if allOK {
 		fmt.Printf("%s All services running\n", style.Bold.Render("✓"))
 		// Log boot event with started services
-		startedServices := []string{"daemon", "deacon", "mayor"}
+		startedServices := []string{"daemon", "boot", "deacon", "mayor"}
 		for _, rigName := range rigs {
 			startedServices = append(startedServices, fmt.Sprintf("%s/witness", rigName))
 			startedServices = append(startedServices, fmt.Sprintf("%s/refinery", rigName))
