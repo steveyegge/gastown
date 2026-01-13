@@ -1318,7 +1318,9 @@ func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 		return nil
 	}
 	if filepath.Base(rc.Command) == "claude" {
-		return []string{"node"}
+		// Claude can appear as either "node" or "claude" in tmux pane_current_command
+		// depending on how it's invoked and whether it's wrapped by Node.js
+		return []string{"node", "claude"}
 	}
 	return []string{filepath.Base(rc.Command)}
 }
