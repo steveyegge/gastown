@@ -115,7 +115,7 @@ func (m *Manager) Start(foreground bool) error {
 	if foreground {
 		// In foreground mode, check tmux session (no PID inference per ZFC)
 		townRoot := filepath.Dir(m.rig.Path)
-		agentCfg := config.ResolveAgentConfig(townRoot, m.rig.Path)
+		agentCfg := config.ResolveRoleAgentConfig(constants.RoleRefinery, townRoot, m.rig.Path)
 		if running, _ := t.HasSession(sessionID); running && t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 			return ErrAlreadyRunning
 		}
@@ -137,15 +137,15 @@ func (m *Manager) Start(foreground bool) error {
 	// Background mode: check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
+		// Session exists - check if agent is actually running (healthy vs zombie)
 		townRoot := filepath.Dir(m.rig.Path)
-		agentCfg := config.ResolveAgentConfig(townRoot, m.rig.Path)
+		agentCfg := config.ResolveRoleAgentConfig(constants.RoleRefinery, townRoot, m.rig.Path)
 		if t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
-			// Healthy - Claude is running
+			// Healthy - agent is running
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
-		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, Claude dead). Recreating...")
+		// Zombie - tmux alive but agent dead. Kill and recreate.
+		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, agent dead). Recreating...")
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}

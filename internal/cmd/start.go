@@ -381,10 +381,10 @@ func startConfiguredCrew(t *tmux.Tmux, rigs []*rig.Rig, townRoot string, mu *syn
 func startOrRestartCrewMember(t *tmux.Tmux, r *rig.Rig, crewName, townRoot string) (msg string, started bool) {
 	sessionID := crewSessionName(r.Name, crewName)
 	if running, _ := t.HasSession(sessionID); running {
-		// Session exists - check if Claude is still running
-		agentCfg := config.ResolveAgentConfig(townRoot, r.Path)
+		// Session exists - check if agent is still running
+		agentCfg := config.ResolveRoleAgentConfig(constants.RoleCrew, townRoot, r.Path)
 		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
-			// Claude has exited, restart it
+			// Agent has exited, restart it
 			// Build startup beacon for predecessor discovery via /resume
 			address := fmt.Sprintf("%s/crew/%s", r.Name, crewName)
 			beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
@@ -392,11 +392,11 @@ func startOrRestartCrewMember(t *tmux.Tmux, r *rig.Rig, crewName, townRoot strin
 				Sender:    "human",
 				Topic:     "restart",
 			})
-			claudeCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, beacon)
-			if err := t.SendKeys(sessionID, claudeCmd); err != nil {
+			agentCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, beacon)
+			if err := t.SendKeys(sessionID, agentCmd); err != nil {
 				return fmt.Sprintf("  %s %s/%s restart failed: %v\n", style.Dim.Render("○"), r.Name, crewName, err), false
 			}
-			return fmt.Sprintf("  %s %s/%s Claude restarted\n", style.Bold.Render("✓"), r.Name, crewName), true
+			return fmt.Sprintf("  %s %s/%s agent restarted\n", style.Bold.Render("✓"), r.Name, crewName), true
 		}
 		return fmt.Sprintf("  %s %s/%s already running\n", style.Dim.Render("○"), r.Name, crewName), false
 	}

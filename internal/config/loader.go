@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -898,6 +899,48 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 	return lookupAgentConfig(agentName, townSettings, rigSettings), agentName, nil
 }
 
+// ValidateAgentConfig checks if an agent configuration is valid and the binary exists.
+// Returns an error describing the issue, or nil if valid.
+func ValidateAgentConfig(agentName string, townSettings *TownSettings, rigSettings *RigSettings) error {
+	// Check if agent exists in config
+	rc := lookupAgentConfigIfExists(agentName, townSettings, rigSettings)
+	if rc == nil {
+		return fmt.Errorf("agent %q not found in config or built-in presets", agentName)
+	}
+
+	// Check if binary exists on system
+	if _, err := exec.LookPath(rc.Command); err != nil {
+		return fmt.Errorf("agent %q binary %q not found in PATH", agentName, rc.Command)
+	}
+
+	return nil
+}
+
+// lookupAgentConfigIfExists looks up an agent by name but returns nil if not found
+// (instead of falling back to default). Used for validation.
+func lookupAgentConfigIfExists(name string, townSettings *TownSettings, rigSettings *RigSettings) *RuntimeConfig {
+	// Check rig's custom agents
+	if rigSettings != nil && rigSettings.Agents != nil {
+		if custom, ok := rigSettings.Agents[name]; ok && custom != nil {
+			return fillRuntimeDefaults(custom)
+		}
+	}
+
+	// Check town's custom agents
+	if townSettings != nil && townSettings.Agents != nil {
+		if custom, ok := townSettings.Agents[name]; ok && custom != nil {
+			return fillRuntimeDefaults(custom)
+		}
+	}
+
+	// Check built-in presets
+	if preset := GetAgentPresetByName(name); preset != nil {
+		return RuntimeConfigFromPreset(AgentPreset(name))
+	}
+
+	return nil
+}
+
 // ResolveRoleAgentConfig resolves the agent configuration for a specific role.
 // It checks role-specific agent assignments before falling back to the default agent.
 //
@@ -905,6 +948,9 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 //  1. Rig's RoleAgents[role] - if set, look up that agent
 //  2. Town's RoleAgents[role] - if set, look up that agent
 //  3. Fall back to ResolveAgentConfig (rig's Agent → town's DefaultAgent → "claude")
+//
+// If a configured agent is not found or its binary doesn't exist, a warning is
+// printed to stderr and it falls back to the default agent.
 //
 // role is one of: "mayor", "deacon", "witness", "refinery", "polecat", "crew".
 // townRoot is the path to the town directory (e.g., ~/gt).
@@ -935,14 +981,22 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	// Check rig's RoleAgents first
 	if rigSettings != nil && rigSettings.RoleAgents != nil {
 		if agentName, ok := rigSettings.RoleAgents[role]; ok && agentName != "" {
-			return lookupAgentConfig(agentName, townSettings, rigSettings)
+			if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: role_agents[%s]=%s - %v, falling back to default\n", role, agentName, err)
+			} else {
+				return lookupAgentConfig(agentName, townSettings, rigSettings)
+			}
 		}
 	}
 
 	// Check town's RoleAgents
 	if townSettings.RoleAgents != nil {
 		if agentName, ok := townSettings.RoleAgents[role]; ok && agentName != "" {
-			return lookupAgentConfig(agentName, townSettings, rigSettings)
+			if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: role_agents[%s]=%s - %v, falling back to default\n", role, agentName, err)
+			} else {
+				return lookupAgentConfig(agentName, townSettings, rigSettings)
+			}
 		}
 	}
 
@@ -1150,13 +1204,26 @@ func findTownRootFromCwd() (string, error) {
 // envVars is a map of environment variable names to values.
 // rigPath is optional - if empty, tries to detect town root from cwd.
 // prompt is optional - if provided, appended as the initial prompt.
+//
+// If envVars contains GT_ROLE, the function uses role-based agent resolution
+// (ResolveRoleAgentConfig) to select the appropriate agent for the role.
+// This enables per-role model selection via role_agents in settings.
 func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) string {
 	var rc *RuntimeConfig
 	var townRoot string
+
+	// Extract role from envVars for role-based agent resolution
+	role := envVars["GT_ROLE"]
+
 	if rigPath != "" {
 		// Derive town root from rig path
 		townRoot = filepath.Dir(rigPath)
-		rc = ResolveAgentConfig(townRoot, rigPath)
+		if role != "" {
+			// Use role-based agent resolution for per-role model selection
+			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
+		} else {
+			rc = ResolveAgentConfig(townRoot, rigPath)
+		}
 	} else {
 		// Try to detect town root from cwd for town-level agents (mayor, deacon)
 		var err error
@@ -1164,7 +1231,12 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 		if err != nil {
 			rc = DefaultRuntimeConfig()
 		} else {
-			rc = ResolveAgentConfig(townRoot, "")
+			if role != "" {
+				// Use role-based agent resolution for per-role model selection
+				rc = ResolveRoleAgentConfig(role, townRoot, "")
+			} else {
+				rc = ResolveAgentConfig(townRoot, "")
+			}
 		}
 	}
 
@@ -1222,32 +1294,69 @@ func PrependEnv(command string, envVars map[string]string) string {
 
 // BuildStartupCommandWithAgentOverride builds a startup command like BuildStartupCommand,
 // but uses agentOverride if non-empty.
+//
+// Resolution priority:
+//  1. agentOverride (explicit override)
+//  2. role_agents[GT_ROLE] (if GT_ROLE is in envVars)
+//  3. Default agent resolution (rig's Agent → town's DefaultAgent → "claude")
 func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride string) (string, error) {
 	var rc *RuntimeConfig
+	var townRoot string
+
+	// Extract role from envVars for role-based agent resolution (when no override)
+	role := envVars["GT_ROLE"]
 
 	if rigPath != "" {
-		townRoot := filepath.Dir(rigPath)
-		var err error
-		rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
-		if err != nil {
-			return "", err
+		townRoot = filepath.Dir(rigPath)
+		if agentOverride != "" {
+			var err error
+			rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
+			if err != nil {
+				return "", err
+			}
+		} else if role != "" {
+			// No override, use role-based agent resolution
+			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
+		} else {
+			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		townRoot, err := findTownRootFromCwd()
+		var err error
+		townRoot, err = findTownRootFromCwd()
 		if err != nil {
 			rc = DefaultRuntimeConfig()
 		} else {
-			var resolveErr error
-			rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
-			if resolveErr != nil {
-				return "", resolveErr
+			if agentOverride != "" {
+				var resolveErr error
+				rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
+				if resolveErr != nil {
+					return "", resolveErr
+				}
+			} else if role != "" {
+				// No override, use role-based agent resolution
+				rc = ResolveRoleAgentConfig(role, townRoot, "")
+			} else {
+				rc = ResolveAgentConfig(townRoot, "")
 			}
 		}
 	}
 
+	// Copy env vars to avoid mutating caller map
+	resolvedEnv := make(map[string]string, len(envVars)+2)
+	for k, v := range envVars {
+		resolvedEnv[k] = v
+	}
+	// Add GT_ROOT so agents can find town-level resources (formulas, etc.)
+	if townRoot != "" {
+		resolvedEnv["GT_ROOT"] = townRoot
+	}
+	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
+		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
+	}
+
 	// Build environment export prefix
 	var exports []string
-	for k, v := range envVars {
+	for k, v := range resolvedEnv {
 		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
 	}
 	sort.Strings(exports)
@@ -1265,7 +1374,6 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 
 	return cmd, nil
 }
-
 
 // BuildAgentStartupCommand is a convenience function for starting agent sessions.
 // It sets standard environment variables (GT_ROLE, BD_ACTOR, GIT_AUTHOR_NAME)
