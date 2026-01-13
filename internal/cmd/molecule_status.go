@@ -342,8 +342,22 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 				// Fetch the bead on the hook
 				hookBead, err = b.Show(agentBead.HookBead)
 				if err != nil {
-					// Hook bead referenced but not found - report error but continue
-					hookBead = nil
+					// Hook bead not found in rig's beads - check town beads
+					// This handles cross-database references (e.g., agent bead in rig, work in town)
+					if !isTownLevelRole(target) && townRoot != "" {
+						townBeadsDir := filepath.Join(townRoot, ".beads")
+						if _, err := os.Stat(townBeadsDir); err == nil {
+							townB := beads.New(townRoot)
+							hookBead, err = townB.Show(agentBead.HookBead)
+							if err != nil {
+								// Not found in town beads either
+								hookBead = nil
+							}
+						}
+					}
+					if hookBead == nil {
+						// Still not found - will fall through to fallback approach
+					}
 				}
 			}
 		}
