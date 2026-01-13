@@ -184,6 +184,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 // The function:
 // 1. Tries to create the agent bead
 // 2. If UNIQUE constraint fails, reopens the existing bead and updates its fields
+// 3. Returns a reconstructed Issue object (Show may fail for cross-routed beads)
 func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (*Issue, error) {
 	// First try to create the bead
 	issue, err := b.CreateAgentBead(id, title, fields)
@@ -233,8 +234,19 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		}
 	}
 
-	// Return the updated bead
-	return b.Show(id)
+	// Return a reconstructed Issue object
+	// (Note: Show may fail for cross-routed beads since Beads object may be initialized
+	// with a different beads directory. The bead was successfully reopened and updated,
+	// so we construct an Issue object with the information we provided.)
+	reconstructed := &Issue{
+		ID:          id,
+		Title:       title,
+		Type:        "agent",
+		Description: description,
+		Labels:      []string{"gt:agent"},
+		Status:      "open",
+	}
+	return reconstructed, nil
 }
 
 // UpdateAgentState updates the agent_state field in an agent bead.

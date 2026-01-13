@@ -200,7 +200,7 @@ func runEscalateList(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("  %s %s [%s] %s\n", emoji, issue.ID, status, issue.Title)
 		fmt.Printf("     Severity: %s | From: %s | %s\n",
-			fields.Severity, fields.EscalatedBy, formatRelativeTime(issue.CreatedAt))
+			fields.Severity, fields.EscalatedBy, formatRelativeTimeSimple(issue.CreatedAt))
 		if fields.AckedBy != "" {
 			fmt.Printf("     Acked by: %s\n", fields.AckedBy)
 		}
@@ -501,7 +501,7 @@ func runEscalateShow(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Title: %s\n", issue.Title)
 	fmt.Printf("  Status: %s\n", issue.Status)
 	fmt.Printf("  Severity: %s\n", fields.Severity)
-	fmt.Printf("  Created: %s\n", formatRelativeTime(issue.CreatedAt))
+	fmt.Printf("  Created: %s\n", formatRelativeTimeSimple(issue.CreatedAt))
 	fmt.Printf("  Escalated by: %s\n", fields.EscalatedBy)
 	if fields.Reason != "" {
 		fmt.Printf("  Reason: %s\n", fields.Reason)
@@ -611,7 +611,7 @@ func severityEmoji(severity string) string {
 	}
 }
 
-func formatRelativeTime(timestamp string) string {
+func formatRelativeTimeSimple(timestamp string) string {
 	t, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil {
 		return timestamp

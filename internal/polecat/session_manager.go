@@ -450,6 +450,7 @@ func (m *SessionManager) StopAll(force bool) error {
 }
 
 // hookIssue pins an issue to a polecat's hook using bd update.
+// Also sets the reverse link (agent bead's hook_bead field) so cleanup can find the hooked work.
 func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
 	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID) //nolint:gosec
 	cmd.Dir = workDir
@@ -458,5 +459,24 @@ func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
 		return fmt.Errorf("bd update failed: %w", err)
 	}
 	fmt.Printf("✓ Hooked issue %s to %s\n", issueID, agentID)
+
+	// Set the reverse link: agent bead's hook_bead field (bug fix: hq-tc2j)
+	// This enables gt done to find and close the hooked work when the polecat completes.
+	// Note: This is non-fatal - if it fails, the work is still hooked but cleanup may fail later.
+	bd := beads.New(workDir)
+
+	// Convert agent ID to agent bead ID (e.g., "gastown/polecats/furiosa" -> "gt-gastown-polecat-furiosa")
+	// Agent ID format: "rigname/polecats/name"
+	parts := strings.Split(agentID, "/")
+	if len(parts) == 3 && parts[1] == "polecats" {
+		rigName := parts[0]
+		polecatName := parts[2]
+		agentBeadID := beads.PolecatBeadID(rigName, polecatName)
+		if err := bd.SetHookBead(agentBeadID, issueID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook_bead field: %v (cleanup may fail later)\n", agentID, err)
+			// Continue anyway - the work is hooked, it just won't auto-cleanup properly
+		}
+	}
+
 	return nil
 }
