@@ -99,6 +99,10 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["BEADS_NO_DAEMON"] = "1"
 	}
 
+	// Prevent daemon auto-start race condition (bd-63o).
+	// All agents should use an existing daemon but never try to start one.
+	env["BEADS_AUTO_START_DAEMON"] = "false"
+
 	// Add optional runtime config directory
 	if cfg.RuntimeConfigDir != "" {
 		env["CLAUDE_CONFIG_DIR"] = cfg.RuntimeConfigDir

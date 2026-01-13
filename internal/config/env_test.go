@@ -17,6 +17,7 @@ func TestAgentEnv_Mayor(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "mayor")
 	assertEnv(t, env, "GT_ROOT", "/town")
 	assertEnv(t, env, "BEADS_DIR", "/town/.beads")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 	assertNotSet(t, env, "GT_RIG")
 	assertNotSet(t, env, "BEADS_NO_DAEMON")
 }
@@ -36,6 +37,7 @@ func TestAgentEnv_Witness(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "myrig/witness")
 	assertEnv(t, env, "GT_ROOT", "/town")
 	assertEnv(t, env, "BEADS_DIR", "/town/myrig/.beads")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 }
 
 func TestAgentEnv_Polecat(t *testing.T) {
@@ -56,6 +58,7 @@ func TestAgentEnv_Polecat(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "Toast")
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/Toast")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 }
 
 func TestAgentEnv_Crew(t *testing.T) {
@@ -76,6 +79,7 @@ func TestAgentEnv_Crew(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "emma")
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/emma")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 }
 
 func TestAgentEnv_Refinery(t *testing.T) {
@@ -93,6 +97,7 @@ func TestAgentEnv_Refinery(t *testing.T) {
 	assertEnv(t, env, "BD_ACTOR", "myrig/refinery")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "myrig/refinery")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 }
 
 func TestAgentEnv_Deacon(t *testing.T) {
@@ -108,6 +113,7 @@ func TestAgentEnv_Deacon(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "deacon")
 	assertEnv(t, env, "GT_ROOT", "/town")
 	assertEnv(t, env, "BEADS_DIR", "/town/.beads")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 	assertNotSet(t, env, "GT_RIG")
 	assertNotSet(t, env, "BEADS_NO_DAEMON")
 }
@@ -125,6 +131,7 @@ func TestAgentEnv_Boot(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "boot")
 	assertEnv(t, env, "GT_ROOT", "/town")
 	assertEnv(t, env, "BEADS_DIR", "/town/.beads")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 	assertNotSet(t, env, "GT_RIG")
 	assertNotSet(t, env, "BEADS_NO_DAEMON")
 }
