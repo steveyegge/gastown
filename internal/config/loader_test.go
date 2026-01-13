@@ -1193,6 +1193,121 @@ func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 	}
 }
 
+func TestBuildStartupCommand_UsesRoleAgentsFromTownSettings(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure town settings with role_agents
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		"refinery": "gemini",
+		"witness":  "codex",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create empty rig settings (no agent override)
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	t.Run("refinery role gets gemini from role_agents", func(t *testing.T) {
+		cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "refinery"}, rigPath, "")
+		if !strings.Contains(cmd, "gemini") {
+			t.Fatalf("expected gemini for refinery role, got: %q", cmd)
+		}
+	})
+
+	t.Run("witness role gets codex from role_agents", func(t *testing.T) {
+		cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "witness"}, rigPath, "")
+		if !strings.Contains(cmd, "codex") {
+			t.Fatalf("expected codex for witness role, got: %q", cmd)
+		}
+	})
+
+	t.Run("crew role falls back to default_agent (not in role_agents)", func(t *testing.T) {
+		cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "crew"}, rigPath, "")
+		if !strings.Contains(cmd, "claude") {
+			t.Fatalf("expected claude fallback for crew role, got: %q", cmd)
+		}
+	})
+
+	t.Run("no role falls back to default resolution", func(t *testing.T) {
+		cmd := BuildStartupCommand(map[string]string{}, rigPath, "")
+		if !strings.Contains(cmd, "claude") {
+			t.Fatalf("expected claude for no role, got: %q", cmd)
+		}
+	})
+}
+
+func TestBuildStartupCommand_RigRoleAgentsOverridesTownRoleAgents(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Town settings has witness = gemini
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		"witness": "gemini",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Rig settings overrides witness to codex
+	rigSettings := NewRigSettings()
+	rigSettings.RoleAgents = map[string]string{
+		"witness": "codex",
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "witness"}, rigPath, "")
+	if !strings.Contains(cmd, "codex") {
+		t.Fatalf("expected codex from rig role_agents override, got: %q", cmd)
+	}
+	if strings.Contains(cmd, "gemini") {
+		t.Fatalf("did not expect town role_agents (gemini) in command: %q", cmd)
+	}
+}
+
+func TestBuildAgentStartupCommand_UsesRoleAgents(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure town settings with role_agents
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		"refinery": "codex",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create empty rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	// BuildAgentStartupCommand passes role via GT_ROLE env var
+	cmd := BuildAgentStartupCommand("refinery", "testrig/refinery", rigPath, "")
+	if !strings.Contains(cmd, "codex") {
+		t.Fatalf("expected codex for refinery role, got: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_ROLE=refinery") {
+		t.Fatalf("expected GT_ROLE=refinery in command: %q", cmd)
+	}
+}
+
 func TestGetRuntimeCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()

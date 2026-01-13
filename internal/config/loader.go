@@ -1150,13 +1150,26 @@ func findTownRootFromCwd() (string, error) {
 // envVars is a map of environment variable names to values.
 // rigPath is optional - if empty, tries to detect town root from cwd.
 // prompt is optional - if provided, appended as the initial prompt.
+//
+// If envVars contains GT_ROLE, the function uses role-based agent resolution
+// (ResolveRoleAgentConfig) to select the appropriate agent for the role.
+// This enables per-role model selection via role_agents in settings.
 func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) string {
 	var rc *RuntimeConfig
 	var townRoot string
+
+	// Extract role from envVars for role-based agent resolution
+	role := envVars["GT_ROLE"]
+
 	if rigPath != "" {
 		// Derive town root from rig path
 		townRoot = filepath.Dir(rigPath)
-		rc = ResolveAgentConfig(townRoot, rigPath)
+		if role != "" {
+			// Use role-based agent resolution for per-role model selection
+			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
+		} else {
+			rc = ResolveAgentConfig(townRoot, rigPath)
+		}
 	} else {
 		// Try to detect town root from cwd for town-level agents (mayor, deacon)
 		var err error
@@ -1164,7 +1177,12 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 		if err != nil {
 			rc = DefaultRuntimeConfig()
 		} else {
-			rc = ResolveAgentConfig(townRoot, "")
+			if role != "" {
+				// Use role-based agent resolution for per-role model selection
+				rc = ResolveRoleAgentConfig(role, townRoot, "")
+			} else {
+				rc = ResolveAgentConfig(townRoot, "")
+			}
 		}
 	}
 
@@ -1222,25 +1240,47 @@ func PrependEnv(command string, envVars map[string]string) string {
 
 // BuildStartupCommandWithAgentOverride builds a startup command like BuildStartupCommand,
 // but uses agentOverride if non-empty.
+//
+// Resolution priority:
+//  1. agentOverride (explicit override)
+//  2. role_agents[GT_ROLE] (if GT_ROLE is in envVars)
+//  3. Default agent resolution (rig's Agent → town's DefaultAgent → "claude")
 func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride string) (string, error) {
 	var rc *RuntimeConfig
 
+	// Extract role from envVars for role-based agent resolution (when no override)
+	role := envVars["GT_ROLE"]
+
 	if rigPath != "" {
 		townRoot := filepath.Dir(rigPath)
-		var err error
-		rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
-		if err != nil {
-			return "", err
+		if agentOverride != "" {
+			var err error
+			rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
+			if err != nil {
+				return "", err
+			}
+		} else if role != "" {
+			// No override, use role-based agent resolution
+			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
+		} else {
+			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
 		townRoot, err := findTownRootFromCwd()
 		if err != nil {
 			rc = DefaultRuntimeConfig()
 		} else {
-			var resolveErr error
-			rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
-			if resolveErr != nil {
-				return "", resolveErr
+			if agentOverride != "" {
+				var resolveErr error
+				rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
+				if resolveErr != nil {
+					return "", resolveErr
+				}
+			} else if role != "" {
+				// No override, use role-based agent resolution
+				rc = ResolveRoleAgentConfig(role, townRoot, "")
+			} else {
+				rc = ResolveAgentConfig(townRoot, "")
 			}
 		}
 	}
