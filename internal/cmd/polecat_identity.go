@@ -4,7 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
@@ -77,7 +84,10 @@ var polecatIdentityShowCmd = &cobra.Command{
 
 Displays:
   - Identity bead fields
-  - CV history (past work)
+  - CV history (past work) with completion statistics
+  - Session count and performance metrics
+  - Language breakdown from changed files
+  - Work type breakdown (feat, fix, refactor, etc.)
   - Current hook bead details
 
 Example:
@@ -146,6 +156,30 @@ func init() {
 
 	// Add identity to polecat command
 	polecatCmd.AddCommand(polecatIdentityCmd)
+}
+
+// CVSummary represents the CV/work history summary for a polecat.
+type CVSummary struct {
+	Identity         string            `json:"identity"`
+	Created          string            `json:"created,omitempty"`
+	Sessions         int               `json:"sessions"`
+	IssuesCompleted  int               `json:"issues_completed"`
+	IssuesFailed     int               `json:"issues_failed"`
+	IssuesAbandoned  int               `json:"issues_abandoned"`
+	Languages        map[string]int    `json:"languages,omitempty"`
+	WorkTypes        map[string]int    `json:"work_types,omitempty"`
+	AvgCompletionMin int               `json:"avg_completion_minutes,omitempty"`
+	FirstPassRate    float64           `json:"first_pass_rate,omitempty"`
+	RecentWork       []RecentWorkItem  `json:"recent_work,omitempty"`
+}
+
+// RecentWorkItem represents a recent work item in the CV.
+type RecentWorkItem struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Type      string `json:"type,omitempty"`
+	Completed string `json:"completed"`
+	Ago       string `json:"ago"`
 }
 
 // IdentityInfo holds identity bead information for display.
@@ -328,16 +362,6 @@ func runPolecatIdentityList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// IdentityDetails holds detailed identity information for show command.
-type IdentityDetails struct {
-	IdentityInfo
-	Title       string   `json:"title"`
-	Description string   `json:"description,omitempty"`
-	CreatedAt   string   `json:"created_at,omitempty"`
-	UpdatedAt   string   `json:"updated_at,omitempty"`
-	CVBeads     []string `json:"cv_beads,omitempty"`
-}
-
 func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 	polecatName := args[1]
@@ -365,69 +389,56 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 	mgr := polecat.NewManager(r, nil)
 
 	worktreeExists := false
+	var p *polecat.Polecat
 	if p, err := mgr.Get(polecatName); err == nil && p != nil {
 		worktreeExists = true
 	}
 	sessionRunning, _ := polecatMgr.IsRunning(polecatName)
 
-	// Build details
-	details := IdentityDetails{
-		IdentityInfo: IdentityInfo{
-			Rig:            rigName,
-			Name:           polecatName,
-			BeadID:         beadID,
-			AgentState:     fields.AgentState,
-			HookBead:       issue.HookBead,
-			CleanupStatus:  fields.CleanupStatus,
-			WorktreeExists: worktreeExists,
-			SessionRunning: sessionRunning,
-		},
-		Title:     issue.Title,
-		CreatedAt: issue.CreatedAt,
-		UpdatedAt: issue.UpdatedAt,
-	}
-	if details.HookBead == "" {
-		details.HookBead = fields.HookBead
+	// Build CV summary for enhanced display
+	var cv *CVSummary
+	if worktreeExists && p != nil {
+		cv, _ = buildCVSummary(r.Path, rigName, polecatName, beadID, p.ClonePath)
+	} else {
+		cv, _ = buildCVSummary(r.Path, rigName, polecatName, beadID, "")
 	}
 
-	// Get CV beads (work history) - beads that were assigned to this polecat
-	// Assignee format is "rig/name" (e.g., "gastown/Toast")
-	assignee := fmt.Sprintf("%s/%s", rigName, polecatName)
-	cvBeads, _ := bd.ListByAssignee(assignee)
-	for _, cv := range cvBeads {
-		if cv.ID != beadID && cv.Status == "closed" {
-			details.CVBeads = append(details.CVBeads, cv.ID)
-		}
-	}
-
-	// JSON output
+	// JSON output - include both identity and CV data
 	if polecatIdentityShowJSON {
+		if cv == nil {
+			cv = &CVSummary{
+				Identity:   beadID,
+				Languages:  make(map[string]int),
+				WorkTypes:  make(map[string]int),
+				RecentWork: []RecentWorkItem{},
+			}
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(details)
+		return enc.Encode(cv)
 	}
 
 	// Human-readable output
 	fmt.Printf("%s\n\n", style.Bold.Render(fmt.Sprintf("Identity: %s/%s", rigName, polecatName)))
 
-	fmt.Printf("  Bead ID:       %s\n", details.BeadID)
-	fmt.Printf("  Title:         %s\n", details.Title)
+	fmt.Printf("  Bead ID:       %s\n", beadID)
+	fmt.Printf("  Title:         %s\n", issue.Title)
 
 	// Status
 	sessionStr := style.Dim.Render("stopped")
-	if details.SessionRunning {
+	if sessionRunning {
 		sessionStr = style.Success.Render("running")
 	}
 	fmt.Printf("  Session:       %s\n", sessionStr)
 
 	worktreeStr := style.Dim.Render("no")
-	if details.WorktreeExists {
+	if worktreeExists {
 		worktreeStr = style.Success.Render("yes")
 	}
 	fmt.Printf("  Worktree:      %s\n", worktreeStr)
 
 	// Agent state
-	stateStr := details.AgentState
+	stateStr := fields.AgentState
 	if stateStr == "" {
 		stateStr = "unknown"
 	}
@@ -444,36 +455,74 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Agent State:   %s\n", stateStr)
 
 	// Hook
-	if details.HookBead != "" {
-		fmt.Printf("  Hook:          %s\n", details.HookBead)
+	hookBead := issue.HookBead
+	if hookBead == "" {
+		hookBead = fields.HookBead
+	}
+	if hookBead != "" {
+		fmt.Printf("  Hook:          %s\n", hookBead)
 	} else {
 		fmt.Printf("  Hook:          %s\n", style.Dim.Render("(empty)"))
 	}
 
 	// Cleanup status
-	if details.CleanupStatus != "" {
-		fmt.Printf("  Cleanup:       %s\n", details.CleanupStatus)
+	if fields.CleanupStatus != "" {
+		fmt.Printf("  Cleanup:       %s\n", fields.CleanupStatus)
 	}
 
 	// Timestamps
-	if details.CreatedAt != "" {
-		fmt.Printf("  Created:       %s\n", style.Dim.Render(details.CreatedAt))
+	if issue.CreatedAt != "" {
+		fmt.Printf("  Created:       %s\n", style.Dim.Render(issue.CreatedAt))
 	}
-	if details.UpdatedAt != "" {
-		fmt.Printf("  Updated:       %s\n", style.Dim.Render(details.UpdatedAt))
+	if issue.UpdatedAt != "" {
+		fmt.Printf("  Updated:       %s\n", style.Dim.Render(issue.UpdatedAt))
 	}
 
-	// CV summary
-	fmt.Println()
-	fmt.Printf("%s\n", style.Bold.Render("CV (Work History)"))
-	if len(details.CVBeads) == 0 {
-		fmt.Printf("  %s\n", style.Dim.Render("(no completed work)"))
-	} else {
-		for _, cv := range details.CVBeads {
-			fmt.Printf("  - %s\n", cv)
+	// CV Summary section (if available)
+	if cv != nil && cv.Sessions > 0 {
+		fmt.Println()
+		fmt.Printf("%s\n", style.Bold.Render("CV Summary:"))
+		fmt.Printf("  Sessions: %d\n", cv.Sessions)
+		fmt.Printf("  Issues completed: %s\n", style.Success.Render(fmt.Sprintf("%d", cv.IssuesCompleted)))
+		fmt.Printf("  Issues failed:    %s\n", formatCountStyled(cv.IssuesFailed, style.Error))
+		fmt.Printf("  Issues abandoned: %s\n", formatCountStyled(cv.IssuesAbandoned, style.Warning))
+
+		// Language stats
+		if len(cv.Languages) > 0 {
+			fmt.Printf("\n  %s %s\n", style.Bold.Render("Languages:"), formatLanguageStats(cv.Languages))
+		}
+
+		// Work type stats
+		if len(cv.WorkTypes) > 0 {
+			fmt.Printf("  %s     %s\n", style.Bold.Render("Types:"), formatWorkTypeStats(cv.WorkTypes))
+		}
+
+		// Performance metrics
+		if cv.AvgCompletionMin > 0 {
+			fmt.Printf("\n  Avg completion time: %d minutes\n", cv.AvgCompletionMin)
+		}
+		if cv.FirstPassRate > 0 {
+			fmt.Printf("  First-pass success:  %.0f%%\n", cv.FirstPassRate*100)
+		}
+
+		// Recent work
+		if len(cv.RecentWork) > 0 {
+			fmt.Printf("\n%s\n", style.Bold.Render("Recent work:"))
+			for _, work := range cv.RecentWork {
+				typeStr := ""
+				if work.Type != "" {
+					typeStr = work.Type + ": "
+				}
+				title := work.Title
+				if len(title) > 40 {
+					title = title[:37] + "..."
+				}
+				fmt.Printf("  %-10s %s%s  %s\n", work.ID, typeStr, title, style.Dim.Render(work.Ago))
+			}
 		}
 	}
 
+	fmt.Println()
 	return nil
 }
 
@@ -632,4 +681,374 @@ func runPolecatIdentityRemove(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Removed identity bead: %s\n", style.SuccessPrefix, beadID)
 	return nil
+}
+
+// buildCVSummary constructs the CV summary for a polecat.
+func buildCVSummary(rigPath, rigName, polecatName, identityBeadID, clonePath string) (*CVSummary, error) {
+	cv := &CVSummary{
+		Identity:   identityBeadID,
+		Languages:  make(map[string]int),
+		WorkTypes:  make(map[string]int),
+		RecentWork: []RecentWorkItem{},
+	}
+
+	// Use clonePath for beads queries (has proper redirect setup)
+	// Fall back to rigPath if clonePath is empty
+	beadsQueryPath := clonePath
+	if beadsQueryPath == "" {
+		beadsQueryPath = rigPath
+	}
+
+	// Get agent bead info for creation date
+	bd := beads.New(beadsQueryPath)
+	agentBead, _, err := bd.GetAgentBead(identityBeadID)
+	if err == nil && agentBead != nil {
+		if agentBead.CreatedAt != "" && len(agentBead.CreatedAt) >= 10 {
+			cv.Created = agentBead.CreatedAt[:10] // Just the date part
+		}
+	}
+
+	// Count sessions from checkpoint files (session history)
+	cv.Sessions = countPolecatSessions(rigPath, polecatName)
+
+	// Query completed issues assigned to this polecat
+	assignee := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+	completedIssues, err := queryAssignedIssues(beadsQueryPath, assignee, "closed")
+	if err == nil {
+		cv.IssuesCompleted = len(completedIssues)
+
+		// Extract work types from issue titles/types
+		for _, issue := range completedIssues {
+			workType := extractWorkType(issue.Title, issue.Type)
+			if workType != "" {
+				cv.WorkTypes[workType]++
+			}
+
+			// Add to recent work (limit to 5)
+			if len(cv.RecentWork) < 5 {
+				ago := formatRelativeTime(issue.Updated)
+				cv.RecentWork = append(cv.RecentWork, RecentWorkItem{
+					ID:        issue.ID,
+					Title:     issue.Title,
+					Type:      workType,
+					Completed: issue.Updated,
+					Ago:       ago,
+				})
+			}
+		}
+	}
+
+	// Query failed/escalated issues
+	escalatedIssues, err := queryAssignedIssues(beadsQueryPath, assignee, "escalated")
+	if err == nil {
+		cv.IssuesFailed = len(escalatedIssues)
+	}
+
+	// Query abandoned issues (deferred)
+	deferredIssues, err := queryAssignedIssues(beadsQueryPath, assignee, "deferred")
+	if err == nil {
+		cv.IssuesAbandoned = len(deferredIssues)
+	}
+
+	// Get language stats from git commits
+	if clonePath != "" {
+		langStats := getLanguageStats(clonePath)
+		if len(langStats) > 0 {
+			cv.Languages = langStats
+		}
+	}
+
+	// Calculate first-pass success rate
+	total := cv.IssuesCompleted + cv.IssuesFailed + cv.IssuesAbandoned
+	if total > 0 {
+		cv.FirstPassRate = float64(cv.IssuesCompleted) / float64(total)
+	}
+
+	return cv, nil
+}
+
+// IssueInfo holds basic issue information for CV queries.
+type IssueInfo struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Type    string `json:"issue_type"`
+	Status  string `json:"status"`
+	Updated string `json:"updated_at"`
+}
+
+// queryAssignedIssues queries beads for issues assigned to a specific agent.
+func queryAssignedIssues(rigPath, assignee, status string) ([]IssueInfo, error) {
+	// Use bd list with filters
+	args := []string{"list", "--assignee=" + assignee, "--json"}
+	if status != "" {
+		args = append(args, "--status="+status)
+	}
+
+	cmd := exec.Command("bd", args...)
+	cmd.Dir = rigPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(out) == 0 {
+		return []IssueInfo{}, nil
+	}
+
+	var issues []IssueInfo
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, err
+	}
+
+	// Sort by updated date (most recent first)
+	sort.Slice(issues, func(i, j int) bool {
+		return issues[i].Updated > issues[j].Updated
+	})
+
+	return issues, nil
+}
+
+// extractWorkType extracts the work type from issue title or type.
+func extractWorkType(title, issueType string) string {
+	// Check explicit issue type first
+	switch issueType {
+	case "bug":
+		return "fix"
+	case "task", "feature":
+		return "feat"
+	case "epic":
+		return "epic"
+	}
+
+	// Try to extract from conventional commit-style title
+	title = strings.ToLower(title)
+	prefixes := []string{"feat:", "fix:", "refactor:", "docs:", "test:", "chore:", "style:", "perf:"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(title, prefix) {
+			return strings.TrimSuffix(prefix, ":")
+		}
+	}
+
+	// Try to infer from keywords
+	if strings.Contains(title, "fix") || strings.Contains(title, "bug") {
+		return "fix"
+	}
+	if strings.Contains(title, "add") || strings.Contains(title, "implement") || strings.Contains(title, "create") {
+		return "feat"
+	}
+	if strings.Contains(title, "refactor") || strings.Contains(title, "cleanup") {
+		return "refactor"
+	}
+
+	return ""
+}
+
+// getLanguageStats analyzes git history to determine language distribution.
+func getLanguageStats(clonePath string) map[string]int {
+	stats := make(map[string]int)
+
+	// Get list of files changed in commits by this author
+	// We use git log with --name-only to get file names
+	cmd := exec.Command("git", "log", "--name-only", "--pretty=format:", "--diff-filter=ACMR", "-100")
+	cmd.Dir = clonePath
+	out, err := cmd.Output()
+	if err != nil {
+		return stats
+	}
+
+	// Count file extensions
+	extCount := make(map[string]int)
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		ext := filepath.Ext(line)
+		if ext != "" {
+			extCount[ext]++
+		}
+	}
+
+	// Map extensions to languages
+	extToLang := map[string]string{
+		".go":    "Go",
+		".ts":    "TypeScript",
+		".tsx":   "TypeScript",
+		".js":    "JavaScript",
+		".jsx":   "JavaScript",
+		".py":    "Python",
+		".rs":    "Rust",
+		".java":  "Java",
+		".rb":    "Ruby",
+		".c":     "C",
+		".cpp":   "C++",
+		".h":     "C",
+		".hpp":   "C++",
+		".cs":    "C#",
+		".swift": "Swift",
+		".kt":    "Kotlin",
+		".scala": "Scala",
+		".php":   "PHP",
+		".sh":    "Shell",
+		".bash":  "Shell",
+		".zsh":   "Shell",
+		".md":    "Markdown",
+		".yaml":  "YAML",
+		".yml":   "YAML",
+		".json":  "JSON",
+		".toml":  "TOML",
+		".sql":   "SQL",
+		".html":  "HTML",
+		".css":   "CSS",
+		".scss":  "SCSS",
+	}
+
+	for ext, count := range extCount {
+		if lang, ok := extToLang[ext]; ok {
+			stats[lang] += count
+		}
+	}
+
+	return stats
+}
+
+// formatRelativeTime returns a human-readable relative time string.
+func formatRelativeTime(timestamp string) string {
+	// Try RFC3339 format with timezone (ISO 8601)
+	t, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		// Try RFC3339Nano
+		t, err = time.Parse(time.RFC3339Nano, timestamp)
+		if err != nil {
+			// Try without timezone
+			t, err = time.Parse("2006-01-02T15:04:05", timestamp)
+			if err != nil {
+				// Try alternative format
+				t, err = time.Parse("2006-01-02 15:04:05", timestamp)
+				if err != nil {
+					// Try date only
+					t, err = time.Parse("2006-01-02", timestamp)
+					if err != nil {
+						return ""
+					}
+				}
+			}
+		}
+	}
+
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		mins := int(d.Minutes())
+		if mins == 1 {
+			return "1m ago"
+		}
+		return fmt.Sprintf("%dm ago", mins)
+	case d < 24*time.Hour:
+		hours := int(d.Hours())
+		if hours == 1 {
+			return "1h ago"
+		}
+		return fmt.Sprintf("%dh ago", hours)
+	case d < 7*24*time.Hour:
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "1d ago"
+		}
+		return fmt.Sprintf("%dd ago", days)
+	default:
+		weeks := int(d.Hours() / 24 / 7)
+		if weeks == 1 {
+			return "1w ago"
+		}
+		return fmt.Sprintf("%dw ago", weeks)
+	}
+}
+
+// formatCountStyled formats a count with appropriate styling using lipgloss.Style.
+func formatCountStyled(count int, s lipgloss.Style) string {
+	if count == 0 {
+		return style.Dim.Render("0")
+	}
+	return s.Render(strconv.Itoa(count))
+}
+
+// countPolecatSessions counts the number of sessions from checkpoint files.
+func countPolecatSessions(rigPath, polecatName string) int {
+	// Look for checkpoint files in the polecat's directory
+	checkpointDir := filepath.Join(rigPath, "polecats", polecatName, ".checkpoints")
+	entries, err := os.ReadDir(checkpointDir)
+	if err != nil {
+		// Also check at rig level
+		checkpointDir = filepath.Join(rigPath, ".checkpoints")
+		entries, err = os.ReadDir(checkpointDir)
+		if err != nil {
+			return 0
+		}
+	}
+
+	// Count checkpoint files that contain this polecat's name
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.Contains(entry.Name(), polecatName) {
+			count++
+		}
+	}
+
+	// If no checkpoint files found, return at least 1 if polecat exists
+	if count == 0 {
+		return 1
+	}
+	return count
+}
+
+// formatLanguageStats formats language statistics for display.
+func formatLanguageStats(langs map[string]int) string {
+	// Sort by count descending
+	type langCount struct {
+		lang  string
+		count int
+	}
+	var sorted []langCount
+	for lang, count := range langs {
+		sorted = append(sorted, langCount{lang, count})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].count > sorted[j].count
+	})
+
+	// Format top languages
+	var parts []string
+	for i, lc := range sorted {
+		if i >= 3 { // Show top 3
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s (%d)", lc.lang, lc.count))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// formatWorkTypeStats formats work type statistics for display.
+func formatWorkTypeStats(types map[string]int) string {
+	// Sort by count descending
+	type typeCount struct {
+		typ   string
+		count int
+	}
+	var sorted []typeCount
+	for typ, count := range types {
+		sorted = append(sorted, typeCount{typ, count})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].count > sorted[j].count
+	})
+
+	// Format all types
+	var parts []string
+	for _, tc := range sorted {
+		parts = append(parts, fmt.Sprintf("%s (%d)", tc.typ, tc.count))
+	}
+	return strings.Join(parts, ", ")
 }
