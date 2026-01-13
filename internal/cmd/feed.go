@@ -92,12 +92,12 @@ Examples:
 }
 
 func runFeed(cmd *cobra.Command, args []string) error {
-	// Detect Claude Code environment and suggest non-interactive mode
-	if ui.IsAgentMode() && !feedPlain && !feedNoFollow {
-		return fmt.Errorf(`gt feed launches an interactive TUI which doesn't work in Claude Code
+	// Detect Claude Code environment - require --no-follow to prevent infinite streaming
+	if ui.IsAgentMode() && !feedNoFollow {
+		return fmt.Errorf(`gt feed streams forever by default, which hangs Claude Code
 
-Use this instead:
-  gt feed --plain --no-follow    # Show recent events as plain text
+Use --no-follow to get a snapshot instead:
+  gt feed --plain --no-follow              # Recent events as plain text
   gt feed --plain --no-follow --since 5m   # Events from last 5 minutes
   gt feed --plain --no-follow --limit 20   # Last 20 events`)
 	}
