@@ -28,16 +28,36 @@ type branchInfo struct {
 // parseBranchName extracts issue ID and worker from a branch name.
 // Supports formats:
 //   - polecat/<worker>/<issue>  → issue=<issue>, worker=<worker>
+//   - polecat/<worker>-<timestamp>  → issue="", worker=<worker> (modern polecat branches)
 //   - <issue>                   → issue=<issue>, worker=""
 func parseBranchName(branch string) branchInfo {
 	info := branchInfo{Branch: branch}
 
-	// Try polecat/<worker>/<issue> format
+	// Try polecat/<worker>/<issue> or polecat/<worker>/<issue>@<timestamp> format
 	if strings.HasPrefix(branch, constants.BranchPolecatPrefix) {
 		parts := strings.SplitN(branch, "/", 3)
 		if len(parts) == 3 {
 			info.Worker = parts[1]
-			info.Issue = parts[2]
+			// Strip @timestamp suffix if present (e.g., "gt-abc@mk123" -> "gt-abc")
+			issue := parts[2]
+			if atIdx := strings.Index(issue, "@"); atIdx > 0 {
+				issue = issue[:atIdx]
+			}
+			info.Issue = issue
+			return info
+		}
+		// Modern polecat branch format: polecat/<worker>-<timestamp>
+		// The second part is "worker-timestamp", not an issue ID.
+		// Don't try to extract an issue ID - gt done will use hook_bead fallback.
+		if len(parts) == 2 {
+			// Extract worker name from "worker-timestamp" format
+			workerPart := parts[1]
+			if dashIdx := strings.LastIndex(workerPart, "-"); dashIdx > 0 {
+				info.Worker = workerPart[:dashIdx]
+			} else {
+				info.Worker = workerPart
+			}
+			// Explicitly don't set info.Issue - let hook_bead fallback handle it
 			return info
 		}
 	}
@@ -186,54 +206,55 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// detectIntegrationBranch checks if an issue is a child of an epic that has an integration branch.
+// detectIntegrationBranch checks if an issue is a descendant of an epic that has an integration branch.
+// Traverses up the parent chain until it finds an epic or runs out of parents.
 // Returns the integration branch target (e.g., "integration/gt-epic") if found, or "" if not.
 func detectIntegrationBranch(bd *beads.Beads, g *git.Git, issueID string) (string, error) {
-	// Get the source issue
-	issue, err := bd.Show(issueID)
-	if err != nil {
-		return "", fmt.Errorf("looking up issue %s: %w", issueID, err)
+	// Traverse up the parent chain looking for an epic with an integration branch
+	// Limit depth to prevent infinite loops in case of circular references
+	const maxDepth = 10
+	currentID := issueID
+
+	for depth := 0; depth < maxDepth; depth++ {
+		// Get the current issue
+		issue, err := bd.Show(currentID)
+		if err != nil {
+			return "", fmt.Errorf("looking up issue %s: %w", currentID, err)
+		}
+
+		// Check if this issue is an epic
+		if issue.Type == "epic" {
+			// Found an epic - check if it has an integration branch
+			integrationBranch := "integration/" + issue.ID
+
+			// Check local first (faster)
+			exists, err := g.BranchExists(integrationBranch)
+			if err != nil {
+				return "", fmt.Errorf("checking local branch: %w", err)
+			}
+			if exists {
+				return integrationBranch, nil
+			}
+
+			// Check remote
+			exists, err = g.RemoteBranchExists("origin", integrationBranch)
+			if err != nil {
+				// Remote check failure is non-fatal, continue to parent
+			} else if exists {
+				return integrationBranch, nil
+			}
+			// Epic found but no integration branch - continue checking parents
+			// in case there's a higher-level epic with an integration branch
+		}
+
+		// Move to parent
+		if issue.Parent == "" {
+			return "", nil // No more parents, no integration branch found
+		}
+		currentID = issue.Parent
 	}
 
-	// Check if issue has a parent
-	if issue.Parent == "" {
-		return "", nil // No parent, no integration branch
-	}
-
-	// Get the parent issue
-	parent, err := bd.Show(issue.Parent)
-	if err != nil {
-		return "", fmt.Errorf("looking up parent %s: %w", issue.Parent, err)
-	}
-
-	// Check if parent is an epic
-	if parent.Type != "epic" {
-		return "", nil // Parent is not an epic
-	}
-
-	// Check if integration branch exists
-	integrationBranch := "integration/" + parent.ID
-
-	// Check local first (faster)
-	exists, err := g.BranchExists(integrationBranch)
-	if err != nil {
-		return "", fmt.Errorf("checking local branch: %w", err)
-	}
-	if exists {
-		return integrationBranch, nil
-	}
-
-	// Check remote
-	exists, err = g.RemoteBranchExists("origin", integrationBranch)
-	if err != nil {
-		// Remote check failure is non-fatal
-		return "", nil
-	}
-	if exists {
-		return integrationBranch, nil
-	}
-
-	return "", nil // No integration branch found
+	return "", nil // Max depth reached, no integration branch found
 }
 
 // polecatCleanup sends a lifecycle shutdown request to the witness and waits for termination.

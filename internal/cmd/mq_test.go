@@ -69,6 +69,24 @@ func TestParseBranchName(t *testing.T) {
 			wantWorker: "Worker",
 		},
 		{
+			name:       "polecat branch with issue and timestamp",
+			branch:     "polecat/furiosa/gt-jns7.1@mk123456",
+			wantIssue:  "gt-jns7.1",
+			wantWorker: "furiosa",
+		},
+		{
+			name:       "modern polecat branch (timestamp format)",
+			branch:     "polecat/furiosa-mkc36bb9",
+			wantIssue:  "", // Should NOT extract fake issue from worker-timestamp
+			wantWorker: "furiosa",
+		},
+		{
+			name:       "modern polecat branch with longer name",
+			branch:     "polecat/citadel-mk0vro62",
+			wantIssue:  "",
+			wantWorker: "citadel",
+		},
+		{
 			name:       "simple issue branch",
 			branch:     "gt-xyz",
 			wantIssue:  "gt-xyz",

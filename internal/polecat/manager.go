@@ -249,9 +249,18 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	polecatDir := m.polecatDir(name)
 	clonePath := filepath.Join(polecatDir, m.rig.Name)
 
-	// Unique branch per run - prevents drift from stale branches
-	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
-	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
+	// Branch naming: include issue ID when available for better traceability.
+	// Format: polecat/<worker>/<issue>@<timestamp> when HookBead is set
+	// The @timestamp suffix ensures uniqueness if the same issue is re-slung.
+	// parseBranchName strips the @suffix to extract the issue ID.
+	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 36)
+	var branchName string
+	if opts.HookBead != "" {
+		branchName = fmt.Sprintf("polecat/%s/%s@%s", name, opts.HookBead, timestamp)
+	} else {
+		// Fallback to timestamp format when no issue is known at spawn time
+		branchName = fmt.Sprintf("polecat/%s-%s", name, timestamp)
+	}
 
 	// Create polecat directory (polecats/<name>/)
 	if err := os.MkdirAll(polecatDir, 0755); err != nil {
@@ -574,8 +583,14 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Create fresh worktree with unique branch name, starting from origin's default branch
 	// Old branches are left behind - they're ephemeral (never pushed to origin)
 	// and will be cleaned up by garbage collection
-	// Use base36 encoding for shorter branch names (8 chars vs 13 digits)
-	branchName := fmt.Sprintf("polecat/%s-%s", name, strconv.FormatInt(time.Now().UnixMilli(), 36))
+	// Branch naming: include issue ID when available for better traceability.
+	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 36)
+	var branchName string
+	if opts.HookBead != "" {
+		branchName = fmt.Sprintf("polecat/%s/%s@%s", name, opts.HookBead, timestamp)
+	} else {
+		branchName = fmt.Sprintf("polecat/%s-%s", name, timestamp)
+	}
 	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
