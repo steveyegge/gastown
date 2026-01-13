@@ -344,27 +344,29 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		rigs = append(rigs, rigInfo{name: rigName, status: status})
 	}
 
-	// Sort by: 1) running state, 2) polecat count (desc), 3) operational state, 4) alphabetical
+	// Sort by: 1) operational state (OPERATIONAL first, then PARKED, then DOCKED),
+	//          2) running state (within operational: running before idle),
+	//          3) polecat count (desc), 4) alphabetical
+	// This pushes PARKED and DOCKED rigs to the right.
 	sort.Slice(rigs, func(i, j int) bool {
-		isRunningI := rigs[i].status.hasWitness || rigs[i].status.hasRefinery
-		isRunningJ := rigs[j].status.hasWitness || rigs[j].status.hasRefinery
-
-		// Primary sort: running rigs before non-running rigs
-		if isRunningI != isRunningJ {
-			return isRunningI
-		}
-
-		// Secondary sort: polecat count (descending)
-		if rigs[i].status.polecatCount != rigs[j].status.polecatCount {
-			return rigs[i].status.polecatCount > rigs[j].status.polecatCount
-		}
-
-		// Tertiary sort: operational state (for non-running rigs: OPERATIONAL < PARKED < DOCKED)
+		// Primary sort: operational state (OPERATIONAL < PARKED < DOCKED)
 		stateOrder := map[string]int{"OPERATIONAL": 0, "PARKED": 1, "DOCKED": 2}
 		stateI := stateOrder[rigs[i].status.opState]
 		stateJ := stateOrder[rigs[j].status.opState]
 		if stateI != stateJ {
 			return stateI < stateJ
+		}
+
+		// Secondary sort: running state (within same operational state)
+		isRunningI := rigs[i].status.hasWitness || rigs[i].status.hasRefinery
+		isRunningJ := rigs[j].status.hasWitness || rigs[j].status.hasRefinery
+		if isRunningI != isRunningJ {
+			return isRunningI
+		}
+
+		// Tertiary sort: polecat count (descending)
+		if rigs[i].status.polecatCount != rigs[j].status.polecatCount {
+			return rigs[i].status.polecatCount > rigs[j].status.polecatCount
 		}
 
 		// Quaternary sort: alphabetical
@@ -375,15 +377,10 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	var rigParts []string
 	var lastGroup string
 	for _, rig := range rigs {
-		isRunning := rig.status.hasWitness || rig.status.hasRefinery
-		var currentGroup string
-		if isRunning {
-			currentGroup = "running"
-		} else {
-			currentGroup = "idle-" + rig.status.opState
-		}
+		// Group by operational state (matches new sort order)
+		currentGroup := rig.status.opState
 
-		// Add separator when group changes (running -> non-running, or different opStates within non-running)
+		// Add separator when operational state changes
 		if lastGroup != "" && lastGroup != currentGroup {
 			rigParts = append(rigParts, "|")
 		}
