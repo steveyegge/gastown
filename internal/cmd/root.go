@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/exitcode"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/version"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -157,10 +158,26 @@ func checkStaleBinaryWarning() {
 
 // Execute runs the root command and returns an exit code.
 // The caller (main) should call os.Exit with this code.
+//
+// Exit codes follow a structured scheme for programmatic handling:
+//   - 0: Success
+//   - 1: General error
+//   - 2: Invalid arguments
+//   - 10-19: Resource not found (bead, agent, rig, file)
+//   - 20-29: Permission errors
+//   - 30-39: Network errors
+//   - 40-49: Timeout errors
+//   - 50-59: Conflict errors
+//
+// See internal/exitcode for the full list of codes.
 func Execute() int {
 	if err := rootCmd.Execute(); err != nil {
 		// Check for silent exit (scripting commands that signal status via exit code)
 		if code, ok := IsSilentExit(err); ok {
+			return code
+		}
+		// Check for structured exit code
+		if code := exitcode.Code(err); code != exitcode.ErrGeneral {
 			return code
 		}
 		// Other errors already printed by cobra
@@ -216,10 +233,13 @@ func buildCommandPath(cmd *cobra.Command) string {
 // requireSubcommand returns a RunE function for parent commands that require
 // a subcommand. Without this, Cobra silently shows help and exits 0 for
 // unknown subcommands like "gt mol foobar", masking errors.
+// Returns exitcode.ErrUsage (2) for programmatic error handling.
 func requireSubcommand(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("requires a subcommand\n\nRun '%s --help' for usage", buildCommandPath(cmd))
+		return exitcode.Newf(exitcode.ErrUsage,
+			"requires a subcommand\n\nRun '%s --help' for usage", buildCommandPath(cmd))
 	}
-	return fmt.Errorf("unknown command %q for %q\n\nRun '%s --help' for available commands",
+	return exitcode.Newf(exitcode.ErrUsage,
+		"unknown command %q for %q\n\nRun '%s --help' for available commands",
 		args[0], buildCommandPath(cmd), buildCommandPath(cmd))
 }
