@@ -385,6 +385,23 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("listing hooked beads: %w", err)
 		}
 
+		// For rig-level agents (polecat/witness/refinery), also check town beads
+		// since hooked work might be in the town beads location (hq- prefix)
+		if len(hookedBeads) == 0 && !isTownLevelRole(target) && townRoot != "" {
+			townBeadsDir := filepath.Join(townRoot, ".beads")
+			if _, err := os.Stat(townBeadsDir); err == nil {
+				townB := beads.New(townRoot)
+				townHookedBeads, err := townB.List(beads.ListOptions{
+					Status:   beads.StatusHooked,
+					Assignee: target,
+					Priority: -1,
+				})
+				if err == nil && len(townHookedBeads) > 0 {
+					hookedBeads = townHookedBeads
+				}
+			}
+		}
+
 		// If no hooked beads found, also check in_progress beads assigned to this agent.
 		// This handles the case where work was claimed (status changed to in_progress)
 		// but the session was interrupted before completion. The hook should persist.

@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var hookCmd = &cobra.Command{
@@ -224,6 +225,20 @@ func runHook(_ *cobra.Command, args []string) error {
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking bead: %w", err)
+	}
+
+	// Also set the hook_bead slot on the agent bead so gt hook can find it
+	// This ensures the agent bead's hook_bead field is updated to point to the new hooked work
+	townRoot, townErr := workspace.FindFromCwd()
+	if townErr == nil && townRoot != "" {
+		agentBeadID := agentIDToBeadID(agentID, townRoot)
+		if agentBeadID != "" {
+			bd := beads.New(workDir)
+			if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
+				// Log warning but don't fail - the bead is already hooked
+				fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
+			}
+		}
 	}
 
 	fmt.Printf("%s Work attached to hook (hooked bead)\n", style.Bold.Render("✓"))
