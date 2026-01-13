@@ -399,9 +399,9 @@ func runOrphansKill(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s\n", style.Warning.Render("WARNING: This operation is irreversible!"))
 		fmt.Printf("Remove %d orphaned commit(s)? [y/N] ", len(filtered))
 		var response string
-		fmt.Scanln(&response)
+		_, _ = fmt.Scanln(&response)
 		if strings.ToLower(strings.TrimSpace(response)) != "y" {
-			fmt.Printf("%s Cancelled\n", style.Dim.Render("ℹ"))
+			fmt.Printf("%s Canceled\n", style.Dim.Render("ℹ"))
 			return nil
 		}
 	}
@@ -568,7 +568,7 @@ func runOrphansKillProcesses(cmd *cobra.Command, args []string) error {
 	if !orphansProcsForce {
 		fmt.Printf("Kill these %d process(es)? [y/N] ", len(orphans))
 		var response string
-		fmt.Scanln(&response)
+		_, _ = fmt.Scanln(&response)
 		response = strings.ToLower(strings.TrimSpace(response))
 		if response != "y" && response != "yes" {
 			fmt.Println("Aborted")
