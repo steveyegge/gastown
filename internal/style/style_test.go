@@ -9,26 +9,26 @@ import (
 )
 
 func TestStyleVariables(t *testing.T) {
-	// Test that all style variables are non-nil
+	// Test that all style variables render non-empty output
 	tests := []struct {
-		name  string
-		style interface{ Render(string) string }
+		name   string
+		render func(...string) string
 	}{
-		{"Success", Success},
-		{"Warning", Warning},
-		{"Error", Error},
-		{"Info", Info},
-		{"Dim", Dim},
-		{"Bold", Bold},
+		{"Success", Success.Render},
+		{"Warning", Warning.Render},
+		{"Error", Error.Render},
+		{"Info", Info.Render},
+		{"Dim", Dim.Render},
+		{"Bold", Bold.Render},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.style == nil {
+			if tt.render == nil {
 				t.Errorf("Style variable %s should not be nil", tt.name)
 			}
 			// Test that Render works
-			result := tt.style.Render("test")
+			result := tt.render("test")
 			if result == "" {
 				t.Errorf("Style %s.Render() should not return empty string", tt.name)
 			}
@@ -110,7 +110,7 @@ func TestStyles_RenderConsistently(t *testing.T) {
 	// Test that styles consistently render non-empty output
 	testText := "test message"
 
-	styles := map[string]func(string) string{
+	styles := map[string]func(...string) string{
 		"Success": Success.Render,
 		"Warning": Warning.Render,
 		"Error":   Error.Render,
@@ -146,7 +146,7 @@ func TestMultiplePrintWarning(t *testing.T) {
 
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
-	output := buf.String()
+	_ = buf.String() // ensure buffer is read
 
 	// Should have 3 lines
 	lineCount := 0
