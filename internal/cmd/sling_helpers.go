@@ -397,11 +397,17 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 		return
 	}
 
-	// Run from workDir WITHOUT BEADS_DIR to enable redirect-based routing.
+	// Resolve the correct working directory for the agent bead.
+	// Agent beads with rig-level prefixes (e.g., go-) live in rig databases,
+	// not the town database. Use prefix-based resolution to find the correct path.
+	// This fixes go-19z: bd slot commands failing for go-* prefixed beads.
+	agentWorkDir := beads.ResolveHookDir(townRoot, agentBeadID, bdWorkDir)
+
+	// Run from agentWorkDir WITHOUT BEADS_DIR to enable redirect-based routing.
 	// Set hook_bead to the slung work (gt-zecmc: removed agent_state update).
 	// Agent liveness is observable from tmux - no need to record it in bead.
 	// For cross-database scenarios, slot set may fail gracefully (warning only).
-	bd := beads.New(bdWorkDir)
+	bd := beads.New(agentWorkDir)
 	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
