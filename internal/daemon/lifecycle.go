@@ -482,21 +482,32 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 
 	// Polecats and crew need environment variables set in the command
 	if parsed.RoleType == "polecat" {
-		envVars := config.AgentEnvSimple("polecat", parsed.RigName, parsed.AgentName)
-		// Add GT_ROOT and session ID env if available
-		envVars["GT_ROOT"] = d.config.TownRoot
-		if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
-			envVars["GT_SESSION_ID_ENV"] = runtimeConfig.Session.SessionIDEnv
+		var sessionIDEnv string
+		if runtimeConfig.Session != nil {
+			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
 		}
+		envVars := config.AgentEnv(config.AgentEnvConfig{
+			Role:         "polecat",
+			Rig:          parsed.RigName,
+			AgentName:    parsed.AgentName,
+			TownRoot:     d.config.TownRoot,
+			SessionIDEnv: sessionIDEnv,
+		})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommand(), envVars)
 	}
 
 	if parsed.RoleType == "crew" {
-		envVars := config.AgentEnvSimple("crew", parsed.RigName, parsed.AgentName)
-		envVars["GT_ROOT"] = d.config.TownRoot
-		if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
-			envVars["GT_SESSION_ID_ENV"] = runtimeConfig.Session.SessionIDEnv
+		var sessionIDEnv string
+		if runtimeConfig.Session != nil {
+			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
 		}
+		envVars := config.AgentEnv(config.AgentEnvConfig{
+			Role:         "crew",
+			Rig:          parsed.RigName,
+			AgentName:    parsed.AgentName,
+			TownRoot:     d.config.TownRoot,
+			SessionIDEnv: sessionIDEnv,
+		})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommand(), envVars)
 	}
 
@@ -506,21 +517,12 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 // setSessionEnvironment sets environment variables for the tmux session.
 // Uses centralized AgentEnv for consistency, plus role bead custom env vars if available.
 func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
-	// Determine beads dir based on role type
-	var beadsPath string
-	if parsed.RigName != "" {
-		beadsPath = filepath.Join(d.config.TownRoot, parsed.RigName)
-	} else {
-		beadsPath = d.config.TownRoot
-	}
-
 	// Use centralized AgentEnv for base environment variables
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:      parsed.RoleType,
 		Rig:       parsed.RigName,
 		AgentName: parsed.AgentName,
 		TownRoot:  d.config.TownRoot,
-		BeadsDir:  beads.ResolveBeadsDir(beadsPath),
 	})
 	for k, v := range envVars {
 		_ = d.tmux.SetEnvironment(sessionName, k, v)

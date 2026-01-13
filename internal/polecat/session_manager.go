@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -195,7 +194,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		Rig:              m.rig.Name,
 		AgentName:        polecat,
 		TownRoot:         townRoot,
-		BeadsDir:         beads.ResolveBeadsDir(m.rig.Path),
 		RuntimeConfigDir: opts.RuntimeConfigDir,
 		BeadsNoDaemon:    true,
 	})

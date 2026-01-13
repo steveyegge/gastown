@@ -187,7 +187,7 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 			})
 
 			// Build startup command with beacon
-			startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", beacon, mayorAgentOverride)
+			startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", townRoot, "", beacon, mayorAgentOverride)
 			if err != nil {
 				return fmt.Errorf("building startup command: %w", err)
 			}

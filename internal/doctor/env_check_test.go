@@ -41,21 +41,12 @@ func (m *mockEnvReader) GetAllEnvironment(session string) (map[string]string, er
 const testTownRoot = "/town"
 
 // expectedEnv generates expected env vars matching what the check generates.
-// For town-level roles (mayor, deacon), beadsDir is /town/.beads
-// For rig-level roles, beadsDir is /town/rigName/.beads
 func expectedEnv(role, rig, agentName string) map[string]string {
-	var beadsDir string
-	if rig != "" {
-		beadsDir = testTownRoot + "/" + rig + "/.beads"
-	} else {
-		beadsDir = testTownRoot + "/.beads"
-	}
 	return config.AgentEnv(config.AgentEnvConfig{
 		Role:      role,
 		Rig:       rig,
 		AgentName: agentName,
 		TownRoot:  testTownRoot,
-		BeadsDir:  beadsDir,
 	})
 }
 

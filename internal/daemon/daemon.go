@@ -841,13 +841,16 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		return fmt.Errorf("cannot restart polecat: %s", reason)
 	}
 
+	// Calculate rig path for agent config resolution
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
+
 	// Determine working directory (handle both new and old structures)
 	// New structure: polecats/<name>/<rigname>/
 	// Old structure: polecats/<name>/
-	workDir := filepath.Join(d.config.TownRoot, rigName, "polecats", polecatName, rigName)
+	workDir := filepath.Join(rigPath, "polecats", polecatName, rigName)
 	if _, err := os.Stat(workDir); os.IsNotExist(err) {
 		// Fall back to old structure
-		workDir = filepath.Join(d.config.TownRoot, rigName, "polecats", polecatName)
+		workDir = filepath.Join(rigPath, "polecats", polecatName)
 	}
 
 	// Verify the worktree exists
@@ -865,13 +868,11 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	}
 
 	// Set environment variables using centralized AgentEnv
-	rigPath := filepath.Join(d.config.TownRoot, rigName)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:          "polecat",
 		Rig:           rigName,
 		AgentName:     polecatName,
 		TownRoot:      d.config.TownRoot,
-		BeadsDir:      beads.ResolveBeadsDir(rigPath),
 		BeadsNoDaemon: true,
 	})
 

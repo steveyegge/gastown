@@ -353,7 +353,7 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	// Build startup command first
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "deacon", "", "", agentOverride)
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", "", agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}
@@ -370,7 +370,6 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "deacon",
 		TownRoot: townRoot,
-		BeadsDir: beads.ResolveBeadsDir(townRoot),
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionName, k, v)

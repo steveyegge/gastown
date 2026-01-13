@@ -939,7 +939,8 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origWD) })
 
 	// Test without rig config (uses defaults)
-	cmd := BuildAgentStartupCommand("witness", "gastown/witness", "", "")
+	// New signature: (role, rig, townRoot, rigPath, prompt)
+	cmd := BuildAgentStartupCommand("witness", "gastown", "", "", "")
 
 	// Should contain environment exports and claude command
 	if !strings.Contains(cmd, "export") {
@@ -1121,7 +1122,8 @@ func TestBuildAgentStartupCommandWithAgentOverride(t *testing.T) {
 	}
 
 	t.Run("empty override uses default agent", func(t *testing.T) {
-		cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", "", "")
+		// New signature: (role, rig, townRoot, rigPath, prompt, agentOverride)
+		cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "", "", "", "", "")
 		if err != nil {
 			t.Fatalf("BuildAgentStartupCommandWithAgentOverride: %v", err)
 		}
@@ -1137,7 +1139,8 @@ func TestBuildAgentStartupCommandWithAgentOverride(t *testing.T) {
 	})
 
 	t.Run("override switches agent", func(t *testing.T) {
-		cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", "", "codex")
+		// New signature: (role, rig, townRoot, rigPath, prompt, agentOverride)
+		cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "", "", "", "", "codex")
 		if err != nil {
 			t.Fatalf("BuildAgentStartupCommandWithAgentOverride: %v", err)
 		}
@@ -1317,7 +1320,7 @@ func TestBuildAgentStartupCommand_UsesRoleAgents(t *testing.T) {
 	}
 
 	// BuildAgentStartupCommand passes role via GT_ROLE env var
-	cmd := BuildAgentStartupCommand(constants.RoleRefinery, "testrig/refinery", rigPath, "")
+	cmd := BuildAgentStartupCommand(constants.RoleRefinery, "testrig", townRoot, rigPath, "")
 	if !strings.Contains(cmd, "codex") {
 		t.Fatalf("expected codex for refinery role, got: %q", cmd)
 	}
