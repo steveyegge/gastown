@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -169,6 +170,13 @@ func runStart(cmd *cobra.Command, args []string) error {
 	fmt.Println("Starting all agents in parallel...")
 	fmt.Println()
 
+	// Discover rigs once upfront to avoid redundant calls from parallel goroutines
+	rigs, rigsErr := discoverAllRigs(townRoot)
+	if rigsErr != nil {
+		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), rigsErr)
+		// Continue anyway - core agents don't need rigs
+	}
+
 	// Start all agent groups in parallel for maximum speed
 	var wg sync.WaitGroup
 	var mu sync.Mutex // Protects stdout
@@ -178,7 +186,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := startCoreAgentsParallel(townRoot, startAgentOverride, &mu); err != nil {
+		if err := startCoreAgents(townRoot, startAgentOverride, &mu); err != nil {
 			mu.Lock()
 			coreErr = err
 			mu.Unlock()
@@ -186,20 +194,22 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Start rig agents (witnesses, refineries) if --all
-	if startAll {
+	if startAll && rigs != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			startRigAgentsParallel(t, townRoot, &mu)
+			startRigAgents(t, rigs, &mu)
 		}()
 	}
 
 	// Start configured crew
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		startConfiguredCrewParallel(t, townRoot, &mu)
-	}()
+	if rigs != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startConfiguredCrew(t, rigs, townRoot, &mu)
+		}()
+	}
 
 	wg.Wait()
 
@@ -217,9 +227,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// startCoreAgentsParallel starts Mayor and Deacon sessions in parallel using the Manager pattern.
+// startCoreAgents starts Mayor and Deacon sessions in parallel using the Manager pattern.
 // The mutex is used to synchronize output with other parallel startup operations.
-func startCoreAgentsParallel(townRoot string, agentOverride string, mu *sync.Mutex) error {
+func startCoreAgents(townRoot string, agentOverride string, mu *sync.Mutex) error {
 	var wg sync.WaitGroup
 	var firstErr error
 	var errMu sync.Mutex
@@ -284,15 +294,8 @@ func startCoreAgentsParallel(townRoot string, agentOverride string, mu *sync.Mut
 
 // startRigAgents starts witness and refinery for all rigs in parallel.
 // Called when --all flag is passed to gt start.
-func startRigAgents(t *tmux.Tmux, townRoot string) {
-	rigs, err := discoverAllRigs(townRoot)
-	if err != nil {
-		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), err)
-		return
-	}
-
+func startRigAgents(t *tmux.Tmux, rigs []*rig.Rig, mu *sync.Mutex) {
 	var wg sync.WaitGroup
-	var mu sync.Mutex // Protects stdout
 
 	for _, r := range rigs {
 		wg.Add(2) // Witness + Refinery
@@ -350,93 +353,9 @@ func startRefineryForRig(r *rig.Rig) string {
 }
 
 // startConfiguredCrew starts crew members configured in rig settings in parallel.
-func startConfiguredCrew(t *tmux.Tmux, townRoot string) {
-	rigs, err := discoverAllRigs(townRoot)
-	if err != nil {
-		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), err)
-		return
-	}
-
+func startConfiguredCrew(t *tmux.Tmux, rigs []*rig.Rig, townRoot string, mu *sync.Mutex) {
 	var wg sync.WaitGroup
-	var mu sync.Mutex // Protects stdout and startedAny
-	startedAny := false
-
-	for _, r := range rigs {
-		crewToStart := getCrewToStart(r)
-		for _, crewName := range crewToStart {
-			wg.Add(1)
-			go func(r *rig.Rig, crewName string) {
-				defer wg.Done()
-				msg, started := startOrRestartCrewMember(t, r, crewName, townRoot)
-				mu.Lock()
-				fmt.Print(msg)
-				if started {
-					startedAny = true
-				}
-				mu.Unlock()
-			}(r, crewName)
-		}
-	}
-
-	wg.Wait()
-
-	if !startedAny {
-		fmt.Printf("  %s No crew configured or all already running\n", style.Dim.Render("○"))
-	}
-}
-
-// startRigAgentsParallel starts witness and refinery for all rigs in parallel.
-// Uses the provided mutex for synchronized output with other parallel operations.
-func startRigAgentsParallel(t *tmux.Tmux, townRoot string, mu *sync.Mutex) {
-	rigs, err := discoverAllRigs(townRoot)
-	if err != nil {
-		mu.Lock()
-		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), err)
-		mu.Unlock()
-		return
-	}
-
-	var wg sync.WaitGroup
-
-	for _, r := range rigs {
-		wg.Add(2) // Witness + Refinery
-
-		// Start Witness in goroutine
-		go func(r *rig.Rig) {
-			defer wg.Done()
-			msg := startWitnessForRig(t, r)
-			mu.Lock()
-			fmt.Print(msg)
-			mu.Unlock()
-		}(r)
-
-		// Start Refinery in goroutine
-		go func(r *rig.Rig) {
-			defer wg.Done()
-			msg := startRefineryForRig(r)
-			mu.Lock()
-			fmt.Print(msg)
-			mu.Unlock()
-		}(r)
-	}
-
-	wg.Wait()
-}
-
-// startConfiguredCrewParallel starts crew members configured in rig settings in parallel.
-// Uses the provided mutex for synchronized output with other parallel operations.
-func startConfiguredCrewParallel(t *tmux.Tmux, townRoot string, mu *sync.Mutex) {
-	rigs, err := discoverAllRigs(townRoot)
-	if err != nil {
-		mu.Lock()
-		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), err)
-		mu.Unlock()
-		return
-	}
-
-	var wg sync.WaitGroup
-	startedAny := false
-	var startedMu sync.Mutex // Protects startedAny
+	var startedAny int32 // Use atomic for thread-safe flag
 
 	for _, r := range rigs {
 		crewToStart := getCrewToStart(r)
@@ -449,9 +368,7 @@ func startConfiguredCrewParallel(t *tmux.Tmux, townRoot string, mu *sync.Mutex) 
 				fmt.Print(msg)
 				mu.Unlock()
 				if started {
-					startedMu.Lock()
-					startedAny = true
-					startedMu.Unlock()
+					atomic.StoreInt32(&startedAny, 1)
 				}
 			}(r, crewName)
 		}
@@ -459,7 +376,7 @@ func startConfiguredCrewParallel(t *tmux.Tmux, townRoot string, mu *sync.Mutex) 
 
 	wg.Wait()
 
-	if !startedAny {
+	if atomic.LoadInt32(&startedAny) == 0 {
 		mu.Lock()
 		fmt.Printf("  %s No crew configured or all already running\n", style.Dim.Render("○"))
 		mu.Unlock()

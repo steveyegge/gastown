@@ -154,13 +154,17 @@ bd show hq-abc      # Routes to town beads
 - `bd create --title="Found bug" --type=bug` - File new issue
 - `bd create --title="Need feature" --type=task` - File new task
 
-### Agent UX: File Issues for CLI Surprises
-If you guess how a `gt` or `bd` command should work and it fails, file a bead!
-Example: If `gt session capture rig/polecat 50` fails but `-n 50` works, file:
+### Desire Paths: File Issues for CLI Surprises
+When a command fails but your guess felt reasonable ("this should have worked"):
+1. **Evaluate**: Was your guess a natural extension of the tool's design?
+2. **If yes**: File a bead with the `desire-path` label
+3. **If no**: Your mental model was off - note it and continue
+
+Example: `gt mail hook hq-abc` fails but should work (hook this mail).
 ```
-bd create --title="gt session capture: Support positional line count" --type=task --priority=1
+bd new -t task "Add gt mail hook alias" -l desire-path -d "Tried gt mail hook, expected to hook mail"
 ```
-Agent-friendly UX is critical. Your guesses reveal what's intuitive.
+Your guesses reveal what's intuitive. See `~/gt/docs/AGENT-ERGONOMICS.md` for the philosophy.
 
 ### Completion
 - `gt done` - Signal work ready for merge queue (handles beads sync internally)

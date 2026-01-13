@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // RunResult represents the outcome of a plugin execution.
@@ -77,6 +79,9 @@ func (r *Recorder) RecordRun(record PluginRunRecord) (string, error) {
 
 	cmd := exec.Command("bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = r.townRoot
+	// Set BEADS_DIR explicitly to prevent inherited env vars from causing
+	// prefix mismatches when redirects are in play.
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beads.ResolveBeadsDir(r.townRoot))
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -140,7 +145,9 @@ func (r *Recorder) queryRuns(pluginName string, limit int, since string) ([]*Plu
 
 	cmd := exec.Command("bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = r.townRoot
-	cmd.Env = os.Environ()
+	// Set BEADS_DIR explicitly to prevent inherited env vars from causing
+	// prefix mismatches when redirects are in play.
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beads.ResolveBeadsDir(r.townRoot))
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

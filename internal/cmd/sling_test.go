@@ -292,6 +292,9 @@ exit 0
 	slingVars = nil
 	slingOnTarget = "gt-abc123"
 
+	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+
 	if err := runSling(nil, []string{"mol-review"}); err != nil {
 		t.Fatalf("runSling: %v", err)
 	}
@@ -451,6 +454,9 @@ exit 0
 	slingNoConvoy = true
 	slingVars = nil
 	slingOnTarget = "gt-abc123"
+
+	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
 
 	if err := runSling(nil, []string{"mol-review"}); err != nil {
 		t.Fatalf("runSling: %v", err)
