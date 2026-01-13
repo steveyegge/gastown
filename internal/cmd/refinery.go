@@ -16,9 +16,10 @@ import (
 
 // Refinery command flags
 var (
-	refineryForeground bool
-	refineryStatusJSON bool
-	refineryQueueJSON  bool
+	refineryForeground    bool
+	refineryStatusJSON    bool
+	refineryQueueJSON     bool
+	refineryAgentOverride string
 )
 
 var refineryCmd = &cobra.Command{
@@ -208,6 +209,13 @@ var refineryBlockedJSON bool
 func init() {
 	// Start flags
 	refineryStartCmd.Flags().BoolVar(&refineryForeground, "foreground", false, "Run in foreground (default: background)")
+	refineryStartCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
+
+	// Attach flags
+	refineryAttachCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
+
+	// Restart flags
+	refineryRestartCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
 
 	// Status flags
 	refineryStatusCmd.Flags().BoolVar(&refineryStatusJSON, "json", false, "Output as JSON")
@@ -273,6 +281,10 @@ func runRefineryStart(cmd *cobra.Command, args []string) error {
 	mgr, _, rigName, err := getRefineryManager(rigName)
 	if err != nil {
 		return err
+	}
+
+	if refineryAgentOverride != "" {
+		mgr.SetAgentOverride(refineryAgentOverride)
 	}
 
 	fmt.Printf("Starting refinery for %s...\n", rigName)
@@ -478,6 +490,10 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if refineryAgentOverride != "" {
+		mgr.SetAgentOverride(refineryAgentOverride)
+	}
+
 	// Session name follows the same pattern as refinery manager
 	sessionID := fmt.Sprintf("gt-%s-refinery", rigName)
 
@@ -509,6 +525,10 @@ func runRefineryRestart(cmd *cobra.Command, args []string) error {
 	mgr, _, rigName, err := getRefineryManager(rigName)
 	if err != nil {
 		return err
+	}
+
+	if refineryAgentOverride != "" {
+		mgr.SetAgentOverride(refineryAgentOverride)
 	}
 
 	fmt.Printf("Restarting refinery for %s...\n", rigName)

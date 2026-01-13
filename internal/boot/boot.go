@@ -41,11 +41,12 @@ type Status struct {
 
 // Boot manages the Boot watchdog lifecycle.
 type Boot struct {
-	townRoot   string
-	bootDir    string // ~/gt/deacon/dogs/boot/
-	deaconDir  string // ~/gt/deacon/
-	tmux       *tmux.Tmux
-	degraded   bool
+	townRoot      string
+	bootDir       string // ~/gt/deacon/dogs/boot/
+	deaconDir     string // ~/gt/deacon/
+	tmux          *tmux.Tmux
+	degraded      bool
+	agentOverride string // Optional agent alias override
 }
 
 // New creates a new Boot manager.
@@ -187,7 +188,17 @@ func (b *Boot) spawnTmux() error {
 
 	// Launch Claude with environment exported inline and initial triage prompt
 	// The "gt boot triage" prompt tells Boot to immediately start triage (GUPP principle)
-	startCmd := config.BuildAgentStartupCommand("boot", "deacon-boot", "", "gt boot triage")
+	var startCmd string
+	if b.agentOverride != "" {
+		var err error
+		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "deacon-boot", "", "gt boot triage", b.agentOverride)
+		if err != nil {
+			_ = b.tmux.KillSession(SessionName)
+			return fmt.Errorf("building startup command with agent override: %w", err)
+		}
+	} else {
+		startCmd = config.BuildAgentStartupCommand("boot", "deacon-boot", "", "gt boot triage")
+	}
 	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
 	if err := b.tmux.WaitForShellReady(SessionName, 5*time.Second); err != nil {
 		_ = b.tmux.KillSession(SessionName)
@@ -224,6 +235,11 @@ func (b *Boot) spawnDegraded() error {
 // IsDegraded returns whether Boot is in degraded mode.
 func (b *Boot) IsDegraded() bool {
 	return b.degraded
+}
+
+// SetAgentOverride sets an agent alias to use instead of the town default.
+func (b *Boot) SetAgentOverride(agent string) {
+	b.agentOverride = agent
 }
 
 // Dir returns Boot's working directory.

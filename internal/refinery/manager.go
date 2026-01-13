@@ -32,9 +32,10 @@ var (
 
 // Manager handles refinery lifecycle and queue operations.
 type Manager struct {
-	rig     *rig.Rig
-	workDir string
-	output  io.Writer // Output destination for user-facing messages
+	rig           *rig.Rig
+	workDir       string
+	output        io.Writer // Output destination for user-facing messages
+	agentOverride string    // Optional agent alias override
 }
 
 // NewManager creates a new refinery manager for a rig.
@@ -50,6 +51,11 @@ func NewManager(r *rig.Rig) *Manager {
 // This is useful for testing or redirecting output.
 func (m *Manager) SetOutput(w io.Writer) {
 	m.output = w
+}
+
+// SetAgentOverride sets an agent alias to use instead of the town default.
+func (m *Manager) SetAgentOverride(agent string) {
+	m.agentOverride = agent
 }
 
 // stateFile returns the path to the refinery state file.
@@ -174,7 +180,16 @@ func (m *Manager) Start(foreground bool) error {
 
 	// Build startup command first
 	bdActor := fmt.Sprintf("%s/refinery", m.rig.Name)
-	command := config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
+	var command string
+	if m.agentOverride != "" {
+		var err error
+		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", bdActor, m.rig.Path, "", m.agentOverride)
+		if err != nil {
+			return fmt.Errorf("building startup command with agent override: %w", err)
+		}
+	} else {
+		command = config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
+	}
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
