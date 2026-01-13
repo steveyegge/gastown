@@ -30,6 +30,12 @@ func DeaconBeadIDTown() string {
 	return TownBeadsPrefix + "-deacon"
 }
 
+// BootBeadIDTown returns the Boot agent bead ID for town-level beads.
+// Boot is the Deacon's watchdog, stored at hq-boot.
+func BootBeadIDTown() string {
+	return TownBeadsPrefix + "-boot"
+}
+
 // DogBeadIDTown returns a Dog agent bead ID for town-level beads.
 // Dogs are town-level agents, so they follow the pattern: hq-dog-<name>
 func DogBeadIDTown(name string) string {
