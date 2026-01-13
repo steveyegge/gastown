@@ -306,8 +306,16 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		t.Fatalf("write AGENTS.md: %v", err)
 	}
 
-	// Commit AGENTS.md so it's part of the repo
+	// Checkout main branch to ensure it exists (needed for origin/main remote tracking)
+	cmd = exec.Command("git", "checkout", "-b", "main")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b main: %v\n%s", err, out)
+	}
+
 	mayorGit := git.NewGit(mayorRig)
+
+	// Commit AGENTS.md so it's part of the repo
 	if err := mayorGit.Add("AGENTS.md"); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
@@ -378,6 +386,13 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	if err := os.WriteFile(dummyPath, []byte("# Test\n"), 0644); err != nil {
 		t.Fatalf("write README.md: %v", err)
 	}
+	// Checkout main branch to ensure it exists (needed for origin/main remote tracking)
+	cmd = exec.Command("git", "checkout", "-b", "main")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b main: %v\n%s", err, out)
+	}
+
 	mayorGit := git.NewGit(mayorRig)
 	if err := mayorGit.Add("README.md"); err != nil {
 		t.Fatalf("git add: %v", err)
