@@ -20,6 +20,15 @@ func TestDeaconBeadIDTown(t *testing.T) {
 	}
 }
 
+// TestBootBeadIDTown tests the town-level Boot bead ID.
+func TestBootBeadIDTown(t *testing.T) {
+	got := BootBeadIDTown()
+	want := "hq-boot"
+	if got != want {
+		t.Errorf("BootBeadIDTown() = %q, want %q", got, want)
+	}
+}
+
 // TestDogBeadIDTown tests town-level Dog bead IDs.
 func TestDogBeadIDTown(t *testing.T) {
 	tests := []struct {

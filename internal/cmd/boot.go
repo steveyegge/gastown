@@ -101,6 +101,11 @@ func getBootManager() (*boot.Boot, error) {
 	return boot.New(townRoot), nil
 }
 
+// getBootSessionName returns the Boot session name.
+func getBootSessionName() string {
+	return boot.SessionName
+}
+
 func runBootStatus(cmd *cobra.Command, args []string) error {
 	b, err := getBootManager()
 	if err != nil {
