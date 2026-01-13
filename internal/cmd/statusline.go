@@ -630,19 +630,27 @@ func runRefineryStatusLine(t *tmux.Tmux, rigName string) error {
 }
 
 // isSessionWorking detects if a Claude Code session is actively working.
-// Returns true if the ✻ symbol is visible in the pane (indicates Claude is processing).
+// Returns true if the ✶ symbol is visible in the pane (indicates Claude is processing).
 // Returns false for idle sessions (showing ❯ prompt) or if state cannot be determined.
+//
+// Claude Code uses two different status indicators:
+//   - ✶ (U+2736): Active - shown during thinking/tool execution ("Proposing fix...")
+//   - ✻ (U+273B): Completed - shown after work finishes ("Worked for 1m 55s")
+//
+// We check for ✶ to detect active work, and optionally ✻ as a fallback for
+// sessions that just completed work (still considered "working" for display purposes).
 func isSessionWorking(t *tmux.Tmux, session string) bool {
-	// Capture last few lines of the pane
-	lines, err := t.CapturePaneLines(session, 5)
+	// Capture last few lines of the pane (increased from 5 to 10 for reliability)
+	lines, err := t.CapturePaneLines(session, 10)
 	if err != nil || len(lines) == 0 {
 		return false
 	}
 
-	// Check all captured lines for the working indicator
-	// ✻ appears in Claude's status line when actively processing
+	// Check all captured lines for working indicators
+	// Primary: ✶ (U+2736) appears during active processing
+	// Secondary: ✻ (U+273B) appears after completion (recent work)
 	for _, line := range lines {
-		if strings.Contains(line, "✻") {
+		if strings.Contains(line, "✶") || strings.Contains(line, "✻") {
 			return true
 		}
 	}
