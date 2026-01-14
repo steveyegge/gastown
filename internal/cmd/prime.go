@@ -679,8 +679,7 @@ func ensureBeadsRedirect(ctx RoleContext) {
 	// Check if redirect already exists
 	redirectPath := filepath.Join(ctx.WorkDir, ".beads", "redirect")
 	if _, err := os.Stat(redirectPath); err == nil {
-		// Redirect exists, nothing to do
-		return
+		return // Redirect exists, nothing to do
 	}
 
 	// Use shared helper - silently ignore errors during prime
