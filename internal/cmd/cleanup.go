@@ -5,9 +5,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
+	"path/filepath"
+	"sort"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -127,15 +132,12 @@ func runCleanupOrphans(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Check if this is a polecat agent
-		if !strings.Contains(agent.ID, "-polecat-") {
+		rigName, role, polecatName, ok := beads.ParseAgentBeadID(agent.ID)
+		if !ok || role != constants.RolePolecat || rigName == "" || polecatName == "" {
 			continue
 		}
 
-		// Extract rig and polecat name from agent ID
-		rigName := extractRigFromAgentID(agent.ID)
-		polecatName := extractPolecatNameFromAgentID(agent.ID)
-		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		sessionName := session.PolecatSessionName(rigName, polecatName)
 
 		// Check if session is alive
 		if tmuxClient.IsClaudeRunning(sessionName) {
@@ -341,34 +343,9 @@ Action needed: Restart the agent or reassign the work.`,
 	return cmd.Run()
 }
 
-func extractRigFromAgentID(agentID string) string {
-	// Format: gt-<rig>-polecat-<name> where name may contain hyphens
-	// Find "-polecat-" and extract rig between "gt-" and "-polecat-"
-	idx := strings.Index(agentID, "-polecat-")
-	if idx == -1 {
-		return ""
-	}
-	// agentID starts with "gt-", so rig is from position 3 to idx
-	if len(agentID) < 3 || agentID[:3] != "gt-" {
-		return ""
-	}
-	return agentID[3:idx]
-}
-
-func extractPolecatNameFromAgentID(agentID string) string {
-	// Format: gt-<rig>-polecat-<name> where name may contain hyphens
-	// Find "-polecat-" and take everything after
-	idx := strings.Index(agentID, "-polecat-")
-	if idx == -1 {
-		return ""
-	}
-	return agentID[idx+9:] // len("-polecat-") = 9
-}
-
 func getKnownRigs(townRoot string) ([]string, error) {
-	// Get rigs from the rigs directory
-	rigsDir := townRoot + "/rigs"
-	entries, err := os.ReadDir(rigsDir)
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -376,16 +353,14 @@ func getKnownRigs(townRoot string) ([]string, error) {
 		return nil, err
 	}
 
-	var rigs []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			// Check if it's a valid rig (has rig.yaml)
-			rigYAML := rigsDir + "/" + entry.Name() + "/rig.yaml"
-			if _, err := os.Stat(rigYAML); err == nil {
-				rigs = append(rigs, entry.Name())
-			}
-		}
+	if len(rigsConfig.Rigs) == 0 {
+		return nil, nil
 	}
 
+	rigs := make([]string, 0, len(rigsConfig.Rigs))
+	for name := range rigsConfig.Rigs {
+		rigs = append(rigs, name)
+	}
+	sort.Strings(rigs)
 	return rigs, nil
 }
