@@ -23,6 +23,9 @@ import (
 // this indicates an errant redirect file that should be removed. The function logs a
 // warning and returns the original beads directory.
 func ResolveBeadsDir(workDir string) string {
+	if filepath.Base(workDir) == ".beads" {
+		workDir = filepath.Dir(workDir)
+	}
 	beadsDir := filepath.Join(workDir, ".beads")
 	redirectPath := filepath.Join(beadsDir, "redirect")
 
