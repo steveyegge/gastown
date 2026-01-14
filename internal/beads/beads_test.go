@@ -2129,7 +2129,7 @@ func TestCloseAndClearAgentBead_FieldClearing(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create unique agent ID for each test case
-			agentID := fmt.Sprintf("test-testrig-%s-%d", tc.fields.RoleType, i)
+			agentID := fmt.Sprintf("test-testrig-%s-case-%c", tc.fields.RoleType, 'a'+i)
 
 			// Step 1: Create agent bead with specified fields
 			_, err := bd.CreateAgentBead(agentID, "Test agent", tc.fields)
@@ -2362,7 +2362,7 @@ func TestCloseAndClearAgentBead_ReasonVariations(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			agentID := fmt.Sprintf("test-testrig-polecat-reason%d", i)
+			agentID := fmt.Sprintf("test-testrig-polecat-reason-%c", 'a'+i)
 
 			// Create agent bead
 			_, err := bd.CreateAgentBead(agentID, "Test agent", &AgentFields{
