@@ -224,11 +224,33 @@ If tests FAILED:
 1. Diagnose: Is this a branch regression or pre-existing on main?
 2. If branch caused it:
    - Abort merge
-   - Notify polecat: "Tests failing. Please fix and resubmit."
+   - **REOPEN the source issue** so it returns to the ready queue:
+     ```bash
+     bd update <source-issue-id> --status=open
+     bd sync
+     ```
+   - Notify witness of rejection (so it can track):
+     ```bash
+     gt mail send <rig>/witness -s "REJECTED <polecat-name>" -m "Branch: <branch>
+     Issue: <source-issue-id>
+     Reason: <failure description>
+     Action: Issue reopened for re-dispatch"
+     ```
+   - Close the MR bead as rejected:
+     ```bash
+     bd close <mr-bead-id> --reason "Rejected: <failure description>"
+     ```
+   - Archive the MERGE_READY message
    - Skip to loop-check
 3. If pre-existing on main:
    - Option A: Fix it yourself (you're the Engineer!)
    - Option B: File a bead: bd create --type=bug --priority=1 --title="..."
+
+**REJECTION CHECKLIST** (all required before skipping to loop-check):
+- [ ] Source issue reopened (bd update --status=open)
+- [ ] REJECTED notification sent to witness
+- [ ] MR bead closed with rejection reason
+- [ ] MERGE_READY message archived
 
 **GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
 - Tests passing, OR
