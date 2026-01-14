@@ -606,14 +606,14 @@ func TestDeriveBeadsPrefix(t *testing.T) {
 		want string
 	}{
 		// Compound words with common suffixes should split
-		{"gastown", "gt"},       // gas + town
-		{"nashville", "nv"},     // nash + ville
-		{"bridgeport", "bp"},    // bridge + port
-		{"someplace", "sp"},     // some + place
-		{"greenland", "gl"},     // green + land
-		{"springfield", "sf"},   // spring + field
-		{"hollywood", "hw"},     // holly + wood
-		{"oxford", "of"},        // ox + ford
+		{"gastown", "gt"},     // gas + town
+		{"nashville", "nv"},   // nash + ville
+		{"bridgeport", "bp"},  // bridge + port
+		{"someplace", "sp"},   // some + place
+		{"greenland", "gl"},   // green + land
+		{"springfield", "sf"}, // spring + field
+		{"hollywood", "hw"},   // holly + wood
+		{"oxford", "of"},      // ox + ford
 
 		// Hyphenated names
 		{"my-project", "mp"},

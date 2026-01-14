@@ -1804,7 +1804,6 @@ func TestSetupRedirect(t *testing.T) {
 // TestAgentBeadTombstoneBug demonstrates the bd bug where `bd delete --hard --force`
 // creates tombstones instead of truly deleting records.
 //
-//
 // This test documents the bug behavior:
 // 1. Create agent bead
 // 2. Delete with --hard --force (supposed to permanently delete)
@@ -1821,8 +1820,7 @@ func TestAgentBeadTombstoneBug(t *testing.T) {
 		t.Fatalf("bd init: %v\n%s", err, output)
 	}
 
-	beadsDir := filepath.Join(tmpDir, ".beads")
-	bd := New(beadsDir)
+	bd := New(tmpDir)
 
 	agentID := "test-testrig-polecat-tombstone"
 
@@ -1905,8 +1903,7 @@ func TestAgentBeadCloseReopenWorkaround(t *testing.T) {
 		t.Fatalf("bd init: %v\n%s", err, output)
 	}
 
-	beadsDir := filepath.Join(tmpDir, ".beads")
-	bd := New(beadsDir)
+	bd := New(tmpDir)
 
 	agentID := "test-testrig-polecat-closereopen"
 
@@ -1966,8 +1963,7 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 		t.Fatalf("bd init: %v\n%s", err, output)
 	}
 
-	beadsDir := filepath.Join(tmpDir, ".beads")
-	bd := New(beadsDir)
+	bd := New(tmpDir)
 
 	agentID := "test-testrig-polecat-lifecycle"
 
@@ -2054,8 +2050,7 @@ func TestCloseAndClearAgentBead_FieldClearing(t *testing.T) {
 		t.Fatalf("bd init: %v\n%s", err, output)
 	}
 
-	beadsDir := filepath.Join(tmpDir, ".beads")
-	bd := New(beadsDir)
+	bd := New(tmpDir)
 
 	// Test cases for field clearing permutations
 	tests := []struct {
@@ -2211,8 +2206,7 @@ func TestCloseAndClearAgentBead_NonExistent(t *testing.T) {
 		t.Fatalf("bd init: %v\n%s", err, output)
 	}
 
-	beadsDir := filepath.Join(tmpDir, ".beads")
-	bd := New(beadsDir)
+	bd := New(tmpDir)
 
 	// Attempt to close non-existent bead
 	err := bd.CloseAndClearAgentBead("test-nonexistent-polecat-xyz", "should fail")
@@ -2233,8 +2227,7 @@ func TestCloseAndClearAgentBead_AlreadyClosed(t *testing.T) {
 		t.Fatalf("bd init: %v\n%s", err, output)
 	}
 
-	beadsDir := filepath.Join(tmpDir, ".beads")
-	bd := New(beadsDir)
+	bd := New(tmpDir)
 
 	agentID := "test-testrig-polecat-doubleclosed"
 
@@ -2287,8 +2280,7 @@ func TestCloseAndClearAgentBead_ReopenHasCleanState(t *testing.T) {
 		t.Fatalf("bd init: %v\n%s", err, output)
 	}
 
-	beadsDir := filepath.Join(tmpDir, ".beads")
-	bd := New(beadsDir)
+	bd := New(tmpDir)
 
 	agentID := "test-testrig-polecat-cleanreopen"
 
@@ -2355,8 +2347,7 @@ func TestCloseAndClearAgentBead_ReasonVariations(t *testing.T) {
 		t.Fatalf("bd init: %v\n%s", err, output)
 	}
 
-	beadsDir := filepath.Join(tmpDir, ".beads")
-	bd := New(beadsDir)
+	bd := New(tmpDir)
 
 	tests := []struct {
 		name   string

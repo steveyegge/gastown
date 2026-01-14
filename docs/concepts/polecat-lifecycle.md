@@ -198,6 +198,15 @@ If you see a non-working polecat, it's in a **failure state**:
 Don't call these "idle" - that implies they're waiting for work. They're not.
 A stalled polecat is *supposed* to be working. A zombie is *supposed* to be dead.
 
+## Stale Cleanup (Reaping, Not Reuse)
+
+If stalled/zombie polecats linger, they should be cleaned up, not reused.
+Cleanup is safe only when the worktree has no uncommitted or unpushed work.
+Some commands (like `gt sling` when targeting a rig) may opportunistically
+reap stale polecats that pass safety checks before spawning a new one. This
+keeps the transient model intact and avoids accumulation without creating
+an idle pool.
+
 ### Manual State Transitions
 
 **Anti-pattern:**
