@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -513,6 +516,201 @@ func runConfigAgentEmailDomain(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// Seance subcommands
+
+var configSeanceCmd = &cobra.Command{
+	Use:   "seance",
+	Short: "Manage auto-seance configuration",
+	Long: `Manage auto-seance context recovery settings.
+
+Auto-seance automatically recovers context from predecessor sessions
+when starting work on "cold" projects (no recent activity).
+
+Commands:
+  gt config seance            Show current settings
+  gt config seance enable     Enable auto-seance
+  gt config seance disable    Disable auto-seance
+  gt config seance threshold  Get or set cold threshold`,
+	RunE: runConfigSeanceShow,
+}
+
+var configSeanceEnableCmd = &cobra.Command{
+	Use:   "enable",
+	Short: "Enable auto-seance",
+	RunE:  runConfigSeanceEnable,
+}
+
+var configSeanceDisableCmd = &cobra.Command{
+	Use:   "disable",
+	Short: "Disable auto-seance",
+	RunE:  runConfigSeanceDisable,
+}
+
+var configSeanceThresholdCmd = &cobra.Command{
+	Use:   "threshold [duration]",
+	Short: "Get or set cold threshold",
+	Long: `Get or set the cold threshold for auto-seance.
+
+The cold threshold determines how long a rig must be inactive before
+auto-seance runs on startup. Default is 24h.
+
+Duration format: 1h, 30m, 2h30m, 24h, 48h, etc.
+
+Examples:
+  gt config seance threshold         # Show current threshold
+  gt config seance threshold 12h     # Set to 12 hours
+  gt config seance threshold 48h     # Set to 48 hours`,
+	RunE: runConfigSeanceThreshold,
+}
+
+func runConfigSeanceShow(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Detect rig from cwd
+	rigName := detectRigFromCwd(townRoot)
+	if rigName == "" {
+		rigName = "default"
+	}
+
+	wispCfg := wisp.NewConfig(townRoot, rigName)
+
+	// Get enabled status
+	enabled := true // default
+	if val := wispCfg.Get("seance.enabled"); val != nil {
+		switch v := val.(type) {
+		case bool:
+			enabled = v
+		case string:
+			enabled = v == "true" || v == "1" || v == "yes"
+		}
+	}
+
+	// Get threshold
+	threshold := "24h" // default
+	if val := wispCfg.Get("seance.cold_threshold"); val != nil {
+		if s, ok := val.(string); ok {
+			threshold = s
+		}
+	}
+
+	fmt.Printf("%s\n\n", style.Bold.Render("Auto-Seance Configuration"))
+	fmt.Printf("Rig:       %s\n", rigName)
+	fmt.Printf("Enabled:   %v\n", enabled)
+	fmt.Printf("Threshold: %s\n", threshold)
+	fmt.Printf("\nConfig file: %s\n", style.Dim.Render(wispCfg.ConfigPath()))
+	return nil
+}
+
+func runConfigSeanceEnable(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	rigName := detectRigFromCwd(townRoot)
+	if rigName == "" {
+		rigName = "default"
+	}
+
+	wispCfg := wisp.NewConfig(townRoot, rigName)
+	if err := wispCfg.Set("seance.enabled", true); err != nil {
+		return fmt.Errorf("setting config: %w", err)
+	}
+
+	fmt.Printf("Auto-seance enabled for rig '%s'\n", style.Bold.Render(rigName))
+	return nil
+}
+
+func runConfigSeanceDisable(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	rigName := detectRigFromCwd(townRoot)
+	if rigName == "" {
+		rigName = "default"
+	}
+
+	wispCfg := wisp.NewConfig(townRoot, rigName)
+	if err := wispCfg.Set("seance.enabled", false); err != nil {
+		return fmt.Errorf("setting config: %w", err)
+	}
+
+	fmt.Printf("Auto-seance disabled for rig '%s'\n", style.Bold.Render(rigName))
+	return nil
+}
+
+func runConfigSeanceThreshold(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	rigName := detectRigFromCwd(townRoot)
+	if rigName == "" {
+		rigName = "default"
+	}
+
+	wispCfg := wisp.NewConfig(townRoot, rigName)
+
+	if len(args) == 0 {
+		// Show current threshold
+		threshold := "24h" // default
+		if val := wispCfg.Get("seance.cold_threshold"); val != nil {
+			if s, ok := val.(string); ok {
+				threshold = s
+			}
+		}
+		fmt.Printf("Cold threshold: %s\n", style.Bold.Render(threshold))
+		return nil
+	}
+
+	// Set new threshold - validate duration format
+	thresholdStr := args[0]
+	if _, err := time.ParseDuration(thresholdStr); err != nil {
+		return fmt.Errorf("invalid duration '%s': use format like 1h, 30m, 24h, 48h", thresholdStr)
+	}
+
+	if err := wispCfg.Set("seance.cold_threshold", thresholdStr); err != nil {
+		return fmt.Errorf("setting config: %w", err)
+	}
+
+	fmt.Printf("Cold threshold set to '%s' for rig '%s'\n", style.Bold.Render(thresholdStr), rigName)
+	return nil
+}
+
+// detectRigFromCwd detects the rig name from current working directory.
+func detectRigFromCwd(townRoot string) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	relPath, err := filepath.Rel(townRoot, cwd)
+	if err != nil {
+		return ""
+	}
+
+	// First path component after town root is the rig name
+	// (unless it's mayor, deacon, or other top-level dirs)
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+	if len(parts) == 0 || parts[0] == "." || parts[0] == "" {
+		return ""
+	}
+
+	// Skip non-rig directories
+	first := parts[0]
+	if first == "mayor" || first == "deacon" || first == ".beads" || first == "settings" {
+		return ""
+	}
+
+	return first
+}
+
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
@@ -528,10 +726,16 @@ func init() {
 	configAgentCmd.AddCommand(configAgentSetCmd)
 	configAgentCmd.AddCommand(configAgentRemoveCmd)
 
+	// Add seance subcommands
+	configSeanceCmd.AddCommand(configSeanceEnableCmd)
+	configSeanceCmd.AddCommand(configSeanceDisableCmd)
+	configSeanceCmd.AddCommand(configSeanceThresholdCmd)
+
 	// Add subcommands to config
 	configCmd.AddCommand(configAgentCmd)
 	configCmd.AddCommand(configDefaultAgentCmd)
 	configCmd.AddCommand(configAgentEmailDomainCmd)
+	configCmd.AddCommand(configSeanceCmd)
 
 	// Register with root
 	rootCmd.AddCommand(configCmd)

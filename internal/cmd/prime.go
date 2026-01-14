@@ -212,6 +212,10 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	// Output handoff content if present
 	outputHandoffContent(ctx)
 
+	// Run auto-seance for cold project context recovery
+	// Order: Handoff Mail -> Auto-Seance -> Role Instructions
+	outputAutoSeanceContext(ctx)
+
 	// Output attachment status (for autonomous work detection)
 	outputAttachmentStatus(ctx)
 
