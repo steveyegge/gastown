@@ -1061,7 +1061,7 @@ func TestRunSeanceSummaryWithErrorCancellation(t *testing.T) {
 
 	_, err := runSeanceSummaryWithError(ctx, "valid-session-id")
 	if err == nil {
-		t.Error("expected error for cancelled context")
+		t.Error("expected error for canceled context")
 	}
 	// The actual error message depends on whether the command starts or not
 }
