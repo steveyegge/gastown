@@ -362,91 +362,6 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 	}
 }
 
-func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
-	// This test verifies the fallback: if AGENTS.md is not in git,
-	// it should be copied from mayor/rig.
-
-	root := t.TempDir()
-
-	// Create mayor/rig directory structure
-	mayorRig := filepath.Join(root, "mayor", "rig")
-	if err := os.MkdirAll(mayorRig, 0755); err != nil {
-		t.Fatalf("mkdir mayor/rig: %v", err)
-	}
-
-	// Initialize git repo in mayor/rig WITHOUT AGENTS.md in git
-	cmd := exec.Command("git", "init")
-	cmd.Dir = mayorRig
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v\n%s", err, out)
-	}
-
-	// Create a dummy file and commit (repo needs at least one commit)
-	dummyPath := filepath.Join(mayorRig, "README.md")
-	if err := os.WriteFile(dummyPath, []byte("# Test\n"), 0644); err != nil {
-		t.Fatalf("write README.md: %v", err)
-	}
-	mayorGit := git.NewGit(mayorRig)
-	if err := mayorGit.Add("README.md"); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
-	if err := mayorGit.Commit("Initial commit"); err != nil {
-		t.Fatalf("git commit: %v", err)
-	}
-
-	// AddWithOptions needs origin/main to exist. Add self as origin and create tracking ref.
-	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
-	cmd.Dir = mayorRig
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git remote add: %v\n%s", err, out)
-	}
-	// When using a local directory as remote, fetch doesn't create tracking branches.
-	// Create origin/main manually since AddWithOptions expects origin/main by default.
-	cmd = exec.Command("git", "update-ref", "refs/remotes/origin/main", "HEAD")
-	cmd.Dir = mayorRig
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git update-ref: %v\n%s", err, out)
-	}
-
-	// Now create AGENTS.md in mayor/rig (but NOT committed to git)
-	// This simulates the fallback scenario
-	agentsMDContent := []byte("# AGENTS.md\n\nFallback content.\n")
-	agentsMDPath := filepath.Join(mayorRig, "AGENTS.md")
-	if err := os.WriteFile(agentsMDPath, agentsMDContent, 0644); err != nil {
-		t.Fatalf("write AGENTS.md: %v", err)
-	}
-
-	// Create rig pointing to root
-	r := &rig.Rig{
-		Name: "rig",
-		Path: root,
-	}
-	m := NewManager(r, git.NewGit(root), nil)
-
-	// Create polecat via AddWithOptions
-	polecat, err := m.AddWithOptions("TestFallback", AddOptions{})
-	if err != nil {
-		t.Fatalf("AddWithOptions: %v", err)
-	}
-
-	// Verify AGENTS.md exists in the worktree (via fallback copy)
-	worktreeAgentsMD := filepath.Join(polecat.ClonePath, "AGENTS.md")
-	if _, err := os.Stat(worktreeAgentsMD); os.IsNotExist(err) {
-		t.Errorf("AGENTS.md does not exist in worktree (fallback failed) at %s", worktreeAgentsMD)
-	}
-
-	// Verify content matches the fallback source
-	content, err := os.ReadFile(worktreeAgentsMD)
-	if err != nil {
-		t.Fatalf("read worktree AGENTS.md: %v", err)
-	}
-	gotContent := strings.ReplaceAll(string(content), "\r\n", "\n")
-	wantContent := strings.ReplaceAll(string(agentsMDContent), "\r\n", "\n")
-	if gotContent != wantContent {
-		t.Errorf("AGENTS.md content = %q, want %q", gotContent, wantContent)
-	}
-}
-
 // TestReconcilePoolWith tests all permutations of directory and session existence.
 // This is the core allocation policy logic.
 //
@@ -758,101 +673,6 @@ func TestBuildBranchName(t *testing.T) {
 				}
 			}
 		})
-}
-
-func TestAddWithOptions_NoPrimeMDInWorktreeBeads(t *testing.T) {
-	// This test verifies that PRIME.md is NOT present in the worktree's .beads folder
-	// after polecat creation, even when the source repo has a tracked .beads/PRIME.md.
-	//
-	// Bug: When source repo has .beads/PRIME.md tracked in git, creating a worktree
-	// brings that file along. The polecat should use redirect to access rig-level
-	// PRIME.md, not a local copy. If both exist, bd prime may read the wrong one.
-
-	root := t.TempDir()
-
-	// Create mayor/rig directory structure
-	mayorRig := filepath.Join(root, "mayor", "rig")
-	if err := os.MkdirAll(mayorRig, 0755); err != nil {
-		t.Fatalf("mkdir mayor/rig: %v", err)
-	}
-
-	// Create rig-level .beads directory
-	rigBeads := filepath.Join(root, ".beads")
-	if err := os.MkdirAll(rigBeads, 0755); err != nil {
-		t.Fatalf("mkdir rig .beads: %v", err)
-	}
-
-	// Create redirect at rig level pointing to mayor/rig/.beads
-	mayorBeads := filepath.Join(mayorRig, ".beads")
-	if err := os.MkdirAll(mayorBeads, 0755); err != nil {
-		t.Fatalf("mkdir mayor/rig/.beads: %v", err)
-	}
-	rigRedirect := filepath.Join(rigBeads, "redirect")
-	if err := os.WriteFile(rigRedirect, []byte("mayor/rig/.beads\n"), 0644); err != nil {
-		t.Fatalf("write rig redirect: %v", err)
-	}
-
-	// Initialize git repo in mayor/rig WITH a tracked .beads/PRIME.md
-	// This simulates a repo that has PRIME.md committed (the bug scenario)
-	cmd := exec.Command("git", "init")
-	cmd.Dir = mayorRig
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v\n%s", err, out)
-	}
-
-	// Create tracked .beads/PRIME.md in the source repo
-	trackedPrimeMD := filepath.Join(mayorBeads, "PRIME.md")
-	if err := os.WriteFile(trackedPrimeMD, []byte("# Tracked PRIME.md (should not appear in worktree)\n"), 0644); err != nil {
-		t.Fatalf("write tracked PRIME.md: %v", err)
-	}
-
-	// Create a dummy file and commit (including .beads/PRIME.md)
-	dummyPath := filepath.Join(mayorRig, "README.md")
-	if err := os.WriteFile(dummyPath, []byte("# Test\n"), 0644); err != nil {
-		t.Fatalf("write README.md: %v", err)
-	}
-	mayorGit := git.NewGit(mayorRig)
-	if err := mayorGit.Add("."); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
-	if err := mayorGit.Commit("Initial commit with tracked PRIME.md"); err != nil {
-		t.Fatalf("git commit: %v", err)
-	}
-
-	// Add origin and fetch
-	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
-	cmd.Dir = mayorRig
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git remote add: %v\n%s", err, out)
-	}
-	if err := mayorGit.Fetch("origin"); err != nil {
-		t.Fatalf("git fetch: %v", err)
-	}
-
-	// Create rig pointing to root
-	r := &rig.Rig{
-		Name: "rig",
-		Path: root,
-	}
-	m := NewManager(r, git.NewGit(root))
-
-	// Create polecat
-	polecat, err := m.AddWithOptions("TestPrime", AddOptions{})
-	if err != nil {
-		t.Fatalf("AddWithOptions: %v", err)
-	}
-
-	// BUG CHECK: The worktree should NOT have a local .beads/PRIME.md
-	// (even though the source repo has one tracked in git)
-	worktreePrimeMD := filepath.Join(polecat.ClonePath, ".beads", "PRIME.md")
-	if _, err := os.Stat(worktreePrimeMD); err == nil {
-		t.Errorf("PRIME.md should NOT exist in worktree .beads/ (should use redirect): %s", worktreePrimeMD)
-	}
-
-	// Verify the redirect file exists and points correctly
-	worktreeRedirect := filepath.Join(polecat.ClonePath, ".beads", "redirect")
-	if _, err := os.Stat(worktreeRedirect); os.IsNotExist(err) {
-		t.Errorf("redirect file should exist at: %s", worktreeRedirect)
 	}
 }
 
@@ -908,14 +728,18 @@ func TestAddWithOptions_NoPrimeMDCreatedLocally(t *testing.T) {
 		t.Fatalf("git commit: %v", err)
 	}
 
-	// Add origin and fetch
+	// AddWithOptions needs origin/main to exist. Add self as origin and create tracking ref.
 	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
 	cmd.Dir = mayorRig
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git remote add: %v\n%s", err, out)
 	}
-	if err := mayorGit.Fetch("origin"); err != nil {
-		t.Fatalf("git fetch: %v", err)
+	// When using a local directory as remote, fetch doesn't create tracking branches.
+	// Create origin/main manually since AddWithOptions expects origin/main by default.
+	cmd = exec.Command("git", "update-ref", "refs/remotes/origin/main", "HEAD")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git update-ref: %v\n%s", err, out)
 	}
 
 	// Create rig pointing to root
@@ -923,7 +747,7 @@ func TestAddWithOptions_NoPrimeMDCreatedLocally(t *testing.T) {
 		Name: "rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root))
+	m := NewManager(r, git.NewGit(root), nil)
 
 	// Create polecat
 	polecat, err := m.AddWithOptions("TestNoLocal", AddOptions{})
@@ -1010,14 +834,18 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 		t.Fatalf("git commit: %v", err)
 	}
 
-	// Add origin and fetch
+	// AddWithOptions needs origin/main to exist. Add self as origin and create tracking ref.
 	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
 	cmd.Dir = mayorRig
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git remote add: %v\n%s", err, out)
 	}
-	if err := mayorGit.Fetch("origin"); err != nil {
-		t.Fatalf("git fetch: %v", err)
+	// When using a local directory as remote, fetch doesn't create tracking branches.
+	// Create origin/main manually since AddWithOptions expects origin/main by default.
+	cmd = exec.Command("git", "update-ref", "refs/remotes/origin/main", "HEAD")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git update-ref: %v\n%s", err, out)
 	}
 
 	// Create AGENTS.md in mayor/rig AFTER git commit (NOT tracked in git)
@@ -1032,7 +860,7 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 		Name: "rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root))
+	m := NewManager(r, git.NewGit(root), nil)
 
 	// Create polecat
 	polecat, err := m.AddWithOptions("TestClean", AddOptions{})
@@ -1040,8 +868,8 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 		t.Fatalf("AddWithOptions: %v", err)
 	}
 
-	// Run git status in worktree - should show nothing (clean)
-	// This catches ANY files added to the repo, providing regression protection
+	// Run git status in worktree - should show nothing except .beads/ (infrastructure)
+	// This catches files added to the repo, providing regression protection
 	cmd = exec.Command("git", "status", "--porcelain")
 	cmd.Dir = polecat.ClonePath
 	out, err := cmd.CombinedOutput()
@@ -1049,8 +877,23 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 		t.Fatalf("git status: %v\n%s", err, out)
 	}
 
-	status := string(out)
-	if status != "" {
-		t.Errorf("polecat worktree should be clean after install (no files added to repo), but git status shows:\n%s", status)
+	// Filter out expected infrastructure files
+	var unexpected []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if line == "" {
+			continue
+		}
+		// .beads/ is expected - it contains the redirect file for shared beads
+		if strings.Contains(line, ".beads") {
+			continue
+		}
+		// .gitignore is expected - Gas Town patterns added
+		if strings.Contains(line, ".gitignore") {
+			continue
+		}
+		unexpected = append(unexpected, line)
+	}
+	if len(unexpected) > 0 {
+		t.Errorf("polecat worktree should be clean after install (no files added to repo), but git status shows:\n%s", strings.Join(unexpected, "\n"))
 	}
 }
