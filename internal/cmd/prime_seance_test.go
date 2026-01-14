@@ -173,7 +173,7 @@ func TestFindPredecessorSession(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Test with no events file
-	pred := findPredecessorSession(tmpDir, "testrig", "current-session-id")
+	pred := findPredecessorSession(tmpDir, "testrig", "current-session-id", 0)
 	if pred != nil {
 		t.Error("expected nil predecessor with no events file")
 	}
@@ -242,8 +242,8 @@ func TestFindPredecessorSession(t *testing.T) {
 		t.Fatalf("failed to write events file: %v", err)
 	}
 
-	// Find predecessor - should get newest-session-id (not current)
-	pred = findPredecessorSession(tmpDir, "testrig", "current-session-id")
+	// Find predecessor with minAge=0 - should get newest-session-id (1 hour old)
+	pred = findPredecessorSession(tmpDir, "testrig", "current-session-id", 0)
 	if pred == nil {
 		t.Fatal("expected to find predecessor")
 	}
@@ -254,6 +254,17 @@ func TestFindPredecessorSession(t *testing.T) {
 	}
 	if pred.Actor != "testrig/crew/max" {
 		t.Errorf("expected testrig/crew/max, got %s", pred.Actor)
+	}
+
+	// Find predecessor with minAge=2h - should get old-session-id (3 hours old)
+	// The 1-hour-old session should be skipped
+	pred = findPredecessorSession(tmpDir, "testrig", "current-session-id", 2*time.Hour)
+	if pred == nil {
+		t.Fatal("expected to find predecessor with minAge=2h")
+	}
+	sessionID = getSeancePayloadString(pred.Payload, "session_id")
+	if sessionID != "old-session-id" {
+		t.Errorf("expected old-session-id with minAge=2h, got %s", sessionID)
 	}
 }
 
