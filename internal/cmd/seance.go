@@ -188,8 +188,16 @@ func runSeanceList() error {
 }
 
 func runSeanceTalk(sessionID, prompt string) error {
-	// Expand short IDs if needed (user might provide partial)
-	// For now, require full ID or let claude --resume handle it
+	// Look up the session's working directory from events
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil || townRoot == "" {
+		return fmt.Errorf("not in a Gas Town workspace")
+	}
+
+	sessionCwd, err := findSessionCwd(townRoot, sessionID)
+	if err != nil {
+		return fmt.Errorf("looking up session: %w", err)
+	}
 
 	fmt.Printf("%s Summoning session %s...\n\n", style.Bold.Render("🔮"), sessionID)
 
@@ -201,6 +209,7 @@ func runSeanceTalk(sessionID, prompt string) error {
 		args = append(args, "--print", prompt)
 
 		cmd := exec.Command("claude", args...)
+		cmd.Dir = sessionCwd // Run from the session's original directory
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
@@ -212,6 +221,7 @@ func runSeanceTalk(sessionID, prompt string) error {
 
 	// Interactive mode - just launch claude
 	cmd := exec.Command("claude", args...)
+	cmd.Dir = sessionCwd // Run from the session's original directory
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -230,6 +240,49 @@ func runSeanceTalk(sessionID, prompt string) error {
 	}
 
 	return nil
+}
+
+// findSessionCwd looks up a session's working directory from the events log.
+// Returns the cwd if found, or the current directory if not found (fallback).
+func findSessionCwd(townRoot, sessionID string) (string, error) {
+	eventsPath := filepath.Join(townRoot, events.EventsFile)
+
+	file, err := os.Open(eventsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No events file, use current directory
+			return os.Getwd()
+		}
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		var event sessionEvent
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			continue
+		}
+
+		if event.Type != events.TypeSessionStart {
+			continue
+		}
+
+		// Check if this is the session we're looking for
+		eventSessionID := getPayloadString(event.Payload, "session_id")
+		if eventSessionID == sessionID || strings.HasPrefix(eventSessionID, sessionID) {
+			cwd := getPayloadString(event.Payload, "cwd")
+			if cwd != "" {
+				return cwd, nil
+			}
+		}
+	}
+
+	// Session not found in events, use current directory as fallback
+	return os.Getwd()
 }
 
 // discoverSessions reads session_start events from our event stream.
