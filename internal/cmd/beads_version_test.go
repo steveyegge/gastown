@@ -1,6 +1,11 @@
 package cmd
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
 
 func TestParseBeadsVersion(t *testing.T) {
 	tests := []struct {
@@ -64,5 +69,124 @@ func TestBeadsVersionCompare(t *testing.T) {
 				t.Errorf("(%s).compare(%s) = %d, want %d", tt.v1, tt.v2, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateBeadsVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		wantErr bool
+	}{
+		{"meets minimum", "0.44.0", false},
+		{"above minimum", "0.45.0", false},
+		{"below minimum", "0.43.0", true},
+		{"way above minimum", "1.0.0", false},
+		{"invalid version", "invalid", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateBeadsVersion(tt.version)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateBeadsVersion(%q) error = %v, wantErr %v", tt.version, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestVersionCacheSaveLoad(t *testing.T) {
+	// Create a temp directory for the cache
+	tmpDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	t.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	// Ensure the .gt directory exists
+	gtDir := filepath.Join(tmpDir, ".gt")
+	if err := os.MkdirAll(gtDir, 0755); err != nil {
+		t.Fatalf("failed to create .gt dir: %v", err)
+	}
+
+	// Test saving and loading cache
+	testTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	cache := &beadsVersionCache{
+		BdPath:  "/usr/local/bin/bd",
+		BdMtime: testTime,
+		Version: "0.45.0",
+	}
+
+	saveVersionCache(cache)
+
+	loaded := loadVersionCache()
+	if loaded == nil {
+		t.Fatal("loadVersionCache returned nil")
+	}
+
+	if loaded.BdPath != cache.BdPath {
+		t.Errorf("BdPath = %q, want %q", loaded.BdPath, cache.BdPath)
+	}
+	if !loaded.BdMtime.Equal(cache.BdMtime) {
+		t.Errorf("BdMtime = %v, want %v", loaded.BdMtime, cache.BdMtime)
+	}
+	if loaded.Version != cache.Version {
+		t.Errorf("Version = %q, want %q", loaded.Version, cache.Version)
+	}
+}
+
+func TestVersionCacheInvalidation(t *testing.T) {
+	// Create a temp directory for the cache
+	tmpDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	t.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	// Ensure the .gt directory exists
+	gtDir := filepath.Join(tmpDir, ".gt")
+	if err := os.MkdirAll(gtDir, 0755); err != nil {
+		t.Fatalf("failed to create .gt dir: %v", err)
+	}
+
+	testTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	cache := &beadsVersionCache{
+		BdPath:  "/usr/local/bin/bd",
+		BdMtime: testTime,
+		Version: "0.45.0",
+	}
+	saveVersionCache(cache)
+
+	loaded := loadVersionCache()
+	if loaded == nil {
+		t.Fatal("loadVersionCache returned nil")
+	}
+
+	// Same path and mtime should be a cache hit
+	if loaded.BdPath != "/usr/local/bin/bd" || !loaded.BdMtime.Equal(testTime) {
+		t.Error("cache should match for same path and mtime")
+	}
+
+	// Different path should not match
+	if loaded.BdPath == "/different/path/bd" {
+		t.Error("cache should not match for different path")
+	}
+
+	// Different mtime should not match
+	differentTime := testTime.Add(time.Hour)
+	if loaded.BdMtime.Equal(differentTime) {
+		t.Error("cache should not match for different mtime")
+	}
+}
+
+func TestLoadVersionCacheNoFile(t *testing.T) {
+	// Create a temp directory with no cache file
+	tmpDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	t.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	// Should return nil when no cache file exists
+	loaded := loadVersionCache()
+	if loaded != nil {
+		t.Errorf("loadVersionCache should return nil when no cache file exists, got %+v", loaded)
 	}
 }
