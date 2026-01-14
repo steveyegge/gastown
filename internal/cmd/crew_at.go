@@ -262,7 +262,18 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 
 	// Check if we're already in the target session
 	if isInTmuxSession(sessionID) {
-		// We're in the session at a shell prompt - just start the agent directly
+		// Check if agent is already running - don't restart if so
+		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, r.Path, crewAgentOverride)
+		if err != nil {
+			return fmt.Errorf("resolving agent: %w", err)
+		}
+		if t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
+			// Agent is already running, nothing to do
+			fmt.Printf("Already in %s session with %s running.\n", name, agentCfg.Command)
+			return nil
+		}
+
+		// We're in the session at a shell prompt - start the agent
 		// Build startup beacon for predecessor discovery via /resume
 		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
 		beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
@@ -270,10 +281,6 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			Sender:    "human",
 			Topic:     "start",
 		})
-		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, r.Path, crewAgentOverride)
-		if err != nil {
-			return fmt.Errorf("resolving agent: %w", err)
-		}
 		fmt.Printf("Starting %s in current session...\n", agentCfg.Command)
 		return execAgent(agentCfg, beacon)
 	}
