@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 	"path/filepath"
 
@@ -72,24 +73,25 @@ func (a *SessionAdapter) Stop(rigName, polecatName string, force bool) error {
 
 // Start creates and starts a new session for a polecat with the given profile.
 func (a *SessionAdapter) Start(rigName, polecatName, profile string) (string, error) {
-	sessMgr, r, err := a.getSessionManager(rigName)
+	sessMgr, _, err := a.getSessionManager(rigName)
 	if err != nil {
 		return "", err
 	}
 
-	// Build startup command with profile
-	// Profile determines which API provider/account to use
 	opts := polecat.SessionStartOptions{}
 
-	// If profile specified, we need to configure the session to use it
-	// The profile maps to runtime configuration that includes API keys
+	// If profile specified, resolve it to a runtime config directory
+	// Profile maps to an account handle in accounts.json
 	if profile != "" {
-		// Build command that uses the specified profile
-		// This could be extended to pass profile to the runtime
-		cmd := config.BuildPolecatStartupCommand(rigName, polecatName, r.Path, "")
-		opts.Command = cmd
-		// Note: Full profile support would require extending SessionStartOptions
-		// to accept profile name and configure the runtime accordingly
+		accountsPath := filepath.Join(a.townRoot, "mayor", "accounts.json")
+		configDir, _, resolveErr := config.ResolveAccountConfigDir(accountsPath, profile)
+		if resolveErr != nil {
+			// Log warning but continue - fallback to default account
+			log.Printf("[WARN] failed to resolve profile '%s' to config dir: %v", profile, resolveErr)
+		} else if configDir != "" {
+			opts.Account = profile
+			opts.RuntimeConfigDir = configDir
+		}
 	}
 
 	if err := sessMgr.Start(polecatName, opts); err != nil {
@@ -105,6 +107,11 @@ type beadEntry struct {
 	ID string `json:"id"`
 }
 
+// formatAgentID constructs the agent ID for bd commands.
+func formatAgentID(rigName, polecatName string) string {
+	return fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+}
+
 // GetHookedWork returns the bead ID of work currently hooked to the polecat.
 func (a *SessionAdapter) GetHookedWork(rigName, polecatName string) (string, error) {
 	_, r, err := a.getSessionManager(rigName)
@@ -113,7 +120,7 @@ func (a *SessionAdapter) GetHookedWork(rigName, polecatName string) (string, err
 	}
 
 	// Run bd list to get hooked work
-	agentID := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+	agentID := formatAgentID(rigName, polecatName)
 	cmd := exec.Command("bd", "list", "--json", "--status=hooked", "--assignee="+agentID) //nolint:gosec
 	cmd.Dir = r.Path
 	output, err := cmd.Output()
@@ -142,7 +149,7 @@ func (a *SessionAdapter) HookWork(rigName, polecatName, beadID string) error {
 		return err
 	}
 
-	agentID := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+	agentID := formatAgentID(rigName, polecatName)
 	cmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID) //nolint:gosec
 	cmd.Dir = r.Path
 	return cmd.Run()

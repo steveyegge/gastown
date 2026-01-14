@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"fmt"
+	"log"
 )
 
 // Swapper handles graceful session replacement during rate limit events.
@@ -54,7 +55,8 @@ func (s *DefaultSwapper) Swap(ctx context.Context, req SwapRequest) (*SwapResult
 	// Step 4: Re-hook work if we had work hooked
 	if req.HookedWork != "" {
 		if err := s.ops.HookWork(req.RigName, req.PolecatName, req.HookedWork); err != nil {
-			// Log but don't fail - work might already be hooked
+			// Log but don't fail - work might already be hooked or re-hooked automatically
+			log.Printf("[WARN] failed to re-hook work %s: %v (non-fatal)", req.HookedWork, err)
 		}
 	}
 
