@@ -303,14 +303,14 @@ func (b *DaytonaBackend) waitForClaudeReady(ctx context.Context, sandboxID strin
 		time.Sleep(1 * time.Second)
 
 		output := readOutput()
-		fmt.Printf("Output: %s\n", output)
+		// fmt.Printf("Output: %s\n", output)
 
 		// Check for API key confirmation dialog
 		if !handledAPIKeyDialog && (strings.Contains(output, "Detected a custom API key") ||
 			strings.Contains(output, "Do you want to use this API key")) {
-			fmt.Println("*** API KEY CONFIRMATION DIALOG DETECTED ***")
+			// fmt.Println("*** API KEY CONFIRMATION DIALOG DETECTED ***")
 			// Need to press Up arrow to select "Yes", then Enter to confirm
-			fmt.Println("Sending Up arrow + Enter to select Yes...")
+			// fmt.Println("Sending Up arrow + Enter to select Yes...")
 			if err := ptyHandle.SendInput("\x1b[A"); err != nil { // Up arrow
 				return fmt.Errorf("sending up arrow: %w", err)
 			}
@@ -326,9 +326,9 @@ func (b *DaytonaBackend) waitForClaudeReady(ctx context.Context, sandboxID strin
 		// Check for Bypass Permissions warning dialog
 		if !handledBypassPermissionsDialog && (strings.Contains(output, "Bypass Permissions mode") ||
 			strings.Contains(output, "Yes, I accept")) {
-			fmt.Println("*** BYPASS PERMISSIONS DIALOG DETECTED ***")
+			// fmt.Println("*** BYPASS PERMISSIONS DIALOG DETECTED ***")
 			// Need to press Down arrow to select "Yes, I accept", then Enter
-			fmt.Println("Sending Down arrow + Enter to accept...")
+			// fmt.Println("Sending Down arrow + Enter to accept...")
 			if err := ptyHandle.SendInput("\x1b[B"); err != nil { // Down arrow
 				return fmt.Errorf("sending down arrow: %w", err)
 			}
@@ -343,7 +343,7 @@ func (b *DaytonaBackend) waitForClaudeReady(ctx context.Context, sandboxID strin
 
 		// Check if Claude is ready (look for welcome message or prompt)
 		if strings.Contains(output, "Welcome back") || strings.Contains(output, "bypass permissions on") {
-			fmt.Println("Claude is READY!")
+			// fmt.Println("Claude is READY!")
 			return nil
 		}
 	}
@@ -475,8 +475,8 @@ func (b *DaytonaBackend) IsRunning(ctx context.Context, session *Session) (bool,
 			// PTY session doesn't exist - process not running
 			return false, nil
 		}
-		// Check PTY status
-		return ptyInfo.Status == "running" || ptyInfo.Status == "active", nil
+		// Check PTY active status
+		return ptyInfo.Active, nil
 	}
 
 	// Sandbox is running but no PTY tracked - assume running

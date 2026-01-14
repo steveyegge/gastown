@@ -404,7 +404,7 @@ type PtySessionInfo struct {
 	ID     string `json:"id"`
 	Cols   int    `json:"cols"`
 	Rows   int    `json:"rows"`
-	Status string `json:"status"`
+	Active bool   `json:"active"`
 }
 
 // --- Toolbox API Methods ---

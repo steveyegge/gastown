@@ -650,9 +650,35 @@ func (m *SessionManager) IsRunning(polecat string) (bool, error) {
 		ctx := context.Background()
 		sessionName := m.SessionName(polecat)
 
-		// For remote backends, query the backend directly (source of truth).
-		// First check existence, then check if agent is actually running.
-		exists, err := m.backend.HasSession(ctx, sessionName)
+		// For remote backends, we need to check if a sandbox exists.
+		// First try cached session, then load persisted state to get sandbox_id.
+		var session *sandbox.Session
+		if cached, ok := m.activeSessions[polecat]; ok {
+			session = cached
+		} else {
+			// Try to load persisted state (cross-process session tracking)
+			state, err := m.loadSessionState(polecat)
+			if err != nil {
+				// No persisted state - session doesn't exist
+				return false, nil
+			}
+			// Build session from persisted state
+			session = &sandbox.Session{
+				ID:       sessionName,
+				Backend:  sandbox.BackendType(state.Backend),
+				Metadata: state.Metadata,
+			}
+		}
+
+		// Check if sandbox exists using sandbox_id from metadata
+		sandboxID := session.Metadata[sandbox.MetaSandboxID]
+		if sandboxID == "" {
+			// No sandbox_id - can't verify, assume not running
+			return false, nil
+		}
+
+		// Query the backend to check if sandbox is still active
+		exists, err := m.backend.HasSession(ctx, sandboxID)
 		if err != nil {
 			return false, err
 		}
@@ -660,14 +686,8 @@ func (m *SessionManager) IsRunning(polecat string) (bool, error) {
 			return false, nil
 		}
 
-		// Session exists - check if agent process is running
-		// Use cached session if available, otherwise create minimal session object
-		session := &sandbox.Session{ID: sessionName}
-		if cached, ok := m.activeSessions[polecat]; ok {
-			session = cached
-		}
-
-		return m.backend.IsRunning(ctx, session)
+		running, err := m.backend.IsRunning(ctx, session)
+		return running, err
 	}
 
 	sessionID := m.SessionName(polecat)
