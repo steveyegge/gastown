@@ -76,7 +76,14 @@ Batch Slinging:
   gt sling gt-abc gt-def gt-ghi gastown   # Sling multiple beads to a rig
 
   When multiple beads are provided with a rig target, each bead gets its own
-  polecat. This parallelizes work dispatch without running gt sling N times.`,
+  polecat. This parallelizes work dispatch without running gt sling N times.
+
+JSON Output (--json):
+  For automation, use --json to get structured output:
+  gt sling gt-abc gastown --json
+
+  Output includes: action, bead_id, target, convoy_id, nudge_sent, and more.
+  Actions: "slung" (normal), "spawned" (new polecat), "dry_run" (--dry-run).`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runSling,
 }
@@ -88,6 +95,7 @@ var (
 	slingOnTarget string   // --on flag: target bead when slinging a formula
 	slingVars     []string // --var flag: formula variables (key=value)
 	slingArgs     string   // --args flag: natural language instructions for executor
+	slingJSON     bool     // --json flag: output structured JSON
 
 	// Flags migrated for polecat spawning (used by sling for work assignment)
 	slingCreate   bool   // --create: create polecat if it doesn't exist
@@ -96,6 +104,41 @@ var (
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
 )
+
+// Sling action constants for JSON output.
+const (
+	slingActionSlung   = "slung"   // Successfully slung work to target
+	slingActionDryRun  = "dry_run" // Dry run - no actual changes made
+	slingActionSpawned = "spawned" // Spawned polecat and slung work
+)
+
+// slingResult represents the outcome of a sling operation for JSON output.
+type slingResult struct {
+	Action         string `json:"action"`                     // One of: slung, dry_run, spawned
+	BeadID         string `json:"bead_id"`                    // The bead that was slung (final ID after bonding)
+	OriginalBeadID string `json:"original_bead_id,omitempty"` // Original bead ID (before formula bonding)
+	Target         string `json:"target"`                     // Target agent
+	Formula        string `json:"formula,omitempty"`          // Formula name if formula-on-bead mode
+	WispID         string `json:"wisp_id,omitempty"`          // Created wisp ID if formula mode
+	ConvoyID       string `json:"convoy_id,omitempty"`        // Auto-created convoy ID
+	Pane           string `json:"pane,omitempty"`             // Target pane
+	SpawnedPolecat bool   `json:"spawned_polecat,omitempty"`  // Whether a polecat was spawned
+	PolecatName    string `json:"polecat_name,omitempty"`     // Name of spawned polecat
+	NudgeSent      bool   `json:"nudge_sent"`                 // Whether start prompt was sent
+}
+
+// outputSlingResult outputs the sling result as JSON.
+func outputSlingResult(result slingResult) error {
+	enc := json.NewEncoder(os.Stdout)
+	return enc.Encode(result)
+}
+
+// slingPrintf prints formatted output only if not in JSON mode.
+func slingPrintf(format string, args ...interface{}) {
+	if !slingJSON {
+		fmt.Printf(format, args...)
+	}
+}
 
 func init() {
 	slingCmd.Flags().StringVarP(&slingSubject, "subject", "s", "", "Context subject for the work")
@@ -111,6 +154,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
 	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
+	slingCmd.Flags().BoolVar(&slingJSON, "json", false, "Output structured JSON for automation")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -185,6 +229,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Initialize result for JSON output
+	result := slingResult{
+		Action: slingActionSlung,
+	}
+
 	// Determine target agent (self or specified)
 	var targetAgent string
 	var targetPane string
@@ -202,9 +251,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 		} else if dogName, isDog := IsDogTarget(target); isDog {
 			if slingDryRun {
 				if dogName == "" {
-					fmt.Printf("Would dispatch to idle dog in kennel\n")
+					slingPrintf("Would dispatch to idle dog in kennel\n")
 				} else {
-					fmt.Printf("Would dispatch to dog '%s'\n", dogName)
+					slingPrintf("Would dispatch to dog '%s'\n", dogName)
 				}
 				targetAgent = fmt.Sprintf("deacon/dogs/%s", dogName)
 				if dogName == "" {
@@ -219,18 +268,19 @@ func runSling(cmd *cobra.Command, args []string) error {
 				}
 				targetAgent = dispatchInfo.AgentID
 				targetPane = dispatchInfo.Pane
-				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
+				slingPrintf("Dispatched to dog %s\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
 			// Check if target is a rig name (auto-spawn polecat)
 			if slingDryRun {
 				// Dry run - just indicate what would happen
-				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
+				slingPrintf("Would spawn fresh polecat in rig '%s'\n", rigName)
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
 				targetPane = "<new-pane>"
+				result.SpawnedPolecat = true
 			} else {
 				// Spawn a fresh polecat in the rig
-				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
+				slingPrintf("Target is rig '%s', spawning fresh polecat...\n", rigName)
 				spawnOpts := SlingSpawnOptions{
 					Force:    slingForce,
 					Account:  slingAccount,
@@ -245,6 +295,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 				targetAgent = spawnInfo.AgentID()
 				targetPane = spawnInfo.Pane
 				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
+				result.SpawnedPolecat = true
+				result.PolecatName = spawnInfo.PolecatName
+				result.Action = slingActionSpawned
 
 				// Wake witness and refinery to monitor the new polecat
 				wakeRigAgents(rigName)
@@ -261,7 +314,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 					parts := strings.Split(target, "/")
 					if len(parts) >= 3 && parts[1] == "polecats" {
 						rigName := parts[0]
-						fmt.Printf("Target polecat has no active session, spawning fresh polecat in rig '%s'...\n", rigName)
+						slingPrintf("Target polecat has no active session, spawning fresh polecat in rig '%s'...\n", rigName)
 						spawnOpts := SlingSpawnOptions{
 							Force:    slingForce,
 							Account:  slingAccount,
@@ -276,6 +329,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 						targetAgent = spawnInfo.AgentID()
 						targetPane = spawnInfo.Pane
 						hookWorkDir = spawnInfo.ClonePath
+						result.SpawnedPolecat = true
+						result.PolecatName = spawnInfo.PolecatName
+						result.Action = slingActionSpawned
 
 						// Wake witness and refinery to monitor the new polecat
 						wakeRigAgents(rigName)
@@ -304,11 +360,20 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Set result fields (BeadID may be updated after formula bonding)
+	result.BeadID = beadID
+	result.Target = targetAgent
+	result.Formula = formulaName
+	result.Pane = targetPane
+	if formulaName != "" {
+		result.OriginalBeadID = beadID // Track original before formula changes it
+	}
+
 	// Display what we're doing
 	if formulaName != "" {
-		fmt.Printf("%s Slinging formula %s on %s to %s...\n", style.Bold.Render("🎯"), formulaName, beadID, targetAgent)
+		slingPrintf("%s Slinging formula %s on %s to %s...\n", style.Bold.Render("🎯"), formulaName, beadID, targetAgent)
 	} else {
-		fmt.Printf("%s Slinging %s to %s...\n", style.Bold.Render("🎯"), beadID, targetAgent)
+		slingPrintf("%s Slinging %s to %s...\n", style.Bold.Render("🎯"), beadID, targetAgent)
 	}
 
 	// Check if bead is already pinned (guard against accidental re-sling)
@@ -330,49 +395,55 @@ func runSling(cmd *cobra.Command, args []string) error {
 		existingConvoy := isTrackedByConvoy(beadID)
 		if existingConvoy == "" {
 			if slingDryRun {
-				fmt.Printf("Would create convoy 'Work: %s'\n", info.Title)
-				fmt.Printf("Would add tracking relation to %s\n", beadID)
+				slingPrintf("Would create convoy 'Work: %s'\n", info.Title)
+				slingPrintf("Would add tracking relation to %s\n", beadID)
 			} else {
 				convoyID, err := createAutoConvoy(beadID, info.Title)
 				if err != nil {
 					// Log warning but don't fail - convoy is optional
-					fmt.Printf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
+					slingPrintf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
 				} else {
-					fmt.Printf("%s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
-					fmt.Printf("  Tracking: %s\n", beadID)
+					result.ConvoyID = convoyID
+					slingPrintf("%s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
+					slingPrintf("  Tracking: %s\n", beadID)
 				}
 			}
 		} else {
-			fmt.Printf("%s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
+			result.ConvoyID = existingConvoy
+			slingPrintf("%s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
 		}
 	}
 
 	if slingDryRun {
 		if formulaName != "" {
-			fmt.Printf("Would instantiate formula %s:\n", formulaName)
-			fmt.Printf("  1. bd cook %s\n", formulaName)
-			fmt.Printf("  2. bd mol wisp %s --var feature=\"%s\" --var issue=\"%s\"\n", formulaName, info.Title, beadID)
-			fmt.Printf("  3. bd mol bond <wisp-root> %s\n", beadID)
-			fmt.Printf("  4. bd update <compound-root> --status=hooked --assignee=%s\n", targetAgent)
+			slingPrintf("Would instantiate formula %s:\n", formulaName)
+			slingPrintf("  1. bd cook %s\n", formulaName)
+			slingPrintf("  2. bd mol wisp %s --var feature=\"%s\" --var issue=\"%s\"\n", formulaName, info.Title, beadID)
+			slingPrintf("  3. bd mol bond <wisp-root> %s\n", beadID)
+			slingPrintf("  4. bd update <compound-root> --status=hooked --assignee=%s\n", targetAgent)
 		} else {
-			fmt.Printf("Would run: bd update %s --status=hooked --assignee=%s\n", beadID, targetAgent)
+			slingPrintf("Would run: bd update %s --status=hooked --assignee=%s\n", beadID, targetAgent)
 		}
 		if slingSubject != "" {
-			fmt.Printf("  subject (in nudge): %s\n", slingSubject)
+			slingPrintf("  subject (in nudge): %s\n", slingSubject)
 		}
 		if slingMessage != "" {
-			fmt.Printf("  context: %s\n", slingMessage)
+			slingPrintf("  context: %s\n", slingMessage)
 		}
 		if slingArgs != "" {
-			fmt.Printf("  args (in nudge): %s\n", slingArgs)
+			slingPrintf("  args (in nudge): %s\n", slingArgs)
 		}
-		fmt.Printf("Would inject start prompt to pane: %s\n", targetPane)
+		slingPrintf("Would inject start prompt to pane: %s\n", targetPane)
+		if slingJSON {
+			result.Action = slingActionDryRun
+			return outputSlingResult(result)
+		}
 		return nil
 	}
 
 	// Formula-on-bead mode: instantiate formula and bond to original bead
 	if formulaName != "" {
-		fmt.Printf("  Instantiating formula %s...\n", formulaName)
+		slingPrintf("  Instantiating formula %s...\n", formulaName)
 
 		// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
 		// Some bd mol commands don't support prefix routing, so we must run them from the
@@ -407,7 +478,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("parsing wisp output: %w", err)
 		}
-		fmt.Printf("%s Formula wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
+		result.WispID = wispRootID
+		slingPrintf("%s Formula wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
 
 		// Step 3: Bond wisp to original bead (creates compound)
 		// Use --no-daemon for mol bond (requires direct database access)
@@ -427,15 +499,16 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 		if err := json.Unmarshal(bondOut, &bondResult); err != nil {
 			// Fallback: use wisp root as the compound root
-			fmt.Printf("%s Could not parse bond output, using wisp root\n", style.Dim.Render("Warning:"))
+			slingPrintf("%s Could not parse bond output, using wisp root\n", style.Dim.Render("Warning:"))
 		} else if bondResult.RootID != "" {
 			wispRootID = bondResult.RootID
 		}
 
-		fmt.Printf("%s Formula bonded to %s\n", style.Bold.Render("✓"), beadID)
+		slingPrintf("%s Formula bonded to %s\n", style.Bold.Render("✓"), beadID)
 
 		// Update beadID to hook the compound root instead of bare bead
 		beadID = wispRootID
+		result.BeadID = wispRootID // Update result to reflect final bead ID
 	}
 
 	// Hook the bead using bd update.
@@ -447,7 +520,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("hooking bead: %w", err)
 	}
 
-	fmt.Printf("%s Work attached to hook (status=hooked)\n", style.Bold.Render("✓"))
+	slingPrintf("%s Work attached to hook (status=hooked)\n", style.Bold.Render("✓"))
 
 	// Log sling event to activity feed
 	actor := detectActor()
@@ -461,29 +534,29 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if strings.Contains(targetAgent, "/polecats/") {
 		if err := attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot); err != nil {
 			// Warn but don't fail - polecat will still work without molecule
-			fmt.Printf("%s Could not attach work molecule: %v\n", style.Dim.Render("Warning:"), err)
+			slingPrintf("%s Could not attach work molecule: %v\n", style.Dim.Render("Warning:"), err)
 		}
 	}
 
 	// Store dispatcher in bead description (enables completion notification to dispatcher)
 	if err := storeDispatcherInBead(beadID, actor); err != nil {
 		// Warn but don't fail - polecat will still complete work
-		fmt.Printf("%s Could not store dispatcher in bead: %v\n", style.Dim.Render("Warning:"), err)
+		slingPrintf("%s Could not store dispatcher in bead: %v\n", style.Dim.Render("Warning:"), err)
 	}
 
 	// Store args in bead description (no-tmux mode: beads as data plane)
 	if slingArgs != "" {
 		if err := storeArgsInBead(beadID, slingArgs); err != nil {
 			// Warn but don't fail - args will still be in the nudge prompt
-			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
+			slingPrintf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
 		} else {
-			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
+			slingPrintf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
 		}
 	}
 
 	// Try to inject the "start now" prompt (graceful if no tmux)
 	if targetPane == "" {
-		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
+		slingPrintf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
 	} else {
 		// Ensure agent is ready before nudging (prevents race condition where
 		// message arrives before Claude has fully started - see issue #115)
@@ -491,17 +564,23 @@ func runSling(cmd *cobra.Command, args []string) error {
 		if sessionName != "" {
 			if err := ensureAgentReady(sessionName); err != nil {
 				// Non-fatal: warn and continue, agent will discover work via gt prime
-				fmt.Printf("%s Could not verify agent ready: %v\n", style.Dim.Render("○"), err)
+				slingPrintf("%s Could not verify agent ready: %v\n", style.Dim.Render("○"), err)
 			}
 		}
 
 		if err := injectStartPrompt(targetPane, beadID, slingSubject, slingArgs); err != nil {
 			// Graceful fallback for no-tmux mode
-			fmt.Printf("%s Could not nudge (no tmux?): %v\n", style.Dim.Render("○"), err)
-			fmt.Printf("  Agent will discover work via gt prime / bd show\n")
+			slingPrintf("%s Could not nudge (no tmux?): %v\n", style.Dim.Render("○"), err)
+			slingPrintf("  Agent will discover work via gt prime / bd show\n")
 		} else {
-			fmt.Printf("%s Start prompt sent\n", style.Bold.Render("▶"))
+			result.NudgeSent = true
+			slingPrintf("%s Start prompt sent\n", style.Bold.Render("▶"))
 		}
+	}
+
+	// Output JSON if requested
+	if slingJSON {
+		return outputSlingResult(result)
 	}
 
 	return nil
