@@ -499,7 +499,7 @@ func runSeanceSummaryWithError(ctx context.Context, sessionID string) (string, e
 	if err := cmd.Run(); err != nil {
 		// Check for context cancellation/timeout
 		if ctx.Err() != nil {
-			return "", fmt.Errorf("seance cancelled: %w", ctx.Err())
+			return "", fmt.Errorf("seance canceled: %w", ctx.Err())
 		}
 
 		// Include stderr in error message if available
