@@ -8,6 +8,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -42,20 +45,20 @@ func init() {
 
 // SessionProcess represents a tmux session with process information
 type SessionProcess struct {
-	Name         string `json:"name"`
-	Alive        bool   `json:"alive"`
-	Command      string `json:"command"`
-	PID          string `json:"pid"`
-	WorkDir      string `json:"work_dir"`
-	Attached     bool   `json:"attached"`
-	HookBead     string `json:"hook_bead,omitempty"`
-	AgentID      string `json:"agent_id,omitempty"`
-	Role         string `json:"role,omitempty"`
-	IsGasTown    bool   `json:"is_gas_town"`
+	Name      string `json:"name"`
+	Alive     bool   `json:"alive"`
+	Command   string `json:"command"`
+	PID       string `json:"pid"`
+	WorkDir   string `json:"work_dir"`
+	Attached  bool   `json:"attached"`
+	HookBead  string `json:"hook_bead,omitempty"`
+	AgentID   string `json:"agent_id,omitempty"`
+	Role      string `json:"role,omitempty"`
+	IsGasTown bool   `json:"is_gas_town"`
 }
 
 func runPS(cmd *cobra.Command, args []string) error {
-	_, err := workspace.FindFromCwdOrError()
+	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
@@ -78,46 +81,49 @@ func runPS(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get agent data for work-on-hook information
-	agents := loadAgentData()
+	agents := loadAgentData(townRoot)
 
 	// Collect session information
 	var sessionProcesses []SessionProcess
 
-	for _, session := range sessions {
-		if session == "" {
+	for _, sessionName := range sessions {
+		if sessionName == "" {
 			continue
 		}
 
 		sp := SessionProcess{
-			Name:      session,
-			IsGasTown: isGasTownSession(session),
+			Name:      sessionName,
+			IsGasTown: isGasTownSession(sessionName),
 		}
 
 		// Get process information
-		if cmd, err := tmuxClient.GetPaneCommand(session); err == nil {
+		if cmd, err := tmuxClient.GetPaneCommand(sessionName); err == nil {
 			sp.Command = cmd
 			sp.Alive = !isShellCommand(cmd)
 		}
 
 		// Get PID
-		if pid, err := tmuxClient.GetPanePID(session); err == nil {
+		if pid, err := tmuxClient.GetPanePID(sessionName); err == nil {
 			sp.PID = pid
 		}
 
 		// Get work directory
-		if workDir, err := tmuxClient.GetPaneWorkDir(session); err == nil {
+		if workDir, err := tmuxClient.GetPaneWorkDir(sessionName); err == nil {
 			sp.WorkDir = workDir
 		}
 
 		// Get attached status
-		if info, err := tmuxClient.GetSessionInfo(session); err == nil {
+		if info, err := tmuxClient.GetSessionInfo(sessionName); err == nil {
 			sp.Attached = info.Attached
 		}
 
 		// Get agent information if this is a Gas Town session
 		if sp.IsGasTown {
-			sp.Role = extractRoleFromSession(session)
-			sp.AgentID = extractAgentIDFromSession(session)
+			identity, err := session.ParseSessionName(sessionName)
+			if err == nil {
+				sp.Role = string(identity.Role)
+				sp.AgentID = agentIDFromIdentity(townRoot, identity)
+			}
 
 			// Look up work-on-hook
 			if agentInfo, ok := agents[sp.AgentID]; ok {
@@ -211,10 +217,13 @@ type AgentInfo struct {
 	HookBead string `json:"hook_bead"`
 }
 
-func loadAgentData() map[string]AgentInfo {
+func loadAgentData(townRoot string) map[string]AgentInfo {
 	agents := make(map[string]AgentInfo)
 
 	cmd := exec.Command("bd", "list", "--type=agent", "--json")
+	if townRoot != "" {
+		cmd.Dir = townRoot
+	}
 	output, err := cmd.Output()
 	if err != nil {
 		return agents
@@ -236,40 +245,28 @@ func isGasTownSession(name string) bool {
 	return strings.HasPrefix(name, "gt-") || strings.HasPrefix(name, "hq-")
 }
 
-func extractRoleFromSession(session string) string {
-	// Session name format: gt-<rig>-<role>-<name> or gt-<role> (for town-level)
-	parts := strings.Split(session, "-")
-	if len(parts) < 2 {
+func agentIDFromIdentity(townRoot string, identity *session.AgentIdentity) string {
+	if identity == nil {
 		return ""
 	}
-
-	// Check for town-level agents (gt-mayor, gt-deacon)
-	if len(parts) == 2 {
-		return parts[1]
+	switch identity.Role {
+	case session.RoleMayor:
+		return beads.MayorBeadIDTown()
+	case session.RoleDeacon:
+		return beads.DeaconBeadIDTown()
+	case session.RoleWitness:
+		prefix := config.GetRigPrefix(townRoot, identity.Rig)
+		return beads.WitnessBeadIDWithPrefix(prefix, identity.Rig)
+	case session.RoleRefinery:
+		prefix := config.GetRigPrefix(townRoot, identity.Rig)
+		return beads.RefineryBeadIDWithPrefix(prefix, identity.Rig)
+	case session.RoleCrew:
+		prefix := config.GetRigPrefix(townRoot, identity.Rig)
+		return beads.CrewBeadIDWithPrefix(prefix, identity.Rig, identity.Name)
+	case session.RolePolecat:
+		prefix := config.GetRigPrefix(townRoot, identity.Rig)
+		return beads.PolecatBeadIDWithPrefix(prefix, identity.Rig, identity.Name)
+	default:
+		return ""
 	}
-
-	// Rig-level agents (gt-<rig>-<role>-<name>)
-	if len(parts) >= 3 {
-		return parts[2]
-	}
-
-	return ""
-}
-
-func extractAgentIDFromSession(session string) string {
-	// Session format: gt-<rig>-<name> → agent ID: gt-<rig>-polecat-<name>
-	// Town-level: gt-mayor → mayor
-	parts := strings.Split(session, "-")
-
-	if len(parts) == 2 {
-		// Town-level agent (gt-mayor, gt-deacon)
-		return parts[1]
-	}
-
-	// For polecats: gt-gastown-Toast → gt-gastown-polecat-Toast
-	if len(parts) == 3 {
-		return fmt.Sprintf("%s-%s-polecat-%s", parts[0], parts[1], parts[2])
-	}
-
-	return session
 }
