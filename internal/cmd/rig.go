@@ -556,8 +556,8 @@ func runRigReset(cmd *cobra.Command, args []string) error {
 
 	// Town beads for handoff/mail operations
 	townBd := beads.New(townRoot)
-	// Rig beads for issue operations (uses cwd to find .beads/)
-	rigBd := beads.New(cwd)
+	// Rig beads for issue operations (resolve redirect for polecat worktrees)
+	rigBd := beads.New(beads.ResolveBeadsDir(cwd))
 
 	// Reset handoff content
 	if resetAll || rigResetHandoff {

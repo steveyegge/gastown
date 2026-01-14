@@ -44,7 +44,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
 
-	bd := beads.New(cwd)
+	bd := beads.New(beads.ResolveBeadsDir(cwd))
 
 	// Release each issue
 	var released, failed int
