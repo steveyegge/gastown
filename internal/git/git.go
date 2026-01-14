@@ -953,6 +953,32 @@ func (s *UncommittedWorkStatus) Clean() bool {
 	return !s.HasUncommittedChanges && s.StashCount == 0 && s.UnpushedCommits == 0
 }
 
+// CleanExcludingBeads returns true if the only uncommitted changes are in .beads/ paths.
+// This is used by stale detection to allow cleanup of polecats that only have beads sync changes.
+func (s *UncommittedWorkStatus) CleanExcludingBeads() bool {
+	if s.StashCount > 0 || s.UnpushedCommits > 0 {
+		return false
+	}
+
+	// Check if all modified files are beads files
+	for _, f := range s.ModifiedFiles {
+		if !isBeadsPath(f) {
+			return false
+		}
+	}
+	for _, f := range s.UntrackedFiles {
+		if !isBeadsPath(f) {
+			return false
+		}
+	}
+	return true
+}
+
+// isBeadsPath returns true if the path is a beads database file.
+func isBeadsPath(path string) bool {
+	return strings.Contains(path, ".beads/") || strings.Contains(path, ".beads\\")
+}
+
 // String returns a human-readable summary of uncommitted work.
 func (s *UncommittedWorkStatus) String() string {
 	var issues []string

@@ -387,3 +387,117 @@ func TestCheckConflicts_WithConflict(t *testing.T) {
 		t.Error("expected clean working directory after CheckConflicts")
 	}
 }
+
+func TestIsBeadsPath(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		// Beads paths
+		{".beads/issues.jsonl", true},
+		{".beads/agents.jsonl", true},
+		{"some/dir/.beads/issues.jsonl", true},
+		{".beads\\issues.jsonl", true}, // Windows path separator
+		{"foo/.beads/bar", true},
+
+		// Non-beads paths
+		{"src/main.go", false},
+		{"README.md", false},
+		{".github/workflows/ci.yml", false},
+		{"beads/not-dotbeads.txt", false}, // Missing the dot
+		{".beadsfile", false},             // Not a directory path
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got := isBeadsPath(tt.path)
+			if got != tt.expected {
+				t.Errorf("isBeadsPath(%q) = %v, want %v", tt.path, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCleanExcludingBeads_OnlyBeadsFiles(t *testing.T) {
+	status := &UncommittedWorkStatus{
+		HasUncommittedChanges: true,
+		StashCount:            0,
+		UnpushedCommits:       0,
+		ModifiedFiles:         []string{".beads/issues.jsonl"},
+		UntrackedFiles:        []string{".beads/agents.jsonl"},
+	}
+
+	if !status.CleanExcludingBeads() {
+		t.Error("expected CleanExcludingBeads() to return true when only beads files changed")
+	}
+}
+
+func TestCleanExcludingBeads_RealCodeFiles(t *testing.T) {
+	status := &UncommittedWorkStatus{
+		HasUncommittedChanges: true,
+		StashCount:            0,
+		UnpushedCommits:       0,
+		ModifiedFiles:         []string{"src/main.go", ".beads/issues.jsonl"},
+		UntrackedFiles:        nil,
+	}
+
+	if status.CleanExcludingBeads() {
+		t.Error("expected CleanExcludingBeads() to return false when real code files changed")
+	}
+}
+
+func TestCleanExcludingBeads_UntrackedNonBeads(t *testing.T) {
+	status := &UncommittedWorkStatus{
+		HasUncommittedChanges: true,
+		StashCount:            0,
+		UnpushedCommits:       0,
+		ModifiedFiles:         []string{".beads/issues.jsonl"},
+		UntrackedFiles:        []string{"newfile.txt"},
+	}
+
+	if status.CleanExcludingBeads() {
+		t.Error("expected CleanExcludingBeads() to return false when untracked non-beads files exist")
+	}
+}
+
+func TestCleanExcludingBeads_WithStash(t *testing.T) {
+	status := &UncommittedWorkStatus{
+		HasUncommittedChanges: false,
+		StashCount:            1,
+		UnpushedCommits:       0,
+		ModifiedFiles:         nil,
+		UntrackedFiles:        nil,
+	}
+
+	if status.CleanExcludingBeads() {
+		t.Error("expected CleanExcludingBeads() to return false when stashes exist")
+	}
+}
+
+func TestCleanExcludingBeads_WithUnpushedCommits(t *testing.T) {
+	status := &UncommittedWorkStatus{
+		HasUncommittedChanges: false,
+		StashCount:            0,
+		UnpushedCommits:       3,
+		ModifiedFiles:         nil,
+		UntrackedFiles:        nil,
+	}
+
+	if status.CleanExcludingBeads() {
+		t.Error("expected CleanExcludingBeads() to return false when unpushed commits exist")
+	}
+}
+
+func TestCleanExcludingBeads_TrulyClean(t *testing.T) {
+	status := &UncommittedWorkStatus{
+		HasUncommittedChanges: false,
+		StashCount:            0,
+		UnpushedCommits:       0,
+		ModifiedFiles:         nil,
+		UntrackedFiles:        nil,
+	}
+
+	if !status.CleanExcludingBeads() {
+		t.Error("expected CleanExcludingBeads() to return true when everything is clean")
+	}
+}

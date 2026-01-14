@@ -892,9 +892,9 @@ func (m *Manager) DetectStalePolecats(threshold int) ([]*StalenessInfo, error) {
 		polecatGit := git.NewGit(p.ClonePath)
 		info.CommitsBehind = countCommitsBehind(polecatGit, defaultBranch)
 
-		// Check for uncommitted work
+		// Check for uncommitted work (excluding beads-only changes)
 		status, err := polecatGit.CheckUncommittedWork()
-		if err == nil && !status.Clean() {
+		if err == nil && !status.CleanExcludingBeads() {
 			info.HasUncommittedWork = true
 		}
 
