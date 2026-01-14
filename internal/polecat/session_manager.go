@@ -617,12 +617,6 @@ func (m *SessionManager) stopWithRemoteBackend(polecat string, force bool) error
 		}
 	}
 
-	// Try graceful shutdown first
-	if !force {
-		_ = m.backend.Stop(ctx, sandboxSession)
-		time.Sleep(100 * time.Millisecond)
-	}
-
 	// Destroy the sandbox
 	if err := m.backend.Destroy(ctx, sandboxSession); err != nil {
 		return fmt.Errorf("destroying sandbox: %w", err)

@@ -309,7 +309,7 @@ func TestDaytonaPtySession(t *testing.T) {
 
 	// Stop the session
 	t.Log("Stopping session...")
-	if err := backend.Stop(ctx, session); err != nil {
+	if err := backend.Destroy(ctx, session); err != nil {
 		t.Errorf("Failed to stop session: %v", err)
 	} else {
 		t.Log("Session stopped")
@@ -833,7 +833,7 @@ func TestDaytonaPtySessionInfo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get PTY session info: %v", err)
 	}
-	t.Logf("PTY info: ID=%s, Cols=%d, Rows=%d, Status=%s", info.ID, info.Cols, info.Rows, info.Status)
+	t.Logf("PTY info: ID=%s, Cols=%d, Rows=%d, Active=%v", info.ID, info.Cols, info.Rows, info.Active)
 
 	if info.Cols != 120 || info.Rows != 40 {
 		t.Errorf("Expected cols=120, rows=40, got cols=%d, rows=%d", info.Cols, info.Rows)
@@ -914,7 +914,7 @@ func TestDaytonaClaudeCode(t *testing.T) {
 
 	// Stop
 	t.Log("Stopping Claude...")
-	if err := backend.Stop(ctx, session); err != nil {
+	if err := backend.Destroy(ctx, session); err != nil {
 		t.Errorf("Failed to stop: %v", err)
 	}
 	t.Log("Test completed")
@@ -974,7 +974,7 @@ func TestDaytonaClaudePtyStream(t *testing.T) {
 
 	// Stop Claude
 	t.Log("Stopping Claude...")
-	if err := backend.Stop(ctx, session); err != nil {
+	if err := backend.Destroy(ctx, session); err != nil {
 		t.Errorf("Failed to stop: %v", err)
 	}
 	t.Log("Test completed")
