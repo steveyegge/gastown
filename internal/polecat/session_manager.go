@@ -466,8 +466,8 @@ func (m *SessionManager) startWithRemoteBackend(polecat string, opts SessionStar
 		"BEADS_NO_DAEMON":  "1",
 		"BEADS_AGENT_NAME": fmt.Sprintf("%s/%s", m.rig.Name, polecat),
 	}
-	if opts.ClaudeConfigDir != "" {
-		env["CLAUDE_CONFIG_DIR"] = opts.ClaudeConfigDir
+	if opts.RuntimeConfigDir != "" {
+		env["CLAUDE_CONFIG_DIR"] = opts.RuntimeConfigDir
 	}
 
 	// Create sandbox session with remote working directory

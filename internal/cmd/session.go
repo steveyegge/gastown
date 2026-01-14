@@ -235,7 +235,7 @@ func getSessionManager(rigName string) (*polecat.SessionManager, *rig.Rig, error
 
 	// Use Manager.GetSessionManagerWithTmux to properly load sandbox config
 	polecatGit := git.NewGit(r.Path)
-	mgr := polecat.NewManager(r, polecatGit)
+	mgr := polecat.NewManager(r, polecatGit, t)
 	polecatMgr, err := mgr.GetSessionManagerWithTmux(t)
 	if err != nil {
 		// Fall back to direct session manager if sandbox config fails

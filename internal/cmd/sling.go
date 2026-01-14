@@ -242,7 +242,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 				spawnOpts := SlingSpawnOptions{
 					Force:      slingForce,
-					Naked:      slingNaked,
 					Account:    slingAccount,
 					Create:     slingCreate,
 					HookBead:   beadID, // Set atomically at spawn time
@@ -546,17 +545,6 @@ func buildTaskPromptForRemote(beadID string, info *beadInfo, args string) string
 	fmt.Fprintf(&sb, "## Task: %s\n\n", info.Title)
 	fmt.Fprintf(&sb, "**Bead ID:** %s\n", beadID)
 	fmt.Fprintf(&sb, "**Working Directory:** %s\n", remoteWorkDir)
-
-	if len(info.Labels) > 0 {
-		fmt.Fprintf(&sb, "**Labels:** %s\n", strings.Join(info.Labels, ", "))
-	}
-
-	sb.WriteString("\n### Description\n\n")
-	if info.Description != "" {
-		sb.WriteString(info.Description)
-	} else {
-		sb.WriteString("(No description provided)")
-	}
 
 	if args != "" {
 		fmt.Fprintf(&sb, "\n\n### Instructions\n\n%s", args)

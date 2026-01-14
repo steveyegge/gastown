@@ -34,7 +34,6 @@ func (s *SpawnedPolecatInfo) AgentID() string {
 // SlingSpawnOptions contains options for spawning a polecat via sling.
 type SlingSpawnOptions struct {
 	Force      bool   // Force spawn even if polecat has uncommitted work
-	Naked      bool   // No-tmux mode: skip session creation
 	Account    string // Claude Code account handle to use
 	Create     bool   // Create polecat if it doesn't exist (currently always true for sling)
 	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
