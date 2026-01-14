@@ -424,6 +424,9 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 // deterministic IDs rather than auto-generated ones.
 func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	args := []string{"create", "--json", "--id=" + id}
+	if NeedsForceForID(id) {
+		args = append(args, "--force")
+	}
 
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)

@@ -139,6 +139,9 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--type=agent",
 		"--labels=gt:agent",
 	}
+	if NeedsForceForID(id) {
+		args = append(args, "--force")
+	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking
 	if actor := os.Getenv("BD_ACTOR"); actor != "" {

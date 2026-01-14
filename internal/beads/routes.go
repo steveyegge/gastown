@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 // Route represents a prefix-to-path routing rule.
@@ -150,7 +152,7 @@ func GetPrefixForRig(townRoot, rigName string) string {
 	beadsDir := filepath.Join(townRoot, ".beads")
 	routes, err := LoadRoutes(beadsDir)
 	if err != nil || routes == nil {
-		return "gt" // Default prefix
+		return config.GetRigPrefix(townRoot, rigName)
 	}
 
 	// Look for a route where the path starts with the rig name
@@ -163,7 +165,7 @@ func GetPrefixForRig(townRoot, rigName string) string {
 		}
 	}
 
-	return "gt" // Default prefix
+	return config.GetRigPrefix(townRoot, rigName)
 }
 
 // FindConflictingPrefixes checks for duplicate prefixes in routes.

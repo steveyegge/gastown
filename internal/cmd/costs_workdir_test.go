@@ -211,7 +211,14 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	if wsErr != nil {
 		t.Fatalf("workspace.FindFromCwdOrError failed: %v", wsErr)
 	}
-	if foundTownRoot != townRoot {
+	normalizePath := func(path string) string {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return filepath.Clean(path)
+		}
+		return resolved
+	}
+	if normalizePath(foundTownRoot) != normalizePath(townRoot) {
 		t.Errorf("workspace.FindFromCwdOrError returned %s, expected %s", foundTownRoot, townRoot)
 	}
 

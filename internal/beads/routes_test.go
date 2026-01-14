@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 func TestGetPrefixForRig(t *testing.T) {
@@ -49,6 +51,33 @@ func TestGetPrefixForRig_NoRoutesFile(t *testing.T) {
 	result := GetPrefixForRig(tmpDir, "anything")
 	if result != "gt" {
 		t.Errorf("Expected default 'gt' when no routes file, got %q", result)
+	}
+}
+
+func TestGetPrefixForRig_RigsConfigFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Write rigs.json with a non-gt prefix
+	rigsPath := filepath.Join(tmpDir, "mayor", "rigs.json")
+	if err := os.MkdirAll(filepath.Dir(rigsPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.RigsConfig{
+		Version: config.CurrentRigsVersion,
+		Rigs: map[string]config.RigEntry{
+			"project_ideas": {
+				BeadsConfig: &config.BeadsConfig{Prefix: "pi"},
+			},
+		},
+	}
+	if err := config.SaveRigsConfig(rigsPath, cfg); err != nil {
+		t.Fatalf("SaveRigsConfig: %v", err)
+	}
+
+	result := GetPrefixForRig(tmpDir, "project_ideas")
+	if result != "pi" {
+		t.Errorf("Expected prefix from rigs config, got %q", result)
 	}
 }
 
@@ -100,7 +129,7 @@ func TestGetRigPathForPrefix(t *testing.T) {
 	}{
 		{"ap-", filepath.Join(tmpDir, "ai_platform/mayor/rig")},
 		{"gt-", filepath.Join(tmpDir, "gastown/mayor/rig")},
-		{"hq-", tmpDir}, // Town-level beads return townRoot
+		{"hq-", tmpDir},  // Town-level beads return townRoot
 		{"unknown-", ""}, // Unknown prefix returns empty
 		{"", ""},         // Empty prefix returns empty
 	}

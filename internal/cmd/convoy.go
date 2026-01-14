@@ -16,6 +16,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tui/convoy"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -318,6 +319,9 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		"--title=" + name,
 		"--description=" + description,
 		"--json",
+	}
+	if beads.NeedsForceForID(convoyID) {
+		createArgs = append(createArgs, "--force")
 	}
 
 	createCmd := exec.Command("bd", createArgs...)
