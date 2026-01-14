@@ -221,7 +221,12 @@ gt mq list {{ .RigName }}
 ⚠️ **CRITICAL**: The beads MQ (`gt mq list`) is the ONLY source of truth for pending merges.
 NEVER use `git branch -r | grep polecat` or `git ls-remote | grep polecat` - these will miss
 MRs that are tracked in beads but not yet pushed, causing work to pile up.
-If queue empty, skip to context-check step.
+
+**If queue is empty:**
+1. Skip to generate-summary step
+2. Sleep 30 seconds (avoid busy-waiting)
+3. Loop back to inbox-check
+4. **DO NOT EXIT** - keep polling for new MRs!
 
 **process-branch**: Pick next branch, rebase on main
 ```bash
@@ -272,7 +277,7 @@ bd close <step-id>           # Mark step complete
 bd ready                     # Check for next step
 ```
 
-### Squash and Loop (or Exit)
+### Squash and Loop (Continuous Polling)
 
 At the end of each patrol cycle, print a summary banner:
 
@@ -289,13 +294,22 @@ Then squash and decide:
 # Squash the wisp to a digest
 bd mol squash <wisp-id> --summary="Patrol: merged 3 branches, no issues"
 
-# Option A: Loop (low context, more branches)
-bd mol spawn mol-refinery-patrol --wisp --assignee=refinery
-# Continue to inbox-check...
+# Check context usage with /context
+# If context > 70%: exit (daemon will respawn with fresh context)
+# Otherwise: ALWAYS loop (even with empty queue!)
 
-# Option B: Exit (high context OR queue empty)
-# Just exit - daemon will respawn if needed
+# CRITICAL: Never exit just because queue is empty!
+# The queue can receive new MRs at any time. You must keep polling.
+bd mol spawn mol-refinery-patrol --wisp --assignee=refinery
+
+# If queue was empty, sleep 30 seconds before next poll to avoid busy-waiting
+# Then continue to inbox-check...
 ```
+
+**⚠️ IMPORTANT: Continuous polling is mandatory!**
+The refinery must NEVER exit just because the merge queue is empty.
+New MRs can arrive at any time (polecats calling `gt done`).
+Only exit when context usage exceeds 70% - the daemon will respawn you.
 
 ## CRITICAL: Sequential Rebase Protocol
 
