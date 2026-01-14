@@ -447,8 +447,9 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	// This is the fallback if SessionStart hook fails - ensures ALL workers
 	// (crew, polecats, refinery, witness) have GUPP and essential Gas Town context.
 	// PRIME.md is read by bd prime and output to the agent.
-	rigBeadsPath := filepath.Join(rigPath, ".beads")
-	if err := beads.ProvisionPrimeMD(rigBeadsPath); err != nil {
+	// Use ResolveBeadsDir to follow redirect (writes to mayor/rig/.beads/ if tracked).
+	resolvedBeadsPath := beads.ResolveBeadsDir(rigPath)
+	if err := beads.ProvisionPrimeMD(resolvedBeadsPath); err != nil {
 		fmt.Printf("  Warning: Could not provision PRIME.md: %v\n", err)
 	}
 
