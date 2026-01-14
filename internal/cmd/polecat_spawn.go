@@ -81,6 +81,9 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	t := tmux.NewTmux()
 	polecatMgr := polecat.NewManager(r, polecatGit, t)
 
+	// Reap stale polecats before allocating a new one (ephemeral model: done means gone).
+	cleanupStalePolecatsForSling(polecatMgr, r)
+
 	// Allocate a new polecat name
 	polecatName, err := polecatMgr.AllocateName()
 	if err != nil {
@@ -246,6 +249,48 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 	return pane, nil
 }
 
+func cleanupStalePolecatsForSling(mgr *polecat.Manager, r *rig.Rig) {
+	const staleThreshold = 20
+
+	staleInfos, err := mgr.DetectStalePolecats(staleThreshold)
+	if err != nil {
+		fmt.Printf("Warning: could not scan for stale polecats: %v\n", err)
+		return
+	}
+
+	cleaned := 0
+	skipped := 0
+	for _, info := range staleInfos {
+		if !info.IsStale {
+			continue
+		}
+
+		target := polecatTarget{
+			rigName:     r.Name,
+			polecatName: info.Name,
+			mgr:         mgr,
+			r:           r,
+		}
+		safety := checkPolecatSafety(target)
+		if safety.Blocked {
+			skipped++
+			continue
+		}
+
+		if err := mgr.RemoveWithOptions(info.Name, false, false, false); err != nil {
+			fmt.Printf("Warning: could not clean stale polecat %s: %v\n", info.Name, err)
+			continue
+		}
+		cleaned++
+	}
+
+	if cleaned > 0 {
+		fmt.Printf("Cleaned %d stale polecat(s) in %s\n", cleaned, r.Name)
+	}
+	if skipped > 0 {
+		fmt.Printf("Skipped %d stale polecat(s) pending cleanup\n", skipped)
+	}
+}
 // IsRigName checks if a target string is a rig name (not a role or path).
 // Returns the rig name and true if it's a valid rig.
 func IsRigName(target string) (string, bool) {

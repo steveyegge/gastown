@@ -140,7 +140,7 @@ func runCleanupOrphans(cmd *cobra.Command, args []string) error {
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
 		// Check if session is alive
-		if tmuxClient.IsClaudeRunning(sessionName) {
+		if tmuxClient.IsAgentAlive(sessionName) {
 			continue // Session alive, not orphaned
 		}
 
