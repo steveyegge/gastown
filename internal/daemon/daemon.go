@@ -23,6 +23,7 @@ import (
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/feed"
+	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -221,23 +222,27 @@ func (d *Daemon) heartbeat(state *State) {
 	// 5. Ensure Refineries are running for all rigs (restart if dead)
 	d.ensureRefineriesRunning()
 
-	// 6. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
+	// 6. Ensure Mayor is running (restart if dead)
+	// Mayor is the orchestrator - without it, work dispatch stalls
+	d.ensureMayorRunning()
+
+	// 7. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
 	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
 	// Uses regex-based WaitForRuntimeReady, which is acceptable for daemon bootstrap.
 	d.triggerPendingSpawns()
 
-	// 7. Process lifecycle requests
+	// 8. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 8. (Removed) Stale agent check - violated "discover, don't track"
+	// 9. (Removed) Stale agent check - violated "discover, don't track"
 
-	// 9. Check for GUPP violations (agents with work-on-hook not progressing)
+	// 10. Check for GUPP violations (agents with work-on-hook not progressing)
 	d.checkGUPPViolations()
 
-	// 10. Check for orphaned work (assigned to dead agents)
+	// 11. Check for orphaned work (assigned to dead agents)
 	d.checkOrphanedWork()
 
-	// 11. Check polecat session health (proactive crash detection)
+	// 12. Check polecat session health (proactive crash detection)
 	// This validates tmux sessions are still alive for polecats with work-on-hook
 	d.checkPolecatSessionHealth()
 
@@ -975,4 +980,37 @@ Manual intervention may be required.`,
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of crashed polecat: %v", err)
 	}
+}
+
+// ensureMayorRunning ensures the Mayor is running.
+// Mayor is the town orchestrator - without it, work dispatch stalls and the
+// system requires human intervention. This adds Mayor to daemon supervision
+// alongside Deacon, Witnesses, and Refineries.
+func (d *Daemon) ensureMayorRunning() {
+	mgr := mayor.NewManager(d.config.TownRoot)
+
+	if err := mgr.Start(""); err != nil {
+		if err == mayor.ErrAlreadyRunning {
+			// Mayor is running - nothing to do
+			return
+		}
+		d.logger.Printf("Error starting Mayor: %v", err)
+		return
+	}
+
+	d.logger.Println("Mayor started successfully")
+
+	// Give Mayor a moment to initialize, then send startup nudge
+	// to ensure it begins its dispatch patrol
+	time.Sleep(5 * time.Second)
+	if err := d.nudgeMayor("Daemon startup: begin dispatch patrol"); err != nil {
+		d.logger.Printf("Warning: failed to nudge Mayor: %v", err)
+	}
+}
+
+// nudgeMayor sends a nudge message to the Mayor session.
+func (d *Daemon) nudgeMayor(message string) error {
+	cmd := exec.Command("gt", "nudge", "mayor", message) //nolint:gosec // G204: args are constructed internally
+	cmd.Dir = d.config.TownRoot
+	return cmd.Run()
 }
