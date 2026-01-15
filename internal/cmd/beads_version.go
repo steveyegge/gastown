@@ -3,8 +3,11 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -90,6 +93,69 @@ func (v beadsVersion) compare(other beadsVersion) int {
 // Pre-compiled regex for beads version parsing
 var beadsVersionRe = regexp.MustCompile(`bd version (\d+\.\d+(?:\.\d+)?(?:-\w+)?)`)
 
+// beadsVersionCache stores cached version info keyed by binary path and mtime.
+// This avoids spawning bd subprocess on every gt command when the binary hasn't changed.
+type beadsVersionCache struct {
+	BdPath  string    `json:"bd_path"`
+	BdMtime time.Time `json:"bd_mtime"`
+	Version string    `json:"version"`
+}
+
+// getCacheFilePath returns the path to the version cache file.
+func getCacheFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".gt", "beads-version-cache.json")
+}
+
+// loadVersionCache loads the cached version info from disk.
+func loadVersionCache() *beadsVersionCache {
+	path := getCacheFilePath()
+	if path == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	var cache beadsVersionCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return nil
+	}
+
+	return &cache
+}
+
+// saveVersionCache saves the version info to disk.
+func saveVersionCache(cache *beadsVersionCache) {
+	path := getCacheFilePath()
+	if path == "" {
+		return
+	}
+
+	// Ensure directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+
+	data, err := json.Marshal(cache)
+	if err != nil {
+		return
+	}
+
+	// Write atomically by writing to temp file then renaming
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return
+	}
+	_ = os.Rename(tmpPath, path)
+}
+
 func getBeadsVersion() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -132,11 +198,44 @@ func CheckBeadsVersion() error {
 }
 
 func checkBeadsVersionInternal() error {
+	// Look up bd binary path (no subprocess, just PATH lookup)
+	bdPath, err := exec.LookPath("bd")
+	if err != nil {
+		return fmt.Errorf("bd not found in PATH: %w (is beads installed?)", err)
+	}
+
+	// Get binary modification time (single stat syscall)
+	info, err := os.Stat(bdPath)
+	if err != nil {
+		return fmt.Errorf("cannot stat bd binary: %w", err)
+	}
+	bdMtime := info.ModTime()
+
+	// Check if we have a valid cached version for this binary
+	cache := loadVersionCache()
+	if cache != nil && cache.BdPath == bdPath && cache.BdMtime.Equal(bdMtime) {
+		// Cache hit - validate cached version without spawning subprocess
+		return validateBeadsVersion(cache.Version)
+	}
+
+	// Cache miss - need to run bd version
 	installedStr, err := getBeadsVersion()
 	if err != nil {
 		return fmt.Errorf("cannot verify beads version: %w", err)
 	}
 
+	// Save to cache for future invocations
+	saveVersionCache(&beadsVersionCache{
+		BdPath:  bdPath,
+		BdMtime: bdMtime,
+		Version: installedStr,
+	})
+
+	return validateBeadsVersion(installedStr)
+}
+
+// validateBeadsVersion checks if the given version string meets minimum requirements.
+func validateBeadsVersion(installedStr string) error {
 	installed, err := parseBeadsVersion(installedStr)
 	if err != nil {
 		return fmt.Errorf("cannot parse installed beads version %q: %w", installedStr, err)
