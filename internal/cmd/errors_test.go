@@ -54,9 +54,9 @@ func TestNewSilentExit(t *testing.T) {
 
 func TestIsSilentExit(t *testing.T) {
 	tests := []struct {
-		name        string
-		err         error
-		wantCode    int
+		name         string
+		err          error
+		wantCode     int
 		wantIsSilent bool
 	}{
 		{"nil error", nil, 0, false},
@@ -64,7 +64,7 @@ func TestIsSilentExit(t *testing.T) {
 		{"silent exit code 1", NewSilentExit(1), 1, true},
 		{"silent exit code 2", NewSilentExit(2), 2, true},
 		{"other error", errors.New("some error"), 0, false},
-		// Note: wrapped errors require errors.As fix - see PR #462
+		{"wrapped silent exit", fmt.Errorf("wrapped: %w", NewSilentExit(5)), 5, true},
 	}
 
 	for _, tt := range tests {
@@ -81,7 +81,6 @@ func TestIsSilentExit(t *testing.T) {
 }
 
 func TestSilentExitError_Is(t *testing.T) {
-	// Test that SilentExitError works with errors.Is
 	err := NewSilentExit(1)
 	var target *SilentExitError
 	if !errors.As(err, &target) {
