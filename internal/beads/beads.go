@@ -136,14 +136,13 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 
-	// Always explicitly set BEADS_DIR to prevent inherited env vars from
-	// causing prefix mismatches. Use explicit beadsDir if set, otherwise
-	// resolve from working directory.
-	beadsDir := b.beadsDir
-	if beadsDir == "" {
-		beadsDir = ResolveBeadsDir(b.workDir)
+	// Only set BEADS_DIR if explicitly provided via NewWithBeadsDir().
+	// Otherwise, let bd use its native prefix-based routing to find the correct
+	// database for each bead ID. Setting BEADS_DIR forces bd to use only that
+	// database, bypassing routing for beads with different prefixes.
+	if b.beadsDir != "" {
+		cmd.Env = append(os.Environ(), "BEADS_DIR="+b.beadsDir)
 	}
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
