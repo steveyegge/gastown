@@ -226,6 +226,50 @@ This is THE command for dispatching work. It:
 - `gt polecat nuke <rig>/<name> --force` - Kill session + remove worktree
 - `gt polecat status <rig>/<name>` - Show polecat status
 
+### Molecule Workflow
+
+Molecules are workflow templates that coordinate multi-step work. The Mayor doesn't
+need to understand molecule internals - `gt sling` handles instantiation automatically.
+
+**The molecule lifecycle:**
+```
+Formula (source TOML)
+    ↓ bd cook
+Protomolecule (frozen template)
+    ├─▶ bd mol pour ──▶ Molecule (persistent)
+    └─▶ bd mol wisp ──▶ Wisp (ephemeral)
+```
+
+**What the Mayor needs to know:**
+
+1. **Automatic molecule attachment**: When you `gt sling <bead> <rig>`, the polecat
+   automatically gets `mol-polecat-work` attached for guidance. You don't need to
+   do anything extra.
+
+2. **Formula slinging**: To apply a workflow template to work:
+   ```bash
+   gt sling mol-release mayor/           # Cook + wisp + attach + nudge
+   gt sling mol-review --on gt-abc crew  # Apply formula to existing bead
+   ```
+
+3. **When to use formulas vs direct sling**:
+   - **Direct sling** (`gt sling gt-abc rig`): Single-task work, straightforward issues
+   - **Formula sling** (`gt sling mol-X --on gt-abc`): Multi-step workflows, standardized processes
+
+**Key molecule commands for Mayor:**
+```bash
+# Inspect molecules (read-only, for status checks)
+bd mol list                   # Available protos/molecules
+bd mol current <id>           # Step progress for molecule
+
+# Formula operations (rare - usually let gt sling handle this)
+bd formula list               # Available formulas
+bd cook <formula>             # Formula → Proto (happens automatically in gt sling)
+```
+
+**Bottom line**: For most work dispatch, just use `gt sling <bead> <rig>`. The molecule
+system is transparent - polecats handle the step-by-step execution internally.
+
 ### Delegation
 Prefer delegating to Refineries, not directly to polecats:
 - `gt send <rig>/refinery -s "Subject" -m "Message"`
