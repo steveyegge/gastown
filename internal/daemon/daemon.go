@@ -49,6 +49,9 @@ type Daemon struct {
 	// Mass death detection: track recent session deaths
 	deathsMu     sync.Mutex
 	recentDeaths []sessionDeath
+
+	// Restart tracking with exponential backoff
+	restartTracker *RestartTracker
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -80,12 +83,19 @@ func New(config *Config) (*Daemon, error) {
 	logger := log.New(logFile, "", log.LstdFlags)
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Initialize restart tracker
+	restartTracker := NewRestartTracker(config.TownRoot)
+	if err := restartTracker.Load(); err != nil {
+		logger.Printf("Warning: failed to load restart state: %v", err)
+	}
+
 	return &Daemon{
-		config: config,
-		tmux:   tmux.NewTmux(),
-		logger: logger,
-		ctx:    ctx,
-		cancel: cancel,
+		config:         config,
+		tmux:           tmux.NewTmux(),
+		logger:         logger,
+		ctx:            ctx,
+		cancel:         cancel,
+		restartTracker: restartTracker,
 	}, nil
 }
 
@@ -898,6 +908,24 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		return fmt.Errorf("cannot restart polecat: %s", reason)
 	}
 
+	// Check restart backoff and crash loop status
+	polecatID := fmt.Sprintf("%s/%s", rigName, polecatName)
+	shouldRestart, reason := d.restartTracker.ShouldRestart(polecatID)
+	if !shouldRestart {
+		return fmt.Errorf("restart blocked: %s", reason)
+	}
+
+	// Record this restart attempt (for backoff calculation)
+	backoff, err := d.restartTracker.RecordRestart(polecatID)
+	if err != nil {
+		// Crash loop detected - log and return error
+		d.logger.Printf("Crash loop detected for %s: %v", polecatID, err)
+		return err
+	}
+	if backoff > 0 {
+		d.logger.Printf("Polecat %s: backoff %v in effect", polecatID, backoff)
+	}
+
 	// Calculate rig path for agent config resolution
 	rigPath := filepath.Join(d.config.TownRoot, rigName)
 
@@ -959,6 +987,9 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		// Non-fatal - Claude might still start
 	}
 	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
+
+	// Record successful restart (resets backoff counter)
+	d.restartTracker.RecordSuccess(polecatID)
 
 	return nil
 }
