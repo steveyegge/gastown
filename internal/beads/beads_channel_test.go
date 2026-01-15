@@ -213,9 +213,9 @@ func TestChannelBeadID(t *testing.T) {
 		name string
 		want string
 	}{
-		{"alerts", "gt-channel-alerts"},
-		{"builds", "gt-channel-builds"},
-		{"team-updates", "gt-channel-team-updates"},
+		{"alerts", "hq-channel-alerts"},
+		{"builds", "hq-channel-builds"},
+		{"team-updates", "hq-channel-team-updates"},
 	}
 
 	for _, tt := range tests {

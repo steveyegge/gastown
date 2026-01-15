@@ -127,14 +127,15 @@ func ParseChannelFields(description string) *ChannelFields {
 	return fields
 }
 
-// ChannelBeadID returns the bead ID for a channel name.
-// Format: gt-channel-<name>
+// ChannelBeadID returns the channel bead ID for a given channel name.
+// Format: hq-channel-<name> for town-level channels (default).
+// Town-level channels are stored in the shared beads database.
 func ChannelBeadID(name string) string {
-	return "gt-channel-" + name
+	return "hq-channel-" + name
 }
 
 // CreateChannelBead creates a channel bead for pub/sub messaging.
-// The ID format is: gt-channel-<name> (e.g., gt-channel-alerts)
+// The ID format is: hq-channel-<name> (e.g., hq-channel-alerts) for town-level.
 // The created_by field is populated from BD_ACTOR env var for provenance tracking.
 func (b *Beads) CreateChannelBead(name string, subscribers []string, createdBy string) (*Issue, error) {
 	id := ChannelBeadID(name)
