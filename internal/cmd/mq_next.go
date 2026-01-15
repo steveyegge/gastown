@@ -73,6 +73,10 @@ func runMQNext(cmd *cobra.Command, args []string) error {
 	// Filter to only ready MRs (no blockers)
 	var ready []*beads.Issue
 	for _, issue := range issues {
+		// Skip closed MRs (workaround for bd list not respecting --status filter)
+		if issue.Status != "open" {
+			continue
+		}
 		if len(issue.BlockedBy) == 0 && issue.BlockedByCount == 0 {
 			ready = append(ready, issue)
 		}

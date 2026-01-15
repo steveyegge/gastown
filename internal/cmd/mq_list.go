@@ -71,6 +71,22 @@ func runMQList(cmd *cobra.Command, args []string) error {
 	var scored []scoredIssue
 
 	for _, issue := range issues {
+		// Manual status filtering as workaround for bd list not respecting --status filter
+		if mqListReady {
+			// Ready view should only show open MRs
+			if issue.Status != "open" {
+				continue
+			}
+		} else if mqListStatus != "" && !strings.EqualFold(mqListStatus, "all") {
+			// Explicit status filter should match exactly
+			if !strings.EqualFold(issue.Status, mqListStatus) {
+				continue
+			}
+		} else if mqListStatus == "" && issue.Status != "open" {
+			// Default case (no status specified) should only show open
+			continue
+		}
+
 		// Parse MR fields
 		fields := beads.ParseMRFields(issue)
 

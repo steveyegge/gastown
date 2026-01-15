@@ -768,6 +768,11 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 	// Convert beads issues to MRInfo
 	var mrs []*MRInfo
 	for _, issue := range issues {
+		// Skip closed MRs (workaround for bd list not respecting --status filter)
+		if issue.Status != "open" {
+			continue
+		}
+
 		fields := beads.ParseMRFields(issue)
 		if fields == nil {
 			continue // Skip issues without MR fields
