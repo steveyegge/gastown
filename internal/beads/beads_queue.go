@@ -22,6 +22,8 @@ type QueueFields struct {
 	ProcessingCount int    // Number of items currently being processed
 	CompletedCount  int    // Number of items completed
 	FailedCount     int    // Number of items that failed
+	CreatedBy       string // Who created this queue
+	CreatedAt       string // ISO 8601 timestamp of creation
 }
 
 // Queue status constants
@@ -77,6 +79,13 @@ func FormatQueueDescription(title string, fields *QueueFields) string {
 	lines = append(lines, fmt.Sprintf("processing_count: %d", fields.ProcessingCount))
 	lines = append(lines, fmt.Sprintf("completed_count: %d", fields.CompletedCount))
 	lines = append(lines, fmt.Sprintf("failed_count: %d", fields.FailedCount))
+
+	if fields.CreatedBy != "" {
+		lines = append(lines, fmt.Sprintf("created_by: %s", fields.CreatedBy))
+	}
+	if fields.CreatedAt != "" {
+		lines = append(lines, fmt.Sprintf("created_at: %s", fields.CreatedAt))
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -137,6 +146,10 @@ func ParseQueueFields(description string) *QueueFields {
 			if v, err := strconv.Atoi(value); err == nil {
 				fields.FailedCount = v
 			}
+		case "created_by":
+			fields.CreatedBy = value
+		case "created_at":
+			fields.CreatedAt = value
 		}
 	}
 
