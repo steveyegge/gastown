@@ -23,6 +23,7 @@ export const GasTown = async ({ $, directory }) => {
   };
 
   const onSessionCompacted = async () => {
+    // Re-inject Gas Town context after compaction
     await run("gt prime");
   };
 
@@ -30,7 +31,8 @@ export const GasTown = async ({ $, directory }) => {
     event: async ({ event }) => {
       if (event?.type === "session.created") {
         await onSessionCreated();
-      } else if (event?.type === "session.compacted") {
+      }
+      if (event?.type === "session.compacted") {
         await onSessionCompacted();
       }
     },
