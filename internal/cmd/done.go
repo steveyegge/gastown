@@ -161,7 +161,8 @@ func runDone(cmd *cobra.Command, args []string) error {
 
 	// Auto-detect cleanup status if not explicitly provided
 	// This prevents premature polecat cleanup by ensuring witness knows git state
-	if doneCleanupStatus == "" {
+	cleanupStatusAuto := doneCleanupStatus == ""
+	if cleanupStatusAuto {
 		if !cwdAvailable {
 			// Can't detect git state without working directory, default to unknown
 			doneCleanupStatus = "unknown"
@@ -302,6 +303,10 @@ func runDone(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("pushing branch '%s' to origin: %w\nCommits exist locally but failed to push. Fix the issue and retry.", branch, err)
 		}
 		fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
+		if cleanupStatusAuto && doneCleanupStatus == "unpushed" {
+			// Update cleanup status after successful push
+			doneCleanupStatus = "clean"
+		}
 
 		if issueID == "" {
 			return fmt.Errorf("cannot determine source issue from branch '%s'; use --issue to specify", branch)
@@ -519,6 +524,20 @@ notifyWitness:
 
 		// Step 1: Nuke the worktree (only for COMPLETED - other statuses preserve work)
 		if exitType == ExitCompleted {
+			// CRITICAL: Push branch to origin before self-nuking
+			// The Refinery needs the branch to be accessible after the polecat's
+			// worktree is deleted. Without this push, the branch only exists locally
+			// in the polecat's worktree and will be lost when self-nuke removes it.
+			fmt.Printf("\nPushing branch to origin before self-nuke...\n")
+			if err := g.Push("origin", branch, false); err != nil {
+				// Push failure is fatal - we cannot self-nuke without pushing
+				// The work must be preserved for the Refinery to process
+				fmt.Fprintf(os.Stderr, "Error: failed to push branch to origin: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Error: cannot self-nuke without pushing - worktree preserved for manual intervention\n")
+				return fmt.Errorf("push to origin failed (self-nuke aborted): %w", err)
+			}
+			fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
+
 			if err := selfNukePolecat(roleInfo, townRoot); err != nil {
 				// Non-fatal: Witness will clean up if we fail
 				style.PrintWarning("worktree nuke failed: %v (Witness will clean up)", err)
@@ -763,10 +782,12 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 		return fmt.Errorf("getting polecat manager: %w", err)
 	}
 
-	// Use nuclear=true since we know we just pushed our work
-	// The branch is pushed, MR is created, we're clean
+<<<<<<< HEAD
+	// Use nuclear=false to respect cleanup_status safety checks (ZFC #10)
+	// The agent's self-reported cleanup_status will be validated before removal
+	// This prevents accidental work loss if git state doesn't match expectations
 	// selfNuke=true because polecat is deleting its own worktree from inside it
-	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, true, true); err != nil {
+	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, false, true); err != nil {
 		return fmt.Errorf("removing worktree: %w", err)
 	}
 
