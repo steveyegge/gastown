@@ -375,3 +375,107 @@ func (b *Beads) LookupChannelByName(name string) (*Issue, *ChannelFields, error)
 
 	return nil, nil, nil // Not found
 }
+
+// EnforceChannelRetention prunes old messages from a channel to enforce retention.
+// Called after posting a new message to the channel (on-write cleanup).
+// If channel has >= retainCount messages, deletes oldest until count < retainCount.
+func (b *Beads) EnforceChannelRetention(name string) error {
+	// Get channel config
+	_, fields, err := b.GetChannelBead(name)
+	if err != nil {
+		return err
+	}
+	if fields == nil {
+		return fmt.Errorf("channel not found: %s", name)
+	}
+
+	// Skip if no retention limit
+	if fields.RetentionCount <= 0 {
+		return nil
+	}
+
+	// Query messages in this channel (oldest first)
+	out, err := b.run("list",
+		"--type=message",
+		"--label=channel:"+name,
+		"--json",
+		"--limit=0",
+		"--sort=created",
+	)
+	if err != nil {
+		return fmt.Errorf("listing channel messages: %w", err)
+	}
+
+	var messages []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &messages); err != nil {
+		return fmt.Errorf("parsing channel messages: %w", err)
+	}
+
+	// Calculate how many to delete
+	// We're being called after a new message is posted, so we want to end up with retainCount
+	toDelete := len(messages) - fields.RetentionCount
+	if toDelete <= 0 {
+		return nil // No pruning needed
+	}
+
+	// Delete oldest messages (best-effort)
+	for i := 0; i < toDelete && i < len(messages); i++ {
+		// Use close instead of delete for audit trail
+		_, _ = b.run("close", messages[i].ID, "--reason=channel retention pruning")
+	}
+
+	return nil
+}
+
+// PruneAllChannels enforces retention on all channels.
+// Called by Deacon patrol as a backup cleanup mechanism.
+// Uses a 10% buffer to avoid thrashing (only prunes if count > retainCount * 1.1).
+func (b *Beads) PruneAllChannels() (int, error) {
+	channels, err := b.ListChannelBeads()
+	if err != nil {
+		return 0, err
+	}
+
+	pruned := 0
+	for name, fields := range channels {
+		if fields.RetentionCount <= 0 {
+			continue
+		}
+
+		// Count messages
+		out, err := b.run("list",
+			"--type=message",
+			"--label=channel:"+name,
+			"--json",
+			"--limit=0",
+		)
+		if err != nil {
+			continue // Skip on error
+		}
+
+		var messages []struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(out, &messages); err != nil {
+			continue
+		}
+
+		// 10% buffer - only prune if significantly over limit
+		threshold := int(float64(fields.RetentionCount) * 1.1)
+		if len(messages) <= threshold {
+			continue
+		}
+
+		// Prune down to exactly retainCount
+		toDelete := len(messages) - fields.RetentionCount
+		for i := 0; i < toDelete && i < len(messages); i++ {
+			if _, err := b.run("close", messages[i].ID, "--reason=patrol retention pruning"); err == nil {
+				pruned++
+			}
+		}
+	}
+
+	return pruned, nil
+}
