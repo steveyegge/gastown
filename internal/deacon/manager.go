@@ -63,7 +63,7 @@ func (m *Manager) Start(agentOverride string) error {
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but Claude dead. Kill and recreate.
-		if err := t.KillSession(sessionID); err != nil {
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -151,7 +151,7 @@ func (m *Manager) Stop() error {
 	time.Sleep(100 * time.Millisecond)
 
 	// Kill the session
-	if err := t.KillSession(sessionID); err != nil {
+	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
