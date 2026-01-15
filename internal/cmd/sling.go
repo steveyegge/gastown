@@ -116,9 +116,15 @@ func init() {
 }
 
 func runSling(cmd *cobra.Command, args []string) error {
-	// Polecats cannot sling - check early before writing anything
-	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
-		return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
+	// Polecats cannot sling - check early before writing anything.
+	// However, coordinator roles (mayor, deacon, witness, refinery) CAN sling,
+	// even if GT_POLECAT is set from a stale environment.
+	role := os.Getenv("GT_ROLE")
+	isCoordinator := role == "mayor" || role == "deacon" || role == "witness" || role == "refinery"
+	if !isCoordinator {
+		if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
+			return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
+		}
 	}
 
 	// Get town root early - needed for BEADS_DIR when running bd commands
