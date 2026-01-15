@@ -269,7 +269,7 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if err := m.tmux.KillSession(sessionID); err != nil {
+	if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
