@@ -107,6 +107,22 @@ type Message struct {
 	// CC contains addresses that should receive a copy of this message.
 	// CC'd recipients see the message in their inbox but are not the primary recipient.
 	CC []string `json:"cc,omitempty"`
+
+	// Queue is the queue name for queue-routed messages.
+	// Mutually exclusive with To and Channel - a message is either direct, queued, or broadcast.
+	Queue string `json:"queue,omitempty"`
+
+	// Channel is the channel name for broadcast messages.
+	// Mutually exclusive with To and Queue - a message is either direct, queued, or broadcast.
+	Channel string `json:"channel,omitempty"`
+
+	// ClaimedBy is the agent that claimed this queue message.
+	// Only set for queue messages after claiming.
+	ClaimedBy string `json:"claimed_by,omitempty"`
+
+	// ClaimedAt is when the queue message was claimed.
+	// Only set for queue messages after claiming.
+	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
 }
 
 // NewMessage creates a new message with a generated ID and thread ID.
@@ -142,6 +158,92 @@ func NewReplyMessage(from, to, subject, body string, original *Message) *Message
 	}
 }
 
+// NewQueueMessage creates a message destined for a queue.
+// Queue messages have no direct recipient - they are claimed by eligible agents.
+func NewQueueMessage(from, queue, subject, body string) *Message {
+	return &Message{
+		ID:        generateID(),
+		From:      from,
+		Queue:     queue,
+		Subject:   subject,
+		Body:      body,
+		Timestamp: time.Now(),
+		Read:      false,
+		Priority:  PriorityNormal,
+		Type:      TypeTask, // Queue messages are typically tasks
+		ThreadID:  generateThreadID(),
+	}
+}
+
+// NewChannelMessage creates a broadcast message for a channel.
+// Channel messages are visible to all readers of the channel.
+func NewChannelMessage(from, channel, subject, body string) *Message {
+	return &Message{
+		ID:        generateID(),
+		From:      from,
+		Channel:   channel,
+		Subject:   subject,
+		Body:      body,
+		Timestamp: time.Now(),
+		Read:      false,
+		Priority:  PriorityNormal,
+		Type:      TypeNotification,
+		ThreadID:  generateThreadID(),
+	}
+}
+
+// IsQueueMessage returns true if this is a queue-routed message.
+func (m *Message) IsQueueMessage() bool {
+	return m.Queue != ""
+}
+
+// IsChannelMessage returns true if this is a channel broadcast message.
+func (m *Message) IsChannelMessage() bool {
+	return m.Channel != ""
+}
+
+// IsDirectMessage returns true if this is a direct (To-addressed) message.
+func (m *Message) IsDirectMessage() bool {
+	return m.Queue == "" && m.Channel == "" && m.To != ""
+}
+
+// IsClaimed returns true if this queue message has been claimed.
+func (m *Message) IsClaimed() bool {
+	return m.ClaimedBy != ""
+}
+
+// Validate checks that the message has a valid routing configuration.
+// Returns an error if to, queue, and channel are not mutually exclusive.
+func (m *Message) Validate() error {
+	count := 0
+	if m.To != "" {
+		count++
+	}
+	if m.Queue != "" {
+		count++
+	}
+	if m.Channel != "" {
+		count++
+	}
+
+	if count == 0 {
+		return fmt.Errorf("message must have exactly one of: to, queue, or channel")
+	}
+	if count > 1 {
+		return fmt.Errorf("message cannot have multiple routing targets (to, queue, channel are mutually exclusive)")
+	}
+
+	// ClaimedBy/ClaimedAt only valid for queue messages
+	if m.ClaimedBy != "" && m.Queue == "" {
+		return fmt.Errorf("claimed_by is only valid for queue messages")
+	}
+	if m.ClaimedAt != nil && m.Queue == "" {
+		return fmt.Errorf("claimed_at is only valid for queue messages")
+	}
+
+	return nil
+}
+
 // generateID creates a random message ID.
 // Falls back to time-based ID if crypto/rand fails (extremely rare).
 func generateID() string {
@@ -170,20 +272,24 @@ type BeadsMessage struct {
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`       // Subject
 	Description string    `json:"description"` // Body
-	Assignee    string    `json:"assignee"`    // To identity
+	Assignee    string    `json:"assignee"`    // To identity (for direct messages)
 	Priority    int       `json:"priority"`    // 0=urgent, 1=high, 2=normal, 3=low
 	Status      string    `json:"status"`      // open=unread, closed=read
 	CreatedAt   time.Time `json:"created_at"`
-	Labels      []string  `json:"labels"` // Metadata labels (from:X, thread:X, reply-to:X, msg-type:X, cc:X)
+	Labels      []string  `json:"labels"` // Metadata labels (from:X, thread:X, reply-to:X, msg-type:X, cc:X, queue:X, channel:X, claimed-by:X, claimed-at:X)
 	Pinned      bool      `json:"pinned,omitempty"`
 	Wisp        bool      `json:"wisp,omitempty"` // Ephemeral message (filtered from JSONL export)
 
 	// Cached parsed values (populated by ParseLabels)
-	sender   string
-	threadID string
-	replyTo  string
-	msgType  string
-	cc       []string // CC recipients
+	sender    string
+	threadID  string
+	replyTo   string
+	msgType   string
+	cc        []string   // CC recipients
+	queue     string     // Queue name (for queue messages)
+	channel   string     // Channel name (for broadcast messages)
+	claimedBy string     // Who claimed the queue message
+	claimedAt *time.Time // When the queue message was claimed
 }
 
 // ParseLabels extracts metadata from the labels array.
@@ -199,6 +305,17 @@ func (bm *BeadsMessage) ParseLabels() {
 			bm.msgType = strings.TrimPrefix(label, "msg-type:")
 		} else if strings.HasPrefix(label, "cc:") {
 			bm.cc = append(bm.cc, strings.TrimPrefix(label, "cc:"))
+		} else if strings.HasPrefix(label, "queue:") {
+			bm.queue = strings.TrimPrefix(label, "queue:")
+		} else if strings.HasPrefix(label, "channel:") {
+			bm.channel = strings.TrimPrefix(label, "channel:")
+		} else if strings.HasPrefix(label, "claimed-by:") {
+			bm.claimedBy = strings.TrimPrefix(label, "claimed-by:")
+		} else if strings.HasPrefix(label, "claimed-at:") {
+			ts := strings.TrimPrefix(label, "claimed-at:")
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				bm.claimedAt = &t
+			}
 		}
 	}
 }
@@ -263,7 +380,49 @@ func (bm *BeadsMessage) ToMessage() *Message {
 		ReplyTo:   bm.replyTo,
 		Wisp:      bm.Wisp,
 		CC:        ccAddrs,
+		Queue:     bm.queue,
+		Channel:   bm.channel,
+		ClaimedBy: bm.claimedBy,
+		ClaimedAt: bm.claimedAt,
 	}
+}
+
+// GetQueue returns the queue name for queue messages.
+func (bm *BeadsMessage) GetQueue() string {
+	return bm.queue
+}
+
+// GetChannel returns the channel name for broadcast messages.
+func (bm *BeadsMessage) GetChannel() string {
+	return bm.channel
+}
+
+// GetClaimedBy returns who claimed the queue message.
+func (bm *BeadsMessage) GetClaimedBy() string {
+	return bm.claimedBy
+}
+
+// GetClaimedAt returns when the queue message was claimed.
+func (bm *BeadsMessage) GetClaimedAt() *time.Time {
+	return bm.claimedAt
+}
+
+// IsQueueMessage returns true if this is a queue-routed message.
+func (bm *BeadsMessage) IsQueueMessage() bool {
+	bm.ParseLabels()
+	return bm.queue != ""
+}
+
+// IsChannelMessage returns true if this is a channel broadcast message.
+func (bm *BeadsMessage) IsChannelMessage() bool {
+	bm.ParseLabels()
+	return bm.channel != ""
+}
+
+// IsDirectMessage returns true if this is a direct (To-addressed) message.
+func (bm *BeadsMessage) IsDirectMessage() bool {
+	bm.ParseLabels()
+	return bm.queue == "" && bm.channel == "" && bm.Assignee != ""
 }
 
 // HasLabel checks if the message has a specific label.

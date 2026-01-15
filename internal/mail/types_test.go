@@ -349,3 +349,366 @@ func TestBeadsMessageToMessageEmptyLabels(t *testing.T) {
 		t.Errorf("ThreadID should be empty, got %q", msg.ThreadID)
 	}
 }
+
+func TestNewQueueMessage(t *testing.T) {
+	msg := NewQueueMessage("mayor/", "work-requests", "New Task", "Please process this")
+
+	if msg.From != "mayor/" {
+		t.Errorf("From = %q, want 'mayor/'", msg.From)
+	}
+	if msg.Queue != "work-requests" {
+		t.Errorf("Queue = %q, want 'work-requests'", msg.Queue)
+	}
+	if msg.To != "" {
+		t.Errorf("To should be empty for queue messages, got %q", msg.To)
+	}
+	if msg.Channel != "" {
+		t.Errorf("Channel should be empty for queue messages, got %q", msg.Channel)
+	}
+	if msg.Type != TypeTask {
+		t.Errorf("Type = %q, want TypeTask", msg.Type)
+	}
+	if msg.ID == "" {
+		t.Error("ID should be generated")
+	}
+	if msg.ThreadID == "" {
+		t.Error("ThreadID should be generated")
+	}
+}
+
+func TestNewChannelMessage(t *testing.T) {
+	msg := NewChannelMessage("deacon/", "alerts", "System Alert", "System is healthy")
+
+	if msg.From != "deacon/" {
+		t.Errorf("From = %q, want 'deacon/'", msg.From)
+	}
+	if msg.Channel != "alerts" {
+		t.Errorf("Channel = %q, want 'alerts'", msg.Channel)
+	}
+	if msg.To != "" {
+		t.Errorf("To should be empty for channel messages, got %q", msg.To)
+	}
+	if msg.Queue != "" {
+		t.Errorf("Queue should be empty for channel messages, got %q", msg.Queue)
+	}
+	if msg.Type != TypeNotification {
+		t.Errorf("Type = %q, want TypeNotification", msg.Type)
+	}
+}
+
+func TestMessageIsQueueMessage(t *testing.T) {
+	directMsg := NewMessage("mayor/", "gastown/Toast", "Test", "Body")
+	queueMsg := NewQueueMessage("mayor/", "work-requests", "Task", "Body")
+	channelMsg := NewChannelMessage("deacon/", "alerts", "Alert", "Body")
+
+	if directMsg.IsQueueMessage() {
+		t.Error("Direct message should not be a queue message")
+	}
+	if !queueMsg.IsQueueMessage() {
+		t.Error("Queue message should be a queue message")
+	}
+	if channelMsg.IsQueueMessage() {
+		t.Error("Channel message should not be a queue message")
+	}
+}
+
+func TestMessageIsChannelMessage(t *testing.T) {
+	directMsg := NewMessage("mayor/", "gastown/Toast", "Test", "Body")
+	queueMsg := NewQueueMessage("mayor/", "work-requests", "Task", "Body")
+	channelMsg := NewChannelMessage("deacon/", "alerts", "Alert", "Body")
+
+	if directMsg.IsChannelMessage() {
+		t.Error("Direct message should not be a channel message")
+	}
+	if queueMsg.IsChannelMessage() {
+		t.Error("Queue message should not be a channel message")
+	}
+	if !channelMsg.IsChannelMessage() {
+		t.Error("Channel message should be a channel message")
+	}
+}
+
+func TestMessageIsDirectMessage(t *testing.T) {
+	directMsg := NewMessage("mayor/", "gastown/Toast", "Test", "Body")
+	queueMsg := NewQueueMessage("mayor/", "work-requests", "Task", "Body")
+	channelMsg := NewChannelMessage("deacon/", "alerts", "Alert", "Body")
+
+	if !directMsg.IsDirectMessage() {
+		t.Error("Direct message should be a direct message")
+	}
+	if queueMsg.IsDirectMessage() {
+		t.Error("Queue message should not be a direct message")
+	}
+	if channelMsg.IsDirectMessage() {
+		t.Error("Channel message should not be a direct message")
+	}
+}
+
+func TestMessageValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		msg     *Message
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "valid direct message",
+			msg:     NewMessage("mayor/", "gastown/Toast", "Test", "Body"),
+			wantErr: false,
+		},
+		{
+			name:    "valid queue message",
+			msg:     NewQueueMessage("mayor/", "work-requests", "Task", "Body"),
+			wantErr: false,
+		},
+		{
+			name:    "valid channel message",
+			msg:     NewChannelMessage("deacon/", "alerts", "Alert", "Body"),
+			wantErr: false,
+		},
+		{
+			name: "no routing target",
+			msg: &Message{
+				ID:      "msg-001",
+				From:    "mayor/",
+				Subject: "Test",
+			},
+			wantErr: true,
+			errMsg:  "must have exactly one of",
+		},
+		{
+			name: "both to and queue",
+			msg: &Message{
+				ID:      "msg-001",
+				From:    "mayor/",
+				To:      "gastown/Toast",
+				Queue:   "work-requests",
+				Subject: "Test",
+			},
+			wantErr: true,
+			errMsg:  "mutually exclusive",
+		},
+		{
+			name: "both to and channel",
+			msg: &Message{
+				ID:      "msg-001",
+				From:    "mayor/",
+				To:      "gastown/Toast",
+				Channel: "alerts",
+				Subject: "Test",
+			},
+			wantErr: true,
+			errMsg:  "mutually exclusive",
+		},
+		{
+			name: "both queue and channel",
+			msg: &Message{
+				ID:      "msg-001",
+				From:    "mayor/",
+				Queue:   "work-requests",
+				Channel: "alerts",
+				Subject: "Test",
+			},
+			wantErr: true,
+			errMsg:  "mutually exclusive",
+		},
+		{
+			name: "claimed_by on non-queue message",
+			msg: &Message{
+				ID:        "msg-001",
+				From:      "mayor/",
+				To:        "gastown/Toast",
+				Subject:   "Test",
+				ClaimedBy: "gastown/nux",
+			},
+			wantErr: true,
+			errMsg:  "claimed_by is only valid for queue messages",
+		},
+		{
+			name: "claimed_by on queue message is valid",
+			msg: &Message{
+				ID:        "msg-001",
+				From:      "mayor/",
+				Queue:     "work-requests",
+				Subject:   "Test",
+				ClaimedBy: "gastown/nux",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.msg.Validate()
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got nil")
+				} else if tt.errMsg != "" && !containsString(err.Error(), tt.errMsg) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBeadsMessageParseQueueChannelLabels(t *testing.T) {
+	claimedTime := time.Date(2026, 1, 14, 12, 0, 0, 0, time.UTC)
+	claimedAtStr := claimedTime.Format(time.RFC3339)
+
+	bm := BeadsMessage{
+		ID:          "hq-queue",
+		Title:       "Queue Message",
+		Description: "Test queue message",
+		Status:      "open",
+		Labels: []string{
+			"from:mayor/",
+			"queue:work-requests",
+			"claimed-by:gastown/nux",
+			"claimed-at:" + claimedAtStr,
+		},
+		Priority: 2,
+	}
+
+	msg := bm.ToMessage()
+
+	if msg.Queue != "work-requests" {
+		t.Errorf("Queue = %q, want 'work-requests'", msg.Queue)
+	}
+	if msg.ClaimedBy != "gastown/nux" {
+		t.Errorf("ClaimedBy = %q, want 'gastown/nux'", msg.ClaimedBy)
+	}
+	if msg.ClaimedAt == nil {
+		t.Error("ClaimedAt should not be nil")
+	} else if !msg.ClaimedAt.Equal(claimedTime) {
+		t.Errorf("ClaimedAt = %v, want %v", msg.ClaimedAt, claimedTime)
+	}
+}
+
+func TestBeadsMessageParseChannelLabel(t *testing.T) {
+	bm := BeadsMessage{
+		ID:          "hq-channel",
+		Title:       "Channel Message",
+		Description: "Test channel message",
+		Status:      "open",
+		Labels:      []string{"from:deacon/", "channel:alerts"},
+		Priority:    2,
+	}
+
+	msg := bm.ToMessage()
+
+	if msg.Channel != "alerts" {
+		t.Errorf("Channel = %q, want 'alerts'", msg.Channel)
+	}
+	if msg.Queue != "" {
+		t.Errorf("Queue should be empty, got %q", msg.Queue)
+	}
+}
+
+func TestBeadsMessageIsQueueMessage(t *testing.T) {
+	queueMsg := BeadsMessage{
+		ID:     "hq-queue",
+		Labels: []string{"queue:work-requests"},
+	}
+	directMsg := BeadsMessage{
+		ID:       "hq-direct",
+		Assignee: "gastown/Toast",
+	}
+	channelMsg := BeadsMessage{
+		ID:     "hq-channel",
+		Labels: []string{"channel:alerts"},
+	}
+
+	if !queueMsg.IsQueueMessage() {
+		t.Error("Queue message should be identified as queue message")
+	}
+	if directMsg.IsQueueMessage() {
+		t.Error("Direct message should not be identified as queue message")
+	}
+	if channelMsg.IsQueueMessage() {
+		t.Error("Channel message should not be identified as queue message")
+	}
+}
+
+func TestBeadsMessageIsChannelMessage(t *testing.T) {
+	queueMsg := BeadsMessage{
+		ID:     "hq-queue",
+		Labels: []string{"queue:work-requests"},
+	}
+	directMsg := BeadsMessage{
+		ID:       "hq-direct",
+		Assignee: "gastown/Toast",
+	}
+	channelMsg := BeadsMessage{
+		ID:     "hq-channel",
+		Labels: []string{"channel:alerts"},
+	}
+
+	if queueMsg.IsChannelMessage() {
+		t.Error("Queue message should not be identified as channel message")
+	}
+	if directMsg.IsChannelMessage() {
+		t.Error("Direct message should not be identified as channel message")
+	}
+	if !channelMsg.IsChannelMessage() {
+		t.Error("Channel message should be identified as channel message")
+	}
+}
+
+func TestBeadsMessageIsDirectMessage(t *testing.T) {
+	queueMsg := BeadsMessage{
+		ID:     "hq-queue",
+		Labels: []string{"queue:work-requests"},
+	}
+	directMsg := BeadsMessage{
+		ID:       "hq-direct",
+		Assignee: "gastown/Toast",
+	}
+	channelMsg := BeadsMessage{
+		ID:     "hq-channel",
+		Labels: []string{"channel:alerts"},
+	}
+
+	if queueMsg.IsDirectMessage() {
+		t.Error("Queue message should not be identified as direct message")
+	}
+	if !directMsg.IsDirectMessage() {
+		t.Error("Direct message should be identified as direct message")
+	}
+	if channelMsg.IsDirectMessage() {
+		t.Error("Channel message should not be identified as direct message")
+	}
+}
+
+func TestMessageIsClaimed(t *testing.T) {
+	unclaimed := NewQueueMessage("mayor/", "work-requests", "Task", "Body")
+	if unclaimed.IsClaimed() {
+		t.Error("Unclaimed message should not be claimed")
+	}
+
+	claimed := NewQueueMessage("mayor/", "work-requests", "Task", "Body")
+	claimed.ClaimedBy = "gastown/nux"
+	now := time.Now()
+	claimed.ClaimedAt = &now
+
+	if !claimed.IsClaimed() {
+		t.Error("Claimed message should be claimed")
+	}
+}
