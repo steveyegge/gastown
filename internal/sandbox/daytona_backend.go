@@ -166,7 +166,7 @@ func (b *DaytonaBackend) Create(ctx context.Context, opts CreateOptions) (*Sessi
 // installClaudeCode installs Claude Code in a sandbox.
 func (b *DaytonaBackend) installClaudeCode(ctx context.Context, sandboxID string) error {
 	resp, err := b.client.ExecuteCommand(ctx, sandboxID, &daytona.ExecuteRequest{
-		Command: "npm install -g @anthropic-ai/claude-code",
+		Command: "npm install -g @anthropic-ai/claude-code@2.1.7", // Fix Claude version so we ensure our terminal output parsing logic inside waitForClaudeReady works
 		Timeout: 120, // 2 minutes for npm install
 	})
 	if err != nil {
@@ -263,6 +263,7 @@ func (b *DaytonaBackend) Start(ctx context.Context, session *Session, command st
 
 	// Wait for Claude to start and handle any dialogs (only if running Claude)
 	if strings.Contains(command, "claude") {
+		fmt.Printf("Starting Claude inside sandbox...\n")
 		if err := b.waitForClaudeReady(ctx, sandboxID, ptyHandle); err != nil {
 			return fmt.Errorf("waiting for Claude to be ready: %w", err)
 		}
@@ -343,7 +344,7 @@ func (b *DaytonaBackend) waitForClaudeReady(ctx context.Context, sandboxID strin
 
 		// Check if Claude is ready (look for welcome message or prompt)
 		if strings.Contains(output, "Welcome back") || strings.Contains(output, "bypass permissions on") {
-			// fmt.Println("Claude is READY!")
+			fmt.Printf("✓ Claude is ready\n")
 			return nil
 		}
 	}
