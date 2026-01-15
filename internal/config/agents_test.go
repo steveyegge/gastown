@@ -11,7 +11,7 @@ import (
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := []AgentPreset{AgentClaude, AgentClaudeHaiku, AgentClaudeOpus, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -39,6 +39,8 @@ func TestGetAgentPresetByName(t *testing.T) {
 		wantNil bool
 	}{
 		{"claude", AgentClaude, false},
+		{"claude-haiku", AgentClaudeHaiku, false},
+		{"claude-opus", AgentClaudeOpus, false},
 		{"gemini", AgentGemini, false},
 		{"codex", AgentCodex, false},
 		{"cursor", AgentCursor, false},
@@ -72,6 +74,8 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		wantCommand string
 	}{
 		{AgentClaude, "claude"},
+		{AgentClaudeHaiku, "claude"},
+		{AgentClaudeOpus, "claude"},
 		{AgentGemini, "gemini"},
 		{AgentCodex, "codex"},
 		{AgentCursor, "cursor-agent"},
@@ -97,6 +101,8 @@ func TestIsKnownPreset(t *testing.T) {
 		want bool
 	}{
 		{"claude", true},
+		{"claude-haiku", true},
+		{"claude-opus", true},
 		{"gemini", true},
 		{"codex", true},
 		{"cursor", true},
@@ -115,6 +121,64 @@ func TestIsKnownPreset(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestClaudeModelPresets(t *testing.T) {
+	t.Parallel()
+
+	t.Run("claude-haiku has correct model flag", func(t *testing.T) {
+		info := GetAgentPreset(AgentClaudeHaiku)
+		if info == nil {
+			t.Fatal("claude-haiku preset not found")
+		}
+		if info.Command != "claude" {
+			t.Errorf("Command = %q, want 'claude'", info.Command)
+		}
+		// Check --model haiku is in args
+		hasModelFlag := false
+		for i, arg := range info.Args {
+			if arg == "--model" && i+1 < len(info.Args) && info.Args[i+1] == "haiku" {
+				hasModelFlag = true
+				break
+			}
+		}
+		if !hasModelFlag {
+			t.Errorf("Args = %v, want --model haiku", info.Args)
+		}
+	})
+
+	t.Run("claude-opus has correct model flag", func(t *testing.T) {
+		info := GetAgentPreset(AgentClaudeOpus)
+		if info == nil {
+			t.Fatal("claude-opus preset not found")
+		}
+		if info.Command != "claude" {
+			t.Errorf("Command = %q, want 'claude'", info.Command)
+		}
+		// Check --model opus is in args
+		hasModelFlag := false
+		for i, arg := range info.Args {
+			if arg == "--model" && i+1 < len(info.Args) && info.Args[i+1] == "opus" {
+				hasModelFlag = true
+				break
+			}
+		}
+		if !hasModelFlag {
+			t.Errorf("Args = %v, want --model opus", info.Args)
+		}
+	})
+
+	t.Run("claude model presets support hooks", func(t *testing.T) {
+		for _, preset := range []AgentPreset{AgentClaudeHaiku, AgentClaudeOpus} {
+			info := GetAgentPreset(preset)
+			if info == nil {
+				t.Fatalf("%s preset not found", preset)
+			}
+			if !info.SupportsHooks {
+				t.Errorf("%s.SupportsHooks = false, want true", preset)
+			}
+		}
+	})
 }
 
 func TestLoadAgentRegistry(t *testing.T) {

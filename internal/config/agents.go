@@ -15,8 +15,12 @@ type AgentPreset string
 
 // Supported agent presets (built-in, E2E tested).
 const (
-	// AgentClaude is Claude Code (default).
+	// AgentClaude is Claude Code with Sonnet (default).
 	AgentClaude AgentPreset = "claude"
+	// AgentClaudeHaiku is Claude Code with Haiku model (fast, low-cost).
+	AgentClaudeHaiku AgentPreset = "claude-haiku"
+	// AgentClaudeOpus is Claude Code with Opus model (high reasoning).
+	AgentClaudeOpus AgentPreset = "claude-opus"
 	// AgentGemini is Gemini CLI.
 	AgentGemini AgentPreset = "gemini"
 	// AgentCodex is OpenAI Codex.
@@ -109,6 +113,30 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SupportsHooks:       true,
 		SupportsForkSession: true,
 		NonInteractive:      nil, // Claude is native non-interactive
+	},
+	AgentClaudeHaiku: {
+		Name:                AgentClaudeHaiku,
+		Command:             "claude",
+		Args:                []string{"--model", "haiku", "--dangerously-skip-permissions"},
+		ProcessNames:        []string{"node"},
+		SessionIDEnv:        "CLAUDE_SESSION_ID",
+		ResumeFlag:          "--resume",
+		ResumeStyle:         "flag",
+		SupportsHooks:       true,
+		SupportsForkSession: true,
+		NonInteractive:      nil,
+	},
+	AgentClaudeOpus: {
+		Name:                AgentClaudeOpus,
+		Command:             "claude",
+		Args:                []string{"--model", "opus", "--dangerously-skip-permissions"},
+		ProcessNames:        []string{"node"},
+		SessionIDEnv:        "CLAUDE_SESSION_ID",
+		ResumeFlag:          "--resume",
+		ResumeStyle:         "flag",
+		SupportsHooks:       true,
+		SupportsForkSession: true,
+		NonInteractive:      nil,
 	},
 	AgentGemini: {
 		Name:                AgentGemini,
