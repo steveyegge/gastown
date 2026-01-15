@@ -95,6 +95,9 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 	// No pending MR - try to auto-nuke immediately
 	nukeResult := AutoNukeIfClean(workDir, rigName, payload.PolecatName)
 	if nukeResult.Nuked {
+		// Notify Mayor that capacity is available for new work
+		NotifyMayorCapacityAvailable(workDir, rigName, payload.PolecatName)
+
 		result.Handled = true
 		result.Action = fmt.Sprintf("auto-nuked %s (exit=%s, no MR): %s", payload.PolecatName, payload.Exit, nukeResult.Reason)
 		return result
@@ -262,6 +265,9 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 			result.Error = fmt.Errorf("nuke failed for %s: %w", payload.PolecatName, err)
 			result.Action = fmt.Sprintf("cleanup wisp %s for %s: nuke FAILED", wispID, payload.PolecatName)
 		} else {
+			// Notify Mayor that capacity is available for new work
+			NotifyMayorCapacityAvailable(workDir, rigName, payload.PolecatName)
+
 			result.Handled = true
 			result.WispCreated = wispID
 			result.Action = fmt.Sprintf("auto-nuked %s (cleanup_status=clean, wisp=%s)", payload.PolecatName, wispID)
@@ -297,6 +303,9 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 			result.Error = fmt.Errorf("nuke failed for %s: %w", payload.PolecatName, err)
 			result.Action = fmt.Sprintf("cleanup wisp %s for %s: nuke FAILED", wispID, payload.PolecatName)
 		} else {
+			// Notify Mayor that capacity is available for new work
+			NotifyMayorCapacityAvailable(workDir, rigName, payload.PolecatName)
+
 			result.Handled = true
 			result.WispCreated = wispID
 			result.Action = fmt.Sprintf("auto-nuked %s (commit on main, cleanup_status=%s, wisp=%s)", payload.PolecatName, cleanupStatus, wispID)
@@ -705,6 +714,8 @@ func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
 			result.Error = err
 			result.Reason = fmt.Sprintf("nuke failed: %v", err)
 		} else {
+			// Notify Mayor that capacity is available
+			NotifyMayorCapacityAvailable(workDir, rigName, polecatName)
 			result.Nuked = true
 			result.Reason = "auto-nuked (cleanup_status=clean, no MR)"
 		}
@@ -727,6 +738,8 @@ func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
 				result.Error = err
 				result.Reason = fmt.Sprintf("nuke failed: %v", err)
 			} else {
+				// Notify Mayor that capacity is available
+				NotifyMayorCapacityAvailable(workDir, rigName, polecatName)
 				result.Nuked = true
 				result.Reason = "auto-nuked (commit on main, no cleanup_status)"
 			}
@@ -738,6 +751,27 @@ func AutoNukeIfClean(workDir, rigName, polecatName string) *NukePolecatResult {
 	}
 
 	return result
+}
+
+// NotifyMayorCapacityAvailable sends POLECAT_AVAILABLE signal to Mayor after a successful nuke.
+// This enables Mayor to immediately check for ready work and dispatch to the freed slot.
+// Without this signal, Mayor sleeps and work piles up until human intervention.
+func NotifyMayorCapacityAvailable(workDir, rigName, polecatName string) {
+	subject := fmt.Sprintf("POLECAT_AVAILABLE %s", rigName)
+	body := fmt.Sprintf(`Rig: %s
+Polecat: %s
+Freed-At: %s
+Status: Ready for new work assignment
+
+A polecat slot has been freed. Check for ready work and dispatch if available.`,
+		rigName,
+		polecatName,
+		time.Now().Format(time.RFC3339),
+	)
+
+	// Send mail to Mayor (fire-and-forget, non-blocking)
+	// The mail will be processed in Mayor's next patrol cycle
+	_ = util.ExecRun(workDir, "gt", "mail", "send", "mayor/", "-s", subject, "-m", body)
 }
 
 // verifyCommitOnMain checks if the polecat's current commit is on the default branch.
