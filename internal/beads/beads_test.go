@@ -1513,7 +1513,9 @@ func TestDelegationTerms(t *testing.T) {
 
 // TestSetupRedirect tests the beads redirect setup for worktrees.
 func TestSetupRedirect(t *testing.T) {
+	t.Parallel()
 	t.Run("crew worktree with local beads", func(t *testing.T) {
+		t.Parallel()
 		// Setup: town/rig/.beads (local, no redirect)
 		townRoot := t.TempDir()
 		rigRoot := filepath.Join(townRoot, "testrig")
@@ -1812,6 +1814,7 @@ func TestSetupRedirect(t *testing.T) {
 // 4. BUG: bd create fails with UNIQUE constraint
 // 5. BUG: bd reopen fails with "issue not found" (tombstones are invisible)
 func TestAgentBeadTombstoneBug(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Initialize beads database
@@ -1896,6 +1899,7 @@ func TestAgentBeadTombstoneBug(t *testing.T) {
 // TestAgentBeadCloseReopenWorkaround demonstrates the workaround for the tombstone bug:
 // use Close instead of Delete, then Reopen works.
 func TestAgentBeadCloseReopenWorkaround(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Initialize beads database
@@ -1957,6 +1961,7 @@ func TestAgentBeadCloseReopenWorkaround(t *testing.T) {
 // TestCreateOrReopenAgentBead_ClosedBead tests that CreateOrReopenAgentBead
 // successfully reopens a closed agent bead and updates its fields.
 func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Initialize beads database
@@ -2045,6 +2050,7 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 // fields to emulate delete --force --hard behavior. This ensures reopened agent
 // beads don't have stale state from previous lifecycle.
 func TestCloseAndClearAgentBead_FieldClearing(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Initialize beads database
@@ -2203,6 +2209,7 @@ func TestCloseAndClearAgentBead_FieldClearing(t *testing.T) {
 
 // TestCloseAndClearAgentBead_NonExistent tests behavior when closing a non-existent agent bead.
 func TestCloseAndClearAgentBead_NonExistent(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", "test", "--quiet")
@@ -2225,6 +2232,7 @@ func TestCloseAndClearAgentBead_NonExistent(t *testing.T) {
 
 // TestCloseAndClearAgentBead_AlreadyClosed tests behavior when closing an already-closed agent bead.
 func TestCloseAndClearAgentBead_AlreadyClosed(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", "test", "--quiet")
@@ -2279,6 +2287,7 @@ func TestCloseAndClearAgentBead_AlreadyClosed(t *testing.T) {
 // TestCloseAndClearAgentBead_ReopenHasCleanState tests that reopening a closed agent bead
 // starts with clean state (no stale hook_bead, active_mr, etc.).
 func TestCloseAndClearAgentBead_ReopenHasCleanState(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", "test", "--quiet")
@@ -2347,6 +2356,7 @@ func TestCloseAndClearAgentBead_ReopenHasCleanState(t *testing.T) {
 
 // TestCloseAndClearAgentBead_ReasonVariations tests close with different reason values.
 func TestCloseAndClearAgentBead_ReasonVariations(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 
 	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", "test", "--quiet")
