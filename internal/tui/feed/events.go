@@ -515,6 +515,8 @@ type CombinedSource struct {
 	cancel  context.CancelFunc
 }
 
+const sourceFaninTimeout = 30 * time.Second
+
 // NewCombinedSource creates a source that merges multiple event sources
 func NewCombinedSource(sources ...EventSource) *CombinedSource {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -528,26 +530,23 @@ func NewCombinedSource(sources ...EventSource) *CombinedSource {
 	// Fan-in from all sources
 	for _, src := range sources {
 		go func(s EventSource) {
-			// Add timeout to prevent orphaned goroutines if source channel never closes
-			timeout := time.NewTimer(5 * time.Minute)
-			defer timeout.Stop()
+			// Create a timeout context for this goroutine to prevent indefinite blocking
+			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, sourceFaninTimeout)
 
 			for {
 				select {
-				case <-ctx.Done():
-					return
-				case <-timeout.C:
-					// Source channel hung for too long - exit to prevent goroutine leak
+				case <-timeoutCtx.Done():
+					// Timeout or parent context cancelled - exit
+					timeoutCancel()
 					return
 				case event, ok := <-s.Events():
 					if !ok {
+						timeoutCancel()
 						return
 					}
-					// Reset timeout on successful receive
-					if !timeout.Stop() {
-						<-timeout.C
-					}
-					timeout.Reset(5 * time.Minute)
+					// Reset timeout on successful event receive
+					timeoutCancel()
+					timeoutCtx, timeoutCancel = context.WithTimeout(ctx, sourceFaninTimeout)
 					select {
 					case combined.events <- event:
 					default:
