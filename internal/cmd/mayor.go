@@ -145,6 +145,11 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// If no explicit --agent flag, use the persisted override from start
+	if mayorAgentOverride == "" {
+		mayorAgentOverride = mgr.LoadAgentOverride()
+	}
+
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("finding workspace: %w", err)
