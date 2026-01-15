@@ -833,34 +833,34 @@ func isValidBeadsPrefix(prefix string) bool {
 // prefix instead of generating a new one. Otherwise, the rig would have a mismatched
 // prefix and routing would fail to find the existing issues.
 func detectBeadsPrefixFromConfig(configPath string) string {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return ""
-	}
-
-	// Parse YAML-style config (simple line-by-line parsing)
-	// Looking for "issue-prefix: <value>" or "prefix: <value>"
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		// Skip comments and empty lines
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		// Check for issue-prefix or prefix key
-		for _, key := range []string{"issue-prefix:", "prefix:"} {
-			if strings.HasPrefix(line, key) {
-				value := strings.TrimSpace(strings.TrimPrefix(line, key))
-				// Remove quotes if present
-				value = strings.Trim(value, `"'`)
-				if value != "" && isValidBeadsPrefix(value) {
-					return value
+	// Try config.yaml first (don't return early on error - fallback to issues.jsonl)
+	if data, err := os.ReadFile(configPath); err == nil {
+		// Parse YAML-style config (simple line-by-line parsing)
+		// Looking for "issue-prefix: <value>" or "prefix: <value>"
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			// Skip comments and empty lines
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			// Check for issue-prefix or prefix key
+			for _, key := range []string{"issue-prefix:", "prefix:"} {
+				if strings.HasPrefix(line, key) {
+					value := strings.TrimSpace(strings.TrimPrefix(line, key))
+					// Remove quotes if present
+					value = strings.Trim(value, `"'`)
+					if value != "" && isValidBeadsPrefix(value) {
+						return value
+					}
 				}
 			}
 		}
 	}
 
-	// Fallback: try to detect prefix from existing issues in issues.jsonl
+	// Fallback: try to detect prefix from existing issues in issues.jsonl.
+	// This runs whether config.yaml exists or not, since config.yaml might
+	// exist but not contain a prefix setting.
 	// Look for the first issue ID pattern like "gt-abc123"
 	beadsDir := filepath.Dir(configPath)
 	issuesPath := filepath.Join(beadsDir, "issues.jsonl")

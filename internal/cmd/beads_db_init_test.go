@@ -19,6 +19,32 @@ import (
 	"testing"
 )
 
+// extractJSON extracts the first JSON object from output that may contain
+// warning messages or other text before or after the JSON. Returns only the
+// JSON object portion (from first '{' to matching '}').
+func extractJSON(output []byte) []byte {
+	s := string(output)
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return output
+	}
+	// Find the matching closing brace
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return []byte(s[start : i+1])
+			}
+		}
+	}
+	// No matching brace found, return from start
+	return []byte(s[start:])
+}
+
 // createTrackedBeadsRepoWithIssues creates a git repo with .beads/ tracked that contains existing issues.
 // This simulates a clone of a repo that has tracked beads with issues exported to issues.jsonl.
 // The beads.db is NOT included (gitignored), so prefix must be detected from issues.jsonl.
@@ -68,25 +94,24 @@ func createTrackedBeadsRepoWithIssues(t *testing.T, path, prefix string, numIssu
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
-	// Run bd init
-	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
-	cmd.Dir = path
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bd init failed: %v\nOutput: %s", err, output)
-	}
-
-	// Create issues
+	// Write issues.jsonl directly with test issues
+	// We don't use bd create + bd export because bd export has version-dependent
+	// behavior that causes empty output in some CI environments.
+	// The test only needs issues.jsonl to exist with valid issue IDs for prefix detection.
+	issuesJSONL := filepath.Join(beadsDir, "issues.jsonl")
+	var issuesLines []string
 	for i := 1; i <= numIssues; i++ {
-		cmd = exec.Command("bd", "--no-daemon", "-q", "create",
-			"--type", "task", "--title", fmt.Sprintf("Test issue %d", i))
-		cmd.Dir = path
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("bd create issue %d failed: %v\nOutput: %s", i, err, output)
-		}
+		// Generate a simple issue ID: prefix-hash (using index as pseudo-hash)
+		issueID := fmt.Sprintf("%s-%03d", prefix, i)
+		issueLine := fmt.Sprintf(`{"id":"%s","title":"Test issue %d","status":"open","priority":2,"issue_type":"task"}`, issueID, i)
+		issuesLines = append(issuesLines, issueLine)
+	}
+	if err := os.WriteFile(issuesJSONL, []byte(strings.Join(issuesLines, "\n")+"\n"), 0644); err != nil {
+		t.Fatalf("write issues.jsonl: %v", err)
 	}
 
 	// Add .beads to git (simulating tracked beads)
-	cmd = exec.Command("git", "add", ".beads")
+	cmd := exec.Command("git", "add", ".beads")
 	cmd.Dir = path
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git add .beads: %v\n%s", err, out)
@@ -98,12 +123,8 @@ func createTrackedBeadsRepoWithIssues(t *testing.T, path, prefix string, numIssu
 		t.Fatalf("git commit beads: %v\n%s", err, out)
 	}
 
-	// Remove beads.db to simulate what a clone would look like
-	// (beads.db is gitignored, so cloned repos don't have it)
-	dbPath := filepath.Join(beadsDir, "beads.db")
-	if err := os.Remove(dbPath); err != nil {
-		t.Fatalf("remove beads.db: %v", err)
-	}
+	// Note: No beads.db to remove since we're not using bd init/create
+	// This simulates exactly what a clone looks like: only issues.jsonl exists
 }
 
 // TestBeadsDbInitAfterClone tests that when a tracked beads repo is added as a rig,
@@ -114,7 +135,6 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		t.Skip("bd not installed, skipping test")
 	}
 
-	tmpDir := t.TempDir()
 	gtBinary := buildGT(t)
 
 	t.Run("TrackedRepoWithExistingPrefix", func(t *testing.T) {
@@ -124,7 +144,9 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		// This tests that when a tracked beads repo has existing issues in issues.jsonl,
 		// gt rig add can detect the prefix from those issues WITHOUT --prefix flag.
 
-		townRoot := filepath.Join(tmpDir, "town-prefix-test")
+		// Each subtest gets its own temp directory to avoid cross-test contamination
+		tmpDir := t.TempDir()
+		townRoot := filepath.Join(tmpDir, "town")
 		reposDir := filepath.Join(tmpDir, "repos")
 		os.MkdirAll(reposDir, 0755)
 
@@ -164,6 +186,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
 			"--type", "task", "--title", "test-from-rig")
 		cmd.Dir = rigPath
+		// Isolate environment to prevent cross-test contamination via daemon
+		cmd.Env = append(os.Environ(), "HOME="+tmpDir, "BEADS_NO_DAEMON=1")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd create failed (bug!): %v\nOutput: %s\n\nThis is the bug: beads.db doesn't exist after clone because bd init was never run", err, output)
@@ -172,7 +196,7 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		var result struct {
 			ID string `json:"id"`
 		}
-		if err := json.Unmarshal(output, &result); err != nil {
+		if err := json.Unmarshal(extractJSON(output), &result); err != nil {
 			t.Fatalf("parse output: %v", err)
 		}
 
@@ -185,8 +209,10 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		// Regression test: When a tracked beads repo has NO issues (fresh init),
 		// gt rig add must use the --prefix flag since there's nothing to detect from.
 
-		townRoot := filepath.Join(tmpDir, "town-no-issues")
-		reposDir := filepath.Join(tmpDir, "repos-no-issues")
+		// Each subtest gets its own temp directory to avoid cross-test contamination
+		tmpDir := t.TempDir()
+		townRoot := filepath.Join(tmpDir, "town")
+		reposDir := filepath.Join(tmpDir, "repos")
 		os.MkdirAll(reposDir, 0755)
 
 		// Create a tracked beads repo with NO issues (just bd init)
@@ -223,6 +249,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
 			"--type", "task", "--title", "test-from-empty-repo")
 		cmd.Dir = rigPath
+		// Isolate environment to prevent cross-test contamination via daemon
+		cmd.Env = append(os.Environ(), "HOME="+tmpDir, "BEADS_NO_DAEMON=1")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd create failed: %v\nOutput: %s", err, output)
@@ -231,7 +259,7 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		var result struct {
 			ID string `json:"id"`
 		}
-		if err := json.Unmarshal(output, &result); err != nil {
+		if err := json.Unmarshal(extractJSON(output), &result); err != nil {
 			t.Fatalf("parse output: %v", err)
 		}
 
@@ -244,8 +272,10 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		// Test that when --prefix is explicitly provided but doesn't match
 		// the prefix detected from existing issues, gt rig add fails with an error.
 
-		townRoot := filepath.Join(tmpDir, "town-mismatch")
-		reposDir := filepath.Join(tmpDir, "repos-mismatch")
+		// Each subtest gets its own temp directory to avoid cross-test contamination
+		tmpDir := t.TempDir()
+		townRoot := filepath.Join(tmpDir, "town")
+		reposDir := filepath.Join(tmpDir, "repos")
 		os.MkdirAll(reposDir, 0755)
 
 		// Create a repo with existing beads prefix "real-prefix" with issues
@@ -287,8 +317,10 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		// Test the fallback behavior: when a tracked beads repo has NO issues
 		// and NO --prefix is provided, gt rig add should derive prefix from rig name.
 
-		townRoot := filepath.Join(tmpDir, "town-derived")
-		reposDir := filepath.Join(tmpDir, "repos-derived")
+		// Each subtest gets its own temp directory to avoid cross-test contamination
+		tmpDir := t.TempDir()
+		townRoot := filepath.Join(tmpDir, "town")
+		reposDir := filepath.Join(tmpDir, "repos")
 		os.MkdirAll(reposDir, 0755)
 
 		// Create a tracked beads repo with NO issues
@@ -322,6 +354,8 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
 			"--type", "task", "--title", "test-derived-prefix")
 		cmd.Dir = rigPath
+		// Isolate environment to prevent cross-test contamination via daemon
+		cmd.Env = append(os.Environ(), "HOME="+tmpDir, "BEADS_NO_DAEMON=1")
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd create failed (beads.db not initialized?): %v\nOutput: %s", err, output)
@@ -330,7 +364,7 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		var result struct {
 			ID string `json:"id"`
 		}
-		if err := json.Unmarshal(output, &result); err != nil {
+		if err := json.Unmarshal(extractJSON(output), &result); err != nil {
 			t.Fatalf("parse output: %v", err)
 		}
 
@@ -385,21 +419,20 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 		}
 	}
 
-	// Initialize beads
+	// Create .beads directory with empty issues.jsonl (no issues to detect from)
 	beadsDir := filepath.Join(path, ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)
 	}
 
-	// Run bd init (creates beads.db but no issues)
-	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
-	cmd.Dir = path
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bd init failed: %v\nOutput: %s", err, output)
+	// Write empty issues.jsonl - simulates a tracked beads repo with no issues yet
+	issuesJSONL := filepath.Join(beadsDir, "issues.jsonl")
+	if err := os.WriteFile(issuesJSONL, []byte(""), 0644); err != nil {
+		t.Fatalf("write issues.jsonl: %v", err)
 	}
 
 	// Add .beads to git (simulating tracked beads)
-	cmd = exec.Command("git", "add", ".beads")
+	cmd := exec.Command("git", "add", ".beads")
 	cmd.Dir = path
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git add .beads: %v\n%s", err, out)
@@ -409,11 +442,5 @@ func createTrackedBeadsRepoWithNoIssues(t *testing.T, path, prefix string) {
 	cmd.Dir = path
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit beads: %v\n%s", err, out)
-	}
-
-	// Remove beads.db to simulate what a clone would look like
-	dbPath := filepath.Join(beadsDir, "beads.db")
-	if err := os.Remove(dbPath); err != nil {
-		t.Fatalf("remove beads.db: %v", err)
 	}
 }
