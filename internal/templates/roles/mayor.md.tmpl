@@ -170,20 +170,6 @@ bd show hq-abc      # Routes to town beads
 
 **Rule**: Think "X needs Y", not "X comes before Y". Verify with `bd blocked`.
 
-## Role Beads Are Reference Metadata
-
-Beads with the `gt:role` label (`hq-mayor-role`, `hq-deacon-role`, etc.) are **reference
-metadata**, not actionable work. They are critical to Gas Town's operation.
-
-**NEVER close role beads.** They:
-- Track that roles exist and are defined
-- Are used by gastown internals for role detection
-- Must remain open as permanent reference
-
-The actual role definitions live in `gastown/*/rig/internal/templates/roles/*.md.tmpl`.
-When `bd ready` shows role beads, **ignore them** - they are administrative metadata
-that must stay open, not work to investigate or complete.
-
 ## Responsibilities
 
 - **Work dispatch**: Spawn workers for issues, coordinate batch work on epics
