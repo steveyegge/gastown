@@ -5,11 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -65,6 +67,20 @@ var daemonRunCmd = &cobra.Command{
 	RunE:   runDaemonRun,
 }
 
+var daemonEnableSupervisorCmd = &cobra.Command{
+	Use:   "enable-supervisor",
+	Short: "Configure launchd/systemd for daemon auto-restart",
+	Long: `Configure external supervision for the Gas Town daemon.
+
+This command creates and enables a supervisor service (launchd on macOS,
+systemd on Linux) that will automatically restart the daemon if it crashes
+or terminates. The daemon will also start automatically on login/boot.
+
+Examples:
+  gt daemon enable-supervisor    # Configure launchd/systemd`,
+	RunE: runDaemonEnableSupervisor,
+}
+
 var (
 	daemonLogLines int
 	daemonLogFollow bool
@@ -76,6 +92,7 @@ func init() {
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonRunCmd)
+	daemonCmd.AddCommand(daemonEnableSupervisorCmd)
 
 	daemonLogsCmd.Flags().IntVarP(&daemonLogLines, "lines", "n", 50, "Number of lines to show")
 	daemonLogsCmd.Flags().BoolVarP(&daemonLogFollow, "follow", "f", false, "Follow log output")
@@ -264,4 +281,29 @@ func runDaemonRun(cmd *cobra.Command, args []string) error {
 	}
 
 	return d.Run()
+}
+
+func runDaemonEnableSupervisor(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	msg, err := templates.ProvisionSupervisor(townRoot)
+	if err != nil {
+		return fmt.Errorf("configuring supervisor: %w", err)
+	}
+
+	fmt.Printf("%s %s\n", style.Bold.Render("✓"), msg)
+	fmt.Println("\nThe daemon will now:")
+	fmt.Println("  - Auto-restart if it crashes")
+	fmt.Println("  - Start automatically on login/boot")
+	fmt.Println("\nTo stop the supervised daemon:")
+	if runtime.GOOS == "darwin" {
+		fmt.Println("  launchctl unload ~/Library/LaunchAgents/com.gastown.daemon.plist")
+	} else {
+		fmt.Println("  systemctl --user stop gastown-daemon.service")
+		fmt.Println("  systemctl --user disable gastown-daemon.service")
+	}
+	return nil
 }
