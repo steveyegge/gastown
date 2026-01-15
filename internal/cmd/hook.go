@@ -33,6 +33,8 @@ Examples:
   gt hook status                    # Same as above
   gt hook gt-abc                    # Attach issue gt-abc to your hook
   gt hook gt-abc -s "Fix the bug"   # With subject for handoff mail
+  gt hook gt-abc --if-empty         # Hook only if nothing hooked (idempotent)
+  gt hook gt-abc --upsert           # Replace any existing hook (idempotent)
 
 Related commands:
   gt sling <bead>    # Hook + start now (keep context)
@@ -89,6 +91,8 @@ var (
 	hookMessage string
 	hookDryRun  bool
 	hookForce   bool
+	hookIfEmpty bool
+	hookUpsert  bool
 )
 
 func init() {
@@ -97,6 +101,8 @@ func init() {
 	hookCmd.Flags().StringVarP(&hookMessage, "message", "m", "", "Message for handoff mail (optional)")
 	hookCmd.Flags().BoolVarP(&hookDryRun, "dry-run", "n", false, "Show what would be done")
 	hookCmd.Flags().BoolVarP(&hookForce, "force", "f", false, "Replace existing incomplete hooked bead")
+	hookCmd.Flags().BoolVar(&hookIfEmpty, "if-empty", false, "Only hook if empty, exit 0 either way")
+	hookCmd.Flags().BoolVar(&hookUpsert, "upsert", false, "Replace existing hook, always succeed")
 
 	// --json flag for status output (used when no args, i.e., gt hook --json)
 	hookCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON (for status)")
@@ -118,8 +124,38 @@ func runHookOrStatus(cmd *cobra.Command, args []string) error {
 	return runHook(cmd, args)
 }
 
+// Hook action constants for JSON output.
+const (
+	hookActionHooked   = "hooked"   // Successfully hooked the bead
+	hookActionSkipped  = "skipped"  // Skipped because hook was occupied (--if-empty)
+	hookActionReplaced = "replaced" // Replaced existing hook (--upsert)
+)
+
+// Hook skip reason constants for JSON output.
+const (
+	hookReasonOccupied = "hook_occupied" // Hook already has work attached
+)
+
+// hookResult represents the outcome of a hook operation for JSON output.
+// Used with --json flag to provide machine-readable results for automation.
+type hookResult struct {
+	Action   string  `json:"action"`             // One of: hooked, skipped, replaced
+	BeadID   string  `json:"bead_id"`            // The bead we attempted to hook
+	Previous *string `json:"previous,omitempty"` // Previous bead ID (only for "replaced")
+	Reason   string  `json:"reason,omitempty"`   // Skip reason (only for "skipped")
+	Current  string  `json:"current,omitempty"`  // Current hooked bead (only for "skipped")
+}
+
 func runHook(_ *cobra.Command, args []string) error {
 	beadID := args[0]
+
+	// Validate flag combinations
+	if hookIfEmpty && hookUpsert {
+		return fmt.Errorf("--if-empty and --upsert are mutually exclusive")
+	}
+	if hookIfEmpty && hookForce {
+		return fmt.Errorf("--if-empty and --force are mutually exclusive")
+	}
 
 	// Polecats cannot hook - they use gt done for lifecycle
 	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
@@ -155,22 +191,61 @@ func runHook(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("checking existing hooked beads: %w", err)
 	}
 
-	// If there's an existing hooked bead, check if we can auto-replace
+	// If there's an existing hooked bead, handle based on flags
 	if len(existingPinned) > 0 {
 		existing := existingPinned[0]
 
-		// Skip if it's the same bead we're trying to pin
+		// Skip if it's the same bead we're trying to hook
 		if existing.ID == beadID {
+			if moleculeJSON {
+				return outputHookResult(hookResult{Action: hookActionHooked, BeadID: beadID})
+			}
 			fmt.Printf("%s Already hooked: %s\n", style.Bold.Render("✓"), beadID)
 			return nil
 		}
 
-		// Check if existing bead is complete
+		// --if-empty: Skip if hook is occupied, exit 0 (idempotent)
+		if hookIfEmpty {
+			if moleculeJSON {
+				return outputHookResult(hookResult{
+					Action:  hookActionSkipped,
+					BeadID:  beadID,
+					Reason:  hookReasonOccupied,
+					Current: existing.ID,
+				})
+			}
+			fmt.Printf("%s Hook occupied by %s, skipping\n", style.Dim.Render("ℹ"), existing.ID)
+			return nil
+		}
+
+		// --upsert: Always replace existing hook (idempotent)
+		if hookUpsert {
+			if hookDryRun {
+				fmt.Printf("Would unhook %s and hook %s\n", existing.ID, beadID)
+				return nil
+			}
+			if err := unhookBead(b, existing); err != nil {
+				return fmt.Errorf("unhooking existing bead %s: %w", existing.ID, err)
+			}
+			if err := doHook(beadID, agentID); err != nil {
+				return err
+			}
+			prev := existing.ID
+			if moleculeJSON {
+				return outputHookResult(hookResult{Action: hookActionReplaced, BeadID: beadID, Previous: &prev})
+			}
+			fmt.Printf("%s Replaced %s with %s\n", style.Bold.Render("✓"), existing.ID, beadID)
+			return nil
+		}
+
+		// Check if existing bead is complete (original behavior)
 		isComplete, hasAttachment := checkPinnedBeadComplete(b, existing)
 
 		if isComplete {
 			// Auto-replace completed bead
-			fmt.Printf("%s Replacing completed bead %s...\n", style.Dim.Render("ℹ"), existing.ID)
+			if !moleculeJSON {
+				fmt.Printf("%s Replacing completed bead %s...\n", style.Dim.Render("ℹ"), existing.ID)
+			}
 			if !hookDryRun {
 				if hasAttachment {
 					// Close completed molecule bead (use bd close --force for pinned)
@@ -194,7 +269,9 @@ func runHook(_ *cobra.Command, args []string) error {
 			}
 		} else if hookForce {
 			// Force replace incomplete bead
-			fmt.Printf("%s Force-replacing incomplete bead %s...\n", style.Dim.Render("⚠"), existing.ID)
+			if !moleculeJSON {
+				fmt.Printf("%s Force-replacing incomplete bead %s...\n", style.Dim.Render("⚠"), existing.ID)
+			}
 			if !hookDryRun {
 				// Unpin by setting status back to open
 				status := "open"
@@ -209,8 +286,7 @@ func runHook(_ *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("%s Hooking %s...\n", style.Bold.Render("🪝"), beadID)
-
+	// Perform the hook
 	if hookDryRun {
 		fmt.Printf("Would run: bd update %s --status=hooked --assignee=%s\n", beadID, agentID)
 		if hookSubject != "" {
@@ -222,16 +298,29 @@ func runHook(_ *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Hook the bead using bd update (discovery-based approach)
-	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
-	hookCmd.Stderr = os.Stderr
-	if err := hookCmd.Run(); err != nil {
-		return fmt.Errorf("hooking bead: %w", err)
+	if err := doHook(beadID, agentID); err != nil {
+		return err
+	}
+
+	if moleculeJSON {
+		return outputHookResult(hookResult{Action: hookActionHooked, BeadID: beadID})
 	}
 
 	fmt.Printf("%s Work attached to hook (hooked bead)\n", style.Bold.Render("✓"))
 	fmt.Printf("  Use 'gt handoff' to restart with this work\n")
 	fmt.Printf("  Use 'gt hook' to see hook status\n")
+
+	return nil
+}
+
+// doHook performs the actual hook operation and logs the event.
+// It uses the bd CLI for discovery-based bead routing.
+func doHook(beadID, agentID string) error {
+	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
+	hookCmd.Stderr = os.Stderr
+	if err := hookCmd.Run(); err != nil {
+		return fmt.Errorf("hooking bead: %w", err)
+	}
 
 	// Log hook event to activity feed (non-fatal)
 	if err := events.LogFeed(events.TypeHook, agentID, events.HookPayload(beadID)); err != nil {
@@ -239,6 +328,18 @@ func runHook(_ *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// unhookBead removes a bead from the hook by setting status back to open.
+func unhookBead(b *beads.Beads, bead *beads.Issue) error {
+	status := "open"
+	return b.Update(bead.ID, beads.UpdateOptions{Status: &status})
+}
+
+// outputHookResult outputs the hook result as JSON.
+func outputHookResult(result hookResult) error {
+	enc := json.NewEncoder(os.Stdout)
+	return enc.Encode(result)
 }
 
 // checkPinnedBeadComplete checks if a pinned bead's attached molecule is 100% complete.
