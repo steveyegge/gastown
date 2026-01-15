@@ -3,6 +3,7 @@ package beads
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,8 +11,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -127,7 +130,41 @@ func NewWithBeadsDir(workDir, beadsDir string) *Beads {
 }
 
 // run executes a bd command and returns stdout.
+// It uses exponential backoff retry for transient errors like network
+// timeouts, connection issues, or temporary file locks.
 func (b *Beads) run(args ...string) ([]byte, error) {
+	return b.runWithContext(context.Background(), args...)
+}
+
+// runWithContext executes a bd command with context support and retry logic.
+func (b *Beads) runWithContext(ctx context.Context, args ...string) ([]byte, error) {
+	// Configure retry with beads-specific error handling
+	cfg := util.RetryConfig{
+		MaxAttempts:  3,
+		InitialDelay: 100 * time.Millisecond,
+		MaxDelay:     2 * time.Second, // bd operations should be fast
+		Multiplier:   2.0,
+		Jitter:       true,
+		IsRetryable: func(err error) bool {
+			// Never retry permanent errors
+			if errors.Is(err, ErrNotInstalled) || errors.Is(err, ErrNotFound) {
+				return false
+			}
+			if util.IsPermanent(err) {
+				return false
+			}
+			// Use default transient error detection
+			return util.IsTransientError(err)
+		},
+	}
+
+	return util.Retry(ctx, cfg, func() ([]byte, error) {
+		return b.runOnce(args...)
+	})
+}
+
+// runOnce executes a single bd command attempt.
+func (b *Beads) runOnce(args ...string) ([]byte, error) {
 	// Use --no-daemon for faster read operations (avoids daemon IPC overhead)
 	// The daemon is primarily useful for write coalescing, not reads.
 	// Use --allow-stale to prevent failures when db is out of sync with JSONL
