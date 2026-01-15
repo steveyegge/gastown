@@ -449,6 +449,11 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
+
+	// Accept bypass permissions warning dialog if it appears.
+	// This prevents hangs on systems where Claude prompts for permissions.
+	_ = t.AcceptBypassPermissionsWarning(sessionName)
+
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	runtimeCfg := config.LoadRuntimeConfig("")
@@ -734,19 +739,24 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Get current bead update time
-	baselineTime, err := getAgentBeadUpdateTime(townRoot, beadID)
-	if err != nil {
-		// Bead might not exist yet - that's okay
-		baselineTime = time.Time{}
-	}
-
 	// Record ping
 	agentState.RecordPing()
 
 	// Send health check nudge
 	if err := t.NudgeSession(sessionName, "HEALTH_CHECK: respond with any action to confirm responsiveness"); err != nil {
 		return fmt.Errorf("sending nudge: %w", err)
+	}
+
+	// Get baseline time AFTER sending nudge to avoid false positives.
+	// If we get the time before the nudge and the bead doesn't exist (time.Time{}),
+	// any subsequent update would incorrectly appear as a response.
+	// By getting the baseline after the nudge, we ensure we're only detecting
+	// activity that happens in response to our health check.
+	baselineTime, err := getAgentBeadUpdateTime(townRoot, beadID)
+	if err != nil {
+		// Bead might not exist yet - use current time as baseline
+		// This way only updates AFTER this point count as responses
+		baselineTime = time.Now()
 	}
 
 	fmt.Printf("%s Sent HEALTH_CHECK to %s, waiting %s...\n",
