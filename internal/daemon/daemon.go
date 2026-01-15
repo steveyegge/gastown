@@ -342,6 +342,11 @@ func (d *Daemon) ensureDeaconRunning() {
 	d.logger.Println("Deacon started successfully")
 }
 
+// deaconStartupGracePeriod is the time to wait after a Deacon session starts
+// before checking heartbeat staleness. This prevents killing freshly started
+// sessions that haven't had time to complete a patrol cycle yet.
+const deaconStartupGracePeriod = 10 * time.Minute
+
 // checkDeaconHeartbeat checks if the Deacon is making progress.
 // This is a belt-and-suspenders fallback in case Boot doesn't detect stuck states.
 // Uses the heartbeat file that the Deacon updates on each patrol cycle.
@@ -377,10 +382,22 @@ func (d *Daemon) checkDeaconHeartbeat() {
 		return
 	}
 
-	// Session exists but heartbeat is stale - Deacon is stuck
+	// Check session age to avoid killing freshly started sessions.
+	// A fresh session needs time to complete its first patrol cycle and update the heartbeat.
+	// Without this check, we create a death loop: start session -> heartbeat stale -> kill -> repeat.
+	sessionAge, err := d.getSessionAge(sessionName)
+	if err != nil {
+		d.logger.Printf("Warning: could not determine Deacon session age: %v", err)
+		// Continue with check - better to be cautious than to let stuck sessions run forever
+	} else if sessionAge < deaconStartupGracePeriod {
+		d.logger.Printf("Deacon session is young (%s old), giving time to update heartbeat", sessionAge.Round(time.Second))
+		return
+	}
+
+	// Session exists, is old enough, but heartbeat is stale - Deacon is stuck
 	if age > 30*time.Minute {
 		// Very stuck - restart the session
-		d.logger.Printf("Deacon stuck for %s - restarting session", age.Round(time.Minute))
+		d.logger.Printf("Deacon stuck for %s (session age: %s) - restarting session", age.Round(time.Minute), sessionAge.Round(time.Minute))
 		if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
 			d.logger.Printf("Error killing stuck Deacon: %v", err)
 		}
@@ -392,6 +409,24 @@ func (d *Daemon) checkDeaconHeartbeat() {
 			d.logger.Printf("Error nudging stuck Deacon: %v", err)
 		}
 	}
+}
+
+// getSessionAge returns how long a tmux session has been running.
+func (d *Daemon) getSessionAge(sessionName string) (time.Duration, error) {
+	info, err := d.tmux.GetSessionInfo(sessionName)
+	if err != nil {
+		return 0, err
+	}
+
+	// Parse session created time - tmux returns it as a Unix timestamp string
+	// Format: "Tue Jan 14 20:42:46 2026" (from session_created_string)
+	// We need to parse this and calculate age
+	created, err := time.Parse("Mon Jan _2 15:04:05 2006", info.Created)
+	if err != nil {
+		return 0, fmt.Errorf("parsing session created time %q: %w", info.Created, err)
+	}
+
+	return time.Since(created), nil
 }
 
 // ensureWitnessesRunning ensures witnesses are running for all rigs.
