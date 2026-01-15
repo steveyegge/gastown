@@ -97,13 +97,14 @@ func ParseGroupFields(description string) *GroupFields {
 }
 
 // GroupBeadID returns the bead ID for a group name.
-// Format: gt-group-<name>
+// Format: hq-group-<name> (town-level, groups span rigs)
 func GroupBeadID(name string) string {
-	return "gt-group-" + name
+	return "hq-group-" + name
 }
 
 // CreateGroupBead creates a group bead for mail distribution.
-// The ID format is: gt-group-<name> (e.g., gt-group-ops-team)
+// The ID format is: hq-group-<name> (e.g., hq-group-ops-team)
+// Groups are town-level entities (hq- prefix) because they span rigs.
 // The created_by field is populated from BD_ACTOR env var for provenance tracking.
 func (b *Beads) CreateGroupBead(name string, members []string, createdBy string) (*Issue, error) {
 	id := GroupBeadID(name)
@@ -123,6 +124,7 @@ func (b *Beads) CreateGroupBead(name string, members []string, createdBy string)
 		"--description=" + description,
 		"--type=task", // Groups use task type with gt:group label
 		"--labels=gt:group",
+		"--force", // Override prefix check (town beads may have mixed prefixes)
 	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking

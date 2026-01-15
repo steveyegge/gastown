@@ -163,9 +163,9 @@ func TestGroupBeadID(t *testing.T) {
 		name string
 		want string
 	}{
-		{"ops-team", "gt-group-ops-team"},
-		{"all", "gt-group-all"},
-		{"crew-leads", "gt-group-crew-leads"},
+		{"ops-team", "hq-group-ops-team"},
+		{"all", "hq-group-all"},
+		{"crew-leads", "hq-group-crew-leads"},
 	}
 
 	for _, tt := range tests {
