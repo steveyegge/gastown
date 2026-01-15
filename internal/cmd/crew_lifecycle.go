@@ -64,7 +64,7 @@ func runCrewRemove(cmd *cobra.Command, args []string) error {
 		t := tmux.NewTmux()
 		sessionID := crewSessionName(r.Name, name)
 		if hasSession, _ := t.HasSession(sessionID); hasSession {
-			if err := t.KillSession(sessionID); err != nil {
+			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				fmt.Printf("Error killing session for %s: %v\n", arg, err)
 				lastErr = err
 				continue
@@ -592,7 +592,7 @@ func runCrewStop(cmd *cobra.Command, args []string) error {
 		}
 
 		// Kill the session
-		if err := t.KillSession(sessionID); err != nil {
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			fmt.Printf("  %s [%s] %s: %s\n",
 				style.ErrorPrefix,
 				r.Name, name,
@@ -682,7 +682,7 @@ func runCrewStopAll() error {
 		}
 
 		// Kill the session
-		if err := t.KillSession(sessionID); err != nil {
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			failed++
 			failures = append(failures, fmt.Sprintf("%s: %v", agentName, err))
 			fmt.Printf("  %s %s\n", style.ErrorPrefix, agentName)

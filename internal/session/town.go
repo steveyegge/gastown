@@ -69,7 +69,7 @@ func stopTownSessionInternal(t *tmux.Tmux, ts TownSession, force bool) (bool, er
 		events.SessionDeathPayload(ts.SessionID, ts.Name, reason, "gt down"))
 
 	// Kill the session
-	if err := t.KillSession(ts.SessionID); err != nil {
+	if err := t.KillSessionWithProcesses(ts.SessionID); err != nil {
 		return false, fmt.Errorf("killing %s session: %w", ts.Name, err)
 	}
 

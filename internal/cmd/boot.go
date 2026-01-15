@@ -303,7 +303,7 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 			if age > 30*time.Minute {
 				// Very stuck - restart the session
 				fmt.Printf("Deacon heartbeat is %s old - restarting session\n", age.Round(time.Minute))
-				if err := tm.KillSession(deaconSession); err == nil {
+				if err := tm.KillSessionWithProcesses(deaconSession); err == nil {
 					return "restart", "deacon-stuck", nil
 				}
 			} else {
