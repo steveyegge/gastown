@@ -431,7 +431,7 @@ func (m *SessionManager) startWithRemoteBackend(polecat string, opts SessionStar
 	// Local polecat worktree directory (source for file sync)
 	localWorkDir := opts.WorkDir
 	if localWorkDir == "" {
-		localWorkDir = m.polecatDir(polecat)
+		localWorkDir = m.clonePath(polecat)
 	}
 
 	// Remote working directory inside sandbox (destination for file sync)
@@ -630,7 +630,7 @@ func (m *SessionManager) stopWithRemoteBackend(polecat string, force bool) error
 	// Get work directories for sync back (stored in metadata during start)
 	localWorkDir := sandboxSession.Metadata["local_work_dir"]
 	if localWorkDir == "" {
-		localWorkDir = m.polecatDir(polecat)
+		localWorkDir = m.clonePath(polecat)
 	}
 	remoteWorkDir := sandboxSession.Metadata["remote_work_dir"]
 	if remoteWorkDir == "" {
@@ -1215,7 +1215,7 @@ func (m *SessionManager) CompleteRemotePolecat(polecat string) (*CompleteRemoteP
 	// Get work directories from session metadata
 	localWorkDir := sandboxSession.Metadata["local_work_dir"]
 	if localWorkDir == "" {
-		localWorkDir = m.polecatDir(polecat)
+		localWorkDir = m.clonePath(polecat)
 	}
 	remoteWorkDir := sandboxSession.Metadata["remote_work_dir"]
 	if remoteWorkDir == "" {
