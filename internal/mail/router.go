@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -83,6 +84,16 @@ func isAnnounceAddress(address string) bool {
 // parseAnnounceName extracts the announce channel name from an announce:name address.
 func parseAnnounceName(address string) string {
 	return strings.TrimPrefix(address, "announce:")
+}
+
+// isChannelAddress returns true if the address uses channel:name syntax (beads-native channels).
+func isChannelAddress(address string) bool {
+	return strings.HasPrefix(address, "channel:")
+}
+
+// parseChannelName extracts the channel name from a channel:name address.
+func parseChannelName(address string) string {
+	return strings.TrimPrefix(address, "channel:")
 }
 
 // expandFromConfig is a generic helper for config-based expansion.
@@ -515,6 +526,11 @@ func (r *Router) Send(msg *Message) error {
 		return r.sendToAnnounce(msg)
 	}
 
+	// Check for beads-native channel address - broadcast with retention
+	if isChannelAddress(msg.To) {
+		return r.sendToChannel(msg)
+	}
+
 	// Check for @group address - resolve and fan-out
 	if isGroupAddress(msg.To) {
 		return r.sendToGroup(msg)
@@ -791,6 +807,78 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 	}
 
 	// No notification for announce messages - readers poll or check on their own schedule
+
+	return nil
+}
+
+// sendToChannel delivers a message to a beads-native channel.
+// Creates a message with channel:<name> label for channel queries.
+// Retention is enforced by the channel's EnforceChannelRetention after message creation.
+func (r *Router) sendToChannel(msg *Message) error {
+	channelName := parseChannelName(msg.To)
+
+	// Validate channel exists as a beads-native channel
+	if r.townRoot == "" {
+		return fmt.Errorf("town root not set, cannot send to channel: %s", channelName)
+	}
+	b := beads.New(r.townRoot)
+	_, fields, err := b.GetChannelBead(channelName)
+	if err != nil {
+		return fmt.Errorf("getting channel %s: %w", channelName, err)
+	}
+	if fields == nil {
+		return fmt.Errorf("channel not found: %s", channelName)
+	}
+
+	// Build labels for from/thread/reply-to/cc plus channel metadata
+	var labels []string
+	labels = append(labels, "from:"+msg.From)
+	labels = append(labels, "channel:"+channelName)
+	if msg.ThreadID != "" {
+		labels = append(labels, "thread:"+msg.ThreadID)
+	}
+	if msg.ReplyTo != "" {
+		labels = append(labels, "reply-to:"+msg.ReplyTo)
+	}
+	for _, cc := range msg.CC {
+		ccIdentity := addressToIdentity(cc)
+		labels = append(labels, "cc:"+ccIdentity)
+	}
+
+	// Build command: bd create <subject> --type=message --assignee=channel:<name> -d <body>
+	// Use channel:<name> as assignee so queries can filter by channel
+	args := []string{"create", msg.Subject,
+		"--type", "message",
+		"--assignee", msg.To, // channel:name
+		"-d", msg.Body,
+	}
+
+	// Add priority flag
+	beadsPriority := PriorityToBeads(msg.Priority)
+	args = append(args, "--priority", fmt.Sprintf("%d", beadsPriority))
+
+	// Add labels (includes channel name for filtering)
+	if len(labels) > 0 {
+		args = append(args, "--labels", strings.Join(labels, ","))
+	}
+
+	// Add actor for attribution (sender identity)
+	args = append(args, "--actor", msg.From)
+
+	// Channel messages are never ephemeral - they persist according to retention policy
+	// (deliberately not checking shouldBeWisp)
+
+	// Channel messages go to town-level beads (shared location)
+	beadsDir := r.resolveBeadsDir("")
+	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
+	if err != nil {
+		return fmt.Errorf("sending to channel %s: %w", channelName, err)
+	}
+
+	// Enforce channel retention policy (on-write cleanup)
+	_ = b.EnforceChannelRetention(channelName)
+
+	// No notification for channel messages - readers poll or check on their own schedule
 
 	return nil
 }
