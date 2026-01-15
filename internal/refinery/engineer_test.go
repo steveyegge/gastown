@@ -215,3 +215,170 @@ func TestEngineer_DeleteMergedBranchesConfig(t *testing.T) {
 		t.Error("expected DeleteMergedBranches to be true by default")
 	}
 }
+
+func TestDefaultMergeQueueConfig_BatchDefaults(t *testing.T) {
+	cfg := DefaultMergeQueueConfig()
+
+	// Batch merge should be disabled by default (opt-in feature)
+	if cfg.BatchMerge {
+		t.Error("expected BatchMerge to be false by default")
+	}
+	if cfg.BatchSize != 5 {
+		t.Errorf("expected BatchSize to be 5, got %d", cfg.BatchSize)
+	}
+	if cfg.BatchWindow != 5*time.Minute {
+		t.Errorf("expected BatchWindow to be 5m, got %v", cfg.BatchWindow)
+	}
+	if cfg.BatchStrategy != "all-or-nothing" {
+		t.Errorf("expected BatchStrategy to be 'all-or-nothing', got %q", cfg.BatchStrategy)
+	}
+}
+
+func TestEngineer_LoadConfig_WithBatchOptions(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "engineer-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	config := map[string]interface{}{
+		"type":    "rig",
+		"version": 1,
+		"name":    "test-rig",
+		"merge_queue": map[string]interface{}{
+			"batch_merge":    true,
+			"batch_size":     10,
+			"batch_window":   "10m",
+			"batch_strategy": "bisect-on-fail",
+		},
+	}
+
+	data, _ := json.MarshalIndent(config, "", "  ")
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{
+		Name: "test-rig",
+		Path: tmpDir,
+	}
+
+	e := NewEngineer(r)
+
+	if err := e.LoadConfig(); err != nil {
+		t.Errorf("unexpected error loading config: %v", err)
+	}
+
+	if !e.config.BatchMerge {
+		t.Error("expected BatchMerge to be true")
+	}
+	if e.config.BatchSize != 10 {
+		t.Errorf("expected BatchSize 10, got %d", e.config.BatchSize)
+	}
+	if e.config.BatchWindow != 10*time.Minute {
+		t.Errorf("expected BatchWindow 10m, got %v", e.config.BatchWindow)
+	}
+	if e.config.BatchStrategy != "bisect-on-fail" {
+		t.Errorf("expected BatchStrategy 'bisect-on-fail', got %q", e.config.BatchStrategy)
+	}
+}
+
+func TestEngineer_LoadConfig_InvalidBatchWindow(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "engineer-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	config := map[string]interface{}{
+		"merge_queue": map[string]interface{}{
+			"batch_window": "invalid",
+		},
+	}
+
+	data, _ := json.MarshalIndent(config, "", "  ")
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &rig.Rig{
+		Name: "test-rig",
+		Path: tmpDir,
+	}
+
+	e := NewEngineer(r)
+
+	err = e.LoadConfig()
+	if err == nil {
+		t.Error("expected error for invalid batch_window")
+	}
+}
+
+func TestBatchResult_Empty(t *testing.T) {
+	// An empty batch result should indicate success with no merged/ejected MRs
+	result := BatchResult{Success: true}
+	if !result.Success {
+		t.Error("expected empty batch result to be successful")
+	}
+	if len(result.Merged) != 0 {
+		t.Error("expected no merged MRs in empty batch")
+	}
+	if len(result.Ejected) != 0 {
+		t.Error("expected no ejected MRs in empty batch")
+	}
+}
+
+func TestBatchResult_Fields(t *testing.T) {
+	// Test that BatchResult can hold all expected fields
+	merged := []*MRInfo{{ID: "mr-001"}, {ID: "mr-002"}}
+	ejected := []*MRInfo{{ID: "mr-003"}}
+
+	result := BatchResult{
+		Success:       true,
+		MergeCommit:   "abc123",
+		Merged:        merged,
+		Ejected:       ejected,
+		StagingBranch: "batch-staging-12345",
+	}
+
+	if !result.Success {
+		t.Error("expected success")
+	}
+	if result.MergeCommit != "abc123" {
+		t.Errorf("expected MergeCommit 'abc123', got %q", result.MergeCommit)
+	}
+	if len(result.Merged) != 2 {
+		t.Errorf("expected 2 merged MRs, got %d", len(result.Merged))
+	}
+	if len(result.Ejected) != 1 {
+		t.Errorf("expected 1 ejected MR, got %d", len(result.Ejected))
+	}
+	if result.StagingBranch != "batch-staging-12345" {
+		t.Errorf("expected staging branch name, got %q", result.StagingBranch)
+	}
+}
+
+func TestBatchResult_FailedBatch(t *testing.T) {
+	// Test batch failure scenario
+	failed := []*MRInfo{{ID: "mr-001"}, {ID: "mr-002"}}
+
+	result := BatchResult{
+		Success:     false,
+		TestsFailed: true,
+		Error:       "tests failed: exit code 1",
+		Failed:      failed,
+	}
+
+	if result.Success {
+		t.Error("expected failure")
+	}
+	if !result.TestsFailed {
+		t.Error("expected TestsFailed to be true")
+	}
+	if result.Error == "" {
+		t.Error("expected error message")
+	}
+	if len(result.Failed) != 2 {
+		t.Errorf("expected 2 failed MRs, got %d", len(result.Failed))
+	}
+}
