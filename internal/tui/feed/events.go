@@ -528,14 +528,26 @@ func NewCombinedSource(sources ...EventSource) *CombinedSource {
 	// Fan-in from all sources
 	for _, src := range sources {
 		go func(s EventSource) {
+			// Add timeout to prevent orphaned goroutines if source channel never closes
+			timeout := time.NewTimer(5 * time.Minute)
+			defer timeout.Stop()
+
 			for {
 				select {
 				case <-ctx.Done():
+					return
+				case <-timeout.C:
+					// Source channel hung for too long - exit to prevent goroutine leak
 					return
 				case event, ok := <-s.Events():
 					if !ok {
 						return
 					}
+					// Reset timeout on successful receive
+					if !timeout.Stop() {
+						<-timeout.C
+					}
+					timeout.Reset(5 * time.Minute)
 					select {
 					case combined.events <- event:
 					default:
