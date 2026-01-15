@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -176,12 +175,12 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	var startCmd string
 	if agentOverride != "" {
 		var err error
-		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "deacon-boot", "", "gt boot triage", agentOverride)
+		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", "gt boot triage", agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		startCmd = config.BuildAgentStartupCommand("boot", "deacon-boot", "", "gt boot triage")
+		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", "gt boot triage")
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -194,7 +193,6 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "boot",
 		TownRoot: b.townRoot,
-		BeadsDir: beads.ResolveBeadsDir(b.townRoot),
 	})
 	for k, v := range envVars {
 		_ = b.tmux.SetEnvironment(SessionName, k, v)
@@ -215,7 +213,6 @@ func (b *Boot) spawnDegraded() error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "boot",
 		TownRoot: b.townRoot,
-		BeadsDir: beads.ResolveBeadsDir(b.townRoot),
 	})
 	cmd.Env = config.EnvForExecCommand(envVars)
 	cmd.Env = append(cmd.Env, "GT_DEGRADED=true")

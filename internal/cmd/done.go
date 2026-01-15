@@ -264,6 +264,16 @@ func runDone(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("branch '%s' has 0 commits ahead of %s; nothing to merge\nMake and commit changes first, or use --status DEFERRED to exit without completing", branch, originDefault)
 		}
 
+		// CRITICAL: Push branch BEFORE creating MR bead (hq-6dk53, hq-a4ksk)
+		// The MR bead triggers Refinery to process this branch. If the branch
+		// isn't pushed yet, Refinery finds nothing to merge. The worktree gets
+		// nuked at the end of gt done, so the commits are lost forever.
+		fmt.Printf("Pushing branch to remote...\n")
+		if err := g.Push("origin", branch, false); err != nil {
+			return fmt.Errorf("pushing branch '%s' to origin: %w\nCommits exist locally but failed to push. Fix the issue and retry.", branch, err)
+		}
+		fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
+
 		if issueID == "" {
 			return fmt.Errorf("cannot determine source issue from branch '%s'; use --issue to specify", branch)
 		}

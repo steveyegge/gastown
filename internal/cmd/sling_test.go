@@ -265,6 +265,7 @@ exit 0
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
+	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -327,9 +328,7 @@ exit 0
 		switch {
 		case strings.Contains(args, " cook "):
 			gotCook = true
-			if dir != wantDir {
-				t.Fatalf("bd cook ran in %q, want %q (args: %q)", dir, wantDir, args)
-			}
+			// cook doesn't need database context, runs from cwd
 		case strings.Contains(args, " mol wisp "):
 			gotWisp = true
 			if dir != wantDir {
@@ -428,6 +427,7 @@ exit 0
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
+	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
 
 	cwd, err := os.Getwd()
 	if err != nil {

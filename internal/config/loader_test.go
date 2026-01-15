@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +10,18 @@ import (
 
 	"github.com/steveyegge/gastown/internal/constants"
 )
+
+// skipIfAgentBinaryMissing skips the test if any of the specified agent binaries
+// are not found in PATH. This allows tests that depend on specific agents to be
+// skipped in environments where those agents aren't installed.
+func skipIfAgentBinaryMissing(t *testing.T, agents ...string) {
+	t.Helper()
+	for _, agent := range agents {
+		if _, err := exec.LookPath(agent); err != nil {
+			t.Skipf("skipping test: agent binary %q not found in PATH", agent)
+		}
+	}
+}
 
 func TestTownConfigRoundTrip(t *testing.T) {
 	t.Parallel()
@@ -926,7 +939,8 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origWD) })
 
 	// Test without rig config (uses defaults)
-	cmd := BuildAgentStartupCommand("witness", "gastown/witness", "", "")
+	// New signature: (role, rig, townRoot, rigPath, prompt)
+	cmd := BuildAgentStartupCommand("witness", "gastown", "", "", "")
 
 	// Should contain environment exports and claude command
 	if !strings.Contains(cmd, "export") {
@@ -1108,7 +1122,8 @@ func TestBuildAgentStartupCommandWithAgentOverride(t *testing.T) {
 	}
 
 	t.Run("empty override uses default agent", func(t *testing.T) {
-		cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", "", "")
+		// New signature: (role, rig, townRoot, rigPath, prompt, agentOverride)
+		cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "", "", "", "", "")
 		if err != nil {
 			t.Fatalf("BuildAgentStartupCommandWithAgentOverride: %v", err)
 		}
@@ -1124,7 +1139,8 @@ func TestBuildAgentStartupCommandWithAgentOverride(t *testing.T) {
 	})
 
 	t.Run("override switches agent", func(t *testing.T) {
-		cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", "", "codex")
+		// New signature: (role, rig, townRoot, rigPath, prompt, agentOverride)
+		cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "", "", "", "", "codex")
 		if err != nil {
 			t.Fatalf("BuildAgentStartupCommandWithAgentOverride: %v", err)
 		}
@@ -1196,6 +1212,7 @@ func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 }
 
 func TestBuildStartupCommand_UsesRoleAgentsFromTownSettings(t *testing.T) {
+	skipIfAgentBinaryMissing(t, "gemini", "codex")
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
 
@@ -1255,6 +1272,7 @@ func TestBuildStartupCommand_UsesRoleAgentsFromTownSettings(t *testing.T) {
 }
 
 func TestBuildStartupCommand_RigRoleAgentsOverridesTownRoleAgents(t *testing.T) {
+	skipIfAgentBinaryMissing(t, "gemini", "codex")
 	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
@@ -1288,6 +1306,7 @@ func TestBuildStartupCommand_RigRoleAgentsOverridesTownRoleAgents(t *testing.T) 
 }
 
 func TestBuildAgentStartupCommand_UsesRoleAgents(t *testing.T) {
+	skipIfAgentBinaryMissing(t, "codex")
 	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
@@ -1309,7 +1328,7 @@ func TestBuildAgentStartupCommand_UsesRoleAgents(t *testing.T) {
 	}
 
 	// BuildAgentStartupCommand passes role via GT_ROLE env var
-	cmd := BuildAgentStartupCommand(constants.RoleRefinery, "testrig/refinery", rigPath, "")
+	cmd := BuildAgentStartupCommand(constants.RoleRefinery, "testrig", townRoot, rigPath, "")
 	if !strings.Contains(cmd, "codex") {
 		t.Fatalf("expected codex for refinery role, got: %q", cmd)
 	}
@@ -1945,6 +1964,7 @@ func TestLookupAgentConfigWithRigSettings(t *testing.T) {
 }
 
 func TestResolveRoleAgentConfig(t *testing.T) {
+	skipIfAgentBinaryMissing(t, "gemini", "codex")
 	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")

@@ -25,12 +25,12 @@ type AgentEnvConfig struct {
 	// Sets GT_ROOT environment variable.
 	TownRoot string
 
-	// BeadsDir is the resolved BEADS_DIR path.
-	// Callers should use beads.ResolveBeadsDir() to compute this.
-	BeadsDir string
-
 	// RuntimeConfigDir is the optional CLAUDE_CONFIG_DIR path
 	RuntimeConfigDir string
+
+	// SessionIDEnv is the environment variable name that holds the session ID.
+	// Sets GT_SESSION_ID_ENV so the runtime knows where to find the session ID.
+	SessionIDEnv string
 
 	// BeadsNoDaemon sets BEADS_NO_DAEMON=1 if true
 	// Used for polecats that should bypass the beads daemon
@@ -81,13 +81,10 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["GIT_AUTHOR_NAME"] = cfg.AgentName
 	}
 
-	// Only set GT_ROOT and BEADS_DIR if provided
+	// Only set GT_ROOT if provided
 	// Empty values would override tmux session environment
 	if cfg.TownRoot != "" {
 		env["GT_ROOT"] = cfg.TownRoot
-	}
-	if cfg.BeadsDir != "" {
-		env["BEADS_DIR"] = cfg.BeadsDir
 	}
 
 	// Set BEADS_AGENT_NAME for polecat/crew (uses same format as BD_ACTOR)
@@ -102,6 +99,11 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Add optional runtime config directory
 	if cfg.RuntimeConfigDir != "" {
 		env["CLAUDE_CONFIG_DIR"] = cfg.RuntimeConfigDir
+	}
+
+	// Add session ID env var name if provided
+	if cfg.SessionIDEnv != "" {
+		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
 	}
 
 	return env

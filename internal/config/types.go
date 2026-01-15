@@ -56,6 +56,11 @@ type TownSettings struct {
 	// This allows cost optimization by using different models for different roles.
 	// Example: {"mayor": "claude-opus", "witness": "claude-haiku", "polecat": "claude-sonnet"}
 	RoleAgents map[string]string `json:"role_agents,omitempty"`
+
+	// AgentEmailDomain is the domain used for agent git identity emails.
+	// Agent addresses like "gastown/crew/jack" become "gastown.crew.jack@{domain}".
+	// Default: "gastown.local"
+	AgentEmailDomain string `json:"agent_email_domain,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.

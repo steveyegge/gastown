@@ -15,6 +15,12 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
+// versionPattern matches Claude Code version numbers like "2.0.76"
+var versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
+// validSessionNameRe validates session names to prevent shell injection
+var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 // Common errors
 var (
 	ErrNoServer        = errors.New("no tmux server running")
@@ -139,12 +145,13 @@ func (t *Tmux) KillSession(name string) error {
 //
 // Process:
 // 1. Get the pane's main process PID
-// 2. Send SIGTERM to all child processes (pkill -TERM -P <pid>)
-// 3. Wait 100ms for graceful shutdown
-// 4. Send SIGKILL to any remaining children (pkill -KILL -P <pid>)
-// 5. Kill the tmux session
+// 2. Find all descendant processes recursively (not just direct children)
+// 3. Send SIGTERM to all descendants (deepest first)
+// 4. Wait 100ms for graceful shutdown
+// 5. Send SIGKILL to any remaining descendants
+// 6. Kill the tmux session
 //
-// This ensures Claude processes are properly terminated even if they ignore SIGHUP.
+// This ensures Claude processes and all their children are properly terminated.
 func (t *Tmux) KillSessionWithProcesses(name string) error {
 	// Get the pane PID
 	pid, err := t.GetPanePID(name)
@@ -154,18 +161,47 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	if pid != "" {
-		// Send SIGTERM to child processes
-		_ = exec.Command("pkill", "-TERM", "-P", pid).Run()
+		// Get all descendant PIDs recursively (returns deepest-first order)
+		descendants := getAllDescendants(pid)
+
+		// Send SIGTERM to all descendants (deepest first to avoid orphaning)
+		for _, dpid := range descendants {
+			_ = exec.Command("kill", "-TERM", dpid).Run()
+		}
 
 		// Wait for graceful shutdown
 		time.Sleep(100 * time.Millisecond)
 
-		// Send SIGKILL to any remaining children
-		_ = exec.Command("pkill", "-KILL", "-P", pid).Run()
+		// Send SIGKILL to any remaining descendants
+		for _, dpid := range descendants {
+			_ = exec.Command("kill", "-KILL", dpid).Run()
+		}
 	}
 
 	// Kill the tmux session
 	return t.KillSession(name)
+}
+
+// getAllDescendants recursively finds all descendant PIDs of a process.
+// Returns PIDs in deepest-first order so killing them doesn't orphan grandchildren.
+func getAllDescendants(pid string) []string {
+	var result []string
+
+	// Get direct children using pgrep
+	out, err := exec.Command("pgrep", "-P", pid).Output()
+	if err != nil {
+		return result
+	}
+
+	children := strings.Fields(strings.TrimSpace(string(out)))
+	for _, child := range children {
+		// First add grandchildren (recursively) - deepest first
+		result = append(result, getAllDescendants(child)...)
+		// Then add this child
+		result = append(result, child)
+	}
+
+	return result
 }
 
 // KillServer terminates the entire tmux server and all sessions.
@@ -214,6 +250,72 @@ func (t *Tmux) ListSessions() ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
+// SessionSet provides O(1) session existence checks by caching session names.
+// Use this when you need to check multiple sessions to avoid N+1 subprocess calls.
+type SessionSet struct {
+	sessions map[string]struct{}
+}
+
+// GetSessionSet returns a SessionSet containing all current sessions.
+// Call this once at the start of an operation, then use Has() for O(1) checks.
+// This replaces multiple HasSession() calls with a single ListSessions() call.
+//
+// Builds the map directly from tmux output to avoid intermediate slice allocation.
+func (t *Tmux) GetSessionSet() (*SessionSet, error) {
+	out, err := t.run("list-sessions", "-F", "#{session_name}")
+	if err != nil {
+		if errors.Is(err, ErrNoServer) {
+			return &SessionSet{sessions: make(map[string]struct{})}, nil
+		}
+		return nil, err
+	}
+
+	// Count newlines to pre-size map (avoids rehashing during insertion)
+	count := strings.Count(out, "\n") + 1
+	set := &SessionSet{
+		sessions: make(map[string]struct{}, count),
+	}
+
+	// Parse directly without intermediate slice allocation
+	for len(out) > 0 {
+		idx := strings.IndexByte(out, '\n')
+		var line string
+		if idx >= 0 {
+			line = out[:idx]
+			out = out[idx+1:]
+		} else {
+			line = out
+			out = ""
+		}
+		if line != "" {
+			set.sessions[line] = struct{}{}
+		}
+	}
+	return set, nil
+}
+
+// Has returns true if the session exists in the set.
+// This is an O(1) lookup - no subprocess is spawned.
+func (s *SessionSet) Has(name string) bool {
+	if s == nil {
+		return false
+	}
+	_, ok := s.sessions[name]
+	return ok
+}
+
+// Names returns all session names in the set.
+func (s *SessionSet) Names() []string {
+	if s == nil || len(s.sessions) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(s.sessions))
+	for name := range s.sessions {
+		names = append(names, name)
+	}
+	return names
+}
+
 // ListSessionIDs returns a map of session name to session ID.
 // Session IDs are in the format "$N" where N is a number.
 func (t *Tmux) ListSessionIDs() (map[string]string, error) {
@@ -230,6 +332,7 @@ func (t *Tmux) ListSessionIDs() (map[string]string, error) {
 	}
 
 	result := make(map[string]string)
+	skipped := 0
 	for _, line := range strings.Split(out, "\n") {
 		if line == "" {
 			continue
@@ -240,8 +343,12 @@ func (t *Tmux) ListSessionIDs() (map[string]string, error) {
 			name := line[:idx]
 			id := line[idx+1:]
 			result[name] = id
+		} else {
+			skipped++
 		}
 	}
+	// Note: skipped lines are silently ignored for backward compatibility
+	_ = skipped
 	return result, nil
 }
 
@@ -573,7 +680,7 @@ func (t *Tmux) GetEnvironment(session, key string) (string, error) {
 	// Output format: KEY=value
 	parts := strings.SplitN(out, "=", 2)
 	if len(parts) != 2 {
-		return "", nil
+		return "", fmt.Errorf("unexpected environment format for %s: %q", key, out)
 	}
 	return parts[1], nil
 }
@@ -635,13 +742,19 @@ func (t *Tmux) DisplayMessageDefault(session, message string) error {
 // This interrupts the terminal to ensure the notification is seen.
 // Uses echo to print a boxed banner with the notification details.
 func (t *Tmux) SendNotificationBanner(session, from, subject string) error {
+	// Sanitize inputs to prevent output manipulation
+	from = strings.ReplaceAll(from, "\n", " ")
+	from = strings.ReplaceAll(from, "\r", " ")
+	subject = strings.ReplaceAll(subject, "\n", " ")
+	subject = strings.ReplaceAll(subject, "\r", " ")
+
 	// Build the banner text
 	banner := fmt.Sprintf(`echo '
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📬 NEW MAIL from %s
 Subject: %s
 Run: gt mail inbox
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 '`, from, subject)
 
 	return t.SendKeys(session, banner)
@@ -689,8 +802,7 @@ func (t *Tmux) IsClaudeRunning(session string) bool {
 	if err != nil {
 		return false
 	}
-	matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+`, cmd)
-	if matched {
+	if versionPattern.MatchString(cmd) {
 		return true
 	}
 	// If pane command is a shell, check for claude/node child processes.
@@ -926,6 +1038,11 @@ func (t *Tmux) SetStatusFormat(session, rig, worker, role string) error {
 // SetDynamicStatus configures the right side with dynamic content.
 // Uses a shell command that tmux calls periodically to get current status.
 func (t *Tmux) SetDynamicStatus(session string) error {
+	// Validate session name to prevent shell injection
+	if !validSessionNameRe.MatchString(session) {
+		return fmt.Errorf("invalid session name %q: must match %s", session, validSessionNameRe.String())
+	}
+
 	// tmux calls this command every status-interval seconds
 	// gt status-line reads env vars and mail to build the status
 	right := fmt.Sprintf(`#(gt status-line --session=%s 2>/dev/null) %%H:%%M`, session)
@@ -1086,6 +1203,10 @@ func (t *Tmux) SetFeedBinding(session string) error {
 // When the pane exits, tmux runs the hook command with exit status info.
 // The agentID is used to identify the agent in crash logs (e.g., "gastown/Toast").
 func (t *Tmux) SetPaneDiedHook(session, agentID string) error {
+	// Sanitize inputs to prevent shell injection
+	session = strings.ReplaceAll(session, "'", "'\\''")
+	agentID = strings.ReplaceAll(agentID, "'", "'\\''")
+
 	// Hook command logs the crash with exit status
 	// #{pane_dead_status} is the exit code of the process that died
 	// We run gt log crash which records to the town log

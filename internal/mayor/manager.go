@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -89,7 +88,7 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Build startup command WITH the beacon prompt - the startup hook handles 'gt prime' automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", beacon, agentOverride)
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", m.townRoot, "", beacon, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}
@@ -106,7 +105,6 @@ func (m *Manager) Start(agentOverride string) error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "mayor",
 		TownRoot: m.townRoot,
-		BeadsDir: beads.ResolveBeadsDir(m.townRoot),
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)

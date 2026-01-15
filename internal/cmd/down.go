@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -106,6 +105,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 
 	rigs := discoverRigs(townRoot)
 
+	// Pre-fetch all sessions once for O(1) lookups (avoids N+1 subprocess calls)
+	sessionSet, _ := t.GetSessionSet() // Ignore error - empty set is safe fallback
+
 	// Phase 0.5: Stop polecats if --polecats
 	if downPolecats {
 		if downDryRun {
@@ -162,12 +164,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
 		if downDryRun {
-			if running, _ := t.HasSession(sessionName); running {
+			if sessionSet.Has(sessionName) {
 				printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "would stop")
 			}
 			continue
 		}
-		wasRunning, err := stopSession(t, sessionName)
+		wasRunning, err := stopSessionWithCache(t, sessionName, sessionSet)
 		if err != nil {
 			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
 			allOK = false
@@ -182,12 +184,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-witness", rigName)
 		if downDryRun {
-			if running, _ := t.HasSession(sessionName); running {
+			if sessionSet.Has(sessionName) {
 				printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "would stop")
 			}
 			continue
 		}
-		wasRunning, err := stopSession(t, sessionName)
+		wasRunning, err := stopSessionWithCache(t, sessionName, sessionSet)
 		if err != nil {
 			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), false, err.Error())
 			allOK = false
@@ -201,12 +203,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 	// Phase 3: Stop town-level sessions (Mayor, Boot, Deacon)
 	for _, ts := range session.TownSessions() {
 		if downDryRun {
-			if running, _ := t.HasSession(ts.SessionID); running {
+			if sessionSet.Has(ts.SessionID) {
 				printDownStatus(ts.Name, true, "would stop")
 			}
 			continue
 		}
-		stopped, err := session.StopTownSession(t, ts, downForce)
+		stopped, err := session.StopTownSessionWithCache(t, ts, downForce, sessionSet)
 		if err != nil {
 			printDownStatus(ts.Name, false, err.Error())
 			allOK = false
@@ -391,6 +393,23 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 	return true, t.KillSessionWithProcesses(sessionName)
 }
 
+// stopSessionWithCache is like stopSession but uses a pre-fetched SessionSet
+// for O(1) existence check instead of spawning a subprocess.
+func stopSessionWithCache(t *tmux.Tmux, sessionName string, cache *tmux.SessionSet) (bool, error) {
+	if !cache.Has(sessionName) {
+		return false, nil // Already stopped
+	}
+
+	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
+	if !downForce {
+		_ = t.SendKeysRaw(sessionName, "C-c")
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Kill the session (with explicit process termination to prevent orphans)
+	return true, t.KillSessionWithProcesses(sessionName)
+}
+
 // acquireShutdownLock prevents concurrent shutdowns.
 // Returns the lock (caller must defer Unlock()) or error if lock held.
 func acquireShutdownLock(townRoot string) (*flock.Flock, error) {
@@ -450,20 +469,4 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 	}
 
 	return respawned
-}
-
-// isProcessRunning checks if a process with the given PID exists.
-func isProcessRunning(pid int) bool {
-	if pid <= 0 {
-		return false // Invalid PID
-	}
-	err := syscall.Kill(pid, 0)
-	if err == nil {
-		return true
-	}
-	// EPERM means process exists but we don't have permission to signal it
-	if err == syscall.EPERM {
-		return true
-	}
-	return false
 }

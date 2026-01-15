@@ -174,16 +174,16 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	}
 
 	// Build startup command first
-	bdActor := fmt.Sprintf("%s/refinery", m.rig.Name)
+	townRoot := filepath.Dir(m.rig.Path)
 	var command string
 	if agentOverride != "" {
 		var err error
-		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", bdActor, m.rig.Path, "", agentOverride)
+		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, "", agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		command = config.BuildAgentStartupCommand("refinery", bdActor, m.rig.Path, "")
+		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, "")
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -194,12 +194,10 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:          "refinery",
 		Rig:           m.rig.Name,
 		TownRoot:      townRoot,
-		BeadsDir:      beads.ResolveBeadsDir(m.rig.Path),
 		BeadsNoDaemon: true,
 	})
 

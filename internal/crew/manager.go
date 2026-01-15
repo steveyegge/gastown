@@ -528,7 +528,6 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		Rig:              m.rig.Name,
 		AgentName:        name,
 		TownRoot:         townRoot,
-		BeadsDir:         beads.ResolveBeadsDir(m.rig.Path),
 		RuntimeConfigDir: opts.ClaudeConfigDir,
 		BeadsNoDaemon:    true,
 	})

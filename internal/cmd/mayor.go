@@ -4,8 +4,11 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/mayor"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -142,6 +145,14 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("finding workspace: %w", err)
+	}
+
+	t := tmux.NewTmux()
+	sessionID := mgr.SessionName()
+
 	running, err := mgr.IsRunning()
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
@@ -152,10 +163,45 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 		if err := mgr.Start(mayorAgentOverride); err != nil {
 			return err
 		}
+	} else {
+		// Session exists - check if runtime is still running (hq-95xfq)
+		// If runtime exited or sitting at shell, restart with proper context
+		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, townRoot, mayorAgentOverride)
+		if err != nil {
+			return fmt.Errorf("resolving agent: %w", err)
+		}
+		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
+			// Runtime has exited, restart it with proper context
+			fmt.Println("Runtime exited, restarting with context...")
+
+			paneID, err := t.GetPaneID(sessionID)
+			if err != nil {
+				return fmt.Errorf("getting pane ID: %w", err)
+			}
+
+			// Build startup beacon for context (like gt handoff does)
+			beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+				Recipient: "mayor",
+				Sender:    "human",
+				Topic:     "attach",
+			})
+
+			// Build startup command with beacon
+			startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", townRoot, "", beacon, mayorAgentOverride)
+			if err != nil {
+				return fmt.Errorf("building startup command: %w", err)
+			}
+
+			if err := t.RespawnPane(paneID, startupCmd); err != nil {
+				return fmt.Errorf("restarting runtime: %w", err)
+			}
+
+			fmt.Printf("%s Mayor restarted with context\n", style.Bold.Render("✓"))
+		}
 	}
 
 	// Use shared attach helper (smart: links if inside tmux, attaches if outside)
-	return attachToTmuxSession(mgr.SessionName())
+	return attachToTmuxSession(sessionID)
 }
 
 func runMayorStatus(cmd *cobra.Command, args []string) error {

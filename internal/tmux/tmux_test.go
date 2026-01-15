@@ -527,3 +527,81 @@ func TestHasClaudeChild(t *testing.T) {
 		t.Error("hasClaudeChild should return false for nonexistent PID")
 	}
 }
+
+func TestGetAllDescendants(t *testing.T) {
+	// Test the getAllDescendants helper function
+
+	// Test with nonexistent PID - should return empty slice
+	got := getAllDescendants("999999999")
+	if len(got) != 0 {
+		t.Errorf("getAllDescendants(nonexistent) = %v, want empty slice", got)
+	}
+
+	// Test with PID 1 (init/launchd) - should find some descendants
+	// Note: We can't test exact PIDs, just that the function doesn't panic
+	// and returns reasonable results
+	descendants := getAllDescendants("1")
+	t.Logf("getAllDescendants(\"1\") found %d descendants", len(descendants))
+
+	// Verify returned PIDs are all numeric strings
+	for _, pid := range descendants {
+		for _, c := range pid {
+			if c < '0' || c > '9' {
+				t.Errorf("getAllDescendants returned non-numeric PID: %q", pid)
+			}
+		}
+	}
+}
+
+func TestSessionSet(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-sessionset-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create a test session
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Get the session set
+	set, err := tm.GetSessionSet()
+	if err != nil {
+		t.Fatalf("GetSessionSet: %v", err)
+	}
+
+	// Test Has() for existing session
+	if !set.Has(sessionName) {
+		t.Errorf("SessionSet.Has(%q) = false, want true", sessionName)
+	}
+
+	// Test Has() for non-existing session
+	if set.Has("nonexistent-session-xyz-12345") {
+		t.Error("SessionSet.Has(nonexistent) = true, want false")
+	}
+
+	// Test nil safety
+	var nilSet *SessionSet
+	if nilSet.Has("anything") {
+		t.Error("nil SessionSet.Has() = true, want false")
+	}
+
+	// Test Names() returns the session
+	names := set.Names()
+	found := false
+	for _, n := range names {
+		if n == sessionName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("SessionSet.Names() doesn't contain %q", sessionName)
+	}
+}

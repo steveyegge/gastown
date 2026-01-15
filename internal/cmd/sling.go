@@ -385,7 +385,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 
 		// Step 1: Cook the formula (ensures proto exists)
-		// Run from rig directory so any formula scaffolding uses the correct beads context.
+		// Run from rig directory so cook uses the correct formula database.
 		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
 		cookCmd.Dir = formulaWorkDir
 		cookCmd.Stderr = os.Stderr
