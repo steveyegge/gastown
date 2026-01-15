@@ -203,6 +203,14 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
 	}
 
+	// Kill all Claude processes in the pane before respawn.
+	// tmux respawn-pane -k sends SIGHUP which Claude ignores, so we need to
+	// explicitly kill the processes to prevent orphans.
+	if err := t.KillPaneProcesses(pane); err != nil {
+		// Non-fatal - continue with respawn even if kill fails
+		style.PrintWarning("could not kill pane processes: %v", err)
+	}
+
 	// Use exec to respawn the pane - this kills us and restarts
 	return t.RespawnPane(pane, restartCmd)
 }
@@ -522,6 +530,14 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 	if err := t.ClearHistory(targetPane); err != nil {
 		// Non-fatal - continue with respawn even if clear fails
 		style.PrintWarning("could not clear history: %v", err)
+	}
+
+	// Kill all Claude processes in the pane before respawn.
+	// tmux respawn-pane -k sends SIGHUP which Claude ignores, so we need to
+	// explicitly kill the processes to prevent orphans.
+	if err := t.KillPaneProcesses(targetPane); err != nil {
+		// Non-fatal - continue with respawn even if kill fails
+		style.PrintWarning("could not kill pane processes: %v", err)
 	}
 
 	// Respawn the remote session's pane

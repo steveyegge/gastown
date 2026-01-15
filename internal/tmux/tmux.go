@@ -144,38 +144,30 @@ func (t *Tmux) KillSession(name string) error {
 // This prevents orphan processes that survive tmux kill-session due to SIGHUP being ignored.
 //
 // Process:
-// 1. Get the pane's main process PID
-// 2. Find all descendant processes recursively (not just direct children)
-// 3. Send SIGTERM to all descendants (deepest first)
-// 4. Wait 100ms for graceful shutdown
-// 5. Send SIGKILL to any remaining descendants
-// 6. Kill the tmux session
+// 1. Find all Claude processes in the session using pgrep
+// 2. Send SIGTERM to all Claude processes
+// 3. Wait 100ms for graceful shutdown
+// 4. Send SIGKILL to any remaining Claude processes
+// 5. Kill the tmux session
 //
 // This ensures Claude processes and all their children are properly terminated.
 func (t *Tmux) KillSessionWithProcesses(name string) error {
-	// Get the pane PID
-	pid, err := t.GetPanePID(name)
-	if err != nil {
-		// Session might not exist or be in bad state, try direct kill
-		return t.KillSession(name)
+	// Find all Claude processes associated with this session
+	// We use pgrep -f to match processes with "claude" in their command line
+	// and filter by the session name to avoid killing unrelated claude processes
+	claudePIDs := findClaudeProcessesInSession(name)
+
+	// Send SIGTERM to all Claude processes
+	for _, pid := range claudePIDs {
+		_ = exec.Command("kill", "-TERM", pid).Run()
 	}
 
-	if pid != "" {
-		// Get all descendant PIDs recursively (returns deepest-first order)
-		descendants := getAllDescendants(pid)
+	// Wait for graceful shutdown
+	time.Sleep(100 * time.Millisecond)
 
-		// Send SIGTERM to all descendants (deepest first to avoid orphaning)
-		for _, dpid := range descendants {
-			_ = exec.Command("kill", "-TERM", dpid).Run()
-		}
-
-		// Wait for graceful shutdown
-		time.Sleep(100 * time.Millisecond)
-
-		// Send SIGKILL to any remaining descendants
-		for _, dpid := range descendants {
-			_ = exec.Command("kill", "-KILL", dpid).Run()
-		}
+	// Send SIGKILL to any remaining Claude processes
+	for _, pid := range claudePIDs {
+		_ = exec.Command("kill", "-KILL", pid).Run()
 	}
 
 	// Kill the tmux session
@@ -199,6 +191,149 @@ func getAllDescendants(pid string) []string {
 		result = append(result, getAllDescendants(child)...)
 		// Then add this child
 		result = append(result, child)
+	}
+
+	return result
+}
+
+// findClaudeProcessesInSession finds all Claude processes that belong to a tmux session.
+// It does this by:
+// 1. Getting the pane PID (root process of the session)
+// 2. Finding all processes with "claude" or "node" in their command line
+// 3. Checking if each process is a descendant of the pane PID
+func findClaudeProcessesInSession(sessionName string) []string {
+	var result []string
+
+	// Get the pane PID for this session
+	pidCmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_pid}")
+	pidOut, err := pidCmd.Output()
+	if err != nil {
+		return result
+	}
+
+	panePID := strings.TrimSpace(string(pidOut))
+	if panePID == "" {
+		return result
+	}
+
+	// Find all processes with "claude" or "node" in their command line
+	// We use pgrep -f to match the full command line (not just process name)
+	pgrepCmd := exec.Command("pgrep", "-f", "claude")
+	claudeOut, err := pgrepCmd.Output()
+	if err != nil {
+		// No claude processes found, try "node" as fallback
+		pgrepCmd = exec.Command("pgrep", "-f", "node")
+		claudeOut, err = pgrepCmd.Output()
+		if err != nil {
+			return result
+		}
+	}
+
+	// For each Claude process, check if it's a descendant of the pane PID
+	claudePIDs := strings.Fields(strings.TrimSpace(string(claudeOut)))
+	for _, pid := range claudePIDs {
+		if isDescendantOf(pid, panePID) {
+			result = append(result, pid)
+		}
+	}
+
+	return result
+}
+
+// isDescendantOf checks if a process is a descendant of an ancestor PID.
+// It does this by walking up the process tree using parent PIDs.
+func isDescendantOf(pid, ancestorPID string) bool {
+	currentPID := pid
+	maxIterations := 50 // Prevent infinite loops
+
+	for i := 0; i < maxIterations; i++ {
+		if currentPID == ancestorPID {
+			return true
+		}
+
+		// Get the parent PID
+		ppid, err := getParentPID(currentPID)
+		if err != nil {
+			return false
+		}
+
+		// If we reached PID 1 (init), we've gone too far
+		if ppid == "1" || ppid == "0" {
+			return false
+		}
+
+		currentPID = ppid
+	}
+
+	return false
+}
+
+// getParentPID gets the parent PID of a process using ps.
+func getParentPID(pid string) (string, error) {
+	out, err := exec.Command("ps", "-o", "ppid=", "-p", pid).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// KillPaneProcesses kills all Claude processes in a pane without killing the pane itself.
+// This is useful before respawn-pane to ensure the old process is actually terminated.
+// The pane parameter should be a pane ID (e.g., "%0") or session:window.pane format.
+func (t *Tmux) KillPaneProcesses(pane string) error {
+	// Get the pane PID
+	pid, err := t.run("list-panes", "-t", pane, "-F", "#{pane_pid}")
+	if err != nil {
+		return err
+	}
+
+	panePID := strings.TrimSpace(pid)
+	if panePID == "" {
+		return nil // No pane PID, nothing to kill
+	}
+
+	// Find all Claude/node processes that are descendants of the pane PID
+	claudePIDs := findClaudeProcessesDescendantsOf(panePID)
+
+	// Send SIGTERM to all Claude processes
+	for _, pid := range claudePIDs {
+		_ = exec.Command("kill", "-TERM", pid).Run()
+	}
+
+	// Wait for graceful shutdown
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGKILL to any remaining Claude processes
+	for _, pid := range claudePIDs {
+		_ = exec.Command("kill", "-KILL", pid).Run()
+	}
+
+	return nil
+}
+
+// findClaudeProcessesDescendantsOf finds all Claude processes that are descendants of a PID.
+// Unlike findClaudeProcessesInSession, this doesn't need to check tmux sessions.
+func findClaudeProcessesDescendantsOf(ancestorPID string) []string {
+	var result []string
+
+	// Find all processes with "claude" or "node" in their command line
+	pgrepCmd := exec.Command("pgrep", "-f", "claude")
+	claudeOut, err := pgrepCmd.Output()
+	if err != nil {
+		// No claude processes found, try "node" as fallback
+		pgrepCmd = exec.Command("pgrep", "-f", "node")
+		claudeOut, err = pgrepCmd.Output()
+		if err != nil {
+			return result
+		}
+	}
+
+	// For each Claude process, check if it's a descendant of the ancestor PID
+	claudePIDs := strings.Fields(strings.TrimSpace(string(claudeOut)))
+	for _, pid := range claudePIDs {
+		if isDescendantOf(pid, ancestorPID) {
+			result = append(result, pid)
+		}
 	}
 
 	return result

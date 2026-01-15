@@ -26,9 +26,71 @@ needs = ['check-refinery']
 title = 'Inspect all active polecats'
 
 [[steps]]
+id = "cleanup-orphan-processes"
+title = "Clean up orphaned Claude processes"
+needs = ["survey-workers"]
+description = """
+Detect and terminate orphaned Claude processes that survived session termination.
+
+**Background:**
+When tmux sessions are killed (via `gt polecat nuke`, session cycling, or manual kill),
+the underlying claude processes may not be terminated due to SIGHUP being ignored.
+This leads to massive resource consumption (memory leaks, CPU usage).
+
+**Step 1: List orphaned Claude processes**
+```bash
+gt orphans procs list
+```
+
+This command finds Claude processes with PPID=1 (orphaned/parented to init).
+
+**Expected output:**
+```
+⚠ Found 3 orphaned Claude process(es):
+  PID 12345 /usr/local/bin/claude ...
+  PID 67890 /opt/homebrew/bin/node /usr/local/bin/claude ...
+```
+
+**Step 2: Kill orphaned processes**
+```bash
+gt orphans procs kill -f
+```
+
+The `-f` flag kills without confirmation (safe in automated patrol).
+
+**Step 3: Log the cleanup**
+If orphans were found and killed:
+```bash
+gt mail send mayor/ -s \"ORPHAN_CLEANUP: <rig>\" -m \"
+Orphaned Claude processes detected and terminated:
+Count: <N>
+PIDs: <pid1>, <pid2>, ...
+Cleaned-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+This is expected behavior when sessions terminate abnormally.
+The patrol ensures these don't accumulate over time.
+\"
+```
+
+**Why this is safe:**
+- Only kills processes with PPID=1 (truly orphaned, no parent)
+- Excludes tmux processes and Claude.app desktop app
+- These are zombie processes from crashed/killed sessions
+- Killing them frees resources without affecting active work
+
+**Exclusions:**
+The command automatically excludes:
+- tmux server processes (may contain \"claude\" in args)
+- Claude.app desktop application processes
+- Claude Helper processes (part of desktop app)
+
+This step should run in every patrol cycle to prevent resource leaks.
+"""
+
+[[steps]]
 id = "cleanup-stale-hooks"
 title = "Recover orphaned hooked work"
-needs = ["survey-workers"]
+needs = ["cleanup-orphan-processes"]
 description = """
 Automatically recover work stuck on dead polecats.
 
