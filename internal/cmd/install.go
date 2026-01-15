@@ -25,16 +25,17 @@ import (
 )
 
 var (
-	installForce      bool
-	installName       string
-	installOwner      string
-	installPublicName string
-	installNoBeads    bool
-	installGit        bool
-	installGitHub     string
-	installPublic     bool
-	installShell      bool
-	installWrappers   bool
+	installForce        bool
+	installName         string
+	installOwner        string
+	installPublicName   string
+	installNoBeads      bool
+	installGit          bool
+	installGitHub       string
+	installPublic       bool
+	installShell        bool
+	installWrappers     bool
+	installSupervisor   bool
 )
 
 var installCmd = &cobra.Command{
@@ -61,7 +62,8 @@ Examples:
   gt install ~/gt --git                        # Also init git with .gitignore
   gt install ~/gt --github=user/repo           # Create private GitHub repo (default)
   gt install ~/gt --github=user/repo --public  # Create public GitHub repo
-  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)`,
+  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)
+  gt install ~/gt --supervisor                 # Configure launchd/systemd for daemon auto-restart`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInstall,
 }
@@ -77,6 +79,7 @@ func init() {
 	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
 	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
+	installCmd.Flags().BoolVar(&installSupervisor, "supervisor", false, "Configure launchd/systemd for daemon auto-restart")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -304,6 +307,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   %s Could not install wrapper scripts: %v\n", style.Dim.Render("⚠"), err)
 		} else {
 			fmt.Printf("   ✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+		}
+	}
+
+	// Configure supervisor (launchd/systemd) for daemon auto-restart
+	if installSupervisor {
+		fmt.Println()
+		if msg, err := templates.ProvisionSupervisor(absPath); err != nil {
+			fmt.Printf("   %s Could not configure supervisor: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ %s\n", msg)
 		}
 	}
 

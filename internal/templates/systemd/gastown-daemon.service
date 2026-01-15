@@ -1,0 +1,16 @@
+[Unit]
+Description=Gas Town Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart={{.GTPath}} daemon run
+WorkingDirectory={{.TownRoot}}
+Restart=always
+RestartSec=5s
+Environment="GT_TOWN_ROOT={{.TownRoot}}"
+StandardOutput=append:{{.TownRoot}}/daemon/daemon.log
+StandardError=append:{{.TownRoot}}/daemon/daemon.log
+
+[Install]
+WantedBy=default.target
