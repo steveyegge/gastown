@@ -97,6 +97,13 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolving account: %w", err)
 	}
+
+	// Validate that the account has credentials before starting
+	// This prevents OAuth prompts from appearing in crew sessions
+	if err := config.ValidateAccountCredentials(claudeConfigDir, accountHandle); err != nil {
+		return err
+	}
+
 	if accountHandle != "" {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}

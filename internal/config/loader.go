@@ -578,6 +578,22 @@ func ResolveAccountConfigDir(accountsPath, accountFlag string) (configDir, handl
 	return "", "", nil
 }
 
+// ValidateAccountCredentials checks if an account has valid credentials.
+// Returns an error if the account's config directory doesn't have .credentials.json.
+// Returns nil if configDir is empty (no account configured).
+func ValidateAccountCredentials(configDir, handle string) error {
+	if configDir == "" {
+		return nil // No account configured, nothing to validate
+	}
+
+	credentialsPath := filepath.Join(configDir, ".credentials.json")
+	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
+		return fmt.Errorf("account '%s' is not authenticated (no credentials in %s)\n\nTo authenticate this account, run:\n  CLAUDE_CONFIG_DIR=%s claude\n\nThen use /login to complete the OAuth flow.",
+			handle, configDir, configDir)
+	}
+	return nil
+}
+
 // expandPath expands ~ to home directory.
 func expandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {

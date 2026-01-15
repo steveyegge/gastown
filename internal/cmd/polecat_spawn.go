@@ -129,6 +129,13 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	if err != nil {
 		return nil, fmt.Errorf("resolving account: %w", err)
 	}
+
+	// Validate that the account has credentials before spawning
+	// This prevents OAuth prompts from appearing in polecat sessions
+	if err := config.ValidateAccountCredentials(claudeConfigDir, accountHandle); err != nil {
+		return nil, err
+	}
+
 	if accountHandle != "" {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}

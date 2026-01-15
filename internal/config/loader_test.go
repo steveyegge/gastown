@@ -556,6 +556,47 @@ func TestLoadAccountsConfigNotFound(t *testing.T) {
 	}
 }
 
+func TestValidateAccountCredentials(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty configDir returns nil", func(t *testing.T) {
+		err := ValidateAccountCredentials("", "")
+		if err != nil {
+			t.Errorf("ValidateAccountCredentials with empty configDir should return nil, got %v", err)
+		}
+	})
+
+	t.Run("missing credentials returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		err := ValidateAccountCredentials(dir, "testaccount")
+		if err == nil {
+			t.Error("ValidateAccountCredentials should return error when credentials are missing")
+		}
+		// Verify the error message contains helpful instructions
+		errStr := err.Error()
+		if !strings.Contains(errStr, "not authenticated") {
+			t.Errorf("error should mention 'not authenticated', got: %s", errStr)
+		}
+		if !strings.Contains(errStr, "CLAUDE_CONFIG_DIR") {
+			t.Errorf("error should contain instructions with CLAUDE_CONFIG_DIR, got: %s", errStr)
+		}
+	})
+
+	t.Run("valid credentials returns nil", func(t *testing.T) {
+		dir := t.TempDir()
+		// Create a fake .credentials.json file
+		credPath := filepath.Join(dir, ".credentials.json")
+		if err := os.WriteFile(credPath, []byte(`{"token": "test"}`), 0600); err != nil {
+			t.Fatalf("failed to create test credentials file: %v", err)
+		}
+
+		err := ValidateAccountCredentials(dir, "testaccount")
+		if err != nil {
+			t.Errorf("ValidateAccountCredentials with valid credentials should return nil, got %v", err)
+		}
+	})
+}
+
 func TestMessagingConfigRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
