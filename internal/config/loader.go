@@ -1269,6 +1269,7 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		Command:       rc.Command,
 		InitialPrompt: rc.InitialPrompt,
 		PromptMode:    rc.PromptMode,
+		Env:           rc.Env,
 	}
 
 	// Deep copy Args slice to avoid sharing backing array
@@ -1552,7 +1553,7 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
-	// Merge agent-specific env vars (e.g., OPENCODE_PERMISSION for yolo mode)
+	// Add agent-specific env vars (e.g., ANTHROPIC_BASE_URL, API tokens, OPENCODE_PERMISSION)
 	for k, v := range rc.Env {
 		resolvedEnv[k] = v
 	}
@@ -1677,7 +1678,7 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	if agentOverride != "" {
 		resolvedEnv["GT_AGENT"] = agentOverride
 	}
-	// Merge agent-specific env vars (e.g., OPENCODE_PERMISSION for yolo mode)
+	// Add agent-specific env vars (e.g., ANTHROPIC_BASE_URL, API tokens, OPENCODE_PERMISSION)
 	for k, v := range rc.Env {
 		resolvedEnv[k] = v
 	}
@@ -1793,16 +1794,18 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 }
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
-// Claude can report as "node" (older versions) or "claude" (newer versions).
-// Other runtimes typically report their executable name.
+// For example, Claude runs as "node" or "claude", while most other runtimes report their executable name.
+// Claude wrapper scripts (claude-org, claude-glm, etc.) also run as "node" or "claude" since they exec claude.
 func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 	if rc == nil || rc.Command == "" {
 		return nil
 	}
-	if filepath.Base(rc.Command) == "claude" {
+	base := filepath.Base(rc.Command)
+	// Claude and Claude wrapper scripts (claude-org, claude-glm, etc.) run as "node" or "claude"
+	if base == "claude" || strings.HasPrefix(base, "claude-") {
 		return []string{"node", "claude"}
 	}
-	return []string{filepath.Base(rc.Command)}
+	return []string{base}
 }
 
 // GetDefaultFormula returns the default formula for a rig from settings/config.json.

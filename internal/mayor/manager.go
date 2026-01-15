@@ -48,6 +48,31 @@ func (m *Manager) mayorDir() string {
 	return filepath.Join(m.townRoot, "mayor")
 }
 
+// agentOverrideFile is the file that persists the agent override between start and attach.
+const agentOverrideFile = ".agent-override"
+
+// PersistAgentOverride saves the agent override so attach can use the same agent.
+func (m *Manager) PersistAgentOverride(agentOverride string) error {
+	if agentOverride == "" {
+		// Remove the file if no override (use default)
+		path := filepath.Join(m.mayorDir(), agentOverrideFile)
+		_ = os.Remove(path)
+		return nil
+	}
+	path := filepath.Join(m.mayorDir(), agentOverrideFile)
+	return os.WriteFile(path, []byte(agentOverride), 0644)
+}
+
+// LoadAgentOverride returns the persisted agent override, or empty string if none.
+func (m *Manager) LoadAgentOverride() string {
+	path := filepath.Join(m.mayorDir(), agentOverrideFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 // Start starts the mayor session.
 // agentOverride optionally specifies a different agent alias to use.
 func (m *Manager) Start(agentOverride string) error {
@@ -61,8 +86,8 @@ func (m *Manager) Start(agentOverride string) error {
 		if t.IsAgentAlive(sessionID) {
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but agent dead. Kill and recreate.
-		if err := t.KillSession(sessionID); err != nil {
+		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -138,6 +163,9 @@ func (m *Manager) Start(agentOverride string) error {
 	// Startup beacon with instructions is now included in the initial command,
 	// so no separate nudge needed. The agent starts with full context immediately.
 
+	// Persist the agent override so attach uses the same agent
+	_ = m.PersistAgentOverride(agentOverride)
+
 	return nil
 }
 
@@ -160,7 +188,7 @@ func (m *Manager) Stop() error {
 	time.Sleep(100 * time.Millisecond)
 
 	// Kill the session
-	if err := t.KillSession(sessionID); err != nil {
+	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
