@@ -23,7 +23,14 @@ import (
 // this indicates an errant redirect file that should be removed. The function logs a
 // warning and returns the original beads directory.
 func ResolveBeadsDir(workDir string) string {
-	beadsDir := filepath.Join(workDir, ".beads")
+	// If workDir is already a .beads directory, use it directly
+	// (prevents double .beads paths like /path/.beads/.beads)
+	var beadsDir string
+	if strings.HasSuffix(workDir, ".beads") {
+		beadsDir = workDir
+	} else {
+		beadsDir = filepath.Join(workDir, ".beads")
+	}
 	redirectPath := filepath.Join(beadsDir, "redirect")
 
 	// Check for redirect file
