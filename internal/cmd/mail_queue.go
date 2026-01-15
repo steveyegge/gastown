@@ -12,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -25,18 +24,6 @@ func runMailClaim(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-
-	// Load queue config from messaging.json
-	configPath := config.MessagingConfigPath(townRoot)
-	cfg, err := config.LoadMessagingConfig(configPath)
-	if err != nil {
-		return fmt.Errorf("loading messaging config: %w", err)
-	}
-
-	queueCfg, ok := cfg.Queues[queueName]
-	if !ok {
-		return fmt.Errorf("unknown queue: %s", queueName)
 	}
 
 	// Get caller identity
