@@ -277,27 +277,27 @@ Examples:
 }
 
 var mailClaimCmd = &cobra.Command{
-	Use:   "claim <queue-name>",
+	Use:   "claim [queue-name]",
 	Short: "Claim a message from a queue",
 	Long: `Claim the oldest unclaimed message from a work queue.
 
 SYNTAX:
-  gt mail claim <queue-name>
+  gt mail claim [queue-name]
 
 BEHAVIOR:
-1. List unclaimed messages in the queue
-2. Pick the oldest unclaimed message
-3. Set assignee to caller identity
-4. Set status to in_progress
-5. Print claimed message details
+1. If queue specified, claim from that queue
+2. If no queue specified, claim from any eligible queue
+3. Add claimed-by and claimed-at labels to the message
+4. Print claimed message details
 
 ELIGIBILITY:
-The caller must match a pattern in the queue's workers list
-(defined in ~/gt/config/messaging.json).
+The caller must match the queue's claim_pattern (stored in the queue bead).
+Pattern examples: "*" (anyone), "gastown/polecats/*" (specific rig crew).
 
 Examples:
-  gt mail claim work/gastown    # Claim from gastown work queue`,
-	Args: cobra.ExactArgs(1),
+  gt mail claim work-requests   # Claim from specific queue
+  gt mail claim                 # Claim from any eligible queue`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runMailClaim,
 }
 
@@ -311,14 +311,14 @@ SYNTAX:
 
 BEHAVIOR:
 1. Find the message by ID
-2. Verify caller is the one who claimed it (assignee matches)
-3. Set assignee back to queue:<name> (from message labels)
-4. Set status back to open
-5. Message returns to queue for others to claim
+2. Verify caller is the one who claimed it (claimed-by label matches)
+3. Remove claimed-by and claimed-at labels
+4. Message returns to queue for others to claim
 
 ERROR CASES:
 - Message not found
-- Message not claimed (still assigned to queue)
+- Message is not a queue message
+- Message not claimed
 - Caller did not claim this message
 
 Examples:

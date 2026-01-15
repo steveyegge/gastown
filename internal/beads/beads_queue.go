@@ -14,6 +14,7 @@ import (
 // These are stored as "key: value" lines in the description.
 type QueueFields struct {
 	Name            string // Queue name (human-readable identifier)
+	ClaimPattern    string // Pattern for who can claim from queue (e.g., "gastown/polecats/*")
 	Status          string // active, paused, closed
 	MaxConcurrency  int    // Maximum number of concurrent workers (0 = unlimited)
 	ProcessingOrder string // fifo, priority (default: fifo)
@@ -52,6 +53,12 @@ func FormatQueueDescription(title string, fields *QueueFields) string {
 		lines = append(lines, "name: null")
 	}
 
+	if fields.ClaimPattern != "" {
+		lines = append(lines, fmt.Sprintf("claim_pattern: %s", fields.ClaimPattern))
+	} else {
+		lines = append(lines, "claim_pattern: *") // Default: anyone can claim
+	}
+
 	if fields.Status != "" {
 		lines = append(lines, fmt.Sprintf("status: %s", fields.Status))
 	} else {
@@ -79,6 +86,7 @@ func ParseQueueFields(description string) *QueueFields {
 	fields := &QueueFields{
 		Status:          QueueStatusActive,
 		ProcessingOrder: QueueOrderFIFO,
+		ClaimPattern:    "*", // Default: anyone can claim
 	}
 
 	for _, line := range strings.Split(description, "\n") {
@@ -101,6 +109,10 @@ func ParseQueueFields(description string) *QueueFields {
 		switch strings.ToLower(key) {
 		case "name":
 			fields.Name = value
+		case "claim_pattern":
+			if value != "" {
+				fields.ClaimPattern = value
+			}
 		case "status":
 			fields.Status = value
 		case "max_concurrency":
@@ -265,4 +277,73 @@ func (b *Beads) ListQueueBeads() (map[string]*Issue, error) {
 func (b *Beads) DeleteQueueBead(id string) error {
 	_, err := b.run("delete", id, "--hard", "--force")
 	return err
+}
+
+// MatchClaimPattern checks if an identity matches a claim pattern.
+// Patterns support:
+//   - "*" matches anyone
+//   - "gastown/polecats/*" matches any polecat in gastown rig
+//   - "*/witness" matches any witness role across rigs
+//   - Exact match for specific identities
+func MatchClaimPattern(pattern, identity string) bool {
+	// Wildcard matches anyone
+	if pattern == "*" {
+		return true
+	}
+
+	// Exact match
+	if pattern == identity {
+		return true
+	}
+
+	// Wildcard pattern matching
+	if strings.Contains(pattern, "*") {
+		// Convert to simple glob matching
+		// "gastown/polecats/*" should match "gastown/polecats/capable"
+		// "*/witness" should match "gastown/witness"
+		parts := strings.Split(pattern, "*")
+		if len(parts) == 2 {
+			prefix := parts[0]
+			suffix := parts[1]
+			if strings.HasPrefix(identity, prefix) && strings.HasSuffix(identity, suffix) {
+				// Check that the middle part doesn't contain path separators
+				// unless the pattern allows it (e.g., "*/" at start)
+				middle := identity[len(prefix) : len(identity)-len(suffix)]
+				// Only allow single segment match (no extra slashes)
+				if !strings.Contains(middle, "/") {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// FindEligibleQueues returns all queue beads that the given identity can claim from.
+func (b *Beads) FindEligibleQueues(identity string) ([]*Issue, []*QueueFields, error) {
+	queues, err := b.ListQueueBeads()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var eligibleIssues []*Issue
+	var eligibleFields []*QueueFields
+
+	for _, issue := range queues {
+		fields := ParseQueueFields(issue.Description)
+
+		// Skip inactive queues
+		if fields.Status != QueueStatusActive {
+			continue
+		}
+
+		// Check if identity matches claim pattern
+		if MatchClaimPattern(fields.ClaimPattern, identity) {
+			eligibleIssues = append(eligibleIssues, issue)
+			eligibleFields = append(eligibleFields, fields)
+		}
+	}
+
+	return eligibleIssues, eligibleFields, nil
 }
