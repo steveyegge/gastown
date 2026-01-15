@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -123,6 +125,11 @@ type Engineer struct {
 
 	// stopCh is used for graceful shutdown
 	stopCh chan struct{}
+
+	// Batch collection state (only used when BatchMerge is enabled)
+	pendingBatch    []*MRInfo  // MRs waiting to be processed as a batch
+	batchWindowStart time.Time // When the current batch window started
+	batchMu         sync.Mutex // Protects batch state
 }
 
 // NewEngineer creates a new Engineer for the given rig.
@@ -263,6 +270,138 @@ func (e *Engineer) LoadConfig() error {
 // Config returns the current merge queue configuration.
 func (e *Engineer) Config() *MergeQueueConfig {
 	return e.config
+}
+
+// CollectBatch adds ready MRs to the pending batch and returns true when the batch
+// is ready for processing (either BatchSize reached or BatchWindow elapsed).
+//
+// This implements the batch collection logic for the refinery:
+//  1. When MR arrives, add to pending batch
+//  2. Start batch window timer (configurable, e.g. 5m)
+//  3. When window expires OR batch_size reached: batch is ready
+//  4. Return ready batch; new MRs start a new batch
+//
+// The caller should call CollectBatch periodically (e.g., every patrol cycle).
+// When it returns a non-empty batch, pass it to ProcessBatch.
+func (e *Engineer) CollectBatch() ([]*MRInfo, error) {
+	if !e.config.BatchMerge {
+		return nil, nil // Batch mode not enabled
+	}
+
+	e.batchMu.Lock()
+	defer e.batchMu.Unlock()
+
+	// Get all ready MRs
+	readyMRs, err := e.ListReadyMRs()
+	if err != nil {
+		return nil, fmt.Errorf("listing ready MRs: %w", err)
+	}
+
+	// If no ready MRs, reset batch state and return
+	if len(readyMRs) == 0 {
+		e.pendingBatch = nil
+		e.batchWindowStart = time.Time{}
+		return nil, nil
+	}
+
+	// Sort by priority score (highest first)
+	now := time.Now()
+	sort.Slice(readyMRs, func(i, j int) bool {
+		return e.scoreMR(readyMRs[i], now) > e.scoreMR(readyMRs[j], now)
+	})
+
+	// If this is a new batch, start the window timer
+	if len(e.pendingBatch) == 0 {
+		e.batchWindowStart = now
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Starting batch collection window (%s)\n", e.config.BatchWindow)
+	}
+
+	// Update pending batch with current ready MRs
+	// (MRs may have been added or removed since last check)
+	e.pendingBatch = readyMRs
+
+	// Check if batch is ready
+	batchSizeReached := len(e.pendingBatch) >= e.config.BatchSize
+	windowElapsed := !e.batchWindowStart.IsZero() && now.Sub(e.batchWindowStart) >= e.config.BatchWindow
+
+	if batchSizeReached {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Batch size reached (%d/%d), processing batch\n",
+			len(e.pendingBatch), e.config.BatchSize)
+	} else if windowElapsed {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Batch window elapsed (%s), processing %d MRs\n",
+			e.config.BatchWindow, len(e.pendingBatch))
+	}
+
+	if batchSizeReached || windowElapsed {
+		// Return the batch and reset state
+		batch := e.pendingBatch
+		e.pendingBatch = nil
+		e.batchWindowStart = time.Time{}
+
+		// Limit to BatchSize
+		if len(batch) > e.config.BatchSize {
+			batch = batch[:e.config.BatchSize]
+		}
+
+		return batch, nil
+	}
+
+	// Batch not ready yet
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Collecting batch: %d MRs, window %s remaining\n",
+		len(e.pendingBatch), e.config.BatchWindow-now.Sub(e.batchWindowStart))
+
+	return nil, nil
+}
+
+// BatchPending returns the current pending batch (for monitoring/display).
+func (e *Engineer) BatchPending() []*MRInfo {
+	e.batchMu.Lock()
+	defer e.batchMu.Unlock()
+	return e.pendingBatch
+}
+
+// BatchWindowRemaining returns the time remaining in the current batch window.
+// Returns 0 if no batch is pending or batch mode is disabled.
+func (e *Engineer) BatchWindowRemaining() time.Duration {
+	if !e.config.BatchMerge {
+		return 0
+	}
+
+	e.batchMu.Lock()
+	defer e.batchMu.Unlock()
+
+	if e.batchWindowStart.IsZero() {
+		return 0
+	}
+
+	remaining := e.config.BatchWindow - time.Since(e.batchWindowStart)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+// scoreMR calculates a priority score for an MR (higher = more urgent).
+func (e *Engineer) scoreMR(mr *MRInfo, now time.Time) float64 {
+	input := ScoreInput{
+		Priority:    mr.Priority,
+		MRCreatedAt: mr.CreatedAt,
+		Now:         now,
+		RetryCount:  mr.RetryCount,
+	}
+	if mr.ConvoyCreatedAt != nil {
+		input.ConvoyCreatedAt = mr.ConvoyCreatedAt
+	}
+	return ScoreMRWithDefaults(input)
+}
+
+// ResetBatch clears the pending batch state.
+// Useful when the batch fails and needs to be restarted.
+func (e *Engineer) ResetBatch() {
+	e.batchMu.Lock()
+	defer e.batchMu.Unlock()
+	e.pendingBatch = nil
+	e.batchWindowStart = time.Time{}
 }
 
 // ProcessResult contains the result of processing a merge request.
@@ -1091,9 +1230,11 @@ func (e *Engineer) ProcessBatch(ctx context.Context, mrs []*MRInfo) BatchResult 
 
 			// Handle based on strategy
 			if e.config.BatchStrategy == "bisect-on-fail" {
-				_, _ = fmt.Fprintln(e.output, "[Engineer] Bisect-on-fail not yet implemented, failing entire batch")
+				// Use bisection to find and eject failing MRs, merge the good ones
+				return e.processBatchWithBisect(ctx, merged, ejected, target)
 			}
 
+			// Default: all-or-nothing - fail entire batch
 			return BatchResult{
 				Success:       false,
 				TestsFailed:   true,
@@ -1154,6 +1295,242 @@ func (e *Engineer) ProcessBatch(ctx context.Context, mrs []*MRInfo) BatchResult 
 		MergeCommit:   mergeCommit,
 		Merged:        merged,
 		Ejected:       ejected,
+		StagingBranch: stagingBranch,
+	}
+}
+
+// bisectBatch uses binary search to identify failing MRs in a batch.
+// It recursively splits the batch and tests each half until individual
+// failing MRs are identified. Returns good MRs and bad MRs.
+//
+// Algorithm:
+//  1. If batch has 1 MR, test it - if fail, it's the culprit
+//  2. Split batch in half
+//  3. Test first half - if pass, problem is in second half
+//  4. If fail, recurse on first half
+//  5. Continue until all failing MRs are identified
+//  6. Return good MRs (can be merged) and bad MRs (ejected)
+func (e *Engineer) bisectBatch(ctx context.Context, mrs []*MRInfo, target string, depth int) (good, bad []*MRInfo) {
+	indent := ""
+	for i := 0; i < depth; i++ {
+		indent += "  "
+	}
+
+	// Base case: single MR
+	if len(mrs) == 1 {
+		_, _ = fmt.Fprintf(e.output, "%s[Bisect] Testing single MR: %s\n", indent, mrs[0].ID)
+		if e.testMRs(ctx, mrs, target) {
+			_, _ = fmt.Fprintf(e.output, "%s[Bisect] %s: PASS\n", indent, mrs[0].ID)
+			return mrs, nil
+		}
+		_, _ = fmt.Fprintf(e.output, "%s[Bisect] %s: FAIL\n", indent, mrs[0].ID)
+		return nil, mrs
+	}
+
+	// Base case: empty
+	if len(mrs) == 0 {
+		return nil, nil
+	}
+
+	_, _ = fmt.Fprintf(e.output, "%s[Bisect] Testing batch of %d MRs...\n", indent, len(mrs))
+
+	// First, test all MRs together
+	if e.testMRs(ctx, mrs, target) {
+		_, _ = fmt.Fprintf(e.output, "%s[Bisect] All %d MRs pass together\n", indent, len(mrs))
+		return mrs, nil
+	}
+
+	// Batch fails - split and recurse
+	mid := len(mrs) / 2
+	firstHalf := mrs[:mid]
+	secondHalf := mrs[mid:]
+
+	_, _ = fmt.Fprintf(e.output, "%s[Bisect] Batch fails, splitting: first=%d, second=%d\n",
+		indent, len(firstHalf), len(secondHalf))
+
+	// Test first half
+	firstGood, firstBad := e.bisectBatch(ctx, firstHalf, target, depth+1)
+
+	// Test second half
+	secondGood, secondBad := e.bisectBatch(ctx, secondHalf, target, depth+1)
+
+	// Combine results
+	good = append(good, firstGood...)
+	good = append(good, secondGood...)
+	bad = append(bad, firstBad...)
+	bad = append(bad, secondBad...)
+
+	return good, bad
+}
+
+// testMRs creates a temporary staging branch, merges the given MRs, and runs tests.
+// Returns true if all tests pass, false otherwise. Cleans up the staging branch.
+func (e *Engineer) testMRs(ctx context.Context, mrs []*MRInfo, target string) bool {
+	if len(mrs) == 0 {
+		return true
+	}
+
+	stagingBranch := fmt.Sprintf("bisect-staging-%d", time.Now().UnixNano())
+
+	// Checkout target and create staging branch
+	if err := e.git.Checkout(target); err != nil {
+		return false
+	}
+	if err := e.git.CreateBranch(stagingBranch); err != nil {
+		return false
+	}
+
+	// Merge all MRs to staging
+	for _, mr := range mrs {
+		exists, err := e.git.BranchExists(mr.Branch)
+		if err != nil || !exists {
+			_ = e.git.Checkout(target)
+			_ = e.git.DeleteBranch(stagingBranch, true)
+			return false
+		}
+
+		mergeMsg := fmt.Sprintf("Bisect merge %s", mr.Branch)
+		if err := e.git.MergeNoFF(mr.Branch, mergeMsg); err != nil {
+			_ = e.git.AbortMerge()
+			_ = e.git.Checkout(target)
+			_ = e.git.DeleteBranch(stagingBranch, true)
+			return false
+		}
+	}
+
+	// Run tests
+	result := e.runTests(ctx)
+
+	// Cleanup
+	_ = e.git.Checkout(target)
+	_ = e.git.DeleteBranch(stagingBranch, true)
+
+	return result.Success
+}
+
+// processBatchWithBisect handles a failed batch using bisect-on-fail strategy.
+// It identifies failing MRs, ejects them, and merges the good ones.
+func (e *Engineer) processBatchWithBisect(ctx context.Context, merged, ejected []*MRInfo, target string) BatchResult {
+	_, _ = fmt.Fprintln(e.output, "[Engineer] Starting bisect-on-fail to identify failing MRs...")
+
+	// Run bisection to separate good and bad MRs
+	good, bad := e.bisectBatch(ctx, merged, target, 0)
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Bisect complete: %d good, %d bad\n", len(good), len(bad))
+
+	// If no good MRs, all failed
+	if len(good) == 0 {
+		return BatchResult{
+			Success:     false,
+			TestsFailed: true,
+			Error:       fmt.Sprintf("all %d MRs failed tests", len(bad)),
+			Ejected:     append(ejected, bad...),
+			Failed:      bad,
+		}
+	}
+
+	// If we have good MRs, merge them
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging %d good MRs after ejecting %d bad MRs...\n", len(good), len(bad))
+
+	// Create fresh staging branch and merge good MRs
+	stagingBranch := fmt.Sprintf("batch-staging-%d", time.Now().Unix())
+
+	if err := e.git.Checkout(target); err != nil {
+		return BatchResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to checkout %s: %v", target, err),
+			Failed:  good,
+			Ejected: append(ejected, bad...),
+		}
+	}
+
+	if err := e.git.CreateBranch(stagingBranch); err != nil {
+		return BatchResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to create staging branch: %v", err),
+			Failed:  good,
+			Ejected: append(ejected, bad...),
+		}
+	}
+
+	// Merge good MRs
+	for _, mr := range good {
+		mergeMsg := fmt.Sprintf("Batch merge %s into %s", mr.Branch, stagingBranch)
+		if err := e.git.MergeNoFF(mr.Branch, mergeMsg); err != nil {
+			_ = e.git.AbortMerge()
+			_ = e.git.Checkout(target)
+			_ = e.git.DeleteBranch(stagingBranch, true)
+			return BatchResult{
+				Success: false,
+				Error:   fmt.Sprintf("failed to merge good MR %s: %v", mr.ID, err),
+				Failed:  good,
+				Ejected: append(ejected, bad...),
+			}
+		}
+	}
+
+	// Run final verification tests
+	if e.config.RunTests && e.config.TestCommand != "" {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Running verification tests on %d good MRs...\n", len(good))
+		result := e.runTests(ctx)
+		if !result.Success {
+			_ = e.git.Checkout(target)
+			_ = e.git.DeleteBranch(stagingBranch, true)
+			return BatchResult{
+				Success:     false,
+				TestsFailed: true,
+				Error:       "verification tests failed after bisect",
+				Failed:      good,
+				Ejected:     append(ejected, bad...),
+			}
+		}
+	}
+
+	// Fast-forward main to staging
+	if err := e.git.Checkout(target); err != nil {
+		_ = e.git.DeleteBranch(stagingBranch, true)
+		return BatchResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to checkout %s: %v", target, err),
+			Failed:  good,
+			Ejected: append(ejected, bad...),
+		}
+	}
+
+	if err := e.git.Merge(stagingBranch); err != nil {
+		_ = e.git.DeleteBranch(stagingBranch, true)
+		return BatchResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to fast-forward %s: %v", target, err),
+			Failed:  good,
+			Ejected: append(ejected, bad...),
+		}
+	}
+
+	mergeCommit, _ := e.git.Rev("HEAD")
+
+	// Push to origin
+	if err := e.git.Push("origin", target, false); err != nil {
+		return BatchResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to push: %v", err),
+			Failed:  good,
+			Ejected: append(ejected, bad...),
+		}
+	}
+
+	// Cleanup
+	_ = e.git.DeleteBranch(stagingBranch, true)
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Bisect merge complete: %d merged, %d ejected (bad), %d ejected (conflict)\n",
+		len(good), len(bad), len(ejected))
+
+	return BatchResult{
+		Success:       true,
+		MergeCommit:   mergeCommit,
+		Merged:        good,
+		Ejected:       append(ejected, bad...),
+		Failed:        bad,
 		StagingBranch: stagingBranch,
 	}
 }
