@@ -726,7 +726,7 @@ func (m *Manager) ReconcilePoolWith(namesWithDirs, namesWithSessions []string) {
 		for _, name := range namesWithSessions {
 			if !dirSet[name] {
 				sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
-				_ = m.tmux.KillSession(sessionName)
+				_ = m.tmux.KillSessionWithProcesses(sessionName)
 			}
 		}
 	}
