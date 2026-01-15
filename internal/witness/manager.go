@@ -211,9 +211,11 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		return fmt.Errorf("saving state: %w", err)
 	}
 
-	// Wait for Claude to start (non-fatal).
+	// Wait for Claude to start - fatal if Claude fails to launch
 	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal - try to continue anyway
+		// Kill the zombie session before returning error
+		_ = t.KillSessionWithProcesses(sessionID)
+		return fmt.Errorf("waiting for witness to start: %w", err)
 	}
 
 	// Accept bypass permissions warning dialog if it appears.
