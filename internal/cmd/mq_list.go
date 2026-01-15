@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
 )
@@ -24,6 +25,14 @@ func runMQList(cmd *cobra.Command, args []string) error {
 
 	// Create beads wrapper for the rig - use BeadsPath() to get the git-synced location
 	b := beads.New(r.BeadsPath())
+
+	// Create git client for branch verification when --verify is set
+	var gitClient *git.Git
+	if mqListVerify {
+		// Use the refinery's rig worktree to check branches
+		refineryRigPath := fmt.Sprintf("%s/refinery/rig", r.Path)
+		gitClient = git.NewGit(refineryRigPath)
+	}
 
 	// Build list options - query for merge-request type
 	// Priority -1 means no priority filter (otherwise 0 would filter to P0 only)
@@ -64,9 +73,10 @@ func runMQList(cmd *cobra.Command, args []string) error {
 	// Apply additional filters and calculate scores
 	now := time.Now()
 	type scoredIssue struct {
-		issue  *beads.Issue
-		fields *beads.MRFields
-		score  float64
+		issue         *beads.Issue
+		fields        *beads.MRFields
+		score         float64
+		branchMissing bool // true if branch doesn't exist in git (when --verify is set)
 	}
 	var scored []scoredIssue
 
@@ -97,9 +107,18 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		// Check branch existence if --verify is set
+		branchMissing := false
+		if mqListVerify && gitClient != nil && fields != nil && fields.Branch != "" {
+			exists, err := gitClient.BranchExists(fields.Branch)
+			if err == nil && !exists {
+				branchMissing = true
+			}
+		}
+
 		// Calculate priority score
 		score := calculateMRScore(issue, fields, now)
-		scored = append(scored, scoredIssue{issue: issue, fields: fields, score: score})
+		scored = append(scored, scoredIssue{issue: issue, fields: fields, score: score, branchMissing: branchMissing})
 	}
 
 	// Sort by score descending (highest priority first)
@@ -126,16 +145,21 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create styled table with SCORE column
-	table := style.NewTable(
-		style.Column{Name: "ID", Width: 12},
-		style.Column{Name: "SCORE", Width: 7, Align: style.AlignRight},
-		style.Column{Name: "PRI", Width: 4},
-		style.Column{Name: "CONVOY", Width: 12},
-		style.Column{Name: "BRANCH", Width: 24},
-		style.Column{Name: "STATUS", Width: 10},
-		style.Column{Name: "AGE", Width: 6, Align: style.AlignRight},
-	)
+	// Create styled table - add GIT column when --verify is set
+	columns := []style.Column{
+		{Name: "ID", Width: 12},
+		{Name: "SCORE", Width: 7, Align: style.AlignRight},
+		{Name: "PRI", Width: 4},
+		{Name: "CONVOY", Width: 12},
+		{Name: "BRANCH", Width: 24},
+		{Name: "STATUS", Width: 10},
+	}
+	if mqListVerify {
+		columns = append(columns, style.Column{Name: "GIT", Width: 8})
+	}
+	columns = append(columns, style.Column{Name: "AGE", Width: 6, Align: style.AlignRight})
+
+	table := style.NewTable(columns...)
 
 	// Add rows using scored items (already sorted by score)
 	for _, item := range scored {
@@ -194,6 +218,16 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		// Format score
 		scoreStr := fmt.Sprintf("%.1f", item.score)
 
+		// Format branch status when --verify is set
+		gitStatus := ""
+		if mqListVerify {
+			if item.branchMissing {
+				gitStatus = style.Error.Render("MISSING")
+			} else {
+				gitStatus = style.Success.Render("OK")
+			}
+		}
+
 		// Calculate age
 		age := formatMRAge(issue.CreatedAt)
 
@@ -203,10 +237,30 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			displayID = displayID[:12]
 		}
 
-		table.AddRow(displayID, scoreStr, priority, convoyDisplay, branch, styledStatus, style.Dim.Render(age))
+		// Build row with conditional GIT column
+		if mqListVerify {
+			table.AddRow(displayID, scoreStr, priority, convoyDisplay, branch, styledStatus, gitStatus, style.Dim.Render(age))
+		} else {
+			table.AddRow(displayID, scoreStr, priority, convoyDisplay, branch, styledStatus, style.Dim.Render(age))
+		}
 	}
 
 	fmt.Print(table.Render())
+
+	// Show summary of missing branches when --verify is set
+	if mqListVerify {
+		missingCount := 0
+		for _, item := range scored {
+			if item.branchMissing {
+				missingCount++
+			}
+		}
+		if missingCount > 0 {
+			fmt.Printf("\n  %s %d MR(s) with missing branches\n",
+				style.Error.Render("⚠"),
+				missingCount)
+		}
+	}
 
 	// Show blocking details below table
 	for _, item := range scored {
