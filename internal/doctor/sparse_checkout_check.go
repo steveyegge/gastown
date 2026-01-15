@@ -4,20 +4,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/steveyegge/gastown/internal/git"
 )
 
-// SparseCheckoutCheck verifies that git clones/worktrees have sparse checkout configured
-// to exclude Claude Code context files from source repos. This ensures source repo settings
-// and instructions don't override Gas Town agent configuration.
-// Excluded files: .claude/, CLAUDE.md, CLAUDE.local.md
-// Note: .mcp.json is NOT excluded so worktrees inherit MCP server config.
+// SparseCheckoutCheck detects legacy sparse checkout configurations that should be removed.
+// Sparse checkout was previously used to exclude .claude/ from source repos, but this
+// prevented valid .claude/ files in rigged repos from being used. Now that gastown's
+// repo no longer has .claude/ files, sparse checkout is no longer needed.
 type SparseCheckoutCheck struct {
 	FixableCheck
 	rigPath       string
-	affectedRepos []string // repos missing sparse checkout configuration
+	affectedRepos []string // repos with legacy sparse checkout that should be removed
 }
 
 // NewSparseCheckoutCheck creates a new sparse checkout check.
@@ -26,14 +24,14 @@ func NewSparseCheckoutCheck() *SparseCheckoutCheck {
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
 				CheckName:        "sparse-checkout",
-				CheckDescription: "Verify sparse checkout excludes Claude context files (.claude/, CLAUDE.md, etc.)",
+				CheckDescription: "Check for legacy sparse checkout configuration that should be removed",
 				CheckCategory:    CategoryRig,
 			},
 		},
 	}
 }
 
-// Run checks if sparse checkout is configured for all git repos in the rig.
+// Run checks if any git repos have legacy sparse checkout configured.
 func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 	c.rigPath = ctx.RigPath()
 	if c.rigPath == "" {
@@ -78,8 +76,8 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Check if sparse checkout is configured (not just if .claude/ exists)
-		if !git.IsSparseCheckoutConfigured(repoPath) {
+		// Check if sparse checkout is configured (legacy configuration to remove)
+		if git.IsSparseCheckoutConfigured(repoPath) {
 			c.affectedRepos = append(c.affectedRepos, repoPath)
 		}
 	}
@@ -88,7 +86,7 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: "All repos have sparse checkout configured to exclude Claude context files",
+			Message: "No legacy sparse checkout configurations found",
 		}
 	}
 
@@ -104,28 +102,19 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 
 	return &CheckResult{
 		Name:    c.Name(),
-		Status:  StatusError,
-		Message: fmt.Sprintf("%d repo(s) missing sparse checkout configuration", len(c.affectedRepos)),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d repo(s) have legacy sparse checkout that should be removed", len(c.affectedRepos)),
 		Details: details,
-		FixHint: "Run 'gt doctor --fix' to configure sparse checkout",
+		FixHint: "Run 'gt doctor --fix' to remove sparse checkout and restore .claude/ files",
 	}
 }
 
-// Fix configures sparse checkout for affected repos to exclude Claude context files.
+// Fix removes sparse checkout configuration from affected repos.
 func (c *SparseCheckoutCheck) Fix(ctx *CheckContext) error {
 	for _, repoPath := range c.affectedRepos {
-		if err := git.ConfigureSparseCheckout(repoPath); err != nil {
+		if err := git.RemoveSparseCheckout(repoPath); err != nil {
 			relPath, _ := filepath.Rel(c.rigPath, repoPath)
-			return fmt.Errorf("failed to configure sparse checkout for %s: %w", relPath, err)
-		}
-
-		// Check if any excluded files remain (untracked or modified files won't be removed by git read-tree)
-		if remaining := git.CheckExcludedFilesExist(repoPath); len(remaining) > 0 {
-			relPath, _ := filepath.Rel(c.rigPath, repoPath)
-			return fmt.Errorf("sparse checkout configured for %s but these files still exist: %s\n"+
-				"These files are untracked or modified and were not removed by git.\n"+
-				"Please manually remove or revert these files in %s",
-				relPath, strings.Join(remaining, ", "), repoPath)
+			return fmt.Errorf("failed to remove sparse checkout for %s: %w", relPath, err)
 		}
 	}
 	return nil
