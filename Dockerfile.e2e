@@ -1,0 +1,46 @@
+# Dockerfile.test - Isolated environment for e2e testing
+#
+# This container provides full isolation for integration tests that require:
+# - No interference from host tmux sessions
+# - Clean filesystem without existing Gas Town installations
+# - Independent beads daemon
+#
+# Usage:
+#   docker build -f Dockerfile.test -t gastown-test .
+#   docker run --rm gastown-test
+
+FROM golang:1.24-alpine
+
+# Install dependencies including CGO build requirements for beads daemon
+RUN apk add --no-cache \
+    git \
+    bash \
+    sqlite \
+    build-base \
+    zstd-dev
+
+# Configure git (required for gt install --git and rig operations)
+RUN git config --global user.name "Test User" && \
+    git config --global user.email "test@test.com" && \
+    git config --global init.defaultBranch main
+
+# Install beads daemon (bd)
+RUN go install github.com/steveyegge/beads/cmd/bd@latest
+
+# Set up workspace
+WORKDIR /app
+
+# Copy go.mod and go.sum first for better layer caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build gt binary
+RUN go build -o /usr/local/bin/gt ./cmd/gt
+
+# Run integration tests
+# Note: Using -count=1 to disable test caching
+# Runs both TestInstallDoctorClean and TestInstallWithDaemon
+CMD ["go", "test", "-tags=integration", "-timeout=5m", "-v", "-count=1", "-run", "TestInstall(DoctorClean|WithDaemon)", "./internal/cmd/..."]
