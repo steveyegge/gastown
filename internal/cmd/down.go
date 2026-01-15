@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -512,18 +511,3 @@ func isProcessInTown(pid int, townRoot string) bool {
 	return strings.Contains(command, townRoot)
 }
 
-// isProcessRunning checks if a process with the given PID exists.
-func isProcessRunning(pid int) bool {
-	if pid <= 0 {
-		return false // Invalid PID
-	}
-	err := syscall.Kill(pid, 0)
-	if err == nil {
-		return true
-	}
-	// EPERM means process exists but we don't have permission to signal it
-	if err == syscall.EPERM {
-		return true
-	}
-	return false
-}
