@@ -20,6 +20,24 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
+// StaleClaimTimeout is how long a claimed MR can sit without updates before
+// being considered abandoned and eligible for re-claim.
+const StaleClaimTimeout = 10 * time.Minute
+
+// isClaimStale checks if a claimed MR should be considered abandoned based on
+// its UpdatedAt timestamp. Returns true if the claim is stale (eligible for
+// re-claim), false if the claim is recent or the timestamp is invalid/missing.
+func isClaimStale(updatedAt string) bool {
+	if updatedAt == "" {
+		return false // No timestamp - assume claim is valid
+	}
+	t, err := time.Parse(time.RFC3339, updatedAt)
+	if err != nil {
+		return false // Invalid timestamp - assume claim is valid
+	}
+	return time.Since(t) >= StaleClaimTimeout
+}
+
 // MergeQueueConfig holds configuration for the merge queue processor.
 type MergeQueueConfig struct {
 	// Enabled controls whether the merge queue is active.
@@ -773,9 +791,8 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 			continue // Skip issues without MR fields
 		}
 
-		// Skip if already assigned (claimed by another worker)
-		if issue.Assignee != "" {
-			// TODO: Add stale claim detection based on updated_at
+		// Skip if already assigned, unless claim is stale (allows re-claim after crash)
+		if issue.Assignee != "" && !isClaimStale(issue.UpdatedAt) {
 			continue
 		}
 

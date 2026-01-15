@@ -215,3 +215,56 @@ func TestEngineer_DeleteMergedBranchesConfig(t *testing.T) {
 		t.Error("expected DeleteMergedBranches to be true by default")
 	}
 }
+
+func TestIsClaimStale(t *testing.T) {
+	tests := []struct {
+		name      string
+		updatedAt string
+		want      bool
+	}{
+		{
+			name:      "stale claim (> 10 min old)",
+			updatedAt: time.Now().Add(-15 * time.Minute).Format(time.RFC3339),
+			want:      true,
+		},
+		{
+			name:      "recent claim (< 10 min old)",
+			updatedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339),
+			want:      false,
+		},
+		{
+			name:      "exactly at threshold",
+			updatedAt: time.Now().Add(-StaleClaimTimeout).Format(time.RFC3339),
+			want:      true,
+		},
+		{
+			name:      "just under threshold",
+			updatedAt: time.Now().Add(-StaleClaimTimeout + time.Second).Format(time.RFC3339),
+			want:      false,
+		},
+		{
+			name:      "empty timestamp",
+			updatedAt: "",
+			want:      false,
+		},
+		{
+			name:      "invalid timestamp format",
+			updatedAt: "not-a-timestamp",
+			want:      false,
+		},
+		{
+			name:      "wrong date format",
+			updatedAt: "2026-01-14 12:00:00",
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isClaimStale(tt.updatedAt)
+			if got != tt.want {
+				t.Errorf("isClaimStale(%q) = %v, want %v", tt.updatedAt, got, tt.want)
+			}
+		})
+	}
+}
