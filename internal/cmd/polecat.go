@@ -1157,6 +1157,7 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Would nuke %s/%s:\n", p.rigName, p.polecatName)
 			fmt.Printf("  - Kill session: gt-%s-%s\n", p.rigName, p.polecatName)
 			fmt.Printf("  - Delete worktree: %s/polecats/%s\n", p.r.Path, p.polecatName)
+			fmt.Printf("  - Reject any open MRs for the branch\n")
 			fmt.Printf("  - Delete branch (if exists)\n")
 			fmt.Printf("  - Close agent bead: %s\n", beads.PolecatBeadID(p.rigName, p.polecatName))
 
@@ -1202,7 +1203,32 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  %s deleted worktree\n", style.Success.Render("✓"))
 		}
 
-		// Step 4: Delete branch (if we know it)
+		// Step 4: Reject any open MRs for this branch before deleting it
+		// This prevents MQ/git sync inconsistency where MR exists but branch is gone
+		if branchToDelete != "" {
+			mayorRigPath := filepath.Join(p.r.Path, "mayor", "rig")
+			bd := beads.New(mayorRigPath)
+			mr, err := bd.FindMRForBranch(branchToDelete)
+			if err == nil && mr != nil {
+				// Found an open MR for this branch - reject it
+				rejected := "closed"
+				reason := "polecat nuked"
+				if err := bd.Update(mr.ID, beads.UpdateOptions{Status: &rejected}); err == nil {
+					// Also update close_reason field
+					desc := mr.Description
+					if desc == "" {
+						desc = fmt.Sprintf("close_reason: %s", reason)
+					} else if !strings.Contains(desc, "close_reason:") {
+						desc = fmt.Sprintf("%s\nclose_reason: %s", desc, reason)
+					}
+					_ = bd.Update(mr.ID, beads.UpdateOptions{Description: &desc})
+					fmt.Printf("  %s rejected MR %s (polecat nuked)\n", style.Warning.Render("⚠"), mr.ID)
+				}
+				// Non-fatal if MR rejection fails - continue with nuke
+			}
+		}
+
+		// Step 5: Delete branch (if we know it)
 		if branchToDelete != "" {
 			repoGit := git.NewGit(filepath.Join(p.r.Path, "mayor", "rig"))
 			if err := repoGit.DeleteBranch(branchToDelete, true); err != nil {
@@ -1213,7 +1239,7 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Step 5: Close agent bead (if exists)
+		// Step 6: Close agent bead (if exists)
 		agentBeadID := beads.PolecatBeadID(p.rigName, p.polecatName)
 		closeArgs := []string{"close", agentBeadID, "--reason=nuked"}
 		if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
