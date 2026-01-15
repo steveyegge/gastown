@@ -253,18 +253,30 @@ git push origin main
 
 ⚠️ **STOP HERE - DO NOT PROCEED UNTIL STEPS 2-3 COMPLETE**
 
-**Step 2: Send MERGED Notification (REQUIRED - DO THIS IMMEDIATELY)**
+**Step 2: Send MERGED Notifications (REQUIRED - DO THIS IMMEDIATELY)**
 
-RIGHT NOW, before any cleanup, send MERGED mail to Witness:
+RIGHT NOW, before any cleanup, send MERGED mail to BOTH Witness AND Mayor:
 
 ```bash
+# Send to Witness (triggers polecat nuke)
 gt mail send <rig>/witness -s "MERGED <polecat-name>" -m "Branch: <branch>
 Issue: <issue-id>
 Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# Send to Mayor (enables next dispatch)
+gt mail send mayor/ -s "MERGED <rig>" -m "Rig: <rig>
+Task: <issue-id>
+Branch: <branch>
+Polecat: <polecat-name>
+Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Commit: $(git rev-parse --short HEAD)
+
+Work cycle complete. Capacity may be available for next task."
 ```
 
-This signals the Witness to nuke the polecat worktree. WITHOUT THIS NOTIFICATION,
-POLECAT WORKTREES ACCUMULATE INDEFINITELY AND THE LIFECYCLE BREAKS.
+The Witness notification triggers polecat nuke. The Mayor notification enables
+autonomous dispatch of the next ready task. WITHOUT THESE NOTIFICATIONS,
+POLECAT WORKTREES ACCUMULATE AND WORK DISPATCH STALLS.
 
 **Step 3: Close MR Bead (REQUIRED - DO THIS IMMEDIATELY)**
 
