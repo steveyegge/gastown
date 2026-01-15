@@ -10,6 +10,7 @@ import (
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -115,6 +116,11 @@ func (m *Manager) Start(agentOverride string) error {
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
 	time.Sleep(constants.ShutdownNotifyDelay)
+
+	// Run startup fallback if Claude failed to start correctly on the first attempt.
+	// This matches the cmd/deacon.go behavior for consistency.
+	runtimeConfig := config.LoadRuntimeConfig("")
+	_ = runtime.RunStartupFallback(t, sessionID, "deacon", runtimeConfig)
 
 	// Inject startup nudge for predecessor discovery via /resume
 	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
