@@ -140,6 +140,12 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--labels=gt:agent",
 	}
 
+	// Add --force for multi-hyphen IDs (e.g., "test-testrig-polecat-xyz")
+	// Newer bd versions infer prefix from last hyphen, breaking system IDs
+	if NeedsForceForID(id) {
+		args = append(args, "--force")
+	}
+
 	// Default actor from BD_ACTOR env var for provenance tracking
 	if actor := os.Getenv("BD_ACTOR"); actor != "" {
 		args = append(args, "--actor="+actor)
