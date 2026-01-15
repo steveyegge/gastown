@@ -283,6 +283,11 @@ type RuntimeConfig struct {
 
 	// Instructions controls the per-workspace instruction file name.
 	Instructions *RuntimeInstructionsConfig `json:"instructions,omitempty"`
+
+	// Env contains environment variables to export when starting the agent.
+	// These are merged with standard Gas Town env vars (GT_ROLE, BD_ACTOR, etc).
+	// Useful for agent-specific API endpoints, auth tokens, or model overrides.
+	Env map[string]string `json:"env,omitempty"`
 }
 
 // RuntimeSessionConfig configures how Gas Town discovers runtime session IDs.
