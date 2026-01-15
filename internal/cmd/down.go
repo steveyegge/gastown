@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,7 +66,22 @@ var (
 	downNuke     bool
 	downDryRun   bool
 	downPolecats bool
+	downJSON     bool
 )
+
+// DownResult represents the result of a shutdown operation.
+type DownResult struct {
+	DryRun  bool         `json:"dry_run"`
+	Actions []DownAction `json:"actions"`
+	Success bool         `json:"success"`
+}
+
+// DownAction represents a single shutdown action and its result.
+type DownAction struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
 
 func init() {
 	downCmd.Flags().BoolVarP(&downQuiet, "quiet", "q", false, "Only show errors")
@@ -74,10 +90,14 @@ func init() {
 	downCmd.Flags().BoolVarP(&downAll, "all", "a", false, "Stop bd daemons/activity and verify shutdown")
 	downCmd.Flags().BoolVar(&downNuke, "nuke", false, "Kill entire tmux server (DESTRUCTIVE - kills non-GT sessions!)")
 	downCmd.Flags().BoolVar(&downDryRun, "dry-run", false, "Preview what would be stopped without taking action")
+	downCmd.Flags().BoolVar(&downJSON, "json", false, "Output as JSON")
 	rootCmd.AddCommand(downCmd)
 }
 
 func runDown(cmd *cobra.Command, args []string) error {
+	// Reset actions for JSON output
+	downActions = nil
+
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
@@ -98,7 +118,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 	allOK := true
 
-	if downDryRun {
+	if downDryRun && !downJSON {
 		fmt.Println("═══ DRY RUN: Preview of shutdown actions ═══")
 		fmt.Println()
 	}
@@ -110,10 +130,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 
 	// Phase 0.5: Stop polecats if --polecats
 	if downPolecats {
-		if downDryRun {
-			fmt.Println("Would stop polecats...")
-		} else {
-			fmt.Println("Stopping polecats...")
+		if !downJSON {
+			if downDryRun {
+				fmt.Println("Would stop polecats...")
+			} else {
+				fmt.Println("Stopping polecats...")
+			}
 		}
 		polecatsStopped := stopAllPolecats(t, townRoot, rigs, downForce, downDryRun)
 		if downDryRun {
@@ -129,7 +151,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 				printDownStatus("Polecats", true, "none running")
 			}
 		}
-		fmt.Println()
+		if !downJSON {
+			fmt.Println()
+		}
 	}
 
 	// Phase 1: Stop bd resurrection layer (--all only)
@@ -246,16 +270,22 @@ func runDown(cmd *cobra.Command, args []string) error {
 		time.Sleep(500 * time.Millisecond)
 		respawned := verifyShutdown(t, townRoot)
 		if len(respawned) > 0 {
-			fmt.Println()
-			fmt.Printf("%s Warning: Some processes may have respawned:\n", style.Bold.Render("⚠"))
-			for _, r := range respawned {
-				fmt.Printf("  • %s\n", r)
+			if downJSON {
+				for _, r := range respawned {
+					printDownStatus("Respawned", false, r)
+				}
+			} else {
+				fmt.Println()
+				fmt.Printf("%s Warning: Some processes may have respawned:\n", style.Bold.Render("⚠"))
+				for _, r := range respawned {
+					fmt.Printf("  • %s\n", r)
+				}
+				fmt.Println()
+				fmt.Printf("This may indicate systemd/launchd is managing bd.\n")
+				fmt.Printf("Check with:\n")
+				fmt.Printf("  %s\n", style.Dim.Render("systemctl status bd-daemon  # Linux"))
+				fmt.Printf("  %s\n", style.Dim.Render("launchctl list | grep bd    # macOS"))
 			}
-			fmt.Println()
-			fmt.Printf("This may indicate systemd/launchd is managing bd.\n")
-			fmt.Printf("Check with:\n")
-			fmt.Printf("  %s\n", style.Dim.Render("systemctl status bd-daemon  # Linux"))
-			fmt.Printf("  %s\n", style.Dim.Render("launchctl list | grep bd    # macOS"))
 			allOK = false
 		}
 	}
@@ -266,12 +296,15 @@ func runDown(cmd *cobra.Command, args []string) error {
 			printDownStatus("Tmux server", true, "would kill (DESTRUCTIVE)")
 		} else if os.Getenv("GT_NUKE_ACKNOWLEDGED") == "" {
 			// Require explicit acknowledgement for destructive operation
-			fmt.Println()
-			fmt.Printf("%s The --nuke flag kills ALL tmux sessions, not just Gas Town.\n",
-				style.Bold.Render("⚠ BLOCKED:"))
-			fmt.Printf("This includes vim sessions, running builds, SSH connections, etc.\n")
-			fmt.Println()
-			fmt.Printf("To proceed, run with: %s\n", style.Bold.Render("GT_NUKE_ACKNOWLEDGED=1 gt down --nuke"))
+			printDownStatus("Tmux server", false, "blocked: GT_NUKE_ACKNOWLEDGED=1 required")
+			if !downJSON {
+				fmt.Println()
+				fmt.Printf("%s The --nuke flag kills ALL tmux sessions, not just Gas Town.\n",
+					style.Bold.Render("⚠ BLOCKED:"))
+				fmt.Printf("This includes vim sessions, running builds, SSH connections, etc.\n")
+				fmt.Println()
+				fmt.Printf("To proceed, run with: %s\n", style.Bold.Render("GT_NUKE_ACKNOWLEDGED=1 gt down --nuke"))
+			}
 			allOK = false
 		} else {
 			if err := t.KillServer(); err != nil {
@@ -283,7 +316,11 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Summary
+	// Summary / JSON output
+	if downJSON {
+		return outputDownJSON(downDryRun, allOK)
+	}
+
 	fmt.Println()
 	if downDryRun {
 		fmt.Println("═══ DRY RUN COMPLETE (no changes made) ═══")
@@ -345,15 +382,21 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 		for _, info := range infos {
 			if dryRun {
 				stopped++
-				fmt.Printf("  %s [%s] %s would stop\n", style.Dim.Render("○"), rigName, info.Polecat)
+				if !downJSON {
+					fmt.Printf("  %s [%s] %s would stop\n", style.Dim.Render("○"), rigName, info.Polecat)
+				}
 				continue
 			}
 			err := polecatMgr.Stop(info.Polecat, force)
 			if err == nil {
 				stopped++
-				fmt.Printf("  %s [%s] %s stopped\n", style.SuccessPrefix, rigName, info.Polecat)
+				if !downJSON {
+					fmt.Printf("  %s [%s] %s stopped\n", style.SuccessPrefix, rigName, info.Polecat)
+				}
 			} else {
-				fmt.Printf("  %s [%s] %s: %s\n", style.ErrorPrefix, rigName, info.Polecat, err.Error())
+				if !downJSON {
+					fmt.Printf("  %s [%s] %s: %s\n", style.ErrorPrefix, rigName, info.Polecat, err.Error())
+				}
 			}
 		}
 	}
@@ -361,7 +404,19 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 	return stopped
 }
 
+// downActions collects actions during shutdown for JSON output.
+var downActions []DownAction
+
 func printDownStatus(name string, ok bool, detail string) {
+	// Collect for JSON output
+	if downJSON {
+		downActions = append(downActions, DownAction{
+			Name:   name,
+			OK:     ok,
+			Detail: detail,
+		})
+		return
+	}
 	if downQuiet && ok {
 		return
 	}
@@ -370,6 +425,17 @@ func printDownStatus(name string, ok bool, detail string) {
 	} else {
 		fmt.Printf("%s %s: %s\n", style.ErrorPrefix, name, detail)
 	}
+}
+
+func outputDownJSON(dryRun bool, success bool) error {
+	result := DownResult{
+		DryRun:  dryRun,
+		Actions: downActions,
+		Success: success,
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(result)
 }
 
 // stopSession gracefully stops a tmux session.
