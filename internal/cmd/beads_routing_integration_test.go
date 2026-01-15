@@ -104,11 +104,24 @@ func setupRoutingTestTown(t *testing.T) string {
 	return townRoot
 }
 
+// bdEnv returns a minimal, isolated environment for running bd commands.
+// This prevents CI environment variables from interfering with test isolation.
+func bdEnv(tmpDir string) []string {
+	return []string{
+		"HOME=" + tmpDir,
+		"BEADS_NO_DAEMON=1",
+		"PATH=" + os.Getenv("PATH"),
+		"TMPDIR=" + os.TempDir(),
+	}
+}
+
 func initBeadsDBWithPrefix(t *testing.T, dir, prefix string) {
 	t.Helper()
 
 	cmd := exec.Command("bd", "--no-daemon", "init", "--quiet", "--prefix", prefix)
 	cmd.Dir = dir
+	// Use isolated environment to prevent CI workspace interference
+	cmd.Env = bdEnv(filepath.Dir(filepath.Dir(filepath.Dir(dir)))) // Navigate up to temp root
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed in %s: %v\n%s", dir, err, output)
 	}
@@ -129,10 +142,21 @@ func createTestIssue(t *testing.T, dir, title string) *beads.Issue {
 		"--description", "Integration test issue"}
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
+	// Use isolated environment - find the temp root by walking up
+	tmpRoot := dir
+	for i := 0; i < 5; i++ {
+		parent := filepath.Dir(tmpRoot)
+		if parent == tmpRoot {
+			break
+		}
+		tmpRoot = parent
+	}
+	cmd.Env = bdEnv(tmpRoot)
 	output, err := cmd.Output()
 	if err != nil {
 		combinedCmd := exec.Command("bd", args...)
 		combinedCmd.Dir = dir
+		combinedCmd.Env = bdEnv(tmpRoot)
 		combinedOutput, _ := combinedCmd.CombinedOutput()
 		t.Fatalf("create issue in %s: %v\n%s", dir, err, combinedOutput)
 	}

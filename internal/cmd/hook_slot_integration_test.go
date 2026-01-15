@@ -70,12 +70,33 @@ func setupHookTestTown(t *testing.T) (townRoot, polecatDir string) {
 	return townRoot, polecatDir
 }
 
+// hookBdEnv returns a minimal, isolated environment for running bd commands.
+// This prevents CI environment variables from interfering with test isolation.
+func hookBdEnv(tmpDir string) []string {
+	return []string{
+		"HOME=" + tmpDir,
+		"BEADS_NO_DAEMON=1",
+		"PATH=" + os.Getenv("PATH"),
+		"TMPDIR=" + os.TempDir(),
+	}
+}
+
 // initBeadsDB initializes the beads database by running bd init.
 func initBeadsDB(t *testing.T, dir string) {
 	t.Helper()
 
 	cmd := exec.Command("bd", "--no-daemon", "init")
 	cmd.Dir = dir
+	// Use isolated environment - find the temp root by walking up
+	tmpRoot := dir
+	for i := 0; i < 5; i++ {
+		parent := filepath.Dir(tmpRoot)
+		if parent == tmpRoot {
+			break
+		}
+		tmpRoot = parent
+	}
+	cmd.Env = hookBdEnv(tmpRoot)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd init failed: %v\n%s", err, output)
 	}

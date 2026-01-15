@@ -13,6 +13,17 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 )
 
+// installBdEnv returns a minimal, isolated environment for running bd commands.
+// This prevents CI environment variables from interfering with test isolation.
+func installBdEnv(tmpDir string) []string {
+	return []string{
+		"HOME=" + tmpDir,
+		"BEADS_NO_DAEMON=1",
+		"PATH=" + os.Getenv("PATH"),
+		"TMPDIR=" + os.TempDir(),
+	}
+}
+
 // TestInstallCreatesCorrectStructure validates that a fresh gt install
 // creates the expected directory structure and configuration files.
 func TestInstallCreatesCorrectStructure(t *testing.T) {
@@ -109,10 +120,13 @@ func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
 	// Use --no-daemon to avoid daemon startup issues in test environment
 	bdCmd := exec.Command("bd", "--no-daemon", "config", "get", "issue_prefix")
 	bdCmd.Dir = hqPath
+	bdCmd.Env = installBdEnv(tmpDir)
 	prefixOutput, err := bdCmd.Output() // Use Output() to get only stdout
 	if err != nil {
 		// If Output() fails, try CombinedOutput for better error info
-		combinedOut, _ := exec.Command("bd", "--no-daemon", "config", "get", "issue_prefix").CombinedOutput()
+		debugCmd := exec.Command("bd", "--no-daemon", "config", "get", "issue_prefix")
+		debugCmd.Env = installBdEnv(tmpDir)
+		combinedOut, _ := debugCmd.CombinedOutput()
 		t.Fatalf("bd config get issue_prefix failed: %v\nOutput: %s", err, combinedOut)
 	}
 
@@ -155,6 +169,7 @@ func TestInstallTownRoleSlots(t *testing.T) {
 	// List beads for debugging
 	listCmd := exec.Command("bd", "--no-daemon", "list", "--type=agent")
 	listCmd.Dir = hqPath
+	listCmd.Env = installBdEnv(tmpDir)
 	listOutput, _ := listCmd.CombinedOutput()
 	t.Logf("bd list --type=agent output:\n%s", listOutput)
 
@@ -403,12 +418,16 @@ func assertFileExists(t *testing.T, path, name string) {
 
 func assertSlotValue(t *testing.T, townRoot, issueID, slot, want string) {
 	t.Helper()
+	// Calculate tmpDir from townRoot (townRoot is typically tmpDir/test-hq)
+	tmpDir := filepath.Dir(townRoot)
 	cmd := exec.Command("bd", "--no-daemon", "--json", "slot", "show", issueID)
 	cmd.Dir = townRoot
+	cmd.Env = installBdEnv(tmpDir)
 	output, err := cmd.Output()
 	if err != nil {
 		debugCmd := exec.Command("bd", "--no-daemon", "--json", "slot", "show", issueID)
 		debugCmd.Dir = townRoot
+		debugCmd.Env = installBdEnv(tmpDir)
 		combined, _ := debugCmd.CombinedOutput()
 		t.Fatalf("bd slot show %s failed: %v\nOutput: %s", issueID, err, combined)
 	}

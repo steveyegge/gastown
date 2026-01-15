@@ -16,6 +16,17 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
+// primeBdEnv returns a minimal, isolated environment for running bd commands.
+// This prevents CI environment variables from interfering with test isolation.
+func primeBdEnv(tmpDir string) []string {
+	return []string{
+		"HOME=" + tmpDir,
+		"BEADS_NO_DAEMON=1",
+		"PATH=" + os.Getenv("PATH"),
+		"TMPDIR=" + os.TempDir(),
+	}
+}
+
 func writeTestRoutes(t *testing.T, townRoot string, routes []beads.Route) {
 	t.Helper()
 	beadsDir := filepath.Join(townRoot, ".beads")
@@ -382,9 +393,10 @@ func TestDetectSessionState(t *testing.T) {
 		workDir := t.TempDir()
 		townRoot := workDir
 
-		// Initialize beads database
+		// Initialize beads database with isolated environment
 		initCmd := exec.Command("bd", "init", "--prefix=bd-")
 		initCmd.Dir = workDir
+		initCmd.Env = primeBdEnv(workDir)
 		if output, err := initCmd.CombinedOutput(); err != nil {
 			t.Fatalf("bd init failed: %v\n%s", err, output)
 		}

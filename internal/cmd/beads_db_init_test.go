@@ -186,8 +186,14 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
 			"--type", "task", "--title", "test-from-rig")
 		cmd.Dir = rigPath
-		// Isolate environment to prevent cross-test contamination via daemon
-		cmd.Env = append(os.Environ(), "HOME="+tmpDir, "BEADS_NO_DAEMON=1")
+		// Use a minimal, isolated environment to prevent any interference
+		// from CI environment or daemon state. Only include essential variables.
+		cmd.Env = []string{
+			"HOME=" + tmpDir,
+			"BEADS_NO_DAEMON=1",
+			"PATH=" + os.Getenv("PATH"),
+			"TMPDIR=" + os.TempDir(),
+		}
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd create failed (bug!): %v\nOutput: %s\n\nThis is the bug: beads.db doesn't exist after clone because bd init was never run", err, output)
@@ -249,8 +255,13 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
 			"--type", "task", "--title", "test-from-empty-repo")
 		cmd.Dir = rigPath
-		// Isolate environment to prevent cross-test contamination via daemon
-		cmd.Env = append(os.Environ(), "HOME="+tmpDir, "BEADS_NO_DAEMON=1")
+		// Use a minimal, isolated environment to prevent any interference
+		cmd.Env = []string{
+			"HOME=" + tmpDir,
+			"BEADS_NO_DAEMON=1",
+			"PATH=" + os.Getenv("PATH"),
+			"TMPDIR=" + os.TempDir(),
+		}
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd create failed: %v\nOutput: %s", err, output)
@@ -354,8 +365,13 @@ func TestBeadsDbInitAfterClone(t *testing.T) {
 		cmd = exec.Command("bd", "--no-daemon", "--json", "-q", "create",
 			"--type", "task", "--title", "test-derived-prefix")
 		cmd.Dir = rigPath
-		// Isolate environment to prevent cross-test contamination via daemon
-		cmd.Env = append(os.Environ(), "HOME="+tmpDir, "BEADS_NO_DAEMON=1")
+		// Use a minimal, isolated environment to prevent any interference
+		cmd.Env = []string{
+			"HOME=" + tmpDir,
+			"BEADS_NO_DAEMON=1",
+			"PATH=" + os.Getenv("PATH"),
+			"TMPDIR=" + os.TempDir(),
+		}
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("bd create failed (beads.db not initialized?): %v\nOutput: %s", err, output)
