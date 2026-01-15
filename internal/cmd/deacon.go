@@ -390,7 +390,16 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	runtimeConfig := config.LoadRuntimeConfig("")
 	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
 
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Directly execute gt prime to trigger autonomous patrol execution.
+	// This bypasses the prompt area - the command runs immediately.
+	// Wait for Claude to be ready before sending command.
+	time.Sleep(2 * time.Second)
+	_ = t.SendKeys(sessionName, "gt prime") // Non-fatal
+
 	// Inject startup nudge for predecessor discovery via /resume
+	// Send AFTER gt prime so the beacon appears in session history, not prompt area
+	time.Sleep(1 * time.Second)
 	if err := session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
 		Recipient: "deacon",
 		Sender:    "daemon",
