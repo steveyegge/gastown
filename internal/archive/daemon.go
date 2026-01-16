@@ -20,6 +20,11 @@ type Daemon struct {
 
 	// prevScreen holds the previous capture for comparison
 	prevScreen []string
+
+	// Rate limiting state for adaptive diff strategy
+	lastMyersTime   time.Time // Last time Myers diff was run
+	myersFailures   int       // Consecutive Myers failures (for backoff)
+	kmpFailures     int       // Consecutive KMP failures (triggers Myers)
 }
 
 // NewDaemon creates a new archiver daemon for the given session.
@@ -124,6 +129,11 @@ func (d *Daemon) tick() error {
 
 // processCapture analyzes the difference between previous and current captures
 // and updates the archive state accordingly.
+//
+// Uses an adaptive strategy cascade:
+// 1. Fast path: KMP overlap detection O(H) - handles 90%+ of cases
+// 2. Medium path: Myers diff O(H·D) - rate limited for complex changes
+// 3. Slow path: Full redraw - just replace active block
 func (d *Daemon) processCapture(nextScreen []string) error {
 	// Normalize screens for comparison
 	normalizedNext := Normalize(nextScreen)
@@ -137,66 +147,123 @@ func (d *Daemon) processCapture(nextScreen []string) error {
 
 	// No change - nothing to do
 	if slicesEqual(normalizedPrev, normalizedNext) {
+		d.kmpFailures = 0
 		return nil
 	}
 
-	// Try scroll detection first (most common case)
+	// === FAST PATH: KMP scroll detection O(H) ===
 	scrolled, newLines := DetectScrollKMP(normalizedPrev, normalizedNext, d.config.ScrollThreshold)
 	if scrolled {
-		// Scroll detected - commit old lines that scrolled off, append new ones
-		if len(newLines) > 0 {
-			// The lines that scrolled off need to be committed
-			scrolledOff := len(normalizedPrev) - (len(normalizedNext) - len(newLines))
-			if scrolledOff > 0 {
-				if err := d.state.CommitLines(scrolledOff); err != nil {
-					return fmt.Errorf("committing scrolled lines: %w", err)
-				}
-			}
-			// Append the new lines
-			return d.state.AppendLines(newLines)
-		}
-		return nil
+		d.kmpFailures = 0
+		return d.handleScroll(normalizedPrev, normalizedNext, newLines)
 	}
 
-	// No scroll detected - try anchor-based diff for full redraw handling
-	regions := DiffWithAnchors(normalizedPrev, normalizedNext)
+	// KMP failed - track for adaptive behavior
+	d.kmpFailures++
 
-	// Process diff regions
-	for _, region := range regions {
-		switch region.Type {
-		case Inserted:
-			// New lines inserted
-			if region.NextStart < len(normalizedNext) {
-				insertedLines := normalizedNext[region.NextStart:region.NextEnd]
-				if err := d.state.AppendLines(insertedLines); err != nil {
-					return fmt.Errorf("appending inserted lines: %w", err)
-				}
-			}
-		case Modified:
-			// Lines changed in place - replace in active block
-			if region.NextStart < len(normalizedNext) {
-				modifiedLines := normalizedNext[region.NextStart:region.NextEnd]
-				// Map to active block position
-				activeStart := region.PrevStart
-				activeCount := region.PrevEnd - region.PrevStart
-				if err := d.state.ReplaceLines(activeStart, activeCount, modifiedLines); err != nil {
-					return fmt.Errorf("replacing modified lines: %w", err)
-				}
-			}
-		case Deleted:
-			// Lines removed - commit them if they're at the top
-			if region.PrevStart == 0 {
-				deleteCount := region.PrevEnd - region.PrevStart
-				if err := d.state.CommitLines(deleteCount); err != nil {
-					return fmt.Errorf("committing deleted lines: %w", err)
-				}
-			}
-		case Unchanged:
-			// No action needed for unchanged regions
+	// === MEDIUM PATH: Myers diff O(H·D) - rate limited ===
+	if d.canRunMyers() {
+		prevHashes := HashLines(normalizedPrev)
+		nextHashes := HashLines(normalizedNext)
+
+		edits := MyersDiff(prevHashes, nextHashes)
+		if edits != nil {
+			// Myers succeeded
+			d.lastMyersTime = time.Now()
+			d.myersFailures = 0
+			return d.applyMyersEdits(normalizedPrev, normalizedNext, edits)
+		}
+
+		// Myers exceeded threshold - count as failure
+		d.myersFailures++
+	}
+
+	// === SLOW PATH: Full redraw ===
+	return d.handleFullRedraw(normalizedNext)
+}
+
+// canRunMyers checks if we're allowed to run Myers diff based on rate limiting.
+func (d *Daemon) canRunMyers() bool {
+	// Always allow if we haven't run recently
+	elapsed := time.Since(d.lastMyersTime)
+	baseLimit := d.config.MyersRateLimit
+
+	// Apply exponential backoff on consecutive failures
+	if d.myersFailures > 0 {
+		backoff := baseLimit * time.Duration(1<<min(d.myersFailures, 4)) // Cap at 16x
+		if elapsed < backoff {
+			return false
 		}
 	}
 
+	// Allow if enough time has passed
+	if elapsed >= baseLimit {
+		return true
+	}
+
+	// Allow if KMP is failing repeatedly (need to try something)
+	if d.kmpFailures >= 3 {
+		return true
+	}
+
+	return false
+}
+
+// handleScroll processes a detected scroll event.
+func (d *Daemon) handleScroll(prev, next, newLines []string) error {
+	if len(newLines) > 0 {
+		// The lines that scrolled off need to be committed
+		scrolledOff := len(prev) - (len(next) - len(newLines))
+		if scrolledOff > 0 {
+			if err := d.state.CommitLines(scrolledOff); err != nil {
+				return fmt.Errorf("committing scrolled lines: %w", err)
+			}
+		}
+		// Append the new lines
+		return d.state.AppendLines(newLines)
+	}
 	return nil
+}
+
+// applyMyersEdits applies a Myers diff result to the archive state.
+func (d *Daemon) applyMyersEdits(prev, next []string, edits []DiffEdit) error {
+	for _, edit := range edits {
+		switch edit.Type {
+		case EditInsert:
+			// Insert new lines
+			if edit.NextI >= 0 && edit.NextI+edit.Count <= len(next) {
+				insertedLines := next[edit.NextI : edit.NextI+edit.Count]
+				if err := d.state.AppendLines(insertedLines); err != nil {
+					return fmt.Errorf("applying insert: %w", err)
+				}
+			}
+		case EditDelete:
+			// Delete (commit) old lines at the top
+			if edit.PrevI == 0 {
+				if err := d.state.CommitLines(edit.Count); err != nil {
+					return fmt.Errorf("applying delete: %w", err)
+				}
+			}
+		case EditEqual:
+			// No action needed for equal regions
+		}
+	}
+	return nil
+}
+
+// handleFullRedraw replaces the entire active block with new content.
+// This is the fallback when diff algorithms fail or are too expensive.
+func (d *Daemon) handleFullRedraw(next []string) error {
+	// Commit everything in the active block
+	active := d.state.Active()
+	if len(active) > 0 {
+		if err := d.state.CommitLines(len(active)); err != nil {
+			return fmt.Errorf("committing for redraw: %w", err)
+		}
+	}
+
+	// Append the new screen content
+	return d.state.AppendLines(next)
 }
 
 // journalPath returns the full path to the journal file for this session.
