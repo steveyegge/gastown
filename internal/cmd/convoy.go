@@ -69,6 +69,8 @@ var (
 	convoyListTree     bool
 	convoyInteractive  bool
 	convoyStrandedJSON bool
+	convoyCloseReason  string
+	convoyCloseNotify  string
 )
 
 var convoyCmd = &cobra.Command{
@@ -106,6 +108,7 @@ TRACKING SEMANTICS:
 COMMANDS:
   create    Create a convoy tracking specified issues
   add       Add issues to an existing convoy (reopens if closed)
+  close     Close a convoy (manually, regardless of tracked issue status)
   status    Show convoy progress, tracked issues, and active workers
   list      List convoys (the dashboard view)`,
 }
@@ -199,6 +202,26 @@ Examples:
 	RunE: runConvoyStranded,
 }
 
+var convoyCloseCmd = &cobra.Command{
+	Use:   "close <convoy-id>",
+	Short: "Close a convoy",
+	Long: `Close a convoy, optionally with a reason.
+
+Closes the convoy regardless of tracked issue status. Use this to:
+- Force-close abandoned convoys no longer relevant
+- Close convoys where work completed outside the tracked path
+- Manually close stuck convoys
+
+The close is idempotent - closing an already-closed convoy is a no-op.
+
+Examples:
+  gt convoy close hq-cv-abc
+  gt convoy close hq-cv-abc --reason="work done differently"
+  gt convoy close hq-cv-xyz --notify mayor/`,
+	Args: cobra.ExactArgs(1),
+	RunE: runConvoyClose,
+}
+
 func init() {
 	// Create flags
 	convoyCreateCmd.Flags().StringVar(&convoyMolecule, "molecule", "", "Associated molecule ID")
@@ -220,6 +243,10 @@ func init() {
 	// Stranded flags
 	convoyStrandedCmd.Flags().BoolVar(&convoyStrandedJSON, "json", false, "Output as JSON")
 
+	// Close flags
+	convoyCloseCmd.Flags().StringVar(&convoyCloseReason, "reason", "", "Reason for closing the convoy")
+	convoyCloseCmd.Flags().StringVar(&convoyCloseNotify, "notify", "", "Agent to notify on close (e.g., mayor/)")
+
 	// Add subcommands
 	convoyCmd.AddCommand(convoyCreateCmd)
 	convoyCmd.AddCommand(convoyStatusCmd)
@@ -227,6 +254,7 @@ func init() {
 	convoyCmd.AddCommand(convoyAddCmd)
 	convoyCmd.AddCommand(convoyCheckCmd)
 	convoyCmd.AddCommand(convoyStrandedCmd)
+	convoyCmd.AddCommand(convoyCloseCmd)
 
 	rootCmd.AddCommand(convoyCmd)
 }
@@ -430,6 +458,98 @@ func runConvoyCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runConvoyClose(cmd *cobra.Command, args []string) error {
+	convoyID := args[0]
+
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return err
+	}
+
+	// Get convoy details
+	showArgs := []string{"show", convoyID, "--json"}
+	showCmd := exec.Command("bd", showArgs...)
+	showCmd.Dir = townBeads
+	var stdout bytes.Buffer
+	showCmd.Stdout = &stdout
+
+	if err := showCmd.Run(); err != nil {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
+
+	var convoys []struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Status      string `json:"status"`
+		Type        string `json:"issue_type"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil {
+		return fmt.Errorf("parsing convoy data: %w", err)
+	}
+
+	if len(convoys) == 0 {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
+
+	convoy := convoys[0]
+
+	// Verify it's actually a convoy type
+	if convoy.Type != "convoy" {
+		return fmt.Errorf("'%s' is not a convoy (type: %s)", convoyID, convoy.Type)
+	}
+
+	// Idempotent: if already closed, just report it
+	if convoy.Status == "closed" {
+		fmt.Printf("%s Convoy %s is already closed\n", style.Dim.Render("○"), convoyID)
+		return nil
+	}
+
+	// Build close reason
+	reason := convoyCloseReason
+	if reason == "" {
+		reason = "Manually closed"
+	}
+
+	// Close the convoy
+	closeArgs := []string{"close", convoyID, "-r", reason}
+	closeCmd := exec.Command("bd", closeArgs...)
+	closeCmd.Dir = townBeads
+
+	if err := closeCmd.Run(); err != nil {
+		return fmt.Errorf("closing convoy: %w", err)
+	}
+
+	fmt.Printf("%s Closed convoy 🚚 %s: %s\n", style.Bold.Render("✓"), convoyID, convoy.Title)
+	if convoyCloseReason != "" {
+		fmt.Printf("  Reason: %s\n", convoyCloseReason)
+	}
+
+	// Send notification if --notify flag provided
+	if convoyCloseNotify != "" {
+		sendCloseNotification(convoyCloseNotify, convoyID, convoy.Title, reason)
+	} else {
+		// Check if convoy has a notify address in description
+		notifyConvoyCompletion(townBeads, convoyID, convoy.Title)
+	}
+
+	return nil
+}
+
+// sendCloseNotification sends a notification about convoy closure.
+func sendCloseNotification(addr, convoyID, title, reason string) {
+	subject := fmt.Sprintf("🚚 Convoy closed: %s", title)
+	body := fmt.Sprintf("Convoy %s has been closed.\n\nReason: %s", convoyID, reason)
+
+	mailArgs := []string{"mail", "send", addr, "-s", subject, "-m", body}
+	mailCmd := exec.Command("gt", mailArgs...)
+	if err := mailCmd.Run(); err != nil {
+		style.PrintWarning("couldn't send notification: %v", err)
+	} else {
+		fmt.Printf("  Notified: %s\n", addr)
+	}
 }
 
 // strandedConvoyInfo holds info about a stranded convoy.
