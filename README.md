@@ -116,6 +116,18 @@ gt mayor attach
 
 ## Quick Start Guide
 
+### Getting Started
+Run 
+```shell
+gt install ~/gt --git && 
+cd ~/gt && 
+gt config agent list && 
+gt mayor attach
+```
+and tell the Mayor what you want to build!
+
+---
+
 ### Basic Workflow
 
 ```mermaid
@@ -475,7 +487,3 @@ gt mayor attach
 ## License
 
 MIT License - see LICENSE file for details
-
----
-
-**Getting Started:** Run `gt install ~/gt --git && cd ~/gt && gt config agent list && gt mayor attach` (or `gt mayor attach --agent codex`) and tell the Mayor what you want to build!
