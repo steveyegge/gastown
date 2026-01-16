@@ -11,6 +11,22 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 )
 
+func configureTestGitIdentity(t *testing.T, repoDir string) {
+	t.Helper()
+
+	cmds := [][]string{
+		{"git", "config", "user.email", "test@example.com"},
+		{"git", "config", "user.name", "Test User"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git config %s: %v\n%s", args[2], err, out)
+		}
+	}
+}
+
 func TestStateIsActive(t *testing.T) {
 	tests := []struct {
 		state  State
@@ -299,6 +315,7 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
+	configureTestGitIdentity(t, mayorRig)
 
 	// Create AGENTS.md with test content
 	agentsMDContent := []byte("# AGENTS.md\n\nTest content for polecats.\n")
@@ -377,6 +394,7 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
+	configureTestGitIdentity(t, mayorRig)
 
 	// Create a dummy file and commit (repo needs at least one commit)
 	dummyPath := filepath.Join(mayorRig, "README.md")
