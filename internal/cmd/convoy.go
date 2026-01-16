@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/base32"
@@ -337,7 +338,9 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	trackedCount := 0
 	for _, issueID := range trackedIssues {
 		// Use --type=tracks for non-blocking tracking relation
-		depArgs := []string{"dep", "add", convoyID, issueID, "--type=tracks"}
+		// Format cross-rig beads as external references for proper resolution
+		trackID := formatTrackBeadID(issueID)
+		depArgs := []string{"dep", "add", convoyID, trackID, "--type=tracks"}
 		depCmd := exec.Command("bd", depArgs...)
 		depCmd.Dir = townBeads
 
@@ -427,7 +430,9 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 	// Add 'tracks' relations for each issue
 	addedCount := 0
 	for _, issueID := range issuesToAdd {
-		depArgs := []string{"dep", "add", convoyID, issueID, "--type=tracks"}
+		// Format cross-rig beads as external references for proper resolution
+		trackID := formatTrackBeadID(issueID)
+		depArgs := []string{"dep", "add", convoyID, trackID, "--type=tracks"}
 		depCmd := exec.Command("bd", depArgs...)
 		depCmd.Dir = townBeads
 
@@ -1166,29 +1171,15 @@ type trackedIssueInfo struct {
 	WorkerAge string `json:"worker_age,omitempty"` // How long worker has been on this issue
 }
 
-// getTrackedIssues queries SQLite directly to get issues tracked by a convoy.
-// This is needed because bd dep list doesn't properly show cross-rig external dependencies.
+// getTrackedIssues retrieves issues tracked by a convoy.
+// It reads from the JSONL file which embeds dependencies in issue records,
+// avoiding the need for sqlite3 CLI and working around bd dep list not
+// properly handling external references.
 // Uses batched lookup to avoid N+1 subprocess calls.
 func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
-	dbPath := filepath.Join(townBeads, "beads.db")
-
-	// Query tracked dependencies from SQLite
-	// Escape single quotes to prevent SQL injection
-	safeConvoyID := strings.ReplaceAll(convoyID, "'", "''")
-	queryCmd := exec.Command("sqlite3", "-json", dbPath,
-		fmt.Sprintf(`SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, safeConvoyID))
-
-	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
-	if err := queryCmd.Run(); err != nil {
-		return nil
-	}
-
-	var deps []struct {
-		DependsOnID string `json:"depends_on_id"`
-		Type        string `json:"type"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
+	// Read dependencies from JSONL (more reliable than sqlite3 CLI which may not be installed)
+	deps := getConvoyDependenciesFromJSONL(townBeads, convoyID)
+	if deps == nil {
 		return nil
 	}
 
@@ -1250,6 +1241,61 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 	}
 
 	return tracked
+}
+
+// convoyDependency represents a dependency record from JSONL.
+type convoyDependency struct {
+	IssueID     string `json:"issue_id"`
+	DependsOnID string `json:"depends_on_id"`
+	Type        string `json:"type"`
+}
+
+// getConvoyDependenciesFromJSONL reads the convoy's dependencies from the JSONL file.
+// JSONL files embed dependencies directly in issue records, making this more reliable
+// than sqlite3 CLI queries which may not be available on all systems.
+func getConvoyDependenciesFromJSONL(townBeads, convoyID string) []convoyDependency {
+	jsonlPath := filepath.Join(townBeads, "issues.jsonl")
+	file, err := os.Open(jsonlPath)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	// Increase buffer size for large lines
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		// Quick check: does this line contain our convoy ID?
+		if !bytes.Contains(line, []byte(convoyID)) {
+			continue
+		}
+
+		// Parse the issue record
+		var issue struct {
+			ID           string            `json:"id"`
+			Dependencies []convoyDependency `json:"dependencies"`
+		}
+		if err := json.Unmarshal(line, &issue); err != nil {
+			continue
+		}
+
+		// Found our convoy
+		if issue.ID == convoyID {
+			// Filter to only 'tracks' type dependencies
+			var tracksDeps []convoyDependency
+			for _, dep := range issue.Dependencies {
+				if dep.Type == "tracks" {
+					tracksDeps = append(tracksDeps, dep)
+				}
+			}
+			return tracksDeps
+		}
+	}
+
+	return nil
 }
 
 // issueDetails holds basic issue info.
