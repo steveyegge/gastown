@@ -153,6 +153,9 @@ func FindAnchors(prev, next []string) []AnchorPair {
 // ComputeLCS finds the longest common subsequence of hashes.
 // Returns indices into the prev array that are part of the LCS.
 // This forms the "stable spine" of content that didn't change.
+//
+// Deprecated: Use MyersLCS instead, which has O(ND) complexity vs O(N²).
+// This function is kept for reference and testing.
 func ComputeLCS(prevHashes, nextHashes []uint64) []int {
 	m, n := len(prevHashes), len(nextHashes)
 	if m == 0 || n == 0 {
@@ -223,8 +226,8 @@ func DiffWithAnchors(prev, next []string) []DiffRegion {
 	prevHashes := HashLines(prev)
 	nextHashes := HashLines(next)
 
-	// Find LCS - the stable spine
-	lcsIndices := ComputeLCS(prevHashes, nextHashes)
+	// Find LCS using Myers diff - O(ND) instead of O(N²)
+	lcsIndices := MyersLCS(prevHashes, nextHashes)
 
 	// Build mapping from prev index to next index for LCS elements
 	lcsMap := make(map[int]int)
