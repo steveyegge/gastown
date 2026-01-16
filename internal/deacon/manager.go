@@ -63,7 +63,8 @@ func (m *Manager) Start(agentOverride string) error {
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but Claude dead. Kill and recreate.
-		if err := t.KillSession(sessionID); err != nil {
+		// Use KillSessionWithProcesses to ensure any orphaned child processes are cleaned up.
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -150,8 +151,10 @@ func (m *Manager) Stop() error {
 	_ = t.SendKeysRaw(sessionID, "C-c")
 	time.Sleep(100 * time.Millisecond)
 
-	// Kill the session
-	if err := t.KillSession(sessionID); err != nil {
+	// Kill the session and all child processes (Claude, MCPs, etc.)
+	// KillSessionWithProcesses ensures proper cleanup since Claude's Stop hooks
+	// cannot reliably run during shutdown (ENOENT when spawning /bin/sh).
+	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -718,11 +718,11 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 	_ = events.LogFeed(events.TypeSessionDeath, agentID,
 		events.SessionDeathPayload(sessionName, agentID, "self-clean: done means gone", "gt done"))
 
-	// Kill our own tmux session
-	// This will terminate Claude and the shell, completing the self-cleaning cycle.
-	// We use exec.Command instead of the tmux package to avoid import cycles.
-	cmd := exec.Command("tmux", "kill-session", "-t", sessionName) //nolint:gosec // G204: sessionName is derived from env vars, not user input
-	if err := cmd.Run(); err != nil {
+	// Kill our own tmux session with child process cleanup
+	// This terminates Claude and the shell, completing the self-cleaning cycle.
+	// Use KillSessionWithProcesses to prevent orphaned MCP servers.
+	t := tmux.NewTmux()
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
 		return fmt.Errorf("killing session %s: %w", sessionName, err)
 	}
 

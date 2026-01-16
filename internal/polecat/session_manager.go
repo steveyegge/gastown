@@ -269,7 +269,13 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if err := m.tmux.KillSession(sessionID); err != nil {
+	// Record costs before killing (best-effort - Stop hooks can't do this reliably)
+	_ = exec.Command("gt", "costs", "record", "--session", sessionID).Run()
+
+	// Use KillSessionWithProcesses to ensure all Claude child processes (MCPs, etc.)
+	// are properly terminated. Claude's Stop hooks cannot reliably run during shutdown
+	// (ENOENT errors when spawning /bin/sh), so we must handle cleanup at the tmux level.
+	if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 

@@ -121,7 +121,8 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 		if !t.IsAgentRunning(name) {
 			// Zombie session: tmux alive but Claude dead
 			// Kill it so we can create a fresh one
-			if err := t.KillSession(name); err != nil {
+			// Use KillSessionWithProcesses to prevent orphaned MCP servers
+			if err := t.KillSessionWithProcesses(name); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
 		} else {

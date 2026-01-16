@@ -605,3 +605,129 @@ func TestSessionSet(t *testing.T) {
 		t.Errorf("SessionSet.Names() doesn't contain %q", sessionName)
 	}
 }
+
+// TestKillSessionWithProcesses verifies that KillSessionWithProcesses
+// properly terminates all descendant processes, not just the tmux session.
+// This is critical for preventing orphaned MCP server processes.
+func TestKillSessionWithProcesses(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-killwithprocs-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	// Start a process tree: shell -> sleep (simulating MCP server)
+	// Use a long sleep so we can verify it gets killed
+	if err := tm.SendKeys(sessionName, "sleep 3600 &"); err != nil {
+		t.Fatalf("SendKeys: %v", err)
+	}
+
+	// Give it time to spawn
+	exec.Command("sleep", "0.5").Run()
+
+	// Get the pane PID to find descendants
+	panePID, err := tm.GetPanePID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPanePID: %v", err)
+	}
+
+	// Verify we have descendants
+	descendants := getAllDescendants(panePID)
+	if len(descendants) == 0 {
+		t.Log("Warning: no descendants found, test may not be exercising full code path")
+	}
+
+	// Store PIDs to check they're gone later
+	allPIDs := append([]string{panePID}, descendants...)
+
+	// Kill session with processes
+	if err := tm.KillSessionWithProcesses(sessionName); err != nil {
+		t.Fatalf("KillSessionWithProcesses: %v", err)
+	}
+
+	// Verify session is gone
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession after kill: %v", err)
+	}
+	if has {
+		t.Error("expected session to not exist after KillSessionWithProcesses")
+	}
+
+	// Give processes time to die
+	exec.Command("sleep", "0.2").Run()
+
+	// Verify all processes are gone
+	for _, pid := range allPIDs {
+		// Check if process exists using kill -0
+		err := exec.Command("kill", "-0", pid).Run()
+		if err == nil {
+			t.Errorf("process %s still exists after KillSessionWithProcesses", pid)
+		}
+	}
+}
+
+// TestKillSessionWithProcesses_NestedChildren verifies recursive killing
+// of deeply nested process trees (simulating MCP -> node -> child processes)
+func TestKillSessionWithProcesses_NestedChildren(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-nested-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create nested process tree: shell -> bash -> sleep
+	// This simulates: tmux -> claude -> MCP server -> node
+	cmd := `bash -c 'sleep 3600' &`
+	if err := tm.SendKeys(sessionName, cmd); err != nil {
+		t.Fatalf("SendKeys: %v", err)
+	}
+
+	// Give time for processes to spawn
+	exec.Command("sleep", "0.5").Run()
+
+	// Get pane PID
+	panePID, err := tm.GetPanePID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPanePID: %v", err)
+	}
+
+	// Get all descendants before kill
+	descendants := getAllDescendants(panePID)
+	t.Logf("Found %d descendants before kill", len(descendants))
+
+	// Kill with processes
+	if err := tm.KillSessionWithProcesses(sessionName); err != nil {
+		t.Fatalf("KillSessionWithProcesses: %v", err)
+	}
+
+	// Wait for cleanup
+	exec.Command("sleep", "0.3").Run()
+
+	// Verify all descendants are gone
+	for _, pid := range descendants {
+		err := exec.Command("kill", "-0", pid).Run()
+		if err == nil {
+			t.Errorf("descendant process %s still alive after kill", pid)
+		}
+	}
+}

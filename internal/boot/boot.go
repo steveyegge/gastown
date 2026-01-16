@@ -161,8 +161,9 @@ func (b *Boot) Spawn(agentOverride string) error {
 // spawnTmux spawns Boot in a tmux session.
 func (b *Boot) spawnTmux(agentOverride string) error {
 	// Kill any stale session first
+	// Use KillSessionWithProcesses to prevent orphaned MCP servers
 	if b.IsSessionAlive() {
-		_ = b.tmux.KillSession(SessionName)
+		_ = b.tmux.KillSessionWithProcesses(SessionName)
 	}
 
 	// Ensure boot directory exists (it should have CLAUDE.md with Boot context)

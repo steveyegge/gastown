@@ -146,8 +146,9 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but agent dead. Kill and recreate.
+		// Use KillSessionWithProcesses to ensure any orphaned child processes are cleaned up.
 		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, agent dead). Recreating...")
-		if err := t.KillSession(sessionID); err != nil {
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -219,7 +220,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	ref.StartedAt = &now
 	ref.PID = 0 // Claude agent doesn't have a PID we track
 	if err := m.saveState(ref); err != nil {
-		_ = t.KillSession(sessionID) // best-effort cleanup on state save failure
+		_ = t.KillSessionWithProcesses(sessionID) // best-effort cleanup on state save failure
 		return fmt.Errorf("saving state: %w", err)
 	}
 
@@ -270,12 +271,12 @@ func (m *Manager) Stop() error {
 		return ErrNotRunning
 	}
 
-	// Kill tmux session if it exists (best-effort: may already be dead)
+	// Kill tmux session and all child processes (Claude, MCPs, etc.)
+	// KillSessionWithProcesses ensures proper cleanup since Claude's Stop hooks
+	// cannot reliably run during shutdown (ENOENT when spawning /bin/sh).
 	if sessionRunning {
-		_ = t.KillSession(sessionID)
+		_ = t.KillSessionWithProcesses(sessionID)
 	}
-
-	// Note: No PID-based stop per ZFC - tmux session kill is sufficient
 
 	ref.State = StateStopped
 	ref.PID = 0

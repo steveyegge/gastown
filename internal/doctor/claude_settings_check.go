@@ -511,7 +511,8 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 				running, _ := t.HasSession(sf.sessionName)
 				if running {
 					// Cycle the agent by killing and letting gt up restart it
-					_ = t.KillSession(sf.sessionName)
+					// Use KillSessionWithProcesses to prevent orphaned MCP servers
+					_ = t.KillSessionWithProcesses(sf.sessionName)
 				}
 			}
 		}
