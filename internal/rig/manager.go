@@ -24,6 +24,52 @@ var (
 	ErrRigExists   = errors.New("rig already exists")
 )
 
+// wrapCloneError wraps clone errors with helpful suggestions.
+// Detects common auth failures and suggests SSH as an alternative.
+func wrapCloneError(err error, gitURL string) error {
+	errStr := err.Error()
+
+	// Check for GitHub password auth failure
+	if strings.Contains(errStr, "Password authentication is not supported") ||
+		strings.Contains(errStr, "Authentication failed") {
+		// Check if they used HTTPS
+		if strings.HasPrefix(gitURL, "https://") {
+			// Try to suggest the SSH equivalent
+			sshURL := convertToSSH(gitURL)
+			if sshURL != "" {
+				return fmt.Errorf("creating bare repo: %w\n\nHint: GitHub no longer supports password authentication.\nTry using SSH instead:\n  gt rig add <name> %s", err, sshURL)
+			}
+			return fmt.Errorf("creating bare repo: %w\n\nHint: GitHub no longer supports password authentication.\nTry using an SSH URL (git@github.com:owner/repo.git) or a personal access token.", err)
+		}
+	}
+
+	return fmt.Errorf("creating bare repo: %w", err)
+}
+
+// convertToSSH converts an HTTPS GitHub/GitLab URL to SSH format.
+// Returns empty string if conversion is not possible.
+func convertToSSH(httpsURL string) string {
+	// Handle GitHub: https://github.com/owner/repo.git -> git@github.com:owner/repo.git
+	if strings.HasPrefix(httpsURL, "https://github.com/") {
+		path := strings.TrimPrefix(httpsURL, "https://github.com/")
+		if !strings.HasSuffix(path, ".git") {
+			path += ".git"
+		}
+		return "git@github.com:" + path
+	}
+
+	// Handle GitLab: https://gitlab.com/owner/repo.git -> git@gitlab.com:owner/repo.git
+	if strings.HasPrefix(httpsURL, "https://gitlab.com/") {
+		path := strings.TrimPrefix(httpsURL, "https://gitlab.com/")
+		if !strings.HasSuffix(path, ".git") {
+			path += ".git"
+		}
+		return "git@gitlab.com:" + path
+	}
+
+	return ""
+}
+
 // RigConfig represents the rig-level configuration (config.json at rig root).
 type RigConfig struct {
 	Type          string       `json:"type"`                     // "rig"
@@ -285,12 +331,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			fmt.Printf("  Warning: could not use local repo reference: %v\n", err)
 			_ = os.RemoveAll(bareRepoPath)
 			if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
-				return nil, fmt.Errorf("creating bare repo: %w", err)
+				return nil, wrapCloneError(err, opts.GitURL)
 			}
 		}
 	} else {
 		if err := m.git.CloneBare(opts.GitURL, bareRepoPath); err != nil {
-			return nil, fmt.Errorf("creating bare repo: %w", err)
+			return nil, wrapCloneError(err, opts.GitURL)
 		}
 	}
 	fmt.Printf("   ✓ Created shared bare repo\n")
