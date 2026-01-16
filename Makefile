@@ -1,8 +1,10 @@
-.PHONY: build install clean test generate
+.PHONY: build install clean test generate container-test
 
 BINARY := gt
 BUILD_DIR := .
 INSTALL_DIR := $(HOME)/.local/bin
+CONTAINER_IMAGE ?= golang:1.24.2
+BEADS_VERSION ?= v0.47.2
 
 # Get version info for ldflags
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -35,3 +37,22 @@ clean:
 
 test:
 	go test ./...
+
+container-test:
+	@docker run --rm \
+		-e HOST_UID=$(shell id -u) \
+		-e HOST_GID=$(shell id -g) \
+		-e BEADS_VERSION=$(BEADS_VERSION) \
+		-v $(CURDIR):/work \
+		-w /work \
+		$(CONTAINER_IMAGE) \
+		sh -c 'set -eu; \
+			apt-get update -qq; \
+			apt-get install -y -qq git tmux passwd; \
+			groupadd -g "$$HOST_GID" hostgroup || true; \
+			useradd -m -u "$$HOST_UID" -g "$$HOST_GID" hostuser || true; \
+			su hostuser -c "git config --global --add safe.directory /work"; \
+			CGO_ENABLED=1 su hostuser -c "go install github.com/steveyegge/beads/cmd/bd@$$BEADS_VERSION"; \
+			su hostuser -c "go build -o /tmp/gt ./cmd/gt"; \
+			su hostuser -c "PATH=/home/hostuser/go/bin:$$PATH go test ./..."; \
+		'
