@@ -936,16 +936,20 @@ Manual intervention may be required.`,
 // Detection uses TTY column: processes with TTY "?" have no controlling terminal.
 // This is a safety net fallback - Deacon patrol also runs this more frequently.
 func (d *Daemon) cleanupOrphanedProcesses() {
-	killed, err := util.CleanupOrphanedClaudeProcesses()
+	results, err := util.CleanupOrphanedClaudeProcesses()
 	if err != nil {
 		d.logger.Printf("Warning: orphan process cleanup failed: %v", err)
 		return
 	}
 
-	if len(killed) > 0 {
-		d.logger.Printf("Cleaned up %d orphaned claude process(es)", len(killed))
-		for _, p := range killed {
-			d.logger.Printf("  Killed PID %d (%s)", p.PID, p.Cmd)
+	if len(results) > 0 {
+		d.logger.Printf("Orphan cleanup: processed %d process(es)", len(results))
+		for _, r := range results {
+			if r.Signal == "UNKILLABLE" {
+				d.logger.Printf("  WARNING: PID %d (%s) survived SIGKILL", r.Process.PID, r.Process.Cmd)
+			} else {
+				d.logger.Printf("  Sent %s to PID %d (%s)", r.Signal, r.Process.PID, r.Process.Cmd)
+			}
 		}
 	}
 }

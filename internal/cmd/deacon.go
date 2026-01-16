@@ -1144,19 +1144,37 @@ func runDeaconCleanupOrphans(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Found %d orphaned claude process(es)\n", style.Bold.Render("●"), len(orphans))
 
-	// Kill them
-	killed, err := util.CleanupOrphanedClaudeProcesses()
+	// Process them with signal escalation
+	results, err := util.CleanupOrphanedClaudeProcesses()
 	if err != nil {
 		style.PrintWarning("cleanup had errors: %v", err)
 	}
 
 	// Report results
-	for _, p := range killed {
-		fmt.Printf("  %s Killed PID %d (%s)\n", style.Bold.Render("✓"), p.PID, p.Cmd)
+	var terminated, escalated, unkillable int
+	for _, r := range results {
+		switch r.Signal {
+		case "SIGTERM":
+			fmt.Printf("  %s Sent SIGTERM to PID %d (%s)\n", style.Bold.Render("→"), r.Process.PID, r.Process.Cmd)
+			terminated++
+		case "SIGKILL":
+			fmt.Printf("  %s Escalated to SIGKILL for PID %d (%s)\n", style.Bold.Render("!"), r.Process.PID, r.Process.Cmd)
+			escalated++
+		case "UNKILLABLE":
+			fmt.Printf("  %s WARNING: PID %d (%s) survived SIGKILL\n", style.Bold.Render("⚠"), r.Process.PID, r.Process.Cmd)
+			unkillable++
+		}
 	}
 
-	if len(killed) > 0 {
-		fmt.Printf("%s Cleaned up %d orphaned process(es)\n", style.Bold.Render("✓"), len(killed))
+	if len(results) > 0 {
+		summary := fmt.Sprintf("Processed %d orphan(s)", len(results))
+		if escalated > 0 {
+			summary += fmt.Sprintf(" (%d escalated to SIGKILL)", escalated)
+		}
+		if unkillable > 0 {
+			summary += fmt.Sprintf(" (%d unkillable)", unkillable)
+		}
+		fmt.Printf("%s %s\n", style.Bold.Render("✓"), summary)
 	}
 
 	return nil
