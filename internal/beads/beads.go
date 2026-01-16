@@ -141,7 +141,16 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	// database for each bead ID. Setting BEADS_DIR forces bd to use only that
 	// database, bypassing routing for beads with different prefixes.
 	if b.beadsDir != "" {
-		cmd.Env = append(os.Environ(), "BEADS_DIR="+b.beadsDir)
+		// Filter out existing BEADS_DIR to ensure our override takes effect
+		// (append would just add a duplicate, and most programs use the first)
+		env := os.Environ()
+		filteredEnv := make([]string, 0, len(env)+1)
+		for _, e := range env {
+			if !strings.HasPrefix(e, "BEADS_DIR=") {
+				filteredEnv = append(filteredEnv, e)
+			}
+		}
+		cmd.Env = append(filteredEnv, "BEADS_DIR="+b.beadsDir)
 	}
 
 	var stdout, stderr bytes.Buffer
