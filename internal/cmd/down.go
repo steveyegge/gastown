@@ -389,7 +389,7 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Kill the session (KillSession now always terminates child processes)
+	// Kill the session (KillSessionWithProcesses terminates child processes)
 	return true, t.KillSessionWithProcesses(sessionName)
 }
 
@@ -406,7 +406,7 @@ func stopSessionWithCache(t *tmux.Tmux, sessionName string, cache *tmux.SessionS
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Kill the session (KillSession now always terminates child processes)
+	// Kill the session (KillSessionWithProcesses terminates child processes)
 	return true, t.KillSessionWithProcesses(sessionName)
 }
 
