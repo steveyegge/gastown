@@ -1,0 +1,45 @@
+# GitHub Copilot Agent with OpenCode
+# Enables GitHub Copilot coding agent to use OpenCode with real Antigravity models.
+# Use case: Let Copilot investigate functionality, run tests, develop features using OpenCode.
+#
+# Setup:
+# 1. Run `bunx opencode-sync sync` to push your auth to GitHub secrets
+# 2. Save this file as .github/workflows/copilot-setup-steps.yml
+# 3. Enable Copilot coding agent for your repository
+#
+# When Copilot runs, it will have access to the `opencode` CLI with your auth.
+
+name: Copilot Setup Steps
+
+on: workflow_dispatch
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    environment: copilot
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Restore OpenCode Auth
+        uses: rothnic/opencode-sync@v1
+        with:
+          bundle: ${{ secrets.OPENCODE_AUTH_BUNDLE }}
+
+      - name: Configure Git for Copilot
+        run: |
+          git config --global user.name "GitHub Copilot"
+          git config --global user.email "copilot@github.com"
+
+      - name: Verify OpenCode setup
+        run: |
+          echo "OpenCode version: $(opencode --version)"
+          echo "Auth status:"
+          opencode auth status
+          echo ""
+          echo "Available commands:"
+          opencode --help
