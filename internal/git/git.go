@@ -3,11 +3,15 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // GitError contains raw output from a git command for agent observation.
@@ -63,7 +67,38 @@ func (g *Git) IsRepo() bool {
 }
 
 // run executes a git command and returns stdout.
+// It uses exponential backoff retry for transient errors like network
+// timeouts, connection issues, or temporary file locks.
 func (g *Git) run(args ...string) (string, error) {
+	return g.runWithContext(context.Background(), args...)
+}
+
+// runWithContext executes a git command with context support and retry logic.
+func (g *Git) runWithContext(ctx context.Context, args ...string) (string, error) {
+	// Configure retry with git-specific error handling
+	cfg := util.RetryConfig{
+		MaxAttempts:  3,
+		InitialDelay: 100 * time.Millisecond,
+		MaxDelay:     5 * time.Second, // git network ops can be slower
+		Multiplier:   2.0,
+		Jitter:       true,
+		IsRetryable: func(err error) bool {
+			// Check for permanent marker
+			if util.IsPermanent(err) {
+				return false
+			}
+			// Use default transient error detection
+			return util.IsTransientError(err)
+		},
+	}
+
+	return util.Retry(ctx, cfg, func() (string, error) {
+		return g.runOnce(args...)
+	})
+}
+
+// runOnce executes a single git command attempt.
+func (g *Git) runOnce(args ...string) (string, error) {
 	// If gitDir is set (bare repo), prepend --git-dir flag
 	if g.gitDir != "" {
 		args = append([]string{"--git-dir=" + g.gitDir}, args...)

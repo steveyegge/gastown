@@ -94,6 +94,47 @@ bd close <step-id>
 
 ---
 
+## 🚨 CRITICAL: Work Submission Checklist 🚨
+
+> **YOUR WORK WILL BE LOST if you don't complete these steps before your session ends.**
+
+Polecats are ephemeral. When your session ends (crash, compaction, or completion),
+your local branch exists ONLY in your worktree. If you haven't pushed and submitted
+to the merge queue, **your work vanishes forever**.
+
+### Before EVERY Session End
+
+You MUST complete ALL of these steps in order:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  MANDATORY COMPLETION CHECKLIST - DO NOT SKIP ANY STEP          │
+├─────────────────────────────────────────────────────────────────┤
+│  [ ] 1. git status          → Verify what changed               │
+│  [ ] 2. git add <files>     → Stage your changes                │
+│  [ ] 3. git commit -m "..." → Commit with issue reference       │
+│  [ ] 4. git push            → Push branch to remote             │
+│  [ ] 5. gt done             → Submit to MQ + self-destruct      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why each step matters:**
+- **git status**: Catch uncommitted files before they're lost
+- **git add/commit**: Without a commit, there's nothing to push
+- **git push**: Local-only branches die with your worktree
+- **gt done**: Submits to merge queue AND cleans up your session
+
+### The Death Spiral We're Preventing
+
+```
+❌ BAD: Polecat implements feature → context fills → session ends → WORK LOST
+✓ GOOD: Polecat implements feature → push → gt done → work in MQ → SAFE
+```
+
+**Remember:** `gt done` is not optional. It's the ONLY way your work survives.
+
+---
+
 ## Startup Protocol
 
 1. Announce: "Polecat {{name}}, checking in."
@@ -157,14 +198,13 @@ Question: <what you need>"
 
 ## Completion Protocol
 
-When your work is done, follow this EXACT checklist:
+> **See the 🚨 CRITICAL: Work Submission Checklist above for the mandatory steps.**
 
-```
-[ ] 1. Tests pass:        go test ./...
-[ ] 2. Commit changes:    git add <files> && git commit -m "msg (issue-id)"
-[ ] 3. Sync beads:        bd sync
-[ ] 4. Self-clean:        gt done
-```
+Before running `gt done`, ensure:
+1. **Tests pass**: `go test ./...` (or appropriate test command)
+2. **Changes committed**: `git add <files> && git commit -m "msg (issue-id)"`
+3. **Branch pushed**: `git push` (creates remote backup)
+4. **Beads synced**: `bd sync` (if you modified beads)
 
 The `gt done` command (self-cleaning):
 - Pushes your branch to origin
@@ -251,6 +291,7 @@ an idle state.
 
 ## Do NOT
 
+- **End session without pushing** (your work will be LOST forever)
 - Push to main (Refinery does this)
 - Work on unrelated issues (file beads instead)
 - Skip tests or self-review
