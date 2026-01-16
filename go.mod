@@ -10,6 +10,7 @@ require (
 	github.com/go-rod/rod v0.116.2
 	github.com/gofrs/flock v0.13.0
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.38.0
 	golang.org/x/text v0.32.0

@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/sandbox"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -231,12 +233,20 @@ func runSling(cmd *cobra.Command, args []string) error {
 			} else {
 				// Spawn a fresh polecat in the rig
 				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
+
+				// Build task prompt for remote backends (Daytona) that can't access local beads
+				var taskPrompt string
+				if info, infoErr := getBeadInfo(beadID); infoErr == nil {
+					taskPrompt = buildTaskPromptForRemote(beadID, info, slingArgs)
+				}
+
 				spawnOpts := SlingSpawnOptions{
-					Force:    slingForce,
-					Account:  slingAccount,
-					Create:   slingCreate,
-					HookBead: beadID, // Set atomically at spawn time
-					Agent:    slingAgent,
+					Force:      slingForce,
+					Account:    slingAccount,
+					Create:     slingCreate,
+					HookBead:   beadID, // Set atomically at spawn time
+					Agent:      slingAgent,
+					TaskPrompt: taskPrompt,
 				}
 				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
@@ -505,4 +515,47 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// getRemoteWorkDir returns the configured remote work directory from sandbox config.
+// Falls back to DefaultRemoteWorkDir if not configured.
+func getRemoteWorkDir() string {
+	// Get workspace root (git repo root = town root)
+	workspaceRoot, err := detectCloneRoot()
+	if err != nil {
+		return sandbox.DefaultRemoteWorkDir
+	}
+
+	// Load sandbox config from workspace root
+	cfg, err := sandbox.LoadConfig(workspaceRoot)
+	if err == nil && cfg.Daytona != nil && cfg.Daytona.RemoteWorkDir != "" {
+		return cfg.Daytona.RemoteWorkDir
+	}
+
+	return sandbox.DefaultRemoteWorkDir
+}
+
+// buildTaskPromptForRemote builds a comprehensive task prompt for remote backends (Daytona).
+// Remote polecats can't access local beads, so we include all necessary context in the prompt.
+// This includes the bead ID, title, full description, working directory, and any attached args.
+func buildTaskPromptForRemote(beadID string, info *beadInfo, args string) string {
+	remoteWorkDir := getRemoteWorkDir()
+	var sb strings.Builder
+
+	fmt.Fprintf(&sb, "## Task: %s\n\n", info.Title)
+	fmt.Fprintf(&sb, "**Bead ID:** %s\n", beadID)
+	fmt.Fprintf(&sb, "**Working Directory:** %s\n", remoteWorkDir)
+
+	if args != "" {
+		fmt.Fprintf(&sb, "\n\n### Instructions\n\n%s", args)
+	}
+
+	sb.WriteString("\n\n---\n")
+	fmt.Fprintf(&sb, "Complete this task. When done, summarize what you accomplished and output `%s` on its own line to signal completion.\n\n", polecat.TaskCompletedMarker)
+	sb.WriteString("**Environment:**\n")
+	fmt.Fprintf(&sb, "- You are running in a remote sandbox\n")
+	fmt.Fprintf(&sb, "- The project code has been synced to `%s` - work inside this directory\n", remoteWorkDir)
+	sb.WriteString("- You do not have access to gt/bd commands\n")
+
+	return sb.String()
 }

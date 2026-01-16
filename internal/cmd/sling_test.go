@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -699,6 +700,117 @@ func TestLooksLikeBeadID(t *testing.T) {
 			got := looksLikeBeadID(tt.input)
 			if got != tt.want {
 				t.Errorf("looksLikeBeadID(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildTaskPromptForRemote(t *testing.T) {
+	tests := []struct {
+		name           string
+		beadID         string
+		info           *beadInfo
+		args           string
+		wantSubstrings []string
+	}{
+		{
+			name:   "basic bead with all fields",
+			beadID: "gt-mol-test123",
+			info: &beadInfo{
+				Title:       "Fix authentication bug",
+				Description: "Users are unable to login when MFA is enabled.\nNeed to check the token validation logic.",
+				Status:      "in-progress",
+				Assignee:    "alice",
+				Labels:      []string{"bug", "security", "p0"},
+			},
+			args: "Focus on the OAuth flow first",
+			wantSubstrings: []string{
+				"## Task: Fix authentication bug",
+				"**Bead ID:** gt-mol-test123",
+				"**Working Directory:**",
+				"**Labels:** bug, security, p0",
+				"### Description",
+				"Users are unable to login when MFA is enabled.",
+				"Need to check the token validation logic.",
+				"### Instructions",
+				"Focus on the OAuth flow first",
+				"Complete this task",
+				"**Environment:**",
+				"remote sandbox",
+				"work inside this directory",
+				"do not have access to gt/bd commands",
+			},
+		},
+		{
+			name:   "bead without description or labels",
+			beadID: "gt-doc-456",
+			info: &beadInfo{
+				Title:       "Update README",
+				Description: "",
+				Status:      "open",
+				Assignee:    "",
+				Labels:      nil,
+			},
+			args: "",
+			wantSubstrings: []string{
+				"## Task: Update README",
+				"**Bead ID:** gt-doc-456",
+				"(No description provided)",
+			},
+		},
+		{
+			name:   "bead with single label",
+			beadID: "hq-task-789",
+			info: &beadInfo{
+				Title:       "Code review for PR #42",
+				Description: "Review the authentication changes",
+				Labels:      []string{"review"},
+			},
+			args: "Check for SQL injection vulnerabilities",
+			wantSubstrings: []string{
+				"## Task: Code review for PR #42",
+				"**Labels:** review",
+				"Review the authentication changes",
+				"### Instructions",
+				"Check for SQL injection vulnerabilities",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildTaskPromptForRemote(tt.beadID, tt.info, tt.args)
+			fmt.Printf("Generated command: %s \n", result)
+			// Check all expected substrings are present
+			for _, want := range tt.wantSubstrings {
+				if !strings.Contains(result, want) {
+					t.Errorf("buildTaskPromptForRemote() missing expected substring:\nwant: %q\ngot:\n%s", want, result)
+				}
+			}
+
+			// Verify structure markers
+			if !strings.Contains(result, "## Task:") {
+				t.Error("buildTaskPromptForRemote() missing task header")
+			}
+			if tt.info.Description == "" && !strings.Contains(result, "(No description provided)") {
+				t.Error("buildTaskPromptForRemote() should show placeholder for empty description")
+			}
+			if tt.args != "" && !strings.Contains(result, "### Instructions") {
+				t.Error("buildTaskPromptForRemote() missing Instructions section when args provided")
+			}
+			if tt.args == "" && strings.Contains(result, "### Instructions") {
+				t.Error("buildTaskPromptForRemote() should not have Instructions section when args empty")
+			}
+
+			// Verify working directory is included in header and environment section
+			if !strings.Contains(result, "**Working Directory:**") {
+				t.Error("buildTaskPromptForRemote() missing Working Directory header")
+			}
+			if !strings.Contains(result, "work inside this directory") {
+				t.Error("buildTaskPromptForRemote() should instruct agent to work inside the synced directory")
+			}
+			if !strings.Contains(result, "**Environment:**") {
+				t.Error("buildTaskPromptForRemote() missing Environment section")
 			}
 		})
 	}

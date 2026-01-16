@@ -365,7 +365,11 @@ func runPolecatList(cmd *cobra.Command, args []string) error {
 	for _, r := range rigs {
 		polecatGit := git.NewGit(r.Path)
 		mgr := polecat.NewManager(r, polecatGit, t)
-		polecatMgr := polecat.NewSessionManager(t, r)
+		polecatMgr, err := mgr.GetSessionManagerWithTmux(t)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to get session manager for %s: %v\n", r.Name, err)
+			continue
+		}
 
 		polecats, err := mgr.List()
 		if err != nil {
@@ -475,13 +479,33 @@ func runPolecatRemove(cmd *cobra.Command, args []string) error {
 	removed := 0
 
 	for _, p := range targets {
+		// Get session manager to check/stop sessions
+		polecatMgr, err := p.mgr.GetSessionManagerWithTmux(t)
+		if err != nil {
+			removeErrors = append(removeErrors, fmt.Sprintf("%s/%s: failed to get session manager: %v", p.rigName, p.polecatName, err))
+			continue
+		}
+
 		// Check if session is running
-		if !polecatForce {
-			polecatMgr := polecat.NewSessionManager(t, p.r)
-			running, _ := polecatMgr.IsRunning(p.polecatName)
-			if running {
+		running, _ := polecatMgr.IsRunning(p.polecatName)
+		if running {
+			if !polecatForce {
 				removeErrors = append(removeErrors, fmt.Sprintf("%s/%s: session is running (stop first or use --force)", p.rigName, p.polecatName))
 				continue
+			}
+			// Force mode: stop the session first (gracefully for remote to sync files back)
+			fmt.Printf("Stopping session for %s/%s...\n", p.rigName, p.polecatName)
+			// Use force=false for remote backends to ensure file sync happens
+			forceStop := !polecatMgr.IsRemoteBackend()
+			if err := polecatMgr.Stop(p.polecatName, forceStop); err != nil {
+				fmt.Printf("  %s session stop failed: %v\n", style.Warning.Render("⚠"), err)
+				// Continue with removal anyway
+			} else {
+				if polecatMgr.IsRemoteBackend() {
+					fmt.Printf("  %s stopped session and synced files from remote\n", style.Success.Render("✓"))
+				} else {
+					fmt.Printf("  %s stopped session\n", style.Success.Render("✓"))
+				}
 			}
 		}
 
@@ -639,7 +663,11 @@ func runPolecatStatus(cmd *cobra.Command, args []string) error {
 
 	// Get session info
 	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
+	polecatMgr, err := mgr.GetSessionManagerWithTmux(t)
+	if err != nil {
+		// Non-fatal - continue without session manager
+		polecatMgr = polecat.NewSessionManager(t, r)
+	}
 	sessInfo, err := polecatMgr.Status(polecatName)
 	if err != nil {
 		// Non-fatal - continue without session info
@@ -1171,15 +1199,25 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Nuking %s/%s...\n", p.rigName, p.polecatName)
 		}
 
-		// Step 1: Kill session (force mode - no graceful shutdown)
-		polecatMgr := polecat.NewSessionManager(t, p.r)
+		// Step 1: Stop session (graceful for remote to sync files, force for local)
+		polecatMgr, err := p.mgr.GetSessionManagerWithTmux(t)
+		if err != nil {
+			// Fall back to local session manager
+			polecatMgr = polecat.NewSessionManager(t, p.r)
+		}
 		running, _ := polecatMgr.IsRunning(p.polecatName)
 		if running {
-			if err := polecatMgr.Stop(p.polecatName, true); err != nil {
-				fmt.Printf("  %s session kill failed: %v\n", style.Warning.Render("⚠"), err)
+			// For remote backends, use graceful stop to sync files back before nuke
+			// For local backends, use force mode for immediate kill
+			if err := polecatMgr.Stop(p.polecatName, polecatNukeForce); err != nil {
+				fmt.Printf("  %s session stop failed: %v\n", style.Warning.Render("⚠"), err)
 				// Continue anyway - worktree removal will still work
 			} else {
-				fmt.Printf("  %s killed session\n", style.Success.Render("✓"))
+				if polecatMgr.IsRemoteBackend() {
+					fmt.Printf("  %s stopped session and synced files from remote\n", style.Success.Render("✓"))
+				} else {
+					fmt.Printf("  %s killed session\n", style.Success.Render("✓"))
+				}
 			}
 		}
 

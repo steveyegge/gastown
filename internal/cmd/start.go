@@ -680,6 +680,8 @@ func cleanupPolecats(townRoot string) {
 	totalSkipped := 0
 	var uncommittedPolecats []string
 
+	t := tmux.NewTmux()
+
 	for _, r := range rigs {
 		polecatGit := git.NewGit(r.Path)
 		polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing, not allocating
@@ -689,7 +691,27 @@ func cleanupPolecats(townRoot string) {
 			continue
 		}
 
+		// Get session manager for this rig to handle remote sessions
+		sessionMgr, _ := polecatMgr.GetSessionManagerWithTmux(t)
+
 		for _, p := range polecats {
+			// Stop remote sessions first to sync files back before cleanup
+			// Local sessions are left alone to preserve existing gastown behavior
+			if sessionMgr != nil && sessionMgr.IsRemoteBackend() {
+				running, _ := sessionMgr.IsRunning(p.Name)
+				if running {
+					// Graceful stop to sync files back from remote
+					if err := sessionMgr.Stop(p.Name, false); err != nil {
+						fmt.Printf("  %s %s/%s: remote session stop failed: %v\n",
+							style.Warning.Render("⚠"), r.Name, p.Name, err)
+						// Continue with cleanup anyway
+					} else {
+						fmt.Printf("  %s %s/%s: synced and stopped remote session\n",
+							style.Dim.Render("○"), r.Name, p.Name)
+					}
+				}
+			}
+
 			// Check for uncommitted work
 			pGit := git.NewGit(p.ClonePath)
 			status, err := pGit.CheckUncommittedWork()

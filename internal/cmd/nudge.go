@@ -177,25 +177,29 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		var sessionName string
-
 		// Check if this is a crew address (polecatName starts with "crew/")
 		if strings.HasPrefix(polecatName, "crew/") {
 			// Extract crew name and use crew session naming
 			crewName := strings.TrimPrefix(polecatName, "crew/")
-			sessionName = crewSessionName(rigName, crewName)
+			sessionName := crewSessionName(rigName, crewName)
+			// NOTE: Crew workers currently only support local tmux execution.
+			// Remote backend support (Daytona) has not been implemented for crew yet.
+			// To add remote support for crew, create a CrewSessionManager with backend
+			// abstraction similar to polecat's SessionManager.Inject() which routes
+			// to injectRemote() for Daytona backends.
+			if err := t.NudgeSession(sessionName, message); err != nil {
+				return fmt.Errorf("nudging session: %w", err)
+			}
 		} else {
-			// Regular polecat - use session manager
+			// Regular polecat - use session manager (handles remote backends)
 			mgr, _, err := getSessionManager(rigName)
 			if err != nil {
 				return err
 			}
-			sessionName = mgr.SessionName(polecatName)
-		}
-
-		// Send nudge using the reliable NudgeSession
-		if err := t.NudgeSession(sessionName, message); err != nil {
-			return fmt.Errorf("nudging session: %w", err)
+			// Use Inject which handles remote backend detection
+			if err := mgr.Inject(polecatName, message); err != nil {
+				return fmt.Errorf("nudging polecat: %w", err)
+			}
 		}
 
 		fmt.Printf("%s Nudged %s/%s\n", style.Bold.Render("✓"), rigName, polecatName)

@@ -233,6 +233,10 @@ func (d *Daemon) heartbeat(state *State) {
 	// This validates tmux sessions are still alive for polecats with work-on-hook
 	d.checkPolecatSessionHealth()
 
+	// 9. Check remote polecat completion (Daytona sandbox integration)
+	// Remote polecats can't signal completion via gt done, so we check their output
+	d.checkRemotePolecatCompletion()
+
 	// Update state
 	state.LastHeartbeat = time.Now()
 	state.HeartbeatCount++
@@ -922,5 +926,154 @@ Manual intervention may be required.`,
 	cmd.Dir = d.config.TownRoot
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of crashed polecat: %v", err)
+	}
+}
+
+// checkRemotePolecatCompletion checks for completed remote polecats.
+// Remote polecats (Daytona sandboxes) can't signal completion via gt done,
+// so we check their output for completion indicators and run the completion
+// protocol on their behalf when detected.
+func (d *Daemon) checkRemotePolecatCompletion() {
+	rigs := d.getKnownRigs()
+	for _, rigName := range rigs {
+		d.checkRigRemotePolecatCompletion(rigName)
+	}
+}
+
+// checkRigRemotePolecatCompletion checks remote polecats for a specific rig.
+func (d *Daemon) checkRigRemotePolecatCompletion(rigName string) {
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
+
+	// Load rig config to check if it uses remote backend
+	rigsConfigPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return
+	}
+
+	// Get session manager for this rig
+	r := &rig.Rig{
+		Name: rigName,
+		Path: rigPath,
+	}
+	sessMgr, err := polecat.NewSessionManagerForRig(r, rigsConfig)
+	if err != nil {
+		return
+	}
+
+	// Only process if using remote backend
+	if !sessMgr.IsRemoteBackend() {
+		return
+	}
+
+	// List active remote sessions
+	sessions, err := sessMgr.List()
+	if err != nil {
+		d.logger.Printf("Error listing remote sessions for %s: %v", rigName, err)
+		return
+	}
+
+	for _, sess := range sessions {
+		if !sess.Running {
+			continue
+		}
+		d.checkSingleRemotePolecatCompletion(rigName, sess.Polecat, sessMgr)
+	}
+}
+
+// checkSingleRemotePolecatCompletion checks a single remote polecat for completion.
+func (d *Daemon) checkSingleRemotePolecatCompletion(rigName, polecatName string, sessMgr *polecat.SessionManager) {
+	// Check if the polecat has completed its task
+	result, err := sessMgr.CheckRemoteCompletion(polecatName)
+	if err != nil {
+		d.logger.Printf("Error checking completion for %s/%s: %v", rigName, polecatName, err)
+		return
+	}
+
+	if !result.Completed {
+		return
+	}
+
+	d.logger.Printf("Remote polecat %s/%s appears complete: %s", rigName, polecatName, result.Reason)
+
+	// Get the hook bead before completing (we need it for MR submission)
+	localWorkDir := sessMgr.GetLocalWorkDir(polecatName)
+	hookBead := sessMgr.GetHookBead(polecatName)
+	d.logger.Printf("Debug: %s/%s hookBead=%q, localWorkDir=%s", rigName, polecatName, hookBead, localWorkDir)
+
+	// Execute the completion protocol
+	completeResult, err := sessMgr.CompleteRemotePolecat(polecatName)
+	if err != nil {
+		d.logger.Printf("Error completing remote polecat %s/%s: %v", rigName, polecatName, err)
+		return
+	}
+
+	d.logger.Printf("Completed remote polecat %s/%s: synced=%v, branch=%s",
+		rigName, polecatName, completeResult.ChangesSynced, completeResult.BranchName)
+
+	// Submit to merge queue if we have a branch and hook bead
+	if completeResult.BranchName != "" && hookBead != "" {
+		d.submitToMergeQueue(rigName, polecatName, hookBead, completeResult.BranchName, localWorkDir)
+	}
+
+	// Notify witness that polecat is done
+	d.notifyPolecatDone(rigName, polecatName, hookBead, "COMPLETED")
+}
+
+// getPolecatHookBead retrieves the hook bead for a polecat from its agent bead.
+func (d *Daemon) getPolecatHookBead(rigName, polecatName string) string {
+	agentBeadID := beads.PolecatBeadID(rigName, polecatName)
+	info, err := d.getAgentBeadInfo(agentBeadID)
+	if err != nil {
+		d.logger.Printf("Debug: getPolecatHookBead failed for %s: %v", agentBeadID, err)
+		return ""
+	}
+	d.logger.Printf("Debug: getPolecatHookBead %s -> hook_bead=%q", agentBeadID, info.HookBead)
+	return info.HookBead
+}
+
+// submitToMergeQueue submits a branch to the merge queue.
+func (d *Daemon) submitToMergeQueue(rigName, polecatName, hookBead, branchName, workDir string) {
+	d.logger.Printf("Submitting branch %s to merge queue for %s", branchName, hookBead)
+
+	// Use gt done to create the merge request
+	// gt done detects the branch from the working directory
+	// --status=COMPLETED is the default, --issue can be passed if needed
+	cmd := exec.Command("gt", "done", "--issue="+hookBead) //nolint:gosec
+	cmd.Dir = workDir
+
+	// Set environment for gt done
+	cmd.Env = append(os.Environ(),
+		"GT_RIG="+rigName,
+		"GT_POLECAT="+polecatName,
+		"GT_ROLE=polecat",
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		d.logger.Printf("Warning: failed to submit to merge queue: %v, output: %s", err, string(output))
+	} else {
+		d.logger.Printf("Submitted branch %s to merge queue", branchName)
+	}
+}
+
+// notifyPolecatDone sends a POLECAT_DONE mail to the witness.
+func (d *Daemon) notifyPolecatDone(rigName, polecatName, hookBead, exitType string) {
+	witnessAddr := rigName + "/witness"
+	subject := fmt.Sprintf("POLECAT_DONE %s", polecatName)
+
+	// Build the mail body with completion info
+	body := fmt.Sprintf(`Exit: %s
+Issue: %s
+Branch: %s
+`, exitType, hookBead, polecatName)
+
+	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body) //nolint:gosec
+	cmd.Dir = d.config.TownRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		d.logger.Printf("Warning: failed to notify witness of polecat completion: %v, output: %s", err, string(output))
+	} else {
+		d.logger.Printf("Notified witness of polecat %s completion", polecatName)
 	}
 }

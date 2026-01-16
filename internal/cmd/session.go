@@ -224,6 +224,7 @@ func parseAddress(addr string) (rigName, polecatName string, err error) {
 }
 
 // getSessionManager creates a session manager for the given rig.
+// Uses the polecat Manager to properly load sandbox config for remote backends.
 func getSessionManager(rigName string) (*polecat.SessionManager, *rig.Rig, error) {
 	_, r, err := getRig(rigName)
 	if err != nil {
@@ -231,7 +232,15 @@ func getSessionManager(rigName string) (*polecat.SessionManager, *rig.Rig, error
 	}
 
 	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
+
+	// Use Manager.GetSessionManagerWithTmux to properly load sandbox config
+	polecatGit := git.NewGit(r.Path)
+	mgr := polecat.NewManager(r, polecatGit, t)
+	polecatMgr, err := mgr.GetSessionManagerWithTmux(t)
+	if err != nil {
+		// Fall back to direct session manager if sandbox config fails
+		polecatMgr = polecat.NewSessionManager(t, r)
+	}
 
 	return polecatMgr, r, nil
 }

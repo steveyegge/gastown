@@ -33,11 +33,12 @@ func (s *SpawnedPolecatInfo) AgentID() string {
 
 // SlingSpawnOptions contains options for spawning a polecat via sling.
 type SlingSpawnOptions struct {
-	Force    bool   // Force spawn even if polecat has uncommitted work
-	Account  string // Claude Code account handle to use
-	Create   bool   // Create polecat if it doesn't exist (currently always true for sling)
-	HookBead string // Bead ID to set as hook_bead at spawn time (atomic assignment)
-	Agent    string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
+	Force      bool   // Force spawn even if polecat has uncommitted work
+	Account    string // Claude Code account handle to use
+	Create     bool   // Create polecat if it doesn't exist (currently always true for sling)
+	HookBead   string // Bead ID to set as hook_bead at spawn time (atomic assignment)
+	Agent      string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
+	TaskPrompt string // Task description to send directly to agent (for remote backends)
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -126,7 +127,10 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	}
 
 	// Start session (reuse tmux from manager)
-	polecatSessMgr := polecat.NewSessionManager(t, r)
+	polecatSessMgr, err := polecatMgr.GetSessionManagerWithTmux(t)
+	if err != nil {
+		return nil, fmt.Errorf("getting session manager: %w", err)
+	}
 
 	// Check if already running
 	running, _ := polecatSessMgr.IsRunning(polecatName)
@@ -134,6 +138,8 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 		startOpts := polecat.SessionStartOptions{
 			RuntimeConfigDir: claudeConfigDir,
+			TaskPrompt:      opts.TaskPrompt,
+			HookBead:        opts.HookBead,
 		}
 		if opts.Agent != "" {
 			cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, r.Path, "", opts.Agent)
@@ -149,10 +155,16 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 
 	// Get session name and pane
 	sessionName := polecatSessMgr.SessionName(polecatName)
-	pane, err := getSessionPane(sessionName)
-	if err != nil {
-		return nil, fmt.Errorf("getting pane for %s: %w", sessionName, err)
-	}
+
+	var pane string
+	// For remote backends, pane is not applicable
+	// Empty pane check is already implemented in parts where it's used
+  if !polecatSessMgr.IsRemoteBackend() {
+      pane, err = getSessionPane(sessionName)
+      if err != nil {
+          return nil, fmt.Errorf("getting pane for %s: %w", sessionName, err)
+      }
+  }
 
 	fmt.Printf("%s Polecat %s spawned\n", style.Bold.Render("✓"), polecatName)
 

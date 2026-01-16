@@ -1,0 +1,27 @@
+{
+  "_comment": "Sandbox configuration",
+
+  "backend": "local",
+
+  "_comment_daytona": "Daytona sandbox configuration. To enable for polecats, set agent_backends.polecat to 'daytona'",
+  "daytona": {
+    "api_key_env": "DAYTONA_API_KEY",
+    "anthropic_api_key_env": "ANTHROPIC_API_KEY",
+    "auto_stop_minutes": 15,
+    "auto_archive_minutes": 10080,
+    "auto_delete_minutes": -1,
+    "snapshot": "daytona-medium",
+    "snapshot_has_claude_code": false,
+    "target": "us",
+    "remote_work_dir": "/home/daytona/gastown-project" 
+  },
+
+  "local": {
+    "tmux_socket_path": ""
+  },
+
+  "_comment_agent_backends": "Override backend for specific agent roles (polecat, witness, refinery, crew)",
+  "agent_backends": {
+    "polecat": "daytona"
+  }
+}

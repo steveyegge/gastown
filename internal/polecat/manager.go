@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/sandbox"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -1082,4 +1083,95 @@ func assessStaleness(info *StalenessInfo, threshold int) (bool, string) {
 	// No session but has agent bead without special state = clean up
 	// (The session is the source of truth for liveness)
 	return true, "no active session"
+}
+
+// --- Sandbox Backend Integration ---
+
+// GetSessionManager creates a SessionManager with the appropriate backend for this rig.
+// It loads sandbox configuration from the rig and town settings, and configures the
+// session manager to use either local (tmux) or remote (Daytona) execution.
+func (m *Manager) GetSessionManager() (*SessionManager, error) {
+	t := tmux.NewTmux()
+
+	// Try to load sandbox config from rig, fall back to town
+	sandboxCfg, err := m.loadSandboxConfig()
+	if err != nil {
+		// On error, use local backend (default behavior)
+		return NewSessionManager(t, m.rig), nil
+	}
+
+	// Get the backend for polecats
+	backend, err := sandbox.GetBackendForRole(sandboxCfg, "polecat")
+	if err != nil {
+		// If we can't get the configured backend, fall back to local
+		return NewSessionManager(t, m.rig), nil
+	}
+
+	return NewSessionManagerWithBackend(t, m.rig, backend), nil
+}
+
+// GetSessionManagerWithTmux creates a SessionManager with the appropriate backend,
+// using a provided tmux instance. This is useful when the caller already has a tmux
+// instance configured.
+func (m *Manager) GetSessionManagerWithTmux(t *tmux.Tmux) (*SessionManager, error) {
+	// Try to load sandbox config from rig, fall back to town
+	sandboxCfg, err := m.loadSandboxConfig()
+	if err != nil {
+		// On error, use local backend (default behavior)
+		return NewSessionManager(t, m.rig), nil
+	}
+
+	// Get the backend for polecats
+	backend, err := sandbox.GetBackendForRole(sandboxCfg, "polecat")
+	if err != nil {
+		// If we can't get the configured backend, fall back to local
+		return NewSessionManager(t, m.rig), nil
+	}
+
+	return NewSessionManagerWithBackend(t, m.rig, backend), nil
+}
+
+// loadSandboxConfig loads sandbox configuration from rig and town levels.
+// Rig-level settings override town-level settings.
+func (m *Manager) loadSandboxConfig() (*sandbox.Config, error) {
+	// Find town root
+	townRoot, err := workspace.Find(m.rig.Path)
+	if err != nil {
+		return nil, fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Load town-level sandbox config
+	townConfig, townErr := sandbox.LoadConfig(townRoot)
+
+	// Load rig-level sandbox config
+	rigConfig, rigErr := sandbox.LoadConfig(m.rig.Path)
+
+	// If both failed, return error
+	if townErr != nil && rigErr != nil {
+		return nil, fmt.Errorf("no sandbox config found")
+	}
+
+	// Merge configs (rig overrides town)
+	return sandbox.MergeConfigs(townConfig, rigConfig), nil
+}
+
+// GetSandboxBackend returns the sandbox backend configured for this rig's polecats.
+// This is useful for callers that need direct backend access.
+func (m *Manager) GetSandboxBackend() (sandbox.Backend, error) {
+	sandboxCfg, err := m.loadSandboxConfig()
+	if err != nil {
+		// Return local backend as default
+		return sandbox.GetLocalBackend(nil), nil
+	}
+
+	return sandbox.GetBackendForRole(sandboxCfg, "polecat")
+}
+
+// IsDaytonaEnabled returns true if Daytona is configured as the backend for polecats.
+func (m *Manager) IsDaytonaEnabled() bool {
+	sandboxCfg, err := m.loadSandboxConfig()
+	if err != nil {
+		return false
+	}
+	return sandboxCfg.GetBackendForRole("polecat") == sandbox.BackendDaytona
 }
