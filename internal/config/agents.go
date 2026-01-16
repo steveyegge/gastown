@@ -67,6 +67,12 @@ type AgentPresetInfo struct {
 	// Claude-only feature for seance command.
 	SupportsForkSession bool `json:"supports_fork_session,omitempty"`
 
+	// SupportsModel indicates if the agent supports a model flag.
+	SupportsModel bool `json:"supports_model,omitempty"`
+
+	// ModelFlag is the CLI flag used to set the model (default: --model).
+	ModelFlag string `json:"model_flag,omitempty"`
+
 	// NonInteractive contains settings for non-interactive mode.
 	NonInteractive *NonInteractiveConfig `json:"non_interactive,omitempty"`
 }
@@ -108,6 +114,8 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeStyle:         "flag",
 		SupportsHooks:       true,
 		SupportsForkSession: true,
+		SupportsModel:       true,
+		ModelFlag:           "--model",
 		NonInteractive:      nil, // Claude is native non-interactive
 	},
 	AgentGemini: {
@@ -130,11 +138,13 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Command:             "codex",
 		Args:                []string{"--yolo"},
 		ProcessNames:        []string{"codex"}, // Codex CLI binary
-		SessionIDEnv:        "", // Codex captures from JSONL output
+		SessionIDEnv:        "",                // Codex captures from JSONL output
 		ResumeFlag:          "resume",
 		ResumeStyle:         "subcommand",
 		SupportsHooks:       false, // Use env/files instead
 		SupportsForkSession: false,
+		SupportsModel:       true,
+		ModelFlag:           "--model",
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "exec",
 			OutputFlag: "--json",
@@ -298,6 +308,15 @@ func GetAgentPresetByName(name string) *AgentPresetInfo {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	return globalRegistry.Agents[name]
+}
+
+// SupportsModel returns whether the agent supports model selection and its flag.
+func SupportsModel(name string) (bool, string) {
+	info := GetAgentPresetByName(name)
+	if info == nil || !info.SupportsModel {
+		return false, ""
+	}
+	return true, info.ModelFlag
 }
 
 // ListAgentPresets returns all known agent preset names.

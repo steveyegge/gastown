@@ -2,8 +2,8 @@
 package config
 
 import (
-	"path/filepath"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -156,10 +156,24 @@ type RigsConfig struct {
 
 // RigEntry represents a single rig in the registry.
 type RigEntry struct {
-	GitURL      string       `json:"git_url"`
-	LocalRepo   string       `json:"local_repo,omitempty"`
-	AddedAt     time.Time    `json:"added_at"`
-	BeadsConfig *BeadsConfig `json:"beads,omitempty"`
+	GitURL      string          `json:"git_url"`
+	LocalRepo   string          `json:"local_repo,omitempty"`
+	AddedAt     time.Time       `json:"added_at"`
+	BeadsConfig *BeadsConfig    `json:"beads,omitempty"`
+	Git         *RigGitConfig   `json:"git,omitempty"`
+	Setup       *RigSetupConfig `json:"setup,omitempty"`
+}
+
+// RigGitConfig represents git remote configuration for a rig.
+type RigGitConfig struct {
+	Origin   string `json:"origin,omitempty"`
+	Upstream string `json:"upstream,omitempty"`
+}
+
+// RigSetupConfig stores a rig setup command and workdir.
+type RigSetupConfig struct {
+	Command string `json:"command,omitempty"`
+	Workdir string `json:"workdir,omitempty"`
 }
 
 // BeadsConfig represents beads configuration for a rig.
@@ -184,13 +198,15 @@ const CurrentRigSettingsVersion = 1
 // RigConfig represents per-rig identity (rig/config.json).
 // This contains only identity - behavioral config is in settings/config.json.
 type RigConfig struct {
-	Type      string       `json:"type"`    // "rig"
-	Version   int          `json:"version"` // schema version
-	Name      string       `json:"name"`    // rig name
-	GitURL    string       `json:"git_url"` // git repository URL
-	LocalRepo string       `json:"local_repo,omitempty"`
-	CreatedAt time.Time    `json:"created_at"` // when the rig was created
-	Beads     *BeadsConfig `json:"beads,omitempty"`
+	Type      string          `json:"type"`    // "rig"
+	Version   int             `json:"version"` // schema version
+	Name      string          `json:"name"`    // rig name
+	GitURL    string          `json:"git_url"` // git repository URL
+	LocalRepo string          `json:"local_repo,omitempty"`
+	CreatedAt time.Time       `json:"created_at"` // when the rig was created
+	Beads     *BeadsConfig    `json:"beads,omitempty"`
+	Git       *RigGitConfig   `json:"git,omitempty"`
+	Setup     *RigSetupConfig `json:"setup,omitempty"`
 }
 
 // WorkflowConfig represents workflow settings for a rig.
