@@ -250,6 +250,16 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	time.Sleep(2 * time.Second)
 	debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
 
+	// Verify session survived startup - if the command crashed, the session may have died.
+	// Without this check, Start() would return success even if the pane died during initialization.
+	running, err = m.tmux.HasSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("verifying session: %w", err)
+	}
+	if !running {
+		return fmt.Errorf("session %s died during startup (agent command may have failed)", sessionID)
+	}
+
 	return nil
 }
 
