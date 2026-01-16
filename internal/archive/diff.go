@@ -259,3 +259,108 @@ func DetectScrollKMP(prev, next []string, threshold float64) (scrolled bool, new
 	// No scroll detected - could be a full redraw or unrelated content
 	return false, nil
 }
+
+// CharDiffResult represents the result of a character-level diff between two strings.
+// It identifies the common prefix, the changed middle portion, and the common suffix.
+type CharDiffResult struct {
+	// PrefixLen is the length of the common prefix in bytes
+	PrefixLen int
+	// OldMiddle is the changed portion from the old string
+	OldMiddle string
+	// NewMiddle is the changed portion from the new string
+	NewMiddle string
+	// SuffixLen is the length of the common suffix in bytes
+	SuffixLen int
+}
+
+// CharDiff computes a character-level diff between two strings using O(W) prefix/suffix matching.
+//
+// This is optimized for terminal UI updates where changes are typically localized
+// (e.g., progress bars, counters, status updates). Instead of expensive O(W²)
+// Levenshtein distance, we find the longest common prefix and suffix in O(W) time.
+//
+// Algorithm:
+//  1. Find longest common prefix: O(W)
+//  2. Find longest common suffix (after prefix): O(W)
+//  3. The middle portion is what changed
+//
+// Example:
+//
+//	old: "Progress: 45% complete"
+//	new: "Progress: 67% complete"
+//	Result: prefix=10 ("Progress: "), oldMiddle="45", newMiddle="67", suffix=9 ("% complete")
+//
+// Returns a CharDiffResult with the prefix length, changed portions, and suffix length.
+func CharDiff(old, new string) CharDiffResult {
+	if old == new {
+		return CharDiffResult{
+			PrefixLen: len(old),
+			SuffixLen: 0,
+		}
+	}
+
+	// Find longest common prefix
+	prefixLen := commonPrefixLen(old, new)
+
+	// Work with the remaining portions after the prefix
+	oldRest := old[prefixLen:]
+	newRest := new[prefixLen:]
+
+	// Find longest common suffix in the remaining portions
+	suffixLen := commonSuffixLen(oldRest, newRest)
+
+	// Extract the changed middle portions
+	oldMiddleEnd := len(oldRest) - suffixLen
+	newMiddleEnd := len(newRest) - suffixLen
+
+	return CharDiffResult{
+		PrefixLen: prefixLen,
+		OldMiddle: oldRest[:oldMiddleEnd],
+		NewMiddle: newRest[:newMiddleEnd],
+		SuffixLen: suffixLen,
+	}
+}
+
+// commonPrefixLen returns the length of the longest common prefix between two strings.
+// Complexity: O(min(len(a), len(b)))
+func commonPrefixLen(a, b string) int {
+	minLen := len(a)
+	if len(b) < minLen {
+		minLen = len(b)
+	}
+
+	for i := 0; i < minLen; i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return minLen
+}
+
+// commonSuffixLen returns the length of the longest common suffix between two strings.
+// Complexity: O(min(len(a), len(b)))
+func commonSuffixLen(a, b string) int {
+	lenA, lenB := len(a), len(b)
+	minLen := lenA
+	if lenB < minLen {
+		minLen = lenB
+	}
+
+	for i := 0; i < minLen; i++ {
+		if a[lenA-1-i] != b[lenB-1-i] {
+			return i
+		}
+	}
+	return minLen
+}
+
+// HasChanges returns true if the diff result indicates actual changes.
+func (r CharDiffResult) HasChanges() bool {
+	return r.OldMiddle != "" || r.NewMiddle != ""
+}
+
+// ChangedRange returns the byte range of the change in the old string.
+// Returns (start, end) where old[start:end] was replaced.
+func (r CharDiffResult) ChangedRange() (start, end int) {
+	return r.PrefixLen, r.PrefixLen + len(r.OldMiddle)
+}
