@@ -806,8 +806,20 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 	// event fields (event_kind, actor, payload) to not be stored properly.
 	// The bd command will auto-detect the correct rig from cwd.
 
-	// Execute bd create
+	// Find town root so bd can find the .beads database.
+	// The stop hook may run from a role subdirectory (e.g., mayor/) that
+	// doesn't have its own .beads, so we need to run bd from town root.
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+	if townRoot == "" {
+		return fmt.Errorf("not in a Gas Town workspace")
+	}
+
+	// Execute bd create from town root
 	bdCmd := exec.Command("bd", bdArgs...)
+	bdCmd.Dir = townRoot
 	output, err := bdCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("creating session cost wisp: %w\nOutput: %s", err, string(output))
@@ -819,6 +831,7 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 	// These are informational records that don't need to stay open.
 	// The wisp data is preserved and queryable until digested.
 	closeCmd := exec.Command("bd", "close", wispID, "--reason=auto-closed session cost wisp")
+	closeCmd.Dir = townRoot
 	if closeErr := closeCmd.Run(); closeErr != nil {
 		// Non-fatal: wisp was created, just couldn't auto-close
 		fmt.Fprintf(os.Stderr, "warning: could not auto-close session cost wisp %s: %v\n", wispID, closeErr)
