@@ -6,12 +6,13 @@
 # Allowed patterns:
 #   main, beads-sync  - Direct work branches
 #   polecat/*         - Polecat working branches (Refinery merges these)
+#   integration/*     - Epic integration branches (Refinery merges polecat work here)
 
 while read local_ref local_sha remote_ref remote_sha; do
   branch="${remote_ref#refs/heads/}"
 
   case "$branch" in
-    main|beads-sync|polecat/*)
+    main|beads-sync|polecat/*|integration/*)
       # Allowed branches
       ;;
     *)
@@ -20,9 +21,10 @@ while read local_ref local_sha remote_ref remote_sha; do
       echo "Blocked push to: $branch"
       echo ""
       echo "Allowed branches:"
-      echo "  main        - Crew workers push here directly"
-      echo "  polecat/*   - Polecat working branches"
-      echo "  beads-sync  - Beads synchronization"
+      echo "  main          - Crew workers push here directly"
+      echo "  polecat/*     - Polecat working branches"
+      echo "  beads-sync    - Beads synchronization"
+      echo "  integration/* - Epic integration branches"
       echo ""
       echo "Do NOT create PRs. Push to main or let Refinery merge polecat work."
       exit 1
