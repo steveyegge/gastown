@@ -183,10 +183,21 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 		for _, dpid := range descendants {
 			_ = exec.Command("kill", "-KILL", dpid).Run()
 		}
+
+		// Kill the pane process itself (may have called setsid() and detached)
+		_ = exec.Command("kill", "-TERM", pid).Run()
+		time.Sleep(100 * time.Millisecond)
+		_ = exec.Command("kill", "-KILL", pid).Run()
 	}
 
 	// Kill the tmux session
-	return t.KillSession(name)
+	// Note: If we killed the pane process, tmux may have already terminated
+	// the session automatically. Ignore "session not found" errors.
+	err = t.KillSession(name)
+	if err != nil && errors.Is(err, ErrSessionNotFound) {
+		return nil // Session already gone, which is what we wanted
+	}
+	return err
 }
 
 // getAllDescendants recursively finds all descendant PIDs of a process.
