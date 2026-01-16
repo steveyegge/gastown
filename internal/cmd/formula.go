@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 	"golang.org/x/text/cases"
@@ -23,12 +24,15 @@ import (
 
 // Formula command flags
 var (
-	formulaListJSON   bool
-	formulaShowJSON   bool
-	formulaRunPR      int
-	formulaRunRig     string
-	formulaRunDryRun  bool
-	formulaCreateType string
+	formulaListJSON    bool
+	formulaShowJSON    bool
+	formulaRunPR       int
+	formulaRunRig      string
+	formulaRunDryRun   bool
+	formulaCreateType  string
+	formulaFormatWrite bool
+	formulaFormatCheck bool
+	formulaFormatDiff  bool
 )
 
 var formulaCmd = &cobra.Command{
@@ -146,6 +150,26 @@ Examples:
 	RunE: runFormulaCreate,
 }
 
+var formulaFormatCmd = &cobra.Command{
+	Use:   "format [files...]",
+	Short: "Format formula files for readable diffs",
+	Long: `Format formula TOML files to use multi-line strings.
+
+Converts single-line strings with \n escapes into triple-quoted
+multi-line strings, making diffs more readable.
+
+By default, outputs formatted content to stdout. Use --write to
+modify files in-place.
+
+Examples:
+  gt formula format foo.formula.toml          # Format to stdout
+  gt formula format --write *.formula.toml    # Format in-place
+  gt formula format --check *.formula.toml    # Check if formatting needed
+  gt formula format --diff foo.formula.toml   # Show diff of changes`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runFormulaFormat,
+}
+
 func init() {
 	// List flags
 	formulaListCmd.Flags().BoolVar(&formulaListJSON, "json", false, "Output as JSON")
@@ -161,11 +185,17 @@ func init() {
 	// Create flags
 	formulaCreateCmd.Flags().StringVar(&formulaCreateType, "type", "task", "Formula type: task, workflow, or patrol")
 
+	// Format flags
+	formulaFormatCmd.Flags().BoolVar(&formulaFormatWrite, "write", false, "Modify files in-place")
+	formulaFormatCmd.Flags().BoolVar(&formulaFormatCheck, "check", false, "Check if formatting needed (exit 1 if not formatted)")
+	formulaFormatCmd.Flags().BoolVar(&formulaFormatDiff, "diff", false, "Show diff of changes")
+
 	// Add subcommands
 	formulaCmd.AddCommand(formulaListCmd)
 	formulaCmd.AddCommand(formulaShowCmd)
 	formulaCmd.AddCommand(formulaRunCmd)
 	formulaCmd.AddCommand(formulaCreateCmd)
+	formulaCmd.AddCommand(formulaFormatCmd)
 
 	rootCmd.AddCommand(formulaCmd)
 }
@@ -1194,4 +1224,75 @@ func promptYesNo(question string) bool {
 	answer, _ := reader.ReadString('\n')
 	answer = strings.TrimSpace(strings.ToLower(answer))
 	return answer == "y" || answer == "yes"
+}
+
+// runFormulaFormat formats formula TOML files for readable diffs
+func runFormulaFormat(cmd *cobra.Command, args []string) error {
+	hasErrors := false
+	needsFormatting := false
+
+	for _, path := range args {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", path, err)
+			hasErrors = true
+			continue
+		}
+
+		formatted, changed, err := formula.FormatTOML(content)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error formatting %s: %v\n", path, err)
+			hasErrors = true
+			continue
+		}
+
+		if formulaFormatCheck {
+			// Check mode: report if file needs formatting
+			if changed {
+				fmt.Printf("%s needs formatting\n", path)
+				needsFormatting = true
+			}
+			continue
+		}
+
+		if formulaFormatDiff {
+			// Diff mode: show what would change
+			if changed {
+				fmt.Printf("--- %s (original)\n", path)
+				fmt.Printf("+++ %s (formatted)\n", path)
+				// Simple diff: just show before/after
+				// For a real diff, we'd use a diff library
+				fmt.Println("@@ changes @@")
+				fmt.Println(string(formatted))
+			} else {
+				fmt.Printf("%s already formatted\n", path)
+			}
+			continue
+		}
+
+		if formulaFormatWrite {
+			// Write mode: modify file in-place
+			if changed {
+				if err := os.WriteFile(path, formatted, 0644); err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing %s: %v\n", path, err)
+					hasErrors = true
+					continue
+				}
+				fmt.Printf("%s Formatted %s\n", style.Bold.Render("✓"), path)
+			} else {
+				fmt.Printf("%s %s (no changes)\n", style.Dim.Render("-"), path)
+			}
+		} else {
+			// Default: output to stdout
+			fmt.Print(string(formatted))
+		}
+	}
+
+	if hasErrors {
+		return fmt.Errorf("some files had errors")
+	}
+	if formulaFormatCheck && needsFormatting {
+		return fmt.Errorf("some files need formatting")
+	}
+	return nil
 }
