@@ -11,7 +11,7 @@ import (
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpencode}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -44,8 +44,8 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"cursor", AgentCursor, false},
 		{"auggie", AgentAuggie, false},
 		{"amp", AgentAmp, false},
+		{"opencode", AgentOpencode, false},
 		{"aider", "", true},    // Not built-in, can be added via config
-		{"opencode", "", true}, // Not built-in, can be added via config
 		{"unknown", "", true},
 	}
 
@@ -77,6 +77,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentCursor, "cursor-agent"},
 		{AgentAuggie, "auggie"},
 		{AgentAmp, "amp"},
+		{AgentOpencode, "opencode"},
 	}
 
 	for _, tt := range tests {
@@ -102,8 +103,8 @@ func TestIsKnownPreset(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
+		{"opencode", true},
 		{"aider", false},    // Not built-in, can be added via config
-		{"opencode", false}, // Not built-in, can be added via config
 		{"unknown", false},
 		{"chatgpt", false},
 	}
