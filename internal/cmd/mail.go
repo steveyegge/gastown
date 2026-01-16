@@ -150,9 +150,10 @@ Examples:
 var mailReadCmd = &cobra.Command{
 	Use:   "read <message-id>",
 	Short: "Read a message",
-	Long: `Read a specific message and mark it as read.
+	Long: `Read a specific message (does not mark as read).
 
-The message ID can be found from 'gt mail inbox'.`,
+The message ID can be found from 'gt mail inbox'.
+Use 'gt mail mark-read' to mark messages as read.`,
 	Aliases: []string{"show"},
 	Args: cobra.ExactArgs(1),
 	RunE: runMailRead,
