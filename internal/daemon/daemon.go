@@ -37,12 +37,13 @@ import (
 // This is recovery-focused: normal wake is handled by feed subscription (bd activity --follow).
 // The daemon is the safety net for dead sessions, GUPP violations, and orphaned work.
 type Daemon struct {
-	config        *Config
-	tmux          *tmux.Tmux
-	logger        *log.Logger
-	ctx           context.Context
-	cancel        context.CancelFunc
-	curator       *feed.Curator
+	config       *Config
+	patrolConfig *DaemonPatrolConfig
+	tmux         *tmux.Tmux
+	logger       *log.Logger
+	ctx          context.Context
+	cancel       context.CancelFunc
+	curator      *feed.Curator
 	convoyWatcher *ConvoyWatcher
 
 	// Mass death detection: track recent session deaths
@@ -79,12 +80,19 @@ func New(config *Config) (*Daemon, error) {
 	logger := log.New(logFile, "", log.LstdFlags)
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Load patrol config from mayor/daemon.json (optional - nil if missing)
+	patrolConfig := LoadPatrolConfig(config.TownRoot)
+	if patrolConfig != nil {
+		logger.Printf("Loaded patrol config from %s", PatrolConfigFile(config.TownRoot))
+	}
+
 	return &Daemon{
-		config: config,
-		tmux:   tmux.NewTmux(),
-		logger: logger,
-		ctx:    ctx,
-		cancel: cancel,
+		config:       config,
+		patrolConfig: patrolConfig,
+		tmux:         tmux.NewTmux(),
+		logger:       logger,
+		ctx:          ctx,
+		cancel:       cancel,
 	}, nil
 }
 
@@ -208,10 +216,20 @@ func (d *Daemon) heartbeat(state *State) {
 	d.checkDeaconHeartbeat()
 
 	// 4. Ensure Witnesses are running for all rigs (restart if dead)
-	d.ensureWitnessesRunning()
+	// Check patrol config - can be disabled in mayor/daemon.json
+	if IsPatrolEnabled(d.patrolConfig, "witness") {
+		d.ensureWitnessesRunning()
+	} else {
+		d.logger.Printf("Witness patrol disabled in config, skipping")
+	}
 
 	// 5. Ensure Refineries are running for all rigs (restart if dead)
-	d.ensureRefineriesRunning()
+	// Check patrol config - can be disabled in mayor/daemon.json
+	if IsPatrolEnabled(d.patrolConfig, "refinery") {
+		d.ensureRefineriesRunning()
+	} else {
+		d.logger.Printf("Refinery patrol disabled in config, skipping")
+	}
 
 	// 6. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
 	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
@@ -415,7 +433,8 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 
 	if err := mgr.Start(false, "", nil); err != nil {
 		if err == witness.ErrAlreadyRunning {
-			// Already running - nothing to do
+			// Already running - this is the expected case
+			d.logger.Printf("Witness for %s already running, skipping spawn", rigName)
 			return
 		}
 		d.logger.Printf("Error starting witness for %s: %v", rigName, err)
@@ -454,7 +473,8 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 
 	if err := mgr.Start(false, ""); err != nil {
 		if err == refinery.ErrAlreadyRunning {
-			// Already running - nothing to do
+			// Already running - this is the expected case when fix is working
+			d.logger.Printf("Refinery for %s already running, skipping spawn", rigName)
 			return
 		}
 		d.logger.Printf("Error starting refinery for %s: %v", rigName, err)
