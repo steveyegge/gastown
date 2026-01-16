@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -184,6 +185,11 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		}
 	} else {
 		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", "gt boot triage")
+	}
+
+	// Ensure Claude settings exist for boot (autonomous role)
+	if err := claude.EnsureSettingsForRole(b.bootDir, "boot"); err != nil {
+		return fmt.Errorf("ensuring boot settings: %w", err)
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
