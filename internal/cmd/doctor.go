@@ -118,6 +118,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Register built-in checks
 	d.Register(doctor.NewStaleBinaryCheck())
+	d.Register(doctor.NewSqlite3Check())
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewTownRootBranchCheck())
 	d.Register(doctor.NewPreCheckoutHookCheck())
