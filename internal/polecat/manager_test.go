@@ -661,3 +661,57 @@ func TestReconcilePoolWith_OrphanDoesNotBlockAllocation(t *testing.T) {
 		t.Errorf("expected furiosa (orphan freed), got %q", name)
 	}
 }
+
+// TestAllocateName_ConcurrentAllocationUnique verifies that concurrent calls
+// to AllocateName() return unique names (no race condition).
+// This tests the fix for the parallel sling race condition bug (gt-27eer).
+func TestAllocateName_ConcurrentAllocationUnique(t *testing.T) {
+	t.Parallel()
+
+	tmpDir, err := os.MkdirTemp("", "concurrent-alloc-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	r := &rig.Rig{
+		Name: "testrig",
+		Path: tmpDir,
+	}
+	m := NewManager(r, nil, nil)
+
+	// Run 10 concurrent allocations
+	const numAllocs = 10
+	names := make(chan string, numAllocs)
+	errs := make(chan error, numAllocs)
+
+	for i := 0; i < numAllocs; i++ {
+		go func() {
+			name, err := m.AllocateName()
+			if err != nil {
+				errs <- err
+				return
+			}
+			names <- name
+		}()
+	}
+
+	// Collect results
+	allocatedNames := make(map[string]bool)
+	for i := 0; i < numAllocs; i++ {
+		select {
+		case name := <-names:
+			if allocatedNames[name] {
+				t.Errorf("duplicate name allocated: %q (race condition!)", name)
+			}
+			allocatedNames[name] = true
+		case err := <-errs:
+			t.Errorf("allocation error: %v", err)
+		}
+	}
+
+	// Should have exactly numAllocs unique names
+	if len(allocatedNames) != numAllocs {
+		t.Errorf("expected %d unique names, got %d", numAllocs, len(allocatedNames))
+	}
+}

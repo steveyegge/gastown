@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -17,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -48,6 +50,10 @@ type Manager struct {
 	beads    *beads.Beads
 	namePool *NamePool
 	tmux     *tmux.Tmux
+
+	// allocMu protects name allocation within a single process.
+	// File locking (in AllocateName) handles cross-process synchronization.
+	allocMu sync.Mutex
 }
 
 // NewManager creates a new polecat manager.
@@ -474,17 +480,41 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 // AllocateName allocates a name from the name pool.
 // Returns a pooled name (polecat-01 through polecat-50) if available,
 // otherwise returns an overflow name (rigname-N).
+//
+// This function uses two levels of locking to ensure safe allocation:
+// 1. Process-level mutex for concurrent goroutines within the same process
+// 2. File-based locking for concurrent processes (e.g., parallel gt sling commands)
 func (m *Manager) AllocateName() (string, error) {
-	// First reconcile pool with existing polecats to handle stale state
-	m.ReconcilePool()
+	// First acquire process-level lock for goroutine safety
+	m.allocMu.Lock()
+	defer m.allocMu.Unlock()
 
-	name, err := m.namePool.Allocate()
+	// Use file lock to synchronize across processes
+	// This prevents race conditions when multiple gt sling commands run in parallel
+	lockPath := filepath.Join(m.rig.Path, ".runtime", "namepool.lock")
+	flock := util.NewFileLock(lockPath)
+
+	var name string
+	err := flock.WithLock(func() error {
+		// First reconcile pool with existing polecats to handle stale state
+		// This must happen inside the lock to get accurate filesystem state
+		m.ReconcilePool()
+
+		var allocErr error
+		name, allocErr = m.namePool.Allocate()
+		if allocErr != nil {
+			return allocErr
+		}
+
+		if saveErr := m.namePool.Save(); saveErr != nil {
+			return fmt.Errorf("saving pool state: %w", saveErr)
+		}
+
+		return nil
+	})
+
 	if err != nil {
 		return "", err
-	}
-
-	if err := m.namePool.Save(); err != nil {
-		return "", fmt.Errorf("saving pool state: %w", err)
 	}
 
 	return name, nil
