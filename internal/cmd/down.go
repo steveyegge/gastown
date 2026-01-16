@@ -389,8 +389,8 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Kill the session (with explicit process termination to prevent orphans)
-	return true, t.KillSessionWithProcesses(sessionName)
+	// Kill the session (KillSession now always terminates child processes)
+	return true, t.KillSession(sessionName)
 }
 
 // stopSessionWithCache is like stopSession but uses a pre-fetched SessionSet
@@ -406,8 +406,8 @@ func stopSessionWithCache(t *tmux.Tmux, sessionName string, cache *tmux.SessionS
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Kill the session (with explicit process termination to prevent orphans)
-	return true, t.KillSessionWithProcesses(sessionName)
+	// Kill the session (KillSession now always terminates child processes)
+	return true, t.KillSession(sessionName)
 }
 
 // acquireShutdownLock prevents concurrent shutdowns.
