@@ -141,7 +141,7 @@ func (d *Daemon) processCapture(nextScreen []string) error {
 	}
 
 	// Try scroll detection first (most common case)
-	scrolled, newLines := DetectScroll(normalizedPrev, normalizedNext, d.config.ScrollThreshold)
+	scrolled, newLines := DetectScrollKMP(normalizedPrev, normalizedNext, d.config.ScrollThreshold)
 	if scrolled {
 		// Scroll detected - commit old lines that scrolled off, append new ones
 		if len(newLines) > 0 {
