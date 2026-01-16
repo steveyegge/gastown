@@ -27,6 +27,8 @@ const (
 	AgentAuggie AgentPreset = "auggie"
 	// AgentAmp is Sourcegraph AMP.
 	AgentAmp AgentPreset = "amp"
+	// AgentCopilot is GitHub Copilot CLI.
+	AgentCopilot AgentPreset = "copilot"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -176,6 +178,17 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeStyle:         "subcommand", // 'amp threads continue <threadId>'
 		SupportsHooks:       false,
 		SupportsForkSession: false,
+	},
+	AgentCopilot: {
+		Name:         AgentCopilot,
+		Command:      "copilot",
+		Args:         []string{"--allow-all-tools", "--allow-all-paths"},
+		ProcessNames: []string{"node"},
+		ResumeFlag:   "--resume",
+		ResumeStyle:  "flag",
+		NonInteractive: &NonInteractiveConfig{
+			PromptFlag: "-p",
+		},
 	},
 }
 
