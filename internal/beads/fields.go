@@ -187,6 +187,11 @@ type MRFields struct {
 	// Convoy tracking (for priority scoring - convoy starvation prevention)
 	ConvoyID        string // Parent convoy ID if part of a convoy
 	ConvoyCreatedAt string // Convoy creation time (ISO 8601) for starvation prevention
+
+	// Approval gate fields (for human-in-the-loop merge approval)
+	ApprovalGateID string // Gate ID waiting for human approval (if policy requires it)
+	ApprovedAt     string // When the gate was approved (ISO 8601)
+	ApprovedBy     string // Who approved the merge
 }
 
 // ParseMRFields extracts structured merge-request fields from an issue's description.
@@ -261,6 +266,16 @@ func ParseMRFields(issue *Issue) *MRFields {
 		case "convoy_created_at", "convoy-created-at", "convoycreatedat":
 			fields.ConvoyCreatedAt = value
 			hasFields = true
+		// Approval gate fields
+		case "approval_gate_id", "approval-gate-id", "approvalgateid":
+			fields.ApprovalGateID = value
+			hasFields = true
+		case "approved_at", "approved-at", "approvedat":
+			fields.ApprovedAt = value
+			hasFields = true
+		case "approved_by", "approved-by", "approvedby":
+			fields.ApprovedBy = value
+			hasFields = true
 		}
 	}
 
@@ -325,6 +340,16 @@ func FormatMRFields(fields *MRFields) string {
 	if fields.ConvoyCreatedAt != "" {
 		lines = append(lines, "convoy_created_at: "+fields.ConvoyCreatedAt)
 	}
+	// Approval gate fields
+	if fields.ApprovalGateID != "" {
+		lines = append(lines, "approval_gate_id: "+fields.ApprovalGateID)
+	}
+	if fields.ApprovedAt != "" {
+		lines = append(lines, "approved_at: "+fields.ApprovedAt)
+	}
+	if fields.ApprovedBy != "" {
+		lines = append(lines, "approved_by: "+fields.ApprovedBy)
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -371,6 +396,16 @@ func SetMRFields(issue *Issue, fields *MRFields) string {
 		"convoy_created_at":  true,
 		"convoy-created-at":  true,
 		"convoycreatedat":    true,
+		// Approval gate fields
+		"approval_gate_id":   true,
+		"approval-gate-id":   true,
+		"approvalgateid":     true,
+		"approved_at":        true,
+		"approved-at":        true,
+		"approvedat":         true,
+		"approved_by":        true,
+		"approved-by":        true,
+		"approvedby":         true,
 	}
 
 	// Collect non-MR lines from existing description
@@ -547,6 +582,31 @@ type RoleConfig struct {
 	// StuckThreshold is how long a wisp can be in_progress before considered stuck.
 	// Format: duration string (e.g., "1h", "30m"). Default: 1h.
 	StuckThreshold string
+
+	// MergePolicy defines merge behavior for this role.
+	// If nil, default policy is used (auto-merge allowed).
+	MergePolicy *MergePolicy
+}
+
+// MergePolicy defines merge behavior constraints for a role.
+// These fields control when merges require human approval and what targets are allowed.
+type MergePolicy struct {
+	// RequireHumanApproval - if true, create a human gate before merging.
+	// The MR will wait for gate approval before the refinery processes it.
+	// Default: false (auto-merge allowed)
+	RequireHumanApproval bool
+
+	// ApproverPattern - address pattern for who can approve (e.g., "human/*", "ops/").
+	// If empty and RequireHumanApproval=true, any human can approve.
+	ApproverPattern string
+
+	// AllowedTargets - list of branches this role can merge to.
+	// Empty means all branches are allowed.
+	AllowedTargets []string
+
+	// BlockedTargets - branches this role cannot merge to.
+	// Takes precedence over AllowedTargets.
+	BlockedTargets []string
 }
 
 // ParseRoleConfig extracts RoleConfig from a role bead's description.
@@ -610,6 +670,37 @@ func ParseRoleConfig(description string) *RoleConfig {
 		case "stuck_threshold", "stuck-threshold", "stuckthreshold":
 			config.StuckThreshold = value
 			hasFields = true
+		// Merge policy fields
+		case "merge_policy_require_approval", "merge-policy-require-approval":
+			if config.MergePolicy == nil {
+				config.MergePolicy = &MergePolicy{}
+			}
+			config.MergePolicy.RequireHumanApproval = strings.ToLower(value) == "true"
+			hasFields = true
+		case "merge_policy_approver_pattern", "merge-policy-approver-pattern":
+			if config.MergePolicy == nil {
+				config.MergePolicy = &MergePolicy{}
+			}
+			config.MergePolicy.ApproverPattern = value
+			hasFields = true
+		case "merge_policy_allowed_targets", "merge-policy-allowed-targets":
+			if config.MergePolicy == nil {
+				config.MergePolicy = &MergePolicy{}
+			}
+			config.MergePolicy.AllowedTargets = strings.Split(value, ",")
+			for i, t := range config.MergePolicy.AllowedTargets {
+				config.MergePolicy.AllowedTargets[i] = strings.TrimSpace(t)
+			}
+			hasFields = true
+		case "merge_policy_blocked_targets", "merge-policy-blocked-targets":
+			if config.MergePolicy == nil {
+				config.MergePolicy = &MergePolicy{}
+			}
+			config.MergePolicy.BlockedTargets = strings.Split(value, ",")
+			for i, t := range config.MergePolicy.BlockedTargets {
+				config.MergePolicy.BlockedTargets[i] = strings.TrimSpace(t)
+			}
+			hasFields = true
 		}
 	}
 
@@ -649,6 +740,22 @@ func FormatRoleConfig(config *RoleConfig) string {
 	}
 	for k, v := range config.EnvVars {
 		lines = append(lines, "env_var: "+k+"="+v)
+	}
+
+	// Merge policy fields
+	if config.MergePolicy != nil {
+		if config.MergePolicy.RequireHumanApproval {
+			lines = append(lines, "merge_policy_require_approval: true")
+		}
+		if config.MergePolicy.ApproverPattern != "" {
+			lines = append(lines, "merge_policy_approver_pattern: "+config.MergePolicy.ApproverPattern)
+		}
+		if len(config.MergePolicy.AllowedTargets) > 0 {
+			lines = append(lines, "merge_policy_allowed_targets: "+strings.Join(config.MergePolicy.AllowedTargets, ","))
+		}
+		if len(config.MergePolicy.BlockedTargets) > 0 {
+			lines = append(lines, "merge_policy_blocked_targets: "+strings.Join(config.MergePolicy.BlockedTargets, ","))
+		}
 	}
 
 	return strings.Join(lines, "\n")

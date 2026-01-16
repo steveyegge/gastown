@@ -2400,3 +2400,316 @@ func TestCloseAndClearAgentBead_ReasonVariations(t *testing.T) {
 		})
 	}
 }
+
+// TestParseRoleConfigMergePolicy tests parsing merge policy fields from role config.
+func TestParseRoleConfigMergePolicy(t *testing.T) {
+	tests := []struct {
+		name        string
+		description string
+		wantPolicy  *MergePolicy
+	}{
+		{
+			name: "require_human_approval_true",
+			description: `session_pattern: gt-{rig}-{name}
+merge_policy_require_approval: true`,
+			wantPolicy: &MergePolicy{
+				RequireHumanApproval: true,
+			},
+		},
+		{
+			name: "require_human_approval_false",
+			description: `session_pattern: gt-{rig}-{name}
+merge_policy_require_approval: false`,
+			wantPolicy: &MergePolicy{
+				RequireHumanApproval: false,
+			},
+		},
+		{
+			name: "approver_pattern",
+			description: `session_pattern: gt-{rig}-{name}
+merge_policy_require_approval: true
+merge_policy_approver_pattern: human/*`,
+			wantPolicy: &MergePolicy{
+				RequireHumanApproval: true,
+				ApproverPattern:      "human/*",
+			},
+		},
+		{
+			name: "allowed_targets",
+			description: `session_pattern: gt-{rig}-{name}
+merge_policy_allowed_targets: main,develop`,
+			wantPolicy: &MergePolicy{
+				AllowedTargets: []string{"main", "develop"},
+			},
+		},
+		{
+			name: "blocked_targets",
+			description: `session_pattern: gt-{rig}-{name}
+merge_policy_blocked_targets: production,staging`,
+			wantPolicy: &MergePolicy{
+				BlockedTargets: []string{"production", "staging"},
+			},
+		},
+		{
+			name: "all_merge_policy_fields",
+			description: `session_pattern: gt-{rig}-{name}
+merge_policy_require_approval: true
+merge_policy_approver_pattern: human/*
+merge_policy_allowed_targets: main,develop
+merge_policy_blocked_targets: production`,
+			wantPolicy: &MergePolicy{
+				RequireHumanApproval: true,
+				ApproverPattern:      "human/*",
+				AllowedTargets:       []string{"main", "develop"},
+				BlockedTargets:       []string{"production"},
+			},
+		},
+		{
+			name: "hyphen_format_keys",
+			description: `session_pattern: gt-{rig}-{name}
+merge-policy-require-approval: true
+merge-policy-approver-pattern: ops/*`,
+			wantPolicy: &MergePolicy{
+				RequireHumanApproval: true,
+				ApproverPattern:      "ops/*",
+			},
+		},
+		{
+			name: "no_merge_policy",
+			description: `session_pattern: gt-{rig}-{name}
+work_dir_pattern: {town}/{rig}`,
+			wantPolicy: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ParseRoleConfig(tt.description)
+			if config == nil {
+				t.Fatal("ParseRoleConfig() = nil, want non-nil")
+			}
+
+			if tt.wantPolicy == nil {
+				if config.MergePolicy != nil {
+					t.Errorf("MergePolicy = %+v, want nil", config.MergePolicy)
+				}
+				return
+			}
+
+			if config.MergePolicy == nil {
+				t.Fatal("MergePolicy = nil, want non-nil")
+			}
+
+			if config.MergePolicy.RequireHumanApproval != tt.wantPolicy.RequireHumanApproval {
+				t.Errorf("RequireHumanApproval = %v, want %v", config.MergePolicy.RequireHumanApproval, tt.wantPolicy.RequireHumanApproval)
+			}
+			if config.MergePolicy.ApproverPattern != tt.wantPolicy.ApproverPattern {
+				t.Errorf("ApproverPattern = %q, want %q", config.MergePolicy.ApproverPattern, tt.wantPolicy.ApproverPattern)
+			}
+			if len(config.MergePolicy.AllowedTargets) != len(tt.wantPolicy.AllowedTargets) {
+				t.Errorf("AllowedTargets len = %d, want %d", len(config.MergePolicy.AllowedTargets), len(tt.wantPolicy.AllowedTargets))
+			} else {
+				for i, target := range config.MergePolicy.AllowedTargets {
+					if target != tt.wantPolicy.AllowedTargets[i] {
+						t.Errorf("AllowedTargets[%d] = %q, want %q", i, target, tt.wantPolicy.AllowedTargets[i])
+					}
+				}
+			}
+			if len(config.MergePolicy.BlockedTargets) != len(tt.wantPolicy.BlockedTargets) {
+				t.Errorf("BlockedTargets len = %d, want %d", len(config.MergePolicy.BlockedTargets), len(tt.wantPolicy.BlockedTargets))
+			} else {
+				for i, target := range config.MergePolicy.BlockedTargets {
+					if target != tt.wantPolicy.BlockedTargets[i] {
+						t.Errorf("BlockedTargets[%d] = %q, want %q", i, target, tt.wantPolicy.BlockedTargets[i])
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestFormatRoleConfigMergePolicy tests formatting merge policy fields.
+func TestFormatRoleConfigMergePolicy(t *testing.T) {
+	config := &RoleConfig{
+		SessionPattern: "gt-{rig}-{name}",
+		MergePolicy: &MergePolicy{
+			RequireHumanApproval: true,
+			ApproverPattern:      "human/*",
+			AllowedTargets:       []string{"main", "develop"},
+			BlockedTargets:       []string{"production"},
+		},
+		EnvVars: map[string]string{},
+	}
+
+	formatted := FormatRoleConfig(config)
+
+	// Check that merge policy fields are included
+	if !strings.Contains(formatted, "merge_policy_require_approval: true") {
+		t.Error("formatted config missing merge_policy_require_approval")
+	}
+	if !strings.Contains(formatted, "merge_policy_approver_pattern: human/*") {
+		t.Error("formatted config missing merge_policy_approver_pattern")
+	}
+	if !strings.Contains(formatted, "merge_policy_allowed_targets: main,develop") {
+		t.Error("formatted config missing merge_policy_allowed_targets")
+	}
+	if !strings.Contains(formatted, "merge_policy_blocked_targets: production") {
+		t.Error("formatted config missing merge_policy_blocked_targets")
+	}
+}
+
+// TestParseMRFieldsApprovalGate tests parsing approval gate fields from MR descriptions.
+func TestParseMRFieldsApprovalGate(t *testing.T) {
+	tests := []struct {
+		name       string
+		issue      *Issue
+		wantGateID string
+		wantAt     string
+		wantBy     string
+	}{
+		{
+			name: "all_approval_fields",
+			issue: &Issue{
+				Description: `branch: polecat/nux
+target: main
+approval_gate_id: human:mr-approval-gt-abc
+approved_at: 2024-01-15T10:30:00Z
+approved_by: human/dustin`,
+			},
+			wantGateID: "human:mr-approval-gt-abc",
+			wantAt:     "2024-01-15T10:30:00Z",
+			wantBy:     "human/dustin",
+		},
+		{
+			name: "only_gate_id",
+			issue: &Issue{
+				Description: `branch: polecat/nux
+target: main
+approval_gate_id: human:mr-approval-gt-xyz`,
+			},
+			wantGateID: "human:mr-approval-gt-xyz",
+			wantAt:     "",
+			wantBy:     "",
+		},
+		{
+			name: "hyphen_format_keys",
+			issue: &Issue{
+				Description: `branch: polecat/nux
+target: main
+approval-gate-id: human:mr-approval-gt-def
+approved-at: 2024-01-15T10:30:00Z
+approved-by: human/dustin`,
+			},
+			wantGateID: "human:mr-approval-gt-def",
+			wantAt:     "2024-01-15T10:30:00Z",
+			wantBy:     "human/dustin",
+		},
+		{
+			name: "no_approval_fields",
+			issue: &Issue{
+				Description: `branch: polecat/nux
+target: main
+worker: testrig/polecats/nux`,
+			},
+			wantGateID: "",
+			wantAt:     "",
+			wantBy:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields := ParseMRFields(tt.issue)
+			if fields == nil {
+				t.Fatal("ParseMRFields() = nil, want non-nil")
+			}
+
+			if fields.ApprovalGateID != tt.wantGateID {
+				t.Errorf("ApprovalGateID = %q, want %q", fields.ApprovalGateID, tt.wantGateID)
+			}
+			if fields.ApprovedAt != tt.wantAt {
+				t.Errorf("ApprovedAt = %q, want %q", fields.ApprovedAt, tt.wantAt)
+			}
+			if fields.ApprovedBy != tt.wantBy {
+				t.Errorf("ApprovedBy = %q, want %q", fields.ApprovedBy, tt.wantBy)
+			}
+		})
+	}
+}
+
+// TestFormatMRFieldsApprovalGate tests formatting approval gate fields.
+func TestFormatMRFieldsApprovalGate(t *testing.T) {
+	fields := &MRFields{
+		Branch:         "polecat/nux",
+		Target:         "main",
+		ApprovalGateID: "human:mr-approval-gt-abc",
+		ApprovedAt:     "2024-01-15T10:30:00Z",
+		ApprovedBy:     "human/dustin",
+	}
+
+	formatted := FormatMRFields(fields)
+
+	if !strings.Contains(formatted, "approval_gate_id: human:mr-approval-gt-abc") {
+		t.Error("formatted fields missing approval_gate_id")
+	}
+	if !strings.Contains(formatted, "approved_at: 2024-01-15T10:30:00Z") {
+		t.Error("formatted fields missing approved_at")
+	}
+	if !strings.Contains(formatted, "approved_by: human/dustin") {
+		t.Error("formatted fields missing approved_by")
+	}
+}
+
+// TestExtractRoleFromWorker tests extracting role type from worker paths.
+func TestExtractRoleFromWorker(t *testing.T) {
+	tests := []struct {
+		name       string
+		workerPath string
+		wantRole   string
+	}{
+		{
+			name:       "polecat_worker",
+			workerPath: "testrig/polecats/nux",
+			wantRole:   "polecat",
+		},
+		{
+			name:       "crew_worker",
+			workerPath: "testrig/crew/alice",
+			wantRole:   "crew",
+		},
+		{
+			name:       "witness_worker",
+			workerPath: "testrig/witness",
+			wantRole:   "witness",
+		},
+		{
+			name:       "refinery_worker",
+			workerPath: "testrig/refinery",
+			wantRole:   "refinery",
+		},
+		{
+			name:       "unknown_path",
+			workerPath: "testrig/unknown/agent",
+			wantRole:   "",
+		},
+		{
+			name:       "empty_path",
+			workerPath: "",
+			wantRole:   "",
+		},
+		{
+			name:       "single_component",
+			workerPath: "testrig",
+			wantRole:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			role := ExtractRoleFromWorker(tt.workerPath)
+			if role != tt.wantRole {
+				t.Errorf("ExtractRoleFromWorker(%q) = %q, want %q", tt.workerPath, role, tt.wantRole)
+			}
+		})
+	}
+}

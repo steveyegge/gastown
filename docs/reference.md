@@ -559,6 +559,93 @@ bd dep add <child> <parent>  # child depends on parent
 bd sync                      # Push/pull changes
 ```
 
+## Role-Based Merge Policies
+
+Refinery checks role-based merge policies before processing MRs. This enables
+human-in-the-loop approval for roles that require it.
+
+### Policy Fields
+
+Merge policies are stored in role beads (`hq-<role>-role`) as part of the
+role config in the description field:
+
+| Field | Example | Description |
+|-------|---------|-------------|
+| `merge_policy_require_approval` | `true` | Require human gate approval before merge |
+| `merge_policy_approver_pattern` | `human/*` | Who can approve (mail address pattern) |
+| `merge_policy_allowed_targets` | `main,develop` | Only allow merges to these branches |
+| `merge_policy_blocked_targets` | `production` | Block merges to these branches |
+
+### Viewing Current Policy
+
+```bash
+bd show hq-polecat-role
+```
+
+### Enabling Human Approval
+
+```bash
+bd update hq-polecat-role --description "$(cat <<'EOF'
+Role definition for Polecat agents. Ephemeral workers for batch work dispatch.
+
+session_pattern: gt-{rig}-{name}
+work_dir_pattern: {town}/{rig}/polecats/{name}
+needs_pre_sync: true
+
+merge_policy_require_approval: true
+merge_policy_approver_pattern: human/*
+EOF
+)"
+```
+
+### Approving a Waiting MR
+
+When an MR requires approval, refinery creates a human gate and blocks the merge.
+
+```bash
+# List open gates
+bd gate list
+
+# Approve the gate
+bd gate approve human:mr-approval-gt-xyz --reason "LGTM"
+```
+
+### Disabling Approval
+
+Remove the merge policy fields from the role description to revert to auto-merge:
+
+```bash
+bd update hq-polecat-role --description "$(cat <<'EOF'
+Role definition for Polecat agents. Ephemeral workers for batch work dispatch.
+
+session_pattern: gt-{rig}-{name}
+work_dir_pattern: {town}/{rig}/polecats/{name}
+needs_pre_sync: true
+EOF
+)"
+```
+
+### Policy Examples
+
+```bash
+# Polecats require human approval
+bd update hq-polecat-role --description "...
+merge_policy_require_approval: true
+merge_policy_approver_pattern: human/*
+..."
+
+# Crew can only merge to main/develop, blocked from production
+bd update hq-crew-role --description "...
+merge_policy_allowed_targets: main,develop
+merge_policy_blocked_targets: production
+..."
+```
+
+### Backward Compatibility
+
+Roles without merge policy fields continue to auto-merge as before. Policy
+enforcement is fail-open: if role lookup fails, the merge proceeds with a warning.
+
 ## Patrol Agents
 
 Deacon, Witness, and Refinery run continuous patrol loops using wisps:

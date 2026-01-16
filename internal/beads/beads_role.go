@@ -4,6 +4,7 @@ package beads
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Role bead ID naming convention:
@@ -142,4 +143,45 @@ func AllRoleBeadDefs() []RoleBeadDef {
 			Desc:  "Role definition for Crew agents. Persistent user-managed workspaces.",
 		},
 	}
+}
+
+// ExtractRoleFromWorker extracts the role type from a worker address path.
+// Worker formats:
+//   - "<rig>/polecats/<name>" -> "polecat"
+//   - "<rig>/crew/<name>" -> "crew"
+//   - "<rig>/witness" -> "witness"
+//   - "<rig>/refinery" -> "refinery"
+//
+// Returns empty string if role cannot be determined.
+func ExtractRoleFromWorker(workerPath string) string {
+	parts := strings.Split(workerPath, "/")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	// Check for known role patterns
+	switch parts[1] {
+	case "polecats":
+		return "polecat"
+	case "crew":
+		return "crew"
+	case "witness":
+		return "witness"
+	case "refinery":
+		return "refinery"
+	default:
+		return ""
+	}
+}
+
+// GetWorkerRoleConfig looks up the role config for a worker based on their path.
+// Returns nil, nil if no role config is found (worker should use defaults).
+func (b *Beads) GetWorkerRoleConfig(workerPath string) (*RoleConfig, error) {
+	roleType := ExtractRoleFromWorker(workerPath)
+	if roleType == "" {
+		return nil, nil // Unknown role, use defaults
+	}
+
+	roleBeadID := RoleBeadIDTown(roleType)
+	return b.GetRoleConfig(roleBeadID)
 }
