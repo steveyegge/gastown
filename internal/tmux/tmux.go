@@ -134,13 +134,7 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 	return t.NewSession(name, workDir)
 }
 
-// KillSession terminates a tmux session.
-func (t *Tmux) KillSession(name string) error {
-	_, err := t.run("kill-session", "-t", name)
-	return err
-}
-
-// KillSessionWithProcesses explicitly kills all processes in a session before terminating it.
+// KillSession terminates a tmux session and all its child processes.
 // This prevents orphan processes that survive tmux kill-session due to SIGHUP being ignored.
 //
 // Process:
@@ -152,12 +146,14 @@ func (t *Tmux) KillSession(name string) error {
 // 6. Kill the tmux session
 //
 // This ensures Claude processes and all their children are properly terminated.
-func (t *Tmux) KillSessionWithProcesses(name string) error {
+// See: https://github.com/steveyegge/gastown/issues/536
+func (t *Tmux) KillSession(name string) error {
 	// Get the pane PID
 	pid, err := t.GetPanePID(name)
 	if err != nil {
 		// Session might not exist or be in bad state, try direct kill
-		return t.KillSession(name)
+		_, err := t.run("kill-session", "-t", name)
+		return err
 	}
 
 	if pid != "" {
@@ -179,6 +175,13 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	// Kill the tmux session
+	_, err = t.run("kill-session", "-t", name)
+	return err
+}
+
+// KillSessionWithProcesses is an alias for KillSession.
+// Deprecated: KillSession now always kills processes. Use KillSession instead.
+func (t *Tmux) KillSessionWithProcesses(name string) error {
 	return t.KillSession(name)
 }
 
