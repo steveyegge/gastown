@@ -22,9 +22,9 @@ import (
 
 // Common errors
 var (
-	ErrPolecatExists     = errors.New("polecat already exists")
-	ErrPolecatNotFound   = errors.New("polecat not found")
-	ErrHasChanges        = errors.New("polecat has uncommitted changes")
+	ErrPolecatExists      = errors.New("polecat already exists")
+	ErrPolecatNotFound    = errors.New("polecat not found")
+	ErrHasChanges         = errors.New("polecat has uncommitted changes")
 	ErrHasUncommittedWork = errors.New("polecat has uncommitted work")
 )
 
@@ -242,6 +242,19 @@ func (m *Manager) Add(name string) (*Polecat, error) {
 func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error) {
 	if m.exists(name) {
 		return nil, ErrPolecatExists
+	}
+
+	// Validate HookBead exists and isn't tombstoned before creating polecat.
+	// This prevents CPU spin loops from polecats assigned to invalid issues.
+	// See: https://github.com/steveyegge/gastown/issues/569
+	if opts.HookBead != "" {
+		issue, err := m.beads.Show(opts.HookBead)
+		if err != nil {
+			return nil, fmt.Errorf("invalid hook_bead %s: %w", opts.HookBead, err)
+		}
+		if issue.Status == "tombstone" {
+			return nil, fmt.Errorf("invalid hook_bead %s: issue is tombstoned", opts.HookBead)
+		}
 	}
 
 	// New structure: polecats/<name>/<rigname>/ for LLM ergonomics
@@ -510,6 +523,19 @@ func (m *Manager) RepairWorktree(name string, force bool) (*Polecat, error) {
 func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOptions) (*Polecat, error) {
 	if !m.exists(name) {
 		return nil, ErrPolecatNotFound
+	}
+
+	// Validate HookBead exists and isn't tombstoned before repairing polecat.
+	// This prevents CPU spin loops from polecats assigned to invalid issues.
+	// See: https://github.com/steveyegge/gastown/issues/569
+	if opts.HookBead != "" {
+		issue, err := m.beads.Show(opts.HookBead)
+		if err != nil {
+			return nil, fmt.Errorf("invalid hook_bead %s: %w", opts.HookBead, err)
+		}
+		if issue.Status == "tombstone" {
+			return nil, fmt.Errorf("invalid hook_bead %s: issue is tombstoned", opts.HookBead)
+		}
 	}
 
 	// Get the old clone path (may be old or new structure)
@@ -959,13 +985,13 @@ func (m *Manager) CleanupStaleBranches() (int, error) {
 
 // StalenessInfo contains details about a polecat's staleness.
 type StalenessInfo struct {
-	Name            string
-	CommitsBehind   int  // How many commits behind origin/main
-	HasActiveSession bool // Whether tmux session is running
-	HasUncommittedWork bool // Whether there's uncommitted or unpushed work
-	AgentState      string // From agent bead (empty if no bead)
-	IsStale         bool   // Overall assessment: safe to clean up
-	Reason          string // Why it's considered stale (or not)
+	Name               string
+	CommitsBehind      int    // How many commits behind origin/main
+	HasActiveSession   bool   // Whether tmux session is running
+	HasUncommittedWork bool   // Whether there's uncommitted or unpushed work
+	AgentState         string // From agent bead (empty if no bead)
+	IsStale            bool   // Overall assessment: safe to clean up
+	Reason             string // Why it's considered stale (or not)
 }
 
 // DetectStalePolecats identifies polecats that are candidates for cleanup.

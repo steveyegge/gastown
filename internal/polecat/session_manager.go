@@ -2,6 +2,7 @@
 package polecat
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -178,6 +179,15 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
 		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
+	}
+
+	// Validate issue exists and isn't tombstoned before creating session.
+	// This prevents CPU spin loops when polecats are assigned to invalid issues.
+	// See: https://github.com/steveyegge/gastown/issues/569
+	if opts.Issue != "" {
+		if err := m.validateIssue(opts.Issue, workDir); err != nil {
+			return fmt.Errorf("invalid issue %s: %w", opts.Issue, err)
+		}
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -447,6 +457,35 @@ func (m *SessionManager) StopAll(force bool) error {
 	}
 
 	return lastErr
+}
+
+// validateIssue checks that an issue exists and isn't tombstoned.
+// This prevents starting sessions for invalid work assignments.
+func (m *SessionManager) validateIssue(issueID, workDir string) error {
+	cmd := exec.Command("bd", "show", issueID, "--json") //nolint:gosec
+	cmd.Dir = workDir
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("issue not found: %w", err)
+	}
+
+	// Parse JSON to check status - bd show returns an array
+	var issues []struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil {
+		return fmt.Errorf("parsing issue: %w", err)
+	}
+
+	if len(issues) == 0 {
+		return errors.New("issue not found")
+	}
+
+	if issues[0].Status == "tombstone" {
+		return errors.New("issue is tombstoned")
+	}
+
+	return nil
 }
 
 // hookIssue pins an issue to a polecat's hook using bd update.

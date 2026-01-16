@@ -190,3 +190,38 @@ func TestPolecatCommandFormat(t *testing.T) {
 		t.Error("GT_ROLE must be 'polecat', not 'mayor' or 'crew'")
 	}
 }
+
+func TestValidateIssue(t *testing.T) {
+	// Create a temp directory with a minimal beads setup
+	tmpDir := t.TempDir()
+
+	r := &rig.Rig{
+		Name:     "test-rig",
+		Path:     tmpDir,
+		Polecats: []string{"test-polecat"},
+	}
+	m := NewSessionManager(tmux.NewTmux(), r)
+
+	// Test with nonexistent issue - should fail
+	// This requires bd to be installed, so skip if not available
+	if _, err := os.Stat("/opt/homebrew/bin/bd"); os.IsNotExist(err) {
+		if _, err := os.Stat("/usr/local/bin/bd"); os.IsNotExist(err) {
+			t.Skip("bd not installed, skipping integration test")
+		}
+	}
+
+	// Create minimal .beads directory so bd can run
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Validate nonexistent issue should fail
+	err := m.validateIssue("nonexistent-issue-xyz123", tmpDir)
+	if err == nil {
+		t.Error("expected error for nonexistent issue")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
