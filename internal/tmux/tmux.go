@@ -15,6 +15,12 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
+// versionPattern matches Claude Code version numbers like "2.0.76"
+var versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
+// validSessionNameRe validates session names to prevent shell injection
+var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 // Common errors
 var (
 	ErrNoServer        = errors.New("no tmux server running")
@@ -196,6 +202,7 @@ func (t *Tmux) ListSessionIDs() (map[string]string, error) {
 	}
 
 	result := make(map[string]string)
+	skipped := 0
 	for _, line := range strings.Split(out, "\n") {
 		if line == "" {
 			continue
@@ -206,8 +213,12 @@ func (t *Tmux) ListSessionIDs() (map[string]string, error) {
 			name := line[:idx]
 			id := line[idx+1:]
 			result[name] = id
+		} else {
+			skipped++
 		}
 	}
+	// Note: skipped lines are silently ignored for backward compatibility
+	_ = skipped
 	return result, nil
 }
 
@@ -539,7 +550,7 @@ func (t *Tmux) GetEnvironment(session, key string) (string, error) {
 	// Output format: KEY=value
 	parts := strings.SplitN(out, "=", 2)
 	if len(parts) != 2 {
-		return "", nil
+		return "", fmt.Errorf("unexpected environment format for %s: %q", key, out)
 	}
 	return parts[1], nil
 }
@@ -601,13 +612,19 @@ func (t *Tmux) DisplayMessageDefault(session, message string) error {
 // This interrupts the terminal to ensure the notification is seen.
 // Uses echo to print a boxed banner with the notification details.
 func (t *Tmux) SendNotificationBanner(session, from, subject string) error {
+	// Sanitize inputs to prevent output manipulation
+	from = strings.ReplaceAll(from, "\n", " ")
+	from = strings.ReplaceAll(from, "\r", " ")
+	subject = strings.ReplaceAll(subject, "\n", " ")
+	subject = strings.ReplaceAll(subject, "\r", " ")
+
 	// Build the banner text
 	banner := fmt.Sprintf(`echo '
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📬 NEW MAIL from %s
 Subject: %s
 Run: gt mail inbox
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 '`, from, subject)
 
 	return t.SendKeys(session, banner)
@@ -655,8 +672,7 @@ func (t *Tmux) IsClaudeRunning(session string) bool {
 	if err != nil {
 		return false
 	}
-	matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+`, cmd)
-	if matched {
+	if versionPattern.MatchString(cmd) {
 		return true
 	}
 	// If pane command is a shell, check for claude/node child processes.
@@ -892,6 +908,11 @@ func (t *Tmux) SetStatusFormat(session, rig, worker, role string) error {
 // SetDynamicStatus configures the right side with dynamic content.
 // Uses a shell command that tmux calls periodically to get current status.
 func (t *Tmux) SetDynamicStatus(session string) error {
+	// Validate session name to prevent shell injection
+	if !validSessionNameRe.MatchString(session) {
+		return fmt.Errorf("invalid session name %q: must match %s", session, validSessionNameRe.String())
+	}
+
 	// tmux calls this command every status-interval seconds
 	// gt status-line reads env vars and mail to build the status
 	right := fmt.Sprintf(`#(gt status-line --session=%s 2>/dev/null) %%H:%%M`, session)
@@ -1052,6 +1073,10 @@ func (t *Tmux) SetFeedBinding(session string) error {
 // When the pane exits, tmux runs the hook command with exit status info.
 // The agentID is used to identify the agent in crash logs (e.g., "gastown/Toast").
 func (t *Tmux) SetPaneDiedHook(session, agentID string) error {
+	// Sanitize inputs to prevent shell injection
+	session = strings.ReplaceAll(session, "'", "'\\''")
+	agentID = strings.ReplaceAll(agentID, "'", "'\\''")
+
 	// Hook command logs the crash with exit status
 	// #{pane_dead_status} is the exit code of the process that died
 	// We run gt log crash which records to the town log
