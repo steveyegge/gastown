@@ -91,6 +91,7 @@ Git-backed issue tracking system that stores work state as structured data.
 - **sqlite3** - for convoy database queries (usually pre-installed on macOS/Linux)
 - **tmux 3.0+** - recommended for full experience
 - **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
+- **OpenCode CLI** (optional runtime) - [opencode.ai](https://opencode.ai)
 - **Codex CLI** (optional runtime) - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
 
 ### Setup
@@ -334,7 +335,7 @@ gt mayor start --agent auggie           # Run Mayor with a specific agent alias
 gt prime                    # Context recovery (run inside existing session)
 ```
 
-**Built-in agent presets**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
+**Built-in agent presets**: `claude`, `opencode`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
 
 ### Convoy (Work Tracking)
 
