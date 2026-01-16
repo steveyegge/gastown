@@ -130,3 +130,132 @@ func slicesEqual(a, b []string) bool {
 	}
 	return true
 }
+
+// FindOverlapKMP finds the scroll overlap using the KMP algorithm on hashed lines.
+// This is O(H) instead of O(H²) for the naive approach.
+//
+// The algorithm:
+// 1. Hash each line to uint64
+// 2. Build combined sequence: S = next + SENTINEL + prev
+// 3. Compute KMP prefix function on S
+// 4. The value at the end gives the longest prefix of next matching suffix of prev
+//
+// Returns k (overlap size) and score (1.0 for exact match via hashes).
+func FindOverlapKMP(prev, next []string) (k int, score float64) {
+	if len(prev) == 0 || len(next) == 0 {
+		return 0, 0.0
+	}
+
+	// Hash all lines
+	prevHashes := HashLines(prev)
+	nextHashes := HashLines(next)
+
+	// Use the optimized hash-based version
+	k = findOverlapKMPHashed(prevHashes, nextHashes)
+	if k > 0 {
+		return k, 1.0
+	}
+	return 0, 0.0
+}
+
+// findOverlapKMPHashed finds overlap using KMP on pre-hashed lines.
+// Returns the length of the longest suffix of prev that matches a prefix of next.
+func findOverlapKMPHashed(prevHashes, nextHashes []uint64) int {
+	if len(prevHashes) == 0 || len(nextHashes) == 0 {
+		return 0
+	}
+
+	// Build combined sequence: next + SENTINEL + prev
+	// SENTINEL is 0 which won't match any real hash (we skip 0 hashes in HashLines)
+	// But to be safe, we use a value that's unlikely to collide
+	const sentinel uint64 = 0xDEADBEEFCAFEBABE
+
+	n := len(nextHashes)
+	m := len(prevHashes)
+
+	// Combined sequence: [next..., sentinel, prev...]
+	seq := make([]uint64, n+1+m)
+	copy(seq[:n], nextHashes)
+	seq[n] = sentinel
+	copy(seq[n+1:], prevHashes)
+
+	// Compute KMP prefix function
+	pi := kmpPrefixFunction(seq)
+
+	// The value at the last position gives us the overlap
+	// It's the length of the longest prefix of next that matches a suffix of prev
+	overlap := pi[len(seq)-1]
+
+	// Ensure overlap doesn't exceed the smaller array
+	if overlap > n {
+		overlap = n
+	}
+	if overlap > m {
+		overlap = m
+	}
+
+	return overlap
+}
+
+// kmpPrefixFunction computes the KMP prefix/failure function for a sequence.
+// pi[i] = length of the longest proper prefix of seq[0:i+1] that is also a suffix.
+//
+// This runs in O(n) time where n is the length of the sequence.
+func kmpPrefixFunction(seq []uint64) []int {
+	n := len(seq)
+	if n == 0 {
+		return nil
+	}
+
+	pi := make([]int, n)
+	pi[0] = 0
+
+	for i := 1; i < n; i++ {
+		// j is the length of the previous longest prefix-suffix
+		j := pi[i-1]
+
+		// Try to extend the previous prefix-suffix
+		for j > 0 && seq[i] != seq[j] {
+			j = pi[j-1]
+		}
+
+		if seq[i] == seq[j] {
+			j++
+		}
+
+		pi[i] = j
+	}
+
+	return pi
+}
+
+// DetectScrollKMP is like DetectScroll but uses the O(H) KMP algorithm.
+// Use this for better performance on large captures.
+func DetectScrollKMP(prev, next []string, threshold float64) (scrolled bool, newLines []string) {
+	if len(prev) == 0 {
+		return false, next
+	}
+	if len(next) == 0 {
+		return false, nil
+	}
+
+	k, _ := FindOverlapKMP(prev, next)
+
+	// Calculate minimum overlap required
+	minOverlap := int(float64(len(prev)) * threshold)
+	if minOverlap < 1 {
+		minOverlap = 1
+	}
+
+	if k >= minOverlap {
+		// Scroll detected - return the new lines (everything after the overlap)
+		if k < len(next) {
+			return true, next[k:]
+		}
+		// Complete overlap, no new lines
+		return true, nil
+	}
+
+	// No scroll detected - could be a full redraw or unrelated content
+	return false, nil
+}
