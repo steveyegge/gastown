@@ -101,44 +101,47 @@ func setupTestTown(t *testing.T) string {
 
 // mockBdCommand creates a fake bd binary that simulates bd behavior.
 // This avoids needing bd installed for tests.
-func mockBdCommand(t *testing.T) {
+func mockBdCommand(t *testing.T) string {
 	t.Helper()
 
 	binDir := t.TempDir()
 	bdPath := filepath.Join(binDir, "bd")
+	logPath := filepath.Join(binDir, "bd.log")
 
 	// Create a script that simulates bd init and other commands
+	// Also logs all create commands for verification.
+	// Note: beads.run() prepends --no-daemon --allow-stale to all commands,
+	// so we need to find the actual command in the argument list.
 	script := `#!/bin/sh
 # Mock bd for testing
+LOG_FILE="` + logPath + `"
 
-case "$1" in
+# Find the actual command (skip global flags like --no-daemon, --allow-stale)
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    --*) ;; # skip flags
+    *) cmd="$arg"; break ;;
+  esac
+done
+
+case "$cmd" in
   init)
     # Create .beads directory and config.yaml
     mkdir -p .beads
     prefix="gt"
+    # Handle both --prefix=value and --prefix value forms
+    next_is_prefix=false
     for arg in "$@"; do
-      case "$arg" in
-        --prefix=*) prefix="${arg#--prefix=}" ;;
-        --prefix)
-          # Next arg is the prefix
-          shift
-          if [ -n "$1" ] && [ "$1" != "--"* ]; then
-            prefix="$1"
-          fi
-          ;;
-      esac
-      shift
-    done
-    # Handle positional --prefix VALUE
-    shift  # skip 'init'
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --prefix)
-          shift
-          prefix="$1"
-          ;;
-      esac
-      shift
+      if [ "$next_is_prefix" = true ]; then
+        prefix="$arg"
+        next_is_prefix=false
+      else
+        case "$arg" in
+          --prefix=*) prefix="${arg#--prefix=}" ;;
+          --prefix) next_is_prefix=true ;;
+        esac
+      fi
     done
     echo "prefix: $prefix" > .beads/config.yaml
     exit 0
@@ -151,8 +154,17 @@ case "$1" in
     exit 1
     ;;
   create)
-    # Return minimal JSON for agent bead creation
-    echo '{}'
+    # Log all create commands for verification
+    echo "$@" >> "$LOG_FILE"
+    # Extract the ID from --id=xxx argument
+    bead_id=""
+    for arg in "$@"; do
+      case "$arg" in
+        --id=*) bead_id="${arg#--id=}" ;;
+      esac
+    done
+    # Return valid JSON for bead creation
+    echo "{\"id\":\"$bead_id\",\"status\":\"open\",\"created_at\":\"2025-01-01T00:00:00Z\"}"
     exit 0
     ;;
   mol|list)
@@ -169,12 +181,14 @@ esac
 
 	// Prepend to PATH
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	return logPath
 }
 
 // TestRigAddCreatesCorrectStructure verifies that gt rig add creates
 // the expected directory structure.
 func TestRigAddCreatesCorrectStructure(t *testing.T) {
-	mockBdCommand(t)
+	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "testproject")
 
@@ -202,16 +216,16 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 
 	// Verify directory structure
 	expectedDirs := []string{
-		"",                // rig root
-		"mayor",           // mayor container
-		"mayor/rig",       // mayor clone
-		"refinery",        // refinery container
-		"refinery/rig",    // refinery worktree
-		"witness",         // witness dir
-		"polecats",        // polecats dir
-		"crew",            // crew dir
-		".beads",          // beads dir
-		"plugins",         // plugins dir
+		"",             // rig root
+		"mayor",        // mayor container
+		"mayor/rig",    // mayor clone
+		"refinery",     // refinery container
+		"refinery/rig", // refinery worktree
+		"witness",      // witness dir
+		"polecats",     // polecats dir
+		"crew",         // crew dir
+		".beads",       // beads dir
+		"plugins",      // plugins dir
 	}
 
 	for _, dir := range expectedDirs {
@@ -293,7 +307,7 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 // TestRigAddInitializesBeads verifies that beads is initialized with
 // the correct prefix.
 func TestRigAddInitializesBeads(t *testing.T) {
-	mockBdCommand(t)
+	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "beadstest")
 
@@ -389,7 +403,7 @@ func TestRigAddInitializesBeads(t *testing.T) {
 // TestRigAddUpdatesRoutes verifies that routes.jsonl is updated
 // with the new rig's route.
 func TestRigAddUpdatesRoutes(t *testing.T) {
-	mockBdCommand(t)
+	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "routetest")
 
@@ -458,7 +472,7 @@ func TestRigAddUpdatesRoutes(t *testing.T) {
 // TestRigAddUpdatesRigsJson verifies that rigs.json is updated
 // with the new rig entry.
 func TestRigAddUpdatesRigsJson(t *testing.T) {
-	mockBdCommand(t)
+	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "jsontest")
 
@@ -510,7 +524,7 @@ func TestRigAddUpdatesRigsJson(t *testing.T) {
 // TestRigAddDerivesPrefix verifies that when no prefix is specified,
 // one is derived from the rig name.
 func TestRigAddDerivesPrefix(t *testing.T) {
-	mockBdCommand(t)
+	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "myproject")
 
@@ -541,7 +555,7 @@ func TestRigAddDerivesPrefix(t *testing.T) {
 // TestRigAddCreatesRigConfig verifies that config.json contains
 // the correct rig configuration.
 func TestRigAddCreatesRigConfig(t *testing.T) {
-	mockBdCommand(t)
+	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "configtest")
 
@@ -596,7 +610,7 @@ func TestRigAddCreatesRigConfig(t *testing.T) {
 
 // TestRigAddCreatesAgentDirs verifies that agent state files are created.
 func TestRigAddCreatesAgentDirs(t *testing.T) {
-	mockBdCommand(t)
+	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "agenttest")
 
@@ -641,7 +655,7 @@ func TestRigAddCreatesAgentDirs(t *testing.T) {
 // TestRigAddRejectsInvalidNames verifies that rig names with invalid
 // characters are rejected.
 func TestRigAddRejectsInvalidNames(t *testing.T) {
-	mockBdCommand(t)
+	_ = mockBdCommand(t)
 	townRoot := setupTestTown(t)
 	gitURL := createTestGitRepo(t, "validname")
 
@@ -673,6 +687,97 @@ func TestRigAddRejectsInvalidNames(t *testing.T) {
 				t.Errorf("AddRig(%q) should have failed", name)
 			} else if !strings.Contains(err.Error(), "invalid characters") {
 				t.Errorf("AddRig(%q) error = %v, want 'invalid characters'", name, err)
+			}
+		})
+	}
+}
+
+// TestRigAddCreatesAgentBeads verifies that gt rig add creates
+// witness and refinery agent beads via the manager's initAgentBeads.
+func TestRigAddCreatesAgentBeads(t *testing.T) {
+	bdLogPath := mockBdCommand(t)
+	townRoot := setupTestTown(t)
+	gitURL := createTestGitRepo(t, "agentbeadtest")
+
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsPath)
+	if err != nil {
+		t.Fatalf("load rigs.json: %v", err)
+	}
+
+	g := git.NewGit(townRoot)
+	mgr := rig.NewManager(townRoot, rigsConfig, g)
+
+	// AddRig internally calls initAgentBeads which creates witness and refinery beads
+	newRig, err := mgr.AddRig(rig.AddRigOptions{
+		Name:        "agentbeadtest",
+		GitURL:      gitURL,
+		BeadsPrefix: "ab",
+	})
+	if err != nil {
+		t.Fatalf("AddRig: %v", err)
+	}
+
+	// Verify the mock bd was called with correct create commands
+	logContent, err := os.ReadFile(bdLogPath)
+	if err != nil {
+		t.Fatalf("reading bd log: %v", err)
+	}
+	logStr := string(logContent)
+
+	// Expected bead IDs that initAgentBeads should create
+	witnessID := beads.WitnessBeadIDWithPrefix(newRig.Config.Prefix, "agentbeadtest")
+	refineryID := beads.RefineryBeadIDWithPrefix(newRig.Config.Prefix, "agentbeadtest")
+
+	expectedIDs := []struct {
+		id   string
+		desc string
+	}{
+		{witnessID, "witness agent bead"},
+		{refineryID, "refinery agent bead"},
+	}
+
+	for _, expected := range expectedIDs {
+		if !strings.Contains(logStr, expected.id) {
+			t.Errorf("bd create log should contain %s (%s), got:\n%s", expected.id, expected.desc, logStr)
+		}
+	}
+
+	// Verify correct prefix is used (ab-)
+	if !strings.Contains(logStr, "ab-") {
+		t.Errorf("bd create log should contain prefix 'ab-', got:\n%s", logStr)
+	}
+}
+
+// TestAgentBeadIDs verifies the agent bead ID generation functions.
+func TestAgentBeadIDs(t *testing.T) {
+	tests := []struct {
+		name     string
+		fn       func() string
+		expected string
+	}{
+		{
+			"WitnessBeadIDWithPrefix",
+			func() string { return beads.WitnessBeadIDWithPrefix("ab", "myrig") },
+			"ab-myrig-witness",
+		},
+		{
+			"RefineryBeadIDWithPrefix",
+			func() string { return beads.RefineryBeadIDWithPrefix("ab", "myrig") },
+			"ab-myrig-refinery",
+		},
+		{
+			"RigBeadIDWithPrefix",
+			func() string { return beads.RigBeadIDWithPrefix("ab", "myrig") },
+			"ab-rig-myrig",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.fn()
+			if result != tc.expected {
+				t.Errorf("got %q, want %q", result, tc.expected)
 			}
 		})
 	}
