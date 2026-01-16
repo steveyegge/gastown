@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -57,25 +57,27 @@ func (m *Manager) Start(agentOverride string) error {
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		agentCfg := config.ResolveRoleAgentConfig(constants.RoleMayor, m.townRoot, "")
+		if t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
 
-	// Ensure mayor directory exists (for Claude settings)
+	// Ensure mayor directory exists (for runtime settings)
 	mayorDir := m.mayorDir()
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
-	// Ensure Claude settings exist
-	if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	// Ensure runtime settings exist (Claude hooks, OpenCode plugins, etc.)
+	runtimeConfig := config.ResolveRoleAgentConfig(constants.RoleMayor, m.townRoot, "")
+	if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	// Build startup beacon with explicit instructions (matches gt handoff behavior)

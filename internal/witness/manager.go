@@ -10,10 +10,10 @@ import (
 
 	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -114,7 +114,9 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	if foreground {
 		// Foreground mode is deprecated - patrol logic moved to mol-witness-patrol
 		// Just check tmux session (no PID inference per ZFC)
-		if running, _ := t.HasSession(sessionID); running && t.IsClaudeRunning(sessionID) {
+		townRoot := m.townRoot()
+		agentCfg := config.ResolveRoleAgentConfig(constants.RoleWitness, townRoot, m.rig.Path)
+		if running, _ := t.HasSession(sessionID); running && t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 			return ErrAlreadyRunning
 		}
 
@@ -130,12 +132,14 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Background mode: check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
-			// Healthy - Claude is running
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		townRoot := m.townRoot()
+		agentCfg := config.ResolveRoleAgentConfig(constants.RoleWitness, townRoot, m.rig.Path)
+		if t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
+			// Healthy - agent is running
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
@@ -146,19 +150,19 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Working directory
 	witnessDir := m.witnessDir()
 
-	// Ensure Claude settings exist in witness/ (not witness/rig/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
+	// Ensure runtime settings exist in witness/ (not witness/rig/) so we don't
+	// write into the source repo. Agent walks up the tree to find settings.
 	witnessParentDir := filepath.Join(m.rig.Path, "witness")
-	if err := claude.EnsureSettingsForRole(witnessParentDir, "witness"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	townRoot := m.townRoot()
+	runtimeConfig := config.ResolveRoleAgentConfig(constants.RoleWitness, townRoot, m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(witnessParentDir, "witness", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	roleConfig, err := m.roleConfig()
 	if err != nil {
 		return err
 	}
-
-	townRoot := m.townRoot()
 
 	// Build startup command first
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
