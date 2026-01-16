@@ -1,4 +1,5 @@
 {
+  "permissionMode": "permissive",
   "enabledPlugins": {
     "beads@beads-marketplace": false
   },
