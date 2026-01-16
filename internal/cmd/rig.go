@@ -41,7 +41,7 @@ A rig is a container for managing a project and its agents:
 }
 
 var rigAddCmd = &cobra.Command{
-	Use:   "add <name> <git-url>",
+	Use:   "add [name] <git-url|path|preset>",
 	Short: "Add a new rig to the workspace",
 	Long: `Add a new rig by cloning a repository.
 
@@ -68,8 +68,15 @@ Use --adopt to register an existing directory instead of creating new:
 Example:
   gt rig add gastown https://github.com/steveyegge/gastown
   gt rig add my-project git@github.com:user/repo.git --prefix mp
+  gt rig add https://github.com/user/repo.git
+  gt rig add . --crew $USER
   gt rig add existing-rig --adopt`,
-	Args: cobra.RangeArgs(1, 2),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) < 1 || len(args) > 2 {
+			return fmt.Errorf("requires 1 or 2 arguments")
+		}
+		return nil
+	},
 	RunE: runRigAdd,
 }
 
@@ -259,23 +266,31 @@ Examples:
 
 // Flags
 var (
-	rigAddPrefix       string
-	rigAddLocalRepo    string
-	rigAddBranch       string
-	rigAddAdopt        bool
-	rigAddAdoptURL     string
-	rigAddAdoptForce   bool
-	rigResetHandoff    bool
-	rigResetMail       bool
-	rigResetStale      bool
-	rigResetDryRun     bool
-	rigResetRole       string
-	rigShutdownForce   bool
-	rigShutdownNuclear bool
-	rigStopForce       bool
-	rigStopNuclear     bool
-	rigRestartForce    bool
-	rigRestartNuclear  bool
+	rigAddPrefix         string
+	rigAddLocalRepo      string
+	rigAddBranch         string
+	rigAddAdopt          bool
+	rigAddAdoptURL       string
+	rigAddAdoptForce     bool
+	rigAddCrew           []string
+	rigAddNoCrew         bool
+	rigAddStart          bool
+	rigAddIgnoreManifest bool
+	rigAddYes            bool
+	rigAddOrigin         string
+	rigAddUpstream       string
+	rigAddForkPolicy     string
+	rigResetHandoff      bool
+	rigResetMail         bool
+	rigResetStale        bool
+	rigResetDryRun       bool
+	rigResetRole         string
+	rigShutdownForce     bool
+	rigShutdownNuclear   bool
+	rigStopForce         bool
+	rigStopNuclear       bool
+	rigRestartForce      bool
+	rigRestartNuclear    bool
 )
 
 func init() {
@@ -298,6 +313,14 @@ func init() {
 	rigAddCmd.Flags().BoolVar(&rigAddAdopt, "adopt", false, "Adopt an existing directory instead of creating new")
 	rigAddCmd.Flags().StringVar(&rigAddAdoptURL, "url", "", "Git remote URL for --adopt (default: auto-detected from origin)")
 	rigAddCmd.Flags().BoolVar(&rigAddAdoptForce, "force", false, "With --adopt, register even if git remote cannot be detected")
+	rigAddCmd.Flags().StringArrayVar(&rigAddCrew, "crew", nil, "Crew workspace name to create (repeatable)")
+	rigAddCmd.Flags().BoolVar(&rigAddNoCrew, "no-crew", false, "Skip crew creation")
+	rigAddCmd.Flags().BoolVar(&rigAddStart, "start", false, "Start created crew sessions")
+	rigAddCmd.Flags().BoolVar(&rigAddIgnoreManifest, "ignore-manifest", false, "Ignore .gt/rig.toml defaults")
+	rigAddCmd.Flags().BoolVar(&rigAddYes, "yes", false, "Non-interactive, accept defaults")
+	rigAddCmd.Flags().StringVar(&rigAddOrigin, "origin", "", "Explicit origin remote URL (overrides manifest/prompt)")
+	rigAddCmd.Flags().StringVar(&rigAddUpstream, "upstream", "", "Explicit upstream remote URL (overrides manifest/prompt)")
+	rigAddCmd.Flags().StringVar(&rigAddForkPolicy, "fork", "prompt", "Fork policy: prompt, require, or never")
 
 	rigResetCmd.Flags().BoolVar(&rigResetHandoff, "handoff", false, "Clear handoff content")
 	rigResetCmd.Flags().BoolVar(&rigResetMail, "mail", false, "Clear stale mail messages")
@@ -318,18 +341,84 @@ func init() {
 }
 
 func runRigAdd(cmd *cobra.Command, args []string) error {
-	name := args[0]
-
 	// Handle --adopt mode: register existing directory
 	if rigAddAdopt {
 		return runRigAdopt(cmd, args)
 	}
 
-	// Normal add mode requires git URL
-	if len(args) < 2 {
-		return fmt.Errorf("git-url is required (or use --adopt to register an existing directory)")
+	var (
+		rigName         string
+		rigNameProvided bool
+		sourceArg       string
+		gitURL          string
+		localPath       string
+		preset          *rigPreset
+		manifest        *rig.Manifest
+		setupCommand    string
+		setupWorkdir    string
+		settingsPath    string
+	)
+
+	if rigAddNoCrew && len(rigAddCrew) > 0 {
+		return fmt.Errorf("cannot use --crew with --no-crew")
 	}
-	gitURL := args[1]
+
+	if len(args) == 2 {
+		rigName = args[0]
+		rigNameProvided = true
+		sourceArg = args[1]
+	} else {
+		sourceArg = args[0]
+		if p, ok := rigPresets[sourceArg]; ok {
+			preset = &p
+			rigName = p.Name
+			rigNameProvided = true
+		}
+	}
+
+	if preset == nil {
+		if isLocalPath(sourceArg) {
+			localPath = sourceArg
+		} else if isLikelyGitURL(sourceArg) {
+			gitURL = sourceArg
+		} else {
+			return fmt.Errorf("unknown rig source %q (use git URL, local path, or preset)", sourceArg)
+		}
+	} else {
+		gitURL = preset.UpstreamURL
+	}
+
+	var sourceRepoRoot string
+	if localPath != "" {
+		root, err := findGitRoot(localPath)
+		if err != nil {
+			return fmt.Errorf("not a git repository: %w", err)
+		}
+		sourceRepoRoot = root
+		if !rigNameProvided {
+			rigName = deriveRigNameFromPath(root)
+		}
+		if gitURL == "" {
+			var err error
+			gitURL, err = findGitRemoteURL(root)
+			if err != nil {
+				return fmt.Errorf("no git remote found: %w", err)
+			}
+		}
+	} else if rigName == "" {
+		rigName = deriveRigNameFromURL(gitURL)
+	}
+
+	if rigName == "" {
+		return fmt.Errorf("could not determine rig name")
+	}
+	if !rigNameProvided {
+		sanitized := sanitizeRigName(rigName)
+		if sanitized != rigName {
+			fmt.Printf("Note: Using %q as rig name (sanitized from %q)\n", sanitized, rigName)
+			rigName = sanitized
+		}
+	}
 
 	// Ensure beads (bd) is available before proceeding
 	if err := deps.EnsureBeads(true); err != nil {
@@ -357,8 +446,93 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
 
-	fmt.Printf("Creating rig %s...\n", style.Bold.Render(name))
+	if !rigAddIgnoreManifest && sourceRepoRoot != "" {
+		if loaded, err := rig.LoadManifest(sourceRepoRoot); err != nil {
+			fmt.Printf("  %s Could not load rig manifest: %v\n", style.Warning.Render("!"), err)
+		} else if loaded != nil {
+			manifest = loaded
+		}
+	}
+
+	if manifest == nil && preset != nil && !rigAddIgnoreManifest {
+		manifest = &rig.Manifest{Version: rig.ManifestVersion}
+		manifest.Rig.Name = preset.Name
+		manifest.Rig.Prefix = preset.Prefix
+		manifest.Rig.DefaultBranch = preset.DefaultBranch
+		manifest.Git.Upstream = preset.UpstreamURL
+		manifest.Setup.Command = preset.SetupCommand
+		manifest.Setup.Workdir = preset.SetupWorkdir
+	}
+
+	if manifest != nil && !rigAddIgnoreManifest {
+		if !rigNameProvided && manifest.Rig.Name != "" {
+			manifestName := sanitizeRigName(manifest.Rig.Name)
+			if manifestName != rigName {
+				fmt.Printf("Note: Using %q as rig name from manifest\n", manifestName)
+			}
+			rigName = manifestName
+		}
+		if rigAddPrefix == "" && manifest.Rig.Prefix != "" {
+			rigAddPrefix = manifest.Rig.Prefix
+		}
+		if rigAddBranch == "" && manifest.Rig.DefaultBranch != "" {
+			rigAddBranch = manifest.Rig.DefaultBranch
+		}
+		if rigAddUpstream == "" && manifest.Git.Upstream != "" {
+			rigAddUpstream = manifest.Git.Upstream
+		}
+		if rigAddOrigin == "" && manifest.Git.Origin != "" {
+			rigAddOrigin = manifest.Git.Origin
+		}
+		if setupCommand == "" && manifest.Setup.Command != "" {
+			setupCommand = manifest.Setup.Command
+			setupWorkdir = manifest.Setup.Workdir
+		}
+		if settingsPath == "" && manifest.Settings.Path != "" {
+			settingsPath = manifest.Settings.Path
+		}
+		if !cmd.Flags().Changed("fork") && manifest.Git.ForkPolicy != "" {
+			rigAddForkPolicy = manifest.Git.ForkPolicy
+		}
+	}
+
+	forkPolicy, err := normalizeForkPolicy(rigAddForkPolicy)
+	if err != nil {
+		return err
+	}
+
+	upstreamURL := rigAddUpstream
+	if upstreamURL == "" {
+		upstreamURL = gitURL
+	}
+
+	originURL := rigAddOrigin
+	if originURL == "" {
+		originURL = upstreamURL
+	}
+
+	forked := false
+	if originURL == upstreamURL {
+		decision, err := resolveForkOrigin(upstreamURL, rigAddOrigin, forkPolicy, rigAddYes)
+		if err != nil {
+			return err
+		}
+		originURL = decision.OriginURL
+		forked = decision.Forked
+	} else if originURL != "" && upstreamURL != "" && originURL != upstreamURL {
+		forked = true
+	}
+
+	gitURL = originURL
+	if gitURL == "" {
+		return fmt.Errorf("missing git URL (provide a git URL, preset, or --upstream)")
+	}
+
+	fmt.Printf("Creating rig %s...\n", style.Bold.Render(rigName))
 	fmt.Printf("  Repository: %s\n", gitURL)
+	if upstreamURL != "" && upstreamURL != originURL {
+		fmt.Printf("  Upstream:   %s\n", upstreamURL)
+	}
 	if rigAddLocalRepo != "" {
 		fmt.Printf("  Local repo: %s\n", rigAddLocalRepo)
 	}
@@ -367,11 +541,15 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 
 	// Add the rig
 	newRig, err := mgr.AddRig(rig.AddRigOptions{
-		Name:          name,
+		Name:          rigName,
 		GitURL:        gitURL,
 		BeadsPrefix:   rigAddPrefix,
 		LocalRepo:     rigAddLocalRepo,
 		DefaultBranch: rigAddBranch,
+		OriginURL:     originURL,
+		UpstreamURL:   upstreamURL,
+		SetupCommand:  setupCommand,
+		SetupWorkdir:  setupWorkdir,
 	})
 	if err != nil {
 		return fmt.Errorf("adding rig: %w", err)
@@ -390,14 +568,14 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	// "<rig>/.beads", while repos with tracked beads have their database at mayor/rig/.beads.
 	var beadsWorkDir string
 	if newRig.Config.Prefix != "" {
-		routePath := name
-		mayorRigBeads := filepath.Join(townRoot, name, "mayor", "rig", ".beads")
+		routePath := rigName
+		mayorRigBeads := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
 		if _, err := os.Stat(mayorRigBeads); err == nil {
 			// Source repo has .beads/ tracked - route to mayor/rig
-			routePath = name + "/mayor/rig"
-			beadsWorkDir = filepath.Join(townRoot, name, "mayor", "rig")
+			routePath = rigName + "/mayor/rig"
+			beadsWorkDir = filepath.Join(townRoot, rigName, "mayor", "rig")
 		} else {
-			beadsWorkDir = filepath.Join(townRoot, name)
+			beadsWorkDir = filepath.Join(townRoot, rigName)
 		}
 		route := beads.Route{
 			Prefix: newRig.Config.Prefix + "-",
@@ -412,13 +590,17 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	// Create rig identity bead
 	if newRig.Config.Prefix != "" && beadsWorkDir != "" {
 		bd := beads.New(beadsWorkDir)
-		rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, name)
+		rigBeadID := beads.RigBeadIDWithPrefix(newRig.Config.Prefix, rigName)
+		repoForBead := gitURL
+		if upstreamURL != "" {
+			repoForBead = upstreamURL
+		}
 		fields := &beads.RigFields{
-			Repo:   gitURL,
+			Repo:   repoForBead,
 			Prefix: newRig.Config.Prefix,
 			State:  "active",
 		}
-		if _, err := bd.CreateRigBead(rigBeadID, name, fields); err != nil {
+		if _, err := bd.CreateRigBead(rigBeadID, rigName, fields); err != nil {
 			// Non-fatal: rig is functional without the identity bead
 			fmt.Printf("  %s Could not create rig identity bead: %v\n", style.Warning.Render("!"), err)
 		} else {
@@ -430,26 +612,151 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 
 	// Read default branch from rig config
 	defaultBranch := "main"
-	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, name)); err == nil && rigCfg.DefaultBranch != "" {
+	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
 		defaultBranch = rigCfg.DefaultBranch
+	}
+
+	// Configure remotes in all clones.
+	if err := configureRigRemotes(newRig.Path, originURL, upstreamURL); err != nil {
+		fmt.Printf("  %s Could not configure remotes: %v\n", style.Warning.Render("!"), err)
+	}
+
+	if forked {
+		if err := setBeadsSyncRemote(newRig.Path, "upstream"); err != nil {
+			fmt.Printf("  %s Could not set beads sync remote: %v\n", style.Warning.Render("!"), err)
+		}
+	}
+
+	// Load manifest after clone if not available yet.
+	if manifest == nil && !rigAddIgnoreManifest {
+		mayorRepo := filepath.Join(newRig.Path, "mayor", "rig")
+		if loaded, err := rig.LoadManifest(mayorRepo); err != nil {
+			fmt.Printf("  %s Could not load rig manifest: %v\n", style.Warning.Render("!"), err)
+		} else if loaded != nil {
+			manifest = loaded
+			if setupCommand == "" && manifest.Setup.Command != "" {
+				setupCommand = manifest.Setup.Command
+				setupWorkdir = manifest.Setup.Workdir
+			}
+			if settingsPath == "" && manifest.Settings.Path != "" {
+				settingsPath = manifest.Settings.Path
+			}
+		}
+	}
+
+	if setupCommand != "" {
+		repoRoot := filepath.Join(newRig.Path, "mayor", "rig")
+		if err := runRigSetupCommand(repoRoot, setupCommand, setupWorkdir); err != nil {
+			return err
+		}
+	}
+
+	if settingsPath != "" {
+		repoRoot := filepath.Join(newRig.Path, "mayor", "rig")
+		copied, err := copyRigSettings(repoRoot, newRig.Path, settingsPath)
+		if err != nil {
+			fmt.Printf("  %s Could not copy rig settings: %v\n", style.Warning.Render("!"), err)
+		} else if copied {
+			fmt.Printf("  ✓ Applied rig settings from %s\n", settingsPath)
+		}
+	}
+
+	var createdCrew []string
+	if !rigAddNoCrew {
+		var crewSpecs []rig.CrewSpec
+		if manifest != nil && !rigAddIgnoreManifest {
+			if specs, err := manifest.CrewSpecs(); err != nil {
+				fmt.Printf("  %s Could not parse crew manifest: %v\n", style.Warning.Render("!"), err)
+			} else {
+				crewSpecs = specs
+			}
+		}
+
+		var toCreate []rig.CrewSpec
+		if len(rigAddCrew) > 0 {
+			byName := map[string]rig.CrewSpec{}
+			if manifest != nil && !rigAddIgnoreManifest {
+				if specs, err := manifest.CrewByName(); err == nil {
+					byName = specs
+				}
+			}
+			for _, name := range rigAddCrew {
+				if spec, ok := byName[name]; ok {
+					toCreate = append(toCreate, spec)
+				} else {
+					toCreate = append(toCreate, rig.CrewSpec{Name: name})
+				}
+			}
+		} else if len(crewSpecs) > 0 {
+			toCreate = append(toCreate, crewSpecs...)
+		}
+
+		if len(toCreate) > 0 {
+			crewMgr := crew.NewManager(newRig, git.NewGit(newRig.Path))
+			bd := beads.New(beads.ResolveBeadsDir(newRig.Path))
+			for _, spec := range toCreate {
+				_, err := crewMgr.AddWithOptions(spec.Name, crew.AddOptions{
+					CreateBranch: spec.CreateBranch,
+					BranchName:   spec.BranchName,
+					Agent:        spec.Agent,
+					Model:        spec.Model,
+					Account:      spec.Account,
+					Args:         spec.Args,
+					Env:          spec.Env,
+				})
+				if err != nil {
+					fmt.Printf("  %s Could not create crew %s: %v\n", style.Warning.Render("!"), spec.Name, err)
+					continue
+				}
+				createdCrew = append(createdCrew, spec.Name)
+
+				prefix := beads.GetPrefixForRig(townRoot, rigName)
+				crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, spec.Name)
+				if _, err := bd.Show(crewID); err != nil {
+					fields := &beads.AgentFields{
+						RoleType:   "crew",
+						Rig:        rigName,
+						AgentState: "idle",
+					}
+					desc := fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", spec.Name, rigName)
+					if _, err := bd.CreateAgentBead(crewID, desc, fields); err != nil {
+						fmt.Printf("  %s Could not create crew bead for %s: %v\n", style.Warning.Render("!"), spec.Name, err)
+					}
+				}
+
+				if rigAddStart {
+					if err := crewMgr.Start(spec.Name, crew.StartOptions{}); err != nil {
+						fmt.Printf("  %s Could not start crew %s: %v\n", style.Warning.Render("!"), spec.Name, err)
+					}
+				}
+			}
+		}
 	}
 
 	fmt.Printf("\n%s Rig created in %.1fs\n", style.Success.Render("✓"), elapsed.Seconds())
 	fmt.Printf("\nStructure:\n")
-	fmt.Printf("  %s/\n", name)
+	fmt.Printf("  %s/\n", rigName)
 	fmt.Printf("  ├── config.json\n")
 	fmt.Printf("  ├── .repo.git/        (shared bare repo for refinery+polecats)\n")
 	fmt.Printf("  ├── .beads/           (prefix: %s)\n", newRig.Config.Prefix)
 	fmt.Printf("  ├── plugins/          (rig-level plugins)\n")
 	fmt.Printf("  ├── mayor/rig/        (clone: %s)\n", defaultBranch)
 	fmt.Printf("  ├── refinery/rig/     (worktree: %s, sees polecat branches)\n", defaultBranch)
-	fmt.Printf("  ├── crew/             (empty - add crew with 'gt crew add')\n")
+	if len(createdCrew) == 0 {
+		fmt.Printf("  ├── crew/             (empty - add crew with 'gt crew add')\n")
+	} else {
+		fmt.Printf("  ├── crew/             (created: %s)\n", strings.Join(createdCrew, ", "))
+	}
 	fmt.Printf("  ├── witness/\n")
 	fmt.Printf("  └── polecats/\n")
 
 	fmt.Printf("\nNext steps:\n")
-	fmt.Printf("  gt crew add <name> --rig %s   # Create your personal workspace\n", name)
-	fmt.Printf("  cd %s/crew/<name>              # Start working\n", filepath.Join(townRoot, name))
+	if len(createdCrew) == 0 {
+		fmt.Printf("  gt crew add <name> --rig %s   # Create your personal workspace\n", rigName)
+		fmt.Printf("  cd %s/crew/<name>              # Start working\n", filepath.Join(townRoot, rigName))
+	} else if len(createdCrew) == 1 {
+		fmt.Printf("  cd %s/crew/%s              # Start working\n", filepath.Join(townRoot, rigName), createdCrew[0])
+	}
 
 	return nil
 }

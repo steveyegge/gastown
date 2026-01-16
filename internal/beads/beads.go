@@ -212,7 +212,15 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	} else {
 		env = os.Environ()
 	}
-	cmd.Env = append(env, "BEADS_DIR="+beadsDir)
+	env = append(env, "BEADS_DIR="+beadsDir)
+	beadsDB := filepath.Join(beadsDir, "beads.db")
+	if _, err := os.Stat(beadsDB); err == nil {
+		env = append(env, "BEADS_DB="+beadsDB)
+	}
+	// Disable auto-routing when BEADS_DIR is explicitly set.
+	env = setEnv(env, "BD_ROUTING_MODE", "explicit")
+	env = setEnv(env, "BD_ROUTING_DEFAULT", ".")
+	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -234,6 +242,21 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	}
 
 	return stdout.Bytes(), nil
+}
+
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	replaced := false
+	for i, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			env[i] = prefix + value
+			replaced = true
+		}
+	}
+	if !replaced {
+		env = append(env, prefix+value)
+	}
+	return env
 }
 
 // Run executes a bd command and returns stdout.
@@ -499,6 +522,7 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	if actor != "" {
 		args = append(args, "--actor="+actor)
 	}
+	args = b.maybeForceRepo(args)
 
 	out, err := b.run(args...)
 	if err != nil {
@@ -547,6 +571,7 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	if actor != "" {
 		args = append(args, "--actor="+actor)
 	}
+	args = b.maybeForceRepo(args)
 
 	out, err := b.run(args...)
 	if err != nil {
@@ -559,6 +584,41 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	}
 
 	return &issue, nil
+}
+
+func (b *Beads) maybeForceRepo(args []string) []string {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--repo=") {
+			return args
+		}
+	}
+
+	repoRoot := b.forceRepoRoot()
+	if repoRoot == "" {
+		return args
+	}
+
+	return append(args, "--repo="+repoRoot)
+}
+
+func (b *Beads) forceRepoRoot() string {
+	beadsDir := b.beadsDir
+	if beadsDir == "" {
+		beadsDir = ResolveBeadsDir(b.workDir)
+	}
+	if !isTempPath(beadsDir) {
+		return ""
+	}
+	return filepath.Dir(beadsDir)
+}
+
+func isTempPath(path string) bool {
+	tempDir := filepath.Clean(os.TempDir())
+	clean := filepath.Clean(path)
+	if clean == tempDir {
+		return true
+	}
+	return strings.HasPrefix(clean, tempDir+string(os.PathSeparator))
 }
 
 // Update updates an existing issue.

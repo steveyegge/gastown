@@ -38,6 +38,10 @@ func ResolveBeadsDir(workDir string) string {
 		workDir = filepath.Dir(workDir)
 	}
 	beadsDir := filepath.Join(workDir, ".beads")
+	if filepath.Base(workDir) == ".beads" {
+		beadsDir = workDir
+		workDir = filepath.Dir(workDir)
+	}
 	redirectPath := filepath.Join(beadsDir, "redirect")
 
 	// Check for redirect file

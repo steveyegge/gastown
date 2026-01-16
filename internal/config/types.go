@@ -163,10 +163,24 @@ type RigsConfig struct {
 
 // RigEntry represents a single rig in the registry.
 type RigEntry struct {
-	GitURL      string       `json:"git_url"`
-	LocalRepo   string       `json:"local_repo,omitempty"`
-	AddedAt     time.Time    `json:"added_at"`
-	BeadsConfig *BeadsConfig `json:"beads,omitempty"`
+	GitURL      string          `json:"git_url"`
+	LocalRepo   string          `json:"local_repo,omitempty"`
+	AddedAt     time.Time       `json:"added_at"`
+	BeadsConfig *BeadsConfig    `json:"beads,omitempty"`
+	Git         *RigGitConfig   `json:"git,omitempty"`
+	Setup       *RigSetupConfig `json:"setup,omitempty"`
+}
+
+// RigGitConfig represents git remote configuration for a rig.
+type RigGitConfig struct {
+	Origin   string `json:"origin,omitempty"`
+	Upstream string `json:"upstream,omitempty"`
+}
+
+// RigSetupConfig stores a rig setup command and workdir.
+type RigSetupConfig struct {
+	Command string `json:"command,omitempty"`
+	Workdir string `json:"workdir,omitempty"`
 }
 
 // BeadsConfig represents beads configuration for a rig.
@@ -191,13 +205,15 @@ const CurrentRigSettingsVersion = 1
 // RigConfig represents per-rig identity (rig/config.json).
 // This contains only identity - behavioral config is in settings/config.json.
 type RigConfig struct {
-	Type      string       `json:"type"`    // "rig"
-	Version   int          `json:"version"` // schema version
-	Name      string       `json:"name"`    // rig name
-	GitURL    string       `json:"git_url"` // git repository URL
-	LocalRepo string       `json:"local_repo,omitempty"`
-	CreatedAt time.Time    `json:"created_at"` // when the rig was created
-	Beads     *BeadsConfig `json:"beads,omitempty"`
+	Type      string          `json:"type"`    // "rig"
+	Version   int             `json:"version"` // schema version
+	Name      string          `json:"name"`    // rig name
+	GitURL    string          `json:"git_url"` // git repository URL
+	LocalRepo string          `json:"local_repo,omitempty"`
+	CreatedAt time.Time       `json:"created_at"` // when the rig was created
+	Beads     *BeadsConfig    `json:"beads,omitempty"`
+	Git       *RigGitConfig   `json:"git,omitempty"`
+	Setup     *RigSetupConfig `json:"setup,omitempty"`
 }
 
 // WorkflowConfig represents workflow settings for a rig.
@@ -581,11 +597,6 @@ func defaultProcessNames(provider, command string) []string {
 	if provider == "claude" {
 		return []string{"node"}
 	}
-	if provider == "opencode" {
-		// OpenCode runs as Node.js process, need both for IsAgentRunning detection.
-		// tmux pane_current_command may show "node" or "opencode" depending on how invoked.
-		return []string{"opencode", "node"}
-	}
 	if command != "" {
 		return []string{filepath.Base(command)}
 	}
@@ -594,8 +605,7 @@ func defaultProcessNames(provider, command string) []string {
 
 func defaultReadyPromptPrefix(provider string) string {
 	if provider == "claude" {
-		// Claude Code uses ❯ (U+276F) as the prompt character
-		return "❯ "
+		return "> "
 	}
 	return ""
 }
@@ -606,12 +616,6 @@ func defaultReadyDelayMs(provider string) int {
 	}
 	if provider == "codex" {
 		return 3000
-	}
-	if provider == "opencode" {
-		// OpenCode requires delay-based detection because its TUI uses
-		// box-drawing characters (┃) that break prompt prefix matching.
-		// 8000ms provides reliable startup detection across models.
-		return 8000
 	}
 	return 0
 }
@@ -628,15 +632,9 @@ func defaultInstructionsFile(provider string) string {
 
 // quoteForShell quotes a string for safe shell usage.
 func quoteForShell(s string) string {
-	// Wrap in double quotes, escaping characters that are special in double-quoted strings:
-	// - backslash (escape character)
-	// - double quote (string delimiter)
-	// - backtick (command substitution)
-	// - dollar sign (variable expansion)
+	// Simple quoting: wrap in double quotes, escape internal quotes
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	escaped = strings.ReplaceAll(escaped, "`", "\\`")
-	escaped = strings.ReplaceAll(escaped, "$", `\$`)
 	return `"` + escaped + `"`
 }
 

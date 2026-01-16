@@ -159,6 +159,53 @@ func TestCurrentBranch(t *testing.T) {
 	}
 }
 
+func TestAheadBehind(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	baseBranch, err := g.CurrentBranch()
+	if err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	cmd := exec.Command("git", "checkout", "-b", "feature")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("checkout feature: %v", err)
+	}
+
+	newFile := filepath.Join(dir, "feature.txt")
+	if err := os.WriteFile(newFile, []byte("feature\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	cmd = exec.Command("git", "add", "feature.txt")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	cmd = exec.Command("git", "commit", "-m", "feature commit")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	ahead, behind, err := g.AheadBehind(baseBranch, "feature")
+	if err != nil {
+		t.Fatalf("AheadBehind: %v", err)
+	}
+	if ahead != 0 || behind != 1 {
+		t.Errorf("AheadBehind(%s, feature) = (%d,%d), want (0,1)", baseBranch, ahead, behind)
+	}
+
+	ahead, behind, err = g.AheadBehind("feature", baseBranch)
+	if err != nil {
+		t.Fatalf("AheadBehind: %v", err)
+	}
+	if ahead != 1 || behind != 0 {
+		t.Errorf("AheadBehind(feature, %s) = (%d,%d), want (1,0)", baseBranch, ahead, behind)
+	}
+}
+
 func TestStatus(t *testing.T) {
 	dir := initTestRepo(t)
 	g := NewGit(dir)

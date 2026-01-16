@@ -71,6 +71,33 @@ func TestGetAgentPresetByName(t *testing.T) {
 	}
 }
 
+func TestSupportsModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		wantOK   bool
+		wantFlag string
+	}{
+		{"claude", true, "--model"},
+		{"codex", true, "--model"},
+		{"gemini", false, ""},
+		{"unknown", false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ok, flag := SupportsModel(tt.name)
+			if ok != tt.wantOK {
+				t.Errorf("SupportsModel(%q) ok = %v, want %v", tt.name, ok, tt.wantOK)
+			}
+			if flag != tt.wantFlag {
+				t.Errorf("SupportsModel(%q) flag = %q, want %q", tt.name, flag, tt.wantFlag)
+			}
+		})
+	}
+}
+
 func TestRuntimeConfigFromPreset(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -362,10 +389,10 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 	}{
 		{"claude", "CLAUDE_SESSION_ID"},
 		{"gemini", "GEMINI_SESSION_ID"},
-		{"codex", ""},    // Codex uses JSONL output instead
-		{"cursor", ""},   // Cursor uses --resume with chatId directly
-		{"auggie", ""},   // Auggie uses --resume directly
-		{"amp", ""},      // AMP uses 'threads continue' subcommand
+		{"codex", ""},  // Codex uses JSONL output instead
+		{"cursor", ""}, // Cursor uses --resume with chatId directly
+		{"auggie", ""}, // Auggie uses --resume directly
+		{"amp", ""},    // AMP uses 'threads continue' subcommand
 		{"unknown", ""},
 	}
 

@@ -509,6 +509,8 @@ export OPENCODE_PERMISSION='{"*":"allow"}'
 
 ```bash
 gt rig add <name> <url>
+gt rig add <name> <url> --crew <name>
+gt rig update <rig> --check|--pull
 gt rig list
 gt rig remove <name>
 ```

@@ -11,9 +11,10 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/runtime"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -51,6 +52,26 @@ type StartOptions struct {
 
 	// AgentOverride specifies an alternate agent alias (e.g., for testing).
 	AgentOverride string
+
+	// Model specifies the model name to use (if supported).
+	Model string
+
+	// Args are extra runtime CLI args to append.
+	Args []string
+
+	// Env contains additional environment variables to set.
+	Env map[string]string
+}
+
+// AddOptions configures crew workspace creation.
+type AddOptions struct {
+	CreateBranch bool
+	BranchName   string
+	Agent        string
+	Model        string
+	Account      string
+	Args         []string
+	Env          map[string]string
 }
 
 // validateCrewName checks that a crew name is safe and valid.
@@ -114,11 +135,20 @@ func (m *Manager) exists(name string) bool {
 
 // Add creates a new crew worker with a clone of the rig.
 func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
+	return m.AddWithOptions(name, AddOptions{CreateBranch: createBranch})
+}
+
+// AddWithOptions creates a new crew worker with a clone of the rig.
+func (m *Manager) AddWithOptions(name string, opts AddOptions) (*CrewWorker, error) {
 	if err := validateCrewName(name); err != nil {
 		return nil, err
 	}
 	if m.exists(name) {
 		return nil, ErrCrewExists
+	}
+
+	if opts.BranchName != "" {
+		opts.CreateBranch = true
 	}
 
 	crewPath := m.crewDir(name)
@@ -147,8 +177,12 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	branchName := m.rig.DefaultBranch()
 
 	// Optionally create a working branch
-	if createBranch {
-		branchName = fmt.Sprintf("crew/%s", name)
+	if opts.CreateBranch {
+		if opts.BranchName != "" {
+			branchName = opts.BranchName
+		} else {
+			branchName = fmt.Sprintf("crew/%s", name)
+		}
 		if err := crewGit.CreateBranch(branchName); err != nil {
 			_ = os.RemoveAll(crewPath) // best-effort cleanup
 			return nil, fmt.Errorf("creating branch: %w", err)
@@ -156,6 +190,13 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		if err := crewGit.Checkout(branchName); err != nil {
 			_ = os.RemoveAll(crewPath) // best-effort cleanup
 			return nil, fmt.Errorf("checking out branch: %w", err)
+		}
+	}
+
+	// Add upstream remote if configured and distinct from origin.
+	if m.rig.UpstreamURL != "" && m.rig.UpstreamURL != m.rig.GitURL {
+		if err := crewGit.SetRemoteURL("upstream", m.rig.UpstreamURL); err != nil {
+			fmt.Printf("Warning: could not add upstream remote: %v\n", err)
 		}
 	}
 
@@ -203,11 +244,28 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 
 	// Create crew worker state
 	now := time.Now()
+	var argsCopy []string
+	if len(opts.Args) > 0 {
+		argsCopy = append([]string(nil), opts.Args...)
+	}
+	var envCopy map[string]string
+	if len(opts.Env) > 0 {
+		envCopy = make(map[string]string, len(opts.Env))
+		for k, v := range opts.Env {
+			envCopy[k] = v
+		}
+	}
+
 	crew := &CrewWorker{
 		Name:      name,
 		Rig:       m.rig.Name,
 		ClonePath: crewPath,
 		Branch:    branchName,
+		Agent:     opts.Agent,
+		Model:     opts.Model,
+		Account:   opts.Account,
+		Args:      argsCopy,
+		Env:       envCopy,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -320,14 +378,15 @@ func (m *Manager) loadState(name string) (*CrewWorker, error) {
 		return nil, fmt.Errorf("parsing state: %w", err)
 	}
 
-	// Directory name is source of truth for Name and ClonePath.
-	// state.json can become stale after directory rename, copy, or corruption.
-	crew.Name = name
-	crew.ClonePath = m.crewDir(name)
-
-	// Rig only needs backfill when empty (less likely to drift)
+	// Backfill essential fields if missing (handles empty or incomplete state.json)
+	if crew.Name == "" {
+		crew.Name = name
+	}
 	if crew.Rig == "" {
 		crew.Rig = m.rig.Name
+	}
+	if crew.ClonePath == "" {
+		crew.ClonePath = m.crewDir(name)
 	}
 
 	return &crew, nil
@@ -458,9 +517,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	}
 	if running {
 		if opts.KillExisting {
-			// Restart mode - kill existing session.
-			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
-			if err := t.KillSessionWithProcesses(sessionID); err != nil {
+			// Restart mode - kill existing session
+			if err := t.KillSession(sessionID); err != nil {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
 		} else {
@@ -468,22 +526,11 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 			if t.IsAgentAlive(sessionID) {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
-			// Zombie session - kill and recreate.
-			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
-			if err := t.KillSessionWithProcesses(sessionID); err != nil {
+			// Zombie session - kill and recreate
+			if err := t.KillSession(sessionID); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
 		}
-	}
-
-	// Ensure runtime settings exist in crew/ (not crew/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	// All crew members share the same settings file.
-	crewBaseDir := filepath.Join(m.rig.Path, "crew")
-	townRoot := filepath.Dir(m.rig.Path)
-	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(crewBaseDir, "crew", runtimeConfig); err != nil {
-		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	// Build the startup beacon for predecessor discovery via /resume
@@ -499,17 +546,89 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		Topic:     topic,
 	})
 
-	// Build startup command first
-	// SessionStart hook handles context loading (gt prime --hook)
-	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride, worker.ClonePath)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
+	account := opts.Account
+	if account == "" {
+		account = worker.Account
+	}
+	agentOverride := opts.AgentOverride
+	if agentOverride == "" {
+		agentOverride = worker.Agent
+	}
+	model := opts.Model
+	if model == "" {
+		model = worker.Model
 	}
 
-	// For interactive/refresh mode, remove --dangerously-skip-permissions
-	if opts.Interactive {
-		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
+	extraArgs := append([]string(nil), worker.Args...)
+	if len(opts.Args) > 0 {
+		extraArgs = append(extraArgs, opts.Args...)
 	}
+	envOverrides := config.MergeEnv(worker.Env, opts.Env)
+
+	townRoot := filepath.Dir(m.rig.Path)
+	claudeConfigDir := opts.ClaudeConfigDir
+	if claudeConfigDir == "" {
+		accountsPath := constants.MayorAccountsPath(townRoot)
+		claudeConfigDir, _, err = config.ResolveAccountConfigDir(accountsPath, account)
+		if err != nil {
+			return fmt.Errorf("resolving account: %w", err)
+		}
+	}
+
+	rc, agentName, err := config.ResolveAgentConfigWithOverride(townRoot, m.rig.Path, agentOverride)
+	if err != nil {
+		return fmt.Errorf("resolving agent: %w", err)
+	}
+	resolved := cloneRuntimeConfig(rc)
+	if len(extraArgs) > 0 {
+		resolved.Args = append(resolved.Args, extraArgs...)
+	}
+	if model != "" {
+		if ok, flag := config.SupportsModel(agentName); ok {
+			if flag == "" {
+				flag = "--model"
+			}
+			resolved.Args = append(resolved.Args, flag, model)
+		} else {
+			fmt.Printf("Warning: agent %q does not support models; skipping %q\n", agentName, model)
+		}
+	}
+	if opts.Interactive {
+		resolved.Args = filterArgs(resolved.Args, "--dangerously-skip-permissions")
+	}
+
+	// Ensure runtime settings exist in crew/ (not crew/<name>/) so we don't
+	// write into the source repo. Runtimes walk up the tree to find settings.
+	crewBaseDir := filepath.Join(m.rig.Path, "crew")
+	if err := runtime.EnsureSettingsForRole(crewBaseDir, "crew", resolved); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
+	}
+
+	agentCmd := resolved.BuildCommand()
+	if beacon != "" {
+		agentCmd = resolved.BuildCommandWithPrompt(beacon)
+	}
+
+	envCfg := config.AgentEnvConfig{
+		Role:          "crew",
+		Rig:           m.rig.Name,
+		AgentName:     name,
+		TownRoot:      townRoot,
+		BeadsNoDaemon: true,
+	}
+	if resolved.Session != nil {
+		envCfg.SessionIDEnv = resolved.Session.SessionIDEnv
+		if resolved.Session.ConfigDirEnv == "" || resolved.Session.ConfigDirEnv == "CLAUDE_CONFIG_DIR" {
+			envCfg.RuntimeConfigDir = claudeConfigDir
+		}
+	}
+	envVars := config.AgentEnv(envCfg)
+	if resolved.Session != nil && resolved.Session.ConfigDirEnv != "" && resolved.Session.ConfigDirEnv != "CLAUDE_CONFIG_DIR" && claudeConfigDir != "" {
+		envVars[resolved.Session.ConfigDirEnv] = claudeConfigDir
+	}
+	envVars = config.MergeEnv(envVars, envOverrides)
+
+	claudeCmd := config.PrependEnv(agentCmd, envVars)
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
@@ -519,15 +638,6 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:             "crew",
-		Rig:              m.rig.Name,
-		AgentName:        name,
-		TownRoot:         townRoot,
-		RuntimeConfigDir: opts.ClaudeConfigDir,
-		BeadsNoDaemon:    true,
-		WorkDir:          worker.ClonePath,
-	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
 	}
@@ -565,10 +675,8 @@ func (m *Manager) Stop(name string) error {
 		return ErrSessionNotFound
 	}
 
-	// Kill the session.
-	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
-	// This prevents orphan bash processes from Claude's Bash tool surviving session termination.
-	if err := t.KillSessionWithProcesses(sessionID); err != nil {
+	// Kill the session
+	if err := t.KillSession(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
@@ -582,3 +690,27 @@ func (m *Manager) IsRunning(name string) (bool, error) {
 	return t.HasSession(sessionID)
 }
 
+func cloneRuntimeConfig(rc *config.RuntimeConfig) *config.RuntimeConfig {
+	if rc == nil {
+		return config.DefaultRuntimeConfig()
+	}
+	copy := *rc
+	if rc.Args != nil {
+		copy.Args = append([]string(nil), rc.Args...)
+	}
+	return &copy
+}
+
+func filterArgs(args []string, flag string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	filtered := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == flag {
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	return filtered
+}

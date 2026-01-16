@@ -80,6 +80,20 @@ type RigConfig struct {
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
 	Beads         *BeadsConfig `json:"beads,omitempty"`
+	Git           *GitConfig   `json:"git,omitempty"`
+	Setup         *SetupConfig `json:"setup,omitempty"`
+}
+
+// GitConfig represents git remote configuration for a rig.
+type GitConfig struct {
+	Origin   string `json:"origin,omitempty"`
+	Upstream string `json:"upstream,omitempty"`
+}
+
+// SetupConfig stores a rig setup command and workdir.
+type SetupConfig struct {
+	Command string `json:"command,omitempty"`
+	Workdir string `json:"workdir,omitempty"`
 }
 
 // BeadsConfig represents beads configuration for the rig.
@@ -153,12 +167,27 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 		return nil, fmt.Errorf("not a directory: %s", rigPath)
 	}
 
+	gitURL := entry.GitURL
+	originURL := entry.GitURL
+	upstreamURL := ""
+	if entry.Git != nil {
+		if entry.Git.Origin != "" {
+			gitURL = entry.Git.Origin
+			originURL = entry.Git.Origin
+		}
+		if entry.Git.Upstream != "" {
+			upstreamURL = entry.Git.Upstream
+		}
+	}
+
 	rig := &Rig{
-		Name:      name,
-		Path:      rigPath,
-		GitURL:    entry.GitURL,
-		LocalRepo: entry.LocalRepo,
-		Config:    entry.BeadsConfig,
+		Name:        name,
+		Path:        rigPath,
+		GitURL:      gitURL,
+		OriginURL:   originURL,
+		UpstreamURL: upstreamURL,
+		LocalRepo:   entry.LocalRepo,
+		Config:      entry.BeadsConfig,
 	}
 
 	// Scan for polecats
@@ -214,6 +243,10 @@ type AddRigOptions struct {
 	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
 	LocalRepo     string // Optional local repo for reference clones
 	DefaultBranch string // Default branch (defaults to auto-detected from remote)
+	OriginURL     string // Optional origin remote URL
+	UpstreamURL   string // Optional upstream remote URL
+	SetupCommand  string // Optional setup command to store
+	SetupWorkdir  string // Optional setup workdir to store
 }
 
 func resolveLocalRepo(path, gitURL string) (string, string) {
@@ -306,16 +339,32 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}()
 
 	// Create rig config
+	originURL := opts.OriginURL
+	if originURL == "" {
+		originURL = opts.GitURL
+	}
 	rigConfig := &RigConfig{
 		Type:      "rig",
 		Version:   CurrentRigConfigVersion,
 		Name:      opts.Name,
-		GitURL:    opts.GitURL,
+		GitURL:    originURL,
 		LocalRepo: localRepo,
 		CreatedAt: time.Now(),
 		Beads: &BeadsConfig{
 			Prefix: opts.BeadsPrefix,
 		},
+	}
+	if originURL != "" || opts.UpstreamURL != "" {
+		rigConfig.Git = &GitConfig{
+			Origin:   originURL,
+			Upstream: opts.UpstreamURL,
+		}
+	}
+	if opts.SetupCommand != "" {
+		rigConfig.Setup = &SetupConfig{
+			Command: opts.SetupCommand,
+			Workdir: opts.SetupWorkdir,
+		}
 	}
 	if err := m.saveRigConfig(rigPath, rigConfig); err != nil {
 		return nil, fmt.Errorf("saving rig config: %w", err)
@@ -576,14 +625,25 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	}
 
 	// Register in town config
-	m.config.Rigs[opts.Name] = config.RigEntry{
-		GitURL:    opts.GitURL,
+	entry := config.RigEntry{
+		GitURL:    originURL,
 		LocalRepo: localRepo,
 		AddedAt:   time.Now(),
 		BeadsConfig: &config.BeadsConfig{
 			Prefix: opts.BeadsPrefix,
 		},
+		Git: &config.RigGitConfig{
+			Origin:   originURL,
+			Upstream: opts.UpstreamURL,
+		},
 	}
+	if opts.SetupCommand != "" {
+		entry.Setup = &config.RigSetupConfig{
+			Command: opts.SetupCommand,
+			Workdir: opts.SetupWorkdir,
+		}
+	}
+	m.config.Rigs[opts.Name] = entry
 
 	success = true
 	return m.loadRig(opts.Name, m.config.Rigs[opts.Name])

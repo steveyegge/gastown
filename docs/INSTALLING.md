@@ -112,8 +112,8 @@ gt install ~/gt
 ### Step 3: Add a Project (Rig)
 
 ```bash
-# Add your first project
-gt rig add myproject https://github.com/you/repo.git
+# Add your first project + crew workspace
+gt rig add myproject https://github.com/you/repo.git --crew $USER
 
 # This clones the repo and sets up:
 #   ~/gt/myproject/
@@ -122,6 +122,9 @@ gt rig add myproject https://github.com/you/repo.git
 #   ├── refinery/rig/      # Merge queue processor
 #   ├── witness/           # Worker monitor
 #   └── polecats/          # Worker clones (created on demand)
+#
+# Your crew workspace is created at:
+#   ~/gt/myproject/crew/$USER
 ```
 
 ### Step 4: Verify Installation
@@ -286,6 +289,7 @@ To update Gas Town and Beads:
 go install github.com/steveyegge/gastown/cmd/gt@latest
 go install github.com/steveyegge/beads/cmd/bd@latest
 gt doctor --fix            # Fix any post-update issues
+gt rig update myproject --pull  # Update rig clones from upstream
 ```
 
 ## Uninstalling

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -354,6 +355,12 @@ func (g *Git) Pull(remote, branch string) error {
 	return err
 }
 
+// PullFastForward pulls from the remote branch, refusing to merge.
+func (g *Git) PullFastForward(remote, branch string) error {
+	_, err := g.run("pull", "--ff-only", remote, branch)
+	return err
+}
+
 // Push pushes to the remote branch.
 func (g *Git) Push(remote, branch string, force bool) error {
 	args := []string{"push", remote, branch}
@@ -385,10 +392,10 @@ func (g *Git) CommitAll(message string) error {
 
 // GitStatus represents the status of the working directory.
 type GitStatus struct {
-	Clean    bool
-	Modified []string
-	Added    []string
-	Deleted  []string
+	Clean     bool
+	Modified  []string
+	Added     []string
+	Deleted   []string
 	Untracked []string
 }
 
@@ -475,6 +482,11 @@ func (g *Git) RemoteDefaultBranch() string {
 	return "main" // final fallback
 }
 
+// ConfigGet gets a git config value.
+func (g *Git) ConfigGet(key string) (string, error) {
+	return g.run("config", "--get", key)
+}
+
 // HasUncommittedChanges returns true if there are uncommitted changes.
 func (g *Git) HasUncommittedChanges() (bool, error) {
 	status, err := g.Status()
@@ -501,15 +513,23 @@ func (g *Git) Remotes() ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
-// ConfigGet returns the value of a git config key.
-// Returns empty string if the key is not set.
-func (g *Git) ConfigGet(key string) (string, error) {
-	out, err := g.run("config", "--get", key)
-	if err != nil {
-		// git config --get returns exit code 1 if key not found
-		return "", nil
+// SetRemoteURL sets an existing remote URL or adds it if missing.
+func (g *Git) SetRemoteURL(remote, url string) error {
+	if url == "" {
+		return nil
 	}
-	return out, nil
+	remotes, err := g.Remotes()
+	if err != nil {
+		return err
+	}
+	for _, r := range remotes {
+		if r == remote {
+			_, err := g.run("remote", "set-url", remote, url)
+			return err
+		}
+	}
+	_, err = g.run("remote", "add", remote, url)
+	return err
 }
 
 // Merge merges the given branch into the current branch.
@@ -1036,6 +1056,28 @@ func (g *Git) CommitsAhead(base, branch string) (int, error) {
 	return count, nil
 }
 
+// AheadBehind returns commit counts between two refs (left...right).
+// The "ahead" count is commits in left not in right; "behind" is commits in right not in left.
+func (g *Git) AheadBehind(left, right string) (ahead, behind int, err error) {
+	out, err := g.run("rev-list", "--left-right", "--count", left+"..."+right)
+	if err != nil {
+		return 0, 0, err
+	}
+	fields := strings.Fields(out)
+	if len(fields) != 2 {
+		return 0, 0, fmt.Errorf("unexpected rev-list output: %q", out)
+	}
+	ahead, err = strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("parsing ahead count: %w", err)
+	}
+	behind, err = strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("parsing behind count: %w", err)
+	}
+	return ahead, behind, nil
+}
+
 // CountCommitsBehind returns the number of commits that HEAD is behind the given ref.
 // For example, CountCommitsBehind("origin/main") returns how many commits
 // are on origin/main that are not on the current HEAD.
@@ -1110,8 +1152,8 @@ type UncommittedWorkStatus struct {
 	StashCount            int
 	UnpushedCommits       int
 	// Details for error messages
-	ModifiedFiles   []string
-	UntrackedFiles  []string
+	ModifiedFiles  []string
+	UntrackedFiles []string
 }
 
 // Clean returns true if there is no uncommitted work.

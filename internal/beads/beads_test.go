@@ -1931,7 +1931,6 @@ func TestSetupRedirect(t *testing.T) {
 // TestAgentBeadTombstoneBug demonstrates the bd bug where `bd delete --hard --force`
 // creates tombstones instead of truly deleting records.
 //
-//
 // This test documents the bug behavior:
 // 1. Create agent bead
 // 2. Delete with --hard --force (supposed to permanently delete)
