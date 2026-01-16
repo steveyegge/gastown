@@ -451,6 +451,25 @@ func runDone(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Notify Mayor of work completion for non-merge work (gt-o701h)
+	// This enables the Mayor to auto-dispatch next phases of epic/convoy work
+	// without polling. For merge work, the Refinery handles notifications.
+	if mrID == "" && issueID != "" {
+		mayorAddr := "mayor/"
+		workCompleteNotification := &mail.Message{
+			To:       mayorAddr,
+			From:     sender,
+			Subject:  fmt.Sprintf("WORK_COMPLETE: %s", issueID),
+			Priority: mail.PriorityNormal,
+			Body:     strings.Join(bodyLines, "\n") + fmt.Sprintf("\nRig: %s\nPolecat: %s", rigName, polecatName),
+		}
+		if err := townRouter.Send(workCompleteNotification); err != nil {
+			style.PrintWarning("could not notify mayor: %v", err)
+		} else {
+			fmt.Printf("%s Mayor notified of work completion\n", style.Bold.Render("✓"))
+		}
+	}
+
 	// Log done event (townlog and activity feed)
 	_ = LogDone(townRoot, sender, issueID)
 	_ = events.LogFeed(events.TypeDone, sender, events.DonePayload(issueID, branch))
