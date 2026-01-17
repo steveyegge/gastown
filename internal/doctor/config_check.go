@@ -767,3 +767,116 @@ func (c *CustomTypesCheck) Fix(ctx *CheckContext) error {
 	}
 	return nil
 }
+
+// AllowedPrefixesCheck verifies allowed_prefixes config includes convoy prefix.
+// Convoy beads use hq-cv-* IDs, which requires allowed_prefixes to include "hq-cv".
+type AllowedPrefixesCheck struct {
+	FixableCheck
+	townRoot string // Cached during Run for use in Fix
+}
+
+// NewAllowedPrefixesCheck creates a new allowed prefixes check.
+func NewAllowedPrefixesCheck() *AllowedPrefixesCheck {
+	return &AllowedPrefixesCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "beads-allowed-prefixes",
+				CheckDescription: "Check that allowed_prefixes includes convoy prefix (hq-cv)",
+				CheckCategory:    CategoryConfig,
+			},
+		},
+	}
+}
+
+// requiredPrefixes are the prefixes that must be in allowed_prefixes for Gas Town.
+var requiredPrefixes = []string{"hq", "hq-cv"}
+
+// Run checks if allowed_prefixes is properly configured.
+func (c *AllowedPrefixesCheck) Run(ctx *CheckContext) *CheckResult {
+	// Check if bd command is available
+	if _, err := exec.LookPath("bd"); err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "beads not installed (skipped)",
+		}
+	}
+
+	// Check if .beads directory exists at town level
+	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No beads database (skipped)",
+		}
+	}
+
+	// Get current allowed_prefixes configuration
+	cmd := exec.Command("bd", "config", "get", "allowed_prefixes")
+	cmd.Dir = ctx.TownRoot
+	output, err := cmd.Output()
+	if err != nil {
+		// If config key doesn't exist, prefixes are not configured
+		c.townRoot = ctx.TownRoot
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: "allowed_prefixes not configured",
+			Details: []string{
+				"Convoy beads require allowed_prefixes to include 'hq' and 'hq-cv'",
+				"Without this, bd create --id=hq-cv-xxx will fail prefix validation",
+			},
+			FixHint: "Run 'gt doctor --fix' or 'bd config set allowed_prefixes \"hq,hq-cv\"'",
+		}
+	}
+
+	// Parse configured prefixes
+	configuredPrefixes := parseConfigOutput(output)
+	configuredSet := make(map[string]bool)
+	for _, p := range strings.Split(configuredPrefixes, ",") {
+		configuredSet[strings.TrimSpace(p)] = true
+	}
+
+	// Check for missing required prefixes
+	var missing []string
+	for _, required := range requiredPrefixes {
+		if !configuredSet[required] {
+			missing = append(missing, required)
+		}
+	}
+
+	if len(missing) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "allowed_prefixes configured correctly",
+		}
+	}
+
+	// Cache for Fix
+	c.townRoot = ctx.TownRoot
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%d required prefix(es) missing from allowed_prefixes", len(missing)),
+		Details: []string{
+			fmt.Sprintf("Missing: %s", strings.Join(missing, ", ")),
+			fmt.Sprintf("Configured: %s", configuredPrefixes),
+			fmt.Sprintf("Required: %s", strings.Join(requiredPrefixes, ", ")),
+		},
+		FixHint: "Run 'gt doctor --fix' to add missing prefixes",
+	}
+}
+
+// Fix sets allowed_prefixes to the required value.
+func (c *AllowedPrefixesCheck) Fix(ctx *CheckContext) error {
+	cmd := exec.Command("bd", "config", "set", "allowed_prefixes", strings.Join(requiredPrefixes, ","))
+	cmd.Dir = c.townRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bd config set allowed_prefixes: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
