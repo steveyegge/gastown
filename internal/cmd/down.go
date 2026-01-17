@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -370,6 +371,60 @@ func printDownStatus(name string, ok bool, detail string) {
 	}
 }
 
+// killOrphanProcesses terminates claude and node child processes of a tmux pane.
+// This prevents orphan Claude Code processes that can accumulate and drain resources.
+func killOrphanProcesses(t *tmux.Tmux, sessionName string) {
+	// Get the shell PID running in the tmux pane
+	panePID, err := t.GetPanePID(sessionName)
+	if err != nil || panePID == "" {
+		return // No pane PID, nothing to kill
+	}
+
+	// Find claude and node child processes
+	var childPIDs []int
+	for _, procName := range []string{"claude", "node"} {
+		// pgrep -P finds children of the pane's shell
+		out, err := runCommand("pgrep", "-P", panePID, procName)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			if line == "" {
+				continue
+			}
+			var pid int
+			if _, err := fmt.Sscanf(line, "%d", &pid); err == nil && pid > 0 {
+				childPIDs = append(childPIDs, pid)
+			}
+		}
+	}
+
+	if len(childPIDs) == 0 {
+		return
+	}
+
+	// SIGTERM for graceful shutdown
+	for _, pid := range childPIDs {
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+	}
+
+	// Wait 2 seconds for graceful termination
+	time.Sleep(2 * time.Second)
+
+	// SIGKILL survivors
+	for _, pid := range childPIDs {
+		if isProcessRunning(pid) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
+}
+
+// runCommand executes a command and returns stdout.
+func runCommand(name string, args ...string) (string, error) {
+	out, err := exec.Command(name, args...).Output()
+	return string(out), err
+}
+
 // stopSession gracefully stops a tmux session.
 // Returns (wasRunning, error) - wasRunning is true if session existed and was stopped.
 func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
@@ -380,6 +435,9 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 	if !running {
 		return false, nil // Already stopped
 	}
+
+	// Kill orphan Claude/node processes before destroying the session
+	killOrphanProcesses(t, sessionName)
 
 	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
 	if !downForce {
