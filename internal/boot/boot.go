@@ -170,17 +170,24 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
 
-	// Build startup command with optional agent override
-	// The "gt boot triage" prompt tells Boot to immediately start triage (GUPP principle)
+	// Build startup beacon for predecessor discovery via /resume
+	// Use formatted beacon instead of bare "gt boot triage" which confuses agents
+	// The SessionStart hook handles context injection (gt prime --hook)
+	// Note: Can't use session.FormatStartupNudge due to import cycle (session imports boot)
+	timestamp := time.Now().Format("2006-01-02T15:04")
+	beacon := fmt.Sprintf("[GAS TOWN] boot <- daemon • %s • triage", timestamp)
+
+	// Build startup command with beacon as initial prompt.
+	// The CLI prompt is more reliable than post-startup nudges (which arrive before input is ready).
 	var startCmd string
 	if agentOverride != "" {
 		var err error
-		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", "gt boot triage", agentOverride)
+		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", beacon, agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", "gt boot triage")
+		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", beacon)
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
