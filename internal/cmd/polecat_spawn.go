@@ -221,8 +221,8 @@ func cleanupOrphanPolecatState(rigName, polecatName, townRoot string, tm *tmux.T
 	polecatDir := filepath.Join(townRoot, "polecats", polecatName)
 	sessionName := fmt.Sprintf("gt-%s-p-%s", rigName, polecatName)
 
-	// Step 1: Kill orphan tmux session if it exists
-	if err := tm.KillSession(sessionName); err == nil {
+	// Step 1: Kill orphan tmux session if it exists (with process cleanup)
+	if err := tm.KillSessionWithProcesses(sessionName); err == nil {
 		fmt.Printf("  Cleaned up orphan tmux session: %s\n", sessionName)
 	}
 
