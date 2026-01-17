@@ -223,9 +223,10 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
-	// Wait for Claude to start and show its prompt - fatal if Claude fails to launch
-	// WaitForRuntimeReady waits for the runtime to be ready
-	if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
+	// Wait for Claude to start - fatal if Claude fails to launch
+	// Use WaitForCommand (like witness) instead of WaitForRuntimeReady for reliability.
+	// WaitForRuntimeReady can fail to detect the prompt due to ANSI codes or timing issues.
+	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
 		return fmt.Errorf("waiting for refinery to start: %w", err)

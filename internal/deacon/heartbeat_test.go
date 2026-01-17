@@ -379,3 +379,57 @@ func TestWriteHeartbeat_SetsTimestamp(t *testing.T) {
 		t.Error("Timestamp should be recent")
 	}
 }
+
+func TestReadHeartbeat_LegacyFormat(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "deacon-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Create deacon directory
+	deaconDir := filepath.Join(tmpDir, "deacon")
+	if err := os.MkdirAll(deaconDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write legacy format heartbeat
+	legacyJSON := `{"last_ping":"2026-01-17T16:52:56Z","status":"alive"}`
+	hbFile := filepath.Join(deaconDir, "heartbeat.json")
+	if err := os.WriteFile(hbFile, []byte(legacyJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read heartbeat - should parse legacy format
+	hb := ReadHeartbeat(tmpDir)
+	if hb == nil {
+		t.Fatal("expected heartbeat from legacy format")
+	}
+
+	// Verify timestamp was extracted from last_ping
+	if hb.Timestamp.IsZero() {
+		t.Error("expected Timestamp to be set from legacy last_ping")
+	}
+
+	// Verify the timestamp is correct (2026-01-17T16:52:56Z)
+	expected := time.Date(2026, 1, 17, 16, 52, 56, 0, time.UTC)
+	if !hb.Timestamp.Equal(expected) {
+		t.Errorf("Timestamp = %v, want %v", hb.Timestamp, expected)
+	}
+
+	// Verify status was mapped to LastAction
+	if hb.LastAction != "alive" {
+		t.Errorf("LastAction = %q, want 'alive'", hb.LastAction)
+	}
+
+	// Cycle should be 0 (unknown in legacy format)
+	if hb.Cycle != 0 {
+		t.Errorf("Cycle = %d, want 0", hb.Cycle)
+	}
+
+	// Most importantly: Age() should NOT return ~292 years!
+	age := hb.Age()
+	if age > 24*time.Hour*365 {
+		t.Errorf("Age() = %v, should not be hundreds of years (legacy parsing failed)", age)
+	}
+}

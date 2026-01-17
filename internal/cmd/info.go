@@ -75,6 +75,14 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.3.1-fix",
+		Date:    "2026-01-17",
+		Changes: []string{
+			"FIX: Deacon heartbeat parsing - fixes stale detection showing 292 years",
+			"FIX: Refinery startup timeout - improved runtime prompt detection",
+		},
+	},
+	{
 		Version: "0.3.1",
 		Date:    "2026-01-17",
 		Changes: []string{

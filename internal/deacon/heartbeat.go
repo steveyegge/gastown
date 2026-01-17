@@ -58,8 +58,16 @@ func WriteHeartbeat(townRoot string, hb *Heartbeat) error {
 	return os.WriteFile(hbFile, data, 0600)
 }
 
+// legacyHeartbeat represents the old heartbeat format for backwards compatibility.
+// Old format: {"last_ping":"2026-01-17T16:52:56Z","status":"alive"}
+type legacyHeartbeat struct {
+	LastPing time.Time `json:"last_ping"`
+	Status   string    `json:"status"`
+}
+
 // ReadHeartbeat reads the Deacon heartbeat from disk.
 // Returns nil if the file doesn't exist or can't be read.
+// Supports both new format (timestamp) and legacy format (last_ping).
 func ReadHeartbeat(townRoot string) *Heartbeat {
 	hbFile := HeartbeatFile(townRoot)
 
@@ -73,6 +81,24 @@ func ReadHeartbeat(townRoot string) *Heartbeat {
 		return nil
 	}
 
+	// Check if we got a valid timestamp from the new format
+	if !hb.Timestamp.IsZero() {
+		return &hb
+	}
+
+	// Try parsing as legacy format (last_ping/status)
+	var legacy legacyHeartbeat
+	if err := json.Unmarshal(data, &legacy); err == nil && !legacy.LastPing.IsZero() {
+		// Convert legacy format to new format
+		return &Heartbeat{
+			Timestamp:  legacy.LastPing,
+			Cycle:      0, // Unknown in legacy format
+			LastAction: legacy.Status,
+		}
+	}
+
+	// Return the parsed heartbeat even with zero timestamp
+	// (will be treated as very stale, which is correct behavior)
 	return &hb
 }
 
