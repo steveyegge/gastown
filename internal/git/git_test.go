@@ -488,3 +488,85 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
+
+// initBareRepoWithWorktree creates a bare repo with an initial commit and a worktree.
+// Returns (bareDir, worktreePath). The bare repo can be accessed via NewGitWithDir(bareDir, "").
+func initBareRepoWithWorktree(t *testing.T) (bareDir, worktreePath string) {
+	t.Helper()
+	tmp := t.TempDir()
+
+	// Create bare repo
+	bareDir = filepath.Join(tmp, "bare.git")
+	if err := exec.Command("git", "init", "--bare", bareDir).Run(); err != nil {
+		t.Fatalf("git init --bare: %v", err)
+	}
+
+	// Create source repo with initial commit and push to bare
+	srcDir := initTestRepo(t)
+	cmd := exec.Command("git", "-C", srcDir, "remote", "add", "origin", bareDir)
+	_ = cmd.Run()
+	if err := exec.Command("git", "-C", srcDir, "push", "-u", "origin", "HEAD").Run(); err != nil {
+		t.Fatalf("git push: %v", err)
+	}
+
+	// Create worktree from bare repo
+	worktreePath = filepath.Join(tmp, "worktree")
+	if err := exec.Command("git", "--git-dir="+bareDir, "worktree", "add", worktreePath, "HEAD").Run(); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+
+	return bareDir, worktreePath
+}
+
+// TestWorktreeRemoveDeletesDirectory verifies that WorktreeRemove actually
+// deletes the worktree directory, not just the git registration.
+func TestWorktreeRemoveDeletesDirectory(t *testing.T) {
+	bareDir, worktreePath := initBareRepoWithWorktree(t)
+
+	// Verify worktree exists
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Fatalf("worktree should exist: %v", err)
+	}
+
+	// Remove using our function
+	bareGit := NewGitWithDir(bareDir, "")
+	if err := bareGit.WorktreeRemove(worktreePath, true); err != nil {
+		t.Fatalf("WorktreeRemove: %v", err)
+	}
+
+	// Verify directory is gone
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Errorf("worktree directory should be deleted, but still exists")
+	}
+
+	// Verify worktree is no longer registered
+	out, err := exec.Command("git", "--git-dir="+bareDir, "worktree", "list").Output()
+	if err != nil {
+		t.Fatalf("git worktree list: %v", err)
+	}
+	if stringContains(string(out), worktreePath) {
+		t.Errorf("worktree should not be in list: %s", out)
+	}
+}
+
+// TestWorktreeRemoveForceFlag verifies that --force flag is placed correctly
+// (before the path, not after) so git accepts it.
+func TestWorktreeRemoveForceFlag(t *testing.T) {
+	bareDir, worktreePath := initBareRepoWithWorktree(t)
+
+	// Create uncommitted changes (requires --force to remove)
+	if err := os.WriteFile(filepath.Join(worktreePath, "dirty.txt"), []byte("uncommitted\n"), 0644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+
+	// Remove with force=true should succeed even with uncommitted changes
+	bareGit := NewGitWithDir(bareDir, "")
+	if err := bareGit.WorktreeRemove(worktreePath, true); err != nil {
+		t.Errorf("WorktreeRemove with force=true should succeed with uncommitted changes: %v", err)
+	}
+
+	// Verify directory is gone
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Errorf("worktree directory should be deleted")
+	}
+}
