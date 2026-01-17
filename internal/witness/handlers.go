@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -810,4 +811,154 @@ func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 
 	// Commit is not on any remote's default branch
 	return false, nil
+}
+
+// PolecatsWithHookedWork contains info about polecats that have hooked work but no active session.
+type PolecatsWithHookedWork struct {
+	PolecatName string
+	HookBead    string
+	RigName     string
+}
+
+// FindPolecatsWithHookedWork finds polecats that have hooked work but no active tmux session.
+// These are polecats that completed work (gt done) but then had new work slung to them via gt sling.
+// They need to be respawned to process the hooked work.
+// Returns a list of such polecats that should be respawned.
+//
+// FIX (hq-50u3h): This function addresses the bug where done polecats don't process hooked work.
+// The fix checks each polecat's agent bead for hook_bead and verifies no active tmux session.
+func FindPolecatsWithHookedWork(workDir, rigName string) ([]*PolecatsWithHookedWork, error) {
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		return nil, fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Get beads directory
+	rigPath := filepath.Join(townRoot, rigName)
+	bd := beads.New(rigPath)
+	t := tmux.NewTmux()
+
+	var result []*PolecatsWithHookedWork
+
+	// Get all polecat agent beads (returns map of bead ID to Issue)
+	agentBeads, err := bd.ListAgentBeads()
+	if err != nil {
+		return nil, fmt.Errorf("listing agent beads: %w", err)
+	}
+
+	// Filter for polecat agents in this rig
+	// Format: <prefix>-<rig>-polecat-<name>
+	polecatSuffix := fmt.Sprintf("%s-polecat-", rigName)
+	for agentID := range agentBeads {
+		// Check if this is a polecat agent bead for this rig
+		if !strings.Contains(agentID, polecatSuffix) {
+			continue
+		}
+
+		// Extract polecat name from agent ID
+		parts := strings.Split(agentID, "-polecat-")
+		if len(parts) < 2 {
+			continue
+		}
+		polecatName := parts[len(parts)-1]
+
+		// Get agent bead fields to check hook_bead
+		_, fields, err := bd.GetAgentBead(agentID)
+		if err != nil || fields == nil {
+			// Skip if we can't get agent bead info
+			continue
+		}
+
+		// Check if hook_bead is set (indicating work is waiting)
+		if fields.HookBead == "" {
+			continue
+		}
+
+		// Check if polecat has an active tmux session
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		hasSession, _ := t.HasSession(sessionName)
+
+		if hasSession {
+			// Session is active - polecat is already working
+			continue
+		}
+
+		// Polecat has hooked work but no active session - needs respawn
+		result = append(result, &PolecatsWithHookedWork{
+			PolecatName: polecatName,
+			HookBead:    fields.HookBead,
+			RigName:     rigName,
+		})
+	}
+
+	return result, nil
+}
+
+// RespawnPolecatWithHookedWork respawns a polecat to process its hooked work.
+// This is used when a polecat has completed work (gt done) but new work was slung to it.
+// The polecat's session is restarted to process the hooked work.
+//
+// FIX (hq-50u3h): This function respawns polecats with hooked work but no active session.
+func RespawnPolecatWithHookedWork(workDir, rigName, polecatName string) error {
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	rigPath := filepath.Join(townRoot, rigName)
+	// Create rig struct directly (no LoadRig function exists)
+	r := &rig.Rig{
+		Name: rigName,
+		Path: rigPath,
+	}
+
+	// Get the polecat manager
+	g := git.NewGit(rigPath)
+	t := tmux.NewTmux()
+	mgr := polecat.NewManager(r, g, t)
+
+	// Get the hook_bead from the agent bead
+	prefix := beads.GetPrefixForRig(townRoot, rigName)
+	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+	bd := beads.New(rigPath)
+	_, fields, err := bd.GetAgentBead(agentBeadID)
+	if err != nil || fields == nil {
+		return fmt.Errorf("getting agent bead: %w", err)
+	}
+
+	if fields.HookBead == "" {
+		return fmt.Errorf("no hooked work found for polecat %s", polecatName)
+	}
+
+	// Check if polecat directory exists (using Get to check if polecat exists)
+	_, err = mgr.Get(polecatName)
+	if err != nil {
+		// Polecat doesn't exist - need to create it fresh
+		_, err := mgr.AddWithOptions(polecatName, polecat.AddOptions{
+			HookBead: fields.HookBead,
+		})
+		if err != nil {
+			return fmt.Errorf("creating polecat: %w", err)
+		}
+	} else {
+		// Polecat exists - repair it to get a fresh worktree
+		_, err := mgr.RepairWorktreeWithOptions(polecatName, true, polecat.AddOptions{
+			HookBead: fields.HookBead,
+		})
+		if err != nil {
+			return fmt.Errorf("repairing polecat worktree: %w", err)
+		}
+	}
+
+	// Start a new tmux session for the polecat
+	sessionMgr := polecat.NewSessionManager(t, r)
+
+	err = sessionMgr.Start(polecatName, polecat.SessionStartOptions{
+		Issue: fields.HookBead,
+	})
+	if err != nil {
+		return fmt.Errorf("starting polecat session: %w", err)
+	}
+
+	return nil
 }

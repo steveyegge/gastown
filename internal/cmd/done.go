@@ -464,6 +464,20 @@ func runDone(cmd *cobra.Command, args []string) error {
 	selfCleanAttempted := false
 	if exitType == ExitCompleted {
 		if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
+			// CRITICAL: Push branch to origin before self-nuking
+			// The Refinery needs the branch to be accessible after the polecat's
+			// worktree is deleted. Without this push, the branch only exists locally
+			// in the polecat's worktree and will be lost when self-nuke removes it.
+			fmt.Printf("\nPushing branch to origin before self-nuke...\n")
+			if err := g.Push("origin", branch, false); err != nil {
+				// Push failure is fatal - we cannot self-nuke without pushing
+				// The work must be preserved for the Refinery to process
+				fmt.Fprintf(os.Stderr, "Error: failed to push branch to origin: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Error: cannot self-nuke without pushing - worktree preserved for manual intervention\n")
+				return fmt.Errorf("push to origin failed (self-nuke aborted): %w", err)
+			}
+			fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
+
 			selfCleanAttempted = true
 
 			// Step 1: Nuke the worktree
@@ -697,9 +711,10 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 		return fmt.Errorf("getting polecat manager: %w", err)
 	}
 
-	// Use nuclear=true since we know we just pushed our work
-	// The branch is pushed, MR is created, we're clean
-	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, true); err != nil {
+	// Use nuclear=false to respect cleanup_status safety checks (ZFC #10)
+	// The agent's self-reported cleanup_status will be validated before removal
+	// This prevents accidental work loss if git state doesn't match expectations
+	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, false); err != nil {
 		return fmt.Errorf("removing worktree: %w", err)
 	}
 
