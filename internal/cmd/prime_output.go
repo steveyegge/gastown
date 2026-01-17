@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -382,6 +383,79 @@ func outputAttachmentStatus(ctx RoleContext) {
 
 	// Show current step from molecule
 	showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
+}
+
+// outputEpicContributingContext outputs CONTRIBUTING.md content when hooked bead is an epic.
+func outputEpicContributingContext(ctx RoleContext) {
+	if ctx.Role == RoleUnknown {
+		return
+	}
+
+	b := beads.New(ctx.WorkDir)
+	assignee := getAgentIdentity(ctx)
+	if assignee == "" {
+		return
+	}
+
+	// Find hooked beads for this agent
+	hookedBeads, err := b.List(beads.ListOptions{
+		Status:   beads.StatusHooked,
+		Assignee: assignee,
+		Priority: -1,
+	})
+	if err != nil || len(hookedBeads) == 0 {
+		return
+	}
+
+	// Check if hooked bead is an epic
+	hooked := hookedBeads[0]
+	if hooked.Type != "epic" && !beads.HasLabel(hooked, "gt:epic") {
+		return
+	}
+
+	// Parse epic fields
+	fields := beads.ParseEpicFields(hooked.Description)
+	if fields.ContributingMD == "" {
+		return
+	}
+
+	// Find and read CONTRIBUTING.md
+	// Look in the rig's mayor/rig directory
+	rigPath := ctx.WorkDir
+	contributingPath := fields.ContributingMD
+
+	// Try to read the file
+	content, err := readContributingFile(rigPath, contributingPath)
+	if err != nil || content == "" {
+		return
+	}
+
+	// Output CONTRIBUTING.md content
+	fmt.Println()
+	fmt.Printf("%s\n\n", style.Bold.Render("## 📋 CONTRIBUTING.md Guidelines"))
+	fmt.Printf("File: %s\n\n", contributingPath)
+	fmt.Println(content)
+	fmt.Println()
+	fmt.Println(style.Dim.Render("(Follow these guidelines when planning and implementing the epic)"))
+}
+
+// readContributingFile reads a CONTRIBUTING.md file from the rig.
+func readContributingFile(rigPath, relativePath string) (string, error) {
+	// Try multiple possible locations
+	paths := []string{
+		filepath.Join(rigPath, relativePath),
+		filepath.Join(rigPath, "..", relativePath),
+		filepath.Join(rigPath, "..", "..", relativePath),
+	}
+
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err == nil {
+			return string(data), nil
+		}
+	}
+
+	return "", fmt.Errorf("CONTRIBUTING.md not found")
 }
 
 // outputHandoffWarning outputs the post-handoff warning message.
