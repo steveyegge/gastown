@@ -221,6 +221,36 @@ This is particularly valuable for:
 - **Capability mapping:** Claude for architecture, GPT for tests?
 - **Cost optimization:** When is a smaller model sufficient?
 
+## Crew-Slings-Polecat Coordination
+
+A key pattern for crew-supervised workflows. Crew workers can dispatch work to
+Polecats and receive completion notifications.
+
+**The Flow:**
+1. Crew runs `gt sling <bead> <rig>` to dispatch work
+2. Sling stores `dispatched_by: crew/` in the bead
+3. Polecat executes work autonomously
+4. Polecat calls `gt done` when complete
+5. `gt done` sends `WORK_DONE: <issue-id>` mail to the dispatcher
+
+**Why it matters:**
+- Polecats cannot use `gt sling` (they're ephemeral workers)
+- The dispatcher receives notification without polling
+- Enables crew to orchestrate parallel polecat workflows
+
+**Example:**
+```bash
+# Crew dispatches work
+gt sling gt-abc gastown
+
+# ... polecat works ...
+# When done, crew receives mail:
+# Subject: WORK_DONE: gt-abc
+# Body: Exit: COMPLETED, Issue: gt-abc, MR: mr-xyz
+```
+
+See `~/gt/ROLES.md` for the full coordination patterns documentation.
+
 ## Common Mistakes
 
 1. **Using dogs for user work**: Dogs are Deacon infrastructure. Use crew or polecats.
