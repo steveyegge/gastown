@@ -215,13 +215,15 @@ squashed_at: %s
 		}())
 	}
 
-	// Create the digest bead
+	// Create the digest bead (ephemeral to avoid JSONL pollution)
+	// Per-cycle digests are aggregated daily by 'gt patrol digest'
 	digestIssue, err := b.Create(beads.CreateOptions{
 		Title:       digestTitle,
 		Description: digestDesc,
 		Type:        "task",
-		Priority:    4, // P4 - backlog priority for digests
+		Priority:    4,       // P4 - backlog priority for digests
 		Actor:       target,
+		Ephemeral:   true,    // Don't export to JSONL - daily aggregation handles permanent record
 	})
 	if err != nil {
 		return fmt.Errorf("creating digest: %w", err)

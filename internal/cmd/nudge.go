@@ -27,8 +27,12 @@ func init() {
 var nudgeCmd = &cobra.Command{
 	Use:     "nudge <target> [message]",
 	GroupID: GroupComm,
-	Short:   "Send a message to a polecat or deacon session reliably",
-	Long: `Sends a message to a polecat's or deacon's Claude Code session.
+	Short:   "Send a synchronous message to any Gas Town worker",
+	Long: `Universal synchronous messaging API for Gas Town worker-to-worker communication.
+
+Delivers a message directly to any worker's Claude Code session: polecats, crew,
+witness, refinery, mayor, or deacon. Use this for real-time coordination when
+you need immediate attention from another worker.
 
 Uses a reliable delivery pattern:
 1. Sends text in literal mode (-l flag)

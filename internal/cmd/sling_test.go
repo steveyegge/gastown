@@ -616,6 +616,7 @@ exit 0
 	t.Setenv(EnvGTRole, "crew")
 	t.Setenv("GT_CREW", "jv")
 	t.Setenv("GT_POLECAT", "")
+	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -636,6 +637,9 @@ exit 0
 
 	slingDryRun = true
 	slingNoConvoy = true
+
+	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
 
 	// EXPECTED: gt sling should use daemon mode and succeed
 	// ACTUAL: verifyBeadExists uses --no-daemon and fails with sync error
@@ -792,6 +796,7 @@ exit 0
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
+	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -818,6 +823,9 @@ exit 0
 	slingNoConvoy = true
 	slingVars = nil
 	slingOnTarget = "gt-abc123" // The bug bead we're applying formula to
+
+	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
 
 	if err := runSling(nil, []string{"mol-polecat-work"}); err != nil {
 		t.Fatalf("runSling: %v", err)

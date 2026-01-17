@@ -231,6 +231,23 @@ func (t *Tmux) KillServer() error {
 	return err
 }
 
+// SetExitEmpty controls the tmux exit-empty server option.
+// When on (default), the server exits when there are no sessions.
+// When off, the server stays running even with no sessions.
+// This is useful during shutdown to prevent the server from exiting
+// when all Gas Town sessions are killed but the user has no other sessions.
+func (t *Tmux) SetExitEmpty(on bool) error {
+	value := "on"
+	if !on {
+		value = "off"
+	}
+	_, err := t.run("set-option", "-g", "exit-empty", value)
+	if errors.Is(err, ErrNoServer) {
+		return nil // No server to configure
+	}
+	return err
+}
+
 // IsAvailable checks if tmux is installed and can be invoked.
 func (t *Tmux) IsAvailable() bool {
 	cmd := exec.Command("tmux", "-V")

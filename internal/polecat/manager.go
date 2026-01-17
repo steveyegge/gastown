@@ -437,6 +437,18 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 	// Get repo base to remove the worktree properly
 	repoGit, err := m.repoBase()
 	if err != nil {
+		// Best-effort: try to prune stale worktree entries from both possible repo locations.
+		// This handles edge cases where the repo base is corrupted but worktree entries exist.
+		bareRepoPath := filepath.Join(m.rig.Path, ".repo.git")
+		if info, statErr := os.Stat(bareRepoPath); statErr == nil && info.IsDir() {
+			bareGit := git.NewGitWithDir(bareRepoPath, "")
+			_ = bareGit.WorktreePrune()
+		}
+		mayorRigPath := filepath.Join(m.rig.Path, "mayor", "rig")
+		if info, statErr := os.Stat(mayorRigPath); statErr == nil && info.IsDir() {
+			mayorGit := git.NewGit(mayorRigPath)
+			_ = mayorGit.WorktreePrune()
+		}
 		// Fall back to direct removal if repo base not found
 		return os.RemoveAll(polecatDir)
 	}
@@ -450,21 +462,17 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 		}
 	} else {
 		// GT-1L3MY9: git worktree remove may leave untracked directories behind.
-		// Clean up any leftover .beads/ directory that wasn't fully removed.
-		cloneBeadsDir := filepath.Join(clonePath, ".beads")
-		_ = os.RemoveAll(cloneBeadsDir)
-		// Remove the now-empty clonePath if it still exists
-		_ = os.Remove(clonePath)
+		// Clean up any leftover files (overlay files, .beads/, setup hook outputs, etc.)
+		// Use RemoveAll to handle non-empty directories with untracked files.
+		_ = os.RemoveAll(clonePath)
 	}
 
-	// Also remove the parent polecat directory if it's now empty
+	// Also remove the parent polecat directory
 	// (for new structure: polecats/<name>/ contains only polecats/<name>/<rigname>/)
 	if polecatDir != clonePath {
-		// GT-1L3MY9: Clean up any orphaned .beads/ directory at polecat level.
-		// This can happen if the worktree cleanup was incomplete or from old state.
-		polecatBeadsDir := filepath.Join(polecatDir, ".beads")
-		_ = os.RemoveAll(polecatBeadsDir)
-		_ = os.Remove(polecatDir) // Non-fatal: only removes if empty
+		// GT-1L3MY9: Clean up any orphaned files at polecat level.
+		// Use RemoveAll to handle non-empty directories with leftover files.
+		_ = os.RemoveAll(polecatDir)
 	}
 
 	// Prune any stale worktree entries (non-fatal: cleanup only)

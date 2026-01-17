@@ -825,6 +825,15 @@ func runRigStart(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		// Check if rig is parked or docked
+		cfg := wisp.NewConfig(townRoot, rigName)
+		status := cfg.GetString("status")
+		if status == "parked" || status == "docked" {
+			fmt.Printf("%s Rig '%s' is %s - skipping (use 'gt rig unpark' or 'gt rig undock' first)\n",
+				style.Warning.Render("⚠"), rigName, status)
+			continue
+		}
+
 		fmt.Printf("Starting rig %s...\n", style.Bold.Render(rigName))
 
 		var started []string

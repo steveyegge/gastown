@@ -44,13 +44,22 @@ var (
 var costsCmd = &cobra.Command{
 	Use:     "costs",
 	GroupID: GroupDiag,
-	Short:   "Show costs for running Claude sessions",
+	Short:   "Show costs for running Claude sessions [DISABLED]",
 	Long: `Display costs for Claude Code sessions in Gas Town.
 
-By default, shows live costs scraped from running tmux sessions.
+⚠️  COST TRACKING IS CURRENTLY DISABLED
 
-Cost tracking uses ephemeral wisps for individual sessions that are
-aggregated into daily "Cost Report" digest beads for audit purposes.
+Claude Code displays costs in the TUI status bar, which cannot be captured
+via tmux. All sessions will show $0.00 until Claude Code exposes cost data
+through an API or environment variable.
+
+What we need from Claude Code:
+  - Stop hook env var (e.g., $CLAUDE_SESSION_COST)
+  - Or queryable file/API endpoint
+
+See: GH#24, gt-7awfj
+
+The infrastructure remains in place and will work once cost data is available.
 
 Examples:
   gt costs              # Live costs from running sessions
@@ -194,6 +203,11 @@ func runCosts(cmd *cobra.Command, args []string) error {
 }
 
 func runLiveCosts() error {
+	// Warn that cost tracking is disabled
+	fmt.Fprintf(os.Stderr, "%s Cost tracking is disabled - Claude Code does not expose session costs.\n",
+		style.Warning.Render("⚠"))
+	fmt.Fprintf(os.Stderr, "   All sessions will show $0.00. See: GH#24, gt-7awfj\n\n")
+
 	t := tmux.NewTmux()
 
 	// Get all tmux sessions
@@ -253,6 +267,11 @@ func runLiveCosts() error {
 }
 
 func runCostsFromLedger() error {
+	// Warn that cost tracking is disabled
+	fmt.Fprintf(os.Stderr, "%s Cost tracking is disabled - Claude Code does not expose session costs.\n",
+		style.Warning.Render("⚠"))
+	fmt.Fprintf(os.Stderr, "   Historical data may show $0.00 for all sessions. See: GH#24, gt-7awfj\n\n")
+
 	now := time.Now()
 	var entries []CostEntry
 	var err error

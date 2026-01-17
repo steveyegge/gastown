@@ -29,7 +29,7 @@ func NewBdDaemonCheck() *BdDaemonCheck {
 // Run checks if the bd daemon is running and healthy.
 func (c *BdDaemonCheck) Run(ctx *CheckContext) *CheckResult {
 	// Check daemon status
-	cmd := exec.Command("bd", "daemon", "--status")
+	cmd := exec.Command("bd", "daemon", "status")
 	cmd.Dir = ctx.TownRoot
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -41,7 +41,7 @@ func (c *BdDaemonCheck) Run(ctx *CheckContext) *CheckResult {
 	// Check if daemon is running
 	if err == nil && strings.Contains(output, "Daemon is running") {
 		// Daemon is running, now check health
-		healthCmd := exec.Command("bd", "daemon", "--health")
+		healthCmd := exec.Command("bd", "daemon", "health")
 		healthCmd.Dir = ctx.TownRoot
 		var healthOut bytes.Buffer
 		healthCmd.Stdout = &healthOut
@@ -82,7 +82,7 @@ func (c *BdDaemonCheck) Run(ctx *CheckContext) *CheckResult {
 
 // tryStartDaemon attempts to start the bd daemon and returns any error output.
 func (c *BdDaemonCheck) tryStartDaemon(ctx *CheckContext) *startError {
-	cmd := exec.Command("bd", "daemon", "--start")
+	cmd := exec.Command("bd", "daemon", "start")
 	cmd.Dir = ctx.TownRoot
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -178,7 +178,7 @@ func (c *BdDaemonCheck) parseStartError(err *startError) *CheckResult {
 		Status:  StatusError,
 		Message: "bd daemon failed to start",
 		Details: details,
-		FixHint: "Check 'bd daemon --status' and logs in .beads/daemon.log",
+		FixHint: "Check 'bd daemon status' and logs in .beads/daemon.log",
 	}
 }
 
@@ -201,13 +201,13 @@ func (c *BdDaemonCheck) Fix(ctx *CheckContext) error {
 		}
 
 		// Try starting again
-		startCmd := exec.Command("bd", "daemon", "--start")
+		startCmd := exec.Command("bd", "daemon", "start")
 		startCmd.Dir = ctx.TownRoot
 		return startCmd.Run()
 	}
 
 	// For other errors, just try to start
-	startCmd := exec.Command("bd", "daemon", "--start")
+	startCmd := exec.Command("bd", "daemon", "start")
 	startCmd.Dir = ctx.TownRoot
 	return startCmd.Run()
 }

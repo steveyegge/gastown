@@ -171,7 +171,29 @@ func (r *Resolver) resolveByName(name string) ([]Recipient, error) {
 		}
 	}
 
-	// Check for queue in config
+	// Check for beads-native queue
+	if r.beads != nil {
+		_, queueFields, err := r.beads.LookupQueueByName(name)
+		if err != nil {
+			return nil, err
+		}
+		if queueFields != nil {
+			foundQueue = true
+		}
+	}
+
+	// Check for beads-native channel
+	if r.beads != nil {
+		_, channelFields, err := r.beads.LookupChannelByName(name)
+		if err != nil {
+			return nil, err
+		}
+		if channelFields != nil {
+			foundChannel = true
+		}
+	}
+
+	// Check for queue/channel in config (legacy)
 	if r.townRoot != "" {
 		cfg, err := config.LoadMessagingConfig(config.MessagingConfigPath(r.townRoot))
 		if err == nil && cfg != nil {

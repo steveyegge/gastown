@@ -85,9 +85,45 @@ Callbacks may spawn new polecats, update issue state, or trigger other actions.
 Keep inbox near-empty - only unprocessed items should remain."""
 
 [[steps]]
+id = "orphan-process-cleanup"
+title = "Clean up orphaned claude subagent processes"
+needs = ["inbox-check"]
+description = """
+Clean up orphaned claude subagent processes.
+
+Claude Code's Task tool spawns subagent processes that sometimes don't clean up
+properly after completion. These accumulate and consume significant memory.
+
+**Detection method:**
+Orphaned processes have no controlling terminal (TTY = "?"). Legitimate claude
+instances in terminals have a TTY like "pts/0".
+
+**Run cleanup:**
+```bash
+gt deacon cleanup-orphans
+```
+
+This command:
+1. Lists all claude/codex processes with `ps -eo pid,tty,comm`
+2. Filters for TTY = "?" (no controlling terminal)
+3. Sends SIGTERM to each orphaned process
+4. Reports how many were killed
+
+**Why this is safe:**
+- Processes in terminals (your personal sessions) have a TTY - they won't be touched
+- Only kills processes that have no controlling terminal
+- These orphans are children of the tmux server with no TTY, indicating they're
+  detached subagents that failed to exit
+
+**If cleanup fails:**
+Log the error but continue patrol - this is best-effort cleanup.
+
+**Exit criteria:** Orphan cleanup attempted (success or logged failure)."""
+
+[[steps]]
 id = "trigger-pending-spawns"
 title = "Nudge newly spawned polecats"
-needs = ["inbox-check"]  # P1: High priority - polecats waiting for work
+needs = ["orphan-process-cleanup"]
 description = """
 Nudge newly spawned polecats that are ready for input.
 
@@ -460,9 +496,118 @@ Skip dispatch - system is healthy.
 **Exit criteria:** Session GC dispatched to dog (if needed)."""
 
 [[steps]]
+id = "costs-digest"
+title = "Aggregate daily costs [DISABLED]"
+needs = ["session-gc"]
+description = """
+**⚠️ DISABLED** - Skip this step entirely.
+
+Cost tracking is temporarily disabled because Claude Code does not expose
+session costs in a way that can be captured programmatically.
+
+**Why disabled:**
+- The `gt costs` command uses tmux capture-pane to find costs
+- Claude Code displays costs in the TUI status bar, not in scrollback
+- All sessions show $0.00 because capture-pane can't see TUI chrome
+- The infrastructure is sound but has no data source
+
+**What we need from Claude Code:**
+- Stop hook env var (e.g., `$CLAUDE_SESSION_COST`)
+- Or queryable file/API endpoint
+
+**Re-enable when:** Claude Code exposes cost data via API or environment.
+
+See: GH#24, gt-7awfj
+
+**Exit criteria:** Skip this step - proceed to next."""
+
+[[steps]]
+id = "patrol-digest"
+title = "Aggregate daily patrol digests"
+needs = ["costs-digest"]
+description = """
+**DAILY DIGEST** - Aggregate yesterday's patrol cycle digests.
+
+Patrol cycles (Deacon, Witness, Refinery) create ephemeral per-cycle digests
+to avoid JSONL pollution. This step aggregates them into a single permanent
+"Patrol Report YYYY-MM-DD" bead for audit purposes.
+
+**Step 1: Check if digest is needed**
+```bash
+# Preview yesterday's patrol digests (dry run)
+gt patrol digest --yesterday --dry-run
+```
+
+If output shows "No patrol digests found", skip to Step 3.
+
+**Step 2: Create the digest**
+```bash
+gt patrol digest --yesterday
+```
+
+This:
+- Queries all ephemeral patrol digests from yesterday
+- Creates a single "Patrol Report YYYY-MM-DD" bead with aggregated data
+- Deletes the source digests
+
+**Step 3: Verify**
+Daily patrol digests preserve audit trail without per-cycle pollution.
+
+**Timing**: Run once per morning patrol cycle. The --yesterday flag ensures
+we don't try to digest today's incomplete data.
+
+**Exit criteria:** Yesterday's patrol digests aggregated (or none to aggregate)."""
+
+[[steps]]
+id = "log-maintenance"
+title = "Rotate logs and prune state"
+needs = ["patrol-digest"]
+description = """
+Maintain daemon logs and state files.
+
+**Step 1: Check daemon.log size**
+```bash
+# Get log file size
+ls -la ~/.beads/daemon*.log 2>/dev/null || ls -la ~/gt/.beads/daemon*.log 2>/dev/null
+```
+
+If daemon.log exceeds 10MB:
+```bash
+# Rotate with date suffix and gzip
+LOGFILE="$HOME/gt/.beads/daemon.log"
+if [ -f "$LOGFILE" ] && [ $(stat -f%z "$LOGFILE" 2>/dev/null || stat -c%s "$LOGFILE") -gt 10485760 ]; then
+    DATE=$(date +%Y-%m-%dT%H-%M-%S)
+    mv "$LOGFILE" "${LOGFILE%.log}-${DATE}.log"
+    gzip "${LOGFILE%.log}-${DATE}.log"
+fi
+```
+
+**Step 2: Archive old daemon logs**
+
+Clean up daemon logs older than 7 days:
+```bash
+find ~/gt/.beads/ -name "daemon-*.log.gz" -mtime +7 -delete
+```
+
+**Step 3: Prune state.json of dead sessions**
+
+The state.json tracks active sessions. Prune entries for sessions that no longer exist:
+```bash
+# Check for stale session entries
+gt daemon status --json 2>/dev/null
+```
+
+If state.json references sessions not in tmux:
+- Remove the stale entries
+- The daemon's internal cleanup should handle this, but verify
+
+**Note**: Log rotation prevents disk bloat from long-running daemons.
+State pruning keeps runtime state accurate."""
+
+[[steps]]
 id = "patrol-cleanup"
 title = "End-of-cycle inbox hygiene"
-needs = ["session-gc"]
+needs = ["log-maintenance"]
 description = """
 Verify inbox hygiene before ending patrol cycle.
 

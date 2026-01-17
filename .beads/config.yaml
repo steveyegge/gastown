@@ -62,6 +62,12 @@
 # - github.repo
 sync-branch: beads-sync
 
+# Gas Town custom types (bd-t5o8i)
+# These types are used by Gas Town infrastructure but are not core beads types.
+# They will be removed from beads built-in types (bd-find4) and configured here instead.
+types:
+  custom: "molecule,gate,convoy,merge-request,slot,agent,role,rig,event,message"
+
 # Cross-project dependencies (gt-o3is)
 # Maps project names to paths for external dependency resolution
 # Format: external:<project>:<capability> in bd dep commands

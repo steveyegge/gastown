@@ -191,7 +191,8 @@ func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 		etimeStr := fields[3]
 
 		// Only look for claude/codex processes without a TTY
-		if tty != "?" {
+		// Linux shows "?" for no TTY, macOS shows "??"
+		if tty != "?" && tty != "??" {
 			continue
 		}
 

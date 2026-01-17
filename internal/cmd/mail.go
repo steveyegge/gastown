@@ -194,8 +194,9 @@ Examples:
 }
 
 var mailMarkReadCmd = &cobra.Command{
-	Use:   "mark-read <message-id> [message-id...]",
-	Short: "Mark messages as read without archiving",
+	Use:     "mark-read <message-id> [message-id...]",
+	Aliases: []string{"ack"},
+	Short:   "Mark messages as read without archiving",
 	Long: `Mark one or more messages as read without removing them from inbox.
 
 This adds a 'read' label to the message, which is reflected in the inbox display.

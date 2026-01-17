@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 )
@@ -180,7 +179,8 @@ func (b *Beads) CreateQueueBead(id, title string, fields *QueueFields) (*Issue, 
 	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking
-	if actor := os.Getenv("BD_ACTOR"); actor != "" {
+	// Uses getActor() to respect isolated mode (tests)
+	if actor := b.getActor(); actor != "" {
 		args = append(args, "--actor="+actor)
 	}
 
@@ -290,6 +290,37 @@ func (b *Beads) ListQueueBeads() (map[string]*Issue, error) {
 func (b *Beads) DeleteQueueBead(id string) error {
 	_, err := b.run("delete", id, "--hard", "--force")
 	return err
+}
+
+// LookupQueueByName finds a queue by its name field (not by ID).
+// This is used for address resolution where we may not know the full bead ID.
+func (b *Beads) LookupQueueByName(name string) (*Issue, *QueueFields, error) {
+	// First try direct lookup by standard ID formats (town and rig level)
+	for _, isTownLevel := range []bool{true, false} {
+		id := QueueBeadID(name, isTownLevel)
+		issue, fields, err := b.GetQueueBead(id)
+		if err != nil {
+			return nil, nil, err
+		}
+		if issue != nil {
+			return issue, fields, nil
+		}
+	}
+
+	// If not found by ID, search all queues by name field
+	queues, err := b.ListQueueBeads()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, issue := range queues {
+		fields := ParseQueueFields(issue.Description)
+		if fields.Name == name {
+			return issue, fields, nil
+		}
+	}
+
+	return nil, nil, nil // Not found
 }
 
 // MatchClaimPattern checks if an identity matches a claim pattern.

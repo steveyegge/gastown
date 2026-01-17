@@ -1,0 +1,95 @@
+description = """
+Test molecule for verifying exponential backoff behavior.
+
+Uses SHORT intervals (2s base, 10s max) so you can observe multiple
+backoff cycles in under a minute.
+
+Expected backoff progression:
+- Cycle 0: 2s
+- Cycle 1: 4s
+- Cycle 2: 8s
+- Cycle 3+: 10s (capped)
+
+Full backoff cycle observable in ~24 seconds.
+
+## Running This Test
+
+1. Create a test agent bead (if not exists):
+   ```bash
+   bd create --type=agent --title="Backoff Test Agent" --id=hq-backoff-test
+   ```
+
+2. Run the deacon with this formula, or execute steps manually:
+   ```bash
+   gt mol step await-signal --agent-bead hq-backoff-test \
+     --backoff-base 2s --backoff-mult 2 --backoff-max 10s
+   ```
+
+3. Watch the idle counter increment on each timeout:
+   ```bash
+   bd show hq-backoff-test --json | jq '.[] | .labels'
+   ```
+
+4. Trigger activity to test signal wake:
+   ```bash
+   bd create --title="Wake signal" --silent  # Any bd command triggers activity
+   ```
+
+5. Reset idle counter after signal (caller responsibility):
+   ```bash
+   bd update hq-backoff-test --set-labels=idle:0
+   ```
+"""
+formula = "mol-backoff-test"
+version = 1
+
+[[steps]]
+id = "heartbeat"
+title = "Touch heartbeat"
+description = """
+Touch heartbeat to show we're alive.
+
+```bash
+gt deacon heartbeat "backoff test cycle"
+```
+
+This updates the deacon's heartbeat file to signal liveness.
+"""
+
+[[steps]]
+id = "await-signal"
+title = "Wait with exponential backoff (SHORT intervals)"
+needs = ["heartbeat"]
+description = """
+Wait for activity with exponential backoff using TEST intervals.
+
+**IMPORTANT**: This uses SHORT intervals for testing:
+- Base: 2s (production: 60s)
+- Multiplier: 2
+- Max: 10s (production: 10m)
+
+```bash
+gt mol step await-signal --agent-bead hq-backoff-test \
+  --backoff-base 2s --backoff-mult 2 --backoff-max 10s
+```
+
+**Expected behavior:**
+
+| Idle Cycles | Timeout |
+|-------------|---------|
+| 0           | 2s      |
+| 1           | 4s      |
+| 2           | 8s      |
+| 3+          | 10s     |
+
+**On timeout**: The command auto-increments the `idle:N` label on the agent bead.
+Continue to the next patrol cycle (loop back to heartbeat).
+
+**On signal**: Activity was detected. Reset the idle counter:
+```bash
+bd update hq-backoff-test --set-labels=idle:0
+```
+Then loop back to heartbeat for the next cycle.
+
+**To exit**: When context is high or testing is complete, exit cleanly.
+"""

@@ -347,9 +347,15 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		depArgs := []string{"dep", "add", convoyID, trackID, "--type=tracks"}
 		depCmd := exec.Command("bd", depArgs...)
 		depCmd.Dir = townBeads
+		var depStderr bytes.Buffer
+		depCmd.Stderr = &depStderr
 
 		if err := depCmd.Run(); err != nil {
-			style.PrintWarning("couldn't track %s: %v", issueID, err)
+			errMsg := strings.TrimSpace(depStderr.String())
+			if errMsg == "" {
+				errMsg = err.Error()
+			}
+			style.PrintWarning("couldn't track %s: %s", issueID, errMsg)
 		} else {
 			trackedCount++
 		}
@@ -439,9 +445,15 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 		depArgs := []string{"dep", "add", convoyID, trackID, "--type=tracks"}
 		depCmd := exec.Command("bd", depArgs...)
 		depCmd.Dir = townBeads
+		var depStderr bytes.Buffer
+		depCmd.Stderr = &depStderr
 
 		if err := depCmd.Run(); err != nil {
-			style.PrintWarning("couldn't add %s: %v", issueID, err)
+			errMsg := strings.TrimSpace(depStderr.String())
+			if errMsg == "" {
+				errMsg = err.Error()
+			}
+			style.PrintWarning("couldn't add %s: %s", issueID, errMsg)
 		} else {
 			addedCount++
 		}

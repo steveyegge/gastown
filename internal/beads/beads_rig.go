@@ -4,7 +4,6 @@ package beads
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -90,7 +89,8 @@ func (b *Beads) CreateRigBead(id, title string, fields *RigFields) (*Issue, erro
 	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking
-	if actor := os.Getenv("BD_ACTOR"); actor != "" {
+	// Uses getActor() to respect isolated mode (tests)
+	if actor := b.getActor(); actor != "" {
 		args = append(args, "--actor="+actor)
 	}
 

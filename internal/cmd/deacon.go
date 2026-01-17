@@ -35,14 +35,20 @@ var deaconCmd = &cobra.Command{
 	Use:     "deacon",
 	Aliases: []string{"dea"},
 	GroupID: GroupAgents,
-	Short:   "Manage the Deacon session",
+	Short:   "Manage the Deacon (town-level watchdog)",
 	RunE:    requireSubcommand,
-	Long: `Manage the Deacon tmux session.
+	Long: `Manage the Deacon - the town-level watchdog for Gas Town.
 
-The Deacon is the hierarchical health-check orchestrator for Gas Town.
-It monitors the Mayor and Witnesses, handles lifecycle requests, and
-keeps the town running. Use the subcommands to start, stop, attach,
-and check status.`,
+The Deacon ("daemon beacon") is the only agent that receives mechanical
+heartbeats from the daemon. It monitors system health across all rigs:
+  - Watches all Witnesses (are they alive? stuck? responsive?)
+  - Manages Dogs for cross-rig infrastructure work
+  - Handles lifecycle requests (respawns, restarts)
+  - Receives heartbeat pokes and decides what needs attention
+
+The Deacon patrols the town; Witnesses patrol their rigs; Polecats work.
+
+Role shortcuts: "deacon" in mail/nudge addresses resolves to this agent.`,
 }
 
 var deaconStartCmd = &cobra.Command{

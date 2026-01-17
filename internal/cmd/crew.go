@@ -27,27 +27,33 @@ var (
 var crewCmd = &cobra.Command{
 	Use:     "crew",
 	GroupID: GroupWorkspace,
-	Short:   "Manage crew workspaces (user-managed persistent workspaces)",
+	Short:   "Manage crew workers (persistent workspaces for humans)",
 	RunE:    requireSubcommand,
-	Long: `Crew workers are user-managed persistent workspaces within a rig.
+	Long: `Manage crew workers - persistent workspaces for human developers.
 
-Unlike polecats which are witness-managed and transient, crew workers are:
-- Persistent: Not auto-garbage-collected
-- User-managed: Overseer controls lifecycle
-- Long-lived identities: recognizable names like dave, emma, fred
-- Gas Town integrated: Mail, handoff mechanics work
-- Tmux optional: Can work in terminal directly
+CREW VS POLECATS:
+  Polecats: Ephemeral. Witness-managed. Auto-nuked after work.
+  Crew:     Persistent. User-managed. Stays until you remove it.
+
+Crew workers are full git clones (not worktrees) for human developers
+who want persistent context and control over their workspace lifecycle.
+Use crew workers for exploratory work, long-running tasks, or when you
+want to keep uncommitted changes around.
+
+Features:
+  - Gas Town integrated: Mail, nudge, handoff all work
+  - Recognizable names: dave, emma, fred (not ephemeral pool names)
+  - Tmux optional: Can work in terminal directly without tmux session
 
 Commands:
-  gt crew start <name>     Start a crew workspace (creates if needed)
-  gt crew stop <name>      Stop crew workspace session(s)
-  gt crew add <name>       Create a new crew workspace
-  gt crew list             List crew workspaces with status
-  gt crew at <name>        Attach to crew workspace session
-  gt crew remove <name>    Remove a crew workspace
-  gt crew refresh <name>   Context cycling with mail-to-self handoff
-  gt crew restart <name>   Kill and restart session fresh (alias: rs)
-  gt crew status [<name>]  Show detailed workspace status`,
+  gt crew start <name>     Start session (creates workspace if needed)
+  gt crew stop <name>      Stop session(s)
+  gt crew add <name>       Create workspace without starting
+  gt crew list             List workspaces with status
+  gt crew at <name>        Attach to session
+  gt crew remove <name>    Remove workspace
+  gt crew refresh <name>   Context cycle with handoff mail
+  gt crew restart <name>   Kill and restart session fresh`,
 }
 
 var crewAddCmd = &cobra.Command{

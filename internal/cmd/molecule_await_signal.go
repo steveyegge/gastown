@@ -237,8 +237,10 @@ func calculateEffectiveTimeout(idleCycles int) (time.Duration, error) {
 // waitForActivitySignal starts bd activity --follow and waits for any output.
 // Returns immediately when a line is received, or when context is canceled.
 func waitForActivitySignal(ctx context.Context, workDir string) (*AwaitSignalResult, error) {
-	// Start bd activity --follow
-	cmd := exec.CommandContext(ctx, "bd", "activity", "--follow")
+	// Start bd activity --follow --since 1s
+	// The --since flag ensures we only wait for NEW events, not historical ones.
+	// Without this, the feed would immediately return old activity and never timeout.
+	cmd := exec.CommandContext(ctx, "bd", "activity", "--follow", "--since", "1s")
 	cmd.Dir = workDir
 
 	stdout, err := cmd.StdoutPipe()

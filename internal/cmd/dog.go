@@ -40,14 +40,22 @@ var dogCmd = &cobra.Command{
 	Use:     "dog",
 	Aliases: []string{"dogs"},
 	GroupID: GroupAgents,
-	Short:   "Manage dogs (Deacon's helper workers)",
-	Long: `Manage dogs in the kennel.
+	Short:   "Manage dogs (cross-rig infrastructure workers)",
+	Long: `Manage dogs - reusable workers for infrastructure and cleanup.
 
-Dogs are reusable helper workers managed by the Deacon for infrastructure
-and cleanup tasks. Unlike polecats (single-rig, ephemeral), dogs handle
-cross-rig infrastructure work with worktrees into each rig.
+CATS VS DOGS:
+  Polecats (cats) build features. One rig. Ephemeral (one task, then nuked).
+  Dogs clean up messes. Cross-rig. Reusable (multiple tasks, eventually recycled).
 
-The kennel is located at ~/gt/deacon/dogs/.`,
+Dogs are managed by the Deacon for town-level work:
+  - Infrastructure tasks (rebuilding, syncing, migrations)
+  - Cleanup operations (orphan branches, stale files)
+  - Cross-rig work that spans multiple projects
+
+Each dog has worktrees into every configured rig, enabling cross-project
+operations. Dogs return to idle state after completing work (unlike cats).
+
+The kennel is at ~/gt/deacon/dogs/. The Deacon dispatches work to dogs.`,
 }
 
 var dogAddCmd = &cobra.Command{

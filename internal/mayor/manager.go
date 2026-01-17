@@ -114,9 +114,11 @@ func (m *Manager) Start(agentOverride string) error {
 	theme := tmux.MayorTheme()
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Mayor", "coordinator")
 
-	// Wait for Claude to start (non-fatal)
+	// Wait for Claude to start - fatal if Claude fails to launch
 	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal - try to continue anyway
+		// Kill the zombie session before returning error
+		_ = t.KillSessionWithProcesses(sessionID)
+		return fmt.Errorf("waiting for mayor to start: %w", err)
 	}
 
 	// Accept bypass permissions warning dialog if it appears.

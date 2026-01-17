@@ -5,8 +5,8 @@
 ## Overview
 
 Polecats have three distinct lifecycle layers that operate independently. Confusing
-these layers leads to bugs like "idle polecats" and misunderstanding when
-recycling occurs.
+these layers leads to "heresies" like thinking there are "idle polecats" and
+misunderstanding when recycling occurs.
 
 ## The Three Operating States
 

@@ -80,6 +80,32 @@ var channelDeleteCmd = &cobra.Command{
 	RunE:  runChannelDelete,
 }
 
+var channelSubscribeCmd = &cobra.Command{
+	Use:   "subscribe <name>",
+	Short: "Subscribe to a channel",
+	Long: `Subscribe the current identity (BD_ACTOR) to a channel.
+
+Subscribers receive messages broadcast to the channel.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runChannelSubscribe,
+}
+
+var channelUnsubscribeCmd = &cobra.Command{
+	Use:   "unsubscribe <name>",
+	Short: "Unsubscribe from a channel",
+	Long:  `Unsubscribe the current identity (BD_ACTOR) from a channel.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runChannelUnsubscribe,
+}
+
+var channelSubscribersCmd = &cobra.Command{
+	Use:   "subscribers <name>",
+	Short: "List channel subscribers",
+	Long:  `List all subscribers to a channel.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runChannelSubscribers,
+}
+
 func init() {
 	// List flags
 	channelListCmd.Flags().BoolVar(&channelJSON, "json", false, "Output as JSON")
@@ -91,6 +117,9 @@ func init() {
 	channelCreateCmd.Flags().IntVar(&channelRetainCount, "retain-count", 0, "Number of messages to retain (0 = unlimited)")
 	channelCreateCmd.Flags().IntVar(&channelRetainHours, "retain-hours", 0, "Hours to retain messages (0 = forever)")
 
+	// Subscribers flags
+	channelSubscribersCmd.Flags().BoolVar(&channelJSON, "json", false, "Output as JSON")
+
 	// Main channel command flags
 	mailChannelCmd.Flags().BoolVar(&channelJSON, "json", false, "Output as JSON")
 
@@ -99,6 +128,9 @@ func init() {
 	mailChannelCmd.AddCommand(channelShowCmd)
 	mailChannelCmd.AddCommand(channelCreateCmd)
 	mailChannelCmd.AddCommand(channelDeleteCmd)
+	mailChannelCmd.AddCommand(channelSubscribeCmd)
+	mailChannelCmd.AddCommand(channelUnsubscribeCmd)
+	mailChannelCmd.AddCommand(channelSubscribersCmd)
 
 	mailCmd.AddCommand(mailChannelCmd)
 }
@@ -302,6 +334,131 @@ func runChannelDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Deleted channel %q\n", name)
+	return nil
+}
+
+func runChannelSubscribe(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	subscriber := os.Getenv("BD_ACTOR")
+	if subscriber == "" {
+		return fmt.Errorf("BD_ACTOR not set - cannot determine subscriber identity")
+	}
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	b := beads.New(townRoot)
+
+	// Check channel exists and current subscription status
+	_, fields, err := b.GetChannelBead(name)
+	if err != nil {
+		return fmt.Errorf("getting channel: %w", err)
+	}
+	if fields == nil {
+		return fmt.Errorf("channel not found: %s", name)
+	}
+
+	// Check if already subscribed
+	for _, s := range fields.Subscribers {
+		if s == subscriber {
+			fmt.Printf("%s is already subscribed to channel %q\n", subscriber, name)
+			return nil
+		}
+	}
+
+	if err := b.SubscribeToChannel(name, subscriber); err != nil {
+		return fmt.Errorf("subscribing to channel: %w", err)
+	}
+
+	fmt.Printf("Subscribed %s to channel %q\n", subscriber, name)
+	return nil
+}
+
+func runChannelUnsubscribe(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	subscriber := os.Getenv("BD_ACTOR")
+	if subscriber == "" {
+		return fmt.Errorf("BD_ACTOR not set - cannot determine subscriber identity")
+	}
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	b := beads.New(townRoot)
+
+	// Check channel exists and current subscription status
+	_, fields, err := b.GetChannelBead(name)
+	if err != nil {
+		return fmt.Errorf("getting channel: %w", err)
+	}
+	if fields == nil {
+		return fmt.Errorf("channel not found: %s", name)
+	}
+
+	// Check if actually subscribed
+	found := false
+	for _, s := range fields.Subscribers {
+		if s == subscriber {
+			found = true
+			break
+		}
+	}
+	if !found {
+		fmt.Printf("%s is not subscribed to channel %q\n", subscriber, name)
+		return nil
+	}
+
+	if err := b.UnsubscribeFromChannel(name, subscriber); err != nil {
+		return fmt.Errorf("unsubscribing from channel: %w", err)
+	}
+
+	fmt.Printf("Unsubscribed %s from channel %q\n", subscriber, name)
+	return nil
+}
+
+func runChannelSubscribers(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	b := beads.New(townRoot)
+
+	_, fields, err := b.GetChannelBead(name)
+	if err != nil {
+		return fmt.Errorf("getting channel: %w", err)
+	}
+	if fields == nil {
+		return fmt.Errorf("channel not found: %s", name)
+	}
+
+	if channelJSON {
+		subs := fields.Subscribers
+		if subs == nil {
+			subs = []string{}
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(subs)
+	}
+
+	if len(fields.Subscribers) == 0 {
+		fmt.Printf("Channel %q has no subscribers\n", name)
+		return nil
+	}
+
+	fmt.Printf("Subscribers to channel %q:\n", name)
+	for _, sub := range fields.Subscribers {
+		fmt.Printf("  %s\n", sub)
+	}
 	return nil
 }
 

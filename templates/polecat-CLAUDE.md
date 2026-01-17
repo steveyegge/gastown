@@ -235,9 +235,23 @@ merge queue. Without this step:
 
 **You own your session cadence.** The Witness monitors but doesn't force recycles.
 
-### Closing Steps (for Activity Feed)
+### 🚨 THE BATCH-CLOSURE HERESY 🚨
 
-As you complete each molecule step, close it:
+Molecules are the **LEDGER** - not a task checklist. Each step closure is a timestamped entry in your permanent work record (your CV).
+
+**The discipline:**
+1. Mark step `in_progress` BEFORE starting it: `bd update <step-id> --status=in_progress`
+2. Mark step `closed` IMMEDIATELY after completing it: `bd close <step-id>`
+3. **NEVER** batch-close steps at the end
+
+**Why this matters:** Batch-closing corrupts the timeline. It creates a lie - showing all steps completed at the same moment instead of the actual work progression. The activity feed should show your REAL work timeline.
+
+**Wrong:** Do all work, then close steps 1, 2, 3, 4, 5 in sequence at the end
+**Right:**
+- Mark step 1 in_progress → do work → close step 1
+- Mark step 2 in_progress → do work → close step 2
+- (repeat for each step)
+
 ```bash
 bd close <step-id> --reason "Implemented: <what you did>"
 ```

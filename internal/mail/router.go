@@ -804,6 +804,7 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 
 // sendToChannel delivers a message to a beads-native channel.
 // Creates a message with channel:<name> label for channel queries.
+// Also fans out delivery to each subscriber's inbox.
 // Retention is enforced by the channel's EnforceChannelRetention after message creation.
 func (r *Router) sendToChannel(msg *Message) error {
 	channelName := parseChannelName(msg.To)
@@ -872,7 +873,23 @@ func (r *Router) sendToChannel(msg *Message) error {
 	// Enforce channel retention policy (on-write cleanup)
 	_ = b.EnforceChannelRetention(channelName)
 
-	// No notification for channel messages - readers poll or check on their own schedule
+	// Fan-out delivery: send a copy to each subscriber's inbox
+	if len(fields.Subscribers) > 0 {
+		for _, subscriber := range fields.Subscribers {
+			// Skip self-delivery (don't notify the sender)
+			if isSelfMail(msg.From, subscriber) {
+				continue
+			}
+
+			// Create a copy for this subscriber with channel context in subject
+			msgCopy := *msg
+			msgCopy.To = subscriber
+			msgCopy.Subject = fmt.Sprintf("[channel:%s] %s", channelName, msg.Subject)
+
+			// Best-effort delivery - don't fail the channel send if one subscriber fails
+			_ = r.sendToSingle(&msgCopy)
+		}
+	}
 
 	return nil
 }
