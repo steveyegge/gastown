@@ -28,6 +28,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 )
@@ -37,17 +38,24 @@ import (
 // This is recovery-focused: normal wake is handled by feed subscription (bd activity --follow).
 // The daemon is the safety net for dead sessions, GUPP violations, and orphaned work.
 type Daemon struct {
-	config        *Config
-	tmux          *tmux.Tmux
-	logger        *log.Logger
-	ctx           context.Context
-	cancel        context.CancelFunc
-	curator       *feed.Curator
+	config       *Config
+	patrolConfig *DaemonPatrolConfig
+	tmux         *tmux.Tmux
+	logger       *log.Logger
+	ctx          context.Context
+	cancel       context.CancelFunc
+	curator      *feed.Curator
 	convoyWatcher *ConvoyWatcher
 
 	// Mass death detection: track recent session deaths
 	deathsMu     sync.Mutex
 	recentDeaths []sessionDeath
+
+	// Deacon startup tracking: prevents race condition where newly started
+	// sessions are immediately killed by the heartbeat check.
+	// See: https://github.com/steveyegge/gastown/issues/567
+	// Note: Only accessed from heartbeat loop goroutine - no sync needed.
+	deaconLastStarted time.Time
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -79,12 +87,19 @@ func New(config *Config) (*Daemon, error) {
 	logger := log.New(logFile, "", log.LstdFlags)
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Load patrol config from mayor/daemon.json (optional - nil if missing)
+	patrolConfig := LoadPatrolConfig(config.TownRoot)
+	if patrolConfig != nil {
+		logger.Printf("Loaded patrol config from %s", PatrolConfigFile(config.TownRoot))
+	}
+
 	return &Daemon{
-		config: config,
-		tmux:   tmux.NewTmux(),
-		logger: logger,
-		ctx:    ctx,
-		cancel: cancel,
+		config:       config,
+		patrolConfig: patrolConfig,
+		tmux:         tmux.NewTmux(),
+		logger:       logger,
+		ctx:          ctx,
+		cancel:       cancel,
 	}, nil
 }
 
@@ -196,34 +211,68 @@ const recoveryHeartbeatInterval = 3 * time.Minute
 func (d *Daemon) heartbeat(state *State) {
 	d.logger.Println("Heartbeat starting (recovery-focused)")
 
-	// 1. Spawn Boot for intelligent triage - Boot decides whether to wake Deacon
-	// Boot is the primary entry point for Deacon management. It observes state
-	// and decides: start, wake, nudge, interrupt, or nothing.
-	d.ensureBootRunning()
+	// 1. Ensure Deacon is running (restart if dead)
+	// Check patrol config - can be disabled in mayor/daemon.json
+	if IsPatrolEnabled(d.patrolConfig, "deacon") {
+		d.ensureDeaconRunning()
+	} else {
+		d.logger.Printf("Deacon patrol disabled in config, skipping")
+	}
 
-	// 2. Ensure Witnesses are running for all rigs (restart if dead)
-	d.ensureWitnessesRunning()
+	// 2. Poke Boot for intelligent triage (stuck/nudge/interrupt)
+	// Boot handles nuanced "is Deacon responsive" decisions
+	// Only run if Deacon patrol is enabled
+	if IsPatrolEnabled(d.patrolConfig, "deacon") {
+		d.ensureBootRunning()
+	}
 
-	// 3. Ensure Refineries are running for all rigs (restart if dead)
-	d.ensureRefineriesRunning()
+	// 3. Direct Deacon heartbeat check (belt-and-suspenders)
+	// Boot may not detect all stuck states; this provides a fallback
+	// Only run if Deacon patrol is enabled
+	if IsPatrolEnabled(d.patrolConfig, "deacon") {
+		d.checkDeaconHeartbeat()
+	}
 
-	// 4. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
+	// 4. Ensure Witnesses are running for all rigs (restart if dead)
+	// Check patrol config - can be disabled in mayor/daemon.json
+	if IsPatrolEnabled(d.patrolConfig, "witness") {
+		d.ensureWitnessesRunning()
+	} else {
+		d.logger.Printf("Witness patrol disabled in config, skipping")
+	}
+
+	// 5. Ensure Refineries are running for all rigs (restart if dead)
+	// Check patrol config - can be disabled in mayor/daemon.json
+	if IsPatrolEnabled(d.patrolConfig, "refinery") {
+		d.ensureRefineriesRunning()
+	} else {
+		d.logger.Printf("Refinery patrol disabled in config, skipping")
+	}
+
+	// 6. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
 	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
 	// Uses regex-based WaitForRuntimeReady, which is acceptable for daemon bootstrap.
 	d.triggerPendingSpawns()
 
-	// 5. Process lifecycle requests
+	// 7. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 6. Check for GUPP violations (agents with work-on-hook not progressing)
+	// 8. (Removed) Stale agent check - violated "discover, don't track"
+
+	// 9. Check for GUPP violations (agents with work-on-hook not progressing)
 	d.checkGUPPViolations()
 
-	// 7. Check for orphaned work (assigned to dead agents)
+	// 10. Check for orphaned work (assigned to dead agents)
 	d.checkOrphanedWork()
 
-	// 8. Check polecat session health (proactive crash detection)
+	// 11. Check polecat session health (proactive crash detection)
 	// This validates tmux sessions are still alive for polecats with work-on-hook
 	d.checkPolecatSessionHealth()
+
+	// 12. Clean up orphaned claude subagent processes (memory leak prevention)
+	// These are Task tool subagents that didn't clean up after completion.
+	// This is a safety net - Deacon patrol also does this more frequently.
+	d.cleanupOrphanedProcesses()
 
 	// Update state
 	state.LastHeartbeat = time.Now()
@@ -250,13 +299,10 @@ func (d *Daemon) getDeaconSessionName() string {
 func (d *Daemon) ensureBootRunning() {
 	b := boot.New(d.config.TownRoot)
 
-	// Kill any stale Boot session - Boot should run fresh each tick
-	// This ensures Boot doesn't get stuck and fail to manage Deacon
-	if b.IsSessionAlive() {
-		d.logger.Println("Killing stale Boot session for fresh spawn")
-		if err := b.Tmux().KillSessionWithProcesses(boot.SessionName); err != nil {
-			d.logger.Printf("Error killing stale Boot session: %v", err)
-		}
+	// Check if Boot is already running (recent marker)
+	if b.IsRunning() {
+		d.logger.Println("Boot already running, skipping spawn")
+		return
 	}
 
 	// Check for degraded mode
@@ -326,7 +372,77 @@ func (d *Daemon) ensureDeaconRunning() {
 		return
 	}
 
+	// Track when we started the Deacon to prevent race condition in checkDeaconHeartbeat.
+	// The heartbeat file will still be stale until the Deacon runs a full patrol cycle.
+	d.deaconLastStarted = time.Now()
 	d.logger.Println("Deacon started successfully")
+}
+
+// deaconGracePeriod is the time to wait after starting a Deacon before checking heartbeat.
+// The Deacon needs time to initialize Claude, run SessionStart hooks, execute gt prime,
+// run a patrol cycle, and write a fresh heartbeat. 5 minutes is conservative.
+const deaconGracePeriod = 5 * time.Minute
+
+// checkDeaconHeartbeat checks if the Deacon is making progress.
+// This is a belt-and-suspenders fallback in case Boot doesn't detect stuck states.
+// Uses the heartbeat file that the Deacon updates on each patrol cycle.
+func (d *Daemon) checkDeaconHeartbeat() {
+	// Grace period: don't check heartbeat for newly started sessions.
+	// This prevents the race condition where we start a Deacon, then immediately
+	// see a stale heartbeat (from before the crash) and kill the session we just started.
+	// See: https://github.com/steveyegge/gastown/issues/567
+	if !d.deaconLastStarted.IsZero() && time.Since(d.deaconLastStarted) < deaconGracePeriod {
+		d.logger.Printf("Deacon started recently (%s ago), skipping heartbeat check",
+			time.Since(d.deaconLastStarted).Round(time.Second))
+		return
+	}
+
+	hb := deacon.ReadHeartbeat(d.config.TownRoot)
+	if hb == nil {
+		// No heartbeat file - Deacon hasn't started a cycle yet
+		return
+	}
+
+	age := hb.Age()
+
+	// If heartbeat is very stale (>15 min), the Deacon is likely stuck
+	if !hb.ShouldPoke() {
+		// Heartbeat is fresh enough
+		return
+	}
+
+	d.logger.Printf("Deacon heartbeat is stale (%s old), checking session...", age.Round(time.Minute))
+
+	sessionName := d.getDeaconSessionName()
+
+	// Check if session exists
+	hasSession, err := d.tmux.HasSession(sessionName)
+	if err != nil {
+		d.logger.Printf("Error checking Deacon session: %v", err)
+		return
+	}
+
+	if !hasSession {
+		// Session doesn't exist - ensureDeaconRunning already ran earlier
+		// in heartbeat, so Deacon should be starting
+		return
+	}
+
+	// Session exists but heartbeat is stale - Deacon is stuck
+	if age > 30*time.Minute {
+		// Very stuck - restart the session
+		d.logger.Printf("Deacon stuck for %s - restarting session", age.Round(time.Minute))
+		if err := d.tmux.KillSession(sessionName); err != nil {
+			d.logger.Printf("Error killing stuck Deacon: %v", err)
+		}
+		// ensureDeaconRunning will restart on next heartbeat
+	} else {
+		// Stuck but not critically - nudge to wake up
+		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
+		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
+			d.logger.Printf("Error nudging stuck Deacon: %v", err)
+		}
+	}
 }
 
 // ensureWitnessesRunning ensures witnesses are running for all rigs.
@@ -358,7 +474,8 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 
 	if err := mgr.Start(false, "", nil); err != nil {
 		if err == witness.ErrAlreadyRunning {
-			// Already running - nothing to do
+			// Already running - this is the expected case
+			d.logger.Printf("Witness for %s already running, skipping spawn", rigName)
 			return
 		}
 		d.logger.Printf("Error starting witness for %s: %v", rigName, err)
@@ -397,7 +514,8 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 
 	if err := mgr.Start(false, ""); err != nil {
 		if err == refinery.ErrAlreadyRunning {
-			// Already running - nothing to do
+			// Already running - this is the expected case when fix is working
+			d.logger.Printf("Refinery for %s already running, skipping spawn", rigName)
 			return
 		}
 		d.logger.Printf("Error starting refinery for %s: %v", rigName, err)
@@ -435,9 +553,10 @@ func (d *Daemon) getKnownRigs() []string {
 func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 	cfg := wisp.NewConfig(d.config.TownRoot, rigName)
 
-	// Note: Wisp config is created lazily (e.g., when parking a rig).
-	// The absence of wisp config is the normal/expected state for rigs that have never been parked.
-	// No need to warn about missing config - it's only created when needed.
+	// Warn if wisp config is missing - parked/docked state may have been lost
+	if _, err := os.Stat(cfg.ConfigPath()); os.IsNotExist(err) {
+		d.logger.Printf("Warning: no wisp config for %s - parked state may have been lost", rigName)
+	}
 
 	// Check rig status - parked and docked rigs should not have agents auto-started
 	status := cfg.GetString("status")
@@ -865,5 +984,28 @@ Manual intervention may be required.`,
 	cmd.Dir = d.config.TownRoot
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of crashed polecat: %v", err)
+	}
+}
+
+// cleanupOrphanedProcesses kills orphaned claude subagent processes.
+// These are Task tool subagents that didn't clean up after completion.
+// Detection uses TTY column: processes with TTY "?" have no controlling terminal.
+// This is a safety net fallback - Deacon patrol also runs this more frequently.
+func (d *Daemon) cleanupOrphanedProcesses() {
+	results, err := util.CleanupOrphanedClaudeProcesses()
+	if err != nil {
+		d.logger.Printf("Warning: orphan process cleanup failed: %v", err)
+		return
+	}
+
+	if len(results) > 0 {
+		d.logger.Printf("Orphan cleanup: processed %d process(es)", len(results))
+		for _, r := range results {
+			if r.Signal == "UNKILLABLE" {
+				d.logger.Printf("  WARNING: PID %d (%s) survived SIGKILL", r.Process.PID, r.Process.Cmd)
+			} else {
+				d.logger.Printf("  Sent %s to PID %d (%s)", r.Signal, r.Process.PID, r.Process.Cmd)
+			}
+		}
 	}
 }

@@ -96,6 +96,78 @@ func SaveState(townRoot string, state *State) error {
 	return util.AtomicWriteJSON(stateFile, state)
 }
 
+// PatrolConfig holds configuration for a single patrol.
+type PatrolConfig struct {
+	// Enabled controls whether this patrol runs during heartbeat.
+	Enabled bool `json:"enabled"`
+
+	// Interval is how often to run this patrol (not used yet).
+	Interval string `json:"interval,omitempty"`
+
+	// Agent is the agent type for this patrol (not used yet).
+	Agent string `json:"agent,omitempty"`
+}
+
+// PatrolsConfig holds configuration for all patrols.
+type PatrolsConfig struct {
+	Refinery *PatrolConfig `json:"refinery,omitempty"`
+	Witness  *PatrolConfig `json:"witness,omitempty"`
+	Deacon   *PatrolConfig `json:"deacon,omitempty"`
+}
+
+// DaemonPatrolConfig is the structure of mayor/daemon.json.
+type DaemonPatrolConfig struct {
+	Type      string         `json:"type"`
+	Version   int            `json:"version"`
+	Heartbeat *PatrolConfig  `json:"heartbeat,omitempty"`
+	Patrols   *PatrolsConfig `json:"patrols,omitempty"`
+}
+
+// PatrolConfigFile returns the path to the patrol config file.
+func PatrolConfigFile(townRoot string) string {
+	return filepath.Join(townRoot, "mayor", "daemon.json")
+}
+
+// LoadPatrolConfig loads patrol configuration from mayor/daemon.json.
+// Returns nil if the file doesn't exist or can't be parsed.
+func LoadPatrolConfig(townRoot string) *DaemonPatrolConfig {
+	configFile := PatrolConfigFile(townRoot)
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil
+	}
+
+	var config DaemonPatrolConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil
+	}
+	return &config
+}
+
+// IsPatrolEnabled checks if a patrol is enabled in the config.
+// Returns true if the config doesn't exist (default enabled for backwards compatibility).
+func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
+	if config == nil || config.Patrols == nil {
+		return true // Default: enabled
+	}
+
+	switch patrol {
+	case "refinery":
+		if config.Patrols.Refinery != nil {
+			return config.Patrols.Refinery.Enabled
+		}
+	case "witness":
+		if config.Patrols.Witness != nil {
+			return config.Patrols.Witness.Enabled
+		}
+	case "deacon":
+		if config.Patrols.Deacon != nil {
+			return config.Patrols.Deacon.Enabled
+		}
+	}
+	return true // Default: enabled
+}
+
 // LifecycleAction represents a lifecycle request action.
 type LifecycleAction string
 

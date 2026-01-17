@@ -109,7 +109,7 @@ type NamePool struct {
 func NewNamePool(rigPath, rigName string) *NamePool {
 	return &NamePool{
 		RigName:      rigName,
-		Theme:        DefaultTheme,
+		Theme:        ThemeForRig(rigName),
 		InUse:        make(map[string]bool),
 		Reserved:     make(map[string]bool),
 		OverflowNext: DefaultPoolSize + 1,
@@ -411,6 +411,21 @@ func ListThemes() []string {
 	}
 	sort.Strings(themes)
 	return themes
+}
+
+// ThemeForRig returns a deterministic theme for a rig based on its name.
+// This provides variety across rigs without requiring manual configuration.
+func ThemeForRig(rigName string) string {
+	themes := ListThemes()
+	if len(themes) == 0 {
+		return DefaultTheme
+	}
+	// Hash using prime multiplier for better distribution
+	var hash uint32
+	for _, b := range []byte(rigName) {
+		hash = hash*31 + uint32(b)
+	}
+	return themes[hash%uint32(len(themes))]
 }
 
 // GetThemeNames returns the names in a specific theme.

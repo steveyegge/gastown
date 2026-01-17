@@ -690,3 +690,56 @@ func TestSplitCompoundWord(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertToSSH(t *testing.T) {
+	tests := []struct {
+		name     string
+		https    string
+		wantSSH  string
+	}{
+		{
+			name:    "GitHub with .git suffix",
+			https:   "https://github.com/owner/repo.git",
+			wantSSH: "git@github.com:owner/repo.git",
+		},
+		{
+			name:    "GitHub without .git suffix",
+			https:   "https://github.com/owner/repo",
+			wantSSH: "git@github.com:owner/repo.git",
+		},
+		{
+			name:    "GitHub with org/subpath",
+			https:   "https://github.com/myorg/myproject.git",
+			wantSSH: "git@github.com:myorg/myproject.git",
+		},
+		{
+			name:    "GitLab with .git suffix",
+			https:   "https://gitlab.com/owner/repo.git",
+			wantSSH: "git@gitlab.com:owner/repo.git",
+		},
+		{
+			name:    "GitLab without .git suffix",
+			https:   "https://gitlab.com/owner/repo",
+			wantSSH: "git@gitlab.com:owner/repo.git",
+		},
+		{
+			name:    "Unknown host returns empty",
+			https:   "https://bitbucket.org/owner/repo.git",
+			wantSSH: "",
+		},
+		{
+			name:    "Non-HTTPS URL returns empty",
+			https:   "git@github.com:owner/repo.git",
+			wantSSH: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := convertToSSH(tt.https)
+			if got != tt.wantSSH {
+				t.Errorf("convertToSSH(%q) = %q, want %q", tt.https, got, tt.wantSSH)
+			}
+		})
+	}
+}

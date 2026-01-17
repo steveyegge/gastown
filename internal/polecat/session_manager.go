@@ -2,6 +2,7 @@
 package polecat
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -30,6 +30,7 @@ func debugSession(context string, err error) {
 var (
 	ErrSessionRunning  = errors.New("session already running")
 	ErrSessionNotFound = errors.New("session not found")
+	ErrIssueInvalid    = errors.New("issue not found or tombstoned")
 )
 
 // SessionManager handles polecat session lifecycle.
@@ -162,14 +163,20 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		workDir = m.clonePath(polecat)
 	}
 
-	townRoot := filepath.Dir(m.rig.Path)
-	runtimeConfig := config.ResolveAgentConfig(townRoot, m.rig.Path)
+	// Validate issue exists and isn't tombstoned BEFORE creating session.
+	// This prevents CPU spin loops from agents retrying work on invalid issues.
+	if opts.Issue != "" {
+		if err := m.validateIssue(opts.Issue, workDir); err != nil {
+			return err
+		}
+	}
 
-	// Ensure runtime settings exist.
-	// If an account is configured, settings are stored per-account (shared across all polecats).
-	// Otherwise, settings are stored in polecats/ (legacy per-workspace behavior).
+	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
+
+	// Ensure runtime settings exist in polecats/ (not polecats/<name>/) so we don't
+	// write into the source repo. Runtime walks up the tree to find settings.
 	polecatsDir := filepath.Join(m.rig.Path, "polecats")
-	if err := runtime.EnsureSettingsForRoleWithAccount(polecatsDir, "polecat", opts.RuntimeConfigDir, runtimeConfig); err != nil {
+	if err := runtime.EnsureSettingsForRole(polecatsDir, "polecat", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
@@ -191,6 +198,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Set environment (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
+	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:             "polecat",
 		Rig:              m.rig.Name,
@@ -242,6 +250,16 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	time.Sleep(2 * time.Second)
 	debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
 
+	// Verify session survived startup - if the command crashed, the session may have died.
+	// Without this check, Start() would return success even if the pane died during initialization.
+	running, err = m.tmux.HasSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("verifying session: %w", err)
+	}
+	if !running {
+		return fmt.Errorf("session %s died during startup (agent command may have failed)", sessionID)
+	}
+
 	return nil
 }
 
@@ -271,7 +289,7 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
+	if err := m.tmux.KillSession(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
@@ -451,8 +469,33 @@ func (m *SessionManager) StopAll(force bool) error {
 	return lastErr
 }
 
+// validateIssue checks that an issue exists and is not tombstoned.
+// This must be called before starting a session to avoid CPU spin loops
+// from agents retrying work on invalid issues.
+func (m *SessionManager) validateIssue(issueID, workDir string) error {
+	cmd := exec.Command("bd", "show", issueID, "--json") //nolint:gosec
+	cmd.Dir = workDir
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrIssueInvalid, issueID)
+	}
+
+	var issues []struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil {
+		return fmt.Errorf("parsing issue: %w", err)
+	}
+	if len(issues) == 0 {
+		return fmt.Errorf("%w: %s", ErrIssueInvalid, issueID)
+	}
+	if issues[0].Status == "tombstone" {
+		return fmt.Errorf("%w: %s is tombstoned", ErrIssueInvalid, issueID)
+	}
+	return nil
+}
+
 // hookIssue pins an issue to a polecat's hook using bd update.
-// Also sets the reverse link (agent bead's hook_bead field) so cleanup can find the hooked work.
 func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
 	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID) //nolint:gosec
 	cmd.Dir = workDir
@@ -461,24 +504,5 @@ func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
 		return fmt.Errorf("bd update failed: %w", err)
 	}
 	fmt.Printf("✓ Hooked issue %s to %s\n", issueID, agentID)
-
-	// Set the reverse link: agent bead's hook_bead field (bug fix: hq-tc2j)
-	// This enables gt done to find and close the hooked work when the polecat completes.
-	// Note: This is non-fatal - if it fails, the work is still hooked but cleanup may fail later.
-	bd := beads.New(workDir)
-
-	// Convert agent ID to agent bead ID (e.g., "gastown/polecats/furiosa" -> "gt-gastown-polecat-furiosa")
-	// Agent ID format: "rigname/polecats/name"
-	parts := strings.Split(agentID, "/")
-	if len(parts) == 3 && parts[1] == "polecats" {
-		rigName := parts[0]
-		polecatName := parts[2]
-		agentBeadID := beads.PolecatBeadID(rigName, polecatName)
-		if err := bd.SetHookBead(agentBeadID, issueID); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook_bead field: %v (cleanup may fail later)\n", agentID, err)
-			// Continue anyway - the work is hooked, it just won't auto-cleanup properly
-		}
-	}
-
 	return nil
 }

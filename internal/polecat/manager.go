@@ -448,11 +448,22 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 		if removeErr := os.RemoveAll(clonePath); removeErr != nil {
 			return fmt.Errorf("removing clone path: %w", removeErr)
 		}
+	} else {
+		// GT-1L3MY9: git worktree remove may leave untracked directories behind.
+		// Clean up any leftover .beads/ directory that wasn't fully removed.
+		cloneBeadsDir := filepath.Join(clonePath, ".beads")
+		_ = os.RemoveAll(cloneBeadsDir)
+		// Remove the now-empty clonePath if it still exists
+		_ = os.Remove(clonePath)
 	}
 
 	// Also remove the parent polecat directory if it's now empty
 	// (for new structure: polecats/<name>/ contains only polecats/<name>/<rigname>/)
 	if polecatDir != clonePath {
+		// GT-1L3MY9: Clean up any orphaned .beads/ directory at polecat level.
+		// This can happen if the worktree cleanup was incomplete or from old state.
+		polecatBeadsDir := filepath.Join(polecatDir, ".beads")
+		_ = os.RemoveAll(polecatBeadsDir)
 		_ = os.Remove(polecatDir) // Non-fatal: only removes if empty
 	}
 
@@ -1050,9 +1061,9 @@ func (m *Manager) DetectStalePolecats(threshold int) ([]*StalenessInfo, error) {
 		polecatGit := git.NewGit(p.ClonePath)
 		info.CommitsBehind = countCommitsBehind(polecatGit, defaultBranch)
 
-		// Check for uncommitted work
+		// Check for uncommitted work (excluding .beads/ files which are synced across worktrees)
 		status, err := polecatGit.CheckUncommittedWork()
-		if err == nil && !status.Clean() {
+		if err == nil && !status.CleanExcludingBeads() {
 			info.HasUncommittedWork = true
 		}
 

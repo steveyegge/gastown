@@ -544,8 +544,9 @@ func TestReconcilePoolWith(t *testing.T) {
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
 			// Create rig and manager (nil tmux for unit test)
+			// Use "myrig" which hashes to mad-max theme
 			r := &rig.Rig{
-				Name: "testrig",
+				Name: "myrig",
 				Path: tmpDir,
 			}
 			m := NewManager(r, nil, nil)
@@ -606,8 +607,9 @@ func TestReconcilePoolWith_Allocation(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
+	// Use "myrig" which hashes to mad-max theme
 	r := &rig.Rig{
-		Name: "testrig",
+		Name: "myrig",
 		Path: tmpDir,
 	}
 	m := NewManager(r, nil, nil)
@@ -642,8 +644,9 @@ func TestReconcilePoolWith_OrphanDoesNotBlockAllocation(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
+	// Use "myrig" which hashes to mad-max theme
 	r := &rig.Rig{
-		Name: "testrig",
+		Name: "myrig",
 		Path: tmpDir,
 	}
 	m := NewManager(r, nil, nil)

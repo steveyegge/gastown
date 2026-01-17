@@ -250,21 +250,17 @@ func (m *Mailbox) listLegacy() ([]*Message, error) {
 
 // ListUnread returns unread (open) messages.
 func (m *Mailbox) ListUnread() ([]*Message, error) {
-	if m.legacy {
-		all, err := m.List()
-		if err != nil {
-			return nil, err
-		}
-		var unread []*Message
-		for _, msg := range all {
-			if !msg.Read {
-				unread = append(unread, msg)
-			}
-		}
-		return unread, nil
+	all, err := m.List()
+	if err != nil {
+		return nil, err
 	}
-	// For beads, inbox only returns open (unread) messages
-	return m.List()
+	var unread []*Message
+	for _, msg := range all {
+		if !msg.Read {
+			unread = append(unread, msg)
+		}
+	}
+	return unread, nil
 }
 
 // Get returns a message by ID.

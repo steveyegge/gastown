@@ -2131,10 +2131,11 @@ func TestCloseAndClearAgentBead_FieldClearing(t *testing.T) {
 		},
 	}
 
-	for i, tc := range tests {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create unique agent ID for each test case
-			agentID := fmt.Sprintf("test-testrig-%s-%d", tc.fields.RoleType, i)
+			// Use tc.name for suffix to avoid hash-like patterns (e.g., single digits)
+			// that trigger bd's isLikelyHash() prefix extraction in v0.47.1+
+			agentID := fmt.Sprintf("test-testrig-%s-%s", tc.fields.RoleType, tc.name)
 
 			// Step 1: Create agent bead with specified fields
 			_, err := bd.CreateAgentBead(agentID, "Test agent", tc.fields)
@@ -2369,9 +2370,11 @@ func TestCloseAndClearAgentBead_ReasonVariations(t *testing.T) {
 		{"long_reason", "This is a very long reason that explains in detail why the agent bead was closed including multiple sentences and detailed context about the situation."},
 	}
 
-	for i, tc := range tests {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			agentID := fmt.Sprintf("test-testrig-polecat-reason%d", i)
+			// Use tc.name for suffix to avoid hash-like patterns (e.g., "reason0")
+			// that trigger bd's isLikelyHash() prefix extraction in v0.47.1+
+			agentID := fmt.Sprintf("test-testrig-polecat-%s", tc.name)
 
 			// Create agent bead
 			_, err := bd.CreateAgentBead(agentID, "Test agent", &AgentFields{

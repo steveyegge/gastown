@@ -630,11 +630,12 @@ func (e *Engineer) HandleMRInfoFailure(mr *MRInfo, result ProcessResult) {
 // Returns the created task's ID for blocking the MR until resolution.
 //
 // Task format:
-//   Title: Resolve merge conflicts: <original-issue-title>
-//   Type: task
-//   Priority: inherit from original + boost (P2 -> P1)
-//   Parent: original MR bead
-//   Description: metadata including branch, conflict SHA, etc.
+//
+//	Title: Resolve merge conflicts: <original-issue-title>
+//	Type: task
+//	Priority: inherit from original + boost (P2 -> P1)
+//	Parent: original MR bead
+//	Description: metadata including branch, conflict SHA, etc.
 //
 // Merge Slot Integration:
 // Before creating a conflict resolution task, we acquire the merge-slot for this rig.
@@ -768,6 +769,11 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 	// Convert beads issues to MRInfo
 	var mrs []*MRInfo
 	for _, issue := range issues {
+		// Skip closed MRs (workaround for bd list not respecting --status filter)
+		if issue.Status != "open" {
+			continue
+		}
+
 		fields := beads.ParseMRFields(issue)
 		if fields == nil {
 			continue // Skip issues without MR fields

@@ -113,6 +113,11 @@ func RemoveRoute(townRoot string, prefix string) error {
 
 // WriteRoutes writes routes to routes.jsonl, overwriting existing content.
 func WriteRoutes(beadsDir string, routes []Route) error {
+	// Ensure beads directory exists
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		return fmt.Errorf("creating beads directory: %w", err)
+	}
+
 	routesPath := filepath.Join(beadsDir, RoutesFileName)
 
 	file, err := os.Create(routesPath)
