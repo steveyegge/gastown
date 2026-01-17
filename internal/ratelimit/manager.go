@@ -261,7 +261,7 @@ func (m *Manager) HandleRateLimit(event *RateLimitEvent) (*SwapResult, error) {
 	policy := m.config.Roles[event.Role]
 	if policy == nil {
 		result.Error = fmt.Sprintf("no policy for role %s", event.Role)
-		return result, fmt.Errorf(result.Error)
+		return result, fmt.Errorf("no policy for role %s", event.Role)
 	}
 
 	// Start cooldown for the rate-limited profile

@@ -29,8 +29,8 @@ type RateLimitIndicator struct {
 
 // Patterns for detecting rate limits from different providers.
 var (
-	// HTTP 429 patterns
-	pattern429        = regexp.MustCompile(`(?i)(429|rate.?limit(ed)?|too.?many.?requests|quota.?exceeded|throttl(ed|ing))`)
+	// HTTP 429 patterns (includes overloaded which indicates capacity limits)
+	pattern429        = regexp.MustCompile(`(?i)(429|rate.?limit(ed)?|too.?many.?requests|quota.?exceeded|throttl(ed|ing)|overloaded|at.?capacity)`)
 	patternRetryAfter = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
 
 	// Anthropic-specific patterns
