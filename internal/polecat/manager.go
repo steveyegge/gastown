@@ -299,6 +299,14 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 
+	// Verify worktree was actually created (guards against silent failures).
+	// Issue: gt sling reports success but worktree never created.
+	if err := verifyWorktree(clonePath); err != nil {
+		// Clean up the parent directory we created
+		_ = os.RemoveAll(polecatDir)
+		return nil, fmt.Errorf("verifying worktree at %s: %w", clonePath, err)
+	}
+
 	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
 	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
 	agentsMDPath := filepath.Join(clonePath, "AGENTS.md")
@@ -641,6 +649,12 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	}
 	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
+	}
+
+	// Verify worktree was actually created (guards against silent failures).
+	// Issue: gt sling reports success but worktree never created.
+	if err := verifyWorktree(newClonePath); err != nil {
+		return nil, fmt.Errorf("verifying worktree at %s: %w", newClonePath, err)
 	}
 
 	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
@@ -986,6 +1000,47 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 func (m *Manager) setupSharedBeads(clonePath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
 	return beads.SetupRedirect(townRoot, clonePath)
+}
+
+// verifyWorktree checks that a worktree was actually created and is valid.
+// This guards against silent failures in git worktree add where git returns
+// success but the worktree is incomplete or missing.
+//
+// Checks:
+// 1. Directory exists
+// 2. Has a .git file (worktree marker) or .git directory
+// 3. Can run git commands in it
+//
+// Issue: gt sling reports success but worktree never created (hq-yh8icr).
+func verifyWorktree(path string) error {
+	// Check 1: Directory exists
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("worktree directory does not exist")
+		}
+		return fmt.Errorf("checking worktree directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("worktree path is not a directory")
+	}
+
+	// Check 2: Has .git file or directory (indicates git worktree or repo)
+	gitPath := filepath.Join(path, ".git")
+	if _, err := os.Stat(gitPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("worktree missing .git (not a valid worktree)")
+		}
+		return fmt.Errorf("checking .git: %w", err)
+	}
+
+	// Check 3: Can run git rev-parse to verify it's a working git directory
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--git-dir")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git rev-parse failed (invalid git worktree): %w", err)
+	}
+
+	return nil
 }
 
 // CleanupStaleBranches removes orphaned polecat branches that are no longer in use.
