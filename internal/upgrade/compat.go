@@ -85,7 +85,7 @@ func FetchCompatibilityInfo(release *ReleaseInfo) (*CompatibilityInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("downloading compatibility info: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("compatibility.json download failed with status %d", resp.StatusCode)

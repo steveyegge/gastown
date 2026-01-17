@@ -148,7 +148,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("downloading: %w", err)
 	}
-	defer os.Remove(archivePath)
+	defer func() { _ = os.Remove(archivePath) }()
 	fmt.Println() // newline after progress
 
 	// Extract the binary

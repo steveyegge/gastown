@@ -16,15 +16,27 @@ import (
 	"time"
 )
 
-const (
-	// GitHubAPIURL is the endpoint for fetching latest release info.
-	GitHubAPIURL = "https://api.github.com/repos/steveyegge/gastown/releases/latest"
+// GitHubAPIURL is the endpoint for fetching latest release info.
+// Can be overridden with GT_UPGRADE_URL env var for testing.
+var GitHubAPIURL = getUpgradeURL()
 
+func getUpgradeURL() string {
+	if url := os.Getenv("GT_UPGRADE_URL"); url != "" {
+		return url
+	}
+	return "https://api.github.com/repos/steveyegge/gastown/releases/latest"
+}
+
+const (
 	// UserAgent is sent with GitHub API requests.
 	UserAgent = "gt-upgrade/1.0"
 
 	// HTTPTimeout is the timeout for HTTP requests.
 	HTTPTimeout = 30 * time.Second
+
+	// MaxBinarySize is the maximum size for extracted binaries (100MB).
+	// This prevents decompression bomb attacks.
+	MaxBinarySize = 100 * 1024 * 1024
 )
 
 // ReleaseInfo contains information about a GitHub release.
@@ -72,7 +84,7 @@ func FetchLatestRelease() (*ReleaseInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetching release: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -134,7 +146,7 @@ func Download(asset *Asset, progress func(downloaded, total int64)) (string, err
 	if err != nil {
 		return "", fmt.Errorf("downloading: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download failed with status %d", resp.StatusCode)
@@ -149,7 +161,7 @@ func Download(asset *Asset, progress func(downloaded, total int64)) (string, err
 	if err != nil {
 		return "", fmt.Errorf("creating temp file: %w", err)
 	}
-	defer tmpFile.Close()
+	defer func() { _ = tmpFile.Close() }()
 
 	// Copy with optional progress tracking
 	var reader io.Reader = resp.Body
@@ -162,7 +174,7 @@ func Download(asset *Asset, progress func(downloaded, total int64)) (string, err
 	}
 
 	if _, err := io.Copy(tmpFile, reader); err != nil {
-		os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
 		return "", fmt.Errorf("writing download: %w", err)
 	}
 
@@ -199,13 +211,13 @@ func extractTarGz(archivePath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("opening archive: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gzr, err := gzip.NewReader(f)
 	if err != nil {
 		return "", fmt.Errorf("creating gzip reader: %w", err)
 	}
-	defer gzr.Close()
+	defer func() { _ = gzr.Close() }()
 
 	tr := tar.NewReader(gzr)
 
@@ -224,7 +236,7 @@ func extractTarGz(archivePath string) (string, error) {
 			break
 		}
 		if err != nil {
-			os.RemoveAll(extractDir)
+			_ = os.RemoveAll(extractDir)
 			return "", fmt.Errorf("reading tar: %w", err)
 		}
 
@@ -235,22 +247,26 @@ func extractTarGz(archivePath string) (string, error) {
 		}
 
 		binaryPath = filepath.Join(extractDir, binaryName)
-		outFile, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_WRONLY, os.FileMode(header.Mode))
+		// Mask mode to avoid integer overflow (G115) and use safe permissions
+		mode := os.FileMode(header.Mode & 0o777)
+		outFile, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_WRONLY, mode)
 		if err != nil {
-			os.RemoveAll(extractDir)
+			_ = os.RemoveAll(extractDir)
 			return "", fmt.Errorf("creating file: %w", err)
 		}
 
-		if _, err := io.Copy(outFile, tr); err != nil {
-			outFile.Close()
-			os.RemoveAll(extractDir)
+		// Use LimitReader to prevent decompression bomb attacks (G110)
+		limitedReader := io.LimitReader(tr, MaxBinarySize)
+		if _, err := io.Copy(outFile, limitedReader); err != nil {
+			_ = outFile.Close()
+			_ = os.RemoveAll(extractDir)
 			return "", fmt.Errorf("extracting file: %w", err)
 		}
-		outFile.Close()
+		_ = outFile.Close()
 	}
 
 	if binaryPath == "" {
-		os.RemoveAll(extractDir)
+		_ = os.RemoveAll(extractDir)
 		return "", fmt.Errorf("binary %q not found in archive", binaryName)
 	}
 
@@ -262,7 +278,7 @@ func extractZip(archivePath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("opening zip: %w", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	extractDir, err := os.MkdirTemp("", "gt-extract-*")
 	if err != nil {
@@ -282,29 +298,31 @@ func extractZip(archivePath string) (string, error) {
 
 		rc, err := f.Open()
 		if err != nil {
-			os.RemoveAll(extractDir)
+			_ = os.RemoveAll(extractDir)
 			return "", fmt.Errorf("opening file in zip: %w", err)
 		}
 
 		outFile, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_WRONLY, f.Mode())
 		if err != nil {
-			rc.Close()
-			os.RemoveAll(extractDir)
+			_ = rc.Close()
+			_ = os.RemoveAll(extractDir)
 			return "", fmt.Errorf("creating file: %w", err)
 		}
 
-		_, copyErr := io.Copy(outFile, rc)
-		rc.Close()
-		outFile.Close()
+		// Use LimitReader to prevent decompression bomb attacks (G110)
+		limitedReader := io.LimitReader(rc, MaxBinarySize)
+		_, copyErr := io.Copy(outFile, limitedReader)
+		_ = rc.Close()
+		_ = outFile.Close()
 
 		if copyErr != nil {
-			os.RemoveAll(extractDir)
+			_ = os.RemoveAll(extractDir)
 			return "", fmt.Errorf("extracting file: %w", copyErr)
 		}
 	}
 
 	if binaryPath == "" {
-		os.RemoveAll(extractDir)
+		_ = os.RemoveAll(extractDir)
 		return "", fmt.Errorf("binary %q not found in archive", binaryName)
 	}
 
