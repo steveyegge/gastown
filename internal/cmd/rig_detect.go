@@ -30,10 +30,11 @@ for fast lookups by the shell hook.
 
 Output format (to stdout):
   export GT_TOWN_ROOT=/path/to/town
+  export GT_ROOT=/path/to/town
   export GT_RIG=rigname
 
 Or if not in a rig:
-  unset GT_TOWN_ROOT GT_RIG`,
+  unset GT_TOWN_ROOT GT_ROOT GT_RIG`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runRigDetect,
 }
@@ -63,9 +64,11 @@ func runRigDetect(cmd *cobra.Command, args []string) error {
 
 	if rigName != "" {
 		fmt.Printf("export GT_TOWN_ROOT=%q\n", townRoot)
+		fmt.Printf("export GT_ROOT=%q\n", townRoot)
 		fmt.Printf("export GT_RIG=%q\n", rigName)
 	} else {
 		fmt.Printf("export GT_TOWN_ROOT=%q\n", townRoot)
+		fmt.Printf("export GT_ROOT=%q\n", townRoot)
 		fmt.Println("unset GT_RIG")
 	}
 
@@ -105,7 +108,7 @@ func detectRigFromPath(townRoot, absPath string) string {
 }
 
 func outputNotInRig() error {
-	fmt.Println("unset GT_TOWN_ROOT GT_RIG")
+	fmt.Println("unset GT_TOWN_ROOT GT_ROOT GT_RIG")
 	return nil
 }
 
@@ -129,11 +132,11 @@ func updateRigCache(repoRoot, townRoot, rigName string) error {
 
 	var value string
 	if rigName != "" {
-		value = fmt.Sprintf("export GT_TOWN_ROOT=%q; export GT_RIG=%q", townRoot, rigName)
+		value = fmt.Sprintf("export GT_TOWN_ROOT=%q; export GT_ROOT=%q; export GT_RIG=%q", townRoot, townRoot, rigName)
 	} else if townRoot != "" {
-		value = fmt.Sprintf("export GT_TOWN_ROOT=%q; unset GT_RIG", townRoot)
+		value = fmt.Sprintf("export GT_TOWN_ROOT=%q; export GT_ROOT=%q; unset GT_RIG", townRoot, townRoot)
 	} else {
-		value = "unset GT_TOWN_ROOT GT_RIG"
+		value = "unset GT_TOWN_ROOT GT_ROOT GT_RIG"
 	}
 
 	existing[repoRoot] = value
