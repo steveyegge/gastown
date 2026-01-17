@@ -450,6 +450,12 @@ func (e *Engineer) handleSuccess(mr *beads.Issue, result ProcessResult) {
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mrFields.SourceIssue)
 		}
+
+		// 3.1. Issue lifecycle automation: close associated wisp if exists.
+		// When a formula was applied to an issue (gt sling <formula> --on <issue>),
+		// the wisp root is stored in attached_molecule. Close it with the parent issue.
+		// See: https://github.com/steveyegge/gastown/issues/634
+		e.closeAssociatedWisp(mrFields.SourceIssue, mr.ID)
 	}
 
 	// 3.5. Clear agent bead's active_mr reference (traceability cleanup)
@@ -491,6 +497,41 @@ func (e *Engineer) handleFailure(mr *beads.Issue, result ProcessResult) {
 
 	// Log the failure
 	_, _ = fmt.Fprintf(e.output, "[Engineer] ✗ Failed: %s - %s\n", mr.ID, result.Error)
+}
+
+// closeAssociatedWisp closes any wisp attached to the source issue.
+// When a formula is applied to an issue (gt sling <formula> --on <issue>),
+// the wisp root is stored in the attached_molecule field. This wisp should
+// be closed when the parent issue is closed after merge.
+// See: https://github.com/steveyegge/gastown/issues/634
+func (e *Engineer) closeAssociatedWisp(sourceIssue, mrID string) {
+	if sourceIssue == "" {
+		return
+	}
+
+	// Fetch the source issue to check for attached_molecule
+	issue, err := e.beads.Show(sourceIssue)
+	if err != nil {
+		// Issue might already be closed or not found - that's fine
+		return
+	}
+
+	// Check for attached_molecule field
+	attachment := beads.ParseAttachmentFields(issue)
+	if attachment == nil || attachment.AttachedMolecule == "" {
+		// No wisp attached - nothing to do
+		return
+	}
+
+	wispID := attachment.AttachedMolecule
+
+	// Close the wisp with a reason
+	closeReason := fmt.Sprintf("Parent issue %s closed (merged in %s)", sourceIssue, mrID)
+	if err := e.beads.CloseWithReason(closeReason, wispID); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close associated wisp %s: %v\n", wispID, err)
+	} else {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Closed associated wisp: %s\n", wispID)
+	}
 }
 
 // ProcessMRInfo processes a merge request from MRInfo.
