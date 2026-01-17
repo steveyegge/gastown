@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -61,6 +63,27 @@ func New(townRoot string) *Boot {
 // EnsureDir ensures the Boot directory exists.
 func (b *Boot) EnsureDir() error {
 	return os.MkdirAll(b.bootDir, 0755)
+}
+
+// EnsureCLAUDEmd ensures Boot's CLAUDE.md exists with proper context.
+// Creates it from the boot role template if missing.
+func (b *Boot) EnsureCLAUDEmd() error {
+	claudePath := filepath.Join(b.bootDir, "CLAUDE.md")
+
+	// Check if CLAUDE.md already exists
+	if _, err := os.Stat(claudePath); err == nil {
+		// File exists, nothing to do
+		return nil
+	}
+
+	// Create CLAUDE.md from template
+	townName := filepath.Base(b.townRoot)
+	// Deacon session name is "hq-{townname}" or just "hq-deacon" for town root
+	deaconSession := "hq-deacon"
+	if townName != "" && strings.ToLower(townName) != "gt" {
+		deaconSession = fmt.Sprintf("hq-%s", strings.ToLower(townName))
+	}
+	return templates.CreateBootCLAUDEmd(b.bootDir, b.townRoot, townName, deaconSession)
 }
 
 // markerPath returns the path to the marker file.
@@ -168,6 +191,11 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	// Ensure boot directory exists (it should have CLAUDE.md with Boot context)
 	if err := b.EnsureDir(); err != nil {
 		return fmt.Errorf("ensuring boot dir: %w", err)
+	}
+
+	// Ensure CLAUDE.md exists with proper Boot context
+	if err := b.EnsureCLAUDEmd(); err != nil {
+		return fmt.Errorf("ensuring boot CLAUDE.md: %w", err)
 	}
 
 	// Build startup command with optional agent override

@@ -128,7 +128,7 @@ func (t *Templates) RenderMessage(name string, data interface{}) (string, error)
 
 // RoleNames returns the list of available role templates.
 func (t *Templates) RoleNames() []string {
-	return []string{"mayor", "witness", "refinery", "polecat", "crew", "deacon"}
+	return []string{"mayor", "witness", "refinery", "polecat", "crew", "deacon", "boot"}
 }
 
 // MessageNames returns the list of available message templates.
@@ -159,6 +159,31 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 	}
 
 	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
+	return os.WriteFile(claudePath, []byte(content), 0644)
+}
+
+// CreateBootCLAUDEmd creates the Boot watchdog's CLAUDE.md file at the specified directory.
+// This ensures Boot has proper context when spawned by the daemon.
+func CreateBootCLAUDEmd(bootDir, townRoot, townName, deaconSession string) error {
+	tmpl, err := New()
+	if err != nil {
+		return err
+	}
+
+	data := RoleData{
+		Role:          "boot",
+		TownRoot:      townRoot,
+		TownName:      townName,
+		WorkDir:       bootDir,
+		DeaconSession: deaconSession,
+	}
+
+	content, err := tmpl.RenderRole("boot", data)
+	if err != nil {
+		return err
+	}
+
+	claudePath := filepath.Join(bootDir, "CLAUDE.md")
 	return os.WriteFile(claudePath, []byte(content), 0644)
 }
 
