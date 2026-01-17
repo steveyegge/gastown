@@ -499,10 +499,11 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 // when tmux sessions were killed. These processes have PPID=1 (reparented to launchd).
 // Returns the number of processes cleaned up.
 func cleanupOrphanedClaude() int {
-	// Find claude/node processes with PPID=1 (orphaned to launchd) and no controlling tty
-	// The tty="?" check ensures we don't kill user's manual Claude sessions that crashed
+	// Find claude/node processes with PPID=1 (orphaned to launchd).
+	// PPID=1 is sufficient - user's active sessions have PPID = parent shell, not 1.
+	// Do NOT filter by tty - orphans can have tty attached (s001, etc).
 	cmd := exec.Command("sh", "-c",
-		`ps -eo pid,ppid,tty,comm | awk '$2 == 1 && $3 == "?" && ($4 == "claude" || $4 == "node") {print $1}'`)
+		`ps -eo pid,ppid,comm | awk '$2 == 1 && ($3 == "claude" || $3 == "node") {print $1}'`)
 	output, err := cmd.Output()
 	if err != nil {
 		return 0
