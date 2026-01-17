@@ -777,10 +777,12 @@ func IsSparseCheckoutConfigured(repoPath string) bool {
 
 // WorktreeRemove removes a worktree.
 func (g *Git) WorktreeRemove(path string, force bool) error {
-	args := []string{"worktree", "remove", path}
+	// Build args with --force before path (git requires this order)
+	args := []string{"worktree", "remove"}
 	if force {
 		args = append(args, "--force")
 	}
+	args = append(args, path)
 	_, err := g.run(args...)
 	return err
 }
