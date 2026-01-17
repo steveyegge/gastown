@@ -22,11 +22,39 @@ export const GasTown = async ({ $, directory }) => {
     await run("gt nudge deacon session-started");
   };
 
+  const onSessionCompacted = async () => {
+    // Re-inject Gas Town context after compaction
+    await run("gt prime");
+  };
+
   return {
     event: async ({ event }) => {
       if (event?.type === "session.created") {
         await onSessionCreated();
       }
+      if (event?.type === "session.compacted") {
+        await onSessionCompacted();
+      }
+    },
+    // Customize compaction to preserve critical Gas Town context
+    "experimental.session.compacting": async ({ sessionID }, output) => {
+      const roleDisplay = role || "unknown";
+      output.context.push(`
+## Gas Town Multi-Agent System
+
+You are working in the Gas Town multi-agent workspace.
+
+**Critical Actions After Compaction:**
+- Run \`gt prime\` to restore full Gas Town context
+- Check your hook with \`gt mol status\` or \`gt hook\`
+- If work is hooked, execute immediately per GUPP (Gas Town Universal Propulsion Principle)
+
+**Current Session:**
+- Role: ${roleDisplay}
+- Session ID: ${sessionID}
+
+**Remember:** The hook having work IS your assignment. Execute without waiting for confirmation.
+`);
     },
   };
 };
