@@ -1198,6 +1198,131 @@ func (c *BareRepoRefspecCheck) Fix(ctx *CheckContext) error {
 	return nil
 }
 
+// TrackedBeadsErrantRedirectCheck detects errant redirect files in tracked beads.
+// When a source repo has .beads/ tracked in git, it should NOT contain a redirect
+// file. If it does, and the redirect points outside the project, it will create
+// circular routing chains in Gas Town.
+//
+// This happens when someone accidentally commits a .beads/redirect file that was
+// created by Gas Town's worktree architecture but should have been gitignored.
+type TrackedBeadsErrantRedirectCheck struct {
+	FixableCheck
+}
+
+// NewTrackedBeadsErrantRedirectCheck creates a new check for errant redirects in tracked beads.
+func NewTrackedBeadsErrantRedirectCheck() *TrackedBeadsErrantRedirectCheck {
+	return &TrackedBeadsErrantRedirectCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "tracked-beads-redirect",
+				CheckDescription: "Check for errant redirect files in tracked beads",
+				CheckCategory:    CategoryRig,
+			},
+		},
+	}
+}
+
+// Run checks if mayor/rig/.beads/redirect exists and points to an invalid location.
+func (c *TrackedBeadsErrantRedirectCheck) Run(ctx *CheckContext) *CheckResult {
+	if ctx.RigName == "" {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No rig specified, skipping tracked beads redirect check",
+		}
+	}
+
+	rigPath := ctx.RigPath()
+	mayorRigBeads := filepath.Join(rigPath, "mayor", "rig", ".beads")
+	redirectPath := filepath.Join(mayorRigBeads, "redirect")
+
+	// Check if tracked beads exist
+	if _, err := os.Stat(mayorRigBeads); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No tracked beads at mayor/rig/.beads",
+		}
+	}
+
+	// Check if redirect file exists
+	if _, err := os.Stat(redirectPath); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No redirect file in tracked beads (correct)",
+		}
+	}
+
+	// Redirect file exists in tracked beads - this is likely an error
+	content, err := os.ReadFile(redirectPath)
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not read redirect file: %v", err),
+		}
+	}
+
+	target := strings.TrimSpace(string(content))
+
+	// Check if it points outside the project (contains ../)
+	if strings.Contains(target, "../") {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusError,
+			Message: "Tracked beads has errant redirect file",
+			Details: []string{
+				fmt.Sprintf("File: mayor/rig/.beads/redirect"),
+				fmt.Sprintf("Points to: %s", target),
+				"This redirect creates circular routing chains in Gas Town",
+				"The redirect file was likely accidentally committed to git",
+			},
+			FixHint: "Run 'gt doctor --fix --rig " + ctx.RigName + "' to remove the redirect file",
+		}
+	}
+
+	// Redirect exists but doesn't point outside - still suspicious
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: "Tracked beads has redirect file (unusual)",
+		Details: []string{
+			fmt.Sprintf("File: mayor/rig/.beads/redirect"),
+			fmt.Sprintf("Points to: %s", target),
+			"Tracked beads normally should not have redirect files",
+		},
+	}
+}
+
+// Fix removes the errant redirect file from tracked beads.
+func (c *TrackedBeadsErrantRedirectCheck) Fix(ctx *CheckContext) error {
+	if ctx.RigName == "" {
+		return nil
+	}
+
+	rigPath := ctx.RigPath()
+	redirectPath := filepath.Join(rigPath, "mayor", "rig", ".beads", "redirect")
+
+	// Only remove if it exists and points outside the project
+	content, err := os.ReadFile(redirectPath)
+	if err != nil {
+		return nil // No redirect file to fix
+	}
+
+	target := strings.TrimSpace(string(content))
+	if !strings.Contains(target, "../") {
+		return nil // Not an errant redirect
+	}
+
+	// Remove the errant redirect file
+	if err := os.Remove(redirectPath); err != nil {
+		return fmt.Errorf("removing errant redirect: %w", err)
+	}
+
+	return nil
+}
+
 // RigChecks returns all rig-level health checks.
 func RigChecks() []Check {
 	return []Check{
@@ -1212,5 +1337,6 @@ func RigChecks() []Check {
 		NewPolecatClonesValidCheck(),
 		NewBeadsConfigValidCheck(),
 		NewBeadsRedirectCheck(),
+		NewTrackedBeadsErrantRedirectCheck(),
 	}
 }
