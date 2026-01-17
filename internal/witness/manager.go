@@ -111,11 +111,13 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
+	// Cache townRoot and agentCfg to avoid repeated calls
+	townRoot := m.townRoot()
+	agentCfg := config.ResolveRoleAgentConfig(constants.RoleWitness, townRoot, m.rig.Path)
+
 	if foreground {
 		// Foreground mode is deprecated - patrol logic moved to mol-witness-patrol
 		// Just check tmux session (no PID inference per ZFC)
-		townRoot := m.townRoot()
-		agentCfg := config.ResolveRoleAgentConfig(constants.RoleWitness, townRoot, m.rig.Path)
 		if running, _ := t.HasSession(sessionID); running && t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 			return ErrAlreadyRunning
 		}
@@ -133,8 +135,6 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	running, _ := t.HasSession(sessionID)
 	if running {
 		// Session exists - check if agent is actually running (healthy vs zombie)
-		townRoot := m.townRoot()
-		agentCfg := config.ResolveRoleAgentConfig(constants.RoleWitness, townRoot, m.rig.Path)
 		if t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 			// Healthy - agent is running
 			return ErrAlreadyRunning
@@ -153,9 +153,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Ensure runtime settings exist in witness/ (not witness/rig/) so we don't
 	// write into the source repo. Agent walks up the tree to find settings.
 	witnessParentDir := filepath.Join(m.rig.Path, "witness")
-	townRoot := m.townRoot()
-	runtimeConfig := config.ResolveRoleAgentConfig(constants.RoleWitness, townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(witnessParentDir, "witness", runtimeConfig); err != nil {
+	if err := runtime.EnsureSettingsForRole(witnessParentDir, "witness", agentCfg); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
