@@ -456,6 +456,22 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Work attached to hook (status=hooked)\n", style.Bold.Render("✓"))
 
+	// Issue lifecycle automation: set original issue to in_progress when using --on flag.
+	// When a formula is slung onto an issue (gt sling <formula> --on <issue>), the original
+	// issue should transition to in_progress to indicate work has started.
+	// See: https://github.com/steveyegge/gastown/issues/634
+	if slingOnTarget != "" {
+		inProgressCmd := exec.Command("bd", "--no-daemon", "update", slingOnTarget, "--status=in_progress")
+		inProgressCmd.Dir = beads.ResolveHookDir(townRoot, slingOnTarget, hookWorkDir)
+		inProgressCmd.Stderr = os.Stderr
+		if err := inProgressCmd.Run(); err != nil {
+			// Warn but don't fail - work is still hooked
+			fmt.Printf("%s Could not set issue to in_progress: %v\n", style.Dim.Render("Warning:"), err)
+		} else {
+			fmt.Printf("%s Issue %s set to in_progress\n", style.Bold.Render("✓"), slingOnTarget)
+		}
+	}
+
 	// Log sling event to activity feed
 	actor := detectActor()
 	_ = events.LogFeed(events.TypeSling, actor, events.SlingPayload(beadID, targetAgent))
