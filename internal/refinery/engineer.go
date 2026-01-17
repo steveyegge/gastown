@@ -599,6 +599,12 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mr.SourceIssue)
 		}
+
+		// 1.1. Issue lifecycle automation: close associated wisp if exists.
+		// When a formula was applied to an issue (gt sling <formula> --on <issue>),
+		// the wisp root is stored in attached_molecule. Close it with the parent issue.
+		// See: https://github.com/steveyegge/gastown/issues/634
+		e.closeAssociatedWisp(mr.SourceIssue, mr.ID)
 	}
 
 	// 1.5. Clear agent bead's active_mr reference (traceability cleanup)
