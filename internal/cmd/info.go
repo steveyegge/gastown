@@ -75,6 +75,14 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.3.2-fix",
+		Date:    "2026-01-17",
+		Changes: []string{
+			"FIX: Initial prompt not applied - wait for runtime ready before sending nudges",
+			"FIX: Witness/Deacon startup - add SleepForReadyDelay for runtime-agnostic support",
+		},
+	},
+	{
 		Version: "0.3.1-fix",
 		Date:    "2026-01-17",
 		Changes: []string{
