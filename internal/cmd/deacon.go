@@ -414,9 +414,14 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
-	time.Sleep(constants.ShutdownNotifyDelay)
 
+	// Accept bypass permissions warning dialog if it appears.
+	_ = t.AcceptBypassPermissionsWarning(sessionName)
+
+	// Wait for runtime to be fully ready before sending any nudges.
+	// This ensures the LLM runtime (Claude, OpenCode, etc.) is ready to receive input.
 	runtimeConfig := config.LoadRuntimeConfig("")
+	runtime.SleepForReadyDelay(runtimeConfig)
 	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
 
 	// Inject startup nudge for predecessor discovery via /resume

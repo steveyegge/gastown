@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -159,6 +160,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	}
 
 	townRoot := m.townRoot()
+	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
 
 	// Build startup command first
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
@@ -221,7 +223,10 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
-	time.Sleep(constants.ShutdownNotifyDelay)
+	// Wait for runtime to be fully ready before sending any nudges.
+	// This ensures the LLM runtime (Claude, OpenCode, etc.) is ready to receive input.
+	runtime.SleepForReadyDelay(runtimeConfig)
+	_ = runtime.RunStartupFallback(t, sessionID, "witness", runtimeConfig)
 
 	// Inject startup nudge for predecessor discovery via /resume
 	address := fmt.Sprintf("%s/witness", m.rig.Name)
