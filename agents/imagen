@@ -1,0 +1,368 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Imagen Agent - Image Generation via Gemini 2.0 Flash
+# Uses Google's Gemini 2.0 Flash model for image generation
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+show_help() {
+    cat << 'EOF'
+Usage: imagen [options] <prompt>
+
+Generate images using Google's Gemini 2.0 Flash model.
+
+Options:
+  --style, -s <name>    Apply a style preset (flat, 3d, pixel, classic, etc.)
+  --count, -c <n>       Number of images to generate (default: 1, max: 4)
+  --output, -o <dir>    Output directory (default: ./generated)
+  --aspect, -a <ratio>  Aspect ratio: square, portrait, landscape, wide, 4:3, 16:9
+  --size <WxH>          Explicit dimensions to request (e.g., 1024x768)
+  --reference, -r <f>   Reference image for style matching (can use multiple)
+  --piece, -p <name>    Item name (for consistent naming)
+  --variant, -v <name>  Variant name (for batch generation)
+  --version, -V         Show version information
+  --help, -h            Show this help message
+
+Aspect Ratios:
+  square      1:1   (default)
+  portrait    2:3   (vertical)
+  landscape   3:2   (horizontal)  
+  wide        16:9  (cinematic)
+  ultrawide   21:9  (banner)
+  4:3         4:3   (classic photo)
+  Or specify custom like "3:4", "1:2", etc.
+
+Style Presets:
+  flat        Minimalist flat design, solid colors, no shadows
+  3d          3D rendered with soft shadows and studio lighting
+  pixel       Pixel art style, 32x32 aesthetic upscaled
+  classic     Traditional realistic style
+  medieval    Medieval manuscript illumination style
+  neon        Neon glow cyberpunk style
+  watercolor  Soft watercolor painting style
+  geometric   Low poly, angular geometric shapes
+  staunton    Classic Staunton chess piece style
+
+Examples:
+  imagen "A knight chess piece in minimalist flat design"
+  imagen --style pixel --piece knight "Chess knight"
+  imagen --reference style.png "Chess bishop in same style"
+  imagen --aspect wide "Mountain landscape panorama"
+
+Requires: curl, jq, base64
+EOF
+}
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Configuration
+MODEL="gemini-2.0-flash-exp-image-generation"
+OUTPUT_DIR="./generated"
+COUNT=1
+ASPECT=""
+SIZE=""
+STYLE=""
+PIECE_NAME=""
+VARIANT_NAME=""
+
+# Support multiple reference images
+declare -a REFERENCES
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --style|-s)
+            STYLE="$2"
+            shift 2
+            ;;
+        --count|-c)
+            COUNT="$2"
+            shift 2
+            ;;
+        --output|-o)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --aspect|-a)
+            ASPECT="$2"
+            shift 2
+            ;;
+        --size)
+            SIZE="$2"
+            shift 2
+            ;;
+        --reference|-r)
+            REFERENCES+=("$2")
+            shift 2
+            ;;
+        --piece|-p)
+            PIECE_NAME="$2"
+            shift 2
+            ;;
+        --variant|-v)
+            VARIANT_NAME="$2"
+            shift 2
+            ;;
+        --version|-V)
+            echo "imagen $VERSION"
+            exit 0
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        *)
+            PROMPT="$*"
+            break
+            ;;
+    esac
+done
+
+if [[ -z "$PROMPT" ]]; then
+    echo "Error: No prompt provided"
+    echo "Usage: imagen [options] <prompt>"
+    exit 1
+fi
+
+# Style presets (using case to avoid bash associative array issues)
+get_style_preset() {
+    case "$1" in
+        flat) echo "minimalist flat design, solid colors, no shadows, vector art style, clean lines, white background" ;;
+        3d) echo "3D rendered, glossy material, soft shadows, studio lighting, white background" ;;
+        pixel) echo "pixel art style, 32x32 pixel aesthetic upscaled, retro game style, white background" ;;
+        classic) echo "traditional wooden piece, realistic wood grain texture, photograph style" ;;
+        medieval) echo "medieval manuscript illumination style, gold leaf accents, ornate details" ;;
+        neon) echo "neon glow effect, cyberpunk style, dark background with bright outlines" ;;
+        watercolor) echo "watercolor painting style, soft edges, artistic brush strokes" ;;
+        geometric) echo "geometric shapes, low poly style, angular facets, modern design" ;;
+        staunton) echo "Staunton chess set style, traditional tournament piece design, elegant proportions" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Convert aspect ratio to descriptive text for prompt
+get_aspect_description() {
+    case "$1" in
+        square|1:1)      echo "square aspect ratio (1:1)" ;;
+        portrait|2:3)    echo "portrait orientation, vertical aspect ratio (2:3)" ;;
+        landscape|3:2)   echo "landscape orientation, horizontal aspect ratio (3:2)" ;;
+        wide|16:9)       echo "wide cinematic aspect ratio (16:9)" ;;
+        ultrawide|21:9)  echo "ultra-wide panoramic aspect ratio (21:9)" ;;
+        4:3)             echo "classic 4:3 aspect ratio" ;;
+        3:4)             echo "vertical 3:4 aspect ratio" ;;
+        1:2)             echo "tall narrow aspect ratio (1:2)" ;;
+        2:1)             echo "wide banner aspect ratio (2:1)" ;;
+        *)
+            # Custom ratio like "5:4" - pass through
+            if [[ "$1" =~ ^[0-9]+:[0-9]+$ ]]; then
+                echo "aspect ratio $1"
+            else
+                echo ""
+            fi
+            ;;
+    esac
+}
+
+# Apply style preset to prompt
+if [[ -n "$STYLE" ]]; then
+    STYLE_DESC=$(get_style_preset "$STYLE")
+    if [[ -n "$STYLE_DESC" ]]; then
+        PROMPT="$PROMPT, $STYLE_DESC"
+        echo "Applied style preset: $STYLE"
+    fi
+fi
+
+# Apply aspect ratio to prompt
+if [[ -n "$ASPECT" ]]; then
+    ASPECT_DESC=$(get_aspect_description "$ASPECT")
+    if [[ -n "$ASPECT_DESC" ]]; then
+        PROMPT="$PROMPT, $ASPECT_DESC"
+        echo "Applied aspect ratio: $ASPECT"
+    fi
+fi
+
+# Apply explicit size to prompt
+if [[ -n "$SIZE" ]]; then
+    # Parse WxH format
+    if [[ "$SIZE" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+        WIDTH="${BASH_REMATCH[1]}"
+        HEIGHT="${BASH_REMATCH[2]}"
+        PROMPT="$PROMPT, image dimensions ${WIDTH}x${HEIGHT} pixels"
+        echo "Applied size: ${WIDTH}x${HEIGHT}"
+    fi
+fi
+
+# Create output directory
+mkdir -p "$OUTPUT_DIR"
+
+# Generate filename: variant_style_piece format
+# Build base name with available components
+BASE_NAME=""
+if [[ -n "$VARIANT_NAME" ]]; then
+    BASE_NAME="${VARIANT_NAME}"
+fi
+if [[ -n "$STYLE" ]]; then
+    if [[ -n "$BASE_NAME" ]]; then
+        BASE_NAME="${BASE_NAME}_${STYLE}"
+    else
+        BASE_NAME="$STYLE"
+    fi
+fi
+if [[ -n "$PIECE_NAME" ]]; then
+    if [[ -n "$BASE_NAME" ]]; then
+        BASE_NAME="${BASE_NAME}_${PIECE_NAME}"
+    else
+        BASE_NAME="$PIECE_NAME"
+    fi
+fi
+# Fallback if nothing specified
+if [[ -z "$BASE_NAME" ]]; then
+    BASE_NAME="image_$(date +%Y%m%d_%H%M%S)"
+fi
+
+# Check for existing files and add version number if needed
+get_versioned_filename() {
+    local dir="$1"
+    local base="$2"
+    local ext="$3"
+    
+    if [[ ! -f "$dir/${base}.${ext}" ]]; then
+        echo "${base}"
+        return
+    fi
+    
+    # Find next available version number
+    local version=2
+    while [[ -f "$dir/${base}_v${version}.${ext}" ]]; do
+        ((version++))
+    done
+    echo "${base}_v${version}"
+}
+
+# Get versioned filename
+FINAL_NAME=$(get_versioned_filename "$OUTPUT_DIR" "$BASE_NAME" "png")
+
+echo "🎨 Generating image..."
+echo "   Prompt: $PROMPT"
+echo "   Output: $OUTPUT_DIR/$FINAL_NAME.png"
+
+# Check for API key
+if [[ -z "$GEMINI_API_KEY" && -z "$GOOGLE_API_KEY" ]]; then
+    echo "Error: GEMINI_API_KEY or GOOGLE_API_KEY environment variable required"
+    exit 1
+fi
+
+API_KEY="${GEMINI_API_KEY:-$GOOGLE_API_KEY}"
+
+# Build the request
+# Gemini 2.0 Flash experimental image generation
+
+# Check if we have reference images
+if [[ ${#REFERENCES[@]} -gt 0 ]]; then
+    # Build parts array with text and reference images
+    PARTS_JSON='['
+    
+    # Add instructional text
+    if [[ ${#REFERENCES[@]} -eq 1 ]]; then
+        PARTS_JSON+='{"text": "Generate an image matching the style of the reference image provided. '
+    else
+        PARTS_JSON+='{"text": "Generate an image matching the style and aesthetic of these reference images. '
+    fi
+    PARTS_JSON+="$PROMPT\"}"
+    
+    # Add each reference image
+    for ref in "${REFERENCES[@]}"; do
+        if [[ -f "$ref" ]]; then
+            echo "   Reference: $ref"
+            REF_BASE64=$(base64 < "$ref" | tr -d '\n')
+            REF_MIME=$(file --mime-type -b "$ref")
+            PARTS_JSON+=",{\"inlineData\":{\"mimeType\":\"$REF_MIME\",\"data\":\"$REF_BASE64\"}}"
+        else
+            echo "   Warning: Reference file not found: $ref"
+        fi
+    done
+    
+    PARTS_JSON+=']'
+    
+    REQUEST_BODY=$(cat <<EOF
+{
+  "contents": [{
+    "parts": $PARTS_JSON
+  }],
+  "generationConfig": {
+    "responseModalities": ["TEXT", "IMAGE"]
+  }
+}
+EOF
+)
+else
+    # No reference images - simple text prompt
+    REQUEST_BODY=$(cat <<EOF
+{
+  "contents": [{
+    "parts": [{"text": "$PROMPT"}]
+  }],
+  "generationConfig": {
+    "responseModalities": ["TEXT", "IMAGE"]
+  }
+}
+EOF
+)
+fi
+
+# Make the API call
+RESPONSE=$(curl -s -X POST \
+    "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent?key=$API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$REQUEST_BODY")
+
+# Check for errors
+if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+    echo "Error from API:"
+    echo "$RESPONSE" | jq '.error'
+    exit 1
+fi
+
+# Extract and save the image
+# The response contains base64-encoded image data
+IMAGE_DATA=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[] | select(.inlineData) | .inlineData.data' 2>/dev/null)
+
+if [[ -n "$IMAGE_DATA" && "$IMAGE_DATA" != "null" ]]; then
+    echo "$IMAGE_DATA" | base64 -d > "$OUTPUT_DIR/$FINAL_NAME.png"
+    echo "✅ Saved: $OUTPUT_DIR/$FINAL_NAME.png"
+    
+    # Also save the prompt for reproducibility
+    echo "$PROMPT" > "$OUTPUT_DIR/$FINAL_NAME.prompt.txt"
+else
+    echo "⚠️  No image in response. Text response:"
+    echo "$RESPONSE" | jq -r '.candidates[0].content.parts[] | select(.text) | .text'
+    exit 1
+fi
+
+# Generate multiple if requested
+if [[ $COUNT -gt 1 ]]; then
+    for i in $(seq 2 $COUNT); do
+        echo "🎨 Generating variation $i/$COUNT..."
+        
+        # Get versioned name for each additional image
+        VARIANT_FINAL_NAME=$(get_versioned_filename "$OUTPUT_DIR" "$BASE_NAME" "png")
+        
+        RESPONSE=$(curl -s -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent?key=$API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$REQUEST_BODY")
+        
+        IMAGE_DATA=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[] | select(.inlineData) | .inlineData.data' 2>/dev/null)
+        
+        if [[ -n "$IMAGE_DATA" && "$IMAGE_DATA" != "null" ]]; then
+            echo "$IMAGE_DATA" | base64 -d > "$OUTPUT_DIR/${VARIANT_FINAL_NAME}.png"
+            echo "✅ Saved: $OUTPUT_DIR/${VARIANT_FINAL_NAME}.png"
+            echo "$PROMPT" > "$OUTPUT_DIR/${VARIANT_FINAL_NAME}.prompt.txt"
+        fi
+    done
+fi
+
+echo ""
+echo "Done! Generated $COUNT image(s) in $OUTPUT_DIR/"

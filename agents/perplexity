@@ -1,0 +1,157 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Perplexity Agent for Gastown
+# Uses Perplexity's sonar API for research and fact-gathering
+#
+# Best for:
+# - Web research with citations
+# - API documentation lookup
+# - Current events and news
+# - Fact-checking and verification
+# - Technical documentation discovery
+#
+# Prerequisites:
+#   Set PERPLEXITY_API_KEY environment variable
+#
+# Note: Perplexity's API is free-tier friendly for research tasks
+#
+# Requires: curl, jq
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Source usage tracking library
+if [[ -f "$SCRIPT_DIR/lib/usage-tracker.sh" ]]; then
+    source "$SCRIPT_DIR/lib/usage-tracker.sh"
+    TRACKING_ENABLED=true
+else
+    TRACKING_ENABLED=false
+fi
+
+TASK_ID="${BD_ISSUE:-${GT_TASK:-task-$$}}"
+
+# Model options:
+# - sonar: Fast, cheaper
+# - sonar-pro: More thorough, better citations
+# - sonar-reasoning: Best for complex research
+MODEL="${PERPLEXITY_MODEL:-sonar-pro}"
+
+# Check for API key
+if [[ -z "$PERPLEXITY_API_KEY" ]]; then
+    echo "Error: PERPLEXITY_API_KEY environment variable not set"
+    echo ""
+    echo "Get your API key at: https://www.perplexity.ai/settings/api"
+    echo "Then add to ~/.zshrc:"
+    echo '  export PERPLEXITY_API_KEY="pplx-..."'
+    exit 1
+fi
+
+# Collect prompt from arguments
+PROMPT="$*"
+
+if [[ -z "$PROMPT" ]]; then
+    echo "Perplexity Research Agent for Gastown"
+    echo ""
+    echo "Usage: perplexity <research query>"
+    echo ""
+    echo "Examples:"
+    echo "  perplexity 'What is the latest version of React?'"
+    echo "  perplexity 'How do I set up OAuth with Cloudflare Workers?'"
+    echo "  perplexity 'What are the rate limits for Yahoo Finance API?'"
+    echo ""
+    echo "Models (set via PERPLEXITY_MODEL):"
+    echo "  sonar         - Fast, cheaper"
+    echo "  sonar-pro     - More thorough (default)"
+    echo "  sonar-reasoning - Best for complex research"
+    exit 0
+fi
+
+# Start tracking
+[[ "$TRACKING_ENABLED" == "true" ]] && usage_start "perplexity" "$TASK_ID"
+
+START_TIME=$(date +%s)
+
+# Make API call
+RESPONSE=$(curl -s "https://api.perplexity.ai/chat/completions" \
+    -H "Authorization: Bearer $PERPLEXITY_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{
+        \"model\": \"$MODEL\",
+        \"messages\": [
+            {
+                \"role\": \"system\",
+                \"content\": \"You are a research assistant. Provide accurate, well-cited information. Focus on facts and include sources when possible.\"
+            },
+            {
+                \"role\": \"user\",
+                \"content\": \"$PROMPT\"
+            }
+        ],
+        \"return_citations\": true,
+        \"return_related_questions\": true
+    }")
+
+END_TIME=$(date +%s)
+
+# Extract and display the response, capture token counts
+OUTPUT=$(echo "$RESPONSE" | python3 -c "
+import json
+import sys
+
+try:
+    data = json.load(sys.stdin)
+
+    # Print main response
+    if 'choices' in data and len(data['choices']) > 0:
+        content = data['choices'][0].get('message', {}).get('content', '')
+        print(content)
+        print()
+
+        # Print citations if available
+        citations = data.get('citations', [])
+        if citations:
+            print('--- Sources ---')
+            for i, cite in enumerate(citations, 1):
+                print(f'{i}. {cite}')
+
+        # Extract usage for tracking
+        usage = data.get('usage', {})
+        input_tokens = usage.get('prompt_tokens', 0)
+        output_tokens = usage.get('completion_tokens', 0)
+        print(f'TOKENS:{input_tokens}:{output_tokens}', file=sys.stderr)
+    else:
+        print('Error:', data.get('error', {}).get('message', 'Unknown error'))
+        print('TOKENS:0:0', file=sys.stderr)
+        sys.exit(1)
+except json.JSONDecodeError:
+    print('Error: Invalid response from Perplexity API')
+    print('TOKENS:0:0', file=sys.stderr)
+    sys.exit(1)
+" 2>&1)
+
+EXIT_CODE=$?
+
+# Extract tokens from output
+TOKENS_LINE=$(echo "$OUTPUT" | grep "^TOKENS:" | tail -1)
+if [[ -n "$TOKENS_LINE" ]]; then
+    INPUT_TOKENS=$(echo "$TOKENS_LINE" | cut -d: -f2)
+    OUTPUT_TOKENS=$(echo "$TOKENS_LINE" | cut -d: -f3)
+    OUTPUT=$(echo "$OUTPUT" | grep -v "^TOKENS:")
+else
+    INPUT_TOKENS=$((${#PROMPT} / 4))
+    OUTPUT_TOKENS=$((${#OUTPUT} / 4))
+fi
+
+echo "$OUTPUT"
+
+# End tracking (Perplexity is free tier, so cost will be $0)
+if [[ "$TRACKING_ENABLED" == "true" ]]; then
+    STATUS="completed"
+    [[ $EXIT_CODE -ne 0 ]] && STATUS="failed"
+    usage_end "perplexity" "$TASK_ID" "$INPUT_TOKENS" "$OUTPUT_TOKENS" "$STATUS"
+fi
+
+exit $EXIT_CODE
