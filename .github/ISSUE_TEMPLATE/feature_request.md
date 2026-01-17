@@ -1,22 +1,17 @@
 ---
 name: Feature Request
-about: Suggest a new feature for Gas Town
-title: ''
+about: Suggest an improvement or new feature
 labels: enhancement
-assignees: ''
 ---
 
-## Problem Statement
-<!-- What problem does this feature solve? -->
+**What problem does this solve?**
 
-## Proposed Solution
-<!-- Describe the feature you'd like -->
 
-## Alternatives Considered
-<!-- Any alternative solutions or features you've considered -->
+**Proposed solution**
 
-## Use Case
-<!-- How would you use this feature? -->
 
-## Additional Context
-<!-- Any other context, mockups, or examples -->
+**Alternatives considered**
+
+
+---
+- [ ] I searched existing issues and didn't find a duplicate
