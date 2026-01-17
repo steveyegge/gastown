@@ -661,8 +661,9 @@ func NukePolecat(workDir, rigName, polecatName string) error {
 		_ = t.SendKeysRaw(sessionName, "C-c")
 		// Brief delay for graceful handling
 		time.Sleep(100 * time.Millisecond)
-		// Force kill the session
-		if err := t.KillSession(sessionName); err != nil {
+		// Force kill the session and all child processes
+		// Use KillSessionWithProcesses to ensure Claude and its children are terminated
+		if err := t.KillSessionWithProcesses(sessionName); err != nil {
 			// Log but continue - session might already be dead
 			// The important thing is we tried
 		}
