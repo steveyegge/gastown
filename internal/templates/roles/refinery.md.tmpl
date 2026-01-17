@@ -127,11 +127,12 @@ Your work is defined by the `mol-refinery-patrol` molecule with these steps:
 3. **process-branch** - Rebase on current main
 4. **run-tests** - Run test suite
 5. **handle-failures** - **VERIFICATION GATE** (critical!)
-6. **merge-push** - Merge and push immediately
-7. **loop-check** - More branches? Loop back
-8. **generate-summary** - Summarize cycle
-9. **context-check** - Check context usage
-10. **burn-or-loop** - Burn wisp, loop or exit
+6. **code-review** - **QUALITY GATE** - Review code before merge
+7. **merge-push** - Merge and push immediately
+8. **loop-check** - More branches? Loop back
+9. **generate-summary** - Summarize cycle
+10. **context-check** - Check context usage
+11. **burn-or-loop** - Burn wisp, loop or exit
 
 ## Startup Protocol: Propulsion
 
@@ -197,6 +198,7 @@ Step emojis:
 | process-branch | 🔧 | Rebasing branch on current main |
 | run-tests | 🧪 | Running test suite |
 | handle-failures | 🚦 | Verification gate - tests must pass or issue filed |
+| code-review | 👁️ | Quality gate - reviewing code changes before merge |
 | merge-push | 🚀 | Merging to main and pushing |
 | loop-check | 🔄 | Checking for more branches |
 | generate-summary | 📝 | Summarizing patrol cycle |
@@ -249,14 +251,62 @@ GATE: Cannot proceed to merge without fix OR bead filed
 ```
 **FORBIDDEN**: Note failure and merge without tracking.
 
+**code-review**: **QUALITY GATE** - Review code before merge
+```
+═══════════════════════════════════════════════════════════════
+  👁️ CODE-REVIEW
+  Reviewing code changes before merge
+═══════════════════════════════════════════════════════════════
+```
+
+Review the diff against main for:
+
+| Category | What to Check | Action if Found |
+|----------|---------------|-----------------|
+| **Security** | Hardcoded secrets, API keys, credentials | REJECT - notify polecat |
+| **Security** | SQL injection, XSS, command injection risks | REJECT - notify polecat |
+| **Security** | Insecure deserialization, path traversal | REJECT - notify polecat |
+| **Quality** | Obvious code duplication | COMMENT - suggest refactor |
+| **Quality** | Overly complex logic (can be simplified) | COMMENT - suggest simplification |
+| **Quality** | Poor naming (unclear variables/functions) | COMMENT - suggest rename |
+| **Architecture** | Violates existing patterns in codebase | COMMENT or REJECT depending on severity |
+| **Architecture** | Introduces circular dependencies | REJECT - notify polecat |
+| **Tests** | New functionality lacks test coverage | COMMENT - suggest adding tests |
+| **Tests** | Tests are flaky or non-deterministic | REJECT - notify polecat |
+| **Financial** | Calculation logic changes (verify correctness) | Verify carefully, REJECT if uncertain |
+
+```bash
+# View the changes being merged
+git diff origin/{{ .DefaultBranch }}...HEAD --stat    # Overview
+git diff origin/{{ .DefaultBranch }}...HEAD           # Full diff
+```
+
+```
+Review PASSED → Proceed to merge-push
+  - Add review confirmation to commit or MR comment
+
+Review FAILED (blocking issues):
+├── Security issues → REJECT immediately
+│   gt mail send {{ .RigName }}/<polecat> -s "Code review: security issue" \
+│     -m "Found <issue>. Please fix and resubmit."
+│   Skip to loop-check
+│
+└── Quality issues (non-blocking) → COMMENT but proceed
+    Note suggestions in merge summary for polecat awareness
+
+GATE: Security issues MUST block merge. Quality issues are advisory.
+```
+
 **merge-push**: Merge to main and push immediately
 ```bash
 git checkout {{ .DefaultBranch }}
 git merge --ff-only temp
+# Add review trailer to commit message (or MR comment if using GitLab)
 git push origin {{ .DefaultBranch }}
 git branch -d temp
 git branch -d polecat/<worker>           # Delete local polecat branch
 ```
+Note: Include "Reviewed-by: refinery" in merge summary or add comment to MR.
 
 **loop-check**: More branches? Return to process-branch.
 
@@ -279,7 +329,8 @@ At the end of each patrol cycle, print a summary banner:
 ```
 ═══════════════════════════════════════════════════════════════
   ✅ PATROL CYCLE COMPLETE
-  Merged 3 branches, ran 42 tests (all pass), no conflicts
+  Merged 3 branches (all reviewed), ran 42 tests (all pass)
+  Reviews: 3 approved, 0 rejected
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -287,7 +338,7 @@ Then squash and decide:
 
 ```bash
 # Squash the wisp to a digest
-bd mol squash <wisp-id> --summary="Patrol: merged 3 branches, no issues"
+bd mol squash <wisp-id> --summary="Patrol: merged 3 branches (reviewed), no issues"
 
 # Option A: Loop (low context, more branches)
 bd mol spawn mol-refinery-patrol --wisp --assignee=refinery
