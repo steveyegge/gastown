@@ -79,10 +79,19 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
-	// Build startup command with initial prompt for propulsion.
+	// Build startup beacon for predecessor discovery via /resume
+	// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+	// The SessionStart hook handles context injection (gt prime --hook)
+	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	})
+
+	// Build startup command with beacon as initial prompt.
 	// The CLI prompt is more reliable than post-startup nudges (which arrive before input is ready).
-	// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", "gt prime", agentOverride)
+	// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat.
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", beacon, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}

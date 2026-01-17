@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -264,7 +265,14 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 	if roleConfig != nil && roleConfig.StartCommand != "" {
 		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), nil
 	}
-	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, "gt prime", agentOverride)
+	// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+	// The SessionStart hook handles context injection (gt prime --hook)
+	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		Recipient: "witness",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	})
+	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, beacon, agentOverride)
 	if err != nil {
 		return "", fmt.Errorf("building startup command: %w", err)
 	}
