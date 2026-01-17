@@ -467,7 +467,7 @@ export const EventLogger = async () => {
 4. ⬜ Update plugin based on actual events
 5. ⬜ Test interactive roles end-to-end
 6. ⬜ Add integration tests to CI
-7. ⬜ Update OPENCODE_IMPACT_ANALYSIS.md with findings
+7. ✅ Update impact analysis with findings
 
 ---
 
@@ -482,6 +482,6 @@ export const EventLogger = async () => {
 
 - **Setup**: `scripts/setup-opencode.sh`
 - **Fork Testing**: `docs/opencode/SESSION_FORK_TEST_RESULTS.md`
-- **Impact Analysis**: `OPENCODE_IMPACT_ANALYSIS.md`
+- **Impact Analysis**: `docs/opencode/OPENCODE_IMPACT_ANALYSIS.md`
 - **Plugin Template**: `internal/opencode/plugin/gastown.js`
 - **Claude Hooks**: `internal/claude/config/settings-*.json`

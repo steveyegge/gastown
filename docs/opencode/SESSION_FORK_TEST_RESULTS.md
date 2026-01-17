@@ -269,8 +269,9 @@ OpenCode handoffs have TWO options:
    - For OpenCode: Use export/import pattern
    - Document as "query mode" vs "fork mode"
 
-2. **Update OPENCODE_IMPACT_ANALYSIS.md (Priority: High)**
-   - Session fork: ❌ NOT SUPPORTED in CLI
+2. **Update Impact Analysis (Priority: High)**
+   - ✅ Updated `docs/opencode/OPENCODE_IMPACT_ANALYSIS.md`
+   - Session fork: ✅ SUPPORTED via HTTP API
    - Session export/import: ✅ SUPPORTED
    - Handoffs: ✅ FULLY SUPPORTED via resume
 
@@ -356,7 +357,7 @@ OpenCode handoffs have TWO options:
 
 1. ✅ **Test Session Fork** - COMPLETE (HTTP API works perfectly)
 2. ⬜ **Update `gt seance`** - Implement HTTP API fork
-3. ⬜ **Update OPENCODE_IMPACT_ANALYSIS.md** - Session fork: ✅ SUPPORTED via HTTP API
+3. ✅ **Update Impact Analysis** - Session fork: ✅ SUPPORTED via HTTP API
 4. ⬜ **Create Gastown OpenCode client** - Wrap HTTP API for programmatic access
 
 ### Implementation Plan for `gt seance`
