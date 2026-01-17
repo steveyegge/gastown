@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -79,6 +82,12 @@ func runUp(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// 0. Cleanup orphaned Claude processes before starting services
+	cleanedCount := cleanupOrphanedClaude()
+	if cleanedCount > 0 && !upQuiet {
+		fmt.Printf("%s Cleaned up %d orphaned Claude process(es)\n", style.SuccessPrefix, cleanedCount)
 	}
 
 	allOK := true
@@ -712,4 +721,60 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 	}
 
 	return started, errors
+}
+
+// cleanupOrphanedClaude kills orphaned Claude/node processes that were left behind
+// when tmux sessions were killed. These processes have PPID=1 (reparented to launchd).
+//
+// Detection uses PPID=1 (parent is launchd/init) rather than TTY because:
+// - Orphaned processes may still have a TTY attached (observed: s001, s002, etc.)
+// - PPID=1 definitively identifies processes reparented after parent death
+// - User's active sessions have PPID = their parent shell, not 1
+//
+// Returns the number of processes cleaned up.
+func cleanupOrphanedClaude() int {
+	// Find claude/node processes with PPID=1 (orphaned to launchd).
+	// Do NOT filter by TTY - orphans can have TTY attached.
+	cmd := exec.Command("sh", "-c",
+		`ps -eo pid,ppid,comm | awk '$2 == 1 && ($3 == "claude" || $3 == "node") {print $1}'`)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	var pids []int
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+
+	if len(pids) == 0 {
+		return 0
+	}
+
+	// Send SIGTERM to all orphaned processes
+	for _, pid := range pids {
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+	}
+
+	// Wait for graceful shutdown
+	time.Sleep(2 * time.Second)
+
+	// SIGKILL any survivors
+	for _, pid := range pids {
+		// Check if process still exists by sending signal 0
+		if err := syscall.Kill(pid, 0); err == nil {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
+
+	return len(pids)
 }
