@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/protocol"
@@ -253,26 +254,54 @@ type PolicyResult struct {
 	Policy *beads.MergePolicy
 }
 
-// CheckMergePolicy evaluates merge policy for an MR based on the worker's role.
+// CheckMergePolicy evaluates merge policy for an MR based on the worker's role
+// and rig/town protected branches settings.
 // Returns a PolicyResult indicating if the merge can proceed.
 func (e *Engineer) CheckMergePolicy(mr *MRInfo) (*PolicyResult, error) {
 	result := &PolicyResult{Allowed: true}
 
-	// Get the worker's role config
+	// First, check rig/town-level protected branches
+	// These apply regardless of role bead settings
+	protectedBranches := e.getProtectedBranches()
+	if len(protectedBranches) > 0 {
+		for _, protected := range protectedBranches {
+			if mr.Target == protected {
+				// Target is protected, require human approval
+				result.NeedsGate = true
+				result.Policy = &beads.MergePolicy{
+					RequireHumanApproval: true,
+					BlockedTargets:       protectedBranches,
+				}
+				break
+			}
+		}
+	}
+
+	// Get the worker's role config for additional policy checks
 	roleConfig, err := e.beads.GetWorkerRoleConfig(mr.Worker)
 	if err != nil {
 		// Log warning but allow merge (fail-open for robustness)
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not get role config for %s: %v\n", mr.Worker, err)
+		// If protected branches already set needs gate, check gate status
+		if result.NeedsGate {
+			return e.checkExistingGate(mr, result)
+		}
 		return result, nil
 	}
 
 	if roleConfig == nil || roleConfig.MergePolicy == nil {
-		// No policy defined, use defaults (auto-merge allowed)
+		// No additional policy from role, but check protected branches gate
+		if result.NeedsGate {
+			return e.checkExistingGate(mr, result)
+		}
 		return result, nil
 	}
 
 	policy := roleConfig.MergePolicy
-	result.Policy = policy
+	// Merge role policy with any rig-level policy
+	if result.Policy == nil {
+		result.Policy = policy
+	}
 
 	// Check target branch restrictions
 	if len(policy.BlockedTargets) > 0 {
@@ -1157,4 +1186,55 @@ func (e *Engineer) ReleaseMR(mrID string) error {
 	return e.beads.Update(mrID, beads.UpdateOptions{
 		Assignee: &empty,
 	})
+}
+
+// getProtectedBranches returns the resolved protected branches for this rig.
+// It checks rig-level settings first, then falls back to town-level settings.
+func (e *Engineer) getProtectedBranches() []string {
+	// Find town root from rig path
+	// Rig path is typically: /path/to/town/rigs/rig-name
+	townRoot := filepath.Dir(filepath.Dir(e.rig.Path))
+
+	// Load town settings
+	townSettingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(townSettingsPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not load town settings: %v\n", err)
+		townSettings = nil
+	}
+
+	// Load rig settings
+	rigSettingsPath := config.RigSettingsPath(e.rig.Path)
+	rigSettings, err := config.LoadRigSettings(rigSettingsPath)
+	if err != nil {
+		// No rig settings file, that's ok
+		rigSettings = nil
+	}
+
+	return config.ResolveProtectedBranches(townSettings, rigSettings)
+}
+
+// checkExistingGate checks if an approval gate already exists for the MR
+// and updates the result with gate status.
+func (e *Engineer) checkExistingGate(mr *MRInfo, result *PolicyResult) (*PolicyResult, error) {
+	// Check if gate already exists by fetching the MR bead
+	mrBead, err := e.beads.Show(mr.ID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching MR bead: %w", err)
+	}
+
+	mrFields := beads.ParseMRFields(mrBead)
+	if mrFields != nil && mrFields.ApprovalGateID != "" {
+		result.GateExists = true
+
+		// Check if gate is closed (approved)
+		gateStatus, err := e.checkGateStatus(mrFields.ApprovalGateID)
+		if err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not check gate status: %v\n", err)
+		} else if gateStatus.Closed {
+			result.GateClosed = true
+		}
+	}
+
+	return result, nil
 }

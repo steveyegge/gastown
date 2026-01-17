@@ -428,3 +428,255 @@ func assertSlotValue(t *testing.T, townRoot, issueID, slot, want string) {
 		t.Fatalf("slot %s for %s = %q, want %q", slot, issueID, got, want)
 	}
 }
+
+// TestInstallProtectedBranchesDefault validates that branch protection is
+// enabled by default with main,master.
+func TestInstallProtectedBranchesDefault(t *testing.T) {
+	// Skip if bd is not available
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not installed, skipping protected branches test")
+	}
+
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	gtBinary := buildGT(t)
+
+	// Run gt install (default: --protected-branches=main,master)
+	cmd := exec.Command(gtBinary, "install", hqPath)
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
+	}
+
+	// Verify output mentions protected branches
+	if !strings.Contains(string(output), "Protected branches") {
+		t.Errorf("expected output to mention protected branches, got: %s", output)
+	}
+
+	// Verify TownSettings has protected branches
+	settingsPath := filepath.Join(hqPath, "settings", "config.json")
+	settings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("failed to load town settings: %v", err)
+	}
+
+	if len(settings.ProtectedBranches) != 2 {
+		t.Errorf("expected 2 protected branches, got %d: %v", len(settings.ProtectedBranches), settings.ProtectedBranches)
+	}
+
+	// Verify pre-push hook exists and blocks main
+	hookPath := filepath.Join(hqPath, ".githooks", "pre-push")
+	assertFileExists(t, hookPath, ".githooks/pre-push")
+
+	hookContent, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("failed to read pre-push hook: %v", err)
+	}
+
+	if !strings.Contains(string(hookContent), "main|master") {
+		t.Errorf("pre-push hook should contain main|master pattern")
+	}
+
+	// Verify hook is executable
+	info, err := os.Stat(hookPath)
+	if err != nil {
+		t.Fatalf("failed to stat hook: %v", err)
+	}
+	if info.Mode()&0111 == 0 {
+		t.Error("pre-push hook should be executable")
+	}
+}
+
+// TestInstallProtectedBranchesCustom validates custom protected branches.
+func TestInstallProtectedBranchesCustom(t *testing.T) {
+	// Skip if bd is not available
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not installed, skipping protected branches test")
+	}
+
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	gtBinary := buildGT(t)
+
+	// Run gt install with custom protected branches
+	cmd := exec.Command(gtBinary, "install", hqPath, "--protected-branches=production,staging")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
+	}
+
+	// Verify TownSettings has custom protected branches
+	settingsPath := filepath.Join(hqPath, "settings", "config.json")
+	settings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("failed to load town settings: %v", err)
+	}
+
+	if len(settings.ProtectedBranches) != 2 {
+		t.Errorf("expected 2 protected branches, got %d", len(settings.ProtectedBranches))
+	}
+	if settings.ProtectedBranches[0] != "production" {
+		t.Errorf("expected first branch to be 'production', got %q", settings.ProtectedBranches[0])
+	}
+	if settings.ProtectedBranches[1] != "staging" {
+		t.Errorf("expected second branch to be 'staging', got %q", settings.ProtectedBranches[1])
+	}
+
+	// Verify pre-push hook has custom pattern
+	hookPath := filepath.Join(hqPath, ".githooks", "pre-push")
+	hookContent, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("failed to read pre-push hook: %v", err)
+	}
+
+	if !strings.Contains(string(hookContent), "production|staging") {
+		t.Errorf("pre-push hook should contain production|staging pattern")
+	}
+}
+
+// TestInstallProtectedBranchesDisabled validates disabling protection.
+func TestInstallProtectedBranchesDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	gtBinary := buildGT(t)
+
+	// Run gt install with empty protected branches (disabled)
+	cmd := exec.Command(gtBinary, "install", hqPath, "--protected-branches=", "--no-beads")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
+	}
+
+	// Verify output does NOT mention protected branches
+	if strings.Contains(string(output), "Protected branches:") {
+		t.Errorf("expected output to NOT mention protected branches when disabled")
+	}
+
+	// Verify pre-push hook does NOT exist
+	hookPath := filepath.Join(hqPath, ".githooks", "pre-push")
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Error("pre-push hook should not exist when protection is disabled")
+	}
+}
+
+// TestInstallProtectedBranchesRoleBeads validates role beads get merge policy.
+func TestInstallProtectedBranchesRoleBeads(t *testing.T) {
+	// Skip if bd is not available
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not installed, skipping role beads test")
+	}
+
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	gtBinary := buildGT(t)
+
+	// Run gt install with default protection
+	cmd := exec.Command(gtBinary, "install", hqPath)
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
+	}
+
+	// Check that polecat role bead has merge policy
+	bdCmd := exec.Command("bd", "--no-daemon", "show", "hq-polecat-role")
+	bdCmd.Dir = hqPath
+	roleOutput, err := bdCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bd show hq-polecat-role failed: %v\nOutput: %s", err, roleOutput)
+	}
+
+	roleStr := string(roleOutput)
+	if !strings.Contains(roleStr, "merge_policy_require_approval: true") {
+		t.Errorf("polecat role should have merge_policy_require_approval: true\nGot: %s", roleStr)
+	}
+	if !strings.Contains(roleStr, "merge_policy_blocked_targets: main,master") {
+		t.Errorf("polecat role should have merge_policy_blocked_targets: main,master\nGot: %s", roleStr)
+	}
+}
+
+// TestConfigProtectedBranchesCommand validates the config command.
+func TestConfigProtectedBranchesCommand(t *testing.T) {
+	// Skip if bd is not available
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not installed, skipping config command test")
+	}
+
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	gtBinary := buildGT(t)
+
+	// First install with default protection
+	cmd := exec.Command(gtBinary, "install", hqPath)
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
+	}
+
+	// Test: show current protected branches
+	cmd = exec.Command(gtBinary, "config", "protected-branches")
+	cmd.Dir = hqPath
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt config protected-branches failed: %v\nOutput: %s", err, output)
+	}
+	if !strings.Contains(string(output), "main") {
+		t.Errorf("expected output to show 'main', got: %s", output)
+	}
+
+	// Test: change protected branches
+	cmd = exec.Command(gtBinary, "config", "protected-branches", "production")
+	cmd.Dir = hqPath
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt config protected-branches production failed: %v\nOutput: %s", err, output)
+	}
+
+	// Verify settings were updated
+	settingsPath := filepath.Join(hqPath, "settings", "config.json")
+	settings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("failed to load town settings: %v", err)
+	}
+	if len(settings.ProtectedBranches) != 1 || settings.ProtectedBranches[0] != "production" {
+		t.Errorf("expected [production], got %v", settings.ProtectedBranches)
+	}
+
+	// Verify hook was regenerated
+	hookPath := filepath.Join(hqPath, ".githooks", "pre-push")
+	hookContent, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("failed to read hook: %v", err)
+	}
+	if !strings.Contains(string(hookContent), "production)") {
+		t.Errorf("hook should contain production pattern")
+	}
+
+	// Test: clear protection
+	cmd = exec.Command(gtBinary, "config", "protected-branches", "--clear")
+	cmd.Dir = hqPath
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt config protected-branches --clear failed: %v\nOutput: %s", err, output)
+	}
+
+	// Verify settings were cleared
+	settings, err = config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("failed to load town settings: %v", err)
+	}
+	if len(settings.ProtectedBranches) != 0 {
+		t.Errorf("expected empty protected branches after --clear, got %v", settings.ProtectedBranches)
+	}
+}

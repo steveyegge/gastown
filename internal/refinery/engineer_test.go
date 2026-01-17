@@ -215,3 +215,237 @@ func TestEngineer_DeleteMergedBranchesConfig(t *testing.T) {
 		t.Error("expected DeleteMergedBranches to be true by default")
 	}
 }
+
+func TestEngineer_GetProtectedBranches(t *testing.T) {
+	// Create a temp town structure
+	tmpDir, err := os.MkdirTemp("", "engineer-protection-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create town structure: tmpDir/rigs/testrig
+	townRoot := tmpDir
+	rigPath := filepath.Join(townRoot, "rigs", "testrig")
+	settingsDir := filepath.Join(townRoot, "settings")
+
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Helper to write town settings
+	writeTownSettings := func(branches []string) {
+		settings := map[string]interface{}{
+			"type":               "town-settings",
+			"version":            1,
+			"protected_branches": branches,
+		}
+		data, _ := json.MarshalIndent(settings, "", "  ")
+		os.WriteFile(filepath.Join(settingsDir, "config.json"), data, 0644)
+	}
+
+	// Helper to write rig settings
+	// Rig settings path is: rigPath/settings/config.json
+	rigSettingsDir := filepath.Join(rigPath, "settings")
+	writeRigSettings := func(branches []string) {
+		os.MkdirAll(rigSettingsDir, 0755)
+		settings := map[string]interface{}{
+			"type":               "rig-settings",
+			"version":            1,
+			"protected_branches": branches,
+		}
+		data, _ := json.MarshalIndent(settings, "", "  ")
+		os.WriteFile(filepath.Join(rigSettingsDir, "config.json"), data, 0644)
+	}
+
+	// Helper to remove rig settings
+	removeRigSettings := func() {
+		os.Remove(filepath.Join(rigSettingsDir, "config.json"))
+	}
+
+	r := &rig.Rig{
+		Name: "testrig",
+		Path: rigPath,
+	}
+	e := NewEngineer(r)
+
+	t.Run("uses town settings when no rig override", func(t *testing.T) {
+		writeTownSettings([]string{"main", "master"})
+		removeRigSettings()
+
+		branches := e.getProtectedBranches()
+		if len(branches) != 2 {
+			t.Errorf("expected 2 branches, got %d", len(branches))
+		}
+		if len(branches) > 0 && branches[0] != "main" {
+			t.Errorf("expected first branch to be 'main', got %q", branches[0])
+		}
+	})
+
+	t.Run("rig override takes precedence", func(t *testing.T) {
+		writeTownSettings([]string{"main", "master"})
+		writeRigSettings([]string{"develop", "staging"})
+
+		branches := e.getProtectedBranches()
+		if len(branches) != 2 {
+			t.Errorf("expected 2 branches, got %d", len(branches))
+		}
+		if len(branches) > 0 && branches[0] != "develop" {
+			t.Errorf("expected first branch to be 'develop', got %q", branches[0])
+		}
+	})
+
+	t.Run("rig can disable protection with empty list", func(t *testing.T) {
+		writeTownSettings([]string{"main", "master"})
+		writeRigSettings([]string{})
+
+		branches := e.getProtectedBranches()
+		if len(branches) != 0 {
+			t.Errorf("expected 0 branches (disabled), got %d: %v", len(branches), branches)
+		}
+	})
+
+	t.Run("no protection when neither town nor rig set", func(t *testing.T) {
+		// Write town settings without protected_branches
+		settings := map[string]interface{}{
+			"type":    "town-settings",
+			"version": 1,
+		}
+		data, _ := json.MarshalIndent(settings, "", "  ")
+		os.WriteFile(filepath.Join(settingsDir, "config.json"), data, 0644)
+		removeRigSettings()
+
+		branches := e.getProtectedBranches()
+		if len(branches) != 0 {
+			t.Errorf("expected 0 branches, got %d", len(branches))
+		}
+	})
+}
+
+func TestEngineer_CheckMergePolicy_ProtectedBranches(t *testing.T) {
+	// Create a temp town structure
+	tmpDir, err := os.MkdirTemp("", "engineer-policy-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create town structure
+	townRoot := tmpDir
+	rigPath := filepath.Join(townRoot, "rigs", "testrig")
+	settingsDir := filepath.Join(townRoot, "settings")
+	rigSettingsDir := filepath.Join(rigPath, "settings")
+
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write town settings with protected branches
+	townSettings := map[string]interface{}{
+		"type":               "town-settings",
+		"version":            1,
+		"protected_branches": []string{"main", "master"},
+	}
+	data, _ := json.MarshalIndent(townSettings, "", "  ")
+	os.WriteFile(filepath.Join(settingsDir, "config.json"), data, 0644)
+
+	r := &rig.Rig{
+		Name: "testrig",
+		Path: rigPath,
+	}
+	e := NewEngineer(r)
+
+	// Note: CheckMergePolicy calls checkExistingGate when NeedsGate=true,
+	// which tries to fetch the MR bead. Without a beads DB, this fails.
+	// We test the core logic through getProtectedBranches tests above.
+	// Here we just verify non-protected branches work (no bead fetch needed).
+
+	t.Run("no gate required for non-protected branch", func(t *testing.T) {
+		mr := &MRInfo{
+			ID:     "gt-test456",
+			Branch: "polecat/feature",
+			Target: "develop", // Not protected
+			Worker: "testrig/polecat/nux",
+		}
+
+		result, err := e.CheckMergePolicy(mr)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// NeedsGate should be false since develop is not protected
+		if result.NeedsGate {
+			t.Error("expected NeedsGate=false for non-protected branch")
+		}
+	})
+
+	t.Run("rig override makes main unprotected", func(t *testing.T) {
+		// Write rig settings that only protect 'staging'
+		os.MkdirAll(rigSettingsDir, 0755)
+		rigSettings := map[string]interface{}{
+			"type":               "rig-settings",
+			"version":            1,
+			"protected_branches": []string{"staging"},
+		}
+		data, _ := json.MarshalIndent(rigSettings, "", "  ")
+		os.WriteFile(filepath.Join(rigSettingsDir, "config.json"), data, 0644)
+
+		// main is no longer protected (rig override)
+		mr := &MRInfo{
+			ID:     "gt-test789",
+			Branch: "polecat/feature",
+			Target: "main",
+			Worker: "testrig/polecat/nux",
+		}
+
+		result, err := e.CheckMergePolicy(mr)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.NeedsGate {
+			t.Error("expected NeedsGate=false since rig override doesn't protect main")
+		}
+
+		// Cleanup
+		os.Remove(filepath.Join(rigSettingsDir, "config.json"))
+	})
+
+	t.Run("rig empty override disables all protection", func(t *testing.T) {
+		// Write rig settings with empty protection (disables town protection)
+		os.MkdirAll(rigSettingsDir, 0755)
+		rigSettings := map[string]interface{}{
+			"type":               "rig-settings",
+			"version":            1,
+			"protected_branches": []string{},
+		}
+		data, _ := json.MarshalIndent(rigSettings, "", "  ")
+		os.WriteFile(filepath.Join(rigSettingsDir, "config.json"), data, 0644)
+
+		// main is no longer protected (rig empty override)
+		mr := &MRInfo{
+			ID:     "gt-testABC",
+			Branch: "polecat/feature",
+			Target: "main",
+			Worker: "testrig/polecat/nux",
+		}
+
+		result, err := e.CheckMergePolicy(mr)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.NeedsGate {
+			t.Error("expected NeedsGate=false since rig override disables all protection")
+		}
+
+		// Cleanup
+		os.Remove(filepath.Join(rigSettingsDir, "config.json"))
+	})
+}

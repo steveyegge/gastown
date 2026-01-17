@@ -385,6 +385,8 @@ at session start. Interactive agents wait for user prompts.
 ```bash
 gt install [path]            # Create town
 gt install --git             # With git init
+gt install --protected-branches=main,master  # Default: protects main,master
+gt install --protected-branches=""           # Disable branch protection
 gt doctor                    # Health check
 gt doctor --fix              # Auto-repair
 ```
@@ -400,6 +402,11 @@ gt config agent remove <name>     # Remove custom agent (built-ins protected)
 
 # Default agent
 gt config default-agent [name]    # Get or set town default agent
+
+# Branch protection
+gt config protected-branches              # Show protected branches
+gt config protected-branches main master  # Set protected branches
+gt config protected-branches --clear      # Remove all protection
 ```
 
 **Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
@@ -645,6 +652,130 @@ merge_policy_blocked_targets: production
 
 Roles without merge policy fields continue to auto-merge as before. Policy
 enforcement is fail-open: if role lookup fails, the merge proceeds with a warning.
+
+## Branch Protection
+
+Branch protection prevents agents from directly pushing or auto-merging to
+critical branches like `main` and `master`. This ensures all changes go through
+human-approved merge requests.
+
+### How It Works
+
+When branch protection is enabled (default: `main,master`):
+
+1. **Push protection**: A pre-push git hook blocks direct pushes to protected branches
+2. **Merge protection**: All role beads get merge policy requiring human approval
+
+Agents must use the polecat workflow:
+1. Create a `polecat/*` branch
+2. Submit work to the merge queue
+3. Wait for human approval via gate
+4. Refinery merges after approval
+
+### Configuring During Install
+
+```bash
+# Default: protects main and master
+gt install ~/gt
+
+# Custom branches
+gt install ~/gt --protected-branches=main,develop,production
+
+# Disable protection (legacy behavior)
+gt install ~/gt --protected-branches=""
+```
+
+### Modifying After Install
+
+```bash
+# View current protection
+gt config protected-branches
+
+# Add or change protected branches
+gt config protected-branches main master production
+
+# Remove all protection
+gt config protected-branches --clear
+```
+
+### Per-Rig Overrides
+
+Each rig can override the town-wide protected branches setting:
+
+```bash
+# View current protection for a rig (shows rig override and town default)
+gt rig config protected-branches myrig
+
+# Set rig-specific protection (overrides town default)
+gt rig config protected-branches myrig main develop
+
+# Remove rig override (use town defaults)
+gt rig config protected-branches myrig --inherit
+```
+
+Resolution order:
+1. **Rig override**: If the rig has `protected_branches` set, use those
+2. **Town default**: Otherwise, fall back to town-wide `protected_branches`
+
+Example output:
+```
+Protected Branches for myrig
+
+Rig override: main, develop
+Town default: main, master
+
+Effective: main, develop
+```
+
+Use cases:
+- A staging rig might protect only `staging` instead of `main`
+- A development rig might have no protection at all
+- A production rig might protect additional branches like `release/*`
+
+### What Gets Updated
+
+When you set protected branches:
+
+1. **TownSettings** (`settings/config.json`): Stores the branch list
+2. **Role beads** (all roles): Sets `merge_policy_require_approval: true` and
+   `merge_policy_blocked_targets: <branches>`
+3. **Pre-push hook** (`.githooks/pre-push`): Regenerated to block the branches
+
+### Pre-Push Hook Behavior
+
+The generated hook:
+- **Blocks**: All protected branches (`main`, `master`, etc.)
+- **Blocks**: Arbitrary feature branches (prevents PRs)
+- **Allows**: `polecat/*` branches (worker branches)
+- **Allows**: `beads-sync` (beads synchronization)
+
+Example error when pushing to protected branch:
+```
+ERROR: Push to protected branch blocked.
+
+Blocked push to: main
+
+Protected branches require human approval for changes.
+Use the MR workflow instead:
+  1. Create a polecat/* branch
+  2. Submit via Refinery for human-approved merge
+```
+
+### Approval Workflow
+
+When a polecat submits work to a protected branch:
+
+1. Refinery detects the MR targets a protected branch
+2. Refinery creates a human gate: `human:mr-approval-<mr-id>`
+3. MR blocks until gate is approved
+4. Human approves: `bd gate approve human:mr-approval-gt-xyz --reason "LGTM"`
+5. Refinery merges the approved MR
+
+### Backward Compatibility
+
+- Existing towns without `protected_branches` setting have no protection
+- Role beads without merge policy fields allow auto-merge
+- The pre-push hook only exists if branch protection was configured
 
 ## Patrol Agents
 

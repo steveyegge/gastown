@@ -25,16 +25,17 @@ import (
 )
 
 var (
-	installForce      bool
-	installName       string
-	installOwner      string
-	installPublicName string
-	installNoBeads    bool
-	installGit        bool
-	installGitHub     string
-	installPublic     bool
-	installShell      bool
-	installWrappers   bool
+	installForce             bool
+	installName              string
+	installOwner             string
+	installPublicName        string
+	installNoBeads           bool
+	installGit               bool
+	installGitHub            string
+	installPublic            bool
+	installShell             bool
+	installWrappers          bool
+	installProtectedBranches string
 )
 
 var installCmd = &cobra.Command{
@@ -77,6 +78,8 @@ func init() {
 	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
 	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
+	installCmd.Flags().StringVar(&installProtectedBranches, "protected-branches", "main,master",
+		"Comma-separated branches to protect (blocks direct push, requires merge approval). Use empty string to disable.")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -252,6 +255,18 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		// These use hq- prefix and are stored in town beads for cross-rig coordination.
 		if err := initTownAgentBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not create town-level agent beads: %v\n", style.Dim.Render("⚠"), err)
+		}
+
+		// Apply branch protection if configured
+		if installProtectedBranches != "" {
+			branches := parseProtectedBranches(installProtectedBranches)
+			if len(branches) > 0 {
+				if err := applyBranchProtection(absPath, branches); err != nil {
+					fmt.Printf("   %s Could not apply branch protection: %v\n", style.Dim.Render("⚠"), err)
+				} else {
+					fmt.Printf("   ✓ Protected branches: %s\n", strings.Join(branches, ", "))
+				}
+			}
 		}
 	}
 
@@ -557,4 +572,168 @@ func ensureBeadsCustomTypes(workDir string, types []string) error {
 		return fmt.Errorf("bd config set types.custom failed: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// parseProtectedBranches parses a comma-separated list of branch names.
+func parseProtectedBranches(input string) []string {
+	if input == "" {
+		return nil
+	}
+	parts := strings.Split(input, ",")
+	var branches []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			branches = append(branches, p)
+		}
+	}
+	return branches
+}
+
+// applyBranchProtection configures branch protection for the town.
+// This updates:
+// 1. TownSettings with the protected branches list
+// 2. All role beads with merge policy (require approval, block protected branches)
+// 3. Creates/updates the pre-push hook to block direct pushes
+func applyBranchProtection(townPath string, branches []string) error {
+	// 1. Save to TownSettings
+	settingsPath := config.TownSettingsPath(townPath)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+	townSettings.ProtectedBranches = branches
+	if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
+		return fmt.Errorf("saving town settings: %w", err)
+	}
+
+	// 2. Update role beads with merge policy
+	bd := beads.New(townPath)
+	roleIDs := []string{
+		beads.RoleBeadIDTown("mayor"),
+		beads.RoleBeadIDTown("deacon"),
+		beads.RoleBeadIDTown("witness"),
+		beads.RoleBeadIDTown("refinery"),
+		beads.RoleBeadIDTown("polecat"),
+		beads.RoleBeadIDTown("crew"),
+	}
+
+	for _, roleID := range roleIDs {
+		if err := updateRoleBeadMergePolicy(bd, roleID, branches); err != nil {
+			// Log but continue - some role beads might not exist yet
+			fmt.Printf("   %s Could not update %s: %v\n", style.Dim.Render("⚠"), roleID, err)
+		}
+	}
+
+	// 3. Install/update pre-push hook
+	if err := installProtectedBranchesHook(townPath, branches); err != nil {
+		return fmt.Errorf("installing pre-push hook: %w", err)
+	}
+
+	return nil
+}
+
+// updateRoleBeadMergePolicy updates a role bead's merge policy.
+func updateRoleBeadMergePolicy(bd *beads.Beads, roleID string, protectedBranches []string) error {
+	issue, err := bd.Show(roleID)
+	if err != nil {
+		return err // Role bead doesn't exist
+	}
+
+	// Parse existing config
+	roleConfig := beads.ParseRoleConfig(issue.Description)
+	if roleConfig == nil {
+		roleConfig = &beads.RoleConfig{}
+	}
+
+	// Update merge policy
+	if len(protectedBranches) > 0 {
+		roleConfig.MergePolicy = &beads.MergePolicy{
+			RequireHumanApproval: true,
+			BlockedTargets:       protectedBranches,
+		}
+	} else {
+		roleConfig.MergePolicy = nil
+	}
+
+	// Format and update
+	newDesc := beads.FormatRoleConfig(roleConfig)
+	return bd.Update(roleID, beads.UpdateOptions{Description: &newDesc})
+}
+
+// installProtectedBranchesHook creates/updates the pre-push hook to block protected branches.
+func installProtectedBranchesHook(townPath string, branches []string) error {
+	hooksDir := filepath.Join(townPath, ".githooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		return fmt.Errorf("creating .githooks directory: %w", err)
+	}
+
+	hookPath := filepath.Join(hooksDir, "pre-push")
+	hook := generatePrePushHook(branches)
+
+	if err := os.WriteFile(hookPath, []byte(hook), 0755); err != nil {
+		return fmt.Errorf("writing pre-push hook: %w", err)
+	}
+
+	return nil
+}
+
+// generatePrePushHook generates a pre-push hook script that blocks protected branches.
+func generatePrePushHook(protectedBranches []string) string {
+	// Build the case pattern for protected branches
+	protectedPattern := strings.Join(protectedBranches, "|")
+
+	return fmt.Sprintf(`#!/bin/bash
+# Gas Town pre-push hook
+# Blocks pushes to protected branches and arbitrary feature branches.
+# Gas Town agents push to polecat/* branches (polecats) which are merged by Refinery.
+
+# Protected branches (configured via gt config protected-branches):
+#   %s
+#
+# Allowed patterns:
+#   beads-sync    - Beads synchronization
+#   polecat/*     - Polecat working branches (Refinery merges these)
+
+while read local_ref local_sha remote_ref remote_sha; do
+  branch="${remote_ref#refs/heads/}"
+
+  case "$branch" in
+    %s)
+      # Protected branch - block push
+      echo ""
+      echo "ERROR: Push to protected branch blocked."
+      echo ""
+      echo "Blocked push to: $branch"
+      echo ""
+      echo "Protected branches require human approval for changes."
+      echo "Use the MR workflow instead:"
+      echo "  1. Create a polecat/* branch"
+      echo "  2. Submit via Refinery for human-approved merge"
+      echo ""
+      echo "To modify protected branches, run:"
+      echo "  gt config protected-branches --clear"
+      echo ""
+      exit 1
+      ;;
+    beads-sync|polecat/*)
+      # Allowed branches
+      ;;
+    *)
+      echo "ERROR: Invalid branch for Gas Town agents."
+      echo ""
+      echo "Blocked push to: $branch"
+      echo ""
+      echo "Allowed branches:"
+      echo "  polecat/*   - Polecat working branches"
+      echo "  beads-sync  - Beads synchronization"
+      echo ""
+      echo "Do NOT create PRs. Let Refinery merge polecat work."
+      exit 1
+      ;;
+  esac
+done
+
+exit 0
+`, strings.Join(protectedBranches, ", "), protectedPattern)
 }

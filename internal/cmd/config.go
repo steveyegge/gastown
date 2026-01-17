@@ -25,11 +25,12 @@ This command allows you to view and modify configuration settings
 for your Gas Town workspace, including agent aliases and defaults.
 
 Commands:
-  gt config agent list              List all agents (built-in and custom)
-  gt config agent get <name>         Show agent configuration
-  gt config agent set <name> <cmd>   Set custom agent command
-  gt config agent remove <name>      Remove custom agent
-  gt config default-agent [name]     Get or set default agent`,
+  gt config agent list                List all agents (built-in and custom)
+  gt config agent get <name>          Show agent configuration
+  gt config agent set <name> <cmd>    Set custom agent command
+  gt config agent remove <name>       Remove custom agent
+  gt config default-agent [name]      Get or set default agent
+  gt config protected-branches [...]  Get or set protected branches`,
 }
 
 // Agent subcommands
@@ -118,6 +119,50 @@ Examples:
   gt config default-agent my-custom # Set to custom agent`,
 	RunE: runConfigDefaultAgent,
 }
+
+var configAgentEmailDomainCmd = &cobra.Command{
+	Use:   "agent-email-domain [domain]",
+	Short: "Get or set agent email domain",
+	Long: `Get or set the domain used for agent git commit emails.
+
+When agents commit code via 'gt commit', their identity is converted
+to a git email address. For example, "gastown/crew/jack" becomes
+"gastown.crew.jack@{domain}".
+
+With no arguments, shows the current domain.
+With an argument, sets the domain.
+
+Default: gastown.local
+
+Examples:
+  gt config agent-email-domain                 # Show current domain
+  gt config agent-email-domain gastown.local   # Set to gastown.local
+  gt config agent-email-domain example.com     # Set custom domain`,
+	RunE: runConfigAgentEmailDomain,
+}
+
+var configProtectedBranchesCmd = &cobra.Command{
+	Use:   "protected-branches [branches...]",
+	Short: "Get or set protected branches",
+	Long: `Get or set branches protected from direct push and auto-merge.
+
+With no arguments, shows current protected branches.
+With arguments, sets the protected branches list.
+Use --clear to remove all protection.
+
+Protection includes:
+  - Direct pushes to these branches are blocked (via pre-push hook)
+  - All merges to these branches require human approval
+
+Examples:
+  gt config protected-branches               # Show current list
+  gt config protected-branches main master   # Protect main and master
+  gt config protected-branches main          # Protect only main
+  gt config protected-branches --clear       # Remove all protection`,
+	RunE: runConfigProtectedBranches,
+}
+
+var configProtectedBranchesClear bool
 
 // Flags
 var (
@@ -444,9 +489,116 @@ func runConfigDefaultAgent(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runConfigAgentEmailDomain(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Load town settings
+	settingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	if len(args) == 0 {
+		// Show current domain
+		domain := townSettings.AgentEmailDomain
+		if domain == "" {
+			domain = DefaultAgentEmailDomain
+		}
+		fmt.Printf("Agent email domain: %s\n", style.Bold.Render(domain))
+		fmt.Printf("\nExample: gastown/crew/jack → gastown.crew.jack@%s\n", domain)
+		return nil
+	}
+
+	// Set new domain
+	domain := args[0]
+
+	// Basic validation - domain should not be empty and should not start with @
+	if domain == "" {
+		return fmt.Errorf("domain cannot be empty")
+	}
+	if strings.HasPrefix(domain, "@") {
+		return fmt.Errorf("domain should not include @: use '%s' instead", strings.TrimPrefix(domain, "@"))
+	}
+
+	// Set domain
+	townSettings.AgentEmailDomain = domain
+
+	// Save settings
+	if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
+		return fmt.Errorf("saving town settings: %w", err)
+	}
+
+	fmt.Printf("Agent email domain set to '%s'\n", style.Bold.Render(domain))
+	fmt.Printf("\nExample: gastown/crew/jack → gastown.crew.jack@%s\n", domain)
+	return nil
+}
+
+func runConfigProtectedBranches(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Load town settings
+	settingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	// Handle --clear flag
+	if configProtectedBranchesClear {
+		if err := applyBranchProtection(townRoot, nil); err != nil {
+			return fmt.Errorf("clearing branch protection: %w", err)
+		}
+		fmt.Println("Branch protection cleared.")
+		fmt.Println("\nDirect pushes to all branches are now allowed.")
+		fmt.Println("Merges no longer require human approval.")
+		return nil
+	}
+
+	if len(args) == 0 {
+		// Show current protected branches
+		if len(townSettings.ProtectedBranches) == 0 {
+			fmt.Println("No protected branches configured.")
+			fmt.Println()
+			fmt.Println("To enable branch protection, run:")
+			fmt.Printf("  %s\n", style.Dim.Render("gt config protected-branches main master"))
+			return nil
+		}
+
+		fmt.Printf("%s\n\n", style.Bold.Render("Protected Branches"))
+		for _, branch := range townSettings.ProtectedBranches {
+			fmt.Printf("  • %s\n", branch)
+		}
+		fmt.Println()
+		fmt.Println("Protection includes:")
+		fmt.Println("  - Direct pushes are blocked")
+		fmt.Println("  - Merges require human approval")
+		return nil
+	}
+
+	// Set new protected branches
+	if err := applyBranchProtection(townRoot, args); err != nil {
+		return fmt.Errorf("applying branch protection: %w", err)
+	}
+
+	fmt.Printf("Protected branches: %s\n", style.Bold.Render(strings.Join(args, ", ")))
+	fmt.Println()
+	fmt.Println("Protection includes:")
+	fmt.Println("  - Direct pushes are blocked")
+	fmt.Println("  - Merges require human approval")
+	return nil
+}
+
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
+	configProtectedBranchesCmd.Flags().BoolVar(&configProtectedBranchesClear, "clear", false, "Remove all branch protection")
 
 	// Add agent subcommands
 	configAgentCmd := &cobra.Command{
@@ -462,6 +614,8 @@ func init() {
 	// Add subcommands to config
 	configCmd.AddCommand(configAgentCmd)
 	configCmd.AddCommand(configDefaultAgentCmd)
+	configCmd.AddCommand(configAgentEmailDomainCmd)
+	configCmd.AddCommand(configProtectedBranchesCmd)
 
 	// Register with root
 	rootCmd.AddCommand(configCmd)

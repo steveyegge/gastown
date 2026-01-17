@@ -56,6 +56,17 @@ type TownSettings struct {
 	// This allows cost optimization by using different models for different roles.
 	// Example: {"mayor": "claude-opus", "witness": "claude-haiku", "polecat": "claude-sonnet"}
 	RoleAgents map[string]string `json:"role_agents,omitempty"`
+
+	// AgentEmailDomain is the domain used for agent git identity emails.
+	// Agent addresses like "gastown/crew/jack" become "gastown.crew.jack@{domain}".
+	// Default: "gastown.local"
+	AgentEmailDomain string `json:"agent_email_domain,omitempty"`
+
+	// ProtectedBranches lists branches that require human approval for merges
+	// and block direct pushes. When set, agents cannot directly push or auto-merge
+	// to these branches. Default: empty (no protection) for backward compatibility.
+	// Example: ["main", "master"]
+	ProtectedBranches []string `json:"protected_branches,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -224,6 +235,13 @@ type RigSettings struct {
 	// Overrides TownSettings.RoleAgents for this specific rig.
 	// Example: {"witness": "claude-haiku", "polecat": "claude-sonnet"}
 	RoleAgents map[string]string `json:"role_agents,omitempty"`
+
+	// ProtectedBranches overrides the town-level protected branches for this rig.
+	// When set, this rig uses these branches instead of town defaults.
+	// Set to empty slice [] to explicitly disable protection for this rig.
+	// If nil/omitted, inherits from TownSettings.ProtectedBranches.
+	// NOTE: No omitempty so empty slice is preserved (distinct from nil/inherit).
+	ProtectedBranches []string `json:"protected_branches"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.
