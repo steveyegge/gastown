@@ -26,9 +26,101 @@ needs = ['check-refinery']
 title = 'Inspect all active polecats'
 
 [[steps]]
+id = "cleanup-stale-hooks"
+title = "Recover orphaned hooked work"
+needs = ["survey-workers"]
+description = """
+Automatically recover work stuck on dead polecats.
+
+In normal operation, polecats complete work and send POLECAT_DONE, triggering cleanup.
+However, if a polecat crashes before sending POLECAT_DONE, its hooked work is orphaned.
+This step detects and recovers such work automatically.
+
+**Step 1: Find stale hooked work**
+```bash
+bd list --status=hooked --json
+```
+
+For each hooked bead, check the age:
+- created_at or hook_time from bead metadata
+- Calculate: age = now - hook_time
+
+Filter for beads hooked > 30 minutes (stale threshold).
+
+**Step 2: For each stale hook, check polecat health**
+
+Extract polecat name from hook_bead field:
+```bash
+bd show <hook_bead> --json  # Get polecat agent bead
+# Parse: agent name from bead ID or description
+```
+
+Check if polecat session is alive:
+```bash
+gt polecat status <rig>/<polecat-name>
+# OR check tmux directly:
+tmux has-session -t gt-<rig>-<polecat> 2>/dev/null && echo "alive" || echo "dead"
+```
+
+**Step 3: Categorize and act**
+
+| Polecat Status | Hook Age | Action |
+|----------------|----------|--------|
+| Session alive | 30-60min | Monitor - polecat may be working |
+| Session alive | >60min | Stuck - escalate to Mayor |
+| Session DEAD | >30min | ORPHANED - recover work |
+
+**Step 4: Recover orphaned work (dead polecat)**
+
+If polecat session is dead and work is hooked:
+```bash
+# Unhook the work so it can be re-dispatched
+bd unhook <bead-id>
+
+# Reset status to ready
+bd update <bead-id> --status=ready
+
+# Notify Mayor that work was recovered
+gt mail send mayor/ -s "WORK_RECOVERED <rig>" -m "
+Bead: <bead-id>
+Previous-Polecat: <polecat-name>
+Recovered-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Status: Ready for re-dispatch
+
+Work was orphaned on a dead polecat and has been recovered.
+"
+```
+
+Log the recovery for audit purposes.
+
+**Step 5: Escalate stuck work (alive but stale >60min)**
+
+If polecat is alive but hooked work is >60 minutes old:
+```bash
+gt mail send mayor/ -s "STUCK_WORK: <rig>/<polecat>" -m "
+Bead: <bead-id>
+Polecat: <polecat-name>
+Hooked-Duration: <age> minutes
+Status: Session alive but work not progressing
+
+Please investigate:
+1. Check polecat logs: gt polecat logs <rig>/<polecat>
+2. Nudge if idle: gt nudge <rig>/<polecat>
+3. Consider force-nuke if unresponsive
+"
+```
+
+**Thresholds (configurable):**
+- Stale hook (dead session assumed): 30 minutes
+- Stuck work (intervention needed): 60 minutes
+
+This ensures orphaned work is recovered automatically without human intervention.
+"""
+
+[[steps]]
 description = "Check for expired timer gates and escalate as needed.\n\nTimer gates are async wait conditions with a timeout. When the timeout expires,\nthe gate should be escalated to the overseer for human intervention.\n\n**Step 1: Run timer gate check**\n```bash\nbd gate check --type=timer --escalate\n```\n\nThis command:\n1. Finds all open gate issues with await_type=timer\n2. Checks if `now > created_at + timeout`\n3. Escalates expired gates via `gt escalate` (HIGH severity)\n4. Reports summary of gate status\n\n**Step 2: Review output**\n\nIf expired gates were found and escalated:\n- The escalation creates an audit trail bead\n- Overseer will be notified via mail\n- Gate remains open until manually resolved\n\nIf no expired gates:\n- Continue patrol normally\n\n**Note**: Timer gates do NOT auto-close on expiration. They escalate.\nThis ensures human oversight of timeout conditions.\n\n**Parallelism**: This is a single command, no parallel execution needed."
 id = 'check-timer-gates'
-needs = ['survey-workers']
+needs = ['cleanup-stale-hooks']
 title = 'Check timer gates for expiration'
 
 [[steps]]
