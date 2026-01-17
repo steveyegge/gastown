@@ -426,6 +426,14 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 		}
 	}
 
+	// Verify directory is actually gone - git worktree remove can sometimes
+	// succeed in removing the registration but leave the directory behind
+	if _, err := os.Stat(clonePath); err == nil {
+		if removeErr := os.RemoveAll(clonePath); removeErr != nil {
+			return fmt.Errorf("removing lingering worktree directory: %w", removeErr)
+		}
+	}
+
 	// Also remove the parent polecat directory if it's now empty
 	// (for new structure: polecats/<name>/ contains only polecats/<name>/<rigname>/)
 	if polecatDir != clonePath {

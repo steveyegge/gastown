@@ -432,3 +432,89 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 		t.Errorf("AGENTS.md content = %q, want %q", string(content), string(agentsMDContent))
 	}
 }
+
+// TestRemoveWithOptionsDeletesDirectory verifies that RemoveWithOptions
+// actually removes the polecat directory from the filesystem, not just
+// the git worktree registration.
+func TestRemoveWithOptionsDeletesDirectory(t *testing.T) {
+	root := t.TempDir()
+
+	// Create mayor/rig directory structure
+	mayorRig := filepath.Join(root, "mayor", "rig")
+	if err := os.MkdirAll(mayorRig, 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Initialize git repo in mayor/rig
+	cmd := exec.Command("git", "init")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "config", "user.email", "test@test.com")
+	cmd.Dir = mayorRig
+	_ = cmd.Run()
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = mayorRig
+	_ = cmd.Run()
+
+	// Create initial commit
+	readmePath := filepath.Join(mayorRig, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("write README.md: %v", err)
+	}
+	mayorGit := git.NewGit(mayorRig)
+	if err := mayorGit.Add("README.md"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := mayorGit.Commit("Initial commit"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	// Add origin for worktree creation
+	cmd = exec.Command("git", "remote", "add", "origin", mayorRig)
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	if err := mayorGit.Fetch("origin"); err != nil {
+		t.Fatalf("git fetch: %v", err)
+	}
+
+	// Create rig and manager
+	r := &rig.Rig{
+		Name: "test-rig",
+		Path: root,
+	}
+	m := NewManager(r, git.NewGit(root))
+
+	// Create polecat
+	polecat, err := m.AddWithOptions("TestRemove", AddOptions{})
+	if err != nil {
+		t.Fatalf("AddWithOptions: %v", err)
+	}
+
+	// Verify polecat directory exists
+	polecatDir := m.polecatDir("TestRemove")
+	if _, err := os.Stat(polecatDir); err != nil {
+		t.Fatalf("polecat dir should exist: %v", err)
+	}
+	if _, err := os.Stat(polecat.ClonePath); err != nil {
+		t.Fatalf("clone path should exist: %v", err)
+	}
+
+	// Remove with nuclear=true (bypasses safety checks)
+	if err := m.RemoveWithOptions("TestRemove", true, true); err != nil {
+		t.Fatalf("RemoveWithOptions: %v", err)
+	}
+
+	// Verify clone path is gone
+	if _, err := os.Stat(polecat.ClonePath); !os.IsNotExist(err) {
+		t.Errorf("clone path should be deleted: %s", polecat.ClonePath)
+	}
+
+	// Verify polecat directory is gone (or at least empty)
+	if entries, err := os.ReadDir(polecatDir); err == nil && len(entries) > 0 {
+		t.Errorf("polecat dir should be empty or deleted, has %d entries", len(entries))
+	}
+}
