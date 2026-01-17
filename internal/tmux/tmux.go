@@ -215,6 +215,104 @@ func getAllDescendants(pid string) []string {
 	return result
 }
 
+// isDescendantOf checks if a process is a descendant of an ancestor PID.
+// It does this by walking up the process tree using parent PIDs.
+func isDescendantOf(pid, ancestorPID string) bool {
+	currentPID := pid
+	maxIterations := 50 // Prevent infinite loops
+
+	for i := 0; i < maxIterations; i++ {
+		if currentPID == ancestorPID {
+			return true
+		}
+
+		// Get the parent PID
+		ppid, err := getParentPID(currentPID)
+		if err != nil {
+			return false
+		}
+
+		// If we reached PID 1 (init), we've gone too far
+		if ppid == "1" || ppid == "0" {
+			return false
+		}
+
+		currentPID = ppid
+	}
+
+	return false
+}
+
+// getParentPID gets the parent PID of a process using ps.
+func getParentPID(pid string) (string, error) {
+	out, err := exec.Command("ps", "-o", "ppid=", "-p", pid).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// findClaudeProcessesDescendantsOf finds all Claude processes that are descendants of a PID.
+func findClaudeProcessesDescendantsOf(ancestorPID string) []string {
+	var result []string
+
+	// Find all processes with "claude" or "node" in their command line
+	pgrepCmd := exec.Command("pgrep", "-f", "claude")
+	claudeOut, err := pgrepCmd.Output()
+	if err != nil {
+		// No claude processes found, try "node" as fallback
+		pgrepCmd = exec.Command("pgrep", "-f", "node")
+		claudeOut, err = pgrepCmd.Output()
+		if err != nil {
+			return result
+		}
+	}
+
+	// For each Claude process, check if it's a descendant of the ancestor PID
+	claudePIDs := strings.Fields(strings.TrimSpace(string(claudeOut)))
+	for _, pid := range claudePIDs {
+		if isDescendantOf(pid, ancestorPID) {
+			result = append(result, pid)
+		}
+	}
+
+	return result
+}
+
+// KillPaneProcesses kills all Claude processes in a pane without killing the pane itself.
+// This is useful before respawn-pane to ensure the old process is actually terminated.
+// The pane parameter should be a pane ID (e.g., "%0") or session:window.pane format.
+func (t *Tmux) KillPaneProcesses(pane string) error {
+	// Get the pane PID
+	pid, err := t.run("list-panes", "-t", pane, "-F", "#{pane_pid}")
+	if err != nil {
+		return err
+	}
+
+	panePID := strings.TrimSpace(pid)
+	if panePID == "" {
+		return nil // No pane PID, nothing to kill
+	}
+
+	// Find all Claude/node processes that are descendants of the pane PID
+	claudePIDs := findClaudeProcessesDescendantsOf(panePID)
+
+	// Send SIGTERM to all Claude processes
+	for _, pid := range claudePIDs {
+		_ = exec.Command("kill", "-TERM", pid).Run()
+	}
+
+	// Wait for graceful shutdown
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGKILL to any remaining Claude processes
+	for _, pid := range claudePIDs {
+		_ = exec.Command("kill", "-KILL", pid).Run()
+	}
+
+	return nil
+}
+
 // KillServer terminates the entire tmux server and all sessions.
 func (t *Tmux) KillServer() error {
 	_, err := t.run("kill-server")
@@ -1267,4 +1365,46 @@ func (t *Tmux) SetPaneDiedHook(session, agentID string) error {
 	// Set the hook on this specific session
 	_, err := t.run("set-hook", "-t", session, "pane-died", hookCmd)
 	return err
+}
+
+// CleanupOrphanedSessions kills any Gas Town sessions that have zombie agents.
+// This prevents session accumulation when gt is restarted without proper shutdown.
+//
+// A session is cleaned up if:
+// - Its name starts with "gt-" or "hq-" (Gas Town naming convention)
+// - The agent (Claude) is not running in it (zombie session)
+//
+// Returns the number of sessions cleaned up and any errors encountered.
+func (t *Tmux) CleanupOrphanedSessions() (int, error) {
+	sessions, err := t.ListSessions()
+	if err != nil {
+		return 0, err
+	}
+
+	cleaned := 0
+	for _, session := range sessions {
+		if session == "" {
+			continue
+		}
+
+		// Only clean up Gas Town sessions (both gt-* and hq-* prefixes)
+		if !strings.HasPrefix(session, "gt-") && !strings.HasPrefix(session, "hq-") {
+			continue
+		}
+
+		// Check if Claude is running - if so, leave it alone
+		if t.IsClaudeRunning(session) {
+			continue
+		}
+
+		// Zombie session: tmux alive but Claude dead
+		// Kill it with process cleanup to prevent orphan processes
+		if err := t.KillSessionWithProcesses(session); err != nil {
+			// Log but continue - don't fail the whole cleanup
+			continue
+		}
+		cleaned++
+	}
+
+	return cleaned, nil
 }
