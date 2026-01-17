@@ -1,14 +1,19 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/upgrade"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// ErrIncompatibleUpgrade is returned when an upgrade is blocked due to compatibility issues.
+var ErrIncompatibleUpgrade = errors.New("upgrade blocked due to compatibility issues")
 
 var (
 	upgradeCheck  bool // --check: only check for updates
@@ -119,7 +124,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		if !result.Compatible && !upgradeForce {
 			fmt.Println()
 			fmt.Println(upgrade.FormatCompatWarning(result))
-			return nil
+			return ErrIncompatibleUpgrade
 		}
 
 		if !result.Compatible {
@@ -157,7 +162,8 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("extracting: %w", err)
 	}
-	defer os.RemoveAll(binaryPath) // Clean up extract dir
+	// Clean up extract directory (binaryPath is the file, parent is the temp dir)
+	defer func() { _ = os.RemoveAll(filepath.Dir(binaryPath)) }()
 
 	// Replace the current binary
 	fmt.Println("Installing...")

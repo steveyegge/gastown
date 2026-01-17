@@ -37,6 +37,13 @@ const (
 	// MaxBinarySize is the maximum size for extracted binaries (100MB).
 	// This prevents decompression bomb attacks.
 	MaxBinarySize = 100 * 1024 * 1024
+
+	// MaxAPIResponseSize is the maximum size for API responses (1MB).
+	// This prevents memory exhaustion from malicious servers.
+	MaxAPIResponseSize = 1 * 1024 * 1024
+
+	// MaxErrorBodySize is the maximum size for error response bodies (4KB).
+	MaxErrorBodySize = 4 * 1024
 )
 
 // ReleaseInfo contains information about a GitHub release.
@@ -87,12 +94,12 @@ func FetchLatestRelease() (*ReleaseInfo, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxErrorBodySize))
 		return nil, fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var release ReleaseInfo
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, MaxAPIResponseSize)).Decode(&release); err != nil {
 		return nil, fmt.Errorf("parsing release info: %w", err)
 	}
 
@@ -247,8 +254,8 @@ func extractTarGz(archivePath string) (string, error) {
 		}
 
 		binaryPath = filepath.Join(extractDir, binaryName)
-		// Mask mode to avoid integer overflow (G115) and use safe permissions
-		mode := os.FileMode(header.Mode & 0o777)
+		// Mask mode to avoid integer overflow (G115) and use safe permissions (no world-writable)
+		mode := os.FileMode(header.Mode & 0o755)
 		outFile, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_WRONLY, mode)
 		if err != nil {
 			_ = os.RemoveAll(extractDir)
@@ -257,12 +264,23 @@ func extractTarGz(archivePath string) (string, error) {
 
 		// Use LimitReader to prevent decompression bomb attacks (G110)
 		limitedReader := io.LimitReader(tr, MaxBinarySize)
-		if _, err := io.Copy(outFile, limitedReader); err != nil {
+		n, err := io.Copy(outFile, limitedReader)
+		if err != nil {
 			_ = outFile.Close()
 			_ = os.RemoveAll(extractDir)
 			return "", fmt.Errorf("extracting file: %w", err)
 		}
 		_ = outFile.Close()
+
+		// Check if we hit the size limit (file was truncated)
+		if n == MaxBinarySize {
+			// Try reading one more byte to see if there's more data
+			buf := make([]byte, 1)
+			if extra, _ := tr.Read(buf); extra > 0 {
+				_ = os.RemoveAll(extractDir)
+				return "", fmt.Errorf("binary exceeds maximum allowed size of %d bytes", MaxBinarySize)
+			}
+		}
 	}
 
 	if binaryPath == "" {
@@ -302,7 +320,9 @@ func extractZip(archivePath string) (string, error) {
 			return "", fmt.Errorf("opening file in zip: %w", err)
 		}
 
-		outFile, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_WRONLY, f.Mode())
+		// Mask mode to avoid arbitrary permissions from archive
+		mode := f.Mode() & 0o755
+		outFile, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_WRONLY, mode)
 		if err != nil {
 			_ = rc.Close()
 			_ = os.RemoveAll(extractDir)
@@ -311,9 +331,20 @@ func extractZip(archivePath string) (string, error) {
 
 		// Use LimitReader to prevent decompression bomb attacks (G110)
 		limitedReader := io.LimitReader(rc, MaxBinarySize)
-		_, copyErr := io.Copy(outFile, limitedReader)
-		_ = rc.Close()
+		n, copyErr := io.Copy(outFile, limitedReader)
 		_ = outFile.Close()
+
+		// Check if we hit the size limit (file was truncated)
+		if copyErr == nil && n == MaxBinarySize {
+			// Try reading one more byte to see if there's more data
+			buf := make([]byte, 1)
+			if extra, _ := rc.Read(buf); extra > 0 {
+				_ = rc.Close()
+				_ = os.RemoveAll(extractDir)
+				return "", fmt.Errorf("binary exceeds maximum allowed size of %d bytes", MaxBinarySize)
+			}
+		}
+		_ = rc.Close()
 
 		if copyErr != nil {
 			_ = os.RemoveAll(extractDir)

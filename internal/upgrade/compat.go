@@ -91,7 +91,7 @@ func FetchCompatibilityInfo(release *ReleaseInfo) (*CompatibilityInfo, error) {
 		return nil, fmt.Errorf("compatibility.json download failed with status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxAPIResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("reading compatibility info: %w", err)
 	}
