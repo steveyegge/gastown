@@ -1,4 +1,4 @@
-.PHONY: build install clean test generate
+.PHONY: build install clean test test-e2e test-e2e-container generate
 
 BINARY := gt
 BUILD_DIR := .
@@ -22,14 +22,20 @@ ifeq ($(shell uname),Darwin)
 	@echo "Signed $(BINARY) for macOS"
 endif
 
-install: build
-	cp $(BUILD_DIR)/$(BINARY) ~/.local/bin/$(BINARY)
-ifeq ($(shell uname),Darwin)
-	@codesign -s - -f ~/.local/bin/$(BINARY) 2>/dev/null || true
-endif
+install: generate
+	go install -ldflags "$(LDFLAGS)" ./cmd/gt
 
 clean:
 	rm -f $(BUILD_DIR)/$(BINARY)
 
 test:
 	go test ./...
+
+# Run e2e tests locally (may have false failures from host environment leakage)
+test-e2e:
+	go test -tags=integration -run 'TestInstallDoctorClean' ./internal/cmd -v -timeout=5m
+
+# Run e2e tests in isolated container (recommended for CI)
+test-e2e-container:
+	docker build -f Dockerfile.e2e -t gastown-test .
+	docker run --rm gastown-test

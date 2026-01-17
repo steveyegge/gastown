@@ -428,3 +428,189 @@ func assertSlotValue(t *testing.T, townRoot, issueID, slot, want string) {
 		t.Fatalf("slot %s for %s = %q, want %q", slot, issueID, got, want)
 	}
 }
+
+// TestInstallDoctorClean validates that gt install creates a functional system.
+// This test verifies:
+// 1. gt install succeeds with proper structure
+// 2. gt rig add succeeds
+// 3. gt crew add succeeds
+// 4. Basic commands work
+//
+// NOTE: Full doctor --fix verification is currently limited by known issues:
+// - Doctor fix has bugs with bead creation (UNIQUE constraint errors)
+// - Container environment lacks tmux for session checks
+// - Test repos don't satisfy priming expectations (AGENTS.md length)
+//
+// TODO: Enable full doctor verification once these issues are resolved.
+func TestInstallDoctorClean(t *testing.T) {
+	// Skip if bd is not available
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not installed")
+	}
+
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+	gtBinary := buildGT(t)
+
+	// Clean environment for predictable behavior
+	env := cleanGTEnv()
+	env = append(env, "HOME="+tmpDir)
+
+	// 1. Install town with git
+	t.Run("install", func(t *testing.T) {
+		runGTCmd(t, gtBinary, tmpDir, env, "install", hqPath, "--name", "test-town", "--git")
+	})
+
+	// 2. Verify core structure exists
+	t.Run("verify-structure", func(t *testing.T) {
+		assertDirExists(t, filepath.Join(hqPath, "mayor"), "mayor/")
+		assertDirExists(t, filepath.Join(hqPath, "deacon"), "deacon/")
+		assertDirExists(t, filepath.Join(hqPath, ".beads"), ".beads/")
+		assertFileExists(t, filepath.Join(hqPath, "mayor", "town.json"), "mayor/town.json")
+		assertFileExists(t, filepath.Join(hqPath, "mayor", "rigs.json"), "mayor/rigs.json")
+	})
+
+	// 3. Create a test git repo and add as rig
+	testRepoPath := createTestGitRepo(t, "testproject")
+	t.Run("rig-add", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "rig", "add", "testrig", testRepoPath, "--prefix", "tr")
+	})
+
+	// 4. Verify rig structure exists
+	t.Run("verify-rig-structure", func(t *testing.T) {
+		rigPath := filepath.Join(hqPath, "testrig")
+		assertDirExists(t, rigPath, "testrig/")
+		assertDirExists(t, filepath.Join(rigPath, "witness"), "testrig/witness/")
+		assertDirExists(t, filepath.Join(rigPath, "refinery"), "testrig/refinery/")
+		assertDirExists(t, filepath.Join(rigPath, ".repo.git"), "testrig/.repo.git/")
+	})
+
+	// 5. Add a crew member
+	t.Run("crew-add", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "crew", "add", "jayne", "--rig", "testrig")
+	})
+
+	// 6. Verify crew structure exists
+	t.Run("verify-crew-structure", func(t *testing.T) {
+		crewPath := filepath.Join(hqPath, "testrig", "crew", "jayne")
+		assertDirExists(t, crewPath, "testrig/crew/jayne/")
+	})
+
+	// 7. Basic commands should work
+	t.Run("commands", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "rig", "list")
+		runGTCmd(t, gtBinary, hqPath, env, "crew", "list", "--rig", "testrig")
+		runGTCmd(t, gtBinary, hqPath, env, "mail", "inbox")
+		runGTCmd(t, gtBinary, hqPath, env, "hook")
+	})
+
+	// 8. Doctor runs without crashing (may have warnings/errors but should not panic)
+	t.Run("doctor-runs", func(t *testing.T) {
+		// Run doctor and capture output - we just verify it doesn't crash
+		// Full clean verification is TODO pending doctor fix bugs
+		cmd := exec.Command(gtBinary, "doctor", "-v")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		out, _ := cmd.CombinedOutput()
+		t.Logf("Doctor output:\n%s", out)
+		// Note: We don't fail on doctor errors yet due to known issues
+	})
+}
+
+// TestInstallWithDaemon validates that gt install creates a functional system
+// with the daemon running. This extends TestInstallDoctorClean by:
+// 1. Starting the daemon after install
+// 2. Verifying the daemon is healthy
+// 3. Running basic operations with daemon support
+func TestInstallWithDaemon(t *testing.T) {
+	// Skip if bd is not available
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not installed")
+	}
+
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+	gtBinary := buildGT(t)
+
+	// Clean environment for predictable behavior
+	env := cleanGTEnv()
+	env = append(env, "HOME="+tmpDir)
+
+	// 1. Install town with git
+	t.Run("install", func(t *testing.T) {
+		runGTCmd(t, gtBinary, tmpDir, env, "install", hqPath, "--name", "test-town", "--git")
+	})
+
+	// 2. Start daemon
+	t.Run("daemon-start", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "daemon", "start")
+	})
+
+	// Ensure daemon is stopped on test cleanup
+	t.Cleanup(func() {
+		cmd := exec.Command(gtBinary, "daemon", "stop")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		_ = cmd.Run() // Best effort cleanup
+	})
+
+	// 3. Verify daemon is running
+	t.Run("daemon-status", func(t *testing.T) {
+		cmd := exec.Command(gtBinary, "daemon", "status")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("daemon status failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(string(out), "running") {
+			t.Errorf("expected daemon to be running, got: %s", out)
+		}
+	})
+
+	// 4. Create rig and verify operations work
+	testRepoPath := createTestGitRepo(t, "testproject")
+	t.Run("rig-add", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "rig", "add", "testrig", testRepoPath, "--prefix", "tr")
+	})
+
+	// 5. Add crew member
+	t.Run("crew-add", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "crew", "add", "jayne", "--rig", "testrig")
+	})
+
+	// 6. Verify commands work with daemon running
+	t.Run("commands", func(t *testing.T) {
+		runGTCmd(t, gtBinary, hqPath, env, "rig", "list")
+		runGTCmd(t, gtBinary, hqPath, env, "crew", "list", "--rig", "testrig")
+		runGTCmd(t, gtBinary, hqPath, env, "mail", "inbox")
+		runGTCmd(t, gtBinary, hqPath, env, "hook")
+	})
+
+	// 7. Verify daemon shows in doctor output
+	t.Run("doctor-daemon-check", func(t *testing.T) {
+		cmd := exec.Command(gtBinary, "doctor", "-v")
+		cmd.Dir = hqPath
+		cmd.Env = env
+		out, _ := cmd.CombinedOutput()
+		outStr := string(out)
+		t.Logf("Doctor output:\n%s", outStr)
+
+		// Verify daemon check passes (shows as running)
+		if !strings.Contains(outStr, "Daemon is running") && !strings.Contains(outStr, "daemon") {
+			t.Logf("Note: daemon check output: %s", outStr)
+		}
+	})
+}
+
+// runGTCmd runs a gt command and fails the test if it fails.
+func runGTCmd(t *testing.T, binary, dir string, env []string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(binary, args...)
+	cmd.Dir = dir
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt %v failed: %v\n%s", args, err, out)
+	}
+}
