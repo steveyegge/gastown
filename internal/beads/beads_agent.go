@@ -537,6 +537,11 @@ func (b *Beads) CloseAndClearAgentBead(id, reason string) error {
 
 // GetAgentBead retrieves an agent bead by ID.
 // Returns nil if not found.
+//
+// IMPORTANT: The returned AgentFields uses authoritative values from the Issue struct's
+// SQLite columns (hook_bead, role_bead, agent_state) when available, falling back to
+// description text for backward compatibility. This fixes the bug where SetHookBead
+// updates the slot but GetAgentBead was only reading from description text.
 func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	issue, err := b.Show(id)
 	if err != nil {
@@ -550,7 +555,24 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 		return nil, nil, fmt.Errorf("issue %s is not an agent bead (missing gt:agent label)", id)
 	}
 
+	// Parse fields from description text first (for backward compatibility with older beads)
 	fields := ParseAgentFields(issue.Description)
+
+	// Override with authoritative values from Issue struct (populated from SQLite columns)
+	// These are set by SetHookBead, UpdateAgentState, etc. and are the source of truth.
+	// FIX: gt-l7wvt - SetHookBead updates the slot column but GetAgentBead was only
+	// reading from description text, causing polecats to show as "done" when they have
+	// hooked work.
+	if issue.HookBead != "" {
+		fields.HookBead = issue.HookBead
+	}
+	if issue.RoleBead != "" {
+		fields.RoleBead = issue.RoleBead
+	}
+	if issue.AgentState != "" {
+		fields.AgentState = issue.AgentState
+	}
+
 	return issue, fields, nil
 }
 
