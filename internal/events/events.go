@@ -68,6 +68,12 @@ const (
 	TypeMerged       = "merged"
 	TypeMergeFailed  = "merge_failed"
 	TypeMergeSkipped = "merge_skipped"
+
+	// Rate limit events (Issue #232: intelligent instance swapping)
+	TypeRateLimit     = "rate_limit"      // A rate limit was detected
+	TypeInstanceSwap  = "instance_swap"   // Instance/profile was swapped
+	TypeCooldownStart = "cooldown_start"  // Profile entered cooldown
+	TypeCooldownEnd   = "cooldown_end"    // Profile cooldown expired
 )
 
 // EventsFile is the name of the raw events log.
