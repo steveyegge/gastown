@@ -216,7 +216,7 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 		RuntimeConfigDir: claudeConfigDir,
 	}
 	if s.agent != "" {
-		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(s.RigName, s.PolecatName, r.Path, "", s.agent)
+		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(s.RigName, s.PolecatName, r.Path, "", s.agent, s.ClonePath)
 		if err != nil {
 			return "", err
 		}

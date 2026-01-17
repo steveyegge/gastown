@@ -1516,7 +1516,8 @@ func BuildAgentStartupCommandWithAgentOverride(role, rig, townRoot, rigPath, pro
 
 // BuildPolecatStartupCommand builds the startup command for a polecat.
 // Sets GT_ROLE, GT_RIG, GT_POLECAT, BD_ACTOR, GIT_AUTHOR_NAME, and GT_ROOT.
-func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) string {
+// workDir is the polecat's working directory, used to check for beads redirects.
+func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt, workDir string) string {
 	var townRoot string
 	if rigPath != "" {
 		townRoot = filepath.Dir(rigPath)
@@ -1526,12 +1527,13 @@ func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) st
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  townRoot,
+		WorkDir:   workDir,
 	})
 	return BuildStartupCommand(envVars, rigPath, prompt)
 }
 
 // BuildPolecatStartupCommandWithAgentOverride is like BuildPolecatStartupCommand, but uses agentOverride if non-empty.
-func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, prompt, agentOverride string) (string, error) {
+func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, prompt, agentOverride, workDir string) (string, error) {
 	var townRoot string
 	if rigPath != "" {
 		townRoot = filepath.Dir(rigPath)
@@ -1541,13 +1543,15 @@ func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, 
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  townRoot,
+		WorkDir:   workDir,
 	})
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }
 
 // BuildCrewStartupCommand builds the startup command for a crew member.
 // Sets GT_ROLE, GT_RIG, GT_CREW, BD_ACTOR, GIT_AUTHOR_NAME, and GT_ROOT.
-func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
+// workDir is the crew member's working directory, used to check for beads redirects.
+func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt, workDir string) string {
 	var townRoot string
 	if rigPath != "" {
 		townRoot = filepath.Dir(rigPath)
@@ -1557,12 +1561,13 @@ func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
 		Rig:       rigName,
 		AgentName: crewName,
 		TownRoot:  townRoot,
+		WorkDir:   workDir,
 	})
 	return BuildStartupCommand(envVars, rigPath, prompt)
 }
 
 // BuildCrewStartupCommandWithAgentOverride is like BuildCrewStartupCommand, but uses agentOverride if non-empty.
-func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt, agentOverride string) (string, error) {
+func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt, agentOverride, workDir string) (string, error) {
 	var townRoot string
 	if rigPath != "" {
 		townRoot = filepath.Dir(rigPath)
@@ -1572,6 +1577,7 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 		Rig:       rigName,
 		AgentName: crewName,
 		TownRoot:  townRoot,
+		WorkDir:   workDir,
 	})
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }

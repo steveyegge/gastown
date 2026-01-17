@@ -501,7 +501,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 
 	// Build startup command first
 	// SessionStart hook handles context loading (gt prime --hook)
-	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
+	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride, worker.ClonePath)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}
@@ -526,6 +526,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.ClaudeConfigDir,
 		BeadsNoDaemon:    true,
+		WorkDir:          worker.ClonePath,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
