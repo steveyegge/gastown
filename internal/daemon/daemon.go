@@ -56,6 +56,9 @@ type Daemon struct {
 	// See: https://github.com/steveyegge/gastown/issues/567
 	// Note: Only accessed from heartbeat loop goroutine - no sync needed.
 	deaconLastStarted time.Time
+
+	// Restart tracking with exponential backoff to prevent crash loops
+	restartTracker *RestartTracker
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -93,13 +96,20 @@ func New(config *Config) (*Daemon, error) {
 		logger.Printf("Loaded patrol config from %s", PatrolConfigFile(config.TownRoot))
 	}
 
+	// Initialize restart tracker with exponential backoff
+	restartTracker := NewRestartTracker(config.TownRoot)
+	if err := restartTracker.Load(); err != nil {
+		logger.Printf("Warning: failed to load restart state: %v", err)
+	}
+
 	return &Daemon{
-		config:       config,
-		patrolConfig: patrolConfig,
-		tmux:         tmux.NewTmux(),
-		logger:       logger,
-		ctx:          ctx,
-		cancel:       cancel,
+		config:         config,
+		patrolConfig:   patrolConfig,
+		tmux:           tmux.NewTmux(),
+		logger:         logger,
+		ctx:            ctx,
+		cancel:         cancel,
+		restartTracker: restartTracker,
 	}, nil
 }
 
@@ -361,15 +371,41 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 // ensureDeaconRunning ensures the Deacon is running.
 // Uses deacon.Manager for consistent startup behavior (WaitForShellReady, GUPP, etc.).
 func (d *Daemon) ensureDeaconRunning() {
+	const agentID = "deacon"
+
+	// Check restart tracker for backoff/crash loop
+	if d.restartTracker != nil {
+		if d.restartTracker.IsInCrashLoop(agentID) {
+			d.logger.Printf("Deacon is in crash loop, skipping restart (use 'gt daemon clear-backoff deacon' to reset)")
+			return
+		}
+		if !d.restartTracker.CanRestart(agentID) {
+			remaining := d.restartTracker.GetBackoffRemaining(agentID)
+			d.logger.Printf("Deacon restart in backoff, %s remaining", remaining.Round(time.Second))
+			return
+		}
+	}
+
 	mgr := deacon.NewManager(d.config.TownRoot)
 
 	if err := mgr.Start(""); err != nil {
 		if err == deacon.ErrAlreadyRunning {
-			// Deacon is running - nothing to do
+			// Deacon is running - record success to reset backoff
+			if d.restartTracker != nil {
+				d.restartTracker.RecordSuccess(agentID)
+			}
 			return
 		}
 		d.logger.Printf("Error starting Deacon: %v", err)
 		return
+	}
+
+	// Record this restart attempt for backoff tracking
+	if d.restartTracker != nil {
+		d.restartTracker.RecordRestart(agentID)
+		if err := d.restartTracker.Save(); err != nil {
+			d.logger.Printf("Warning: failed to save restart state: %v", err)
+		}
 	}
 
 	// Track when we started the Deacon to prevent race condition in checkDeaconHeartbeat.
