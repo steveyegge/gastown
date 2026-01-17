@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"html/template"
 	"net/http"
 )
@@ -57,10 +58,12 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Polecats:   polecats,
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	if err := h.template.ExecuteTemplate(w, "convoy.html", data); err != nil {
+	var buf bytes.Buffer
+	if err := h.template.ExecuteTemplate(&buf, "convoy.html", data); err != nil {
 		http.Error(w, "Failed to render template", http.StatusInternalServerError)
 		return
 	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	buf.WriteTo(w)
 }
