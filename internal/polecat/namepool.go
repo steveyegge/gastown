@@ -205,9 +205,10 @@ func (p *NamePool) Load() error {
 // namePoolState is the subset of NamePool that is persisted to the state file.
 // Only runtime state is saved, not configuration (Theme, CustomNames come from settings).
 type namePoolState struct {
-	RigName      string `json:"rig_name"`
-	OverflowNext int    `json:"overflow_next"`
-	MaxSize      int    `json:"max_size"`
+	RigName      string          `json:"rig_name"`
+	OverflowNext int             `json:"overflow_next"`
+	MaxSize      int             `json:"max_size"`
+	Reserved     map[string]bool `json:"reserved,omitempty"`
 }
 
 // Save persists the pool state to disk using atomic write.
@@ -227,6 +228,7 @@ func (p *NamePool) Save() error {
 		RigName:      p.RigName,
 		OverflowNext: p.OverflowNext,
 		MaxSize:      p.MaxSize,
+		Reserved:     p.Reserved,
 	}
 
 	return util.AtomicWriteJSON(p.stateFile, state)
