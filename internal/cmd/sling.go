@@ -95,6 +95,7 @@ var (
 	slingAccount  string // --account: Claude Code account handle to use
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
+	slingWorkers  string // --workers: worker type for batch sling (crew or polecats)
 )
 
 func init() {
@@ -111,6 +112,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
 	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
+	slingCmd.Flags().StringVar(&slingWorkers, "workers", "", "Worker type for batch sling: crew or polecats (default: crew if crew exist)")
 
 	rootCmd.AddCommand(slingCmd)
 }

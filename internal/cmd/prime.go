@@ -215,6 +215,9 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	// Output attachment status (for autonomous work detection)
 	outputAttachmentStatus(ctx)
 
+	// Output CONTRIBUTING.md context if hooked bead is an epic
+	outputEpicContributingContext(ctx)
+
 	// Check for slung work on hook (from gt sling)
 	// If found, we're in autonomous mode - skip normal startup directive
 	hasSlungWork := checkSlungWork(ctx)
