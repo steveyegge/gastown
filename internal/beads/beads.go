@@ -219,10 +219,20 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	var env []string
 	if b.isolated {
 		env = filterBeadsEnv(os.Environ())
+		// In isolated mode, always set BEADS_DIR to the resolved directory
+		cmd.Env = append(env, "BEADS_DIR="+beadsDir)
 	} else {
 		env = os.Environ()
+		// Only set BEADS_DIR if explicitly provided via NewWithBeadsDir().
+		// Otherwise, let bd use its native prefix-based routing to find the correct
+		// database for each bead ID. Setting BEADS_DIR forces bd to use only that
+		// database, bypassing routing for beads with different prefixes.
+		if b.beadsDir != "" {
+			cmd.Env = append(env, "BEADS_DIR="+b.beadsDir)
+		} else {
+			cmd.Env = env
+		}
 	}
-	cmd.Env = append(env, "BEADS_DIR="+beadsDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
