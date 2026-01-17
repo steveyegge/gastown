@@ -68,10 +68,11 @@ type Daemon struct {
 	syncFailures map[string]int
 
 	// PATCH-006: Resolved binary paths to avoid PATH issues in subprocesses.
-	// The daemon may be started with a limited PATH, causing exec.Command("gt", ...)
-	// to fail with "executable file not found in $PATH".
 	gtPath string
 	bdPath string
+
+	// Restart tracking with exponential backoff to prevent crash loops
+	restartTracker *RestartTracker
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -118,29 +119,35 @@ func New(config *Config) (*Daemon, error) {
 		}
 	}
 
-	// PATCH-006: Resolve binary paths at startup to avoid PATH issues in subprocesses.
-	// If not found, fall back to bare command names (will use PATH at runtime).
+	// PATCH-006: Resolve binary paths at startup.
 	gtPath, err := exec.LookPath("gt")
 	if err != nil {
-		gtPath = "gt" // Fallback - will fail with helpful error if not in PATH
+		gtPath = "gt"
 		logger.Printf("Warning: gt not found in PATH, subprocess calls may fail")
 	}
 	bdPath, err := exec.LookPath("bd")
 	if err != nil {
-		bdPath = "bd" // Fallback
+		bdPath = "bd"
 		logger.Printf("Warning: bd not found in PATH, subprocess calls may fail")
 	}
 
+	// Initialize restart tracker with exponential backoff
+	restartTracker := NewRestartTracker(config.TownRoot)
+	if err := restartTracker.Load(); err != nil {
+		logger.Printf("Warning: failed to load restart state: %v", err)
+	}
+
 	return &Daemon{
-		config:       config,
-		patrolConfig: patrolConfig,
-		tmux:         tmux.NewTmux(),
-		logger:       logger,
-		ctx:          ctx,
-		cancel:       cancel,
-		doltServer:   doltServer,
-		gtPath:       gtPath,
-		bdPath:       bdPath,
+		config:         config,
+		patrolConfig:   patrolConfig,
+		tmux:           tmux.NewTmux(),
+		logger:         logger,
+		ctx:            ctx,
+		cancel:         cancel,
+		doltServer:     doltServer,
+		gtPath:         gtPath,
+		bdPath:         bdPath,
+		restartTracker: restartTracker,
 	}, nil
 }
 
@@ -567,15 +574,41 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 // ensureDeaconRunning ensures the Deacon is running.
 // Uses deacon.Manager for consistent startup behavior (WaitForShellReady, GUPP, etc.).
 func (d *Daemon) ensureDeaconRunning() {
+	const agentID = "deacon"
+
+	// Check restart tracker for backoff/crash loop
+	if d.restartTracker != nil {
+		if d.restartTracker.IsInCrashLoop(agentID) {
+			d.logger.Printf("Deacon is in crash loop, skipping restart (use 'gt daemon clear-backoff deacon' to reset)")
+			return
+		}
+		if !d.restartTracker.CanRestart(agentID) {
+			remaining := d.restartTracker.GetBackoffRemaining(agentID)
+			d.logger.Printf("Deacon restart in backoff, %s remaining", remaining.Round(time.Second))
+			return
+		}
+	}
+
 	mgr := deacon.NewManager(d.config.TownRoot)
 
 	if err := mgr.Start(""); err != nil {
 		if err == deacon.ErrAlreadyRunning {
-			// Deacon is running - nothing to do
+			// Deacon is running - record success to reset backoff
+			if d.restartTracker != nil {
+				d.restartTracker.RecordSuccess(agentID)
+			}
 			return
 		}
 		d.logger.Printf("Error starting Deacon: %v", err)
 		return
+	}
+
+	// Record this restart attempt for backoff tracking
+	if d.restartTracker != nil {
+		d.restartTracker.RecordRestart(agentID)
+		if err := d.restartTracker.Save(); err != nil {
+			d.logger.Printf("Warning: failed to save restart state: %v", err)
+		}
 	}
 
 	// Track when we started the Deacon to prevent race condition in checkDeaconHeartbeat.
