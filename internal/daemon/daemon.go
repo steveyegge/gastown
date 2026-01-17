@@ -274,6 +274,11 @@ func (d *Daemon) heartbeat(state *State) {
 	// This is a safety net - Deacon patrol also does this more frequently.
 	d.cleanupOrphanedProcesses()
 
+	// 13. Check for rate limits and perform intelligent instance swapping
+	// This detects 429 errors and provider throttling, automatically swapping
+	// to fallback profiles when rate limited. See GitHub Issue #232.
+	d.checkRateLimits()
+
 	// Update state
 	state.LastHeartbeat = time.Now()
 	state.HeartbeatCount++
