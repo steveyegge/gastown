@@ -1,0 +1,133 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# GPT-4o-mini Agent for Gastown
+# Ultra-cheap tier for high-volume, low-complexity tasks
+#
+# Best for:
+# - Simple code generation
+# - Quick refactoring
+# - Bulk documentation updates
+# - Repetitive transformations
+# - Tasks where cost matters more than quality
+#
+# Cost comparison (approximate):
+#   Claude Opus:    ~$15/million tokens input
+#   GPT-4o:         ~$2.50/million tokens input
+#   GPT-4o-mini:    ~$0.15/million tokens input (100x cheaper than Opus!)
+#
+# Prerequisites:
+#   npm install -g @openai/codex (for CLI)
+#   OR set OPENAI_API_KEY for direct API calls
+#
+# Requires: curl, jq (for API fallback)
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Source usage tracking library
+if [[ -f "$SCRIPT_DIR/lib/usage-tracker.sh" ]]; then
+    source "$SCRIPT_DIR/lib/usage-tracker.sh"
+    TRACKING_ENABLED=true
+else
+    TRACKING_ENABLED=false
+fi
+
+TASK_ID="${BD_ISSUE:-${GT_TASK:-task-$$}}"
+MODEL="gpt4o-mini"
+
+# Check for codex CLI
+if command -v codex &> /dev/null; then
+    [[ "$TRACKING_ENABLED" == "true" ]] && usage_start "$MODEL" "$TASK_ID"
+
+    START_TIME=$(date +%s)
+    codex --model gpt-4o-mini "$@"
+    EXIT_CODE=$?
+    END_TIME=$(date +%s)
+
+    INPUT_TOKENS=$((${#*} / 4))
+    OUTPUT_TOKENS=500
+
+    [[ "$TRACKING_ENABLED" == "true" ]] && usage_end "$MODEL" "$TASK_ID" "$INPUT_TOKENS" "$OUTPUT_TOKENS" "completed"
+    exit $EXIT_CODE
+fi
+
+# Fallback: Direct API call
+if [[ -z "$OPENAI_API_KEY" ]]; then
+    echo "Error: Neither codex CLI nor OPENAI_API_KEY found"
+    echo ""
+    echo "Option 1: Install codex CLI"
+    echo "  npm install -g @openai/codex"
+    echo ""
+    echo "Option 2: Set API key"
+    echo "  export OPENAI_API_KEY='sk-...'"
+    exit 1
+fi
+
+PROMPT="$*"
+
+if [[ -z "$PROMPT" ]]; then
+    echo "GPT-4o-mini Agent for Gastown"
+    echo ""
+    echo "Usage: gpt4o-mini <prompt>"
+    echo ""
+    echo "Ultra-cheap tier (~100x cheaper than Claude Opus)."
+    echo "Best for simple, high-volume tasks."
+    exit 0
+fi
+
+[[ "$TRACKING_ENABLED" == "true" ]] && usage_start "$MODEL" "$TASK_ID"
+
+START_TIME=$(date +%s)
+
+# Direct API call
+RESPONSE=$(curl -s "https://api.openai.com/v1/chat/completions" \
+    -H "Authorization: Bearer $OPENAI_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{
+        \"model\": \"gpt-4o-mini\",
+        \"messages\": [
+            {
+                \"role\": \"system\",
+                \"content\": \"You are a coding assistant. Be concise.\"
+            },
+            {
+                \"role\": \"user\",
+                \"content\": \"$PROMPT\"
+            }
+        ]
+    }")
+
+END_TIME=$(date +%s)
+
+# Parse response and extract token usage
+OUTPUT=$(echo "$RESPONSE" | python3 -c "
+import json
+import sys
+data = json.load(sys.stdin)
+if 'choices' in data:
+    print(data['choices'][0]['message']['content'])
+    usage = data.get('usage', {})
+    print(f\"TOKENS:{usage.get('prompt_tokens', 0)}:{usage.get('completion_tokens', 0)}\", file=sys.stderr)
+else:
+    print('Error:', data.get('error', {}).get('message', 'Unknown error'))
+    print('TOKENS:0:0', file=sys.stderr)
+" 2>&1)
+
+TOKENS_LINE=$(echo "$OUTPUT" | grep "^TOKENS:" | tail -1)
+if [[ -n "$TOKENS_LINE" ]]; then
+    INPUT_TOKENS=$(echo "$TOKENS_LINE" | cut -d: -f2)
+    OUTPUT_TOKENS=$(echo "$TOKENS_LINE" | cut -d: -f3)
+    OUTPUT=$(echo "$OUTPUT" | grep -v "^TOKENS:")
+else
+    INPUT_TOKENS=$((${#PROMPT} / 4))
+    OUTPUT_TOKENS=$((${#OUTPUT} / 4))
+fi
+
+echo "$OUTPUT"
+
+if [[ "$TRACKING_ENABLED" == "true" ]]; then
+    usage_end "$MODEL" "$TASK_ID" "$INPUT_TOKENS" "$OUTPUT_TOKENS" "completed"
+fi

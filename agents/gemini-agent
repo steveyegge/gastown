@@ -1,0 +1,199 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Gemini Agent Wrapper for Gastown
+# Provides a Gastown-compatible interface to Google's Gemini CLI
+#
+# Usage: gemini-agent [options] [prompt...]
+#
+# This wrapper:
+# - Supports different model tiers for cost optimization
+# - Handles session management for Gastown hooks
+# - Tracks token usage for cost reporting
+# - Provides sensible defaults for agentic workflows
+#
+# Environment Variables:
+#   GEMINI_MODEL      - Override default model (e.g., gemini-2.5-flash, gemini-2.5-pro)
+#   GEMINI_API_KEY    - API key (alternative to Google login)
+#   GEMINI_SESSION_ID - Session ID for Gastown hooks
+#   GT_RIG            - Current rig (set by Gastown)
+#   GT_CONVOY         - Current convoy (set by Gastown)
+#
+# Requires: gemini (Gemini CLI), jq
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Source usage tracking library
+if [[ -f "$SCRIPT_DIR/lib/usage-tracker.sh" ]]; then
+    source "$SCRIPT_DIR/lib/usage-tracker.sh"
+    TRACKING_ENABLED=true
+else
+    TRACKING_ENABLED=false
+fi
+
+# Default to 2.5 Flash for cost efficiency (cheaper than Pro)
+# Override with GEMINI_MODEL or --model flag
+DEFAULT_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
+
+# Parse arguments
+ARGS=()
+MODEL=""
+YOLO_MODE=false
+RESUME=""
+PROMPT=""
+TASK_ID="${BD_ISSUE:-${GT_TASK:-task-$$}}"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --model|-m)
+            MODEL="$2"
+            shift 2
+            ;;
+        --approval-mode)
+            if [[ "$2" == "yolo" ]]; then
+                YOLO_MODE=true
+            fi
+            ARGS+=("--approval-mode" "$2")
+            shift 2
+            ;;
+        --yolo|-y)
+            YOLO_MODE=true
+            ARGS+=("--yolo")
+            shift
+            ;;
+        --resume|-r)
+            RESUME="$2"
+            shift 2
+            ;;
+        --task-id)
+            TASK_ID="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Gemini Agent Wrapper for Gastown"
+            echo ""
+            echo "Usage: gemini-agent [options] [prompt...]"
+            echo ""
+            echo "Options:"
+            echo "  --model, -m        Model to use (default: $DEFAULT_MODEL)"
+            echo "  --approval-mode    Set approval mode: default, auto_edit, yolo"
+            echo "  --yolo, -y         Auto-approve all actions"
+            echo "  --resume, -r       Resume previous session"
+            echo "  --task-id          Task ID for usage tracking"
+            echo "  --help, -h         Show this help"
+            echo ""
+            echo "Environment Variables:"
+            echo "  GEMINI_MODEL       Default model (overridden by --model)"
+            echo "  GEMINI_API_KEY     API key for authentication"
+            echo "  GEMINI_SESSION_ID  Session ID for Gastown"
+            echo "  GT_RIG             Current rig name"
+            echo "  GT_CONVOY          Current convoy ID"
+            echo ""
+            echo "Available Models (from cheapest to most capable):"
+            echo "  gemini-2.5-flash   - Fast, cheap, good for simple tasks"
+            echo "  gemini-2.5-pro     - More capable, 1M context window"
+            echo "  gemini-2.0-flash   - Older flash model"
+            exit 0
+            ;;
+        -*)
+            # Pass through other flags
+            ARGS+=("$1")
+            shift
+            ;;
+        *)
+            # Collect prompt words
+            PROMPT="$PROMPT $1"
+            shift
+            ;;
+    esac
+done
+
+# Use specified model or default
+FINAL_MODEL="${MODEL:-$DEFAULT_MODEL}"
+
+# Normalize model name for tracking
+TRACK_MODEL="$FINAL_MODEL"
+case "$FINAL_MODEL" in
+    *flash*) TRACK_MODEL="gemini-flash" ;;
+    *pro*) TRACK_MODEL="gemini-pro" ;;
+esac
+
+# Start usage tracking
+if [[ "$TRACKING_ENABLED" == "true" ]]; then
+    usage_start "$TRACK_MODEL" "$TASK_ID"
+fi
+
+# Build final command
+CMD=(gemini)
+
+# Add model
+CMD+=(--model "$FINAL_MODEL")
+
+# Add session resume if provided
+if [[ -n "$RESUME" ]]; then
+    CMD+=(--resume "$RESUME")
+elif [[ -n "$GEMINI_SESSION_ID" ]]; then
+    # Use Gastown-provided session ID
+    CMD+=(--resume "$GEMINI_SESSION_ID")
+fi
+
+# Request JSON output to capture token usage
+CMD+=(--output-format json)
+
+# Add collected args
+CMD+=("${ARGS[@]}")
+
+# Add prompt if provided
+if [[ -n "${PROMPT// }" ]]; then
+    CMD+=($PROMPT)
+fi
+
+# Create temp file for output
+OUTPUT_FILE=$(mktemp)
+trap "rm -f $OUTPUT_FILE" EXIT
+
+# Execute and capture output
+START_TIME=$(date +%s)
+"${CMD[@]}" > "$OUTPUT_FILE" 2>&1
+EXIT_CODE=$?
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+
+# Parse output for token usage (Gemini CLI outputs JSON with usage info)
+INPUT_TOKENS=0
+OUTPUT_TOKENS=0
+
+if [[ -f "$OUTPUT_FILE" ]]; then
+    # Try to extract token counts from JSON output
+    # Gemini CLI format varies, try common patterns
+    INPUT_TOKENS=$(cat "$OUTPUT_FILE" | grep -o '"input_tokens":[0-9]*' | grep -o '[0-9]*' | tail -1 || echo "0")
+    OUTPUT_TOKENS=$(cat "$OUTPUT_FILE" | grep -o '"output_tokens":[0-9]*' | grep -o '[0-9]*' | tail -1 || echo "0")
+
+    # Fallback: estimate from content length if no token counts
+    if [[ "$INPUT_TOKENS" == "0" && "$OUTPUT_TOKENS" == "0" ]]; then
+        CONTENT_LENGTH=$(wc -c < "$OUTPUT_FILE")
+        # Rough estimate: ~4 chars per token
+        OUTPUT_TOKENS=$((CONTENT_LENGTH / 4))
+        # Estimate input from prompt length
+        INPUT_TOKENS=$((${#PROMPT} / 4))
+    fi
+
+    # Output the content (strip JSON wrapper if present, or output as-is)
+    if grep -q '"text":' "$OUTPUT_FILE" 2>/dev/null; then
+        cat "$OUTPUT_FILE" | jq -r '.text // .content // .message // .' 2>/dev/null || cat "$OUTPUT_FILE"
+    else
+        cat "$OUTPUT_FILE"
+    fi
+fi
+
+# End usage tracking
+if [[ "$TRACKING_ENABLED" == "true" ]]; then
+    STATUS="completed"
+    [[ $EXIT_CODE -ne 0 ]] && STATUS="failed"
+    usage_end "$TRACK_MODEL" "$TASK_ID" "$INPUT_TOKENS" "$OUTPUT_TOKENS" "$STATUS"
+fi
+
+exit $EXIT_CODE

@@ -1,0 +1,452 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# imagen-batch - Generic batch image generation agent
+# Uses project definitions from lib/imagen-projects/
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+show_help() {
+    cat << 'EOF'
+Usage: imagen-batch <project> [options] [variant]
+
+Batch image generation using project templates.
+
+Options:
+  --list, -l           List available projects
+  --variants, -v       List variants for a project
+  --style, -s <style>  Style preset to use
+  --test, -t           Generate test images (multiple styles × test item)
+  --output, -o <dir>   Override output directory
+  --color, -c <color>  Color variant (name, palette, hex, or list)
+  --dry-run, -n        Show what would be generated without generating
+  --version, -V        Show version information
+  --help, -h           Show this help message
+
+Color Options:
+  Named palette:   --color fire (project-defined palette)
+  Color list:      --color "red blue green"
+  Hex colors:      --color "#FF5500 #00AA33"
+  All colors:      --color all
+
+Examples:
+  imagen-batch --list
+  imagen-batch weirdchess --variants
+  imagen-batch weirdchess --test grand
+  imagen-batch weirdchess --style flat grand
+  imagen-batch icons --style neon actions
+  imagen-batch game-characters --color "#FF5500" heroes
+
+Requires: curl, jq, base64
+EOF
+}
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+IMAGEN="$SCRIPT_DIR/imagen"
+PROJECTS_DIR="$SCRIPT_DIR/lib/imagen-projects"
+
+# Helper: Check if a string is a hex color
+is_hex_color() {
+    local color="$1"
+    # Match #RRGGBB, #RGB, RRGGBB, or RGB
+    [[ "$color" =~ ^#?([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$ ]]
+}
+
+# Helper: Convert hex to approximate color name for prompts
+hex_to_color_desc() {
+    local hex="$1"
+    # Remove # if present
+    hex="${hex#\#}"
+    
+    # Expand 3-digit hex to 6-digit
+    if [[ ${#hex} -eq 3 ]]; then
+        hex="${hex:0:1}${hex:0:1}${hex:1:1}${hex:1:1}${hex:2:1}${hex:2:1}"
+    fi
+    
+    # Parse RGB values
+    local r=$((16#${hex:0:2}))
+    local g=$((16#${hex:2:2}))
+    local b=$((16#${hex:4:2}))
+    
+    # Determine approximate color name based on RGB
+    local brightness=$(( (r + g + b) / 3 ))
+    local max_val=$r
+    [[ $g -gt $max_val ]] && max_val=$g
+    [[ $b -gt $max_val ]] && max_val=$b
+    
+    # Check for grayscale
+    local diff=$(( (r > g ? r - g : g - r) + (g > b ? g - b : b - g) + (r > b ? r - b : b - r) ))
+    if [[ $diff -lt 50 ]]; then
+        if [[ $brightness -lt 50 ]]; then
+            echo "very dark, near-black (hex #$hex)"
+        elif [[ $brightness -lt 100 ]]; then
+            echo "dark gray (hex #$hex)"
+        elif [[ $brightness -lt 180 ]]; then
+            echo "medium gray (hex #$hex)"
+        elif [[ $brightness -lt 230 ]]; then
+            echo "light gray (hex #$hex)"
+        else
+            echo "very light, near-white (hex #$hex)"
+        fi
+        return
+    fi
+    
+    # Determine dominant color
+    local color_name=""
+    if [[ $r -ge $g && $r -ge $b ]]; then
+        if [[ $g -gt $((b + 50)) ]]; then
+            color_name="orange/yellow"
+        elif [[ $b -gt $((g + 50)) ]]; then
+            color_name="pink/magenta"
+        else
+            color_name="red"
+        fi
+    elif [[ $g -ge $r && $g -ge $b ]]; then
+        if [[ $r -gt $((b + 50)) ]]; then
+            color_name="yellow/lime"
+        elif [[ $b -gt $((r + 50)) ]]; then
+            color_name="cyan/teal"
+        else
+            color_name="green"
+        fi
+    else
+        if [[ $r -gt $((g + 50)) ]]; then
+            color_name="purple/violet"
+        elif [[ $g -gt $((r + 50)) ]]; then
+            color_name="cyan/teal"
+        else
+            color_name="blue"
+        fi
+    fi
+    
+    # Add brightness qualifier
+    if [[ $brightness -lt 80 ]]; then
+        echo "dark $color_name colored (hex #$hex)"
+    elif [[ $brightness -gt 200 ]]; then
+        echo "light/pastel $color_name colored (hex #$hex)"
+    else
+        echo "$color_name colored (hex #$hex)"
+    fi
+}
+
+# Helper: Get safe filename from color (hex-safe)
+color_to_filename() {
+    local color="$1"
+    # Remove # and convert to lowercase for filenames
+    echo "${color#\#}" | tr '[:upper:]' '[:lower:]'
+}
+
+# Defaults
+PROJECT=""
+VARIANT=""
+STYLE=""
+TEST_MODE=false
+OUTPUT_DIR=""
+COLOR=""
+DRY_RUN=false
+LIST_PROJECTS=false
+LIST_VARIANTS=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --list|-l)
+            LIST_PROJECTS=true
+            shift
+            ;;
+        --variants|-v)
+            LIST_VARIANTS=true
+            shift
+            ;;
+        --style|-s)
+            STYLE="$2"
+            shift 2
+            ;;
+        --test|-t)
+            TEST_MODE=true
+            shift
+            ;;
+        --output|-o)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --color|-c)
+            COLOR="$2"
+            shift 2
+            ;;
+        --dry-run|-n)
+            DRY_RUN=true
+            shift
+            ;;
+        --version|-V)
+            echo "imagen-batch $VERSION"
+            exit 0
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+        *)
+            if [[ -z "$PROJECT" ]]; then
+                PROJECT="$1"
+            else
+                VARIANT="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+# List available projects
+if [[ "$LIST_PROJECTS" == "true" ]]; then
+    echo "Available projects:"
+    echo ""
+    for project_file in "$PROJECTS_DIR"/*.sh; do
+        [[ "$(basename "$project_file")" == "_template.sh" ]] && continue
+        [[ ! -f "$project_file" ]] && continue
+        
+        project_name=$(basename "$project_file" .sh)
+        # Source to get PROJECT_NAME and PROJECT_DESC
+        (
+            source "$project_file" 2>/dev/null
+            echo "  $project_name"
+            echo "    ${PROJECT_DESC:-No description}"
+            echo ""
+        )
+    done
+    exit 0
+fi
+
+# Validate project
+if [[ -z "$PROJECT" ]]; then
+    echo "Error: No project specified"
+    echo "Usage: imagen-batch <project> [options] [variant]"
+    echo "Run 'imagen-batch --list' to see available projects"
+    exit 1
+fi
+
+PROJECT_FILE="$PROJECTS_DIR/${PROJECT}.sh"
+if [[ ! -f "$PROJECT_FILE" ]]; then
+    echo "Error: Project '$PROJECT' not found"
+    echo "Looking for: $PROJECT_FILE"
+    echo "Run 'imagen-batch --list' to see available projects"
+    exit 1
+fi
+
+# Load project definition
+source "$PROJECT_FILE"
+
+# List variants for this project
+if [[ "$LIST_VARIANTS" == "true" ]]; then
+    echo "Variants for $PROJECT_NAME:"
+    echo ""
+    for v in "${VARIANTS[@]}"; do
+        echo "  $v"
+    done
+    echo ""
+    echo "Recommended styles: ${RECOMMENDED_STYLES[*]}"
+    exit 0
+fi
+
+# Validate variant
+if [[ -z "$VARIANT" ]]; then
+    echo "Error: No variant specified for $PROJECT_NAME"
+    echo "Available variants: ${VARIANTS[*]}"
+    echo "Run 'imagen-batch $PROJECT --variants' for details"
+    exit 1
+fi
+
+# Check if variant is valid
+VALID_VARIANT=false
+for v in "${VARIANTS[@]}"; do
+    if [[ "$v" == "$VARIANT" ]]; then
+        VALID_VARIANT=true
+        break
+    fi
+done
+
+if [[ "$VALID_VARIANT" != "true" ]]; then
+    echo "Error: Unknown variant '$VARIANT' for $PROJECT_NAME"
+    echo "Available variants: ${VARIANTS[*]}"
+    exit 1
+fi
+
+# Set output directory
+if [[ -z "$OUTPUT_DIR" ]]; then
+    OUTPUT_DIR="${DEFAULT_OUTPUT:-./generated}/$VARIANT"
+fi
+
+# Get items for this variant (compatible with bash and zsh)
+ITEMS=()
+while IFS= read -r line; do
+    [[ -n "$line" ]] && ITEMS+=("$line")
+done < <(get_items_for_variant "$VARIANT")
+
+if [[ ${#ITEMS[@]} -eq 0 ]]; then
+    echo "Error: No items defined for variant '$VARIANT'"
+    exit 1
+fi
+
+# Test mode: generate sample images in different styles
+if [[ "$TEST_MODE" == "true" ]]; then
+    # Get styles for this variant
+    if type get_variant_styles &>/dev/null; then
+        read -ra TEST_STYLES <<< "$(get_variant_styles "$VARIANT")"
+    else
+        TEST_STYLES=("${RECOMMENDED_STYLES[@]}")
+    fi
+    
+    # Limit to 5 styles for testing
+    TEST_STYLES=("${TEST_STYLES[@]:0:5}")
+    
+    # Use first item as test subject
+    TEST_ITEM="${ITEMS[0]}"
+    IFS='|' read -r item_id item_name item_desc <<< "$TEST_ITEM"
+    
+    TEST_OUTPUT="$OUTPUT_DIR/test_styles"
+    mkdir -p "$TEST_OUTPUT"
+    
+    echo "🧪 Testing styles for $PROJECT_NAME / $VARIANT"
+    echo "   Test item: $item_name"
+    echo "   Styles: ${TEST_STYLES[*]}"
+    echo "   Output: $TEST_OUTPUT/"
+    echo ""
+    
+    for style in "${TEST_STYLES[@]}"; do
+        echo "=== Testing style: $style ==="
+        
+        # Build prompt
+        PROMPT="$item_desc"
+        if [[ -n "$PROJECT_PROMPT_SUFFIX" ]]; then
+            PROMPT="$PROMPT, $PROJECT_PROMPT_SUFFIX"
+        fi
+        
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo "[DRY RUN] Would generate: $TEST_OUTPUT/${VARIANT}_${style}_${item_id}.png"
+            echo "          Prompt: $PROMPT"
+        else
+            "$IMAGEN" --style "$style" --piece "$item_id" --variant "$VARIANT" --output "$TEST_OUTPUT" "$PROMPT"
+        fi
+        echo ""
+    done
+    
+    echo "✅ Test images generated in $TEST_OUTPUT/"
+    echo "   Review and choose a style, then run:"
+    echo "   imagen-batch $PROJECT --style <chosen-style> $VARIANT"
+    exit 0
+fi
+
+# Full generation requires a style
+if [[ -z "$STYLE" ]]; then
+    echo "Error: No style specified. Run with --test first to see style options."
+    echo "Usage: imagen-batch $PROJECT --style <style> $VARIANT"
+    exit 1
+fi
+
+# Set up color/palette support
+# COLORS can be:
+#   - A simple list: "red blue green"
+#   - Named palettes defined in project: "primary" -> "red blue yellow"
+#   - Special values: "all" (use all defined colors), "none" (no color variants)
+COLORS_TO_USE=()
+
+if [[ "$SUPPORTS_COLORS" == "true" ]]; then
+    # Default color if none specified
+    if [[ -z "$COLOR" ]]; then
+        COLOR="${DEFAULT_COLORS:-all}"
+    fi
+    
+    # Check if project defines a get_palette function for named palettes
+    if [[ "$COLOR" != "none" ]]; then
+        if type get_palette &>/dev/null; then
+            PALETTE_COLORS=$(get_palette "$COLOR")
+            if [[ -n "$PALETTE_COLORS" ]]; then
+                read -ra COLORS_TO_USE <<< "$PALETTE_COLORS"
+            fi
+        fi
+        
+        # If no palette matched, check for predefined color list
+        if [[ ${#COLORS_TO_USE[@]} -eq 0 ]]; then
+            if [[ "$COLOR" == "all" && -n "$DEFINED_COLORS" ]]; then
+                read -ra COLORS_TO_USE <<< "$DEFINED_COLORS"
+            elif [[ "$COLOR" == "both" ]]; then
+                # Legacy chess support
+                COLORS_TO_USE=("white" "black")
+            else
+                # Treat as space-separated list of colors
+                read -ra COLORS_TO_USE <<< "$COLOR"
+            fi
+        fi
+    fi
+fi
+
+# Add style to output path
+OUTPUT_DIR="$OUTPUT_DIR/$STYLE"
+mkdir -p "$OUTPUT_DIR"
+
+echo "🎨 Generating $PROJECT_NAME / $VARIANT in $STYLE style"
+echo "   Output: $OUTPUT_DIR/"
+echo "   Items: ${#ITEMS[@]}"
+if [[ ${#COLORS_TO_USE[@]} -gt 0 ]]; then
+    echo "   Colors: ${COLORS_TO_USE[*]}"
+fi
+echo ""
+
+# Generate each item
+for item_def in "${ITEMS[@]}"; do
+    IFS='|' read -r item_id item_name item_desc <<< "$item_def"
+    
+    # Build prompt
+    PROMPT="$item_desc"
+    if [[ -n "$PROJECT_PROMPT_SUFFIX" ]]; then
+        PROMPT="$PROMPT, $PROJECT_PROMPT_SUFFIX"
+    fi
+    
+    # Handle color variants if defined
+    if [[ ${#COLORS_TO_USE[@]} -gt 0 ]]; then
+        for color in "${COLORS_TO_USE[@]}"; do
+            # Get color description based on type
+            if is_hex_color "$color"; then
+                # Hex color - convert to description
+                COLOR_DESC=$(hex_to_color_desc "$color")
+                COLOR_FILENAME=$(color_to_filename "$color")
+            elif type get_color_desc &>/dev/null; then
+                # Project-defined color description
+                COLOR_DESC=$(get_color_desc "$color")
+                COLOR_FILENAME="$color"
+            else
+                # Default: just use color name
+                COLOR_DESC="$color colored"
+                COLOR_FILENAME="$color"
+            fi
+            
+            echo "=== $item_name ($color) ==="
+            if [[ "$DRY_RUN" == "true" ]]; then
+                echo "[DRY RUN] Would generate: ${item_id}_${COLOR_FILENAME}"
+                echo "          Color: $COLOR_DESC"
+            else
+                "$IMAGEN" --style "$STYLE" --piece "${item_id}_${COLOR_FILENAME}" --variant "$VARIANT" --output "$OUTPUT_DIR" \
+                    "$PROMPT, $COLOR_DESC"
+            fi
+        done
+    else
+        echo "=== $item_name ==="
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo "[DRY RUN] Would generate: $item_id"
+        else
+            "$IMAGEN" --style "$STYLE" --piece "$item_id" --variant "$VARIANT" --output "$OUTPUT_DIR" "$PROMPT"
+        fi
+    fi
+    
+    echo ""
+done
+
+echo "✅ Generated ${#ITEMS[@]} items in $OUTPUT_DIR/"
+echo ""
+echo "Files:"
+ls -la "$OUTPUT_DIR/"*.png 2>/dev/null | head -20 || echo "(no PNG files found)"

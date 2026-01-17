@@ -1,53 +1,67 @@
-# Binaries
-/gt
-*.exe
+# Gas Town HQ .gitignore
+# Track: Role context, handoff docs, beads config/data, rig configs
+# Ignore: Git worktrees (polecats) and clones (mayor/refinery rigs), runtime state
 
-# Build
-/dist/
-/build/
+# =============================================================================
+# Runtime state files (transient)
+# =============================================================================
+**/state.json
+**/*.lock
+**/registry.json
 
-# IDE
-.idea/
-.vscode/
+# =============================================================================
+# Rig git worktrees (recreate with 'gt sling' or 'gt rig add')
+# =============================================================================
+
+# Polecats - worker worktrees
+**/polecats/
+
+# Mayor rig clones
+**/mayor/rig/
+
+# Refinery working clones
+**/refinery/rig/
+
+# Crew workspaces (user-managed)
+**/crew/
+
+# =============================================================================
+# Runtime state directories (gitignored ephemeral data)
+# =============================================================================
+**/.runtime/
+
+# =============================================================================
+# Rig .beads symlinks (point to ignored mayor/rig/.beads, recreated on setup)
+# =============================================================================
+# Add rig-specific symlinks here, e.g.:
+# gastown/.beads
+
+# =============================================================================
+# OS and editor files
+# =============================================================================
+.DS_Store
+*~
 *.swp
 *.swo
-*~
+.vscode/
+.idea/
 
-# OS
-.DS_Store
-Thumbs.db
+# =============================================================================
+# Secrets and credentials (never commit)
+# =============================================================================
+.env
+.env.*
+*.env
+.envrc
+.secrets
+*.pem
+*.key
+**/credentials.json
+**/secrets.json
 
-# Claude Code local state
-.claude/
-
-# Test
-coverage.out
-*.test
-
-# Local config
-config.toml
-!config.example.toml
-gt
-
-# Runtime state
-state.json
-.runtime/
-
-# Beads runtime state (not tracked)
-# Formulas ARE tracked for `go install @latest` - see bottom of file
-.beads/redirect
-.beads/issues.jsonl
-.beads/interactions.jsonl
-.beads/metadata.json
-.beads/mq/
-.beads/last-touched
-.beads/daemon-*.log.gz
-.beads/.sync.lock
-.beads/sync_base.jsonl
-.beads-wisp/
-
-# Clone-specific CLAUDE.md (regenerated locally per clone)
-CLAUDE.md
-
-# Embedded formulas are committed so `go install @latest` works
-# Run `go generate ./...` after modifying .beads/formulas/
+# =============================================================================
+# Explicitly track (override above patterns)
+# =============================================================================
+# Note: .beads/ has its own .gitignore that handles SQLite files
+# and keeps issues.jsonl, metadata.json, config file as source of truth
+OVERNIGHT-CRON-SETUP.md
