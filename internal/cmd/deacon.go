@@ -464,8 +464,8 @@ func runDeaconStop(cmd *cobra.Command, args []string) error {
 	_ = t.SendKeysRaw(sessionName, "C-c")
 	time.Sleep(100 * time.Millisecond)
 
-	// Kill the session
-	if err := t.KillSession(sessionName); err != nil {
+	// Kill the session (with all child processes)
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
@@ -565,8 +565,8 @@ func runDeaconRestart(cmd *cobra.Command, args []string) error {
 	fmt.Println("Restarting Deacon...")
 
 	if running {
-		// Kill existing session
-		if err := t.KillSession(sessionName); err != nil {
+		// Kill existing session (with all child processes)
+		if err := t.KillSessionWithProcesses(sessionName); err != nil {
 			style.PrintWarning("failed to kill session: %v", err)
 		}
 	}
@@ -849,9 +849,9 @@ func runDeaconForceKill(cmd *cobra.Command, args []string) error {
 	mailBody := fmt.Sprintf("Deacon detected %s as unresponsive.\nReason: %s\nAction: force-killing session", agent, reason)
 	sendMail(townRoot, agent, "FORCE_KILL: unresponsive", mailBody)
 
-	// Step 2: Kill the tmux session
+	// Step 2: Kill the tmux session (with all child processes)
 	fmt.Printf("%s Killing tmux session %s...\n", style.Dim.Render("2."), sessionName)
-	if err := t.KillSession(sessionName); err != nil {
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 

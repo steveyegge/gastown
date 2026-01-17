@@ -137,7 +137,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but Claude dead. Kill and recreate.
-		if err := t.KillSession(sessionID); err != nil {
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -209,7 +209,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	w.PID = 0 // Claude agent doesn't have a PID we track
 	w.MonitoredPolecats = m.rig.Polecats
 	if err := m.saveState(w); err != nil {
-		_ = t.KillSession(sessionID) // best-effort cleanup on state save failure
+		_ = t.KillSessionWithProcesses(sessionID) // best-effort cleanup on state save failure
 		return fmt.Errorf("saving state: %w", err)
 	}
 
@@ -308,7 +308,7 @@ func (m *Manager) Stop() error {
 
 	// Kill tmux session if it exists (best-effort: may already be dead)
 	if sessionRunning {
-		_ = t.KillSession(sessionID)
+		_ = t.KillSessionWithProcesses(sessionID)
 	}
 
 	// Note: No PID-based stop per ZFC - tmux session kill is sufficient

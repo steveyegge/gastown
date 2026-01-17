@@ -160,9 +160,9 @@ func (c *LocalConnection) TmuxNewSession(name, dir string) error {
 	return c.tmux.NewSession(name, dir)
 }
 
-// TmuxKillSession terminates a tmux session.
+// TmuxKillSession terminates a tmux session (with all child processes).
 func (c *LocalConnection) TmuxKillSession(name string) error {
-	return c.tmux.KillSession(name)
+	return c.tmux.KillSessionWithProcesses(name)
 }
 
 // TmuxSendKeys sends keys to a tmux session.
