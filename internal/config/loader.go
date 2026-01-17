@@ -1225,18 +1225,29 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		// Try to detect town root from cwd for town-level agents (mayor, deacon)
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			rc = DefaultRuntimeConfig()
+		// For town-level agents (mayor, deacon), use GT_ROOT from envVars if set.
+		// This ensures role_agents config is respected even when the daemon
+		// is running from a directory outside the town hierarchy.
+		// Fall back to findTownRootFromCwd() for backwards compatibility.
+		if gtRoot := envVars["GT_ROOT"]; gtRoot != "" {
+			townRoot = gtRoot
 		} else {
+			var err error
+			townRoot, err = findTownRootFromCwd()
+			if err != nil {
+				rc = DefaultRuntimeConfig()
+			}
+		}
+		// Only resolve agent config if we found a townRoot and haven't already set rc
+		if rc == nil && townRoot != "" {
 			if role != "" {
 				// Use role-based agent resolution for per-role model selection
 				rc = ResolveRoleAgentConfig(role, townRoot, "")
 			} else {
 				rc = ResolveAgentConfig(townRoot, "")
 			}
+		} else if rc == nil {
+			rc = DefaultRuntimeConfig()
 		}
 	}
 
@@ -1321,11 +1332,21 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			rc = DefaultRuntimeConfig()
+		// For town-level agents (mayor, deacon), use GT_ROOT from envVars if set.
+		// This ensures role_agents config is respected even when the daemon
+		// is running from a directory outside the town hierarchy.
+		// Fall back to findTownRootFromCwd() for backwards compatibility.
+		if gtRoot := envVars["GT_ROOT"]; gtRoot != "" {
+			townRoot = gtRoot
 		} else {
+			var err error
+			townRoot, err = findTownRootFromCwd()
+			if err != nil {
+				rc = DefaultRuntimeConfig()
+			}
+		}
+		// Only resolve agent config if we found a townRoot and haven't already set rc
+		if rc == nil && townRoot != "" {
 			if agentOverride != "" {
 				var resolveErr error
 				rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
@@ -1338,6 +1359,8 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			} else {
 				rc = ResolveAgentConfig(townRoot, "")
 			}
+		} else if rc == nil {
+			rc = DefaultRuntimeConfig()
 		}
 	}
 
