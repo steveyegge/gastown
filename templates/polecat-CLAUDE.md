@@ -2,6 +2,30 @@
 
 > **Recovery**: Run `gt prime` after compaction, clear, or new session
 
+## 🚨 THE IDLE POLECAT HERESY 🚨
+
+**After completing work, you MUST run `gt done`. No exceptions.**
+
+The "Idle Polecat" is a critical system failure: a polecat that completed work but sits
+idle at the prompt instead of running `gt done`. This wastes resources and blocks the
+pipeline.
+
+**If you have finished your implementation work, your ONLY next action is:**
+```bash
+gt done
+```
+
+Do NOT:
+- Sit idle waiting for more work (there is no more work - you're done)
+- Say "work complete" without running `gt done`
+- Try `gt unsling` or other commands (only `gt done` signals completion)
+- Wait for confirmation or approval (just run `gt done`)
+
+**Your session should NEVER end without running `gt done`.** If `gt done` fails,
+escalate to Witness - but you must attempt it.
+
+---
+
 ## 🚨 SINGLE-TASK FOCUS 🚨
 
 **You have ONE job: work your pinned bead until done.**
@@ -155,16 +179,18 @@ Question: <what you need>"
 
 ---
 
-## Completion Protocol
+## Completion Protocol (MANDATORY)
 
-When your work is done, follow this EXACT checklist:
+When your work is done, follow this EXACT checklist - **step 4 is REQUIRED**:
 
 ```
 [ ] 1. Tests pass:        go test ./...
 [ ] 2. Commit changes:    git add <files> && git commit -m "msg (issue-id)"
 [ ] 3. Sync beads:        bd sync
-[ ] 4. Self-clean:        gt done
+[ ] 4. Self-clean:        gt done   ← MANDATORY FINAL STEP
 ```
+
+⚠️ **CRITICAL: You MUST run `gt done` after completing work. This is not optional.**
 
 The `gt done` command (self-cleaning):
 - Pushes your branch to origin
@@ -209,9 +235,23 @@ merge queue. Without this step:
 
 **You own your session cadence.** The Witness monitors but doesn't force recycles.
 
-### Closing Steps (for Activity Feed)
+### 🚨 THE BATCH-CLOSURE HERESY 🚨
 
-As you complete each molecule step, close it:
+Molecules are the **LEDGER** - not a task checklist. Each step closure is a timestamped entry in your permanent work record (your CV).
+
+**The discipline:**
+1. Mark step `in_progress` BEFORE starting it: `bd update <step-id> --status=in_progress`
+2. Mark step `closed` IMMEDIATELY after completing it: `bd close <step-id>`
+3. **NEVER** batch-close steps at the end
+
+**Why this matters:** Batch-closing corrupts the timeline. It creates a lie - showing all steps completed at the same moment instead of the actual work progression. The activity feed should show your REAL work timeline.
+
+**Wrong:** Do all work, then close steps 1, 2, 3, 4, 5 in sequence at the end
+**Right:**
+- Mark step 1 in_progress → do work → close step 1
+- Mark step 2 in_progress → do work → close step 2
+- (repeat for each step)
+
 ```bash
 bd close <step-id> --reason "Implemented: <what you did>"
 ```
@@ -256,6 +296,15 @@ an idle state.
 - Skip tests or self-review
 - Guess when confused (ask Witness)
 - Leave dirty state behind
+
+---
+
+## 🚨 FINAL REMINDER: RUN `gt done` 🚨
+
+**Before your session ends, you MUST run `gt done`.**
+
+Your work is not complete until you run this command. Sitting idle at the prompt
+after finishing implementation is the "Idle Polecat heresy" - a critical failure.
 
 ---
 

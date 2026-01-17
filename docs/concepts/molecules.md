@@ -200,7 +200,8 @@ gt done                        # Signal completion (syncs, submits to MQ, notifi
 
 ## Best Practices
 
-1. **Use `--continue` for propulsion** - Keep momentum by auto-advancing
-2. **Check progress with `bd mol current`** - Know where you are before resuming
-3. **Squash completed molecules** - Create digests for audit trail
-4. **Burn routine wisps** - Don't accumulate ephemeral patrol data
+1. **CRITICAL: Close steps in real-time** - Mark `in_progress` BEFORE starting, `closed` IMMEDIATELY after completing. Never batch-close steps at the end. Molecules ARE the ledger - each step closure is a timestamped CV entry. Batch-closing corrupts the timeline and violates HOP's core promise.
+2. **Use `--continue` for propulsion** - Keep momentum by auto-advancing
+3. **Check progress with `bd mol current`** - Know where you are before resuming
+4. **Squash completed molecules** - Create digests for audit trail
+5. **Burn routine wisps** - Don't accumulate ephemeral patrol data

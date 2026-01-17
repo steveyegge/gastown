@@ -26,12 +26,23 @@ var refineryCmd = &cobra.Command{
 	Use:     "refinery",
 	Aliases: []string{"ref"},
 	GroupID: GroupAgents,
-	Short:   "Manage the merge queue processor",
+	Short:   "Manage the Refinery (merge queue processor)",
 	RunE:    requireSubcommand,
-	Long: `Manage the Refinery merge queue processor for a rig.
+	Long: `Manage the Refinery - the per-rig merge queue processor.
 
-The Refinery processes merge requests from polecats, merging their work
-into integration branches and ultimately to main.`,
+The Refinery serializes all merges to main for a rig:
+  - Receives MRs submitted by polecats (via gt done)
+  - Rebases work branches onto latest main
+  - Runs validation (tests, builds, checks)
+  - Merges to main when clear
+  - If conflict: spawns FRESH polecat to re-implement (original is gone)
+
+Work flows: Polecat completes → gt done → MR in queue → Refinery merges.
+The polecat is already nuked by the time the Refinery processes.
+
+One Refinery per rig. Persistent agent that processes work as it arrives.
+
+Role shortcuts: "refinery" in mail/nudge addresses resolves to this rig's Refinery.`,
 }
 
 var refineryStartCmd = &cobra.Command{

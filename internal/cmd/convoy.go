@@ -16,6 +16,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tui/convoy"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -319,6 +320,9 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		"--description=" + description,
 		"--json",
 	}
+	if beads.NeedsForceForID(convoyID) {
+		createArgs = append(createArgs, "--force")
+	}
 
 	createCmd := exec.Command("bd", createArgs...)
 	createCmd.Dir = townBeads
@@ -340,9 +344,15 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		depArgs := []string{"dep", "add", convoyID, issueID, "--type=tracks"}
 		depCmd := exec.Command("bd", depArgs...)
 		depCmd.Dir = townBeads
+		var depStderr bytes.Buffer
+		depCmd.Stderr = &depStderr
 
 		if err := depCmd.Run(); err != nil {
-			style.PrintWarning("couldn't track %s: %v", issueID, err)
+			errMsg := strings.TrimSpace(depStderr.String())
+			if errMsg == "" {
+				errMsg = err.Error()
+			}
+			style.PrintWarning("couldn't track %s: %s", issueID, errMsg)
 		} else {
 			trackedCount++
 		}
@@ -430,9 +440,15 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 		depArgs := []string{"dep", "add", convoyID, issueID, "--type=tracks"}
 		depCmd := exec.Command("bd", depArgs...)
 		depCmd.Dir = townBeads
+		var depStderr bytes.Buffer
+		depCmd.Stderr = &depStderr
 
 		if err := depCmd.Run(); err != nil {
-			style.PrintWarning("couldn't add %s: %v", issueID, err)
+			errMsg := strings.TrimSpace(depStderr.String())
+			if errMsg == "" {
+				errMsg = err.Error()
+			}
+			style.PrintWarning("couldn't add %s: %s", issueID, errMsg)
 		} else {
 			addedCount++
 		}

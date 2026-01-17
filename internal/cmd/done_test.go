@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -244,5 +245,94 @@ func TestDoneCircularRedirectProtection(t *testing.T) {
 	resolved := beads.ResolveBeadsDir(tmpDir)
 	if resolved != beadsDir {
 		t.Errorf("circular redirect should return original: got %s, want %s", resolved, beadsDir)
+	}
+}
+
+// TestGetIssueFromAgentHook verifies that getIssueFromAgentHook correctly
+// retrieves the issue ID from an agent's hook_bead field.
+// This is critical because branch names like "polecat/furiosa-mkb0vq9f" don't
+// contain the actual issue ID (test-845.1), but the agent's hook does.
+func TestGetIssueFromAgentHook(t *testing.T) {
+	tests := []struct {
+		name         string
+		agentBeadID  string
+		setupBeads   func(t *testing.T, bd *beads.Beads) // setup agent bead with hook
+		wantIssueID  string
+	}{
+		{
+			name:        "agent with hook_bead returns issue ID",
+			agentBeadID: "test-testrig-polecat-furiosa",
+			setupBeads: func(t *testing.T, bd *beads.Beads) {
+				// Create a task that will be hooked
+				_, err := bd.CreateWithID("test-456", beads.CreateOptions{
+					Title: "Task to be hooked",
+					Type:  "task",
+				})
+				if err != nil {
+					t.Fatalf("create task bead: %v", err)
+				}
+
+				// Create agent bead using CreateAgentBead
+				// Agent ID format: <prefix>-<rig>-<role>-<name>
+				_, err = bd.CreateAgentBead("test-testrig-polecat-furiosa", "Test polecat agent", nil)
+				if err != nil {
+					t.Fatalf("create agent bead: %v", err)
+				}
+
+				// Set hook_bead on agent
+				if err := bd.SetHookBead("test-testrig-polecat-furiosa", "test-456"); err != nil {
+					t.Fatalf("set hook bead: %v", err)
+				}
+			},
+			wantIssueID: "test-456",
+		},
+		{
+			name:        "agent without hook_bead returns empty",
+			agentBeadID: "test-testrig-polecat-idle",
+			setupBeads: func(t *testing.T, bd *beads.Beads) {
+				// Create agent bead without hook
+				_, err := bd.CreateAgentBead("test-testrig-polecat-idle", "Test agent without hook", nil)
+				if err != nil {
+					t.Fatalf("create agent bead: %v", err)
+				}
+			},
+			wantIssueID: "",
+		},
+		{
+			name:        "nonexistent agent returns empty",
+			agentBeadID: "test-nonexistent",
+			setupBeads:  func(t *testing.T, bd *beads.Beads) {},
+			wantIssueID: "",
+		},
+		{
+			name:        "empty agent ID returns empty",
+			agentBeadID: "",
+			setupBeads:  func(t *testing.T, bd *beads.Beads) {},
+			wantIssueID: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+
+			// Initialize the beads database
+			cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", "test", "--quiet")
+			cmd.Dir = tmpDir
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("bd init: %v\n%s", err, output)
+			}
+
+			// beads.New expects the .beads directory path
+			beadsDir := filepath.Join(tmpDir, ".beads")
+			bd := beads.New(beadsDir)
+
+			tt.setupBeads(t, bd)
+
+			got := getIssueFromAgentHook(bd, tt.agentBeadID)
+			if got != tt.wantIssueID {
+				t.Errorf("getIssueFromAgentHook(%q) = %q, want %q", tt.agentBeadID, got, tt.wantIssueID)
+			}
+		})
 	}
 }

@@ -30,14 +30,27 @@ var (
 
 var polecatCmd = &cobra.Command{
 	Use:     "polecat",
-	Aliases: []string{"cat", "polecats"},
+	Aliases: []string{"polecats"},
 	GroupID: GroupAgents,
-	Short:   "Manage polecats in rigs",
+	Short:   "Manage polecats (ephemeral workers, one task then nuked)",
 	RunE:    requireSubcommand,
 	Long: `Manage polecat lifecycle in rigs.
 
-Polecats are worker agents that operate in their own git worktrees.
-Use the subcommands to add, remove, list, wake, and sleep polecats.`,
+Polecats are EPHEMERAL workers: spawned for one task, nuked when done.
+There is NO idle state. A polecat is either:
+  - Working: Actively doing assigned work
+  - Stalled: Session crashed mid-work (needs Witness intervention)
+  - Zombie: Finished but gt done failed (needs cleanup)
+
+Self-cleaning model: When work completes, the polecat runs 'gt done',
+which pushes the branch, submits to the merge queue, and exits. The
+Witness then nukes the sandbox. Polecats don't wait for more work.
+
+Session vs sandbox: The Claude session cycles frequently (handoffs,
+compaction). The git worktree (sandbox) persists until nuke. Work
+survives session restarts.
+
+Cats build features. Dogs clean up messes.`,
 }
 
 var polecatListCmd = &cobra.Command{
@@ -957,7 +970,7 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 	// We need to read it directly from beads since manager doesn't expose it
 	rigPath := r.Path
 	bd := beads.New(rigPath)
-	agentBeadID := beads.PolecatBeadID(rigName, polecatName)
+	agentBeadID := polecatBeadIDForRig(r, rigName, polecatName)
 	_, fields, err := bd.GetAgentBead(agentBeadID)
 
 	status := RecoveryStatus{
@@ -1157,9 +1170,8 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Would nuke %s/%s:\n", p.rigName, p.polecatName)
 			fmt.Printf("  - Kill session: gt-%s-%s\n", p.rigName, p.polecatName)
 			fmt.Printf("  - Delete worktree: %s/polecats/%s\n", p.r.Path, p.polecatName)
-			fmt.Printf("  - Reject any open MRs for the branch\n")
 			fmt.Printf("  - Delete branch (if exists)\n")
-			fmt.Printf("  - Close agent bead: %s\n", beads.PolecatBeadID(p.rigName, p.polecatName))
+			fmt.Printf("  - Close agent bead: %s\n", polecatBeadIDForRig(p.r, p.rigName, p.polecatName))
 
 			displayDryRunSafetyCheck(p)
 			fmt.Println()
@@ -1203,34 +1215,16 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  %s deleted worktree\n", style.Success.Render("✓"))
 		}
 
-		// Step 4: Reject any open MRs for this branch before deleting it
-		// This prevents MQ/git sync inconsistency where MR exists but branch is gone
+		// Step 4: Delete branch (if we know it)
+		// Use bare repo if it exists (matches where worktree was created), otherwise mayor/rig
 		if branchToDelete != "" {
-			mayorRigPath := filepath.Join(p.r.Path, "mayor", "rig")
-			bd := beads.New(mayorRigPath)
-			mr, err := bd.FindMRForBranch(branchToDelete)
-			if err == nil && mr != nil {
-				// Found an open MR for this branch - reject it
-				rejected := "closed"
-				reason := "polecat nuked"
-				if err := bd.Update(mr.ID, beads.UpdateOptions{Status: &rejected}); err == nil {
-					// Also update close_reason field
-					desc := mr.Description
-					if desc == "" {
-						desc = fmt.Sprintf("close_reason: %s", reason)
-					} else if !strings.Contains(desc, "close_reason:") {
-						desc = fmt.Sprintf("%s\nclose_reason: %s", desc, reason)
-					}
-					_ = bd.Update(mr.ID, beads.UpdateOptions{Description: &desc})
-					fmt.Printf("  %s rejected MR %s (polecat nuked)\n", style.Warning.Render("⚠"), mr.ID)
-				}
-				// Non-fatal if MR rejection fails - continue with nuke
+			var repoGit *git.Git
+			bareRepoPath := filepath.Join(p.r.Path, ".repo.git")
+			if info, err := os.Stat(bareRepoPath); err == nil && info.IsDir() {
+				repoGit = git.NewGitWithDir(bareRepoPath, "")
+			} else {
+				repoGit = git.NewGit(filepath.Join(p.r.Path, "mayor", "rig"))
 			}
-		}
-
-		// Step 5: Delete branch (if we know it)
-		if branchToDelete != "" {
-			repoGit := git.NewGit(filepath.Join(p.r.Path, "mayor", "rig"))
 			if err := repoGit.DeleteBranch(branchToDelete, true); err != nil {
 				// Non-fatal - branch might already be gone
 				fmt.Printf("  %s branch delete: %v\n", style.Dim.Render("○"), err)
@@ -1239,8 +1233,8 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Step 6: Close agent bead (if exists)
-		agentBeadID := beads.PolecatBeadID(p.rigName, p.polecatName)
+		// Step 5: Close agent bead (if exists)
+		agentBeadID := polecatBeadIDForRig(p.r, p.rigName, p.polecatName)
 		closeArgs := []string{"close", agentBeadID, "--reason=nuked"}
 		if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 			closeArgs = append(closeArgs, "--session="+sessionID)

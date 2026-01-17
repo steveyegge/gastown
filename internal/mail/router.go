@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // ErrUnknownList indicates a mailing list name was not found in configuration.
@@ -161,24 +161,15 @@ func (r *Router) expandAnnounce(announceName string) (*config.AnnounceConfig, er
 	}, ErrUnknownAnnounce)
 }
 
-// detectTownRoot finds the town root by looking for mayor/town.json.
+// detectTownRoot finds the town root using workspace.Find.
+// This ensures consistent detection with the rest of the codebase,
+// supporting both primary (mayor/town.json) and secondary (mayor/) markers.
 func detectTownRoot(startDir string) string {
-	dir := startDir
-	for {
-		// Check for primary marker (mayor/town.json)
-		markerPath := filepath.Join(dir, "mayor", "town.json")
-		if _, err := os.Stat(markerPath); err == nil {
-			return dir
-		}
-
-		// Move up
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
+	townRoot, err := workspace.Find(startDir)
+	if err != nil {
+		return ""
 	}
-	return ""
+	return townRoot
 }
 
 // resolveBeadsDir returns the correct .beads directory for the given address.
@@ -813,6 +804,7 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 
 // sendToChannel delivers a message to a beads-native channel.
 // Creates a message with channel:<name> label for channel queries.
+// Also fans out delivery to each subscriber's inbox.
 // Retention is enforced by the channel's EnforceChannelRetention after message creation.
 func (r *Router) sendToChannel(msg *Message) error {
 	channelName := parseChannelName(msg.To)
@@ -881,7 +873,23 @@ func (r *Router) sendToChannel(msg *Message) error {
 	// Enforce channel retention policy (on-write cleanup)
 	_ = b.EnforceChannelRetention(channelName)
 
-	// No notification for channel messages - readers poll or check on their own schedule
+	// Fan-out delivery: send a copy to each subscriber's inbox
+	if len(fields.Subscribers) > 0 {
+		for _, subscriber := range fields.Subscribers {
+			// Skip self-delivery (don't notify the sender)
+			if isSelfMail(msg.From, subscriber) {
+				continue
+			}
+
+			// Create a copy for this subscriber with channel context in subject
+			msgCopy := *msg
+			msgCopy.To = subscriber
+			msgCopy.Subject = fmt.Sprintf("[channel:%s] %s", channelName, msg.Subject)
+
+			// Best-effort delivery - don't fail the channel send if one subscriber fails
+			_ = r.sendToSingle(&msgCopy)
+		}
+	}
 
 	return nil
 }

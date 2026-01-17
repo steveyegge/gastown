@@ -124,7 +124,7 @@ func restartBdDaemons() error { //nolint:unparam // error return kept for future
 // StartBdDaemonIfNeeded starts the bd daemon for a specific workspace if not running.
 // This is a best-effort operation - failures are logged but don't block execution.
 func StartBdDaemonIfNeeded(workDir string) error {
-	cmd := exec.Command("bd", "daemon", "--start")
+	cmd := exec.Command("bd", "daemon", "start")
 	cmd.Dir = workDir
 	return cmd.Run()
 }

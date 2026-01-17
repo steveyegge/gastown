@@ -103,7 +103,7 @@ type NamePool struct {
 func NewNamePool(rigPath, rigName string) *NamePool {
 	return &NamePool{
 		RigName:      rigName,
-		Theme:        DefaultTheme,
+		Theme:        ThemeForRig(rigName),
 		InUse:        make(map[string]bool),
 		OverflowNext: DefaultPoolSize + 1,
 		MaxSize:      DefaultPoolSize,
@@ -163,17 +163,14 @@ func (p *NamePool) Load() error {
 		return err
 	}
 
-	var loaded NamePool
+	// Load only runtime state - Theme and CustomNames come from settings/config.json.
+	// ZFC: InUse is NEVER loaded from disk - it's transient state derived
+	// from filesystem via Reconcile(). Always start with empty map.
+	var loaded namePoolState
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		return err
 	}
 
-	// Note: Theme and CustomNames are NOT loaded from state file.
-	// They are configuration (from settings/config.json), not runtime state.
-	// The state file only persists OverflowNext and MaxSize.
-	//
-	// ZFC: InUse is NEVER loaded from disk - it's transient state derived
-	// from filesystem via Reconcile(). Always start with empty map.
 	p.InUse = make(map[string]bool)
 
 	p.OverflowNext = loaded.OverflowNext
@@ -187,7 +184,17 @@ func (p *NamePool) Load() error {
 	return nil
 }
 
+// namePoolState is the subset of NamePool that is persisted to the state file.
+// Only runtime state is saved, not configuration (Theme, CustomNames come from settings).
+type namePoolState struct {
+	RigName      string `json:"rig_name"`
+	OverflowNext int    `json:"overflow_next"`
+	MaxSize      int    `json:"max_size"`
+}
+
 // Save persists the pool state to disk using atomic write.
+// Only runtime state (OverflowNext, MaxSize) is saved - configuration like
+// Theme and CustomNames come from settings/config.json and are not persisted here.
 func (p *NamePool) Save() error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -197,7 +204,14 @@ func (p *NamePool) Save() error {
 		return err
 	}
 
-	return util.AtomicWriteJSON(p.stateFile, p)
+	// Only save runtime state, not configuration
+	state := namePoolState{
+		RigName:      p.RigName,
+		OverflowNext: p.OverflowNext,
+		MaxSize:      p.MaxSize,
+	}
+
+	return util.AtomicWriteJSON(p.stateFile, state)
 }
 
 // Allocate returns a name from the pool.
@@ -350,6 +364,21 @@ func ListThemes() []string {
 	}
 	sort.Strings(themes)
 	return themes
+}
+
+// ThemeForRig returns a deterministic theme for a rig based on its name.
+// This provides variety across rigs without requiring manual configuration.
+func ThemeForRig(rigName string) string {
+	themes := ListThemes()
+	if len(themes) == 0 {
+		return DefaultTheme
+	}
+	// Hash using prime multiplier for better distribution
+	var hash uint32
+	for _, b := range []byte(rigName) {
+		hash = hash*31 + uint32(b)
+	}
+	return themes[hash%uint32(len(themes))]
 }
 
 // GetThemeNames returns the names in a specific theme.

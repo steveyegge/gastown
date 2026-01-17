@@ -1,0 +1,381 @@
+description = """
+Gas Town release workflow - from version bump to verified release.
+
+This formula orchestrates a release cycle for Gas Town:
+1. Preflight checks (workspace cleanliness, clean git, up to date)
+2. Documentation updates (CHANGELOG.md, info.go)
+3. Version bump (all components)
+4. Git operations (commit, tag, push)
+5. Local installation update
+6. Daemon restart
+
+## Usage
+
+```bash
+gt mol wisp create gastown-release --var version=0.3.0
+```
+
+Or assign to a crew member:
+```bash
+gt sling gastown/crew/max --formula gastown-release --var version=0.3.0
+```
+
+## Error Handling
+
+- **Crew members (with user present)**: Attempt to resolve issues (merge branches,
+  commit/stash work). Ask the user if blocked.
+- **Polecats (autonomous)**: Escalate via `gt escalate` if preflight fails or
+  unrecoverable errors occur. Do not proceed with a release if workspaces have
+  uncommitted work.
+"""
+formula = "gastown-release"
+type = "workflow"
+version = 1
+
+[vars.version]
+description = "The semantic version to release (e.g., 0.3.0)"
+required = true
+
+[[steps]]
+id = "preflight-workspaces"
+title = "Preflight: Check all workspaces for uncommitted work"
+description = """
+Before releasing, ensure no gastown workspaces have uncommitted work that would
+be excluded from the release.
+
+Check all crew workspaces and the mayor rig:
+
+```bash
+# Check each workspace
+for dir in ~/gt/gastown/crew/* ~/gt/gastown/mayor; do
+  if [ -d "$dir/.git" ] || [ -d "$dir" ]; then
+    echo "=== Checking $dir ==="
+    cd "$dir" 2>/dev/null || continue
+
+    # Check for uncommitted changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+      echo "  ⚠ UNCOMMITTED CHANGES"
+      git status --short
+    fi
+
+    # Check for stashes
+    stash_count=$(git stash list 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$stash_count" -gt 0 ]; then
+      echo "  ⚠ HAS $stash_count STASH(ES)"
+      git stash list
+    fi
+
+    # Check for non-main branches with unpushed commits
+    current_branch=$(git branch --show-current 2>/dev/null)
+    if [ -n "$current_branch" ] && [ "$current_branch" != "main" ]; then
+      echo "  ⚠ ON BRANCH: $current_branch (not main)"
+    fi
+  fi
+done
+```
+
+## If issues found:
+
+**For crew members (interactive)**:
+1. Try to resolve: merge branches, commit work, apply/drop stashes
+2. If work is in-progress and not ready, ask the user whether to:
+   - Wait for completion
+   - Stash and proceed
+   - Exclude from this release
+3. Only proceed when all workspaces are clean on main
+
+**For polecats (autonomous)**:
+1. If any workspace has uncommitted work: STOP and escalate
+2. Use: `gt escalate --severity medium "Release blocked: workspace X has uncommitted work"`
+3. Do NOT proceed with release - uncommitted work would be excluded
+
+This step is critical. A release with uncommitted work means losing changes.
+"""
+
+[[steps]]
+id = "preflight-git"
+title = "Preflight: Check git status"
+needs = ["preflight-workspaces"]
+description = """
+Ensure YOUR working tree is clean before starting release.
+
+```bash
+git status
+```
+
+If there are uncommitted changes:
+- Commit them first (if they should be in the release)
+- Stash them: `git stash` (if they should NOT be in the release)
+
+## On failure:
+- **Crew**: Commit or stash your changes, then continue
+- **Polecat**: Escalate if you have uncommitted changes you didn't create
+"""
+
+[[steps]]
+id = "preflight-pull"
+title = "Preflight: Pull latest"
+needs = ["preflight-git"]
+description = """
+Ensure we're up to date with origin.
+
+```bash
+git pull --rebase
+```
+
+## On merge conflicts:
+- **Crew**: Resolve conflicts manually. Ask user if unsure about resolution.
+- **Polecat**: Escalate immediately. Do not attempt to resolve release-blocking
+  merge conflicts autonomously.
+"""
+
+[[steps]]
+id = "review-changes"
+title = "Review changes since last release"
+needs = ["preflight-pull"]
+description = """
+Understand what's being released.
+
+```bash
+git log $(git describe --tags --abbrev=0)..HEAD --oneline
+```
+
+Categorize changes:
+- Features (feat:)
+- Fixes (fix:)
+- Breaking changes
+- Documentation
+
+If there are no changes since last release, ask whether to proceed with an
+empty release (version bump only).
+"""
+
+[[steps]]
+id = "update-changelog"
+title = "Update CHANGELOG.md"
+needs = ["review-changes"]
+description = """
+Write the [Unreleased] section with all changes for {{version}}.
+
+Edit CHANGELOG.md and add entries under [Unreleased].
+
+Format: Keep a Changelog (https://keepachangelog.com)
+
+Sections to use:
+- ### Added - for new features
+- ### Changed - for changes in existing functionality
+- ### Fixed - for bug fixes
+- ### Deprecated - for soon-to-be removed features
+- ### Removed - for now removed features
+
+Base entries on the git log from the previous step. Group related commits.
+
+The bump script will automatically create the version header with today's date.
+"""
+
+[[steps]]
+id = "update-info-go"
+title = "Update info.go versionChanges"
+needs = ["update-changelog"]
+description = """
+Add entry to versionChanges in internal/cmd/info.go.
+
+This powers `gt info --whats-new` for agents.
+
+Add a new entry at the TOP of the versionChanges slice:
+
+```go
+{
+    Version: "{{version}}",
+    Date:    "YYYY-MM-DD",  // Today's date
+    Changes: []string{
+        "NEW: Key feature 1",
+        "NEW: Key feature 2",
+        "CHANGED: Modified behavior",
+        "FIX: Bug that was fixed",
+    },
+},
+```
+
+Focus on agent-relevant and workflow-impacting changes.
+Prefix with NEW:, CHANGED:, FIX:, or DEPRECATED: for clarity.
+
+This is similar to CHANGELOG.md but focused on what agents need to know -
+new commands, changed behaviors, workflow impacts.
+"""
+
+[[steps]]
+id = "run-bump-script"
+title = "Run bump-version.sh"
+needs = ["update-info-go"]
+description = """
+Update all component versions atomically.
+
+```bash
+./scripts/bump-version.sh {{version}}
+```
+
+This updates:
+- internal/cmd/version.go - CLI version constant
+- npm-package/package.json - npm package version
+- CHANGELOG.md - Creates [{{version}}] header with date
+
+Review the changes shown by the script.
+
+## On failure:
+If the script fails (e.g., version already exists, format error):
+- **Crew**: Debug and fix, or ask user
+- **Polecat**: Escalate with error details
+"""
+
+[[steps]]
+id = "verify-versions"
+title = "Verify version consistency"
+needs = ["run-bump-script"]
+description = """
+Confirm all versions match {{version}}.
+
+```bash
+grep 'Version = ' internal/cmd/version.go
+grep '"version"' npm-package/package.json | head -1
+```
+
+Both should show {{version}}.
+
+## On mismatch:
+Do NOT proceed. Either the bump script failed or there's a bug.
+- **Crew**: Investigate and fix manually
+- **Polecat**: Escalate immediately - version mismatch is a release blocker
+"""
+
+[[steps]]
+id = "commit-release"
+title = "Commit release"
+needs = ["verify-versions"]
+description = """
+Stage and commit all version changes.
+
+```bash
+git add -A
+git commit -m "chore: Bump version to {{version}}"
+```
+
+Review the commit to ensure all expected files are included:
+- internal/cmd/version.go
+- internal/cmd/info.go
+- npm-package/package.json
+- CHANGELOG.md
+"""
+
+[[steps]]
+id = "create-tag"
+title = "Create release tag"
+needs = ["commit-release"]
+description = """
+Create annotated git tag.
+
+```bash
+git tag -a v{{version}} -m "Release v{{version}}"
+```
+
+Verify: `git tag -l | tail -5`
+
+## If tag already exists:
+The version may have been previously (partially) released.
+- **Crew**: Ask user how to proceed (delete tag and retry? use different version?)
+- **Polecat**: Escalate - do not delete existing tags autonomously
+"""
+
+[[steps]]
+id = "push-release"
+title = "Push commit and tag"
+needs = ["create-tag"]
+description = """
+Push the release commit and tag to origin.
+
+```bash
+git push origin main
+git push origin v{{version}}
+```
+
+This triggers GitHub Actions to build release artifacts.
+
+Monitor: https://github.com/steveyegge/gastown/actions
+
+## On push rejection:
+Someone pushed while we were releasing.
+- **Crew**: Pull, rebase, re-tag, try again. Ask user if conflicts.
+- **Polecat**: Escalate - release coordination conflict requires human decision
+"""
+
+[[steps]]
+id = "local-install"
+title = "Update local installation"
+needs = ["push-release"]
+description = """
+Rebuild and install gt locally with the new version.
+
+```bash
+go build -o $(go env GOPATH)/bin/gt ./cmd/gt
+```
+
+On macOS, codesign the binary:
+```bash
+codesign -f -s - $(go env GOPATH)/bin/gt
+```
+
+Verify:
+```bash
+gt version
+```
+
+Should show {{version}}.
+
+## On build failure:
+- **Crew**: Debug build error, fix, retry
+- **Polecat**: Escalate - release is pushed but local install failed
+"""
+
+[[steps]]
+id = "restart-daemons"
+title = "Restart daemons"
+needs = ["local-install"]
+description = """
+Restart gt daemon to pick up the new version.
+
+```bash
+gt daemon stop && gt daemon start
+```
+
+Verify:
+```bash
+gt daemon status
+```
+
+The daemon should show the new binary timestamp and no stale warning.
+
+Note: This step is safe to retry if it fails.
+"""
+
+[[steps]]
+id = "release-complete"
+title = "Release complete"
+needs = ["restart-daemons"]
+description = """
+Release v{{version}} is complete!
+
+Summary:
+- All workspaces verified clean before release
+- Version files updated (version.go, package.json)
+- CHANGELOG.md updated with release date
+- info.go versionChanges updated for `gt info --whats-new`
+- Git tag v{{version}} pushed
+- GitHub Actions triggered for artifact builds
+- Local gt binary rebuilt and installed
+- Daemons restarted with new version
+
+Optional next steps:
+- Monitor GitHub Actions for release build completion
+- Verify release artifacts at https://github.com/steveyegge/gastown/releases
+- Announce the release
+"""

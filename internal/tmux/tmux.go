@@ -9,11 +9,17 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 )
+
+// sessionNudgeLocks serializes nudges to the same session.
+// This prevents interleaving when multiple nudges arrive concurrently,
+// which can cause garbled input and missed Enter keys.
+var sessionNudgeLocks sync.Map // map[string]*sync.Mutex
 
 // versionPattern matches Claude Code version numbers like "2.0.76"
 var versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
@@ -144,29 +150,42 @@ func (t *Tmux) KillSession(name string) error {
 // This prevents orphan processes that survive tmux kill-session due to SIGHUP being ignored.
 //
 // Process:
-// 1. Find all Claude processes in the session using pgrep
-// 2. Send SIGTERM to all Claude processes
-// 3. Wait 100ms for graceful shutdown
-// 4. Send SIGKILL to any remaining Claude processes
-// 5. Kill the tmux session
+// 1. Get the pane's main process PID
+// 2. Find all descendant processes recursively (not just direct children)
+// 3. Send SIGTERM to all descendants (deepest first)
+// 4. Wait 100ms for graceful shutdown
+// 5. Send SIGKILL to any remaining descendants
+// 6. Kill the tmux session
 //
 // This ensures Claude processes and all their children are properly terminated.
 func (t *Tmux) KillSessionWithProcesses(name string) error {
-	// Find all Claude processes associated with this session
-	// We use pgrep -f to match processes with "claude" in their command line
-	// and filter by the session name to avoid killing unrelated claude processes
-	claudePIDs := findClaudeProcessesInSession(name)
-
-	// Send SIGTERM to all Claude processes
-	for _, pid := range claudePIDs {
-		_ = exec.Command("kill", "-TERM", pid).Run()
+	// Get the pane PID
+	pid, err := t.GetPanePID(name)
+	if err != nil {
+		// Session might not exist or be in bad state, try direct kill
+		return t.KillSession(name)
 	}
 
-	// Wait for graceful shutdown
-	time.Sleep(100 * time.Millisecond)
+	if pid != "" {
+		// Get all descendant PIDs recursively (returns deepest-first order)
+		descendants := getAllDescendants(pid)
 
-	// Send SIGKILL to any remaining Claude processes
-	for _, pid := range claudePIDs {
+		// Send SIGTERM to all descendants (deepest first to avoid orphaning)
+		for _, dpid := range descendants {
+			_ = exec.Command("kill", "-TERM", dpid).Run()
+		}
+
+		// Wait for graceful shutdown
+		time.Sleep(100 * time.Millisecond)
+
+		// Send SIGKILL to any remaining descendants
+		for _, dpid := range descendants {
+			_ = exec.Command("kill", "-KILL", dpid).Run()
+		}
+
+		// Kill the pane process itself (may have called setsid() and detached)
+		_ = exec.Command("kill", "-TERM", pid).Run()
+		time.Sleep(100 * time.Millisecond)
 		_ = exec.Command("kill", "-KILL", pid).Run()
 	}
 
@@ -196,154 +215,28 @@ func getAllDescendants(pid string) []string {
 	return result
 }
 
-// findClaudeProcessesInSession finds all Claude processes that belong to a tmux session.
-// It does this by:
-// 1. Getting the pane PID (root process of the session)
-// 2. Finding all processes with "claude" or "node" in their command line
-// 3. Checking if each process is a descendant of the pane PID
-func findClaudeProcessesInSession(sessionName string) []string {
-	var result []string
-
-	// Get the pane PID for this session
-	pidCmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_pid}")
-	pidOut, err := pidCmd.Output()
-	if err != nil {
-		return result
-	}
-
-	panePID := strings.TrimSpace(string(pidOut))
-	if panePID == "" {
-		return result
-	}
-
-	// Find all processes with "claude" or "node" in their command line
-	// We use pgrep -f to match the full command line (not just process name)
-	pgrepCmd := exec.Command("pgrep", "-f", "claude")
-	claudeOut, err := pgrepCmd.Output()
-	if err != nil {
-		// No claude processes found, try "node" as fallback
-		pgrepCmd = exec.Command("pgrep", "-f", "node")
-		claudeOut, err = pgrepCmd.Output()
-		if err != nil {
-			return result
-		}
-	}
-
-	// For each Claude process, check if it's a descendant of the pane PID
-	claudePIDs := strings.Fields(strings.TrimSpace(string(claudeOut)))
-	for _, pid := range claudePIDs {
-		if isDescendantOf(pid, panePID) {
-			result = append(result, pid)
-		}
-	}
-
-	return result
-}
-
-// isDescendantOf checks if a process is a descendant of an ancestor PID.
-// It does this by walking up the process tree using parent PIDs.
-func isDescendantOf(pid, ancestorPID string) bool {
-	currentPID := pid
-	maxIterations := 50 // Prevent infinite loops
-
-	for i := 0; i < maxIterations; i++ {
-		if currentPID == ancestorPID {
-			return true
-		}
-
-		// Get the parent PID
-		ppid, err := getParentPID(currentPID)
-		if err != nil {
-			return false
-		}
-
-		// If we reached PID 1 (init), we've gone too far
-		if ppid == "1" || ppid == "0" {
-			return false
-		}
-
-		currentPID = ppid
-	}
-
-	return false
-}
-
-// getParentPID gets the parent PID of a process using ps.
-func getParentPID(pid string) (string, error) {
-	out, err := exec.Command("ps", "-o", "ppid=", "-p", pid).Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// KillPaneProcesses kills all Claude processes in a pane without killing the pane itself.
-// This is useful before respawn-pane to ensure the old process is actually terminated.
-// The pane parameter should be a pane ID (e.g., "%0") or session:window.pane format.
-func (t *Tmux) KillPaneProcesses(pane string) error {
-	// Get the pane PID
-	pid, err := t.run("list-panes", "-t", pane, "-F", "#{pane_pid}")
-	if err != nil {
-		return err
-	}
-
-	panePID := strings.TrimSpace(pid)
-	if panePID == "" {
-		return nil // No pane PID, nothing to kill
-	}
-
-	// Find all Claude/node processes that are descendants of the pane PID
-	claudePIDs := findClaudeProcessesDescendantsOf(panePID)
-
-	// Send SIGTERM to all Claude processes
-	for _, pid := range claudePIDs {
-		_ = exec.Command("kill", "-TERM", pid).Run()
-	}
-
-	// Wait for graceful shutdown
-	time.Sleep(100 * time.Millisecond)
-
-	// Send SIGKILL to any remaining Claude processes
-	for _, pid := range claudePIDs {
-		_ = exec.Command("kill", "-KILL", pid).Run()
-	}
-
-	return nil
-}
-
-// findClaudeProcessesDescendantsOf finds all Claude processes that are descendants of a PID.
-// Unlike findClaudeProcessesInSession, this doesn't need to check tmux sessions.
-func findClaudeProcessesDescendantsOf(ancestorPID string) []string {
-	var result []string
-
-	// Find all processes with "claude" or "node" in their command line
-	pgrepCmd := exec.Command("pgrep", "-f", "claude")
-	claudeOut, err := pgrepCmd.Output()
-	if err != nil {
-		// No claude processes found, try "node" as fallback
-		pgrepCmd = exec.Command("pgrep", "-f", "node")
-		claudeOut, err = pgrepCmd.Output()
-		if err != nil {
-			return result
-		}
-	}
-
-	// For each Claude process, check if it's a descendant of the ancestor PID
-	claudePIDs := strings.Fields(strings.TrimSpace(string(claudeOut)))
-	for _, pid := range claudePIDs {
-		if isDescendantOf(pid, ancestorPID) {
-			result = append(result, pid)
-		}
-	}
-
-	return result
-}
-
 // KillServer terminates the entire tmux server and all sessions.
 func (t *Tmux) KillServer() error {
 	_, err := t.run("kill-server")
 	if errors.Is(err, ErrNoServer) {
 		return nil // Already dead
+	}
+	return err
+}
+
+// SetExitEmpty controls the tmux exit-empty server option.
+// When on (default), the server exits when there are no sessions.
+// When off, the server stays running even with no sessions.
+// This is useful during shutdown to prevent the server from exiting
+// when all Gas Town sessions are killed but the user has no other sessions.
+func (t *Tmux) SetExitEmpty(on bool) error {
+	value := "on"
+	if !on {
+		value = "off"
+	}
+	_, err := t.run("set-option", "-g", "exit-empty", value)
+	if errors.Is(err, ErrNoServer) {
+		return nil // No server to configure
 	}
 	return err
 }
@@ -555,11 +448,28 @@ func (t *Tmux) SendKeysDelayedDebounced(session, keys string, preDelayMs, deboun
 	return t.SendKeysDebounced(session, keys, debounceMs)
 }
 
+// getSessionNudgeLock returns the mutex for serializing nudges to a session.
+// Creates a new mutex if one doesn't exist for this session.
+func getSessionNudgeLock(session string) *sync.Mutex {
+	actual, _ := sessionNudgeLocks.LoadOrStore(session, &sync.Mutex{})
+	return actual.(*sync.Mutex)
+}
+
 // NudgeSession sends a message to a Claude Code session reliably.
 // This is the canonical way to send messages to Claude sessions.
 // Uses: literal mode + 500ms debounce + ESC (for vim mode) + separate Enter.
 // Verification is the Witness's job (AI), not this function.
+//
+// IMPORTANT: Nudges to the same session are serialized to prevent interleaving.
+// If multiple goroutines try to nudge the same session concurrently, they will
+// queue up and execute one at a time. This prevents garbled input when
+// SessionStart hooks and nudges arrive simultaneously.
 func (t *Tmux) NudgeSession(session, message string) error {
+	// Serialize nudges to this session to prevent interleaving
+	lock := getSessionNudgeLock(session)
+	lock.Lock()
+	defer lock.Unlock()
+
 	// 1. Send text in literal mode (handles special characters)
 	if _, err := t.run("send-keys", "-t", session, "-l", message); err != nil {
 		return err
@@ -590,7 +500,13 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 // NudgePane sends a message to a specific pane reliably.
 // Same pattern as NudgeSession but targets a pane ID (e.g., "%9") instead of session name.
+// Nudges to the same pane are serialized to prevent interleaving.
 func (t *Tmux) NudgePane(pane, message string) error {
+	// Serialize nudges to this pane to prevent interleaving
+	lock := getSessionNudgeLock(pane)
+	lock.Lock()
+	defer lock.Unlock()
+
 	// 1. Send text in literal mode (handles special characters)
 	if _, err := t.run("send-keys", "-t", pane, "-l", message); err != nil {
 		return err

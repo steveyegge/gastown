@@ -85,6 +85,9 @@ func (b *Beads) CreateRigBead(id, title string, fields *RigFields) (*Issue, erro
 		"--description=" + description,
 		"--labels=gt:rig",
 	}
+	if NeedsForceForID(id) {
+		args = append(args, "--force")
+	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking
 	if actor := os.Getenv("BD_ACTOR"); actor != "" {

@@ -214,14 +214,22 @@ func isInTmuxSession(targetSession string) bool {
 }
 
 // attachToTmuxSession attaches to a tmux session.
-// Should only be called from outside tmux.
+// If already inside tmux, uses switch-client instead of attach-session.
 func attachToTmuxSession(sessionID string) error {
 	tmuxPath, err := exec.LookPath("tmux")
 	if err != nil {
 		return fmt.Errorf("tmux not found: %w", err)
 	}
 
-	cmd := exec.Command(tmuxPath, "attach-session", "-t", sessionID)
+	// Check if we're already inside a tmux session
+	var cmd *exec.Cmd
+	if os.Getenv("TMUX") != "" {
+		// Inside tmux: switch to the target session
+		cmd = exec.Command(tmuxPath, "switch-client", "-t", sessionID)
+	} else {
+		// Outside tmux: attach to the session
+		cmd = exec.Command(tmuxPath, "attach-session", "-t", sessionID)
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

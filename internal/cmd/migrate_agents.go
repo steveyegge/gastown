@@ -284,17 +284,21 @@ func migrateRoleBead(sourceBd, targetBd *beads.Beads, oldID, newID, role string,
 	return result
 }
 
-func printMigrationResult(r migrationResult) {
-	var icon string
-	switch r.Status {
+func getMigrationStatusIcon(status string) string {
+	switch status {
 	case "migrated", "would migrate":
-		icon = "  ✓"
+		return "  ✓"
 	case "skipped":
-		icon = "  ⊘"
+		return "  ⊘"
 	case "error":
-		icon = "  ✗"
+		return "  ✗"
+	default:
+		return "  ?"
 	}
-	fmt.Printf("%s %s → %s: %s\n", icon, r.OldID, r.NewID, r.Message)
+}
+
+func printMigrationResult(r migrationResult) {
+	fmt.Printf("%s %s → %s: %s\n", getMigrationStatusIcon(r.Status), r.OldID, r.NewID, r.Message)
 }
 
 func printMigrationSummary(results []migrationResult, dryRun bool) {

@@ -139,6 +139,9 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--type=agent",
 		"--labels=gt:agent",
 	}
+	if NeedsForceForID(id) {
+		args = append(args, "--force")
+	}
 
 	// Add --force for multi-hyphen IDs (e.g., "test-testrig-polecat-xyz")
 	// Newer bd versions infer prefix from last hyphen, breaking system IDs

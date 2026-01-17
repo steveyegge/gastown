@@ -16,12 +16,20 @@ var mayorCmd = &cobra.Command{
 	Use:     "mayor",
 	Aliases: []string{"may"},
 	GroupID: GroupAgents,
-	Short:   "Manage the Mayor session",
+	Short:   "Manage the Mayor (Chief of Staff for cross-rig coordination)",
 	RunE:    requireSubcommand,
-	Long: `Manage the Mayor tmux session.
+	Long: `Manage the Mayor - the Overseer's Chief of Staff.
 
-The Mayor is the global coordinator for Gas Town, running as a persistent
-tmux session. Use the subcommands to start, stop, attach, and check status.`,
+The Mayor is the global coordinator for Gas Town:
+  - Receives escalations from Witnesses and Deacon
+  - Coordinates work across multiple rigs
+  - Handles human communication when needed
+  - Routes strategic decisions and cross-project issues
+
+The Mayor is the primary interface between the human Overseer and the
+automated agents. When in doubt, escalate to the Mayor.
+
+Role shortcuts: "mayor" in mail/nudge addresses resolves to this agent.`,
 }
 
 var mayorAgentOverride string
