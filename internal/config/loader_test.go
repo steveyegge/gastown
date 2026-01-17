@@ -2603,3 +2603,99 @@ func TestBuildStartupCommandWithAgentOverride_IncludesGTRoot(t *testing.T) {
 		t.Errorf("expected GT_ROOT=%s in command, got: %q", townRoot, cmd)
 	}
 }
+
+// TestBuildStartupCommand_UsesGTRootFromEnvVars tests that when rigPath is empty
+// but GT_ROOT is provided in envVars, the function uses GT_ROOT to find town settings
+// and respects role_agents configuration. This is critical for daemon spawns of
+// town-level agents (deacon, mayor) where rigPath is empty.
+// Related issue: #433 - Daemon doesn't respect role_agents configuration
+func TestBuildStartupCommand_UsesGTRootFromEnvVars(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// Configure town settings with role_agents for deacon
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"claude-sonnet": {
+			Command: "claude",
+			Args:    []string{"--dangerously-skip-permissions", "--model", "sonnet"},
+		},
+	}
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleDeacon: "claude-sonnet",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create mayor/town.json marker (required for findTownRootFromCwd fallback)
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatalf("creating mayor dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "town.json"), []byte(`{"type":"town","name":"test"}`), 0644); err != nil {
+		t.Fatalf("creating town.json: %v", err)
+	}
+
+	// Call BuildStartupCommand with empty rigPath but GT_ROOT in envVars.
+	// This simulates how the daemon calls BuildAgentStartupCommand for deacon.
+	envVars := map[string]string{
+		"GT_ROLE": constants.RoleDeacon,
+		"GT_ROOT": townRoot,
+	}
+	cmd := BuildStartupCommand(envVars, "", "")
+
+	// Should use claude-sonnet from role_agents[deacon]
+	if !strings.Contains(cmd, "--model sonnet") {
+		t.Errorf("expected --model sonnet from role_agents[deacon], got: %q", cmd)
+	}
+	if !strings.Contains(cmd, "claude") {
+		t.Errorf("expected claude command, got: %q", cmd)
+	}
+}
+
+// TestBuildStartupCommandWithAgentOverride_UsesGTRootFromEnvVars tests the same
+// scenario for BuildStartupCommandWithAgentOverride.
+func TestBuildStartupCommandWithAgentOverride_UsesGTRootFromEnvVars(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// Configure town settings with role_agents for deacon
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"claude-sonnet": {
+			Command: "claude",
+			Args:    []string{"--dangerously-skip-permissions", "--model", "sonnet"},
+		},
+	}
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleDeacon: "claude-sonnet",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create mayor/town.json marker
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatalf("creating mayor dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "town.json"), []byte(`{"type":"town","name":"test"}`), 0644); err != nil {
+		t.Fatalf("creating town.json: %v", err)
+	}
+
+	// Call with empty rigPath but GT_ROOT in envVars, no agent override
+	envVars := map[string]string{
+		"GT_ROLE": constants.RoleDeacon,
+		"GT_ROOT": townRoot,
+	}
+	cmd, err := BuildStartupCommandWithAgentOverride(envVars, "", "", "")
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should use claude-sonnet from role_agents[deacon]
+	if !strings.Contains(cmd, "--model sonnet") {
+		t.Errorf("expected --model sonnet from role_agents[deacon], got: %q", cmd)
+	}
+}
