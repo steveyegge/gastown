@@ -8,6 +8,17 @@ import (
 	"strings"
 )
 
+// HasRedirect returns true if the workDir has a beads redirect file.
+// This indicates the workdir uses a shared beads database (e.g., crew/polecat clones).
+func HasRedirect(workDir string) bool {
+	if filepath.Base(workDir) == ".beads" {
+		workDir = filepath.Dir(workDir)
+	}
+	redirectPath := filepath.Join(workDir, ".beads", "redirect")
+	_, err := os.Stat(redirectPath)
+	return err == nil
+}
+
 // ResolveBeadsDir returns the actual beads directory, following any redirect.
 // If workDir/.beads/redirect exists, it reads the redirect path and resolves it
 // relative to workDir (not the .beads directory). Otherwise, returns workDir/.beads.
