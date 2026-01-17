@@ -47,7 +47,7 @@ Manages the Merge Queue for a Rig. The Refinery intelligently merges changes fro
 Patrol agent that oversees Polecats and the Refinery within a Rig. The Witness monitors progress, detects stuck agents, and can trigger recovery actions.
 
 ### Crew
-Long-lived, named agents for persistent collaboration. Unlike ephemeral Polecats, Crew members maintain context across sessions and are ideal for ongoing work relationships.
+Formula-owning agents that orchestrate polecat execution. Each crew member owns exactly one formula (1:1 mapping) and is responsible for: spawning polecats to execute their formula, collecting execution feedback, and iterating to improve the formula. Crew are persistent and maintain context across sessions. Key principle: **Crew build formulas, polecats run them.**
 
 ## Work Units
 

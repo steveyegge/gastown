@@ -68,27 +68,45 @@ When issues close, the convoy lands. See [Convoys](concepts/convoy.md) for detai
 
 ## Crew vs Polecats
 
-Both do project work, but with key differences:
+Both do project work, but with fundamentally different purposes:
 
 | Aspect | Crew | Polecat |
 |--------|------|---------|
+| **Primary role** | Formula owners | Formula executors |
 | **Lifecycle** | Persistent (user controls) | Transient (Witness controls) |
-| **Monitoring** | None | Witness watches, nudges, recycles |
-| **Work assignment** | Human-directed or self-assigned | Slung via `gt sling` |
+| **Monitoring** | Self-directed | Witness watches, nudges, recycles |
+| **Work assignment** | Subscribes to formula-matching work | Spawned by crew with molecule |
 | **Git state** | Pushes to main directly | Works on branch, Refinery merges |
 | **Cleanup** | Manual | Automatic on completion |
 | **Identity** | `<rig>/crew/<name>` | `<rig>/polecats/<name>` |
 
+### The Core Principle
+
+**Crew build formulas, polecats run them.**
+
+Each crew member owns exactly one formula:
+- `crew/code_review` owns `code-review.formula.toml`
+- `crew/conflict_resolve` owns `mol-polecat-conflict-resolve.formula.toml`
+
+Crew responsibilities:
+1. **Own the formula** - Canonical source of truth for one workflow
+2. **Spawn polecats** - When work arrives, dispatch to workers
+3. **Collect feedback** - Aggregate execution results
+4. **Iterate** - Improve formula based on execution patterns
+5. **Never execute directly** - Crew orchestrate, polecats execute
+
+See [Crew Formula Ownership](design/crew-formula-ownership.md) for full details.
+
 **When to use Crew**:
-- Exploratory work
-- Long-running projects
-- Work requiring human judgment
-- Tasks where you want direct control
+- Formula development and iteration
+- Orchestrating parallel polecat workflows
+- Long-running oversight of specific workflow types
+- Work requiring human judgment on formula design
 
 **When to use Polecats**:
+- Executing molecules (formulas instantiated as work)
 - Discrete, well-defined tasks
 - Batch work (tracked via convoys)
-- Parallelizable work
 - Work that benefits from supervision
 
 ## Dogs vs Crew
@@ -221,35 +239,45 @@ This is particularly valuable for:
 - **Capability mapping:** Claude for architecture, GPT for tests?
 - **Cost optimization:** When is a smaller model sufficient?
 
-## Crew-Slings-Polecat Coordination
+## Crew-Polecat Coordination
 
-A key pattern for crew-supervised workflows. Crew workers can dispatch work to
-Polecats and receive completion notifications.
+Crew own formulas and dispatch polecats to execute them. This creates a clean
+separation between workflow design (crew) and workflow execution (polecat).
 
-**The Flow:**
-1. Crew runs `gt sling <bead> <rig>` to dispatch work
-2. Sling stores `dispatched_by: crew/` in the bead
-3. Polecat executes work autonomously
-4. Polecat calls `gt done` when complete
-5. `gt done` sends `WORK_DONE: <issue-id>` mail to the dispatcher
+**The Dispatch Flow:**
+1. Work arrives matching crew's formula subscription (label, type, etc.)
+2. Crew runs `gt crew dispatch <bead>` to spawn a polecat
+3. Polecat receives molecule from crew's formula
+4. Polecat executes work autonomously
+5. Polecat calls `gt done` when complete
+6. Execution report generated for crew feedback
+7. Crew receives `WORK_DONE: <issue-id>` mail
 
-**Why it matters:**
-- Polecats cannot use `gt sling` (they're ephemeral workers)
-- The dispatcher receives notification without polling
-- Enables crew to orchestrate parallel polecat workflows
+**The Feedback Loop:**
+1. Polecat execution reports accumulate in crew's feedback inbox
+2. Crew periodically reviews execution patterns
+3. Common failures or slow steps trigger formula improvements
+4. Updated formula benefits all future executions
 
 **Example:**
 ```bash
-# Crew dispatches work
-gt sling gt-abc gastown
+# Crew discovers work matching their formula
+gt crew prime  # Shows pending work for code-review formula
+
+# Crew dispatches to polecat
+gt crew dispatch gt-review-456
 
 # ... polecat works ...
-# When done, crew receives mail:
-# Subject: WORK_DONE: gt-abc
-# Body: Exit: COMPLETED, Issue: gt-abc, MR: mr-xyz
+
+# Crew reviews execution feedback
+gt crew feedback
+# Shows: 95% success rate, step 3 avg 45s, 2 timeouts this week
+
+# Crew iterates on formula if needed
+gt crew formula edit
 ```
 
-See `~/gt/ROLES.md` for the full coordination patterns documentation.
+See [Crew Formula Ownership](design/crew-formula-ownership.md) for the full model.
 
 ## Common Mistakes
 
