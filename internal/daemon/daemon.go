@@ -24,6 +24,7 @@ import (
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/feed"
+	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -379,27 +380,35 @@ func (d *Daemon) heartbeat(state *State) {
 		d.killRefinerySessions()
 	}
 
-	// 6. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
+	// 6. Ensure Mayor is running (restart if dead)
+	// Check patrol config - can be disabled in mayor/daemon.json
+	if IsPatrolEnabled(d.patrolConfig, "mayor") {
+		d.ensureMayorRunning()
+	} else {
+		d.logger.Printf("Mayor patrol disabled in config, skipping")
+	}
+
+	// 7. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
 	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
 	// Uses regex-based WaitForRuntimeReady, which is acceptable for daemon bootstrap.
 	d.triggerPendingSpawns()
 
-	// 7. Process lifecycle requests
+	// 8. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 8. (Removed) Stale agent check - violated "discover, don't track"
+	// 9. (Removed) Stale agent check - violated "discover, don't track"
 
-	// 9. Check for GUPP violations (agents with work-on-hook not progressing)
+	// 10. Check for GUPP violations (agents with work-on-hook not progressing)
 	d.checkGUPPViolations()
 
-	// 10. Check for orphaned work (assigned to dead agents)
+	// 11. Check for orphaned work (assigned to dead agents)
 	d.checkOrphanedWork()
 
-	// 11. Check polecat session health (proactive crash detection)
+	// 12. Check polecat session health (proactive crash detection)
 	// This validates tmux sessions are still alive for polecats with work-on-hook
 	d.checkPolecatSessionHealth()
 
-	// 12. Clean up orphaned claude subagent processes (memory leak prevention)
+	// 13. Clean up orphaned claude subagent processes (memory leak prevention)
 	// These are Task tool subagents that didn't clean up after completion.
 	// This is a safety net - Deacon patrol also does this more frequently.
 	d.cleanupOrphanedProcesses()
@@ -767,6 +776,41 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	}
 
 	d.logger.Printf("Refinery session for %s started successfully", rigName)
+}
+
+// ensureMayorRunning ensures the Mayor is running.
+// Without Mayor supervision, work dispatch stalls until human intervention via 'gt mayor attach'.
+func (d *Daemon) ensureMayorRunning() {
+	mgr := mayor.NewManager(d.config.TownRoot)
+
+	running, err := mgr.IsRunning()
+	if err != nil {
+		d.logger.Printf("Error checking Mayor status: %v", err)
+		return
+	}
+
+	if running {
+		// Mayor is running - check for zombie state (tmux alive but Claude dead)
+		sessionName := mgr.SessionName()
+		if d.tmux.IsClaudeRunning(sessionName) {
+			// All good - Mayor is running and Claude is active
+			return
+		}
+		// Zombie session - kill and restart
+		d.logger.Printf("Mayor session %s is zombie (Claude dead), killing and restarting", sessionName)
+		if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
+			d.logger.Printf("Error killing zombie Mayor session: %v", err)
+		}
+		// Fall through to restart
+	}
+
+	// Start Mayor
+	if err := mgr.Start(""); err != nil {
+		d.logger.Printf("Error starting Mayor: %v", err)
+		return
+	}
+
+	d.logger.Println("Mayor started successfully")
 }
 
 // killDeaconSessions kills leftover deacon and boot tmux sessions.
