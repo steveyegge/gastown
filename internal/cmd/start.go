@@ -166,6 +166,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	t := tmux.NewTmux()
 
+	// Clean up any orphaned sessions from previous runs before starting
+	// This prevents session accumulation when gt is restarted without proper shutdown
+	if cleaned, err := t.CleanupOrphanedSessions(); err != nil {
+		fmt.Printf("  %s Could not cleanup orphaned sessions: %v\n", style.Dim.Render("○"), err)
+	} else if cleaned > 0 {
+		fmt.Printf("  %s Cleaned up %d orphaned session(s)\n", style.Dim.Render("○"), cleaned)
+	}
+
 	fmt.Printf("Starting Gas Town from %s\n\n", style.Dim.Render(townRoot))
 	fmt.Println("Starting all agents in parallel...")
 	fmt.Println()
