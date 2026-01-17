@@ -959,7 +959,7 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 
 func TestBuildPolecatStartupCommand(t *testing.T) {
 	t.Parallel()
-	cmd := BuildPolecatStartupCommand("gastown", "toast", "", "")
+	cmd := BuildPolecatStartupCommand("gastown", "toast", "", "", "")
 
 	if !strings.Contains(cmd, "GT_ROLE=polecat") {
 		t.Error("expected GT_ROLE=polecat in command")
@@ -977,7 +977,7 @@ func TestBuildPolecatStartupCommand(t *testing.T) {
 
 func TestBuildCrewStartupCommand(t *testing.T) {
 	t.Parallel()
-	cmd := BuildCrewStartupCommand("gastown", "max", "", "")
+	cmd := BuildCrewStartupCommand("gastown", "max", "", "", "")
 
 	if !strings.Contains(cmd, "GT_ROLE=crew") {
 		t.Error("expected GT_ROLE=crew in command")
@@ -1081,7 +1081,7 @@ func TestBuildPolecatStartupCommandWithAgentOverride(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	cmd, err := BuildPolecatStartupCommandWithAgentOverride("testrig", "toast", rigPath, "", "gemini")
+	cmd, err := BuildPolecatStartupCommandWithAgentOverride("testrig", "toast", rigPath, "", "gemini", "")
 	if err != nil {
 		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
 	}
@@ -1164,7 +1164,7 @@ func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	cmd, err := BuildCrewStartupCommandWithAgentOverride("testrig", "max", rigPath, "gt prime", "gemini")
+	cmd, err := BuildCrewStartupCommandWithAgentOverride("testrig", "max", rigPath, "gt prime", "gemini", "")
 	if err != nil {
 		t.Fatalf("BuildCrewStartupCommandWithAgentOverride: %v", err)
 	}
