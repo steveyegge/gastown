@@ -15,35 +15,35 @@ import (
 	"github.com/steveyegge/gastown/internal/templates"
 )
 
-// PatrolMoleculesExistCheck verifies that patrol molecules exist for each rig.
+// PatrolMoleculesExistCheck verifies that patrol formulas are accessible.
+// Patrols use `bd mol wisp <formula-name>` to spawn workflows, so the formulas
+// must exist in the formula search path (.beads/formulas/, ~/.beads/formulas/, or $GT_ROOT/.beads/formulas/).
 type PatrolMoleculesExistCheck struct {
-	FixableCheck
-	missingMols map[string][]string // rig -> missing molecule titles
+	BaseCheck
+	missingFormulas map[string][]string // rig -> missing formula names
 }
 
-// NewPatrolMoleculesExistCheck creates a new patrol molecules exist check.
+// NewPatrolMoleculesExistCheck creates a new patrol formulas exist check.
 func NewPatrolMoleculesExistCheck() *PatrolMoleculesExistCheck {
 	return &PatrolMoleculesExistCheck{
-		FixableCheck: FixableCheck{
-			BaseCheck: BaseCheck{
-				CheckName:        "patrol-molecules-exist",
-				CheckDescription: "Check if patrol molecules exist for each rig",
-				CheckCategory:    CategoryPatrol,
-			},
+		BaseCheck: BaseCheck{
+			CheckName:        "patrol-molecules-exist",
+			CheckDescription: "Check if patrol formulas are accessible",
+			CheckCategory:    CategoryPatrol,
 		},
 	}
 }
 
-// patrolMolecules are the required patrol molecule titles.
-var patrolMolecules = []string{
-	"Deacon Patrol",
-	"Witness Patrol",
-	"Refinery Patrol",
+// patrolFormulas are the required patrol formula names.
+var patrolFormulas = []string{
+	"mol-deacon-patrol",
+	"mol-witness-patrol",
+	"mol-refinery-patrol",
 }
 
-// Run checks if patrol molecules exist.
+// Run checks if patrol formulas are accessible.
 func (c *PatrolMoleculesExistCheck) Run(ctx *CheckContext) *CheckResult {
-	c.missingMols = make(map[string][]string)
+	c.missingFormulas = make(map[string][]string)
 
 	rigs, err := discoverRigs(ctx.TownRoot)
 	if err != nil {
@@ -66,9 +66,9 @@ func (c *PatrolMoleculesExistCheck) Run(ctx *CheckContext) *CheckResult {
 	var details []string
 	for _, rigName := range rigs {
 		rigPath := filepath.Join(ctx.TownRoot, rigName)
-		missing := c.checkPatrolMolecules(rigPath)
+		missing := c.checkPatrolFormulas(rigPath)
 		if len(missing) > 0 {
-			c.missingMols[rigName] = missing
+			c.missingFormulas[rigName] = missing
 			details = append(details, fmt.Sprintf("%s: missing %v", rigName, missing))
 		}
 	}
@@ -77,71 +77,40 @@ func (c *PatrolMoleculesExistCheck) Run(ctx *CheckContext) *CheckResult {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("%d rig(s) missing patrol molecules", len(c.missingMols)),
+			Message: fmt.Sprintf("%d rig(s) missing patrol formulas", len(c.missingFormulas)),
 			Details: details,
-			FixHint: "Run 'gt doctor --fix' to create missing patrol molecules",
+			FixHint: "Formulas should exist in .beads/formulas/ at town or rig level, or in ~/.beads/formulas/",
 		}
 	}
 
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusOK,
-		Message: fmt.Sprintf("All %d rig(s) have patrol molecules", len(rigs)),
+		Message: fmt.Sprintf("All %d rig(s) have patrol formulas accessible", len(rigs)),
 	}
 }
 
-// checkPatrolMolecules returns missing patrol molecule titles for a rig.
-func (c *PatrolMoleculesExistCheck) checkPatrolMolecules(rigPath string) []string {
-	// List molecules using bd
-	cmd := exec.Command("bd", "list", "--type=molecule")
+// checkPatrolFormulas returns missing patrol formula names for a rig.
+func (c *PatrolMoleculesExistCheck) checkPatrolFormulas(rigPath string) []string {
+	// List formulas accessible from this rig using bd formula list
+	// This checks .beads/formulas/, ~/.beads/formulas/, and $GT_ROOT/.beads/formulas/
+	cmd := exec.Command("bd", "formula", "list")
 	cmd.Dir = rigPath
 	output, err := cmd.Output()
 	if err != nil {
-		return patrolMolecules // Can't check, assume all missing
+		// Can't check formulas, assume all missing
+		return patrolFormulas
 	}
 
 	outputStr := string(output)
 	var missing []string
-	for _, mol := range patrolMolecules {
-		if !strings.Contains(outputStr, mol) {
-			missing = append(missing, mol)
+	for _, formulaName := range patrolFormulas {
+		// Formula list output includes the formula name without extension
+		if !strings.Contains(outputStr, formulaName) {
+			missing = append(missing, formulaName)
 		}
 	}
 	return missing
-}
-
-// Fix creates missing patrol molecules.
-func (c *PatrolMoleculesExistCheck) Fix(ctx *CheckContext) error {
-	for rigName, missing := range c.missingMols {
-		rigPath := filepath.Join(ctx.TownRoot, rigName)
-		for _, mol := range missing {
-			desc := getPatrolMoleculeDesc(mol)
-			cmd := exec.Command("bd", "create", //nolint:gosec // G204: args are constructed internally
-				"--type=molecule",
-				"--title="+mol,
-				"--description="+desc,
-				"--priority=2",
-			)
-			cmd.Dir = rigPath
-			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("creating %s in %s: %w", mol, rigName, err)
-			}
-		}
-	}
-	return nil
-}
-
-func getPatrolMoleculeDesc(title string) string {
-	switch title {
-	case "Deacon Patrol":
-		return "Mayor's daemon patrol loop for handling callbacks, health checks, and cleanup."
-	case "Witness Patrol":
-		return "Per-rig worker monitor patrol loop with progressive nudging."
-	case "Refinery Patrol":
-		return "Merge queue processor patrol loop with verification gates."
-	default:
-		return "Patrol molecule"
-	}
 }
 
 // PatrolHooksWiredCheck verifies that hooks trigger patrol execution.
