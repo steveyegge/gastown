@@ -25,11 +25,12 @@ This command allows you to view and modify configuration settings
 for your Gas Town workspace, including agent aliases and defaults.
 
 Commands:
-  gt config agent list              List all agents (built-in and custom)
-  gt config agent get <name>         Show agent configuration
-  gt config agent set <name> <cmd>   Set custom agent command
-  gt config agent remove <name>      Remove custom agent
-  gt config default-agent [name]     Get or set default agent`,
+  gt config agent list                 List all agents (built-in and custom)
+  gt config agent get <name>           Show agent configuration
+  gt config agent set <name> <cmd>     Set custom agent command
+  gt config agent remove <name>        Remove custom agent
+  gt config default-agent [name]       Get or set default agent
+  gt config role-agent [role] [agent]  Get or set per-role default agent`,
 }
 
 // Agent subcommands
@@ -76,9 +77,9 @@ The command can include arguments. Use quotes if the command or
 arguments contain spaces.
 
 Examples:
-  gt config agent set claude-glm \"claude-glm --model glm-4\"
+  gt config agent set claude-glm "claude-glm --model glm-4"
   gt config agent set gemini-custom gemini --approval-mode yolo
-  gt config agent set claude \"claude-glm\"  # Override built-in claude`,
+  gt config agent set claude "claude-glm"  # Override built-in claude`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigAgentSet,
 }
@@ -140,9 +141,41 @@ Examples:
 	RunE: runConfigAgentEmailDomain,
 }
 
+var configRoleAgentCmd = &cobra.Command{
+	Use:   "role-agent [role] [agent]",
+	Short: "Get or set default agent for a role",
+	Long: `Get or set the default agent for a specific role.
+
+Per-role agent configuration allows cost optimization by using different
+models for different roles. For example, use cheaper models (haiku) for
+simple monitoring roles and more capable models (opus) for complex tasks.
+
+Valid roles: mayor, deacon, witness, refinery, polecat, crew
+
+With no arguments, shows all configured role agents.
+With one argument (role), shows the agent for that role.
+With two arguments (role and agent), sets the agent for that role.
+
+Resolution priority when starting a role:
+  1. --agent flag (explicit override)
+  2. role_agents[role] from settings
+  3. default_agent from settings
+  4. "claude" (ultimate fallback)
+
+Examples:
+  gt config role-agent                      # List all role agent settings
+  gt config role-agent witness              # Show witness agent
+  gt config role-agent witness haiku        # Set witness to use haiku
+  gt config role-agent deacon haiku         # Set deacon to use haiku
+  gt config role-agent polecat opus         # Set polecat to use opus
+  gt config role-agent witness --remove     # Remove witness role agent`,
+	RunE: runConfigRoleAgent,
+}
+
 // Flags
 var (
 	configAgentListJSON bool
+	roleAgentRemove     bool
 )
 
 // AgentListItem represents an agent in list output.
@@ -485,7 +518,7 @@ func runConfigAgentEmailDomain(cmd *cobra.Command, args []string) error {
 			domain = DefaultAgentEmailDomain
 		}
 		fmt.Printf("Agent email domain: %s\n", style.Bold.Render(domain))
-		fmt.Printf("\nExample: gastown/crew/jack → gastown.crew.jack@%s\n", domain)
+		fmt.Printf("\nExample: gastown/crew/jack -> gastown.crew.jack@%s\n", domain)
 		return nil
 	}
 
@@ -509,13 +542,201 @@ func runConfigAgentEmailDomain(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Agent email domain set to '%s'\n", style.Bold.Render(domain))
-	fmt.Printf("\nExample: gastown/crew/jack → gastown.crew.jack@%s\n", domain)
+	fmt.Printf("\nExample: gastown/crew/jack -> gastown.crew.jack@%s\n", domain)
 	return nil
+}
+
+// validRoles lists the valid role names for role-agent configuration.
+var validRoles = []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"}
+
+// isValidRole checks if a role name is valid.
+func isValidRole(role string) bool {
+	for _, r := range validRoles {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
+func runConfigRoleAgent(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Load town settings
+	settingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	// Load agent registry for validation
+	registryPath := config.DefaultAgentRegistryPath(townRoot)
+	if err := config.LoadAgentRegistry(registryPath); err != nil {
+		// Non-fatal: built-in presets still work
+	}
+
+	// No arguments: list all role agent settings
+	if len(args) == 0 {
+		return listRoleAgents(townSettings)
+	}
+
+	role := args[0]
+
+	// Validate role name
+	if !isValidRole(role) {
+		return fmt.Errorf("invalid role '%s' (valid roles: %s)", role, strings.Join(validRoles, ", "))
+	}
+
+	// One argument: show or remove role agent
+	if len(args) == 1 {
+		if roleAgentRemove {
+			return removeRoleAgent(townSettings, settingsPath, role)
+		}
+		return showRoleAgent(townSettings, role)
+	}
+
+	// Two arguments: set role agent
+	agentName := args[1]
+	return setRoleAgent(townSettings, settingsPath, role, agentName)
+}
+
+func listRoleAgents(townSettings *config.TownSettings) error {
+	fmt.Printf("%s\n\n", style.Bold.Render("Role Agent Configuration"))
+
+	// Show default agent
+	defaultAgent := townSettings.DefaultAgent
+	if defaultAgent == "" {
+		defaultAgent = "claude"
+	}
+	fmt.Printf("Default agent: %s\n\n", style.Bold.Render(defaultAgent))
+
+	// Show per-role agents
+	if len(townSettings.RoleAgents) == 0 {
+		fmt.Printf("No per-role agents configured.\n")
+		fmt.Printf("\n%s\n", style.Dim.Render("All roles will use the default agent."))
+		fmt.Printf("%s\n", style.Dim.Render("Use 'gt config role-agent <role> <agent>' to set per-role agents."))
+		return nil
+	}
+
+	fmt.Printf("Per-role agents:\n")
+	for _, role := range validRoles {
+		if agent, ok := townSettings.RoleAgents[role]; ok {
+			fmt.Printf("  %s: %s\n", style.Bold.Render(role), agent)
+		}
+	}
+
+	// Show roles using default
+	fmt.Printf("\nRoles using default:\n")
+	hasDefault := false
+	for _, role := range validRoles {
+		if _, ok := townSettings.RoleAgents[role]; !ok {
+			fmt.Printf("  %s: %s %s\n", role, defaultAgent, style.Dim.Render("(default)"))
+			hasDefault = true
+		}
+	}
+	if !hasDefault {
+		fmt.Printf("  %s\n", style.Dim.Render("(none - all roles have explicit agents)"))
+	}
+
+	return nil
+}
+
+func showRoleAgent(townSettings *config.TownSettings, role string) error {
+	// Check if role has explicit agent
+	if townSettings.RoleAgents != nil {
+		if agent, ok := townSettings.RoleAgents[role]; ok {
+			fmt.Printf("%s agent: %s\n", style.Bold.Render(role), style.Bold.Render(agent))
+			return nil
+		}
+	}
+
+	// Role uses default
+	defaultAgent := townSettings.DefaultAgent
+	if defaultAgent == "" {
+		defaultAgent = "claude"
+	}
+	fmt.Printf("%s agent: %s %s\n", style.Bold.Render(role), defaultAgent, style.Dim.Render("(using default)"))
+	return nil
+}
+
+func setRoleAgent(townSettings *config.TownSettings, settingsPath, role, agentName string) error {
+	// Verify agent exists
+	if !agentExists(townSettings, agentName) {
+		return fmt.Errorf("agent '%s' not found (use 'gt config agent list' to see available agents)", agentName)
+	}
+
+	// Initialize RoleAgents map if needed
+	if townSettings.RoleAgents == nil {
+		townSettings.RoleAgents = make(map[string]string)
+	}
+
+	// Set the role agent
+	townSettings.RoleAgents[role] = agentName
+
+	// Save settings
+	if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
+		return fmt.Errorf("saving town settings: %w", err)
+	}
+
+	fmt.Printf("Set %s agent to '%s'\n", style.Bold.Render(role), style.Bold.Render(agentName))
+	fmt.Printf("\n%s\n", style.Dim.Render("The --agent flag can still override this when starting the role."))
+	return nil
+}
+
+func removeRoleAgent(townSettings *config.TownSettings, settingsPath, role string) error {
+	// Check if role has explicit agent
+	if townSettings.RoleAgents == nil || townSettings.RoleAgents[role] == "" {
+		fmt.Printf("%s agent is not explicitly set (already using default)\n", style.Bold.Render(role))
+		return nil
+	}
+
+	oldAgent := townSettings.RoleAgents[role]
+
+	// Remove the role agent
+	delete(townSettings.RoleAgents, role)
+
+	// Save settings
+	if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
+		return fmt.Errorf("saving town settings: %w", err)
+	}
+
+	defaultAgent := townSettings.DefaultAgent
+	if defaultAgent == "" {
+		defaultAgent = "claude"
+	}
+
+	fmt.Printf("Removed %s agent (was '%s')\n", style.Bold.Render(role), oldAgent)
+	fmt.Printf("Now using default: %s\n", style.Bold.Render(defaultAgent))
+	return nil
+}
+
+// agentExists checks if an agent name exists (built-in or custom).
+func agentExists(townSettings *config.TownSettings, name string) bool {
+	// Check built-in presets
+	builtInAgents := config.ListAgentPresets()
+	for _, builtin := range builtInAgents {
+		if name == builtin {
+			return true
+		}
+	}
+
+	// Check custom agents
+	if townSettings.Agents != nil {
+		if _, ok := townSettings.Agents[name]; ok {
+			return true
+		}
+	}
+
+	return false
 }
 
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
+	configRoleAgentCmd.Flags().BoolVar(&roleAgentRemove, "remove", false, "Remove role agent (revert to default)")
 
 	// Add agent subcommands
 	configAgentCmd := &cobra.Command{
@@ -532,6 +753,7 @@ func init() {
 	configCmd.AddCommand(configAgentCmd)
 	configCmd.AddCommand(configDefaultAgentCmd)
 	configCmd.AddCommand(configAgentEmailDomainCmd)
+	configCmd.AddCommand(configRoleAgentCmd)
 
 	// Register with root
 	rootCmd.AddCommand(configCmd)
