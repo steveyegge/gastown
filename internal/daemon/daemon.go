@@ -209,6 +209,14 @@ const recoveryHeartbeatInterval = 3 * time.Minute
 // - Agents with work-on-hook not progressing (GUPP violation)
 // - Orphaned work (assigned to dead agents)
 func (d *Daemon) heartbeat(state *State) {
+	// Skip heartbeat if shutdown is in progress.
+	// This prevents the daemon from fighting shutdown by auto-restarting killed agents.
+	// The shutdown.lock file is created by gt down before terminating sessions.
+	if d.isShutdownInProgress() {
+		d.logger.Println("Shutdown in progress, skipping heartbeat")
+		return
+	}
+
 	d.logger.Println("Heartbeat starting (recovery-focused)")
 
 	// 1. Ensure Deacon is running (restart if dead)
@@ -667,6 +675,15 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 // Stop signals the daemon to stop.
 func (d *Daemon) Stop() {
 	d.cancel()
+}
+
+// isShutdownInProgress checks if a shutdown is currently in progress.
+// The shutdown.lock file is created by gt down before terminating sessions.
+// This prevents the daemon from fighting shutdown by auto-restarting killed agents.
+func (d *Daemon) isShutdownInProgress() bool {
+	lockPath := filepath.Join(d.config.TownRoot, "daemon", "shutdown.lock")
+	_, err := os.Stat(lockPath)
+	return err == nil
 }
 
 // IsRunning checks if a daemon is running for the given town.
