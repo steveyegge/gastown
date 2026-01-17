@@ -188,7 +188,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeFlag:          "--session",
 		ResumeStyle:         "flag",
 		SupportsHooks:       true, // via plugin system
-		SupportsForkSession: false,
+		SupportsForkSession: true, // via HTTP API (opencode serve) - POST /session/{id}/fork
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "run",
 			PromptFlag: "",
