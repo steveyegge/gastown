@@ -378,7 +378,8 @@ func ThemeForRig(rigName string) string {
 	for _, b := range []byte(rigName) {
 		hash = hash*31 + uint32(b)
 	}
-	return themes[hash%uint32(len(themes))]
+	themeLen := len(themes)
+	return themes[int(hash)%themeLen]
 }
 
 // GetThemeNames returns the names in a specific theme.
