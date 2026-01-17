@@ -209,6 +209,7 @@ type RigSettings struct {
 	Namepool   *NamepoolConfig   `json:"namepool,omitempty"`    // polecat name pool settings
 	Crew       *CrewConfig       `json:"crew,omitempty"`        // crew startup settings
 	Workflow   *WorkflowConfig   `json:"workflow,omitempty"`    // workflow settings
+	Refinery   *RefineryConfig   `json:"refinery,omitempty"`    // refinery settings (disable per-rig)
 	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
 
 	// Agent selects which agent preset to use for this rig.
@@ -243,6 +244,26 @@ type CrewConfig struct {
 	//   "max, but not emma"      - start max, skip emma
 	// If empty, defaults to starting no crew automatically.
 	Startup string `json:"startup,omitempty"`
+}
+
+// RefineryConfig represents per-rig refinery settings.
+// This allows disabling the refinery for rigs that don't need merge queue processing.
+type RefineryConfig struct {
+	// Enabled controls whether the refinery is started for this rig.
+	// When false (or explicitly set to false), `gt up` and daemon will skip
+	// starting the refinery. Use pointer to distinguish nil (default: enabled)
+	// from explicit false.
+	// Default: true (refinery enabled)
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// IsEnabled returns whether the refinery is enabled for this rig.
+// Returns true if config is nil or Enabled is nil (default behavior).
+func (rc *RefineryConfig) IsEnabled() bool {
+	if rc == nil || rc.Enabled == nil {
+		return true // Default: enabled
+	}
+	return *rc.Enabled
 }
 
 // RuntimeConfig represents LLM runtime configuration for agent sessions.

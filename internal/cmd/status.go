@@ -80,6 +80,7 @@ type AgentRuntime struct {
 	Session      string `json:"session"`                 // tmux session name
 	Role         string `json:"role"`                    // Role type
 	Running      bool   `json:"running"`                 // Is tmux session running?
+	Disabled     bool   `json:"disabled,omitempty"`      // Is agent disabled in rig settings?
 	HasWork      bool   `json:"has_work"`                // Has pinned work?
 	WorkTitle    string `json:"work_title,omitempty"`    // Title of pinned work
 	HookBead     string `json:"hook_bead,omitempty"`     // Pinned bead ID from agent bead
@@ -817,6 +818,11 @@ func renderAgentCompact(agent AgentRuntime, indent string, hooks []AgentHookInfo
 // Per gt-zecmc: uses tmux state (observable reality), not bead state.
 // Non-observable states (stuck, awaiting-gate, muted, etc.) are shown as suffixes.
 func buildStatusIndicator(agent AgentRuntime) string {
+	// Check if agent is disabled in settings
+	if agent.Disabled {
+		return style.Dim.Render("◌ disabled")
+	}
+
 	sessionExists := agent.Running
 
 	// Base indicator from tmux state
@@ -1010,11 +1016,12 @@ func populateMailInfo(agent *AgentRuntime, router *mail.Router) {
 
 // agentDef defines an agent to discover
 type agentDef struct {
-	name    string
-	address string
-	session string
-	role    string
-	beadID  string
+	name     string
+	address  string
+	session  string
+	role     string
+	beadID   string
+	disabled bool // true if agent is disabled in rig settings
 }
 
 // discoverRigAgents checks runtime state for all agents in a rig.
@@ -1041,12 +1048,18 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 
 	// Refinery
 	if r.HasRefinery {
+		// Check if refinery is disabled in rig settings
+		refineryDisabled := false
+		if settings, err := config.LoadRigSettings(config.RigSettingsPath(r.Path)); err == nil {
+			refineryDisabled = !settings.Refinery.IsEnabled()
+		}
 		defs = append(defs, agentDef{
-			name:    "refinery",
-			address: r.Name + "/refinery",
-			session: fmt.Sprintf("gt-%s-refinery", r.Name),
-			role:    "refinery",
-			beadID:  beads.RefineryBeadIDWithPrefix(prefix, r.Name),
+			name:     "refinery",
+			address:  r.Name + "/refinery",
+			session:  fmt.Sprintf("gt-%s-refinery", r.Name),
+			role:     "refinery",
+			beadID:   beads.RefineryBeadIDWithPrefix(prefix, r.Name),
+			disabled: refineryDisabled,
 		})
 	}
 
@@ -1086,10 +1099,11 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 			defer wg.Done()
 
 			agent := AgentRuntime{
-				Name:    d.name,
-				Address: d.address,
-				Session: d.session,
-				Role:    d.role,
+				Name:     d.name,
+				Address:  d.address,
+				Session:  d.session,
+				Role:     d.role,
+				Disabled: d.disabled,
 			}
 
 			// Check tmux session from preloaded map (O(1))

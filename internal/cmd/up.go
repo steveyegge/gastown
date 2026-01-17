@@ -455,7 +455,8 @@ func upStartWitness(rigName string, r *rig.Rig) agentStartResult {
 }
 
 // upStartRefinery starts a refinery for the given rig and returns a result struct.
-// Respects parked/docked status - skips starting if rig is not operational.
+// Respects parked/docked status and refinery.enabled setting - skips starting if
+// rig is not operational or refinery is explicitly disabled.
 func upStartRefinery(rigName string, r *rig.Rig) agentStartResult {
 	name := "Refinery (" + rigName + ")"
 
@@ -465,6 +466,14 @@ func upStartRefinery(rigName string, r *rig.Rig) agentStartResult {
 	status := cfg.GetString("status")
 	if status == "parked" || status == "docked" {
 		return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", status)}
+	}
+
+	// Check if refinery is disabled in rig settings
+	settingsPath := filepath.Join(r.Path, "settings", "config.json")
+	if settings, err := config.LoadRigSettings(settingsPath); err == nil {
+		if settings.Refinery != nil && !settings.Refinery.IsEnabled() {
+			return agentStartResult{name: name, ok: true, detail: "disabled"}
+		}
 	}
 
 	mgr := refinery.NewManager(r)

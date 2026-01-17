@@ -503,12 +503,21 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 		return
 	}
 
+	// Check if refinery is disabled in rig settings
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
+	if settings, err := config.LoadRigSettings(config.RigSettingsPath(rigPath)); err == nil {
+		if !settings.Refinery.IsEnabled() {
+			d.logger.Printf("Skipping refinery auto-start for %s: disabled in settings", rigName)
+			return
+		}
+	}
+
 	// Manager.Start() handles: zombie detection, session creation, env vars, theming,
 	// WaitForClaudeReady, and crucially - startup/propulsion nudges (GUPP).
 	// It returns ErrAlreadyRunning if Claude is already running in tmux.
 	r := &rig.Rig{
 		Name: rigName,
-		Path: filepath.Join(d.config.TownRoot, rigName),
+		Path: rigPath,
 	}
 	mgr := refinery.NewManager(r)
 
