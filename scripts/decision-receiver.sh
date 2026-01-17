@@ -30,6 +30,10 @@ set -euo pipefail
 FIFO_IN="${GT_DECISION_FIFO_IN:-/tmp/gt-decisions.fifo}"
 FIFO_OUT="${GT_DECISION_FIFO_OUT:-/tmp/gt-decisions-out.fifo}"
 POLL_INTERVAL=0.1
+DECISION_MODE="${GT_DECISION_MODE:-terminal}"  # terminal or notify
+
+# Script directory for finding decision-notify.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors
 RED='\033[0;31m'
@@ -89,8 +93,8 @@ json_get_array() {
     fi
 }
 
-# Present yes/no decision
-present_yesno() {
+# Present yes/no decision (terminal mode)
+present_yesno_terminal() {
     local context="$1"
     local default="${2:-}"
     local timeout="${3:-0}"
@@ -131,6 +135,51 @@ present_yesno() {
         "") echo "${default:-no}" ;;
         *) echo "no" ;;
     esac
+}
+
+# Present yes/no decision (notification mode - macOS)
+present_yesno_notify() {
+    local context="$1"
+    local default="${2:-no}"
+    local timeout="${3:-0}"
+
+    local notify_script="$SCRIPT_DIR/decision-notify.sh"
+    if [[ ! -x "$notify_script" ]]; then
+        echo -e "${YELLOW}Warning: decision-notify.sh not found, falling back to terminal${NC}" >&2
+        present_yesno_terminal "$context" "$default" "$timeout"
+        return
+    fi
+
+    local args=(
+        "$context"
+        "--default=$default"
+    )
+    if [[ "$timeout" -gt 0 ]]; then
+        args+=("--timeout=$timeout")
+    fi
+
+    local result
+    result=$("$notify_script" "${args[@]}" 2>/dev/null) || {
+        echo -e "${YELLOW}Notification failed, falling back to terminal${NC}" >&2
+        present_yesno_terminal "$context" "$default" "$timeout"
+        return
+    }
+
+    # Extract decision from JSON response
+    if command -v jq &>/dev/null; then
+        echo "$result" | jq -r '.decision // "no"'
+    else
+        echo "$result" | grep -oP '"decision"\s*:\s*"\K[^"]+' || echo "no"
+    fi
+}
+
+# Present yes/no decision (auto-selects based on mode)
+present_yesno() {
+    if [[ "$DECISION_MODE" == "notify" ]]; then
+        present_yesno_notify "$@"
+    else
+        present_yesno_terminal "$@"
+    fi
 }
 
 # Present choice decision (single select)
@@ -355,7 +404,7 @@ test_mode() {
 # Usage
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [COMMAND]
+Usage: $(basename "$0") [COMMAND] [OPTIONS]
 
 Commands:
     listen      Start listening for decisions on FIFO (default)
@@ -363,9 +412,23 @@ Commands:
     test        Run interactive test with sample decisions
     help        Show this help
 
+Options:
+    --mode=MODE     Decision presentation mode: terminal (default) or notify
+                    In notify mode, uses macOS notifications for yes/no decisions
+
 Environment:
     GT_DECISION_FIFO_IN   Input FIFO path (default: /tmp/gt-decisions.fifo)
     GT_DECISION_FIFO_OUT  Output FIFO path (default: /tmp/gt-decisions-out.fifo)
+    GT_DECISION_MODE      Default presentation mode: terminal or notify
+
+Notification Mode (macOS):
+    When mode=notify, yes/no decisions are shown as macOS notifications
+    with actionable Yes/No buttons. Requires one of:
+    - terminal-notifier (brew install terminal-notifier) [recommended]
+    - alerter (brew install alerter)
+    - osascript (built-in, uses modal dialogs)
+
+    Falls back to terminal mode if notifications unavailable.
 
 Example (agent side):
     # Send decision request
@@ -375,13 +438,47 @@ Example (agent side):
 
 Example (oneshot):
     echo '{"id":"1","type":"yesno","context":"Continue?"}' | $0 oneshot
+
+Example (notification mode):
+    GT_DECISION_MODE=notify $0 listen
+    $0 listen --mode=notify
 EOF
 }
 
+# Parse global options
+parse_global_opts() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --mode=*)
+                DECISION_MODE="${1#*=}"
+                shift
+                ;;
+            *)
+                echo "$1"
+                shift
+                ;;
+        esac
+    done
+}
+
 # Main entry point
-case "${1:-listen}" in
+# First, extract any --mode= options
+args=()
+for arg in "$@"; do
+    case "$arg" in
+        --mode=*)
+            DECISION_MODE="${arg#*=}"
+            ;;
+        *)
+            args+=("$arg")
+            ;;
+    esac
+done
+
+case "${args[0]:-listen}" in
     listen)
         setup_fifos
+        echo -e "${DIM}Mode: $DECISION_MODE${NC}"
         main_loop
         ;;
     oneshot)
@@ -394,7 +491,7 @@ case "${1:-listen}" in
         usage
         ;;
     *)
-        echo "Unknown command: $1" >&2
+        echo "Unknown command: ${args[0]}" >&2
         usage
         exit 1
         ;;
