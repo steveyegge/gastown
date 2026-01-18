@@ -564,6 +564,9 @@ func defaultReadyPromptPrefix(provider string) string {
 	if provider == "claude" {
 		return "> "
 	}
+	if provider == "copilot" {
+		return "❯" // Copilot CLI uses this Unicode prompt character
+	}
 	return ""
 }
 
@@ -571,7 +574,7 @@ func defaultReadyDelayMs(provider string) int {
 	if provider == "claude" {
 		return 10000
 	}
-	if provider == "codex" {
+	if provider == "codex" || provider == "copilot" {
 		return 3000
 	}
 	return 0
