@@ -322,6 +322,12 @@ func handleStepContinue(cwd, townRoot, _ string, nextStep *beads.Issue, dryRun b
 
 	t := tmux.NewTmux()
 
+	// Kill all processes in the pane before respawning to prevent process leaks
+	if err := t.KillPaneProcesses(pane); err != nil {
+		// Non-fatal but log the warning
+		style.PrintWarning("could not kill pane processes: %v", err)
+	}
+
 	// Clear history before respawn
 	if err := t.ClearHistory(pane); err != nil {
 		// Non-fatal

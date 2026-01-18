@@ -204,6 +204,48 @@ func getAllDescendants(pid string) []string {
 	return result
 }
 
+// KillPaneProcesses explicitly kills all processes associated with a tmux pane.
+// This prevents orphan processes that survive pane respawn due to SIGHUP being ignored.
+//
+// Process:
+// 1. Get the pane's main process PID
+// 2. Find all descendant processes recursively (not just direct children)
+// 3. Send SIGTERM to all descendants (deepest first)
+// 4. Wait 100ms for graceful shutdown
+// 5. Send SIGKILL to any remaining descendants
+//
+// This ensures Claude processes and all their children are properly terminated
+// before respawning the pane.
+func (t *Tmux) KillPaneProcesses(pane string) error {
+	// Get the pane PID
+	pid, err := t.GetPanePID(pane)
+	if err != nil {
+		return fmt.Errorf("getting pane PID: %w", err)
+	}
+
+	if pid == "" {
+		return fmt.Errorf("pane PID is empty")
+	}
+
+	// Get all descendant PIDs recursively (returns deepest-first order)
+	descendants := getAllDescendants(pid)
+
+	// Send SIGTERM to all descendants (deepest first to avoid orphaning)
+	for _, dpid := range descendants {
+		_ = exec.Command("kill", "-TERM", dpid).Run()
+	}
+
+	// Wait for graceful shutdown
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGKILL to any remaining descendants
+	for _, dpid := range descendants {
+		_ = exec.Command("kill", "-KILL", dpid).Run()
+	}
+
+	return nil
+}
+
 // KillServer terminates the entire tmux server and all sessions.
 func (t *Tmux) KillServer() error {
 	_, err := t.run("kill-server")
