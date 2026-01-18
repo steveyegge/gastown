@@ -305,6 +305,7 @@ Gas Town supports multiple AI coding runtimes. Per-rig runtime settings are in `
 
 **Notes:**
 
+- **Cost optimization**: Use `role_agents` to assign different models to different roles. See the [Cost Optimization Guide](docs/guides/cost-optimization.md) for recommended configurations.
 - Claude uses hooks in `.claude/settings.json` for mail injection and startup.
 - For Codex, set `project_doc_fallback_filenames = ["CLAUDE.md"]` in
   `~/.codex/config.toml` so role instructions are picked up.
