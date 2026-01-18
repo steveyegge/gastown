@@ -145,13 +145,13 @@ func (t *Tmux) KillSession(name string) error {
 //
 // Process:
 // 1. Get the pane's main process PID
-// 2. Find all descendant processes recursively (not just direct children)
-// 3. Send SIGTERM to all descendants (deepest first)
+// 2. Find all descendant processes recursively (including the main PID)
+// 3. Send SIGTERM to all descendants and the main PID (deepest first)
 // 4. Wait 100ms for graceful shutdown
-// 5. Send SIGKILL to any remaining descendants
+// 5. Send SIGKILL to any remaining descendants and the main PID
 // 6. Kill the tmux session
 //
-// This ensures Claude processes and all their children are properly terminated.
+// This ensures Claude processes, all their children, and the main pane process are properly terminated.
 func (t *Tmux) KillSessionWithProcesses(name string) error {
 	// Get the pane PID
 	pid, err := t.GetPanePID(name)
@@ -182,15 +182,17 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	return t.KillSession(name)
 }
 
-// getAllDescendants recursively finds all descendant PIDs of a process.
+// getAllDescendants recursively finds all descendant PIDs of a process, including the root PID itself.
 // Returns PIDs in deepest-first order so killing them doesn't orphan grandchildren.
+// The root PID is returned last (after all descendants) to ensure proper cleanup order.
 func getAllDescendants(pid string) []string {
 	var result []string
 
 	// Get direct children using pgrep
 	out, err := exec.Command("pgrep", "-P", pid).Output()
 	if err != nil {
-		return result
+		// No children - return just the root PID
+		return []string{pid}
 	}
 
 	children := strings.Fields(strings.TrimSpace(string(out)))
@@ -200,6 +202,9 @@ func getAllDescendants(pid string) []string {
 		// Then add this child
 		result = append(result, child)
 	}
+
+	// Add root PID last (after all descendants)
+	result = append(result, pid)
 
 	return result
 }

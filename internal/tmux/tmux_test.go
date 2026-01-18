@@ -531,10 +531,10 @@ func TestHasClaudeChild(t *testing.T) {
 func TestGetAllDescendants(t *testing.T) {
 	// Test the getAllDescendants helper function
 
-	// Test with nonexistent PID - should return empty slice
+	// Test with nonexistent PID - should return slice containing only that PID
 	got := getAllDescendants("999999999")
-	if len(got) != 0 {
-		t.Errorf("getAllDescendants(nonexistent) = %v, want empty slice", got)
+	if len(got) != 1 || got[0] != "999999999" {
+		t.Errorf("getAllDescendants(nonexistent) = %v, want [\"999999999\"]", got)
 	}
 
 	// Test with PID 1 (init/launchd) - should find some descendants
@@ -550,6 +550,46 @@ func TestGetAllDescendants(t *testing.T) {
 				t.Errorf("getAllDescendants returned non-numeric PID: %q", pid)
 			}
 		}
+	}
+}
+
+func TestGetAllDescendantsIncludesRoot(t *testing.T) {
+	// Test that getAllDescendants includes the root PID itself
+
+	// Test with PID 1 (init always exists and has children)
+	pid := "1"
+	result := getAllDescendants(pid)
+
+	// Result should contain the root PID
+	found := false
+	for _, p := range result {
+		if p == pid {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("getAllDescendants(%s) should include root PID, got %v", pid, result)
+	}
+
+	// The root PID should be last in the list (after all descendants)
+	if len(result) > 0 && result[len(result)-1] != pid {
+		t.Errorf("getAllDescendants(%s): root PID should be last, got %v", pid, result)
+	}
+
+	// Test with nonexistent PID (no children)
+	nonexistentPID := "999999999"
+	result = getAllDescendants(nonexistentPID)
+
+	if len(result) != 1 {
+		t.Errorf("getAllDescendants(%s) with no children should return [%s], got %v",
+			nonexistentPID, nonexistentPID, result)
+	}
+
+	if result[0] != nonexistentPID {
+		t.Errorf("getAllDescendants(%s) with no children should return [%s], got %v",
+			nonexistentPID, nonexistentPID, result)
 	}
 }
 
