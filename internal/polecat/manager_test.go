@@ -630,6 +630,14 @@ func TestAddWithOptions_NoPrimeMDCreatedLocally(t *testing.T) {
 	if err := mayorGit.Fetch("origin"); err != nil {
 		t.Fatalf("git fetch: %v", err)
 	}
+	// When using a local directory as remote, fetch doesn't always create tracking
+	// branches (behavior varies by git version/environment). Create origin/main
+	// manually since AddWithOptions expects it by default.
+	cmd = exec.Command("git", "update-ref", "refs/remotes/origin/main", "HEAD")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git update-ref: %v\n%s", err, out)
+	}
 
 	// Create rig pointing to root
 	r := &rig.Rig{
@@ -731,6 +739,14 @@ func TestAddWithOptions_NoFilesAddedToRepo(t *testing.T) {
 	}
 	if err := mayorGit.Fetch("origin"); err != nil {
 		t.Fatalf("git fetch: %v", err)
+	}
+	// When using a local directory as remote, fetch doesn't always create tracking
+	// branches (behavior varies by git version/environment). Create origin/main
+	// manually since AddWithOptions expects it by default.
+	cmd = exec.Command("git", "update-ref", "refs/remotes/origin/main", "HEAD")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git update-ref: %v\n%s", err, out)
 	}
 
 	// Create AGENTS.md in mayor/rig AFTER git commit (NOT tracked in git)
