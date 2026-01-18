@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,19 +25,36 @@ type beadInfo struct {
 }
 
 // verifyBeadExists checks that the bead exists using bd show.
-// Uses bd's native prefix-based routing via routes.jsonl - do NOT set BEADS_DIR
-// as that overrides routing and breaks resolution of rig-level beads.
+// Always explicitly sets BEADS_DIR based on the bead's prefix to ensure correct
+// database resolution. This follows the pattern established in beads.go:run()
+// (commit 598a39e7) which prevents inherited BEADS_DIR from causing prefix mismatches.
 //
 // Uses --no-daemon with --allow-stale to avoid daemon socket timing issues
 // while still finding beads when database is out of sync with JSONL.
 // For existence checks, stale data is acceptable - we just need to know it exists.
 func verifyBeadExists(beadID string) error {
 	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
-	// Run from town root so bd can find routes.jsonl for prefix-based routing.
-	// Do NOT set BEADS_DIR - that overrides routing and breaks rig bead resolution.
-	if townRoot, err := workspace.FindFromCwd(); err == nil {
-		cmd.Dir = townRoot
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
 	}
+	cmd.Dir = townRoot
+
+	// Always explicitly set BEADS_DIR based on bead prefix (598a39e7 pattern).
+	// This ensures the correct rig database is used instead of relying on
+	// bd's routing which only kicks in after database initialization.
+	prefix := beads.ExtractPrefix(beadID)
+	rigPath := beads.GetRigPathForPrefix(townRoot, prefix)
+	var beadsDir string
+	if rigPath != "" {
+		beadsDir = filepath.Join(rigPath, ".beads")
+	} else {
+		// Fallback to town beads for unknown/hq prefixes
+		beadsDir = filepath.Join(townRoot, ".beads")
+	}
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+
 	// Use Output() instead of Run() to detect bd --no-daemon exit 0 bug:
 	// when issue not found, --no-daemon exits 0 but produces empty stdout.
 	out, err := cmd.Output()
@@ -50,14 +68,28 @@ func verifyBeadExists(beadID string) error {
 }
 
 // getBeadInfo returns status and assignee for a bead.
-// Uses bd's native prefix-based routing via routes.jsonl.
+// Always explicitly sets BEADS_DIR based on the bead's prefix (598a39e7 pattern).
 // Uses --no-daemon with --allow-stale for consistency with verifyBeadExists.
 func getBeadInfo(beadID string) (*beadInfo, error) {
 	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
-	// Run from town root so bd can find routes.jsonl for prefix-based routing.
-	if townRoot, err := workspace.FindFromCwd(); err == nil {
-		cmd.Dir = townRoot
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return nil, fmt.Errorf("finding town root: %w", err)
 	}
+	cmd.Dir = townRoot
+
+	// Always explicitly set BEADS_DIR based on bead prefix (598a39e7 pattern).
+	prefix := beads.ExtractPrefix(beadID)
+	rigPath := beads.GetRigPathForPrefix(townRoot, prefix)
+	var beadsDir string
+	if rigPath != "" {
+		beadsDir = filepath.Join(rigPath, ".beads")
+	} else {
+		beadsDir = filepath.Join(townRoot, ".beads")
+	}
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
