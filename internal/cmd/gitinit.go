@@ -62,9 +62,10 @@ const HQGitignore = `# Gas Town HQ .gitignore
 **/state.json
 **/*.lock
 **/registry.json
+**/.events.jsonl
 
 # =============================================================================
-# Rig git worktrees (recreate with 'gt sling' or 'gt rig add')
+# Rig git worktrees and clones (recreate with 'gt sling' or 'gt rig add')
 # =============================================================================
 
 # Polecats - worker worktrees
@@ -73,15 +74,23 @@ const HQGitignore = `# Gas Town HQ .gitignore
 # Mayor rig clones
 **/mayor/rig/
 
-# Refinery working clones
-**/refinery/rig/
+# Refinery agent directories (both the clone and state)
+**/refinery/
+
+# Witness agent directories
+**/witness/
 
 # Crew workspaces (user-managed)
 **/crew/
 
 # =============================================================================
-# Runtime state directories (gitignored ephemeral data)
+# Town-level runtime directories (recreated on gt start)
 # =============================================================================
+**/daemon/
+**/deacon/
+**/logs/
+**/settings/
+**/plugins/
 **/.runtime/
 
 # =============================================================================
