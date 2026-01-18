@@ -1,12 +1,17 @@
-# Opencode Integration Documentation
+# OpenCode Integration Documentation
 
-> Comprehensive documentation for integrating Opencode as an alternative orchestration layer in Gastown
+> **Status**: ⚠️ **Experimental** - Community-contributed feature  
+> **Primary Runtime**: Claude Code (recommended for production)  
+> **This Integration**: Optional extension for users preferring OpenCode
 
-**Location**: All Opencode integration documentation is centralized in this folder
+## Important Notes
 
-**Repository Source**: Based on [anomalyco/opencode](https://github.com/anomalyco/opencode) GitHub repository
+- **Default**: Gastown is designed for and tested primarily with Claude Code
+- **Optional**: OpenCode support is an opt-in extension
+- **Community Maintained**: While thoroughly tested, this is a community contribution
+- **Production**: Claude Code recommended; OpenCode for experimental/alternative use cases
 
-**Status**: ✅ **Implementation Complete - Production Ready**
+**Repository Source**: Based on [anomalyco/opencode](https://github.com/anomalyco/opencode)
 
 ---
 

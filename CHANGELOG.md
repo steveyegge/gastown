@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### OpenCode Integration (Community Contribution - Experimental)
+- **OpenCode as alternative orchestration layer** - Full support for OpenCode CLI as runtime
+  - Agent preset configuration with hooks/plugin support
+  - Runtime abstraction extended to Mayor, Witness, and Deacon roles
+  - Session fork via HTTP API
+  - 100% feature parity with Claude Code hooks
+  - Provider-agnostic authentication (GitHub Copilot, Antigravity, custom providers)
+  - Comprehensive testing (130+ tests) and documentation (16 docs, 8,376 lines)
+  - **Note**: Claude Code remains the primary, default, and recommended runtime
+  - **Status**: Experimental, community-maintained
+  - See `docs/opencode/` for complete documentation
+
 ## [0.4.0] - 2026-01-17
 
 ### Fixed

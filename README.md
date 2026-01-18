@@ -85,14 +85,18 @@ Git-backed issue tracking system that stores work state as structured data.
 
 ### Prerequisites
 
+**Core Requirements**:
 - **Go 1.23+** - [go.dev/dl](https://go.dev/dl/)
 - **Git 2.25+** - for worktree support
 - **beads (bd) 0.44.0+** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads) (required for custom type support)
 - **sqlite3** - for convoy database queries (usually pre-installed on macOS/Linux)
 - **tmux 3.0+** - recommended for full experience
-- **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
-- **OpenCode CLI** (optional runtime) - [opencode.ai](https://opencode.ai)
-- **Codex CLI** (optional runtime) - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
+- **Claude Code CLI** - [claude.ai/code](https://claude.ai/code) **(primary runtime, recommended)**
+
+**Optional Runtimes** (experimental):
+- **OpenCode CLI** - [opencode.ai](https://opencode.ai) (community-maintained, see [docs/opencode](docs/opencode))
+- **Codex CLI** - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
+- **Other agents** - Gemini, Cursor, Auggie, AMP (varying support levels)
 
 ### Setup
 
