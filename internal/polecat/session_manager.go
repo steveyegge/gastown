@@ -246,9 +246,14 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		MolID:     opts.Issue,
 	}))
 
-	// GUPP: Send propulsion nudge to trigger autonomous work execution
-	time.Sleep(2 * time.Second)
-	debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
+	// GUPP: Send propulsion nudge to trigger autonomous work execution.
+	// Skip when issue is assigned - StartupNudge with topic="assigned" already
+	// includes the instruction, and PropulsionNudge's ESC key interrupts Claude
+	// while it's still processing the first message. See: gt-p0esc
+	if opts.Issue == "" {
+		time.Sleep(2 * time.Second)
+		debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
+	}
 
 	// Verify session survived startup - if the command crashed, the session may have died.
 	// Without this check, Start() would return success even if the pane died during initialization.
