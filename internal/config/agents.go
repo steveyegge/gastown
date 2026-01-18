@@ -187,7 +187,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SessionIDEnv:        "COPILOT_SESSION_ID",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
-		SupportsHooks:       false, // Copilot uses AGENTS.md instead of hooks
+		SupportsHooks:       true, // Copilot CLI supports hooks per docs
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",
