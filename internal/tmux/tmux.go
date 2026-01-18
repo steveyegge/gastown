@@ -420,9 +420,25 @@ func (t *Tmux) SendKeysDelayedDebounced(session, keys string, preDelayMs, deboun
 	return t.SendKeysDebounced(session, keys, debounceMs)
 }
 
+// WakePane triggers a SIGWINCH in a pane by resizing it slightly then restoring.
+// This wakes up Claude Code's event loop in detached tmux sessions.
+// See: hq-a85w (GUPP race: Claude idle in detached tmux)
+//
+// When Claude runs in a detached tmux session, its TUI library may not process
+// stdin until a terminal event occurs. Attaching triggers SIGWINCH which wakes
+// the event loop. This function simulates that by doing a resize dance.
+func (t *Tmux) WakePane(target string) {
+	// Resize pane down by 1 row, then up by 1 row
+	// This triggers SIGWINCH without changing the final pane size
+	_, _ = t.run("resize-pane", "-t", target, "-y", "-1")
+	time.Sleep(50 * time.Millisecond)
+	_, _ = t.run("resize-pane", "-t", target, "-y", "+1")
+}
+
 // NudgeSession sends a message to a Claude Code session reliably.
 // This is the canonical way to send messages to Claude sessions.
 // Uses: literal mode + 500ms debounce + ESC (for vim mode) + separate Enter.
+// After sending, triggers SIGWINCH to wake Claude in detached sessions.
 // Verification is the Witness's job (AI), not this function.
 func (t *Tmux) NudgeSession(session, message string) error {
 	// 1. Send text in literal mode (handles special characters)
@@ -448,6 +464,9 @@ func (t *Tmux) NudgeSession(session, message string) error {
 			lastErr = err
 			continue
 		}
+		// 5. Wake the pane to trigger SIGWINCH for detached sessions
+		// See: hq-a85w (GUPP race: Claude idle in detached tmux)
+		t.WakePane(session)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
@@ -455,6 +474,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 // NudgePane sends a message to a specific pane reliably.
 // Same pattern as NudgeSession but targets a pane ID (e.g., "%9") instead of session name.
+// After sending, triggers SIGWINCH to wake Claude in detached sessions.
 func (t *Tmux) NudgePane(pane, message string) error {
 	// 1. Send text in literal mode (handles special characters)
 	if _, err := t.run("send-keys", "-t", pane, "-l", message); err != nil {
@@ -479,6 +499,9 @@ func (t *Tmux) NudgePane(pane, message string) error {
 			lastErr = err
 			continue
 		}
+		// 5. Wake the pane to trigger SIGWINCH for detached sessions
+		// See: hq-a85w (GUPP race: Claude idle in detached tmux)
+		t.WakePane(pane)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
