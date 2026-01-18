@@ -136,7 +136,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but Claude dead. Kill and recreate.
-		if err := t.KillSession(sessionID); err != nil {
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -207,7 +207,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	w.PID = 0 // Claude agent doesn't have a PID we track
 	w.MonitoredPolecats = m.rig.Polecats
 	if err := m.saveState(w); err != nil {
-		_ = t.KillSession(sessionID) // best-effort cleanup on state save failure
+		_ = t.KillSessionWithProcesses(sessionID) // best-effort cleanup on state save failure
 		return fmt.Errorf("saving state: %w", err)
 	}
 
@@ -221,21 +221,9 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Accept bypass permissions warning dialog if it appears.
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
-	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/witness", m.rig.Name)
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "deacon",
-		Topic:     "patrol",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("witness", witnessDir)) // Non-fatal
+	// Propulsion is handled by the CLI prompt ("gt prime") passed at startup.
+	// No need for post-startup nudges which are unreliable (text arrives before input is ready).
+	// The SessionStart hook also runs "gt prime" as a backup.
 
 	return nil
 }
@@ -277,7 +265,14 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 	if roleConfig != nil && roleConfig.StartCommand != "" {
 		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), nil
 	}
-	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, "", agentOverride)
+	// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+	// The SessionStart hook handles context injection (gt prime --hook)
+	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		Recipient: "witness",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	})
+	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, beacon, agentOverride)
 	if err != nil {
 		return "", fmt.Errorf("building startup command: %w", err)
 	}
@@ -303,7 +298,7 @@ func (m *Manager) Stop() error {
 
 	// Kill tmux session if it exists (best-effort: may already be dead)
 	if sessionRunning {
-		_ = t.KillSession(sessionID)
+		_ = t.KillSessionWithProcesses(sessionID)
 	}
 
 	// Note: No PID-based stop per ZFC - tmux session kill is sufficient

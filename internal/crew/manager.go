@@ -466,7 +466,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	if running {
 		if opts.KillExisting {
 			// Restart mode - kill existing session
-			if err := t.KillSession(sessionID); err != nil {
+			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
 		} else {
@@ -475,7 +475,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
 			// Zombie session - kill and recreate
-			if err := t.KillSession(sessionID); err != nil {
+			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
 		}
@@ -569,7 +569,7 @@ func (m *Manager) Stop(name string) error {
 	}
 
 	// Kill the session
-	if err := t.KillSession(sessionID); err != nil {
+	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 

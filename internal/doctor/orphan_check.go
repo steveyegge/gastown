@@ -150,7 +150,7 @@ func (c *OrphanSessionCheck) Fix(ctx *CheckContext) error {
 		// Log pre-death event for crash investigation (before killing)
 		_ = events.LogFeed(events.TypeSessionDeath, sess,
 			events.SessionDeathPayload(sess, "unknown", "orphan cleanup", "gt doctor"))
-		if err := t.KillSession(sess); err != nil {
+		if err := t.KillSessionWithProcesses(sess); err != nil {
 			lastErr = err
 		}
 	}

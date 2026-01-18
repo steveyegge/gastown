@@ -432,10 +432,12 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	if age > 30*time.Minute {
 		// Very stuck - restart the session
 		d.logger.Printf("Deacon stuck for %s - restarting session", age.Round(time.Minute))
-		if err := d.tmux.KillSession(sessionName); err != nil {
+		if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
 			d.logger.Printf("Error killing stuck Deacon: %v", err)
 		}
-		// ensureDeaconRunning will restart on next heartbeat
+		// Spawn new Deacon immediately instead of waiting for next heartbeat
+		// (kill may fail if session disappeared between check and kill)
+		d.ensureDeaconRunning()
 	} else {
 		// Stuck but not critically - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))

@@ -180,10 +180,17 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
+	// Build startup beacon for predecessor discovery via /resume
+	// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+	// The SessionStart hook handles context injection (gt prime --hook)
 	command := opts.Command
 	if command == "" {
-		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
+		beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+			Recipient: polecat,
+			Sender:    "witness",
+			Topic:     "work",
+		})
+		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, beacon)
 	}
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
@@ -237,18 +244,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	runtime.SleepForReadyDelay(runtimeConfig)
 	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)
 
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
-	debugSession("StartupNudge", session.StartupNudge(m.tmux, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "witness",
-		Topic:     "assigned",
-		MolID:     opts.Issue,
-	}))
-
-	// GUPP: Send propulsion nudge to trigger autonomous work execution
-	time.Sleep(2 * time.Second)
-	debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
+	// Propulsion is handled by the CLI prompt ("gt prime") passed at startup.
+	// No need for post-startup nudges which are unreliable (text arrives before input is ready).
+	// The SessionStart hook also runs "gt prime" as a backup.
 
 	// Verify session survived startup - if the command crashed, the session may have died.
 	// Without this check, Start() would return success even if the pane died during initialization.
@@ -289,7 +287,7 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if err := m.tmux.KillSession(sessionID); err != nil {
+	if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 

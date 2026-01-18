@@ -662,7 +662,7 @@ func NukePolecat(workDir, rigName, polecatName string) error {
 		// Brief delay for graceful handling
 		time.Sleep(100 * time.Millisecond)
 		// Force kill the session
-		if err := t.KillSession(sessionName); err != nil {
+		if err := t.KillSessionWithProcesses(sessionName); err != nil {
 			// Log but continue - session might already be dead
 			// The important thing is we tried
 		}
