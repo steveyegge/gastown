@@ -340,6 +340,11 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
+	// Ensure .gitignore has required Gas Town patterns
+	if err := rig.EnsureGitignorePatterns(clonePath); err != nil {
+		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+	}
+
 	// Run setup hooks from .runtime/setup-hooks/.
 	// These hooks can inject local git config, copy secrets, or perform other setup tasks.
 	if err := rig.RunSetupHooks(m.rig.Path, clonePath); err != nil {
@@ -642,6 +647,11 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Copy overlay files from .runtime/overlay/ to polecat root.
 	if err := rig.CopyOverlay(m.rig.Path, newClonePath); err != nil {
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
+	}
+
+	// Ensure .gitignore has required Gas Town patterns
+	if err := rig.EnsureGitignorePatterns(newClonePath); err != nil {
+		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
 	}
 
 	// NOTE: Slash commands inherited from town level - no per-workspace copies needed.
