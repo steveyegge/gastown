@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // StaleBeadsRedirectCheck detects .beads directories that have both a redirect
@@ -13,11 +15,26 @@ import (
 // - Crew workspaces are cloned from repos with existing .beads/ files
 // - SetupRedirect failed or was run before cleanup logic was added
 //
+// Additionally, this check verifies redirect topology:
+// - Worktrees (crew, polecats, refinery) should have redirects
+// - Redirects should point to the correct canonical location
+// - Redirect targets should exist
+//
 // When both redirect and data files exist, bd commands may use stale data
 // instead of following the redirect.
 type StaleBeadsRedirectCheck struct {
 	FixableCheck
-	staleLocations []string // Cached for Fix
+	staleLocations   []string        // Cached for Fix - dirs with stale files
+	missingRedirects []redirectIssue // Cached for Fix - worktrees missing redirects
+	incorrectRedirects []redirectIssue // Cached for Fix - worktrees with wrong redirect target
+}
+
+// redirectIssue represents a missing or incorrect redirect.
+type redirectIssue struct {
+	worktreePath   string // Full path to the worktree (e.g., <rig>/crew/max)
+	townRoot       string // Town root for SetupRedirect
+	currentTarget  string // Current redirect target (empty if missing)
+	expectedTarget string // Expected redirect target
 }
 
 // NewStaleBeadsRedirectCheck creates a new stale beads redirect check.
@@ -56,9 +73,12 @@ var staleFilePatterns = []string{
 	"bd.sock",
 }
 
-// Run checks for stale files in .beads directories that have redirects.
+// Run checks for stale files in .beads directories that have redirects,
+// and verifies redirect topology for all worktrees.
 func (c *StaleBeadsRedirectCheck) Run(ctx *CheckContext) *CheckResult {
 	var staleLocations []string
+	var missingRedirects []redirectIssue
+	var incorrectRedirects []redirectIssue
 
 	// Get list of rigs to scan
 	rigDirs, err := findRigDirs(ctx.TownRoot)
@@ -83,36 +103,80 @@ func (c *StaleBeadsRedirectCheck) Run(ctx *CheckContext) *CheckResult {
 				staleLocations = append(staleLocations, relPath)
 			}
 		}
+
+		// Verify redirect topology for this rig
+		missing, incorrect := c.verifyRedirectTopology(ctx.TownRoot, rigDir)
+		missingRedirects = append(missingRedirects, missing...)
+		incorrectRedirects = append(incorrectRedirects, incorrect...)
 	}
 
 	// Cache for Fix
 	c.staleLocations = staleLocations
+	c.missingRedirects = missingRedirects
+	c.incorrectRedirects = incorrectRedirects
 
-	if len(staleLocations) == 0 {
+	// Build result
+	var details []string
+	totalIssues := len(staleLocations) + len(missingRedirects) + len(incorrectRedirects)
+
+	if totalIssues == 0 {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: "No stale beads files found in redirect locations",
+			Message: "No stale beads files or redirect issues found",
 		}
+	}
+
+	// Add details for each issue type
+	for _, loc := range staleLocations {
+		details = append(details, fmt.Sprintf("stale files: %s", loc))
+	}
+	for _, issue := range missingRedirects {
+		relPath, _ := filepath.Rel(ctx.TownRoot, issue.worktreePath)
+		details = append(details, fmt.Sprintf("missing redirect: %s", relPath))
+	}
+	for _, issue := range incorrectRedirects {
+		relPath, _ := filepath.Rel(ctx.TownRoot, issue.worktreePath)
+		details = append(details, fmt.Sprintf("incorrect redirect: %s (has %q, expected %q)",
+			relPath, issue.currentTarget, issue.expectedTarget))
 	}
 
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusWarning,
-		Message: fmt.Sprintf("%d location(s) have stale beads files alongside redirect", len(staleLocations)),
-		Details: staleLocations,
-		FixHint: "Run 'gt doctor --fix' to remove stale files",
+		Message: fmt.Sprintf("%d beads redirect issue(s) found", totalIssues),
+		Details: details,
+		FixHint: "Run 'gt doctor --fix' to repair redirects and remove stale files",
 	}
 }
 
-// Fix removes stale files from .beads directories that have redirects.
+// Fix removes stale files from .beads directories that have redirects,
+// and creates/repairs missing or incorrect redirects.
 func (c *StaleBeadsRedirectCheck) Fix(ctx *CheckContext) error {
+	// Remove stale files
 	for _, relPath := range c.staleLocations {
 		beadsDir := filepath.Join(ctx.TownRoot, relPath)
 		if err := cleanStaleBeadsFiles(beadsDir); err != nil {
 			return fmt.Errorf("cleaning %s: %w", relPath, err)
 		}
 	}
+
+	// Create missing redirects
+	for _, issue := range c.missingRedirects {
+		if err := beads.SetupRedirect(issue.townRoot, issue.worktreePath); err != nil {
+			relPath, _ := filepath.Rel(ctx.TownRoot, issue.worktreePath)
+			return fmt.Errorf("creating redirect for %s: %w", relPath, err)
+		}
+	}
+
+	// Fix incorrect redirects (same as creating - SetupRedirect overwrites)
+	for _, issue := range c.incorrectRedirects {
+		if err := beads.SetupRedirect(issue.townRoot, issue.worktreePath); err != nil {
+			relPath, _ := filepath.Rel(ctx.TownRoot, issue.worktreePath)
+			return fmt.Errorf("fixing redirect for %s: %w", relPath, err)
+		}
+	}
+
 	return nil
 }
 
@@ -179,7 +243,8 @@ func getBeadsDirsToCheck(rigDir string) []string {
 	crewDir := filepath.Join(rigDir, "crew")
 	if entries, err := os.ReadDir(crewDir); err == nil {
 		for _, entry := range entries {
-			if entry.IsDir() {
+			// Skip hidden directories (like .claude)
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
 				beadsDir := filepath.Join(crewDir, entry.Name(), ".beads")
 				if _, err := os.Stat(beadsDir); err == nil {
 					dirs = append(dirs, beadsDir)
@@ -198,7 +263,8 @@ func getBeadsDirsToCheck(rigDir string) []string {
 	polecatsDir := filepath.Join(rigDir, "polecats")
 	if entries, err := os.ReadDir(polecatsDir); err == nil {
 		for _, entry := range entries {
-			if entry.IsDir() {
+			// Skip hidden directories
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
 				beadsDir := filepath.Join(polecatsDir, entry.Name(), ".beads")
 				if _, err := os.Stat(beadsDir); err == nil {
 					dirs = append(dirs, beadsDir)
@@ -265,3 +331,120 @@ func cleanStaleBeadsFiles(beadsDir string) error {
 
 	return nil
 }
+
+// verifyRedirectTopology checks that all worktrees in a rig have correct redirects.
+// Returns lists of missing and incorrect redirect issues.
+func (c *StaleBeadsRedirectCheck) verifyRedirectTopology(townRoot, rigDir string) (missing, incorrect []redirectIssue) {
+	// Check if rig has beads configured at all
+	rigBeadsPath := filepath.Join(rigDir, ".beads")
+	mayorBeadsPath := filepath.Join(rigDir, "mayor", "rig", ".beads")
+
+	// If neither location has beads, skip this rig (not configured)
+	if !beadsDirExists(rigBeadsPath) && !beadsDirExists(mayorBeadsPath) {
+		return nil, nil
+	}
+
+	// Get all worktrees that should have redirects
+	worktrees := getWorktreePaths(rigDir)
+
+	for _, worktreePath := range worktrees {
+		// Skip if worktree doesn't exist
+		if !beadsDirExists(worktreePath) {
+			continue
+		}
+
+		// Use the canonical ComputeRedirectTarget function from beads package
+		// This ensures doctor check and SetupRedirect stay in sync
+		expected, err := beads.ComputeRedirectTarget(townRoot, worktreePath)
+		if err != nil {
+			// Can't compute expected - skip this worktree (e.g., no beads configured)
+			continue
+		}
+		actual := readRedirectTarget(worktreePath)
+
+		if actual == "" {
+			// Missing redirect
+			missing = append(missing, redirectIssue{
+				worktreePath:   worktreePath,
+				townRoot:       townRoot,
+				expectedTarget: expected,
+			})
+		} else if normalizeRedirectPath(actual) != normalizeRedirectPath(expected) {
+			// Redirect exists but doesn't match expected
+			incorrect = append(incorrect, redirectIssue{
+				worktreePath:   worktreePath,
+				townRoot:       townRoot,
+				currentTarget:  actual,
+				expectedTarget: expected,
+			})
+		}
+	}
+
+	return missing, incorrect
+}
+
+// beadsDirExists checks if a directory exists.
+func beadsDirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// getWorktreePaths returns all worktree paths that should have redirects.
+func getWorktreePaths(rigDir string) []string {
+	var paths []string
+
+	// Crew workspaces: <rig>/crew/*
+	crewDir := filepath.Join(rigDir, "crew")
+	if entries, err := os.ReadDir(crewDir); err == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			// Skip hidden directories (like .claude)
+			if entry.IsDir() && !strings.HasPrefix(name, ".") {
+				paths = append(paths, filepath.Join(crewDir, name))
+			}
+		}
+	}
+
+	// Polecats: <rig>/polecats/*
+	polecatsDir := filepath.Join(rigDir, "polecats")
+	if entries, err := os.ReadDir(polecatsDir); err == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			// Skip hidden directories
+			if entry.IsDir() && !strings.HasPrefix(name, ".") {
+				paths = append(paths, filepath.Join(polecatsDir, name))
+			}
+		}
+	}
+
+	// Refinery: <rig>/refinery/rig
+	refineryPath := filepath.Join(rigDir, "refinery", "rig")
+	if beadsDirExists(refineryPath) {
+		paths = append(paths, refineryPath)
+	}
+
+	return paths
+}
+
+// readRedirectTarget reads the redirect target from a worktree's .beads/redirect file.
+// Returns empty string if no redirect exists.
+func readRedirectTarget(worktreePath string) string {
+	redirectPath := filepath.Join(worktreePath, ".beads", "redirect")
+	data, err := os.ReadFile(redirectPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// normalizeRedirectPath normalizes a redirect path for comparison.
+func normalizeRedirectPath(path string) string {
+	// Remove trailing newlines/spaces and clean the path
+	path = strings.TrimSpace(path)
+	// Normalize slashes
+	path = filepath.ToSlash(path)
+	// Remove trailing slash
+	path = strings.TrimSuffix(path, "/")
+	return path
+}
+
