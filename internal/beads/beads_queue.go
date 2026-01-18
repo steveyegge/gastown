@@ -176,6 +176,7 @@ func (b *Beads) CreateQueueBead(id, title string, fields *QueueFields) (*Issue, 
 		"--description=" + description,
 		"--type=queue",
 		"--labels=gt:queue",
+		"--force",
 	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking
