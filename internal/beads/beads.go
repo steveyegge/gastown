@@ -743,6 +743,17 @@ Before signaling completion:
 7. ` + "`gt done`" + ` (submit to merge queue and exit)
 
 **Polecats MUST call ` + "`gt done`" + ` - this submits work and exits the session.**
+
+## Non-Code Tasks (Reports, Validation, Research)
+
+If your task produces no code changes, you MUST still create a commit:
+
+1. Write findings to ` + "`docs/reports/<bead-id>.md`" + `
+2. Include: summary, findings, recommendations, any errors encountered
+3. Commit: ` + "`git add docs/reports/ && git commit -m \"docs(<bead-id>): <summary>\"`" + `
+4. Push and complete: ` + "`git push && gt done`" + `
+
+This ensures the merge queue has reviewable output and your work is recorded.
 `
 
 // ProvisionPrimeMD writes the Gas Town PRIME.md file to the specified beads directory.
