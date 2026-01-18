@@ -77,7 +77,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. Deacon (Claude agent)
-	if _, err := factory.Start(townRoot, agent.DeaconAddress, ""); err != nil {
+	if _, err := factory.Start(townRoot, agent.DeaconAddress); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			printStatus("Deacon", true, "running")
 		} else {
@@ -89,7 +89,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	// 3. Mayor (Claude agent)
-	if _, err := factory.Start(townRoot, agent.MayorAddress, ""); err != nil {
+	if _, err := factory.Start(townRoot, agent.MayorAddress); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			printStatus("Mayor", true, "running")
 		} else {
@@ -111,7 +111,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 		witnessID := agent.WitnessAddress(rigName)
 		sessionName := fmt.Sprintf("gt-%s-witness", rigName)
-		if _, err := factory.Start(townRoot, witnessID, ""); err != nil {
+		if _, err := factory.Start(townRoot, witnessID); err != nil {
 			if err == agent.ErrAlreadyRunning {
 				printStatus(fmt.Sprintf("Witness (%s)", rigName), true, sessionName)
 			} else {
@@ -133,7 +133,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 		refineryID := agent.RefineryAddress(rigName)
 		sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
-		if _, err := factory.Start(townRoot, refineryID, ""); err != nil {
+		if _, err := factory.Start(townRoot, refineryID); err != nil {
 			if err == agent.ErrAlreadyRunning {
 				printStatus(fmt.Sprintf("Refinery (%s)", rigName), true, sessionName)
 			} else {
@@ -340,7 +340,7 @@ func startCrewFromSettings(townRoot, rigName string) ([]string, map[string]error
 	// Start each crew member using factory.Start (agent resolved automatically)
 	for _, crewName := range toStart {
 		crewID := agent.CrewAddress(rigName, crewName)
-		if _, err := factory.Start(townRoot, crewID, ""); err != nil {
+		if _, err := factory.Start(townRoot, crewID); err != nil {
 			if err == agent.ErrAlreadyRunning {
 				started = append(started, crewName)
 			} else {
@@ -459,7 +459,7 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 
 		// This polecat has work - start it using factory.Start() (agent resolved automatically)
 		polecatID := agent.PolecatAddress(rigName, polecatName)
-		if _, err := factory.Start(townRoot, polecatID, ""); err != nil {
+		if _, err := factory.Start(townRoot, polecatID); err != nil {
 			if err == agent.ErrAlreadyRunning {
 				started = append(started, polecatName)
 			} else {

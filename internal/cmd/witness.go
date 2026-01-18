@@ -185,7 +185,7 @@ func runWitnessStart(cmd *cobra.Command, args []string) error {
 
 	// Use factory.Start() with WitnessAddress
 	id := agent.WitnessAddress(rigName)
-	if _, err := factory.Start(townRoot, id, "", opts...); err != nil {
+	if _, err := factory.Start(townRoot, id, opts...); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			fmt.Printf("%s Witness is already running\n", style.Dim.Render("⚠"))
 			fmt.Printf("  %s\n", style.Dim.Render("Use 'gt witness attach' to connect"))
@@ -339,15 +339,14 @@ func runWitnessAttach(cmd *cobra.Command, args []string) error {
 	}
 
 	// Verify rig exists and get townRoot
-	townRoot, r, err := getRig(rigName)
+	townRoot, _, err := getRig(rigName)
 	if err != nil {
 		return err
 	}
 
-	// Ensure session exists (creates if needed)
+	// Ensure session exists (creates if needed, agent auto-resolved)
 	witnessID := agent.WitnessAddress(rigName)
-	agentName, _ := config.ResolveRoleAgentName("witness", townRoot, r.Path)
-	if _, err := factory.Start(townRoot, witnessID, agentName); err != nil && err != agent.ErrAlreadyRunning {
+	if _, err := factory.Start(townRoot, witnessID); err != nil && err != agent.ErrAlreadyRunning {
 		return err
 	} else if err == nil {
 		fmt.Printf("Started witness session for %s\n", rigName)
@@ -372,18 +371,12 @@ func runWitnessAttach(cmd *cobra.Command, args []string) error {
 func runWitnessRestart(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
-	townRoot, r, err := getRig(rigName)
+	townRoot, _, err := getRig(rigName)
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("Restarting witness for %s...\n", rigName)
-
-	// Resolve agent name (with optional override)
-	agentName, _ := config.ResolveRoleAgentName("witness", townRoot, r.Path)
-	if witnessAgentOverride != "" {
-		agentName = witnessAgentOverride
-	}
 
 	// Convert env overrides from []string to map
 	envOverrides := make(map[string]string)
@@ -393,16 +386,17 @@ func runWitnessRestart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Build start options with KillExisting
+	// Build start options with KillExisting (agent auto-resolved, with optional override)
 	var opts []factory.StartOption
 	opts = append(opts, factory.WithKillExisting())
+	opts = append(opts, factory.WithAgent(witnessAgentOverride))
 	if len(envOverrides) > 0 {
 		opts = append(opts, factory.WithEnvOverrides(envOverrides))
 	}
 
 	// Use factory.Start() with WitnessAddress
 	id := agent.WitnessAddress(rigName)
-	if _, err := factory.Start(townRoot, id, agentName, opts...); err != nil {
+	if _, err := factory.Start(townRoot, id, opts...); err != nil {
 		return fmt.Errorf("starting witness: %w", err)
 	}
 

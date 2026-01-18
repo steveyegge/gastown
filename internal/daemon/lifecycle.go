@@ -340,31 +340,31 @@ func (d *Daemon) restartAgent(identity string) error {
 
 	switch parsed.RoleType {
 	case "mayor":
-		_, err := factory.Start(d.config.TownRoot, agentpkg.MayorAddress, "")
+		_, err := factory.Start(d.config.TownRoot, agentpkg.MayorAddress)
 		return err
 
 	case "deacon":
-		_, err := factory.Start(d.config.TownRoot, agentpkg.DeaconAddress, "")
+		_, err := factory.Start(d.config.TownRoot, agentpkg.DeaconAddress)
 		return err
 
 	case "witness":
 		witnessID := agentpkg.WitnessAddress(parsed.RigName)
-		_, err := factory.Start(d.config.TownRoot, witnessID, "")
+		_, err := factory.Start(d.config.TownRoot, witnessID)
 		return err
 
 	case "refinery":
 		refineryID := agentpkg.RefineryAddress(parsed.RigName)
-		_, err := factory.Start(d.config.TownRoot, refineryID, "")
+		_, err := factory.Start(d.config.TownRoot, refineryID)
 		return err
 
 	case "crew":
 		crewID := agentpkg.CrewAddress(parsed.RigName, parsed.AgentName)
-		_, err := factory.Start(d.config.TownRoot, crewID, "")
+		_, err := factory.Start(d.config.TownRoot, crewID)
 		return err
 
 	case "polecat":
 		polecatID := agentpkg.PolecatAddress(parsed.RigName, parsed.AgentName)
-		_, err := factory.Start(d.config.TownRoot, polecatID, "")
+		_, err := factory.Start(d.config.TownRoot, polecatID)
 		return err
 
 	default:

@@ -107,7 +107,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	if !hasSession {
 		fmt.Printf("Starting session for %s/%s...\n", r.Name, name)
 		opts := []factory.StartOption{factory.WithTopic("start"), factory.WithAgent(crewAgentOverride)}
-		if _, err := factory.Start(townRoot, crewID, "", opts...); err != nil {
+		if _, err := factory.Start(townRoot, crewID, opts...); err != nil {
 			return fmt.Errorf("starting crew session: %w", err)
 		}
 		fmt.Printf("%s Created session for %s/%s\n", style.Bold.Render("✓"), r.Name, name)

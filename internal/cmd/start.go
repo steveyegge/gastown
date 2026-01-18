@@ -213,7 +213,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 // startCoreAgents starts Mayor and Deacon sessions.
 func startCoreAgents(townRoot string, agentOverride string) error {
 	// Start Mayor first (so Deacon sees it as up) - agent resolved automatically, with optional override
-	if _, err := factory.Start(townRoot, agent.MayorAddress, "", factory.WithAgent(agentOverride)); err != nil {
+	if _, err := factory.Start(townRoot, agent.MayorAddress, factory.WithAgent(agentOverride)); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			fmt.Printf("  %s Mayor already running\n", style.Dim.Render("○"))
 		} else {
@@ -224,7 +224,7 @@ func startCoreAgents(townRoot string, agentOverride string) error {
 	}
 
 	// Start Deacon (health monitor) - agent resolved automatically, with optional override
-	if _, err := factory.Start(townRoot, agent.DeaconAddress, "", factory.WithAgent(agentOverride)); err != nil {
+	if _, err := factory.Start(townRoot, agent.DeaconAddress, factory.WithAgent(agentOverride)); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			fmt.Printf("  %s Deacon already running\n", style.Dim.Render("○"))
 		} else {
@@ -249,7 +249,7 @@ func startRigAgents(townRoot string) {
 	for _, r := range rigs {
 		// Start Witness (agent resolved automatically)
 		witnessID := agent.WitnessAddress(r.Name)
-		if _, err := factory.Start(townRoot, witnessID, ""); err != nil {
+		if _, err := factory.Start(townRoot, witnessID); err != nil {
 			if err == agent.ErrAlreadyRunning {
 				fmt.Printf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
 			} else {
@@ -261,7 +261,7 @@ func startRigAgents(townRoot string) {
 
 		// Start Refinery (agent resolved automatically)
 		refineryID := agent.RefineryAddress(r.Name)
-		if _, err := factory.Start(townRoot, refineryID, ""); err != nil {
+		if _, err := factory.Start(townRoot, refineryID); err != nil {
 			if errors.Is(err, agent.ErrAlreadyRunning) {
 				fmt.Printf("  %s %s refinery already running\n", style.Dim.Render("○"), r.Name)
 			} else {
@@ -316,7 +316,7 @@ func startCoreAgentsParallel(townRoot string, agentOverride string, mu *sync.Mut
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if _, err := factory.Start(townRoot, agent.MayorAddress, "", factory.WithAgent(agentOverride)); err != nil {
+		if _, err := factory.Start(townRoot, agent.MayorAddress, factory.WithAgent(agentOverride)); err != nil {
 			if errors.Is(err, agent.ErrAlreadyRunning) {
 				mu.Lock()
 				fmt.Printf("  %s Mayor already running\n", style.Dim.Render("○"))
@@ -342,7 +342,7 @@ func startCoreAgentsParallel(townRoot string, agentOverride string, mu *sync.Mut
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if _, err := factory.Start(townRoot, agent.DeaconAddress, "", factory.WithAgent(agentOverride)); err != nil {
+		if _, err := factory.Start(townRoot, agent.DeaconAddress, factory.WithAgent(agentOverride)); err != nil {
 			if errors.Is(err, agent.ErrAlreadyRunning) {
 				mu.Lock()
 				fmt.Printf("  %s Deacon already running\n", style.Dim.Render("○"))
@@ -409,7 +409,7 @@ func startRigAgentsParallel(townRoot string, mu *sync.Mutex) {
 // startWitnessForRig starts the witness for a single rig and returns a status message.
 func startWitnessForRig(townRoot string, r *rig.Rig) string {
 	witnessID := agent.WitnessAddress(r.Name)
-	if _, err := factory.Start(townRoot, witnessID, ""); err != nil {
+	if _, err := factory.Start(townRoot, witnessID); err != nil {
 		if errors.Is(err, agent.ErrAlreadyRunning) {
 			return fmt.Sprintf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
 		}
@@ -421,7 +421,7 @@ func startWitnessForRig(townRoot string, r *rig.Rig) string {
 // startRefineryForRig starts the refinery for a single rig and returns a status message.
 func startRefineryForRig(townRoot string, r *rig.Rig) string {
 	refineryID := agent.RefineryAddress(r.Name)
-	if _, err := factory.Start(townRoot, refineryID, ""); err != nil {
+	if _, err := factory.Start(townRoot, refineryID); err != nil {
 		if errors.Is(err, agent.ErrAlreadyRunning) {
 			return fmt.Sprintf("  %s %s refinery already running\n", style.Dim.Render("○"), r.Name)
 		}
@@ -824,7 +824,7 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 	// Use factory.Start() for crew (agent resolved automatically, with optional override)
 	crewID := agent.CrewAddress(rigName, name)
 	sessionName := fmt.Sprintf("gt-%s-c-%s", rigName, name)
-	if _, err = factory.Start(townRoot, crewID, "", factory.WithAgent(startCrewAgentOverride)); err != nil {
+	if _, err = factory.Start(townRoot, crewID, factory.WithAgent(startCrewAgentOverride)); err != nil {
 		if errors.Is(err, agent.ErrAlreadyRunning) {
 			fmt.Printf("%s Session already running: %s\n", style.Dim.Render("○"), sessionName)
 		} else {
@@ -908,6 +908,6 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 	crewID := agent.CrewAddress(rigName, crewName)
 
 	// Zombie sessions are detected and restarted automatically by factory.Start()
-	_, err = factory.Start(townRoot, crewID, "")
+	_, err = factory.Start(townRoot, crewID)
 	return err
 }

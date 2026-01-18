@@ -319,7 +319,7 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 // ensureDeaconRunning ensures the Deacon is running.
 // Uses factory.Start for consistent startup behavior (WaitForShellReady, GUPP, etc.).
 func (d *Daemon) ensureDeaconRunning() {
-	if _, err := factory.Start(d.config.TownRoot, agent.DeaconAddress, ""); err != nil {
+	if _, err := factory.Start(d.config.TownRoot, agent.DeaconAddress); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			// Deacon is running - nothing to do
 			return
@@ -401,7 +401,7 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	// It returns ErrAlreadyRunning if Claude is already running in tmux.
 	witnessID := agent.WitnessAddress(rigName)
 
-	if _, err := factory.Start(d.config.TownRoot, witnessID, ""); err != nil {
+	if _, err := factory.Start(d.config.TownRoot, witnessID); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			// Already running - nothing to do
 			return
@@ -436,7 +436,7 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	// It returns ErrAlreadyRunning if Claude is already running in tmux.
 	refineryID := agent.RefineryAddress(rigName)
 
-	if _, err := factory.Start(d.config.TownRoot, refineryID, ""); err != nil {
+	if _, err := factory.Start(d.config.TownRoot, refineryID); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			// Already running - nothing to do
 			return
@@ -821,7 +821,7 @@ func (d *Daemon) restartPolecatAgent(rigName, polecatName string) error {
 
 	// Use factory.Start() with AgentID for consistent startup (agent resolved automatically)
 	polecatID := agent.PolecatAddress(rigName, polecatName)
-	_, err := factory.Start(d.config.TownRoot, polecatID, "")
+	_, err := factory.Start(d.config.TownRoot, polecatID)
 	return err
 }
 

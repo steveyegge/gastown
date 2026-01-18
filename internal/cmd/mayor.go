@@ -99,7 +99,7 @@ func runMayorStart(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Starting Mayor session...")
-	if _, err := factory.Start(townRoot, agent.MayorAddress, "", factory.WithAgent(mayorAgentOverride)); err != nil {
+	if _, err := factory.Start(townRoot, agent.MayorAddress, factory.WithAgent(mayorAgentOverride)); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			return fmt.Errorf("Mayor session already running. Attach with: gt mayor attach")
 		}
@@ -146,7 +146,7 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 	if !agents.Exists(id) {
 		// Auto-start if not running
 		fmt.Println("Mayor session not running, starting...")
-		if _, err := factory.Start(townRoot, agent.MayorAddress, "", factory.WithAgent(mayorAgentOverride)); err != nil {
+		if _, err := factory.Start(townRoot, agent.MayorAddress, factory.WithAgent(mayorAgentOverride)); err != nil {
 			return err
 		}
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/factory"
@@ -237,24 +236,21 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Sent handoff mail to %s/%s\n", r.Name, name)
 
-	// Resolve agent name
+	// Resolve townRoot
 	townRoot, _ := workspace.Find(r.Path)
 	if townRoot == "" {
 		townRoot = r.Path
 	}
-	agentName, _ := config.ResolveRoleAgentName("crew", townRoot, r.Path)
-	if crewAgentOverride != "" {
-		agentName = crewAgentOverride
-	}
 
-	// Use factory.Start() with refresh options
+	// Use factory.Start() with refresh options (agent auto-resolved, with optional override)
 	id := agent.CrewAddress(r.Name, name)
 	opts := []factory.StartOption{
 		factory.WithKillExisting(),
 		factory.WithTopic("refresh"),
 		factory.WithInteractive(),
+		factory.WithAgent(crewAgentOverride),
 	}
-	if _, err = factory.Start(townRoot, id, agentName, opts...); err != nil {
+	if _, err = factory.Start(townRoot, id, opts...); err != nil {
 		return fmt.Errorf("starting crew session: %w", err)
 	}
 
@@ -312,17 +308,13 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Resolve agent name and townRoot for factory.Start()
+	// Resolve townRoot for factory.Start()
 	townRoot, _ := workspace.Find(r.Path)
 	if townRoot == "" {
 		townRoot = r.Path
 	}
-	agentName, _ := config.ResolveRoleAgentName("crew", townRoot, r.Path)
-	if crewAgentOverride != "" {
-		agentName = crewAgentOverride
-	}
 
-	// Start each crew member in parallel
+	// Start each crew member in parallel (agent auto-resolved, with optional override)
 	type result struct {
 		name    string
 		err     error
@@ -338,7 +330,7 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		go func(crewName string) {
 			defer wg.Done()
 			id := agent.CrewAddress(rigName, crewName)
-			_, err := factory.Start(townRoot, id, agentName)
+			_, err := factory.Start(townRoot, id, factory.WithAgent(crewAgentOverride))
 			skipped := errors.Is(err, agent.ErrAlreadyRunning)
 			if skipped {
 				err = nil // Not an error, just already running
@@ -407,23 +399,20 @@ func runCrewRestart(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Resolve agent name and townRoot
+		// Resolve townRoot
 		townRoot, _ := workspace.Find(r.Path)
 		if townRoot == "" {
 			townRoot = r.Path
 		}
-		agentName, _ := config.ResolveRoleAgentName("crew", townRoot, r.Path)
-		if crewAgentOverride != "" {
-			agentName = crewAgentOverride
-		}
 
-		// Use factory.Start() with restart options
+		// Use factory.Start() with restart options (agent auto-resolved, with optional override)
 		id := agent.CrewAddress(r.Name, name)
 		opts := []factory.StartOption{
 			factory.WithKillExisting(),
 			factory.WithTopic("restart"),
+			factory.WithAgent(crewAgentOverride),
 		}
-		if _, err = factory.Start(townRoot, id, agentName, opts...); err != nil {
+		if _, err = factory.Start(townRoot, id, opts...); err != nil {
 			fmt.Printf("Error restarting %s: %v\n", arg, err)
 			lastErr = err
 			continue
@@ -483,22 +472,17 @@ func runCrewRestartAll() error {
 	var succeeded, failed int
 	var failures []string
 
-	// Resolve agent runtime (use override if set)
-	aiRuntime, _ := config.ResolveRoleAgentName("crew", townRoot, "")
-	if crewAgentOverride != "" {
-		aiRuntime = crewAgentOverride
-	}
-
 	for _, as := range targets {
 		agentDisplay := fmt.Sprintf("%s/crew/%s", as.Rig, as.AgentName)
 
-		// Use factory.Start() with restart options
+		// Use factory.Start() with restart options (agent auto-resolved, with optional override)
 		id := agent.CrewAddress(as.Rig, as.AgentName)
 		opts := []factory.StartOption{
 			factory.WithKillExisting(),
 			factory.WithTopic("restart"),
+			factory.WithAgent(crewAgentOverride),
 		}
-		if _, err := factory.Start(townRoot, id, aiRuntime, opts...); err != nil {
+		if _, err := factory.Start(townRoot, id, opts...); err != nil {
 			failed++
 			failures = append(failures, fmt.Sprintf("%s: %v", agentDisplay, err))
 			fmt.Printf("  %s %s\n", style.ErrorPrefix, agentDisplay)

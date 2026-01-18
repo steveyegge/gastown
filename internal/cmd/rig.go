@@ -735,8 +735,7 @@ func runRigBoot(cmd *cobra.Command, args []string) error {
 
 	g := git.NewGit(townRoot)
 	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
-	r, err := rigMgr.GetRig(rigName)
-	if err != nil {
+	if _, err := rigMgr.GetRig(rigName); err != nil {
 		return fmt.Errorf("rig '%s' not found", rigName)
 	}
 
@@ -747,9 +746,8 @@ func runRigBoot(cmd *cobra.Command, args []string) error {
 
 	// 1. Start the witness
 	fmt.Printf("  Starting witness...\n")
-	witnessAgentName, _ := config.ResolveRoleAgentName("witness", townRoot, r.Path)
 	witnessID := agent.WitnessAddress(rigName)
-	if _, err := factory.Start(townRoot, witnessID, witnessAgentName); err != nil {
+	if _, err := factory.Start(townRoot, witnessID); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			skipped = append(skipped, "witness (already running)")
 		} else {
@@ -761,9 +759,8 @@ func runRigBoot(cmd *cobra.Command, args []string) error {
 
 	// 2. Start the refinery
 	fmt.Printf("  Starting refinery...\n")
-	refineryAgentName, _ := config.ResolveRoleAgentName("refinery", townRoot, r.Path)
 	refineryID := agent.RefineryAddress(rigName)
-	if _, err := factory.Start(townRoot, refineryID, refineryAgentName); err != nil {
+	if _, err := factory.Start(townRoot, refineryID); err != nil {
 		if err == agent.ErrAlreadyRunning {
 			skipped = append(skipped, "refinery (already running)")
 		} else {
@@ -805,8 +802,7 @@ func runRigStart(cmd *cobra.Command, args []string) error {
 	var failedRigs []string
 
 	for _, rigName := range args {
-		r, err := rigMgr.GetRig(rigName)
-		if err != nil {
+		if _, err := rigMgr.GetRig(rigName); err != nil {
 			fmt.Printf("%s Rig '%s' not found\n", style.Warning.Render("⚠"), rigName)
 			failedRigs = append(failedRigs, rigName)
 			continue
@@ -829,9 +825,8 @@ func runRigStart(cmd *cobra.Command, args []string) error {
 
 		// 1. Start the witness
 		fmt.Printf("  Starting witness...\n")
-		witnessAgentName, _ := config.ResolveRoleAgentName("witness", townRoot, r.Path)
 		witnessID := agent.WitnessAddress(rigName)
-		if _, err := factory.Start(townRoot, witnessID, witnessAgentName); err != nil {
+		if _, err := factory.Start(townRoot, witnessID); err != nil {
 			if err == agent.ErrAlreadyRunning {
 				skipped = append(skipped, "witness")
 			} else {
@@ -844,9 +839,8 @@ func runRigStart(cmd *cobra.Command, args []string) error {
 
 		// 2. Start the refinery
 		fmt.Printf("  Starting refinery...\n")
-		refineryAgentName, _ := config.ResolveRoleAgentName("refinery", townRoot, r.Path)
 		refineryID := agent.RefineryAddress(rigName)
-		if _, err := factory.Start(townRoot, refineryID, refineryAgentName); err != nil {
+		if _, err := factory.Start(townRoot, refineryID); err != nil {
 			if err == agent.ErrAlreadyRunning {
 				skipped = append(skipped, "refinery")
 			} else {
@@ -1397,8 +1391,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 
 		// 1. Start the witness
 		fmt.Printf("    Starting witness...\n")
-		witnessAgentName, _ := config.ResolveRoleAgentName("witness", townRoot, r.Path)
-		if _, err := factory.Start(townRoot, witnessID, witnessAgentName); err != nil {
+		if _, err := factory.Start(townRoot, witnessID); err != nil {
 			if err == agent.ErrAlreadyRunning {
 				skipped = append(skipped, "witness")
 			} else {
@@ -1411,8 +1404,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 
 		// 2. Start the refinery
 		fmt.Printf("    Starting refinery...\n")
-		refineryAgentName, _ := config.ResolveRoleAgentName("refinery", townRoot, r.Path)
-		if _, err := factory.Start(townRoot, refineryID, refineryAgentName); err != nil {
+		if _, err := factory.Start(townRoot, refineryID); err != nil {
 			if err == agent.ErrAlreadyRunning {
 				skipped = append(skipped, "refinery")
 			} else {

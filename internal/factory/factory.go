@@ -106,27 +106,26 @@ func resolveAgentForID(townRoot string, id agent.AgentID) string {
 // from the old per-role managers which returned immediately after session creation.
 // The blocking behavior ensures callers can interact with the agent immediately.
 //
-// Agent resolution: If aiRuntime is empty, the agent is automatically resolved
-// from config based on the AgentID's role. Use WithAgent() to override.
+// Agent resolution: The agent is automatically resolved from config based on the
+// AgentID's role. Use WithAgent() to override (e.g., from a --agent CLI flag).
 //
 // Usage:
 //
-//	factory.Start(townRoot, agent.MayorAddress, "")                              // Auto-resolve
-//	factory.Start(townRoot, agent.WitnessAddress("myrig"), "")                   // Auto-resolve
-//	factory.Start(townRoot, agent.PolecatAddress("myrig", "toast"), "")          // Auto-resolve
-//	factory.Start(townRoot, agent.CrewAddress("myrig", "joe"), "", WithTopic("patrol"))
-//	factory.Start(townRoot, agent.MayorAddress, "", WithAgent("custom"))         // Override
-func Start(townRoot string, id agent.AgentID, aiRuntime string, opts ...StartOption) (agent.AgentID, error) {
+//	factory.Start(townRoot, agent.MayorAddress)                              // Auto-resolve
+//	factory.Start(townRoot, agent.WitnessAddress("myrig"))                   // Auto-resolve
+//	factory.Start(townRoot, agent.PolecatAddress("myrig", "toast"))          // Auto-resolve
+//	factory.Start(townRoot, agent.CrewAddress("myrig", "joe"), WithTopic("patrol"))
+//	factory.Start(townRoot, agent.MayorAddress, WithAgent("custom"))         // Override
+func Start(townRoot string, id agent.AgentID, opts ...StartOption) (agent.AgentID, error) {
 	// Apply options first to check for WithAgent override
 	cfg := &startConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	// Resolve agent name: WithAgent() > explicit aiRuntime > auto-resolve from config
-	if cfg.agent != "" {
-		aiRuntime = cfg.agent
-	} else if aiRuntime == "" {
+	// Resolve agent name: WithAgent() override > auto-resolve from config
+	aiRuntime := cfg.agent
+	if aiRuntime == "" {
 		aiRuntime = resolveAgentForID(townRoot, id)
 	}
 
@@ -152,7 +151,7 @@ func Start(townRoot string, id agent.AgentID, aiRuntime string, opts ...StartOpt
 	// Build session configurer callback - passed to StartWithAgents for OnCreated
 	themer := buildSessionConfigurer(id, envVars, t)
 
-	return StartWithAgents(agents, themer, townRoot, id, aiRuntime, opts...)
+	return StartWithAgents(agents, themer, townRoot, id, opts...)
 }
 
 // StartWithAgents is the testable version of Start().
@@ -163,13 +162,12 @@ func Start(townRoot string, id agent.AgentID, aiRuntime string, opts ...StartOpt
 // Usage in tests:
 //
 //	agents := agent.NewDouble()
-//	id, err := factory.StartWithAgents(agents, nil, townRoot, agent.MayorAddress, "claude")
+//	id, err := factory.StartWithAgents(agents, nil, townRoot, agent.MayorAddress)
 func StartWithAgents(
 	agents agent.Agents,
 	themer agent.OnSessionCreated,
 	townRoot string,
 	id agent.AgentID,
-	aiRuntime string,
 	opts ...StartOption,
 ) (agent.AgentID, error) {
 	// Apply options
@@ -178,10 +176,9 @@ func StartWithAgents(
 		opt(cfg)
 	}
 
-	// Resolve agent name: WithAgent() > explicit aiRuntime > auto-resolve from config
-	if cfg.agent != "" {
-		aiRuntime = cfg.agent
-	} else if aiRuntime == "" {
+	// Resolve agent name: WithAgent() override > auto-resolve from config
+	aiRuntime := cfg.agent
+	if aiRuntime == "" {
 		aiRuntime = resolveAgentForID(townRoot, id)
 	}
 
