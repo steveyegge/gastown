@@ -452,6 +452,56 @@ For OpenCode autonomous mode, set env var in your shell profile:
 export OPENCODE_PERMISSION='{"*":"allow"}'
 ```
 
+### Role Context Overrides
+
+Customize the CLAUDE.md content for each role via `settings/config.json`. This allows
+you to replace the default embedded templates with your own instructions.
+
+**Resolution order**: Rig settings → Town settings → Default embedded template (first match wins).
+
+**Town-level overrides** (`settings/config.json`):
+```json
+{
+  "type": "town-settings",
+  "version": 1,
+  "context": {
+    "roles": {
+      "mayor": "# Custom Mayor Context\n\nYou are the Mayor with special instructions...",
+      "polecat": "# Custom Polecat Context\n\nFollow these specific guidelines...",
+      "crew": "# Custom Crew Context\n\nAs a crew member, you should..."
+    }
+  }
+}
+```
+
+**Rig-level overrides** (`<rig>/settings/config.json`):
+```json
+{
+  "type": "rig-settings",
+  "version": 1,
+  "context": {
+    "roles": {
+      "witness": "# Custom Witness for this rig\n\nSpecial monitoring rules...",
+      "refinery": "# Custom Refinery\n\nMerge policies for this project..."
+    }
+  }
+}
+```
+
+**Available roles**: `mayor`, `deacon`, `witness`, `refinery`, `polecat`, `crew`
+
+**Use cases**:
+- Add project-specific instructions for polecats working on a particular rig
+- Customize merge policies per-rig in refinery context
+- Add team conventions or coding standards
+- Include domain-specific knowledge for agents
+
+**Tips**:
+- Use `\n` for newlines in JSON strings, or use a HEREDOC to generate the JSON
+- Rig overrides only need to specify roles you want to customize; others fall through to town or default
+- Town overrides apply to all rigs unless a rig-specific override exists
+- View the default templates with `gt prime --role <role>` in a clean environment
+
 ### Rig Management
 
 ```bash

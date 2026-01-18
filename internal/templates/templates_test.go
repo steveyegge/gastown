@@ -1,8 +1,12 @@
 package templates
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 func TestNew(t *testing.T) {
@@ -293,5 +297,337 @@ func TestGetAllRoleTemplates_ContentValidity(t *testing.T) {
 		if !strings.Contains(contentStr, "Context") {
 			t.Errorf("%s doesn't contain 'Context' - may not be a valid role template", name)
 		}
+	}
+}
+
+func TestGetRoleContent_NoOverride(t *testing.T) {
+	// With nil settings, should fall back to embedded template
+	data := RoleData{
+		Role:          "mayor",
+		TownRoot:      "/test/town",
+		TownName:      "town",
+		WorkDir:       "/test/town",
+		DefaultBranch: "main",
+		MayorSession:  "gt-town-mayor",
+		DeaconSession: "gt-town-deacon",
+	}
+
+	output, err := GetRoleContent("mayor", data, nil, nil)
+	if err != nil {
+		t.Fatalf("GetRoleContent() error = %v", err)
+	}
+
+	// Should contain content from embedded template
+	if !strings.Contains(output, "Mayor Context") {
+		t.Error("output missing 'Mayor Context' from embedded template")
+	}
+}
+
+func TestGetRoleContent_TownOverride(t *testing.T) {
+	customContent := "# Custom Mayor Context\n\nThis is a custom mayor context."
+	townSettings := &config.TownSettings{
+		Context: &config.ContextConfig{
+			Roles: map[string]string{
+				"mayor": customContent,
+			},
+		},
+	}
+
+	data := RoleData{
+		Role:     "mayor",
+		TownRoot: "/test/town",
+	}
+
+	output, err := GetRoleContent("mayor", data, townSettings, nil)
+	if err != nil {
+		t.Fatalf("GetRoleContent() error = %v", err)
+	}
+
+	if output != customContent {
+		t.Errorf("GetRoleContent() = %q, want %q", output, customContent)
+	}
+}
+
+func TestGetRoleContent_RigOverride(t *testing.T) {
+	customContent := "# Rig-specific Mayor Context\n\nCustom for this rig."
+	rigSettings := &config.RigSettings{
+		Context: &config.ContextConfig{
+			Roles: map[string]string{
+				"mayor": customContent,
+			},
+		},
+	}
+
+	data := RoleData{
+		Role:     "mayor",
+		TownRoot: "/test/town",
+	}
+
+	output, err := GetRoleContent("mayor", data, nil, rigSettings)
+	if err != nil {
+		t.Fatalf("GetRoleContent() error = %v", err)
+	}
+
+	if output != customContent {
+		t.Errorf("GetRoleContent() = %q, want %q", output, customContent)
+	}
+}
+
+func TestGetRoleContent_RigOverridesTownPrecedence(t *testing.T) {
+	townContent := "# Town Mayor Context"
+	rigContent := "# Rig Mayor Context"
+
+	townSettings := &config.TownSettings{
+		Context: &config.ContextConfig{
+			Roles: map[string]string{
+				"mayor": townContent,
+			},
+		},
+	}
+	rigSettings := &config.RigSettings{
+		Context: &config.ContextConfig{
+			Roles: map[string]string{
+				"mayor": rigContent,
+			},
+		},
+	}
+
+	data := RoleData{
+		Role:     "mayor",
+		TownRoot: "/test/town",
+	}
+
+	output, err := GetRoleContent("mayor", data, townSettings, rigSettings)
+	if err != nil {
+		t.Fatalf("GetRoleContent() error = %v", err)
+	}
+
+	// Rig should take precedence over town
+	if output != rigContent {
+		t.Errorf("GetRoleContent() = %q, want %q (rig should override town)", output, rigContent)
+	}
+}
+
+func TestGetRoleContent_PartialOverride(t *testing.T) {
+	// Town has override for mayor, but we're asking for witness
+	townSettings := &config.TownSettings{
+		Context: &config.ContextConfig{
+			Roles: map[string]string{
+				"mayor": "# Custom Mayor",
+			},
+		},
+	}
+
+	data := RoleData{
+		Role:          "witness",
+		RigName:       "testrig",
+		TownRoot:      "/test/town",
+		TownName:      "town",
+		WorkDir:       "/test/town/testrig/witness/rig",
+		DefaultBranch: "main",
+		MayorSession:  "gt-town-mayor",
+		DeaconSession: "gt-town-deacon",
+	}
+
+	output, err := GetRoleContent("witness", data, townSettings, nil)
+	if err != nil {
+		t.Fatalf("GetRoleContent() error = %v", err)
+	}
+
+	// Should fall back to embedded template for witness
+	if !strings.Contains(output, "Witness Context") {
+		t.Error("output missing 'Witness Context' - should fall back to embedded template")
+	}
+}
+
+// Tests for Create*CLAUDEmd functions
+
+func TestCreateMayorCLAUDEmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("creating mayor dir: %v", err)
+	}
+
+	err := CreateMayorCLAUDEmd(mayorDir, tmpDir, "testtown", "gt-testtown-mayor", "gt-testtown-deacon")
+	if err != nil {
+		t.Fatalf("CreateMayorCLAUDEmd() error = %v", err)
+	}
+
+	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
+	content, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md: %v", err)
+	}
+
+	// Should contain rendered template content
+	if !strings.Contains(string(content), "Mayor Context") {
+		t.Error("CLAUDE.md missing 'Mayor Context'")
+	}
+	if !strings.Contains(string(content), tmpDir) {
+		t.Error("CLAUDE.md missing town root path")
+	}
+}
+
+func TestCreateWitnessCLAUDEmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigDir := filepath.Join(tmpDir, "testrig")
+	witnessDir := filepath.Join(rigDir, "witness")
+	if err := os.MkdirAll(witnessDir, 0755); err != nil {
+		t.Fatalf("creating witness dir: %v", err)
+	}
+
+	polecats := []string{"alice", "bob"}
+	err := CreateWitnessCLAUDEmd(witnessDir, rigDir, "testrig", polecats)
+	if err != nil {
+		t.Fatalf("CreateWitnessCLAUDEmd() error = %v", err)
+	}
+
+	claudePath := filepath.Join(witnessDir, "CLAUDE.md")
+	content, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md: %v", err)
+	}
+
+	// Should contain rendered template content
+	if !strings.Contains(string(content), "Witness Context") {
+		t.Error("CLAUDE.md missing 'Witness Context'")
+	}
+	if !strings.Contains(string(content), "testrig") {
+		t.Error("CLAUDE.md missing rig name")
+	}
+}
+
+func TestCreateDeaconCLAUDEmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	deaconDir := filepath.Join(tmpDir, "deacon")
+	if err := os.MkdirAll(deaconDir, 0755); err != nil {
+		t.Fatalf("creating deacon dir: %v", err)
+	}
+
+	err := CreateDeaconCLAUDEmd(deaconDir, tmpDir)
+	if err != nil {
+		t.Fatalf("CreateDeaconCLAUDEmd() error = %v", err)
+	}
+
+	claudePath := filepath.Join(deaconDir, "CLAUDE.md")
+	content, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md: %v", err)
+	}
+
+	// Should contain rendered template content
+	if !strings.Contains(string(content), "Deacon Context") {
+		t.Error("CLAUDE.md missing 'Deacon Context'")
+	}
+	if !strings.Contains(string(content), tmpDir) {
+		t.Error("CLAUDE.md missing town root path")
+	}
+}
+
+func TestCreateRefineryCLAUDEmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigDir := filepath.Join(tmpDir, "testrig")
+	refineryDir := filepath.Join(rigDir, "refinery")
+	if err := os.MkdirAll(refineryDir, 0755); err != nil {
+		t.Fatalf("creating refinery dir: %v", err)
+	}
+
+	err := CreateRefineryCLAUDEmd(refineryDir, rigDir, "testrig", "develop")
+	if err != nil {
+		t.Fatalf("CreateRefineryCLAUDEmd() error = %v", err)
+	}
+
+	claudePath := filepath.Join(refineryDir, "CLAUDE.md")
+	content, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md: %v", err)
+	}
+
+	// Should contain rendered template content
+	if !strings.Contains(string(content), "Refinery Context") {
+		t.Error("CLAUDE.md missing 'Refinery Context'")
+	}
+	if !strings.Contains(string(content), "testrig") {
+		t.Error("CLAUDE.md missing rig name")
+	}
+	// Should use the custom default branch
+	if !strings.Contains(string(content), "develop") {
+		t.Error("CLAUDE.md missing custom default branch 'develop'")
+	}
+}
+
+func TestCreateCrewCLAUDEmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigDir := filepath.Join(tmpDir, "testrig")
+	workDir := filepath.Join(rigDir, "polecats", "alice", "rig")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatalf("creating work dir: %v", err)
+	}
+
+	err := CreateCrewCLAUDEmd(workDir, rigDir, "testrig", "alice")
+	if err != nil {
+		t.Fatalf("CreateCrewCLAUDEmd() error = %v", err)
+	}
+
+	claudePath := filepath.Join(workDir, "CLAUDE.md")
+	content, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md: %v", err)
+	}
+
+	// Should contain rendered template content
+	if !strings.Contains(string(content), "Crew Worker Context") {
+		t.Error("CLAUDE.md missing 'Crew Worker Context'")
+	}
+	if !strings.Contains(string(content), "testrig") {
+		t.Error("CLAUDE.md missing rig name")
+	}
+	if !strings.Contains(string(content), "alice") {
+		t.Error("CLAUDE.md missing crew name")
+	}
+}
+
+func TestCreateMayorCLAUDEmd_WithConfigOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	settingsDir := filepath.Join(tmpDir, "settings")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("creating mayor dir: %v", err)
+	}
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatalf("creating settings dir: %v", err)
+	}
+
+	// Create a settings file with a custom context override
+	customContext := "# Custom Mayor Instructions\n\nThis is a custom context for testing."
+	settingsContent := `{
+		"context": {
+			"roles": {
+				"mayor": "# Custom Mayor Instructions\n\nThis is a custom context for testing."
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(settingsDir, "config.json"), []byte(settingsContent), 0644); err != nil {
+		t.Fatalf("writing settings: %v", err)
+	}
+
+	err := CreateMayorCLAUDEmd(mayorDir, tmpDir, "testtown", "gt-testtown-mayor", "gt-testtown-deacon")
+	if err != nil {
+		t.Fatalf("CreateMayorCLAUDEmd() error = %v", err)
+	}
+
+	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
+	content, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md: %v", err)
+	}
+
+	// Should contain the custom context, not the default template
+	if !strings.Contains(string(content), "Custom Mayor Instructions") {
+		t.Error("CLAUDE.md should contain custom context override")
+	}
+	if string(content) != customContext {
+		t.Errorf("CLAUDE.md content = %q, want %q", string(content), customContext)
 	}
 }

@@ -61,6 +61,10 @@ type TownSettings struct {
 	// Agent addresses like "gastown/crew/jack" become "gastown.crew.jack@{domain}".
 	// Default: "gastown.local"
 	AgentEmailDomain string `json:"agent_email_domain,omitempty"`
+
+	// Context provides custom role context overrides for CLAUDE.md content.
+	// When set, these replace the default embedded templates for each role.
+	Context *ContextConfig `json:"context,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -229,6 +233,10 @@ type RigSettings struct {
 	// Overrides TownSettings.RoleAgents for this specific rig.
 	// Example: {"witness": "claude-haiku", "polecat": "claude-sonnet"}
 	RoleAgents map[string]string `json:"role_agents,omitempty"`
+
+	// Context provides custom role context overrides for CLAUDE.md content.
+	// Rig-level overrides take precedence over town-level overrides.
+	Context *ContextConfig `json:"context,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.
@@ -888,4 +896,14 @@ func NewEscalationConfig() *EscalationConfig {
 		StaleThreshold:   "4h",
 		MaxReescalations: 2,
 	}
+}
+
+// ContextConfig provides custom role context overrides.
+// This allows replacing the default embedded CLAUDE.md templates with custom content.
+type ContextConfig struct {
+	// Roles maps role names to custom context content.
+	// Keys are role names: "mayor", "deacon", "witness", "refinery", "polecat", "crew".
+	// Values are the complete CLAUDE.md content to use for that role.
+	// Resolution order: Rig → Town → Default (first match wins, no merging).
+	Roles map[string]string `json:"roles,omitempty"`
 }

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"text/template"
+
+	"github.com/steveyegge/gastown/internal/config"
 )
 
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
@@ -138,12 +140,8 @@ func (t *Templates) MessageNames() []string {
 
 // CreateMayorCLAUDEmd creates the Mayor's CLAUDE.md file at the specified directory.
 // This is used by both gt install and gt doctor --fix.
+// Uses config overrides if available (rig → town → default template).
 func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSession string) error {
-	tmpl, err := New()
-	if err != nil {
-		return err
-	}
-
 	data := RoleData{
 		Role:          "mayor",
 		TownRoot:      townRoot,
@@ -153,12 +151,124 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 		DeaconSession: deaconSession,
 	}
 
-	content, err := tmpl.RenderRole("mayor", data)
+	// Load settings for config override resolution
+	townSettings, _ := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot))
+
+	content, err := GetRoleContent("mayor", data, townSettings, nil)
 	if err != nil {
 		return err
 	}
 
 	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
+	return os.WriteFile(claudePath, []byte(content), 0644)
+}
+
+// CreateWitnessCLAUDEmd creates the Witness's CLAUDE.md file at the specified directory.
+// Uses config overrides if available (rig → town → default template).
+func CreateWitnessCLAUDEmd(witnessDir, rigPath, rigName string, polecats []string) error {
+	townRoot := filepath.Dir(rigPath)
+	townName := filepath.Base(townRoot)
+
+	data := RoleData{
+		Role:     "witness",
+		RigName:  rigName,
+		TownRoot: townRoot,
+		TownName: townName,
+		WorkDir:  witnessDir,
+		Polecats: polecats,
+	}
+
+	// Load settings for config override resolution
+	townSettings, _ := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot))
+	rigSettings, _ := config.LoadRigSettings(config.RigSettingsPath(rigPath))
+
+	content, err := GetRoleContent("witness", data, townSettings, rigSettings)
+	if err != nil {
+		return err
+	}
+
+	claudePath := filepath.Join(witnessDir, "CLAUDE.md")
+	return os.WriteFile(claudePath, []byte(content), 0644)
+}
+
+// CreateDeaconCLAUDEmd creates the Deacon's CLAUDE.md file at the specified directory.
+// Uses config overrides if available (town → default template).
+func CreateDeaconCLAUDEmd(deaconDir, townRoot string) error {
+	townName := filepath.Base(townRoot)
+
+	data := RoleData{
+		Role:          "deacon",
+		TownRoot:      townRoot,
+		TownName:      townName,
+		WorkDir:       deaconDir,
+		DeaconSession: fmt.Sprintf("gt-%s-deacon", townName),
+	}
+
+	// Load settings for config override resolution
+	townSettings, _ := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot))
+
+	content, err := GetRoleContent("deacon", data, townSettings, nil)
+	if err != nil {
+		return err
+	}
+
+	claudePath := filepath.Join(deaconDir, "CLAUDE.md")
+	return os.WriteFile(claudePath, []byte(content), 0644)
+}
+
+// CreateRefineryCLAUDEmd creates the Refinery's CLAUDE.md file at the specified directory.
+// Uses config overrides if available (rig → town → default template).
+func CreateRefineryCLAUDEmd(refineryDir, rigPath, rigName, defaultBranch string) error {
+	townRoot := filepath.Dir(rigPath)
+	townName := filepath.Base(townRoot)
+
+	data := RoleData{
+		Role:          "refinery",
+		RigName:       rigName,
+		TownRoot:      townRoot,
+		TownName:      townName,
+		WorkDir:       refineryDir,
+		DefaultBranch: defaultBranch,
+	}
+
+	// Load settings for config override resolution
+	townSettings, _ := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot))
+	rigSettings, _ := config.LoadRigSettings(config.RigSettingsPath(rigPath))
+
+	content, err := GetRoleContent("refinery", data, townSettings, rigSettings)
+	if err != nil {
+		return err
+	}
+
+	claudePath := filepath.Join(refineryDir, "CLAUDE.md")
+	return os.WriteFile(claudePath, []byte(content), 0644)
+}
+
+// CreateCrewCLAUDEmd creates the Crew (polecat) CLAUDE.md file at the specified directory.
+// Uses config overrides if available (rig → town → default template).
+func CreateCrewCLAUDEmd(workDir, rigPath, rigName, crewName string) error {
+	townRoot := filepath.Dir(rigPath)
+	townName := filepath.Base(townRoot)
+
+	data := RoleData{
+		Role:     "crew",
+		RigName:  rigName,
+		TownRoot: townRoot,
+		TownName: townName,
+		WorkDir:  workDir,
+		Polecat:  crewName,
+	}
+
+	// Load settings for config override resolution
+	townSettings, _ := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot))
+	rigSettings, _ := config.LoadRigSettings(config.RigSettingsPath(rigPath))
+
+	content, err := GetRoleContent("crew", data, townSettings, rigSettings)
+	if err != nil {
+		return err
+	}
+
+	claudePath := filepath.Join(workDir, "CLAUDE.md")
 	return os.WriteFile(claudePath, []byte(content), 0644)
 }
 
@@ -269,4 +379,22 @@ func MissingCommands(workspacePath string) ([]string, error) {
 	}
 
 	return missing, nil
+}
+
+// GetRoleContent returns the role context content, checking config overrides first.
+// Resolution order: Rig settings → Town settings → Default embedded template.
+// This allows users to customize role contexts via settings/config.json.
+func GetRoleContent(role string, data RoleData, townSettings *config.TownSettings, rigSettings *config.RigSettings) (string, error) {
+	// Check for config override
+	override := config.ResolveRoleContext(townSettings, rigSettings, role)
+	if override != "" {
+		return override, nil
+	}
+
+	// Fall back to embedded template
+	tmpl, err := New()
+	if err != nil {
+		return "", err
+	}
+	return tmpl.RenderRole(role, data)
 }

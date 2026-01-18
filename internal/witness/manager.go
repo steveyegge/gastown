@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -151,6 +152,11 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	witnessParentDir := filepath.Join(m.rig.Path, "witness")
 	if err := claude.EnsureSettingsForRole(witnessParentDir, "witness"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
+	}
+
+	// Regenerate CLAUDE.md with config overrides (supports town/rig context customization)
+	if err := templates.CreateWitnessCLAUDEmd(witnessParentDir, m.rig.Path, m.rig.Name, m.rig.Polecats); err != nil {
+		return fmt.Errorf("creating CLAUDE.md: %w", err)
 	}
 
 	roleConfig, err := m.roleConfig()

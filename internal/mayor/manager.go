@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -76,6 +77,12 @@ func (m *Manager) Start(agentOverride string) error {
 	// Ensure Claude settings exist
 	if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
+	}
+
+	// Regenerate CLAUDE.md with config overrides (supports town/rig context customization)
+	townName := filepath.Base(m.townRoot)
+	if err := templates.CreateMayorCLAUDEmd(mayorDir, m.townRoot, townName, m.SessionName(), "gt-"+townName+"-deacon"); err != nil {
+		return fmt.Errorf("creating CLAUDE.md: %w", err)
 	}
 
 	// Build startup beacon with explicit instructions (matches gt handoff behavior)

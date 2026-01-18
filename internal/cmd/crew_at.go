@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -198,6 +199,11 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			Topic:     "start",
 		})
 
+		// Regenerate CLAUDE.md with config overrides (supports town/rig context customization)
+		if err := templates.CreateCrewCLAUDEmd(worker.ClonePath, r.Path, r.Name, name); err != nil {
+			return fmt.Errorf("creating CLAUDE.md: %w", err)
+		}
+
 		// Use respawn-pane to replace shell with runtime directly
 		// This gives cleaner lifecycle: runtime exits → session ends (no intermediate shell)
 		// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
@@ -241,6 +247,11 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 				Sender:    "human",
 				Topic:     "restart",
 			})
+
+			// Regenerate CLAUDE.md with config overrides (supports town/rig context customization)
+			if err := templates.CreateCrewCLAUDEmd(worker.ClonePath, r.Path, r.Name, name); err != nil {
+				return fmt.Errorf("creating CLAUDE.md: %w", err)
+			}
 
 			// Use respawn-pane to replace shell with runtime directly
 			// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
