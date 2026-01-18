@@ -38,7 +38,74 @@ needs = ['check-timer-gates']
 title = 'Check if active swarm is complete'
 
 [[steps]]
-description = "Send WITNESS_PING to Deacon for second-order monitoring.\n\nThe Witness fleet collectively monitors Deacon health - this prevents the\n\"who watches the watchers\" problem. If Deacon dies, Witnesses detect it.\n\n**Step 1: Send ping**\n```bash\ngt mail send deacon/ -s \"WITNESS_PING <rig>\" -m \"Rig: <rig>\nTimestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)\nPatrol: <cycle-number>\"\n```\n\n**Step 2: Check Deacon health**\n```bash\n# Check Deacon agent bead for last_activity\nbd list --type=agent --json | jq '.[] | select(.description | contains(\"deacon\"))'\n```\n\nLook at the `last_activity` timestamp. If stale (>5 minutes since last update):\n- Deacon may be dead or stuck\n\n**Step 3: Escalate if needed**\n```bash\n# If Deacon appears down\ngt mail send mayor/ -s \"ALERT: Deacon appears unresponsive\" -m \"No Deacon activity for >5 minutes.\nLast seen: <timestamp>\nWitness: <rig>/witness\"\n```\n\nNote: Multiple Witnesses may send this alert. Mayor should handle deduplication."
+description = """
+Ping Deacon with request-response protocol and backoff.
+
+The Witness fleet monitors Deacon health via PING/PONG protocol. This prevents
+flooding: only ONE outstanding PING at a time, with exponential backoff on no response.
+
+**Step 1: Check for pending PING**
+
+Read witness state.json for pending_ping:
+```bash
+cat state.json | jq '.pending_ping // empty'
+```
+
+If pending_ping exists:
+- Check inbox for WITNESS_PONG with matching request_id
+- If PONG found: Clear pending_ping, proceed to send new ping
+- If no PONG and timeout not reached: SKIP this step (still waiting)
+- If no PONG and timeout reached: Increment retry_count
+
+**Step 2: Check retry count**
+
+If retry_count >= 3:
+- Escalate to Mayor:
+  ```bash
+  gt mail send mayor/ -s "ALERT: Deacon unresponsive" -m "Rig: <rig>
+  No PONG after 3 retries over ~3.5 minutes.
+  Last PING: <timestamp>
+  Witness: <rig>/witness"
+  ```
+- Reset pending_ping (don't keep flooding)
+- Set cooldown_until = now + 5 minutes
+- SKIP sending new PING
+
+**Step 3: Check cooldown**
+
+If in cooldown period after escalation:
+- SKIP sending new PING (let Mayor handle it)
+
+**Step 4: Send PING (if no pending/cooldown)**
+
+Generate unique request_id and send:
+```bash
+REQUEST_ID=$(date +%s)-$(head -c 4 /dev/urandom | xxd -p)
+gt mail send deacon/ -s "WITNESS_PING <rig> [req:$REQUEST_ID]" -m "Rig: <rig>
+Request-ID: $REQUEST_ID
+Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Patrol: <cycle>"
+```
+
+Update state.json:
+```json
+{
+  "pending_ping": {
+    "request_id": "<REQUEST_ID>",
+    "sent_at": "<timestamp>",
+    "retry_count": 0,
+    "timeout_seconds": 30
+  }
+}
+```
+
+**Backoff schedule:**
+- Attempt 1: wait 30s
+- Attempt 2: wait 60s (retry_count=1)
+- Attempt 3: wait 120s (retry_count=2)
+- Attempt 4: escalate (retry_count=3)
+
+**Key principle:** One outstanding PING at a time prevents flooding."""
 id = 'ping-deacon'
 needs = ['check-swarm-completion']
 title = 'Ping Deacon for health check'

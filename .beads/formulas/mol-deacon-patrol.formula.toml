@@ -45,12 +45,25 @@ gt mail read <id>
 ```
 
 **WITNESS_PING**:
-Witnesses periodically ping to verify Deacon is alive. Simply acknowledge
-and archive - the fact that you're processing mail proves you're running.
-Your agent bead last_activity is updated automatically during patrol.
+Witnesses ping to verify Deacon is alive. Send PONG response and archive.
+
+The PING subject contains a request_id: `WITNESS_PING <rig> [req:<id>]`
+Extract the request_id and respond:
 ```bash
+# Extract request_id from subject (e.g., "WITNESS_PING myrig [req:abc123]")
+REQUEST_ID=$(echo "<subject>" | grep -o 'req:[^]]*' | cut -d: -f2)
+
+# Send PONG back to the witness
+gt mail send <rig>/witness -s "WITNESS_PONG [req:$REQUEST_ID]" -m "Request-ID: $REQUEST_ID
+Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Deacon-Patrol: <cycle>"
+
+# Archive the PING
 gt mail archive <message-id>
 ```
+
+This completes the request-response handshake. The witness will clear its
+pending_ping state when it receives the PONG.
 
 **HELP / Escalation**:
 Assess and handle or forward to Mayor.
