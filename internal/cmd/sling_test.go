@@ -682,8 +682,8 @@ func TestLooksLikeBeadID(t *testing.T) {
 		{"hq-00gyg", true},
 
 		// Short prefixes that match pattern (but may be formulas in practice)
-		{"mol-release", true},    // 3-char prefix matches pattern (formula check runs first in sling)
-		{"mol-abc123", true},     // 3-char prefix matches pattern
+		{"oc-release", true},     // 2-char prefix matches pattern (formula check runs first in sling)
+		{"oc-abc123", true},      // 2-char prefix matches pattern
 
 		// Non-bead strings - should return false
 		{"formula-name", false},  // "formula" is 7 chars (> 5)
