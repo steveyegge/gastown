@@ -51,6 +51,24 @@ type MergeQueueConfig struct {
 
 	// MaxConcurrent is the maximum number of MRs to process concurrently.
 	MaxConcurrent int `json:"max_concurrent"`
+
+	// BatchMerge enables batch mode where multiple MRs are merged together
+	// before running tests once. This reduces CPU load when processing many MRs.
+	BatchMerge bool `json:"batch_merge"`
+
+	// BatchSize is the maximum number of MRs to include in a single batch.
+	// Only used when BatchMerge is enabled. Default: 5
+	BatchSize int `json:"batch_size"`
+
+	// BatchWindow is the time window to wait for collecting MRs into a batch.
+	// Only used when BatchMerge is enabled. Default: 5m
+	BatchWindow time.Duration `json:"batch_window"`
+
+	// BatchStrategy controls how to handle test failures in batch mode.
+	// "all-or-nothing": Reject entire batch on failure (fast, simple).
+	// "bisect-on-fail": Binary search to find failing MR(s) on failure.
+	// Only used when BatchMerge is enabled. Default: "all-or-nothing"
+	BatchStrategy string `json:"batch_strategy"`
 }
 
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
@@ -66,6 +84,10 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		RetryFlakyTests:      1,
 		PollInterval:         30 * time.Second,
 		MaxConcurrent:        1,
+		BatchMerge:           false, // Opt-in feature
+		BatchSize:            5,
+		BatchWindow:          5 * time.Minute,
+		BatchStrategy:        "all-or-nothing",
 	}
 }
 
@@ -161,7 +183,7 @@ func (e *Engineer) LoadConfig() error {
 	}
 
 	// Parse merge_queue section into our config struct
-	// We need special handling for poll_interval (string -> Duration)
+	// We need special handling for poll_interval and batch_window (string -> Duration)
 	var mqRaw struct {
 		Enabled              *bool   `json:"enabled"`
 		TargetBranch         *string `json:"target_branch"`
@@ -173,6 +195,10 @@ func (e *Engineer) LoadConfig() error {
 		RetryFlakyTests      *int    `json:"retry_flaky_tests"`
 		PollInterval         *string `json:"poll_interval"`
 		MaxConcurrent        *int    `json:"max_concurrent"`
+		BatchMerge           *bool   `json:"batch_merge"`
+		BatchSize            *int    `json:"batch_size"`
+		BatchWindow          *string `json:"batch_window"`
+		BatchStrategy        *string `json:"batch_strategy"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -213,6 +239,22 @@ func (e *Engineer) LoadConfig() error {
 			return fmt.Errorf("invalid poll_interval %q: %w", *mqRaw.PollInterval, err)
 		}
 		e.config.PollInterval = dur
+	}
+	if mqRaw.BatchMerge != nil {
+		e.config.BatchMerge = *mqRaw.BatchMerge
+	}
+	if mqRaw.BatchSize != nil {
+		e.config.BatchSize = *mqRaw.BatchSize
+	}
+	if mqRaw.BatchWindow != nil {
+		dur, err := time.ParseDuration(*mqRaw.BatchWindow)
+		if err != nil {
+			return fmt.Errorf("invalid batch_window %q: %w", *mqRaw.BatchWindow, err)
+		}
+		e.config.BatchWindow = dur
+	}
+	if mqRaw.BatchStrategy != nil {
+		e.config.BatchStrategy = *mqRaw.BatchStrategy
 	}
 
 	return nil
@@ -927,4 +969,191 @@ func (e *Engineer) ReleaseMR(mrID string) error {
 	return e.beads.Update(mrID, beads.UpdateOptions{
 		Assignee: &empty,
 	})
+}
+
+// BatchResult contains the result of processing a batch of merge requests.
+type BatchResult struct {
+	Success      bool        // Whether the entire batch succeeded
+	MergeCommit  string      // Final merge commit SHA (if successful)
+	Merged       []*MRInfo   // MRs that were successfully merged
+	Ejected      []*MRInfo   // MRs ejected due to conflicts
+	Failed       []*MRInfo   // MRs that failed (if batch failed)
+	Error        string      // Error message if batch failed
+	TestsFailed  bool        // Whether tests failed
+	StagingBranch string     // Name of the staging branch used
+}
+
+// ProcessBatch processes multiple MRs as a single batch.
+// This merges all MRs to a staging branch, runs tests once, then fast-forwards main.
+// MRs that conflict are ejected from the batch and returned for individual processing.
+func (e *Engineer) ProcessBatch(ctx context.Context, mrs []*MRInfo) BatchResult {
+	if len(mrs) == 0 {
+		return BatchResult{Success: true}
+	}
+
+	target := e.config.TargetBranch
+	stagingBranch := fmt.Sprintf("batch-staging-%d", time.Now().Unix())
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Starting batch merge of %d MRs\n", len(mrs))
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Staging branch: %s\n", stagingBranch)
+
+	// Step 1: Create staging branch from target
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Creating staging branch from %s...\n", target)
+	if err := e.git.Checkout(target); err != nil {
+		return BatchResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to checkout %s: %v", target, err),
+			Failed:  mrs,
+		}
+	}
+
+	// Pull latest from origin
+	if err := e.git.Pull("origin", target); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: pull from origin/%s: %v (continuing)\n", target, err)
+	}
+
+	// Create staging branch
+	if err := e.git.CreateBranch(stagingBranch); err != nil {
+		return BatchResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to create staging branch: %v", err),
+			Failed:  mrs,
+		}
+	}
+
+	// Step 2: Merge each MR to staging, ejecting conflicts
+	var merged []*MRInfo
+	var ejected []*MRInfo
+
+	for _, mr := range mrs {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Merging %s (%s)...\n", mr.ID, mr.Branch)
+
+		// Check if branch exists
+		exists, err := e.git.BranchExists(mr.Branch)
+		if err != nil || !exists {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Ejecting %s: branch %s not found\n", mr.ID, mr.Branch)
+			ejected = append(ejected, mr)
+			continue
+		}
+
+		// Check for conflicts
+		conflicts, err := e.git.CheckConflicts(mr.Branch, stagingBranch)
+		if err != nil || len(conflicts) > 0 {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Ejecting %s: conflicts detected\n", mr.ID)
+			ejected = append(ejected, mr)
+			continue
+		}
+
+		// Perform merge
+		mergeMsg := fmt.Sprintf("Batch merge %s into %s", mr.Branch, stagingBranch)
+		if err := e.git.MergeNoFF(mr.Branch, mergeMsg); err != nil {
+			// Check if it's a conflict
+			conflictFiles, _ := e.git.GetConflictingFiles()
+			if len(conflictFiles) > 0 {
+				_ = e.git.AbortMerge()
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Ejecting %s: merge conflict\n", mr.ID)
+				ejected = append(ejected, mr)
+				continue
+			}
+			// Other error
+			_ = e.git.AbortMerge()
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Ejecting %s: merge failed: %v\n", mr.ID, err)
+			ejected = append(ejected, mr)
+			continue
+		}
+
+		merged = append(merged, mr)
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Merged %s successfully\n", mr.ID)
+	}
+
+	// If nothing merged, cleanup and return
+	if len(merged) == 0 {
+		_ = e.git.Checkout(target)
+		_ = e.git.DeleteBranch(stagingBranch, true)
+		return BatchResult{
+			Success:       true,
+			Merged:        merged,
+			Ejected:       ejected,
+			StagingBranch: stagingBranch,
+		}
+	}
+
+	// Step 3: Run tests ONCE on the combined staging branch
+	if e.config.RunTests && e.config.TestCommand != "" {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Running tests on batch (%d MRs)...\n", len(merged))
+		result := e.runTests(ctx)
+		if !result.Success {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Batch tests failed: %s\n", result.Error)
+
+			// Cleanup staging branch
+			_ = e.git.Checkout(target)
+			_ = e.git.DeleteBranch(stagingBranch, true)
+
+			// Handle based on strategy
+			if e.config.BatchStrategy == "bisect-on-fail" {
+				_, _ = fmt.Fprintln(e.output, "[Engineer] Bisect-on-fail not yet implemented, failing entire batch")
+			}
+
+			return BatchResult{
+				Success:       false,
+				TestsFailed:   true,
+				Error:         result.Error,
+				Merged:        nil,
+				Ejected:       ejected,
+				Failed:        merged,
+				StagingBranch: stagingBranch,
+			}
+		}
+		_, _ = fmt.Fprintln(e.output, "[Engineer] Batch tests passed")
+	}
+
+	// Step 4: Fast-forward main to staging
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Fast-forwarding %s to staging...\n", target)
+	if err := e.git.Checkout(target); err != nil {
+		_ = e.git.DeleteBranch(stagingBranch, true)
+		return BatchResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to checkout %s: %v", target, err),
+			Failed:  merged,
+			Ejected: ejected,
+		}
+	}
+
+	// Merge staging into target (should be fast-forward)
+	if err := e.git.Merge(stagingBranch); err != nil {
+		_ = e.git.DeleteBranch(stagingBranch, true)
+		return BatchResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to fast-forward %s: %v", target, err),
+			Failed:  merged,
+			Ejected: ejected,
+		}
+	}
+
+	// Get the merge commit SHA
+	mergeCommit, _ := e.git.Rev("HEAD")
+
+	// Step 5: Push to origin
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing to origin/%s...\n", target)
+	if err := e.git.Push("origin", target, false); err != nil {
+		return BatchResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to push: %v", err),
+			Failed:  merged,
+			Ejected: ejected,
+		}
+	}
+
+	// Step 6: Cleanup staging branch
+	_ = e.git.DeleteBranch(stagingBranch, true)
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Batch merge complete: %d merged, %d ejected\n", len(merged), len(ejected))
+
+	return BatchResult{
+		Success:       true,
+		MergeCommit:   mergeCommit,
+		Merged:        merged,
+		Ejected:       ejected,
+		StagingBranch: stagingBranch,
+	}
 }

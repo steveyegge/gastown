@@ -661,12 +661,43 @@ type MergeQueueConfig struct {
 
 	// MaxConcurrent is the maximum number of concurrent merges.
 	MaxConcurrent int `json:"max_concurrent"`
+
+	// BatchMerge enables batch mode where multiple MRs are merged together
+	// before running tests once. This reduces CPU load when processing many MRs.
+	BatchMerge bool `json:"batch_merge,omitempty"`
+
+	// BatchSize is the maximum number of MRs to include in a single batch.
+	// Only used when BatchMerge is enabled. Default: 5
+	BatchSize int `json:"batch_size,omitempty"`
+
+	// BatchWindow is the time window to wait for collecting MRs into a batch.
+	// Format: Go duration string (e.g., "5m", "2m30s").
+	// Only used when BatchMerge is enabled. Default: "5m"
+	BatchWindow string `json:"batch_window,omitempty"`
+
+	// BatchStrategy controls how to handle test failures in batch mode.
+	// "all-or-nothing": Reject entire batch on failure (fast, simple).
+	// "bisect-on-fail": Binary search to find failing MR(s) on failure.
+	// Only used when BatchMerge is enabled. Default: "all-or-nothing"
+	BatchStrategy string `json:"batch_strategy,omitempty"`
 }
 
 // OnConflict strategy constants.
 const (
 	OnConflictAssignBack = "assign_back"
 	OnConflictAutoRebase = "auto_rebase"
+)
+
+// BatchStrategy constants for batch merge mode.
+const (
+	BatchStrategyAllOrNothing = "all-or-nothing"
+	BatchStrategyBisectOnFail = "bisect-on-fail"
+)
+
+// Default batch merge settings.
+const (
+	DefaultBatchSize   = 5
+	DefaultBatchWindow = "5m"
 )
 
 // DefaultMergeQueueConfig returns a MergeQueueConfig with sensible defaults.
