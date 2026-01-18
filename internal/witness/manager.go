@@ -277,7 +277,10 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 	if roleConfig != nil && roleConfig.StartCommand != "" {
 		return beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, rigName, "", "witness"), nil
 	}
-	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, "", agentOverride)
+	// Add initial prompt for autonomous patrol startup.
+	// The prompt triggers GUPP: witness starts patrol immediately without waiting for input.
+	initialPrompt := "I am Witness for " + rigName + ". Start patrol: check gt hook, if empty create mol-witness-patrol wisp and execute it."
+	command, err := config.BuildAgentStartupCommandWithAgentOverride("witness", rigName, townRoot, rigPath, initialPrompt, agentOverride)
 	if err != nil {
 		return "", fmt.Errorf("building startup command: %w", err)
 	}
