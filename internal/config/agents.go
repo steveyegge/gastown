@@ -27,6 +27,8 @@ const (
 	AgentAuggie AgentPreset = "auggie"
 	// AgentAmp is Sourcegraph AMP.
 	AgentAmp AgentPreset = "amp"
+	// AgentOpenCode is OpenCode CLI.
+	AgentOpenCode AgentPreset = "opencode"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -130,7 +132,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Command:             "codex",
 		Args:                []string{"--yolo"},
 		ProcessNames:        []string{"codex"}, // Codex CLI binary
-		SessionIDEnv:        "", // Codex captures from JSONL output
+		SessionIDEnv:        "",                // Codex captures from JSONL output
 		ResumeFlag:          "resume",
 		ResumeStyle:         "subcommand",
 		SupportsHooks:       false, // Use env/files instead
@@ -176,6 +178,21 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeStyle:         "subcommand", // 'amp threads continue <threadId>'
 		SupportsHooks:       false,
 		SupportsForkSession: false,
+	},
+	AgentOpenCode: {
+		Name:                AgentOpenCode,
+		Command:             "opencode",
+		Args:                []string{},                  // OpenCode handles permissions internally
+		ProcessNames:        []string{"opencode", "bun"}, // Runs via Bun runtime
+		SessionIDEnv:        "OPENCODE_SESSION_ID",
+		ResumeFlag:          "-c", // --continue flag
+		ResumeStyle:         "flag",
+		SupportsHooks:       true, // Uses gastown.js plugin
+		SupportsForkSession: false,
+		NonInteractive: &NonInteractiveConfig{
+			Subcommand: "run", // opencode run "prompt"
+			OutputFlag: "--format json",
+		},
 	},
 }
 
@@ -327,10 +344,10 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		return DefaultRuntimeConfig()
 	}
 
-	return &RuntimeConfig{
+	return normalizeRuntimeConfig(&RuntimeConfig{
 		Command: info.Command,
 		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
-	}
+	})
 }
 
 // BuildResumeCommand builds a command to resume an agent session.

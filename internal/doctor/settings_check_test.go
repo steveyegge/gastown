@@ -9,11 +9,11 @@ import (
 	"testing"
 )
 
-func TestNewClaudeSettingsCheck(t *testing.T) {
-	check := NewClaudeSettingsCheck()
+func TestNewAgentSettingsCheck(t *testing.T) {
+	check := NewAgentSettingsCheck()
 
-	if check.Name() != "claude-settings" {
-		t.Errorf("expected name 'claude-settings', got %q", check.Name())
+	if check.Name() != "settings" {
+		t.Errorf("expected name 'settings', got %q", check.Name())
 	}
 
 	if !check.CanFix() {
@@ -21,10 +21,10 @@ func TestNewClaudeSettingsCheck(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_NoSettingsFiles(t *testing.T) {
+func TestSettingsCheck_NoSettingsFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -176,15 +176,15 @@ func createStaleSettings(t *testing.T, path string, missingElements ...string) {
 	}
 }
 
-func TestClaudeSettingsCheck_ValidMayorSettings(t *testing.T) {
+func TestSettingsCheck_ValidMayorSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create valid mayor settings at correct location (mayor/.claude/settings.json)
-	// NOT at town root (.claude/settings.json) which is wrong location
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create valid mayor settings at correct location (town root: .claude/settings.json)
+	// Mayor runs from town root, so settings must be there (not in mayor/ subdirectory)
+	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
 	createValidSettings(t, mayorSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -194,14 +194,14 @@ func TestClaudeSettingsCheck_ValidMayorSettings(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_ValidDeaconSettings(t *testing.T) {
+func TestSettingsCheck_ValidDeaconSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create valid deacon settings
 	deaconSettings := filepath.Join(tmpDir, "deacon", ".claude", "settings.json")
 	createValidSettings(t, deaconSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -211,7 +211,7 @@ func TestClaudeSettingsCheck_ValidDeaconSettings(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_ValidWitnessSettings(t *testing.T) {
+func TestSettingsCheck_ValidWitnessSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -219,7 +219,7 @@ func TestClaudeSettingsCheck_ValidWitnessSettings(t *testing.T) {
 	witnessSettings := filepath.Join(tmpDir, rigName, "witness", ".claude", "settings.json")
 	createValidSettings(t, witnessSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -229,7 +229,7 @@ func TestClaudeSettingsCheck_ValidWitnessSettings(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_ValidRefinerySettings(t *testing.T) {
+func TestSettingsCheck_ValidRefinerySettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -237,7 +237,7 @@ func TestClaudeSettingsCheck_ValidRefinerySettings(t *testing.T) {
 	refinerySettings := filepath.Join(tmpDir, rigName, "refinery", ".claude", "settings.json")
 	createValidSettings(t, refinerySettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -247,7 +247,7 @@ func TestClaudeSettingsCheck_ValidRefinerySettings(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_ValidCrewSettings(t *testing.T) {
+func TestSettingsCheck_ValidCrewSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -255,7 +255,7 @@ func TestClaudeSettingsCheck_ValidCrewSettings(t *testing.T) {
 	crewSettings := filepath.Join(tmpDir, rigName, "crew", ".claude", "settings.json")
 	createValidSettings(t, crewSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -265,7 +265,7 @@ func TestClaudeSettingsCheck_ValidCrewSettings(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_ValidPolecatSettings(t *testing.T) {
+func TestSettingsCheck_ValidPolecatSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -273,7 +273,7 @@ func TestClaudeSettingsCheck_ValidPolecatSettings(t *testing.T) {
 	pcSettings := filepath.Join(tmpDir, rigName, "polecats", ".claude", "settings.json")
 	createValidSettings(t, pcSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -283,14 +283,14 @@ func TestClaudeSettingsCheck_ValidPolecatSettings(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_MissingEnabledPlugins(t *testing.T) {
+func TestSettingsCheck_MissingEnabledPlugins(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale mayor settings missing enabledPlugins (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create stale mayor settings missing enabledPlugins (at town root)
+	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "enabledPlugins")
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -303,14 +303,14 @@ func TestClaudeSettingsCheck_MissingEnabledPlugins(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_MissingHooks(t *testing.T) {
+func TestSettingsCheck_MissingHooks(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing hooks entirely (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create stale settings missing hooks entirely (at town root)
+	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "hooks")
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -320,14 +320,14 @@ func TestClaudeSettingsCheck_MissingHooks(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_MissingPATH(t *testing.T) {
+func TestSettingsCheck_MissingPATH(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing PATH export (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create stale settings missing PATH export (at town root)
+	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "PATH")
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -347,14 +347,14 @@ func TestClaudeSettingsCheck_MissingPATH(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_MissingDeaconNudge(t *testing.T) {
+func TestSettingsCheck_MissingDeaconNudge(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing deacon nudge (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create stale settings missing deacon nudge (at town root)
+	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "deacon-nudge")
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -374,14 +374,14 @@ func TestClaudeSettingsCheck_MissingDeaconNudge(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_MissingStopHook(t *testing.T) {
+func TestSettingsCheck_MissingStopHook(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create stale settings missing Stop hook (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create stale settings missing Stop hook (at town root)
+	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "Stop")
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -401,7 +401,7 @@ func TestClaudeSettingsCheck_MissingStopHook(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_WrongLocationWitness(t *testing.T) {
+func TestSettingsCheck_WrongLocationWitness(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -410,7 +410,7 @@ func TestClaudeSettingsCheck_WrongLocationWitness(t *testing.T) {
 	wrongSettings := filepath.Join(tmpDir, rigName, "witness", "rig", ".claude", "settings.json")
 	createValidSettings(t, wrongSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -430,7 +430,7 @@ func TestClaudeSettingsCheck_WrongLocationWitness(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_WrongLocationRefinery(t *testing.T) {
+func TestSettingsCheck_WrongLocationRefinery(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -439,7 +439,7 @@ func TestClaudeSettingsCheck_WrongLocationRefinery(t *testing.T) {
 	wrongSettings := filepath.Join(tmpDir, rigName, "refinery", "rig", ".claude", "settings.json")
 	createValidSettings(t, wrongSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -459,12 +459,12 @@ func TestClaudeSettingsCheck_WrongLocationRefinery(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_MultipleStaleFiles(t *testing.T) {
+func TestSettingsCheck_MultipleStaleFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
 	// Create multiple stale settings files (all at correct locations)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
 	createStaleSettings(t, mayorSettings, "PATH")
 
 	deaconSettings := filepath.Join(tmpDir, "deacon", ".claude", "settings.json")
@@ -474,7 +474,7 @@ func TestClaudeSettingsCheck_MultipleStaleFiles(t *testing.T) {
 	witnessWrong := filepath.Join(tmpDir, rigName, "witness", "rig", ".claude", "settings.json")
 	createValidSettings(t, witnessWrong) // Valid content but wrong location
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -487,11 +487,11 @@ func TestClaudeSettingsCheck_MultipleStaleFiles(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_InvalidJSON(t *testing.T) {
+func TestSettingsCheck_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create invalid JSON file (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create invalid JSON file (at town root)
+	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(mayorSettings), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +499,7 @@ func TestClaudeSettingsCheck_InvalidJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -519,7 +519,7 @@ func TestClaudeSettingsCheck_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_FixDeletesStaleFile(t *testing.T) {
+func TestSettingsCheck_FixDeletesStaleFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create stale settings in wrong location (inside git repo - easy to test - just delete, no recreate)
@@ -527,7 +527,7 @@ func TestClaudeSettingsCheck_FixDeletesStaleFile(t *testing.T) {
 	wrongSettings := filepath.Join(tmpDir, rigName, "witness", "rig", ".claude", "settings.json")
 	createValidSettings(t, wrongSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	// Run to detect
@@ -553,7 +553,7 @@ func TestClaudeSettingsCheck_FixDeletesStaleFile(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_SkipsNonRigDirectories(t *testing.T) {
+func TestSettingsCheck_SkipsNonRigDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create directories that should be skipped
@@ -567,7 +567,7 @@ func TestClaudeSettingsCheck_SkipsNonRigDirectories(t *testing.T) {
 		createStaleSettings(t, settingsPath, "PATH")
 	}
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	_ = check.Run(ctx)
@@ -584,12 +584,12 @@ func TestClaudeSettingsCheck_SkipsNonRigDirectories(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_MixedValidAndStale(t *testing.T) {
+func TestSettingsCheck_MixedValidAndStale(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
-	// Create valid mayor settings (at correct location)
-	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	// Create valid mayor settings (at town root)
+	mayorSettings := filepath.Join(tmpDir, ".claude", "settings.json")
 	createValidSettings(t, mayorSettings)
 
 	// Create stale witness settings in correct location (missing PATH)
@@ -600,7 +600,7 @@ func TestClaudeSettingsCheck_MixedValidAndStale(t *testing.T) {
 	refinerySettings := filepath.Join(tmpDir, rigName, "refinery", ".claude", "settings.json")
 	createValidSettings(t, refinerySettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -617,7 +617,7 @@ func TestClaudeSettingsCheck_MixedValidAndStale(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_WrongLocationCrew(t *testing.T) {
+func TestSettingsCheck_WrongLocationCrew(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -626,7 +626,7 @@ func TestClaudeSettingsCheck_WrongLocationCrew(t *testing.T) {
 	wrongSettings := filepath.Join(tmpDir, rigName, "crew", "agent1", ".claude", "settings.json")
 	createValidSettings(t, wrongSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -646,7 +646,7 @@ func TestClaudeSettingsCheck_WrongLocationCrew(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_WrongLocationPolecat(t *testing.T) {
+func TestSettingsCheck_WrongLocationPolecat(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -655,7 +655,7 @@ func TestClaudeSettingsCheck_WrongLocationPolecat(t *testing.T) {
 	wrongSettings := filepath.Join(tmpDir, rigName, "polecats", "pc1", ".claude", "settings.json")
 	createValidSettings(t, wrongSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -714,7 +714,7 @@ func gitAddAndCommit(t *testing.T, repoDir, filePath string) {
 	}
 }
 
-func TestClaudeSettingsCheck_GitStatusUntracked(t *testing.T) {
+func TestSettingsCheck_GitStatusUntracked(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -729,7 +729,7 @@ func TestClaudeSettingsCheck_GitStatusUntracked(t *testing.T) {
 	wrongSettings := filepath.Join(rigDir, ".claude", "settings.json")
 	createValidSettings(t, wrongSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -750,7 +750,7 @@ func TestClaudeSettingsCheck_GitStatusUntracked(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_GitStatusTrackedClean(t *testing.T) {
+func TestSettingsCheck_GitStatusTrackedClean(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -766,7 +766,7 @@ func TestClaudeSettingsCheck_GitStatusTrackedClean(t *testing.T) {
 	createValidSettings(t, wrongSettings)
 	gitAddAndCommit(t, rigDir, wrongSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -787,7 +787,7 @@ func TestClaudeSettingsCheck_GitStatusTrackedClean(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_GitStatusTrackedModified(t *testing.T) {
+func TestSettingsCheck_GitStatusTrackedModified(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -808,7 +808,7 @@ func TestClaudeSettingsCheck_GitStatusTrackedModified(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -833,7 +833,7 @@ func TestClaudeSettingsCheck_GitStatusTrackedModified(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_FixSkipsModifiedFiles(t *testing.T) {
+func TestSettingsCheck_FixSkipsModifiedFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -854,7 +854,7 @@ func TestClaudeSettingsCheck_FixSkipsModifiedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	// Run to detect
@@ -874,7 +874,7 @@ func TestClaudeSettingsCheck_FixSkipsModifiedFiles(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_FixDeletesUntrackedFiles(t *testing.T) {
+func TestSettingsCheck_FixDeletesUntrackedFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -889,7 +889,7 @@ func TestClaudeSettingsCheck_FixDeletesUntrackedFiles(t *testing.T) {
 	wrongSettings := filepath.Join(rigDir, ".claude", "settings.json")
 	createValidSettings(t, wrongSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	// Run to detect
@@ -909,7 +909,7 @@ func TestClaudeSettingsCheck_FixDeletesUntrackedFiles(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_FixDeletesTrackedCleanFiles(t *testing.T) {
+func TestSettingsCheck_FixDeletesTrackedCleanFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -925,7 +925,7 @@ func TestClaudeSettingsCheck_FixDeletesTrackedCleanFiles(t *testing.T) {
 	createValidSettings(t, wrongSettings)
 	gitAddAndCommit(t, rigDir, wrongSettings)
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	// Run to detect
@@ -945,7 +945,7 @@ func TestClaudeSettingsCheck_FixDeletesTrackedCleanFiles(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_DetectsStaleCLAUDEmdAtTownRoot(t *testing.T) {
+func TestSettingsCheck_DetectsStaleCLAUDEmdAtTownRoot(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create CLAUDE.md at town root (wrong location)
@@ -954,7 +954,7 @@ func TestClaudeSettingsCheck_DetectsStaleCLAUDEmdAtTownRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
@@ -976,7 +976,7 @@ func TestClaudeSettingsCheck_DetectsStaleCLAUDEmdAtTownRoot(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_FixMovesCLAUDEmdToMayor(t *testing.T) {
+func TestSettingsCheck_FixMovesCLAUDEmdToMayor(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create mayor directory (needed for fix to create CLAUDE.md there)
@@ -991,7 +991,7 @@ func TestClaudeSettingsCheck_FixMovesCLAUDEmdToMayor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	// Run to detect
@@ -1017,68 +1017,21 @@ func TestClaudeSettingsCheck_FixMovesCLAUDEmdToMayor(t *testing.T) {
 	}
 }
 
-func TestClaudeSettingsCheck_TownRootSettingsWarnsInsteadOfKilling(t *testing.T) {
+func TestSettingsCheck_TownRootSettingsIsCorrectForMayor(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create mayor directory (needed for fix to recreate settings there)
-	mayorDir := filepath.Join(tmpDir, "mayor")
-	if err := os.MkdirAll(mayorDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+	// Create valid mayor settings at town root (this is the CORRECT location)
+	// Mayor runs from town root, so settings must be there.
+	// This is the new behavior after OpenCode support - Mayor settings are at town root.
+	townRootSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	createValidSettings(t, townRootSettings)
 
-	// Create settings.json at town root (wrong location - pollutes all agents)
-	staleTownRootDir := filepath.Join(tmpDir, ".claude")
-	if err := os.MkdirAll(staleTownRootDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	staleTownRootSettings := filepath.Join(staleTownRootDir, "settings.json")
-	// Create valid settings content
-	settingsContent := `{
-		"env": {"PATH": "/usr/bin"},
-		"enabledPlugins": ["claude-code-expert"],
-		"hooks": {
-			"SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "gt prime"}]}],
-			"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "gt handoff"}]}]
-		}
-	}`
-	if err := os.WriteFile(staleTownRootSettings, []byte(settingsContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	check := NewClaudeSettingsCheck()
+	check := NewAgentSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
-	// Run to detect
+	// Run to detect - should be OK since town root is correct for Mayor
 	result := check.Run(ctx)
-	if result.Status != StatusError {
-		t.Fatalf("expected StatusError for town root settings, got %v", result.Status)
-	}
-
-	// Verify it's flagged as wrong location
-	foundWrongLocation := false
-	for _, d := range result.Details {
-		if strings.Contains(d, "wrong location") {
-			foundWrongLocation = true
-			break
-		}
-	}
-	if !foundWrongLocation {
-		t.Errorf("expected details to mention wrong location, got %v", result.Details)
-	}
-
-	// Apply fix - should NOT return error and should NOT kill sessions
-	// (session killing would require tmux which isn't available in tests)
-	if err := check.Fix(ctx); err != nil {
-		t.Fatalf("Fix failed: %v", err)
-	}
-
-	// Verify stale file was deleted
-	if _, err := os.Stat(staleTownRootSettings); !os.IsNotExist(err) {
-		t.Error("expected settings.json at town root to be deleted")
-	}
-
-	// Verify .claude directory was cleaned up (best-effort)
-	if _, err := os.Stat(staleTownRootDir); !os.IsNotExist(err) {
-		t.Error("expected .claude directory at town root to be deleted")
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK for valid town root settings, got %v: %s", result.Status, result.Message)
 	}
 }

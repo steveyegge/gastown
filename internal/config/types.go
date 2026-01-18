@@ -268,8 +268,11 @@ type RuntimeConfig struct {
 	InitialPrompt string `json:"initial_prompt,omitempty"`
 
 	// PromptMode controls how prompts are passed to the runtime.
-	// Supported values: "arg" (append prompt arg), "none" (ignore prompt).
-	// Default: "arg" for claude/generic, "none" for codex.
+	// Supported values:
+	//   "arg"  - append prompt as positional argument (claude style)
+	//   "flag" - use --prompt "..." flag (opencode style)
+	//   "none" - ignore prompt entirely
+	// Default: "arg" for claude/generic, "flag" for opencode, "none" for codex.
 	PromptMode string `json:"prompt_mode,omitempty"`
 
 	// Session config controls environment integration for runtime session IDs.
@@ -364,7 +367,16 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 	}
 
 	// Quote the prompt for shell safety
-	return base + " " + quoteForShell(p)
+	quoted := quoteForShell(p)
+
+	switch resolved.PromptMode {
+	case "flag":
+		// OpenCode style: --prompt "message"
+		return base + " --prompt " + quoted
+	default:
+		// Claude style: positional argument
+		return base + " " + quoted
+	}
 }
 
 // BuildArgsWithPrompt returns the runtime command and args suitable for exec.
@@ -378,7 +390,14 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	}
 
 	if p != "" && resolved.PromptMode != "none" {
-		args = append(args, p)
+		switch resolved.PromptMode {
+		case "flag":
+			// OpenCode style: --prompt "message"
+			args = append(args, "--prompt", p)
+		default:
+			// Claude style: positional argument
+			args = append(args, p)
+		}
 	}
 
 	return args
@@ -389,6 +408,9 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 		rc = &RuntimeConfig{}
 	}
 
+	if rc.Provider == "" {
+		rc.Provider = inferProviderFromCommand(rc.Command)
+	}
 	if rc.Provider == "" {
 		rc.Provider = "claude"
 	}
@@ -403,6 +425,10 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 
 	if rc.PromptMode == "" {
 		rc.PromptMode = defaultPromptMode(rc.Provider)
+	}
+
+	if rc.InitialPrompt == "" {
+		rc.InitialPrompt = defaultInitialPrompt(rc.Provider)
 	}
 
 	if rc.Session == nil {
@@ -460,6 +486,19 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 	return rc
 }
 
+func inferProviderFromCommand(command string) string {
+	if command == "" {
+		return ""
+	}
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
+	switch base {
+	case "claude", "codex", "gemini", "cursor", "auggie", "amp", "opencode":
+		return base
+	default:
+		return ""
+	}
+}
+
 func defaultRuntimeCommand(provider string) string {
 	switch provider {
 	case "codex":
@@ -487,9 +526,20 @@ func defaultPromptMode(provider string) string {
 	case "codex":
 		return "none"
 	case "opencode":
-		return "none"
+		return "flag"
 	default:
 		return "arg"
+	}
+}
+
+func defaultInitialPrompt(provider string) string {
+	switch provider {
+	case "opencode":
+		// Trigger message for OpenCode plugin auto-init.
+		// The plugin replaces this with Gas Town context when GT_AUTO_INIT=1.
+		return "[GT_AGENT_INIT]"
+	default:
+		return ""
 	}
 }
 
@@ -523,7 +573,7 @@ func defaultHooksDir(provider string) string {
 	case "claude":
 		return ".claude"
 	case "opencode":
-		return ".opencode/plugin"
+		return ".opencode/plugins"
 	default:
 		return ""
 	}

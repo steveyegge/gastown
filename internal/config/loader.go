@@ -1091,7 +1091,7 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 	if result.Args == nil {
 		result.Args = []string{"--dangerously-skip-permissions"}
 	}
-	return result
+	return normalizeRuntimeConfig(result)
 }
 
 // GetRuntimeCommand is a convenience function that returns the full command string
@@ -1252,6 +1252,10 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
+	// Add provider-specific env vars (e.g., GT_AUTO_INIT for OpenCode)
+	for k, v := range providerEnv(rc.Provider, role) {
+		resolvedEnv[k] = v
+	}
 
 	// Build environment export prefix
 	var exports []string
@@ -1352,6 +1356,10 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	}
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
+	}
+	// Add provider-specific env vars (e.g., GT_AUTO_INIT for OpenCode)
+	for k, v := range providerEnv(rc.Provider, role) {
+		resolvedEnv[k] = v
 	}
 
 	// Build environment export prefix

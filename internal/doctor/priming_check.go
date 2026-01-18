@@ -115,7 +115,8 @@ func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, _ string) []priming
 	var issues []primingIssue
 
 	agentPath := filepath.Join(townRoot, agentDir)
-	settingsPath := filepath.Join(agentPath, ".claude", "settings.json")
+	hooksDir := DetectHooksDir(agentPath)
+	settingsPath := filepath.Join(agentPath, hooksDir, "settings.json")
 
 	// Check for SessionStart hook with gt prime
 	if fileExists(settingsPath) {
@@ -238,7 +239,8 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 		if dirExists(crewDir) {
 			crewEntries, _ := os.ReadDir(crewDir)
 			for _, crewEntry := range crewEntries {
-				if !crewEntry.IsDir() || crewEntry.Name() == ".claude" {
+				name := crewEntry.Name()
+				if !crewEntry.IsDir() || name == ".claude" || name == ".opencode" {
 					continue
 				}
 				crewPath := filepath.Join(crewDir, crewEntry.Name())
@@ -261,16 +263,17 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 		if dirExists(polecatsDir) {
 			pcEntries, _ := os.ReadDir(polecatsDir)
 			for _, pcEntry := range pcEntries {
-				if !pcEntry.IsDir() || pcEntry.Name() == ".claude" {
+				pcName := pcEntry.Name()
+				if !pcEntry.IsDir() || pcName == ".claude" || pcName == ".opencode" {
 					continue
 				}
-				polecatPath := filepath.Join(polecatsDir, pcEntry.Name())
+				polecatPath := filepath.Join(polecatsDir, pcName)
 				// Check if beads redirect is set up
 				beadsDir := beads.ResolveBeadsDir(polecatPath)
 				primeMdPath := filepath.Join(beadsDir, "PRIME.md")
 				if !fileExists(primeMdPath) {
 					issues = append(issues, primingIssue{
-						location:    fmt.Sprintf("%s/polecats/%s", rigName, pcEntry.Name()),
+						location:    fmt.Sprintf("%s/polecats/%s", rigName, pcName),
 						issueType:   "missing_prime_md",
 						description: "Missing PRIME.md (Gas Town context fallback)",
 						fixable:     true,

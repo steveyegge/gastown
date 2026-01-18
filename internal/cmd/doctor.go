@@ -160,11 +160,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// NOTE: StaleAttachmentsCheck removed - staleness detection belongs in Deacon molecule
 
 	// Config architecture checks
-	d.Register(doctor.NewSettingsCheck())
+	d.Register(doctor.NewAgentSettingsCheck())
 	d.Register(doctor.NewSessionHookCheck())
 	d.Register(doctor.NewRuntimeGitignoreCheck())
 	d.Register(doctor.NewLegacyGastownCheck())
-	d.Register(doctor.NewClaudeSettingsCheck())
 
 	// Priming subsystem check
 	d.Register(doctor.NewPrimingCheck())

@@ -831,6 +831,20 @@ func TestRuntimeConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigProviderInference(t *testing.T) {
+	t.Parallel()
+	rc := normalizeRuntimeConfig(&RuntimeConfig{Command: "opencode"})
+	if rc.Provider != "opencode" {
+		t.Errorf("Provider = %q, want %q", rc.Provider, "opencode")
+	}
+	if rc.Hooks == nil || rc.Hooks.Provider != "opencode" {
+		t.Errorf("Hooks.Provider = %q, want %q", rc.Hooks.Provider, "opencode")
+	}
+	if rc.PromptMode != "flag" {
+		t.Errorf("PromptMode = %q, want %q", rc.PromptMode, "flag")
+	}
+}
+
 func TestRuntimeConfigBuildCommand(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -2601,5 +2615,89 @@ func TestBuildStartupCommandWithAgentOverride_IncludesGTRoot(t *testing.T) {
 	// Should include GT_ROOT in export
 	if !strings.Contains(cmd, "GT_ROOT="+townRoot) {
 		t.Errorf("expected GT_ROOT=%s in command, got: %q", townRoot, cmd)
+	}
+}
+
+func TestBuildStartupCommand_IncludesProviderEnvForOpenCode(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure with opencode agent
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "opencode"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "polecat"}, rigPath, "")
+
+	// Should include GT_AUTO_INIT=1 for OpenCode
+	if !strings.Contains(cmd, "GT_AUTO_INIT=1") {
+		t.Errorf("expected GT_AUTO_INIT=1 for opencode provider, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommand_NoProviderEnvForClaude(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure with claude agent (default)
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "polecat"}, rigPath, "")
+
+	// Should NOT include GT_AUTO_INIT for Claude
+	if strings.Contains(cmd, "GT_AUTO_INIT") {
+		t.Errorf("did not expect GT_AUTO_INIT for claude provider, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_IncludesProviderEnvForOpenCode(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure with claude default, but we'll override to opencode
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": "witness"},
+		rigPath, "", "opencode",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should include GT_AUTO_INIT=1 for OpenCode override
+	if !strings.Contains(cmd, "GT_AUTO_INIT=1") {
+		t.Errorf("expected GT_AUTO_INIT=1 for opencode override, got: %q", cmd)
 	}
 }

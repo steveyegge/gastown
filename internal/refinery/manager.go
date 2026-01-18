@@ -165,16 +165,18 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		refineryRigDir = filepath.Join(m.rig.Path, "mayor", "rig")
 	}
 
-	// Ensure runtime settings exist in refinery/ (not refinery/rig/) so we don't
-	// write into the source repo. Runtime walks up the tree to find settings.
-	refineryParentDir := filepath.Join(m.rig.Path, "refinery")
-	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(refineryParentDir, "refinery", runtimeConfig); err != nil {
+	// Resolve agent config from town settings to get role-specific agent (e.g., role_agents["refinery"] = "glm")
+	townRoot := filepath.Dir(m.rig.Path)
+	runtimeConfig := config.ResolveAgentConfig(townRoot, m.rig.Path)
+
+	// Ensure runtime settings exist in refineryRigDir where session runs.
+	// OpenCode looks for plugins relative to the working directory, not by directory traversal.
+	// Note: .opencode/ should be in .gitignore to avoid committing to source repo.
+	if err := runtime.EnsureSettingsForRole(refineryRigDir, "refinery", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	// Build startup command first
-	townRoot := filepath.Dir(m.rig.Path)
 	var command string
 	if agentOverride != "" {
 		var err error
