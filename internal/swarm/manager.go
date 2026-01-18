@@ -13,19 +13,19 @@ import (
 
 // Common errors
 var (
-	ErrSwarmNotFound  = errors.New("swarm not found")
-	ErrSwarmExists    = errors.New("swarm already exists")
-	ErrInvalidState   = errors.New("invalid state transition")
-	ErrNoReadyTasks   = errors.New("no ready tasks")
-	ErrBeadsNotFound  = errors.New("beads not available")
+	ErrSwarmNotFound = errors.New("swarm not found")
+	ErrSwarmExists   = errors.New("swarm already exists")
+	ErrInvalidState  = errors.New("invalid state transition")
+	ErrNoReadyTasks  = errors.New("no ready tasks")
+	ErrBeadsNotFound = errors.New("beads not available")
 )
 
 // Manager handles swarm lifecycle operations.
 // Manager is stateless - all swarm state is discovered from beads.
 type Manager struct {
-	rig       *rig.Rig
-	beadsDir  string // Path for beads operations (git-synced)
-	gitDir    string // Path for git operations (rig root)
+	rig      *rig.Rig
+	beadsDir string // Path for beads operations (git-synced)
+	gitDir   string // Path for git operations (rig root)
 }
 
 // NewManager creates a new swarm manager for a rig.

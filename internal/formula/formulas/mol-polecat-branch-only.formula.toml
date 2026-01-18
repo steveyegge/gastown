@@ -1,0 +1,366 @@
+description = """
+Polecat work lifecycle that pushes to branch but does NOT merge to main.
+
+This molecule guides a polecat through a complete work assignment, but instead
+of submitting to the merge queue, it pushes the branch to origin and closes
+the issue directly. Use this for:
+- Convoy work where you want separate branches reviewed before merging
+- Work that targets an integration branch later
+- Creating PR-ready branches without auto-merge
+
+## Polecat Contract (Self-Cleaning Model)
+
+You are a self-cleaning worker. You:
+1. Receive work via your hook (pinned molecule + issue)
+2. Work through molecule steps using `bd ready` / `bd close <step>`
+3. Complete via branch push + issue close + `gt done --status DEFERRED`
+4. You are GONE - branch is on origin, issue is closed, no MR created
+
+**Key difference from mol-polecat-work:** No merge queue submission. The branch
+stays on origin until someone manually merges it or creates a PR.
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| issue | hook_bead | The issue ID you're assigned to work on |
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| Tests fail | Fix them. Do not proceed with failures. |
+| Blocked on external | Mail Witness for help, mark yourself stuck |
+| Context filling | Use gt handoff to cycle to fresh session |
+| Unsure what to do | Mail Witness, don't guess |"""
+formula = "mol-polecat-branch-only"
+version = 1
+
+[[steps]]
+id = "load-context"
+title = "Load context and verify assignment"
+description = """
+Initialize your session and understand your assignment.
+
+**1. Prime your environment:**
+```bash
+gt prime                    # Load role context
+bd prime                    # Load beads context
+```
+
+**2. Check your hook:**
+```bash
+gt hook               # Shows your pinned molecule and hook_bead
+```
+
+The hook_bead is your assigned issue. Read it carefully:
+```bash
+bd show {{issue}}           # Full issue details
+```
+
+**3. Check inbox for additional context:**
+```bash
+gt mail inbox
+# Read any HANDOFF or assignment messages
+```
+
+**4. Understand the requirements:**
+- What exactly needs to be done?
+- What files are likely involved?
+- Are there dependencies or blockers?
+- What does "done" look like?
+
+**5. Verify you can proceed:**
+- No unresolved blockers on the issue
+- You understand what to do
+- Required resources are available
+
+If blocked or unclear, mail Witness immediately:
+```bash
+gt mail send <rig>/witness -s "HELP: Unclear requirements" -m "Issue: {{issue}}
+Question: <what you need clarified>"
+```
+
+**Exit criteria:** You understand the work and can begin implementation."""
+
+[[steps]]
+id = "branch-setup"
+title = "Set up working branch"
+needs = ["load-context"]
+description = """
+Ensure you're on a clean feature branch ready for work.
+
+**1. Check current branch state:**
+```bash
+git status
+git branch --show-current
+```
+
+**2. If not on a feature branch, create one:**
+```bash
+# Standard naming: polecat/<your-name> or feature/<issue-id>
+git checkout -b polecat/<name>
+```
+
+**3. Ensure clean working state:**
+```bash
+git status                  # Should show "working tree clean"
+git stash list              # Should be empty
+```
+
+If dirty state from previous work:
+```bash
+# If changes are relevant to this issue:
+git add -A && git commit -m "WIP: <description>"
+
+# If changes are unrelated cruft:
+git stash push -m "unrelated changes before {{issue}}"
+# Or discard if truly garbage:
+git checkout -- .
+```
+
+**4. Sync with main:**
+```bash
+git fetch origin
+git rebase origin/main      # Get latest, rebase your branch
+```
+
+If rebase conflicts:
+- Resolve them carefully
+- Test after resolution
+- If stuck, mail Witness
+
+**Exit criteria:** You're on a clean feature branch, rebased on latest main."""
+
+[[steps]]
+id = "implement"
+title = "Implement the solution"
+needs = ["branch-setup"]
+description = """
+Do the actual implementation work.
+
+**Working principles:**
+- Follow existing codebase conventions
+- Make atomic, focused commits
+- Keep changes scoped to the assigned issue
+- Don't gold-plate or scope-creep
+
+**Commit frequently:**
+```bash
+# After each logical unit of work:
+git add <files>
+git commit -m "<type>: <description> ({{issue}})"
+```
+
+Commit types: feat, fix, refactor, test, docs, chore
+
+**Discovered work:**
+If you find bugs or improvements outside your scope:
+```bash
+bd create --title "Found: <description>" --type bug --priority 2
+# Note the ID, continue with your work
+```
+
+Do NOT fix unrelated issues in this branch.
+
+**If stuck:**
+Don't spin for more than 15 minutes. Mail Witness:
+```bash
+gt mail send <rig>/witness -s "HELP: Stuck on implementation" -m "Issue: {{issue}}
+Trying to: <what you're attempting>
+Problem: <what's blocking you>
+Tried: <what you've attempted>"
+```
+
+**Exit criteria:** Implementation complete, all changes committed."""
+
+[[steps]]
+id = "run-tests"
+title = "Run tests and verify"
+needs = ["implement"]
+description = """
+Verify your changes don't break anything.
+
+**1. Run the full test suite:**
+```bash
+go test ./...               # For Go projects
+# Or appropriate command for your stack
+```
+
+**ALL TESTS MUST PASS.** Do not proceed with failures.
+
+**2. If tests fail:**
+- Read the failure output carefully
+- Determine if your change caused it
+- Fix it. Return to implement step if needed.
+
+**3. Run any other quality checks:**
+```bash
+# Linting (if configured)
+golangci-lint run ./...
+
+# Build check
+go build ./...
+```
+
+**Exit criteria:** All tests pass, build succeeds."""
+
+[[steps]]
+id = "push-branch"
+title = "Push branch to origin"
+needs = ["run-tests"]
+description = """
+Push your completed work to origin.
+
+**1. Check for uncommitted changes:**
+```bash
+git status
+```
+Must show "working tree clean". If not, commit or discard.
+
+**2. Push your branch:**
+```bash
+git push -u origin $(git branch --show-current)
+```
+
+**3. Verify push succeeded:**
+```bash
+git log origin/$(git branch --show-current) --oneline -3
+```
+
+**Exit criteria:** Branch pushed to origin with all commits."""
+
+[[steps]]
+id = "generate-pr-content"
+title = "Generate PR title and description"
+needs = ["push-branch"]
+description = """
+Create a PR title and description based on CONTRIBUTING.md and .github/PULL_REQUEST_TEMPLATE.md.
+These should be in raw GitHub markdown to help with formatting.
+
+**1. Read the project conventions:**
+```bash
+cat CONTRIBUTING.md
+cat .github/PULL_REQUEST_TEMPLATE.md
+```
+
+**2. Review your changes:**
+```bash
+git log origin/main..HEAD --oneline
+git diff origin/main..HEAD --stat
+```
+
+**3. Generate the PR title:**
+Follow the conventions in CONTRIBUTING.md (usually `type(scope): description`).
+Write it to a file:
+```bash
+echo "your-title-here" > .pr-title.txt
+```
+
+**4. Generate the PR description:**
+Follow the template structure from .github/PULL_REQUEST_TEMPLATE.md.
+Write raw GitHub markdown to a file:
+```bash
+cat > .pr-body.md << 'EOF'
+## Summary
+<your summary here>
+
+## Related Issue
+Relates to {{issue}}
+
+## Changes
+- <change 1>
+- <change 2>
+
+## Testing
+- <how you tested>
+EOF
+```
+
+**5. Review what you wrote:**
+```bash
+cat .pr-title.txt
+cat .pr-body.md
+```
+
+**Exit criteria:** `.pr-title.txt` and `.pr-body.md` created with proper content."""
+
+[[steps]]
+id = "create-pr"
+title = "Create pull request"
+needs = ["generate-pr-content"]
+description = """
+Create the GitHub pull request using the generated title and description.
+
+**Create the PR:**
+```bash
+gh pr create --title "$(cat .pr-title.txt)" --body-file .pr-body.md --base main
+```
+
+**Clean up temp files:**
+```bash
+rm -f .pr-title.txt .pr-body.md
+```
+
+**Note the PR URL** for the issue update.
+
+**Exit criteria:** PR created on GitHub, targeting main."""
+
+[[steps]]
+id = "update-issue"
+title = "Update issue with PR info"
+needs = ["create-pr"]
+description = """
+Add PR reference and review label to issue (leave issue open).
+
+**1. Add completion notes with PR link:**
+```bash
+bd update {{issue}} --notes "PR: <pr-url>
+Branch: $(git branch --show-current)
+Commits: $(git log origin/main..HEAD --oneline | wc -l)
+Ready for review."
+```
+
+**2. Add needs-review label:**
+```bash
+bd label {{issue}} add needs-review
+```
+
+The issue stays OPEN with `needs-review` label. It will be closed when PR merges.
+
+**Exit criteria:** Issue updated with PR reference and needs-review label."""
+
+[[steps]]
+id = "exit-deferred"
+title = "Exit without merge queue"
+needs = ["update-issue"]
+description = """
+Self-clean and exit WITHOUT submitting to merge queue.
+
+**Important:** We use `--status DEFERRED` to skip MR creation. The branch
+is already pushed and the issue is already closed.
+
+**Run gt done with DEFERRED status:**
+```bash
+gt done --status DEFERRED --cleanup-status clean
+```
+
+This will:
+1. Notify Witness of completion
+2. Nuke your sandbox (worktree removal)
+3. Exit your session
+
+**What happens next:**
+- Your branch stays on origin
+- Someone can create a PR from it manually
+- Or it can be merged to an integration branch later
+- The issue is already closed (you did that)
+
+You are GONE after this step.
+
+**Exit criteria:** Sandbox nuked, session exited."""
+
+[vars]
+[vars.issue]
+description = "The issue ID assigned to this polecat"
+required = true

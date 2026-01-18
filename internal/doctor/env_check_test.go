@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -16,7 +15,7 @@ type mockEnvReader struct {
 	envErrs     map[string]error
 }
 
-func (m *mockEnvReader) ListSessions() ([]string, error) {
+func (m *mockEnvReader) List() ([]string, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
@@ -338,103 +337,5 @@ func TestEnvVarsCheck_HyphenatedRig(t *testing.T) {
 
 	if result.Status != StatusOK {
 		t.Errorf("Status = %v, want StatusOK", result.Status)
-	}
-}
-
-func TestEnvVarsCheck_BeadsDirWarning(t *testing.T) {
-	// BEADS_DIR being set breaks prefix-based routing
-	expected := expectedEnv("witness", "myrig", "")
-	expected["BEADS_DIR"] = "/some/path/.beads" // This shouldn't be set!
-	reader := &mockEnvReader{
-		sessions: []string{"gt-myrig-witness"},
-		sessionEnvs: map[string]map[string]string{
-			"gt-myrig-witness": expected,
-		},
-	}
-	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(testCtx())
-
-	if result.Status != StatusWarning {
-		t.Errorf("Status = %v, want StatusWarning", result.Status)
-	}
-	if !strings.Contains(result.Message, "BEADS_DIR") {
-		t.Errorf("Message should mention BEADS_DIR, got: %q", result.Message)
-	}
-	if !strings.Contains(result.FixHint, "gt shutdown") {
-		t.Errorf("FixHint should mention restart, got: %q", result.FixHint)
-	}
-}
-
-func TestEnvVarsCheck_BeadsDirEmptyIsOK(t *testing.T) {
-	// Empty BEADS_DIR should not warn
-	expected := expectedEnv("witness", "myrig", "")
-	expected["BEADS_DIR"] = "" // Empty is fine
-	reader := &mockEnvReader{
-		sessions: []string{"gt-myrig-witness"},
-		sessionEnvs: map[string]map[string]string{
-			"gt-myrig-witness": expected,
-		},
-	}
-	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(testCtx())
-
-	if result.Status != StatusOK {
-		t.Errorf("Status = %v, want StatusOK for empty BEADS_DIR", result.Status)
-	}
-}
-
-func TestEnvVarsCheck_BeadsDirMultipleSessions(t *testing.T) {
-	// Multiple sessions, only one has BEADS_DIR
-	witnessEnv := expectedEnv("witness", "myrig", "")
-	polecatEnv := expectedEnv("polecat", "myrig", "Toast")
-	polecatEnv["BEADS_DIR"] = "/bad/path" // This shouldn't be set!
-
-	reader := &mockEnvReader{
-		sessions: []string{"gt-myrig-witness", "gt-myrig-Toast"},
-		sessionEnvs: map[string]map[string]string{
-			"gt-myrig-witness": witnessEnv,
-			"gt-myrig-Toast":   polecatEnv,
-		},
-	}
-	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(testCtx())
-
-	if result.Status != StatusWarning {
-		t.Errorf("Status = %v, want StatusWarning", result.Status)
-	}
-	if !strings.Contains(result.Message, "1 session") {
-		t.Errorf("Message should mention 1 session with BEADS_DIR, got: %q", result.Message)
-	}
-}
-
-func TestEnvVarsCheck_BeadsDirWithOtherMismatches(t *testing.T) {
-	// Session has BEADS_DIR AND other mismatches - both should be reported
-	reader := &mockEnvReader{
-		sessions: []string{"gt-myrig-witness"},
-		sessionEnvs: map[string]map[string]string{
-			"gt-myrig-witness": {
-				"GT_ROLE":   "witness",
-				"GT_RIG":    "wrongrig", // Mismatch
-				"BEADS_DIR": "/bad/path",
-			},
-		},
-	}
-	check := NewEnvVarsCheckWithReader(reader)
-	result := check.Run(testCtx())
-
-	if result.Status != StatusWarning {
-		t.Errorf("Status = %v, want StatusWarning", result.Status)
-	}
-	// BEADS_DIR takes priority in message
-	if !strings.Contains(result.Message, "BEADS_DIR") {
-		t.Errorf("Message should prioritize BEADS_DIR, got: %q", result.Message)
-	}
-	// But details should include both
-	detailsStr := strings.Join(result.Details, "\n")
-	if !strings.Contains(detailsStr, "BEADS_DIR") {
-		t.Errorf("Details should mention BEADS_DIR")
-	}
-	if !strings.Contains(detailsStr, "Other env var issues") {
-		t.Errorf("Details should mention other issues")
 	}
 }

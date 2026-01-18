@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -1004,6 +1003,17 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	return ResolveAgentConfig(townRoot, rigPath)
 }
 
+// ResolveAgentForRole resolves the agent name for a role, merging command line override with config.
+// cmdOverride takes precedence if non-empty, otherwise falls back to configured agent.
+// This is the standard pattern for all agent startup paths.
+func ResolveAgentForRole(role, townRoot, rigPath, cmdOverride string) string {
+	if cmdOverride != "" {
+		return cmdOverride
+	}
+	name, _ := ResolveRoleAgentName(role, townRoot, rigPath)
+	return name
+}
+
 // ResolveRoleAgentName returns the agent name that would be used for a specific role.
 // This is useful for logging and diagnostics.
 // Returns the agent name and whether it came from role-specific configuration.
@@ -1198,278 +1208,6 @@ func findTownRootFromCwd() (string, error) {
 		}
 		current = parent
 	}
-}
-
-// BuildStartupCommand builds a full startup command with environment exports.
-// envVars is a map of environment variable names to values.
-// rigPath is optional - if empty, tries to detect town root from cwd.
-// prompt is optional - if provided, appended as the initial prompt.
-//
-// If envVars contains GT_ROLE, the function uses role-based agent resolution
-// (ResolveRoleAgentConfig) to select the appropriate agent for the role.
-// This enables per-role model selection via role_agents in settings.
-func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) string {
-	var rc *RuntimeConfig
-	var townRoot string
-
-	// Extract role from envVars for role-based agent resolution
-	role := envVars["GT_ROLE"]
-
-	if rigPath != "" {
-		// Derive town root from rig path
-		townRoot = filepath.Dir(rigPath)
-		if role != "" {
-			// Use role-based agent resolution for per-role model selection
-			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
-		} else {
-			rc = ResolveAgentConfig(townRoot, rigPath)
-		}
-	} else {
-		// Try to detect town root from cwd for town-level agents (mayor, deacon)
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			rc = DefaultRuntimeConfig()
-		} else {
-			if role != "" {
-				// Use role-based agent resolution for per-role model selection
-				rc = ResolveRoleAgentConfig(role, townRoot, "")
-			} else {
-				rc = ResolveAgentConfig(townRoot, "")
-			}
-		}
-	}
-
-	// Copy env vars to avoid mutating caller map
-	resolvedEnv := make(map[string]string, len(envVars)+2)
-	for k, v := range envVars {
-		resolvedEnv[k] = v
-	}
-	// Add GT_ROOT so agents can find town-level resources (formulas, etc.)
-	if townRoot != "" {
-		resolvedEnv["GT_ROOT"] = townRoot
-	}
-	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
-		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
-	}
-
-	// Build environment export prefix
-	var exports []string
-	for k, v := range resolvedEnv {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Sort for deterministic output
-	sort.Strings(exports)
-
-	var cmd string
-	if len(exports) > 0 {
-		cmd = "export " + strings.Join(exports, " ") + " && "
-	}
-
-	// Add runtime command
-	if prompt != "" {
-		cmd += rc.BuildCommandWithPrompt(prompt)
-	} else {
-		cmd += rc.BuildCommand()
-	}
-
-	return cmd
-}
-
-// PrependEnv prepends export statements to a command string.
-func PrependEnv(command string, envVars map[string]string) string {
-	if len(envVars) == 0 {
-		return command
-	}
-
-	var exports []string
-	for k, v := range envVars {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	sort.Strings(exports)
-	return "export " + strings.Join(exports, " ") + " && " + command
-}
-
-// BuildStartupCommandWithAgentOverride builds a startup command like BuildStartupCommand,
-// but uses agentOverride if non-empty.
-//
-// Resolution priority:
-//  1. agentOverride (explicit override)
-//  2. role_agents[GT_ROLE] (if GT_ROLE is in envVars)
-//  3. Default agent resolution (rig's Agent → town's DefaultAgent → "claude")
-func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride string) (string, error) {
-	var rc *RuntimeConfig
-	var townRoot string
-
-	// Extract role from envVars for role-based agent resolution (when no override)
-	role := envVars["GT_ROLE"]
-
-	if rigPath != "" {
-		townRoot = filepath.Dir(rigPath)
-		if agentOverride != "" {
-			var err error
-			rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
-			if err != nil {
-				return "", err
-			}
-		} else if role != "" {
-			// No override, use role-based agent resolution
-			rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
-		} else {
-			rc = ResolveAgentConfig(townRoot, rigPath)
-		}
-	} else {
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			rc = DefaultRuntimeConfig()
-		} else {
-			if agentOverride != "" {
-				var resolveErr error
-				rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
-				if resolveErr != nil {
-					return "", resolveErr
-				}
-			} else if role != "" {
-				// No override, use role-based agent resolution
-				rc = ResolveRoleAgentConfig(role, townRoot, "")
-			} else {
-				rc = ResolveAgentConfig(townRoot, "")
-			}
-		}
-	}
-
-	// Copy env vars to avoid mutating caller map
-	resolvedEnv := make(map[string]string, len(envVars)+2)
-	for k, v := range envVars {
-		resolvedEnv[k] = v
-	}
-	// Add GT_ROOT so agents can find town-level resources (formulas, etc.)
-	if townRoot != "" {
-		resolvedEnv["GT_ROOT"] = townRoot
-	}
-	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
-		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
-	}
-
-	// Build environment export prefix
-	var exports []string
-	for k, v := range resolvedEnv {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
-	}
-	sort.Strings(exports)
-
-	var cmd string
-	if len(exports) > 0 {
-		cmd = "export " + strings.Join(exports, " ") + " && "
-	}
-
-	if prompt != "" {
-		cmd += rc.BuildCommandWithPrompt(prompt)
-	} else {
-		cmd += rc.BuildCommand()
-	}
-
-	return cmd, nil
-}
-
-// BuildAgentStartupCommand is a convenience function for starting agent sessions.
-// It uses AgentEnv to set all standard environment variables.
-// For rig-level roles (witness, refinery), pass the rig name and rigPath.
-// For town-level roles (mayor, deacon, boot), pass empty rig and rigPath, but provide townRoot.
-func BuildAgentStartupCommand(role, rig, townRoot, rigPath, prompt string) string {
-	envVars := AgentEnv(AgentEnvConfig{
-		Role:     role,
-		Rig:      rig,
-		TownRoot: townRoot,
-	})
-	return BuildStartupCommand(envVars, rigPath, prompt)
-}
-
-// BuildAgentStartupCommandWithAgentOverride is like BuildAgentStartupCommand, but uses agentOverride if non-empty.
-func BuildAgentStartupCommandWithAgentOverride(role, rig, townRoot, rigPath, prompt, agentOverride string) (string, error) {
-	envVars := AgentEnv(AgentEnvConfig{
-		Role:     role,
-		Rig:      rig,
-		TownRoot: townRoot,
-	})
-	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
-}
-
-// BuildPolecatStartupCommand builds the startup command for a polecat.
-// Sets GT_ROLE, GT_RIG, GT_POLECAT, BD_ACTOR, GIT_AUTHOR_NAME, and GT_ROOT.
-func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) string {
-	var townRoot string
-	if rigPath != "" {
-		townRoot = filepath.Dir(rigPath)
-	}
-	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "polecat",
-		Rig:       rigName,
-		AgentName: polecatName,
-		TownRoot:  townRoot,
-	})
-	return BuildStartupCommand(envVars, rigPath, prompt)
-}
-
-// BuildPolecatStartupCommandWithAgentOverride is like BuildPolecatStartupCommand, but uses agentOverride if non-empty.
-func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, prompt, agentOverride string) (string, error) {
-	var townRoot string
-	if rigPath != "" {
-		townRoot = filepath.Dir(rigPath)
-	}
-	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "polecat",
-		Rig:       rigName,
-		AgentName: polecatName,
-		TownRoot:  townRoot,
-	})
-	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
-}
-
-// BuildCrewStartupCommand builds the startup command for a crew member.
-// Sets GT_ROLE, GT_RIG, GT_CREW, BD_ACTOR, GIT_AUTHOR_NAME, and GT_ROOT.
-func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
-	var townRoot string
-	if rigPath != "" {
-		townRoot = filepath.Dir(rigPath)
-	}
-	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "crew",
-		Rig:       rigName,
-		AgentName: crewName,
-		TownRoot:  townRoot,
-	})
-	return BuildStartupCommand(envVars, rigPath, prompt)
-}
-
-// BuildCrewStartupCommandWithAgentOverride is like BuildCrewStartupCommand, but uses agentOverride if non-empty.
-func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt, agentOverride string) (string, error) {
-	var townRoot string
-	if rigPath != "" {
-		townRoot = filepath.Dir(rigPath)
-	}
-	envVars := AgentEnv(AgentEnvConfig{
-		Role:      "crew",
-		Rig:       rigName,
-		AgentName: crewName,
-		TownRoot:  townRoot,
-	})
-	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
-}
-
-// ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
-// For example, Claude runs as "node", while most other runtimes report their executable name.
-func ExpectedPaneCommands(rc *RuntimeConfig) []string {
-	if rc == nil || rc.Command == "" {
-		return nil
-	}
-	if filepath.Base(rc.Command) == "claude" {
-		return []string{"node"}
-	}
-	return []string{filepath.Base(rc.Command)}
 }
 
 // GetDefaultFormula returns the default formula for a rig from settings/config.json.

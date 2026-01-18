@@ -251,14 +251,18 @@ var crewNextCmd = &cobra.Command{
 	Use:    "next",
 	Short:  "Switch to next crew session in same rig",
 	Hidden: true, // Internal command for tmux keybindings
-	RunE:   runCrewNext,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cycleToSession(1)
+	},
 }
 
 var crewPrevCmd = &cobra.Command{
 	Use:    "prev",
 	Short:  "Switch to previous crew session in same rig",
 	Hidden: true, // Internal command for tmux keybindings
-	RunE:   runCrewPrev,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cycleToSession(-1)
+	},
 }
 
 var crewStartCmd = &cobra.Command{
@@ -381,10 +385,6 @@ func init() {
 	crewCmd.AddCommand(crewPristineCmd)
 	crewCmd.AddCommand(crewRestartCmd)
 
-	// Add --session flag to next/prev commands for tmux key binding support
-	// When run via run-shell, tmux session context may be wrong, so we pass it explicitly
-	crewNextCmd.Flags().StringVarP(&crewCycleSession, "session", "s", "", "tmux session name (for key bindings)")
-	crewPrevCmd.Flags().StringVarP(&crewCycleSession, "session", "s", "", "tmux session name (for key bindings)")
 	crewCmd.AddCommand(crewNextCmd)
 	crewCmd.AddCommand(crewPrevCmd)
 	crewCmd.AddCommand(crewStartCmd)

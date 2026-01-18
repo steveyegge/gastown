@@ -10,12 +10,72 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/ids"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// getTownName loads the logical town name from config.
+func getTownName(townRoot string) string {
+	cfg, err := config.LoadTownConfig(filepath.Join(townRoot, "mayor", "town.json"))
+	if err == nil && cfg.Name != "" {
+		return cfg.Name
+	}
+	return filepath.Base(townRoot)
+}
+
+// agentSessionToAgentID converts an AgentSession to an agent.AgentID.
+func agentSessionToAgentID(as *AgentSession) agent.AgentID {
+	switch as.Type {
+	case AgentMayor:
+		return agent.MayorAddress
+	case AgentDeacon:
+		return agent.DeaconAddress
+	case AgentWitness:
+		return agent.WitnessAddress(as.Rig)
+	case AgentRefinery:
+		return agent.RefineryAddress(as.Rig)
+	case AgentCrew:
+		return agent.CrewAddress(as.Rig, as.AgentName)
+	case AgentPolecat:
+		return agent.PolecatAddress(as.Rig, as.AgentName)
+	default:
+		// Unknown type - return empty AgentID
+		return agent.AgentID{}
+	}
+}
+
+// agentIDToAgentSession converts an agent.AgentID to an AgentSession.
+func agentIDToAgentSession(id agent.AgentID) *AgentSession {
+	as := &AgentSession{
+		Name:      id.String(), // Used for display/session switching
+		Rig:       id.Rig,
+		AgentName: id.Worker,
+	}
+
+	switch id.Role {
+	case "mayor":
+		as.Type = AgentMayor
+	case "deacon":
+		as.Type = AgentDeacon
+	case "witness":
+		as.Type = AgentWitness
+	case "refinery":
+		as.Type = AgentRefinery
+	case "crew":
+		as.Type = AgentCrew
+	case "polecat":
+		as.Type = AgentPolecat
+	default:
+		return nil
+	}
+
+	return as
+}
 
 // AgentType represents the type of Gas Town agent.
 type AgentType int
@@ -127,86 +187,55 @@ func init() {
 
 // categorizeSession determines the agent type from a session name.
 func categorizeSession(name string) *AgentSession {
-	session := &AgentSession{Name: name}
-
-	// Town-level agents use hq- prefix: hq-mayor, hq-deacon
-	if strings.HasPrefix(name, "hq-") {
-		suffix := strings.TrimPrefix(name, "hq-")
-		if suffix == "mayor" {
-			session.Type = AgentMayor
-			return session
-		}
-		if suffix == "deacon" {
-			session.Type = AgentDeacon
-			return session
-		}
-		return nil // Unknown hq- session
-	}
-
-	// Rig-level agents use gt- prefix
-	if !strings.HasPrefix(name, "gt-") {
+	identity := ids.ParseSessionName(name)
+	if identity.Role == "" {
 		return nil
 	}
 
-	suffix := strings.TrimPrefix(name, "gt-")
-
-	// Witness sessions: legacy format gt-witness-<rig> (fallback)
-	if strings.HasPrefix(suffix, "witness-") {
-		session.Type = AgentWitness
-		session.Rig = strings.TrimPrefix(suffix, "witness-")
-		return session
+	agentSession := &AgentSession{
+		Name:      name,
+		Rig:       identity.Rig,
+		AgentName: identity.Worker,
 	}
 
-	// Rig-level agents: gt-<rig>-<type> or gt-<rig>-crew-<name>
-	parts := strings.SplitN(suffix, "-", 2)
-	if len(parts) < 2 {
-		return nil // Invalid format
-	}
-
-	session.Rig = parts[0]
-	remainder := parts[1]
-
-	// Check for crew: gt-<rig>-crew-<name>
-	if strings.HasPrefix(remainder, "crew-") {
-		session.Type = AgentCrew
-		session.AgentName = strings.TrimPrefix(remainder, "crew-")
-		return session
-	}
-
-	// Check for other agent types
-	switch remainder {
+	switch identity.Role {
+	case "mayor":
+		agentSession.Type = AgentMayor
+	case "deacon":
+		agentSession.Type = AgentDeacon
 	case "witness":
-		session.Type = AgentWitness
-		return session
+		agentSession.Type = AgentWitness
 	case "refinery":
-		session.Type = AgentRefinery
-		return session
+		agentSession.Type = AgentRefinery
+	case "crew":
+		agentSession.Type = AgentCrew
+	case "polecat":
+		agentSession.Type = AgentPolecat
+	default:
+		return nil
 	}
 
-	// Everything else is a polecat
-	session.Type = AgentPolecat
-	session.AgentName = remainder
-	return session
+	return agentSession
 }
 
 // getAgentSessions returns all categorized Gas Town sessions.
-func getAgentSessions(includePolecats bool) ([]*AgentSession, error) {
-	t := tmux.NewTmux()
-	sessions, err := t.ListSessions()
+func getAgentSessions(townRoot string, includePolecats bool) ([]*AgentSession, error) {
+	agentsAPI := agent.Default()
+	agentIDs, err := agentsAPI.List()
 	if err != nil {
 		return nil, err
 	}
 
 	var agents []*AgentSession
-	for _, name := range sessions {
-		agent := categorizeSession(name)
-		if agent == nil {
+	for _, id := range agentIDs {
+		a := agentIDToAgentSession(id)
+		if a == nil {
 			continue
 		}
-		if agent.Type == AgentPolecat && !includePolecats {
+		if a.Type == AgentPolecat && !includePolecats {
 			continue
 		}
-		agents = append(agents, agent)
+		agents = append(agents, a)
 	}
 
 	// Sort: mayor, deacon first, then by rig, then by type
@@ -285,7 +314,8 @@ func shortcutKey(index int) string {
 }
 
 func runAgents(cmd *cobra.Command, args []string) error {
-	agents, err := getAgentSessions(agentsAllFlag)
+	townRoot, _ := workspace.FindFromCwd() // Best effort - empty string is OK
+	agents, err := getAgentSessions(townRoot, agentsAllFlag)
 	if err != nil {
 		return fmt.Errorf("listing sessions: %w", err)
 	}
@@ -344,7 +374,8 @@ func runAgents(cmd *cobra.Command, args []string) error {
 }
 
 func runAgentsList(cmd *cobra.Command, args []string) error {
-	agents, err := getAgentSessions(agentsAllFlag)
+	townRoot, _ := workspace.FindFromCwd() // Best effort - empty string is OK
+	agents, err := getAgentSessions(townRoot, agentsAllFlag)
 	if err != nil {
 		return fmt.Errorf("listing sessions: %w", err)
 	}
@@ -387,11 +418,11 @@ func runAgentsList(cmd *cobra.Command, args []string) error {
 
 // CollisionReport holds the results of a collision check.
 type CollisionReport struct {
-	TotalSessions int                    `json:"total_sessions"`
-	TotalLocks    int                    `json:"total_locks"`
-	Collisions    int                    `json:"collisions"`
-	StaleLocks    int                    `json:"stale_locks"`
-	Issues        []CollisionIssue       `json:"issues,omitempty"`
+	TotalSessions int                       `json:"total_sessions"`
+	TotalLocks    int                       `json:"total_locks"`
+	Collisions    int                       `json:"collisions"`
+	StaleLocks    int                       `json:"stale_locks"`
+	Issues        []CollisionIssue          `json:"issues,omitempty"`
 	Locks         map[string]*lock.LockInfo `json:"locks,omitempty"`
 }
 
@@ -492,18 +523,20 @@ func buildCollisionReport(townRoot string) (*CollisionReport, error) {
 		Locks: make(map[string]*lock.LockInfo),
 	}
 
-	// Get all tmux sessions
-	t := tmux.NewTmux()
-	sessions, err := t.ListSessions()
+	// Get all running agents
+	agentsAPI := agent.Default()
+	agentIDs, err := agentsAPI.List()
 	if err != nil {
-		sessions = []string{} // Continue even if tmux not running
+		agentIDs = nil // Continue even if tmux not running
 	}
 
-	// Filter to gt- sessions
+	// Filter to gt- sessions (all agents should have gt- prefix)
 	var gtSessions []string
-	for _, s := range sessions {
-		if strings.HasPrefix(s, "gt-") {
-			gtSessions = append(gtSessions, s)
+	for _, id := range agentIDs {
+		sessionName := id.String()
+		// All valid agent addresses should have a role
+		if strings.HasPrefix(sessionName, "gt-") || id.Role != "" {
+			gtSessions = append(gtSessions, sessionName)
 		}
 	}
 	report.TotalSessions = len(gtSessions)

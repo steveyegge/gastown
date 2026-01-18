@@ -265,7 +265,6 @@ exit 0
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
-	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -427,7 +426,6 @@ exit 0
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
-	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -666,6 +664,36 @@ exit 0
 // 3. Fall back to looksLikeBeadID pattern match
 // So "mol-release" matches the pattern but won't be treated as bead in practice
 // because it would be caught by formula verification first.
+// TestSlingFormulaToRigPassesHookBead verifies that when slinging a formula to a rig,
+// TestSlingSpawnOptionsFields verifies the SlingSpawnOptions struct fields.
+func TestSlingSpawnOptionsFields(t *testing.T) {
+	// Verify all fields exist and can be set
+	opts := SlingSpawnOptions{
+		Force:    true,
+		Account:  "test-account",
+		Create:   true,
+		Agent:    "claude",
+		HookBead: "gt-mol-abc123",
+	}
+
+	// Verify all fields are accessible
+	if opts.HookBead != "gt-mol-abc123" {
+		t.Errorf("HookBead = %q, want %q", opts.HookBead, "gt-mol-abc123")
+	}
+	if !opts.Force {
+		t.Error("Force should be true")
+	}
+	if opts.Account != "test-account" {
+		t.Errorf("Account = %q, want %q", opts.Account, "test-account")
+	}
+	if !opts.Create {
+		t.Error("Create should be true")
+	}
+	if opts.Agent != "claude" {
+		t.Errorf("Agent = %q, want %q", opts.Agent, "claude")
+	}
+}
+
 func TestLooksLikeBeadID(t *testing.T) {
 	tests := []struct {
 		input string
@@ -682,20 +710,20 @@ func TestLooksLikeBeadID(t *testing.T) {
 		{"hq-00gyg", true},
 
 		// Short prefixes that match pattern (but may be formulas in practice)
-		{"mol-release", true},    // 3-char prefix matches pattern (formula check runs first in sling)
-		{"mol-abc123", true},     // 3-char prefix matches pattern
+		{"mol-release", true}, // 3-char prefix matches pattern (formula check runs first in sling)
+		{"mol-abc123", true},  // 3-char prefix matches pattern
 
 		// Non-bead strings - should return false
-		{"formula-name", false},  // "formula" is 7 chars (> 5)
-		{"mayor", false},         // no hyphen
-		{"gastown", false},       // no hyphen
-		{"deacon/dogs", false},   // contains slash
-		{"", false},              // empty
-		{"-abc", false},          // starts with hyphen
-		{"GT-abc", false},        // uppercase prefix
-		{"123-abc", false},       // numeric prefix
-		{"a-", false},            // nothing after hyphen
-		{"aaaaaa-b", false},      // prefix too long (6 chars)
+		{"formula-name", false}, // "formula" is 7 chars (> 5)
+		{"mayor", false},        // no hyphen
+		{"gastown", false},      // no hyphen
+		{"deacon/dogs", false},  // contains slash
+		{"", false},             // empty
+		{"-abc", false},         // starts with hyphen
+		{"GT-abc", false},       // uppercase prefix
+		{"123-abc", false},      // numeric prefix
+		{"a-", false},           // nothing after hyphen
+		{"aaaaaa-b", false},     // prefix too long (6 chars)
 	}
 
 	for _, tt := range tests {

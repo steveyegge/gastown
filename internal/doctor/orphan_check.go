@@ -23,15 +23,23 @@ type OrphanSessionCheck struct {
 
 // SessionLister abstracts tmux session listing for testing.
 type SessionLister interface {
-	ListSessions() ([]string, error)
+	List() ([]string, error)
 }
 
 type realSessionLister struct {
 	t *tmux.Tmux
 }
 
-func (r *realSessionLister) ListSessions() ([]string, error) {
-	return r.t.ListSessions()
+func (r *realSessionLister) List() ([]string, error) {
+	sessionIDs, err := r.t.List()
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]string, len(sessionIDs))
+	for i, id := range sessionIDs {
+		sessions[i] = string(id)
+	}
+	return sessions, nil
 }
 
 // NewOrphanSessionCheck creates a new orphan session check.
@@ -61,7 +69,7 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 		lister = &realSessionLister{t: tmux.NewTmux()}
 	}
 
-	sessions, err := lister.ListSessions()
+	sessions, err := lister.List()
 	if err != nil {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -95,8 +103,8 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Only check gt-* sessions (Gas Town sessions)
-		if !strings.HasPrefix(sess, "gt-") {
+		// Only check Gas Town sessions (gt-* for rig agents, hq-* for town agents)
+		if !strings.HasPrefix(sess, session.Prefix) && !strings.HasPrefix(sess, session.HQPrefix) {
 			continue
 		}
 
@@ -150,7 +158,7 @@ func (c *OrphanSessionCheck) Fix(ctx *CheckContext) error {
 		// Log pre-death event for crash investigation (before killing)
 		_ = events.LogFeed(events.TypeSessionDeath, sess,
 			events.SessionDeathPayload(sess, "unknown", "orphan cleanup", "gt doctor"))
-		if err := t.KillSession(sess); err != nil {
+		if err := t.Stop(session.SessionID(sess)); err != nil {
 			lastErr = err
 		}
 	}
@@ -208,25 +216,36 @@ func (c *OrphanSessionCheck) getValidRigs(townRoot string) []string {
 //
 // Note: We can't verify polecat names without reading state, so we're permissive.
 func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, mayorSession, deaconSession string) bool {
-	// Mayor session is always valid (dynamic name based on town)
+	// Mayor session is always valid
 	if mayorSession != "" && sess == mayorSession {
 		return true
 	}
 
-	// Deacon session is always valid (dynamic name based on town)
+	// Deacon session is always valid
 	if deaconSession != "" && sess == deaconSession {
 		return true
 	}
 
-	// For rig-specific sessions, extract rig name
-	// Pattern: gt-<rig>-<role>
-	parts := strings.SplitN(sess, "-", 3)
-	if len(parts) < 3 {
+	// Boot session is always valid
+	if sess == session.BootSessionName {
+		return true
+	}
+
+	// For rig-specific sessions (gt-* prefix), extract rig name
+	// Pattern: gt-<rig>-<role> or gt-<rig>-<polecat>
+	if !strings.HasPrefix(sess, session.Prefix) {
+		// Not a rig-level session and not matched above - invalid
+		return false
+	}
+
+	suffix := strings.TrimPrefix(sess, session.Prefix)
+	parts := strings.SplitN(suffix, "-", 2)
+	if len(parts) < 2 {
 		// Invalid format - must be gt-<rig>-<something>
 		return false
 	}
 
-	rigName := parts[1]
+	rigName := parts[0]
 
 	// Check if this rig exists
 	rigFound := false
@@ -242,7 +261,7 @@ func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, may
 		return false
 	}
 
-	role := parts[2]
+	role := parts[1]
 
 	// witness and refinery are valid roles
 	if role == "witness" || role == "refinery" {
@@ -370,10 +389,10 @@ func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //noli
 
 	// Also get shell PIDs inside tmux panes
 	t := tmux.NewTmux()
-	sessions, _ := t.ListSessions()
-	for _, session := range sessions {
+	sessions, _ := t.List()
+	for _, sessionID := range sessions {
 		// Get pane PIDs for this session
-		out, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_pid}").Output()
+		out, err := exec.Command("tmux", "list-panes", "-t", string(sessionID), "-F", "#{pane_pid}").Output()
 		if err != nil {
 			continue
 		}

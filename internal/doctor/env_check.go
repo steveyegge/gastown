@@ -11,7 +11,7 @@ import (
 
 // SessionEnvReader abstracts tmux session environment access for testing.
 type SessionEnvReader interface {
-	ListSessions() ([]string, error)
+	List() ([]string, error)
 	GetAllEnvironment(session string) (map[string]string, error)
 }
 
@@ -20,8 +20,16 @@ type tmuxEnvReader struct {
 	t *tmux.Tmux
 }
 
-func (r *tmuxEnvReader) ListSessions() ([]string, error) {
-	return r.t.ListSessions()
+func (r *tmuxEnvReader) List() ([]string, error) {
+	sessionIDs, err := r.t.List()
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]string, len(sessionIDs))
+	for i, id := range sessionIDs {
+		sessions[i] = string(id)
+	}
+	return sessions, nil
 }
 
 func (r *tmuxEnvReader) GetAllEnvironment(session string) (map[string]string, error) {
@@ -59,7 +67,7 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 		reader = &tmuxEnvReader{t: tmux.NewTmux()}
 	}
 
-	sessions, err := reader.ListSessions()
+	sessions, err := reader.List()
 	if err != nil {
 		// No tmux server - treat as success (valid when Gas Town is down)
 		return &CheckResult{
@@ -87,11 +95,10 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	var mismatches []string
-	var beadsDirWarnings []string
 	checkedCount := 0
 
 	for _, sess := range gtSessions {
-		identity, err := session.ParseSessionName(sess)
+		agentID, err := session.ParseSessionName(sess)
 		if err != nil {
 			// Skip unparseable sessions
 			continue
@@ -99,9 +106,9 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 
 		// Get expected env vars based on role
 		expected := config.AgentEnv(config.AgentEnvConfig{
-			Role:      string(identity.Role),
-			Rig:       identity.Rig,
-			AgentName: identity.Name,
+			Role:      agentID.Role,
+			Rig:       agentID.Rig,
+			AgentName: agentID.Worker,
 			TownRoot:  ctx.TownRoot,
 		})
 
@@ -122,31 +129,6 @@ func (c *EnvVarsCheck) Run(ctx *CheckContext) *CheckResult {
 			} else if actualVal != expectedVal {
 				mismatches = append(mismatches, fmt.Sprintf("%s: %s=%q (expected %q)", sess, key, actualVal, expectedVal))
 			}
-		}
-
-		// Check for BEADS_DIR - this breaks routing-based lookups
-		if beadsDir, exists := actual["BEADS_DIR"]; exists && beadsDir != "" {
-			beadsDirWarnings = append(beadsDirWarnings, fmt.Sprintf("%s: BEADS_DIR=%q (breaks prefix routing)", sess, beadsDir))
-		}
-	}
-
-	// Check for BEADS_DIR issues first (higher priority warning)
-	if len(beadsDirWarnings) > 0 {
-		details := beadsDirWarnings
-		if len(mismatches) > 0 {
-			details = append(details, "", "Other env var issues:")
-			details = append(details, mismatches...)
-		}
-		details = append(details,
-			"",
-			"BEADS_DIR overrides prefix-based routing and breaks multi-rig lookups.",
-		)
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Found BEADS_DIR set in %d session(s)", len(beadsDirWarnings)),
-			Details: details,
-			FixHint: "Remove BEADS_DIR from session environment: gt shutdown && gt up",
 		}
 	}
 

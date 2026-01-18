@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/dog"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/plugin"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -538,13 +538,11 @@ func showDogStatus(mgr *dog.Manager, name string) error {
 	// Check for tmux session
 	townRoot, _ := workspace.FindFromCwd()
 	if townRoot != "" {
-		townName, err := workspace.GetTownName(townRoot)
-		if err == nil {
-			sessionName := fmt.Sprintf("gt-%s-deacon-%s", townName, name)
-			tm := tmux.NewTmux()
-			if has, _ := tm.HasSession(sessionName); has {
-				fmt.Printf("\nSession: %s (running)\n", sessionName)
-			}
+		// Check if deacon is running
+		agentsAPI := agent.Default()
+		deaconID := agent.DeaconAddress
+		if agentsAPI.Exists(deaconID) {
+			fmt.Printf("\nSession: deacon (running)\n")
 		}
 	}
 

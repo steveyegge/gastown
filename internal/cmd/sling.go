@@ -187,15 +187,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	// Determine target agent (self or specified)
 	var targetAgent string
-	var targetPane string
-	var hookWorkDir string // Working directory for running bd hook commands
+	var hookWorkDir string // Clone path for polecat spawns (used for molecule attachment)
 
 	if len(args) > 1 {
 		target := args[1]
 
 		// Resolve "." to current agent identity (like git's "." meaning current directory)
 		if target == "." {
-			targetAgent, targetPane, _, err = resolveSelfTarget()
+			targetAgent, err = resolveSelfTarget()
 			if err != nil {
 				return fmt.Errorf("resolving self for '.' target: %w", err)
 			}
@@ -210,7 +209,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 				if dogName == "" {
 					targetAgent = "deacon/dogs/<idle>"
 				}
-				targetPane = "<dog-pane>"
+				// Dogs are goroutines, not tmux sessions
 			} else {
 				// Dispatch to dog
 				dispatchInfo, dispatchErr := DispatchToDog(dogName, slingCreate)
@@ -218,7 +217,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 					return fmt.Errorf("dispatching to dog: %w", dispatchErr)
 				}
 				targetAgent = dispatchInfo.AgentID
-				targetPane = dispatchInfo.Pane
 				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
@@ -227,7 +225,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 				// Dry run - just indicate what would happen
 				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
-				targetPane = "<new-pane>"
 			} else {
 				// Spawn a fresh polecat in the rig
 				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
@@ -243,16 +240,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 					return fmt.Errorf("spawning polecat: %w", spawnErr)
 				}
 				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
-				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
+				hookWorkDir = spawnInfo.ClonePath
 
 				// Wake witness and refinery to monitor the new polecat
-				wakeRigAgents(rigName)
+				wakeRigAgents(townRoot, rigName)
 			}
 		} else {
 			// Slinging to an existing agent
-			var targetWorkDir string
-			targetAgent, targetPane, targetWorkDir, err = resolveTargetAgent(target)
+			targetAgent, err = resolveTargetAgent(target)
 			if err != nil {
 				// Check if this is a dead polecat (no active session)
 				// If so, spawn a fresh polecat instead of failing
@@ -274,11 +269,10 @@ func runSling(cmd *cobra.Command, args []string) error {
 							return fmt.Errorf("spawning polecat to replace dead polecat: %w", spawnErr)
 						}
 						targetAgent = spawnInfo.AgentID()
-						targetPane = spawnInfo.Pane
 						hookWorkDir = spawnInfo.ClonePath
 
 						// Wake witness and refinery to monitor the new polecat
-						wakeRigAgents(rigName)
+						wakeRigAgents(townRoot, rigName)
 					} else {
 						return fmt.Errorf("resolving target: %w", err)
 					}
@@ -286,21 +280,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 					return fmt.Errorf("resolving target: %w", err)
 				}
 			}
-			// Use target's working directory for bd commands (needed for redirect-based routing)
-			if targetWorkDir != "" {
-				hookWorkDir = targetWorkDir
-			}
 		}
 	} else {
 		// Slinging to self
-		var selfWorkDir string
-		targetAgent, targetPane, selfWorkDir, err = resolveSelfTarget()
+		targetAgent, err = resolveSelfTarget()
 		if err != nil {
 			return err
-		}
-		// Use self's working directory for bd commands
-		if selfWorkDir != "" {
-			hookWorkDir = selfWorkDir
 		}
 	}
 
@@ -366,7 +351,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		if slingArgs != "" {
 			fmt.Printf("  args (in nudge): %s\n", slingArgs)
 		}
-		fmt.Printf("Would inject start prompt to pane: %s\n", targetPane)
+		fmt.Printf("Would nudge agent: %s\n", targetAgent)
 		return nil
 	}
 
@@ -377,12 +362,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 		// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
 		// Some bd mol commands don't support prefix routing, so we must run them from the
 		// rig directory that owns the bead's database.
-		formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
+		formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, "")
 
 		// Step 1: Cook the formula (ensures proto exists)
-		// Cook runs from rig directory to access the correct formula database
+		// Cook doesn't need database context - runs from cwd like gt formula show
 		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
-		cookCmd.Dir = formulaWorkDir
 		cookCmd.Stderr = os.Stderr
 		if err := cookCmd.Run(); err != nil {
 			return fmt.Errorf("cooking formula %s: %w", formulaName, err)
@@ -448,7 +432,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Hook the bead using bd update.
 	// See: https://github.com/steveyegge/gastown/issues/148
 	hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
-	hookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
+	hookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, "")
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking bead: %w", err)
@@ -461,7 +445,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	_ = events.LogFeed(events.TypeSling, actor, events.SlingPayload(beadID, targetAgent))
 
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
-	updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
+	updateAgentHookBead(targetAgent, beadID, "", townBeadsDir)
 
 	// Auto-attach mol-polecat-work to polecat agent beads
 	// This ensures polecats have the standard work molecule attached for guidance
@@ -489,25 +473,29 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try to inject the "start now" prompt (graceful if no tmux)
-	if targetPane == "" {
-		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
+	// Use targetAgent (logical format) directly - translation to tmux happens in session layer
+	if targetAgent == "" {
+		fmt.Printf("%s No agent to nudge (work will be discovered via gt prime)\n", style.Dim.Render("○"))
 	} else {
-		// Ensure agent is ready before nudging (prevents race condition where
-		// message arrives before Claude has fully started - see issue #115)
-		sessionName := getSessionFromPane(targetPane)
-		if sessionName != "" {
-			if err := ensureAgentReady(sessionName); err != nil {
+		agentID, err := addressToAgentID(targetAgent)
+		if err != nil {
+			// Placeholder or invalid address - skip nudging
+			fmt.Printf("%s Agent address %q not nudgeable: %v\n", style.Dim.Render("○"), targetAgent, err)
+		} else {
+			// Ensure agent is ready before nudging (prevents race condition where
+			// message arrives before Claude has fully started - see issue #115)
+			if err := ensureAgentReady(townRoot, agentID); err != nil {
 				// Non-fatal: warn and continue, agent will discover work via gt prime
 				fmt.Printf("%s Could not verify agent ready: %v\n", style.Dim.Render("○"), err)
 			}
-		}
 
-		if err := injectStartPrompt(targetPane, beadID, slingSubject, slingArgs); err != nil {
-			// Graceful fallback for no-tmux mode
-			fmt.Printf("%s Could not nudge (no tmux?): %v\n", style.Dim.Render("○"), err)
-			fmt.Printf("  Agent will discover work via gt prime / bd show\n")
-		} else {
-			fmt.Printf("%s Start prompt sent\n", style.Bold.Render("▶"))
+			if err := injectStartPrompt(townRoot, agentID, beadID, slingSubject, slingArgs); err != nil {
+				// Graceful fallback for no-tmux mode
+				fmt.Printf("%s Could not nudge (no tmux?): %v\n", style.Dim.Render("○"), err)
+				fmt.Printf("  Agent will discover work via gt prime / bd show\n")
+			} else {
+				fmt.Printf("%s Start prompt sent\n", style.Bold.Render("▶"))
+			}
 		}
 	}
 

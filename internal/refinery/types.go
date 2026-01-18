@@ -9,26 +9,13 @@ import (
 	"github.com/steveyegge/gastown/internal/agent"
 )
 
-// State is an alias for agent.State for backwards compatibility.
-type State = agent.State
-
-// State constants - re-exported from agent package for backwards compatibility.
-const (
-	StateStopped = agent.StateStopped
-	StateRunning = agent.StateRunning
-	StatePaused  = agent.StatePaused
-)
-
 // Refinery represents a rig's merge queue processor.
 type Refinery struct {
 	// RigName is the rig this refinery processes.
 	RigName string `json:"rig_name"`
 
 	// State is the current running state.
-	State State `json:"state"`
-
-	// PID is the process ID if running in background.
-	PID int `json:"pid,omitempty"`
+	State agent.State `json:"state"`
 
 	// StartedAt is when the refinery was started.
 	StartedAt *time.Time `json:"started_at,omitempty"`
@@ -39,9 +26,25 @@ type Refinery struct {
 	// PendingMRs tracks merge requests that have been submitted.
 	// Key is the MR ID.
 	PendingMRs map[string]*MergeRequest `json:"pending_mrs,omitempty"`
+}
 
-	// LastMergeAt is when the last successful merge happened.
-	LastMergeAt *time.Time `json:"last_merge_at,omitempty"`
+// Ensure Refinery implements RigAgentState
+var _ agent.RigAgentState = (*Refinery)(nil)
+
+// SetRunning updates the state to running with the given start time.
+func (r *Refinery) SetRunning(startedAt time.Time) {
+	r.State = agent.StateRunning
+	r.StartedAt = &startedAt
+}
+
+// SetStopped updates the state to stopped.
+func (r *Refinery) SetStopped() {
+	r.State = agent.StateStopped
+}
+
+// IsRunning returns true if the state indicates running.
+func (r *Refinery) IsRunning() bool {
+	return r.State == agent.StateRunning
 }
 
 // MergeRequest represents a branch waiting to be merged.

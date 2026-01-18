@@ -123,6 +123,12 @@ const (
 	// RoleMayor is the mayor agent role.
 	RoleMayor = "mayor"
 
+	// RoleDeacon is the deacon agent role.
+	RoleDeacon = "deacon"
+
+	// RoleBoot is the boot watchdog agent role.
+	RoleBoot = "boot"
+
 	// RoleWitness is the witness agent role.
 	RoleWitness = "witness"
 
@@ -134,9 +140,6 @@ const (
 
 	// RoleCrew is the crew agent role.
 	RoleCrew = "crew"
-
-	// RoleDeacon is the deacon agent role.
-	RoleDeacon = "deacon"
 )
 
 // Role emojis - centralized for easy customization.

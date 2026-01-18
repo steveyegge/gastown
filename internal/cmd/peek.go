@@ -5,8 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
+	"github.com/steveyegge/gastown/internal/factory"
 )
 
 // Peek command flags
@@ -61,23 +62,21 @@ func runPeek(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	mgr, _, err := getSessionManager(rigName)
-	if err != nil {
-		return err
-	}
+	agents := factory.Agents()
 
-	var output string
-
-	// Handle crew/ prefix for cross-rig crew workers
-	// e.g., "beads/crew/dave" -> session name "gt-beads-crew-dave"
+	// Build agent ID based on address format
+	var id agent.AgentID
 	if strings.HasPrefix(polecatName, "crew/") {
+		// Handle crew/ prefix for cross-rig crew workers
+		// e.g., "beads/crew/dave"
 		crewName := strings.TrimPrefix(polecatName, "crew/")
-		sessionID := session.CrewSessionName(rigName, crewName)
-		output, err = mgr.CaptureSession(sessionID, lines)
+		id = agent.CrewAddress(rigName, crewName)
 	} else {
-		output, err = mgr.Capture(polecatName, lines)
+		// Polecat: rig/name format
+		id = agent.PolecatAddress(rigName, polecatName)
 	}
 
+	output, err := agents.Capture(id, lines)
 	if err != nil {
 		return fmt.Errorf("capturing output: %w", err)
 	}

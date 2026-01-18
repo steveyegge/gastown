@@ -86,7 +86,7 @@ var versionChanges = []VersionChange{
 		Date:    "2026-01-17",
 		Changes: []string{
 			"FIX: Orphan cleanup on macOS - TTY comparison now handles macOS '??' format",
-			"FIX: Session kill orphan prevention - gt done and gt crew stop use KillSessionWithProcesses",
+			"FIX: Session kill orphan prevention - Stop() recursively kills process tree",
 		},
 	},
 	{

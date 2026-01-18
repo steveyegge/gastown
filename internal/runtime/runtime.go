@@ -9,8 +9,13 @@ import (
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/opencode"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
+
+// SessionNudger provides the ability to nudge a tmux session.
+// This interface allows testing without real tmux sessions.
+type SessionNudger interface {
+	NudgeSession(session, message string) error
+}
 
 // EnsureSettingsForRole installs runtime hook settings when supported.
 func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error {
@@ -74,7 +79,7 @@ func StartupFallbackCommands(role string, rc *config.RuntimeConfig) []string {
 }
 
 // RunStartupFallback sends the startup fallback commands via tmux.
-func RunStartupFallback(t *tmux.Tmux, sessionID, role string, rc *config.RuntimeConfig) error {
+func RunStartupFallback(t SessionNudger, sessionID, role string, rc *config.RuntimeConfig) error {
 	commands := StartupFallbackCommands(role, rc)
 	for _, cmd := range commands {
 		if err := t.NudgeSession(sessionID, cmd); err != nil {

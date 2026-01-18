@@ -2,15 +2,19 @@
 package tmux
 
 import (
-	"fmt"
 	"hash/fnv"
 )
 
-// Theme represents a tmux status bar color scheme.
+// Theme represents visual styling for a tmux session.
 type Theme struct {
-	Name string // Human-readable name
-	BG   string // Background color (hex or tmux color name)
-	FG   string // Foreground color (hex or tmux color name)
+	Name string // Human-readable theme name
+	BG   string // Background color (hex or color name)
+	FG   string // Foreground color (hex or color name)
+}
+
+// Style returns the style string for this theme (e.g., "bg=#1e3a5f,fg=#e0e0e0").
+func (t Theme) Style() string {
+	return "bg=" + t.BG + ",fg=" + t.FG
 }
 
 // DefaultPalette is the curated set of distinct, professional color themes.
@@ -26,6 +30,11 @@ var DefaultPalette = []Theme{
 	{Name: "wine", BG: "#722f37", FG: "#f5f5dc"},     // Burgundy
 	{Name: "teal", BG: "#0d5c63", FG: "#e0e0e0"},     // Teal
 	{Name: "copper", BG: "#6d4c41", FG: "#f5f5dc"},   // Warm brown
+}
+
+// DefaultTheme returns a neutral theme for sessions without a specific theme.
+func DefaultTheme() Theme {
+	return Theme{Name: "default", BG: "#4a5568", FG: "#e0e0e0"} // Slate gray
 }
 
 // MayorTheme returns the special theme for the Mayor session.
@@ -68,11 +77,6 @@ func AssignThemeFromPalette(rigName string, palette []Theme) Theme {
 	return palette[idx]
 }
 
-// Style returns the tmux status-style string for this theme.
-func (t Theme) Style() string {
-	return fmt.Sprintf("bg=%s,fg=%s", t.BG, t.FG)
-}
-
 // ListThemeNames returns the names of all themes in the default palette.
 func ListThemeNames() []string {
 	names := make([]string, len(DefaultPalette))
@@ -80,4 +84,49 @@ func ListThemeNames() []string {
 		names[i] = t.Name
 	}
 	return names
+}
+
+// SessionConfigForRole returns the visual session configuration for a role.
+// This centralizes role identity (theme, worker name) in one place.
+// For rig-level roles (witness, refinery, crew, polecat), pass the rigName.
+// EnvVars should be set separately using config.AgentEnv().
+func SessionConfigForRole(role, rigName string) SessionConfig {
+	cfg := SessionConfig{}
+
+	switch role {
+	case "mayor":
+		cfg.Theme = MayorTheme()
+		cfg.Worker = "Mayor"
+		cfg.Role = "coordinator"
+	case "deacon":
+		cfg.Theme = DeaconTheme()
+		cfg.Worker = "Deacon"
+		cfg.Role = "health-check"
+	case "witness":
+		cfg.Theme = AssignTheme(rigName)
+		cfg.Worker = "Witness"
+		cfg.Role = "witness"
+		cfg.Rig = rigName
+	case "refinery":
+		cfg.Theme = AssignTheme(rigName)
+		cfg.Worker = "Refinery"
+		cfg.Role = "refinery"
+		cfg.Rig = rigName
+	case "crew":
+		cfg.Theme = AssignTheme(rigName)
+		cfg.Worker = "Crew"
+		cfg.Role = "crew"
+		cfg.Rig = rigName
+	case "polecat":
+		cfg.Theme = AssignTheme(rigName)
+		cfg.Worker = "Polecat"
+		cfg.Role = "polecat"
+		cfg.Rig = rigName
+	default:
+		cfg.Theme = DefaultTheme()
+		cfg.Worker = role
+		cfg.Role = role
+	}
+
+	return cfg
 }

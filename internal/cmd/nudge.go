@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
-	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/ids"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -122,13 +122,16 @@ func runNudge(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	t := tmux.NewTmux()
+	agents := agent.Default()
 
-	// Expand role shortcuts to session names
-	// These shortcuts let users type "mayor" instead of "gt-mayor"
+	// Expand role shortcuts to agent IDs
+	// These shortcuts let users type "mayor" instead of full addresses
+	var agentID agent.AgentID
 	switch target {
 	case "mayor":
-		target = session.MayorSessionName()
+		agentID = agent.MayorAddress
+	case "deacon":
+		agentID = agent.DeaconAddress
 	case "witness", "refinery":
 		// These need the current rig
 		roleInfo, err := GetRole()
@@ -139,37 +142,31 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cannot determine rig for %s shortcut (not in a rig context)", target)
 		}
 		if target == "witness" {
-			target = session.WitnessSessionName(roleInfo.Rig)
+			agentID = agent.WitnessAddress(roleInfo.Rig)
 		} else {
-			target = session.RefinerySessionName(roleInfo.Rig)
+			agentID = agent.RefineryAddress(roleInfo.Rig)
 		}
 	}
 
-	// Special case: "deacon" target maps to the Deacon session
-	if target == "deacon" {
-		deaconSession := session.DeaconSessionName()
-		// Check if Deacon session exists
-		exists, err := t.HasSession(deaconSession)
-		if err != nil {
-			return fmt.Errorf("checking deacon session: %w", err)
-		}
-		if !exists {
-			// Deacon not running - this is not an error, just log and return
-			fmt.Printf("%s Deacon not running, nudge skipped\n", style.Dim.Render("○"))
+	// Handle direct role shortcuts (mayor, deacon, witness, refinery)
+	if agentID.Role != "" {
+		// Check if agent is running
+		if !agents.Exists(agentID) {
+			fmt.Printf("%s %s not running, nudge skipped\n", style.Dim.Render("○"), target)
 			return nil
 		}
 
-		if err := t.NudgeSession(deaconSession, message); err != nil {
-			return fmt.Errorf("nudging deacon: %w", err)
+		if err := agents.Nudge(agentID, message); err != nil {
+			return fmt.Errorf("nudging %s: %w", target, err)
 		}
 
-		fmt.Printf("%s Nudged deacon\n", style.Bold.Render("✓"))
+		fmt.Printf("%s Nudged %s\n", style.Bold.Render("✓"), target)
 
 		// Log nudge event
-		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
-			_ = LogNudge(townRoot, "deacon", message)
+		if townRoot != "" {
+			_ = LogNudge(townRoot, target, message)
 		}
-		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload("", "deacon", message))
+		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload("", target, message))
 		return nil
 	}
 
@@ -181,52 +178,48 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		var sessionName string
+		var targetID agent.AgentID
 
 		// Check if this is a crew address (polecatName starts with "crew/")
 		if strings.HasPrefix(polecatName, "crew/") {
-			// Extract crew name and use crew session naming
+			// Extract crew name
 			crewName := strings.TrimPrefix(polecatName, "crew/")
-			sessionName = crewSessionName(rigName, crewName)
+			targetID = agent.CrewAddress(rigName, crewName)
 		} else {
-			// Regular polecat - use session manager
-			mgr, _, err := getSessionManager(rigName)
-			if err != nil {
-				return err
-			}
-			sessionName = mgr.SessionName(polecatName)
+			// Regular polecat
+			targetID = agent.PolecatAddress(rigName, polecatName)
 		}
 
-		// Send nudge using the reliable NudgeSession
-		if err := t.NudgeSession(sessionName, message); err != nil {
-			return fmt.Errorf("nudging session: %w", err)
+		// Send nudge using the Agents abstraction
+		if err := agents.Nudge(targetID, message); err != nil {
+			return fmt.Errorf("nudging agent: %w", err)
 		}
 
 		fmt.Printf("%s Nudged %s/%s\n", style.Bold.Render("✓"), rigName, polecatName)
 
 		// Log nudge event
-		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		if townRoot != "" {
 			_ = LogNudge(townRoot, target, message)
 		}
 		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload(rigName, target, message))
 	} else {
 		// Raw session name (legacy)
-		exists, err := t.HasSession(target)
-		if err != nil {
-			return fmt.Errorf("checking session: %w", err)
+		targetID := ids.ParseSessionName(target)
+		if targetID.Role == "" {
+			return fmt.Errorf("invalid session name %q", target)
 		}
-		if !exists {
-			return fmt.Errorf("session %q not found", target)
+		if !agents.Exists(targetID) {
+			return fmt.Errorf("agent %q not found", target)
 		}
 
-		if err := t.NudgeSession(target, message); err != nil {
-			return fmt.Errorf("nudging session: %w", err)
+		if err := agents.Nudge(targetID, message); err != nil {
+			return fmt.Errorf("nudging agent: %w", err)
 		}
 
 		fmt.Printf("✓ Nudged %s\n", target)
 
 		// Log nudge event
-		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		if townRoot != "" {
 			_ = LogNudge(townRoot, target, message)
 		}
 		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload("", target, message))
@@ -285,7 +278,7 @@ func runNudgeChannel(channelName, message string) error {
 	prefixedMessage := fmt.Sprintf("[from %s] %s", sender, message)
 
 	// Get all running sessions for pattern matching
-	agents, err := getAgentSessions(true)
+	agentSessions, err := getAgentSessions(townRoot, true)
 	if err != nil {
 		return fmt.Errorf("listing sessions: %w", err)
 	}
@@ -295,7 +288,7 @@ func runNudgeChannel(channelName, message string) error {
 	seenTargets := make(map[string]bool)
 
 	for _, pattern := range patterns {
-		resolved := resolveNudgePattern(pattern, agents)
+		resolved := resolveNudgePattern(pattern, agentSessions)
 		for _, sessionName := range resolved {
 			if !seenTargets[sessionName] {
 				seenTargets[sessionName] = true
@@ -310,20 +303,27 @@ func runNudgeChannel(channelName, message string) error {
 	}
 
 	// Send nudges
-	t := tmux.NewTmux()
+	agentsAPI := agent.Default()
 	var succeeded, failed int
 	var failures []string
 
 	fmt.Printf("Nudging channel %q (%d target(s))...\n\n", channelName, len(targets))
 
-	for i, sessionName := range targets {
-		if err := t.NudgeSession(sessionName, prefixedMessage); err != nil {
+	for i, agentAddr := range targets {
+		agentID := ids.ParseAddress(agentAddr)
+		if agentID.Role == "" {
 			failed++
-			failures = append(failures, fmt.Sprintf("%s: %v", sessionName, err))
-			fmt.Printf("  %s %s\n", style.ErrorPrefix, sessionName)
+			failures = append(failures, fmt.Sprintf("%s: invalid agent address", agentAddr))
+			fmt.Printf("  %s %s\n", style.ErrorPrefix, agentAddr)
+			continue
+		}
+		if err := agentsAPI.Nudge(agentID, prefixedMessage); err != nil {
+			failed++
+			failures = append(failures, fmt.Sprintf("%s: %v", agentAddr, err))
+			fmt.Printf("  %s %s\n", style.ErrorPrefix, agentAddr)
 		} else {
 			succeeded++
-			fmt.Printf("  %s %s\n", style.SuccessPrefix, sessionName)
+			fmt.Printf("  %s %s\n", style.SuccessPrefix, agentAddr)
 		}
 
 		// Small delay between nudges
@@ -350,22 +350,23 @@ func runNudgeChannel(channelName, message string) error {
 	return nil
 }
 
-// resolveNudgePattern resolves a nudge channel pattern to session names.
+// resolveNudgePattern resolves a nudge channel pattern to agent addresses.
 // Patterns can be:
-//   - Literal: "gastown/witness" → gt-gastown-witness
-//   - Wildcard: "gastown/polecats/*" → all polecat sessions in gastown
-//   - Role: "*/witness" → all witness sessions
-//   - Special: "mayor", "deacon" → gt-{town}-mayor, gt-{town}-deacon
-// townName is used to generate the correct session names for mayor/deacon.
-func resolveNudgePattern(pattern string, agents []*AgentSession) []string {
+//   - Literal: "gastown/witness" → gastown/witness
+//   - Wildcard: "gastown/polecats/*" → all polecat addresses in gastown
+//   - Role: "*/witness" → all witness addresses
+//   - Special: "mayor", "deacon" → mayor, deacon
+//
+// Returns agent addresses (not session names).
+func resolveNudgePattern(pattern string, agentSessions []*AgentSession) []string {
 	var results []string
 
 	// Handle special cases
 	switch pattern {
 	case "mayor":
-		return []string{session.MayorSessionName()}
+		return []string{agent.MayorAddress.String()}
 	case "deacon":
-		return []string{session.DeaconSessionName()}
+		return []string{agent.DeaconAddress.String()}
 	}
 
 	// Parse pattern
@@ -378,47 +379,53 @@ func resolveNudgePattern(pattern string, agents []*AgentSession) []string {
 	rigPattern := parts[0]
 	targetPattern := parts[1]
 
-	for _, agent := range agents {
+	for _, as := range agentSessions {
 		// Match rig pattern
-		if rigPattern != "*" && rigPattern != agent.Rig {
+		if rigPattern != "*" && rigPattern != as.Rig {
 			continue
 		}
 
-		// Match target pattern
+		// Match target pattern and construct address
+		var addr string
 		if strings.HasPrefix(targetPattern, "polecats/") {
 			// polecats/* or polecats/<name>
-			if agent.Type != AgentPolecat {
+			if as.Type != AgentPolecat {
 				continue
 			}
 			suffix := strings.TrimPrefix(targetPattern, "polecats/")
-			if suffix != "*" && suffix != agent.AgentName {
+			if suffix != "*" && suffix != as.AgentName {
 				continue
 			}
+			addr = agent.PolecatAddress(as.Rig, as.AgentName).String()
 		} else if strings.HasPrefix(targetPattern, "crew/") {
 			// crew/* or crew/<name>
-			if agent.Type != AgentCrew {
+			if as.Type != AgentCrew {
 				continue
 			}
 			suffix := strings.TrimPrefix(targetPattern, "crew/")
-			if suffix != "*" && suffix != agent.AgentName {
+			if suffix != "*" && suffix != as.AgentName {
 				continue
 			}
+			addr = agent.CrewAddress(as.Rig, as.AgentName).String()
 		} else if targetPattern == "witness" {
-			if agent.Type != AgentWitness {
+			if as.Type != AgentWitness {
 				continue
 			}
+			addr = agent.WitnessAddress(as.Rig).String()
 		} else if targetPattern == "refinery" {
-			if agent.Type != AgentRefinery {
+			if as.Type != AgentRefinery {
 				continue
 			}
+			addr = agent.RefineryAddress(as.Rig).String()
 		} else {
 			// Assume it's a polecat name (legacy short format)
-			if agent.Type != AgentPolecat || agent.AgentName != targetPattern {
+			if as.Type != AgentPolecat || as.AgentName != targetPattern {
 				continue
 			}
+			addr = agent.PolecatAddress(as.Rig, as.AgentName).String()
 		}
 
-		results = append(results, agent.Name)
+		results = append(results, addr)
 	}
 
 	return results
@@ -452,20 +459,20 @@ func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string
 }
 
 // addressToAgentBeadID converts a target address to an agent bead ID.
-// Examples:
-//   - "mayor" -> "gt-{town}-mayor"
-//   - "deacon" -> "gt-{town}-deacon"
+// Bead IDs use the session name format:
+//   - "mayor" -> "hq-mayor"
+//   - "deacon" -> "hq-deacon"
 //   - "gastown/witness" -> "gt-gastown-witness"
 //   - "gastown/alpha" -> "gt-gastown-polecat-alpha"
 //
 // Returns empty string if the address cannot be converted.
 func addressToAgentBeadID(address string) string {
-	// Handle special cases
+	// Handle special cases - town-level agents use hq- prefix
 	switch address {
 	case "mayor":
-		return session.MayorSessionName()
+		return "hq-mayor"
 	case "deacon":
-		return session.DeaconSessionName()
+		return "hq-deacon"
 	}
 
 	// Parse rig/role format

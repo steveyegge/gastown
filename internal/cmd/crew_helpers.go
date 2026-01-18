@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
@@ -42,7 +43,8 @@ func inferRigFromCwd(townRoot string) (string, error) {
 }
 
 // getCrewManager returns a crew manager for the specified or inferred rig.
-func getCrewManager(rigName string) (*crew.Manager, *rig.Rig, error) {
+// agentOverride optionally specifies a different agent alias to use.
+func getCrewManager(rigName string, agentOverride string) (*crew.Manager, *rig.Rig, error) {
 	// Handle optional rig inference from cwd
 	if rigName == "" {
 		townRoot, err := workspace.FindFromCwdOrError()
@@ -55,13 +57,16 @@ func getCrewManager(rigName string) (*crew.Manager, *rig.Rig, error) {
 		}
 	}
 
-	_, r, err := getRig(rigName)
+	townRoot, r, err := getRig(rigName)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	crewGit := git.NewGit(r.Path)
-	crewMgr := crew.NewManager(r, crewGit)
+	agentName, _ := config.ResolveRoleAgentName("crew", townRoot, r.Path)
+	if agentOverride != "" {
+		agentName = agentOverride
+	}
+	crewMgr := factory.New(townRoot).CrewManager(r, agentName)
 
 	return crewMgr, r, nil
 }
@@ -193,49 +198,6 @@ func execRuntime(prompt, rigPath, configDir string) error {
 	return syscall.Exec(binPath, args, env)
 }
 
-// isInTmuxSession checks if we're currently inside the target tmux session.
-func isInTmuxSession(targetSession string) bool {
-	// TMUX env var format: /tmp/tmux-501/default,12345,0
-	// We need to get the current session name via tmux display-message
-	tmuxEnv := os.Getenv("TMUX")
-	if tmuxEnv == "" {
-		return false // Not in tmux at all
-	}
-
-	// Get current session name
-	cmd := exec.Command("tmux", "display-message", "-p", "#{session_name}")
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-
-	currentSession := strings.TrimSpace(string(out))
-	return currentSession == targetSession
-}
-
-// attachToTmuxSession attaches to a tmux session.
-// If already inside tmux, uses switch-client instead of attach-session.
-func attachToTmuxSession(sessionID string) error {
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		return fmt.Errorf("tmux not found: %w", err)
-	}
-
-	// Check if we're already inside a tmux session
-	var cmd *exec.Cmd
-	if os.Getenv("TMUX") != "" {
-		// Inside tmux: switch to the target session
-		cmd = exec.Command(tmuxPath, "switch-client", "-t", sessionID)
-	} else {
-		// Outside tmux: attach to the session
-		cmd = exec.Command(tmuxPath, "attach-session", "-t", sessionID)
-	}
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
 // ensureDefaultBranch checks if a git directory is on the default branch.
 // If not, warns the user and offers to switch.
 // Returns true if on default branch (or switched to it), false if user declined.
@@ -286,57 +248,24 @@ func ensureDefaultBranch(dir, roleName, rigPath string) bool { //nolint:unparam 
 	return true
 }
 
-// parseCrewSessionName extracts rig and crew name from a tmux session name.
-// Format: gt-<rig>-crew-<name>
-// Returns empty strings and false if the format doesn't match.
-func parseCrewSessionName(sessionName string) (rigName, crewName string, ok bool) {
-	// Must start with "gt-" and contain "-crew-"
-	if !strings.HasPrefix(sessionName, "gt-") {
-		return "", "", false
-	}
-
-	// Remove "gt-" prefix
-	rest := sessionName[3:]
-
-	// Find "-crew-" separator
-	idx := strings.Index(rest, "-crew-")
-	if idx == -1 {
-		return "", "", false
-	}
-
-	rigName = rest[:idx]
-	crewName = rest[idx+6:] // len("-crew-") = 6
-
-	if rigName == "" || crewName == "" {
-		return "", "", false
-	}
-
-	return rigName, crewName, true
-}
-
 // findRigCrewSessions returns all crew sessions for a given rig, sorted alphabetically.
-// Uses tmux list-sessions to find sessions matching gt-<rig>-crew-* pattern.
 func findRigCrewSessions(rigName string) ([]string, error) { //nolint:unparam // error return kept for future use
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
-	out, err := cmd.Output()
+	agents := factory.Agents()
+	allIDs, err := agents.List()
 	if err != nil {
-		// No tmux server or no sessions
+		// No agents running
 		return nil, nil
 	}
 
-	prefix := fmt.Sprintf("gt-%s-crew-", rigName)
 	var sessions []string
 
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, prefix) {
-			sessions = append(sessions, line)
+	for _, id := range allIDs {
+		role, rig, _ := id.Parse()
+		// Match: crew role, same rig
+		if role == constants.RoleCrew && rig == rigName {
+			sessions = append(sessions, id.String())
 		}
 	}
 
-	// Sessions are already sorted by tmux, but sort explicitly for consistency
-	// (alphabetical by session name means alphabetical by crew name)
 	return sessions, nil
 }

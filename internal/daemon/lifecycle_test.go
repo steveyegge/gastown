@@ -180,52 +180,50 @@ func TestParseLifecycleRequest_AlwaysUsesFromField(t *testing.T) {
 	}
 }
 
-func TestIdentityToSession_Mayor(t *testing.T) {
-	d, cleanup := testDaemonWithTown(t, "ai")
-	defer cleanup()
-
-	// Mayor session name is now fixed (one per machine, uses hq- prefix)
-	result := d.identityToSession("mayor")
-	if result != "hq-mayor" {
-		t.Errorf("identityToSession('mayor') = %q, expected 'hq-mayor'", result)
+func TestIdentityToAgentID_Mayor(t *testing.T) {
+	// Mayor identity converts to MayorAddress
+	result, err := identityToAgentID("mayor")
+	if err != nil {
+		t.Fatalf("identityToAgentID('mayor') error: %v", err)
+	}
+	if result.String() != "mayor" {
+		t.Errorf("identityToAgentID('mayor') = %q, expected 'mayor'", result)
 	}
 }
 
-func TestIdentityToSession_Witness(t *testing.T) {
-	d := testDaemon()
-
+func TestIdentityToAgentID_Witness(t *testing.T) {
 	tests := []struct {
 		identity string
 		expected string
 	}{
-		{"gastown-witness", "gt-gastown-witness"},
-		{"myrig-witness", "gt-myrig-witness"},
-		{"my-rig-name-witness", "gt-my-rig-name-witness"},
+		{"gastown-witness", "gastown/witness"},
+		{"myrig-witness", "myrig/witness"},
+		{"my-rig-name-witness", "my-rig-name/witness"},
 	}
 
 	for _, tc := range tests {
-		result := d.identityToSession(tc.identity)
-		if result != tc.expected {
-			t.Errorf("identityToSession(%q) = %q, expected %q", tc.identity, result, tc.expected)
+		result, err := identityToAgentID(tc.identity)
+		if err != nil {
+			t.Errorf("identityToAgentID(%q) error: %v", tc.identity, err)
+			continue
+		}
+		if result.String() != tc.expected {
+			t.Errorf("identityToAgentID(%q) = %q, expected %q", tc.identity, result, tc.expected)
 		}
 	}
 }
 
-func TestIdentityToSession_Unknown(t *testing.T) {
-	d := testDaemon()
-
+func TestIdentityToAgentID_Unknown(t *testing.T) {
 	tests := []string{
 		"unknown",
-		"polecat",
-		"refinery",
 		"gastown", // rig name without -witness
 		"",
 	}
 
 	for _, identity := range tests {
-		result := d.identityToSession(identity)
-		if result != "" {
-			t.Errorf("identityToSession(%q) = %q, expected empty string", identity, result)
+		_, err := identityToAgentID(identity)
+		if err == nil {
+			t.Errorf("identityToAgentID(%q) expected error, got nil", identity)
 		}
 	}
 }

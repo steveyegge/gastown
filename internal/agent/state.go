@@ -24,6 +24,16 @@ const (
 	StatePaused State = "paused"
 )
 
+// Status represents common agent status information.
+// This is the base type for role-specific status types (Mayor, Deacon, etc.).
+type Status struct {
+	// State is the current running state.
+	State State `json:"state"`
+
+	// Name is the session name (optional, set by role-specific code).
+	Name string `json:"name,omitempty"`
+}
+
 // StateManager handles loading and saving agent state to disk.
 // It uses generics to work with any state type.
 type StateManager[T any] struct {

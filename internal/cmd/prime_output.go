@@ -10,7 +10,6 @@ import (
 	"github.com/steveyegge/gastown/internal/checkpoint"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -66,8 +65,8 @@ func outputPrimeContext(ctx RoleContext) error {
 		WorkDir:       ctx.WorkDir,
 		DefaultBranch: defaultBranch,
 		Polecat:       ctx.Polecat,
-		MayorSession:  session.MayorSessionName(),
-		DeaconSession: session.DeaconSessionName(),
+		MayorSession:  "hq-mayor",
+		DeaconSession: "hq-deacon",
 	}
 
 	// Render and output

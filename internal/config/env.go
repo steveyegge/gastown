@@ -142,18 +142,6 @@ func ExportPrefix(env map[string]string) string {
 	return "export " + strings.Join(parts, " ") + " && "
 }
 
-// BuildStartupCommandWithEnv builds a startup command with the given environment variables.
-// This combines the export prefix with the agent command and optional prompt.
-func BuildStartupCommandWithEnv(env map[string]string, agentCmd, prompt string) string {
-	prefix := ExportPrefix(env)
-
-	if prompt != "" {
-		// Include prompt as argument to agent command
-		return fmt.Sprintf("%s%s %q", prefix, agentCmd, prompt)
-	}
-	return prefix + agentCmd
-}
-
 // MergeEnv merges multiple environment maps, with later maps taking precedence.
 func MergeEnv(maps ...map[string]string) map[string]string {
 	result := make(map[string]string)

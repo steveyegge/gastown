@@ -2,40 +2,42 @@ package session
 
 import (
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/ids"
 )
 
 func TestParseSessionName(t *testing.T) {
 	tests := []struct {
-		name     string
-		session  string
-		wantRole Role
-		wantRig  string
-		wantName string
-		wantErr  bool
+		name       string
+		session    string
+		wantRole   string
+		wantRig    string
+		wantWorker string
+		wantErr    bool
 	}{
 		// Town-level roles (hq-mayor, hq-deacon)
 		{
 			name:     "mayor",
 			session:  "hq-mayor",
-			wantRole: RoleMayor,
+			wantRole: "mayor",
 		},
 		{
 			name:     "deacon",
 			session:  "hq-deacon",
-			wantRole: RoleDeacon,
+			wantRole: "deacon",
 		},
 
 		// Witness (simple rig)
 		{
 			name:     "witness simple rig",
 			session:  "gt-gastown-witness",
-			wantRole: RoleWitness,
+			wantRole: "witness",
 			wantRig:  "gastown",
 		},
 		{
 			name:     "witness hyphenated rig",
 			session:  "gt-foo-bar-witness",
-			wantRole: RoleWitness,
+			wantRole: "witness",
 			wantRig:  "foo-bar",
 		},
 
@@ -43,53 +45,53 @@ func TestParseSessionName(t *testing.T) {
 		{
 			name:     "refinery simple rig",
 			session:  "gt-gastown-refinery",
-			wantRole: RoleRefinery,
+			wantRole: "refinery",
 			wantRig:  "gastown",
 		},
 		{
 			name:     "refinery hyphenated rig",
 			session:  "gt-my-project-refinery",
-			wantRole: RoleRefinery,
+			wantRole: "refinery",
 			wantRig:  "my-project",
 		},
 
 		// Crew (with marker)
 		{
-			name:     "crew simple",
-			session:  "gt-gastown-crew-max",
-			wantRole: RoleCrew,
-			wantRig:  "gastown",
-			wantName: "max",
+			name:       "crew simple",
+			session:    "gt-gastown-crew-max",
+			wantRole:   "crew",
+			wantRig:    "gastown",
+			wantWorker: "max",
 		},
 		{
-			name:     "crew hyphenated rig",
-			session:  "gt-foo-bar-crew-alice",
-			wantRole: RoleCrew,
-			wantRig:  "foo-bar",
-			wantName: "alice",
+			name:       "crew hyphenated rig",
+			session:    "gt-foo-bar-crew-alice",
+			wantRole:   "crew",
+			wantRig:    "foo-bar",
+			wantWorker: "alice",
 		},
 		{
-			name:     "crew hyphenated name",
-			session:  "gt-gastown-crew-my-worker",
-			wantRole: RoleCrew,
-			wantRig:  "gastown",
-			wantName: "my-worker",
+			name:       "crew hyphenated name",
+			session:    "gt-gastown-crew-my-worker",
+			wantRole:   "crew",
+			wantRig:    "gastown",
+			wantWorker: "my-worker",
 		},
 
 		// Polecat (fallback)
 		{
-			name:     "polecat simple",
-			session:  "gt-gastown-morsov",
-			wantRole: RolePolecat,
-			wantRig:  "gastown",
-			wantName: "morsov",
+			name:       "polecat simple",
+			session:    "gt-gastown-morsov",
+			wantRole:   "polecat",
+			wantRig:    "gastown",
+			wantWorker: "morsov",
 		},
 		{
-			name:     "polecat hyphenated rig",
-			session:  "gt-foo-bar-Toast",
-			wantRole: RolePolecat,
-			wantRig:  "foo-bar",
-			wantName: "Toast",
+			name:       "polecat hyphenated rig",
+			session:    "gt-foo-bar-Toast",
+			wantRole:   "polecat",
+			wantRig:    "foo-bar",
+			wantWorker: "Toast",
 		},
 
 		// Error cases
@@ -126,102 +128,102 @@ func TestParseSessionName(t *testing.T) {
 			if got.Rig != tt.wantRig {
 				t.Errorf("ParseSessionName(%q).Rig = %v, want %v", tt.session, got.Rig, tt.wantRig)
 			}
-			if got.Name != tt.wantName {
-				t.Errorf("ParseSessionName(%q).Name = %v, want %v", tt.session, got.Name, tt.wantName)
+			if got.Worker != tt.wantWorker {
+				t.Errorf("ParseSessionName(%q).Worker = %v, want %v", tt.session, got.Worker, tt.wantWorker)
 			}
 		})
 	}
 }
 
-func TestAgentIdentity_SessionName(t *testing.T) {
+func TestSessionNameFromAgentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		identity AgentIdentity
-		want     string
+		name string
+		id   ids.AgentID
+		want string
 	}{
 		{
-			name:     "mayor",
-			identity: AgentIdentity{Role: RoleMayor},
-			want:     "hq-mayor",
+			name: "mayor",
+			id:   ids.AgentID{Role: "mayor"},
+			want: "hq-mayor",
 		},
 		{
-			name:     "deacon",
-			identity: AgentIdentity{Role: RoleDeacon},
-			want:     "hq-deacon",
+			name: "deacon",
+			id:   ids.AgentID{Role: "deacon"},
+			want: "hq-deacon",
 		},
 		{
-			name:     "witness",
-			identity: AgentIdentity{Role: RoleWitness, Rig: "gastown"},
-			want:     "gt-gastown-witness",
+			name: "witness",
+			id:   ids.AgentID{Role: "witness", Rig: "gastown"},
+			want: "gt-gastown-witness",
 		},
 		{
-			name:     "refinery",
-			identity: AgentIdentity{Role: RoleRefinery, Rig: "my-project"},
-			want:     "gt-my-project-refinery",
+			name: "refinery",
+			id:   ids.AgentID{Role: "refinery", Rig: "my-project"},
+			want: "gt-my-project-refinery",
 		},
 		{
-			name:     "crew",
-			identity: AgentIdentity{Role: RoleCrew, Rig: "gastown", Name: "max"},
-			want:     "gt-gastown-crew-max",
+			name: "crew",
+			id:   ids.AgentID{Role: "crew", Rig: "gastown", Worker: "max"},
+			want: "gt-gastown-crew-max",
 		},
 		{
-			name:     "polecat",
-			identity: AgentIdentity{Role: RolePolecat, Rig: "gastown", Name: "morsov"},
-			want:     "gt-gastown-morsov",
+			name: "polecat",
+			id:   ids.AgentID{Role: "polecat", Rig: "gastown", Worker: "morsov"},
+			want: "gt-gastown-morsov",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.identity.SessionName(); got != tt.want {
-				t.Errorf("AgentIdentity.SessionName() = %v, want %v", got, tt.want)
+			if got := SessionNameFromAgentID(tt.id); got != tt.want {
+				t.Errorf("SessionNameFromAgentID() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestAgentIdentity_Address(t *testing.T) {
+func TestAgentID_String(t *testing.T) {
 	tests := []struct {
-		name     string
-		identity AgentIdentity
-		want     string
+		name string
+		id   ids.AgentID
+		want string
 	}{
 		{
-			name:     "mayor",
-			identity: AgentIdentity{Role: RoleMayor},
-			want:     "mayor",
+			name: "mayor",
+			id:   ids.AgentID{Role: "mayor"},
+			want: "mayor",
 		},
 		{
-			name:     "deacon",
-			identity: AgentIdentity{Role: RoleDeacon},
-			want:     "deacon",
+			name: "deacon",
+			id:   ids.AgentID{Role: "deacon"},
+			want: "deacon",
 		},
 		{
-			name:     "witness",
-			identity: AgentIdentity{Role: RoleWitness, Rig: "gastown"},
-			want:     "gastown/witness",
+			name: "witness",
+			id:   ids.AgentID{Role: "witness", Rig: "gastown"},
+			want: "gastown/witness",
 		},
 		{
-			name:     "refinery",
-			identity: AgentIdentity{Role: RoleRefinery, Rig: "my-project"},
-			want:     "my-project/refinery",
+			name: "refinery",
+			id:   ids.AgentID{Role: "refinery", Rig: "my-project"},
+			want: "my-project/refinery",
 		},
 		{
-			name:     "crew",
-			identity: AgentIdentity{Role: RoleCrew, Rig: "gastown", Name: "max"},
-			want:     "gastown/crew/max",
+			name: "crew",
+			id:   ids.AgentID{Role: "crew", Rig: "gastown", Worker: "max"},
+			want: "gastown/crew/max",
 		},
 		{
-			name:     "polecat",
-			identity: AgentIdentity{Role: RolePolecat, Rig: "gastown", Name: "Toast"},
-			want:     "gastown/polecats/Toast",
+			name: "polecat",
+			id:   ids.AgentID{Role: "polecat", Rig: "gastown", Worker: "Toast"},
+			want: "gastown/polecat/Toast",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.identity.Address(); got != tt.want {
-				t.Errorf("AgentIdentity.Address() = %v, want %v", got, tt.want)
+			if got := tt.id.String(); got != tt.want {
+				t.Errorf("AgentID.String() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -230,23 +232,54 @@ func TestAgentIdentity_Address(t *testing.T) {
 func TestParseSessionName_RoundTrip(t *testing.T) {
 	// Test that parsing then reconstructing gives the same result
 	sessions := []string{
+		// Town-level
 		"hq-mayor",
 		"hq-deacon",
+		// Witness with simple and hyphenated rig names
 		"gt-gastown-witness",
+		"gt-foo-bar-witness",
+		"gt-a-b-c-witness",
+		// Refinery with hyphenated rig
 		"gt-foo-bar-refinery",
+		// Crew with hyphenated rig and/or worker name
 		"gt-gastown-crew-max",
+		"gt-foo-bar-crew-alice",
+		"gt-gastown-crew-joe-bob",
+		"gt-foo-bar-crew-alice-bob",
+		// Polecat with simple and hyphenated rig names
 		"gt-gastown-morsov",
+		"gt-foo-bar-Toast",
 	}
 
 	for _, sess := range sessions {
 		t.Run(sess, func(t *testing.T) {
-			identity, err := ParseSessionName(sess)
+			id, err := ParseSessionName(sess)
 			if err != nil {
 				t.Fatalf("ParseSessionName(%q) error = %v", sess, err)
 			}
-			if got := identity.SessionName(); got != sess {
-				t.Errorf("Round-trip failed: ParseSessionName(%q).SessionName() = %q", sess, got)
+			if got := SessionNameFromAgentID(id); got != sess {
+				t.Errorf("Round-trip failed: ParseSessionName(%q) -> SessionNameFromAgentID() = %q", sess, got)
 			}
 		})
+	}
+}
+
+func TestParseSessionName_KnownLimitations(t *testing.T) {
+	// Document known limitations where parsing is ambiguous.
+	// A polecat named "witness" or "refinery" cannot be distinguished from the
+	// rig-level singleton agents without additional context.
+
+	// This WILL be parsed as witness, not polecat - this is a known limitation
+	sess := "gt-gastown-witness"
+	id, _ := ParseSessionName(sess)
+	if id.Role != "witness" {
+		t.Errorf("Expected role=witness (known limitation: polecat named 'witness' is indistinguishable)")
+	}
+
+	// Similarly for refinery
+	sess = "gt-gastown-refinery"
+	id, _ = ParseSessionName(sess)
+	if id.Role != "refinery" {
+		t.Errorf("Expected role=refinery (known limitation: polecat named 'refinery' is indistinguishable)")
 	}
 }

@@ -239,70 +239,6 @@ func TestMergeWithPreset(t *testing.T) {
 	}
 }
 
-func TestBuildResumeCommand(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		agentName string
-		sessionID string
-		wantEmpty bool
-		contains  []string // strings that should appear in result
-	}{
-		{
-			name:      "claude with session",
-			agentName: "claude",
-			sessionID: "session-123",
-			wantEmpty: false,
-			contains:  []string{"claude", "--dangerously-skip-permissions", "--resume", "session-123"},
-		},
-		{
-			name:      "gemini with session",
-			agentName: "gemini",
-			sessionID: "gemini-sess-456",
-			wantEmpty: false,
-			contains:  []string{"gemini", "--approval-mode", "yolo", "--resume", "gemini-sess-456"},
-		},
-		{
-			name:      "codex subcommand style",
-			agentName: "codex",
-			sessionID: "codex-sess-789",
-			wantEmpty: false,
-			contains:  []string{"codex", "resume", "codex-sess-789", "--yolo"},
-		},
-		{
-			name:      "empty session ID",
-			agentName: "claude",
-			sessionID: "",
-			wantEmpty: true,
-			contains:  []string{"claude"},
-		},
-		{
-			name:      "unknown agent",
-			agentName: "unknown-agent",
-			sessionID: "session-123",
-			wantEmpty: true,
-			contains:  []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := BuildResumeCommand(tt.agentName, tt.sessionID)
-			if tt.wantEmpty {
-				if result != "" {
-					t.Errorf("BuildResumeCommand(%s, %s) = %q, want empty", tt.agentName, tt.sessionID, result)
-				}
-				return
-			}
-			for _, s := range tt.contains {
-				if !strings.Contains(result, s) {
-					t.Errorf("BuildResumeCommand(%s, %s) = %q, missing %q", tt.agentName, tt.sessionID, result, s)
-				}
-			}
-		})
-	}
-}
-
 func TestSupportsSessionResume(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -357,13 +293,13 @@ func TestGetProcessNames(t *testing.T) {
 		agentName string
 		want      []string
 	}{
-		{"claude", []string{"node"}},
+		{"claude", []string{"claude", "node"}},
 		{"gemini", []string{"gemini"}},
 		{"codex", []string{"codex"}},
 		{"cursor", []string{"cursor-agent"}},
 		{"auggie", []string{"auggie"}},
 		{"amp", []string{"amp"}},
-		{"unknown", []string{"node"}}, // Falls back to Claude's process
+		{"unknown", []string{"claude", "node"}}, // Falls back to Claude's process
 	}
 
 	for _, tt := range tests {

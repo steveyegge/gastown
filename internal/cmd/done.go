@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
@@ -692,7 +693,7 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 	}
 
 	// Get polecat manager using existing helper
-	mgr, _, err := getPolecatManager(roleInfo.Rig)
+	mgr, _, _, err := getPolecatManager(roleInfo.Rig)
 	if err != nil {
 		return fmt.Errorf("getting polecat manager: %w", err)
 	}
@@ -745,9 +746,9 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 
 	// Kill our own tmux session with proper process cleanup
 	// This will terminate Claude and all child processes, completing the self-cleaning cycle.
-	// We use KillSessionWithProcesses to ensure no orphaned processes are left behind.
+	// Stop() recursively kills all descendant processes to prevent orphans.
 	t := tmux.NewTmux()
-	if err := t.KillSessionWithProcesses(sessionName); err != nil {
+	if err := t.Stop(session.SessionID(sessionName)); err != nil {
 		return fmt.Errorf("killing session %s: %w", sessionName, err)
 	}
 

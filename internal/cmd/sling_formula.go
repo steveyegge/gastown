@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -87,14 +87,13 @@ func runSlingFormula(args []string) error {
 		target = args[1]
 	}
 
-	// Resolve target agent and pane
+	// Resolve target agent
 	var targetAgent string
-	var targetPane string
 
 	if target != "" {
 		// Resolve "." to current agent identity (like git's "." meaning current directory)
 		if target == "." {
-			targetAgent, targetPane, _, err = resolveSelfTarget()
+			targetAgent, err = resolveSelfTarget()
 			if err != nil {
 				return fmt.Errorf("resolving self for '.' target: %w", err)
 			}
@@ -109,7 +108,6 @@ func runSlingFormula(args []string) error {
 				if dogName == "" {
 					targetAgent = "deacon/dogs/<idle>"
 				}
-				targetPane = "<dog-pane>"
 			} else {
 				// Dispatch to dog
 				dispatchInfo, dispatchErr := DispatchToDog(dogName, slingCreate)
@@ -117,7 +115,6 @@ func runSlingFormula(args []string) error {
 					return fmt.Errorf("dispatching to dog: %w", dispatchErr)
 				}
 				targetAgent = dispatchInfo.AgentID
-				targetPane = dispatchInfo.Pane
 				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
@@ -126,7 +123,6 @@ func runSlingFormula(args []string) error {
 				// Dry run - just indicate what would happen
 				fmt.Printf("Would spawn fresh polecat in rig '%s'\n", rigName)
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
-				targetPane = "<new-pane>"
 			} else {
 				// Spawn a fresh polecat in the rig
 				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
@@ -141,29 +137,23 @@ func runSlingFormula(args []string) error {
 					return fmt.Errorf("spawning polecat: %w", spawnErr)
 				}
 				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
 
 				// Wake witness and refinery to monitor the new polecat
-				wakeRigAgents(rigName)
+				wakeRigAgents(townRoot, rigName)
 			}
 		} else {
 			// Slinging to an existing agent
-			var targetWorkDir string
-			targetAgent, targetPane, targetWorkDir, err = resolveTargetAgent(target)
+			targetAgent, err = resolveTargetAgent(target)
 			if err != nil {
 				return fmt.Errorf("resolving target: %w", err)
 			}
-			// Use target's working directory for bd commands (needed for redirect-based routing)
-			_ = targetWorkDir // Formula sling doesn't need hookWorkDir
 		}
 	} else {
 		// Slinging to self
-		var selfWorkDir string
-		targetAgent, targetPane, selfWorkDir, err = resolveSelfTarget()
+		targetAgent, err = resolveSelfTarget()
 		if err != nil {
 			return err
 		}
-		_ = selfWorkDir // Formula sling doesn't need hookWorkDir
 	}
 
 	fmt.Printf("%s Slinging formula %s to %s...\n", style.Bold.Render("🎯"), formulaName, targetAgent)
@@ -174,7 +164,7 @@ func runSlingFormula(args []string) error {
 		for _, v := range slingVars {
 			fmt.Printf("  --var %s\n", v)
 		}
-		fmt.Printf("Would nudge pane: %s\n", targetPane)
+		fmt.Printf("Would nudge agent: %s\n", targetAgent)
 		return nil
 	}
 
@@ -252,9 +242,9 @@ func runSlingFormula(args []string) error {
 		}
 	}
 
-	// Step 4: Nudge to start (graceful if no tmux)
-	if targetPane == "" {
-		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
+	// Step 4: Nudge to start
+	if targetAgent == "" {
+		fmt.Printf("%s No agent to nudge (work will be discovered via gt prime)\n", style.Dim.Render("○"))
 		return nil
 	}
 
@@ -264,10 +254,17 @@ func runSlingFormula(args []string) error {
 	} else {
 		prompt = fmt.Sprintf("Formula %s slung. Run `gt hook` to see your hook, then execute the steps.", formulaName)
 	}
-	t := tmux.NewTmux()
-	if err := t.NudgePane(targetPane, prompt); err != nil {
-		// Graceful fallback for no-tmux mode
-		fmt.Printf("%s Could not nudge (no tmux?): %v\n", style.Dim.Render("○"), err)
+
+	agentID, err := addressToAgentID(targetAgent)
+	if err != nil {
+		fmt.Printf("%s Agent address %q not nudgeable: %v\n", style.Dim.Render("○"), targetAgent, err)
+		return nil
+	}
+
+	agents := agent.Default()
+	if err := agents.Nudge(agentID, prompt); err != nil {
+		// Graceful fallback
+		fmt.Printf("%s Could not nudge: %v\n", style.Dim.Render("○"), err)
 		fmt.Printf("  Agent will discover work via gt prime / bd show\n")
 	} else {
 		fmt.Printf("%s Nudged to start\n", style.Bold.Render("▶"))

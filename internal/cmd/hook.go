@@ -141,7 +141,7 @@ func runHook(_ *cobra.Command, args []string) error {
 	}
 
 	// Determine agent identity
-	agentID, _, _, err := resolveSelfTarget()
+	agentID, err := resolveSelfTarget()
 	if err != nil {
 		return fmt.Errorf("detecting agent identity: %w", err)
 	}
@@ -242,10 +242,8 @@ func runHook(_ *cobra.Command, args []string) error {
 	fmt.Printf("  Use 'gt handoff' to restart with this work\n")
 	fmt.Printf("  Use 'gt hook' to see hook status\n")
 
-	// Log hook event to activity feed (non-fatal)
-	if err := events.LogFeed(events.TypeHook, agentID, events.HookPayload(beadID)); err != nil {
-		fmt.Fprintf(os.Stderr, "%s Warning: failed to log hook event: %v\n", style.Dim.Render("⚠"), err)
-	}
+	// Log hook event to activity feed
+	_ = events.LogFeed(events.TypeHook, agentID, events.HookPayload(beadID))
 
 	return nil
 }
@@ -284,7 +282,7 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 		target = args[0]
 	} else {
 		// Auto-detect current agent from context
-		agentID, _, _, err := resolveSelfTarget()
+		agentID, err := resolveSelfTarget()
 		if err != nil {
 			return fmt.Errorf("auto-detecting agent (use explicit argument): %w", err)
 		}

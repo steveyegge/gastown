@@ -11,14 +11,15 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/swarm"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -491,10 +492,9 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 	ID    string `json:"id"`
 	Title string `json:"title"`
 }) error { //nolint:unparam // error return kept for future use
-	t := tmux.NewTmux()
-	polecatSessMgr := polecat.NewSessionManager(t, r)
+	agents := factory.Agents()
 	polecatGit := git.NewGit(r.Path)
-	polecatMgr := polecat.NewManager(r, polecatGit, t)
+	polecatMgr := polecat.NewManager(agents, r, polecatGit)
 
 	// Pair workers with tasks (round-robin if more tasks than workers)
 	workerIdx := 0
@@ -520,12 +520,12 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 		}
 
 		// Check if already running
-		running, _ := polecatSessMgr.IsRunning(worker)
-		if running {
+		polecatID := agent.PolecatAddress(r.Name, worker)
+		if agents.Exists(polecatID) {
 			fmt.Printf("  %s already running, injecting task...\n", worker)
 		} else {
 			fmt.Printf("  Starting %s...\n", worker)
-			if err := polecatSessMgr.Start(worker, polecat.SessionStartOptions{}); err != nil {
+			if _, err := factory.Start(townRoot, polecatID, ""); err != nil {
 				style.PrintWarning("  couldn't start %s: %v", worker, err)
 				continue
 			}
@@ -536,7 +536,7 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 		// Inject work assignment
 		context := fmt.Sprintf("[SWARM] You are part of swarm %s.\n\nAssigned task: %s\nTitle: %s\n\nWork on this task. When complete, commit and signal DONE.",
 			swarmID, task.ID, task.Title)
-		if err := polecatSessMgr.Inject(worker, context); err != nil {
+		if err := agents.Nudge(polecatID, context); err != nil {
 			style.PrintWarning("  couldn't inject to %s: %v", worker, err)
 		} else {
 			fmt.Printf("  %s → %s ✓\n", worker, task.ID)

@@ -67,9 +67,15 @@ func runResume(cmd *cobra.Command, args []string) error {
 	}
 
 	// Detect agent identity
-	agentID, _, cloneRoot, err := resolveSelfTarget()
+	agentID, err := resolveSelfTarget()
 	if err != nil {
 		return fmt.Errorf("detecting agent identity: %w", err)
+	}
+
+	// Detect clone root for parked work
+	cloneRoot, err := detectCloneRoot()
+	if err != nil {
+		return fmt.Errorf("detecting clone root: %w", err)
 	}
 
 	// Check for parked work
@@ -257,10 +263,7 @@ func checkHandoffMessages() error {
 	if err := json.Unmarshal(output, &messages); err != nil {
 		// JSON parse failed, use plain text output
 		inboxCmd = exec.Command("gt", "mail", "inbox")
-		output, err = inboxCmd.Output()
-		if err != nil {
-			return fmt.Errorf("fallback inbox check failed: %w", err)
-		}
+		output, _ = inboxCmd.Output()
 		outputStr := string(output)
 		if containsHandoff(outputStr) {
 			fmt.Printf("%s Found handoff message(s):\n\n", style.Bold.Render("🤝"))

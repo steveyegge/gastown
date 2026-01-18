@@ -13,11 +13,12 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // Polecat identity command flags
@@ -221,8 +222,8 @@ func runPolecatIdentityAdd(cmd *cobra.Command, args []string) error {
 	// Generate name if not provided
 	if polecatName == "" {
 		polecatGit := git.NewGit(r.Path)
-		t := tmux.NewTmux()
-		mgr := polecat.NewManager(r, polecatGit, t)
+		agents := agent.Default()
+		mgr := polecat.NewManager(agents, r, polecatGit)
 		polecatName, err = mgr.AllocateName()
 		if err != nil {
 			return fmt.Errorf("generating polecat name: %w", err)
@@ -276,8 +277,7 @@ func runPolecatIdentityList(cmd *cobra.Command, args []string) error {
 
 	// Filter for polecat beads in this rig
 	identities := []IdentityInfo{} // Initialize to empty slice (not nil) for JSON
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
+	agents := factory.Agents()
 
 	for id, issue := range agentBeads {
 		// Parse the bead ID to check if it's a polecat for this rig
@@ -295,13 +295,13 @@ func runPolecatIdentityList(cmd *cobra.Command, args []string) error {
 
 		// Check if worktree exists
 		worktreeExists := false
-		mgr := polecat.NewManager(r, nil, t)
+		mgr := polecat.NewManager(agents, r, nil)
 		if p, err := mgr.Get(name); err == nil && p != nil {
 			worktreeExists = true
 		}
 
 		// Check if session is running
-		sessionRunning, _ := polecatMgr.IsRunning(name)
+		sessionRunning := agents.Exists(agent.PolecatAddress(rigName, name))
 
 		info := IdentityInfo{
 			Rig:            rigName,
@@ -395,9 +395,8 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check worktree and session
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
-	mgr := polecat.NewManager(r, nil, t)
+	agents := factory.Agents()
+	mgr := polecat.NewManager(agents, r, nil)
 
 	worktreeExists := false
 	var clonePath string
@@ -405,7 +404,7 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 		worktreeExists = true
 		clonePath = p.ClonePath
 	}
-	sessionRunning, _ := polecatMgr.IsRunning(polecatName)
+	sessionRunning := agents.Exists(agent.PolecatAddress(rigName, polecatName))
 
 	// Build CV summary with enhanced analytics
 	cv := buildCVSummary(r.Path, rigName, polecatName, beadID, clonePath)
@@ -582,10 +581,7 @@ func runPolecatIdentityRename(cmd *cobra.Command, args []string) error {
 	}
 
 	// Safety check: no active session
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
-	running, _ := polecatMgr.IsRunning(oldName)
-	if running {
+	if factory.Agents().Exists(agent.PolecatAddress(rigName, oldName)) {
 		return fmt.Errorf("cannot rename: polecat session %s is running", oldName)
 	}
 
@@ -650,10 +646,7 @@ func runPolecatIdentityRemove(cmd *cobra.Command, args []string) error {
 		var reasons []string
 
 		// Check for active session
-		t := tmux.NewTmux()
-		polecatMgr := polecat.NewSessionManager(t, r)
-		running, _ := polecatMgr.IsRunning(polecatName)
-		if running {
+		if factory.Agents().Exists(agent.PolecatAddress(rigName, polecatName)) {
 			reasons = append(reasons, "session is running")
 		}
 

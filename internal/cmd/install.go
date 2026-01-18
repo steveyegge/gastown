@@ -11,11 +11,11 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/formula"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/shell"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -203,9 +203,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Settings at town root would be found by ALL agents via directory traversal,
 	// causing crew/polecat/etc to cd to town root before running commands.
 	// mayorDir already defined above
+	runtimeConfig := config.LoadRuntimeConfig(absPath)
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		fmt.Printf("   %s Could not create mayor directory: %v\n", style.Dim.Render("⚠"), err)
-	} else if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
+	} else if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig); err != nil {
 		fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
 	} else {
 		fmt.Printf("   ✓ Created mayor/.claude/settings.json\n")
@@ -215,7 +216,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	deaconDir := filepath.Join(absPath, "deacon")
 	if err := os.MkdirAll(deaconDir, 0755); err != nil {
 		fmt.Printf("   %s Could not create deacon directory: %v\n", style.Dim.Render("⚠"), err)
-	} else if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
+	} else if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", runtimeConfig); err != nil {
 		fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
 	} else {
 		fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")

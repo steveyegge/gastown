@@ -1,26 +1,18 @@
 package cmd
 
 import (
-	"fmt"
-	"os/exec"
 	"sort"
-	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/factory"
 )
-
-// cycleSession is the --session flag for cycle next/prev commands.
-// When run via tmux key binding (run-shell), the session context may not be
-// correct, so we pass the session name explicitly via #{session_name} expansion.
-var cycleSession string
 
 func init() {
 	rootCmd.AddCommand(cycleCmd)
 	cycleCmd.AddCommand(cycleNextCmd)
 	cycleCmd.AddCommand(cyclePrevCmd)
-
-	cycleNextCmd.Flags().StringVar(&cycleSession, "session", "", "Override current session (used by tmux binding)")
-	cyclePrevCmd.Flags().StringVar(&cycleSession, "session", "", "Override current session (used by tmux binding)")
 }
 
 var cycleCmd = &cobra.Command{
@@ -34,7 +26,7 @@ Session groups:
 - Rig infra sessions: Witness ↔ Refinery (per rig)
 - Polecat sessions: All polecats in the same rig (e.g., greenplace/Toast ↔ greenplace/Nux)
 
-The appropriate cycling is detected automatically from the session name.`,
+The appropriate cycling is detected automatically from the agent's environment.`,
 }
 
 var cycleNextCmd = &cobra.Command{
@@ -46,7 +38,7 @@ This command is typically invoked via the C-b n keybinding. It automatically
 detects whether you're in a town-level session (Mayor/Deacon) or a crew session
 and cycles within the appropriate group.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return cycleToSession(1, cycleSession)
+		return cycleToSession(1)
 	},
 }
 
@@ -59,126 +51,128 @@ This command is typically invoked via the C-b p keybinding. It automatically
 detects whether you're in a town-level session (Mayor/Deacon) or a crew session
 and cycles within the appropriate group.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return cycleToSession(-1, cycleSession)
+		return cycleToSession(-1)
 	},
 }
 
-// cycleToSession dispatches to the appropriate cycling function based on session type.
+// cycleToSession dispatches to the appropriate cycling function based on agent role.
 // direction: 1 for next, -1 for previous
-// sessionOverride: if non-empty, use this instead of detecting current session
-func cycleToSession(direction int, sessionOverride string) error {
-	session := sessionOverride
-	if session == "" {
-		var err error
-		session, err = getCurrentTmuxSession()
-		if err != nil {
-			return nil // Not in tmux, nothing to do
-		}
-	}
-
-	// Check if it's a town-level session
-	townLevelSessions := getTownLevelSessions()
-	if townLevelSessions != nil {
-		for _, townSession := range townLevelSessions {
-			if session == townSession {
-				return cycleTownSession(direction, session)
-			}
-		}
-	}
-
-	// Check if it's a crew session (format: gt-<rig>-crew-<name>)
-	if strings.HasPrefix(session, "gt-") && strings.Contains(session, "-crew-") {
-		return cycleCrewSession(direction, session)
-	}
-
-	// Check if it's a rig infra session (witness or refinery)
-	if rig := parseRigInfraSession(session); rig != "" {
-		return cycleRigInfraSession(direction, session, rig)
-	}
-
-	// Check if it's a polecat session (gt-<rig>-<name>, not crew/witness/refinery)
-	if rig, _, ok := parsePolecatSessionName(session); ok && rig != "" {
-		return cyclePolecatSession(direction, session)
-	}
-
-	// Unknown session type - do nothing
-	return nil
-}
-
-// parseRigInfraSession extracts rig name if this is a witness or refinery session.
-// Returns empty string if not a rig infra session.
-// Format: gt-<rig>-witness or gt-<rig>-refinery
-func parseRigInfraSession(session string) string {
-	if !strings.HasPrefix(session, "gt-") {
-		return ""
-	}
-	rest := session[3:] // Remove "gt-" prefix
-
-	// Check for -witness or -refinery suffix
-	if strings.HasSuffix(rest, "-witness") {
-		return strings.TrimSuffix(rest, "-witness")
-	}
-	if strings.HasSuffix(rest, "-refinery") {
-		return strings.TrimSuffix(rest, "-refinery")
-	}
-	return ""
-}
-
-// cycleRigInfraSession cycles between witness and refinery sessions for a rig.
-func cycleRigInfraSession(direction int, currentSession, rig string) error {
-	// Find running infra sessions for this rig
-	witnessSession := fmt.Sprintf("gt-%s-witness", rig)
-	refinerySession := fmt.Sprintf("gt-%s-refinery", rig)
-
-	var sessions []string
-	allSessions, err := listTmuxSessions()
+func cycleToSession(direction int) error {
+	// Get current agent identity from environment
+	currentID, err := agent.Self()
 	if err != nil {
-		return err
+		return nil // Not in a GT session, nothing to do
 	}
 
-	for _, s := range allSessions {
-		if s == witnessSession || s == refinerySession {
-			sessions = append(sessions, s)
-		}
+	agents := factory.Agents()
+
+	// Get all running agents
+	allIDs, err := agents.List()
+	if err != nil {
+		return nil
 	}
 
-	if len(sessions) == 0 {
-		return nil // No infra sessions running
+	role, rig, _ := currentID.Parse()
+
+	// Find siblings based on role
+	var siblings []agent.AgentID
+	switch role {
+	case constants.RoleMayor, constants.RoleDeacon:
+		// Town-level: cycle between mayor and deacon
+		siblings = filterByRoles(allIDs, constants.RoleMayor, constants.RoleDeacon)
+	case constants.RoleCrew:
+		// Crew: cycle between all crew in same rig
+		siblings = filterByRoleAndRig(allIDs, constants.RoleCrew, rig)
+	case constants.RoleWitness, constants.RoleRefinery:
+		// Rig infra: cycle between witness and refinery in same rig
+		siblings = filterByRolesAndRig(allIDs, rig, constants.RoleWitness, constants.RoleRefinery)
+	case constants.RolePolecat:
+		// Polecat: cycle between all polecats in same rig
+		siblings = filterByRoleAndRig(allIDs, constants.RolePolecat, rig)
+	default:
+		return nil
+	}
+
+	if len(siblings) <= 1 {
+		return nil // Nothing to cycle to
 	}
 
 	// Sort for consistent ordering
-	sort.Strings(sessions)
+	sortAgentIDs(siblings)
 
 	// Find current position
 	currentIdx := -1
-	for i, s := range sessions {
-		if s == currentSession {
+	for i, id := range siblings {
+		if id == currentID {
 			currentIdx = i
 			break
 		}
 	}
 
 	if currentIdx == -1 {
-		return nil // Current session not in list
+		return nil // Current agent not in siblings list
 	}
 
 	// Calculate target index (with wrapping)
-	targetIdx := (currentIdx + direction + len(sessions)) % len(sessions)
+	targetIdx := (currentIdx + direction + len(siblings)) % len(siblings)
 
 	if targetIdx == currentIdx {
 		return nil // Only one session
 	}
 
 	// Switch to target session
-	cmd := exec.Command("tmux", "switch-client", "-t", sessions[targetIdx])
-	return cmd.Run()
+	return agents.Attach(siblings[targetIdx])
 }
 
-// listTmuxSessions returns all tmux session names.
-func listTmuxSessions() ([]string, error) {
-	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
-	if err != nil {
-		return nil, err
+// filterByRoles returns agents matching any of the given roles.
+func filterByRoles(ids []agent.AgentID, roles ...string) []agent.AgentID {
+	roleSet := make(map[string]bool)
+	for _, r := range roles {
+		roleSet[r] = true
 	}
-	return splitLines(string(out)), nil
+
+	var result []agent.AgentID
+	for _, id := range ids {
+		role, _, _ := id.Parse()
+		if roleSet[role] {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+// filterByRoleAndRig returns agents matching role and rig.
+func filterByRoleAndRig(ids []agent.AgentID, role, rig string) []agent.AgentID {
+	var result []agent.AgentID
+	for _, id := range ids {
+		r, g, _ := id.Parse()
+		if r == role && g == rig {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+// filterByRolesAndRig returns agents matching any of the roles in the given rig.
+func filterByRolesAndRig(ids []agent.AgentID, rig string, roles ...string) []agent.AgentID {
+	roleSet := make(map[string]bool)
+	for _, r := range roles {
+		roleSet[r] = true
+	}
+
+	var result []agent.AgentID
+	for _, id := range ids {
+		r, g, _ := id.Parse()
+		if roleSet[r] && g == rig {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+// sortAgentIDs sorts agent IDs by their string representation.
+func sortAgentIDs(ids []agent.AgentID) {
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i].String() < ids[j].String()
+	})
 }

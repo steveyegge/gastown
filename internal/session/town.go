@@ -5,33 +5,32 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/events"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// TownSession represents a town-level tmux session.
-type TownSession struct {
+// TownSessionInfo represents metadata about a town-level tmux session.
+type TownSessionInfo struct {
 	Name      string // Display name (e.g., "Mayor")
 	SessionID string // Tmux session ID (e.g., "hq-mayor")
 }
 
-// TownSessions returns the list of town-level sessions in shutdown order.
+// TownSessionInfos returns the list of town-level sessions in shutdown order.
 // Order matters: Boot (Deacon's watchdog) must be stopped before Deacon,
 // otherwise Boot will try to restart Deacon.
-func TownSessions() []TownSession {
-	return []TownSession{
+func TownSessionInfos() []TownSessionInfo {
+	return []TownSessionInfo{
 		{"Mayor", MayorSessionName()},
-		{"Boot", boot.SessionName},
+		{"Boot", BootSessionName},
 		{"Deacon", DeaconSessionName()},
 	}
 }
 
-// StopTownSession stops a single town-level tmux session.
+// StopTownSessionInfo stops a single town-level tmux session.
 // If force is true, skips graceful shutdown (Ctrl-C) and kills immediately.
 // Returns true if the session was running and stopped, false if not running.
-func StopTownSession(t *tmux.Tmux, ts TownSession, force bool) (bool, error) {
-	running, err := t.HasSession(ts.SessionID)
+func StopTownSessionInfo(sess Sessions, ts TownSessionInfo, force bool) (bool, error) {
+	id := SessionID(ts.SessionID)
+	running, err := sess.Exists(id)
 	if err != nil {
 		return false, err
 	}
@@ -39,24 +38,9 @@ func StopTownSession(t *tmux.Tmux, ts TownSession, force bool) (bool, error) {
 		return false, nil
 	}
 
-	return stopTownSessionInternal(t, ts, force)
-}
-
-// StopTownSessionWithCache is like StopTownSession but uses a pre-fetched
-// SessionSet for O(1) existence check instead of spawning a subprocess.
-func StopTownSessionWithCache(t *tmux.Tmux, ts TownSession, force bool, cache *tmux.SessionSet) (bool, error) {
-	if !cache.Has(ts.SessionID) {
-		return false, nil
-	}
-
-	return stopTownSessionInternal(t, ts, force)
-}
-
-// stopTownSessionInternal performs the actual session stop.
-func stopTownSessionInternal(t *tmux.Tmux, ts TownSession, force bool) (bool, error) {
 	// Try graceful shutdown first (unless forced)
 	if !force {
-		_ = t.SendKeysRaw(ts.SessionID, "C-c")
+		_ = sess.SendControl(id, "C-c")
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -69,7 +53,7 @@ func stopTownSessionInternal(t *tmux.Tmux, ts TownSession, force bool) (bool, er
 		events.SessionDeathPayload(ts.SessionID, ts.Name, reason, "gt down"))
 
 	// Kill the session
-	if err := t.KillSession(ts.SessionID); err != nil {
+	if err := sess.Stop(id); err != nil {
 		return false, fmt.Errorf("killing %s session: %w", ts.Name, err)
 	}
 

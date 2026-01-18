@@ -6,36 +6,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/daemon"
-	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/events"
-	"github.com/steveyegge/gastown/internal/mayor"
-	"github.com/steveyegge/gastown/internal/polecat"
-	"github.com/steveyegge/gastown/internal/refinery"
-	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/wisp"
-	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
-
-// agentStartResult holds the result of starting an agent.
-type agentStartResult struct {
-	name   string // Display name like "Witness (gastown)"
-	ok     bool   // Whether start succeeded
-	detail string // Status detail (session name or error)
-}
-
-// maxConcurrentAgentStarts limits parallel agent startups to avoid resource exhaustion.
-const maxConcurrentAgentStarts = 10
 
 var upCmd = &cobra.Command{
 	Use:     "up",
@@ -83,108 +65,87 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	allOK := true
 
-	// Discover rigs early so we can prefetch while daemon/deacon/mayor start
-	rigs := discoverRigs(townRoot)
-
-	// Start daemon, deacon, mayor, and rig prefetch in parallel
-	var daemonErr error
-	var daemonPID int
-	var deaconResult, mayorResult agentStartResult
-	var prefetchedRigs map[string]*rig.Rig
-	var rigErrors map[string]error
-
-	var startupWg sync.WaitGroup
-	startupWg.Add(4)
-
 	// 1. Daemon (Go process)
-	go func() {
-		defer startupWg.Done()
-		if err := ensureDaemon(townRoot); err != nil {
-			daemonErr = err
-		} else {
-			running, pid, _ := daemon.IsRunning(townRoot)
-			if running {
-				daemonPID = pid
-			}
-		}
-	}()
-
-	// 2. Deacon
-	go func() {
-		defer startupWg.Done()
-		deaconMgr := deacon.NewManager(townRoot)
-		if err := deaconMgr.Start(""); err != nil {
-			if err == deacon.ErrAlreadyRunning {
-				deaconResult = agentStartResult{name: "Deacon", ok: true, detail: deaconMgr.SessionName()}
-			} else {
-				deaconResult = agentStartResult{name: "Deacon", ok: false, detail: err.Error()}
-			}
-		} else {
-			deaconResult = agentStartResult{name: "Deacon", ok: true, detail: deaconMgr.SessionName()}
-		}
-	}()
-
-	// 3. Mayor
-	go func() {
-		defer startupWg.Done()
-		mayorMgr := mayor.NewManager(townRoot)
-		if err := mayorMgr.Start(""); err != nil {
-			if err == mayor.ErrAlreadyRunning {
-				mayorResult = agentStartResult{name: "Mayor", ok: true, detail: mayorMgr.SessionName()}
-			} else {
-				mayorResult = agentStartResult{name: "Mayor", ok: false, detail: err.Error()}
-			}
-		} else {
-			mayorResult = agentStartResult{name: "Mayor", ok: true, detail: mayorMgr.SessionName()}
-		}
-	}()
-
-	// 4. Prefetch rig configs (overlaps with daemon/deacon/mayor startup)
-	go func() {
-		defer startupWg.Done()
-		prefetchedRigs, rigErrors = prefetchRigs(rigs)
-	}()
-
-	startupWg.Wait()
-
-	// Print daemon/deacon/mayor results
-	if daemonErr != nil {
-		printStatus("Daemon", false, daemonErr.Error())
+	if err := ensureDaemon(townRoot); err != nil {
+		printStatus("Daemon", false, err.Error())
 		allOK = false
-	} else if daemonPID > 0 {
-		printStatus("Daemon", true, fmt.Sprintf("PID %d", daemonPID))
-	}
-	printStatus(deaconResult.name, deaconResult.ok, deaconResult.detail)
-	if !deaconResult.ok {
-		allOK = false
-	}
-	printStatus(mayorResult.name, mayorResult.ok, mayorResult.detail)
-	if !mayorResult.ok {
-		allOK = false
+	} else {
+		running, pid, _ := daemon.IsRunning(townRoot)
+		if running {
+			printStatus("Daemon", true, fmt.Sprintf("PID %d", pid))
+		}
 	}
 
-	// 5 & 6. Witnesses and Refineries (using prefetched rigs)
-	witnessResults, refineryResults := startRigAgentsWithPrefetch(rigs, prefetchedRigs, rigErrors)
+	// 2. Deacon (Claude agent)
+	if _, err := factory.Start(townRoot, agent.DeaconAddress, ""); err != nil {
+		if err == agent.ErrAlreadyRunning {
+			printStatus("Deacon", true, "running")
+		} else {
+			printStatus("Deacon", false, err.Error())
+			allOK = false
+		}
+	} else {
+		printStatus("Deacon", true, "started")
+	}
 
-	// Print results in order: all witnesses first, then all refineries
+	// 3. Mayor (Claude agent)
+	if _, err := factory.Start(townRoot, agent.MayorAddress, ""); err != nil {
+		if err == agent.ErrAlreadyRunning {
+			printStatus("Mayor", true, "running")
+		} else {
+			printStatus("Mayor", false, err.Error())
+			allOK = false
+		}
+	} else {
+		printStatus("Mayor", true, "started")
+	}
+
+	// 4. Witnesses (one per rig)
+	rigs := discoverRigs(townRoot)
 	for _, rigName := range rigs {
-		if result, ok := witnessResults[rigName]; ok {
-			printStatus(result.name, result.ok, result.detail)
-			if !result.ok {
+		if _, _, err := getRig(rigName); err != nil {
+			printStatus(fmt.Sprintf("Witness (%s)", rigName), false, err.Error())
+			allOK = false
+			continue
+		}
+
+		witnessID := agent.WitnessAddress(rigName)
+		sessionName := fmt.Sprintf("gt-%s-witness", rigName)
+		if _, err := factory.Start(townRoot, witnessID, ""); err != nil {
+			if err == agent.ErrAlreadyRunning {
+				printStatus(fmt.Sprintf("Witness (%s)", rigName), true, sessionName)
+			} else {
+				printStatus(fmt.Sprintf("Witness (%s)", rigName), false, err.Error())
 				allOK = false
 			}
-		}
-	}
-	for _, rigName := range rigs {
-		if result, ok := refineryResults[rigName]; ok {
-			printStatus(result.name, result.ok, result.detail)
-			if !result.ok {
-				allOK = false
-			}
+		} else {
+			printStatus(fmt.Sprintf("Witness (%s)", rigName), true, sessionName)
 		}
 	}
 
-	// 7. Crew (if --restore)
+	// 5. Refineries (one per rig)
+	for _, rigName := range rigs {
+		if _, _, err := getRig(rigName); err != nil {
+			printStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
+			allOK = false
+			continue
+		}
+
+		refineryID := agent.RefineryAddress(rigName)
+		sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+		if _, err := factory.Start(townRoot, refineryID, ""); err != nil {
+			if err == agent.ErrAlreadyRunning {
+				printStatus(fmt.Sprintf("Refinery (%s)", rigName), true, sessionName)
+			} else {
+				printStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
+				allOK = false
+			}
+		} else {
+			printStatus(fmt.Sprintf("Refinery (%s)", rigName), true, sessionName)
+		}
+	}
+
+	// 6. Crew (if --restore)
 	if upRestore {
 		for _, rigName := range rigs {
 			crewStarted, crewErrors := startCrewFromSettings(townRoot, rigName)
@@ -281,202 +242,6 @@ func ensureDaemon(townRoot string) error {
 	return nil
 }
 
-// rigPrefetchResult holds the result of loading a single rig config.
-type rigPrefetchResult struct {
-	index int
-	rig   *rig.Rig
-	err   error
-}
-
-// prefetchRigs loads all rig configs in parallel for faster agent startup.
-// Returns a map of rig name to loaded Rig, and any errors encountered.
-func prefetchRigs(rigNames []string) (map[string]*rig.Rig, map[string]error) {
-	n := len(rigNames)
-	if n == 0 {
-		return make(map[string]*rig.Rig), make(map[string]error)
-	}
-
-	// Use channel to collect results without locking
-	results := make(chan rigPrefetchResult, n)
-
-	for i, name := range rigNames {
-		go func(idx int, rigName string) {
-			_, r, err := getRig(rigName)
-			results <- rigPrefetchResult{index: idx, rig: r, err: err}
-		}(i, name)
-	}
-
-	// Collect results - pre-allocate maps with capacity
-	rigs := make(map[string]*rig.Rig, n)
-	errors := make(map[string]error)
-
-	for i := 0; i < n; i++ {
-		res := <-results
-		name := rigNames[res.index]
-		if res.err != nil {
-			errors[name] = res.err
-		} else {
-			rigs[name] = res.rig
-		}
-	}
-
-	return rigs, errors
-}
-
-// agentTask represents a unit of work for the agent worker pool.
-type agentTask struct {
-	rigName   string
-	rigObj    *rig.Rig
-	isWitness bool // true for witness, false for refinery
-}
-
-// agentResultMsg carries result back from worker to collector.
-type agentResultMsg struct {
-	rigName   string
-	isWitness bool
-	result    agentStartResult
-}
-
-// startRigAgentsParallel starts all Witnesses and Refineries concurrently.
-// Discovers and prefetches rigs internally. For use when rigs aren't pre-loaded.
-func startRigAgentsParallel(rigNames []string) (witnessResults, refineryResults map[string]agentStartResult) {
-	prefetchedRigs, rigErrors := prefetchRigs(rigNames)
-	return startRigAgentsWithPrefetch(rigNames, prefetchedRigs, rigErrors)
-}
-
-// startRigAgentsWithPrefetch starts all Witnesses and Refineries using pre-loaded rig configs.
-// Uses a worker pool with fixed goroutine count to limit concurrency and reduce overhead.
-func startRigAgentsWithPrefetch(rigNames []string, prefetchedRigs map[string]*rig.Rig, rigErrors map[string]error) (witnessResults, refineryResults map[string]agentStartResult) {
-	n := len(rigNames)
-	witnessResults = make(map[string]agentStartResult, n)
-	refineryResults = make(map[string]agentStartResult, n)
-
-	if n == 0 {
-		return
-	}
-
-	// Record errors for rigs that failed to load
-	for rigName, err := range rigErrors {
-		errDetail := err.Error()
-		witnessResults[rigName] = agentStartResult{
-			name:   "Witness (" + rigName + ")",
-			ok:     false,
-			detail: errDetail,
-		}
-		refineryResults[rigName] = agentStartResult{
-			name:   "Refinery (" + rigName + ")",
-			ok:     false,
-			detail: errDetail,
-		}
-	}
-
-	numTasks := len(prefetchedRigs) * 2 // witness + refinery per rig
-	if numTasks == 0 {
-		return
-	}
-
-	// Task channel and result channel
-	tasks := make(chan agentTask, numTasks)
-	results := make(chan agentResultMsg, numTasks)
-
-	// Start fixed worker pool (bounded by maxConcurrentAgentStarts)
-	numWorkers := maxConcurrentAgentStarts
-	if numTasks < numWorkers {
-		numWorkers = numTasks
-	}
-
-	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for task := range tasks {
-				var result agentStartResult
-				if task.isWitness {
-					result = upStartWitness(task.rigName, task.rigObj)
-				} else {
-					result = upStartRefinery(task.rigName, task.rigObj)
-				}
-				results <- agentResultMsg{
-					rigName:   task.rigName,
-					isWitness: task.isWitness,
-					result:    result,
-				}
-			}
-		}()
-	}
-
-	// Enqueue all tasks
-	for rigName, r := range prefetchedRigs {
-		tasks <- agentTask{rigName: rigName, rigObj: r, isWitness: true}
-		tasks <- agentTask{rigName: rigName, rigObj: r, isWitness: false}
-	}
-	close(tasks)
-
-	// Close results channel when workers are done
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	// Collect results - no locking needed, single goroutine collects
-	for msg := range results {
-		if msg.isWitness {
-			witnessResults[msg.rigName] = msg.result
-		} else {
-			refineryResults[msg.rigName] = msg.result
-		}
-	}
-
-	return
-}
-
-// upStartWitness starts a witness for the given rig and returns a result struct.
-// Respects parked/docked status - skips starting if rig is not operational.
-func upStartWitness(rigName string, r *rig.Rig) agentStartResult {
-	name := "Witness (" + rigName + ")"
-
-	// Check if rig is parked or docked
-	townRoot := filepath.Dir(r.Path)
-	cfg := wisp.NewConfig(townRoot, rigName)
-	status := cfg.GetString("status")
-	if status == "parked" || status == "docked" {
-		return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", status)}
-	}
-
-	mgr := witness.NewManager(r)
-	if err := mgr.Start(false, "", nil); err != nil {
-		if err == witness.ErrAlreadyRunning {
-			return agentStartResult{name: name, ok: true, detail: mgr.SessionName()}
-		}
-		return agentStartResult{name: name, ok: false, detail: err.Error()}
-	}
-	return agentStartResult{name: name, ok: true, detail: mgr.SessionName()}
-}
-
-// upStartRefinery starts a refinery for the given rig and returns a result struct.
-// Respects parked/docked status - skips starting if rig is not operational.
-func upStartRefinery(rigName string, r *rig.Rig) agentStartResult {
-	name := "Refinery (" + rigName + ")"
-
-	// Check if rig is parked or docked
-	townRoot := filepath.Dir(r.Path)
-	cfg := wisp.NewConfig(townRoot, rigName)
-	status := cfg.GetString("status")
-	if status == "parked" || status == "docked" {
-		return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", status)}
-	}
-
-	mgr := refinery.NewManager(r)
-	if err := mgr.Start(false, ""); err != nil {
-		if err == refinery.ErrAlreadyRunning {
-			return agentStartResult{name: name, ok: true, detail: mgr.SessionName()}
-		}
-		return agentStartResult{name: name, ok: false, detail: err.Error()}
-	}
-	return agentStartResult{name: name, ok: true, detail: mgr.SessionName()}
-}
-
 // discoverRigs finds all rigs in the town.
 func discoverRigs(townRoot string) []string {
 	var rigs []string
@@ -549,7 +314,7 @@ func startCrewFromSettings(townRoot, rigName string) ([]string, map[string]error
 	}
 
 	// Get available crew members using helper
-	crewMgr, _, err := getCrewManager(rigName)
+	crewMgr, _, err := getCrewManager(rigName, "")
 	if err != nil {
 		return started, errors
 	}
@@ -572,10 +337,11 @@ func startCrewFromSettings(townRoot, rigName string) ([]string, map[string]error
 	// Parse startup preference and determine which crew to start
 	toStart := parseCrewStartupPreference(settings.Crew.Startup, crewNames)
 
-	// Start each crew member using Manager
+	// Start each crew member using factory.Start (agent resolved automatically)
 	for _, crewName := range toStart {
-		if err := crewMgr.Start(crewName, crew.StartOptions{}); err != nil {
-			if err == crew.ErrSessionRunning {
+		crewID := agent.CrewAddress(rigName, crewName)
+		if _, err := factory.Start(townRoot, crewID, ""); err != nil {
+			if err == agent.ErrAlreadyRunning {
 				started = append(started, crewName)
 			} else {
 				errors[crewName] = err
@@ -667,14 +433,6 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 		return started, errors
 	}
 
-	// Get polecat session manager
-	_, r, err := getRig(rigName)
-	if err != nil {
-		return started, errors
-	}
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
-
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -687,11 +445,11 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 		polecatPath := filepath.Join(polecatsDir, polecatName)
 
 		// Check if this polecat has a pinned bead (work attached)
-		agentID := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+		beadAgentID := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
 		b := beads.New(polecatPath)
 		pinnedBeads, err := b.List(beads.ListOptions{
 			Status:   beads.StatusPinned,
-			Assignee: agentID,
+			Assignee: beadAgentID,
 			Priority: -1,
 		})
 		if err != nil || len(pinnedBeads) == 0 {
@@ -699,9 +457,10 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 			continue
 		}
 
-		// This polecat has work - start it using SessionManager
-		if err := polecatMgr.Start(polecatName, polecat.SessionStartOptions{}); err != nil {
-			if err == polecat.ErrSessionRunning {
+		// This polecat has work - start it using factory.Start() (agent resolved automatically)
+		polecatID := agent.PolecatAddress(rigName, polecatName)
+		if _, err := factory.Start(townRoot, polecatID, ""); err != nil {
+			if err == agent.ErrAlreadyRunning {
 				started = append(started, polecatName)
 			} else {
 				errors[polecatName] = err

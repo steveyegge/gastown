@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -53,13 +53,13 @@ func init() {
 
 // StepDoneResult is the result of a step done operation.
 type StepDoneResult struct {
-	StepID       string `json:"step_id"`
-	MoleculeID   string `json:"molecule_id"`
-	StepClosed   bool   `json:"step_closed"`
-	NextStepID   string `json:"next_step_id,omitempty"`
+	StepID        string `json:"step_id"`
+	MoleculeID    string `json:"molecule_id"`
+	StepClosed    bool   `json:"step_closed"`
+	NextStepID    string `json:"next_step_id,omitempty"`
 	NextStepTitle string `json:"next_step_title,omitempty"`
-	Complete     bool   `json:"complete"`
-	Action       string `json:"action"` // "continue", "done", "no_more_ready"
+	Complete      bool   `json:"complete"`
+	Action        string `json:"action"` // "continue", "done", "no_more_ready"
 }
 
 func runMoleculeStepDone(cmd *cobra.Command, args []string) error {
@@ -162,9 +162,10 @@ func runMoleculeStepDone(cmd *cobra.Command, args []string) error {
 // extractMoleculeIDFromStep extracts the molecule ID from a step ID.
 // Step IDs have format: mol-id.N where N is the step number.
 // Examples:
-//   gt-abc.1 -> gt-abc
-//   gt-xyz.3 -> gt-xyz
-//   bd-mol-abc.2 -> bd-mol-abc
+//
+//	gt-abc.1 -> gt-abc
+//	gt-xyz.3 -> gt-xyz
+//	bd-mol-abc.2 -> bd-mol-abc
 func extractMoleculeIDFromStep(stepID string) string {
 	// Find the last dot
 	lastDot := strings.LastIndex(stepID, ".")
@@ -295,40 +296,24 @@ func handleStepContinue(cwd, townRoot, _ string, nextStep *beads.Issue, dryRun b
 	fmt.Printf("%s Next step pinned: %s\n", style.Bold.Render("📌"), nextStep.ID)
 
 	// Respawn the pane
-	if !tmux.IsInsideTmux() {
+	if os.Getenv("TMUX") == "" {
 		// Not in tmux - just print next action
 		fmt.Printf("\n%s Not in tmux - start new session with 'gt prime'\n",
 			style.Dim.Render("ℹ"))
 		return nil
 	}
 
-	pane := os.Getenv("TMUX_PANE")
-	if pane == "" {
-		return fmt.Errorf("TMUX_PANE not set")
-	}
-
-	// Get current session for restart command
-	currentSession, err := getCurrentTmuxSession()
-	if err != nil {
-		return fmt.Errorf("getting session name: %w", err)
-	}
-
-	restartCmd, err := buildRestartCommand(currentSession)
-	if err != nil {
-		return fmt.Errorf("building restart command: %w", err)
+	// Get current agent identity
+	selfID, selfErr := agent.Self()
+	if selfErr != nil {
+		return fmt.Errorf("detecting agent identity: %w", selfErr)
 	}
 
 	fmt.Printf("\n%s Respawning for next step...\n", style.Bold.Render("🔄"))
 
-	t := tmux.NewTmux()
-
-	// Clear history before respawn
-	if err := t.ClearHistory(pane); err != nil {
-		// Non-fatal
-		style.PrintWarning("could not clear history: %v", err)
-	}
-
-	return t.RespawnPane(pane, restartCmd)
+	// Respawn - original command is reused, new session discovers pinned work via hooks
+	agents := agent.Default()
+	return agents.Respawn(selfID)
 }
 
 // handleMoleculeComplete handles when a molecule is complete.

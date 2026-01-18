@@ -9,7 +9,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/tui/feed"
 	"github.com/steveyegge/gastown/internal/workspace"
 	"golang.org/x/term"
@@ -177,7 +176,7 @@ func buildFeedArgs() []string {
 	return args
 }
 
-// runFeedDirect runs bd activity in the current terminal.
+// runFeedDirect runs bd activity in the current session.
 func runFeedDirect(workDir string, bdArgs []string) error {
 	bdPath, err := exec.LookPath("bd")
 	if err != nil {
@@ -245,18 +244,10 @@ func runFeedTUI(workDir string) error {
 // runFeedInWindow opens the feed in a dedicated tmux window.
 func runFeedInWindow(workDir string, bdArgs []string) error {
 	// Check if we're in tmux
-	if !tmux.IsInsideTmux() {
-		return fmt.Errorf("--window requires running inside tmux")
-	}
-
-	// Get current session from TMUX env var
-	// Format: /tmp/tmux-501/default,12345,0 -> we need the session name
 	tmuxEnv := os.Getenv("TMUX")
 	if tmuxEnv == "" {
-		return fmt.Errorf("TMUX environment variable not set")
+		return fmt.Errorf("--window requires running inside tmux")
 	}
-
-	t := tmux.NewTmux()
 
 	// Get current session name
 	sessionName, err := getCurrentTmuxSession()
@@ -282,7 +273,7 @@ func runFeedInWindow(workDir string, bdArgs []string) error {
 
 	// Check if 'feed' window already exists
 	windowTarget := sessionName + ":feed"
-	exists, err := windowExists(t, sessionName, "feed")
+	exists, err := windowExists(sessionName, "feed")
 	if err != nil {
 		return fmt.Errorf("checking for feed window: %w", err)
 	}
@@ -290,22 +281,22 @@ func runFeedInWindow(workDir string, bdArgs []string) error {
 	if exists {
 		// Window exists - just switch to it
 		fmt.Printf("Switching to existing feed window...\n")
-		return selectWindow(t, windowTarget)
+		return selectWindow(windowTarget)
 	}
 
 	// Create new window named 'feed' with the bd activity command
 	fmt.Printf("Creating feed window in session %s...\n", sessionName)
-	if err := createWindow(t, sessionName, "feed", workDir, feedCmd); err != nil {
+	if err := createWindow(sessionName, "feed", workDir, feedCmd); err != nil {
 		return fmt.Errorf("creating feed window: %w", err)
 	}
 
 	// Switch to the new window
-	return selectWindow(t, windowTarget)
+	return selectWindow(windowTarget)
 }
 
 // windowExists checks if a window with the given name exists in the session.
 // Note: getCurrentTmuxSession is defined in handoff.go
-func windowExists(_ *tmux.Tmux, session, windowName string) (bool, error) { // t unused: direct exec for simplicity
+func windowExists(session, windowName string) (bool, error) {
 	cmd := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_name}")
 	out, err := cmd.Output()
 	if err != nil {
@@ -321,14 +312,14 @@ func windowExists(_ *tmux.Tmux, session, windowName string) (bool, error) { // t
 }
 
 // createWindow creates a new tmux window with the given name and command.
-func createWindow(_ *tmux.Tmux, session, windowName, workDir, command string) error { // t unused: direct exec for simplicity
+func createWindow(session, windowName, workDir, command string) error {
 	args := []string{"new-window", "-t", session, "-n", windowName, "-c", workDir, command}
 	cmd := exec.Command("tmux", args...)
 	return cmd.Run()
 }
 
 // selectWindow switches to the specified window.
-func selectWindow(_ *tmux.Tmux, target string) error { // t unused: direct exec for simplicity
+func selectWindow(target string) error {
 	cmd := exec.Command("tmux", "select-window", "-t", target)
 	return cmd.Run()
 }

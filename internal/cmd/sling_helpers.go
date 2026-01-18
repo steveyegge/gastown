@@ -8,11 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -220,11 +219,11 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	return nil
 }
 
-// injectStartPrompt sends a prompt to the target pane to start working.
-// Uses the reliable nudge pattern: literal mode + 500ms debounce + separate Enter.
-func injectStartPrompt(pane, beadID, subject, args string) error {
-	if pane == "" {
-		return fmt.Errorf("no target pane")
+// injectStartPrompt sends a prompt to an agent to start working.
+// Uses the Agents abstraction for reliable nudging.
+func injectStartPrompt(townRoot string, id agent.AgentID, beadID, subject, args string) error {
+	if id.Role == "" {
+		return fmt.Errorf("no agent to nudge")
 	}
 
 	// Skip nudge during tests to prevent agent self-interruption
@@ -247,61 +246,20 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 		prompt = fmt.Sprintf("Work slung: %s. Start working on it now - run `gt hook` to see the hook, then begin.", beadID)
 	}
 
-	// Use the reliable nudge pattern (same as gt nudge / tmux.NudgeSession)
-	t := tmux.NewTmux()
-	return t.NudgePane(pane, prompt)
+	agents := agent.Default()
+	return agents.Nudge(id, prompt)
 }
 
-// getSessionFromPane extracts session name from a pane target.
-// Pane targets can be:
-// - "%9" (pane ID) - need to query tmux for session
-// - "gt-rig-name:0.0" (session:window.pane) - extract session name
-func getSessionFromPane(pane string) string {
-	if strings.HasPrefix(pane, "%") {
-		// Pane ID format - query tmux for the session
-		cmd := exec.Command("tmux", "display-message", "-t", pane, "-p", "#{session_name}")
-		out, err := cmd.Output()
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(string(out))
-	}
-	// Session:window.pane format - extract session name
-	if idx := strings.Index(pane, ":"); idx > 0 {
-		return pane[:idx]
-	}
-	return pane
+// ensureAgentReady waits for an agent to be ready before nudging.
+// Uses the Agents abstraction which handles runtime-specific behavior (Claude's bypass
+// permissions warning, prompt detection, etc.).
+func ensureAgentReady(townRoot string, id agent.AgentID) error {
+	// Always wait for ready, even if process is running - it may still be initializing
+	// (WaitReady is fast if agent is already ready since prompt checker finds ">" quickly)
+	agents := agent.Default()
+	return agents.WaitReady(id)
 }
 
-// ensureAgentReady waits for an agent to be ready before nudging an existing session.
-// Uses a pragmatic approach: wait for the pane to leave a shell, then (Claude-only)
-// accept the bypass permissions warning and give it a moment to finish initializing.
-func ensureAgentReady(sessionName string) error {
-	t := tmux.NewTmux()
-
-	// If an agent is already running, assume it's ready (session was started earlier)
-	if t.IsAgentRunning(sessionName) {
-		return nil
-	}
-
-	// Agent not running yet - wait for it to start (shell → program transition)
-	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		return fmt.Errorf("waiting for agent to start: %w", err)
-	}
-
-	// Claude-only: accept bypass permissions warning if present
-	if t.IsClaudeRunning(sessionName) {
-		_ = t.AcceptBypassPermissionsWarning(sessionName)
-
-		// PRAGMATIC APPROACH: fixed delay rather than prompt detection.
-		// Claude startup takes ~5-8 seconds on typical machines.
-		time.Sleep(8 * time.Second)
-	} else {
-		time.Sleep(1 * time.Second)
-	}
-
-	return nil
-}
 
 // detectCloneRoot finds the root of the current git clone.
 func detectCloneRoot() (string, error) {
@@ -411,19 +369,19 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 
 // wakeRigAgents wakes the witness and refinery for a rig after polecat dispatch.
 // This ensures the patrol agents are ready to monitor and merge.
-func wakeRigAgents(rigName string) {
+func wakeRigAgents(townRoot, rigName string) {
 	// Boot the rig (idempotent - no-op if already running)
 	bootCmd := exec.Command("gt", "rig", "boot", rigName)
 	_ = bootCmd.Run() // Ignore errors - rig might already be running
 
 	// Nudge witness and refinery to clear any backoff
-	t := tmux.NewTmux()
-	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
+	agents := agent.Default()
+	witnessID := agent.WitnessAddress(rigName)
+	refineryID := agent.RefineryAddress(rigName)
 
-	// Silent nudges - sessions might not exist yet
-	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
-	_ = t.NudgeSession(refinerySession, "Polecat dispatched - check for merge requests")
+	// Silent nudges - agents might not exist yet
+	_ = agents.Nudge(witnessID, "Polecat dispatched - check for work")
+	_ = agents.Nudge(refineryID, "Polecat dispatched - check for merge requests")
 }
 
 // isPolecatTarget checks if the target string refers to a polecat.

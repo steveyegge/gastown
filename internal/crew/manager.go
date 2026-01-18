@@ -10,13 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -26,19 +23,12 @@ var (
 	ErrCrewNotFound    = errors.New("crew worker not found")
 	ErrHasChanges      = errors.New("crew worker has uncommitted changes")
 	ErrInvalidCrewName = errors.New("invalid crew name")
-	ErrSessionRunning  = errors.New("session already running")
-	ErrSessionNotFound = errors.New("session not found")
+	ErrSessionRunning  = agent.ErrAlreadyRunning
+	ErrNotRunning      = errors.New("crew session not running")
 )
 
 // StartOptions configures crew session startup.
 type StartOptions struct {
-	// Account specifies the account handle to use (overrides default).
-	Account string
-
-	// ClaudeConfigDir is resolved CLAUDE_CONFIG_DIR for the account.
-	// If set, this is injected as an environment variable.
-	ClaudeConfigDir string
-
 	// KillExisting kills any existing session before starting (for restart operations).
 	// If false and a session is running, Start() returns ErrSessionRunning.
 	KillExisting bool
@@ -49,9 +39,6 @@ type StartOptions struct {
 
 	// Interactive removes --dangerously-skip-permissions for interactive/refresh mode.
 	Interactive bool
-
-	// AgentOverride specifies an alternate agent alias (e.g., for testing).
-	AgentOverride string
 }
 
 // validateCrewName checks that a crew name is safe and valid.
@@ -78,17 +65,27 @@ func validateCrewName(name string) error {
 	return nil
 }
 
-// Manager handles crew worker lifecycle.
+// Manager handles crew worker operations.
+// Start operations are handled via factory.Start().
 type Manager struct {
-	rig *rig.Rig
-	git *git.Git
+	rig      *rig.Rig
+	git      *git.Git
+	agents   agent.AgentObserverStopper // Only needs Exists() and Stop()
+	townRoot string
 }
 
 // NewManager creates a new crew manager.
-func NewManager(r *rig.Rig, g *git.Git) *Manager {
+// The manager handles workspace management and status queries.
+// Lifecycle operations (Start) should use factory.Start().
+//
+// The agents parameter only needs AgentObserverStopper (Exists, Stop, GetInfo, List).
+// In production, pass factory.Agents(). In tests, use agent.NewDouble().
+func NewManager(agents agent.AgentObserverStopper, r *rig.Rig, g *git.Git, townRoot string) *Manager {
 	return &Manager{
-		rig: r,
-		git: g,
+		rig:      r,
+		git:      g,
+		agents:   agents,
+		townRoot: townRoot,
 	}
 }
 
@@ -437,148 +434,39 @@ func (m *Manager) SessionName(name string) string {
 	return fmt.Sprintf("gt-%s-crew-%s", m.rig.Name, name)
 }
 
-// Start creates and starts a tmux session for a crew member.
-// If the crew member doesn't exist, it will be created first.
-func (m *Manager) Start(name string, opts StartOptions) error {
-	if err := validateCrewName(name); err != nil {
-		return err
-	}
+// RigName returns the rig name for this manager.
+func (m *Manager) RigName() string {
+	return m.rig.Name
+}
 
-	// Get or create the crew worker
-	worker, err := m.Get(name)
-	if err == ErrCrewNotFound {
-		worker, err = m.Add(name, false) // No feature branch for crew
-		if err != nil {
-			return fmt.Errorf("creating crew workspace: %w", err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("getting crew worker: %w", err)
-	}
-
-	t := tmux.NewTmux()
-	sessionID := m.SessionName(name)
-
-	// Check if session already exists
-	running, err := t.HasSession(sessionID)
-	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
-	}
-	if running {
-		if opts.KillExisting {
-			// Restart mode - kill existing session
-			if err := t.KillSession(sessionID); err != nil {
-				return fmt.Errorf("killing existing session: %w", err)
-			}
-		} else {
-			// Normal start - session exists, check if Claude is actually running
-			if t.IsClaudeRunning(sessionID) {
-				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
-			}
-			// Zombie session - kill and recreate
-			if err := t.KillSession(sessionID); err != nil {
-				return fmt.Errorf("killing zombie session: %w", err)
-			}
-		}
-	}
-
-	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	// All crew members share the same settings file.
-	crewBaseDir := filepath.Join(m.rig.Path, "crew")
-	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
-	}
-
-	// Build the startup beacon for predecessor discovery via /resume
-	// Pass it as Claude's initial prompt - processed when Claude is ready
-	address := fmt.Sprintf("%s/crew/%s", m.rig.Name, name)
-	topic := opts.Topic
-	if topic == "" {
-		topic = "start"
-	}
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "human",
-		Topic:     topic,
-	})
-
-	// Build startup command first
-	// SessionStart hook handles context loading (gt prime --hook)
-	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
-	}
-
-	// For interactive/refresh mode, remove --dangerously-skip-permissions
-	if opts.Interactive {
-		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
-	}
-
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, worker.ClonePath, claudeCmd); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:             "crew",
-		Rig:              m.rig.Name,
-		AgentName:        name,
-		TownRoot:         townRoot,
-		RuntimeConfigDir: opts.ClaudeConfigDir,
-		BeadsNoDaemon:    true,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
-	}
-
-	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)
-	theme := tmux.AssignTheme(m.rig.Name)
-	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, name, "crew")
-
-	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
-	_ = t.SetCrewCycleBindings(sessionID)
-
-	// Note: We intentionally don't wait for Claude to start here.
-	// The session is created in detached mode, and blocking for 60 seconds
-	// serves no purpose. If the caller needs to know when Claude is ready,
-	// they can check with IsClaudeRunning().
-
-	return nil
+// agentID returns the AgentID for a crew member's session.
+func (m *Manager) agentID(name string) agent.AgentID {
+	return agent.CrewAddress(m.rig.Name, name)
 }
 
 // Stop terminates a crew member's tmux session.
+// Returns ErrNotRunning if the agent was not running (for user messaging).
+// Always cleans up zombie sessions (tmux exists but process dead).
 func (m *Manager) Stop(name string) error {
 	if err := validateCrewName(name); err != nil {
 		return err
 	}
 
-	t := tmux.NewTmux()
-	sessionID := m.SessionName(name)
+	id := m.agentID(name)
+	wasRunning := m.agents.Exists(id)
 
-	// Check if session exists
-	running, err := t.HasSession(sessionID)
-	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
-	}
-	if !running {
-		return ErrSessionNotFound
+	// Always call Stop to clean up zombies
+	if err := m.agents.Stop(id, true); err != nil {
+		return fmt.Errorf("stopping session: %w", err)
 	}
 
-	// Kill the session
-	if err := t.KillSession(sessionID); err != nil {
-		return fmt.Errorf("killing session: %w", err)
+	if !wasRunning {
+		return ErrNotRunning
 	}
-
 	return nil
 }
 
 // IsRunning checks if a crew member's session is active.
 func (m *Manager) IsRunning(name string) (bool, error) {
-	t := tmux.NewTmux()
-	sessionID := m.SessionName(name)
-	return t.HasSession(sessionID)
+	return m.agents.Exists(m.agentID(name)), nil
 }

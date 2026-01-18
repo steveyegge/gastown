@@ -86,17 +86,19 @@ func TestIsTownLevelAddress(t *testing.T) {
 	}
 }
 
-func TestAddressToSessionID(t *testing.T) {
+func TestAddressToAgentID(t *testing.T) {
 	tests := []struct {
 		address string
 		want    string
 	}{
-		{"mayor", "hq-mayor"},
-		{"mayor/", "hq-mayor"},
-		{"deacon", "hq-deacon"},
-		{"gastown/refinery", "gt-gastown-refinery"},
-		{"gastown/Toast", "gt-gastown-Toast"},
-		{"beads/witness", "gt-beads-witness"},
+		{"mayor", "mayor"},
+		{"mayor/", "mayor"},
+		{"deacon", "deacon"},
+		{"deacon/", "deacon"},
+		{"gastown/witness", "gastown/witness"},
+		{"gastown/refinery", "gastown/refinery"},
+		{"gastown/Toast", "gastown/polecat/Toast"},        // Named agent → polecat format (via PolecatAddress)
+		{"beads/witness", "beads/witness"},
 		{"gastown/", ""},   // Empty target
 		{"gastown", ""},    // No slash
 		{"", ""},           // Empty address
@@ -104,9 +106,9 @@ func TestAddressToSessionID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.address, func(t *testing.T) {
-			got := addressToSessionID(tt.address)
+			got := addressToAgentID(tt.address).String()
 			if got != tt.want {
-				t.Errorf("addressToSessionID(%q) = %q, want %q", tt.address, got, tt.want)
+				t.Errorf("addressToAgentID(%q) = %q, want %q", tt.address, got, tt.want)
 			}
 		})
 	}

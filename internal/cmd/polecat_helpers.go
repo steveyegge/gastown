@@ -17,6 +17,7 @@ type polecatTarget struct {
 	polecatName string
 	mgr         *polecat.Manager
 	r           *rig.Rig
+	townRoot    string
 }
 
 // resolvePolecatTargets builds a list of polecats from command args.
@@ -33,7 +34,7 @@ func resolvePolecatTargets(args []string, useAll bool) ([]polecatTarget, error) 
 			return nil, fmt.Errorf("with --all, provide just the rig name (e.g., 'gt polecat <cmd> %s --all')", strings.Split(rigName, "/")[0])
 		}
 
-		mgr, r, err := getPolecatManager(rigName)
+		mgr, r, townRoot, err := getPolecatManager(rigName)
 		if err != nil {
 			return nil, err
 		}
@@ -49,6 +50,7 @@ func resolvePolecatTargets(args []string, useAll bool) ([]polecatTarget, error) 
 				polecatName: p.Name,
 				mgr:         mgr,
 				r:           r,
+				townRoot:    townRoot,
 			})
 		}
 	} else {
@@ -64,7 +66,7 @@ func resolvePolecatTargets(args []string, useAll bool) ([]polecatTarget, error) 
 				return nil, fmt.Errorf("invalid address '%s': %w", arg, err)
 			}
 
-			mgr, r, err := getPolecatManager(rigName)
+			mgr, r, townRoot, err := getPolecatManager(rigName)
 			if err != nil {
 				return nil, err
 			}
@@ -74,6 +76,7 @@ func resolvePolecatTargets(args []string, useAll bool) ([]polecatTarget, error) 
 				polecatName: polecatName,
 				mgr:         mgr,
 				r:           r,
+				townRoot:    townRoot,
 			})
 		}
 	}

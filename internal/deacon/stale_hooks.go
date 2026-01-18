@@ -8,9 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/session"
-	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/agent"
+	"github.com/steveyegge/gastown/internal/ids"
 )
+
+// AgentChecker is the minimal interface for checking if agents exist.
+type AgentChecker interface {
+	Exists(id agent.AgentID) bool
+}
 
 // StaleHookConfig holds configurable parameters for stale hook detection.
 type StaleHookConfig struct {
@@ -18,6 +23,10 @@ type StaleHookConfig struct {
 	MaxAge time.Duration `json:"max_age"`
 	// DryRun if true, only reports what would be done without making changes.
 	DryRun bool `json:"dry_run"`
+	// AgentChecker is used to check if agents exist.
+	// If nil, agent.Default() is used.
+	// This field enables testing without real tmux sessions.
+	AgentChecker AgentChecker `json:"-"`
 }
 
 // DefaultStaleHookConfig returns the default stale hook config.
@@ -78,7 +87,12 @@ func ScanStaleHooks(townRoot string, cfg *StaleHookConfig) (*StaleHookScanResult
 
 	// Filter to stale ones (older than threshold)
 	threshold := time.Now().Add(-cfg.MaxAge)
-	t := tmux.NewTmux()
+
+	// Use injected AgentChecker if provided, otherwise use agent.Default
+	checker := cfg.AgentChecker
+	if checker == nil {
+		checker = agent.Default()
+	}
 
 	for _, bead := range hookedBeads {
 		// Skip if updated recently (not stale)
@@ -96,12 +110,9 @@ func ScanStaleHooks(townRoot string, cfg *StaleHookConfig) (*StaleHookScanResult
 		}
 
 		// Check if assignee agent is still alive
+		// The assignee format (e.g., "gastown/polecat/max") IS the AgentID format
 		if bead.Assignee != "" {
-			sessionName := assigneeToSessionName(bead.Assignee)
-			if sessionName != "" {
-				alive, _ := t.HasSession(sessionName)
-				hookResult.AgentAlive = alive
-			}
+			hookResult.AgentAlive = checker.Exists(ids.ParseAddress(bead.Assignee))
 		}
 
 		// If agent is dead/gone and not dry run, unhook the bead
@@ -144,47 +155,6 @@ func listHookedBeads(townRoot string) ([]*HookedBead, error) {
 	}
 
 	return beads, nil
-}
-
-// assigneeToSessionName converts an assignee address to a tmux session name.
-// Supports formats like "gastown/polecats/max", "gastown/crew/joe", etc.
-func assigneeToSessionName(assignee string) string {
-	parts := strings.Split(assignee, "/")
-
-	switch len(parts) {
-	case 1:
-		// Simple names like "deacon", "mayor"
-		switch assignee {
-		case "deacon":
-			return session.DeaconSessionName()
-		case "mayor":
-			return session.MayorSessionName()
-		default:
-			return ""
-		}
-	case 2:
-		// rig/role: "gastown/witness", "gastown/refinery"
-		rig, role := parts[0], parts[1]
-		switch role {
-		case "witness", "refinery":
-			return fmt.Sprintf("gt-%s-%s", rig, role)
-		default:
-			return ""
-		}
-	case 3:
-		// rig/type/name: "gastown/polecats/max", "gastown/crew/joe"
-		rig, agentType, name := parts[0], parts[1], parts[2]
-		switch agentType {
-		case "polecats":
-			return fmt.Sprintf("gt-%s-%s", rig, name)
-		case "crew":
-			return fmt.Sprintf("gt-%s-crew-%s", rig, name)
-		default:
-			return ""
-		}
-	default:
-		return ""
-	}
 }
 
 // unhookBead sets a bead's status back to 'open'.

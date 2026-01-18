@@ -4,11 +4,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/mayor"
-	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/agent"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -94,29 +92,15 @@ func init() {
 	rootCmd.AddCommand(mayorCmd)
 }
 
-// getMayorManager returns a mayor manager for the current workspace.
-func getMayorManager() (*mayor.Manager, error) {
+func runMayorStart(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return nil, fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
-	return mayor.NewManager(townRoot), nil
-}
-
-// getMayorSessionName returns the Mayor session name.
-func getMayorSessionName() string {
-	return mayor.SessionName()
-}
-
-func runMayorStart(cmd *cobra.Command, args []string) error {
-	mgr, err := getMayorManager()
-	if err != nil {
-		return err
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	fmt.Println("Starting Mayor session...")
-	if err := mgr.Start(mayorAgentOverride); err != nil {
-		if err == mayor.ErrAlreadyRunning {
+	if _, err := factory.Start(townRoot, agent.MayorAddress, "", factory.WithAgent(mayorAgentOverride)); err != nil {
+		if err == agent.ErrAlreadyRunning {
 			return fmt.Errorf("Mayor session already running. Attach with: gt mayor attach")
 		}
 		return err
@@ -130,16 +114,19 @@ func runMayorStart(cmd *cobra.Command, args []string) error {
 }
 
 func runMayorStop(cmd *cobra.Command, args []string) error {
-	mgr, err := getMayorManager()
+	_, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return err
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	agents := factory.Agents()
+	id := agent.MayorAddress
+
 	fmt.Println("Stopping Mayor session...")
-	if err := mgr.Stop(); err != nil {
-		if err == mayor.ErrNotRunning {
-			return fmt.Errorf("Mayor session is not running")
-		}
+	if !agents.Exists(id) {
+		return fmt.Errorf("Mayor session is not running")
+	}
+	if err := agents.Stop(id, true); err != nil {
 		return err
 	}
 
@@ -148,112 +135,61 @@ func runMayorStop(cmd *cobra.Command, args []string) error {
 }
 
 func runMayorAttach(cmd *cobra.Command, args []string) error {
-	mgr, err := getMayorManager()
-	if err != nil {
-		return err
-	}
-
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("finding workspace: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	t := tmux.NewTmux()
-	sessionID := mgr.SessionName()
+	agents := factory.Agents()
+	id := agent.MayorAddress
 
-	running, err := mgr.IsRunning()
-	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
-	}
-	if !running {
+	if !agents.Exists(id) {
 		// Auto-start if not running
 		fmt.Println("Mayor session not running, starting...")
-		if err := mgr.Start(mayorAgentOverride); err != nil {
+		if _, err := factory.Start(townRoot, agent.MayorAddress, "", factory.WithAgent(mayorAgentOverride)); err != nil {
 			return err
-		}
-	} else {
-		// Session exists - check if runtime is still running (hq-95xfq)
-		// If runtime exited or sitting at shell, restart with proper context
-		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, townRoot, mayorAgentOverride)
-		if err != nil {
-			return fmt.Errorf("resolving agent: %w", err)
-		}
-		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
-			// Runtime has exited, restart it with proper context
-			fmt.Println("Runtime exited, restarting with context...")
-
-			paneID, err := t.GetPaneID(sessionID)
-			if err != nil {
-				return fmt.Errorf("getting pane ID: %w", err)
-			}
-
-			// Build startup beacon for context (like gt handoff does)
-			beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
-				Recipient: "mayor",
-				Sender:    "human",
-				Topic:     "attach",
-			})
-
-			// Build startup command with beacon
-			startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", townRoot, "", beacon, mayorAgentOverride)
-			if err != nil {
-				return fmt.Errorf("building startup command: %w", err)
-			}
-
-			if err := t.RespawnPane(paneID, startupCmd); err != nil {
-				return fmt.Errorf("restarting runtime: %w", err)
-			}
-
-			fmt.Printf("%s Mayor restarted with context\n", style.Bold.Render("✓"))
 		}
 	}
 
-	// Use shared attach helper (smart: links if inside tmux, attaches if outside)
-	return attachToTmuxSession(sessionID)
+	// Smart attach: switches if inside tmux, attaches if outside
+	return agents.Attach(agent.MayorAddress)
 }
 
 func runMayorStatus(cmd *cobra.Command, args []string) error {
-	mgr, err := getMayorManager()
+	_, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return err
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	info, err := mgr.Status()
-	if err != nil {
-		if err == mayor.ErrNotRunning {
-			fmt.Printf("%s Mayor session is %s\n",
-				style.Dim.Render("○"),
-				"not running")
-			fmt.Printf("\nStart with: %s\n", style.Dim.Render("gt mayor start"))
-			return nil
-		}
-		return fmt.Errorf("checking status: %w", err)
+	agents := factory.Agents()
+	id := agent.MayorAddress
+
+	if !agents.Exists(id) {
+		fmt.Printf("%s Mayor session is %s\n",
+			style.Dim.Render("○"),
+			"not running")
+		fmt.Printf("\nStart with: %s\n", style.Dim.Render("gt mayor start"))
+		return nil
 	}
 
-	status := "detached"
-	if info.Attached {
-		status = "attached"
-	}
 	fmt.Printf("%s Mayor session is %s\n",
 		style.Bold.Render("●"),
 		style.Bold.Render("running"))
-	fmt.Printf("  Status: %s\n", status)
-	fmt.Printf("  Created: %s\n", info.Created)
 	fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt mayor attach"))
 
 	return nil
 }
 
 func runMayorRestart(cmd *cobra.Command, args []string) error {
-	mgr, err := getMayorManager()
+	_, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return err
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Stop if running (ignore not-running error)
-	if err := mgr.Stop(); err != nil && err != mayor.ErrNotRunning {
-		return fmt.Errorf("stopping session: %w", err)
-	}
+	// Stop if running (ignore errors - we'll start fresh anyway)
+	agents := factory.Agents()
+	id := agent.MayorAddress
+	_ = agents.Stop(id, true)
 
 	// Start fresh
 	return runMayorStart(cmd, args)

@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -43,18 +43,13 @@ func init() {
 func runIssueSet(cmd *cobra.Command, args []string) error {
 	issueID := args[0]
 
-	// Get current tmux session
-	session := os.Getenv("TMUX_PANE")
-	if session == "" {
-		// Try to detect from GT env vars
-		session = detectCurrentSession()
-		if session == "" {
-			return fmt.Errorf("not in a tmux session")
-		}
+	t := tmux.NewTmux()
+	sess, err := t.CurrentSessionName()
+	if err != nil {
+		return err
 	}
 
-	t := tmux.NewTmux()
-	if err := t.SetEnvironment(session, "GT_ISSUE", issueID); err != nil {
+	if err := t.SetEnv(session.SessionID(sess), "GT_ISSUE", issueID); err != nil {
 		return fmt.Errorf("setting issue: %w", err)
 	}
 
@@ -63,17 +58,14 @@ func runIssueSet(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueClear(cmd *cobra.Command, args []string) error {
-	session := os.Getenv("TMUX_PANE")
-	if session == "" {
-		session = detectCurrentSession()
-		if session == "" {
-			return fmt.Errorf("not in a tmux session")
-		}
+	t := tmux.NewTmux()
+	sess, err := t.CurrentSessionName()
+	if err != nil {
+		return err
 	}
 
-	t := tmux.NewTmux()
 	// Set to empty string to clear
-	if err := t.SetEnvironment(session, "GT_ISSUE", ""); err != nil {
+	if err := t.SetEnv(session.SessionID(sess), "GT_ISSUE", ""); err != nil {
 		return fmt.Errorf("clearing issue: %w", err)
 	}
 
@@ -82,16 +74,13 @@ func runIssueClear(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueShow(cmd *cobra.Command, args []string) error {
-	session := os.Getenv("TMUX_PANE")
-	if session == "" {
-		session = detectCurrentSession()
-		if session == "" {
-			return fmt.Errorf("not in a tmux session")
-		}
+	t := tmux.NewTmux()
+	sess, err := t.CurrentSessionName()
+	if err != nil {
+		return err
 	}
 
-	t := tmux.NewTmux()
-	issue, err := t.GetEnvironment(session, "GT_ISSUE")
+	issue, err := t.GetEnvironment(sess, "GT_ISSUE")
 	if err != nil {
 		return fmt.Errorf("getting issue: %w", err)
 	}
@@ -104,26 +93,3 @@ func runIssueShow(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// detectCurrentSession tries to find the tmux session name from env.
-func detectCurrentSession() string {
-	// Try to build session name from GT env vars
-	rig := os.Getenv("GT_RIG")
-	polecat := os.Getenv("GT_POLECAT")
-	crew := os.Getenv("GT_CREW")
-
-	if rig != "" {
-		if polecat != "" {
-			return fmt.Sprintf("gt-%s-%s", rig, polecat)
-		}
-		if crew != "" {
-			return fmt.Sprintf("gt-%s-crew-%s", rig, crew)
-		}
-	}
-
-	// Check if we're mayor
-	if os.Getenv("GT_ROLE") == "mayor" {
-		return getMayorSessionName()
-	}
-
-	return ""
-}

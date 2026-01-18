@@ -8,6 +8,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
@@ -53,8 +54,8 @@ func runCrewAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create crew manager
-	crewGit := git.NewGit(r.Path)
-	crewMgr := crew.NewManager(r, crewGit)
+	agentName, _ := config.ResolveRoleAgentName("crew", townRoot, r.Path)
+	crewMgr := factory.New(townRoot).CrewManager(r, agentName)
 
 	bd := beads.New(beads.ResolveBeadsDir(r.Path))
 

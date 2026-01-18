@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/suggest"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -225,13 +226,12 @@ func parseAddress(addr string) (rigName, polecatName string, err error) {
 
 // getSessionManager creates a session manager for the given rig.
 func getSessionManager(rigName string) (*polecat.SessionManager, *rig.Rig, error) {
-	_, r, err := getRig(rigName)
+	townRoot, r, err := getRig(rigName)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	t := tmux.NewTmux()
-	polecatMgr := polecat.NewSessionManager(t, r)
+	polecatMgr := factory.New(townRoot).PolecatSessionManager(r, "")
 
 	return polecatMgr, r, nil
 }
@@ -242,7 +242,7 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	polecatMgr, r, err := getSessionManager(rigName)
+	townRoot, r, err := getRig(rigName)
 	if err != nil {
 		return err
 	}
@@ -261,12 +261,9 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%s", suggest.FormatSuggestion("Polecat", polecatName, suggestions, hint))
 	}
 
-	opts := polecat.SessionStartOptions{
-		Issue: sessionIssue,
-	}
-
 	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
-	if err := polecatMgr.Start(polecatName, opts); err != nil {
+	polecatID := agent.PolecatAddress(rigName, polecatName)
+	if _, err := factory.Start(townRoot, polecatID, ""); err != nil {
 		return fmt.Errorf("starting session: %w", err)
 	}
 
@@ -377,11 +374,10 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Collect sessions from all rigs
-	t := tmux.NewTmux()
 	var allSessions []SessionListItem
 
 	for _, r := range rigs {
-		polecatMgr := polecat.NewSessionManager(t, r)
+		polecatMgr := factory.New(townRoot).PolecatSessionManager(r, "")
 		infos, err := polecatMgr.List()
 		if err != nil {
 			continue
@@ -495,10 +491,12 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	polecatMgr, _, err := getSessionManager(rigName)
+	townRoot, r, err := getRig(rigName)
 	if err != nil {
 		return err
 	}
+
+	polecatMgr := factory.New(townRoot).PolecatSessionManager(r, "")
 
 	// Check if running
 	running, err := polecatMgr.IsRunning(polecatName)
@@ -518,10 +516,10 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Start fresh session
+	// Start fresh session using factory.Start() (agent resolved automatically)
 	fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
-	opts := polecat.SessionStartOptions{}
-	if err := polecatMgr.Start(polecatName, opts); err != nil {
+	polecatID := agent.PolecatAddress(rigName, polecatName)
+	if _, err := factory.Start(townRoot, polecatID, ""); err != nil {
 		return fmt.Errorf("starting session: %w", err)
 	}
 
@@ -633,31 +631,18 @@ func runSessionCheck(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Session Health Check\n\n", style.Bold.Render("🔍"))
 
-	t := tmux.NewTmux()
 	totalChecked := 0
 	totalHealthy := 0
 	totalCrashed := 0
 
 	for _, r := range rigs {
-		polecatsDir := filepath.Join(r.Path, "polecats")
-		entries, err := os.ReadDir(polecatsDir)
-		if err != nil {
-			continue // Rig might not have polecats
-		}
+		polecatMgr := factory.New(townRoot).PolecatSessionManager(r, "")
 
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			if strings.HasPrefix(entry.Name(), ".") {
-				continue
-			}
-			polecatName := entry.Name()
-			sessionName := fmt.Sprintf("gt-%s-%s", r.Name, polecatName)
+		for _, polecatName := range r.Polecats {
 			totalChecked++
 
-			// Check if session exists
-			running, err := t.HasSession(sessionName)
+			// Check if session is running
+			running, err := polecatMgr.IsRunning(polecatName)
 			if err != nil {
 				fmt.Printf("  %s %s/%s: %s\n", style.Bold.Render("⚠"), r.Name, polecatName, style.Dim.Render("error checking session"))
 				continue
@@ -667,7 +652,6 @@ func runSessionCheck(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  %s %s/%s: %s\n", style.Bold.Render("✓"), r.Name, polecatName, style.Dim.Render("session alive"))
 				totalHealthy++
 			} else {
-				// Check if polecat has work on hook (would need restart)
 				fmt.Printf("  %s %s/%s: %s\n", style.Bold.Render("✗"), r.Name, polecatName, style.Dim.Render("session not running"))
 				totalCrashed++
 			}

@@ -22,7 +22,7 @@ import (
 // This test:
 // 1. Creates a stub agent script that echoes identifiable output
 // 2. Sets up a minimal town/rig with the custom agent configured
-// 3. Verifies that BuildPolecatStartupCommand uses the custom agent
+// 3. Verifies that ResolveAgentConfig uses the custom agent
 // 4. Optionally spawns a tmux session and verifies output (if tmux available)
 func TestRigLevelCustomAgentIntegration(t *testing.T) {
 	t.Parallel()
@@ -55,29 +55,7 @@ func TestRigLevelCustomAgentIntegration(t *testing.T) {
 		}
 	})
 
-	// Test 2: Verify BuildPolecatStartupCommand includes the custom agent
-	t.Run("BuildPolecatStartupCommand uses custom agent", func(t *testing.T) {
-		cmd := BuildPolecatStartupCommand(rigName, "test-polecat", rigPath, "")
-
-		if !strings.Contains(cmd, stubAgentPath) {
-			t.Errorf("Expected command to contain stub agent path %q, got: %s", stubAgentPath, cmd)
-		}
-
-		if !strings.Contains(cmd, "--test-mode") {
-			t.Errorf("Expected command to contain --test-mode, got: %s", cmd)
-		}
-
-		// Verify environment variables are set
-		if !strings.Contains(cmd, "GT_ROLE=polecat") {
-			t.Errorf("Expected GT_ROLE=polecat in command, got: %s", cmd)
-		}
-
-		if !strings.Contains(cmd, "GT_POLECAT=test-polecat") {
-			t.Errorf("Expected GT_POLECAT=test-polecat in command, got: %s", cmd)
-		}
-	})
-
-	// Test 3: Verify ResolveAgentConfigWithOverride respects rig agents
+	// Test 2: Verify ResolveAgentConfigWithOverride respects rig agents
 	t.Run("ResolveAgentConfigWithOverride with rig agent", func(t *testing.T) {
 		rc, agentName, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "stub-agent")
 		if err != nil {

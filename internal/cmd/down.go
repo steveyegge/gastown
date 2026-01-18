@@ -5,19 +5,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/git"
-	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -83,11 +83,6 @@ func runDown(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	t := tmux.NewTmux()
-	if !t.IsAvailable() {
-		return fmt.Errorf("tmux not available (is tmux installed and on PATH?)")
-	}
-
 	// Phase 0: Acquire shutdown lock (skip for dry-run)
 	if !downDryRun {
 		lock, err := acquireShutdownLock(townRoot)
@@ -100,6 +95,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		// By default, tmux exits when there are no sessions (exit-empty on).
 		// This ensures the server stays running for subsequent `gt up`.
 		// Ignore errors - if there's no server, nothing to configure.
+		t := tmux.NewTmux()
 		_ = t.SetExitEmpty(false)
 	}
 	allOK := true
@@ -111,9 +107,6 @@ func runDown(cmd *cobra.Command, args []string) error {
 
 	rigs := discoverRigs(townRoot)
 
-	// Pre-fetch all sessions once for O(1) lookups (avoids N+1 subprocess calls)
-	sessionSet, _ := t.GetSessionSet() // Ignore error - empty set is safe fallback
-
 	// Phase 0.5: Stop polecats if --polecats
 	if downPolecats {
 		if downDryRun {
@@ -121,7 +114,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Println("Stopping polecats...")
 		}
-		polecatsStopped := stopAllPolecats(t, townRoot, rigs, downForce, downDryRun)
+		polecatsStopped := stopAllPolecats(townRoot, rigs, downForce, downDryRun)
 		if downDryRun {
 			if polecatsStopped > 0 {
 				printDownStatus("Polecats", true, fmt.Sprintf("%d would stop", polecatsStopped))
@@ -167,61 +160,74 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 2a: Stop refineries
+	agents := factory.Agents()
+
 	for _, rigName := range rigs {
-		sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+		id := agent.RefineryAddress(rigName)
 		if downDryRun {
-			if sessionSet.Has(sessionName) {
+			if agents.Exists(id) {
 				printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "would stop")
 			}
 			continue
 		}
-		wasRunning, err := stopSessionWithCache(t, sessionName, sessionSet)
-		if err != nil {
+		err := agents.Stop(id, true)
+		if err == agent.ErrNotRunning {
+			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "not running")
+		} else if err != nil {
 			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
 			allOK = false
-		} else if wasRunning {
-			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "stopped")
 		} else {
-			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "not running")
+			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "stopped")
 		}
 	}
 
 	// Phase 2b: Stop witnesses
 	for _, rigName := range rigs {
-		sessionName := fmt.Sprintf("gt-%s-witness", rigName)
+		id := agent.WitnessAddress(rigName)
 		if downDryRun {
-			if sessionSet.Has(sessionName) {
+			if agents.Exists(id) {
 				printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "would stop")
 			}
 			continue
 		}
-		wasRunning, err := stopSessionWithCache(t, sessionName, sessionSet)
-		if err != nil {
+		err := agents.Stop(id, true)
+		if err == agent.ErrNotRunning {
+			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "not running")
+		} else if err != nil {
 			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), false, err.Error())
 			allOK = false
-		} else if wasRunning {
-			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "stopped")
 		} else {
-			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "not running")
+			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "stopped")
 		}
 	}
 
-	// Phase 3: Stop town-level sessions (Mayor, Boot, Deacon)
-	for _, ts := range session.TownSessions() {
+	// Phase 3: Stop town-level agents (Mayor, Boot, Deacon)
+	// Order matters: Boot (Deacon's watchdog) must stop before Deacon.
+	// Reuse agents from rig-level operations (same underlying Agents interface)
+	townAgents := []struct {
+		name string
+		id   agent.AgentID
+	}{
+		{"Mayor", agent.MayorAddress},
+		{"Boot", agent.BootAddress},
+		{"Deacon", agent.DeaconAddress},
+	}
+	for _, ta := range townAgents {
 		if downDryRun {
-			if sessionSet.Has(ts.SessionID) {
-				printDownStatus(ts.Name, true, "would stop")
+			if agents.Exists(ta.id) {
+				printDownStatus(ta.name, true, "would stop")
 			}
 			continue
 		}
-		stopped, err := session.StopTownSessionWithCache(t, ts, downForce, sessionSet)
+		wasRunning := agents.Exists(ta.id)
+		err := agents.Stop(ta.id, !downForce) // graceful = !force
 		if err != nil {
-			printDownStatus(ts.Name, false, err.Error())
+			printDownStatus(ta.name, false, err.Error())
 			allOK = false
-		} else if stopped {
-			printDownStatus(ts.Name, true, "stopped")
+		} else if wasRunning {
+			printDownStatus(ta.name, true, "stopped")
 		} else {
-			printDownStatus(ts.Name, true, "not running")
+			printDownStatus(ta.name, true, "not running")
 		}
 	}
 
@@ -250,7 +256,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	// Phase 5: Verification (--all only)
 	if downAll && !downDryRun {
 		time.Sleep(500 * time.Millisecond)
-		respawned := verifyShutdown(t, townRoot)
+		respawned := verifyShutdown(agents, townRoot)
 		if len(respawned) > 0 {
 			fmt.Println()
 			fmt.Printf("%s Warning: Some processes may have respawned:\n", style.Bold.Render("⚠"))
@@ -280,6 +286,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 			fmt.Printf("To proceed, run with: %s\n", style.Bold.Render("GT_NUKE_ACKNOWLEDGED=1 gt down --nuke"))
 			allOK = false
 		} else {
+			t := tmux.NewTmux()
 			if err := t.KillServer(); err != nil {
 				printDownStatus("Tmux server", false, err.Error())
 				allOK = false
@@ -323,7 +330,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 
 // stopAllPolecats stops all polecat sessions across all rigs.
 // Returns the number of polecats stopped (or would be stopped in dry-run).
-func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force bool, dryRun bool) int {
+func stopAllPolecats(townRoot string, rigNames []string, force bool, dryRun bool) int {
 	stopped := 0
 
 	// Load rigs config
@@ -342,7 +349,7 @@ func stopAllPolecats(t *tmux.Tmux, townRoot string, rigNames []string, force boo
 			continue
 		}
 
-		polecatMgr := polecat.NewSessionManager(t, r)
+		polecatMgr := factory.New(townRoot).PolecatSessionManager(r, "")
 		infos, err := polecatMgr.List()
 		if err != nil {
 			continue
@@ -378,44 +385,6 @@ func printDownStatus(name string, ok bool, detail string) {
 	}
 }
 
-// stopSession gracefully stops a tmux session.
-// Returns (wasRunning, error) - wasRunning is true if session existed and was stopped.
-func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
-	running, err := t.HasSession(sessionName)
-	if err != nil {
-		return false, err
-	}
-	if !running {
-		return false, nil // Already stopped
-	}
-
-	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
-	if !downForce {
-		_ = t.SendKeysRaw(sessionName, "C-c")
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	// Kill the session (with explicit process termination to prevent orphans)
-	return true, t.KillSessionWithProcesses(sessionName)
-}
-
-// stopSessionWithCache is like stopSession but uses a pre-fetched SessionSet
-// for O(1) existence check instead of spawning a subprocess.
-func stopSessionWithCache(t *tmux.Tmux, sessionName string, cache *tmux.SessionSet) (bool, error) {
-	if !cache.Has(sessionName) {
-		return false, nil // Already stopped
-	}
-
-	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
-	if !downForce {
-		_ = t.SendKeysRaw(sessionName, "C-c")
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	// Kill the session (with explicit process termination to prevent orphans)
-	return true, t.KillSessionWithProcesses(sessionName)
-}
-
 // acquireShutdownLock prevents concurrent shutdowns.
 // Returns the lock (caller must defer Unlock()) or error if lock held.
 func acquireShutdownLock(townRoot string) (*flock.Flock, error) {
@@ -444,7 +413,7 @@ func acquireShutdownLock(townRoot string) (*flock.Flock, error) {
 
 // verifyShutdown checks for respawned processes after shutdown.
 // Returns list of things that are still running or respawned.
-func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
+func verifyShutdown(agents agent.Agents, townRoot string) []string {
 	var respawned []string
 
 	if count := beads.CountBdDaemons(); count > 0 {
@@ -455,12 +424,11 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 		respawned = append(respawned, fmt.Sprintf("bd activity (%d running)", count))
 	}
 
-	sessions, err := t.ListSessions()
-	if err == nil {
-		for _, sess := range sessions {
-			if strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-") {
-				respawned = append(respawned, fmt.Sprintf("tmux session %s", sess))
-			}
+	// Check if any agents respawned
+	agentIDs, err := agents.List()
+	if err == nil && len(agentIDs) > 0 {
+		for _, id := range agentIDs {
+			respawned = append(respawned, fmt.Sprintf("agent %s", id))
 		}
 	}
 
@@ -475,4 +443,20 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 	}
 
 	return respawned
+}
+
+// isProcessRunning checks if a process with the given PID exists.
+func isProcessRunning(pid int) bool {
+	if pid <= 0 {
+		return false // Invalid PID
+	}
+	err := syscall.Kill(pid, 0)
+	if err == nil {
+		return true
+	}
+	// EPERM means process exists but we don't have permission to signal it
+	if err == syscall.EPERM {
+		return true
+	}
+	return false
 }

@@ -75,12 +75,12 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 	var agentID string
 	var err error
 	if targetAgent != "" {
-		agentID, _, _, err = resolveTargetAgent(targetAgent)
+		agentID, err = resolveTargetAgent(targetAgent)
 		if err != nil {
 			return fmt.Errorf("resolving target agent: %w", err)
 		}
 	} else {
-		agentID, _, _, err = resolveSelfTarget()
+		agentID, err = resolveSelfTarget()
 		if err != nil {
 			return fmt.Errorf("detecting agent identity: %w", err)
 		}

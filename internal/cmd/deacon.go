@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,23 +11,76 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/runtime"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // getDeaconSessionName returns the Deacon session name.
 func getDeaconSessionName() string {
-	return session.DeaconSessionName()
+	return agent.DeaconAddress.String()
+}
+
+// addressToAgentID converts an agent address to an AgentID.
+// Addresses: "deacon", "mayor", "rig/witness", "rig/refinery", "rig/polecat/name"
+// Also handles trailing slashes (e.g., "mayor/") and deacon sub-agents (e.g., "deacon/dogs/name").
+func addressToAgentID(address string) (agent.AgentID, error) {
+	// Strip trailing slash
+	address = strings.TrimSuffix(address, "/")
+
+	// Handle placeholders - these aren't real agents
+	if strings.Contains(address, "<") {
+		return agent.AgentID{}, fmt.Errorf("placeholder address: %s", address)
+	}
+
+	switch address {
+	case "deacon":
+		return agent.DeaconAddress, nil
+	case "mayor":
+		return agent.MayorAddress, nil
+	}
+
+	parts := strings.Split(address, "/")
+	switch len(parts) {
+	case 2:
+		// rig/role: "gastown/witness", "gastown/refinery"
+		rig, role := parts[0], parts[1]
+		switch role {
+		case "witness":
+			return agent.WitnessAddress(rig), nil
+		case "refinery":
+			return agent.RefineryAddress(rig), nil
+		default:
+			// Could be "rig/polecatname" short form
+			return agent.PolecatAddress(rig, role), nil
+		}
+	case 3:
+		// rig/role/name: "gastown/polecat/toast", "gastown/crew/max", "deacon/dogs/name"
+		first, role, name := parts[0], parts[1], parts[2]
+		switch first {
+		case "deacon":
+			// Deacon sub-agents like "deacon/dogs/name" - treat as deacon for now
+			return agent.DeaconAddress, nil
+		}
+		// Normal rig/role/name
+		switch role {
+		case "polecat", "polecats":
+			return agent.PolecatAddress(first, name), nil
+		case "crew":
+			return agent.CrewAddress(first, name), nil
+		default:
+			return agent.AgentID{}, fmt.Errorf("unknown role: %s", role)
+		}
+	}
+
+	return agent.AgentID{}, fmt.Errorf("invalid address format: %s", address)
 }
 
 var deaconCmd = &cobra.Command{
@@ -336,22 +388,50 @@ func init() {
 }
 
 func runDeaconStart(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
-	sessionName := getDeaconSessionName()
-
-	// Check if session already exists
-	running, err := t.HasSession(sessionName)
+	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
-	if running {
+
+	agents := factory.Agents()
+	id := agent.DeaconAddress
+
+	// Check if already running
+	if agents.Exists(id) {
 		return fmt.Errorf("Deacon session already running. Attach with: gt deacon attach")
 	}
 
-	if err := startDeaconSession(t, sessionName, deaconAgentOverride); err != nil {
-		return err
+	// Ensure deacon directory exists
+	deaconDir := filepath.Join(townRoot, "deacon")
+	if err := os.MkdirAll(deaconDir, 0755); err != nil {
+		return fmt.Errorf("creating deacon directory: %w", err)
 	}
+
+	fmt.Println("Starting Deacon session...")
+
+	// Start deacon (agent resolved automatically, with optional override)
+	if _, err := factory.Start(townRoot, agent.DeaconAddress, "", factory.WithAgent(deaconAgentOverride)); err != nil {
+		return fmt.Errorf("starting deacon: %w", err)
+	}
+
+	// Run startup fallback (dismiss dialogs, etc.)
+	runtimeConfig := config.LoadRuntimeConfig(townRoot)
+	for _, fallbackCmd := range runtime.StartupFallbackCommands("deacon", runtimeConfig) {
+		_ = agents.Nudge(id, fallbackCmd)
+	}
+
+	// Inject startup nudge for predecessor discovery via /resume
+	startupMsg := agent.FormatStartupNudge(agent.StartupNudgeConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	})
+	_ = agents.Nudge(id, startupMsg)
+
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Send the propulsion nudge to trigger autonomous patrol execution.
+	time.Sleep(2 * time.Second)
+	_ = agents.Nudge(id, agent.PropulsionNudgeForRole("deacon", deaconDir))
 
 	fmt.Printf("%s Deacon session started. Attach with: %s\n",
 		style.Bold.Render("✓"),
@@ -360,108 +440,24 @@ func runDeaconStart(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// startDeaconSession creates and initializes the Deacon tmux session.
-func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
-	// Find workspace root
-	townRoot, err := workspace.FindFromCwdOrError()
+func runDeaconStop(cmd *cobra.Command, args []string) error {
+	_, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Deacon runs from its own directory (for correct role detection by gt prime)
-	deaconDir := filepath.Join(townRoot, "deacon")
+	agents := factory.Agents()
+	id := agent.DeaconAddress
 
-	// Ensure deacon directory exists
-	if err := os.MkdirAll(deaconDir, 0755); err != nil {
-		return fmt.Errorf("creating deacon directory: %w", err)
-	}
-
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
-		return fmt.Errorf("creating deacon settings: %w", err)
-	}
-
-	// Build startup command first
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", "", agentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
-	}
-
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	fmt.Println("Starting Deacon session...")
-	if err := t.NewSessionWithCommand(sessionName, deaconDir, startupCmd); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "deacon",
-		TownRoot: townRoot,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionName, k, v)
-	}
-
-	// Apply Deacon theme (non-fatal: theming failure doesn't affect operation)
-	// Note: ConfigureGasTownSession includes cycle bindings
-	theme := tmux.DeaconTheme()
-	_ = t.ConfigureGasTownSession(sessionName, theme, "", "Deacon", "health-check")
-
-	// Wait for Claude to start
-	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		return fmt.Errorf("waiting for deacon to start: %w", err)
-	}
-	time.Sleep(constants.ShutdownNotifyDelay)
-
-	runtimeConfig := config.LoadRuntimeConfig("")
-	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	if err := session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
-		Recipient: "deacon",
-		Sender:    "daemon",
-		Topic:     "patrol",
-	}); err != nil {
-		style.PrintWarning("failed to send startup nudge: %v", err)
-	}
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	if err := t.NudgeSession(sessionName, session.PropulsionNudgeForRole("deacon", deaconDir)); err != nil {
-		return fmt.Errorf("sending propulsion nudge: %w", err)
-	}
-
-	return nil
-}
-
-func runDeaconStop(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
-	sessionName := getDeaconSessionName()
-
-	// Check if session exists
-	running, err := t.HasSession(sessionName)
-	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
-	}
-	if !running {
+	// Check if running
+	if !agents.Exists(id) {
 		return errors.New("Deacon session is not running")
 	}
 
 	fmt.Println("Stopping Deacon session...")
 
-	// Try graceful shutdown first (best-effort interrupt)
-	_ = t.SendKeysRaw(sessionName, "C-c")
-	time.Sleep(100 * time.Millisecond)
-
-	// Kill the session
-	if err := t.KillSession(sessionName); err != nil {
-		return fmt.Errorf("killing session: %w", err)
+	if err := agents.Stop(id, true); err != nil {
+		return fmt.Errorf("stopping deacon: %w", err)
 	}
 
 	fmt.Printf("%s Deacon session stopped.\n", style.Bold.Render("✓"))
@@ -469,74 +465,55 @@ func runDeaconStop(cmd *cobra.Command, args []string) error {
 }
 
 func runDeaconAttach(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
-	sessionName := getDeaconSessionName()
-
-	// Check if session exists
-	running, err := t.HasSession(sessionName)
+	_, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
-	if !running {
+
+	agents := factory.Agents()
+	id := agent.DeaconAddress
+
+	// Check if running
+	if !agents.Exists(id) {
 		// Auto-start if not running
 		fmt.Println("Deacon session not running, starting...")
-		if err := startDeaconSession(t, sessionName, deaconAgentOverride); err != nil {
+		if err := runDeaconStart(cmd, args); err != nil {
 			return err
 		}
 	}
-	// Session uses a respawn loop, so Claude restarts automatically if it exits
 
-	// Use shared attach helper (smart: links if inside tmux, attaches if outside)
-	return attachToTmuxSession(sessionName)
+	// Smart attach: switches if inside tmux, attaches if outside
+	return agents.Attach(agent.DeaconAddress)
 }
 
 func runDeaconStatus(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
-	sessionName := getDeaconSessionName()
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
 
 	// Check pause state first (most important)
-	townRoot, _ := workspace.FindFromCwdOrError()
-	if townRoot != "" {
-		paused, state, err := deacon.IsPaused(townRoot)
-		if err == nil && paused {
-			fmt.Printf("%s DEACON PAUSED\n", style.Bold.Render("⏸️"))
-			if state.Reason != "" {
-				fmt.Printf("  Reason: %s\n", state.Reason)
-			}
-			fmt.Printf("  Paused at: %s\n", state.PausedAt.Format(time.RFC3339))
-			fmt.Printf("  Paused by: %s\n", state.PausedBy)
-			fmt.Println()
-			fmt.Printf("Resume with: %s\n", style.Dim.Render("gt deacon resume"))
-			fmt.Println()
+	paused, state, err := deacon.IsPaused(townRoot)
+	if err == nil && paused {
+		fmt.Printf("%s DEACON PAUSED\n", style.Bold.Render("⏸️"))
+		if state.Reason != "" {
+			fmt.Printf("  Reason: %s\n", state.Reason)
 		}
+		fmt.Printf("  Paused at: %s\n", state.PausedAt.Format(time.RFC3339))
+		fmt.Printf("  Paused by: %s\n", state.PausedBy)
+		fmt.Println()
+		fmt.Printf("Resume with: %s\n", style.Dim.Render("gt deacon resume"))
+		fmt.Println()
 	}
 
-	running, err := t.HasSession(sessionName)
-	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
-	}
+	agents := factory.Agents()
+	id := agent.DeaconAddress
 
-	if running {
-		// Get session info for more details
-		info, err := t.GetSessionInfo(sessionName)
-		if err == nil {
-			status := "detached"
-			if info.Attached {
-				status = "attached"
-			}
-			fmt.Printf("%s Deacon session is %s\n",
-				style.Bold.Render("●"),
-				style.Bold.Render("running"))
-			fmt.Printf("  Status: %s\n", status)
-			fmt.Printf("  Created: %s\n", info.Created)
-			fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt deacon attach"))
-		} else {
-			fmt.Printf("%s Deacon session is %s\n",
-				style.Bold.Render("●"),
-				style.Bold.Render("running"))
-		}
+	if agents.Exists(id) {
+		fmt.Printf("%s Deacon session is %s\n",
+			style.Bold.Render("●"),
+			style.Bold.Render("running"))
+		fmt.Printf("\nAttach with: %s\n", style.Dim.Render("gt deacon attach"))
 	} else {
 		fmt.Printf("%s Deacon session is %s\n",
 			style.Dim.Render("○"),
@@ -548,23 +525,17 @@ func runDeaconStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runDeaconRestart(cmd *cobra.Command, args []string) error {
-	t := tmux.NewTmux()
-
-	sessionName := getDeaconSessionName()
-
-	running, err := t.HasSession(sessionName)
+	_, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	fmt.Println("Restarting Deacon...")
 
-	if running {
-		// Kill existing session
-		if err := t.KillSession(sessionName); err != nil {
-			style.PrintWarning("failed to kill session: %v", err)
-		}
-	}
+	// Stop if running (ignore errors - we'll start fresh anyway)
+	agents := factory.Agents()
+	id := agent.DeaconAddress
+	_ = agents.Stop(id, true)
 
 	// Start fresh
 	if err := runDeaconStart(cmd, args); err != nil {
@@ -674,7 +645,7 @@ func runDeaconTriggerPending(cmd *cobra.Command, args []string) error {
 // runDeaconHealthCheck implements the health-check command.
 // It sends a HEALTH_CHECK nudge to an agent, waits for response, and tracks state.
 func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
-	agent := args[0]
+	targetAgent := args[0]
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -686,31 +657,30 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading health check state: %w", err)
 	}
-	agentState := state.GetAgentState(agent)
+	agentState := state.GetAgentState(targetAgent)
 
 	// Check if agent is in cooldown
 	if agentState.IsInCooldown(healthCheckCooldown) {
 		remaining := agentState.CooldownRemaining(healthCheckCooldown)
 		fmt.Printf("%s Agent %s is in cooldown (remaining: %s)\n",
-			style.Dim.Render("○"), agent, remaining.Round(time.Second))
+			style.Dim.Render("○"), targetAgent, remaining.Round(time.Second))
 		return nil
 	}
 
 	// Get agent bead info before ping (for baseline)
-	beadID, sessionName, err := agentAddressToIDs(agent)
+	beadID, _, err := agentAddressToIDs(targetAgent)
 	if err != nil {
 		return fmt.Errorf("invalid agent address: %w", err)
 	}
 
-	t := tmux.NewTmux()
-
 	// Check if session exists
-	exists, err := t.HasSession(sessionName)
+	agentID, err := addressToAgentID(targetAgent)
 	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
+		return fmt.Errorf("invalid agent address: %w", err)
 	}
-	if !exists {
-		fmt.Printf("%s Agent %s session not running\n", style.Dim.Render("○"), agent)
+	agentsAPI := agent.Default()
+	if !agentsAPI.Exists(agentID) {
+		fmt.Printf("%s Agent %s session not running\n", style.Dim.Render("○"), targetAgent)
 		return nil
 	}
 
@@ -725,42 +695,32 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 	agentState.RecordPing()
 
 	// Send health check nudge
-	if err := t.NudgeSession(sessionName, "HEALTH_CHECK: respond with any action to confirm responsiveness"); err != nil {
+	if err := agentsAPI.Nudge(agentID, "HEALTH_CHECK: respond with any action to confirm responsiveness"); err != nil {
 		return fmt.Errorf("sending nudge: %w", err)
 	}
 
 	fmt.Printf("%s Sent HEALTH_CHECK to %s, waiting %s...\n",
-		style.Bold.Render("→"), agent, healthCheckTimeout)
+		style.Bold.Render("→"), targetAgent, healthCheckTimeout)
 
-	// Wait for response using context and ticker for reliability
-	// This prevents loop hangs if system clock changes
-	ctx, cancel := context.WithTimeout(context.Background(), healthCheckTimeout)
-	defer cancel()
-
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
+	// Wait for response
+	deadline := time.Now().Add(healthCheckTimeout)
 	responded := false
 
-	for {
-		select {
-		case <-ctx.Done():
-			goto Done
-		case <-ticker.C:
-			newTime, err := getAgentBeadUpdateTime(townRoot, beadID)
-			if err != nil {
-				continue
-			}
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second) // Check every 2 seconds
 
-			// If bead was updated after our baseline, agent responded
-			if newTime.After(baselineTime) {
-				responded = true
-				goto Done
-			}
+		newTime, err := getAgentBeadUpdateTime(townRoot, beadID)
+		if err != nil {
+			continue
+		}
+
+		// If bead was updated after our baseline, agent responded
+		if newTime.After(baselineTime) {
+			responded = true
+			break
 		}
 	}
 
-Done:
 	// Record result
 	if responded {
 		agentState.RecordResponse()
@@ -768,7 +728,7 @@ Done:
 			style.PrintWarning("failed to save health check state: %v", err)
 		}
 		fmt.Printf("%s Agent %s responded (failures reset to 0)\n",
-			style.Bold.Render("✓"), agent)
+			style.Bold.Render("✓"), targetAgent)
 		return nil
 	}
 
@@ -779,11 +739,11 @@ Done:
 	}
 
 	fmt.Printf("%s Agent %s did not respond (consecutive failures: %d/%d)\n",
-		style.Dim.Render("⚠"), agent, agentState.ConsecutiveFailures, healthCheckFailures)
+		style.Dim.Render("⚠"), targetAgent, agentState.ConsecutiveFailures, healthCheckFailures)
 
 	// Check if force-kill threshold reached
 	if agentState.ShouldForceKill(healthCheckFailures) {
-		fmt.Printf("%s Agent %s should be force-killed\n", style.Bold.Render("✗"), agent)
+		fmt.Printf("%s Agent %s should be force-killed\n", style.Bold.Render("✗"), targetAgent)
 		os.Exit(2) // Exit code 2 = should force-kill
 	}
 
@@ -793,7 +753,7 @@ Done:
 // runDeaconForceKill implements the force-kill command.
 // It kills a stuck agent session and updates its bead state.
 func runDeaconForceKill(cmd *cobra.Command, args []string) error {
-	agent := args[0]
+	targetAgent := args[0]
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -805,30 +765,25 @@ func runDeaconForceKill(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading health check state: %w", err)
 	}
-	agentState := state.GetAgentState(agent)
+	agentState := state.GetAgentState(targetAgent)
 
 	// Check cooldown (unless bypassed)
 	if agentState.IsInCooldown(healthCheckCooldown) {
 		remaining := agentState.CooldownRemaining(healthCheckCooldown)
 		return fmt.Errorf("agent %s is in cooldown (remaining: %s) - cannot force-kill yet",
-			agent, remaining.Round(time.Second))
+			targetAgent, remaining.Round(time.Second))
 	}
 
-	// Get session name
-	_, sessionName, err := agentAddressToIDs(agent)
+	// Get AgentID
+	agentID, err := addressToAgentID(targetAgent)
 	if err != nil {
 		return fmt.Errorf("invalid agent address: %w", err)
 	}
 
-	t := tmux.NewTmux()
-
 	// Check if session exists
-	exists, err := t.HasSession(sessionName)
-	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
-	}
-	if !exists {
-		fmt.Printf("%s Agent %s session not running\n", style.Dim.Render("○"), agent)
+	agentsAPI := agent.Default()
+	if !agentsAPI.Exists(agentID) {
+		fmt.Printf("%s Agent %s session not running\n", style.Dim.Render("○"), targetAgent)
 		return nil
 	}
 
@@ -840,25 +795,25 @@ func runDeaconForceKill(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 1: Log the intervention (send mail to agent)
-	fmt.Printf("%s Sending force-kill notification to %s...\n", style.Dim.Render("1."), agent)
-	mailBody := fmt.Sprintf("Deacon detected %s as unresponsive.\nReason: %s\nAction: force-killing session", agent, reason)
-	sendMail(townRoot, agent, "FORCE_KILL: unresponsive", mailBody)
+	fmt.Printf("%s Sending force-kill notification to %s...\n", style.Dim.Render("1."), targetAgent)
+	mailBody := fmt.Sprintf("Deacon detected %s as unresponsive.\nReason: %s\nAction: force-killing session", targetAgent, reason)
+	sendMail(townRoot, targetAgent, "FORCE_KILL: unresponsive", mailBody)
 
-	// Step 2: Kill the tmux session
-	fmt.Printf("%s Killing tmux session %s...\n", style.Dim.Render("2."), sessionName)
-	if err := t.KillSession(sessionName); err != nil {
+	// Step 2: Kill the agent session
+	fmt.Printf("%s Killing agent session %s...\n", style.Dim.Render("2."), agentID.String())
+	if err := agentsAPI.Stop(agentID, false); err != nil { // graceful=false (force kill)
 		return fmt.Errorf("killing session: %w", err)
 	}
 
 	// Step 3: Update agent bead state (optional - best effort)
 	fmt.Printf("%s Updating agent bead state to 'killed'...\n", style.Dim.Render("3."))
-	updateAgentBeadState(townRoot, agent, "killed", reason)
+	updateAgentBeadState(townRoot, targetAgent, "killed", reason)
 
 	// Step 4: Notify mayor (optional)
 	if !forceKillSkipNotify {
 		fmt.Printf("%s Notifying mayor...\n", style.Dim.Render("4."))
-		notifyBody := fmt.Sprintf("Agent %s was force-killed by Deacon.\nReason: %s", agent, reason)
-		sendMail(townRoot, "mayor/", "Agent killed: "+agent, notifyBody)
+		notifyBody := fmt.Sprintf("Agent %s was force-killed by Deacon.\nReason: %s", targetAgent, reason)
+		sendMail(townRoot, "mayor/", "Agent killed: "+targetAgent, notifyBody)
 	}
 
 	// Record force-kill in state
@@ -868,7 +823,7 @@ func runDeaconForceKill(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Force-killed agent %s (total kills: %d)\n",
-		style.Bold.Render("✓"), agent, agentState.ForceKillCount)
+		style.Bold.Render("✓"), targetAgent, agentState.ForceKillCount)
 	fmt.Printf("  %s\n", style.Dim.Render("Agent is now 'asleep'. Use 'gt rig boot' to restart."))
 
 	return nil
@@ -927,9 +882,9 @@ func runDeaconHealthState(cmd *cobra.Command, args []string) error {
 func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 	switch address {
 	case "deacon":
-		return beads.DeaconBeadIDTown(), session.DeaconSessionName(), nil
+		return beads.DeaconBeadIDTown(), agent.DeaconAddress.String(), nil
 	case "mayor":
-		return beads.MayorBeadIDTown(), session.MayorSessionName(), nil
+		return beads.MayorBeadIDTown(), agent.MayorAddress.String(), nil
 	}
 
 	parts := strings.Split(address, "/")

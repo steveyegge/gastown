@@ -1,21 +1,19 @@
 package daemon
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	agentpkg "github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // BeadsMessage represents a message from gt mail inbox --json.
@@ -43,7 +41,7 @@ func (d *Daemon) ProcessLifecycleRequests() {
 
 	output, err := cmd.Output()
 	if err != nil {
-		d.logger.Printf("Warning: failed to fetch deacon inbox: %v", err)
+		// gt mail might not be available or inbox empty
 		return
 	}
 
@@ -154,13 +152,13 @@ func (d *Daemon) parseLifecycleRequest(msg *BeadsMessage) *LifecycleRequest {
 
 // executeLifecycleAction performs the requested lifecycle action.
 func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
-	// Determine session name from sender identity
-	sessionName := d.identityToSession(request.From)
-	if sessionName == "" {
+	// Convert identity to AgentID for logging
+	agentID, err := identityToAgentID(request.From)
+	if err != nil {
 		return fmt.Errorf("unknown agent identity: %s", request.From)
 	}
 
-	d.logger.Printf("Executing %s for session %s", request.Action, sessionName)
+	d.logger.Printf("Executing %s for agent %s", request.Action, agentID)
 
 	// Check agent bead state (ZFC: trust what agent reports) - gt-39ttg
 	agentBeadID := d.identityToAgentBeadID(request.From)
@@ -170,39 +168,36 @@ func (d *Daemon) executeLifecycleAction(request *LifecycleRequest) error {
 		}
 	}
 
-	// Check if session exists (tmux detection still needed for lifecycle actions)
-	running, err := d.tmux.HasSession(sessionName)
-	if err != nil {
-		return fmt.Errorf("checking session: %w", err)
-	}
+	// Check if agent exists using factory
+	running := d.isAgentRunning(request.From)
 
 	switch request.Action {
 	case ActionShutdown:
 		if running {
-			if err := d.tmux.KillSession(sessionName); err != nil {
-				return fmt.Errorf("killing session: %w", err)
+			if err := d.stopAgent(request.From); err != nil {
+				return fmt.Errorf("stopping agent: %w", err)
 			}
-			d.logger.Printf("Killed session %s", sessionName)
+			d.logger.Printf("Stopped agent %s", agentID)
 		}
 		return nil
 
 	case ActionCycle, ActionRestart:
 		if running {
-			// Kill the session first
-			if err := d.tmux.KillSession(sessionName); err != nil {
-				return fmt.Errorf("killing session: %w", err)
+			// Stop the agent first
+			if err := d.stopAgent(request.From); err != nil {
+				return fmt.Errorf("stopping agent: %w", err)
 			}
-			d.logger.Printf("Killed session %s for restart", sessionName)
+			d.logger.Printf("Stopped agent %s for restart", agentID)
 
 			// Wait a moment
 			time.Sleep(constants.ShutdownNotifyDelay)
 		}
 
-		// Restart the session
-		if err := d.restartSession(sessionName, request.From); err != nil {
-			return fmt.Errorf("restarting session: %w", err)
+		// Restart using Respawn if the agent was running, otherwise use factory
+		if err := d.restartAgent(request.From); err != nil {
+			return fmt.Errorf("restarting agent: %w", err)
 		}
-		d.logger.Printf("Restarted session %s", sessionName)
+		d.logger.Printf("Restarted agent %s", agentID)
 		return nil
 
 	default:
@@ -302,252 +297,156 @@ func (d *Daemon) getRoleConfigForIdentity(identity string) (*beads.RoleConfig, *
 	return roleConfig, parsed, nil
 }
 
-// identityToSession converts a beads identity to a tmux session name.
-// Uses role bead config if available, falls back to hardcoded patterns.
-func (d *Daemon) identityToSession(identity string) string {
-	config, parsed, err := d.getRoleConfigForIdentity(identity)
+// identityToAgentID converts a beads identity to an AgentID.
+func identityToAgentID(identity string) (agentpkg.AgentID, error) {
+	parsed, err := parseIdentity(identity)
 	if err != nil {
-		return ""
+		return agentpkg.AgentID{}, err
 	}
 
-	// If role bead has session_pattern, use it
-	if config != nil && config.SessionPattern != "" {
-		return beads.ExpandRolePattern(config.SessionPattern, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)
-	}
-
-	// Fallback: use default patterns based on role type
 	switch parsed.RoleType {
 	case "mayor":
-		return session.MayorSessionName()
+		return agentpkg.MayorAddress, nil
 	case "deacon":
-		return session.DeaconSessionName()
-	case "witness", "refinery":
-		return fmt.Sprintf("gt-%s-%s", parsed.RigName, parsed.RoleType)
+		return agentpkg.DeaconAddress, nil
+	case "witness":
+		return agentpkg.WitnessAddress(parsed.RigName), nil
+	case "refinery":
+		return agentpkg.RefineryAddress(parsed.RigName), nil
 	case "crew":
-		return fmt.Sprintf("gt-%s-crew-%s", parsed.RigName, parsed.AgentName)
+		return agentpkg.CrewAddress(parsed.RigName, parsed.AgentName), nil
 	case "polecat":
-		return fmt.Sprintf("gt-%s-%s", parsed.RigName, parsed.AgentName)
+		return agentpkg.PolecatAddress(parsed.RigName, parsed.AgentName), nil
 	default:
-		return ""
+		return agentpkg.AgentID{}, fmt.Errorf("unknown role type: %s", parsed.RoleType)
 	}
 }
 
-// restartSession starts a new session for the given agent.
-// Uses role bead config if available, falls back to hardcoded defaults.
-func (d *Daemon) restartSession(sessionName, identity string) error {
-	// Get role config for this identity
-	config, parsed, err := d.getRoleConfigForIdentity(identity)
+// restartAgent starts an agent using the factory functions.
+// This ensures consistent startup behavior (env vars, theming, GUPP, etc.).
+func (d *Daemon) restartAgent(identity string) error {
+	parsed, err := parseIdentity(identity)
 	if err != nil {
 		return fmt.Errorf("parsing identity: %w", err)
 	}
 
-	// Check rig operational state for rig-level agents (witness, refinery, crew, polecat)
-	// Town-level agents (mayor, deacon) are not affected by rig state
+	// Check rig operational state for rig-level agents
 	if parsed.RigName != "" {
 		if operational, reason := d.isRigOperational(parsed.RigName); !operational {
-			d.logger.Printf("Skipping session restart for %s: %s", identity, reason)
-			return fmt.Errorf("cannot restart session: %s", reason)
+			d.logger.Printf("Skipping agent restart for %s: %s", identity, reason)
+			return fmt.Errorf("cannot restart agent: %s", reason)
 		}
 	}
 
-	// Determine working directory
-	workDir := d.getWorkDir(config, parsed)
-	if workDir == "" {
-		return fmt.Errorf("cannot determine working directory for %s", identity)
-	}
-
-	// Determine if pre-sync is needed
-	needsPreSync := d.getNeedsPreSync(config, parsed)
-
-	// Pre-sync workspace for agents with git worktrees
-	if needsPreSync {
-		d.logger.Printf("Pre-syncing workspace for %s at %s", identity, workDir)
-		d.syncWorkspace(workDir)
-	}
-
-	// Create session
-	// Use EnsureSessionFresh to handle zombie sessions that exist but have dead Claude
-	if err := d.tmux.EnsureSessionFresh(sessionName, workDir); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment variables
-	d.setSessionEnvironment(sessionName, config, parsed)
-
-	// Apply theme (non-fatal: theming failure doesn't affect operation)
-	d.applySessionTheme(sessionName, parsed)
-
-	// Get and send startup command
-	startCmd := d.getStartCommand(config, parsed)
-	if err := d.tmux.SendKeys(sessionName, startCmd); err != nil {
-		return fmt.Errorf("sending startup command: %w", err)
-	}
-
-	// Wait for Claude to start, then accept bypass permissions warning if it appears.
-	// This ensures automated role starts aren't blocked by the warning dialog.
-	if err := d.tmux.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal - Claude might still start
-	}
-	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
-	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send startup nudge for predecessor discovery via /resume
-	recipient := identityToBDActor(identity)
-	_ = session.StartupNudge(d.tmux, sessionName, session.StartupNudgeConfig{
-		Recipient: recipient,
-		Sender:    "deacon",
-		Topic:     "lifecycle-restart",
-	}) // Non-fatal
-
-	// Send propulsion nudge to trigger autonomous execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = d.tmux.NudgeSession(sessionName, session.PropulsionNudgeForRole(parsed.RoleType, workDir)) // Non-fatal
-
-	return nil
-}
-
-// getWorkDir determines the working directory for an agent.
-// Uses role bead config if available, falls back to hardcoded defaults.
-func (d *Daemon) getWorkDir(config *beads.RoleConfig, parsed *ParsedIdentity) string {
-	// If role bead has work_dir_pattern, use it
-	if config != nil && config.WorkDirPattern != "" {
-		return beads.ExpandRolePattern(config.WorkDirPattern, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)
-	}
-
-	// Fallback: use default patterns based on role type
 	switch parsed.RoleType {
 	case "mayor":
-		return d.config.TownRoot
+		_, err := factory.Start(d.config.TownRoot, agentpkg.MayorAddress, "")
+		return err
+
 	case "deacon":
-		return d.config.TownRoot
+		_, err := factory.Start(d.config.TownRoot, agentpkg.DeaconAddress, "")
+		return err
+
 	case "witness":
-		return filepath.Join(d.config.TownRoot, parsed.RigName)
+		witnessID := agentpkg.WitnessAddress(parsed.RigName)
+		_, err := factory.Start(d.config.TownRoot, witnessID, "")
+		return err
+
 	case "refinery":
-		return filepath.Join(d.config.TownRoot, parsed.RigName, "refinery", "rig")
+		refineryID := agentpkg.RefineryAddress(parsed.RigName)
+		_, err := factory.Start(d.config.TownRoot, refineryID, "")
+		return err
+
 	case "crew":
-		return filepath.Join(d.config.TownRoot, parsed.RigName, "crew", parsed.AgentName)
+		crewID := agentpkg.CrewAddress(parsed.RigName, parsed.AgentName)
+		_, err := factory.Start(d.config.TownRoot, crewID, "")
+		return err
+
 	case "polecat":
-		// New structure: polecats/<name>/<rigname>/ (for LLM ergonomics)
-		// Old structure: polecats/<name>/ (for backward compat)
-		newPath := filepath.Join(d.config.TownRoot, parsed.RigName, "polecats", parsed.AgentName, parsed.RigName)
-		if _, err := os.Stat(newPath); err == nil {
-			return newPath
-		}
-		return filepath.Join(d.config.TownRoot, parsed.RigName, "polecats", parsed.AgentName)
+		polecatID := agentpkg.PolecatAddress(parsed.RigName, parsed.AgentName)
+		_, err := factory.Start(d.config.TownRoot, polecatID, "")
+		return err
+
 	default:
-		return ""
+		return fmt.Errorf("unknown role type: %s", parsed.RoleType)
 	}
 }
 
-// getNeedsPreSync determines if a workspace needs git sync before starting.
-// Uses role bead config if available, falls back to hardcoded defaults.
-func (d *Daemon) getNeedsPreSync(config *beads.RoleConfig, parsed *ParsedIdentity) bool {
-	// If role bead has explicit config, use it
-	if config != nil {
-		return config.NeedsPreSync
+// isAgentRunning checks if an agent is running using factory.Agents().Exists().
+func (d *Daemon) isAgentRunning(identity string) bool {
+	parsed, err := parseIdentity(identity)
+	if err != nil {
+		return false
 	}
 
-	// Fallback: roles with persistent git clones need pre-sync
+	agents := factory.Agents()
+
 	switch parsed.RoleType {
-	case "refinery", "crew", "polecat":
-		return true
+	case "mayor":
+		return agents.Exists(agentpkg.MayorAddress)
+
+	case "deacon":
+		return agents.Exists(agentpkg.DeaconAddress)
+
+	case "witness":
+		return agents.Exists(agentpkg.WitnessAddress(parsed.RigName))
+
+	case "refinery":
+		return agents.Exists(agentpkg.RefineryAddress(parsed.RigName))
+
+	case "crew":
+		return agents.Exists(agentpkg.CrewAddress(parsed.RigName, parsed.AgentName))
+
+	case "polecat":
+		return agents.Exists(agentpkg.PolecatAddress(parsed.RigName, parsed.AgentName))
+
 	default:
 		return false
 	}
 }
 
-// getStartCommand determines the startup command for an agent.
-// Uses role bead config if available, then role-based agent selection, then hardcoded defaults.
-func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIdentity) string {
-	// If role bead has explicit config, use it
-	if roleConfig != nil && roleConfig.StartCommand != "" {
-		// Expand any patterns in the command
-		return beads.ExpandRolePattern(roleConfig.StartCommand, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)
+// stopAgent stops an agent using factory.Agents().Stop().
+func (d *Daemon) stopAgent(identity string) error {
+	parsed, err := parseIdentity(identity)
+	if err != nil {
+		return err
 	}
 
-	rigPath := ""
-	if parsed != nil && parsed.RigName != "" {
-		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
-	}
+	agents := factory.Agents()
 
-	// Use role-based agent resolution for per-role model selection
-	runtimeConfig := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
+	switch parsed.RoleType {
+	case "mayor":
+		return agents.Stop(agentpkg.MayorAddress, true)
 
-	// Build default command using the role-resolved runtime config
-	defaultCmd := "exec " + runtimeConfig.BuildCommand()
-	if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
-		defaultCmd = config.PrependEnv(defaultCmd, map[string]string{"GT_SESSION_ID_ENV": runtimeConfig.Session.SessionIDEnv})
-	}
+	case "deacon":
+		return agents.Stop(agentpkg.DeaconAddress, true)
 
-	// Polecats and crew need environment variables set in the command
-	if parsed.RoleType == "polecat" {
-		var sessionIDEnv string
-		if runtimeConfig.Session != nil {
-			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
-		}
-		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:         "polecat",
-			Rig:          parsed.RigName,
-			AgentName:    parsed.AgentName,
-			TownRoot:     d.config.TownRoot,
-			SessionIDEnv: sessionIDEnv,
-		})
-		return config.PrependEnv("exec "+runtimeConfig.BuildCommand(), envVars)
-	}
+	case "witness":
+		witnessID := agentpkg.WitnessAddress(parsed.RigName)
+		return agents.Stop(witnessID, true)
 
-	if parsed.RoleType == "crew" {
-		var sessionIDEnv string
-		if runtimeConfig.Session != nil {
-			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
-		}
-		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:         "crew",
-			Rig:          parsed.RigName,
-			AgentName:    parsed.AgentName,
-			TownRoot:     d.config.TownRoot,
-			SessionIDEnv: sessionIDEnv,
-		})
-		return config.PrependEnv("exec "+runtimeConfig.BuildCommand(), envVars)
-	}
+	case "refinery":
+		refineryID := agentpkg.RefineryAddress(parsed.RigName)
+		return agents.Stop(refineryID, true)
 
-	return defaultCmd
-}
+	case "crew":
+		crewID := agentpkg.CrewAddress(parsed.RigName, parsed.AgentName)
+		return agents.Stop(crewID, true)
 
-// setSessionEnvironment sets environment variables for the tmux session.
-// Uses centralized AgentEnv for consistency, plus role bead custom env vars if available.
-func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
-	// Use centralized AgentEnv for base environment variables
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:      parsed.RoleType,
-		Rig:       parsed.RigName,
-		AgentName: parsed.AgentName,
-		TownRoot:  d.config.TownRoot,
-	})
-	for k, v := range envVars {
-		_ = d.tmux.SetEnvironment(sessionName, k, v)
-	}
+	case "polecat":
+		polecatID := agentpkg.PolecatAddress(parsed.RigName, parsed.AgentName)
+		return agents.Stop(polecatID, true)
 
-	// Set any custom env vars from role config (bead-defined overrides)
-	if roleConfig != nil {
-		for k, v := range roleConfig.EnvVars {
-			expanded := beads.ExpandRolePattern(v, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)
-			_ = d.tmux.SetEnvironment(sessionName, k, expanded)
-		}
+	default:
+		return fmt.Errorf("unknown role type: %s", parsed.RoleType)
 	}
 }
 
-// applySessionTheme applies tmux theming to the session.
-func (d *Daemon) applySessionTheme(sessionName string, parsed *ParsedIdentity) {
-	if parsed.RoleType == "mayor" {
-		theme := tmux.MayorTheme()
-		_ = d.tmux.ConfigureGasTownSession(sessionName, theme, "", "Mayor", "coordinator")
-	} else if parsed.RigName != "" {
-		theme := tmux.AssignTheme(parsed.RigName)
-		_ = d.tmux.ConfigureGasTownSession(sessionName, theme, parsed.RigName, parsed.RoleType, parsed.RoleType)
-	}
-}
+
+
+
+
+
 
 // syncWorkspace syncs a git workspace before starting a new session.
 // This ensures agents with persistent clones (like refinery) start with current code.
@@ -566,52 +465,26 @@ func (d *Daemon) syncWorkspace(workDir string) {
 		}
 	}
 
-	// Capture stderr for debuggability
-	var stderr bytes.Buffer
-
 	// Fetch latest from origin
 	fetchCmd := exec.Command("git", "fetch", "origin")
 	fetchCmd.Dir = workDir
-	fetchCmd.Stderr = &stderr
 	if err := fetchCmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg == "" {
-			errMsg = err.Error()
-		}
-		d.logger.Printf("Error: git fetch failed in %s: %s", workDir, errMsg)
-		return // Fail fast - don't start agent with stale code
+		d.logger.Printf("Warning: git fetch failed in %s: %v", workDir, err)
 	}
-
-	// Reset stderr buffer
-	stderr.Reset()
 
 	// Pull with rebase to incorporate changes
 	pullCmd := exec.Command("git", "pull", "--rebase", "origin", defaultBranch)
 	pullCmd.Dir = workDir
-	pullCmd.Stderr = &stderr
 	if err := pullCmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg == "" {
-			errMsg = err.Error()
-		}
-		d.logger.Printf("Warning: git pull failed in %s: %s (agent may have conflicts)", workDir, errMsg)
+		d.logger.Printf("Warning: git pull failed in %s: %v", workDir, err)
 		// Don't fail - agent can handle conflicts
 	}
-
-	// Reset stderr buffer
-	stderr.Reset()
 
 	// Sync beads
 	bdCmd := exec.Command("bd", "sync")
 	bdCmd.Dir = workDir
-	bdCmd.Stderr = &stderr
 	if err := bdCmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg == "" {
-			errMsg = err.Error()
-		}
-		d.logger.Printf("Warning: bd sync failed in %s: %s", workDir, errMsg)
-		// Don't fail - sync issues may be recoverable
+		d.logger.Printf("Warning: bd sync failed in %s: %v", workDir, err)
 	}
 }
 
@@ -800,8 +673,7 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 
 	output, err := cmd.Output()
 	if err != nil {
-		d.logger.Printf("Warning: bd list failed for GUPP check: %v", err)
-		return
+		return // Silently fail - bd might not be available
 	}
 
 	var agents []struct {
@@ -836,10 +708,12 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 		// Per gt-zecmc: derive running state from tmux, not agent_state
 		// Extract polecat name from agent ID (<prefix>-<rig>-polecat-<name> -> <name>)
 		polecatName := strings.TrimPrefix(agent.ID, prefix)
-		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
-		// Check if tmux session exists and Claude is running
-		if d.tmux.IsClaudeRunning(sessionName) {
+		// Check if agent is running using factory.Agents().Exists()
+		polecatID := agentpkg.PolecatAddress(rigName, polecatName)
+		running := factory.Agents().Exists(polecatID)
+
+		if running {
 			// Session is alive - check if it's been stuck too long
 			updatedAt, err := time.Parse(time.RFC3339, agent.UpdatedAt)
 			if err != nil {
@@ -898,7 +772,6 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 
 	output, err := cmd.Output()
 	if err != nil {
-		d.logger.Printf("Warning: bd list failed for orphaned work check: %v", err)
 		return
 	}
 
@@ -926,12 +799,15 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 			continue
 		}
 
-		// Check if tmux session is alive (derive state from tmux, not bead)
+		// Check if agent is alive (derive state from factory.Agents().Exists(), not bead)
 		polecatName := strings.TrimPrefix(agent.ID, prefix)
-		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
-		// Session running = not orphaned (work is being processed)
-		if d.tmux.IsClaudeRunning(sessionName) {
+		// Check if agent is running using factory.Agents().Exists()
+		polecatID := agentpkg.PolecatAddress(rigName, polecatName)
+		running := factory.Agents().Exists(polecatID)
+
+		// Agent running = not orphaned (work is being processed)
+		if running {
 			continue
 		}
 
