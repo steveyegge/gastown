@@ -381,50 +381,62 @@ id = "patrol-cleanup"
 title = "End-of-cycle inbox hygiene"
 needs = ["context-check"]
 description = """
-Verify inbox hygiene before ending patrol cycle.
+⚠️ CRITICAL: Complete ALL hygiene before proceeding.
 
-**Step 1: Check inbox state**
+This step is MANDATORY - do not skip or defer. Unarchived messages break the system.
+
+**Step 1: Archive ALL processed MERGE_READY messages**
+
 ```bash
 gt mail inbox
 ```
 
-Inbox should contain ONLY:
-- Unprocessed MERGE_READY messages (will process next cycle)
-- Active work items
-
-**Step 2: Archive any stale messages**
-
-Look for messages that were processed but not archived:
-- PATROL: Wake up that was acknowledged → archive
-- HELP/Blocked that was handled → archive
-- MERGE_READY where merge completed but archive was missed → archive
-
+For EACH MERGE_READY you processed this cycle:
 ```bash
-# For each stale message found:
 gt mail archive <message-id>
 ```
 
-**Step 3: Check for orphaned MR beads**
+⛔ DO NOT proceed to burn-or-loop with unarchived MERGE_READY messages.
 
-Look for open MR beads with no corresponding branch:
+**Step 2: Send MERGED notifications (if not already sent)**
+
+For each branch you merged, verify MERGED mail was sent to witness:
+```bash
+gt mail send <rig>/witness -s "MERGED <polecat-name>" -m "Branch: <branch>
+Issue: <issue-id>
+Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+**Step 3: Close MR beads for merged work**
+
 ```bash
 bd list --type=merge-request --status=open
 ```
 
-For each open MR bead:
-1. Check if branch exists: `git ls-remote origin refs/heads/<branch>`
-2. If branch gone, verify work is on main: `git log origin/main --oneline | grep "<source_issue>"`
-3. If work on main → close MR with reason "Merged (verified on main)"
-4. If work NOT on main → investigate before closing:
-   - Check source_issue validity (should be gt-xxxxx, not branch name)
-   - Search reflog/dangling commits if possible
-   - If unverifiable, close with reason "Unverifiable - no audit trail"
-   - File bead if this indicates lost work
+For each MR where work is on main:
+```bash
+bd close <mr-bead-id> --reason "Merged to main"
+```
 
-**NEVER close an MR bead without verifying the work landed or is unrecoverable.**
+**Step 4: Verify inbox is clean**
 
-**Goal**: Inbox should have ≤3 active messages at end of cycle.
-Keep only: pending MRs in queue."""
+```bash
+gt mail inbox
+```
+
+Expected: 0-3 messages (only unprocessed MERGE_READY).
+If more: go back and archive what you missed.
+
+**HYGIENE CHECKLIST (verify before proceeding)**:
+- [ ] All processed MERGE_READY messages archived
+- [ ] MERGED notifications sent to witness for each merge
+- [ ] MR beads closed for merged work
+- [ ] Inbox has ≤3 messages
+
+**Why this matters**: Unarchived MERGE_READY causes:
+- Refinery re-processing same branches
+- Witness not knowing to nuke polecats
+- Mail counts that never decrease"""
 
 [[steps]]
 id = "burn-or-loop"

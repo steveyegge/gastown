@@ -665,71 +665,46 @@ Skip dispatch - system is healthy.
 
 [[steps]]
 id = "costs-digest"
-title = "Aggregate daily costs [DISABLED]"
+title = "Aggregate daily costs"
 needs = ["session-gc"]
 description = """
-**⚠️ DISABLED** - Skip this step entirely.
+**DAILY DIGEST** - Aggregate yesterday's session cost wisps.
 
-Cost tracking is temporarily disabled because Claude Code does not expose
-session costs in a way that can be captured programmatically.
-
-**Why disabled:**
-- The `gt costs` command uses tmux capture-pane to find costs
-- Claude Code displays costs in the TUI status bar, not in scrollback
-- All sessions show $0.00 because capture-pane can't see TUI chrome
-- The infrastructure is sound but has no data source
-
-**What we need from Claude Code:**
-- Stop hook env var (e.g., `$CLAUDE_SESSION_COST`)
-- Or queryable file/API endpoint
-
-**Re-enable when:** Claude Code exposes cost data via API or environment.
-
-See: GH#24, gt-7awfj
-
-**Exit criteria:** Skip this step - proceed to next."""
-
-[[steps]]
-id = "patrol-digest"
-title = "Aggregate daily patrol digests"
-needs = ["costs-digest"]
-description = """
-**DAILY DIGEST** - Aggregate yesterday's patrol cycle digests.
-
-Patrol cycles (Deacon, Witness, Refinery) create ephemeral per-cycle digests
-to avoid JSONL pollution. This step aggregates them into a single permanent
-"Patrol Report YYYY-MM-DD" bead for audit purposes.
+Session costs are recorded as ephemeral wisps (not exported to JSONL) to avoid
+log-in-database pollution. This step aggregates them into a permanent daily
+"Cost Report YYYY-MM-DD" bead for audit purposes.
 
 **Step 1: Check if digest is needed**
 ```bash
-# Preview yesterday's patrol digests (dry run)
-gt patrol digest --yesterday --dry-run
+# Preview yesterday's costs (dry run)
+gt costs digest --yesterday --dry-run
 ```
 
-If output shows "No patrol digests found", skip to Step 3.
+If output shows "No session cost wisps found", skip to Step 3.
 
 **Step 2: Create the digest**
 ```bash
-gt patrol digest --yesterday
+gt costs digest --yesterday
 ```
 
 This:
-- Queries all ephemeral patrol digests from yesterday
-- Creates a single "Patrol Report YYYY-MM-DD" bead with aggregated data
-- Deletes the source digests
+- Queries all session.ended wisps from yesterday
+- Creates a single "Cost Report YYYY-MM-DD" bead with aggregated data
+- Deletes the source wisps
 
 **Step 3: Verify**
-Daily patrol digests preserve audit trail without per-cycle pollution.
+The digest appears in `gt costs --week` queries.
+Daily digests preserve audit trail without per-session pollution.
 
 **Timing**: Run once per morning patrol cycle. The --yesterday flag ensures
 we don't try to digest today's incomplete data.
 
-**Exit criteria:** Yesterday's patrol digests aggregated (or none to aggregate)."""
+**Exit criteria:** Yesterday's costs digested (or no wisps to digest)."""
 
 [[steps]]
 id = "log-maintenance"
 title = "Rotate logs and prune state"
-needs = ["patrol-digest"]
+needs = ["costs-digest"]
 description = """
 Maintain daemon logs and state files.
 
@@ -777,30 +752,68 @@ id = "patrol-cleanup"
 title = "End-of-cycle inbox hygiene"
 needs = ["log-maintenance"]
 description = """
-Verify inbox hygiene before ending patrol cycle.
+⚠️ CRITICAL: Complete ALL hygiene before proceeding.
 
-**Step 1: Check inbox state**
+This step is MANDATORY - do not skip or defer.
+
+**Step 1: Archive ALL processed messages**
+
 ```bash
 gt mail inbox
 ```
 
-Inbox should be EMPTY or contain only just-arrived unprocessed messages.
-
-**Step 2: Archive any remaining processed messages**
-
-All message types should have been archived during inbox-check processing:
-- WITNESS_PING → archived after acknowledging
-- HELP/Escalation → archived after handling
-- LIFECYCLE → archived after processing
-
-If any were missed:
+For EACH message you processed this cycle:
 ```bash
-# For each stale message found:
 gt mail archive <message-id>
 ```
 
-**Goal**: Inbox should have ≤2 active messages at end of cycle.
-Deacon mail should flow through quickly - no accumulation."""
+⛔ DO NOT proceed to loop-or-exit with >2 messages in inbox.
+
+**Step 2: Check and close completed convoys**
+
+```bash
+gt convoy list
+```
+
+For each active convoy:
+```bash
+gt convoy status <convoy-id>
+```
+
+If all tracked issues are closed (100% complete):
+```bash
+bd close <convoy-id> --reason "All tracked issues complete"
+gt mail send mayor/ -s "Convoy complete: <title>" -m "All work finished."
+```
+
+**Step 3: Squash patrol wisps**
+
+```bash
+bd list --wisp --status=open | grep deacon
+```
+
+If old patrol wisps exist (from previous cycles):
+```bash
+bd close <wisp-id> --reason "Superseded by current patrol"
+```
+
+**Step 4: Verify inbox is clean**
+
+```bash
+gt mail inbox
+```
+
+Expected: 0-2 messages (only truly unprocessed items).
+
+**HYGIENE CHECKLIST (verify before proceeding)**:
+- [ ] All WITNESS_PING messages archived
+- [ ] All LIFECYCLE messages archived
+- [ ] Completed convoys closed and mayor notified
+- [ ] Inbox has ≤2 messages
+- [ ] No orphaned patrol wisps
+
+**Why this matters**: The Deacon is the hygiene enforcer. If YOU don't clean up,
+convoys stay open forever and mail accumulates across the system."""
 
 [[steps]]
 id = "context-check"
