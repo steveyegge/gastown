@@ -95,8 +95,8 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Only check gt-* sessions (Gas Town sessions)
-		if !strings.HasPrefix(sess, "gt-") {
+		// Only check gt-* and hq-* sessions (Gas Town sessions)
+		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
 			continue
 		}
 
@@ -200,8 +200,8 @@ func (c *OrphanSessionCheck) getValidRigs(townRoot string) []string {
 
 // isValidSession checks if a session name matches expected Gas Town patterns.
 // Valid patterns:
-//   - gt-{town}-mayor (dynamic based on town name)
-//   - gt-{town}-deacon (dynamic based on town name)
+//   - hq-mayor (headquarters mayor session)
+//   - hq-deacon (headquarters deacon session)
 //   - gt-<rig>-witness
 //   - gt-<rig>-refinery
 //   - gt-<rig>-<polecat> (where polecat is any name)
@@ -354,8 +354,9 @@ func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //noli
 
 	// Find tmux server processes using ps instead of pgrep.
 	// pgrep -x tmux is unreliable on macOS - it often misses the actual server.
-	// We use ps with awk to find processes where comm is exactly "tmux".
-	out, err := exec.Command("sh", "-c", `ps ax -o pid,comm | awk '$2 == "tmux" || $2 ~ /\/tmux$/ { print $1 }'`).Output()
+	// We use ps with awk to find processes where comm is exactly "tmux" or starts with "tmux:".
+	// On Linux, tmux servers show as "tmux: server" in the comm field.
+	out, err := exec.Command("sh", "-c", `ps ax -o pid,comm | awk '$2 == "tmux" || $2 ~ /\/tmux$/ || $2 ~ /^tmux:/ { print $1 }'`).Output()
 	if err != nil {
 		// No tmux server running
 		return pids, nil
