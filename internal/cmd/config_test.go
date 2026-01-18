@@ -581,3 +581,240 @@ func TestConfigDefaultAgent(t *testing.T) {
 		}
 	})
 }
+
+func TestConfigRoleAgentsList(t *testing.T) {
+	t.Run("lists role mappings with defaults", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{}
+		err := runConfigRoleAgentsList(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigRoleAgentsList failed: %v", err)
+		}
+	})
+
+	t.Run("lists configured role mappings", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Create settings with role_agents
+		settings := &config.TownSettings{
+			Type:         "town-settings",
+			Version:      config.CurrentTownSettingsVersion,
+			DefaultAgent: "claude",
+			RoleAgents: map[string]string{
+				"witness":  "claude-haiku",
+				"refinery": "claude-haiku",
+			},
+		}
+		if err := config.SaveTownSettings(settingsPath, settings); err != nil {
+			t.Fatalf("save settings: %v", err)
+		}
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{}
+		err := runConfigRoleAgentsList(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigRoleAgentsList failed: %v", err)
+		}
+	})
+}
+
+func TestConfigRoleAgentsSet(t *testing.T) {
+	t.Run("sets role agent mapping", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Load agent registry
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{"witness", "claude"}
+		err := runConfigRoleAgentsSet(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigRoleAgentsSet failed: %v", err)
+		}
+
+		// Verify settings were saved
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		if loaded.RoleAgents == nil {
+			t.Fatal("RoleAgents map is nil")
+		}
+		if loaded.RoleAgents["witness"] != "claude" {
+			t.Errorf("RoleAgents[witness] = %q, want 'claude'", loaded.RoleAgents["witness"])
+		}
+	})
+
+	t.Run("rejects invalid role", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Run the command with invalid role
+		cmd := &cobra.Command{}
+		args := []string{"invalid-role", "claude"}
+		err := runConfigRoleAgentsSet(cmd, args)
+		if err == nil {
+			t.Fatal("expected error for invalid role")
+		}
+		if !strings.Contains(err.Error(), "invalid role") {
+			t.Errorf("error = %v, want 'invalid role'", err)
+		}
+	})
+
+	t.Run("rejects unknown agent", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Load agent registry
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Run the command with unknown agent
+		cmd := &cobra.Command{}
+		args := []string{"witness", "unknown-agent"}
+		err := runConfigRoleAgentsSet(cmd, args)
+		if err == nil {
+			t.Fatal("expected error for unknown agent")
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			t.Errorf("error = %v, want 'not found'", err)
+		}
+	})
+}
+
+func TestConfigRoleAgentsRemove(t *testing.T) {
+	t.Run("removes role agent override", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Create settings with role_agents
+		settings := &config.TownSettings{
+			Type:         "town-settings",
+			Version:      config.CurrentTownSettingsVersion,
+			DefaultAgent: "claude",
+			RoleAgents: map[string]string{
+				"witness": "gemini",
+			},
+		}
+		if err := config.SaveTownSettings(settingsPath, settings); err != nil {
+			t.Fatalf("save settings: %v", err)
+		}
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{"witness"}
+		err := runConfigRoleAgentsRemove(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigRoleAgentsRemove failed: %v", err)
+		}
+
+		// Verify role was removed
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		if loaded.RoleAgents != nil {
+			if _, ok := loaded.RoleAgents["witness"]; ok {
+				t.Error("role override still exists after removal")
+			}
+		}
+	})
+
+	t.Run("rejects invalid role", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Run the command with invalid role
+		cmd := &cobra.Command{}
+		args := []string{"invalid-role"}
+		err := runConfigRoleAgentsRemove(cmd, args)
+		if err == nil {
+			t.Fatal("expected error for invalid role")
+		}
+		if !strings.Contains(err.Error(), "invalid role") {
+			t.Errorf("error = %v, want 'invalid role'", err)
+		}
+	})
+
+	t.Run("returns error when no override exists", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Run the command when no override exists
+		cmd := &cobra.Command{}
+		args := []string{"witness"}
+		err := runConfigRoleAgentsRemove(cmd, args)
+		if err == nil {
+			t.Fatal("expected error when no override exists")
+		}
+		if !strings.Contains(err.Error(), "no agent override") {
+			t.Errorf("error = %v, want 'no agent override'", err)
+		}
+	})
+}
