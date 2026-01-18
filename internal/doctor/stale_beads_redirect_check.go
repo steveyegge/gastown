@@ -243,7 +243,8 @@ func getBeadsDirsToCheck(rigDir string) []string {
 	crewDir := filepath.Join(rigDir, "crew")
 	if entries, err := os.ReadDir(crewDir); err == nil {
 		for _, entry := range entries {
-			if entry.IsDir() {
+			// Skip hidden directories (like .claude)
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
 				beadsDir := filepath.Join(crewDir, entry.Name(), ".beads")
 				if _, err := os.Stat(beadsDir); err == nil {
 					dirs = append(dirs, beadsDir)
@@ -262,7 +263,8 @@ func getBeadsDirsToCheck(rigDir string) []string {
 	polecatsDir := filepath.Join(rigDir, "polecats")
 	if entries, err := os.ReadDir(polecatsDir); err == nil {
 		for _, entry := range entries {
-			if entry.IsDir() {
+			// Skip hidden directories
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
 				beadsDir := filepath.Join(polecatsDir, entry.Name(), ".beads")
 				if _, err := os.Stat(beadsDir); err == nil {
 					dirs = append(dirs, beadsDir)
