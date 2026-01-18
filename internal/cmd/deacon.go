@@ -460,7 +460,7 @@ func runDeaconStop(cmd *cobra.Command, args []string) error {
 	time.Sleep(100 * time.Millisecond)
 
 	// Kill the session
-	if err := t.KillSession(sessionName); err != nil {
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
@@ -561,7 +561,7 @@ func runDeaconRestart(cmd *cobra.Command, args []string) error {
 
 	if running {
 		// Kill existing session
-		if err := t.KillSession(sessionName); err != nil {
+		if err := t.KillSessionWithProcesses(sessionName); err != nil {
 			style.PrintWarning("failed to kill session: %v", err)
 		}
 	}
@@ -846,7 +846,7 @@ func runDeaconForceKill(cmd *cobra.Command, args []string) error {
 
 	// Step 2: Kill the tmux session
 	fmt.Printf("%s Killing tmux session %s...\n", style.Dim.Render("2."), sessionName)
-	if err := t.KillSession(sessionName); err != nil {
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 

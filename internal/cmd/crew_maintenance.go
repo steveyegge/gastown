@@ -32,7 +32,7 @@ func runCrewRename(cmd *cobra.Command, args []string) error {
 	t := tmux.NewTmux()
 	oldSessionID := crewSessionName(r.Name, oldName)
 	if hasSession, _ := t.HasSession(oldSessionID); hasSession {
-		if err := t.KillSession(oldSessionID); err != nil {
+		if err := t.KillSessionWithProcesses(oldSessionID); err != nil {
 			return fmt.Errorf("killing old session: %w", err)
 		}
 		fmt.Printf("Killed session %s\n", oldSessionID)
