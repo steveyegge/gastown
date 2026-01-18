@@ -160,7 +160,14 @@ func runMoleculeAwaitSignal(cmd *cobra.Command, args []string) error {
 			result.IdleCycles = newIdleCycles
 		}
 	} else if result.Reason == "signal" && awaitSignalAgentBead != "" {
-		// On signal, report current idle cycles (caller should reset)
+		// On signal, update last_activity to prove agent is alive
+		if err := updateAgentHeartbeat(awaitSignalAgentBead, beadsDir); err != nil {
+			if !awaitSignalQuiet {
+				fmt.Printf("%s Failed to update agent heartbeat: %v\n",
+					style.Dim.Render("⚠"), err)
+			}
+		}
+		// Report current idle cycles (caller should reset)
 		result.IdleCycles = idleCycles
 	}
 
@@ -317,6 +324,14 @@ func parseIntSimple(s string) (int, error) {
 		n = n*10 + int(s[i]-'0')
 	}
 	return n, nil
+}
+
+// updateAgentHeartbeat updates the last_activity timestamp on an agent bead.
+// This proves the agent is alive and processing signals.
+func updateAgentHeartbeat(agentBead, beadsDir string) error {
+	cmd := exec.Command("bd", "agent", "heartbeat", agentBead)
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	return cmd.Run()
 }
 
 // setAgentIdleCycles sets the idle:N label on an agent bead.
