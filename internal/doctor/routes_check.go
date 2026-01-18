@@ -10,6 +10,20 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 )
 
+// determineRigBeadsPath returns the correct route path for a rig based on its actual layout.
+// Some rigs have .beads at <rig>/mayor/rig/.beads (mayor clone layout),
+// others have .beads directly at <rig>/.beads (direct rig layout).
+// This matches the logic in rig.go's rigInit().
+func determineRigBeadsPath(townRoot, rigName string) string {
+	// Check if mayor/rig/.beads exists (mayor clone layout)
+	mayorRigBeads := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
+	if _, err := os.Stat(mayorRigBeads); err == nil {
+		return rigName + "/mayor/rig"
+	}
+	// Otherwise use rig root directly
+	return rigName
+}
+
 // RoutesCheck verifies that beads routing is properly configured.
 // It checks that routes.jsonl exists, all rigs have routing entries,
 // and all routes point to valid locations.
@@ -111,7 +125,8 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 
 	// Check each rig has a route (by path, not just prefix from rigs.json)
 	for rigName, rigEntry := range rigsConfig.Rigs {
-		expectedPath := rigName + "/mayor/rig"
+		// Determine the correct path based on actual rig layout
+		expectedPath := determineRigBeadsPath(ctx.TownRoot, rigName)
 
 		// Check if there's already a route for this rig (by path)
 		if _, hasRoute := routeByPath[expectedPath]; hasRoute {
@@ -286,12 +301,13 @@ func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 		}
 
 		if prefix != "" && !routeMap[prefix] {
-			// Verify the rig path exists before adding
-			rigPath := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig")
+			// Determine the correct path based on actual rig layout
+			rigRoutePath := determineRigBeadsPath(ctx.TownRoot, rigName)
+			rigPath := filepath.Join(ctx.TownRoot, rigRoutePath)
 			if _, err := os.Stat(rigPath); err == nil {
 				route := beads.Route{
 					Prefix: prefix,
-					Path:   rigName + "/mayor/rig",
+					Path:   rigRoutePath,
 				}
 				routes = append(routes, route)
 				routeMap[prefix] = true

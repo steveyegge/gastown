@@ -302,7 +302,8 @@ func (c *PrefixMismatchCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 
 		rigsJsonPrefix := rigEntry.BeadsConfig.Prefix
-		expectedPath := rigName + "/mayor/rig"
+		// Determine the correct path based on actual rig layout
+		expectedPath := determineRigBeadsPath(ctx.TownRoot, rigName)
 
 		// Find the route for this rig
 		routePrefix, hasRoute := routePrefixByPath[expectedPath]
@@ -370,7 +371,8 @@ func (c *PrefixMismatchCheck) Fix(ctx *CheckContext) error {
 	// Update each rig's prefix to match routes.jsonl
 	modified := false
 	for rigName, rigEntry := range rigsConfig.Rigs {
-		expectedPath := rigName + "/mayor/rig"
+		// Determine the correct path based on actual rig layout
+		expectedPath := determineRigBeadsPath(ctx.TownRoot, rigName)
 		routePrefix, hasRoute := routePrefixByPath[expectedPath]
 		if !hasRoute {
 			continue
