@@ -1429,10 +1429,11 @@ func TestGetRuntimeCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 
 func TestExpectedPaneCommands(t *testing.T) {
 	t.Parallel()
-	t.Run("claude maps to node", func(t *testing.T) {
+	t.Run("claude maps to node and claude", func(t *testing.T) {
 		got := ExpectedPaneCommands(&RuntimeConfig{Command: "claude"})
-		if len(got) != 1 || got[0] != "node" {
-			t.Fatalf("ExpectedPaneCommands(claude) = %v, want %v", got, []string{"node"})
+		want := []string{"node", "claude"}
+		if len(got) != 2 || got[0] != "node" || got[1] != "claude" {
+			t.Fatalf("ExpectedPaneCommands(claude) = %v, want %v", got, want)
 		}
 	})
 
