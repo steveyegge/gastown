@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -87,13 +88,25 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	account := crewAccount
+	if account == "" {
+		account = worker.Account
+	}
+	agentOverride := crewAgentOverride
+	if agentOverride == "" {
+		agentOverride = worker.Agent
+	}
+	model := worker.Model
+	extraArgs := append([]string(nil), worker.Args...)
+	envOverrides := worker.Env
+
 	// Resolve account for runtime config
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return fmt.Errorf("finding town root: %w", err)
 	}
 	accountsPath := constants.MayorAccountsPath(townRoot)
-	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, crewAccount)
+	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, account)
 	if err != nil {
 		return fmt.Errorf("resolving account: %w", err)
 	}
@@ -101,10 +114,34 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
 
-	runtimeConfig := config.LoadRuntimeConfig(r.Path)
-	if err := runtime.EnsureSettingsForRole(worker.ClonePath, "crew", runtimeConfig); err != nil {
+	resolved, agentName, err := config.ResolveAgentConfigWithOverride(townRoot, r.Path, agentOverride)
+	if err != nil {
+		return fmt.Errorf("resolving agent: %w", err)
+	}
+	normalized := cloneRuntimeConfig(resolved)
+	if len(extraArgs) > 0 {
+		normalized.Args = append(normalized.Args, extraArgs...)
+	}
+	if model != "" {
+		if ok, flag := config.SupportsModel(agentName); ok {
+			if flag == "" {
+				flag = "--model"
+			}
+			normalized.Args = append(normalized.Args, flag, model)
+		} else {
+			fmt.Printf("Warning: agent %q does not support models; skipping %q\n", agentName, model)
+		}
+	}
+
+	crewBaseDir := filepath.Join(r.Path, "crew")
+	if err := runtime.EnsureSettingsForRole(crewBaseDir, "crew", normalized); err != nil {
 		// Non-fatal but log warning - missing settings can cause agents to start without hooks
 		style.PrintWarning("could not ensure settings for %s: %v", name, err)
+	}
+
+	processNames := []string(nil)
+	if normalized.Tmux != nil {
+		processNames = normalized.Tmux.ProcessNames
 	}
 
 	// Check if session exists
@@ -125,7 +162,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	// running in this crew's directory (might have been started manually or via
 	// a different mechanism)
 	if !hasSession {
-		existingSessions, err := t.FindSessionByWorkDir(worker.ClonePath, runtimeConfig.Tmux.ProcessNames)
+		existingSessions, err := t.FindSessionByWorkDir(worker.ClonePath, processNames)
 		if err == nil && len(existingSessions) > 0 {
 			// Found an existing session with runtime running in this directory
 			existingSession := existingSessions[0]
@@ -158,16 +195,27 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("creating session: %w", err)
 		}
 
+		envCfg := config.AgentEnvConfig{
+			Role:          "crew",
+			Rig:           r.Name,
+			AgentName:     name,
+			TownRoot:      townRoot,
+			BeadsNoDaemon: true,
+		}
+		if normalized.Session != nil {
+			envCfg.SessionIDEnv = normalized.Session.SessionIDEnv
+			if normalized.Session.ConfigDirEnv == "" || normalized.Session.ConfigDirEnv == "CLAUDE_CONFIG_DIR" {
+				envCfg.RuntimeConfigDir = claudeConfigDir
+			}
+		}
+		envVars := config.AgentEnv(envCfg)
+		if normalized.Session != nil && normalized.Session.ConfigDirEnv != "" && normalized.Session.ConfigDirEnv != "CLAUDE_CONFIG_DIR" && claudeConfigDir != "" {
+			envVars[normalized.Session.ConfigDirEnv] = claudeConfigDir
+		}
+		envVars = config.MergeEnv(envVars, envOverrides)
+
 		// Set environment (non-fatal: session works without these)
 		// Use centralized AgentEnv for consistency across all role startup paths
-		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:             "crew",
-			Rig:              r.Name,
-			AgentName:        name,
-			TownRoot:         townRoot,
-			RuntimeConfigDir: claudeConfigDir,
-			BeadsNoDaemon:    true,
-		})
 		for k, v := range envVars {
 			_ = t.SetEnvironment(sessionID, k, v)
 		}
@@ -201,14 +249,11 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// Use respawn-pane to replace shell with runtime directly
 		// This gives cleaner lifecycle: runtime exits → session ends (no intermediate shell)
 		// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-		startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, beacon, crewAgentOverride)
-		if err != nil {
-			return fmt.Errorf("building startup command: %w", err)
+		agentCmd := normalized.BuildCommand()
+		if beacon != "" {
+			agentCmd = normalized.BuildCommandWithPrompt(beacon)
 		}
-		// Prepend config dir env if available
-		if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {
-			startupCmd = config.PrependEnv(startupCmd, map[string]string{runtimeConfig.Session.ConfigDirEnv: claudeConfigDir})
-		}
+		startupCmd := config.PrependEnv(agentCmd, envVars)
 		if err := t.RespawnPane(paneID, startupCmd); err != nil {
 			return fmt.Errorf("starting runtime: %w", err)
 		}
@@ -219,7 +264,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// Session exists - check if runtime is still running
 		// Uses both pane command check and UI marker detection to avoid
 		// restarting when user is in a subshell spawned from the runtime
-		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, r.Path, crewAgentOverride)
+		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, r.Path, agentOverride)
 		if err != nil {
 			return fmt.Errorf("resolving agent: %w", err)
 		}
@@ -244,14 +289,29 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 
 			// Use respawn-pane to replace shell with runtime directly
 			// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-			startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, beacon, crewAgentOverride)
-			if err != nil {
-				return fmt.Errorf("building startup command: %w", err)
+			agentCmd := normalized.BuildCommand()
+			if beacon != "" {
+				agentCmd = normalized.BuildCommandWithPrompt(beacon)
 			}
-			// Prepend config dir env if available
-			if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {
-				startupCmd = config.PrependEnv(startupCmd, map[string]string{runtimeConfig.Session.ConfigDirEnv: claudeConfigDir})
+			envCfg := config.AgentEnvConfig{
+				Role:          "crew",
+				Rig:           r.Name,
+				AgentName:     name,
+				TownRoot:      townRoot,
+				BeadsNoDaemon: true,
 			}
+			if normalized.Session != nil {
+				envCfg.SessionIDEnv = normalized.Session.SessionIDEnv
+				if normalized.Session.ConfigDirEnv == "" || normalized.Session.ConfigDirEnv == "CLAUDE_CONFIG_DIR" {
+					envCfg.RuntimeConfigDir = claudeConfigDir
+				}
+			}
+			envVars := config.AgentEnv(envCfg)
+			if normalized.Session != nil && normalized.Session.ConfigDirEnv != "" && normalized.Session.ConfigDirEnv != "CLAUDE_CONFIG_DIR" && claudeConfigDir != "" {
+				envVars[normalized.Session.ConfigDirEnv] = claudeConfigDir
+			}
+			envVars = config.MergeEnv(envVars, envOverrides)
+			startupCmd := config.PrependEnv(agentCmd, envVars)
 			if err := t.RespawnPane(paneID, startupCmd); err != nil {
 				return fmt.Errorf("restarting runtime: %w", err)
 			}
@@ -261,7 +321,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	// Check if we're already in the target session
 	if isInTmuxSession(sessionID) {
 		// Check if agent is already running - don't restart if so
-		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, r.Path, crewAgentOverride)
+		agentCfg, _, err := config.ResolveAgentConfigWithOverride(townRoot, r.Path, agentOverride)
 		if err != nil {
 			return fmt.Errorf("resolving agent: %w", err)
 		}
@@ -280,7 +340,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			Topic:     "start",
 		})
 		fmt.Printf("Starting %s in current session...\n", agentCfg.Command)
-		return execAgent(agentCfg, beacon)
+		return execAgent(normalized, beacon)
 	}
 
 	// If inside tmux (but different session), don't switch - just inform user
@@ -305,4 +365,15 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		fmt.Printf("[DEBUG] calling attachToTmuxSession(%q)\n", sessionID)
 	}
 	return attachToTmuxSession(sessionID)
+}
+
+func cloneRuntimeConfig(rc *config.RuntimeConfig) *config.RuntimeConfig {
+	if rc == nil {
+		return config.DefaultRuntimeConfig()
+	}
+	copy := *rc
+	if rc.Args != nil {
+		copy.Args = append([]string(nil), rc.Args...)
+	}
+	return &copy
 }

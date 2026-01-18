@@ -16,6 +16,12 @@ type Rig struct {
 	// GitURL is the remote repository URL.
 	GitURL string `json:"git_url"`
 
+	// OriginURL is the configured origin remote URL.
+	OriginURL string `json:"origin_url,omitempty"`
+
+	// UpstreamURL is the configured upstream remote URL.
+	UpstreamURL string `json:"upstream_url,omitempty"`
+
 	// LocalRepo is an optional local repository used for reference clones.
 	LocalRepo string `json:"local_repo,omitempty"`
 
