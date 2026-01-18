@@ -30,6 +30,12 @@ func DeaconBeadIDTown() string {
 	return TownBeadsPrefix + "-deacon"
 }
 
+// BootBeadIDTown returns the Boot agent bead ID for town-level beads.
+// Boot is the Deacon's watchdog, stored at hq-boot.
+func BootBeadIDTown() string {
+	return TownBeadsPrefix + "-boot"
+}
+
 // DogBeadIDTown returns a Dog agent bead ID for town-level beads.
 // Dogs are town-level agents, so they follow the pattern: hq-dog-<name>
 func DogBeadIDTown(name string) string {
@@ -96,10 +102,15 @@ func CrewRoleBeadIDTown() string {
 // For town-level agents (mayor, deacon), pass empty rig and name.
 // For rig-level singletons (witness, refinery), pass empty name.
 // For named agents (crew, polecat), pass all three.
+// When rig is empty but name is provided (prefix == rig scenario), generates: prefix-role-name
 func AgentBeadIDWithPrefix(prefix, rig, role, name string) string {
 	if rig == "" {
-		// Town-level agent: prefix-mayor, prefix-deacon
-		return prefix + "-" + role
+		// No rig in ID: prefix-role or prefix-role-name
+		// This handles town-level agents AND rigs where prefix == rig name
+		if name == "" {
+			return prefix + "-" + role
+		}
+		return prefix + "-" + role + "-" + name
 	}
 	if name == "" {
 		// Rig-level singleton: prefix-rig-witness, prefix-rig-refinery
@@ -142,7 +153,12 @@ func DogBeadID(name string) string {
 }
 
 // WitnessBeadIDWithPrefix returns the Witness agent bead ID for a rig using the specified prefix.
+// When prefix equals rig name, the rig is omitted to avoid duplication.
 func WitnessBeadIDWithPrefix(prefix, rig string) string {
+	// Deduplicate: if prefix == rig, omit rig from ID
+	if prefix == rig {
+		return AgentBeadIDWithPrefix(prefix, "", "witness", "")
+	}
 	return AgentBeadIDWithPrefix(prefix, rig, "witness", "")
 }
 
@@ -152,7 +168,12 @@ func WitnessBeadID(rig string) string {
 }
 
 // RefineryBeadIDWithPrefix returns the Refinery agent bead ID for a rig using the specified prefix.
+// When prefix equals rig name, the rig is omitted to avoid duplication.
 func RefineryBeadIDWithPrefix(prefix, rig string) string {
+	// Deduplicate: if prefix == rig, omit rig from ID
+	if prefix == rig {
+		return AgentBeadIDWithPrefix(prefix, "", "refinery", "")
+	}
 	return AgentBeadIDWithPrefix(prefix, rig, "refinery", "")
 }
 
@@ -162,7 +183,12 @@ func RefineryBeadID(rig string) string {
 }
 
 // CrewBeadIDWithPrefix returns a Crew worker agent bead ID using the specified prefix.
+// When prefix equals rig name, the rig is omitted to avoid duplication.
 func CrewBeadIDWithPrefix(prefix, rig, name string) string {
+	// Deduplicate: if prefix == rig, omit rig from ID
+	if prefix == rig {
+		return AgentBeadIDWithPrefix(prefix, "", "crew", name)
+	}
 	return AgentBeadIDWithPrefix(prefix, rig, "crew", name)
 }
 
@@ -172,7 +198,13 @@ func CrewBeadID(rig, name string) string {
 }
 
 // PolecatBeadIDWithPrefix returns a Polecat agent bead ID using the specified prefix.
+// When prefix equals rig name (e.g., fhc rig with fhc prefix), the rig is omitted
+// to avoid duplication like "fhc-fhc-polecat-name". Instead produces "fhc-polecat-name".
 func PolecatBeadIDWithPrefix(prefix, rig, name string) string {
+	// Deduplicate: if prefix == rig, omit rig from ID
+	if prefix == rig {
+		return AgentBeadIDWithPrefix(prefix, "", "polecat", name)
+	}
 	return AgentBeadIDWithPrefix(prefix, rig, "polecat", name)
 }
 

@@ -511,7 +511,7 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 				running, _ := t.HasSession(sf.sessionName)
 				if running {
 					// Cycle the agent by killing and letting gt up restart it
-					_ = t.KillSession(sf.sessionName)
+					_ = t.KillSessionWithProcesses(sf.sessionName)
 				}
 			}
 		}

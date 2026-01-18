@@ -170,7 +170,7 @@ EOF
 **2. Post to activity feed:**
 The convoy closure already creates a feed entry. Verify:
 ```bash
-gt feed --since 5m
+gt feed --since 5m --no-follow
 # Should show convoy completion
 ```
 

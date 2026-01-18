@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -429,7 +429,19 @@ type PristineResult struct {
 // This eliminates the need for git sync between crew clones - all crew members share one database.
 func (m *Manager) setupSharedBeads(crewPath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
-	return beads.SetupRedirect(townRoot, crewPath)
+	if err := beads.SetupRedirect(townRoot, crewPath); err != nil {
+		return err
+	}
+
+	// Set beads.role=maintainer to prevent beads from routing writes to ~/.beads-planning.
+	// Without this, HTTPS-cloned repos are treated as "contributor" and writes go to the
+	// wrong database, causing MR beads to be lost. See: gt-3ml66
+	crewGit := git.NewGit(crewPath)
+	if err := crewGit.SetConfig("beads.role", "maintainer"); err != nil {
+		return fmt.Errorf("setting beads.role config: %w", err)
+	}
+
+	return nil
 }
 
 // SessionName returns the tmux session name for a crew member.
@@ -466,7 +478,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	if running {
 		if opts.KillExisting {
 			// Restart mode - kill existing session
-			if err := t.KillSession(sessionID); err != nil {
+			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
 		} else {
@@ -475,17 +487,19 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
 			// Zombie session - kill and recreate
-			if err := t.KillSession(sessionID); err != nil {
+			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
 		}
 	}
 
-	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	// All crew members share the same settings file.
+	// Ensure Claude settings exist.
+	// If an account is configured, settings are stored per-account (shared across all crew members).
+	// Otherwise, settings are stored in crew/ (legacy per-workspace behavior).
 	crewBaseDir := filepath.Join(m.rig.Path, "crew")
-	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
+	townRoot := filepath.Dir(m.rig.Path)
+	rigRC := config.ResolveAgentConfig(townRoot, m.rig.Path)
+	if err := runtime.EnsureSettingsForRoleWithAccount(crewBaseDir, "crew", opts.ClaudeConfigDir, rigRC); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
@@ -522,7 +536,6 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:             "crew",
 		Rig:              m.rig.Name,
@@ -569,7 +582,7 @@ func (m *Manager) Stop(name string) error {
 	}
 
 	// Kill the session
-	if err := t.KillSession(sessionID); err != nil {
+	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 

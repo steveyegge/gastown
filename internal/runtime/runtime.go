@@ -13,7 +13,15 @@ import (
 )
 
 // EnsureSettingsForRole installs runtime hook settings when supported.
+// Deprecated: Use EnsureSettingsForRoleWithAccount for account-aware settings.
 func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error {
+	return EnsureSettingsForRoleWithAccount(workDir, role, "", rc)
+}
+
+// EnsureSettingsForRoleWithAccount installs runtime hook settings when supported.
+// If accountConfigDir is provided, settings are installed per-account (shared across workspaces).
+// If accountConfigDir is empty, settings are installed per-workspace (legacy behavior).
+func EnsureSettingsForRoleWithAccount(workDir, role, accountConfigDir string, rc *config.RuntimeConfig) error {
 	if rc == nil {
 		rc = config.DefaultRuntimeConfig()
 	}
@@ -24,7 +32,7 @@ func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error
 
 	switch rc.Hooks.Provider {
 	case "claude":
-		return claude.EnsureSettingsForRoleAt(workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile)
+		return claude.EnsureSettingsForAccount(workDir, role, accountConfigDir)
 	case "opencode":
 		return opencode.EnsurePluginAt(workDir, rc.Hooks.Dir, rc.Hooks.SettingsFile)
 	default:

@@ -51,6 +51,7 @@ func TestAgentEnv_Polecat(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "Toast")
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/Toast")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 }
 
 func TestAgentEnv_Crew(t *testing.T) {
@@ -70,6 +71,7 @@ func TestAgentEnv_Crew(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "emma")
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/emma")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 }
 
 func TestAgentEnv_Refinery(t *testing.T) {
@@ -86,6 +88,7 @@ func TestAgentEnv_Refinery(t *testing.T) {
 	assertEnv(t, env, "BD_ACTOR", "myrig/refinery")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "myrig/refinery")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 }
 
 func TestAgentEnv_Deacon(t *testing.T) {

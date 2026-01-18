@@ -83,12 +83,12 @@ var polecatIdentityShowCmd = &cobra.Command{
 	Long: `Show detailed identity information for a polecat including work history.
 
 Displays:
-  - Identity bead ID and creation date
-  - Session count
-  - Completion statistics (issues completed, failed, abandoned)
-  - Language breakdown from file extensions
+  - Identity bead fields
+  - CV history (past work) with completion statistics
+  - Session count and performance metrics
+  - Language breakdown from changed files
   - Work type breakdown (feat, fix, refactor, etc.)
-  - Recent work list with relative timestamps
+  - Current hook bead details
 
 Examples:
   gt polecat identity show gastown Toast
@@ -400,17 +400,21 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 	mgr := polecat.NewManager(r, nil, t)
 
 	worktreeExists := false
-	var clonePath string
+	var p *polecat.Polecat
 	if p, err := mgr.Get(polecatName); err == nil && p != nil {
 		worktreeExists = true
-		clonePath = p.ClonePath
 	}
 	sessionRunning, _ := polecatMgr.IsRunning(polecatName)
 
-	// Build CV summary with enhanced analytics
-	cv := buildCVSummary(r.Path, rigName, polecatName, beadID, clonePath)
+	// Build CV summary for enhanced display
+	var cv *CVSummary
+	if worktreeExists && p != nil {
+		cv, _ = buildCVSummary(r.Path, rigName, polecatName, beadID, p.ClonePath)
+	} else {
+		cv, _ = buildCVSummary(r.Path, rigName, polecatName, beadID, "")
+	}
 
-	// JSON output - include both identity details and CV
+	// JSON output - include both identity and CV data
 	if polecatIdentityShowJSON {
 		output := struct {
 			IdentityInfo
@@ -443,7 +447,7 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Printf("\n%s %s/%s\n", style.Bold.Render("Identity:"), rigName, polecatName)
+	fmt.Printf("%s\n\n", style.Bold.Render(fmt.Sprintf("Identity: %s/%s", rigName, polecatName)))
 	fmt.Printf("  Bead ID:       %s\n", beadID)
 	fmt.Printf("  Title:         %s\n", issue.Title)
 
@@ -501,44 +505,47 @@ func runPolecatIdentityShow(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Updated:       %s\n", style.Dim.Render(issue.UpdatedAt))
 	}
 
-	// CV Summary section with enhanced analytics
-	fmt.Printf("\n%s\n", style.Bold.Render("CV Summary:"))
-	fmt.Printf("  Sessions:         %d\n", cv.Sessions)
-	fmt.Printf("  Issues completed: %s\n", style.Success.Render(fmt.Sprintf("%d", cv.IssuesCompleted)))
-	fmt.Printf("  Issues failed:    %s\n", formatCountStyled(cv.IssuesFailed, style.Error))
-	fmt.Printf("  Issues abandoned: %s\n", formatCountStyled(cv.IssuesAbandoned, style.Warning))
+	// CV Summary section (if available)
+	if cv != nil && cv.Sessions > 0 {
+		fmt.Println()
+		fmt.Printf("%s\n", style.Bold.Render("CV Summary:"))
+		fmt.Printf("  Sessions: %d\n", cv.Sessions)
+		fmt.Printf("  Issues completed: %s\n", style.Success.Render(fmt.Sprintf("%d", cv.IssuesCompleted)))
+		fmt.Printf("  Issues failed:    %s\n", formatCountStyled(cv.IssuesFailed, style.Error))
+		fmt.Printf("  Issues abandoned: %s\n", formatCountStyled(cv.IssuesAbandoned, style.Warning))
 
-	// Language stats
-	if len(cv.Languages) > 0 {
-		fmt.Printf("\n  %s %s\n", style.Bold.Render("Languages:"), formatLanguageStats(cv.Languages))
-	}
+		// Language stats
+		if len(cv.Languages) > 0 {
+			fmt.Printf("\n  %s %s\n", style.Bold.Render("Languages:"), formatLanguageStats(cv.Languages))
+		}
 
-	// Work type stats
-	if len(cv.WorkTypes) > 0 {
-		fmt.Printf("  %s     %s\n", style.Bold.Render("Types:"), formatWorkTypeStats(cv.WorkTypes))
-	}
+		// Work type stats
+		if len(cv.WorkTypes) > 0 {
+			fmt.Printf("  %s     %s\n", style.Bold.Render("Types:"), formatWorkTypeStats(cv.WorkTypes))
+		}
 
-	// Performance metrics
-	if cv.AvgCompletionMin > 0 {
-		fmt.Printf("\n  Avg completion time: %d minutes\n", cv.AvgCompletionMin)
-	}
-	if cv.FirstPassRate > 0 {
-		fmt.Printf("  First-pass success:  %.0f%%\n", cv.FirstPassRate*100)
-	}
+		// Performance metrics
+		if cv.AvgCompletionMin > 0 {
+			fmt.Printf("\n  Avg completion time: %d minutes\n", cv.AvgCompletionMin)
+		}
+		if cv.FirstPassRate > 0 {
+			fmt.Printf("  First-pass success:  %.0f%%\n", cv.FirstPassRate*100)
+		}
 
-	// Recent work
-	if len(cv.RecentWork) > 0 {
-		fmt.Printf("\n%s\n", style.Bold.Render("Recent work:"))
-		for _, work := range cv.RecentWork {
-			typeStr := ""
-			if work.Type != "" {
-				typeStr = work.Type + ": "
+		// Recent work
+		if len(cv.RecentWork) > 0 {
+			fmt.Printf("\n%s\n", style.Bold.Render("Recent work:"))
+			for _, work := range cv.RecentWork {
+				typeStr := ""
+				if work.Type != "" {
+					typeStr = work.Type + ": "
+				}
+				title := work.Title
+				if len(title) > 40 {
+					title = title[:37] + "..."
+				}
+				fmt.Printf("  %-10s %s%s  %s\n", work.ID, typeStr, title, style.Dim.Render(work.Ago))
 			}
-			title := work.Title
-			if len(title) > 40 {
-				title = title[:37] + "..."
-			}
-			fmt.Printf("  %-10s %s%s  %s\n", work.ID, typeStr, title, style.Dim.Render(work.Ago))
 		}
 	}
 
@@ -704,8 +711,7 @@ func runPolecatIdentityRemove(cmd *cobra.Command, args []string) error {
 }
 
 // buildCVSummary constructs the CV summary for a polecat.
-// Returns a partial CV on errors rather than failing - CV data is best-effort.
-func buildCVSummary(rigPath, rigName, polecatName, identityBeadID, clonePath string) *CVSummary {
+func buildCVSummary(rigPath, rigName, polecatName, identityBeadID, clonePath string) (*CVSummary, error) {
 	cv := &CVSummary{
 		Identity:   identityBeadID,
 		Languages:  make(map[string]int),
@@ -747,7 +753,7 @@ func buildCVSummary(rigPath, rigName, polecatName, identityBeadID, clonePath str
 
 			// Add to recent work (limit to 5)
 			if len(cv.RecentWork) < 5 {
-				ago := formatRelativeTimeCV(issue.Updated)
+				ago := formatRelativeTime(issue.Updated)
 				cv.RecentWork = append(cv.RecentWork, RecentWorkItem{
 					ID:        issue.ID,
 					Title:     issue.Title,
@@ -785,7 +791,7 @@ func buildCVSummary(rigPath, rigName, polecatName, identityBeadID, clonePath str
 		cv.FirstPassRate = float64(cv.IssuesCompleted) / float64(total)
 	}
 
-	return cv
+	return cv, nil
 }
 
 // IssueInfo holds basic issue information for CV queries.
@@ -933,8 +939,8 @@ func getLanguageStats(clonePath string) map[string]int {
 	return stats
 }
 
-// formatRelativeTimeCV returns a human-readable relative time string for CV display.
-func formatRelativeTimeCV(timestamp string) string {
+// formatRelativeTime returns a human-readable relative time string.
+func formatRelativeTime(timestamp string) string {
 	// Try RFC3339 format with timezone (ISO 8601)
 	t, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil {

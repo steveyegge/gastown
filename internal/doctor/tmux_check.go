@@ -123,7 +123,7 @@ func (c *LinkedPaneCheck) Fix(ctx *CheckContext) error {
 	var lastErr error
 
 	for _, session := range c.linkedSessions {
-		if err := t.KillSession(session); err != nil {
+		if err := t.KillSessionWithProcesses(session); err != nil {
 			lastErr = err
 		}
 	}

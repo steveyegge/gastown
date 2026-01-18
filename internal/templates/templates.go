@@ -162,6 +162,29 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 	return os.WriteFile(claudePath, []byte(content), 0644)
 }
 
+// CreateBootCLAUDEmd creates Boot's CLAUDE.md file at the specified directory.
+func CreateBootCLAUDEmd(bootDir, townRoot, deaconSession string) error {
+	tmpl, err := New()
+	if err != nil {
+		return err
+	}
+
+	data := RoleData{
+		Role:          "boot",
+		TownRoot:      townRoot,
+		WorkDir:       bootDir,
+		DeaconSession: deaconSession,
+	}
+
+	content, err := tmpl.RenderRole("boot", data)
+	if err != nil {
+		return err
+	}
+
+	claudePath := filepath.Join(bootDir, "CLAUDE.md")
+	return os.WriteFile(claudePath, []byte(content), 0644)
+}
+
 // GetAllRoleTemplates returns all role templates as a map of filename to content.
 func GetAllRoleTemplates() (map[string][]byte, error) {
 	entries, err := templateFS.ReadDir("roles")

@@ -7,6 +7,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -67,4 +68,39 @@ func binPath() (string, error) {
 func BinDir() string {
 	p, _ := binPath()
 	return p
+}
+
+// InstallSymlinks creates symlinks for gt and bd in /usr/local/bin
+// This ensures hooks work without requiring PATH modifications in settings.json
+// Requires sudo access to create symlinks in /usr/local/bin
+func InstallSymlinks() error {
+	binaries := []string{"gt", "bd"}
+
+	for _, binary := range binaries {
+		// Find the binary location
+		whichCmd := exec.Command("which", binary)
+		whichOutput, err := whichCmd.Output()
+		if err != nil {
+			return fmt.Errorf("finding %s: %w", binary, err)
+		}
+
+		binaryPath := string(whichOutput)
+		if len(binaryPath) > 0 && binaryPath[len(binaryPath)-1] == '\n' {
+			binaryPath = binaryPath[:len(binaryPath)-1]
+		}
+
+		if binaryPath == "" {
+			return fmt.Errorf("%s not found in PATH", binary)
+		}
+
+		// Create symlink with sudo
+		// Use -sf to force symlink creation and don't fail if already exists
+		symlinkPath := filepath.Join("/usr/local/bin", binary)
+		symlinkCmd := exec.Command("sudo", "ln", "-sf", binaryPath, symlinkPath)
+		if _, err := symlinkCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("creating symlink for %s: %w", binary, err)
+		}
+	}
+
+	return nil
 }

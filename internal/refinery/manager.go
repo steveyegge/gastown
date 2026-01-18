@@ -18,7 +18,6 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 )
@@ -147,7 +146,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		}
 		// Zombie - tmux alive but Claude dead. Kill and recreate.
 		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, agent dead). Recreating...")
-		if err := t.KillSession(sessionID); err != nil {
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -173,17 +172,18 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
+	// Build startup command with initial prompt for propulsion.
+	// The CLI prompt is more reliable than post-startup nudges (which arrive before input is ready).
 	townRoot := filepath.Dir(m.rig.Path)
 	var command string
 	if agentOverride != "" {
 		var err error
-		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, "", agentOverride)
+		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, "gt prime", agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, "")
+		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, "gt prime")
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -219,7 +219,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	ref.StartedAt = &now
 	ref.PID = 0 // Claude agent doesn't have a PID we track
 	if err := m.saveState(ref); err != nil {
-		_ = t.KillSession(sessionID) // best-effort cleanup on state save failure
+		_ = t.KillSessionWithProcesses(sessionID) // best-effort cleanup on state save failure
 		return fmt.Errorf("saving state: %w", err)
 	}
 
@@ -238,19 +238,9 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	runtime.SleepForReadyDelay(runtimeConfig)
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
 
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/refinery", m.rig.Name)
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "deacon",
-		Topic:     "patrol",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("refinery", refineryRigDir)) // Non-fatal
+	// Propulsion is handled by the CLI prompt ("gt prime") passed at startup.
+	// No need for post-startup nudges which are unreliable (text arrives before input is ready).
+	// The SessionStart hook also runs "gt prime" as a backup.
 
 	return nil
 }
@@ -274,7 +264,7 @@ func (m *Manager) Stop() error {
 
 	// Kill tmux session if it exists (best-effort: may already be dead)
 	if sessionRunning {
-		_ = t.KillSession(sessionID)
+		_ = t.KillSessionWithProcesses(sessionID)
 	}
 
 	// Note: No PID-based stop per ZFC - tmux session kill is sufficient

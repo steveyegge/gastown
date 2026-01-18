@@ -48,7 +48,7 @@ func ShouldUseEmoji() bool {
 // IsAgentMode returns true if the CLI is running in agent-optimized mode.
 // This is triggered by:
 //   - GT_AGENT_MODE=1 environment variable (explicit)
-//   - CLAUDE_CODE environment variable (auto-detect Claude Code)
+//   - CLAUDECODE environment variable (auto-detect Claude Code)
 //
 // Agent mode provides ultra-compact output optimized for LLM context windows.
 func IsAgentMode() bool {
@@ -56,7 +56,7 @@ func IsAgentMode() bool {
 		return true
 	}
 	// auto-detect Claude Code environment
-	if os.Getenv("CLAUDE_CODE") != "" {
+	if os.Getenv("CLAUDECODE") != "" {
 		return true
 	}
 	return false

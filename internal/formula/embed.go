@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 )
 
-// Generate formulas directory from canonical source at .beads/formulas/
-//go:generate sh -c "rm -rf formulas && mkdir -p formulas && cp ../../.beads/formulas/*.formula.toml formulas/"
+// Formulas are canonical in this directory (internal/formula/formulas/).
+// No generation needed - edit formulas directly here.
 
 //go:embed formulas/*.formula.toml
 var formulasFS embed.FS

@@ -578,6 +578,22 @@ func ResolveAccountConfigDir(accountsPath, accountFlag string) (configDir, handl
 	return "", "", nil
 }
 
+// ValidateAccountCredentials checks if an account has valid credentials.
+// Returns an error if the account's config directory doesn't have .credentials.json.
+// Returns nil if configDir is empty (no account configured).
+func ValidateAccountCredentials(configDir, handle string) error {
+	if configDir == "" {
+		return nil // No account configured, nothing to validate
+	}
+
+	credentialsPath := filepath.Join(configDir, ".credentials.json")
+	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
+		return fmt.Errorf("account '%s' is not authenticated (no credentials in %s)\n\nTo authenticate this account, run:\n  CLAUDE_CONFIG_DIR=%s claude\n\nThen use /login to complete the OAuth flow.",
+			handle, configDir, configDir)
+	}
+	return nil
+}
+
 // expandPath expands ~ to home directory.
 func expandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
@@ -1225,18 +1241,29 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		// Try to detect town root from cwd for town-level agents (mayor, deacon)
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			rc = DefaultRuntimeConfig()
+		// For town-level agents (mayor, deacon), use GT_ROOT from envVars if set.
+		// This ensures role_agents config is respected even when the daemon
+		// is running from a directory outside the town hierarchy.
+		// Fall back to findTownRootFromCwd() for backwards compatibility.
+		if gtRoot := envVars["GT_ROOT"]; gtRoot != "" {
+			townRoot = gtRoot
 		} else {
+			var err error
+			townRoot, err = findTownRootFromCwd()
+			if err != nil {
+				rc = DefaultRuntimeConfig()
+			}
+		}
+		// Only resolve agent config if we found a townRoot and haven't already set rc
+		if rc == nil && townRoot != "" {
 			if role != "" {
 				// Use role-based agent resolution for per-role model selection
 				rc = ResolveRoleAgentConfig(role, townRoot, "")
 			} else {
 				rc = ResolveAgentConfig(townRoot, "")
 			}
+		} else if rc == nil {
+			rc = DefaultRuntimeConfig()
 		}
 	}
 
@@ -1321,11 +1348,21 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			rc = DefaultRuntimeConfig()
+		// For town-level agents (mayor, deacon), use GT_ROOT from envVars if set.
+		// This ensures role_agents config is respected even when the daemon
+		// is running from a directory outside the town hierarchy.
+		// Fall back to findTownRootFromCwd() for backwards compatibility.
+		if gtRoot := envVars["GT_ROOT"]; gtRoot != "" {
+			townRoot = gtRoot
 		} else {
+			var err error
+			townRoot, err = findTownRootFromCwd()
+			if err != nil {
+				rc = DefaultRuntimeConfig()
+			}
+		}
+		// Only resolve agent config if we found a townRoot and haven't already set rc
+		if rc == nil && townRoot != "" {
 			if agentOverride != "" {
 				var resolveErr error
 				rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
@@ -1338,6 +1375,8 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			} else {
 				rc = ResolveAgentConfig(townRoot, "")
 			}
+		} else if rc == nil {
+			rc = DefaultRuntimeConfig()
 		}
 	}
 
@@ -1467,7 +1506,9 @@ func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 		return nil
 	}
 	if filepath.Base(rc.Command) == "claude" {
-		return []string{"node"}
+		// Claude can appear as either "node" or "claude" in tmux pane_current_command
+		// depending on how it's invoked and whether it's wrapped by Node.js
+		return []string{"node", "claude"}
 	}
 	return []string{filepath.Base(rc.Command)}
 }

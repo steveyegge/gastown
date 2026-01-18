@@ -108,7 +108,7 @@ func detectSenderFromRole(role string) string {
 	case "polecat":
 		polecat := os.Getenv("GT_POLECAT")
 		if rig != "" && polecat != "" {
-			return fmt.Sprintf("%s/%s", rig, polecat)
+			return fmt.Sprintf("%s/polecats/%s", rig, polecat)
 		}
 		// Fallback to cwd detection for polecats
 		return detectSenderFromCwd()

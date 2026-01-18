@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -653,6 +654,7 @@ func getAgentBeadID(ctx RoleContext) string {
 // ensureBeadsRedirect ensures the .beads/redirect file exists for worktree-based roles.
 // This handles cases where git clean or other operations delete the redirect file.
 // Uses the shared SetupRedirect helper which handles both tracked and local beads.
+// Also ensures beads.role=maintainer is set to prevent writes going to ~/.beads-planning.
 func ensureBeadsRedirect(ctx RoleContext) {
 	// Only applies to worktree-based roles that use shared beads
 	if ctx.Role != RoleCrew && ctx.Role != RolePolecat && ctx.Role != RoleRefinery {
@@ -661,13 +663,16 @@ func ensureBeadsRedirect(ctx RoleContext) {
 
 	// Check if redirect already exists
 	redirectPath := filepath.Join(ctx.WorkDir, ".beads", "redirect")
-	if _, err := os.Stat(redirectPath); err == nil {
-		// Redirect exists, nothing to do
-		return
+	if _, err := os.Stat(redirectPath); err != nil {
+		// Use shared helper - silently ignore errors during prime
+		_ = beads.SetupRedirect(ctx.TownRoot, ctx.WorkDir)
 	}
 
-	// Use shared helper - silently ignore errors during prime
-	_ = beads.SetupRedirect(ctx.TownRoot, ctx.WorkDir)
+	// Always ensure beads.role=maintainer is set to prevent beads from routing
+	// writes to ~/.beads-planning (the default for HTTPS-cloned repos without credentials).
+	// This fixes existing workers that were created before the fix. See: gt-3ml66
+	g := git.NewGit(ctx.WorkDir)
+	_ = g.SetConfig("beads.role", "maintainer")
 }
 
 // checkPendingEscalations queries for open escalation beads and displays them prominently.

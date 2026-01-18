@@ -648,6 +648,13 @@ func (b *Beads) Sync() error {
 	return err
 }
 
+// SyncImportOnly imports from JSONL without git operations.
+// Useful for ensuring database is up-to-date with JSONL after git pull.
+func (b *Beads) SyncImportOnly() error {
+	_, err := b.run("sync", "--import-only")
+	return err
+}
+
 // SyncFromMain syncs beads updates from main branch.
 func (b *Beads) SyncFromMain() error {
 	_, err := b.run("sync", "--from-main")

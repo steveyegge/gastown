@@ -515,6 +515,11 @@ type CombinedSource struct {
 	cancel  context.CancelFunc
 }
 
+// fanInTimeout is the maximum time a fan-in goroutine will wait for an event
+// before checking if it should exit. This prevents goroutine leaks when a source
+// channel blocks forever and the context is never cancelled.
+const fanInTimeout = 30 * time.Second
+
 // NewCombinedSource creates a source that merges multiple event sources
 func NewCombinedSource(sources ...EventSource) *CombinedSource {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -525,7 +530,11 @@ func NewCombinedSource(sources ...EventSource) *CombinedSource {
 		cancel:  cancel,
 	}
 
-	// Fan-in from all sources
+	// Fan-in from all sources with timeout to prevent goroutine leaks.
+	// Each goroutine will exit if:
+	// 1. Context is cancelled (Close() called)
+	// 2. Source channel is closed
+	// 3. No event received for fanInTimeout (prevents indefinite blocking)
 	for _, src := range sources {
 		go func(s EventSource) {
 			for {
@@ -538,8 +547,18 @@ func NewCombinedSource(sources ...EventSource) *CombinedSource {
 					}
 					select {
 					case combined.events <- event:
+					case <-ctx.Done():
+						return
 					default:
 						// Drop if full
+					}
+				case <-time.After(fanInTimeout):
+					// Timeout - check if we should exit
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						// Context still active, continue waiting
 					}
 				}
 			}

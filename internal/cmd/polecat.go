@@ -872,20 +872,44 @@ func getGitState(worktreePath string) (*GitState, error) {
 		state.Clean = false
 	}
 
-	// Check for unpushed commits (git log origin/main..HEAD)
-	// We check commits first, then verify if content differs.
+	// Check for unpushed commits.
+	// For branches without upstream (like polecat branches), check against origin/<branch>
+	// if it exists, otherwise against origin/<default-branch>.
 	// After squash merge, commits may differ but content may be identical.
-	mainRef := "origin/main"
-	logCmd := exec.Command("git", "log", mainRef+"..HEAD", "--oneline")
-	logCmd.Dir = worktreePath
-	output, err = logCmd.Output()
-	if err != nil {
-		// origin/main might not exist - try origin/master
-		mainRef = "origin/master"
-		logCmd = exec.Command("git", "log", mainRef+"..HEAD", "--oneline")
-		logCmd.Dir = worktreePath
-		output, _ = logCmd.Output() // non-fatal: might be a new repo without remote tracking
+
+	// Get current branch
+	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd.Dir = worktreePath
+	branchOutput, err := branchCmd.Output()
+	currentBranch := strings.TrimSpace(string(branchOutput))
+
+	// Determine the correct reference to compare against
+	var compareRef string
+	if err == nil && currentBranch != "" && currentBranch != "HEAD" {
+		// Check if origin/<branch> exists (for pushed polecat branches)
+		remoteBranch := "origin/" + currentBranch
+		checkCmd := exec.Command("git", "rev-parse", "--verify", remoteBranch)
+		checkCmd.Dir = worktreePath
+		if checkErr := checkCmd.Run(); checkErr == nil {
+			// Remote branch exists - use it
+			compareRef = remoteBranch
+		}
 	}
+
+	// Fall back to origin/main or origin/master if no remote branch
+	if compareRef == "" {
+		compareRef = "origin/main"
+		checkCmd := exec.Command("git", "rev-parse", "--verify", compareRef)
+		checkCmd.Dir = worktreePath
+		if checkCmd.Run() != nil {
+			compareRef = "origin/master"
+		}
+	}
+
+	logCmd := exec.Command("git", "log", compareRef+"..HEAD", "--oneline")
+	logCmd.Dir = worktreePath
+	output, _ = logCmd.Output() // non-fatal: might be a new repo without remote tracking
+
 	if len(output) > 0 {
 		lines := splitLines(string(output))
 		count := 0
@@ -895,10 +919,10 @@ func getGitState(worktreePath string) (*GitState, error) {
 			}
 		}
 		if count > 0 {
-			// Commits exist that aren't on main. But after squash merge,
+			// Commits exist that aren't on the compare ref. But after squash merge,
 			// the content may actually be on main with different commit SHAs.
-			// Check if there's any actual diff between HEAD and main.
-			diffCmd := exec.Command("git", "diff", mainRef, "HEAD", "--quiet")
+			// Check if there's any actual diff between HEAD and the compare ref.
+			diffCmd := exec.Command("git", "diff", compareRef, "HEAD", "--quiet")
 			diffCmd.Dir = worktreePath
 			diffErr := diffCmd.Run()
 			if diffErr == nil {
@@ -1170,6 +1194,7 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Would nuke %s/%s:\n", p.rigName, p.polecatName)
 			fmt.Printf("  - Kill session: gt-%s-%s\n", p.rigName, p.polecatName)
 			fmt.Printf("  - Delete worktree: %s/polecats/%s\n", p.r.Path, p.polecatName)
+			fmt.Printf("  - Reject any open MRs for the branch\n")
 			fmt.Printf("  - Delete branch (if exists)\n")
 			fmt.Printf("  - Close agent bead: %s\n", polecatBeadIDForRig(p.r, p.rigName, p.polecatName))
 
@@ -1215,7 +1240,32 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  %s deleted worktree\n", style.Success.Render("✓"))
 		}
 
-		// Step 4: Delete branch (if we know it)
+		// Step 4: Reject any open MRs for this branch before deleting it
+		// This prevents MQ/git sync inconsistency where MR exists but branch is gone
+		if branchToDelete != "" {
+			mayorRigPath := filepath.Join(p.r.Path, "mayor", "rig")
+			bd := beads.New(mayorRigPath)
+			mr, err := bd.FindMRForBranch(branchToDelete)
+			if err == nil && mr != nil {
+				// Found an open MR for this branch - reject it
+				rejected := "closed"
+				reason := "polecat nuked"
+				if err := bd.Update(mr.ID, beads.UpdateOptions{Status: &rejected}); err == nil {
+					// Also update close_reason field
+					desc := mr.Description
+					if desc == "" {
+						desc = fmt.Sprintf("close_reason: %s", reason)
+					} else if !strings.Contains(desc, "close_reason:") {
+						desc = fmt.Sprintf("%s\nclose_reason: %s", desc, reason)
+					}
+					_ = bd.Update(mr.ID, beads.UpdateOptions{Description: &desc})
+					fmt.Printf("  %s rejected MR %s (polecat nuked)\n", style.Warning.Render("⚠"), mr.ID)
+				}
+				// Non-fatal if MR rejection fails - continue with nuke
+			}
+		}
+
+		// Step 5: Delete branch (if we know it)
 		// Use bare repo if it exists (matches where worktree was created), otherwise mayor/rig
 		if branchToDelete != "" {
 			var repoGit *git.Git
@@ -1233,7 +1283,7 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Step 5: Close agent bead (if exists)
+		// Step 6: Close agent bead (if exists)
 		agentBeadID := polecatBeadIDForRig(p.r, p.rigName, p.polecatName)
 		closeArgs := []string{"close", agentBeadID, "--reason=nuked"}
 		if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {

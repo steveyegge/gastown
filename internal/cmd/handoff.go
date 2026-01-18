@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -543,17 +544,41 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 }
 
 // getSessionPane returns the pane identifier for a session's main pane.
+// Includes retry logic to handle race conditions when called immediately after
+// session creation (tmux new-session may return before pane is queryable).
+//
+// The race condition occurs because tmux new-session returns before the session
+// is fully initialized and queryable via list-panes. This is especially common
+// on slower systems or under load. We use 30 retries at 100ms intervals (3 seconds
+// total) which provides ample time for tmux to initialize.
 func getSessionPane(sessionName string) (string, error) {
-	// Get the pane ID for the first pane in the session
-	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}").Output()
-	if err != nil {
-		return "", err
+	const maxRetries = 30
+	const retryDelay = 100 * time.Millisecond
+
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		// Get the pane ID for the first pane in the session
+		cmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}")
+		out, err := cmd.Output()
+		if err != nil {
+			// Capture stderr for better error diagnosis
+			if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+				lastErr = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
+			} else {
+				lastErr = err
+			}
+			time.Sleep(retryDelay)
+			continue
+		}
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(lines) == 0 || lines[0] == "" {
+			lastErr = fmt.Errorf("no panes found in session")
+			time.Sleep(retryDelay)
+			continue
+		}
+		return lines[0], nil
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 0 || lines[0] == "" {
-		return "", fmt.Errorf("no panes found in session")
-	}
-	return lines[0], nil
+	return "", fmt.Errorf("pane lookup failed after %d retries: %w", maxRetries, lastErr)
 }
 
 // sendHandoffMail sends a handoff mail to self and auto-hooks it.

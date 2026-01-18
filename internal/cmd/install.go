@@ -35,6 +35,7 @@ var (
 	installPublic     bool
 	installShell      bool
 	installWrappers   bool
+	installSymlinks   bool
 )
 
 var installCmd = &cobra.Command{
@@ -61,7 +62,8 @@ Examples:
   gt install ~/gt --git                        # Also init git with .gitignore
   gt install ~/gt --github=user/repo           # Create private GitHub repo (default)
   gt install ~/gt --github=user/repo --public  # Create public GitHub repo
-  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)`,
+  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)
+  gt install ~/gt --symlink                    # Symlink gt and bd to /usr/local/bin`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInstall,
 }
@@ -77,6 +79,7 @@ func init() {
 	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
 	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
+	installCmd.Flags().BoolVar(&installSymlinks, "symlink", false, "Create symlinks for gt and bd in /usr/local/bin (requires sudo)")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -115,6 +118,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("installing wrapper scripts: %w", err)
 			}
 			fmt.Printf("✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+			return nil
+		}
+		// If only --symlink is requested in existing town, just install symlinks and exit
+		if installSymlinks {
+			if err := wrappers.InstallSymlinks(); err != nil {
+				return fmt.Errorf("creating symlinks: %w", err)
+			}
+			fmt.Printf("✓ Created symlinks for gt and bd in /usr/local/bin\n")
 			return nil
 		}
 		return fmt.Errorf("directory is already a Gas Town HQ (use --force to reinitialize)")
@@ -304,6 +315,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   %s Could not install wrapper scripts: %v\n", style.Dim.Render("⚠"), err)
 		} else {
 			fmt.Printf("   ✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+		}
+	}
+
+	if installSymlinks {
+		fmt.Println()
+		if err := wrappers.InstallSymlinks(); err != nil {
+			fmt.Printf("   %s Could not create symlinks: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Created symlinks for gt and bd in /usr/local/bin\n")
 		}
 	}
 

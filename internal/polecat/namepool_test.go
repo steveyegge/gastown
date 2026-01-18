@@ -190,9 +190,21 @@ func TestNamePool_SaveLoad(t *testing.T) {
 		t.Errorf("expected 0 active after Load (ZFC: InUse is transient), got %d", pool2.ActiveCount())
 	}
 
+	// Simulate real usage: after polecat directories are created, Reconcile is called.
+	// This clears reservations for names that now have directories (their reservation
+	// is no longer needed - the directory itself marks them as in-use).
+	// In this test, we simulate that furiosa, nux, slit directories were created.
+	pool2.Reconcile([]string{"furiosa", "nux", "slit"})
+
+	// After Reconcile, the 3 names are now InUse (from directories) and their
+	// reservations are cleared. So we need to release them to test OverflowNext.
+	pool2.Release("furiosa")
+	pool2.Release("nux")
+	pool2.Release("slit")
+
 	// OverflowNext SHOULD persist - it's the one piece of state that can't be derived.
 	// Next overflow should be testrig-5, not testrig-4.
-	pool2.Allocate() // furiosa (InUse empty, so starts from beginning)
+	pool2.Allocate() // furiosa (released, so available again)
 	pool2.Allocate() // nux
 	pool2.Allocate() // slit
 	overflowName2, _ := pool2.Allocate() // Should be testrig-5
