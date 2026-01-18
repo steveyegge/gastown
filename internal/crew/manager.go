@@ -24,7 +24,6 @@ var (
 	ErrHasChanges      = errors.New("crew worker has uncommitted changes")
 	ErrInvalidCrewName = errors.New("invalid crew name")
 	ErrSessionRunning  = agent.ErrAlreadyRunning
-	ErrNotRunning      = errors.New("crew session not running")
 )
 
 // StartOptions configures crew session startup.
@@ -66,21 +65,21 @@ func validateCrewName(name string) error {
 }
 
 // Manager handles crew worker operations.
-// Start operations are handled via factory.Start().
+// Lifecycle operations (Start/Stop) are handled via factory.Start()/factory.Agents().Stop().
 type Manager struct {
 	rig      *rig.Rig
 	git      *git.Git
-	agents   agent.AgentObserverStopper // Only needs Exists() and Stop()
+	agents   agent.AgentObserver // Only needs Exists() for status checks
 	townRoot string
 }
 
 // NewManager creates a new crew manager.
 // The manager handles workspace management and status queries.
-// Lifecycle operations (Start) should use factory.Start().
+// Lifecycle operations (Start/Stop) should use factory.Start()/factory.Agents().Stop().
 //
-// The agents parameter only needs AgentObserverStopper (Exists, Stop, GetInfo, List).
-// In production, pass factory.Agents(). In tests, use agent.NewDouble().
-func NewManager(agents agent.AgentObserverStopper, r *rig.Rig, g *git.Git, townRoot string) *Manager {
+// The agents parameter only needs AgentObserver (Exists, GetInfo, List).
+// In production, pass factory.Agents(). In tests, use agent.NewObserverDouble().
+func NewManager(agents agent.AgentObserver, r *rig.Rig, g *git.Git, townRoot string) *Manager {
 	return &Manager{
 		rig:      r,
 		git:      g,
@@ -442,28 +441,6 @@ func (m *Manager) RigName() string {
 // agentID returns the AgentID for a crew member's session.
 func (m *Manager) agentID(name string) agent.AgentID {
 	return agent.CrewAddress(m.rig.Name, name)
-}
-
-// Stop terminates a crew member's tmux session.
-// Returns ErrNotRunning if the agent was not running (for user messaging).
-// Always cleans up zombie sessions (tmux exists but process dead).
-func (m *Manager) Stop(name string) error {
-	if err := validateCrewName(name); err != nil {
-		return err
-	}
-
-	id := m.agentID(name)
-	wasRunning := m.agents.Exists(id)
-
-	// Always call Stop to clean up zombies
-	if err := m.agents.Stop(id, true); err != nil {
-		return fmt.Errorf("stopping session: %w", err)
-	}
-
-	if !wasRunning {
-		return ErrNotRunning
-	}
-	return nil
 }
 
 // IsRunning checks if a crew member's session is active.

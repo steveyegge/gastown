@@ -6,7 +6,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -28,9 +30,11 @@ func runCrewRename(cmd *cobra.Command, args []string) error {
 	}
 
 	// Kill any running session for the old name
-	if err := crewMgr.Stop(oldName); err != nil && err != crew.ErrNotRunning {
+	crewID := agent.CrewAddress(r.Name, oldName)
+	wasRunning := factory.Agents().Exists(crewID)
+	if err := factory.Agents().Stop(crewID, true); err != nil {
 		return fmt.Errorf("killing old session: %w", err)
-	} else if err == nil {
+	} else if wasRunning {
 		fmt.Printf("Killed session %s\n", crewSessionName(r.Name, oldName))
 	}
 

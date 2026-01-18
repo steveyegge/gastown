@@ -60,9 +60,10 @@ func runCrewRemove(cmd *cobra.Command, args []string) error {
 		}
 
 		// Kill session if it exists
-		if isRunning, _ := crewMgr.IsRunning(name); isRunning {
+		crewID := agent.CrewAddress(r.Name, name)
+		if factory.Agents().Exists(crewID) {
 			sessionName := crewSessionName(r.Name, name)
-			if err := crewMgr.Stop(name); err != nil {
+			if err := factory.Agents().Stop(crewID, true); err != nil {
 				fmt.Printf("Error killing session for %s: %v\n", arg, err)
 				lastErr = err
 				continue
@@ -571,7 +572,8 @@ func runCrewStop(cmd *cobra.Command, args []string) error {
 		}
 
 		// Kill the session
-		if err := crewMgr.Stop(name); err != nil {
+		crewID := agent.CrewAddress(r.Name, name)
+		if err := factory.Agents().Stop(crewID, true); err != nil {
 			fmt.Printf("  %s [%s] %s: %s\n",
 				style.ErrorPrefix,
 				r.Name, name,

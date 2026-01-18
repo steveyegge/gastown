@@ -353,94 +353,12 @@ func TestManagerRemove(t *testing.T) {
 }
 
 // =============================================================================
-// Lifecycle Tests (Stop, IsRunning)
+// Status Tests (IsRunning)
 // Using agent.Double for testable abstraction
 //
-// Note: Start operations are handled by factory.Start().
-// These tests verify Stop and IsRunning which delegate to agent.Agents.
+// Note: Start/Stop operations are handled by factory.Start()/factory.Agents().Stop().
+// These tests verify IsRunning which delegates to agent.Agents.Exists().
 // =============================================================================
-
-func TestManagerStop_TerminatesSession(t *testing.T) {
-	tmpDir, rigPath, bareRepoPath := setupTestRigWithRepo(t)
-	defer os.RemoveAll(tmpDir)
-
-	r := &rig.Rig{
-		Name:   "test-rig",
-		Path:   rigPath,
-		GitURL: bareRepoPath,
-	}
-
-	agents := agent.NewDouble()
-	mgr := NewManager(agents, r, git.NewGit(rigPath), "")
-
-	// Create an agent directly (simulating factory.Start())
-	agentID := agent.CrewAddress("test-rig", "emma")
-	agents.CreateAgent(agentID)
-
-	// Verify running
-	running, _ := mgr.IsRunning("emma")
-	if !running {
-		t.Error("expected IsRunning = true before Stop")
-	}
-
-	// Stop
-	err := mgr.Stop("emma")
-	if err != nil {
-		t.Fatalf("Stop failed: %v", err)
-	}
-
-	// Verify not running
-	running, _ = mgr.IsRunning("emma")
-	if running {
-		t.Error("expected IsRunning = false after Stop")
-	}
-}
-
-func TestManagerStop_NotRunning_ReturnsError(t *testing.T) {
-	tmpDir, rigPath, bareRepoPath := setupTestRigWithRepo(t)
-	defer os.RemoveAll(tmpDir)
-
-	r := &rig.Rig{
-		Name:   "test-rig",
-		Path:   rigPath,
-		GitURL: bareRepoPath,
-	}
-
-	agents := agent.NewDouble()
-	mgr := NewManager(agents, r, git.NewGit(rigPath), "")
-
-	// Add but don't create agent (don't start)
-	_, err := mgr.Add("frank", false)
-	if err != nil {
-		t.Fatalf("Add failed: %v", err)
-	}
-
-	// Stop should fail
-	err = mgr.Stop("frank")
-	if err != ErrNotRunning {
-		t.Errorf("expected ErrNotRunning, got %v", err)
-	}
-}
-
-func TestManagerStop_InvalidName_ReturnsError(t *testing.T) {
-	tmpDir, rigPath, bareRepoPath := setupTestRigWithRepo(t)
-	defer os.RemoveAll(tmpDir)
-
-	r := &rig.Rig{
-		Name:   "test-rig",
-		Path:   rigPath,
-		GitURL: bareRepoPath,
-	}
-
-	agents := agent.NewDouble()
-	mgr := NewManager(agents, r, git.NewGit(rigPath), "")
-
-	// Stop with empty name
-	err := mgr.Stop("")
-	if err == nil {
-		t.Error("expected error for empty name")
-	}
-}
 
 func TestManagerIsRunning_CorrectState(t *testing.T) {
 	tmpDir, rigPath, bareRepoPath := setupTestRigWithRepo(t)
