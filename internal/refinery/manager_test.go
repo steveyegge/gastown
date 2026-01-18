@@ -128,6 +128,39 @@ func TestManager_Retry(t *testing.T) {
 	})
 }
 
+func TestManager_Status_ReconcilesStaleTmuxState(t *testing.T) {
+	mgr, rigPath := setupTestManager(t)
+
+	// Write a state file that claims "running" even though no tmux session exists
+	now := time.Now()
+	staleState := &Refinery{
+		RigName:   "testrig",
+		State:     StateRunning, // Lie: claims running
+		StartedAt: &now,
+	}
+
+	stateFile := filepath.Join(rigPath, ".runtime", "refinery.json")
+	data, err := json.Marshal(staleState)
+	if err != nil {
+		t.Fatalf("marshal state: %v", err)
+	}
+	if err := os.WriteFile(stateFile, data, 0644); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	// Status() should reconcile with reality - no tmux session means stopped
+	status, err := mgr.Status()
+	if err != nil {
+		t.Fatalf("Status() unexpected error: %v", err)
+	}
+
+	// The session name would be "gt-testrig-refinery" which doesn't exist
+	// So Status() should return stopped, not running
+	if status.State != StateStopped {
+		t.Errorf("Status().State = %v, want %v (should reconcile stale state)", status.State, StateStopped)
+	}
+}
+
 func TestManager_RegisterMR(t *testing.T) {
 	mgr, rigPath := setupTestManager(t)
 

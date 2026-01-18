@@ -94,10 +94,26 @@ func (m *Manager) saveState(ref *Refinery) error {
 }
 
 // Status returns the current refinery status.
-// ZFC-compliant: trusts agent-reported state, no PID/tmux inference.
-// The daemon reads agent bead state for liveness checks.
+// Reconciles state file with actual tmux session to avoid stale "running" status.
 func (m *Manager) Status() (*Refinery, error) {
-	return m.loadState()
+	ref, err := m.loadState()
+	if err != nil {
+		return nil, err
+	}
+
+	// If state claims running, verify the tmux session actually exists
+	if ref.State == StateRunning {
+		t := tmux.NewTmux()
+		sessionID := m.SessionName()
+		running, _ := t.HasSession(sessionID)
+		if !running {
+			// Session is gone but state file is stale - reconcile
+			ref.State = StateStopped
+			// Don't persist the fix here - let Stop() or next Start() clean it up
+		}
+	}
+
+	return ref, nil
 }
 
 // Start starts the refinery.
