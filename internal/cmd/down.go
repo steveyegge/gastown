@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -259,6 +260,13 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Phase 5.5: TTY-based orphan sweep (--force only, safety net)
+	if downForce && !downDryRun {
+		if killed := sweepOrphansByTTY(t); killed > 0 {
+			printDownStatus("Orphan sweep", true, fmt.Sprintf("%d process(es) killed", killed))
+		}
+	}
+
 	// Phase 6: Nuke tmux server (--nuke only, DESTRUCTIVE)
 	if downNuke {
 		if downDryRun {
@@ -376,52 +384,111 @@ func printDownStatus(name string, ok bool, detail string) {
 	}
 }
 
-// killOrphanProcesses terminates claude and node child processes of a tmux pane.
-// This prevents orphan Claude Code processes that can accumulate and drain resources.
+// killOrphanProcesses terminates all processes in the same process group as tmux pane shells.
+// This uses PGID-based kill to catch ALL descendants (not just direct children),
+// preventing orphan Claude/node processes that can accumulate and drain resources.
 func killOrphanProcesses(t *tmux.Tmux, sessionName string) {
-	// Get the shell PID running in the tmux pane
-	panePID, err := t.GetPanePID(sessionName)
-	if err != nil || panePID == "" {
-		return // No pane PID, nothing to kill
+	// Get the shell PID(s) running in the tmux pane(s)
+	panePIDsRaw, err := t.GetPanePID(sessionName)
+	if err != nil || panePIDsRaw == "" {
+		return // No pane PIDs, nothing to kill
 	}
 
-	// Find claude and node child processes
-	var childPIDs []int
-	for _, procName := range []string{"claude", "node"} {
-		// pgrep -P finds children of the pane's shell
-		out, err := runCommand("pgrep", "-P", panePID, procName)
-		if err != nil {
+	// Collect unique PGIDs from all pane PIDs
+	pgidSet := make(map[int]bool)
+	for _, pidStr := range strings.Split(strings.TrimSpace(panePIDsRaw), "\n") {
+		pidStr = strings.TrimSpace(pidStr)
+		if pidStr == "" {
 			continue
 		}
-		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-			if line == "" {
-				continue
-			}
-			var pid int
-			if _, err := fmt.Sscanf(line, "%d", &pid); err == nil && pid > 0 {
-				childPIDs = append(childPIDs, pid)
-			}
+		var pid int
+		if _, err := fmt.Sscanf(pidStr, "%d", &pid); err != nil || pid <= 0 {
+			continue
 		}
+
+		// Get the process group ID for this pane's shell
+		pgid, err := syscall.Getpgid(pid)
+		if err != nil || pgid <= 0 {
+			continue
+		}
+		pgidSet[pgid] = true
 	}
 
-	if len(childPIDs) == 0 {
+	if len(pgidSet) == 0 {
 		return
 	}
 
-	// SIGTERM for graceful shutdown
-	for _, pid := range childPIDs {
-		_ = syscall.Kill(pid, syscall.SIGTERM)
+	// SIGTERM entire process groups for graceful shutdown
+	for pgid := range pgidSet {
+		// Negative PID signals the entire process group
+		_ = syscall.Kill(-pgid, syscall.SIGTERM)
 	}
 
 	// Wait 2 seconds for graceful termination
 	time.Sleep(2 * time.Second)
 
-	// SIGKILL survivors
-	for _, pid := range childPIDs {
-		if isProcessRunning(pid) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
+	// SIGKILL survivors in each process group
+	for pgid := range pgidSet {
+		// Check if any process in the group is still running
+		// (we check the PGID leader, but kill targets the whole group)
+		if isProcessRunning(pgid) {
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		}
 	}
+}
+
+// sweepOrphansByTTY finds and kills Claude processes whose TTYs are not attached
+// to any active tmux pane. This catches orphans that escaped PGID-based cleanup.
+// Returns the number of orphan processes killed.
+func sweepOrphansByTTY(t *tmux.Tmux) int {
+	// Get all active tmux pane TTYs
+	activeTTYs := make(map[string]bool)
+	output, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_tty}").Output()
+	if err == nil {
+		for _, tty := range strings.Split(string(output), "\n") {
+			tty = strings.TrimSpace(tty)
+			if tty != "" {
+				activeTTYs[tty] = true
+			}
+		}
+	}
+
+	// Find Claude processes with TTYs not in active panes
+	killed := 0
+	claudePIDs, err := exec.Command("pgrep", "claude").Output()
+	if err != nil {
+		return 0 // No Claude processes running
+	}
+
+	for _, pidStr := range strings.Split(string(claudePIDs), "\n") {
+		pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
+		if err != nil || pid <= 0 {
+			continue
+		}
+
+		// Get process TTY
+		ttyOut, err := exec.Command("ps", "-o", "tty=", "-p", strconv.Itoa(pid)).Output()
+		if err != nil {
+			continue
+		}
+		tty := strings.TrimSpace(string(ttyOut))
+
+		// Skip processes with no TTY (might be legitimate background processes)
+		if tty == "" || tty == "??" {
+			continue
+		}
+
+		// Construct full TTY path and check if it's in active panes
+		ttyPath := "/dev/" + tty
+		if !activeTTYs[ttyPath] {
+			// This process has a TTY but no active tmux pane - it's an orphan
+			if err := syscall.Kill(pid, syscall.SIGTERM); err == nil {
+				killed++
+			}
+		}
+	}
+
+	return killed
 }
 
 // runCommand executes a command and returns stdout.
