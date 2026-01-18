@@ -11,7 +11,7 @@ import (
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -44,8 +44,8 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"cursor", AgentCursor, false},
 		{"auggie", AgentAuggie, false},
 		{"amp", AgentAmp, false},
-		{"aider", "", true},    // Not built-in, can be added via config
-		{"opencode", "", true}, // Not built-in, can be added via config
+		{"opencode", AgentOpenCode, false}, // Now built-in
+		{"aider", "", true},                // Not built-in, can be added via config
 		{"unknown", "", true},
 	}
 
@@ -77,6 +77,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentCursor, "cursor-agent"},
 		{AgentAuggie, "auggie"},
 		{AgentAmp, "amp"},
+		{AgentOpenCode, "opencode"},
 	}
 
 	for _, tt := range tests {
@@ -102,8 +103,8 @@ func TestIsKnownPreset(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
+		{"opencode", true},  // Now built-in
 		{"aider", false},    // Not built-in, can be added via config
-		{"opencode", false}, // Not built-in, can be added via config
 		{"unknown", false},
 		{"chatgpt", false},
 	}
@@ -385,7 +386,7 @@ func TestGetProcessNames(t *testing.T) {
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -446,6 +447,11 @@ func TestAgentCommandGeneration(t *testing.T) {
 			preset:       AgentAmp,
 			wantCommand:  "amp",
 			wantContains: []string{"--dangerously-allow-all", "--no-ide"},
+		},
+		{
+			preset:       AgentOpenCode,
+			wantCommand:  "opencode",
+			wantContains: []string{}, // OpenCode has no default YOLO args
 		},
 	}
 
@@ -517,6 +523,52 @@ func TestCursorAgentPreset(t *testing.T) {
 	}
 	if info.ResumeStyle != "flag" {
 		t.Errorf("cursor ResumeStyle = %q, want flag", info.ResumeStyle)
+	}
+}
+
+func TestOpenCodeAgentPreset(t *testing.T) {
+	t.Parallel()
+	// Verify opencode agent preset is correctly configured
+	info := GetAgentPreset(AgentOpenCode)
+	if info == nil {
+		t.Fatal("opencode preset not found")
+	}
+
+	// Check command
+	if info.Command != "opencode" {
+		t.Errorf("opencode command = %q, want opencode", info.Command)
+	}
+
+	// Check ProcessNames includes bun (OpenCode runs via Bun)
+	hasBun := false
+	for _, name := range info.ProcessNames {
+		if name == "bun" {
+			hasBun = true
+		}
+	}
+	if !hasBun {
+		t.Error("opencode ProcessNames should include 'bun'")
+	}
+
+	// Check hooks support
+	if !info.SupportsHooks {
+		t.Error("opencode should support hooks (gastown.js plugin)")
+	}
+
+	// Check resume support
+	if info.ResumeFlag != "-c" {
+		t.Errorf("opencode ResumeFlag = %q, want -c", info.ResumeFlag)
+	}
+	if info.ResumeStyle != "flag" {
+		t.Errorf("opencode ResumeStyle = %q, want flag", info.ResumeStyle)
+	}
+
+	// Check non-interactive config
+	if info.NonInteractive == nil {
+		t.Fatal("opencode NonInteractive should not be nil")
+	}
+	if info.NonInteractive.Subcommand != "run" {
+		t.Errorf("opencode NonInteractive.Subcommand = %q, want run", info.NonInteractive.Subcommand)
 	}
 }
 
