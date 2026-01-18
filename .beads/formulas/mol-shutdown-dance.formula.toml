@@ -8,7 +8,7 @@ goroutine (NOT a Claude session) that runs the interrogation state machine.
 
 Dogs are lightweight workers in Boot's pool (see dog-pool-architecture.md):
 - Fixed pool of 5 goroutines (configurable via GT_DOG_POOL_SIZE)
-- State persisted to ~/gt/deacon/dogs/active/<id>.json
+- State persisted to $GT_ROOT/deacon/dogs/active/<id>.json
 - Recovery on Boot restart via orphan state files
 
 ## State Machine
@@ -151,7 +151,7 @@ If target doesn't exist:
 - Skip to EPITAPH with outcome=already_dead
 
 **3. Initialize state file:**
-Write initial state to ~/gt/deacon/dogs/active/{dog-id}.json
+Write initial state to $GT_ROOT/deacon/dogs/active/{dog-id}.json
 
 **4. Set initial attempt counter:**
 attempt = 1
@@ -477,11 +477,11 @@ bd close {warrant_id} --reason "{epitaph_summary}"
 
 **3. Move state file to completed:**
 ```bash
-mv ~/gt/deacon/dogs/active/{dog-id}.json ~/gt/deacon/dogs/completed/
+mv $GT_ROOT/deacon/dogs/active/{dog-id}.json $GT_ROOT/deacon/dogs/completed/
 ```
 
 **4. Report to Boot:**
-Write completion file: ~/gt/deacon/dogs/active/{dog-id}.done
+Write completion file: $GT_ROOT/deacon/dogs/active/{dog-id}.done
 ```json
 {
   "dog_id": "{dog-id}",
