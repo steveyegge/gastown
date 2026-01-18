@@ -11,7 +11,7 @@ import (
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -44,8 +44,8 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"cursor", AgentCursor, false},
 		{"auggie", AgentAuggie, false},
 		{"amp", AgentAmp, false},
-		{"aider", "", true},    // Not built-in, can be added via config
-		{"opencode", "", true}, // Not built-in, can be added via config
+		{"opencode", AgentOpenCode, false}, // Now built-in
+		{"aider", "", true},                // Not built-in, can be added via config
 		{"unknown", "", true},
 	}
 
@@ -77,6 +77,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentCursor, "cursor-agent"},
 		{AgentAuggie, "auggie"},
 		{AgentAmp, "amp"},
+		{AgentOpenCode, "opencode"},
 	}
 
 	for _, tt := range tests {
@@ -102,8 +103,8 @@ func TestIsKnownPreset(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
+		{"opencode", true},  // Now built-in
 		{"aider", false},    // Not built-in, can be added via config
-		{"opencode", false}, // Not built-in, can be added via config
 		{"unknown", false},
 		{"chatgpt", false},
 	}
@@ -315,6 +316,7 @@ func TestSupportsSessionResume(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
+		{"opencode", false}, // OpenCode doesn't support resume yet
 		{"unknown", false},
 	}
 
@@ -363,7 +365,8 @@ func TestGetProcessNames(t *testing.T) {
 		{"cursor", []string{"cursor-agent"}},
 		{"auggie", []string{"auggie"}},
 		{"amp", []string{"amp"}},
-		{"unknown", []string{"node"}}, // Falls back to Claude's process
+		{"opencode", []string{"opencode", "node"}}, // OpenCode runs as Node.js
+		{"unknown", []string{"node"}},              // Falls back to Claude's process
 	}
 
 	for _, tt := range tests {
@@ -385,7 +388,7 @@ func TestGetProcessNames(t *testing.T) {
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -517,6 +520,79 @@ func TestCursorAgentPreset(t *testing.T) {
 	}
 	if info.ResumeStyle != "flag" {
 		t.Errorf("cursor ResumeStyle = %q, want flag", info.ResumeStyle)
+	}
+}
+
+func TestOpenCodeAgentPreset(t *testing.T) {
+	t.Parallel()
+	// Verify opencode agent preset is correctly configured
+	info := GetAgentPreset(AgentOpenCode)
+	if info == nil {
+		t.Fatal("opencode preset not found")
+	}
+
+	// Check command
+	if info.Command != "opencode" {
+		t.Errorf("opencode command = %q, want opencode", info.Command)
+	}
+
+	// OpenCode uses OPENCODE_PERMISSION env var for yolo mode instead of CLI flag
+	if len(info.Args) != 0 {
+		t.Errorf("opencode args = %v, want empty (uses env var for yolo)", info.Args)
+	}
+
+	// Check OPENCODE_PERMISSION env var is set for yolo mode
+	if info.Env == nil {
+		t.Fatal("opencode Env is nil, expected OPENCODE_PERMISSION")
+	}
+	permValue, ok := info.Env["OPENCODE_PERMISSION"]
+	if !ok {
+		t.Error("opencode Env missing OPENCODE_PERMISSION")
+	}
+	if permValue != `{"*":"allow"}` {
+		t.Errorf("OPENCODE_PERMISSION = %q, want %q", permValue, `{"*":"allow"}`)
+	}
+
+	// Check ProcessNames includes both opencode and node (runs as Node.js)
+	if len(info.ProcessNames) < 2 {
+		t.Errorf("opencode ProcessNames = %v, want at least [opencode, node]", info.ProcessNames)
+	}
+	hasOpenCode := false
+	hasNode := false
+	for _, name := range info.ProcessNames {
+		if name == "opencode" {
+			hasOpenCode = true
+		}
+		if name == "node" {
+			hasNode = true
+		}
+	}
+	if !hasOpenCode {
+		t.Error("opencode ProcessNames missing 'opencode'")
+	}
+	if !hasNode {
+		t.Error("opencode ProcessNames missing 'node' (OpenCode runs as Node.js)")
+	}
+
+	// OpenCode doesn't support session resume yet
+	if info.ResumeFlag != "" {
+		t.Errorf("opencode ResumeFlag = %q, want empty (not supported)", info.ResumeFlag)
+	}
+
+	// Check hooks support
+	if !info.SupportsHooks {
+		t.Error("opencode should support hooks (uses .opencode/plugin)")
+	}
+
+	// Check non-interactive config
+	if info.NonInteractive == nil {
+		t.Fatal("opencode NonInteractive is nil")
+	}
+	if info.NonInteractive.Subcommand != "run" {
+		t.Errorf("opencode NonInteractive.Subcommand = %q, want run", info.NonInteractive.Subcommand)
+	}
+	if info.NonInteractive.OutputFlag != "--format json" {
+		t.Errorf("opencode NonInteractive.OutputFlag = %q, want --format json", info.NonInteractive.OutputFlag)
 	}
 }
 

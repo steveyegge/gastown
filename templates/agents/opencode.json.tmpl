@@ -1,0 +1,24 @@
+{
+  "$schema": "https://gastown.dev/schemas/agent-template-v1.json",
+  "_models_api": "https://models.dev/api.json",
+  "_note": "LLMs: fetch available models from _models_api to get current provider/model options",
+  "name": "opencode-{{.Model}}",
+  "description": "OpenCode agent using {{.Provider}}/{{.Model}}",
+  "command": "{{.OpenCodePath | default \"opencode\"}}",
+  "args": ["-m", "{{.Provider}}/{{.Model}}"],
+  "non_interactive": {
+    "subcommand": "run",
+    "output_flag": "--format json"
+  },
+  "runtime": {
+    "provider": "opencode",
+    "tmux": {
+      "ready_prompt_prefix": "",
+      "ready_delay_ms": {{.ReadyDelayMs | default 8000}},
+      "process_names": ["opencode", "node"]
+    }
+  },
+  "hooks": {
+    "provider": "opencode"
+  }
+}

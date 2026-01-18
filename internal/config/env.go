@@ -119,9 +119,36 @@ func AgentEnvSimple(role, rig, agentName string) map[string]string {
 	})
 }
 
+// ShellQuote returns a shell-safe quoted string.
+// Values containing special characters are wrapped in single quotes.
+// Single quotes within the value are escaped using the '\'' idiom.
+func ShellQuote(s string) string {
+	// Check if quoting is needed (contains shell special chars)
+	needsQuoting := false
+	for _, c := range s {
+		switch c {
+		case ' ', '\t', '\n', '"', '\'', '`', '$', '\\', '!', '*', '?',
+			'[', ']', '{', '}', '(', ')', '<', '>', '|', '&', ';', '#':
+			needsQuoting = true
+		}
+		if needsQuoting {
+			break
+		}
+	}
+
+	if !needsQuoting {
+		return s
+	}
+
+	// Use single quotes, escaping any embedded single quotes
+	// 'foo'\''bar' means: 'foo' + escaped-single-quote + 'bar'
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
 // ExportPrefix builds an export statement prefix for shell commands.
 // Returns a string like "export GT_ROLE=mayor BD_ACTOR=mayor && "
 // The keys are sorted for deterministic output.
+// Values containing special characters are properly shell-quoted.
 func ExportPrefix(env map[string]string) string {
 	if len(env) == 0 {
 		return ""
@@ -136,7 +163,7 @@ func ExportPrefix(env map[string]string) string {
 
 	var parts []string
 	for _, k := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%s", k, env[k]))
+		parts = append(parts, fmt.Sprintf("%s=%s", k, ShellQuote(env[k])))
 	}
 
 	return "export " + strings.Join(parts, " ") + " && "
