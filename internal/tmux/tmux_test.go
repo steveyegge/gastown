@@ -198,6 +198,7 @@ func TestWrapError(t *testing.T) {
 	}{
 		{"no server running on /tmp/tmux-...", ErrNoServer},
 		{"error connecting to /tmp/tmux-...", ErrNoServer},
+		{"no current target", ErrNoServer},
 		{"duplicate session: test", ErrSessionExists},
 		{"session not found: test", ErrSessionNotFound},
 		{"can't find session: test", ErrSessionNotFound},

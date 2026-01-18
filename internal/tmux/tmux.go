@@ -63,7 +63,8 @@ func (t *Tmux) wrapError(err error, stderr string, args []string) error {
 
 	// Detect specific error types
 	if strings.Contains(stderr, "no server running") ||
-		strings.Contains(stderr, "error connecting to") {
+		strings.Contains(stderr, "error connecting to") ||
+		strings.Contains(stderr, "no current target") {
 		return ErrNoServer
 	}
 	if strings.Contains(stderr, "duplicate session") {
