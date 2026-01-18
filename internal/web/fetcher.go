@@ -127,10 +127,15 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 		row.TrackedIssues = make([]TrackedIssue, len(tracked))
 		for i, t := range tracked {
 			row.TrackedIssues[i] = TrackedIssue{
-				ID:       t.ID,
-				Title:    t.Title,
-				Status:   t.Status,
-				Assignee: t.Assignee,
+				ID:          t.ID,
+				Title:       t.Title,
+				Status:      t.Status,
+				Assignee:    t.Assignee,
+				Description: t.Description,
+				Priority:    t.Priority,
+				Type:        t.Type,
+				CreatedAt:   t.CreatedAt,
+				UpdatedAt:   t.UpdatedAt.Format("2006-01-02 15:04"),
 			}
 		}
 
@@ -146,6 +151,10 @@ type trackedIssueInfo struct {
 	Title        string
 	Status       string
 	Assignee     string
+	Description  string
+	Priority     int
+	Type         string
+	CreatedAt    string
 	LastActivity time.Time
 	UpdatedAt    time.Time // Fallback for activity when no assignee
 }
@@ -202,6 +211,10 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 			info.Title = d.Title
 			info.Status = d.Status
 			info.Assignee = d.Assignee
+			info.Description = d.Description
+			info.Priority = d.Priority
+			info.Type = d.Type
+			info.CreatedAt = d.CreatedAt
 			info.UpdatedAt = d.UpdatedAt
 		} else {
 			info.Title = "(external)"
@@ -220,11 +233,15 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 
 // issueDetail holds basic issue info.
 type issueDetail struct {
-	ID        string
-	Title     string
-	Status    string
-	Assignee  string
-	UpdatedAt time.Time
+	ID          string
+	Title       string
+	Status      string
+	Assignee    string
+	Description string
+	Priority    int
+	Type        string
+	CreatedAt   string
+	UpdatedAt   time.Time
 }
 
 // getIssueDetailsBatch fetches details for multiple issues.
@@ -247,11 +264,15 @@ func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*
 	}
 
 	var issues []struct {
-		ID        string `json:"id"`
-		Title     string `json:"title"`
-		Status    string `json:"status"`
-		Assignee  string `json:"assignee"`
-		UpdatedAt string `json:"updated_at"`
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Status      string `json:"status"`
+		Assignee    string `json:"assignee"`
+		Description string `json:"description"`
+		Priority    int    `json:"priority"`
+		Type        string `json:"issue_type"`
+		CreatedAt   string `json:"created_at"`
+		UpdatedAt   string `json:"updated_at"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
 		return result
@@ -259,10 +280,14 @@ func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*
 
 	for _, issue := range issues {
 		detail := &issueDetail{
-			ID:       issue.ID,
-			Title:    issue.Title,
-			Status:   issue.Status,
-			Assignee: issue.Assignee,
+			ID:          issue.ID,
+			Title:       issue.Title,
+			Status:      issue.Status,
+			Assignee:    issue.Assignee,
+			Description: issue.Description,
+			Priority:    issue.Priority,
+			Type:        issue.Type,
+			CreatedAt:   issue.CreatedAt,
 		}
 		// Parse updated_at timestamp
 		if issue.UpdatedAt != "" {
@@ -752,4 +777,107 @@ func parseActivityTimestamp(s string) (int64, bool) {
 		return 0, false
 	}
 	return unix, true
+}
+
+// FetchTaskQueue fetches standalone tasks (open issues not tracked by any convoy).
+func (f *LiveConvoyFetcher) FetchTaskQueue() ([]TaskRow, error) {
+	// List all open issues (excluding convoys, agents, merge-requests)
+	listArgs := []string{"list", "--status=open", "--json"}
+	listCmd := exec.Command("bd", listArgs...)
+	listCmd.Dir = f.townBeads
+
+	var stdout bytes.Buffer
+	listCmd.Stdout = &stdout
+
+	if err := listCmd.Run(); err != nil {
+		return nil, fmt.Errorf("listing issues: %w", err)
+	}
+
+	var issues []struct {
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+		Status   string `json:"status"`
+		Priority int    `json:"priority"`
+		Type     string `json:"issue_type"`
+		Assignee string `json:"assignee"`
+		Labels   string `json:"labels"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return nil, fmt.Errorf("parsing issue list: %w", err)
+	}
+
+	// Get set of tracked issue IDs (to exclude from task queue)
+	trackedIDs := f.getTrackedIssueIDs()
+
+	// Filter to standalone tasks
+	var tasks []TaskRow
+	for _, issue := range issues {
+		// Skip convoys, agents, merge-requests, and tracked issues
+		if issue.Type == "convoy" || issue.Type == "agent" || issue.Type == "merge-request" {
+			continue
+		}
+		if strings.Contains(issue.Labels, "gt:agent") || strings.Contains(issue.Labels, "gt:merge-request") {
+			continue
+		}
+		if trackedIDs[issue.ID] {
+			continue
+		}
+
+		// Determine color class based on priority
+		colorClass := ""
+		switch issue.Priority {
+		case 0, 1:
+			colorClass = "task-high"
+		case 2:
+			colorClass = "task-medium"
+		}
+
+		tasks = append(tasks, TaskRow{
+			ID:         issue.ID,
+			Title:      issue.Title,
+			Status:     issue.Status,
+			Priority:   issue.Priority,
+			Assignee:   issue.Assignee,
+			ColorClass: colorClass,
+		})
+	}
+
+	return tasks, nil
+}
+
+// getTrackedIssueIDs returns a set of issue IDs that are tracked by convoys.
+func (f *LiveConvoyFetcher) getTrackedIssueIDs() map[string]bool {
+	result := make(map[string]bool)
+	dbPath := filepath.Join(f.townBeads, "beads.db")
+
+	// Query all tracked dependencies
+	queryCmd := exec.Command("sqlite3", "-json", dbPath,
+		`SELECT depends_on_id FROM dependencies WHERE type = 'tracks'`)
+
+	var stdout bytes.Buffer
+	queryCmd.Stdout = &stdout
+	if err := queryCmd.Run(); err != nil {
+		return result
+	}
+
+	var deps []struct {
+		DependsOnID string `json:"depends_on_id"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
+		return result
+	}
+
+	for _, dep := range deps {
+		issueID := dep.DependsOnID
+		// Normalize external refs
+		if strings.HasPrefix(issueID, "external:") {
+			parts := strings.SplitN(issueID, ":", 3)
+			if len(parts) == 3 {
+				issueID = parts[2]
+			}
+		}
+		result[issueID] = true
+	}
+
+	return result
 }

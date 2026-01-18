@@ -10,6 +10,7 @@ type ConvoyFetcher interface {
 	FetchConvoys() ([]ConvoyRow, error)
 	FetchMergeQueue() ([]MergeQueueRow, error)
 	FetchPolecats() ([]PolecatRow, error)
+	FetchTaskQueue() ([]TaskRow, error)
 }
 
 // ConvoyHandler handles HTTP requests for the convoy dashboard.
@@ -51,10 +52,17 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		polecats = nil
 	}
 
+	taskQueue, err := h.fetcher.FetchTaskQueue()
+	if err != nil {
+		// Non-fatal: show convoys even if task queue fails
+		taskQueue = nil
+	}
+
 	data := ConvoyData{
 		Convoys:    convoys,
 		MergeQueue: mergeQueue,
 		Polecats:   polecats,
+		TaskQueue:  taskQueue,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
