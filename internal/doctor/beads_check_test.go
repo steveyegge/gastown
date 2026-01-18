@@ -204,10 +204,23 @@ func TestPrefixMismatchCheck_Mismatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
 	mayorDir := filepath.Join(tmpDir, "mayor")
+	// Create rig's mayor/rig/.beads directory and redirect so ResolveBeadsDir returns the mayor/rig path
+	rigBeadsDir := filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads")
+	rigRootBeadsDir := filepath.Join(tmpDir, "gastown", ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rigRootBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create redirect file so ResolveBeadsDir follows it
+	if err := os.WriteFile(filepath.Join(rigRootBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -253,10 +266,23 @@ func TestPrefixMismatchCheck_Fix(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := filepath.Join(tmpDir, ".beads")
 	mayorDir := filepath.Join(tmpDir, "mayor")
+	// Create rig's mayor/rig/.beads directory and redirect so ResolveBeadsDir returns the mayor/rig path
+	rigBeadsDir := filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads")
+	rigRootBeadsDir := filepath.Join(tmpDir, "gastown", ".beads")
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rigRootBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create redirect file so ResolveBeadsDir follows it
+	if err := os.WriteFile(filepath.Join(rigRootBeadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
