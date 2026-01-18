@@ -2,8 +2,9 @@
 package config
 
 import (
-	"path/filepath"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -469,8 +470,33 @@ func defaultRuntimeCommand(provider string) string {
 	case "generic":
 		return ""
 	default:
-		return "claude"
+		return resolveClaudePath()
 	}
+}
+
+// resolveClaudePath finds the claude binary, checking PATH first then common installation locations.
+// This handles the case where claude is installed as an alias (not in PATH) which doesn't work
+// in non-interactive shells spawned by tmux.
+func resolveClaudePath() string {
+	// First, try to find claude in PATH
+	if path, err := exec.LookPath("claude"); err == nil {
+		return path
+	}
+
+	// Check common Claude Code installation locations
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "claude" // Fall back to bare command
+	}
+
+	// Standard Claude Code installation path
+	claudePath := filepath.Join(home, ".claude", "local", "claude")
+	if _, err := os.Stat(claudePath); err == nil {
+		return claudePath
+	}
+
+	// Fall back to bare command (might work if PATH is set differently in tmux)
+	return "claude"
 }
 
 func defaultRuntimeArgs(provider string) []string {

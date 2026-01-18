@@ -8,6 +8,12 @@ import (
 	"testing"
 )
 
+// isClaudeCmd checks if a command is claude (either "claude" or a path ending in "/claude").
+// Note: Named differently from loader_test.go's isClaudeCommand to avoid redeclaration.
+func isClaudeCmd(cmd string) bool {
+	return cmd == "claude" || strings.HasSuffix(cmd, "/claude")
+}
+
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
@@ -71,7 +77,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		preset      AgentPreset
 		wantCommand string
 	}{
-		{AgentClaude, "claude"},
+		{AgentClaude, "claude"}, // Note: claude may resolve to full path
 		{AgentGemini, "gemini"},
 		{AgentCodex, "codex"},
 		{AgentCursor, "cursor-agent"},
@@ -82,7 +88,13 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.preset), func(t *testing.T) {
 			rc := RuntimeConfigFromPreset(tt.preset)
-			if rc.Command != tt.wantCommand {
+			// For claude, command may be full path due to resolveClaudePath
+			if tt.preset == AgentClaude {
+				if !isClaudeCmd(rc.Command) {
+					t.Errorf("RuntimeConfigFromPreset(%s).Command = %v, want claude or path ending in /claude",
+						tt.preset, rc.Command)
+				}
+			} else if rc.Command != tt.wantCommand {
 				t.Errorf("RuntimeConfigFromPreset(%s).Command = %v, want %v",
 					tt.preset, rc.Command, tt.wantCommand)
 			}
@@ -226,8 +238,8 @@ func TestMergeWithPreset(t *testing.T) {
 	var nilConfig *RuntimeConfig
 	merged = nilConfig.MergeWithPreset(AgentClaude)
 
-	if merged.Command != "claude" {
-		t.Errorf("nil config merge should get preset command, got %s", merged.Command)
+	if !isClaudeCmd(merged.Command) {
+		t.Errorf("nil config merge should get preset command (claude or path), got %s", merged.Command)
 	}
 
 	// Test empty config gets preset defaults
@@ -456,7 +468,12 @@ func TestAgentCommandGeneration(t *testing.T) {
 				t.Fatal("RuntimeConfigFromPreset returned nil")
 			}
 
-			if rc.Command != tt.wantCommand {
+			// For claude, command may be full path due to resolveClaudePath
+			if tt.preset == AgentClaude {
+				if !isClaudeCmd(rc.Command) {
+					t.Errorf("Command = %q, want claude or path ending in /claude", rc.Command)
+				}
+			} else if rc.Command != tt.wantCommand {
 				t.Errorf("Command = %q, want %q", rc.Command, tt.wantCommand)
 			}
 
