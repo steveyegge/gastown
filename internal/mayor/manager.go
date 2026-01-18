@@ -57,8 +57,11 @@ func (m *Manager) Start(agentOverride string) error {
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		// Resolve agent config to get expected process names
+		agentConfig := config.ResolveRoleAgentConfig("mayor", m.townRoot, "")
+		processNames := config.ExpectedPaneCommands(agentConfig)
+		if t.IsRuntimeRunning(sessionID, processNames) {
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but Claude dead. Kill and recreate.

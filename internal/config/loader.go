@@ -827,7 +827,7 @@ func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
 	} else if townSettings.DefaultAgent != "" {
 		agentName = townSettings.DefaultAgent
 	} else {
-		agentName = "claude" // ultimate fallback
+		agentName = string(DefaultAgentPreset()) // ultimate fallback
 	}
 
 	return lookupAgentConfig(agentName, townSettings, rigSettings)
@@ -871,7 +871,7 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 	} else if townSettings.DefaultAgent != "" {
 		agentName = townSettings.DefaultAgent
 	} else {
-		agentName = "claude" // ultimate fallback
+		agentName = string(DefaultAgentPreset()) // ultimate fallback
 	}
 
 	// If an override is requested, validate it exists
@@ -1045,7 +1045,7 @@ func ResolveRoleAgentName(role, townRoot, rigPath string) (agentName string, isR
 	if townSettings.DefaultAgent != "" {
 		return townSettings.DefaultAgent, false
 	}
-	return "claude", false
+	return string(DefaultAgentPreset()), false
 }
 
 // lookupAgentConfig looks up an agent by name.
