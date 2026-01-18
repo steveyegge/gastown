@@ -107,12 +107,15 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 }
 
 // EnsureSessionFresh ensures a session is available and healthy.
-// If the session exists but is a zombie (Claude not running), it kills the session first.
+// If the session exists but is a zombie (no agent process running), it kills the session first.
 // This prevents "session already exists" errors when trying to restart dead agents.
 //
 // A session is considered a zombie if:
 // - The tmux session exists
-// - But Claude (node process) is not running in it
+// - But no agent process is running in it (only a shell)
+//
+// This uses generic agent detection (any non-shell process). For specific agent
+// detection with configurable process names, use EnsureSessionFreshWithProcessNames.
 //
 // Returns nil if session was created successfully.
 func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
@@ -125,13 +128,47 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 	if exists {
 		// Session exists - check if it's a zombie
 		if !t.IsAgentRunning(name) {
-			// Zombie session: tmux alive but Claude dead
+			// Zombie session: tmux alive but agent dead
 			// Kill it so we can create a fresh one
 			if err := t.KillSession(name); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
 		} else {
-			// Session is healthy (Claude running) - nothing to do
+			// Session is healthy (agent running) - nothing to do
+			return nil
+		}
+	}
+
+	// Create fresh session
+	return t.NewSession(name, workDir)
+}
+
+// EnsureSessionFreshWithProcessNames ensures a session is available and healthy.
+// Like EnsureSessionFresh, but uses specific process names for agent detection.
+// Use config.GetProcessNames(agentName) to get the appropriate process names.
+//
+// A session is considered a zombie if:
+// - The tmux session exists
+// - But none of the specified process names are running in it
+//
+// Returns nil if session was created successfully.
+func (t *Tmux) EnsureSessionFreshWithProcessNames(name, workDir string, processNames []string) error {
+	// Check if session already exists
+	exists, err := t.HasSession(name)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+
+	if exists {
+		// Session exists - check if it's a zombie
+		if !t.IsRuntimeRunning(name, processNames) {
+			// Zombie session: tmux alive but agent dead
+			// Kill it so we can create a fresh one
+			if err := t.KillSession(name); err != nil {
+				return fmt.Errorf("killing zombie session: %w", err)
+			}
+		} else {
+			// Session is healthy (agent running) - nothing to do
 			return nil
 		}
 	}
@@ -843,6 +880,13 @@ func (t *Tmux) IsAgentRunning(session string, expectedPaneCommands ...string) bo
 // Only trusts the pane command - UI markers in scrollback cause false positives.
 // Claude can report as "node", "claude", or a version number like "2.0.76".
 // Also checks for child processes when the pane is a shell running claude via "bash -c".
+//
+// This is Claude-specific. For generic agent detection with configurable process names,
+// use IsRuntimeRunning() with config.GetProcessNames() instead.
+//
+// Deprecated: New code should use IsRuntimeRunning() with agent config process names.
+// This function remains for backwards compatibility with Claude-specific detection
+// (version patterns, child process checks).
 func (t *Tmux) IsClaudeRunning(session string) bool {
 	// Check for known command names first
 	if t.IsAgentRunning(session, "node", "claude") {
@@ -872,7 +916,17 @@ func (t *Tmux) IsClaudeRunning(session string) bool {
 
 // IsRuntimeRunning checks if a runtime appears to be running in the session.
 // Only trusts the pane command - UI markers in scrollback cause false positives.
-// This is the runtime-config-aware version of IsAgentRunning.
+//
+// This is THE generic, runtime-config-aware function for agent detection.
+// Use config.GetProcessNames(agentName) to get the appropriate process names.
+//
+// Example:
+//
+//	processNames := config.GetProcessNames(agentConfig.Name)
+//	if t.IsRuntimeRunning(session, processNames) { ... }
+//
+// For Claude-specific detection with version patterns and child process checks,
+// use IsClaudeRunning() instead.
 func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 	if len(processNames) == 0 {
 		return false

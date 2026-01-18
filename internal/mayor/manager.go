@@ -54,14 +54,22 @@ func (m *Manager) Start(agentOverride string) error {
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
+	// Resolve agent config for process detection
+	// For town-level agents (mayor), rigPath is empty
+	agentConfig, _, _ := config.ResolveAgentConfigWithOverride(m.townRoot, "", agentOverride)
+	var processNames []string
+	if agentConfig != nil && agentConfig.Tmux != nil {
+		processNames = agentConfig.Tmux.ProcessNames
+	}
+
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		if t.IsRuntimeRunning(sessionID, processNames) {
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}

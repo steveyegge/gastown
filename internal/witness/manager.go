@@ -111,10 +111,18 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
+	// Resolve agent config for process detection
+	townRoot := m.townRoot()
+	agentConfig, _, _ := config.ResolveAgentConfigWithOverride(townRoot, m.rig.Path, agentOverride)
+	var processNames []string
+	if agentConfig != nil && agentConfig.Tmux != nil {
+		processNames = agentConfig.Tmux.ProcessNames
+	}
+
 	if foreground {
 		// Foreground mode is deprecated - patrol logic moved to mol-witness-patrol
 		// Just check tmux session (no PID inference per ZFC)
-		if running, _ := t.HasSession(sessionID); running && t.IsClaudeRunning(sessionID) {
+		if running, _ := t.HasSession(sessionID); running && t.IsRuntimeRunning(sessionID, processNames) {
 			return ErrAlreadyRunning
 		}
 
@@ -130,12 +138,12 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Background mode: check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
-			// Healthy - Claude is running
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		if t.IsRuntimeRunning(sessionID, processNames) {
+			// Healthy - agent is running
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
@@ -158,7 +166,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		return err
 	}
 
-	townRoot := m.townRoot()
+	// townRoot already declared above for agent config resolution
 
 	// Build startup command first
 	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
