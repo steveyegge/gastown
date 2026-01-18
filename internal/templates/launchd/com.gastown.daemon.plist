@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.gastown.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{.GTPath}}</string>
+        <string>daemon</string>
+        <string>run</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>{{.TownRoot}}</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>Crashed</key>
+        <true/>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>{{.TownRoot}}/daemon/daemon.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{{.TownRoot}}/daemon/daemon.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>GT_TOWN_ROOT</key>
+        <string>{{.TownRoot}}</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
