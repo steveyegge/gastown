@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -127,20 +126,15 @@ func (m *Manager) Start(agentOverride string) error {
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// For agents with prompt_mode "none" (e.g., copilot), the beacon wasn't passed
-	// as a command arg. Send it via mail so the agent has startup instructions.
-	var rc *config.RuntimeConfig
-	if agentOverride != "" {
-		rc, _, _ = config.ResolveAgentConfigWithOverride(m.townRoot, "", agentOverride)
-	} else {
-		rc = config.ResolveRoleAgentConfig("mayor", m.townRoot, "")
-	}
-	if rc != nil && rc.PromptMode == "none" && beacon != "" {
-		// Send startup instructions via mail with --notify to alert the agent
-		cmd := exec.Command("gt", "mail", "send", "mayor/", "-s", "Mayor startup instructions [HIGH PRIORITY]", "-m", beacon, "--notify")
-		cmd.Dir = m.townRoot
-		_ = cmd.Run() // Best-effort, don't fail startup if mail fails
-	}
+	// For agents with prompt_mode "none" (e.g., copilot), send beacon via mail
+	_ = config.SendBeaconIfNeeded(config.SendBeaconMailConfig{
+		Role:          "mayor",
+		Recipient:     "mayor/",
+		TownRoot:      m.townRoot,
+		AgentOverride: agentOverride,
+		Beacon:        beacon,
+		Subject:       "Mayor startup instructions [HIGH PRIORITY]",
+	})
 
 	return nil
 }

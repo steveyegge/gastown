@@ -172,15 +172,16 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 
 	// Build startup command with optional agent override
 	// The "gt boot triage" prompt tells Boot to immediately start triage (GUPP principle)
+	beacon := "gt boot triage"
 	var startCmd string
 	if agentOverride != "" {
 		var err error
-		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", "gt boot triage", agentOverride)
+		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", beacon, agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", "gt boot triage")
+		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", beacon)
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -197,6 +198,16 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	for k, v := range envVars {
 		_ = b.tmux.SetEnvironment(SessionName, k, v)
 	}
+
+	// For agents with prompt_mode "none" (e.g., copilot), send beacon via mail
+	_ = config.SendBeaconIfNeeded(config.SendBeaconMailConfig{
+		Role:          "boot",
+		Recipient:     "boot/",
+		TownRoot:      b.townRoot,
+		AgentOverride: agentOverride,
+		Beacon:        beacon,
+		Subject:       "Boot startup instructions [HIGH PRIORITY]",
+	})
 
 	return nil
 }
