@@ -465,6 +465,13 @@ func ensureCustomTypes(beadsPath string) error {
 	if err != nil {
 		return fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
 	}
+
+	// Disable contributor routing to use gastown's rig-based routing instead
+	// This prevents issues being routed to ~/.beads-planning
+	routingCmd := exec.Command("bd", "config", "set", "routing.mode", "direct")
+	routingCmd.Dir = beadsPath
+	_, _ = routingCmd.CombinedOutput() // Ignore errors - not critical
+
 	return nil
 }
 
