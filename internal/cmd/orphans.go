@@ -674,3 +674,108 @@ func runOrphansKillProcesses(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
+
+// findStrayGTProcesses finds Gas Town Claude processes running outside tmux.
+// These are processes with --dangerously-skip-permissions that aren't in tmux sessions.
+func findStrayGTProcesses() ([]int, error) {
+	// Get all tmux pane PIDs
+	tmuxPIDs := getTmuxPanePIDs()
+
+	// Run ps to get all processes
+	cmd := exec.Command("ps", "-eo", "pid,ppid,args")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("running ps: %w", err)
+	}
+
+	var strays []int
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+
+	// Skip header
+	if scanner.Scan() {
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+
+		args := strings.Join(fields[2:], " ")
+
+		// Only interested in Gas Town Claude processes (have --dangerously-skip-permissions)
+		if !strings.Contains(args, "--dangerously-skip-permissions") {
+			continue
+		}
+
+		// Skip if it's in a tmux session (check ancestry)
+		if isDescendantOfTmux(pid, tmuxPIDs) {
+			continue
+		}
+
+		strays = append(strays, pid)
+	}
+
+	return strays, nil
+}
+
+// getTmuxPanePIDs returns all PIDs of processes in tmux panes.
+func getTmuxPanePIDs() map[int]bool {
+	pids := make(map[int]bool)
+
+	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_pid}")
+	out, err := cmd.Output()
+	if err != nil {
+		return pids // Empty if tmux not running
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		if pid, err := strconv.Atoi(strings.TrimSpace(scanner.Text())); err == nil {
+			pids[pid] = true
+		}
+	}
+
+	return pids
+}
+
+// isDescendantOfTmux checks if a process is a descendant of any tmux pane.
+func isDescendantOfTmux(pid int, tmuxPIDs map[int]bool) bool {
+	visited := make(map[int]bool)
+	current := pid
+
+	for current > 1 && !visited[current] {
+		visited[current] = true
+
+		if tmuxPIDs[current] {
+			return true
+		}
+
+		// Get parent PID
+		ppid := getParentPID(current)
+		if ppid <= 1 {
+			break
+		}
+		current = ppid
+	}
+
+	return false
+}
+
+// getParentPID returns the parent PID of a process.
+func getParentPID(pid int) int {
+	cmd := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid))
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	ppid, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+	return ppid
+}
