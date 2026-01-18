@@ -92,3 +92,17 @@ func (r *Rig) DefaultBranch() string {
 	}
 	return cfg.DefaultBranch
 }
+
+// TargetBranch returns the branch to use for merge operations.
+// If target_branch is configured, returns that; otherwise falls back to DefaultBranch().
+// This enables release branch workflows where merges go to a release branch instead of main.
+func (r *Rig) TargetBranch() string {
+	cfg, err := LoadRigConfig(r.Path)
+	if err != nil {
+		return r.DefaultBranch()
+	}
+	if cfg.TargetBranch != "" {
+		return cfg.TargetBranch
+	}
+	return r.DefaultBranch()
+}

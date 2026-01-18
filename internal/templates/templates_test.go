@@ -129,6 +129,7 @@ func TestRenderRole_Refinery_DefaultBranch(t *testing.T) {
 	}
 
 	// Test with custom default branch (e.g., "develop")
+	// TargetBranch is what templates use for merge operations
 	data := RoleData{
 		Role:          "refinery",
 		RigName:       "myrig",
@@ -136,6 +137,7 @@ func TestRenderRole_Refinery_DefaultBranch(t *testing.T) {
 		TownName:      "town",
 		WorkDir:       "/test/town/myrig/refinery/rig",
 		DefaultBranch: "develop",
+		TargetBranch:  "develop",
 		MayorSession:  "gt-town-mayor",
 		DeaconSession: "gt-town-deacon",
 	}

@@ -49,12 +49,21 @@ func outputPrimeContext(ctx RoleContext) error {
 	// Get town name for session names
 	townName, _ := workspace.GetTownName(ctx.TownRoot)
 
-	// Get default branch from rig config (default to "main" if not set)
+	// Get default branch and target branch from rig config
 	defaultBranch := "main"
+	targetBranch := "main"
 	if ctx.Rig != "" && ctx.TownRoot != "" {
 		rigPath := filepath.Join(ctx.TownRoot, ctx.Rig)
-		if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
-			defaultBranch = rigCfg.DefaultBranch
+		if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil {
+			if rigCfg.DefaultBranch != "" {
+				defaultBranch = rigCfg.DefaultBranch
+			}
+			// TargetBranch overrides DefaultBranch for merge operations
+			if rigCfg.TargetBranch != "" {
+				targetBranch = rigCfg.TargetBranch
+			} else {
+				targetBranch = defaultBranch
+			}
 		}
 	}
 
@@ -65,6 +74,7 @@ func outputPrimeContext(ctx RoleContext) error {
 		TownName:      townName,
 		WorkDir:       ctx.WorkDir,
 		DefaultBranch: defaultBranch,
+		TargetBranch:  targetBranch,
 		Polecat:       ctx.Polecat,
 		MayorSession:  session.MayorSessionName(),
 		DeaconSession: session.DeaconSessionName(),
