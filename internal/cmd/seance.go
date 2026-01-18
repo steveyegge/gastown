@@ -211,7 +211,7 @@ func runSeanceTalk(sessionID, prompt string) error {
 	// Find the session in another account and symlink it to the current account
 	// This allows Claude to load sessions from any account while keeping
 	// the forked session in the current account
-	townRoot, _ := workspace.FindFromCwd()
+	townRoot, _ = workspace.FindFromCwd()
 	cleanup, err := symlinkSessionToCurrentAccount(townRoot, sessionID)
 	if err != nil {
 		// Not fatal - session might already be in current account
