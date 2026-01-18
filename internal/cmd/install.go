@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/shell"
@@ -76,7 +76,7 @@ func init() {
 	installCmd.Flags().StringVar(&installGitHub, "github", "", "Create GitHub repo (format: owner/repo, private by default)")
 	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
-	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
+	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode/gt-goose wrapper scripts to ~/bin/")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -114,7 +114,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			if err := wrappers.Install(); err != nil {
 				return fmt.Errorf("installing wrapper scripts: %w", err)
 			}
-			fmt.Printf("✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+			fmt.Printf("✓ Installed gt-codex, gt-opencode and gt-goose to %s\n", wrappers.BinDir())
 			return nil
 		}
 		return fmt.Errorf("directory is already a Gas Town HQ (use --force to reinitialize)")
@@ -303,7 +303,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if err := wrappers.Install(); err != nil {
 			fmt.Printf("   %s Could not install wrapper scripts: %v\n", style.Dim.Render("⚠"), err)
 		} else {
-			fmt.Printf("   ✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+			fmt.Printf("   ✓ Installed gt-codex, gt-opencode and gt-goose to %s\n", wrappers.BinDir())
 		}
 	}
 

@@ -11,7 +11,7 @@ import (
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentGoose}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -44,6 +44,7 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"cursor", AgentCursor, false},
 		{"auggie", AgentAuggie, false},
 		{"amp", AgentAmp, false},
+		{"goose", AgentGoose, false},
 		{"aider", "", true},    // Not built-in, can be added via config
 		{"opencode", "", true}, // Not built-in, can be added via config
 		{"unknown", "", true},
@@ -77,6 +78,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentCursor, "cursor-agent"},
 		{AgentAuggie, "auggie"},
 		{AgentAmp, "amp"},
+		{AgentGoose, "goose"},
 	}
 
 	for _, tt := range tests {
@@ -102,6 +104,7 @@ func TestIsKnownPreset(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
+		{"goose", true},
 		{"aider", false},    // Not built-in, can be added via config
 		{"opencode", false}, // Not built-in, can be added via config
 		{"unknown", false},
@@ -270,6 +273,13 @@ func TestBuildResumeCommand(t *testing.T) {
 			contains:  []string{"codex", "resume", "codex-sess-789", "--yolo"},
 		},
 		{
+			name:      "goose subcommand style",
+			agentName: "goose",
+			sessionID: "goose-sess-101",
+			wantEmpty: false,
+			contains:  []string{"goose", "session", "-r", "--session-id", "goose-sess-101"},
+		},
+		{
 			name:      "empty session ID",
 			agentName: "claude",
 			sessionID: "",
@@ -315,6 +325,7 @@ func TestSupportsSessionResume(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
+		{"goose", true},
 		{"unknown", false},
 	}
 
@@ -335,10 +346,11 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 	}{
 		{"claude", "CLAUDE_SESSION_ID"},
 		{"gemini", "GEMINI_SESSION_ID"},
-		{"codex", ""},    // Codex uses JSONL output instead
-		{"cursor", ""},   // Cursor uses --resume with chatId directly
-		{"auggie", ""},   // Auggie uses --resume directly
-		{"amp", ""},      // AMP uses 'threads continue' subcommand
+		{"codex", ""},  // Codex uses JSONL output instead
+		{"cursor", ""}, // Cursor uses --resume with chatId directly
+		{"auggie", ""}, // Auggie uses --resume directly
+		{"amp", ""},    // AMP uses 'threads continue' subcommand
+		{"goose", "GOOSE_SESSION_ID"},
 		{"unknown", ""},
 	}
 
@@ -363,6 +375,7 @@ func TestGetProcessNames(t *testing.T) {
 		{"cursor", []string{"cursor-agent"}},
 		{"auggie", []string{"auggie"}},
 		{"amp", []string{"amp"}},
+		{"goose", []string{"goose"}},
 		{"unknown", []string{"node"}}, // Falls back to Claude's process
 	}
 
@@ -385,7 +398,7 @@ func TestGetProcessNames(t *testing.T) {
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentGoose}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -446,6 +459,11 @@ func TestAgentCommandGeneration(t *testing.T) {
 			preset:       AgentAmp,
 			wantCommand:  "amp",
 			wantContains: []string{"--dangerously-allow-all", "--no-ide"},
+		},
+		{
+			preset:       AgentGoose,
+			wantCommand:  "goose",
+			wantContains: []string{},
 		},
 	}
 

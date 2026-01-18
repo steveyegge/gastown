@@ -399,9 +399,8 @@ func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
 		return nil, err
 	}
 
-	// Regex to match runtime CLI processes (not Claude.app)
-	// Match: "claude", "claude-code", or "codex" (or paths ending in those)
-	runtimePattern := regexp.MustCompile(`(?i)(^claude$|/claude$|^claude-code$|/claude-code$|^codex$|/codex$)`)
+	// Match: "claude", "claude-code", "codex", or "goose" (or paths ending in those)
+	runtimePattern := regexp.MustCompile(`(?i)(^claude$|/claude$|^claude-code$|/claude-code$|^codex$|/codex$|^goose$|/goose$)`)
 
 	// Pattern to exclude Claude.app and related desktop processes
 	excludePattern := regexp.MustCompile(`(?i)(Claude\.app|claude-native|chrome-native)`)
