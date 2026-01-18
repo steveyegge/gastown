@@ -23,11 +23,40 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 8
+version = 9
+
+[[steps]]
+id = "role-check"
+title = "Verify role is enabled"
+description = """
+**STOP. Read your CLAUDE.md role context first.**
+
+Before proceeding with ANY formula steps, check your role boundaries:
+
+```bash
+cat CLAUDE.md | head -50
+```
+
+**If your role context says DISABLED or contains prohibitions that conflict with this formula:**
+- "This role is DISABLED"
+- Any explicit prohibition against the operations in this formula
+
+**Then DO NOT proceed with this formula.** Instead:
+1. Acknowledge you received the patrol nudge
+2. Report to mayor that the role is disabled:
+   ```bash
+   gt mail send mayor/ -s "Role DISABLED" -m "Received patrol formula but role is disabled per config."
+   ```
+3. Exit the patrol loop
+
+**Role context ALWAYS takes precedence over formula instructions.**
+
+Only proceed to inbox-check if your role context permits the operations in this formula."""
 
 [[steps]]
 id = "inbox-check"
 title = "Handle callbacks from agents"
+needs = ["role-check"]
 description = """
 Handle callbacks from agents.
 
