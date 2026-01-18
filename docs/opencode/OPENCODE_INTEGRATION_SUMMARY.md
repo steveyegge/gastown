@@ -18,7 +18,7 @@ OpenCode has been successfully integrated as a **first-class orchestration layer
 ✅ **Agent Preset** - OpenCode preset with full configuration including fork support  
 ✅ **Plugin System** - Complete plugin with all 4 Claude hooks (SessionStart, UserPromptSubmit, PreCompact, Stop)  
 ✅ **Session Management** - Resume, fork (via HTTP API), export, and import capabilities  
-✅ **Automated Setup** - One-command setup script with Antigravity authentication  
+✅ **Automated Setup** - One-command setup script with authentication support  
 ✅ **Comprehensive Testing** - Integration tests, fork validation, and plugin verification  
 ✅ **Full Documentation** - 7 comprehensive documents totaling 2,804 lines
 
@@ -142,7 +142,7 @@ OpenCode provides 30+ event types via its event bus system:
 ✅ **Session Listing** - List command shows sessions with metadata  
 ✅ **Session Export** - Export to JSON successful (15KB test session)  
 ✅ **Plugin System** - Gastown plugin fires on session.created  
-✅ **Model Availability** - 50+ models accessible via Antigravity  
+✅ **Model Availability** - 50+ models accessible from multiple providers  
 ✅ **Session Resume** - `--session` flag works correctly  
 ✅ **HTTP API Fork** - Fork creates new session with history
 
@@ -180,10 +180,10 @@ chmod +x scripts/setup-opencode.sh
 ```
 
 **What the script does**:
-1. Installs `opencode-ai` and `opencode-antigravity-auth@1.2.8`
+1. Installs `opencode-ai` CLI globally
 2. Restores auth credentials from base64 bundle
 3. Configures OpenCode for headless operation
-4. Verifies installation (version, models)
+4. Verifies installation (version, auth providers, models)
 
 ### Usage Examples
 

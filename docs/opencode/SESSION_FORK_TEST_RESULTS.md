@@ -304,12 +304,12 @@ OpenCode handoffs have TWO options:
 **OS**: Linux  
 **Node.js**: v20.x  
 **OpenCode**: v1.1.25  
-**Auth**: Antigravity (google/antigravity-gemini-3-flash)
+**Auth**: Multiple providers supported (see OpenCode docs)
 
-**Models Available**: 50+ models including:
-- `opencode/gpt-5-nano` (free, used for testing)
-- `google/gemini-3-flash-preview`
-- `github-copilot/*` models
+**Example Models Available** (50+ total):
+- `opencode/gpt-5-nano` (free, good for testing)
+- `google/gemini-3-flash-preview` (via Antigravity)
+- `github-copilot/*` models (via GitHub Copilot auth)
 
 ---
 

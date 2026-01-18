@@ -2,7 +2,8 @@
 set -e
 
 # OpenCode Setup Script for Copilot Agent
-# Sets up OpenCode with Antigravity auth from OPENCODE_AUTH_BUNDLE secret
+# Sets up OpenCode with authentication from OPENCODE_AUTH_BUNDLE secret
+# Supports multiple OpenCode authentication providers (GitHub Copilot, Antigravity, etc.)
 
 echo "🔧 OpenCode Setup Script"
 echo "========================"
@@ -14,20 +15,21 @@ if [ -z "$OPENCODE_AUTH_BUNDLE" ]; then
     echo ""
     echo "This script requires the OPENCODE_AUTH_BUNDLE secret to be available."
     echo "The secret should be set in the 'copilot' environment."
+    echo "The bundle should contain auth configuration for your OpenCode provider(s)."
     exit 1
 fi
 
 echo "✓ OPENCODE_AUTH_BUNDLE found"
 echo ""
 
-# Step 2: Install opencode-ai and opencode-antigravity-auth globally
-echo "📦 Installing OpenCode packages..."
-npm install -g opencode-ai opencode-antigravity-auth@1.2.8 2>&1 | tail -5
+# Step 2: Install opencode-ai CLI
+echo "📦 Installing OpenCode CLI..."
+npm install -g opencode-ai 2>&1 | tail -5
 if [ $? -ne 0 ]; then
-    echo "❌ Failed to install OpenCode packages"
+    echo "❌ Failed to install OpenCode CLI"
     exit 1
 fi
-echo "✓ Packages installed"
+echo "✓ OpenCode CLI installed"
 echo ""
 
 # Step 3: Create necessary directories
@@ -79,20 +81,14 @@ else
 fi
 echo ""
 
-# Step 7.5: Fix opencode config to remove problematic github plugin
-echo "🔧 Fixing OpenCode configuration..."
+# Step 7.5: Verify OpenCode configuration
+echo "🔧 Verifying OpenCode configuration..."
 if [ -f ~/.config/opencode/opencode.jsonc ]; then
-    cat > ~/.config/opencode/opencode.jsonc << 'EOF'
-{
-  "plugin": [
-    "opencode-antigravity-auth@1.2.8"
-  ],
-  "model": "google/antigravity-gemini-3-flash"
-}
-EOF
-    echo "✓ Configuration updated (removed @opencode-ai/github plugin)"
+    echo "✓ OpenCode configuration found"
+    echo "   Config file: ~/.config/opencode/opencode.jsonc"
 else
-    echo "⚠ Warning: opencode.jsonc not found, skipping config fix"
+    echo "⚠ Warning: opencode.jsonc not found at ~/.config/opencode/"
+    echo "   OpenCode will use default configuration"
 fi
 echo ""
 
@@ -121,24 +117,28 @@ if [ $? -ne 0 ]; then
 fi
 echo ""
 
-echo "Checking auth status:"
-opencode auth list 2>&1 | head -10
+echo "Checking auth providers:"
+opencode auth list 2>&1 | head -15
 echo ""
 
 echo "Available models:"
-opencode models 2>&1 | head -20
+opencode models 2>&1 | head -25
 if [ $? -ne 0 ]; then
     echo "⚠ Warning: Could not list models (may require auth configuration)"
 else
     echo ""
     echo "✓ OpenCode is ready!"
-    echo ""
-    echo "Preferred model for testing: google/antigravity-gemini-3-flash"
 fi
 
 echo ""
 echo "✅ Setup complete!"
 echo ""
+echo "OpenCode supports multiple authentication providers including:"
+echo "  - GitHub Copilot (via GitHub account)"
+echo "  - Antigravity (via Antigravity account)"
+echo "  - Custom providers (see OpenCode docs)"
+echo ""
 echo "You can now use OpenCode with commands like:"
-echo "  opencode models"
-echo "  opencode run --model google/antigravity-gemini-3-flash \"<prompt>\""
+echo "  opencode models                    # List available models"
+echo "  opencode auth list                 # List configured auth providers"
+echo "  opencode run --model <model> \"...\"  # Run with specific model"

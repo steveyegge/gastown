@@ -213,7 +213,7 @@
 
 **Phase 2: OpenCode Adapters**
 - ✅ Enhanced `gastown.js` plugin with 4 hooks
-- ✅ Automated setup script with Antigravity auth
+- ✅ Automated setup script with authentication support
 
 **Phase 3: Unified Interface**
 - ✅ Updated 5 agent managers (Mayor, Witness, Deacon + 2 existing)

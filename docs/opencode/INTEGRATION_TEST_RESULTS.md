@@ -22,16 +22,18 @@
 **System**: GitHub Actions runner  
 **OS**: Linux  
 **OpenCode**: v1.1.25  
-**Auth**: Antigravity (3 providers: GitHub Copilot, proxypal, Google)  
-**Models Available**: 50+ models
+**Auth**: Multiple providers (GitHub Copilot, Antigravity, custom providers)  
+**Models Available**: 50+ models from various providers
 
-**Configuration**:
+**Example Configuration**:
 ```json
 {
-  "plugin": ["opencode-antigravity-auth@1.2.8"],
-  "model": "google/antigravity-gemini-3-flash"
+  "plugin": ["<auth-provider-plugin>"],
+  "model": "<provider>/<model-name>"
 }
 ```
+
+Note: Configuration depends on your auth provider. See OpenCode docs for provider-specific setup.
 
 ---
 
@@ -105,7 +107,7 @@ opencode export <sessionID>
 
 **Result**: ✅ **PASSED**
 - Config exists at `~/.config/opencode/opencode.jsonc`
-- Antigravity auth plugin loaded
+- Auth provider plugins configured
 - Gastown plugin template available
 
 **Current Plugin** (`internal/opencode/plugin/gastown.js`):
@@ -144,8 +146,8 @@ opencode models
 **Result**: ✅ **PASSED**
 - 50+ models accessible
 - Includes free models (gpt-5-nano, etc.)
-- Includes Antigravity models
-- GitHub Copilot models available
+- Includes provider-specific models (Antigravity, GitHub Copilot, etc.)
+- Model availability depends on configured auth providers
 
 **Conclusion**: Full model access verified
 

@@ -289,7 +289,7 @@ go test -v ./internal/config                       # 94/94 passing
 - OS: Linux (GitHub Actions runner)
 - Go Version: 1.21+
 - OpenCode: v1.1.25
-- Authentication: Antigravity (50+ models)
+- Authentication: Multiple providers supported (GitHub Copilot, Antigravity, etc.)
 - Test Duration: ~15 seconds (unit tests)
 
 ## Known Issues and Limitations
