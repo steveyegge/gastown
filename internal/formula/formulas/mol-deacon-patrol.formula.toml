@@ -665,71 +665,46 @@ Skip dispatch - system is healthy.
 
 [[steps]]
 id = "costs-digest"
-title = "Aggregate daily costs [DISABLED]"
+title = "Aggregate daily costs"
 needs = ["session-gc"]
 description = """
-**⚠️ DISABLED** - Skip this step entirely.
+**DAILY DIGEST** - Aggregate yesterday's session cost wisps.
 
-Cost tracking is temporarily disabled because Claude Code does not expose
-session costs in a way that can be captured programmatically.
-
-**Why disabled:**
-- The `gt costs` command uses tmux capture-pane to find costs
-- Claude Code displays costs in the TUI status bar, not in scrollback
-- All sessions show $0.00 because capture-pane can't see TUI chrome
-- The infrastructure is sound but has no data source
-
-**What we need from Claude Code:**
-- Stop hook env var (e.g., `$CLAUDE_SESSION_COST`)
-- Or queryable file/API endpoint
-
-**Re-enable when:** Claude Code exposes cost data via API or environment.
-
-See: GH#24, gt-7awfj
-
-**Exit criteria:** Skip this step - proceed to next."""
-
-[[steps]]
-id = "patrol-digest"
-title = "Aggregate daily patrol digests"
-needs = ["costs-digest"]
-description = """
-**DAILY DIGEST** - Aggregate yesterday's patrol cycle digests.
-
-Patrol cycles (Deacon, Witness, Refinery) create ephemeral per-cycle digests
-to avoid JSONL pollution. This step aggregates them into a single permanent
-"Patrol Report YYYY-MM-DD" bead for audit purposes.
+Session costs are recorded as ephemeral wisps (not exported to JSONL) to avoid
+log-in-database pollution. This step aggregates them into a permanent daily
+"Cost Report YYYY-MM-DD" bead for audit purposes.
 
 **Step 1: Check if digest is needed**
 ```bash
-# Preview yesterday's patrol digests (dry run)
-gt patrol digest --yesterday --dry-run
+# Preview yesterday's costs (dry run)
+gt costs digest --yesterday --dry-run
 ```
 
-If output shows "No patrol digests found", skip to Step 3.
+If output shows "No session cost wisps found", skip to Step 3.
 
 **Step 2: Create the digest**
 ```bash
-gt patrol digest --yesterday
+gt costs digest --yesterday
 ```
 
 This:
-- Queries all ephemeral patrol digests from yesterday
-- Creates a single "Patrol Report YYYY-MM-DD" bead with aggregated data
-- Deletes the source digests
+- Queries all session.ended wisps from yesterday
+- Creates a single "Cost Report YYYY-MM-DD" bead with aggregated data
+- Deletes the source wisps
 
 **Step 3: Verify**
-Daily patrol digests preserve audit trail without per-cycle pollution.
+The digest appears in `gt costs --week` queries.
+Daily digests preserve audit trail without per-session pollution.
 
 **Timing**: Run once per morning patrol cycle. The --yesterday flag ensures
 we don't try to digest today's incomplete data.
 
-**Exit criteria:** Yesterday's patrol digests aggregated (or none to aggregate)."""
+**Exit criteria:** Yesterday's costs digested (or no wisps to digest)."""
 
 [[steps]]
 id = "log-maintenance"
 title = "Rotate logs and prune state"
-needs = ["patrol-digest"]
+needs = ["costs-digest"]
 description = """
 Maintain daemon logs and state files.
 
