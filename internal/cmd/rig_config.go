@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/wisp"
@@ -92,6 +94,7 @@ func init() {
 	rigConfigCmd.AddCommand(rigConfigShowCmd)
 	rigConfigCmd.AddCommand(rigConfigSetCmd)
 	rigConfigCmd.AddCommand(rigConfigUnsetCmd)
+	rigConfigCmd.AddCommand(rigConfigProtectedBranchesCmd)
 
 	rigConfigShowCmd.Flags().BoolVar(&rigConfigShowLayers, "layers", false, "Show which layer each value comes from")
 
@@ -319,4 +322,128 @@ func formatValue(v interface{}) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// Protected branches subcommand
+var rigConfigProtectedBranchesCmd = &cobra.Command{
+	Use:   "protected-branches <rig> [branches...]",
+	Short: "Get or set protected branches for a rig",
+	Long: `Get or set protected branches for a specific rig.
+
+With no branch arguments, shows the effective protected branches.
+With branch arguments, overrides the town default for this rig.
+
+Use --inherit to remove the rig override and use town defaults.
+
+Protection includes:
+  - Direct pushes to these branches are blocked
+  - All merges to these branches require human approval
+
+Examples:
+  gt rig config protected-branches myrig           # Show effective branches
+  gt rig config protected-branches myrig main      # Protect only main
+  gt rig config protected-branches myrig --inherit # Use town defaults`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runRigConfigProtectedBranches,
+}
+
+var rigConfigProtectedBranchesInherit bool
+
+func init() {
+	rigConfigProtectedBranchesCmd.Flags().BoolVar(&rigConfigProtectedBranchesInherit, "inherit", false, "Remove rig override and use town defaults")
+}
+
+func runRigConfigProtectedBranches(cmd *cobra.Command, args []string) error {
+	rigName := args[0]
+	branches := args[1:]
+
+	townRoot, r, err := getRig(rigName)
+	if err != nil {
+		return err
+	}
+
+	// Load settings
+	townSettingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(townSettingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	rigSettingsPath := config.RigSettingsPath(r.Path)
+	rigSettings, err := config.LoadRigSettings(rigSettingsPath)
+	if err != nil {
+		// Create new rig settings if doesn't exist
+		rigSettings = config.NewRigSettings()
+	}
+
+	// Handle --inherit flag
+	if rigConfigProtectedBranchesInherit {
+		rigSettings.ProtectedBranches = nil
+		if err := config.SaveRigSettings(rigSettingsPath, rigSettings); err != nil {
+			return fmt.Errorf("saving rig settings: %w", err)
+		}
+		fmt.Printf("Rig %s now inherits protected branches from town.\n", style.Bold.Render(rigName))
+		effectiveBranches := config.ResolveProtectedBranches(townSettings, rigSettings)
+		if len(effectiveBranches) > 0 {
+			fmt.Printf("Effective: %s\n", strings.Join(effectiveBranches, ", "))
+		} else {
+			fmt.Println("Effective: (none)")
+		}
+		return nil
+	}
+
+	// If no branches specified, show current state
+	if len(branches) == 0 {
+		effectiveBranches := config.ResolveProtectedBranches(townSettings, rigSettings)
+
+		fmt.Printf("%s\n\n", style.Bold.Render("Protected Branches for "+rigName))
+
+		if rigSettings.ProtectedBranches != nil {
+			fmt.Printf("Rig override: %s\n", style.Bold.Render(strings.Join(rigSettings.ProtectedBranches, ", ")))
+		} else {
+			fmt.Println("Rig override: (none, using town default)")
+		}
+
+		if len(townSettings.ProtectedBranches) > 0 {
+			fmt.Printf("Town default: %s\n", strings.Join(townSettings.ProtectedBranches, ", "))
+		} else {
+			fmt.Println("Town default: (none)")
+		}
+
+		fmt.Println()
+		if len(effectiveBranches) > 0 {
+			fmt.Printf("Effective: %s\n", style.Bold.Render(strings.Join(effectiveBranches, ", ")))
+		} else {
+			fmt.Println("Effective: (no protection)")
+		}
+		return nil
+	}
+
+	// Set rig-level protected branches
+	rigSettings.ProtectedBranches = branches
+	if err := config.SaveRigSettings(rigSettingsPath, rigSettings); err != nil {
+		return fmt.Errorf("saving rig settings: %w", err)
+	}
+
+	// Update the pre-push hook in the rig's clones
+	if err := installRigProtectedBranchesHooks(r, branches); err != nil {
+		fmt.Printf("   %s Could not update pre-push hooks: %v\n", style.Dim.Render("⚠"), err)
+	}
+
+	fmt.Printf("Protected branches for %s: %s\n", style.Bold.Render(rigName), strings.Join(branches, ", "))
+	return nil
+}
+
+// installRigProtectedBranchesHooks installs pre-push hooks in the rig's git clones.
+func installRigProtectedBranchesHooks(r *rig.Rig, branches []string) error {
+	// Find git directories in the rig that might need hooks
+	// - refinery/rig/ (worktree on main)
+	// - mayor/rig/ (mayor's clone)
+	// - polecats/*/rig/ (polecat worktrees)
+	// - crew/*/rig/ (crew clones)
+
+	// For now, just install in refinery/rig which is the main worktree
+	// Polecats are ephemeral and created from .repo.git
+	refineryPath := r.Path + "/refinery/rig"
+	return installProtectedBranchesHook(refineryPath, branches)
 }

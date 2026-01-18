@@ -740,6 +740,22 @@ func RigSettingsPath(rigPath string) string {
 	return filepath.Join(rigPath, "settings", "config.json")
 }
 
+// ResolveProtectedBranches returns the effective protected branches for a rig.
+// Resolution order: rig settings (if set) > town settings.
+// If rig settings has ProtectedBranches set (even if empty), it overrides town.
+// If rig settings is nil or ProtectedBranches is nil, uses town settings.
+func ResolveProtectedBranches(townSettings *TownSettings, rigSettings *RigSettings) []string {
+	// If rig settings exists and has explicit protected branches, use them
+	if rigSettings != nil && rigSettings.ProtectedBranches != nil {
+		return rigSettings.ProtectedBranches
+	}
+	// Fall back to town settings
+	if townSettings != nil {
+		return townSettings.ProtectedBranches
+	}
+	return nil
+}
+
 // LoadOrCreateTownSettings loads town settings or creates defaults if missing.
 func LoadOrCreateTownSettings(path string) (*TownSettings, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally

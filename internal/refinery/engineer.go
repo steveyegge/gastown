@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/protocol"
@@ -230,6 +231,225 @@ type ProcessResult struct {
 	Error       string
 	Conflict    bool
 	TestsFailed bool
+}
+
+// PolicyResult contains the result of checking merge policy for an MR.
+type PolicyResult struct {
+	// Allowed indicates if the merge is permitted by policy.
+	Allowed bool
+
+	// NeedsGate indicates if a human approval gate is required.
+	NeedsGate bool
+
+	// GateExists indicates if the approval gate already exists.
+	GateExists bool
+
+	// GateClosed indicates if the approval gate has been closed (approved).
+	GateClosed bool
+
+	// BlockReason explains why merge is blocked (if not allowed).
+	BlockReason string
+
+	// Policy is the applicable merge policy (nil means default/no policy).
+	Policy *beads.MergePolicy
+}
+
+// CheckMergePolicy evaluates merge policy for an MR based on the worker's role
+// and rig/town protected branches settings.
+// Returns a PolicyResult indicating if the merge can proceed.
+func (e *Engineer) CheckMergePolicy(mr *MRInfo) (*PolicyResult, error) {
+	result := &PolicyResult{Allowed: true}
+
+	// First, check rig/town-level protected branches
+	// These apply regardless of role bead settings
+	protectedBranches := e.getProtectedBranches()
+	if len(protectedBranches) > 0 {
+		for _, protected := range protectedBranches {
+			if mr.Target == protected {
+				// Target is protected, require human approval
+				result.NeedsGate = true
+				result.Policy = &beads.MergePolicy{
+					RequireHumanApproval: true,
+					BlockedTargets:       protectedBranches,
+				}
+				break
+			}
+		}
+	}
+
+	// Get the worker's role config for additional policy checks
+	roleConfig, err := e.beads.GetWorkerRoleConfig(mr.Worker)
+	if err != nil {
+		// Log warning but allow merge (fail-open for robustness)
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not get role config for %s: %v\n", mr.Worker, err)
+		// If protected branches already set needs gate, check gate status
+		if result.NeedsGate {
+			return e.checkExistingGate(mr, result)
+		}
+		return result, nil
+	}
+
+	if roleConfig == nil || roleConfig.MergePolicy == nil {
+		// No additional policy from role, but check protected branches gate
+		if result.NeedsGate {
+			return e.checkExistingGate(mr, result)
+		}
+		return result, nil
+	}
+
+	policy := roleConfig.MergePolicy
+	// Merge role policy with any rig-level policy
+	if result.Policy == nil {
+		result.Policy = policy
+	}
+
+	// Check target branch restrictions
+	if len(policy.BlockedTargets) > 0 {
+		for _, blocked := range policy.BlockedTargets {
+			if mr.Target == blocked {
+				result.Allowed = false
+				result.BlockReason = fmt.Sprintf("target branch %q is blocked for this role", mr.Target)
+				return result, nil
+			}
+		}
+	}
+
+	if len(policy.AllowedTargets) > 0 {
+		allowed := false
+		for _, target := range policy.AllowedTargets {
+			if mr.Target == target {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			result.Allowed = false
+			result.BlockReason = fmt.Sprintf("target branch %q not in allowed targets for this role", mr.Target)
+			return result, nil
+		}
+	}
+
+	// Check if human approval is required
+	if policy.RequireHumanApproval {
+		result.NeedsGate = true
+
+		// Check if gate already exists by fetching the MR bead
+		mrBead, err := e.beads.Show(mr.ID)
+		if err != nil {
+			return nil, fmt.Errorf("fetching MR bead: %w", err)
+		}
+
+		mrFields := beads.ParseMRFields(mrBead)
+		if mrFields != nil && mrFields.ApprovalGateID != "" {
+			result.GateExists = true
+
+			// Check if gate is closed (approved)
+			gateStatus, err := e.checkGateStatus(mrFields.ApprovalGateID)
+			if err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not check gate status: %v\n", err)
+			} else if gateStatus.Closed {
+				result.GateClosed = true
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// gateStatusResult holds the result of checking a gate's status.
+type gateStatusResult struct {
+	Closed      bool
+	ClosedBy    string
+	CloseReason string
+}
+
+// checkGateStatus checks if a gate is closed (approved).
+func (e *Engineer) checkGateStatus(gateID string) (*gateStatusResult, error) {
+	out, err := exec.Command("bd", "gate", "show", gateID, "--json").Output()
+	if err != nil {
+		return nil, fmt.Errorf("checking gate %s: %w", gateID, err)
+	}
+
+	var gateInfo struct {
+		Status      string `json:"status"`
+		CloseReason string `json:"close_reason"`
+		ClosedBy    string `json:"closed_by"`
+	}
+	if err := json.Unmarshal(out, &gateInfo); err != nil {
+		return nil, fmt.Errorf("parsing gate info: %w", err)
+	}
+
+	return &gateStatusResult{
+		Closed:      gateInfo.Status == "closed",
+		ClosedBy:    gateInfo.ClosedBy,
+		CloseReason: gateInfo.CloseReason,
+	}, nil
+}
+
+// CreateApprovalGate creates a human gate for MR approval.
+// Returns the gate ID for tracking.
+func (e *Engineer) CreateApprovalGate(mr *MRInfo, policy *beads.MergePolicy) (string, error) {
+	// Build gate title
+	title := fmt.Sprintf("Approve merge: %s", mr.Title)
+	if mr.SourceIssue != "" {
+		title = fmt.Sprintf("Approve merge: %s (%s)", mr.Title, mr.SourceIssue)
+	}
+
+	// Create human gate using bd CLI
+	// Gate ID format: mr-approval-<mr-id>
+	gateAwait := fmt.Sprintf("human:mr-approval-%s", mr.ID)
+	args := []string{"gate", "create", "--await", gateAwait, "--title", title}
+
+	out, err := exec.Command("bd", args...).Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("creating approval gate: %s", string(exitErr.Stderr))
+		}
+		return "", fmt.Errorf("creating approval gate: %w", err)
+	}
+
+	// Parse gate ID from JSON output
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		// If output isn't JSON, the gate ID might be the await string
+		result.ID = gateAwait
+	}
+
+	// Update MR bead with gate ID
+	mrBead, err := e.beads.Show(mr.ID)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not fetch MR bead to update with gate ID: %v\n", err)
+	} else {
+		mrFields := beads.ParseMRFields(mrBead)
+		if mrFields == nil {
+			mrFields = &beads.MRFields{}
+		}
+		mrFields.ApprovalGateID = result.ID
+		newDesc := beads.SetMRFields(mrBead, mrFields)
+		if err := e.beads.Update(mr.ID, beads.UpdateOptions{Description: &newDesc}); err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not update MR with gate ID: %v\n", err)
+		}
+	}
+
+	// Send notification to approvers if pattern specified
+	if policy != nil && policy.ApproverPattern != "" {
+		msg := &mail.Message{
+			From:     e.rig.Name + "/refinery",
+			To:       policy.ApproverPattern,
+			Subject:  fmt.Sprintf("Approval needed: %s", mr.Title),
+			Body:     fmt.Sprintf("MR %s requires human approval.\n\nTo approve: bd gate approve %s --reason approved\n", mr.ID, result.ID),
+			Type:     mail.TypeNotification,
+			Priority: mail.PriorityHigh,
+		}
+		if err := e.router.Send(msg); err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not notify approvers: %v\n", err)
+		}
+	}
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Created approval gate: %s (waiting for human approval)\n", result.ID)
+	return result.ID, nil
 }
 
 // ProcessMR processes a single merge request from a beads issue.
@@ -495,6 +715,51 @@ func (e *Engineer) handleFailure(mr *beads.Issue, result ProcessResult) {
 
 // ProcessMRInfo processes a merge request from MRInfo.
 func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult {
+	// Check merge policy first
+	policyResult, err := e.CheckMergePolicy(mr)
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("checking merge policy: %v", err),
+		}
+	}
+
+	// Check if merge is blocked by policy (target restrictions)
+	if !policyResult.Allowed {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Merge blocked by policy: %s\n", policyResult.BlockReason)
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("blocked by policy: %s", policyResult.BlockReason),
+		}
+	}
+
+	// Check if human approval is required but not yet obtained
+	if policyResult.NeedsGate {
+		if !policyResult.GateExists {
+			// Create the approval gate
+			_, err := e.CreateApprovalGate(mr, policyResult.Policy)
+			if err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not create approval gate: %v\n", err)
+				// Continue without gate (fail-open for robustness)
+			} else {
+				// MR needs to wait for approval - don't process yet
+				return ProcessResult{
+					Success: false,
+					Error:   "waiting for human approval",
+				}
+			}
+		} else if !policyResult.GateClosed {
+			// Gate exists but not yet approved
+			_, _ = fmt.Fprintf(e.output, "[Engineer] MR waiting for human approval\n")
+			return ProcessResult{
+				Success: false,
+				Error:   "waiting for human approval",
+			}
+		}
+		// Gate exists and is closed - approval obtained, continue to merge
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Human approval obtained, proceeding with merge\n")
+	}
+
 	// MR fields are directly on the struct
 	_, _ = fmt.Fprintln(e.output, "[Engineer] Processing MR:")
 	_, _ = fmt.Fprintf(e.output, "  Branch: %s\n", mr.Branch)
@@ -927,4 +1192,55 @@ func (e *Engineer) ReleaseMR(mrID string) error {
 	return e.beads.Update(mrID, beads.UpdateOptions{
 		Assignee: &empty,
 	})
+}
+
+// getProtectedBranches returns the resolved protected branches for this rig.
+// It checks rig-level settings first, then falls back to town-level settings.
+func (e *Engineer) getProtectedBranches() []string {
+	// Find town root from rig path
+	// Rig path is typically: /path/to/town/rigs/rig-name
+	townRoot := filepath.Dir(filepath.Dir(e.rig.Path))
+
+	// Load town settings
+	townSettingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(townSettingsPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not load town settings: %v\n", err)
+		townSettings = nil
+	}
+
+	// Load rig settings
+	rigSettingsPath := config.RigSettingsPath(e.rig.Path)
+	rigSettings, err := config.LoadRigSettings(rigSettingsPath)
+	if err != nil {
+		// No rig settings file, that's ok
+		rigSettings = nil
+	}
+
+	return config.ResolveProtectedBranches(townSettings, rigSettings)
+}
+
+// checkExistingGate checks if an approval gate already exists for the MR
+// and updates the result with gate status.
+func (e *Engineer) checkExistingGate(mr *MRInfo, result *PolicyResult) (*PolicyResult, error) {
+	// Check if gate already exists by fetching the MR bead
+	mrBead, err := e.beads.Show(mr.ID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching MR bead: %w", err)
+	}
+
+	mrFields := beads.ParseMRFields(mrBead)
+	if mrFields != nil && mrFields.ApprovalGateID != "" {
+		result.GateExists = true
+
+		// Check if gate is closed (approved)
+		gateStatus, err := e.checkGateStatus(mrFields.ApprovalGateID)
+		if err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not check gate status: %v\n", err)
+		} else if gateStatus.Closed {
+			result.GateClosed = true
+		}
+	}
+
+	return result, nil
 }
