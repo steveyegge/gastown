@@ -440,6 +440,14 @@ func runShutdown(cmd *cobra.Command, args []string) error {
 
 	if len(toStop) == 0 {
 		fmt.Printf("%s Gas Town was not running\n", style.Dim.Render("○"))
+
+		// Still check for orphaned daemons even if no sessions are running
+		if townRoot != "" {
+			fmt.Println()
+			fmt.Println("Checking for orphaned daemon...")
+			stopDaemonIfRunning(townRoot)
+		}
+
 		return nil
 	}
 
@@ -752,16 +760,48 @@ func cleanupPolecats(townRoot string) {
 
 // stopDaemonIfRunning stops the daemon if it is running.
 // This prevents the daemon from restarting agents after shutdown.
+// Uses robust detection with fallback to process search.
 func stopDaemonIfRunning(townRoot string) {
-	running, _, _ := daemon.IsRunning(townRoot)
+	// Primary detection: PID file
+	running, pid, err := daemon.IsRunning(townRoot)
+
+	if err != nil {
+		// Detection error - report it but continue with fallback
+		fmt.Printf("  %s Daemon detection warning: %s\n", style.Bold.Render("⚠"), err.Error())
+	}
+
 	if running {
+		// PID file points to live daemon - stop it
 		if err := daemon.StopDaemon(townRoot); err != nil {
-			fmt.Printf("  %s Daemon: %s\n", style.Dim.Render("○"), err.Error())
+			fmt.Printf("  %s Failed to stop daemon (PID %d): %s\n",
+				style.Bold.Render("✗"), pid, err.Error())
 		} else {
-			fmt.Printf("  %s Daemon stopped\n", style.Bold.Render("✓"))
+			fmt.Printf("  %s Daemon stopped (was PID %d)\n", style.Bold.Render("✓"), pid)
 		}
 	} else {
-		fmt.Printf("  %s Daemon not running\n", style.Dim.Render("○"))
+		fmt.Printf("  %s Daemon not tracked by PID file\n", style.Dim.Render("○"))
+	}
+
+	// Fallback: Search for orphaned daemon processes
+	orphaned, err := daemon.FindOrphanedDaemons()
+	if err != nil {
+		fmt.Printf("  %s Warning: failed to search for orphaned daemons: %v\n",
+			style.Dim.Render("○"), err)
+		return
+	}
+
+	if len(orphaned) > 0 {
+		fmt.Printf("  %s Found %d orphaned daemon process(es): %v\n",
+			style.Bold.Render("⚠"), len(orphaned), orphaned)
+
+		killed, err := daemon.KillOrphanedDaemons()
+		if err != nil {
+			fmt.Printf("  %s Failed to kill orphaned daemons: %v\n",
+				style.Bold.Render("✗"), err)
+		} else if killed > 0 {
+			fmt.Printf("  %s Killed %d orphaned daemon(s)\n",
+				style.Bold.Render("✓"), killed)
+		}
 	}
 }
 
