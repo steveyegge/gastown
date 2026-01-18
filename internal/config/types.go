@@ -494,10 +494,14 @@ func defaultPromptMode(provider string) string {
 }
 
 func defaultSessionIDEnv(provider string) string {
-	if provider == "claude" {
+	switch provider {
+	case "claude":
 		return "CLAUDE_SESSION_ID"
+	case "copilot":
+		return "COPILOT_SESSION_ID"
+	default:
+		return ""
 	}
-	return ""
 }
 
 func defaultConfigDirEnv(provider string) string {
