@@ -46,8 +46,7 @@ state.json
 .beads/sync_base.jsonl
 .beads-wisp/
 
-# Clone-specific CLAUDE.md (regenerated locally per clone)
-CLAUDE.md
+# Note: CLAUDE.md is now tracked (provides crew context like other rigs)
 
 # Embedded formulas are committed so `go install @latest` works
 # Run `go generate ./...` after modifying .beads/formulas/

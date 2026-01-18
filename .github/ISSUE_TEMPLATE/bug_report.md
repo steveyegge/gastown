@@ -1,35 +1,21 @@
 ---
 name: Bug Report
-about: Report a bug in Gas Town
-title: ''
+about: Something isn't working as expected
 labels: bug
-assignees: ''
 ---
 
-## Bug Description
-<!-- A clear description of what the bug is -->
+**Describe the bug**
 
-## Steps to Reproduce
-1.
-2.
-3.
 
-## Expected Behavior
-<!-- What you expected to happen -->
+**Steps to reproduce**
 
-## Actual Behavior
-<!-- What actually happened -->
 
-## Environment
-- **OS**:
-- **Go version**:
-- **Gas Town version**: (`gt version`)
-- **tmux version** (if applicable):
+**Expected behavior**
 
-## Logs / Error Output
-```
-<!-- Paste relevant logs or error messages -->
-```
 
-## Additional Context
-<!-- Any other context about the problem -->
+**Environment**
+- OS:
+- Gas Town version: `gt version`
+
+---
+- [ ] I searched existing issues and didn't find a duplicate
