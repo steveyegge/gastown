@@ -303,6 +303,24 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		// not the agent from the GT_ROLE env var (which might be different if
 		// we cd'd into another rig's crew/polecat directory)
 		roleCtx = detectRole(cwd, townRoot)
+
+		// If cwd detection fails (e.g., at rig root), fall back to env vars
+		// This handles the case where agent cd's to a non-standard location
+		// but still has GT_ROLE/GT_RIG/GT_CREW env vars set
+		if roleCtx.Role == RoleUnknown {
+			envCtx, err := GetRoleWithContext(cwd, townRoot)
+			if err == nil && envCtx.Role != RoleUnknown {
+				roleCtx = RoleContext{
+					Role:     envCtx.Role,
+					Rig:      envCtx.Rig,
+					Polecat:  envCtx.Polecat,
+					TownRoot: envCtx.TownRoot,
+					WorkDir:  envCtx.WorkDir,
+					Source:   envCtx.Source,
+				}
+			}
+		}
+
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
@@ -735,6 +753,24 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 		// not the agent from the GT_ROLE env var (which might be different if
 		// we cd'd into another rig's crew/polecat directory)
 		roleCtx = detectRole(cwd, townRoot)
+
+		// If cwd detection fails (e.g., at rig root), fall back to env vars
+		// This handles the case where agent cd's to a non-standard location
+		// but still has GT_ROLE/GT_RIG/GT_CREW env vars set
+		if roleCtx.Role == RoleUnknown {
+			envCtx, err := GetRoleWithContext(cwd, townRoot)
+			if err == nil && envCtx.Role != RoleUnknown {
+				roleCtx = RoleContext{
+					Role:     envCtx.Role,
+					Rig:      envCtx.Rig,
+					Polecat:  envCtx.Polecat,
+					TownRoot: envCtx.TownRoot,
+					WorkDir:  envCtx.WorkDir,
+					Source:   envCtx.Source,
+				}
+			}
+		}
+
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
