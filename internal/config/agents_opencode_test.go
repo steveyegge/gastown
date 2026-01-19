@@ -22,12 +22,25 @@ func TestOpencodeAgentPreset(t *testing.T) {
 		t.Errorf("Command = %s, want opencode", preset.Command)
 	}
 
-	// Test process detection
-	if len(preset.ProcessNames) != 1 {
-		t.Errorf("ProcessNames length = %d, want 1", len(preset.ProcessNames))
+	// Test process detection - OpenCode can appear as "node" or "opencode" depending on startup
+	if len(preset.ProcessNames) != 2 {
+		t.Errorf("ProcessNames length = %d, want 2", len(preset.ProcessNames))
 	}
-	if preset.ProcessNames[0] != "node" {
-		t.Errorf("ProcessNames[0] = %s, want node", preset.ProcessNames[0])
+	// Should include both "node" (when started via bash -c) and "opencode"
+	foundNode, foundOpencode := false, false
+	for _, name := range preset.ProcessNames {
+		if name == "node" {
+			foundNode = true
+		}
+		if name == "opencode" {
+			foundOpencode = true
+		}
+	}
+	if !foundNode {
+		t.Error("ProcessNames should include 'node'")
+	}
+	if !foundOpencode {
+		t.Error("ProcessNames should include 'opencode'")
 	}
 
 	// Test session features

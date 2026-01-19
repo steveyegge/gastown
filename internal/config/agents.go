@@ -183,7 +183,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentOpencode,
 		Command:             "opencode",
 		Args:                []string{}, // opencode uses config file for settings
-		ProcessNames:        []string{"opencode"}, // opencode is a native binary, not Node.js
+		ProcessNames:        []string{"node", "opencode"}, // opencode can appear as node or opencode depending on startup
 		SessionIDEnv:        "", // opencode manages sessions internally
 		ResumeFlag:          "--session",
 		ResumeStyle:         "flag",
