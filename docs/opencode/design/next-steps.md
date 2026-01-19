@@ -63,35 +63,50 @@
 - Claude Code renders these and writes to workspace as `CLAUDE.md`
 - OpenCode does NOT automatically read `OPENCODE.md` files
 
-**Key Insight**: OpenCode CAN be configured to read `CLAUDE.md` via the `instructions` config:
+**Key Insight**: OpenCode supports **custom agents** that separate permissions from instructions:
+
 ```jsonc
 // .opencode/config.jsonc
 {
-  "instructions": ["CLAUDE.md"]  // Loads CLAUDE.md as context
+  "agents": {
+    "polecat": {
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "instructions": ["roles/polecat.md"],  // Reference separate file
+      "permission": { "*": "allow" }          // Autonomous permissions
+    },
+    "witness": {
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "instructions": ["roles/witness.md"],
+      "permission": {
+        "file.read": "allow",
+        "file.write": "ask",
+        "shell.exec": "ask"
+      }
+    }
+  }
 }
 ```
+
+This approach:
+- Separates permissions (config) from instructions (markdown files)
+- Allows reusing `CLAUDE.md` or role-specific files
+- Custom commands can also reference markdown files the same way
 
 **Implementation Options**:
 
 | Option | How | Pros | Cons |
 |--------|-----|------|------|
-| **A: CLAUDE.md + config** | Write `CLAUDE.md`, add to `instructions` config | Reuses existing templates | Requires config change |
-| **B: Plugin injection** | Plugin injects role context via `chat.message` hook on `session.created` | No config needed, dynamic | More complex plugin |
-| **C: Both** | CLAUDE.md for reference + plugin for injection | Best of both | Potential duplication |
+| **A: Custom agents** | Define agents with `instructions` pointing to role files | Clean separation, no plugin changes | Requires config per workspace |
+| **B: Plugin injection** | Plugin injects role context on `session.created` | No config needed, dynamic | More complex plugin |
+| **C: Hybrid** | Custom agents for permissions + plugin for dynamic context | Best of both | More moving parts |
 
-**Recommended**: Option B or C - Plugin injection is cleanest since it:
-- Works without config changes
-- Can use GT_ROLE environment variable to select template
-- Already runs on session.created
-
-**Current Plugin Approach**:
-The gastown.js plugin already injects `gt prime` output on session start.
-We could extend this to also inject role-specific instructions based on `GT_ROLE`.
+**Recommended**: Option A (Custom Agents) for production, Option B for flexibility.
 
 **Tasks**:
-- [ ] Extend plugin to read role template and inject on session.created
-- [ ] OR configure OpenCode to read `CLAUDE.md` via instructions
-- [ ] Document approach in `design/gastown-plugin.md`
+- [ ] Create role instruction files (can reuse/adapt `CLAUDE.md` templates)
+- [ ] Define custom agents in `.opencode/config.jsonc` per role
+- [ ] OR extend plugin to inject role context based on `GT_ROLE`
+- [ ] Document approach in `design/gastown-plugin.md` and `reference/customization.md`
 
 ### 3. Formula/Specialized Agent Support
 

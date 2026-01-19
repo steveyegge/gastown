@@ -21,23 +21,57 @@
 
 ## Custom Agents
 
-Define custom agent profiles with different models, permissions, or system prompts.
+Define custom agent profiles with different models, permissions, and instructions.
 
-### Configuration
+### Key Pattern: Separate Permissions from Instructions
+
+OpenCode allows you to **separate configuration (permissions) from content (instructions)** by referencing external markdown files:
 
 ```jsonc
 // .opencode/config.jsonc
 {
   "agents": {
-    // Autonomous agent - no prompts, full permissions
     "polecat": {
-      "model": "anthropic/claude-3-5-sonnet-20241022",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "instructions": ["roles/polecat.md"],   // Role-specific instructions
+      "permission": { "*": "allow" }           // Autonomous permissions
+    },
+    "witness": {
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "instructions": ["roles/witness.md"],
+      "permission": {
+        "file.read": "allow",
+        "file.write": "ask",
+        "shell.exec": "ask"
+      }
+    }
+  }
+}
+```
+
+This approach:
+- **Keeps instructions as Markdown** - Easier to version, review, and share
+- **Keeps permissions in config** - Machine-readable, can be templated
+- **Enables reuse** - Same instructions, different permission profiles
+- **Works with CLAUDE.md** - Can reference existing Claude Code instructions
+
+### Configuration Examples
+
+```jsonc
+// .opencode/config.jsonc
+{
+  "agents": {
+    // Autonomous agent - full permissions, role instructions
+    "polecat": {
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "instructions": ["CLAUDE.md"],           // Reuse existing CLAUDE.md
       "permission": { "*": "allow" }
     },
     
     // Interactive agent - confirm dangerous ops
     "crew": {
-      "model": "anthropic/claude-3-5-sonnet-20241022",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "instructions": ["roles/crew.md"],
       "permission": {
         "read": "allow",
         "list": "allow",
@@ -54,7 +88,8 @@ Define custom agent profiles with different models, permissions, or system promp
     
     // Research agent with web access
     "researcher": {
-      "model": "anthropic/claude-3-5-sonnet-20241022",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "instructions": ["roles/researcher.md"],
       "permission": {
         "*": "allow",
         "webfetch": "allow"
@@ -65,10 +100,31 @@ Define custom agent profiles with different models, permissions, or system promp
 }
 ```
 
+### Instructions File Format
+
+Instructions files are plain Markdown:
+
+```markdown
+<!-- roles/polecat.md -->
+# Polecat Worker
+
+You are an autonomous worker agent.
+
+## Your Role
+- Execute assigned work from your hook
+- Complete tasks and report done
+- Do NOT wait idly - work or escalate
+
+## Commands
+- `gt prime` - Recover context
+- `gt mail check --inject` - Get work assignments  
+- `gt done` - Complete current work
+```
+
 ### Usage
 
 ```bash
-opencode --agent polecat    # Use polecat profile
+opencode --agent polecat    # Use polecat profile with its instructions
 opencode --agent researcher # Use researcher profile
 ```
 
@@ -148,6 +204,26 @@ Follow the patterns in @tests/example_test.go
 |----------|-------------|
 | `$ARGUMENTS` | Everything after the command name |
 | `@path/to/file` | Include file contents inline |
+
+### Same Pattern as Agents
+
+Just like custom agents, commands can **reference external files** for their content:
+
+```markdown
+<!-- .opencode/commands/polecat-work.md -->
+---
+description: Start polecat work mode
+---
+
+@roles/polecat.md
+
+Now check your hook and start working:
+- Run `gt prime && bd prime`
+- Check `gt hook` for assigned work
+- Execute steps with `bd ready` / `bd close`
+```
+
+This keeps role-specific instructions in one place (`roles/*.md`) that both agents and commands can reference.
 
 ---
 
