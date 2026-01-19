@@ -284,11 +284,45 @@ func WaitForSession(t *testing.T, session string, timeout time.Duration) error
 func WaitForPaneCommand(t *testing.T, session string, expected []string, timeout time.Duration) error
 ```
 
+**6. Manager Abstraction (Better Approach)**
+
+Tests should use managers, not tmux directly:
+
+```go
+// Current test (bad - knows about tmux)
+tm := tmux.NewTmux()
+go func() { mgr.Start("opencode") }()
+for { 
+    if exists, _ := tm.HasSession(sessionName); exists { ... }
+}
+
+// Improved test (good - manager hides tmux)
+if err := mgr.Start("opencode"); err != nil { ... }  // blocks until ready
+status, _ := mgr.Status()  // no tmux knowledge needed
+```
+
+**Proposed Manager Changes**:
+```go
+// Manager.Start() already waits internally via WaitForCommand
+// Add runtime-aware readiness based on RuntimeConfig:
+
+func (m *Manager) IsReady() (bool, error)  // checks if agent is responsive
+func (m *Manager) WaitForReady(timeout time.Duration) error  // blocks until ready
+```
+
+The `RuntimeConfig.Tmux` already has:
+- `ProcessNames` - expected pane commands
+- `ReadyPromptPrefix` - prompt to detect
+- `ReadyDelayMs` - fallback delay
+
+These should drive `WaitForReady()` automatically based on the agent configuration.
+
 **Tasks**:
 - [ ] Create `internal/testutil/` package
-- [ ] Extract constants to file top
+- [ ] Extract constants to file top  
 - [ ] Move helpers to testutil
-- [ ] Update integration_test.go to use fixtures
+- [ ] **Add `Manager.WaitForReady()` using RuntimeConfig.Tmux**
+- [ ] Update integration_test.go to use fixtures and manager methods
 - [ ] Apply same patterns to other E2E tests
 
 ## Quick Reference
