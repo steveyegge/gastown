@@ -511,10 +511,11 @@ func addressToIdentity(address string) string {
 	}
 
 	// Town-level agents: mayor and deacon keep trailing slash
-	if address == "mayor" || address == "mayor/" {
+	// Handle both bare names and beads/ prefixed forms (they route to same mailbox)
+	if address == "mayor" || address == "mayor/" || address == "beads/mayor" || address == "beads/mayor/" {
 		return "mayor/"
 	}
-	if address == "deacon" || address == "deacon/" {
+	if address == "deacon" || address == "deacon/" || address == "beads/deacon" || address == "beads/deacon/" {
 		return "deacon/"
 	}
 
