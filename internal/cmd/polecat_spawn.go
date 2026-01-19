@@ -84,6 +84,12 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		HookBead: opts.HookBead,
 	}
 
+	// polecatObj will hold the polecat returned from Add or Repair.
+	// We use this directly instead of calling Get() afterwards, because Get()
+	// re-computes the path using os.Stat() which can fail for remote rigs.
+	// See: gt-job89 - "gt sling creates worktree in nested subdirectory"
+	var polecatObj *polecat.Polecat
+
 	if err == nil {
 		// Stale state: polecat exists despite fresh name allocation - repair it
 		// Check for uncommitted work first
@@ -96,23 +102,19 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 			}
 		}
 		fmt.Printf("Repairing stale polecat %s with fresh worktree...\n", polecatName)
-		if _, err = polecatMgr.RepairWorktreeWithOptions(polecatName, opts.Force, addOpts); err != nil {
+		polecatObj, err = polecatMgr.RepairWorktreeWithOptions(polecatName, opts.Force, addOpts)
+		if err != nil {
 			return nil, fmt.Errorf("repairing stale polecat: %w", err)
 		}
 	} else if err == polecat.ErrPolecatNotFound {
 		// Create new polecat
 		fmt.Printf("Creating polecat %s...\n", polecatName)
-		if _, err = polecatMgr.AddWithOptions(polecatName, addOpts); err != nil {
+		polecatObj, err = polecatMgr.AddWithOptions(polecatName, addOpts)
+		if err != nil {
 			return nil, fmt.Errorf("creating polecat: %w", err)
 		}
 	} else {
 		return nil, fmt.Errorf("getting polecat: %w", err)
-	}
-
-	// Get polecat object for path info
-	polecatObj, err := polecatMgr.Get(polecatName)
-	if err != nil {
-		return nil, fmt.Errorf("getting polecat after creation: %w", err)
 	}
 
 	// Resolve account for runtime config
@@ -134,6 +136,12 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 		startOpts := polecat.SessionStartOptions{
 			RuntimeConfigDir: claudeConfigDir,
+			// Use the ClonePath from the polecat object directly, rather than
+			// letting the session manager re-compute it via clonePath() which
+			// uses os.Stat(). This ensures consistency for remote rigs where
+			// the local filesystem check would fail.
+			// See: gt-job89 - "gt sling creates worktree in nested subdirectory"
+			WorkDir: polecatObj.ClonePath,
 		}
 		if opts.Agent != "" {
 			cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, r.Path, "", opts.Agent)
