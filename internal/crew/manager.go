@@ -315,15 +315,14 @@ func (m *Manager) loadState(name string) (*CrewWorker, error) {
 		return nil, fmt.Errorf("parsing state: %w", err)
 	}
 
-	// Backfill essential fields if missing (handles empty or incomplete state.json)
-	if crew.Name == "" {
-		crew.Name = name
-	}
+	// Directory name is source of truth for Name and ClonePath.
+	// state.json can become stale after directory rename, copy, or corruption.
+	crew.Name = name
+	crew.ClonePath = m.crewDir(name)
+
+	// Rig only needs backfill when empty (less likely to drift)
 	if crew.Rig == "" {
 		crew.Rig = m.rig.Name
-	}
-	if crew.ClonePath == "" {
-		crew.ClonePath = m.crewDir(name)
 	}
 
 	return &crew, nil

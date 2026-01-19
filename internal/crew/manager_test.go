@@ -342,6 +342,56 @@ func TestManagerRemove(t *testing.T) {
 	}
 }
 
+func TestManagerGetWithStaleStateName(t *testing.T) {
+	// Regression test: state.json with wrong name should not affect Get() result
+	// See: gt-h1w - gt crew list shows wrong names
+	tmpDir, err := os.MkdirTemp("", "crew-test-stale-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	rigPath := filepath.Join(tmpDir, "test-rig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("failed to create rig dir: %v", err)
+	}
+
+	r := &rig.Rig{
+		Name: "test-rig",
+		Path: rigPath,
+	}
+
+	mgr := NewManager(r, git.NewGit(rigPath))
+
+	// Manually create a crew directory with wrong name in state.json
+	crewDir := filepath.Join(rigPath, "crew", "alice")
+	if err := os.MkdirAll(crewDir, 0755); err != nil {
+		t.Fatalf("failed to create crew dir: %v", err)
+	}
+
+	// Write state.json with wrong name (simulates stale/copied state)
+	stateFile := filepath.Join(crewDir, "state.json")
+	staleState := `{"name": "bob", "rig": "test-rig", "clone_path": "/wrong/path"}`
+	if err := os.WriteFile(stateFile, []byte(staleState), 0644); err != nil {
+		t.Fatalf("failed to write state file: %v", err)
+	}
+
+	// Get should return correct name (alice) not stale name (bob)
+	worker, err := mgr.Get("alice")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if worker.Name != "alice" {
+		t.Errorf("expected name 'alice', got '%s' (stale state.json not overridden)", worker.Name)
+	}
+
+	expectedPath := filepath.Join(rigPath, "crew", "alice")
+	if worker.ClonePath != expectedPath {
+		t.Errorf("expected clone_path '%s', got '%s'", expectedPath, worker.ClonePath)
+	}
+}
+
 // Helper to run commands
 func runCmd(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
