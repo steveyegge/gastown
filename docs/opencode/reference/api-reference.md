@@ -1,83 +1,112 @@
 ---
-# OpenCode Quick Reference
-# Topic-based reference with links to official docs and source code
+# OpenCode Concept Reference
+# Glossary of OpenCode concepts with links to all sources
 
 last_updated: 2026-01-19
 ---
 
-# OpenCode Quick Reference
+# OpenCode Concept Reference
 
-Quick reference for OpenCode concepts with links to official docs, source code, and community resources.
-
----
-
-## External Sources
-
-### Primary Sources
-
-| Source | URL | Notes |
-|--------|-----|-------|
-| **OpenCode Repository** | [github.com/anomalyco/opencode](https://github.com/anomalyco/opencode) | Source of truth - docs lag behind |
-| **Official Documentation** | [opencode.ai/docs](https://opencode.ai/docs/) | May not reflect latest features |
-| **ACP Specification** | [agentclientprotocol.com](https://agentclientprotocol.com/) | Agent Client Protocol draft |
-| **Config Schema** | [opencode.ai/config.json](https://opencode.ai/config.json) | JSON schema for config |
-
-### Community Resources
-
-| Source | URL | Notes |
-|--------|-----|-------|
-| **Awesome OpenCode** | [github.com/awesome-opencode/awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) | Community plugins, tools, extensions |
-| **Ecosystem** | [opencode.ai/docs/ecosystem](https://opencode.ai/docs/ecosystem/) | Official ecosystem directory |
-| **DeepWiki** | [deepwiki.com/anomalyco/opencode](https://deepwiki.com/anomalyco/opencode/) | Technical deep dives |
-
-### Key GitHub Issues
-
-| Issue | Topic |
-|-------|-------|
-| [#7978](https://github.com/anomalyco/opencode/issues/7978) | ACP draft methods (session/fork, session/list) |
-| [#1473](https://github.com/anomalyco/opencode/issues/1473) | Hooks support discussion |
-| [#2829](https://github.com/anomalyco/opencode/issues/2829) | Model variants |
+A glossary of OpenCode concepts with links to official docs, source code, CLI, and SDK.
 
 ---
 
-## Topic Reference
+## How to Use This Document
 
-### CLI
-
-Command-line interface for interactive and scripted use.
-
-| Resource | Link |
-|----------|------|
-| **Official Docs** | [opencode.ai/docs/cli](https://opencode.ai/docs/cli/) |
-| **Source (cmd/)** | [github.com/anomalyco/opencode/tree/main/cmd](https://github.com/anomalyco/opencode/tree/main/cmd) |
-
-**Execution Modes**:
-
-| Mode | Command | Use Case |
-|------|---------|----------|
-| Interactive TUI | `opencode` | Human-in-the-loop |
-| Attach to Server | `opencode attach <url>` | Connect to existing server |
-| Headless | `opencode run "prompt"` | Scripting/automation |
-| Server Only | `opencode serve` | API access |
-| Web Interface | `opencode web` | Browser access |
-
-**Key Flags**:
-- `--continue/-c` - Resume last session
-- `--session/-s <id>` - Resume specific session  
-- `--prompt` - Initial prompt
-- `--port` - Server port
+For each concept, find:
+- **What it is** - Brief description
+- **Official Docs** - opencode.ai documentation
+- **Source** - GitHub directories
+- **CLI** - Command-line usage
+- **SDK** - Programmatic API
+- **Community** - Extensions and plugins
 
 ---
 
-### SDK
+## Concept Glossary
 
-Programmatic access via JavaScript/TypeScript SDK.
+### Sessions
 
-| Resource | Link |
-|----------|------|
+The core unit of conversation and context in OpenCode.
+
+| Source | Link |
+|--------|------|
+| **Official Docs** | [opencode.ai/docs/sessions](https://opencode.ai/docs/sessions/) |
+| **Source** | [/packages/opencode/src/session](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/session) |
+| **CLI** | `opencode --session <id>`, `opencode session list` |
+| **SDK** | `client.session.create()`, `client.session.list()` |
+| **HTTP API** | `GET /session`, `POST /session`, `GET /session/:id` |
+
+**Key Operations**:
+- Create: `opencode` or `POST /session`
+- Resume: `opencode --session <id>` or `opencode -c` (last session)
+- List: `opencode session list`
+- Fork: `POST /session/:id/fork` with `{ messageID: "..." }`
+- Export: `opencode export <id>`
+
+---
+
+### Plugins
+
+Event-driven extensions that run within OpenCode.
+
+| Source | Link |
+|--------|------|
+| **Official Docs** | [opencode.ai/docs/plugins](https://opencode.ai/docs/plugins/) |
+| **Source** | [/packages/opencode/src/plugin](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/plugin) |
+| **Location** | `.opencode/plugin/<name>.js` |
+| **Community** | [awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) |
+| **Gastown Guide** | [plugin-guide.md](plugin-guide.md) |
+
+**Key Events**:
+
+| Event | Fires When |
+|-------|------------|
+| `session.created` | New session starts |
+| `message.updated` | Response complete |
+| `session.idle` | No activity (debounced) |
+| `session.compacted` | Context compaction |
+| `session.error` | Error occurs |
+
+---
+
+### Server / HTTP API
+
+REST API for remote session management.
+
+| Source | Link |
+|--------|------|
+| **Official Docs** | [opencode.ai/docs/server](https://opencode.ai/docs/server/) |
+| **Source** | [/packages/server](https://github.com/anomalyco/opencode/tree/main/packages/server) |
+| **CLI** | `opencode serve --port 4096` |
+| **Default Port** | 4096 |
+
+**Endpoints**:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/session` | List sessions |
+| POST | `/session` | Create session |
+| GET | `/session/:id` | Get session |
+| POST | `/session/:id/message` | Send prompt |
+| POST | `/session/:id/abort` | Cancel request |
+| POST | `/session/:id/fork` | Fork from message |
+
+**Environment Variables**:
+- `OPENCODE_SERVER_PASSWORD` - HTTP basic auth
+- `OPENCODE_SERVER_USERNAME` - Auth username (default: opencode)
+
+---
+
+### SDK (JavaScript/TypeScript)
+
+Programmatic access to OpenCode.
+
+| Source | Link |
+|--------|------|
 | **Official Docs** | [opencode.ai/docs/sdk](https://opencode.ai/docs/sdk/) |
-| **NPM Package** | [@opencode-ai/sdk](https://www.npmjs.com/package/@opencode-ai/sdk) |
-| **Source** | [github.com/anomalyco/opencode/tree/main/packages/sdk](https://github.com/anomalyco/opencode/tree/main/packages/sdk) |
+| **Source** | [/packages/sdk](https://github.com/anomalyco/opencode/tree/main/packages/sdk) |
+| **NPM** | [@opencode-ai/sdk](https://www.npmjs.com/package/@opencode-ai/sdk) |
 
 **Key APIs**:
 ```javascript
@@ -90,97 +119,73 @@ const { client, server } = await createOpencode({ port: 4096 })
 const client = createOpencodeClient({ baseUrl: "http://localhost:4096" })
 
 // Session management
-const session = await client.session.create({ body: { title: "Mayor" } })
+const session = await client.session.create({ body: { title: "My Session" } })
 await client.session.prompt({
   path: { id: session.id },
-  body: { parts: [{ type: "text", text: "Your task..." }] }
+  body: { parts: [{ type: "text", text: "Hello" }] }
+})
+
+// Context injection (no response)
+await client.session.prompt({
+  path: { id: session.id },
+  body: { noReply: true, parts: [{ type: "text", text: "Context..." }] }
 })
 ```
 
 ---
 
-### Go SDK
+### SDK (Go)
 
-Go SDK for programmatic orchestration (Stage 2 plans).
+Go SDK for programmatic orchestration.
 
-| Resource | Link |
-|----------|------|
+| Source | Link |
+|--------|------|
 | **Repository** | [github.com/anomalyco/opencode-sdk-go](https://github.com/anomalyco/opencode-sdk-go) |
-| **Gastown Plans** | [stage2-sdk-orchestration.md](stage2-sdk-orchestration.md) |
+| **Gastown Plans** | [planning/stage2-sdk.md](../planning/stage2-sdk.md) |
 
 ---
 
-### Server / HTTP API
+### CLI
 
-REST API for session and message management.
+Command-line interface.
 
-| Resource | Link |
-|----------|------|
-| **Official Docs** | [opencode.ai/docs/server](https://opencode.ai/docs/server/) |
-| **Source (server/)** | [github.com/anomalyco/opencode/tree/main/packages/server](https://github.com/anomalyco/opencode/tree/main/packages/server) |
+| Source | Link |
+|--------|------|
+| **Official Docs** | [opencode.ai/docs/cli](https://opencode.ai/docs/cli/) |
+| **Source** | [/cmd](https://github.com/anomalyco/opencode/tree/main/cmd) |
 
-**Endpoints**:
+**Execution Modes**:
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/session` | GET | List sessions |
-| `/session` | POST | Create session |
-| `/session/:id` | GET | Get session info |
-| `/session/:id/message` | POST | Send prompt |
-| `/session/:id/abort` | POST | Cancel request |
-| `/session/:id/fork` | POST | Fork session |
+| Mode | Command | Purpose |
+|------|---------|---------|
+| Interactive | `opencode` | TUI for humans |
+| Attach | `opencode attach <url>` | Connect to server |
+| Headless | `opencode run "prompt"` | Scripting |
+| Server | `opencode serve` | API only |
+| Web | `opencode web` | Browser UI |
 
-**Environment Variables**:
-- `OPENCODE_SERVER_PASSWORD` - HTTP basic auth password
-- `OPENCODE_SERVER_USERNAME` - HTTP basic auth username
-- `OPENCODE_PERMISSION` - Auto-approve permissions
+**Key Flags**:
 
----
-
-### Plugins
-
-Event-driven extensions that run within OpenCode.
-
-| Resource | Link |
-|----------|------|
-| **Official Docs** | [opencode.ai/docs/plugins](https://opencode.ai/docs/plugins/) |
-| **Source (plugin/)** | [github.com/anomalyco/opencode/tree/main/packages/opencode/src/plugin](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/plugin) |
-| **Gastown Guide** | [plugin-guide.md](plugin-guide.md) |
-| **Community Plugins** | [awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) |
-
-**Key Events (for Gastown)**:
-
-| Event | Fires When | Gastown Use |
-|-------|------------|-------------|
-| `session.created` | New session starts | `gt prime`, `gt mail check` |
-| `message.updated` | Response complete | Check mail for interactive roles |
-| `session.idle` | No activity | `gt costs record` |
-| `session.compacted` | Context compaction | Archive to `.beads` |
-
----
-
-### Sessions
-
-Session management, forking, and persistence.
-
-| Resource | Link |
-|----------|------|
-| **Source (session/)** | [github.com/anomalyco/opencode/tree/main/packages/opencode/src/session](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/session) |
-| **Fork via HTTP** | POST `/session/:id/fork` with `{ messageID: "..." }` |
-| **Fork via TUI** | Type `/fork` in TUI |
-| **ACP Fork RFC** | [agentclientprotocol.com/rfds/session-fork](https://agentclientprotocol.com/rfds/session-fork) |
+| Flag | Purpose |
+|------|---------|
+| `-c, --continue` | Resume last session |
+| `-s, --session <id>` | Resume specific session |
+| `--prompt` | Initial prompt |
+| `--port` | Server port |
+| `--agent` | Use specific agent |
+| `-m, --model` | Override model |
 
 ---
 
 ### Tools / MCP
 
-Model Context Protocol tools for extending agent capabilities.
+Model Context Protocol tools for extending capabilities.
 
-| Resource | Link |
-|----------|------|
+| Source | Link |
+|--------|------|
 | **MCP Spec** | [modelcontextprotocol.io](https://modelcontextprotocol.io/) |
-| **Source (tools/)** | [github.com/anomalyco/opencode/tree/main/packages/opencode/src/tool](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/tool) |
-| **Community Tools** | [awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) |
+| **Source** | [/packages/opencode/src/tool](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/tool) |
+| **Community** | [awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) |
 
 ---
 
@@ -188,47 +193,62 @@ Model Context Protocol tools for extending agent capabilities.
 
 Configuration files and schema.
 
-| Resource | Link |
-|----------|------|
-| **Config Schema** | [opencode.ai/config.json](https://opencode.ai/config.json) |
-| **Source (config/)** | [github.com/anomalyco/opencode/tree/main/packages/opencode/src/config](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/config) |
+| Source | Link |
+|--------|------|
+| **Schema** | [opencode.ai/config.json](https://opencode.ai/config.json) |
+| **Source** | [/packages/opencode/src/config](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/config) |
 
-**Config Locations**:
+**Locations**:
 - Project: `.opencode/config.json`
 - Global: `~/.config/opencode/config.json`
+
+**Environment**:
+- `OPENCODE_CONFIG` - Path to config file
+- `OPENCODE_PERMISSION` - Auto-approve permissions
 
 ---
 
 ### Agents
 
-Multi-agent capabilities and agent definitions.
+Multi-agent definitions.
 
-| Resource | Link |
-|----------|------|
-| **Source (agent/)** | [github.com/anomalyco/opencode/tree/main/packages/opencode/src/agent](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/agent) |
-| **Community Agents** | [awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) |
-
----
-
-## Gastown Integration Points
-
-| Gastown Operation | OpenCode Approach |
-|-------------------|-------------------|
-| Start Mayor agent | `opencode --session <id>` in tmux |
-| Send nudge | `tmux send-keys` OR SDK `session.prompt()` |
-| Headless task | `opencode run "task"` |
-| Polecat work | `opencode run "task"` |
-| Check costs | Plugin `session.idle` → `gt costs record` |
-| Session fork | HTTP POST `/session/:id/fork` |
+| Source | Link |
+|--------|------|
+| **Source** | [/packages/opencode/src/agent](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/agent) |
+| **Community** | [awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) |
 
 ---
 
-## When to Check Community First
+## Quick Lookup Table
 
-Before building a feature, check if it already exists:
+| Concept | CLI | SDK | HTTP API | Docs | Source |
+|---------|-----|-----|----------|------|--------|
+| **Session** | `opencode --session` | `client.session.*` | `/session` | [docs](https://opencode.ai/docs/sessions/) | [src](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/session) |
+| **Plugin** | - | - | - | [docs](https://opencode.ai/docs/plugins/) | [src](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/plugin) |
+| **Server** | `opencode serve` | `createOpencode()` | - | [docs](https://opencode.ai/docs/server/) | [src](https://github.com/anomalyco/opencode/tree/main/packages/server) |
+| **Config** | - | - | - | - | [src](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/config) |
+| **Tools** | - | - | - | - | [src](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/tool) |
+| **Agents** | `--agent` | - | - | - | [src](https://github.com/anomalyco/opencode/tree/main/packages/opencode/src/agent) |
 
-1. **[Awesome OpenCode](https://github.com/awesome-opencode/awesome-opencode)** - Community extensions
-2. **[Ecosystem](https://opencode.ai/docs/ecosystem/)** - Official directory
-3. **[GitHub Issues](https://github.com/anomalyco/opencode/issues)** - Feature requests/discussions
+---
 
-OpenCode supports extension via SDK, plugins, MCP tools - consider using an existing solution over building from scratch.
+## External Resources
+
+| Resource | URL | Notes |
+|----------|-----|-------|
+| **Repository** | [github.com/anomalyco/opencode](https://github.com/anomalyco/opencode) | Source of truth |
+| **Official Docs** | [opencode.ai/docs](https://opencode.ai/docs/) | May lag behind |
+| **Awesome OpenCode** | [awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) | Community extensions |
+| **Ecosystem** | [opencode.ai/docs/ecosystem](https://opencode.ai/docs/ecosystem/) | Official directory |
+| **ACP Spec** | [agentclientprotocol.com](https://agentclientprotocol.com/) | Protocol spec |
+| **DeepWiki** | [deepwiki.com/anomalyco/opencode](https://deepwiki.com/anomalyco/opencode/) | Technical analysis |
+
+---
+
+## Key GitHub Issues
+
+| Issue | Topic |
+|-------|-------|
+| [#7978](https://github.com/anomalyco/opencode/issues/7978) | ACP draft methods (session/fork) |
+| [#1473](https://github.com/anomalyco/opencode/issues/1473) | Hooks support |
+| [#2829](https://github.com/anomalyco/opencode/issues/2829) | Model variants |
