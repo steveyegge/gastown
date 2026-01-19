@@ -228,11 +228,137 @@ func TestSessionHookCheck_Run(t *testing.T) {
 	})
 }
 
+func TestSessionHookCheck_Fix(t *testing.T) {
+	t.Run("fixes bare gt prime to gt prime --hook", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		claudeDir := filepath.Join(tmpDir, ".claude")
+		if err := os.MkdirAll(claudeDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create settings with bare gt prime
+		settings := `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "gt prime"}]}]}}`
+		settingsPath := filepath.Join(claudeDir, "settings.json")
+		if err := os.WriteFile(settingsPath, []byte(settings), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		check := NewSessionHookCheck()
+		ctx := &CheckContext{TownRoot: tmpDir}
+
+		// Run to detect issue and cache file
+		result := check.Run(ctx)
+		if result.Status != StatusWarning {
+			t.Errorf("expected StatusWarning before fix, got %v", result.Status)
+		}
+
+		// Apply fix
+		if err := check.Fix(ctx); err != nil {
+			t.Fatalf("Fix failed: %v", err)
+		}
+
+		// Re-run to verify fix
+		result = check.Run(ctx)
+		if result.Status != StatusOK {
+			t.Errorf("expected StatusOK after fix, got %v: %v", result.Status, result.Details)
+		}
+
+		// Verify file content
+		data, err := os.ReadFile(settingsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(data)
+		if !strings.Contains(content, "gt prime --hook") {
+			t.Errorf("expected 'gt prime --hook' in fixed file, got: %s", content)
+		}
+	})
+
+	t.Run("fixes multiple hooks in same file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		claudeDir := filepath.Join(tmpDir, ".claude")
+		if err := os.MkdirAll(claudeDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		settings := `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "gt prime && echo done"}]}], "PreCompact": [{"hooks": [{"type": "command", "command": "gt prime"}]}]}}`
+		settingsPath := filepath.Join(claudeDir, "settings.json")
+		if err := os.WriteFile(settingsPath, []byte(settings), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		check := NewSessionHookCheck()
+		ctx := &CheckContext{TownRoot: tmpDir}
+
+		result := check.Run(ctx)
+		if result.Status != StatusWarning {
+			t.Errorf("expected StatusWarning before fix, got %v", result.Status)
+		}
+
+		if err := check.Fix(ctx); err != nil {
+			t.Fatalf("Fix failed: %v", err)
+		}
+
+		result = check.Run(ctx)
+		if result.Status != StatusOK {
+			t.Errorf("expected StatusOK after fix, got %v: %v", result.Status, result.Details)
+		}
+
+		data, err := os.ReadFile(settingsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(data)
+		// Both hooks should now have --hook
+		if strings.Count(content, "gt prime --hook") != 2 {
+			t.Errorf("expected 2 occurrences of 'gt prime --hook', got content: %s", content)
+		}
+	})
+
+	t.Run("does not double-add --hook", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		claudeDir := filepath.Join(tmpDir, ".claude")
+		if err := os.MkdirAll(claudeDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		settings := `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "gt prime --hook"}]}]}}`
+		settingsPath := filepath.Join(claudeDir, "settings.json")
+		if err := os.WriteFile(settingsPath, []byte(settings), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		check := NewSessionHookCheck()
+		ctx := &CheckContext{TownRoot: tmpDir}
+
+		// Should already be OK
+		result := check.Run(ctx)
+		if result.Status != StatusOK {
+			t.Errorf("expected StatusOK for already-fixed file, got %v", result.Status)
+		}
+
+		// Fix should be no-op (no files cached)
+		if err := check.Fix(ctx); err != nil {
+			t.Fatalf("Fix failed: %v", err)
+		}
+
+		data, err := os.ReadFile(settingsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(data)
+		// Should not have --hook --hook
+		if strings.Contains(content, "--hook --hook") {
+			t.Errorf("fix doubled --hook flag: %s", content)
+		}
+	})
+}
+
 func TestParseConfigOutput(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  string
-		want   string
+		name  string
+		input string
+		want  string
 	}{
 		{
 			name:  "simple value",
