@@ -75,7 +75,17 @@ func (m *Manager) Start(agentOverride string) error {
 	}
 
 	// Ensure runtime settings exist (Claude hooks, OpenCode plugins, etc.)
-	runtimeConfig := config.ResolveRoleAgentConfig(constants.RoleMayor, m.townRoot, "")
+	// If agentOverride is specified, use it; otherwise use role-based resolution
+	var runtimeConfig *config.RuntimeConfig
+	if agentOverride != "" {
+		var err error
+		runtimeConfig, _, err = config.ResolveAgentConfigWithOverride(m.townRoot, "", agentOverride)
+		if err != nil {
+			return fmt.Errorf("resolving agent config: %w", err)
+		}
+	} else {
+		runtimeConfig = config.ResolveRoleAgentConfig(constants.RoleMayor, m.townRoot, "")
+	}
 	if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
