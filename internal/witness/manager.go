@@ -301,7 +301,13 @@ func defaultAgentOverride(command string) string {
 	if command == "" {
 		return ""
 	}
-	fields := strings.Fields(command)
+	trimmed := strings.TrimSpace(command)
+	if strings.HasPrefix(trimmed, "export ") {
+		if idx := strings.Index(trimmed, "&&"); idx != -1 {
+			trimmed = strings.TrimSpace(trimmed[idx+2:])
+		}
+	}
+	fields := strings.Fields(trimmed)
 	if len(fields) == 0 {
 		return ""
 	}
