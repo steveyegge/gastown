@@ -1,16 +1,21 @@
-# Opencode Orchestration: Documentation Index
+# OpenCode Documentation: Detailed Navigation
 
-> Central hub for all Opencode orchestration planning documentation
+> Comprehensive navigation for OpenCode integration documentation.
+> For a quick overview, see [README.md](README.md).
 > 
-> **Status**: Planning Phase
-> **Created**: 2026-01-15
-> **Last Updated**: 2026-01-15
+> **Last Updated**: 2026-01-19
 
-## Overview
+## External Resources
 
-This index provides navigation across all Opencode orchestration planning documents. These documents outline the plan to extend Gastown's orchestration capabilities to support Opencode as an alternative to Claude Code.
+Before building something, check if it already exists:
 
-## Document Organization
+- **[OpenCode Repo](https://github.com/anomalyco/opencode)** - Source of truth (docs lag behind)
+- **[Awesome OpenCode](https://github.com/awesome-opencode/awesome-opencode)** - Community extensions
+- **[Ecosystem](https://opencode.ai/docs/ecosystem/)** - Official ecosystem directory
+
+---
+
+## Document Navigation
 
 ### 📘 Core Planning Documents
 
