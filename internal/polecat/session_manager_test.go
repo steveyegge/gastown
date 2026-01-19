@@ -190,3 +190,12 @@ func TestPolecatCommandFormat(t *testing.T) {
 		t.Error("GT_ROLE must be 'polecat', not 'mayor' or 'crew'")
 	}
 }
+
+func TestDefaultAgentOverrideSkipsExportPrefix(t *testing.T) {
+	t.Parallel()
+
+	got := defaultAgentOverride("export GT_ROLE=polecat && export FOO=bar && copilot --yolo")
+	if got != "copilot" {
+		t.Fatalf("defaultAgentOverride = %q, want %q", got, "copilot")
+	}
+}

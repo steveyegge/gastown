@@ -246,4 +246,5 @@ Dog returns to available state in the pool.
 [vars]
 [vars.mode]
 description = "GC mode: 'conservative' or 'aggressive'"
+required = true
 default = "conservative"

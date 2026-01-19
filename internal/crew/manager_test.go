@@ -347,3 +347,12 @@ func runCmd(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	return cmd.Run()
 }
+
+func TestDefaultAgentOverrideSkipsExportPrefix(t *testing.T) {
+	t.Parallel()
+
+	got := defaultAgentOverride("export GT_ROLE=crew && export FOO=bar && copilot --yolo")
+	if got != "copilot" {
+		t.Fatalf("defaultAgentOverride = %q, want %q", got, "copilot")
+	}
+}

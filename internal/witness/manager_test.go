@@ -53,3 +53,12 @@ func TestBuildWitnessStartCommand_AgentOverrideWins(t *testing.T) {
 		t.Errorf("expected GT_ROLE=witness in command, got %q", got)
 	}
 }
+
+func TestDefaultAgentOverrideSkipsExportPrefix(t *testing.T) {
+	t.Parallel()
+
+	got := defaultAgentOverride("export GT_ROLE=witness && export FOO=bar && copilot --yolo")
+	if got != "copilot" {
+		t.Fatalf("defaultAgentOverride = %q, want %q", got, "copilot")
+	}
+}
