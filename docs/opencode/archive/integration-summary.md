@@ -1,10 +1,10 @@
 # OpenCode Integration Summary
 
-**Created**: 2026-01-17  
-**Status**: Complete - Production Ready  
-**Feature Parity**: 100%
+> **Status**: Complete - Production Ready  
+> **Created**: 2026-01-17  
+> **Feature Parity**: 100%
 
-This document provides an executive summary of the OpenCode integration work completed for Gastown, consolidating findings from multiple research, testing, and implementation phases.
+This document provides an executive summary of the OpenCode integration work completed for Gastown.
 
 ---
 
@@ -48,7 +48,7 @@ OpenCode has been successfully integrated as a **first-class orchestration layer
 - `archive/impact-analysis.md` (498 lines) - Impact analysis and feature parity
 - `docs/opencode/archive/session-fork-test-results.md` (437 lines) - Fork testing results
 - `docs/opencode/archive/integration-test-results.md` (487 lines) - E2E integration tests
-- `docs/opencode/plugin-guide.md` (582 lines) - Plugin development guide
+- `docs/opencode/design/gastown-plugin.md` (560 lines) - Plugin implementation plan
 - `docs/opencode/integration-summary.md` (this file)
 
 **Repository Changes**:
@@ -327,7 +327,7 @@ During integration testing, several **general Gastown bugs** were discovered and
    - Enhanced plugin implementation (initial)
    - Production readiness for autonomous roles
 
-4. **[plugin-guide.md](plugin-guide.md)** (582 lines)
+4. **[gastown-plugin.md](../design/gastown-plugin.md)** (560 lines)
    - Complete OpenCode event system overview
    - Solutions for all plugin gaps
    - Enhanced plugin implementation (final)

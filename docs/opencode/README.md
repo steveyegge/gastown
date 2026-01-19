@@ -4,7 +4,7 @@
 #
 # Directory structure:
 #   reference/  - Stable docs on how things work
-#   planning/   - Project direction by phase
+#   design/   - Design documents, roadmaps, implementation strategies
 #   archive/    - Point-in-time analysis/research (with date+commit frontmatter)
 #
 # Naming conventions:
@@ -34,14 +34,30 @@ The **OpenCode repository** is the authoritative source - documentation often la
 
 ---
 
+## ⚠️ Agent Instruction
+
+**All modifications to OpenCode integration must be logged to [HISTORY.md](HISTORY.md).**
+
+When committing changes to:
+- `docs/opencode/**` - Any documentation updates
+- `internal/opencode/**` - Plugin or integration code
+- `internal/config/agents.go` - Agent preset changes
+- OpenCode-related test files
+
+Add an entry to HISTORY.md with: date, what changed, why, and any key decisions.
+
+---
+
 ## Quick Start
 
 | Goal | Document |
 |------|----------|
+| **Compare runtimes** | [../agent-features.md](../agent-features.md) |
 | **Get oriented** | [reference/quickstart.md](reference/quickstart.md) |
-| **See current status** | [reference/integration-summary.md](reference/integration-summary.md) |
-| **Concept index** | [reference/api-reference.md](reference/api-reference.md) |
-| **Project plan** | [planning/phase1/project-plan.md](planning/phase1/project-plan.md) |
+| **Configuration** | [reference/configuration.md](reference/configuration.md) |
+| **Integration guide** | [reference/integration-guide.md](reference/integration-guide.md) |
+| **External resources** | [reference/external-resources.md](reference/external-resources.md) |
+| **Change history** | [HISTORY.md](HISTORY.md) |
 
 ---
 
@@ -50,27 +66,25 @@ The **OpenCode repository** is the authoritative source - documentation often la
 ```
 docs/opencode/
 ├── README.md              # This landing page
+├── HISTORY.md             # Chronological log of work
+├── CONTRIBUTING.md        # Doc standards, review triggers
 ├── reference/             # Stable documentation
-│   ├── api-reference.md   # Concept index with all sources
-│   ├── integration-summary.md
-│   ├── plugin-guide.md
-│   ├── maintenance.md
-│   └── quickstart.md
-├── planning/              # Project direction (by phase)
-│   ├── phase1/            # Claude Code parity (current)
-│   │   ├── project-plan.md
-│   │   └── decisions.md
+│   ├── quickstart.md      # Getting started
+│   ├── configuration.md   # Config files, models, permissions
+│   ├── customization.md   # Agents, commands, skills, MCP
+│   ├── tools.md           # Built-in tools, custom tool options
+│   ├── best-practices.md  # Performance, tool management
+│   ├── integration-guide.md # CLI, SDK, API, Plugin
+│   ├── events.md          # Event types for plugins/SDK
+│   └── external-resources.md # Links to official docs, GitHub
+├── design/              # Design documents, roadmaps
+│   ├── maintenance.md     # Version compatibility, update procedures
+│   ├── gastown-plugin.md  # Gastown plugin implementation
+│   ├── phase1/            # Claude Code parity
 │   └── phase2/            # SDK orchestration (future)
-│       ├── sdk-plan.md
-│       ├── orchestrator-api.md
-│       ├── orchestration-plan.md
-│       └── integration-architecture.md
-└── archive/               # Point-in-time analysis, research, test results
-    ├── README.md          # Frontmatter template requirements
-    ├── concept-analysis.md (foundational)
-    ├── technical-research.md (foundational)
-    ├── experiments.md (phase 1)
-    ├── e2e-test-results.md (phase 1)
+└── archive/               # Point-in-time snapshots
+    ├── integration-summary.md # Status as of 2026-01-17
+    ├── e2e-test-results.md
     └── ...
 ```
 
@@ -78,17 +92,22 @@ docs/opencode/
 
 ## Documentation by Category
 
-### reference/ - How Things Work
+### reference/ - Stable Documentation
 
 | File | Purpose |
 |------|---------|
-| [integration-summary.md](reference/integration-summary.md) | Current status, achievements, bugs fixed |
-| [plugin-guide.md](reference/plugin-guide.md) | Plugin development and events |
-| [api-reference.md](reference/api-reference.md) | Concept index: Sessions, Plugins, CLI, SDK, etc. |
-| [maintenance.md](reference/maintenance.md) | Keeping integration up-to-date |
-| [quickstart.md](reference/quickstart.md) | Quick orientation |
+| [quickstart.md](reference/quickstart.md) | Getting started |
+| [configuration.md](reference/configuration.md) | Config, models, permissions |
+| [customization.md](reference/customization.md) | Agents, commands, skills, MCP |
+| [tools.md](reference/tools.md) | Built-in tools, custom tool options |
+| [best-practices.md](reference/best-practices.md) | Performance, tool management |
+| [integration-guide.md](reference/integration-guide.md) | CLI, SDK, API, Plugin integration |
+| [events.md](reference/events.md) | Event types for plugins/SDK |
+| [external-resources.md](reference/external-resources.md) | Links to official docs, GitHub |
 
-### planning/ - Project Direction
+### design/ - Design Documents
+
+See [design/README.md](design/README.md) for full contents.
 
 Organized by phase:
 
@@ -96,17 +115,17 @@ Organized by phase:
 
 | File | Purpose |
 |------|---------|
-| [phase1/project-plan.md](planning/phase1/project-plan.md) | Current plan, testing, compatibility |
-| [phase1/decisions.md](planning/phase1/decisions.md) | Decision points and questions |
+| [phase1/project-plan.md](design/phase1/project-plan.md) | Current plan, testing, compatibility |
+| [phase1/decisions.md](design/phase1/decisions.md) | Decision points and questions |
 
 **Phase 2: SDK Orchestration** (Future)
 
 | File | Purpose |
 |------|---------|
-| [phase2/sdk-plan.md](planning/phase2/sdk-plan.md) | SDK migration plan |
-| [phase2/orchestrator-api.md](planning/phase2/orchestrator-api.md) | Orchestrator interface design |
-| [phase2/orchestration-plan.md](planning/phase2/orchestration-plan.md) | Multi-session orchestration |
-| [phase2/integration-architecture.md](planning/phase2/integration-architecture.md) | Detailed strategy |
+| [phase2/sdk-plan.md](design/phase2/sdk-plan.md) | SDK migration plan |
+| [phase2/orchestrator-api.md](design/phase2/orchestrator-api.md) | Orchestrator interface design |
+| [phase2/orchestration-plan.md](design/phase2/orchestration-plan.md) | Multi-session orchestration |
+| [phase2/integration-architecture.md](design/phase2/integration-architecture.md) | Detailed strategy |
 
 ### archive/ - Point-in-Time Documentation
 
@@ -129,17 +148,17 @@ Analysis, research, and test results organized by phase. See [archive/README.md]
 | Task | Document | Implementation |
 |------|----------|----------------|
 | **Current status** | [reference/integration-summary.md](reference/integration-summary.md) | - |
-| **Project plan** | [planning/phase1/project-plan.md](planning/phase1/project-plan.md) | - |
+| **Project plan** | [design/phase1/project-plan.md](design/phase1/project-plan.md) | - |
 | **API reference** | [reference/api-reference.md](reference/api-reference.md) | - |
-| **Work on plugin** | [reference/plugin-guide.md](reference/plugin-guide.md) | `internal/opencode/plugin/gastown.js` |
+| **Work on plugin** | [design/gastown-plugin.md](design/gastown-plugin.md) | `internal/opencode/plugin/gastown.js` |
 | **Work on config** | [reference/api-reference.md](reference/api-reference.md) | `internal/config/agents.go` |
-| **Work on tests** | [planning/phase1/project-plan.md](planning/phase1/project-plan.md) | `internal/opencode/integration_test.go` |
+| **Work on tests** | [design/phase1/project-plan.md](design/phase1/project-plan.md) | `internal/opencode/integration_test.go` |
 
 ### What to Update
 
 | When... | Update... |
 |---------|-----------|
 | **Fixing bugs** | `reference/integration-summary.md` |
-| **Adding features** | `reference/integration-summary.md`, `planning/phase1/project-plan.md` |
+| **Adding features** | `reference/integration-summary.md`, `design/phase1/project-plan.md` |
 | **Adding docs** | This README → document tables |
-| **Completing a phase** | `planning/phase1/project-plan.md` or `planning/phase2/` |
+| **Completing a phase** | `design/phase1/project-plan.md` or `design/phase2/` |

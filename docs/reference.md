@@ -404,6 +404,8 @@ gt config default-agent [name]    # Get or set town default agent
 
 **Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
 
+**Feature comparison**: See [agent-features.md](agent-features.md) for detailed runtime capabilities.
+
 **Custom agents**: Define per-town via CLI or JSON:
 ```bash
 gt config agent set claude-glm "claude-glm --model glm-4"

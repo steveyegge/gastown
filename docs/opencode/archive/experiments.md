@@ -3,7 +3,7 @@
 > Hands-on experiments to validate Opencode orchestration assumptions
 > 
 > **Purpose**: Answer open questions before full implementation
-> **Related**: [../planning/orchestration.md](../planning/orchestration.md), [../planning/implementation-guide.md](../planning/implementation-guide.md)
+> **Related**: [../design/orchestration.md](../design/orchestration.md), [../design/implementation-guide.md](../design/implementation-guide.md)
 > **Status**: Planning
 > **Updated**: 2026-01-15
 
