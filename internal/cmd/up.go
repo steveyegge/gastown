@@ -17,7 +17,6 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -108,30 +107,28 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// 2. Deacon (Claude agent)
 	go func() {
 		defer startupWg.Done()
-		sessionName := session.DeaconSessionName()
 		if _, err := factory.Start(townRoot, agent.DeaconAddress); err != nil {
 			if err == agent.ErrAlreadyRunning {
-				deaconResult = agentStartResult{name: "Deacon", ok: true, detail: sessionName}
+				deaconResult = agentStartResult{name: "Deacon", ok: true, detail: "running"}
 			} else {
 				deaconResult = agentStartResult{name: "Deacon", ok: false, detail: err.Error()}
 			}
 		} else {
-			deaconResult = agentStartResult{name: "Deacon", ok: true, detail: sessionName}
+			deaconResult = agentStartResult{name: "Deacon", ok: true, detail: "started"}
 		}
 	}()
 
 	// 3. Mayor (Claude agent)
 	go func() {
 		defer startupWg.Done()
-		sessionName := session.MayorSessionName()
 		if _, err := factory.Start(townRoot, agent.MayorAddress); err != nil {
 			if err == agent.ErrAlreadyRunning {
-				mayorResult = agentStartResult{name: "Mayor", ok: true, detail: sessionName}
+				mayorResult = agentStartResult{name: "Mayor", ok: true, detail: "running"}
 			} else {
 				mayorResult = agentStartResult{name: "Mayor", ok: false, detail: err.Error()}
 			}
 		} else {
-			mayorResult = agentStartResult{name: "Mayor", ok: true, detail: sessionName}
+			mayorResult = agentStartResult{name: "Mayor", ok: true, detail: "started"}
 		}
 	}()
 
