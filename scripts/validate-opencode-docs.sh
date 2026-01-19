@@ -149,7 +149,7 @@ if [[ "$CHECK_STALE" == true ]] && [[ -d "$CODE_DIR" ]]; then
         "$DOCS_DIR/reference/integration-guide.md"
         "$DOCS_DIR/reference/events.md"
         "$DOCS_DIR/reference/configuration.md"
-        "$DOCS_DIR/design/gastown-plugin.md"
+        "$DOCS_DIR/reference/plugin-implementation.md"
     )
     
     STALE_COUNT=0
@@ -173,24 +173,53 @@ if [[ "$CHECK_STALE" == true ]] && [[ -d "$CODE_DIR" ]]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────
-# 3. Check HISTORY.md
+# 3. Check HISTORY.md - Git-based change detection
 # ─────────────────────────────────────────────────────────────────
 if [[ "$CHECK_HISTORY" == true ]]; then
-    echo "Checking HISTORY.md..."
+    echo "Checking HISTORY.md for recent changes..."
     
     if [[ -f "$HISTORY" ]]; then
-        # Check for today's date in history
-        TODAY=$(date +%Y-%m-%d)
-        if grep -q "## $TODAY" "$HISTORY"; then
-            success "HISTORY.md has entry for today"
-        else
-            # Check if docs were modified today
-            DOCS_MODIFIED_TODAY=$(find "$DOCS_DIR" -name "*.md" -mtime 0 2>/dev/null | wc -l | tr -d ' ')
-            if [[ "$DOCS_MODIFIED_TODAY" -gt 0 ]]; then
-                warn "Docs modified today but no HISTORY.md entry for $TODAY"
+        # Find the last commit that modified HISTORY.md
+        LAST_HISTORY_COMMIT=$(git log -1 --format="%H" -- "$HISTORY" 2>/dev/null || echo "")
+        
+        if [[ -n "$LAST_HISTORY_COMMIT" ]]; then
+            # Check if there are staged or unstaged changes to opencode docs/code
+            # that haven't been reflected in HISTORY.md
+            
+            # Get files changed since last HISTORY.md update
+            DOCS_CHANGED=$(git diff --name-only "$LAST_HISTORY_COMMIT" -- "$DOCS_DIR" 2>/dev/null | grep -v "HISTORY.md" | wc -l | tr -d ' ')
+            CODE_CHANGED=$(git diff --name-only "$LAST_HISTORY_COMMIT" -- "$CODE_DIR" 2>/dev/null | wc -l | tr -d ' ')
+            
+            # Also check staged but uncommitted changes
+            STAGED_DOCS=$(git diff --cached --name-only -- "$DOCS_DIR" 2>/dev/null | grep -v "HISTORY.md" | wc -l | tr -d ' ')
+            STAGED_CODE=$(git diff --cached --name-only -- "$CODE_DIR" 2>/dev/null | wc -l | tr -d ' ')
+            
+            TOTAL_CHANGES=$((DOCS_CHANGED + CODE_CHANGED + STAGED_DOCS + STAGED_CODE))
+            
+            if [[ "$TOTAL_CHANGES" -gt 0 ]]; then
+                # Check if HISTORY.md was also updated in the same set of changes
+                HISTORY_IN_STAGED=$(git diff --cached --name-only -- "$HISTORY" 2>/dev/null | wc -l | tr -d ' ')
+                
+                if [[ "$HISTORY_IN_STAGED" -gt 0 ]]; then
+                    success "HISTORY.md is staged with other changes"
+                else
+                    warn "OpenCode docs/code changed ($TOTAL_CHANGES files) since last HISTORY.md update"
+                    info "Consider adding an entry to HISTORY.md before committing"
+                    
+                    # Show what changed
+                    if [[ "$DOCS_CHANGED" -gt 0 ]]; then
+                        info "  Docs changed: $DOCS_CHANGED files"
+                    fi
+                    if [[ "$CODE_CHANGED" -gt 0 ]]; then
+                        info "  Code changed: $CODE_CHANGED files"
+                    fi
+                fi
             else
-                success "HISTORY.md up to date"
+                success "HISTORY.md is current (no changes since last update)"
             fi
+        else
+            # HISTORY.md exists but no git history (new file)
+            success "HISTORY.md exists (no git history yet)"
         fi
     else
         error "HISTORY.md not found"
