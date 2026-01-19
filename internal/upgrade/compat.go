@@ -1,13 +1,13 @@
 package upgrade
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 // CompatibilityInfo describes version compatibility for a release.
@@ -58,7 +58,13 @@ type CompatCheckResult struct {
 
 // FetchCompatibilityInfo downloads compatibility.json from a release's assets.
 // Returns nil (not an error) if the release doesn't have compatibility info.
+// Use FetchCompatibilityInfoWithContext for cancellation support.
 func FetchCompatibilityInfo(release *ReleaseInfo) (*CompatibilityInfo, error) {
+	return FetchCompatibilityInfoWithContext(context.Background(), release)
+}
+
+// FetchCompatibilityInfoWithContext downloads compatibility.json with context support.
+func FetchCompatibilityInfoWithContext(ctx context.Context, release *ReleaseInfo) (*CompatibilityInfo, error) {
 	// Find compatibility.json asset
 	var compatAsset *Asset
 	for i := range release.Assets {
@@ -73,9 +79,14 @@ func FetchCompatibilityInfo(release *ReleaseInfo) (*CompatibilityInfo, error) {
 		return nil, nil
 	}
 
+	// Validate download URL before proceeding
+	if err := ValidateDownloadURL(compatAsset.BrowserDownloadURL); err != nil {
+		return nil, fmt.Errorf("validating compatibility URL: %w", err)
+	}
+
 	// Download the file
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequest("GET", compatAsset.BrowserDownloadURL, nil)
+	client := &http.Client{Timeout: HTTPTimeout}
+	req, err := http.NewRequestWithContext(ctx, "GET", compatAsset.BrowserDownloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -127,6 +138,13 @@ func GetWorkspaceVersion(workspaceRoot string) string {
 func SetWorkspaceVersion(workspaceRoot, version string) error {
 	townPath := filepath.Join(workspaceRoot, "mayor", "town.json")
 
+	// Get original file permissions before reading
+	info, err := os.Stat(townPath)
+	if err != nil {
+		return fmt.Errorf("stat town.json: %w", err)
+	}
+	originalMode := info.Mode()
+
 	// Read existing config
 	data, err := os.ReadFile(townPath)
 	if err != nil {
@@ -148,7 +166,11 @@ func SetWorkspaceVersion(workspaceRoot, version string) error {
 		return fmt.Errorf("marshaling town.json: %w", err)
 	}
 
-	if err := os.WriteFile(townPath, newData, 0644); err != nil {
+	// Add trailing newline for POSIX compliance
+	newData = append(newData, '\n')
+
+	// Write with original permissions preserved
+	if err := os.WriteFile(townPath, newData, originalMode); err != nil {
 		return fmt.Errorf("writing town.json: %w", err)
 	}
 
@@ -156,7 +178,7 @@ func SetWorkspaceVersion(workspaceRoot, version string) error {
 }
 
 // CheckCompatibility verifies if a workspace can safely upgrade to a target version.
-func CheckCompatibility(workspaceRoot string, currentVersion string, targetRelease *ReleaseInfo, compatInfo *CompatibilityInfo) *CompatCheckResult {
+func CheckCompatibility(currentVersion string, targetRelease *ReleaseInfo, compatInfo *CompatibilityInfo) *CompatCheckResult {
 	result := &CompatCheckResult{
 		Compatible:       true,
 		WorkspaceVersion: currentVersion,

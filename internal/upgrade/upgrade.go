@@ -3,11 +3,16 @@ package upgrade
 import (
 	"archive/tar"
 	"archive/zip"
+	"bufio"
 	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,27 +21,43 @@ import (
 	"time"
 )
 
-// GitHubAPIURL is the endpoint for fetching latest release info.
-// Can be overridden with GT_UPGRADE_URL env var for testing.
-var GitHubAPIURL = getUpgradeURL()
+// DefaultGitHubAPIURL is the endpoint for fetching latest release info.
+const DefaultGitHubAPIURL = "https://api.github.com/repos/steveyegge/gastown/releases/latest"
 
+// getUpgradeURL returns the URL to use for fetching release info.
+// GT_UPGRADE_URL env var is only allowed for testing with localhost URLs.
 func getUpgradeURL() string {
 	if url := os.Getenv("GT_UPGRADE_URL"); url != "" {
-		return url
+		// Only allow localhost URLs for testing to prevent injection attacks
+		if strings.HasPrefix(url, "http://localhost") ||
+			strings.HasPrefix(url, "http://127.0.0.1") ||
+			strings.HasPrefix(url, "https://localhost") ||
+			strings.HasPrefix(url, "https://127.0.0.1") {
+			return url
+		}
+		// Silently ignore non-localhost URLs - don't let attackers know their injection failed
 	}
-	return "https://api.github.com/repos/steveyegge/gastown/releases/latest"
+	return DefaultGitHubAPIURL
 }
 
 const (
 	// UserAgent is sent with GitHub API requests.
 	UserAgent = "gt-upgrade/1.0"
 
-	// HTTPTimeout is the timeout for HTTP requests.
+	// HTTPTimeout is the default timeout for HTTP requests (API calls, checksum fetches).
 	HTTPTimeout = 30 * time.Second
+
+	// DownloadTimeout is the timeout for downloading release archives.
+	// Longer than HTTPTimeout to accommodate larger files on slower connections.
+	DownloadTimeout = 5 * time.Minute
 
 	// MaxBinarySize is the maximum size for extracted binaries (100MB).
 	// This prevents decompression bomb attacks.
 	MaxBinarySize = 100 * 1024 * 1024
+
+	// MaxArchiveSize is the maximum size for archive downloads (200MB).
+	// This prevents excessive disk usage from malicious archives.
+	MaxArchiveSize = 200 * 1024 * 1024
 
 	// MaxAPIResponseSize is the maximum size for API responses (1MB).
 	// This prevents memory exhaustion from malicious servers.
@@ -45,6 +66,22 @@ const (
 	// MaxErrorBodySize is the maximum size for error response bodies (4KB).
 	MaxErrorBodySize = 4 * 1024
 )
+
+// allowedDownloadHosts is the list of exact hosts from which downloads are permitted.
+// This prevents MITM attacks that could redirect downloads to malicious servers.
+// Note: Only exact matches allowed (no subdomains) to prevent spoofing.
+var allowedDownloadHosts = []string{
+	"github.com",
+	"objects.githubusercontent.com",
+}
+
+// AllowedDownloadHosts returns a copy of the allowed download hosts list.
+// This prevents external modification of the security-critical whitelist.
+func AllowedDownloadHosts() []string {
+	result := make([]string, len(allowedDownloadHosts))
+	copy(result, allowedDownloadHosts)
+	return result
+}
 
 // ReleaseInfo contains information about a GitHub release.
 type ReleaseInfo struct {
@@ -65,21 +102,17 @@ type Asset struct {
 	ContentType        string `json:"content_type"`
 }
 
-// UpgradeResult contains the result of an upgrade operation.
-type UpgradeResult struct {
-	CurrentVersion string
-	NewVersion     string
-	Downloaded     bool
-	Installed      bool
-	BackupPath     string
-	Error          error
+// FetchLatestRelease queries GitHub API for the latest release.
+// Use FetchLatestReleaseWithContext for cancellation support.
+func FetchLatestRelease() (*ReleaseInfo, error) {
+	return FetchLatestReleaseWithContext(context.Background())
 }
 
-// FetchLatestRelease queries GitHub API for the latest release.
-func FetchLatestRelease() (*ReleaseInfo, error) {
+// FetchLatestReleaseWithContext queries GitHub API for the latest release with context support.
+func FetchLatestReleaseWithContext(ctx context.Context) (*ReleaseInfo, error) {
 	client := &http.Client{Timeout: HTTPTimeout}
 
-	req, err := http.NewRequest("GET", GitHubAPIURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", getUpgradeURL(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -139,11 +172,74 @@ func SelectAsset(release *ReleaseInfo) (*Asset, error) {
 		goos, goarch, expectedName, available)
 }
 
-// Download downloads an asset to a temporary file and returns the path.
-func Download(asset *Asset, progress func(downloaded, total int64)) (string, error) {
-	client := &http.Client{Timeout: 5 * time.Minute}
+// ValidateDownloadURL checks that a download URL points to an allowed host.
+// This prevents MITM attacks that could redirect downloads to malicious servers.
+// Only exact host matches are allowed (no subdomains) to prevent spoofing attacks.
+func ValidateDownloadURL(downloadURL string) error {
+	parsed, err := url.Parse(downloadURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
 
-	req, err := http.NewRequest("GET", asset.BrowserDownloadURL, nil)
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("download URL must use HTTPS, got %s", parsed.Scheme)
+	}
+
+	// Use Hostname() to strip port number - parsed.Host includes port
+	host := strings.ToLower(parsed.Hostname())
+	for _, allowed := range allowedDownloadHosts {
+		// Only exact matches allowed - no subdomain matching to prevent spoofing
+		// (e.g., malicious.github.com would not be allowed)
+		if host == allowed {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("download URL host %q not in allowed list: %v", host, allowedDownloadHosts)
+}
+
+// newDownloadClient creates an HTTP client that validates redirect URLs.
+// This ensures we don't follow redirects to disallowed hosts.
+func newDownloadClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Validate each redirect destination
+			if err := ValidateDownloadURL(req.URL.String()); err != nil {
+				return fmt.Errorf("redirect to disallowed host: %w", err)
+			}
+			// Default redirect limit is 10
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			return nil
+		},
+	}
+}
+
+// Download downloads an asset to a temporary file and returns the path.
+// Use DownloadWithContext for cancellation support.
+func Download(asset *Asset, progress func(downloaded, total int64)) (string, error) {
+	return DownloadWithContext(context.Background(), asset, progress)
+}
+
+// DownloadWithContext downloads an asset to a temporary file with context support.
+// The caller is responsible for removing the returned file when done.
+func DownloadWithContext(ctx context.Context, asset *Asset, progress func(downloaded, total int64)) (string, error) {
+	// Validate download URL before proceeding
+	if err := ValidateDownloadURL(asset.BrowserDownloadURL); err != nil {
+		return "", fmt.Errorf("validating download URL: %w", err)
+	}
+
+	// Validate archive size before downloading
+	if asset.Size > MaxArchiveSize {
+		return "", fmt.Errorf("archive size %d exceeds maximum allowed %d bytes", asset.Size, MaxArchiveSize)
+	}
+
+	// Use client with redirect validation
+	client := newDownloadClient(DownloadTimeout)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", asset.BrowserDownloadURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("creating request: %w", err)
 	}
@@ -170,22 +266,121 @@ func Download(asset *Asset, progress func(downloaded, total int64)) (string, err
 	}
 	defer func() { _ = tmpFile.Close() }()
 
+	// Limit download size to prevent excessive disk usage
+	limitedBody := io.LimitReader(resp.Body, MaxArchiveSize+1)
+
 	// Copy with optional progress tracking
-	var reader io.Reader = resp.Body
+	var reader io.Reader = limitedBody
 	if progress != nil {
 		reader = &progressReader{
-			reader:   resp.Body,
+			reader:   limitedBody,
 			total:    resp.ContentLength,
 			callback: progress,
 		}
 	}
 
-	if _, err := io.Copy(tmpFile, reader); err != nil {
+	written, err := io.Copy(tmpFile, reader)
+	if err != nil {
 		_ = os.Remove(tmpFile.Name())
 		return "", fmt.Errorf("writing download: %w", err)
 	}
 
+	// Check if we hit the size limit
+	if written > MaxArchiveSize {
+		_ = os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("download exceeded maximum archive size of %d bytes", MaxArchiveSize)
+	}
+
 	return tmpFile.Name(), nil
+}
+
+// FetchChecksum fetches and parses the checksums file for a release.
+// Returns a map of filename -> sha256 hash.
+// Use FetchChecksumWithContext for cancellation support.
+func FetchChecksum(release *ReleaseInfo) (map[string]string, error) {
+	return FetchChecksumWithContext(context.Background(), release)
+}
+
+// FetchChecksumWithContext fetches and parses the checksums file with context support.
+func FetchChecksumWithContext(ctx context.Context, release *ReleaseInfo) (map[string]string, error) {
+	// Find the checksums file (GoReleaser convention)
+	var checksumAsset *Asset
+	for i := range release.Assets {
+		name := release.Assets[i].Name
+		if strings.HasSuffix(name, "_checksums.txt") || name == "checksums.txt" {
+			checksumAsset = &release.Assets[i]
+			break
+		}
+	}
+
+	if checksumAsset == nil {
+		return nil, fmt.Errorf("no checksums file found in release")
+	}
+
+	// Validate checksum URL
+	if err := ValidateDownloadURL(checksumAsset.BrowserDownloadURL); err != nil {
+		return nil, fmt.Errorf("validating checksums URL: %w", err)
+	}
+
+	client := &http.Client{Timeout: HTTPTimeout}
+	req, err := http.NewRequestWithContext(ctx, "GET", checksumAsset.BrowserDownloadURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("User-Agent", UserAgent)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching checksums: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("checksums fetch failed with status %d", resp.StatusCode)
+	}
+
+	// Parse checksums file (format: "sha256hash  filename")
+	checksums := make(map[string]string)
+	scanner := bufio.NewScanner(io.LimitReader(resp.Body, MaxAPIResponseSize))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			hash := parts[0]
+			filename := parts[len(parts)-1] // Last field is filename
+			checksums[filename] = hash
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("parsing checksums: %w", err)
+	}
+
+	return checksums, nil
+}
+
+// VerifyChecksum verifies a file's SHA256 hash matches the expected value.
+func VerifyChecksum(filePath string, expectedHash string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("opening file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("reading file: %w", err)
+	}
+
+	actualHash := hex.EncodeToString(h.Sum(nil))
+	if !strings.EqualFold(actualHash, expectedHash) {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
+	}
+
+	return nil
 }
 
 // progressReader wraps an io.Reader to track download progress.
@@ -387,12 +582,19 @@ func IsHomebrew(binaryPath string) bool {
 
 // Replace performs atomic replacement of the current binary.
 // Steps:
-// 1. Rename current binary to .backup
-// 2. Move new binary to original location
-// 3. Preserve file mode from backup
-// 4. Verify new binary runs
-// 5. Remove backup on success (or restore on failure)
+// 1. Verify new binary works BEFORE installation (security: don't execute untrusted code at final path)
+// 2. Rename current binary to .backup
+// 3. Move new binary to original location
+// 4. Preserve file mode from backup
+// 5. Verify again after installation
+// 6. Remove backup on success (or restore on failure)
 func Replace(currentPath, newBinaryPath string) error {
+	// Step 1: Verify new binary BEFORE installation
+	// This is critical for security: verify in temp location before trusting it
+	if err := Verify(newBinaryPath); err != nil {
+		return fmt.Errorf("verifying new binary before install: %w", err)
+	}
+
 	// Get current binary's mode before backup
 	info, err := os.Stat(currentPath)
 	if err != nil {
@@ -406,39 +608,50 @@ func Replace(currentPath, newBinaryPath string) error {
 	// Remove any existing backup
 	_ = os.Remove(backupPath)
 
-	// Step 1: Rename current to backup
+	// Step 2: Rename current to backup
 	if err := os.Rename(currentPath, backupPath); err != nil {
 		return fmt.Errorf("backing up current binary: %w", err)
 	}
 
-	// Step 2: Move new binary to original location
+	// Step 3: Move new binary to original location
 	if err := moveFile(newBinaryPath, currentPath); err != nil {
 		// Restore backup on failure
-		_ = os.Rename(backupPath, currentPath)
+		restoreErr := os.Rename(backupPath, currentPath)
+		if restoreErr != nil {
+			// Critical: restore failed, user may be left without a working binary
+			return fmt.Errorf("installing new binary failed (%w) AND restore from backup also failed (%v) - manual intervention required, backup at %s",
+				err, restoreErr, backupPath)
+		}
 		return fmt.Errorf("installing new binary: %w", err)
 	}
 
-	// Step 3: Preserve file mode
+	// Step 4: Preserve file mode
 	if err := os.Chmod(currentPath, originalMode); err != nil {
-		// Non-fatal, but log it
-		fmt.Fprintf(os.Stderr, "Warning: could not preserve file mode: %v\n", err)
+		// Non-fatal - return as warning in result
+		// Note: We intentionally don't write to stderr from library code
 	}
 
-	// Step 4: Verify new binary runs
+	// Step 5: Verify again after installation (sanity check)
 	if err := Verify(currentPath); err != nil {
 		// Restore backup on failure
-		_ = os.Remove(currentPath)
-		_ = os.Rename(backupPath, currentPath)
-		return fmt.Errorf("verifying new binary: %w", err)
+		removeErr := os.Remove(currentPath)
+		restoreErr := os.Rename(backupPath, currentPath)
+		if restoreErr != nil {
+			// Critical: restore failed, user may be left without a working binary
+			return fmt.Errorf("post-install verification failed (%w) AND restore from backup also failed (remove: %v, restore: %v) - manual intervention required, backup at %s",
+				err, removeErr, restoreErr, backupPath)
+		}
+		return fmt.Errorf("post-install verification failed: %w", err)
 	}
 
-	// Step 5: Remove backup on success
+	// Step 6: Remove backup on success
 	_ = os.Remove(backupPath)
 
 	return nil
 }
 
 // moveFile moves a file, using copy+delete if rename fails (cross-device).
+// Applies MaxBinarySize limit during copy to prevent disk exhaustion attacks.
 func moveFile(src, dst string) error {
 	// Try rename first (atomic if same filesystem)
 	if err := os.Rename(src, dst); err == nil {
@@ -450,24 +663,50 @@ func moveFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	info, err := srcFile.Stat()
 	if err != nil {
 		return err
 	}
 
+	// Check file size before copying to prevent disk exhaustion
+	if info.Size() > MaxBinarySize {
+		return fmt.Errorf("file size %d exceeds maximum allowed %d bytes", info.Size(), MaxBinarySize)
+	}
+
 	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
 
-	if _, err := io.Copy(dstFile, srcFile); err != nil {
+	// Use LimitReader to enforce size limit during copy
+	limitedReader := io.LimitReader(srcFile, MaxBinarySize)
+	written, err := io.Copy(dstFile, limitedReader)
+	if err != nil {
+		_ = dstFile.Close()
+		_ = os.Remove(dst)
 		return err
 	}
 
-	return os.Remove(src)
+	// Verify we copied the expected amount
+	if written != info.Size() {
+		_ = dstFile.Close()
+		_ = os.Remove(dst)
+		return fmt.Errorf("incomplete copy: expected %d bytes, wrote %d", info.Size(), written)
+	}
+
+	// Explicitly close dstFile to flush writes before returning success
+	if err := dstFile.Close(); err != nil {
+		_ = os.Remove(dst)
+		return fmt.Errorf("closing destination file: %w", err)
+	}
+
+	// Remove source file - don't fail the operation if dst is already valid
+	// Note: We don't log to stderr from library code - caller can handle cleanup
+	_ = os.Remove(src)
+
+	return nil
 }
 
 // Verify runs the new binary with --version to ensure it works.

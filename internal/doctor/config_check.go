@@ -493,6 +493,7 @@ func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 }
 
 // findAllRigs is a shared helper that returns all rig directories within a town.
+// This is the single source of truth for rig discovery across the doctor package.
 func findAllRigs(townRoot string) []string {
 	var rigs []string
 
@@ -507,15 +508,21 @@ func findAllRigs(townRoot string) []string {
 		}
 		// Skip non-rig directories
 		name := entry.Name()
-		if name == "mayor" || name == ".beads" || strings.HasPrefix(name, ".") {
+		isExcluded := false
+		for _, excluded := range ExcludedDirs {
+			if name == excluded {
+				isExcluded = true
+				break
+			}
+		}
+		if isExcluded || strings.HasPrefix(name, ".") {
 			continue
 		}
 
 		rigPath := filepath.Join(townRoot, name)
 
 		// Check if this looks like a rig (has crew/, polecats/, witness/, or refinery/)
-		markers := []string{"crew", "polecats", "witness", "refinery"}
-		for _, marker := range markers {
+		for _, marker := range RigMarkers {
 			if _, err := os.Stat(filepath.Join(rigPath, marker)); err == nil {
 				rigs = append(rigs, rigPath)
 				break

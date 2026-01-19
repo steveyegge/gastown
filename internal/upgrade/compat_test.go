@@ -3,6 +3,7 @@ package upgrade
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -86,7 +87,7 @@ func TestCheckCompatibility(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			release := &ReleaseInfo{TagName: tt.targetTag}
-			result := CheckCompatibility("", tt.currentVersion, release, tt.compatInfo)
+			result := CheckCompatibility(tt.currentVersion, release, tt.compatInfo)
 
 			if result.Compatible != tt.wantCompatible {
 				t.Errorf("Compatible = %v, want %v", result.Compatible, tt.wantCompatible)
@@ -165,25 +166,12 @@ func TestSetWorkspaceVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(data)
-	if !contains(content, `"type": "town"`) && !contains(content, `"type":"town"`) {
+	if !strings.Contains(content, `"type": "town"`) && !strings.Contains(content, `"type":"town"`) {
 		t.Errorf("town.json missing type field: %s", content)
 	}
-	if !contains(content, `"name": "test"`) && !contains(content, `"name":"test"`) {
+	if !strings.Contains(content, `"name": "test"`) && !strings.Contains(content, `"name":"test"`) {
 		t.Errorf("town.json missing name field: %s", content)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestFormatCompatWarning(t *testing.T) {
@@ -199,19 +187,19 @@ func TestFormatCompatWarning(t *testing.T) {
 	output := FormatCompatWarning(result)
 
 	// Check that it contains key information
-	if !contains(output, "Breaking changes detected") {
+	if !strings.Contains(output, "Breaking changes detected") {
 		t.Error("Warning should mention breaking changes")
 	}
-	if !contains(output, "beads-v2-schema") {
+	if !strings.Contains(output, "beads-v2-schema") {
 		t.Error("Warning should list breaking changes")
 	}
-	if !contains(output, "0.2.5") {
+	if !strings.Contains(output, "0.2.5") {
 		t.Error("Warning should show workspace version")
 	}
-	if !contains(output, "https://example.com/migration") {
+	if !strings.Contains(output, "https://example.com/migration") {
 		t.Error("Warning should show migration guide URL")
 	}
-	if !contains(output, "--force") {
+	if !strings.Contains(output, "--force") {
 		t.Error("Warning should mention --force option")
 	}
 }
