@@ -155,6 +155,60 @@ These are the guiding principles for OpenCode integration:
 
 ---
 
+### P4: Plugin Simplification - Extract Common Functionality
+
+**Question**: gastown.js duplicates logic that should be centralized.
+
+**Current Plugin Contains**:
+| Lines | Functionality | Should Be... |
+|-------|---------------|--------------|
+| 20-38 | Structured logging | In gt CLI (`gt log`?) or core |
+| 40-68 | Finding gt binary | Unnecessary if PATH is correct |
+| 14-15 | Role definitions (autonomous/interactive) | In Go config, not JS |
+| 133-145 | Debounce logic | Possibly in core |
+
+**Comparison with Claude Hooks**:
+```json
+// Claude: Simple, just calls commands
+"SessionStart": [{
+  "command": "gt prime && gt mail check --inject && gt nudge deacon session-started"
+}]
+```
+
+```javascript
+// OpenCode: 190 lines of infrastructure + same commands
+const findGt = async () => { ... }  // 30 lines
+const log = (level, event, message) => { ... }  // 20 lines
+const autonomousRoles = new Set([...])  // duplicated from Go
+```
+
+**Proposed Simplification**:
+1. **PATH assumption**: Like Claude, assume `gt` is in PATH (set by tmux/shell)
+2. **Role knowledge**: Plugin gets `GT_ROLE` env but shouldn't need role sets
+3. **Logging**: Defer to `gt` - commands log their own output
+4. **Commands**: Plugin just calls commands, no wrapper infrastructure
+
+**Target Plugin** (minimal):
+```javascript
+export const GasTown = async ({ $ }) => ({
+  event: async ({ event }) => {
+    if (event?.type === "session.created") {
+      await $`gt prime && gt mail check --inject && gt nudge deacon session-started`;
+    }
+    if (event?.type === "message.updated" && event.properties?.info?.role === "user") {
+      await $`gt mail check --inject`;
+    }
+  },
+  "experimental.session.compacting": async () => {
+    await $`gt prime`;
+  },
+});
+```
+
+**Blocked by**: Verify PATH works in OpenCode plugin environment
+
+---
+
 ## Constraints
 
 | Constraint | Description | Source |
