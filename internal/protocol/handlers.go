@@ -1,3 +1,5 @@
+// Package protocol provides message handler registration and dispatch for inter-agent
+// communication, including Witness and Refinery protocol handlers.
 package protocol
 
 import (
