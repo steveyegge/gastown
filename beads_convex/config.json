@@ -1,0 +1,11 @@
+{
+  "type": "rig",
+  "version": 1,
+  "name": "beads_convex",
+  "git_url": "https://github.com/sfncore/beads",
+  "default_branch": "main",
+  "created_at": "2026-01-19T19:23:25.851940712+11:00",
+  "beads": {
+    "prefix": "bd"
+  }
+}

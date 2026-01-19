@@ -9,6 +9,18 @@
 **/*.lock
 **/registry.json
 
+# Daemon runtime state
+daemon/daemon.log
+daemon/daemon.pid
+daemon/activity.json
+
+# Mayor runtime state
+mayor/rigs.json
+
+# Event logs (runtime)
+.events.jsonl
+.feed.jsonl
+
 # =============================================================================
 # Rig git worktrees (recreate with 'gt sling' or 'gt rig add')
 # =============================================================================
