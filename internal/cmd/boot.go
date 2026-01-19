@@ -282,7 +282,7 @@ func runBootTriage(cmd *cobra.Command, args []string) error {
 
 // runDegradedTriage performs basic Deacon health check without AI reasoning.
 // This is a mechanical fallback when full Claude sessions aren't available.
-func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
+func runDegradedTriage(_ *boot.Boot) (action, target string, err error) {
 	townRoot, _ := workspace.FindFromCwd()
 	if townRoot == "" {
 		return "error", "deacon", fmt.Errorf("not in a town workspace")

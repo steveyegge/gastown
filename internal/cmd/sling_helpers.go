@@ -221,7 +221,7 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 
 // injectStartPrompt sends a prompt to an agent to start working.
 // Uses the Agents abstraction for reliable nudging.
-func injectStartPrompt(townRoot string, id agent.AgentID, beadID, subject, args string) error {
+func injectStartPrompt(_ string, id agent.AgentID, beadID, subject, args string) error {
 	if id.Role == "" {
 		return fmt.Errorf("no agent to nudge")
 	}
@@ -253,7 +253,7 @@ func injectStartPrompt(townRoot string, id agent.AgentID, beadID, subject, args 
 // ensureAgentReady waits for an agent to be ready before nudging.
 // Uses the Agents abstraction which handles runtime-specific behavior (Claude's bypass
 // permissions warning, prompt detection, etc.).
-func ensureAgentReady(townRoot string, id agent.AgentID) error {
+func ensureAgentReady(_ string, id agent.AgentID) error {
 	// Always wait for ready, even if process is running - it may still be initializing
 	// (WaitReady is fast if agent is already ready since prompt checker finds ">" quickly)
 	agents := agent.Default()
@@ -369,7 +369,7 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 
 // wakeRigAgents wakes the witness and refinery for a rig after polecat dispatch.
 // This ensures the patrol agents are ready to monitor and merge.
-func wakeRigAgents(townRoot, rigName string) {
+func wakeRigAgents(_, rigName string) {
 	// Boot the rig (idempotent - no-op if already running)
 	bootCmd := exec.Command("gt", "rig", "boot", rigName)
 	_ = bootCmd.Run() // Ignore errors - rig might already be running

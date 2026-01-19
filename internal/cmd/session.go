@@ -225,15 +225,15 @@ func parseAddress(addr string) (rigName, polecatName string, err error) {
 }
 
 // getSessionManager creates a session manager for the given rig.
-func getSessionManager(rigName string) (*polecat.SessionManager, *rig.Rig, error) {
+func getSessionManager(rigName string) (*polecat.SessionManager, error) {
 	townRoot, r, err := getRig(rigName)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	polecatMgr := factory.New(townRoot).PolecatSessionManager(r, "")
 
-	return polecatMgr, r, nil
+	return polecatMgr, nil
 }
 
 func runSessionStart(cmd *cobra.Command, args []string) error {
@@ -287,7 +287,7 @@ func runSessionStop(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	polecatMgr, _, err := getSessionManager(rigName)
+	polecatMgr, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func runSessionAttach(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	polecatMgr, _, err := getSessionManager(rigName)
+	polecatMgr, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -424,7 +424,7 @@ func runSessionCapture(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	polecatMgr, _, err := getSessionManager(rigName)
+	polecatMgr, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -471,7 +471,7 @@ func runSessionInject(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no message provided (use -m or -f)")
 	}
 
-	polecatMgr, _, err := getSessionManager(rigName)
+	polecatMgr, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -535,7 +535,7 @@ func runSessionStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	polecatMgr, _, err := getSessionManager(rigName)
+	polecatMgr, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}

@@ -219,7 +219,7 @@ func categorizeSession(name string) *AgentSession {
 }
 
 // getAgentSessions returns all categorized Gas Town sessions.
-func getAgentSessions(townRoot string, includePolecats bool) ([]*AgentSession, error) {
+func getAgentSessions(_ string, includePolecats bool) ([]*AgentSession, error) {
 	agentsAPI := agent.Default()
 	agentIDs, err := agentsAPI.List()
 	if err != nil {

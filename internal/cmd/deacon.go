@@ -668,7 +668,7 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get agent bead info before ping (for baseline)
-	beadID, _, err := agentAddressToIDs(targetAgent)
+	beadID, err := agentAddressToIDs(targetAgent)
 	if err != nil {
 		return fmt.Errorf("invalid agent address: %w", err)
 	}
@@ -876,15 +876,15 @@ func runDeaconHealthState(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// agentAddressToIDs converts an agent address to bead ID and session name.
+// agentAddressToIDs converts an agent address to bead ID.
 // Supports formats: "gastown/polecats/max", "gastown/witness", "deacon", "mayor"
 // Note: Town-level agents (Mayor, Deacon) use hq- prefix bead IDs stored in town beads.
-func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
+func agentAddressToIDs(address string) (beadID string, err error) {
 	switch address {
 	case "deacon":
-		return beads.DeaconBeadIDTown(), agent.DeaconAddress.String(), nil
+		return beads.DeaconBeadIDTown(), nil
 	case "mayor":
-		return beads.MayorBeadIDTown(), agent.MayorAddress.String(), nil
+		return beads.MayorBeadIDTown(), nil
 	}
 
 	parts := strings.Split(address, "/")
@@ -894,25 +894,25 @@ func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 		rig, role := parts[0], parts[1]
 		switch role {
 		case "witness":
-			return fmt.Sprintf("gt-%s-witness", rig), fmt.Sprintf("gt-%s-witness", rig), nil
+			return fmt.Sprintf("gt-%s-witness", rig), nil
 		case "refinery":
-			return fmt.Sprintf("gt-%s-refinery", rig), fmt.Sprintf("gt-%s-refinery", rig), nil
+			return fmt.Sprintf("gt-%s-refinery", rig), nil
 		default:
-			return "", "", fmt.Errorf("unknown role: %s", role)
+			return "", fmt.Errorf("unknown role: %s", role)
 		}
 	case 3:
 		// rig/type/name: "gastown/polecats/max", "gastown/crew/alpha"
 		rig, agentType, name := parts[0], parts[1], parts[2]
 		switch agentType {
 		case "polecats":
-			return fmt.Sprintf("gt-%s-polecat-%s", rig, name), fmt.Sprintf("gt-%s-%s", rig, name), nil
+			return fmt.Sprintf("gt-%s-polecat-%s", rig, name), nil
 		case "crew":
-			return fmt.Sprintf("gt-%s-crew-%s", rig, name), fmt.Sprintf("gt-%s-crew-%s", rig, name), nil
+			return fmt.Sprintf("gt-%s-crew-%s", rig, name), nil
 		default:
-			return "", "", fmt.Errorf("unknown agent type: %s", agentType)
+			return "", fmt.Errorf("unknown agent type: %s", agentType)
 		}
 	default:
-		return "", "", fmt.Errorf("invalid agent address format: %s (expected rig/type/name or rig/role)", address)
+		return "", fmt.Errorf("invalid agent address format: %s (expected rig/type/name or rig/role)", address)
 	}
 }
 
@@ -949,7 +949,7 @@ func sendMail(townRoot, to, subject, body string) {
 
 // updateAgentBeadState updates an agent bead's state.
 func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused but kept for API consistency
-	beadID, _, err := agentAddressToIDs(agent)
+	beadID, err := agentAddressToIDs(agent)
 	if err != nil {
 		return
 	}

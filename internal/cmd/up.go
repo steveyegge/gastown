@@ -283,7 +283,7 @@ type rigPrefetchResult struct {
 
 // prefetchRigs loads all rig configs in parallel for faster agent startup.
 // Returns a map of rig name to loaded Rig, and any errors encountered.
-func prefetchRigs(townRoot string, rigNames []string) (map[string]*rig.Rig, map[string]error) {
+func prefetchRigs(_ string, rigNames []string) (map[string]*rig.Rig, map[string]error) {
 	n := len(rigNames)
 	if n == 0 {
 		return make(map[string]*rig.Rig), make(map[string]error)
@@ -427,7 +427,7 @@ func startRigAgentsWithPrefetch(townRoot string, rigNames []string, prefetchedRi
 
 // upStartWitness starts a witness for the given rig and returns a result struct.
 // Respects parked/docked status - skips starting if rig is not operational.
-func upStartWitness(townRoot, rigName string, r *rig.Rig) agentStartResult {
+func upStartWitness(townRoot, rigName string, _ *rig.Rig) agentStartResult {
 	name := "Witness (" + rigName + ")"
 
 	// Check if rig is parked or docked
@@ -451,7 +451,7 @@ func upStartWitness(townRoot, rigName string, r *rig.Rig) agentStartResult {
 
 // upStartRefinery starts a refinery for the given rig and returns a result struct.
 // Respects parked/docked status - skips starting if rig is not operational.
-func upStartRefinery(townRoot, rigName string, r *rig.Rig) agentStartResult {
+func upStartRefinery(townRoot, rigName string, _ *rig.Rig) agentStartResult {
 	name := "Refinery (" + rigName + ")"
 
 	// Check if rig is parked or docked

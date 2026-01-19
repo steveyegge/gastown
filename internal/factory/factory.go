@@ -254,7 +254,7 @@ func StartWithAgents(
 }
 
 // buildCommand constructs the startup command for an agent.
-func buildCommand(role, aiRuntime string, cfg *startConfig) string {
+func buildCommand(_, aiRuntime string, cfg *startConfig) string {
 	beacon := ""
 	if cfg.topic != "" {
 		beacon = cfg.topic

@@ -95,7 +95,7 @@ func (a *Implementation) StartWithConfig(id AgentID, cfg StartConfig) error {
 	}
 
 	// Wait for agent to be ready (non-blocking)
-	go a.doWaitForReady(id)
+	go func() { _ = a.doWaitForReady(id) }()
 
 	return nil
 }

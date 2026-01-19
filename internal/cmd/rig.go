@@ -591,7 +591,7 @@ func runRigReset(cmd *cobra.Command, args []string) error {
 }
 
 // runResetStale resets in_progress issues whose assigned agent no longer has a session.
-func runResetStale(bd *beads.Beads, townRoot string, dryRun bool) error {
+func runResetStale(bd *beads.Beads, _ string, dryRun bool) error {
 	agents := agent.Default()
 
 	// Get all in_progress issues

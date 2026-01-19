@@ -257,7 +257,7 @@ func (a *Implementation) Respawn(id AgentID) error {
 	}
 
 	// Only reached for remote handoff (respawning a different agent)
-	go a.doWaitForReady(id)
+	go func() { _ = a.doWaitForReady(id) }()
 
 	return nil
 }

@@ -296,7 +296,7 @@ func resolvePathToAgentID(path string) (agent.AgentID, error) {
 }
 
 // handoffRemoteAgent respawns a different agent and optionally switches to its session.
-func handoffRemoteAgent(agents agent.Agents, targetID agent.AgentID, townRoot string) error {
+func handoffRemoteAgent(agents agent.Agents, targetID agent.AgentID, _ string) error {
 	// Check if target agent exists
 	if !agents.Exists(targetID) {
 		return fmt.Errorf("agent '%s' not found - is it running?", targetID)
