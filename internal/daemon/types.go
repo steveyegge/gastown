@@ -30,6 +30,10 @@ type Config struct {
 
 	// PidFile is the path to the PID file.
 	PidFile string `json:"pid_file"`
+
+	// RigFilter limits daemon to managing only this rig's witness/refinery.
+	// If empty, all registered rigs are managed (default behavior).
+	RigFilter string `json:"rig_filter,omitempty"`
 }
 
 // DefaultConfig returns the default daemon configuration.

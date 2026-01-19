@@ -89,7 +89,11 @@ func New(config *Config) (*Daemon, error) {
 
 // Run starts the daemon main loop.
 func (d *Daemon) Run() error {
-	d.logger.Printf("Daemon starting (PID %d)", os.Getpid())
+	if d.config.RigFilter != "" {
+		d.logger.Printf("Daemon starting (PID %d) - single-rig mode: %s", os.Getpid(), d.config.RigFilter)
+	} else {
+		d.logger.Printf("Daemon starting (PID %d)", os.Getpid())
+	}
 
 	// Acquire exclusive lock to prevent multiple daemons from running.
 	// This prevents the TOCTOU race condition where multiple concurrent starts
@@ -456,6 +460,7 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 }
 
 // getKnownRigs returns list of registered rig names.
+// If config.RigFilter is set, returns only that rig (if it exists).
 func (d *Daemon) getKnownRigs() []string {
 	rigsPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
 	data, err := os.ReadFile(rigsPath)
@@ -467,6 +472,15 @@ func (d *Daemon) getKnownRigs() []string {
 		Rigs map[string]interface{} `json:"rigs"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil
+	}
+
+	// If rig filter is set, only return that rig (if registered)
+	if d.config.RigFilter != "" {
+		if _, exists := parsed.Rigs[d.config.RigFilter]; exists {
+			return []string{d.config.RigFilter}
+		}
+		d.logger.Printf("Warning: --rig filter '%s' not found in registered rigs", d.config.RigFilter)
 		return nil
 	}
 

@@ -66,8 +66,9 @@ var daemonRunCmd = &cobra.Command{
 }
 
 var (
-	daemonLogLines int
+	daemonLogLines  int
 	daemonLogFollow bool
+	daemonRig       string // --rig flag for single-rig mode
 )
 
 func init() {
@@ -79,6 +80,10 @@ func init() {
 
 	daemonLogsCmd.Flags().IntVarP(&daemonLogLines, "lines", "n", 50, "Number of lines to show")
 	daemonLogsCmd.Flags().BoolVarP(&daemonLogFollow, "follow", "f", false, "Follow log output")
+
+	// --rig flag for single-rig mode (only manage witness/refinery for specified rig)
+	daemonStartCmd.Flags().StringVar(&daemonRig, "rig", "", "Only manage witness/refinery for this rig")
+	daemonRunCmd.Flags().StringVar(&daemonRig, "rig", "", "Only manage witness/refinery for this rig")
 
 	rootCmd.AddCommand(daemonCmd)
 }
@@ -105,7 +110,13 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("finding executable: %w", err)
 	}
 
-	daemonCmd := exec.Command(gtPath, "daemon", "run")
+	// Build command args, optionally including --rig
+	cmdArgs := []string{"daemon", "run"}
+	if daemonRig != "" {
+		cmdArgs = append(cmdArgs, "--rig", daemonRig)
+	}
+
+	daemonCmd := exec.Command(gtPath, cmdArgs...)
 	daemonCmd.Dir = townRoot
 
 	// Detach from terminal
@@ -258,6 +269,9 @@ func runDaemonRun(cmd *cobra.Command, args []string) error {
 	}
 
 	config := daemon.DefaultConfig(townRoot)
+	if daemonRig != "" {
+		config.RigFilter = daemonRig
+	}
 	d, err := daemon.New(config)
 	if err != nil {
 		return fmt.Errorf("creating daemon: %w", err)
