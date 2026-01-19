@@ -2,8 +2,8 @@
 package config
 
 import (
-	"path/filepath"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -494,10 +494,14 @@ func defaultPromptMode(provider string) string {
 }
 
 func defaultSessionIDEnv(provider string) string {
-	if provider == "claude" {
+	switch provider {
+	case "claude":
 		return "CLAUDE_SESSION_ID"
+	case "copilot":
+		return "COPILOT_SESSION_ID"
+	default:
+		return ""
 	}
-	return ""
 }
 
 func defaultConfigDirEnv(provider string) string {
@@ -513,6 +517,8 @@ func defaultHooksProvider(provider string) string {
 		return "claude"
 	case "opencode":
 		return "opencode"
+	case "copilot":
+		return "copilot"
 	default:
 		return "none"
 	}
@@ -524,6 +530,8 @@ func defaultHooksDir(provider string) string {
 		return ".claude"
 	case "opencode":
 		return ".opencode/plugin"
+	case "copilot":
+		return ".copilot"
 	default:
 		return ""
 	}
@@ -535,6 +543,8 @@ func defaultHooksFile(provider string) string {
 		return "settings.json"
 	case "opencode":
 		return "gastown.js"
+	case "copilot":
+		return "hooks.json"
 	default:
 		return ""
 	}
@@ -554,6 +564,9 @@ func defaultReadyPromptPrefix(provider string) string {
 	if provider == "claude" {
 		return "> "
 	}
+	if provider == "copilot" {
+		return "❯" // Copilot CLI uses this Unicode prompt character
+	}
 	return ""
 }
 
@@ -561,7 +574,7 @@ func defaultReadyDelayMs(provider string) int {
 	if provider == "claude" {
 		return 10000
 	}
-	if provider == "codex" {
+	if provider == "codex" || provider == "copilot" {
 		return 3000
 	}
 	return 0

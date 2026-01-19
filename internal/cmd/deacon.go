@@ -416,7 +416,7 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	runtimeConfig := config.LoadRuntimeConfig("")
+	runtimeConfig := config.ResolveRoleAgentConfig("deacon", townRoot, "")
 	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
 
 	// Inject startup nudge for predecessor discovery via /resume

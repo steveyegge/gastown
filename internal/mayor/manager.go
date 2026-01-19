@@ -126,8 +126,15 @@ func (m *Manager) Start(agentOverride string) error {
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Startup beacon with instructions is now included in the initial command,
-	// so no separate nudge needed. The agent starts with full context immediately.
+	// For agents with prompt_mode "none" (e.g., copilot), send beacon via mail
+	_ = config.SendBeaconIfNeeded(config.SendBeaconMailConfig{
+		Role:          "mayor",
+		Recipient:     "mayor/",
+		TownRoot:      m.townRoot,
+		AgentOverride: agentOverride,
+		Beacon:        beacon,
+		Subject:       "Mayor startup instructions [HIGH PRIORITY]",
+	})
 
 	return nil
 }

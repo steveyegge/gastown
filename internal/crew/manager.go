@@ -547,6 +547,17 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// serves no purpose. If the caller needs to know when Claude is ready,
 	// they can check with IsClaudeRunning().
 
+	// For agents with prompt_mode "none" (e.g., copilot), send beacon via mail
+	_ = config.SendBeaconIfNeeded(config.SendBeaconMailConfig{
+		Role:          "crew",
+		Recipient:     address,
+		TownRoot:      townRoot,
+		RigPath:       m.rig.Path,
+		AgentOverride: opts.AgentOverride,
+		Beacon:        beacon,
+		Subject:       fmt.Sprintf("Crew %s startup instructions [HIGH PRIORITY]", name),
+	})
+
 	return nil
 }
 

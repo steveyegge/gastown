@@ -171,7 +171,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		}
 	}
 
-	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
+	// Use ResolveRoleAgentConfig to honor town's default_agent setting
+	townRoot := filepath.Dir(m.rig.Path)
+	runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
 
 	// Ensure runtime settings exist in polecats/ (not polecats/<name>/) so we don't
 	// write into the source repo. Runtime walks up the tree to find settings.
@@ -198,7 +200,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Set environment (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:             "polecat",
 		Rig:              m.rig.Name,

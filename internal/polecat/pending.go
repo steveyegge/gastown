@@ -141,7 +141,8 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 
 		// Check if runtime is ready (non-blocking poll)
 		rigPath := filepath.Join(townRoot, ps.Rig)
-		runtimeConfig := config.LoadRuntimeConfig(rigPath)
+		// Use ResolveRoleAgentConfig to honor town's default_agent setting
+		runtimeConfig := config.ResolveRoleAgentConfig("polecat", townRoot, rigPath)
 		err = t.WaitForRuntimeReady(ps.Session, runtimeConfig, timeout)
 		if err != nil {
 			// Not ready yet - leave mail in inbox for next poll

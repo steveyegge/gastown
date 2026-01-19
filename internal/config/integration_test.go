@@ -444,3 +444,91 @@ func TestRigAgentOverridesTownAgent(t *testing.T) {
 		t.Errorf("Expected rig args [--rig-level], got %v", rc.Args)
 	}
 }
+
+func TestBuiltinAgentStartupCommands(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		preset       AgentPreset
+		command      string
+		args         []string
+		expectPrompt bool
+	}{
+		{AgentClaude, "claude", []string{"--dangerously-skip-permissions"}, true},
+		{AgentGemini, "gemini", []string{"--approval-mode", "yolo"}, true},
+		{AgentCodex, "codex", []string{"--yolo"}, false},
+		{AgentCursor, "cursor-agent", []string{"-f"}, true},
+		{AgentAuggie, "auggie", []string{"--allow-indexing"}, true},
+		{AgentAmp, "amp", []string{"--dangerously-allow-all", "--no-ide"}, true},
+		{AgentCopilot, "copilot", []string{"--yolo"}, false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(string(tt.preset), func(t *testing.T) {
+			tmpDir := t.TempDir()
+			townRoot := filepath.Join(tmpDir, "town")
+			rigName := "testrig"
+			rigPath := filepath.Join(townRoot, rigName)
+
+			dirs := []string{
+				filepath.Join(townRoot, "settings"),
+				filepath.Join(rigPath, "settings"),
+			}
+
+			for _, dir := range dirs {
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					t.Fatalf("Failed to create directory %s: %v", dir, err)
+				}
+			}
+
+			townSettings := map[string]interface{}{
+				"type":          "town-settings",
+				"version":       1,
+				"default_agent": "claude",
+			}
+			writeTownJSON(t, filepath.Join(townRoot, "settings", "config.json"), townSettings)
+
+			rigSettings := map[string]interface{}{
+				"type":    "rig-settings",
+				"version": 1,
+				"agent":   string(tt.preset),
+			}
+			writeTownJSON(t, filepath.Join(rigPath, "settings", "config.json"), rigSettings)
+
+			rc := ResolveAgentConfig(townRoot, rigPath)
+			if rc == nil {
+				t.Fatal("ResolveAgentConfig returned nil")
+			}
+			if rc.Provider != string(tt.preset) {
+				t.Errorf("Provider = %q, want %q", rc.Provider, tt.preset)
+			}
+			if rc.Command != tt.command {
+				t.Errorf("Command = %q, want %q", rc.Command, tt.command)
+			}
+			if len(rc.Args) != len(tt.args) {
+				t.Fatalf("Args = %v, want %v", rc.Args, tt.args)
+			}
+			for i, arg := range tt.args {
+				if rc.Args[i] != arg {
+					t.Fatalf("Args[%d] = %q, want %q", i, rc.Args[i], arg)
+				}
+			}
+
+			prompt := "builtin-prompt"
+			cmd := BuildPolecatStartupCommand(rigName, "test-polecat", rigPath, prompt)
+
+			expectedFragment := tt.command + " " + strings.Join(tt.args, " ")
+			if !strings.Contains(cmd, expectedFragment) {
+				t.Errorf("Expected command to contain %q, got: %s", expectedFragment, cmd)
+			}
+			if tt.expectPrompt {
+				if !strings.Contains(cmd, prompt) {
+					t.Errorf("Expected prompt %q in command, got: %s", prompt, cmd)
+				}
+			} else if strings.Contains(cmd, prompt) {
+				t.Errorf("Did not expect prompt %q in command, got: %s", prompt, cmd)
+			}
+		})
+	}
+}

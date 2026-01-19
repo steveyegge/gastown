@@ -18,6 +18,7 @@ Complete setup guide for Gas Town multi-agent orchestrator.
 |------|---------|-------|---------|
 | **tmux** | 3.0+ | `tmux -V` | See below |
 | **Claude Code** (default) | latest | `claude --version` | See [claude.ai/claude-code](https://claude.ai/claude-code) |
+| **Copilot CLI** (optional) | latest | `copilot --version` | See [docs.github.com/copilot/using-github-copilot/using-github-copilot-in-the-command-line](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) |
 | **Codex CLI** (optional) | latest | `codex --version` | See [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli) |
 | **OpenCode CLI** (optional) | latest | `opencode --version` | See [opencode.ai](https://opencode.ai) |
 

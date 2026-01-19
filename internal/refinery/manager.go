@@ -168,13 +168,14 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Ensure runtime settings exist in refinery/ (not refinery/rig/) so we don't
 	// write into the source repo. Runtime walks up the tree to find settings.
 	refineryParentDir := filepath.Join(m.rig.Path, "refinery")
-	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
+	// Use ResolveRoleAgentConfig to honor town's default_agent setting
+	townRoot := filepath.Dir(m.rig.Path)
+	runtimeConfig := config.ResolveRoleAgentConfig("refinery", townRoot, m.rig.Path)
 	if err := runtime.EnsureSettingsForRole(refineryParentDir, "refinery", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	// Build startup command first
-	townRoot := filepath.Dir(m.rig.Path)
 	var command string
 	if agentOverride != "" {
 		var err error

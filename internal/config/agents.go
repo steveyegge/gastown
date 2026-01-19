@@ -27,6 +27,8 @@ const (
 	AgentAuggie AgentPreset = "auggie"
 	// AgentAmp is Sourcegraph AMP.
 	AgentAmp AgentPreset = "amp"
+	// AgentCopilot is GitHub Copilot CLI.
+	AgentCopilot AgentPreset = "copilot"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -66,6 +68,11 @@ type AgentPresetInfo struct {
 	// SupportsForkSession indicates if --fork-session is available.
 	// Claude-only feature for seance command.
 	SupportsForkSession bool `json:"supports_fork_session,omitempty"`
+
+	// PromptMode controls how prompts are passed to the runtime.
+	// "arg" - append prompt as positional argument (default for claude)
+	// "none" - don't pass prompt on command line (for copilot, which uses -p flag)
+	PromptMode string `json:"prompt_mode,omitempty"`
 
 	// NonInteractive contains settings for non-interactive mode.
 	NonInteractive *NonInteractiveConfig `json:"non_interactive,omitempty"`
@@ -130,7 +137,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Command:             "codex",
 		Args:                []string{"--yolo"},
 		ProcessNames:        []string{"codex"}, // Codex CLI binary
-		SessionIDEnv:        "", // Codex captures from JSONL output
+		SessionIDEnv:        "",                // Codex captures from JSONL output
 		ResumeFlag:          "resume",
 		ResumeStyle:         "subcommand",
 		SupportsHooks:       false, // Use env/files instead
@@ -176,6 +183,21 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeStyle:         "subcommand", // 'amp threads continue <threadId>'
 		SupportsHooks:       false,
 		SupportsForkSession: false,
+	},
+	AgentCopilot: {
+		Name:                AgentCopilot,
+		Command:             "copilot",
+		Args:                []string{"--yolo"},
+		ProcessNames:        []string{"copilot"},
+		SessionIDEnv:        "COPILOT_SESSION_ID",
+		ResumeFlag:          "--resume",
+		ResumeStyle:         "flag",
+		SupportsHooks:       true, // Copilot CLI supports hooks per docs
+		SupportsForkSession: false,
+		PromptMode:          "none", // Copilot rejects positional prompt args
+		NonInteractive: &NonInteractiveConfig{
+			PromptFlag: "-p",
+		},
 	},
 }
 
@@ -328,8 +350,10 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	}
 
 	return &RuntimeConfig{
-		Command: info.Command,
-		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
+		Provider:   string(info.Name),
+		Command:    info.Command,
+		Args:       append([]string(nil), info.Args...), // Copy to avoid mutation
+		PromptMode: info.PromptMode,
 	}
 }
 

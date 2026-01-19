@@ -24,6 +24,11 @@ func filterGTEnv(env []string) []string {
 	return filtered
 }
 
+func testCmdEnv(env []string) []string {
+	filtered := filterGTEnv(env)
+	return append(filtered, "BEADS_NO_DAEMON=1")
+}
+
 // TestQuerySessionEvents_FindsEventsFromAllLocations verifies that querySessionEvents
 // finds session.ended events from both town-level and rig-level beads databases.
 //
@@ -72,7 +77,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	// Clear GT environment variables to isolate test from parent workspace
 	gtInstallCmd := exec.Command("gt", "install")
 	gtInstallCmd.Dir = townRoot
-	gtInstallCmd.Env = filterGTEnv(os.Environ())
+	gtInstallCmd.Env = testCmdEnv(os.Environ())
 	if out, err := gtInstallCmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install: %v\n%s", err, out)
 	}
@@ -111,7 +116,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	// Add rig using gt rig add
 	rigAddCmd := exec.Command("gt", "rig", "add", "testrig", bareRepo, "--prefix=tr")
 	rigAddCmd.Dir = townRoot
-	rigAddCmd.Env = filterGTEnv(os.Environ())
+	rigAddCmd.Env = testCmdEnv(os.Environ())
 	if out, err := rigAddCmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt rig add: %v\n%s", err, out)
 	}
@@ -128,6 +133,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	// Create a session.ended event in TOWN beads (simulating mayor/deacon)
 	townEventPayload := `{"cost_usd":1.50,"session_id":"hq-mayor","role":"mayor","ended_at":"2026-01-12T10:00:00Z"}`
 	townEventCmd := exec.Command("bd", "create",
+		"--no-daemon",
 		"--type=event",
 		"--title=Town session ended",
 		"--event-category=session.ended",
@@ -135,7 +141,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 		"--json",
 	)
 	townEventCmd.Dir = townRoot
-	townEventCmd.Env = filterGTEnv(os.Environ())
+	townEventCmd.Env = testCmdEnv(os.Environ())
 	townOut, err := townEventCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("creating town event: %v\n%s", err, townOut)
@@ -145,6 +151,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	// Create a session.ended event in RIG beads (simulating polecat)
 	rigEventPayload := `{"cost_usd":2.50,"session_id":"gt-testrig-toast","role":"polecat","rig":"testrig","worker":"toast","ended_at":"2026-01-12T11:00:00Z"}`
 	rigEventCmd := exec.Command("bd", "create",
+		"--no-daemon",
 		"--type=event",
 		"--title=Rig session ended",
 		"--event-category=session.ended",
@@ -152,7 +159,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 		"--json",
 	)
 	rigEventCmd.Dir = rigPath
-	rigEventCmd.Env = filterGTEnv(os.Environ())
+	rigEventCmd.Env = testCmdEnv(os.Environ())
 	rigOut, err := rigEventCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("creating rig event: %v\n%s", err, rigOut)
@@ -160,17 +167,17 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	t.Logf("Created rig event: %s", string(rigOut))
 
 	// Verify events are in separate databases by querying each directly
-	townListCmd := exec.Command("bd", "list", "--type=event", "--all", "--json")
+	townListCmd := exec.Command("bd", "list", "--no-daemon", "--type=event", "--all", "--json")
 	townListCmd.Dir = townRoot
-	townListCmd.Env = filterGTEnv(os.Environ())
+	townListCmd.Env = testCmdEnv(os.Environ())
 	townListOut, err := townListCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("listing town events: %v\n%s", err, townListOut)
 	}
 
-	rigListCmd := exec.Command("bd", "list", "--type=event", "--all", "--json")
+	rigListCmd := exec.Command("bd", "list", "--no-daemon", "--type=event", "--all", "--json")
 	rigListCmd.Dir = rigPath
-	rigListCmd.Env = filterGTEnv(os.Environ())
+	rigListCmd.Env = testCmdEnv(os.Environ())
 	rigListOut, err := rigListCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("listing rig events: %v\n%s", err, rigListOut)

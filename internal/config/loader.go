@@ -1639,3 +1639,63 @@ func (c *EscalationConfig) GetMaxReescalations() int {
 	}
 	return c.MaxReescalations
 }
+
+// SendBeaconMailConfig configures SendBeaconIfNeeded.
+type SendBeaconMailConfig struct {
+	// Role is the gastown role (mayor, deacon, witness, etc.)
+	Role string
+	// Recipient is the mail recipient address (e.g., "mayor/", "deacon/")
+	Recipient string
+	// TownRoot is the path to the town root directory
+	TownRoot string
+	// RigPath is the optional rig path (for rig-level roles)
+	RigPath string
+	// AgentOverride is the optional agent override name
+	AgentOverride string
+	// Beacon is the startup beacon message
+	Beacon string
+	// Subject is the mail subject line
+	Subject string
+}
+
+// SendBeaconIfNeeded sends the startup beacon via mail if the agent's
+// prompt_mode is "none" (meaning the beacon wasn't passed as a command arg).
+// This ensures agents like Copilot CLI receive their startup instructions.
+// Returns nil on success or if no mail was needed; errors are non-fatal.
+func SendBeaconIfNeeded(cfg SendBeaconMailConfig) error {
+	if cfg.Beacon == "" {
+		return nil
+	}
+
+	// Resolve the RuntimeConfig to check PromptMode
+	var rc *RuntimeConfig
+	if cfg.AgentOverride != "" {
+		rc, _, _ = ResolveAgentConfigWithOverride(cfg.TownRoot, cfg.RigPath, cfg.AgentOverride)
+	} else if cfg.Role != "" {
+		rc = ResolveRoleAgentConfig(cfg.Role, cfg.TownRoot, cfg.RigPath)
+	} else {
+		rc = ResolveAgentConfig(cfg.TownRoot, cfg.RigPath)
+	}
+
+	// Only send mail if prompt_mode is "none" (beacon was dropped from command)
+	if rc == nil || rc.PromptMode != "none" {
+		return nil
+	}
+
+	// Determine recipient and subject
+	recipient := cfg.Recipient
+	if recipient == "" {
+		recipient = cfg.Role + "/"
+	}
+	subject := cfg.Subject
+	if subject == "" {
+		subject = fmt.Sprintf("%s startup instructions [HIGH PRIORITY]", cfg.Role)
+	}
+
+	// Send startup instructions via mail with --notify to alert the agent
+	cmd := exec.Command("gt", "mail", "send", recipient, "-s", subject, "-m", cfg.Beacon, "--notify")
+	if cfg.TownRoot != "" {
+		cmd.Dir = cfg.TownRoot
+	}
+	return cmd.Run()
+}
