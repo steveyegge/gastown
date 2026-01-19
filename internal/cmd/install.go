@@ -35,6 +35,7 @@ var (
 	installPublic     bool
 	installShell      bool
 	installWrappers   bool
+	installSymlinks   bool
 )
 
 var installCmd = &cobra.Command{
@@ -61,7 +62,8 @@ Examples:
   gt install ~/gt --git                        # Also init git with .gitignore
   gt install ~/gt --github=user/repo           # Create private GitHub repo (default)
   gt install ~/gt --github=user/repo --public  # Create public GitHub repo
-  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)`,
+  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)
+  gt install ~/gt --symlink                    # Symlink gt and bd to /usr/local/bin`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInstall,
 }
@@ -77,6 +79,7 @@ func init() {
 	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
 	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
+	installCmd.Flags().BoolVar(&installSymlinks, "symlink", false, "Create symlinks for gt and bd in /usr/local/bin (requires sudo)")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -115,6 +118,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("installing wrapper scripts: %w", err)
 			}
 			fmt.Printf("✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+			return nil
+		}
+		// If only --symlink is requested in existing town, just install symlinks and exit
+		if installSymlinks {
+			if err := wrappers.InstallSymlinks(); err != nil {
+				return fmt.Errorf("creating symlinks: %w", err)
+			}
+			fmt.Printf("✓ Created symlinks for gt and bd in /usr/local/bin\n")
 			return nil
 		}
 		return fmt.Errorf("directory is already a Gas Town HQ (use --force to reinitialize)")
@@ -307,6 +318,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if installSymlinks {
+		fmt.Println()
+		if err := wrappers.InstallSymlinks(); err != nil {
+			fmt.Printf("   %s Could not create symlinks: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Created symlinks for gt and bd in /usr/local/bin\n")
+		}
+	}
+
 	fmt.Printf("\n%s HQ created successfully!\n", style.Bold.Render("✓"))
 	fmt.Println()
 	fmt.Println("Next steps:")
@@ -445,6 +465,13 @@ func ensureCustomTypes(beadsPath string) error {
 	if err != nil {
 		return fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
 	}
+
+	// Disable contributor routing to use gastown's rig-based routing instead
+	// This prevents issues being routed to ~/.beads-planning
+	routingCmd := exec.Command("bd", "config", "set", "routing.mode", "direct")
+	routingCmd.Dir = beadsPath
+	_, _ = routingCmd.CombinedOutput() // Ignore errors - not critical
+
 	return nil
 }
 
@@ -472,7 +499,7 @@ func initTownAgentBeads(townPath string) error {
 	// bd init doesn't enable "custom" issue types by default, but Gas Town uses
 	// agent/role beads during install and runtime. Ensure these types are enabled
 	// before attempting to create any town-level system beads.
-	if err := ensureBeadsCustomTypes(townPath, []string{"agent", "role", "rig", "convoy", "slot"}); err != nil {
+	if err := ensureBeadsCustomTypes(townPath, constants.BeadsCustomTypesList()); err != nil {
 		return err
 	}
 

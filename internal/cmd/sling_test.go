@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -682,8 +683,8 @@ func TestLooksLikeBeadID(t *testing.T) {
 		{"hq-00gyg", true},
 
 		// Short prefixes that match pattern (but may be formulas in practice)
-		{"mol-release", true},    // 3-char prefix matches pattern (formula check runs first in sling)
-		{"mol-abc123", true},     // 3-char prefix matches pattern
+		{"oc-release", true},     // 2-char prefix matches pattern (formula check runs first in sling)
+		{"oc-abc123", true},      // 2-char prefix matches pattern
 
 		// Non-bead strings - should return false
 		{"formula-name", false},  // "formula" is 7 chars (> 5)
@@ -705,6 +706,210 @@ func TestLooksLikeBeadID(t *testing.T) {
 				t.Errorf("looksLikeBeadID(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestSlingFormulaRigTargetCreatesWispBeforeSpawn verifies that when slinging
+// a formula to a rig target (which spawns a new polecat), the wisp is created
+// BEFORE the polecat is spawned. This prevents a race condition where the
+// polecat starts and runs gt prime before its work (wisp) exists.
+//
+// Bug (bd-gj3): The original code spawned the polecat during target resolution,
+// then created the wisp afterward. The polecat could start and check its hook
+// before the wisp was created, finding no work.
+//
+// Fix: Defer polecat spawn until after wisp creation. Order is now:
+// 1. Cook formula
+// 2. Create wisp
+// 3. Spawn polecat (wisp already exists)
+// 4. Hook wisp to polecat
+func TestSlingFormulaRigTargetCreatesWispBeforeSpawn(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create minimal workspace structure with a configured rig
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	// Create the test rig directory structure
+	testRigDir := filepath.Join(townRoot, "testrig")
+	if err := os.MkdirAll(filepath.Join(testRigDir, "polecats"), 0755); err != nil {
+		t.Fatalf("mkdir testrig/polecats: %v", err)
+	}
+	// Create a .git file to make it look like a worktree
+	if err := os.WriteFile(filepath.Join(testRigDir, ".git"), []byte("gitdir: ../.."), 0644); err != nil {
+		t.Fatalf("write .git: %v", err)
+	}
+
+	// Create rigs.json with our test rig
+	rigsConfig := `{"rigs":{"testrig":{"path":"testrig","repo":"test"}}}`
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "rigs.json"), []byte(rigsConfig), 0644); err != nil {
+		t.Fatalf("write rigs.json: %v", err)
+	}
+
+	// Create routes.jsonl
+	routes := strings.Join([]string{
+		`{"prefix":"gt-","path":"."}`,
+		`{"prefix":"hq-","path":"."}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(routes), 0644); err != nil {
+		t.Fatalf("write routes.jsonl: %v", err)
+	}
+
+	// Stub bd to log commands with sequence numbers
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	bdPath := filepath.Join(binDir, "bd")
+	// The stub logs each command with a sequence number for order verification
+	bdScript := `#!/bin/sh
+set -e
+# Append command to log with sequence number
+if [ -f "${BD_LOG}" ]; then
+  seq=$(wc -l < "${BD_LOG}" | tr -d ' ')
+else
+  seq=0
+fi
+echo "${seq}|$*" >> "${BD_LOG}"
+
+if [ "$1" = "--no-daemon" ]; then
+  shift
+fi
+cmd="$1"
+shift || true
+case "$cmd" in
+  formula)
+    echo '{"name":"mol-polecat-work"}'
+    exit 0
+    ;;
+  cook)
+    exit 0
+    ;;
+  mol)
+    sub="$1"
+    shift || true
+    case "$sub" in
+      wisp)
+        echo '{"new_epic_id":"gt-wisp-race-test"}'
+        ;;
+    esac
+    ;;
+  update)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flags
+	prevOn := slingOnTarget
+	prevVars := slingVars
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	t.Cleanup(func() {
+		slingOnTarget = prevOn
+		slingVars = prevVars
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true
+	slingVars = nil
+	slingOnTarget = "" // No --on target, we want to test rig target
+
+	// Call runSlingFormula with our configured test rig
+	// The spawn will fail (no tmux, polecat manager issues in test env),
+	// but the key check is that wisp creation happened BEFORE spawn attempt.
+	err = runSlingFormula([]string{"mol-polecat-work", "testrig"})
+
+	// Read the log to verify order - even if overall function failed,
+	// we want to see that wisp was created before spawn was attempted
+	logBytes, err2 := os.ReadFile(logPath)
+	if err2 != nil {
+		// If log doesn't exist, check if the rig was recognized
+		if err != nil {
+			t.Logf("runSlingFormula error: %v", err)
+		}
+		t.Fatalf("bd.log not created - commands not executed (rig may not be recognized)")
+	}
+
+	logContent := string(logBytes)
+	logLines := strings.Split(strings.TrimSpace(logContent), "\n")
+
+	// Find sequence numbers for cook and wisp commands
+	var cookSeq, wispSeq int = -1, -1
+	for _, line := range logLines {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		seq := 0
+		fmt.Sscanf(parts[0], "%d", &seq)
+		args := parts[1]
+
+		if strings.Contains(args, "cook") {
+			cookSeq = seq
+		}
+		if strings.Contains(args, "mol wisp") {
+			wispSeq = seq
+		}
+	}
+
+	// Verify cook happened
+	if cookSeq < 0 {
+		t.Errorf("cook command not found in log:\n%s", logContent)
+	}
+
+	// Verify wisp creation happened - this is the KEY check for the race condition fix
+	if wispSeq < 0 {
+		t.Errorf("mol wisp command not found in log - wisp not created before spawn!\n"+
+			"This indicates the race condition fix is not working.\n"+
+			"Log:\n%s", logContent)
+	}
+
+	// Verify order: cook before wisp
+	if cookSeq >= 0 && wispSeq >= 0 && cookSeq > wispSeq {
+		t.Errorf("cook (seq %d) should happen before wisp (seq %d)", cookSeq, wispSeq)
+	}
+
+	// The key verification: wisp was created before SpawnPolecatForSling was called.
+	// Since SpawnPolecatForSling will fail (no tmux in test), but wisp was created,
+	// this proves the fix is working - wisp creation happens before spawn attempt.
+	if wispSeq >= 0 {
+		t.Logf("SUCCESS: Wisp created at sequence %d (before spawn attempt)", wispSeq)
+		t.Logf("Race condition fix verified: wisp exists before polecat spawn")
+	}
+
+	// The function may return an error due to spawn failing, that's expected
+	if err != nil {
+		t.Logf("runSlingFormula returned error (expected in test env): %v", err)
 	}
 }
 

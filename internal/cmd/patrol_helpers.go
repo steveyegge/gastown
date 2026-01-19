@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -172,6 +173,12 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 		return patrolID, fmt.Errorf("created wisp %s but failed to hook", patrolID)
 	}
 
+	// Also set the hook slot on the agent bead (fixes mi-619: hook slot consistency bug)
+	// This is critical - the agent bead's hook slot is what gt hook queries.
+	// Without this, the patrol wisp status is "hooked" but the agent's hook slot is empty,
+	// making the work invisible to gt hook and breaking autonomous execution.
+	setPatrolAgentHookSlot(patrolID, cfg)
+
 	return patrolID, nil
 }
 
@@ -217,5 +224,46 @@ func outputPatrolContext(cfg PatrolConfig) {
 	if patrolID != "" {
 		fmt.Println()
 		fmt.Printf("Current patrol ID: %s\n", patrolID)
+	}
+}
+
+// setPatrolAgentHookSlot sets the hook slot on the agent bead for a patrol.
+// This fixes the mi-619 bug where the patrol wisp is marked hooked but the agent
+// bead's hook slot is empty, making work invisible to gt hook.
+func setPatrolAgentHookSlot(patrolID string, cfg PatrolConfig) {
+	var agentBeadID string
+
+	switch cfg.RoleName {
+	case "deacon":
+		agentBeadID = beads.DeaconBeadIDTown()
+	case "witness":
+		// Extract rig from assignee (format: "rig/witness")
+		parts := strings.Split(cfg.Assignee, "/")
+		if len(parts) >= 2 && parts[1] == "witness" {
+			rig := parts[0]
+			prefix := beads.GetPrefixForRig("", rig) // "" since we can infer from beads dir
+			agentBeadID = beads.WitnessBeadIDWithPrefix(prefix, rig)
+		}
+	case "refinery":
+		// Extract rig from assignee (format: "rig/refinery")
+		parts := strings.Split(cfg.Assignee, "/")
+		if len(parts) >= 2 && parts[1] == "refinery" {
+			rig := parts[0]
+			prefix := beads.GetPrefixForRig("", rig)
+			agentBeadID = beads.RefineryBeadIDWithPrefix(prefix, rig)
+		}
+	}
+
+	if agentBeadID == "" {
+		// Silent skip - some configurations may not support hook slot setting
+		return
+	}
+
+	cmdHookSlot := exec.Command("bd", "--no-daemon", "slot", "set", agentBeadID, "hook", patrolID)
+	cmdHookSlot.Dir = cfg.BeadsDir
+	if err := cmdHookSlot.Run(); err != nil {
+		// Non-fatal: the work is still hooked (status=hooked), but the agent bead's hook slot
+		// might not be updated. Log but continue - bd slot set can fail for cross-database scenarios.
+		fmt.Fprintf(os.Stderr, "Warning: could not set agent hook slot for %s: %v\n", cfg.Assignee, err)
 	}
 }

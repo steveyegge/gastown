@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/deacon"
@@ -47,6 +48,7 @@ This is the idempotent "boot" command for Gas Town. It ensures all
 infrastructure agents are running:
 
   • Daemon     - Go background process that pokes agents
+  • Boot       - Watchdog that triages Deacon health (the dog)
   • Deacon     - Health orchestrator (monitors Mayor/Witnesses)
   • Mayor      - Global work coordinator
   • Witnesses  - Per-rig polecat managers
@@ -85,6 +87,9 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	// Discover rigs early so we can prefetch while daemon/deacon/mayor start
 	rigs := discoverRigs(townRoot)
+
+	// Ensure beads custom types are configured for all rigs (idempotent)
+	ensureRigBeadsCustomTypes(townRoot, rigs)
 
 	// Start daemon, deacon, mayor, and rig prefetch in parallel
 	var daemonErr error
@@ -197,7 +202,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// 7. Polecats with pinned work (if --restore)
+		// 8. Polecats with pinned work (if --restore)
 		for _, rigName := range rigs {
 			polecatsStarted, polecatErrors := startPolecatsWithWork(townRoot, rigName)
 			for _, name := range polecatsStarted {
@@ -214,7 +219,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	if allOK {
 		fmt.Printf("%s All services running\n", style.Bold.Render("✓"))
 		// Log boot event with started services
-		startedServices := []string{"daemon", "deacon", "mayor"}
+		startedServices := []string{"daemon", "boot", "deacon", "mayor"}
 		for _, rigName := range rigs {
 			startedServices = append(startedServices, fmt.Sprintf("%s/witness", rigName))
 			startedServices = append(startedServices, fmt.Sprintf("%s/refinery", rigName))
@@ -712,4 +717,32 @@ func startPolecatsWithWork(townRoot, rigName string) ([]string, map[string]error
 	}
 
 	return started, errors
+}
+
+// ensureRigBeadsCustomTypes ensures all rigs have beads configured with Gas Town custom types.
+// This is idempotent - safe to run multiple times.
+func ensureRigBeadsCustomTypes(townRoot string, rigNames []string) {
+	// Also configure town-level beads
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if _, err := os.Stat(townBeadsDir); err == nil {
+		cmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+		cmd.Dir = townRoot
+		_ = cmd.Run() // Ignore errors - older beads versions may not support this
+	}
+
+	// Configure each rig's beads
+	for _, rigName := range rigNames {
+		rigPath := filepath.Join(townRoot, rigName)
+
+		// Resolve the actual beads directory (follows redirects)
+		beadsDir := beads.ResolveBeadsDir(rigPath)
+		if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+			continue
+		}
+
+		// Run bd config set in the rig directory
+		cmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+		cmd.Dir = rigPath
+		_ = cmd.Run() // Ignore errors - older beads versions may not support this
+	}
 }

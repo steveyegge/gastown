@@ -1,0 +1,293 @@
+description = """
+Pull in open PRs from upstream repositories into the fork.
+
+This formula fetches PRs from upstream (steveyegge/gastown or steveyegge/beads),
+filters them by category, and merges selected ones into the fork.
+
+## Usage
+
+```bash
+# Intake bugfix PRs from gastown upstream
+gt sling gastown/crew/upstream_sync --formula mol-upstream-pr-intake --var repo=gastown --var mode=bugfix
+
+# Intake all PRs from beads upstream
+gt sling gastown/crew/upstream_sync --formula mol-upstream-pr-intake --var repo=beads --var mode=all
+```
+
+## Modes
+
+- `bugfix` - Only PRs with "fix" in title or labeled as bug
+- `feature` - Only PRs with "feat" in title or labeled as feature
+- `all` - All open PRs
+- `cherry` - Interactive selection (crew only)
+
+## Prerequisites
+
+- Fork remote configured (groblegark/<repo>)
+- Upstream remote configured (steveyegge/<repo>)
+- gh CLI authenticated
+"""
+formula = "mol-upstream-pr-intake"
+version = 1
+
+[vars.repo]
+description = "Target repository: gastown or beads"
+required = true
+
+[vars.mode]
+description = "Filter mode: bugfix, feature, all, or cherry"
+default = "bugfix"
+
+[[steps]]
+id = "sync-fork"
+title = "Sync fork with upstream main"
+description = """
+Ensure the fork is up to date with upstream before processing PRs.
+
+```bash
+cd ~/pihealth/submodules/{{repo}}
+
+# Fetch from both remotes
+git fetch upstream
+git fetch origin
+
+# Check current branch
+git branch --show-current
+
+# If on main, fast-forward to upstream
+git checkout main
+git merge --ff-only upstream/main
+
+# Push to fork
+git push origin main
+```
+
+If merge fails (fork has divergent commits), assess whether to:
+- Rebase fork commits onto upstream
+- Force push to reset fork to upstream
+- Escalate for human decision
+
+**Completion criteria:**
+- Fork main matches upstream main
+- Both remotes fetched
+"""
+
+[[steps]]
+id = "list-prs"
+title = "List open PRs from upstream"
+needs = ["sync-fork"]
+description = """
+Get all open PRs from the upstream repository.
+
+```bash
+# List open PRs with key info
+gh pr list --repo steveyegge/{{repo}} --state open --json number,title,labels,author,headRefName
+
+# Save to temp file for processing
+gh pr list --repo steveyegge/{{repo}} --state open --json number,title,labels,author,headRefName > /tmp/upstream-prs.json
+```
+
+Review the list and note:
+- Total number of open PRs
+- PRs by category (bug, feature, chore, etc.)
+- PRs from known contributors vs external
+
+**Completion criteria:**
+- PR list retrieved and saved
+- Count documented
+"""
+
+[[steps]]
+id = "filter-prs"
+title = "Filter PRs based on mode"
+needs = ["list-prs"]
+description = """
+Filter the PR list based on the intake mode: {{mode}}
+
+**Mode: bugfix**
+- Include PRs with "fix" in title (case-insensitive)
+- Include PRs with "bug" label
+- Exclude PRs marked as breaking changes
+
+**Mode: feature**
+- Include PRs with "feat" in title
+- Include PRs with "feature" or "enhancement" label
+
+**Mode: all**
+- Include all open PRs
+- Sort by age (oldest first)
+
+**Mode: cherry**
+- Present list to user for manual selection
+- (Only works for crew, not polecats)
+
+```bash
+# Example filter for bugfix mode
+cat /tmp/upstream-prs.json | jq '[.[] | select(.title | test("fix"; "i"))]'
+```
+
+Document which PRs will be processed and why.
+
+**Completion criteria:**
+- Filtered list of PRs to process
+- Reasoning documented for inclusions/exclusions
+"""
+
+[[steps]]
+id = "process-prs"
+title = "Process each filtered PR"
+needs = ["filter-prs"]
+description = """
+For each PR in the filtered list:
+
+**1. Checkout the PR branch:**
+```bash
+gh pr checkout <pr_number> --repo steveyegge/{{repo}}
+```
+
+**2. Rebase onto current main:**
+```bash
+git rebase main
+```
+
+**3. If conflicts:**
+- For simple conflicts: resolve and continue
+- For complex conflicts: skip this PR, note for later
+
+**4. Run quick validation:**
+```bash
+go build ./...
+go test ./... -short
+```
+
+**5. If validation passes, merge to main:**
+```bash
+git checkout main
+git merge --no-ff <branch> -m "Merge upstream PR #<number>: <title>"
+```
+
+**6. Track progress:**
+- Log each PR processed
+- Note any skipped PRs and why
+
+Process PRs one at a time to isolate failures.
+
+**Completion criteria:**
+- All filtered PRs attempted
+- Successful merges on main
+- Skipped PRs documented with reasons
+"""
+
+[[steps]]
+id = "test-integrated"
+title = "Run full test suite after merges"
+needs = ["process-prs"]
+description = """
+Validate the integrated changes work together.
+
+```bash
+cd ~/pihealth/submodules/{{repo}}
+
+# Full build
+go build ./...
+
+# Full test suite
+go test ./... 2>&1 | tee /tmp/integration-test.log
+
+# Check for failures
+grep -E "^--- FAIL|^FAIL" /tmp/integration-test.log
+```
+
+**If tests fail:**
+1. Identify which merged PR caused the failure
+2. Options:
+   - Fix the issue if straightforward
+   - Revert the problematic merge
+   - Escalate if unclear
+
+**Completion criteria:**
+- All tests pass, OR
+- Failing PRs reverted and documented
+"""
+
+[[steps]]
+id = "push-to-fork"
+title = "Push merged changes to fork"
+needs = ["test-integrated"]
+description = """
+Push the integrated changes to the fork remote.
+
+```bash
+git push origin main
+```
+
+Verify the push succeeded and the fork is updated.
+
+**Completion criteria:**
+- Fork main updated with merged PRs
+- No push errors
+"""
+
+[[steps]]
+id = "document-results"
+title = "Document intake results"
+needs = ["push-to-fork"]
+description = """
+Create a summary of the intake operation.
+
+**Report to Mayor:**
+```bash
+gt mail send mayor/ -s "Upstream Intake: {{repo}} ({{mode}})" -m "
+## Intake Summary
+
+**Repository:** {{repo}}
+**Mode:** {{mode}}
+**Date:** $(date)
+
+### PRs Merged
+<list merged PRs with numbers and titles>
+
+### PRs Skipped
+<list skipped PRs with reasons>
+
+### Test Results
+<pass/fail summary>
+
+### Notes
+<any issues or observations>
+"
+```
+
+**Completion criteria:**
+- Summary sent to Mayor
+- All outcomes documented
+"""
+
+[[steps]]
+id = "cleanup"
+title = "Clean up and exit"
+needs = ["document-results"]
+description = """
+Clean up temporary files and exit properly.
+
+```bash
+# Remove temp files
+rm -f /tmp/upstream-prs.json /tmp/integration-test.log
+
+# Return to main branch
+git checkout main
+```
+
+**For polecats:**
+```bash
+gt exit
+```
+
+**For crew:**
+Session can continue for follow-up work.
+
+**Completion criteria:**
+- Temp files cleaned
+- On main branch
+- Session properly concluded
+"""

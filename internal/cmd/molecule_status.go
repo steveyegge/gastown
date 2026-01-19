@@ -303,6 +303,24 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		// not the agent from the GT_ROLE env var (which might be different if
 		// we cd'd into another rig's crew/polecat directory)
 		roleCtx = detectRole(cwd, townRoot)
+
+		// If cwd detection fails (e.g., at rig root), fall back to env vars
+		// This handles the case where agent cd's to a non-standard location
+		// but still has GT_ROLE/GT_RIG/GT_CREW env vars set
+		if roleCtx.Role == RoleUnknown {
+			envCtx, err := GetRoleWithContext(cwd, townRoot)
+			if err == nil && envCtx.Role != RoleUnknown {
+				roleCtx = RoleContext{
+					Role:     envCtx.Role,
+					Rig:      envCtx.Rig,
+					Polecat:  envCtx.Polecat,
+					TownRoot: envCtx.TownRoot,
+					WorkDir:  envCtx.WorkDir,
+					Source:   envCtx.Source,
+				}
+			}
+		}
+
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)
@@ -342,8 +360,22 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 				// Fetch the bead on the hook
 				hookBead, err = b.Show(agentBead.HookBead)
 				if err != nil {
-					// Hook bead referenced but not found - report error but continue
-					hookBead = nil
+					// Hook bead not found in rig's beads - check town beads
+					// This handles cross-database references (e.g., agent bead in rig, work in town)
+					if !isTownLevelRole(target) && townRoot != "" {
+						townBeadsDir := filepath.Join(townRoot, ".beads")
+						if _, err := os.Stat(townBeadsDir); err == nil {
+							townB := beads.New(townRoot)
+							hookBead, err = townB.Show(agentBead.HookBead)
+							if err != nil {
+								// Not found in town beads either
+								hookBead = nil
+							}
+						}
+					}
+					if hookBead == nil {
+						// Still not found - will fall through to fallback approach
+					}
 				}
 			}
 		}
@@ -383,6 +415,23 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		})
 		if err != nil {
 			return fmt.Errorf("listing hooked beads: %w", err)
+		}
+
+		// For rig-level agents (polecat/witness/refinery), also check town beads
+		// since hooked work might be in the town beads location (hq- prefix)
+		if len(hookedBeads) == 0 && !isTownLevelRole(target) && townRoot != "" {
+			townBeadsDir := filepath.Join(townRoot, ".beads")
+			if _, err := os.Stat(townBeadsDir); err == nil {
+				townB := beads.New(townRoot)
+				townHookedBeads, err := townB.List(beads.ListOptions{
+					Status:   beads.StatusHooked,
+					Assignee: target,
+					Priority: -1,
+				})
+				if err == nil && len(townHookedBeads) > 0 {
+					hookedBeads = townHookedBeads
+				}
+			}
 		}
 
 		// If no hooked beads found, also check in_progress beads assigned to this agent.
@@ -704,6 +753,24 @@ func runMoleculeCurrent(cmd *cobra.Command, args []string) error {
 		// not the agent from the GT_ROLE env var (which might be different if
 		// we cd'd into another rig's crew/polecat directory)
 		roleCtx = detectRole(cwd, townRoot)
+
+		// If cwd detection fails (e.g., at rig root), fall back to env vars
+		// This handles the case where agent cd's to a non-standard location
+		// but still has GT_ROLE/GT_RIG/GT_CREW env vars set
+		if roleCtx.Role == RoleUnknown {
+			envCtx, err := GetRoleWithContext(cwd, townRoot)
+			if err == nil && envCtx.Role != RoleUnknown {
+				roleCtx = RoleContext{
+					Role:     envCtx.Role,
+					Rig:      envCtx.Rig,
+					Polecat:  envCtx.Polecat,
+					TownRoot: envCtx.TownRoot,
+					WorkDir:  envCtx.WorkDir,
+					Source:   envCtx.Source,
+				}
+			}
+		}
+
 		target = buildAgentIdentity(roleCtx)
 		if target == "" {
 			return fmt.Errorf("cannot determine agent identity (role: %s)", roleCtx.Role)

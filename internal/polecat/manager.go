@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -17,7 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/workspace"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -44,11 +45,16 @@ func (e *UncommittedWorkError) Unwrap() error {
 
 // Manager handles polecat lifecycle.
 type Manager struct {
-	rig      *rig.Rig
-	git      *git.Git
-	beads    *beads.Beads
-	namePool *NamePool
-	tmux     *tmux.Tmux
+	rig       *rig.Rig
+	git       *git.Git
+	beads     *beads.Beads // Rig-level beads for issue operations
+	townBeads *beads.Beads // Town-level beads for agent bead operations (hq- prefix)
+	namePool  *NamePool
+	tmux      *tmux.Tmux
+
+	// allocMu protects name allocation within a single process.
+	// File locking (in AllocateName) handles cross-process synchronization.
+	allocMu sync.Mutex
 }
 
 // NewManager creates a new polecat manager.
@@ -58,6 +64,12 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	// For local beads: rig/.beads is the database, so use rig root
 	resolvedBeads := beads.ResolveBeadsDir(r.Path)
 	beadsPath := filepath.Dir(resolvedBeads) // Get the directory containing .beads
+
+	// Town beads for agent bead operations (hq- prefix).
+	// Agent beads are coordination artifacts stored at town level to avoid
+	// prefix/database mismatch issues (fix for loc-1augh).
+	townRoot := filepath.Dir(r.Path)
+	townBeadsDir := filepath.Join(townRoot, ".beads")
 
 	// Try to load rig settings for namepool config
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
@@ -80,11 +92,12 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	_ = pool.Load() // non-fatal: state file may not exist for new rigs
 
 	return &Manager{
-		rig:      r,
-		git:      g,
-		beads:    beads.NewWithBeadsDir(beadsPath, resolvedBeads),
-		namePool: pool,
-		tmux:     t,
+		rig:       r,
+		git:       g,
+		beads:     beads.NewWithBeadsDir(beadsPath, resolvedBeads),
+		townBeads: beads.NewWithBeadsDir(townRoot, townBeadsDir),
+		namePool:  pool,
+		tmux:      t,
 	}
 }
 
@@ -95,17 +108,11 @@ func (m *Manager) assigneeID(name string) string {
 }
 
 // agentBeadID returns the agent bead ID for a polecat.
-// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast", "bd-beads-polecat-obsidian")
-// The prefix is looked up from routes.jsonl to support rigs with custom prefixes.
+// Format: "hq-<rig>-polecat-<name>" (e.g., "hq-gastown-polecat-Toast")
+// Polecat agent beads are stored at town-level with hq- prefix to avoid
+// prefix/database mismatch issues (fix for loc-1augh).
 func (m *Manager) agentBeadID(name string) string {
-	// Find town root to lookup prefix from routes.jsonl
-	townRoot, err := workspace.Find(m.rig.Path)
-	if err != nil || townRoot == "" {
-		// Fall back to default prefix
-		return beads.PolecatBeadID(m.rig.Name, name)
-	}
-	prefix := beads.GetPrefixForRig(townRoot, m.rig.Name)
-	return beads.PolecatBeadIDWithPrefix(prefix, m.rig.Name, name)
+	return beads.PolecatBeadIDTown(m.rig.Name, name)
 }
 
 // getCleanupStatusFromBead reads the cleanup_status from the polecat's agent bead.
@@ -113,7 +120,7 @@ func (m *Manager) agentBeadID(name string) string {
 // ZFC #10: This is the ZFC-compliant way to check if removal is safe.
 func (m *Manager) getCleanupStatusFromBead(name string) CleanupStatus {
 	agentID := m.agentBeadID(name)
-	_, fields, err := m.beads.GetAgentBead(agentID)
+	_, fields, err := m.townBeads.GetAgentBead(agentID)
 	if err != nil || fields == nil {
 		return CleanupUnknown
 	}
@@ -294,6 +301,14 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 
+	// Verify worktree was actually created (guards against silent failures).
+	// Issue: gt sling reports success but worktree never created.
+	if err := verifyWorktree(clonePath); err != nil {
+		// Clean up the parent directory we created
+		_ = os.RemoveAll(polecatDir)
+		return nil, fmt.Errorf("verifying worktree at %s: %w", clonePath, err)
+	}
+
 	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
 	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
 	agentsMDPath := filepath.Join(clonePath, "AGENTS.md")
@@ -349,7 +364,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// HookBead is set atomically at creation time if provided (avoids cross-beads routing issues).
 	// Uses CreateOrReopenAgentBead to handle re-spawning with same name (GH #332).
 	agentID := m.agentBeadID(name)
-	_, err = m.beads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
+	_, err = m.townBeads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
@@ -481,7 +496,7 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 	// NOTE: We use CloseAndClearAgentBead instead of DeleteAgentBead because bd delete --hard
 	// creates tombstones that cannot be reopened.
 	agentID := m.agentBeadID(name)
-	if err := m.beads.CloseAndClearAgentBead(agentID, "polecat removed"); err != nil {
+	if err := m.townBeads.CloseAndClearAgentBead(agentID, "polecat removed"); err != nil {
 		// Only log if not "not found" - it's ok if it doesn't exist
 		if !errors.Is(err, beads.ErrNotFound) {
 			fmt.Printf("Warning: could not close agent bead %s: %v\n", agentID, err)
@@ -494,17 +509,41 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 // AllocateName allocates a name from the name pool.
 // Returns a pooled name (polecat-01 through polecat-50) if available,
 // otherwise returns an overflow name (rigname-N).
+//
+// This function uses two levels of locking to ensure safe allocation:
+// 1. Process-level mutex for concurrent goroutines within the same process
+// 2. File-based locking for concurrent processes (e.g., parallel gt sling commands)
 func (m *Manager) AllocateName() (string, error) {
-	// First reconcile pool with existing polecats to handle stale state
-	m.ReconcilePool()
+	// First acquire process-level lock for goroutine safety
+	m.allocMu.Lock()
+	defer m.allocMu.Unlock()
 
-	name, err := m.namePool.Allocate()
+	// Use file lock to synchronize across processes
+	// This prevents race conditions when multiple gt sling commands run in parallel
+	lockPath := filepath.Join(m.rig.Path, ".runtime", "namepool.lock")
+	flock := util.NewFileLock(lockPath)
+
+	var name string
+	err := flock.WithLock(func() error {
+		// First reconcile pool with existing polecats to handle stale state
+		// This must happen inside the lock to get accurate filesystem state
+		m.ReconcilePool()
+
+		var allocErr error
+		name, allocErr = m.namePool.Allocate()
+		if allocErr != nil {
+			return allocErr
+		}
+
+		if saveErr := m.namePool.Save(); saveErr != nil {
+			return fmt.Errorf("saving pool state: %w", saveErr)
+		}
+
+		return nil
+	})
+
 	if err != nil {
 		return "", err
-	}
-
-	if err := m.namePool.Save(); err != nil {
-		return "", fmt.Errorf("saving pool state: %w", err)
 	}
 
 	return name, nil
@@ -566,7 +605,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// NOTE: We use CloseAndClearAgentBead instead of DeleteAgentBead because bd delete --hard
 	// creates tombstones that cannot be reopened.
 	agentID := m.agentBeadID(name)
-	if err := m.beads.CloseAndClearAgentBead(agentID, "polecat repair"); err != nil {
+	if err := m.townBeads.CloseAndClearAgentBead(agentID, "polecat repair"); err != nil {
 		if !errors.Is(err, beads.ErrNotFound) {
 			fmt.Printf("Warning: could not close old agent bead %s: %v\n", agentID, err)
 		}
@@ -614,6 +653,12 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
 
+	// Verify worktree was actually created (guards against silent failures).
+	// Issue: gt sling reports success but worktree never created.
+	if err := verifyWorktree(newClonePath); err != nil {
+		return nil, fmt.Errorf("verifying worktree at %s: %w", newClonePath, err)
+	}
+
 	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
 	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
 	agentsMDPath := filepath.Join(newClonePath, "AGENTS.md")
@@ -644,7 +689,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Create or reopen agent bead for ZFC compliance
 	// HookBead is set atomically at recreation time if provided.
 	// Uses CreateOrReopenAgentBead to handle re-spawning with same name (GH #332).
-	_, err = m.beads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
+	_, err = m.townBeads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
@@ -726,7 +771,7 @@ func (m *Manager) ReconcilePoolWith(namesWithDirs, namesWithSessions []string) {
 		for _, name := range namesWithSessions {
 			if !dirSet[name] {
 				sessionName := fmt.Sprintf("gt-%s-%s", m.rig.Name, name)
-				_ = m.tmux.KillSession(sessionName)
+				_ = m.tmux.KillSessionWithProcesses(sessionName)
 			}
 		}
 	}
@@ -882,8 +927,10 @@ func (m *Manager) ClearIssue(name string) error {
 	return nil
 }
 
-// loadFromBeads gets polecat info from beads assignee field.
-// State is simple: issue assigned → working, no issue → done (ready for cleanup).
+// loadFromBeads gets polecat info from beads assignee field and agent bead hook_bead.
+// State is determined by: has assigned issue OR has hook_bead → working, neither → done.
+// This fixes the bug where polecats with newly hooked work show as "done" because
+// the issue assignee hasn't been updated yet.
 // Transient polecats should always have work; no work means ready for Witness cleanup.
 // We don't interpret issue status (ZFC: Go is transport, not decision-maker).
 func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
@@ -923,6 +970,23 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		state = StateWorking
 	}
 
+	// FIX (hq-50u3h): Also check agent bead's hook_bead field.
+	// If hook_bead is set, the polecat has work waiting and should be "working".
+	// This prevents polecats from showing as "done" when new work is hooked via gt sling.
+	// gt sling sets hook_bead atomically, so this is the reliable signal for pending work.
+	agentBeadID := m.agentBeadID(name)
+	if _, fields, err := m.townBeads.GetAgentBead(agentBeadID); err == nil && fields != nil {
+		if fields.HookBead != "" {
+			// Polecat has hooked work - should be working, not done
+			state = StateWorking
+			// If issueID is empty, use the hook_bead as the issue reference
+			// This ensures the hooked work is visible in listings
+			if issueID == "" {
+				issueID = fields.HookBead
+			}
+		}
+	}
+
 	return &Polecat{
 		Name:      name,
 		Rig:       m.rig.Name,
@@ -935,9 +999,64 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.
 // This eliminates the need for git sync between polecat clones - all polecats share one database.
+// Also sets beads.role=maintainer in git config to ensure beads are written to the rig's database
+// instead of ~/.beads-planning (which is the default for HTTPS-cloned repos without credentials).
 func (m *Manager) setupSharedBeads(clonePath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
-	return beads.SetupRedirect(townRoot, clonePath)
+	if err := beads.SetupRedirect(townRoot, clonePath); err != nil {
+		return err
+	}
+
+	// Set beads.role=maintainer to prevent beads from routing writes to ~/.beads-planning.
+	// Without this, HTTPS-cloned repos are treated as "contributor" and writes go to the
+	// wrong database, causing MR beads to be lost. See: gt-3ml66
+	polecatGit := git.NewGit(clonePath)
+	if err := polecatGit.SetConfig("beads.role", "maintainer"); err != nil {
+		return fmt.Errorf("setting beads.role config: %w", err)
+	}
+
+	return nil
+}
+
+// verifyWorktree checks that a worktree was actually created and is valid.
+// This guards against silent failures in git worktree add where git returns
+// success but the worktree is incomplete or missing.
+//
+// Checks:
+// 1. Directory exists
+// 2. Has a .git file (worktree marker) or .git directory
+// 3. Can run git commands in it
+//
+// Issue: gt sling reports success but worktree never created (hq-yh8icr).
+func verifyWorktree(path string) error {
+	// Check 1: Directory exists
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("worktree directory does not exist")
+		}
+		return fmt.Errorf("checking worktree directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("worktree path is not a directory")
+	}
+
+	// Check 2: Has .git file or directory (indicates git worktree or repo)
+	gitPath := filepath.Join(path, ".git")
+	if _, err := os.Stat(gitPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("worktree missing .git (not a valid worktree)")
+		}
+		return fmt.Errorf("checking .git: %w", err)
+	}
+
+	// Check 3: Can run git rev-parse to verify it's a working git directory
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--git-dir")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git rev-parse failed (invalid git worktree): %w", err)
+	}
+
+	return nil
 }
 
 // CleanupStaleBranches removes orphaned polecat branches that are no longer in use.
@@ -1048,7 +1167,7 @@ func (m *Manager) DetectStalePolecats(threshold int) ([]*StalenessInfo, error) {
 
 		// Check agent bead state
 		agentID := m.agentBeadID(p.Name)
-		_, fields, err := m.beads.GetAgentBead(agentID)
+		_, fields, err := m.townBeads.GetAgentBead(agentID)
 		if err == nil && fields != nil {
 			info.AgentState = fields.AgentState
 		}

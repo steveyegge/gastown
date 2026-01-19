@@ -11,14 +11,15 @@ import (
 // AgentFields holds structured fields for agent beads.
 // These are stored as "key: value" lines in the description.
 type AgentFields struct {
-	RoleType          string // polecat, witness, refinery, deacon, mayor
-	Rig               string // Rig name (empty for global agents like mayor/deacon)
-	AgentState        string // spawning, working, done, stuck
-	HookBead          string // Currently pinned work bead ID
-	RoleBead          string // Role definition bead ID (canonical location; may not exist yet)
-	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
-	ActiveMR          string // Currently active merge request bead ID (for traceability)
-	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
+	RoleType          string   // polecat, witness, refinery, deacon, mayor, crew
+	Rig               string   // Rig name (empty for global agents like mayor/deacon)
+	AgentState        string   // spawning, working, done, stuck
+	HookBead          string   // Currently pinned work bead ID
+	RoleBead          string   // Role definition bead ID (canonical location; may not exist yet)
+	CleanupStatus     string   // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
+	ActiveMR          string   // Currently active merge request bead ID (for traceability)
+	NotificationLevel string   // DND mode: verbose, normal, muted (default: normal)
+	OwnedFormulas     []string // Formulas this crew member owns/maintains (crew only)
 }
 
 // Notification level constants
@@ -77,6 +78,12 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, "notification_level: null")
 	}
 
+	if len(fields.OwnedFormulas) > 0 {
+		lines = append(lines, fmt.Sprintf("owned_formulas: %s", strings.Join(fields.OwnedFormulas, ",")))
+	} else {
+		lines = append(lines, "owned_formulas: null")
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -118,6 +125,16 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.ActiveMR = value
 		case "notification_level":
 			fields.NotificationLevel = value
+		case "owned_formulas":
+			if value != "" {
+				// Parse comma-separated list of formulas
+				for _, f := range strings.Split(value, ",") {
+					f = strings.TrimSpace(f)
+					if f != "" {
+						fields.OwnedFormulas = append(fields.OwnedFormulas, f)
+					}
+				}
+			}
 		}
 	}
 
@@ -192,6 +209,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 // The function:
 // 1. Tries to create the agent bead
 // 2. If UNIQUE constraint fails, reopens the existing bead and updates its fields
+// 3. Returns a reconstructed Issue object (Show may fail for cross-routed beads)
 func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (*Issue, error) {
 	// First try to create the bead
 	issue, err := b.CreateAgentBead(id, title, fields)
@@ -242,8 +260,19 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		}
 	}
 
-	// Return the updated bead
-	return b.Show(id)
+	// Return a reconstructed Issue object
+	// (Note: Show may fail for cross-routed beads since Beads object may be initialized
+	// with a different beads directory. The bead was successfully reopened and updated,
+	// so we construct an Issue object with the information we provided.)
+	reconstructed := &Issue{
+		ID:          id,
+		Title:       title,
+		Type:        "agent",
+		Description: description,
+		Labels:      []string{"gt:agent"},
+		Status:      "open",
+	}
+	return reconstructed, nil
 }
 
 // UpdateAgentState updates the agent_state field in an agent bead.
@@ -407,6 +436,39 @@ func (b *Beads) GetAgentNotificationLevel(id string) (string, error) {
 	return fields.NotificationLevel, nil
 }
 
+// UpdateAgentOwnedFormulas updates the owned_formulas field for a crew agent bead.
+// Pass nil to clear the field. This is primarily for crew members who own
+// formulas they are responsible for maintaining.
+func (b *Beads) UpdateAgentOwnedFormulas(id string, formulas []string) error {
+	// First get current issue to preserve other fields
+	issue, err := b.Show(id)
+	if err != nil {
+		return err
+	}
+
+	// Parse existing fields
+	fields := ParseAgentFields(issue.Description)
+	fields.OwnedFormulas = formulas
+
+	// Format new description
+	description := FormatAgentDescription(issue.Title, fields)
+
+	return b.Update(id, UpdateOptions{Description: &description})
+}
+
+// GetAgentOwnedFormulas returns the owned formulas for an agent.
+// Returns nil if not set or not a crew member.
+func (b *Beads) GetAgentOwnedFormulas(id string) ([]string, error) {
+	_, fields, err := b.GetAgentBead(id)
+	if err != nil {
+		return nil, err
+	}
+	if fields == nil {
+		return nil, nil
+	}
+	return fields.OwnedFormulas, nil
+}
+
 // DeleteAgentBead permanently deletes an agent bead.
 // Uses --hard --force for immediate permanent deletion (no tombstone).
 //
@@ -475,6 +537,11 @@ func (b *Beads) CloseAndClearAgentBead(id, reason string) error {
 
 // GetAgentBead retrieves an agent bead by ID.
 // Returns nil if not found.
+//
+// IMPORTANT: The returned AgentFields uses authoritative values from the Issue struct's
+// SQLite columns (hook_bead, role_bead, agent_state) when available, falling back to
+// description text for backward compatibility. This fixes the bug where SetHookBead
+// updates the slot but GetAgentBead was only reading from description text.
 func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	issue, err := b.Show(id)
 	if err != nil {
@@ -488,7 +555,24 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 		return nil, nil, fmt.Errorf("issue %s is not an agent bead (missing gt:agent label)", id)
 	}
 
+	// Parse fields from description text first (for backward compatibility with older beads)
 	fields := ParseAgentFields(issue.Description)
+
+	// Override with authoritative values from Issue struct (populated from SQLite columns)
+	// These are set by SetHookBead, UpdateAgentState, etc. and are the source of truth.
+	// FIX: gt-l7wvt - SetHookBead updates the slot column but GetAgentBead was only
+	// reading from description text, causing polecats to show as "done" when they have
+	// hooked work.
+	if issue.HookBead != "" {
+		fields.HookBead = issue.HookBead
+	}
+	if issue.RoleBead != "" {
+		fields.RoleBead = issue.RoleBead
+	}
+	if issue.AgentState != "" {
+		fields.AgentState = issue.AgentState
+	}
+
 	return issue, fields, nil
 }
 

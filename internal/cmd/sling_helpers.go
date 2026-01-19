@@ -323,10 +323,8 @@ func detectActor() string {
 }
 
 // agentIDToBeadID converts an agent ID to its corresponding agent bead ID.
-// Uses canonical naming: prefix-rig-role-name
-// Town-level agents (Mayor, Deacon) use hq- prefix and are stored in town beads.
-// Rig-level agents use the rig's configured prefix (default "gt-").
-// townRoot is needed to look up the rig's configured prefix.
+// Agent beads use the rig's configured prefix (e.g., "gt" for gastown, "bd" for beads).
+// Town-level agents (mayor, deacon) use "hq" prefix.
 func agentIDToBeadID(agentID, townRoot string) string {
 	// Handle simple cases (town-level agents with hq- prefix)
 	if agentID == "mayor" {
@@ -343,8 +341,11 @@ func agentIDToBeadID(agentID, townRoot string) string {
 	}
 
 	rig := parts[0]
-	prefix := beads.GetPrefixForRig(townRoot, rig)
 
+	// Get the rig's prefix from configuration (falls back to "gt")
+	prefix := config.GetRigPrefix(townRoot, rig)
+
+	// Rig-level agents use the rig's configured prefix
 	switch {
 	case len(parts) == 2 && parts[1] == "witness":
 		return beads.WitnessBeadIDWithPrefix(prefix, rig)
@@ -362,32 +363,18 @@ func agentIDToBeadID(agentID, townRoot string) string {
 // updateAgentHookBead updates the agent bead's state and hook when work is slung.
 // This enables the witness to see that each agent is working.
 //
-// We run from the polecat's workDir (which redirects to the rig's beads database)
-// WITHOUT setting BEADS_DIR, so the redirect mechanism works for gt-* agent beads.
-//
-// For rig-level beads (same database), we set the hook_bead slot directly.
-// For cross-database scenarios (agent in rig db, hook bead in town db),
-// the slot set may fail - this is handled gracefully with a warning.
-// The work is still correctly attached via `bd update <bead> --assignee=<agent>`.
+// Agent beads use the rig's configured prefix (e.g., "gt" for gastown).
+// Town-level agents (mayor, deacon) use "hq" prefix in town beads.
 func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
-	_ = townBeadsDir // Not used - BEADS_DIR breaks redirect mechanism
-
-	// Determine the directory to run bd commands from:
-	// - If workDir is provided (polecat's clone path), use it for redirect-based routing
-	// - Otherwise fall back to town root
-	bdWorkDir := workDir
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		// Not in a Gas Town workspace - can't update agent bead
 		fmt.Fprintf(os.Stderr, "Warning: couldn't find town root to update agent hook: %v\n", err)
 		return
 	}
-	if bdWorkDir == "" {
-		bdWorkDir = townRoot
-	}
 
 	// Convert agent ID to agent bead ID
-	// Format examples (canonical: prefix-rig-role-name):
+	// Format examples (with rig prefix "gt"):
 	//   greenplace/crew/max -> gt-greenplace-crew-max
 	//   greenplace/polecats/Toast -> gt-greenplace-polecat-Toast
 	//   mayor -> hq-mayor
@@ -397,11 +384,17 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 		return
 	}
 
-	// Run from workDir WITHOUT BEADS_DIR to enable redirect-based routing.
-	// Set hook_bead to the slung work (gt-zecmc: removed agent_state update).
-	// Agent liveness is observable from tmux - no need to record it in bead.
-	// For cross-database scenarios, slot set may fail gracefully (warning only).
-	bd := beads.New(bdWorkDir)
+	// Determine which beads directory to use based on agent type
+	var beadsDir string
+	if agentID == "mayor" || agentID == "deacon" {
+		// Town-level agents use town beads
+		beadsDir = townBeadsDir
+	} else {
+		// Rig-level agents use rig beads (workDir is the rig path)
+		beadsDir = workDir
+	}
+
+	bd := beads.NewWithBeadsDir(townRoot, beadsDir)
 	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
@@ -440,6 +433,7 @@ func isPolecatTarget(target string) bool {
 // The molecule is attached by storing it in the agent bead's description using attachment fields.
 //
 // Per issue #288: gt sling should auto-attach mol-polecat-work when slinging to polecats.
+// Agent beads use the rig's configured prefix (e.g., "gt" for gastown).
 func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error {
 	// Parse the polecat name from targetAgent (format: "rig/polecats/name")
 	parts := strings.Split(targetAgent, "/")
@@ -449,18 +443,15 @@ func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error 
 	rigName := parts[0]
 	polecatName := parts[2]
 
-	// Get the polecat's agent bead ID
-	// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast")
+	// Get the rig's prefix from configuration (falls back to "gt")
 	prefix := config.GetRigPrefix(townRoot, rigName)
+
+	// Get the polecat's agent bead ID using rig's prefix
+	// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast")
 	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
 
-	// Resolve the rig directory for running bd commands.
-	// Use ResolveHookDir to ensure we run bd from the correct rig directory
-	// (not from the polecat's worktree, which doesn't have a .beads directory).
-	// This fixes issue #197: polecat fails to hook when slinging with molecule.
-	rigDir := beads.ResolveHookDir(townRoot, prefix+"-"+polecatName, hookWorkDir)
-
-	b := beads.New(rigDir)
+	// Rig-level agent beads are stored in the rig's beads directory
+	b := beads.NewWithBeadsDir(townRoot, hookWorkDir)
 
 	// Check if molecule is already attached (avoid duplicate attach)
 	attachment, err := b.GetAttachment(agentBeadID)
@@ -471,8 +462,9 @@ func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error 
 
 	// Cook the mol-polecat-work formula to ensure the proto exists
 	// This is safe to run multiple times - cooking is idempotent
+	// Cook from town root since formulas are defined at town level
 	cookCmd := exec.Command("bd", "--no-daemon", "cook", "mol-polecat-work")
-	cookCmd.Dir = rigDir
+	cookCmd.Dir = townRoot
 	cookCmd.Stderr = os.Stderr
 	if err := cookCmd.Run(); err != nil {
 		return fmt.Errorf("cooking mol-polecat-work formula: %w", err)

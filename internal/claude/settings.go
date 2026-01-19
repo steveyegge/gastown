@@ -27,7 +27,7 @@ const (
 // RoleTypeFor returns the RoleType for a given role name.
 func RoleTypeFor(role string) RoleType {
 	switch role {
-	case "polecat", "witness", "refinery", "deacon":
+	case "polecat", "witness", "refinery", "deacon", "boot":
 		return Autonomous
 	default:
 		return Interactive
@@ -89,4 +89,52 @@ func EnsureSettingsForRole(workDir, role string) error {
 // EnsureSettingsForRoleAt is a convenience function that combines RoleTypeFor and EnsureSettingsAt.
 func EnsureSettingsForRoleAt(workDir, role, settingsDir, settingsFile string) error {
 	return EnsureSettingsAt(workDir, RoleTypeFor(role), settingsDir, settingsFile)
+}
+
+// EnsureSettingsForAccount ensures settings.json exists for a specific account.
+// If accountConfigDir is provided, settings are installed there (per-account).
+// If accountConfigDir is empty, falls back to workDir (per-workspace).
+// accountConfigDir should be the account's CLAUDE_CONFIG_DIR path (e.g., ~/.claude-accounts/work).
+func EnsureSettingsForAccount(workDir, role, accountConfigDir string) error {
+	roleType := RoleTypeFor(role)
+
+	// If no account config dir, use workspace settings (legacy behavior)
+	if accountConfigDir == "" {
+		return EnsureSettings(workDir, roleType)
+	}
+
+	// Install settings into account config directory
+	settingsPath := filepath.Join(accountConfigDir, "settings.json")
+
+	// If settings already exist, don't overwrite
+	if _, err := os.Stat(settingsPath); err == nil {
+		return nil
+	}
+
+	// Create account config directory if needed
+	if err := os.MkdirAll(accountConfigDir, 0755); err != nil {
+		return fmt.Errorf("creating account config directory: %w", err)
+	}
+
+	// Select template based on role type
+	var templateName string
+	switch roleType {
+	case Autonomous:
+		templateName = "config/settings-autonomous.json"
+	default:
+		templateName = "config/settings-interactive.json"
+	}
+
+	// Read template
+	content, err := configFS.ReadFile(templateName)
+	if err != nil {
+		return fmt.Errorf("reading template %s: %w", templateName, err)
+	}
+
+	// Write settings file
+	if err := os.WriteFile(settingsPath, content, 0600); err != nil {
+		return fmt.Errorf("writing settings: %w", err)
+	}
+
+	return nil
 }
