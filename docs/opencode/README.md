@@ -45,6 +45,7 @@ The **OpenCode repository** should be considered the authoritative source - docu
 |------|----------|
 | **Get oriented** | [opencode-quickstart.md](opencode-quickstart.md) |
 | **See current status** | [integration-summary.md](integration-summary.md) |
+| **Topic reference (CLI, SDK, plugins, etc)** | [opencode-reference.md](opencode-reference.md) |
 | **Develop plugins** | [plugin-guide.md](plugin-guide.md) |
 | **Find detailed navigation** | [opencode-index.md](opencode-index.md) |
 
