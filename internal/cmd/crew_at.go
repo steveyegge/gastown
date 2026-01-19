@@ -97,12 +97,19 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolving account: %w", err)
 	}
+
+	// Validate that the account has credentials before starting
+	// This prevents OAuth prompts from appearing in crew sessions
+	if err := config.ValidateAccountCredentials(claudeConfigDir, accountHandle); err != nil {
+		return err
+	}
+
 	if accountHandle != "" {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
 
 	runtimeConfig := config.LoadRuntimeConfig(r.Path)
-	if err := runtime.EnsureSettingsForRole(worker.ClonePath, "crew", runtimeConfig); err != nil {
+	if err := runtime.EnsureSettingsForRoleWithAccount(worker.ClonePath, "crew", claudeConfigDir, runtimeConfig); err != nil {
 		// Non-fatal but log warning - missing settings can cause agents to start without hooks
 		style.PrintWarning("could not ensure settings for %s: %v", name, err)
 	}

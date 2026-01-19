@@ -9,14 +9,33 @@ Thanks for your interest in contributing! Gas Town is experimental software, and
 3. Install prerequisites (see README.md)
 4. Build and test: `go build -o gt ./cmd/gt && go test ./...`
 
+## Before Making Changes
+
+**Always check for existing PRs first.** Many issues have already been addressed:
+
+```bash
+# Check open PRs for related fixes
+gh pr list --repo steveyegge/gastown --state open
+
+# Or with curl
+curl -s "https://api.github.com/repos/steveyegge/gastown/pulls?state=open" | \
+  jq -r '.[] | "#\(.number): \(.title)"'
+```
+
+If a relevant PR exists:
+1. Review it for completeness
+2. Comment if you find gaps or have suggestions
+3. Only create a new PR if your fix is complementary (different scope)
+
 ## Development Workflow
 
 We use a direct-to-main workflow for trusted contributors. For external contributors:
 
-1. Create a feature branch from `main`
-2. Make your changes
-3. Ensure tests pass: `go test ./...`
-4. Submit a pull request
+1. Check open PRs first (see above)
+2. Create a feature branch from `main`
+3. Make your changes
+4. Ensure tests pass: `go test ./...`
+5. Submit a pull request
 
 ## Code Style
 

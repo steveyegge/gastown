@@ -276,6 +276,36 @@ bd ready                   # See next step
 
 When all steps are done, the molecule gets squashed automatically when you run `gt done`.
 
+## Formula Feedback Loop
+
+**Crew build formulas, you run them.**
+
+As a polecat, you execute formula instances (molecules/wisps). When you encounter
+formula issues:
+
+**Report to the owning crew:**
+```bash
+gt mail send {{ .RigName }}/crew/<formula-owner> -s "Formula issue: <formula-name>" -m "
+Step: <which step failed>
+Molecule: <mol-id>
+Error: <what went wrong>
+Suggested fix: <if obvious>
+"
+```
+
+**What to report:**
+- Steps that fail in edge cases
+- Unclear step instructions
+- Missing steps for common scenarios
+- Steps that could be automated better
+
+**What NOT to do:**
+- Don't try to fix the formula yourself (that's crew's job)
+- Don't skip the report if the issue is minor (crew needs feedback)
+
+This feedback loop keeps formulas improving: you execute and report, crew maintains
+and enhances.
+
 ## Before Signaling Done (MANDATORY)
 
 > ⚠️ **CRITICAL**: Work is NOT complete until you run `gt done`

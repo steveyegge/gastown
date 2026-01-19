@@ -78,6 +78,7 @@ type RigConfig struct {
 	GitURL        string       `json:"git_url"`                  // repository URL
 	LocalRepo     string       `json:"local_repo,omitempty"`     // optional local reference repo
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
+	TargetBranch  string       `json:"target_branch,omitempty"`  // override for merge target (e.g., release/v1.0)
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
 	Beads         *BeadsConfig `json:"beads,omitempty"`
 }

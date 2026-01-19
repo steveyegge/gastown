@@ -83,12 +83,26 @@ const (
 	// BeadsCustomTypes is the comma-separated list of custom issue types that
 	// Gas Town registers with beads. These types were extracted from beads core
 	// in v0.46.0 and now require explicit configuration.
-	BeadsCustomTypes = "agent,role,rig,convoy,slot,queue"
+	//
+	// Types:
+	//   agent        - Agent identity beads (polecat, crew, witness, etc.)
+	//   role         - Role definitions
+	//   rig          - Rig registration beads
+	//   convoy       - Work convoys (grouped beads)
+	//   slot         - Agent work slots
+	//   queue        - Work queues
+	//   message      - Mail messages
+	//   molecule     - Workflow molecules
+	//   event        - Activity events
+	//   wisp         - Ephemeral workflow instances
+	//   merge-request - GitLab/GitHub MRs
+	//   gate         - Timer gates for workflows
+	BeadsCustomTypes = "agent,role,rig,convoy,slot,queue,message,molecule,event,wisp,merge-request,gate"
 )
 
 // BeadsCustomTypesList returns the custom types as a slice.
 func BeadsCustomTypesList() []string {
-	return []string{"agent", "role", "rig", "convoy", "slot", "queue"}
+	return []string{"agent", "role", "rig", "convoy", "slot", "queue", "message", "molecule", "event", "wisp", "merge-request", "gate"}
 }
 
 // Git branch names.
@@ -137,6 +151,9 @@ const (
 
 	// RoleDeacon is the deacon agent role.
 	RoleDeacon = "deacon"
+
+	// RoleBoot is the boot agent role (Deacon's watchdog).
+	RoleBoot = "boot"
 )
 
 // Role emojis - centralized for easy customization.
@@ -159,6 +176,9 @@ const (
 
 	// EmojiPolecat is the polecat emoji (transient worker).
 	EmojiPolecat = "😺"
+
+	// EmojiBoot is the boot emoji (Deacon's watchdog).
+	EmojiBoot = "🐕"
 )
 
 // RoleEmoji returns the emoji for a given role name.
@@ -176,6 +196,8 @@ func RoleEmoji(role string) string {
 		return EmojiCrew
 	case RolePolecat:
 		return EmojiPolecat
+	case RoleBoot:
+		return EmojiBoot
 	default:
 		return "❓"
 	}

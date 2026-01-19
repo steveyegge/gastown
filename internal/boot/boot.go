@@ -11,9 +11,13 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
+
+// deaconSession is the deacon session name, duplicated here to avoid import cycle with session package.
+const deaconSession = "hq-deacon"
 
 // SessionName is the tmux session name for Boot.
 // Note: We use "gt-boot" instead of "hq-deacon-boot" to avoid tmux prefix
@@ -162,10 +166,10 @@ func (b *Boot) Spawn(agentOverride string) error {
 func (b *Boot) spawnTmux(agentOverride string) error {
 	// Kill any stale session first
 	if b.IsSessionAlive() {
-		_ = b.tmux.KillSession(SessionName)
+		_ = b.tmux.KillSessionWithProcesses(SessionName)
 	}
 
-	// Ensure boot directory exists (it should have CLAUDE.md with Boot context)
+	// Ensure boot directory exists
 	if err := b.EnsureDir(); err != nil {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
@@ -181,6 +185,11 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		}
 	} else {
 		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", "gt boot triage")
+	}
+
+	// Ensure Claude settings exist for boot (autonomous role)
+	if err := claude.EnsureSettingsForRole(b.bootDir, "boot"); err != nil {
+		return fmt.Errorf("ensuring boot settings: %w", err)
 	}
 
 	// Create session with command directly to avoid send-keys race condition.

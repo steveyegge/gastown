@@ -414,6 +414,11 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
+
+	// Accept bypass permissions warning dialog if it appears.
+	// This prevents hangs on systems where Claude prompts for permissions.
+	_ = t.AcceptBypassPermissionsWarning(sessionName)
+
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	runtimeConfig := config.LoadRuntimeConfig("")
@@ -460,7 +465,7 @@ func runDeaconStop(cmd *cobra.Command, args []string) error {
 	time.Sleep(100 * time.Millisecond)
 
 	// Kill the session
-	if err := t.KillSession(sessionName); err != nil {
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
@@ -561,7 +566,7 @@ func runDeaconRestart(cmd *cobra.Command, args []string) error {
 
 	if running {
 		// Kill existing session
-		if err := t.KillSession(sessionName); err != nil {
+		if err := t.KillSessionWithProcesses(sessionName); err != nil {
 			style.PrintWarning("failed to kill session: %v", err)
 		}
 	}
@@ -714,19 +719,24 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Get current bead update time
-	baselineTime, err := getAgentBeadUpdateTime(townRoot, beadID)
-	if err != nil {
-		// Bead might not exist yet - that's okay
-		baselineTime = time.Time{}
-	}
-
 	// Record ping
 	agentState.RecordPing()
 
 	// Send health check nudge
 	if err := t.NudgeSession(sessionName, "HEALTH_CHECK: respond with any action to confirm responsiveness"); err != nil {
 		return fmt.Errorf("sending nudge: %w", err)
+	}
+
+	// Get baseline time AFTER sending nudge to avoid false positives.
+	// If we get the time before the nudge and the bead doesn't exist (time.Time{}),
+	// any subsequent update would incorrectly appear as a response.
+	// By getting the baseline after the nudge, we ensure we're only detecting
+	// activity that happens in response to our health check.
+	baselineTime, err := getAgentBeadUpdateTime(townRoot, beadID)
+	if err != nil {
+		// Bead might not exist yet - use current time as baseline
+		// This way only updates AFTER this point count as responses
+		baselineTime = time.Now()
 	}
 
 	fmt.Printf("%s Sent HEALTH_CHECK to %s, waiting %s...\n",
@@ -846,7 +856,7 @@ func runDeaconForceKill(cmd *cobra.Command, args []string) error {
 
 	// Step 2: Kill the tmux session
 	fmt.Printf("%s Killing tmux session %s...\n", style.Dim.Render("2."), sessionName)
-	if err := t.KillSession(sessionName); err != nil {
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 

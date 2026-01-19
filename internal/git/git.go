@@ -375,6 +375,12 @@ func (g *Git) RemoteURL(remote string) (string, error) {
 	return g.run("remote", "get-url", remote)
 }
 
+// SetConfig sets a git config value in the repository.
+func (g *Git) SetConfig(key, value string) error {
+	_, err := g.run("config", key, value)
+	return err
+}
+
 // Remotes returns the list of configured remote names.
 func (g *Git) Remotes() ([]string, error) {
 	out, err := g.run("remote")
@@ -932,15 +938,51 @@ func (g *Git) StashCount() (int, error) {
 
 // UnpushedCommits returns the number of commits that are not pushed to the remote.
 // It checks if the current branch has an upstream and counts commits ahead.
-// Returns 0 if there is no upstream configured.
+// For branches without upstream (like polecat branches), it checks against origin/<branch>
+// if the branch exists on origin, otherwise against origin/<default-branch>.
 func (g *Git) UnpushedCommits() (int, error) {
 	// Get the upstream branch
 	upstream, err := g.run("rev-parse", "--abbrev-ref", "@{u}")
 	if err != nil {
-		// No upstream configured - this is common for polecat branches
-		// Check if we can compare against origin/main instead
-		// If we can't get any reference, return 0 (benefit of the doubt)
-		return 0, nil
+		// No upstream configured - this is common for polecat branches.
+		// Check against origin/<branch> if it exists, otherwise origin/<default-branch>.
+		branch, branchErr := g.CurrentBranch()
+		if branchErr != nil {
+			// Can't determine branch - return 0 as fallback
+			return 0, nil
+		}
+
+		// Check if origin/<branch> exists
+		remoteBranch := "origin/" + branch
+		_, refErr := g.run("rev-parse", "--verify", remoteBranch)
+		if refErr == nil {
+			// Remote branch exists - count commits from origin/<branch>..HEAD
+			out, countErr := g.run("rev-list", "--count", remoteBranch+"..HEAD")
+			if countErr != nil {
+				return 0, nil // Fallback to safe value on error
+			}
+			var count int
+			_, err = fmt.Sscanf(out, "%d", &count)
+			if err != nil {
+				return 0, nil
+			}
+			return count, nil
+		}
+
+		// Remote branch doesn't exist - check against origin/<default-branch>.
+		// All commits since the branch point are unpushed since the branch itself isn't on origin.
+		defaultBranch := g.RemoteDefaultBranch()
+		remoteBranch = "origin/" + defaultBranch
+		out, countErr := g.run("rev-list", "--count", remoteBranch+"..HEAD")
+		if countErr != nil {
+			return 0, nil // Fallback to safe value on error
+		}
+		var count int
+		_, err = fmt.Sscanf(out, "%d", &count)
+		if err != nil {
+			return 0, nil
+		}
+		return count, nil
 	}
 
 	// Count commits between upstream and HEAD

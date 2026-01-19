@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -323,11 +323,12 @@ func detectActor() string {
 }
 
 // agentIDToBeadID converts an agent ID to its corresponding agent bead ID.
-// Uses canonical naming: prefix-rig-role-name
-// Town-level agents (Mayor, Deacon) use hq- prefix and are stored in town beads.
-// Rig-level agents use the rig's configured prefix (default "gt-").
-// townRoot is needed to look up the rig's configured prefix.
+// All agent beads use hq- prefix and are stored in town beads to avoid
+// prefix/database mismatch issues (fix for loc-1augh).
+// townRoot is kept for backward compatibility but no longer used.
 func agentIDToBeadID(agentID, townRoot string) string {
+	_ = townRoot // No longer needed - all agents use hq- prefix
+
 	// Handle simple cases (town-level agents with hq- prefix)
 	if agentID == "mayor" {
 		return beads.MayorBeadIDTown()
@@ -343,17 +344,17 @@ func agentIDToBeadID(agentID, townRoot string) string {
 	}
 
 	rig := parts[0]
-	prefix := beads.GetPrefixForRig(townRoot, rig)
 
+	// All rig-level agents use hq- prefix in town beads (fix for loc-1augh)
 	switch {
 	case len(parts) == 2 && parts[1] == "witness":
-		return beads.WitnessBeadIDWithPrefix(prefix, rig)
+		return beads.WitnessBeadIDTown(rig)
 	case len(parts) == 2 && parts[1] == "refinery":
-		return beads.RefineryBeadIDWithPrefix(prefix, rig)
+		return beads.RefineryBeadIDTown(rig)
 	case len(parts) == 3 && parts[1] == "crew":
-		return beads.CrewBeadIDWithPrefix(prefix, rig, parts[2])
+		return beads.CrewBeadIDTown(rig, parts[2])
 	case len(parts) == 3 && parts[1] == "polecats":
-		return beads.PolecatBeadIDWithPrefix(prefix, rig, parts[2])
+		return beads.PolecatBeadIDTown(rig, parts[2])
 	default:
 		return ""
 	}
@@ -362,46 +363,32 @@ func agentIDToBeadID(agentID, townRoot string) string {
 // updateAgentHookBead updates the agent bead's state and hook when work is slung.
 // This enables the witness to see that each agent is working.
 //
-// We run from the polecat's workDir (which redirects to the rig's beads database)
-// WITHOUT setting BEADS_DIR, so the redirect mechanism works for gt-* agent beads.
-//
-// For rig-level beads (same database), we set the hook_bead slot directly.
-// For cross-database scenarios (agent in rig db, hook bead in town db),
-// the slot set may fail - this is handled gracefully with a warning.
-// The work is still correctly attached via `bd update <bead> --assignee=<agent>`.
+// Agent beads use hq- prefix and are stored in town beads (fix for loc-1augh).
+// We run bd commands from town root with BEADS_DIR pointing to town beads.
 func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
-	_ = townBeadsDir // Not used - BEADS_DIR breaks redirect mechanism
+	_ = workDir // No longer used - agent beads are in town beads
 
-	// Determine the directory to run bd commands from:
-	// - If workDir is provided (polecat's clone path), use it for redirect-based routing
-	// - Otherwise fall back to town root
-	bdWorkDir := workDir
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		// Not in a Gas Town workspace - can't update agent bead
 		fmt.Fprintf(os.Stderr, "Warning: couldn't find town root to update agent hook: %v\n", err)
 		return
 	}
-	if bdWorkDir == "" {
-		bdWorkDir = townRoot
-	}
 
-	// Convert agent ID to agent bead ID
-	// Format examples (canonical: prefix-rig-role-name):
-	//   greenplace/crew/max -> gt-greenplace-crew-max
-	//   greenplace/polecats/Toast -> gt-greenplace-polecat-Toast
+	// Convert agent ID to agent bead ID (now uses hq- prefix)
+	// Format examples:
+	//   greenplace/crew/max -> hq-greenplace-crew-max
+	//   greenplace/polecats/Toast -> hq-greenplace-polecat-Toast
 	//   mayor -> hq-mayor
-	//   greenplace/witness -> gt-greenplace-witness
+	//   greenplace/witness -> hq-greenplace-witness
 	agentBeadID := agentIDToBeadID(agentID, townRoot)
 	if agentBeadID == "" {
 		return
 	}
 
-	// Run from workDir WITHOUT BEADS_DIR to enable redirect-based routing.
-	// Set hook_bead to the slung work (gt-zecmc: removed agent_state update).
-	// Agent liveness is observable from tmux - no need to record it in bead.
-	// For cross-database scenarios, slot set may fail gracefully (warning only).
-	bd := beads.New(bdWorkDir)
+	// Use town beads for agent bead operations (fix for loc-1augh).
+	// townBeadsDir points to the town's .beads directory.
+	bd := beads.NewWithBeadsDir(townRoot, townBeadsDir)
 	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
@@ -440,7 +427,10 @@ func isPolecatTarget(target string) bool {
 // The molecule is attached by storing it in the agent bead's description using attachment fields.
 //
 // Per issue #288: gt sling should auto-attach mol-polecat-work when slinging to polecats.
+// Agent beads use hq- prefix and are stored in town beads (fix for loc-1augh).
 func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error {
+	_ = hookWorkDir // No longer used - agent beads are in town beads
+
 	// Parse the polecat name from targetAgent (format: "rig/polecats/name")
 	parts := strings.Split(targetAgent, "/")
 	if len(parts) != 3 || parts[1] != "polecats" {
@@ -449,18 +439,13 @@ func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error 
 	rigName := parts[0]
 	polecatName := parts[2]
 
-	// Get the polecat's agent bead ID
-	// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast")
-	prefix := config.GetRigPrefix(townRoot, rigName)
-	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+	// Get the polecat's agent bead ID (uses hq- prefix, fix for loc-1augh)
+	// Format: "hq-<rig>-polecat-<name>" (e.g., "hq-gastown-polecat-Toast")
+	agentBeadID := beads.PolecatBeadIDTown(rigName, polecatName)
 
-	// Resolve the rig directory for running bd commands.
-	// Use ResolveHookDir to ensure we run bd from the correct rig directory
-	// (not from the polecat's worktree, which doesn't have a .beads directory).
-	// This fixes issue #197: polecat fails to hook when slinging with molecule.
-	rigDir := beads.ResolveHookDir(townRoot, prefix+"-"+polecatName, hookWorkDir)
-
-	b := beads.New(rigDir)
+	// Use town beads for agent bead operations (fix for loc-1augh)
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	b := beads.NewWithBeadsDir(townRoot, townBeadsDir)
 
 	// Check if molecule is already attached (avoid duplicate attach)
 	attachment, err := b.GetAttachment(agentBeadID)
@@ -471,8 +456,9 @@ func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error 
 
 	// Cook the mol-polecat-work formula to ensure the proto exists
 	// This is safe to run multiple times - cooking is idempotent
+	// Cook from town root since formulas are defined at town level
 	cookCmd := exec.Command("bd", "--no-daemon", "cook", "mol-polecat-work")
-	cookCmd.Dir = rigDir
+	cookCmd.Dir = townRoot
 	cookCmd.Stderr = os.Stderr
 	if err := cookCmd.Run(); err != nil {
 		return fmt.Errorf("cooking mol-polecat-work formula: %w", err)
