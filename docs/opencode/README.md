@@ -72,11 +72,12 @@ docs/opencode/
 │       ├── orchestrator-api.md
 │       ├── orchestration-plan.md
 │       └── integration-architecture.md
-├── research/              # Analysis & experiments
-│   ├── technical-research.md
-│   ├── concept-analysis.md
-│   └── experiments.md
-└── archive/               # Point-in-time results
+└── archive/               # Point-in-time analysis, research, test results
+    ├── README.md          # Frontmatter template requirements
+    ├── concept-analysis.md (foundational)
+    ├── technical-research.md (foundational)
+    ├── experiments.md (phase 1)
+    ├── e2e-test-results.md (phase 1)
     └── ...
 ```
 
@@ -90,7 +91,7 @@ docs/opencode/
 |------|---------|
 | [integration-summary.md](reference/integration-summary.md) | Current status, achievements, bugs fixed |
 | [plugin-guide.md](reference/plugin-guide.md) | Plugin development and events |
-| [api-reference.md](reference/api-reference.md) | CLI, SDK, Server, Plugins reference |
+| [api-reference.md](reference/api-reference.md) | Concept index: Sessions, Plugins, CLI, SDK, etc. |
 | [maintenance.md](reference/maintenance.md) | Keeping integration up-to-date |
 | [quickstart.md](reference/quickstart.md) | Quick orientation |
 
@@ -111,20 +112,12 @@ Organized by phase:
 |------|---------|
 | [phase2/sdk-plan.md](planning/phase2/sdk-plan.md) | SDK migration plan |
 | [phase2/orchestrator-api.md](planning/phase2/orchestrator-api.md) | Orchestrator interface design |
-| [phase2/architecture.md](planning/phase2/architecture.md) | High-level architecture |
+| [phase2/orchestration-plan.md](planning/phase2/orchestration-plan.md) | Multi-session orchestration |
 | [phase2/integration-architecture.md](planning/phase2/integration-architecture.md) | Detailed strategy |
 
-### research/ - Analysis & Experiments
+### archive/ - Point-in-Time Documentation
 
-| File | Purpose |
-|------|---------|
-| [technical-research.md](research/technical-research.md) | Deep dive into OpenCode repo |
-| [concept-analysis.md](research/concept-analysis.md) | Concept coupling analysis |
-| [experiments.md](research/experiments.md) | Validation experiments |
-
-### archive/ - Historical Results
-
-Point-in-time results with date and commit metadata.
+Analysis, research, and test results organized by phase. See [archive/README.md](archive/README.md) for frontmatter template.
 
 | File | Purpose |
 |------|---------|
