@@ -3,8 +3,7 @@
 set -euo pipefail
 
 # Ensure go bin is on PATH (podman doesn't inherit Dockerfile ENV)
-export PATH="$HOME/go/bin:$PATH"
-export PATH="/usr/local/go/bin:$PATH"
+export PATH="/home/testuser/go/bin:/usr/local/go/bin:$PATH"
 
 # Colors for output
 RED='\033[0;31m'
