@@ -1212,5 +1212,6 @@ func RigChecks() []Check {
 		NewPolecatClonesValidCheck(),
 		NewBeadsConfigValidCheck(),
 		NewBeadsRedirectCheck(),
+		NewBeadsCustomTypesCheck(),
 	}
 }
