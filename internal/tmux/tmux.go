@@ -535,6 +535,73 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
 }
 
+// SimpleNudge sends a message to a Claude Code session without ESC key.
+// This is identical to NudgeSession but skips the ESC key step (line 483).
+// Use this for StartupNudge to avoid interrupting Claude's processing during initialization.
+// ESC in vim mode can interrupt Claude while it's reading hooks/CLAUDE.md.
+//
+// IMPORTANT: Nudges to the same session are serialized to prevent interleaving.
+func (t *Tmux) SimpleNudge(session, message string) error {
+	// Serialize nudges to this session to prevent interleaving
+	lock := getSessionNudgeLock(session)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// 1. Send text in literal mode (handles special characters)
+	if _, err := t.run("send-keys", "-t", session, "-l", message); err != nil {
+		return err
+	}
+
+	// 2. Wait 500ms for paste to complete (tested, required)
+	time.Sleep(500 * time.Millisecond)
+
+	// 3. Send Enter with retry (critical for message submission)
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+}
+
+// SimpleNudgePane sends a message to a specific pane without ESC key.
+// Same pattern as SimpleNudge but targets a pane ID (e.g., "%9") instead of session name.
+// Nudges to the same pane are serialized to prevent interleaving.
+func (t *Tmux) SimpleNudgePane(pane, message string) error {
+	// Serialize nudges to this pane to prevent interleaving
+	lock := getSessionNudgeLock(pane)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// 1. Send text in literal mode (handles special characters)
+	if _, err := t.run("send-keys", "-t", pane, "-l", message); err != nil {
+		return err
+	}
+
+	// 2. Wait 500ms for paste to complete (tested, required)
+	time.Sleep(500 * time.Millisecond)
+
+	// 3. Send Enter with retry (critical for message submission)
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if _, err := t.run("send-keys", "-t", pane, "Enter"); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+}
+
 // AcceptBypassPermissionsWarning dismisses the Claude Code bypass permissions warning dialog.
 // When Claude starts with --dangerously-skip-permissions, it shows a warning dialog that
 // requires pressing Down arrow to select "Yes, I accept" and then Enter to confirm.

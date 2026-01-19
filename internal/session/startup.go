@@ -42,7 +42,7 @@ type StartupNudgeConfig struct {
 // The metadata makes sessions identifiable in /resume.
 func StartupNudge(t *tmux.Tmux, session string, cfg StartupNudgeConfig) error {
 	message := FormatStartupNudge(cfg)
-	return t.NudgeSession(session, message)
+	return t.SimpleNudge(session, message)
 }
 
 // FormatStartupNudge builds the formatted startup nudge message.
