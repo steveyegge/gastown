@@ -55,30 +55,43 @@
 - [ ] Create L2-L5 test scenarios
 - [ ] Test mixed primary/secondary runtime scenarios
 
-### 2. Role Templates (CLAUDE.md → OPENCODE.md)
+### 2. Role Instructions for OpenCode
 
 **Current State**:
-- Claude Code uses `CLAUDE.md` files with role-specific instructions
+- Claude Code automatically reads `CLAUDE.md` files
 - Templates are at `internal/templates/roles/*.md.tmpl` (embedded)
 - Claude Code renders these and writes to workspace as `CLAUDE.md`
-- OpenCode has no equivalent - test scripts create minimal `OPENCODE.md` manually
+- OpenCode does NOT automatically read `OPENCODE.md` files
 
-**Gap**: OpenCode doesn't get the full role instructions like Claude Code does.
+**Key Insight**: OpenCode CAN be configured to read `CLAUDE.md` via the `instructions` config:
+```jsonc
+// .opencode/config.jsonc
+{
+  "instructions": ["CLAUDE.md"]  // Loads CLAUDE.md as context
+}
+```
 
 **Implementation Options**:
 
 | Option | How | Pros | Cons |
 |--------|-----|------|------|
-| **A: OPENCODE.md templates** | Create `internal/templates/roles/*-opencode.md.tmpl`, write as `OPENCODE.md` | Mirrors Claude pattern | Duplicates templates |
-| **B: Unified templates** | Single template, write as runtime-appropriate file | No duplication | Need runtime detection |
-| **C: Plugin injection** | Plugin injects role context via `chat.message` hook | Dynamic, no files | More complex plugin |
+| **A: CLAUDE.md + config** | Write `CLAUDE.md`, add to `instructions` config | Reuses existing templates | Requires config change |
+| **B: Plugin injection** | Plugin injects role context via `chat.message` hook on `session.created` | No config needed, dynamic | More complex plugin |
+| **C: Both** | CLAUDE.md for reference + plugin for injection | Best of both | Potential duplication |
 
-**Recommended**: Option B - Detect runtime, write to `CLAUDE.md` or `OPENCODE.md`.
+**Recommended**: Option B or C - Plugin injection is cleanest since it:
+- Works without config changes
+- Can use GT_ROLE environment variable to select template
+- Already runs on session.created
+
+**Current Plugin Approach**:
+The gastown.js plugin already injects `gt prime` output on session start.
+We could extend this to also inject role-specific instructions based on `GT_ROLE`.
 
 **Tasks**:
-- [ ] Add runtime detection to template rendering
-- [ ] Create `OPENCODE.md` during workspace setup (rig creation, crew add)
-- [ ] Verify plugin can read role from `OPENCODE.md` or environment
+- [ ] Extend plugin to read role template and inject on session.created
+- [ ] OR configure OpenCode to read `CLAUDE.md` via instructions
+- [ ] Document approach in `design/gastown-plugin.md`
 
 ### 3. Formula/Specialized Agent Support
 
