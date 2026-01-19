@@ -7,12 +7,16 @@ status: experimental  # experimental | stable | deprecated
 production_ready: true
 opencode_version_tested: 1.1.25
 
-# Organization guidelines:
-# - reference/: Stable docs on how things work
-# - research/: Analysis, experiments, investigations  
-# - planning/: Decisions, roadmaps, future work
-# - archive/: Point-in-time results with date+commit metadata
-# - Use lowercase-with-dashes for filenames (except README.md)
+# Directory structure:
+#   reference/  - Stable docs on how things work
+#   planning/   - Project direction, decisions, roadmaps
+#   research/   - Analysis, experiments, investigations
+#   archive/    - Point-in-time results with date+commit metadata
+#
+# Naming conventions:
+#   - All lowercase with hyphens (kebab-case)
+#   - No "opencode-" prefix in subdirectories (redundant)
+#   - README.md is the exception (uppercase for standard)
 ---
 
 # OpenCode Integration
@@ -20,22 +24,20 @@ opencode_version_tested: 1.1.25
 > **Status**: Experimental - Community-contributed feature  
 > **Primary Runtime**: Claude Code (recommended for production)
 
-This directory contains documentation for OpenCode integration with Gastown.
-
 ---
 
 ## Source of Truth
 
-The **OpenCode repository** should be considered the authoritative source - documentation often lags behind:
+The **OpenCode repository** is the authoritative source - documentation often lags behind:
 
 | Resource | URL | Purpose |
 |----------|-----|---------|
-| **OpenCode Repo** | [github.com/anomalyco/opencode](https://github.com/anomalyco/opencode) | Source of truth for internals |
-| **Awesome OpenCode** | [awesome-opencode/awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) | Community extensions, plugins, tools |
-| **Ecosystem** | [opencode.ai/docs/ecosystem](https://opencode.ai/docs/ecosystem/) | Official ecosystem directory |
+| **OpenCode Repo** | [github.com/anomalyco/opencode](https://github.com/anomalyco/opencode) | Source of truth |
+| **Awesome OpenCode** | [awesome-opencode](https://github.com/awesome-opencode/awesome-opencode) | Community extensions |
+| **Ecosystem** | [opencode.ai/docs/ecosystem](https://opencode.ai/docs/ecosystem/) | Official ecosystem |
 | **Official Docs** | [opencode.ai/docs](https://opencode.ai/docs/) | Official documentation |
 
-> **Tip**: When OpenCode doesn't support something directly, check the ecosystem and awesome-opencode for community solutions before building it ourselves.
+> **Tip**: Check community solutions before building something new.
 
 ---
 
@@ -43,117 +45,107 @@ The **OpenCode repository** should be considered the authoritative source - docu
 
 | Goal | Document |
 |------|----------|
-| **Get oriented** | [opencode-quickstart.md](opencode-quickstart.md) |
-| **See current status** | [integration-summary.md](integration-summary.md) |
-| **Topic reference (CLI, SDK, plugins, etc)** | [opencode-reference.md](opencode-reference.md) |
-| **Develop plugins** | [plugin-guide.md](plugin-guide.md) |
-| **Find detailed navigation** | [opencode-index.md](opencode-index.md) |
+| **Get oriented** | [reference/quickstart.md](reference/quickstart.md) |
+| **See current status** | [reference/integration-summary.md](reference/integration-summary.md) |
+| **Topic reference** | [reference/api-reference.md](reference/api-reference.md) |
+| **See project plan** | [planning/project-plan.md](planning/project-plan.md) |
 
 ---
 
-## Documentation Categories
+## Directory Structure
 
-### Reference (Stable)
-
-How things currently work:
-
-| File | Purpose |
-|------|---------|
-| [integration-summary.md](integration-summary.md) | Current status, achievements, bugs fixed |
-| [plugin-guide.md](plugin-guide.md) | Plugin development and event system |
-| [opencode-reference.md](opencode-reference.md) | CLI/SDK/Server/Plugin reference |
-| [maintenance.md](maintenance.md) | Keeping the integration up-to-date |
-| [opencode-quickstart.md](opencode-quickstart.md) | Quick orientation guide |
-
-### Research & Analysis
-
-Investigation and analysis work:
-
-| File | Purpose |
-|------|---------|
-| [technical-research.md](technical-research.md) | Deep dive into OpenCode repository |
-| [opencode-concept-analysis.md](opencode-concept-analysis.md) | Concept coupling analysis |
-| [opencode-experiments.md](opencode-experiments.md) | Validation experiments |
-
-### Planning & Decisions
-
-Project direction and future work:
-
-| File | Purpose |
-|------|---------|
-| [project-plan.md](project-plan.md) | **Current project plan** - phases, testing requirements, compatibility layer |
-| [opencode-decisions.md](opencode-decisions.md) | Decision points and open questions |
-| [opencode-orchestration.md](opencode-orchestration.md) | High-level architecture vision |
-| [opencode-integration-architecture.md](opencode-integration-architecture.md) | Detailed integration strategy |
-| [opencode-implementation-guide.md](opencode-implementation-guide.md) | Technical specifications |
-| [stage2-sdk-orchestration.md](stage2-sdk-orchestration.md) | Future SDK-based plans |
-
-### Archive
-
-Point-in-time results (each file includes date and commit metadata):
-
-| File | Purpose |
-|------|---------|
-| [archive/e2e-test-results.md](archive/e2e-test-results.md) | E2E testing results |
-| [archive/integration-test-results.md](archive/integration-test-results.md) | Integration test results |
-| [archive/session-fork-test-results.md](archive/session-fork-test-results.md) | Fork testing results |
-| [archive/impact-analysis.md](archive/impact-analysis.md) | Feature parity analysis |
-| [archive/upstream-review.md](archive/upstream-review.md) | PR review notes |
-
-### Navigation
-
-| File | Purpose |
-|------|---------|
-| [opencode-index.md](opencode-index.md) | Comprehensive navigation by role/goal |
+```
+docs/opencode/
+├── README.md              # This landing page
+├── index.md      # Detailed navigation by role/goal
+├── reference/             # Stable documentation
+│   ├── integration-summary.md
+│   ├── plugin-guide.md
+│   ├── api-reference.md
+│   ├── maintenance.md
+│   └── quickstart.md
+├── planning/              # Project direction
+│   ├── project-plan.md
+│   ├── decisions.md
+│   ├── orchestration.md
+│   ├── integration-architecture.md
+│   ├── implementation-guide.md
+│   └── stage2-sdk.md
+├── research/              # Analysis & experiments
+│   ├── technical-research.md
+│   ├── concept-analysis.md
+│   └── experiments.md
+└── archive/               # Point-in-time results
+    ├── e2e-test-results.md
+    ├── integration-test-results.md
+    └── ...
+```
 
 ---
 
-## Key Information
+## Documentation by Category
 
-### Feature Parity
+### reference/ - How Things Work
 
-OpenCode achieves 100% feature parity with Claude Code:
-- ✅ All 4 Claude hooks have OpenCode equivalents
-- ✅ All 6 roles support OpenCode
-- ✅ Session resume, fork (via HTTP API), export/import
+| File | Purpose |
+|------|---------|
+| [integration-summary.md](reference/integration-summary.md) | Current status, achievements, bugs fixed |
+| [plugin-guide.md](reference/plugin-guide.md) | Plugin development and events |
+| [api-reference.md](reference/api-reference.md) | CLI, SDK, Server, Plugins reference |
+| [maintenance.md](reference/maintenance.md) | Keeping integration up-to-date |
+| [quickstart.md](reference/quickstart.md) | Quick orientation |
 
-### Known Issues
+### planning/ - Project Direction
 
-- **OpenCode tmux crash**: Upstream `proper-lockfile/onExit` bug may cause crashes inside tmux
+| File | Purpose |
+|------|---------|
+| [project-plan.md](planning/project-plan.md) | **Current plan** - phases, testing, compatibility |
+| [decisions.md](planning/decisions.md) | Decision points and questions |
+| [orchestration.md](planning/orchestration.md) | High-level architecture |
+| [integration-architecture.md](planning/integration-architecture.md) | Detailed strategy |
+| [implementation-guide.md](planning/implementation-guide.md) | Technical specs |
+| [stage2-sdk.md](planning/stage2-sdk.md) | Future SDK plans |
+
+### research/ - Analysis & Experiments
+
+| File | Purpose |
+|------|---------|
+| [technical-research.md](research/technical-research.md) | Deep dive into OpenCode repo |
+| [concept-analysis.md](research/concept-analysis.md) | Concept coupling analysis |
+| [experiments.md](research/experiments.md) | Validation experiments |
+
+### archive/ - Historical Results
+
+Point-in-time results with date and commit metadata.
+
+| File | Purpose |
+|------|---------|
+| [e2e-test-results.md](archive/e2e-test-results.md) | E2E testing results |
+| [integration-test-results.md](archive/integration-test-results.md) | Integration tests |
+| [session-fork-test-results.md](archive/session-fork-test-results.md) | Fork testing |
+| [impact-analysis.md](archive/impact-analysis.md) | Feature parity analysis |
+| [upstream-review.md](archive/upstream-review.md) | PR review notes |
 
 ---
 
-## For Agents: Navigation
+## For Agents
 
-### Stable Links (Start Here)
+### Primary Entry Points
 
-When working on OpenCode integration, use these entry points:
-
-| Task | Primary Document | Implementation |
-|------|------------------|----------------|
-| **Understand current status** | [integration-summary.md](integration-summary.md) | - |
-| **See the project plan** | [project-plan.md](project-plan.md) | - |
-| **Look up OpenCode APIs** | [opencode-reference.md](opencode-reference.md) | - |
-| **Work on plugin** | [plugin-guide.md](plugin-guide.md) | `internal/opencode/plugin/gastown.js` |
-| **Work on agent config** | [opencode-reference.md](opencode-reference.md) | `internal/config/agents.go` |
-| **Work on tests** | [project-plan.md](project-plan.md) | `internal/opencode/integration_test.go` |
-| **Find external source** | [opencode-reference.md](opencode-reference.md) | GitHub/Docs links |
+| Task | Document | Implementation |
+|------|----------|----------------|
+| **Current status** | [reference/integration-summary.md](reference/integration-summary.md) | - |
+| **Project plan** | [planning/project-plan.md](planning/project-plan.md) | - |
+| **API reference** | [reference/api-reference.md](reference/api-reference.md) | - |
+| **Work on plugin** | [reference/plugin-guide.md](reference/plugin-guide.md) | `internal/opencode/plugin/gastown.js` |
+| **Work on config** | [reference/api-reference.md](reference/api-reference.md) | `internal/config/agents.go` |
+| **Work on tests** | [planning/project-plan.md](planning/project-plan.md) | `internal/opencode/integration_test.go` |
 
 ### What to Update
 
 | When... | Update... |
 |---------|-----------|
-| **Fixing bugs** | [integration-summary.md](integration-summary.md) → Bugs Fixed section |
-| **Adding features** | [integration-summary.md](integration-summary.md), [project-plan.md](project-plan.md) |
-| **Changing OpenCode version** | Frontmatter `opencode_version_tested` in README.md |
-| **Completing a phase** | [project-plan.md](project-plan.md) → checkboxes and status |
-| **Adding docs** | README.md → document tables |
-| **Adding tests** | [project-plan.md](project-plan.md) → Test Status section |
-
-### External Sources (Authoritative)
-
-| Resource | When to Use |
-|----------|-------------|
-| [OpenCode Repo](https://github.com/anomalyco/opencode) | Source code, latest features |
-| [Awesome OpenCode](https://github.com/awesome-opencode/awesome-opencode) | Community plugins before building |
-| [opencode.ai/docs/ecosystem](https://opencode.ai/docs/ecosystem/) | Official extensions |
+| **Fixing bugs** | `reference/integration-summary.md` |
+| **Adding features** | `reference/integration-summary.md`, `planning/project-plan.md` |
+| **Adding docs** | This README → document tables |
+| **Completing a phase** | `planning/project-plan.md` |

@@ -6,7 +6,7 @@
 > **Purpose**: Identify minimal abstractions needed to support both Claude Code and Opencode
 > **Status**: Planning
 > **Created**: 2026-01-16
-> **Related**: [opencode-orchestration.md](opencode-orchestration.md)
+> **Related**: [../planning/orchestration.md](../planning/orchestration.md)
 
 ## Overview
 
@@ -904,4 +904,4 @@ cmd := rc.BuildCommand()
 
 **Last Updated**: 2026-01-16
 **Owner**: Gastown Team
-**Status**: Analysis Complete - See [Integration Architecture](opencode-integration-architecture.md) for Opencode-specific implementation details
+**Status**: Analysis Complete - See [Integration Architecture](../planning/integration-architecture.md) for Opencode-specific implementation details

@@ -19,7 +19,7 @@ Before building something, check if it already exists:
 
 ### 📘 Core Planning Documents
 
-#### [Gastown Concepts: Claude Code Coupling Analysis](opencode-concept-analysis.md) ⭐
+#### [Gastown Concepts: Claude Code Coupling Analysis](research/concept-analysis.md) ⭐
 **Purpose**: Comprehensive analysis of all major Gastown concepts and their Claude Code dependencies
 
 **Use When**:
@@ -41,7 +41,7 @@ Before building something, check if it already exists:
 
 ---
 
-#### [Opencode Integration Architecture](opencode-integration-architecture.md) ⭐ **NEW**
+#### [Opencode Integration Architecture](planning/integration-architecture.md) ⭐ **NEW**
 **Purpose**: Detailed Opencode-specific integration strategy leveraging plugins, SDK, tools, and agents
 
 **Use When**:
@@ -63,7 +63,7 @@ Before building something, check if it already exists:
 
 ---
 
-#### [Opencode Orchestration Plan](opencode-orchestration.md)
+#### [Opencode Orchestration Plan](planning/orchestration.md)
 **Purpose**: Comprehensive strategy and architecture overview
 
 **Use When**: 
@@ -85,7 +85,7 @@ Before building something, check if it already exists:
 
 ---
 
-#### [Opencode Implementation Guide](opencode-implementation-guide.md)
+#### [Opencode Implementation Guide](planning/implementation-guide.md)
 **Purpose**: Detailed technical implementation specifications
 
 **Use When**:
@@ -108,7 +108,7 @@ Before building something, check if it already exists:
 
 ---
 
-#### [Stage 2: SDK-Based Orchestration Layer](stage2-sdk-orchestration.md) 🆕
+#### [Stage 2: SDK-Based Orchestration Layer](planning/stage2-sdk.md) 🆕
 **Purpose**: Future architecture plan using OpenCode Go SDK for programmatic orchestration
 
 **Use When**:
@@ -131,7 +131,7 @@ Before building something, check if it already exists:
 
 ### 🔬 Experimentation & Research
 
-#### [Opencode Experiments Checklist](opencode-experiments.md)
+#### [Opencode Experiments Checklist](research/experiments.md)
 **Purpose**: Hands-on validation of assumptions and unknowns
 
 **Use When**:
@@ -150,7 +150,7 @@ Before building something, check if it already exists:
 
 ---
 
-#### [Decision Points & Open Questions](opencode-decisions.md)
+#### [Decision Points & Open Questions](planning/decisions.md)
 **Purpose**: Track decisions needed and uncertain areas
 
 **Use When**:
@@ -175,10 +175,10 @@ Before building something, check if it already exists:
 ### 👔 For Project Managers
 
 **Start Here**:
-1. [Orchestration Plan - Executive Summary](opencode-orchestration.md#executive-summary)
-2. [Orchestration Plan - Implementation Phases](opencode-orchestration.md#implementation-phases)
-3. [Decisions - Critical Decisions](opencode-decisions.md#critical-decisions-block-implementation)
-4. [Orchestration Plan - Risk Assessment](opencode-orchestration.md#risk-assessment)
+1. [Orchestration Plan - Executive Summary](planning/orchestration.md#executive-summary)
+2. [Orchestration Plan - Implementation Phases](planning/orchestration.md#implementation-phases)
+3. [Decisions - Critical Decisions](planning/decisions.md#critical-decisions-block-implementation)
+4. [Orchestration Plan - Risk Assessment](planning/orchestration.md#risk-assessment)
 
 **Key Questions You Can Answer**:
 - What's the timeline?
@@ -191,11 +191,11 @@ Before building something, check if it already exists:
 **For Architects**
 
 **Start Here**:
-1. [Concept Analysis - Overview](opencode-concept-analysis.md#overview)
-2. [Integration Architecture - Research Findings](opencode-integration-architecture.md#research-findings) ⭐ **NEW**
-3. [Integration Architecture - Integration Strategy](opencode-integration-architecture.md#integration-strategy-core-logic-extraction) ⭐ **NEW**
-4. [Concept Analysis - Coupling Summary](opencode-concept-analysis.md#summary-coupling-analysis)
-5. [Implementation Guide - Interface Definitions](opencode-implementation-guide.md#interface-definitions)
+1. [Concept Analysis - Overview](research/concept-analysis.md#overview)
+2. [Integration Architecture - Research Findings](planning/integration-architecture.md#research-findings) ⭐ **NEW**
+3. [Integration Architecture - Integration Strategy](planning/integration-architecture.md#integration-strategy-core-logic-extraction) ⭐ **NEW**
+4. [Concept Analysis - Coupling Summary](research/concept-analysis.md#summary-coupling-analysis)
+5. [Implementation Guide - Interface Definitions](planning/implementation-guide.md#interface-definitions)
 
 **Key Questions You Can Answer**:
 - Which Gastown concepts need abstraction? (Concept Analysis)
@@ -210,10 +210,10 @@ Before building something, check if it already exists:
 ### 💻 For Engineers
 
 **Start Here**:
-1. [Implementation Guide - Code Structure](opencode-implementation-guide.md#code-structure)
-2. [Implementation Guide - Backend Implementations](opencode-implementation-guide.md#backend-implementations)
-3. [Implementation Guide - Configuration Examples](opencode-implementation-guide.md#configuration-examples)
-4. [Experiments - Basic Experiments](opencode-experiments.md#basic-experiments-required-for-mvp)
+1. [Implementation Guide - Code Structure](planning/implementation-guide.md#code-structure)
+2. [Implementation Guide - Backend Implementations](planning/implementation-guide.md#backend-implementations)
+3. [Implementation Guide - Configuration Examples](planning/implementation-guide.md#configuration-examples)
+4. [Experiments - Basic Experiments](research/experiments.md#basic-experiments-required-for-mvp)
 
 **Key Questions You Can Answer**:
 - What code do I need to write?
@@ -226,10 +226,10 @@ Before building something, check if it already exists:
 ### 🔬 For Researchers
 
 **Start Here**:
-1. [Experiments - Blocking Experiments](opencode-experiments.md#blocking-experiments-must-resolve)
-2. [Decisions - Open Questions](opencode-decisions.md#open-questions-research-needed)
-3. [Decisions - Assumptions Registry](opencode-decisions.md#assumptions-registry)
-4. [Experiments - Experiment Tracking](opencode-experiments.md#experiment-tracking)
+1. [Experiments - Blocking Experiments](research/experiments.md#blocking-experiments-must-resolve)
+2. [Decisions - Open Questions](planning/decisions.md#open-questions-research-needed)
+3. [Decisions - Assumptions Registry](planning/decisions.md#assumptions-registry)
+4. [Experiments - Experiment Tracking](research/experiments.md#experiment-tracking)
 
 **Key Questions You Can Answer**:
 - What needs to be validated?
@@ -242,10 +242,10 @@ Before building something, check if it already exists:
 ### 🎨 For UX/Product
 
 **Start Here**:
-1. [Orchestration Plan - Workflow Patterns](opencode-orchestration.md#workflow-patterns)
-2. [Orchestration Plan - Migration & Compatibility](opencode-orchestration.md#migration--compatibility)
-3. [Decisions - D4: Plugin Installation Strategy](opencode-decisions.md#d4-plugin-installation-strategy)
-4. [Orchestration Plan - Success Criteria](opencode-orchestration.md#success-criteria)
+1. [Orchestration Plan - Workflow Patterns](planning/orchestration.md#workflow-patterns)
+2. [Orchestration Plan - Migration & Compatibility](planning/orchestration.md#migration--compatibility)
+3. [Decisions - D4: Plugin Installation Strategy](planning/decisions.md#d4-plugin-installation-strategy)
+4. [Orchestration Plan - Success Criteria](planning/orchestration.md#success-criteria)
 
 **Key Questions You Can Answer**:
 - How will users interact with this?
@@ -259,11 +259,11 @@ Before building something, check if it already exists:
 
 ### 🎯 "I need to understand the big picture"
 
-1. [Concept Analysis - Overview](opencode-concept-analysis.md#overview) (5 min) ⭐ **START HERE**
-2. [Concept Analysis - Summary](opencode-concept-analysis.md#summary-coupling-analysis) (10 min) ⭐
-3. [Orchestration Plan - Executive Summary](opencode-orchestration.md#executive-summary) (5 min)
-4. [Orchestration Plan - Architecture Overview](opencode-orchestration.md#architecture-overview) (10 min)
-5. [Decisions - Known Divergences](opencode-decisions.md#known-divergences-claude-vs-opencode) (5 min)
+1. [Concept Analysis - Overview](research/concept-analysis.md#overview) (5 min) ⭐ **START HERE**
+2. [Concept Analysis - Summary](research/concept-analysis.md#summary-coupling-analysis) (10 min) ⭐
+3. [Orchestration Plan - Executive Summary](planning/orchestration.md#executive-summary) (5 min)
+4. [Orchestration Plan - Architecture Overview](planning/orchestration.md#architecture-overview) (10 min)
+5. [Decisions - Known Divergences](planning/decisions.md#known-divergences-claude-vs-opencode) (5 min)
 
 **Total Time**: ~35 minutes
 
@@ -271,10 +271,10 @@ Before building something, check if it already exists:
 
 ### 🎯 "I need to start implementing"
 
-1. [Implementation Guide - Quick Reference](opencode-implementation-guide.md#quick-reference) (5 min)
-2. [Implementation Guide - Interface Definitions](opencode-implementation-guide.md#interface-definitions) (15 min)
-3. [Implementation Guide - Backend Implementations](opencode-implementation-guide.md#backend-implementations) (20 min)
-4. [Implementation Guide - Testing Strategy](opencode-implementation-guide.md#testing-strategy) (10 min)
+1. [Implementation Guide - Quick Reference](planning/implementation-guide.md#quick-reference) (5 min)
+2. [Implementation Guide - Interface Definitions](planning/implementation-guide.md#interface-definitions) (15 min)
+3. [Implementation Guide - Backend Implementations](planning/implementation-guide.md#backend-implementations) (20 min)
+4. [Implementation Guide - Testing Strategy](planning/implementation-guide.md#testing-strategy) (10 min)
 
 **Total Time**: ~50 minutes
 
@@ -282,10 +282,10 @@ Before building something, check if it already exists:
 
 ### 🎯 "I need to validate assumptions"
 
-1. [Decisions - Assumptions Registry](opencode-decisions.md#assumptions-registry) (5 min)
-2. [Experiments - Blocking Experiments](opencode-experiments.md#blocking-experiments-must-resolve) (10 min)
-3. [Experiments - Basic Experiments](opencode-experiments.md#basic-experiments-required-for-mvp) (15 min)
-4. [Experiments - Experiment Tracking](opencode-experiments.md#experiment-tracking) (5 min)
+1. [Decisions - Assumptions Registry](planning/decisions.md#assumptions-registry) (5 min)
+2. [Experiments - Blocking Experiments](research/experiments.md#blocking-experiments-must-resolve) (10 min)
+3. [Experiments - Basic Experiments](research/experiments.md#basic-experiments-required-for-mvp) (15 min)
+4. [Experiments - Experiment Tracking](research/experiments.md#experiment-tracking) (5 min)
 
 **Total Time**: ~35 minutes
 
@@ -293,10 +293,10 @@ Before building something, check if it already exists:
 
 ### 🎯 "I need to make decisions"
 
-1. [Decisions - Critical Decisions](opencode-decisions.md#critical-decisions-block-implementation) (15 min)
-2. [Decisions - Open Questions](opencode-decisions.md#open-questions-research-needed) (10 min)
-3. [Orchestration Plan - Risk Assessment](opencode-orchestration.md#risk-assessment) (10 min)
-4. [Decisions - Areas of Uncertainty](opencode-decisions.md#areas-of-uncertainty-design-tradeoffs) (10 min)
+1. [Decisions - Critical Decisions](planning/decisions.md#critical-decisions-block-implementation) (15 min)
+2. [Decisions - Open Questions](planning/decisions.md#open-questions-research-needed) (10 min)
+3. [Orchestration Plan - Risk Assessment](planning/orchestration.md#risk-assessment) (10 min)
+4. [Decisions - Areas of Uncertainty](planning/decisions.md#areas-of-uncertainty-design-tradeoffs) (10 min)
 
 **Total Time**: ~45 minutes
 
@@ -308,12 +308,12 @@ Before building something, check if it already exists:
 
 | Document | Status | Completeness | Next Update |
 |----------|--------|--------------|-------------|
-| [Concept Analysis](opencode-concept-analysis.md) | ✅ Complete | 100% | After adoption |
-| [Integration Architecture](opencode-integration-architecture.md) | ✅ Complete | 100% | After Phase 1 |
-| [Orchestration Plan](opencode-orchestration.md) | ✅ Complete | 100% | After experiments |
-| [Implementation Guide](opencode-implementation-guide.md) | ✅ Complete | 100% | After Phase 1 |
-| [Experiments Checklist](opencode-experiments.md) | ✅ Complete | 100% | As experiments run |
-| [Decisions & Questions](opencode-decisions.md) | ✅ Complete | 100% | Weekly |
+| [Concept Analysis](research/concept-analysis.md) | ✅ Complete | 100% | After adoption |
+| [Integration Architecture](planning/integration-architecture.md) | ✅ Complete | 100% | After Phase 1 |
+| [Orchestration Plan](planning/orchestration.md) | ✅ Complete | 100% | After experiments |
+| [Implementation Guide](planning/implementation-guide.md) | ✅ Complete | 100% | After Phase 1 |
+| [Experiments Checklist](research/experiments.md) | ✅ Complete | 100% | As experiments run |
+| [Decisions & Questions](planning/decisions.md) | ✅ Complete | 100% | Weekly |
 
 ### Implementation Status
 
@@ -361,8 +361,8 @@ Before building something, check if it already exists:
 
 Use relative links for cross-document references:
 ```markdown
-[Orchestration Plan](opencode-orchestration.md)
-[Specific Section](opencode-orchestration.md#section-name)
+[Orchestration Plan](planning/orchestration.md)
+[Specific Section](planning/orchestration.md#section-name)
 ```
 
 ### Status Icons
@@ -416,10 +416,10 @@ Use relative links for cross-document references:
 **Review Cadence**: Weekly during active development
 
 **Questions?**
-- Architecture: Review [Orchestration Plan](opencode-orchestration.md)
-- Implementation: Review [Implementation Guide](opencode-implementation-guide.md)
-- Experiments: Review [Experiments Checklist](opencode-experiments.md)
-- Decisions: Review [Decisions & Questions](opencode-decisions.md)
+- Architecture: Review [Orchestration Plan](planning/orchestration.md)
+- Implementation: Review [Implementation Guide](planning/implementation-guide.md)
+- Experiments: Review [Experiments Checklist](research/experiments.md)
+- Decisions: Review [Decisions & Questions](planning/decisions.md)
 
 ---
 

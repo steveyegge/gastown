@@ -175,7 +175,7 @@ After parity is achieved, consider OpenCode-specific features:
 | Multi-model routing | Use different models per task | Medium |
 | Plugin hot-reload | Faster development | Low |
 
-See [stage2-sdk-orchestration.md](stage2-sdk-orchestration.md) for SDK plans.
+See [stage2-sdk.md](stage2-sdk.md) for SDK plans.
 
 ---
 

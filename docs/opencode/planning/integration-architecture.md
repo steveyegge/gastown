@@ -5,7 +5,7 @@
 > **Purpose**: Define how Opencode's plugins, SDK, hooks, agents, and tools integrate with each Gastown concept
 > **Status**: Architecture Design
 > **Created**: 2026-01-16
-> **Related**: [opencode-concept-analysis.md](opencode-concept-analysis.md), [opencode-orchestration.md](opencode-orchestration.md)
+> **Related**: [../research/concept-analysis.md](../research/concept-analysis.md), [orchestration.md](orchestration.md)
 
 ## Executive Summary
 

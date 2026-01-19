@@ -3,7 +3,7 @@
 > Quick reference for decisions needed and questions to answer
 > 
 > **Purpose**: Track uncertain areas requiring input, research, or experimentation
-> **Related**: [opencode-orchestration.md](opencode-orchestration.md), [opencode-experiments.md](opencode-experiments.md)
+> **Related**: [orchestration.md](orchestration.md), [../research/experiments.md](../research/experiments.md)
 > **Status**: Living Document
 > **Updated**: 2026-01-15
 
