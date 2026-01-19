@@ -5,13 +5,37 @@
 // - UserPromptSubmit → message.updated event (user role filter)
 // - PreCompact → experimental.session.compacting hook
 // - Stop → session.idle event
+//
+// Instrumentation: All actions logged with timestamps for E2E test analysis
+
 export const GasTown = async ({ $, directory }) => {
   const role = (process.env.GT_ROLE || "").toLowerCase();
+  const sessionId = process.env.OPENCODE_SESSION_ID || "unknown";
   const autonomousRoles = new Set(["polecat", "witness", "refinery", "deacon"]);
   const interactiveRoles = new Set(["mayor", "crew"]);
   let didInit = false;
   let lastIdleTime = 0;
   let gtPath = null;
+
+  // Structured logging with timestamps
+  const log = (level, event, message, data = {}) => {
+    const ts = new Date().toISOString();
+    const payload = {
+      ts,
+      level,
+      event,
+      message,
+      role,
+      session: sessionId,
+      ...data
+    };
+    const prefix = `[gastown] ${ts}`;
+    if (level === 'error') {
+      console.error(`${prefix} [ERROR] ${event}: ${message}`, data.error || '');
+    } else {
+      console.log(`${prefix} [${level.toUpperCase()}] ${event}: ${message}`);
+    }
+  };
 
   // Find gt binary - check common locations first
   const findGt = async () => {
@@ -27,36 +51,47 @@ export const GasTown = async ({ $, directory }) => {
     
     for (const candidate of candidates) {
       try {
-        // Try to run with --version to verify it works
         await $`${candidate} version`.quiet();
         gtPath = candidate;
-        console.log(`[gastown] Found gt at: ${gtPath}`);
+        log('info', 'init', `Found gt binary at: ${gtPath}`);
         return gtPath;
       } catch {
         // Continue to next candidate
       }
     }
     
-    console.error("[gastown] gt binary not found in any known location");
-    console.error("[gastown] Checked:", candidates.join(", "));
-    console.error("[gastown] Set GT_BINARY_PATH env var to specify location");
+    log('error', 'init', 'gt binary not found', { 
+      checked: candidates,
+      hint: 'Set GT_BINARY_PATH env var to specify location'
+    });
     return null;
   };
 
   const run = async (cmd) => {
+    const startTime = Date.now();
     try {
       const gt = await findGt();
       if (!gt) {
-        console.error(`[gastown] Skipping: ${cmd} (gt not found)`);
-        return;
+        log('warn', 'run', `Skipping: ${cmd} (gt not found)`);
+        return { success: false, skipped: true };
       }
       // Replace "gt" at start of command with full path
       const fullCmd = cmd.replace(/^gt(\s|$)/, `${gt}$1`);
-      console.log(`[gastown] Running: ${fullCmd}`);
-      await $`/bin/sh -c ${fullCmd}`.cwd(directory);
-      console.log(`[gastown] Success: ${cmd}`);
+      log('info', 'run', `Executing: ${cmd}`);
+      
+      const result = await $`/bin/sh -c ${fullCmd}`.cwd(directory);
+      const duration = Date.now() - startTime;
+      
+      log('info', 'run', `Success: ${cmd}`, { duration_ms: duration, exit: 0 });
+      return { success: true, duration };
     } catch (err) {
-      console.error(`[gastown] ${cmd} failed`, err?.message || err);
+      const duration = Date.now() - startTime;
+      log('error', 'run', `Failed: ${cmd}`, { 
+        duration_ms: duration,
+        error: err?.message || String(err),
+        exit: err?.exitCode
+      });
+      return { success: false, duration, error: err?.message };
     }
   };
 
@@ -64,37 +99,59 @@ export const GasTown = async ({ $, directory }) => {
   const onSessionCreated = async () => {
     if (didInit) return;
     didInit = true;
-    console.log("[gastown] session.created hook triggered");
+    
+    log('info', 'hook', 'session.created triggered');
+    
     await run("gt prime");
+    
     if (autonomousRoles.has(role)) {
+      log('info', 'hook', `Autonomous role (${role}): checking mail`);
       await run("gt mail check --inject");
     }
+    
     await run("gt nudge deacon session-started");
+    
+    log('info', 'hook', 'session.created complete');
   };
 
   // UserPromptSubmit equivalent for interactive roles
   const onUserMessage = async () => {
     if (interactiveRoles.has(role)) {
+      log('info', 'hook', `message.updated triggered for interactive role (${role})`);
       await run("gt mail check --inject");
     }
   };
 
   // PreCompact equivalent
   const onPreCompact = async () => {
-    console.log("[gastown] pre-compact hook triggered");
+    log('info', 'hook', 'pre-compact triggered');
     await run("gt prime");
+    log('info', 'hook', 'pre-compact complete');
   };
 
   // Stop equivalent (with debouncing)
   const onIdle = async () => {
     const now = Date.now();
+    const timeSinceLastIdle = now - lastIdleTime;
+    
     // Debounce: only run if idle for > 5 seconds
-    if (now - lastIdleTime > 5000) {
-      console.log("[gastown] idle hook triggered");
+    if (timeSinceLastIdle > 5000) {
+      log('info', 'hook', 'session.idle triggered', { debounce_ms: timeSinceLastIdle });
       await run("gt costs record");
       lastIdleTime = now;
+    } else {
+      log('debug', 'hook', 'session.idle debounced', { ms_remaining: 5000 - timeSinceLastIdle });
     }
   };
+
+  // Log plugin initialization
+  log('info', 'init', 'Plugin loaded', { 
+    role, 
+    directory, 
+    GT_BINARY_PATH: process.env.GT_BINARY_PATH || '(not set)',
+    autonomousRoles: [...autonomousRoles],
+    interactiveRoles: [...interactiveRoles]
+  });
 
   return {
     // Event-based hooks
@@ -114,6 +171,12 @@ export const GasTown = async ({ $, directory }) => {
         case "session.idle":
           await onIdle();
           break;
+          
+        default:
+          // Log unhandled events for debugging
+          if (event?.type) {
+            log('debug', 'event', `Unhandled event: ${event.type}`);
+          }
       }
     },
     
