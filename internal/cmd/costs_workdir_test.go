@@ -37,6 +37,11 @@ func filterGTEnv(env []string) []string {
 // 2. Creates session.ended events in both town and rig beads
 // 3. Verifies querySessionEvents finds events from both locations
 func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
+	// Skip: bd CLI 0.47.2 has a bug where database writes don't commit
+	// ("sql: database is closed" during auto-flush). This affects all tests
+	// that create issues via bd create. See gt-lnn1xn for tracking.
+	t.Skip("bd CLI 0.47.2 bug: database writes don't commit")
+
 	// Skip if gt and bd are not installed
 	if _, err := exec.LookPath("gt"); err != nil {
 		t.Skip("gt not installed, skipping integration test")
