@@ -184,6 +184,15 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", beacon)
 	}
 
+	if err := config.EnsureCopilotTrustedFolder(config.CopilotTrustConfig{
+		Role:          "boot",
+		TownRoot:      b.townRoot,
+		WorkDir:       b.bootDir,
+		AgentOverride: agentOverride,
+	}); err != nil {
+		return err
+	}
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := b.tmux.NewSessionWithCommand(SessionName, b.bootDir, startCmd); err != nil {

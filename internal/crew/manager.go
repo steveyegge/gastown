@@ -78,6 +78,17 @@ func validateCrewName(name string) error {
 	return nil
 }
 
+func defaultAgentOverride(command string) string {
+	if command == "" {
+		return ""
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	return filepath.Base(fields[0])
+}
+
 // Manager handles crew worker lifecycle.
 type Manager struct {
 	rig *rig.Rig
@@ -514,6 +525,20 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
 	}
 
+	townRoot := filepath.Dir(m.rig.Path)
+	if opts.AgentOverride == "" {
+		opts.AgentOverride = defaultAgentOverride(claudeCmd)
+	}
+	if err := config.EnsureCopilotTrustedFolder(config.CopilotTrustConfig{
+		Role:          "crew",
+		TownRoot:      townRoot,
+		RigPath:       m.rig.Path,
+		WorkDir:       worker.ClonePath,
+		AgentOverride: opts.AgentOverride,
+	}); err != nil {
+		return err
+	}
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := t.NewSessionWithCommand(sessionID, worker.ClonePath, claudeCmd); err != nil {
@@ -522,7 +547,6 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:             "crew",
 		Rig:              m.rig.Name,

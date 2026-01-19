@@ -187,6 +187,16 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, "")
 	}
 
+	if err := config.EnsureCopilotTrustedFolder(config.CopilotTrustConfig{
+		Role:          "refinery",
+		TownRoot:      townRoot,
+		RigPath:       m.rig.Path,
+		WorkDir:       refineryRigDir,
+		AgentOverride: agentOverride,
+	}); err != nil {
+		return err
+	}
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := t.NewSessionWithCommand(sessionID, refineryRigDir, command); err != nil {

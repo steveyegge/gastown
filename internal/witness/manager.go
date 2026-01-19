@@ -168,6 +168,19 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	if err != nil {
 		return err
 	}
+	if agentOverride == "" {
+		agentOverride = defaultAgentOverride(command)
+	}
+
+	if err := config.EnsureCopilotTrustedFolder(config.CopilotTrustConfig{
+		Role:          "witness",
+		TownRoot:      townRoot,
+		RigPath:       m.rig.Path,
+		WorkDir:       witnessDir,
+		AgentOverride: agentOverride,
+	}); err != nil {
+		return err
+	}
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
@@ -282,6 +295,17 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 		return "", fmt.Errorf("building startup command: %w", err)
 	}
 	return command, nil
+}
+
+func defaultAgentOverride(command string) string {
+	if command == "" {
+		return ""
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	return filepath.Base(fields[0])
 }
 
 // Stop stops the witness.
