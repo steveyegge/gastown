@@ -13,7 +13,7 @@ Full context is injected by `gt prime` at session start.
 | Topic | Location |
 |-------|----------|
 | **OpenCode Quick Start** | `docs/opencode/opencode-quickstart.md` |
-| **OpenCode CLI/SDK/Server/Plugins** | `docs/opencode-reference.md` |
+| **OpenCode CLI/SDK/Server/Plugins** | `docs/opencode/opencode-reference.md` |
 | **OpenCode Integration Architecture** | `docs/opencode/opencode-integration-architecture.md` |
 | **OpenCode Index (all docs)** | `docs/opencode/opencode-index.md` |
 | **Gastown Overview** | `docs/overview.md` |

@@ -268,6 +268,41 @@ After comprehensive testing and implementation, **no limitations** were found:
 
 All initially identified gaps had native OpenCode solutions.
 
+### Known OpenCode Issue
+
+⚠️ **OpenCode tmux Crash** - OpenCode may crash when running inside tmux due to a `proper-lockfile/onExit` compatibility bug. This is an upstream OpenCode issue, not a Gastown integration issue. The Gastown integration correctly starts OpenCode; the crash happens after startup during OpenCode's internal initialization.
+
+---
+
+## Bugs Fixed During Integration (2026-01-19)
+
+During integration testing, several **general Gastown bugs** were discovered and fixed. These affect all agent runtimes, not just OpenCode:
+
+### 1. Empty Slice to Nil Conversion (`agents.go`)
+**Bug**: `RuntimeConfigFromPreset` used `append([]string(nil), slice...)` which converts empty slices `[]string{}` to `nil`.  
+**Impact**: Agents with empty Args (like OpenCode/Codex) incorrectly received Claude's default args (`--dangerously-skip-permissions`).  
+**Fix**: Use explicit `make/copy` to preserve nil vs empty distinction.
+
+### 2. Missing Provider Field (`agents.go`)
+**Bug**: `RuntimeConfigFromPreset` didn't set the `Provider` field.  
+**Impact**: `normalizeRuntimeConfig` defaulted to "claude" for all agents.  
+**Fix**: Set `Provider: string(preset)` in the returned config.
+
+### 3. Preset Configs Not Normalized (`loader.go`)
+**Bug**: `ResolveAgentConfigWithOverride` returned preset configs without running through `normalizeRuntimeConfig`.  
+**Impact**: Hooks were nil, so plugins/settings weren't installed for preset-based agents.  
+**Fix**: Wrap `RuntimeConfigFromPreset` with `normalizeRuntimeConfig`.
+
+### 4. GT_ROOT Not Used (`loader.go`)
+**Bug**: `BuildStartupCommandWithAgentOverride` relied on `findTownRootFromCwd()` even when `GT_ROOT` was available in envVars.  
+**Impact**: Tests and commands run from different directories failed to resolve config correctly.  
+**Fix**: Check `envVars["GT_ROOT"]` first before falling back to CWD-based resolution.
+
+### 5. Agent Override Not Used for Runtime Settings (`manager.go`)
+**Bug**: `EnsureSettingsForRole` was called with `ResolveRoleAgentConfig` which ignores `agentOverride`.  
+**Impact**: OpenCode plugin wasn't installed when starting with `--agent opencode`.  
+**Fix**: Use `ResolveAgentConfigWithOverride` when agentOverride is specified.
+
 ---
 
 ## Documentation Index
@@ -439,7 +474,7 @@ The integration achieved **100% feature parity** with Claude Code while actually
 
 ---
 
-**Last Updated**: 2026-01-17  
+**Last Updated**: 2026-01-19  
 **Status**: Complete - Production Ready  
 **Maintainer**: Gastown Team  
 **Contact**: See CONTRIBUTING.md
