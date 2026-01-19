@@ -225,6 +225,72 @@ GT_FORMULA=polecat opencode
 
 ---
 
+## Test Infrastructure Improvements
+
+### integration_test.go Refactoring
+
+The current `internal/opencode/integration_test.go` has several opportunities for cleanup:
+
+**1. Extract Constants to Top of File**
+```go
+const (
+    testTimeout = 65 * time.Second
+    pollInterval = 2 * time.Second
+    defaultAgent = "opencode"
+)
+
+var (
+    townDirs = []string{"mayor", "deacon", "settings", ".beads"}
+    autonomousRoles = []string{"polecat", "witness", "refinery", "deacon"}
+    interactiveRoles = []string{"mayor", "crew"}
+)
+```
+
+**2. Create Test Fixtures Package**
+```go
+// internal/testutil/fixtures.go
+package testutil
+
+type TownFixture struct {
+    Root      string
+    Agent     string
+    cleanup   func()
+}
+
+func NewTownFixture(t *testing.T, agent string) *TownFixture
+func (f *TownFixture) Cleanup()
+func (f *TownFixture) Path(rel string) string
+```
+
+**3. Extract Reusable Helpers**
+| Current | Refactored To |
+|---------|---------------|
+| `ensureBeadsVersion(t)` | `testutil.RequireBeads(t)` |
+| `ensureOpenCode(t)` | `testutil.RequireBinary(t, "opencode")` |
+| `ensureGT(t)` | `testutil.RequireGT(t)` |
+| `createTownWithOpenCode(t, ...)` | `testutil.NewTownFixture(t, "opencode")` |
+
+**4. Centralize Logging**
+```go
+// internal/testutil/logging.go
+func LogDiagnostic(t *testing.T, session string, tm *tmux.Tmux)
+func LogProgress(t *testing.T, format string, args ...any)
+```
+
+**5. Session Waiting Pattern**
+```go
+// internal/testutil/wait.go
+func WaitForSession(t *testing.T, session string, timeout time.Duration) error
+func WaitForPaneCommand(t *testing.T, session string, expected []string, timeout time.Duration) error
+```
+
+**Tasks**:
+- [ ] Create `internal/testutil/` package
+- [ ] Extract constants to file top
+- [ ] Move helpers to testutil
+- [ ] Update integration_test.go to use fixtures
+- [ ] Apply same patterns to other E2E tests
+
 ## Quick Reference
 
 | Need | Document |
