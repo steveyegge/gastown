@@ -17,7 +17,8 @@
 
 | Document | Purpose | Status |
 |----------|---------|--------|
-| [next-steps.md](next-steps.md) | **What to work on next** | Active |
+| [design-decisions.md](design-decisions.md) | **Core design decisions, constraints, assumptions** | Active |
+| [next-steps.md](next-steps.md) | What to work on next | Active |
 | [maintenance.md](maintenance.md) | Version compatibility, update procedures | Active |
 | [gastown-plugin.md](gastown-plugin.md) | Gastown plugin implementation strategy | Active |
 | [role-permissions.md](role-permissions.md) | Role-based permission profiles across runtimes | Active |
