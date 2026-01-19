@@ -1084,6 +1084,7 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		Command:       rc.Command,
 		Args:          rc.Args,
 		InitialPrompt: rc.InitialPrompt,
+		Env:           rc.Env,
 	}
 	if result.Command == "" {
 		result.Command = "claude"
@@ -1252,6 +1253,10 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
+	// Add agent-specific env vars (e.g., ANTHROPIC_BASE_URL, API tokens)
+	for k, v := range rc.Env {
+		resolvedEnv[k] = v
+	}
 
 	// Build environment export prefix
 	var exports []string
@@ -1352,6 +1357,10 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	}
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
+	}
+	// Add agent-specific env vars (e.g., ANTHROPIC_BASE_URL, API tokens)
+	for k, v := range rc.Env {
+		resolvedEnv[k] = v
 	}
 
 	// Build environment export prefix
@@ -1461,15 +1470,18 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 }
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
-// For example, Claude runs as "node", while most other runtimes report their executable name.
+// For example, Claude runs as "node" or "claude", while most other runtimes report their executable name.
+// Claude wrapper scripts (claude-org, claude-glm, etc.) also run as "node" or "claude" since they exec claude.
 func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 	if rc == nil || rc.Command == "" {
 		return nil
 	}
-	if filepath.Base(rc.Command) == "claude" {
-		return []string{"node"}
+	base := filepath.Base(rc.Command)
+	// Claude and Claude wrapper scripts (claude-org, claude-glm, etc.) run as "node" or "claude"
+	if base == "claude" || strings.HasPrefix(base, "claude-") {
+		return []string{"node", "claude"}
 	}
-	return []string{filepath.Base(rc.Command)}
+	return []string{base}
 }
 
 // GetDefaultFormula returns the default formula for a rig from settings/config.json.
