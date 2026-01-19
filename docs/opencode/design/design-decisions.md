@@ -167,24 +167,43 @@ These are the guiding principles for OpenCode integration:
 | 14-15 | Role definitions (autonomous/interactive) | In Go config, not JS |
 | 133-145 | Debounce logic | Possibly in core |
 
-**Comparison with Claude Hooks**:
+**Core Architecture Issue**:
+
+Currently PATH is set **inside each runtime's hooks**, not by the core:
 ```json
-// Claude: Simple, just calls commands
-"SessionStart": [{
-  "command": "gt prime && gt mail check --inject && gt nudge deacon session-started"
-}]
+// Claude hooks embed PATH in every command
+"command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime ..."
 ```
 
+This is wrong - PATH should be set **once** when the session is created, via `AgentEnv()` in `internal/config/env.go`. Then all runtimes (Claude, OpenCode, Gemini, Codex) would automatically have `gt` available.
+
+**Fix**: Add PATH to `AgentEnv()`:
+```go
+func AgentEnv(cfg AgentEnvConfig) map[string]string {
+    env := make(map[string]string)
+    
+    // Ensure gt is in PATH for all runtimes
+    home := os.Getenv("HOME")
+    env["PATH"] = fmt.Sprintf("%s/go/bin:%s/bin:%s", home, home, os.Getenv("PATH"))
+    
+    env["GT_ROLE"] = cfg.Role
+    // ...
+}
+```
+
+Then Claude hooks simplify to:
+```json
+"command": "gt prime && gt mail check --inject && gt nudge deacon session-started"
+```
+
+And OpenCode plugin simplifies to:
 ```javascript
-// OpenCode: 190 lines of infrastructure + same commands
-const findGt = async () => { ... }  // 30 lines
-const log = (level, event, message) => { ... }  // 20 lines
-const autonomousRoles = new Set([...])  // duplicated from Go
+await $`gt prime && gt mail check --inject && gt nudge deacon session-started`;
 ```
 
 **Proposed Simplification**:
-1. **PATH assumption**: Like Claude, assume `gt` is in PATH (set by tmux/shell)
-2. **Role knowledge**: Plugin gets `GT_ROLE` env but shouldn't need role sets
+1. **PATH in AgentEnv**: Set once in core, not in each runtime
+2. **Role knowledge**: Plugin gets `GT_ROLE` but role sets are in Go, not JS
 3. **Logging**: Defer to `gt` - commands log their own output
 4. **Commands**: Plugin just calls commands, no wrapper infrastructure
 
@@ -205,7 +224,11 @@ export const GasTown = async ({ $ }) => ({
 });
 ```
 
-**Blocked by**: Verify PATH works in OpenCode plugin environment
+**Tasks**:
+- [ ] Add PATH to `AgentEnv()` in `internal/config/env.go`
+- [ ] Simplify Claude hooks to remove `export PATH=...`
+- [ ] Simplify gastown.js to minimal version
+- [ ] Move role definitions to config if needed by plugin
 
 ---
 
@@ -216,7 +239,7 @@ export const GasTown = async ({ $ }) => ({
 | OpenCode version | Requires plugin support | OpenCode 0.7.0+ |
 | Node.js | Plugin runtime | Node 18+ |
 | No OPENCODE.md auto-read | OpenCode doesn't auto-load OPENCODE.md | OpenCode docs |
-| Environment variables | GT_ROLE, GT_BINARY_PATH must be set | Gastown |
+| Environment variables | GT_ROLE, GT_ROOT set by core | Gastown |
 
 ---
 
