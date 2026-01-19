@@ -1,22 +1,15 @@
 ---
 # OpenCode Integration Documentation
 # Landing page for all OpenCode-related docs in Gastown.
-
-last_updated: 2026-01-19
-status: experimental  # experimental | stable | deprecated
-production_ready: true
-opencode_version_tested: 1.1.25
-
+#
 # Directory structure:
 #   reference/  - Stable docs on how things work
-#   planning/   - Project direction, decisions, roadmaps
-#   research/   - Analysis, experiments, investigations
-#   archive/    - Point-in-time results with date+commit metadata
+#   planning/   - Project direction by phase
+#   archive/    - Point-in-time analysis/research (with date+commit frontmatter)
 #
 # Naming conventions:
 #   - All lowercase with hyphens (kebab-case)
-#   - No "opencode-" prefix in subdirectories (redundant)
-#   - README.md is the exception (uppercase for standard)
+#   - README.md exception (uppercase for standard)
 ---
 
 # OpenCode Integration

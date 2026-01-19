@@ -1,8 +1,6 @@
 ---
 # OpenCode Concept Index
 # Comprehensive glossary with links to all sources
-
-last_updated: 2026-01-19
 ---
 
 # OpenCode Concept Index
