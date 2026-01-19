@@ -30,9 +30,9 @@ func TestAddressToIdentity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.address, func(t *testing.T) {
-			got := addressToIdentity(tt.address)
+			got := AddressToIdentity(tt.address)
 			if got != tt.expected {
-				t.Errorf("addressToIdentity(%q) = %q, want %q", tt.address, got, tt.expected)
+				t.Errorf("AddressToIdentity(%q) = %q, want %q", tt.address, got, tt.expected)
 			}
 		})
 	}
