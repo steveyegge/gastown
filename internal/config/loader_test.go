@@ -1212,10 +1212,17 @@ func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 }
 
 func TestBuildStartupCommand_UsesRoleAgentsFromTownSettings(t *testing.T) {
-	skipIfAgentBinaryMissing(t, "gemini", "codex")
-	t.Parallel()
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
+
+	binDir := t.TempDir()
+	for _, name := range []string{"gemini", "codex"} {
+		path := filepath.Join(binDir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatalf("write %s stub: %v", name, err)
+		}
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	// Configure town settings with role_agents
 	townSettings := NewTownSettings()

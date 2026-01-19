@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -213,6 +213,16 @@ func runDone(cmd *cobra.Command, args []string) error {
 			WorkDir:  cwd,
 		}
 		agentBeadID = getAgentBeadID(ctx)
+	}
+
+	// If issue ID not set by flag or branch name, try agent's hook_bead.
+	// This handles cases where branch name doesn't contain issue ID
+	// (e.g., "polecat/furiosa-mkb0vq9f" doesn't have the actual issue).
+	if issueID == "" && agentBeadID != "" {
+		bd := beads.New(beads.ResolveBeadsDir(cwd))
+		if hookIssue := getIssueFromAgentHook(bd, agentBeadID); hookIssue != "" {
+			issueID = hookIssue
+		}
 	}
 
 	// Get configured default branch for this rig
@@ -617,6 +627,21 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 	}
 }
 
+// getIssueFromAgentHook retrieves the issue ID from an agent's hook_bead field.
+// This is the authoritative source for what work a polecat is doing, since branch
+// names may not contain the issue ID (e.g., "polecat/furiosa-mkb0vq9f").
+// Returns empty string if agent doesn't exist or has no hook.
+func getIssueFromAgentHook(bd *beads.Beads, agentBeadID string) string {
+	if agentBeadID == "" {
+		return ""
+	}
+	agentBead, err := bd.Show(agentBeadID)
+	if err != nil {
+		return ""
+	}
+	return agentBead.HookBead
+}
+
 // getDispatcherFromBead retrieves the dispatcher agent ID from the bead's attachment fields.
 // Returns empty string if no dispatcher is recorded.
 func getDispatcherFromBead(cwd, issueID string) string {
@@ -718,11 +743,11 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 	_ = events.LogFeed(events.TypeSessionDeath, agentID,
 		events.SessionDeathPayload(sessionName, agentID, "self-clean: done means gone", "gt done"))
 
-	// Kill our own tmux session
-	// This will terminate Claude and the shell, completing the self-cleaning cycle.
-	// We use exec.Command instead of the tmux package to avoid import cycles.
-	cmd := exec.Command("tmux", "kill-session", "-t", sessionName) //nolint:gosec // G204: sessionName is derived from env vars, not user input
-	if err := cmd.Run(); err != nil {
+	// Kill our own tmux session with proper process cleanup
+	// This will terminate Claude and all child processes, completing the self-cleaning cycle.
+	// We use KillSessionWithProcesses to ensure no orphaned processes are left behind.
+	t := tmux.NewTmux()
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
 		return fmt.Errorf("killing session %s: %w", sessionName, err)
 	}
 

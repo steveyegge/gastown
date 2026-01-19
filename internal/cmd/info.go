@@ -75,6 +75,47 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.4.0",
+		Date:    "2026-01-17",
+		Changes: []string{
+			"FIX: Orphan cleanup skips valid tmux sessions - Prevents false kills of witnesses/refineries/deacon during startup by checking gt-*/hq-* session membership",
+		},
+	},
+	{
+		Version: "0.3.1",
+		Date:    "2026-01-17",
+		Changes: []string{
+			"FIX: Orphan cleanup on macOS - TTY comparison now handles macOS '??' format",
+			"FIX: Session kill orphan prevention - gt done and gt crew stop use KillSessionWithProcesses",
+		},
+	},
+	{
+		Version: "0.3.0",
+		Date:    "2026-01-17",
+		Changes: []string{
+			"NEW: gt show/cat - Inspect bead contents and metadata",
+			"NEW: gt orphans list/kill - Detect and clean up orphaned Claude processes",
+			"NEW: gt convoy close - Manual convoy closure command",
+			"NEW: gt commit/trail - Git wrappers with bead awareness",
+			"NEW: Plugin system - gt plugin run/history, gt dispatch --plugin",
+			"NEW: Beads-native messaging - Queue, channel, and group beads",
+			"NEW: gt mail claim - Claim messages from queues",
+			"NEW: gt polecat identity show - Display CV summary",
+			"NEW: gastown-release molecule formula - Automated release workflow",
+			"NEW: Parallel agent startup - Faster boot with concurrency limit",
+			"NEW: Automatic orphan cleanup - Detect and kill orphaned processes",
+			"NEW: Worktree setup hooks - Inject local configurations",
+			"CHANGED: MR tracking via beads - Removed mrqueue package",
+			"CHANGED: Desire-path commands - Agent ergonomics shortcuts",
+			"CHANGED: Explicit escalation in polecat templates",
+			"FIX: Kill process tree on shutdown - Prevents orphaned Claude processes",
+			"FIX: Agent bead prefix alignment - Multi-hyphen IDs for consistency",
+			"FIX: Idle Polecat Heresy warnings in templates",
+			"FIX: Zombie session detection in doctor",
+			"FIX: Windows build support with platform-specific handling",
+		},
+	},
+	{
 		Version: "0.2.0",
 		Date:    "2026-01-04",
 		Changes: []string{

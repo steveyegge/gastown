@@ -378,6 +378,14 @@ func initTownBeads(townPath string) error {
 		fmt.Printf("   %s Could not set custom types: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(configOutput)))
 	}
 
+	// Configure allowed_prefixes for convoy beads (hq-cv-* IDs).
+	// This allows bd create --id=hq-cv-xxx to pass prefix validation.
+	prefixCmd := exec.Command("bd", "config", "set", "allowed_prefixes", "hq,hq-cv")
+	prefixCmd.Dir = townPath
+	if prefixOutput, prefixErr := prefixCmd.CombinedOutput(); prefixErr != nil {
+		fmt.Printf("   %s Could not set allowed_prefixes: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(prefixOutput)))
+	}
+
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
 	// Without fingerprint, the bd daemon fails to start silently.

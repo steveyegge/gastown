@@ -115,9 +115,8 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 
 	if foreground {
 		// In foreground mode, check tmux session (no PID inference per ZFC)
-		townRoot := filepath.Dir(m.rig.Path)
-		agentCfg := config.ResolveRoleAgentConfig(constants.RoleRefinery, townRoot, m.rig.Path)
-		if running, _ := t.HasSession(sessionID); running && t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
+		// Use IsClaudeRunning for robust detection (see gastown#566)
+		if running, _ := t.HasSession(sessionID); running && t.IsClaudeRunning(sessionID) {
 			return ErrAlreadyRunning
 		}
 
@@ -138,14 +137,15 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Background mode: check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if agent is actually running (healthy vs zombie)
-		townRoot := filepath.Dir(m.rig.Path)
-		agentCfg := config.ResolveRoleAgentConfig(constants.RoleRefinery, townRoot, m.rig.Path)
-		if t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
-			// Healthy - agent is running
+		// Session exists - check if Claude is actually running (healthy vs zombie)
+		// Use IsClaudeRunning for robust detection: Claude can report as "node", "claude",
+		// or version number like "2.0.76". IsAgentRunning with just "node" was too strict
+		// and caused healthy sessions to be killed. See: gastown#566
+		if t.IsClaudeRunning(sessionID) {
+			// Healthy - Claude is running
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but agent dead. Kill and recreate.
+		// Zombie - tmux alive but Claude dead. Kill and recreate.
 		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, agent dead). Recreating...")
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
@@ -205,10 +205,12 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
-	// Wait for Claude to start and show its prompt (non-fatal)
+	// Wait for Claude to start and show its prompt - fatal if Claude fails to launch
 	// WaitForRuntimeReady waits for the runtime to be ready
 	if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal - try to continue anyway
+		// Kill the zombie session before returning error
+		_ = t.KillSessionWithProcesses(sessionID)
+		return fmt.Errorf("waiting for refinery to start: %w", err)
 	}
 
 	// Accept bypass permissions warning dialog if it appears.

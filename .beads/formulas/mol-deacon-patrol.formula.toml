@@ -85,9 +85,45 @@ Callbacks may spawn new polecats, update issue state, or trigger other actions.
 Keep inbox near-empty - only unprocessed items should remain."""
 
 [[steps]]
+id = "orphan-process-cleanup"
+title = "Clean up orphaned claude subagent processes"
+needs = ["inbox-check"]
+description = """
+Clean up orphaned claude subagent processes.
+
+Claude Code's Task tool spawns subagent processes that sometimes don't clean up
+properly after completion. These accumulate and consume significant memory.
+
+**Detection method:**
+Orphaned processes have no controlling terminal (TTY = "?"). Legitimate claude
+instances in terminals have a TTY like "pts/0".
+
+**Run cleanup:**
+```bash
+gt deacon cleanup-orphans
+```
+
+This command:
+1. Lists all claude/codex processes with `ps -eo pid,tty,comm`
+2. Filters for TTY = "?" (no controlling terminal)
+3. Sends SIGTERM to each orphaned process
+4. Reports how many were killed
+
+**Why this is safe:**
+- Processes in terminals (your personal sessions) have a TTY - they won't be touched
+- Only kills processes that have no controlling terminal
+- These orphans are children of the tmux server with no TTY, indicating they're
+  detached subagents that failed to exit
+
+**If cleanup fails:**
+Log the error but continue patrol - this is best-effort cleanup.
+
+**Exit criteria:** Orphan cleanup attempted (success or logged failure)."""
+
+[[steps]]
 id = "trigger-pending-spawns"
 title = "Nudge newly spawned polecats"
-needs = ["inbox-check"]
+needs = ["orphan-process-cleanup"]
 description = """
 Nudge newly spawned polecats that are ready for input.
 

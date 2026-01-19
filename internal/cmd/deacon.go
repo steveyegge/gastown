@@ -22,6 +22,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -34,14 +35,20 @@ var deaconCmd = &cobra.Command{
 	Use:     "deacon",
 	Aliases: []string{"dea"},
 	GroupID: GroupAgents,
-	Short:   "Manage the Deacon session",
+	Short:   "Manage the Deacon (town-level watchdog)",
 	RunE:    requireSubcommand,
-	Long: `Manage the Deacon tmux session.
+	Long: `Manage the Deacon - the town-level watchdog for Gas Town.
 
-The Deacon is the hierarchical health-check orchestrator for Gas Town.
-It monitors the Mayor and Witnesses, handles lifecycle requests, and
-keeps the town running. Use the subcommands to start, stop, attach,
-and check status.`,
+The Deacon ("daemon beacon") is the only agent that receives mechanical
+heartbeats from the daemon. It monitors system health across all rigs:
+  - Watches all Witnesses (are they alive? stuck? responsive?)
+  - Manages Dogs for cross-rig infrastructure work
+  - Handles lifecycle requests (respawns, restarts)
+  - Receives heartbeat pokes and decides what needs attention
+
+The Deacon patrols the town; Witnesses patrol their rigs; Polecats work.
+
+Role shortcuts: "deacon" in mail/nudge addresses resolves to this agent.`,
 }
 
 var deaconStartCmd = &cobra.Command{
@@ -236,6 +243,27 @@ This removes the pause file and allows the Deacon to work normally.`,
 	RunE: runDeaconResume,
 }
 
+var deaconCleanupOrphansCmd = &cobra.Command{
+	Use:   "cleanup-orphans",
+	Short: "Clean up orphaned claude subagent processes",
+	Long: `Clean up orphaned claude subagent processes.
+
+Claude Code's Task tool spawns subagent processes that sometimes don't clean up
+properly after completion. These accumulate and consume significant memory.
+
+Detection is based on TTY column: processes with TTY "?" have no controlling
+terminal. Legitimate claude instances in terminals have a TTY like "pts/0".
+
+This is safe because:
+- Processes in terminals (your personal sessions) have a TTY - won't be touched
+- Only kills processes that have no controlling terminal
+- These orphans are children of the tmux server with no TTY
+
+Example:
+  gt deacon cleanup-orphans`,
+	RunE: runDeaconCleanupOrphans,
+}
+
 var (
 	triggerTimeout time.Duration
 
@@ -270,6 +298,7 @@ func init() {
 	deaconCmd.AddCommand(deaconStaleHooksCmd)
 	deaconCmd.AddCommand(deaconPauseCmd)
 	deaconCmd.AddCommand(deaconResumeCmd)
+	deaconCmd.AddCommand(deaconCleanupOrphansCmd)
 
 	// Flags for trigger-pending
 	deaconTriggerPendingCmd.Flags().DurationVar(&triggerTimeout, "timeout", 2*time.Second,
@@ -1102,6 +1131,57 @@ func runDeaconResume(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Deacon resumed\n", style.Bold.Render("▶️"))
 	fmt.Println("The Deacon can now perform patrol actions.")
+
+	return nil
+}
+
+// runDeaconCleanupOrphans cleans up orphaned claude subagent processes.
+func runDeaconCleanupOrphans(cmd *cobra.Command, args []string) error {
+	// First, find orphans
+	orphans, err := util.FindOrphanedClaudeProcesses()
+	if err != nil {
+		return fmt.Errorf("finding orphaned processes: %w", err)
+	}
+
+	if len(orphans) == 0 {
+		fmt.Printf("%s No orphaned claude processes found\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	fmt.Printf("%s Found %d orphaned claude process(es)\n", style.Bold.Render("●"), len(orphans))
+
+	// Process them with signal escalation
+	results, err := util.CleanupOrphanedClaudeProcesses()
+	if err != nil {
+		style.PrintWarning("cleanup had errors: %v", err)
+	}
+
+	// Report results
+	var terminated, escalated, unkillable int
+	for _, r := range results {
+		switch r.Signal {
+		case "SIGTERM":
+			fmt.Printf("  %s Sent SIGTERM to PID %d (%s)\n", style.Bold.Render("→"), r.Process.PID, r.Process.Cmd)
+			terminated++
+		case "SIGKILL":
+			fmt.Printf("  %s Escalated to SIGKILL for PID %d (%s)\n", style.Bold.Render("!"), r.Process.PID, r.Process.Cmd)
+			escalated++
+		case "UNKILLABLE":
+			fmt.Printf("  %s WARNING: PID %d (%s) survived SIGKILL\n", style.Bold.Render("⚠"), r.Process.PID, r.Process.Cmd)
+			unkillable++
+		}
+	}
+
+	if len(results) > 0 {
+		summary := fmt.Sprintf("Processed %d orphan(s)", len(results))
+		if escalated > 0 {
+			summary += fmt.Sprintf(" (%d escalated to SIGKILL)", escalated)
+		}
+		if unkillable > 0 {
+			summary += fmt.Sprintf(" (%d unkillable)", unkillable)
+		}
+		fmt.Printf("%s %s\n", style.Bold.Render("✓"), summary)
+	}
 
 	return nil
 }

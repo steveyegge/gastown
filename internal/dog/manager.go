@@ -242,6 +242,7 @@ func (m *Manager) List() ([]*Dog, error) {
 }
 
 // Get returns a specific dog by name.
+// Returns ErrDogNotFound if the dog directory or .dog.json state file doesn't exist.
 func (m *Manager) Get(name string) (*Dog, error) {
 	if !m.exists(name) {
 		return nil, ErrDogNotFound
@@ -249,12 +250,9 @@ func (m *Manager) Get(name string) (*Dog, error) {
 
 	state, err := m.loadState(name)
 	if err != nil {
-		// Return minimal dog if state file is missing
-		return &Dog{
-			Name:  name,
-			State: StateIdle,
-			Path:  m.dogDir(name),
-		}, nil
+		// No .dog.json means this isn't a valid dog worker
+		// (e.g., "boot" is the boot watchdog using .boot-status.json, not a dog)
+		return nil, ErrDogNotFound
 	}
 
 	return &Dog{

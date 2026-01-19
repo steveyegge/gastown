@@ -113,6 +113,7 @@ type SyncStatus struct {
 type Beads struct {
 	workDir  string
 	beadsDir string // Optional BEADS_DIR override for cross-database access
+	isolated bool   // If true, suppress inherited beads env vars (for test isolation)
 }
 
 // New creates a new Beads wrapper for the given directory.
@@ -120,10 +121,34 @@ func New(workDir string) *Beads {
 	return &Beads{workDir: workDir}
 }
 
+// NewIsolated creates a Beads wrapper for test isolation.
+// This suppresses inherited beads env vars (BD_ACTOR, BEADS_DB) to prevent
+// tests from accidentally routing to production databases.
+func NewIsolated(workDir string) *Beads {
+	return &Beads{workDir: workDir, isolated: true}
+}
+
 // NewWithBeadsDir creates a Beads wrapper with an explicit BEADS_DIR.
 // This is needed when running from a polecat worktree but accessing town-level beads.
 func NewWithBeadsDir(workDir, beadsDir string) *Beads {
 	return &Beads{workDir: workDir, beadsDir: beadsDir}
+}
+
+// getActor returns the BD_ACTOR value for this context.
+// Returns empty string when in isolated mode (tests) to prevent
+// inherited actors from routing to production databases.
+func (b *Beads) getActor() string {
+	if b.isolated {
+		return ""
+	}
+	return os.Getenv("BD_ACTOR")
+}
+
+// Init initializes a new beads database in the working directory.
+// This uses the same environment isolation as other commands.
+func (b *Beads) Init(prefix string) error {
+	_, err := b.run("init", "--prefix", prefix, "--quiet")
+	return err
 }
 
 // run executes a bd command and returns stdout.
@@ -133,8 +158,6 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	// Use --allow-stale to prevent failures when db is out of sync with JSONL
 	// (e.g., after daemon is killed during shutdown before syncing).
 	fullArgs := append([]string{"--no-daemon", "--allow-stale"}, args...)
-	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
-	cmd.Dir = b.workDir
 
 	// Always explicitly set BEADS_DIR to prevent inherited env vars from
 	// causing prefix mismatches. Use explicit beadsDir if set, otherwise
@@ -143,7 +166,28 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	if beadsDir == "" {
 		beadsDir = ResolveBeadsDir(b.workDir)
 	}
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+
+	// In isolated mode, use --db flag to force specific database path
+	// This bypasses bd's routing logic that can redirect to .beads-planning
+	// Skip --db for init command since it creates the database
+	isInit := len(args) > 0 && args[0] == "init"
+	if b.isolated && !isInit {
+		beadsDB := filepath.Join(beadsDir, "beads.db")
+		fullArgs = append([]string{"--db", beadsDB}, fullArgs...)
+	}
+
+	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
+	cmd.Dir = b.workDir
+
+	// Build environment: filter beads env vars when in isolated mode (tests)
+	// to prevent routing to production databases.
+	var env []string
+	if b.isolated {
+		env = filterBeadsEnv(os.Environ())
+	} else {
+		env = os.Environ()
+	}
+	cmd.Env = append(env, "BEADS_DIR="+beadsDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -194,6 +238,27 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 		return fmt.Errorf("bd %s: %s", strings.Join(args, " "), stderr)
 	}
 	return fmt.Errorf("bd %s: %w", strings.Join(args, " "), err)
+}
+
+// filterBeadsEnv removes beads-related environment variables from the given
+// environment slice. This ensures test isolation by preventing inherited
+// BD_ACTOR, BEADS_DB, GT_ROOT, HOME etc. from routing commands to production databases.
+func filterBeadsEnv(environ []string) []string {
+	filtered := make([]string, 0, len(environ))
+	for _, env := range environ {
+		// Skip beads-related env vars that could interfere with test isolation
+		// BD_ACTOR, BEADS_* - direct beads config
+		// GT_ROOT - causes bd to find global routes file
+		// HOME - causes bd to find ~/.beads-planning routing
+		if strings.HasPrefix(env, "BD_ACTOR=") ||
+			strings.HasPrefix(env, "BEADS_") ||
+			strings.HasPrefix(env, "GT_ROOT=") ||
+			strings.HasPrefix(env, "HOME=") {
+			continue
+		}
+		filtered = append(filtered, env)
+	}
+	return filtered
 }
 
 // List returns issues matching the given options.
@@ -398,9 +463,10 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 		args = append(args, "--ephemeral")
 	}
 	// Default Actor from BD_ACTOR env var if not specified
+	// Uses getActor() to respect isolated mode (tests)
 	actor := opts.Actor
 	if actor == "" {
-		actor = os.Getenv("BD_ACTOR")
+		actor = b.getActor()
 	}
 	if actor != "" {
 		args = append(args, "--actor="+actor)
@@ -424,6 +490,9 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 // deterministic IDs rather than auto-generated ones.
 func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	args := []string{"create", "--json", "--id=" + id}
+	if NeedsForceForID(id) {
+		args = append(args, "--force")
+	}
 
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
@@ -442,9 +511,10 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 		args = append(args, "--parent="+opts.Parent)
 	}
 	// Default Actor from BD_ACTOR env var if not specified
+	// Uses getActor() to respect isolated mode (tests)
 	actor := opts.Actor
 	if actor == "" {
-		actor = os.Getenv("BD_ACTOR")
+		actor = b.getActor()
 	}
 	if actor != "" {
 		args = append(args, "--actor="+actor)

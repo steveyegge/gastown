@@ -152,7 +152,7 @@ You can also override the agent per command without changing defaults:
 
 ```bash
 gt start --agent codex-low
-gt sling issue-123 myproject --agent claude-haiku
+gt sling gt-abc12 myproject --agent claude-haiku
 ```
 
 ## Minimal Mode vs Full Stack Mode
@@ -165,8 +165,8 @@ Run individual runtime instances manually. Gas Town only tracks state.
 
 ```bash
 # Create and assign work
-gt convoy create "Fix bugs" issue-123
-gt sling issue-123 myproject
+gt convoy create "Fix bugs" gt-abc12
+gt sling gt-abc12 myproject
 
 # Run runtime manually
 cd ~/gt/myproject/polecats/<worker>
@@ -188,9 +188,9 @@ Agents run in tmux sessions. Daemon manages lifecycle automatically.
 gt daemon start
 
 # Create and assign work (workers spawn automatically)
-gt convoy create "Feature X" issue-123 issue-456
-gt sling issue-123 myproject
-gt sling issue-456 myproject
+gt convoy create "Feature X" gt-abc12 gt-def34
+gt sling gt-abc12 myproject
+gt sling gt-def34 myproject
 
 # Monitor on dashboard
 gt convoy list
@@ -303,6 +303,6 @@ rm -rf ~/gt
 After installation:
 
 1. **Read the README** - Core concepts and workflows
-2. **Try a simple workflow** - `gt convoy create "Test" test-issue`
+2. **Try a simple workflow** - `bd create "Test task"` then `gt convoy create "Test" <bead-id>`
 3. **Explore docs** - `docs/reference.md` for command reference
 4. **Run doctor regularly** - `gt doctor` catches problems early

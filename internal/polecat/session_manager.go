@@ -2,6 +2,7 @@
 package polecat
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -29,6 +30,7 @@ func debugSession(context string, err error) {
 var (
 	ErrSessionRunning  = errors.New("session already running")
 	ErrSessionNotFound = errors.New("session not found")
+	ErrIssueInvalid    = errors.New("issue not found or tombstoned")
 )
 
 // SessionManager handles polecat session lifecycle.
@@ -161,6 +163,14 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		workDir = m.clonePath(polecat)
 	}
 
+	// Validate issue exists and isn't tombstoned BEFORE creating session.
+	// This prevents CPU spin loops from agents retrying work on invalid issues.
+	if opts.Issue != "" {
+		if err := m.validateIssue(opts.Issue, workDir); err != nil {
+			return err
+		}
+	}
+
 	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
 
 	// Ensure runtime settings exist in polecats/ (not polecats/<name>/) so we don't
@@ -260,6 +270,16 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// GUPP: Send propulsion nudge to trigger autonomous work execution
 	time.Sleep(2 * time.Second)
 	debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
+
+	// Verify session survived startup - if the command crashed, the session may have died.
+	// Without this check, Start() would return success even if the pane died during initialization.
+	running, err = m.tmux.HasSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("verifying session: %w", err)
+	}
+	if !running {
+		return fmt.Errorf("session %s died during startup (agent command may have failed)", sessionID)
+	}
 
 	return nil
 }
@@ -468,6 +488,32 @@ func (m *SessionManager) StopAll(force bool) error {
 	}
 
 	return lastErr
+}
+
+// validateIssue checks that an issue exists and is not tombstoned.
+// This must be called before starting a session to avoid CPU spin loops
+// from agents retrying work on invalid issues.
+func (m *SessionManager) validateIssue(issueID, workDir string) error {
+	cmd := exec.Command("bd", "show", issueID, "--json") //nolint:gosec
+	cmd.Dir = workDir
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrIssueInvalid, issueID)
+	}
+
+	var issues []struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(output, &issues); err != nil {
+		return fmt.Errorf("parsing issue: %w", err)
+	}
+	if len(issues) == 0 {
+		return fmt.Errorf("%w: %s", ErrIssueInvalid, issueID)
+	}
+	if issues[0].Status == "tombstone" {
+		return fmt.Errorf("%w: %s is tombstoned", ErrIssueInvalid, issueID)
+	}
+	return nil
 }
 
 // hookIssue pins an issue to a polecat's hook using bd update.

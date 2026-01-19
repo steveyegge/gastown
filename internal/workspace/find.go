@@ -48,10 +48,12 @@ func Find(startDir string) (string, error) {
 			primaryMatch = current
 		}
 
-		if secondaryMatch == "" {
-			if info, err := os.Stat(filepath.Join(current, SecondaryMarker)); err == nil && info.IsDir() {
-				secondaryMatch = current
-			}
+		// Always keep updating secondaryMatch to find the outermost mayor/ directory.
+		// This handles nested structures where rigs have their own mayor/ directories
+		// but only the town root should be detected as the workspace.
+		// The primary marker (mayor/town.json) is authoritative and returns early above.
+		if info, err := os.Stat(filepath.Join(current, SecondaryMarker)); err == nil && info.IsDir() {
+			secondaryMatch = current
 		}
 
 		parent := filepath.Dir(current)

@@ -89,6 +89,7 @@ var (
 	hookMessage string
 	hookDryRun  bool
 	hookForce   bool
+	hookClear   bool
 )
 
 func init() {
@@ -97,6 +98,7 @@ func init() {
 	hookCmd.Flags().StringVarP(&hookMessage, "message", "m", "", "Message for handoff mail (optional)")
 	hookCmd.Flags().BoolVarP(&hookDryRun, "dry-run", "n", false, "Show what would be done")
 	hookCmd.Flags().BoolVarP(&hookForce, "force", "f", false, "Replace existing incomplete hooked bead")
+	hookCmd.Flags().BoolVar(&hookClear, "clear", false, "Clear your hook (alias for 'gt unhook')")
 
 	// --json flag for status output (used when no args, i.e., gt hook --json)
 	hookCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON (for status)")
@@ -108,8 +110,15 @@ func init() {
 	rootCmd.AddCommand(hookCmd)
 }
 
-// runHookOrStatus dispatches to status or hook based on args
+// runHookOrStatus dispatches to status, clear, or hook based on args/flags
 func runHookOrStatus(cmd *cobra.Command, args []string) error {
+	// --clear flag is alias for 'gt unhook'
+	if hookClear {
+		// Pass through dry-run and force flags
+		unslingDryRun = hookDryRun
+		unslingForce = hookForce
+		return runUnsling(cmd, args)
+	}
 	if len(args) == 0 {
 		// No args - show status
 		return runMoleculeStatus(cmd, args)

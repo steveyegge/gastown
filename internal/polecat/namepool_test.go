@@ -13,7 +13,7 @@ func TestNamePool_Allocate(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// First allocation should be first themed name (furiosa)
 	name, err := pool.Allocate()
@@ -41,7 +41,7 @@ func TestNamePool_Release(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// Allocate first two
 	name1, _ := pool.Allocate()
@@ -68,7 +68,7 @@ func TestNamePool_PrefersOrder(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// Allocate first 5
 	for i := 0; i < 5; i++ {
@@ -209,7 +209,7 @@ func TestNamePool_Reconcile(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// Simulate existing polecats from filesystem
 	existing := []string{"slit", "valkyrie", "some-other-name"}
@@ -234,7 +234,7 @@ func TestNamePool_IsPoolName(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	tests := []struct {
 		name     string
@@ -263,7 +263,7 @@ func TestNamePool_ActiveNames(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	pool.Allocate() // furiosa
 	pool.Allocate() // nux
@@ -287,7 +287,7 @@ func TestNamePool_MarkInUse(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// Mark some slots as in use
 	pool.MarkInUse("dementus")
@@ -417,7 +417,7 @@ func TestNamePool_Reset(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// Allocate several names
 	for i := 0; i < 10; i++ {
@@ -439,5 +439,26 @@ func TestNamePool_Reset(t *testing.T) {
 	name, _ := pool.Allocate()
 	if name != "furiosa" {
 		t.Errorf("expected furiosa after reset, got %s", name)
+	}
+}
+
+func TestThemeForRig(t *testing.T) {
+	// Different rigs should get different themes (with high probability)
+	themes := make(map[string]bool)
+	for _, rigName := range []string{"gastown", "beads", "myproject", "webapp"} {
+		themes[ThemeForRig(rigName)] = true
+	}
+	// Should have at least 2 different themes across 4 rigs
+	if len(themes) < 2 {
+		t.Errorf("expected variety in themes, got only %d unique theme(s)", len(themes))
+	}
+}
+
+func TestThemeForRigDeterministic(t *testing.T) {
+	// Same rig name should always get same theme
+	theme1 := ThemeForRig("myrig")
+	theme2 := ThemeForRig("myrig")
+	if theme1 != theme2 {
+		t.Errorf("theme not deterministic: got %q and %q", theme1, theme2)
 	}
 }

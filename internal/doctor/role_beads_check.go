@@ -100,12 +100,17 @@ func (c *RoleBeadsCheck) Fix(ctx *CheckContext) error {
 		}
 
 		// Create role bead using bd create --type=role
-		cmd := exec.Command("bd", "create",
+		args := []string{
+			"create",
 			"--type=role",
-			"--id="+role.ID,
-			"--title="+role.Title,
-			"--description="+role.Desc,
-		)
+			"--id=" + role.ID,
+			"--title=" + role.Title,
+			"--description=" + role.Desc,
+		}
+		if beads.NeedsForceForID(role.ID) {
+			args = append(args, "--force")
+		}
+		cmd := exec.Command("bd", args...)
 		cmd.Dir = ctx.TownRoot
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("creating %s: %s", role.ID, strings.TrimSpace(string(output)))

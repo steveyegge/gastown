@@ -10,11 +10,17 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 )
+
+// sessionNudgeLocks serializes nudges to the same session.
+// This prevents interleaving when multiple nudges arrive concurrently,
+// which can cause garbled input and missed Enter keys.
+var sessionNudgeLocks sync.Map // map[string]*sync.Mutex
 
 // versionPattern matches Claude Code version numbers like "2.0.76"
 var versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
@@ -245,6 +251,11 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 		for _, dpid := range descendants {
 			_ = exec.Command("kill", "-KILL", dpid).Run()
 		}
+
+		// Kill the pane process itself (may have called setsid() and detached)
+		_ = exec.Command("kill", "-TERM", pid).Run()
+		time.Sleep(100 * time.Millisecond)
+		_ = exec.Command("kill", "-KILL", pid).Run()
 	}
 
 	// Kill the tmux session
@@ -278,6 +289,23 @@ func (t *Tmux) KillServer() error {
 	_, err := t.run("kill-server")
 	if errors.Is(err, ErrNoServer) {
 		return nil // Already dead
+	}
+	return err
+}
+
+// SetExitEmpty controls the tmux exit-empty server option.
+// When on (default), the server exits when there are no sessions.
+// When off, the server stays running even with no sessions.
+// This is useful during shutdown to prevent the server from exiting
+// when all Gas Town sessions are killed but the user has no other sessions.
+func (t *Tmux) SetExitEmpty(on bool) error {
+	value := "on"
+	if !on {
+		value = "off"
+	}
+	_, err := t.run("set-option", "-g", "exit-empty", value)
+	if errors.Is(err, ErrNoServer) {
+		return nil // No server to configure
 	}
 	return err
 }
@@ -489,11 +517,28 @@ func (t *Tmux) SendKeysDelayedDebounced(session, keys string, preDelayMs, deboun
 	return t.SendKeysDebounced(session, keys, debounceMs)
 }
 
+// getSessionNudgeLock returns the mutex for serializing nudges to a session.
+// Creates a new mutex if one doesn't exist for this session.
+func getSessionNudgeLock(session string) *sync.Mutex {
+	actual, _ := sessionNudgeLocks.LoadOrStore(session, &sync.Mutex{})
+	return actual.(*sync.Mutex)
+}
+
 // NudgeSession sends a message to a Claude Code session reliably.
 // This is the canonical way to send messages to Claude sessions.
 // Uses: literal mode + 500ms debounce + ESC (for vim mode) + separate Enter.
 // Verification is the Witness's job (AI), not this function.
+//
+// IMPORTANT: Nudges to the same session are serialized to prevent interleaving.
+// If multiple goroutines try to nudge the same session concurrently, they will
+// queue up and execute one at a time. This prevents garbled input when
+// SessionStart hooks and nudges arrive simultaneously.
 func (t *Tmux) NudgeSession(session, message string) error {
+	// Serialize nudges to this session to prevent interleaving
+	lock := getSessionNudgeLock(session)
+	lock.Lock()
+	defer lock.Unlock()
+
 	// 1. Send text in literal mode (handles special characters)
 	if _, err := t.run("send-keys", "-t", session, "-l", message); err != nil {
 		return err
@@ -529,7 +574,13 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 // NudgePane sends a message to a specific pane reliably.
 // Same pattern as NudgeSession but targets a pane ID (e.g., "%9") instead of session name.
+// Nudges to the same pane are serialized to prevent interleaving.
 func (t *Tmux) NudgePane(pane, message string) error {
+	// Serialize nudges to this pane to prevent interleaving
+	lock := getSessionNudgeLock(pane)
+	lock.Lock()
+	defer lock.Unlock()
+
 	// 1. Send text in literal mode (handles special characters)
 	if _, err := t.run("send-keys", "-t", pane, "-l", message); err != nil {
 		return err

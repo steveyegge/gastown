@@ -170,6 +170,56 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 	return nil
 }
 
+// storeAttachedMoleculeInBead sets the attached_molecule field in a bead's description.
+// This is required for gt hook to recognize that a molecule is attached to the bead.
+// Called after bonding a formula wisp to a bead via "gt sling <formula> --on <bead>".
+func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
+	if moleculeID == "" {
+		return nil
+	}
+
+	// Get the bead to preserve existing description content
+	showCmd := exec.Command("bd", "show", beadID, "--json")
+	out, err := showCmd.Output()
+	if err != nil {
+		return fmt.Errorf("fetching bead: %w", err)
+	}
+
+	// Parse the bead
+	var issues []beads.Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return fmt.Errorf("parsing bead: %w", err)
+	}
+	if len(issues) == 0 {
+		return fmt.Errorf("bead not found")
+	}
+	issue := &issues[0]
+
+	// Get or create attachment fields
+	fields := beads.ParseAttachmentFields(issue)
+	if fields == nil {
+		fields = &beads.AttachmentFields{}
+	}
+
+	// Set the attached molecule
+	fields.AttachedMolecule = moleculeID
+	if fields.AttachedAt == "" {
+		fields.AttachedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	// Update the description
+	newDesc := beads.SetAttachmentFields(issue, fields)
+
+	// Update the bead
+	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd.Stderr = os.Stderr
+	if err := updateCmd.Run(); err != nil {
+		return fmt.Errorf("updating bead description: %w", err)
+	}
+
+	return nil
+}
+
 // injectStartPrompt sends a prompt to the target pane to start working.
 // Uses the reliable nudge pattern: literal mode + 500ms debounce + separate Enter.
 func injectStartPrompt(pane, beadID, subject, args string) error {

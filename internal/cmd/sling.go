@@ -434,6 +434,13 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("%s Formula bonded to %s\n", style.Bold.Render("✓"), beadID)
 
+		// Record the attached molecule in the wisp's description.
+		// This is required for gt hook to recognize the molecule attachment.
+		if err := storeAttachedMoleculeInBead(wispRootID, wispRootID); err != nil {
+			// Warn but don't fail - polecat can still work through steps
+			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
+		}
+
 		// Update beadID to hook the compound root instead of bare bead
 		beadID = wispRootID
 	}

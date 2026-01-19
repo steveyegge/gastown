@@ -22,6 +22,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -431,8 +432,18 @@ func startRigAgentsWithPrefetch(rigNames []string, prefetchedRigs map[string]*ri
 }
 
 // upStartWitness starts a witness for the given rig and returns a result struct.
+// Respects parked/docked status - skips starting if rig is not operational.
 func upStartWitness(rigName string, r *rig.Rig) agentStartResult {
 	name := "Witness (" + rigName + ")"
+
+	// Check if rig is parked or docked
+	townRoot := filepath.Dir(r.Path)
+	cfg := wisp.NewConfig(townRoot, rigName)
+	status := cfg.GetString("status")
+	if status == "parked" || status == "docked" {
+		return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", status)}
+	}
+
 	mgr := witness.NewManager(r)
 	if err := mgr.Start(false, "", nil); err != nil {
 		if err == witness.ErrAlreadyRunning {
@@ -444,8 +455,18 @@ func upStartWitness(rigName string, r *rig.Rig) agentStartResult {
 }
 
 // upStartRefinery starts a refinery for the given rig and returns a result struct.
+// Respects parked/docked status - skips starting if rig is not operational.
 func upStartRefinery(rigName string, r *rig.Rig) agentStartResult {
 	name := "Refinery (" + rigName + ")"
+
+	// Check if rig is parked or docked
+	townRoot := filepath.Dir(r.Path)
+	cfg := wisp.NewConfig(townRoot, rigName)
+	status := cfg.GetString("status")
+	if status == "parked" || status == "docked" {
+		return agentStartResult{name: name, ok: true, detail: fmt.Sprintf("skipped (rig %s)", status)}
+	}
+
 	mgr := refinery.NewManager(r)
 	if err := mgr.Start(false, ""); err != nil {
 		if err == refinery.ErrAlreadyRunning {

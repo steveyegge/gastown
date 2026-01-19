@@ -257,7 +257,10 @@ func checkHandoffMessages() error {
 	if err := json.Unmarshal(output, &messages); err != nil {
 		// JSON parse failed, use plain text output
 		inboxCmd = exec.Command("gt", "mail", "inbox")
-		output, _ = inboxCmd.Output()
+		output, err = inboxCmd.Output()
+		if err != nil {
+			return fmt.Errorf("fallback inbox check failed: %w", err)
+		}
 		outputStr := string(output)
 		if containsHandoff(outputStr) {
 			fmt.Printf("%s Found handoff message(s):\n\n", style.Bold.Render("🤝"))

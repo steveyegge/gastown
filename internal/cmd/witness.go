@@ -24,16 +24,23 @@ var (
 var witnessCmd = &cobra.Command{
 	Use:     "witness",
 	GroupID: GroupAgents,
-	Short:   "Manage the polecat monitoring agent",
+	Short:   "Manage the Witness (per-rig polecat health monitor)",
 	RunE:    requireSubcommand,
-	Long: `Manage the Witness monitoring agent for a rig.
+	Long: `Manage the Witness - the per-rig polecat health monitor.
 
-The Witness monitors polecats for stuck states and orphaned sandboxes,
-nudges polecats that seem blocked, and reports status to the mayor.
+The Witness patrols a single rig, watching over its polecats:
+  - Detects stalled polecats (crashed or stuck mid-work)
+  - Nudges unresponsive sessions back to life
+  - Cleans up zombie polecats (finished but failed to exit)
+  - Nukes sandboxes when polecats complete via 'gt done'
 
-In the self-cleaning model, polecats nuke themselves after work completion.
-The Witness handles edge cases: crashed sessions, orphaned worktrees, and
-stuck polecats that need intervention.`,
+The Witness does NOT force session cycles or interrupt working polecats.
+Polecats manage their own sessions (via gt handoff). The Witness handles
+failures and edge cases only.
+
+One Witness per rig. The Deacon monitors all Witnesses.
+
+Role shortcuts: "witness" in mail/nudge addresses resolves to this rig's Witness.`,
 }
 
 var witnessStartCmd = &cobra.Command{

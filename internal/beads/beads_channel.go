@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -162,7 +161,8 @@ func (b *Beads) CreateChannelBead(name string, subscribers []string, createdBy s
 	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking
-	if actor := os.Getenv("BD_ACTOR"); actor != "" {
+	// Uses getActor() to respect isolated mode (tests)
+	if actor := b.getActor(); actor != "" {
 		args = append(args, "--actor="+actor)
 	}
 
@@ -382,7 +382,7 @@ func (b *Beads) LookupChannelByName(name string) (*Issue, *ChannelFields, error)
 
 // EnforceChannelRetention prunes old messages from a channel to enforce retention.
 // Called after posting a new message to the channel (on-write cleanup).
-// If channel has >= retainCount messages, deletes oldest until count < retainCount.
+// Enforces both count-based (RetentionCount) and time-based (RetentionHours) limits.
 func (b *Beads) EnforceChannelRetention(name string) error {
 	// Get channel config
 	_, fields, err := b.GetChannelBead(name)
@@ -393,8 +393,8 @@ func (b *Beads) EnforceChannelRetention(name string) error {
 		return fmt.Errorf("channel not found: %s", name)
 	}
 
-	// Skip if no retention limit
-	if fields.RetentionCount <= 0 {
+	// Skip if no retention limits configured
+	if fields.RetentionCount <= 0 && fields.RetentionHours <= 0 {
 		return nil
 	}
 
@@ -411,23 +411,42 @@ func (b *Beads) EnforceChannelRetention(name string) error {
 	}
 
 	var messages []struct {
-		ID string `json:"id"`
+		ID        string `json:"id"`
+		CreatedAt string `json:"created_at"`
 	}
 	if err := json.Unmarshal(out, &messages); err != nil {
 		return fmt.Errorf("parsing channel messages: %w", err)
 	}
 
-	// Calculate how many to delete
-	// We're being called after a new message is posted, so we want to end up with retainCount
-	toDelete := len(messages) - fields.RetentionCount
-	if toDelete <= 0 {
-		return nil // No pruning needed
+	// Track which messages to delete (use map to avoid duplicates)
+	toDeleteIDs := make(map[string]bool)
+
+	// Time-based retention: delete messages older than RetentionHours
+	if fields.RetentionHours > 0 {
+		cutoff := time.Now().Add(-time.Duration(fields.RetentionHours) * time.Hour)
+		for _, msg := range messages {
+			createdAt, err := time.Parse(time.RFC3339, msg.CreatedAt)
+			if err != nil {
+				continue // Skip messages with unparseable timestamps
+			}
+			if createdAt.Before(cutoff) {
+				toDeleteIDs[msg.ID] = true
+			}
+		}
 	}
 
-	// Delete oldest messages (best-effort)
-	for i := 0; i < toDelete && i < len(messages); i++ {
+	// Count-based retention: delete oldest messages beyond RetentionCount
+	if fields.RetentionCount > 0 {
+		toDeleteByCount := len(messages) - fields.RetentionCount
+		for i := 0; i < toDeleteByCount && i < len(messages); i++ {
+			toDeleteIDs[messages[i].ID] = true
+		}
+	}
+
+	// Delete marked messages (best-effort)
+	for id := range toDeleteIDs {
 		// Use close instead of delete for audit trail
-		_, _ = b.run("close", messages[i].ID, "--reason=channel retention pruning")
+		_, _ = b.run("close", id, "--reason=channel retention pruning")
 	}
 
 	return nil
@@ -435,7 +454,8 @@ func (b *Beads) EnforceChannelRetention(name string) error {
 
 // PruneAllChannels enforces retention on all channels.
 // Called by Deacon patrol as a backup cleanup mechanism.
-// Uses a 10% buffer to avoid thrashing (only prunes if count > retainCount * 1.1).
+// Enforces both count-based (RetentionCount) and time-based (RetentionHours) limits.
+// Uses a 10% buffer for count-based pruning to avoid thrashing.
 func (b *Beads) PruneAllChannels() (int, error) {
 	channels, err := b.ListChannelBeads()
 	if err != nil {
@@ -444,38 +464,62 @@ func (b *Beads) PruneAllChannels() (int, error) {
 
 	pruned := 0
 	for name, fields := range channels {
-		if fields.RetentionCount <= 0 {
+		// Skip if no retention limits configured
+		if fields.RetentionCount <= 0 && fields.RetentionHours <= 0 {
 			continue
 		}
 
-		// Count messages
+		// Get messages with timestamps
 		out, err := b.run("list",
 			"--type=message",
 			"--label=channel:"+name,
 			"--json",
 			"--limit=0",
+			"--sort=created",
 		)
 		if err != nil {
 			continue // Skip on error
 		}
 
 		var messages []struct {
-			ID string `json:"id"`
+			ID        string `json:"id"`
+			CreatedAt string `json:"created_at"`
 		}
 		if err := json.Unmarshal(out, &messages); err != nil {
 			continue
 		}
 
-		// 10% buffer - only prune if significantly over limit
-		threshold := int(float64(fields.RetentionCount) * 1.1)
-		if len(messages) <= threshold {
-			continue
+		// Track which messages to delete (use map to avoid duplicates)
+		toDeleteIDs := make(map[string]bool)
+
+		// Time-based retention: delete messages older than RetentionHours
+		if fields.RetentionHours > 0 {
+			cutoff := time.Now().Add(-time.Duration(fields.RetentionHours) * time.Hour)
+			for _, msg := range messages {
+				createdAt, err := time.Parse(time.RFC3339, msg.CreatedAt)
+				if err != nil {
+					continue // Skip messages with unparseable timestamps
+				}
+				if createdAt.Before(cutoff) {
+					toDeleteIDs[msg.ID] = true
+				}
+			}
 		}
 
-		// Prune down to exactly retainCount
-		toDelete := len(messages) - fields.RetentionCount
-		for i := 0; i < toDelete && i < len(messages); i++ {
-			if _, err := b.run("close", messages[i].ID, "--reason=patrol retention pruning"); err == nil {
+		// Count-based retention with 10% buffer to avoid thrashing
+		if fields.RetentionCount > 0 {
+			threshold := int(float64(fields.RetentionCount) * 1.1)
+			if len(messages) > threshold {
+				toDeleteByCount := len(messages) - fields.RetentionCount
+				for i := 0; i < toDeleteByCount && i < len(messages); i++ {
+					toDeleteIDs[messages[i].ID] = true
+				}
+			}
+		}
+
+		// Delete marked messages
+		for id := range toDeleteIDs {
+			if _, err := b.run("close", id, "--reason=patrol retention pruning"); err == nil {
 				pruned++
 			}
 		}

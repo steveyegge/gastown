@@ -7,6 +7,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-01-17
+
+### Fixed
+
+- **Orphan cleanup skips valid tmux sessions** - `gt orphans kill` and automatic orphan cleanup now check for Claude processes belonging to valid Gas Town tmux sessions (gt-*/hq-*) before killing. This prevents false kills of witnesses, refineries, and deacon during startup when they may temporarily show TTY "?"
+
+## [0.3.1] - 2026-01-17
+
+### Fixed
+
+- **Orphan cleanup on macOS** - Fixed TTY comparison (`??` vs `?`) so orphan detection works on macOS
+- **Session kill leaves orphans** - `gt done` and `gt crew stop` now use `KillSessionWithProcesses` to properly terminate all child processes before killing the tmux session
+
+## [0.3.0] - 2026-01-17
+
+### Added
+
+#### Release Automation
+- **`gastown-release` molecule formula** - Workflow for releases with preflight checks, CHANGELOG/info.go updates, local install, and daemon restart
+
+#### New Commands
+- **`gt show`** - Inspect bead contents and metadata
+- **`gt cat`** - Display bead content directly
+- **`gt orphans list/kill`** - Detect and clean up orphaned Claude processes
+- **`gt convoy close`** - Manual convoy closure command
+- **`gt commit`** - Wrapper for git commit with bead awareness
+- **`gt trail`** - View commit trail for current work
+- **`gt mail ack`** - Alias for mark-read command
+
+#### Plugin System
+- **Plugin discovery and management** - `gt plugin run`, `gt plugin history`
+- **`gt dispatch --plugin`** - Execute plugins via dispatch command
+
+#### Messaging Infrastructure (Beads-Native)
+- **Queue beads** - New bead type for message queues
+- **Channel beads** - Pub/sub messaging with retention
+- **Group beads** - Group management for messaging
+- **Address resolution** - Resolve agent addresses for mail routing
+- **`gt mail claim`** - Claim messages from queues
+
+#### Agent Identity
+- **`gt polecat identity show`** - Display CV summary for agents
+- **Worktree setup hooks** - Inject local configurations into worktrees
+
+#### Performance & Reliability
+- **Parallel agent startup** - Faster boot with concurrency limit
+- **Event-driven convoy completion** - Deacon checks convoy status on events
+- **Automatic orphan cleanup** - Detect and kill orphaned Claude processes
+- **Namepool auto-theming** - Themes selected per rig based on name hash
+
+### Changed
+
+- **MR tracking via beads** - Removed mrqueue package, MRs now stored as beads
+- **Desire-path commands** - Added agent ergonomics shortcuts
+- **Explicit escalation in templates** - Polecat templates include escalation instructions
+- **NamePool state is transient** - InUse state no longer persisted to config
+
+### Fixed
+
+#### Process Management
+- **Kill process tree on shutdown** - Prevents orphaned Claude processes
+- **Explicit pane process kill** - Prevents setsid orphans in tmux
+- **Session survival verification** - Verify session survives startup before returning
+- **Batch session queries** - Improved performance in `gt down`
+- **Prevent tmux server exit** - `gt down` no longer kills tmux server
+
+#### Beads & Routing
+- **Agent bead prefix alignment** - Force multi-hyphen IDs for consistency
+- **hq- prefix for town-level beads** - Groups, channels use correct prefix
+- **CreatedAt for group/channel beads** - Proper timestamps on creation
+- **Routes.jsonl protection** - Doctor check for rig-level routing issues
+- **Clear BEADS_DIR in auto-convoys** - Prevent prefix inheritance issues
+
+#### Mail & Communication
+- **Channel routing in router.Send()** - Mail correctly routes to channels
+- **Filter unread in beads mode** - Correct unread message filtering
+- **Town root detection** - Use workspace.Find for consistent detection
+
+#### Session & Lifecycle
+- **Idle Polecat Heresy warnings** - Templates warn against idle waiting
+- **Direct push prohibition for polecats** - Explicit in templates
+- **Handoff working directory** - Use correct witness directory
+- **Dead polecat handling in sling** - Detect and handle dead polecats
+- **gt done self-cleaning** - Kill tmux session on completion
+
+#### Doctor & Diagnostics
+- **Zombie session detection** - Detect dead Claude processes in tmux
+- **sqlite3 availability check** - Verify sqlite3 is installed
+- **Clone divergence check** - Remove blocking git fetch
+
+#### Build & Platform
+- **Windows build support** - Platform-specific process/signal handling
+- **macOS codesigning** - Sign binary after install
+
+### Documentation
+
+- **Idle Polecat Heresy** - Document the anti-pattern of waiting for work
+- **Bead ID vs Issue ID** - Clarify terminology in README
+- **Explicit escalation** - Add escalation guidance to polecat templates
+- **Getting Started placement** - Fix README section ordering
+
 ## [0.2.6] - 2026-01-12
 
 ### Added

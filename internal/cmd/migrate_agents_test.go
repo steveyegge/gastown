@@ -56,17 +56,9 @@ func TestMigrationResultStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var icon string
-			switch tt.result.Status {
-			case "migrated", "would migrate":
-				icon = "  ✓"
-			case "skipped":
-				icon = "  ⊘"
-			case "error":
-				icon = "  ✗"
-			}
+			icon := getMigrationStatusIcon(tt.result.Status)
 			if icon != tt.wantIcon {
-				t.Errorf("icon for status %q = %q, want %q", tt.result.Status, icon, tt.wantIcon)
+				t.Errorf("getMigrationStatusIcon(%q) = %q, want %q", tt.result.Status, icon, tt.wantIcon)
 			}
 		})
 	}
