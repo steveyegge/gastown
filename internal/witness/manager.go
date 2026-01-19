@@ -160,39 +160,49 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 
 	townRoot := m.townRoot()
 
-	// Build startup command first
-	// NOTE: No gt prime injection needed - SessionStart hook handles it automatically
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	// Pass m.rig.Path so rig agent settings are honored (not town-level defaults)
-	command, err := buildWitnessStartCommand(m.rig.Path, m.rig.Name, townRoot, agentOverride, roleConfig)
-	if err != nil {
-		return err
-	}
-
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, witnessDir, command); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
+	// Build environment variables
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "witness",
 		Rig:      m.rig.Name,
 		TownRoot: townRoot,
 	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
-	}
-	// Apply role config env vars if present (non-fatal).
+	// Apply role config env vars if present
 	for key, value := range roleConfigEnvVars(roleConfig, townRoot, m.rig.Name) {
-		_ = t.SetEnvironment(sessionID, key, value)
+		envVars[key] = value
 	}
-	// Apply CLI env overrides (highest priority, non-fatal).
+	// Apply CLI env overrides (highest priority)
 	for _, override := range envOverrides {
 		if key, value, ok := strings.Cut(override, "="); ok {
-			_ = t.SetEnvironment(sessionID, key, value)
+			envVars[key] = value
+		}
+	}
+
+	// Determine session creation path based on command type
+	// Custom roleConfig.StartCommand → use shell wrapper (it's a custom command)
+	// Standard agent → use session.StartSession for PTY-aware startup
+	if agentOverride == "" && roleConfig != nil && roleConfig.StartCommand != "" {
+		// Custom start command from role config - use shell wrapper
+		command := beads.ExpandRolePattern(roleConfig.StartCommand, townRoot, m.rig.Name, "", "witness")
+		if err := t.NewSessionWithCommand(sessionID, witnessDir, command); err != nil {
+			return fmt.Errorf("creating tmux session: %w", err)
+		}
+		// Set environment variables in tmux (for new panes)
+		for k, v := range envVars {
+			_ = t.SetEnvironment(sessionID, k, v)
+		}
+	} else {
+		// Standard agent - use StartSession for consistent PTY handling
+		if err := session.StartSession(t, session.StartSessionOpts{
+			SessionID:     sessionID,
+			WorkDir:       witnessDir,
+			Role:          "witness",
+			Rig:           m.rig.Name,
+			TownRoot:      townRoot,
+			RigPath:       m.rig.Path,
+			AgentOverride: agentOverride,
+			ExtraEnv:      envVars, // Includes roleConfig env vars and CLI overrides
+		}); err != nil {
+			return fmt.Errorf("creating session: %w", err)
 		}
 	}
 

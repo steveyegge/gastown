@@ -360,7 +360,7 @@ func TestGetProcessNames(t *testing.T) {
 		{"claude", []string{"node"}},
 		{"gemini", []string{"gemini"}},
 		{"codex", []string{"codex"}},
-		{"cursor", []string{"cursor-agent"}},
+		{"cursor", []string{"cursor-agent", "node"}}, // node because cursor-agent is a Node.js app
 		{"auggie", []string{"auggie"}},
 		{"amp", []string{"amp"}},
 		{"unknown", []string{"node"}}, // Falls back to Claude's process
@@ -628,4 +628,96 @@ func TestLoadRigAgentRegistry(t *testing.T) {
 			t.Errorf("LoadRigAgentRegistry(%s) should error for invalid JSON: got nil", invalidRegistryPath)
 		}
 	})
+}
+
+func TestGetNeedsPTY(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		agentName string
+		want      bool
+	}{
+		{"claude", false},
+		{"gemini", false},
+		{"codex", false},
+		{"cursor", true}, // cursor-agent requires PTY
+		{"auggie", false},
+		{"amp", false},
+		{"unknown", false}, // Unknown agents default to false
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agentName, func(t *testing.T) {
+			if got := GetNeedsPTY(tt.agentName); got != tt.want {
+				t.Errorf("GetNeedsPTY(%s) = %v, want %v", tt.agentName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetSupportsMultilinePrompt(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		agentName string
+		want      bool
+	}{
+		{"claude", true},
+		{"gemini", true},
+		{"codex", true},
+		{"cursor", false}, // cursor-agent can't parse multiline prompts
+		{"auggie", true},
+		{"amp", true},
+		{"unknown", true}, // Unknown agents default to true
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agentName, func(t *testing.T) {
+			if got := GetSupportsMultilinePrompt(tt.agentName); got != tt.want {
+				t.Errorf("GetSupportsMultilinePrompt(%s) = %v, want %v", tt.agentName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCursorAgentPTYAndMultilineFlags(t *testing.T) {
+	t.Parallel()
+	// Verify cursor agent has the correct PTY and multiline flags set
+	info := GetAgentPreset(AgentCursor)
+	if info == nil {
+		t.Fatal("cursor preset not found")
+	}
+
+	// cursor-agent requires PTY access
+	if !info.NeedsPTY {
+		t.Error("cursor preset should have NeedsPTY=true")
+	}
+
+	// cursor-agent can't parse multiline prompts
+	if info.SupportsMultilinePrompt {
+		t.Error("cursor preset should have SupportsMultilinePrompt=false")
+	}
+}
+
+func TestOtherAgentsHaveCorrectPTYDefaults(t *testing.T) {
+	t.Parallel()
+	// All agents except cursor should have default PTY/multiline settings
+	standardAgents := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentAuggie, AgentAmp}
+
+	for _, preset := range standardAgents {
+		t.Run(string(preset), func(t *testing.T) {
+			info := GetAgentPreset(preset)
+			if info == nil {
+				t.Fatalf("preset %s not found", preset)
+			}
+
+			// Standard agents don't need PTY
+			if info.NeedsPTY {
+				t.Errorf("preset %s should have NeedsPTY=false", preset)
+			}
+
+			// Standard agents support multiline prompts
+			if !info.SupportsMultilinePrompt {
+				t.Errorf("preset %s should have SupportsMultilinePrompt=true", preset)
+			}
+		})
+	}
 }

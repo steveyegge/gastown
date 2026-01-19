@@ -508,6 +508,80 @@ func TestIsClaudeRunning_ShellWithNodeChild(t *testing.T) {
 	}
 }
 
+func TestNewSessionWithEnvAndCommand(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-env-cmd-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session with env vars and command
+	env := map[string]string{
+		"TEST_VAR1":     "value1",
+		"TEST_VAR2":     "value with spaces",
+		"TEST_SPECIAL":  "value'with\"quotes",
+		"GT_TEST_EMPTY": "",
+	}
+
+	// Use a simple command that echoes env vars
+	cmd := `echo "TEST_VAR1=$TEST_VAR1" "TEST_VAR2=$TEST_VAR2"`
+	if err := tm.NewSessionWithEnvAndCommand(sessionName, "", env, cmd); err != nil {
+		t.Fatalf("NewSessionWithEnvAndCommand: %v", err)
+	}
+
+	// Verify session was created
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Error("session was not created")
+	}
+
+	// Verify env vars were set in tmux
+	gotVar, err := tm.GetEnvironment(sessionName, "TEST_VAR1")
+	if err != nil {
+		t.Logf("GetEnvironment(TEST_VAR1): %v (may be expected)", err)
+	} else if gotVar != "value1" {
+		t.Errorf("TEST_VAR1 = %q, want %q", gotVar, "value1")
+	}
+}
+
+func TestNewSessionWithEnvAndCommand_EmptyEnv(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-empty-env-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Create session with empty env map
+	env := map[string]string{}
+	cmd := `echo "hello"`
+
+	if err := tm.NewSessionWithEnvAndCommand(sessionName, "", env, cmd); err != nil {
+		t.Fatalf("NewSessionWithEnvAndCommand with empty env: %v", err)
+	}
+
+	// Verify session was created
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Error("session was not created with empty env")
+	}
+}
+
 func TestHasClaudeChild(t *testing.T) {
 	// Test the hasClaudeChild helper function directly
 	// This uses the current process as a test subject

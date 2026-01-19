@@ -67,6 +67,18 @@ type AgentPresetInfo struct {
 	// Claude-only feature for seance command.
 	SupportsForkSession bool `json:"supports_fork_session,omitempty"`
 
+	// NeedsPTY indicates if the agent requires direct PTY access for stdin.
+	// When true, sessions are created with shell first, then agent command via send-keys.
+	// When false (default), sessions use shell wrapper: "export VAR=val && agent-cmd".
+	// cursor-agent requires this due to how it handles stdin.
+	NeedsPTY bool `json:"needs_pty,omitempty"`
+
+	// SupportsMultilinePrompt indicates if the agent can handle multi-line prompts.
+	// When true (default), startup beacon can be embedded in the --prompt flag.
+	// When false, beacon must be sent via NudgeSession after agent starts.
+	// cursor-agent cannot parse multi-line prompts correctly.
+	SupportsMultilinePrompt bool `json:"supports_multiline_prompt,omitempty"`
+
 	// NonInteractive contains settings for non-interactive mode.
 	NonInteractive *NonInteractiveConfig `json:"non_interactive,omitempty"`
 }
@@ -99,83 +111,90 @@ const CurrentAgentRegistryVersion = 1
 // builtinPresets contains the default presets for supported agents.
 var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentClaude: {
-		Name:                AgentClaude,
-		Command:             "claude",
-		Args:                []string{"--dangerously-skip-permissions"},
-		ProcessNames:        []string{"node"}, // Claude runs as Node.js
-		SessionIDEnv:        "CLAUDE_SESSION_ID",
-		ResumeFlag:          "--resume",
-		ResumeStyle:         "flag",
-		SupportsHooks:       true,
-		SupportsForkSession: true,
-		NonInteractive:      nil, // Claude is native non-interactive
+		Name:                    AgentClaude,
+		Command:                 "claude",
+		Args:                    []string{"--dangerously-skip-permissions"},
+		ProcessNames:            []string{"node"}, // Claude runs as Node.js
+		SessionIDEnv:            "CLAUDE_SESSION_ID",
+		ResumeFlag:              "--resume",
+		ResumeStyle:             "flag",
+		SupportsHooks:           true,
+		SupportsForkSession:     true,
+		SupportsMultilinePrompt: true,
+		NonInteractive:          nil, // Claude is native non-interactive
 	},
 	AgentGemini: {
-		Name:                AgentGemini,
-		Command:             "gemini",
-		Args:                []string{"--approval-mode", "yolo"},
-		ProcessNames:        []string{"gemini"}, // Gemini CLI binary
-		SessionIDEnv:        "GEMINI_SESSION_ID",
-		ResumeFlag:          "--resume",
-		ResumeStyle:         "flag",
-		SupportsHooks:       true,
-		SupportsForkSession: false,
+		Name:                    AgentGemini,
+		Command:                 "gemini",
+		Args:                    []string{"--approval-mode", "yolo"},
+		ProcessNames:            []string{"gemini"}, // Gemini CLI binary
+		SessionIDEnv:            "GEMINI_SESSION_ID",
+		ResumeFlag:              "--resume",
+		ResumeStyle:             "flag",
+		SupportsHooks:           true,
+		SupportsForkSession:     false,
+		SupportsMultilinePrompt: true,
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",
 			OutputFlag: "--output-format json",
 		},
 	},
 	AgentCodex: {
-		Name:                AgentCodex,
-		Command:             "codex",
-		Args:                []string{"--yolo"},
-		ProcessNames:        []string{"codex"}, // Codex CLI binary
-		SessionIDEnv:        "", // Codex captures from JSONL output
-		ResumeFlag:          "resume",
-		ResumeStyle:         "subcommand",
-		SupportsHooks:       false, // Use env/files instead
-		SupportsForkSession: false,
+		Name:                    AgentCodex,
+		Command:                 "codex",
+		Args:                    []string{"--yolo"},
+		ProcessNames:            []string{"codex"}, // Codex CLI binary
+		SessionIDEnv:            "",                // Codex captures from JSONL output
+		ResumeFlag:              "resume",
+		ResumeStyle:             "subcommand",
+		SupportsHooks:           false, // Use env/files instead
+		SupportsForkSession:     false,
+		SupportsMultilinePrompt: true,
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "exec",
 			OutputFlag: "--json",
 		},
 	},
 	AgentCursor: {
-		Name:                AgentCursor,
-		Command:             "cursor-agent",
-		Args:                []string{"-f"}, // Force mode (YOLO equivalent), -p requires prompt
-		ProcessNames:        []string{"cursor-agent"},
-		SessionIDEnv:        "", // Uses --resume with chatId directly
-		ResumeFlag:          "--resume",
-		ResumeStyle:         "flag",
-		SupportsHooks:       false, // TODO: verify hooks support
-		SupportsForkSession: false,
+		Name:                    AgentCursor,
+		Command:                 "cursor-agent",
+		Args:                    []string{"-f"}, // Force mode (YOLO equivalent), -p requires prompt
+		ProcessNames:            []string{"cursor-agent", "node"}, // node because cursor-agent is a Node.js app
+		SessionIDEnv:            "",       // Uses --resume with chatId directly
+		ResumeFlag:              "--resume",
+		ResumeStyle:             "flag",
+		SupportsHooks:           false, // TODO: verify hooks support
+		SupportsForkSession:     false,
+		NeedsPTY:                true,  // cursor-agent requires direct PTY stdin
+		SupportsMultilinePrompt: false, // cursor-agent can't parse multi-line prompts
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "-p",
 			OutputFlag: "--output-format json",
 		},
 	},
 	AgentAuggie: {
-		Name:                AgentAuggie,
-		Command:             "auggie",
-		Args:                []string{"--allow-indexing"},
-		ProcessNames:        []string{"auggie"},
-		SessionIDEnv:        "",
-		ResumeFlag:          "--resume",
-		ResumeStyle:         "flag",
-		SupportsHooks:       false,
-		SupportsForkSession: false,
+		Name:                    AgentAuggie,
+		Command:                 "auggie",
+		Args:                    []string{"--allow-indexing"},
+		ProcessNames:            []string{"auggie"},
+		SessionIDEnv:            "",
+		ResumeFlag:              "--resume",
+		ResumeStyle:             "flag",
+		SupportsHooks:           false,
+		SupportsForkSession:     false,
+		SupportsMultilinePrompt: true,
 	},
 	AgentAmp: {
-		Name:                AgentAmp,
-		Command:             "amp",
-		Args:                []string{"--dangerously-allow-all", "--no-ide"},
-		ProcessNames:        []string{"amp"},
-		SessionIDEnv:        "",
-		ResumeFlag:          "threads continue",
-		ResumeStyle:         "subcommand", // 'amp threads continue <threadId>'
-		SupportsHooks:       false,
-		SupportsForkSession: false,
+		Name:                    AgentAmp,
+		Command:                 "amp",
+		Args:                    []string{"--dangerously-allow-all", "--no-ide"},
+		ProcessNames:            []string{"amp"},
+		SessionIDEnv:            "",
+		ResumeFlag:              "threads continue",
+		ResumeStyle:             "subcommand", // 'amp threads continue <threadId>'
+		SupportsHooks:           false,
+		SupportsForkSession:     false,
+		SupportsMultilinePrompt: true,
 	},
 }
 
@@ -389,6 +408,53 @@ func GetProcessNames(agentName string) []string {
 		return []string{"node"}
 	}
 	return info.ProcessNames
+}
+
+// GetNeedsPTY returns whether an agent requires direct PTY access for stdin.
+// When true, sessions should be created with shell first, then agent command via send-keys.
+// Returns false (default) if agent is not found.
+// agentName can be either a preset name (e.g., "cursor") or a command name (e.g., "cursor-agent").
+func GetNeedsPTY(agentName string) bool {
+	// First try looking up by preset name
+	info := GetAgentPresetByName(agentName)
+	if info != nil {
+		return info.NeedsPTY
+	}
+	// If not found, search by command name
+	// This handles custom agents where rc.Command is "cursor-agent" but preset name is "cursor"
+	ensureRegistry()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	for _, preset := range globalRegistry.Agents {
+		if preset.Command == agentName {
+			return preset.NeedsPTY
+		}
+	}
+	return false
+}
+
+// GetSupportsMultilinePrompt returns whether an agent can handle multi-line prompts.
+// When true (default), startup beacon can be embedded in the --prompt flag.
+// When false, beacon must be sent via NudgeSession after agent starts.
+// Returns true (default) if agent is not found.
+// agentName can be either a preset name (e.g., "cursor") or a command name (e.g., "cursor-agent").
+func GetSupportsMultilinePrompt(agentName string) bool {
+	// First try looking up by preset name
+	info := GetAgentPresetByName(agentName)
+	if info != nil {
+		return info.SupportsMultilinePrompt
+	}
+	// If not found, search by command name
+	// This handles custom agents where rc.Command is "cursor-agent" but preset name is "cursor"
+	ensureRegistry()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	for _, preset := range globalRegistry.Agents {
+		if preset.Command == agentName {
+			return preset.SupportsMultilinePrompt
+		}
+	}
+	return true // Default to true for unknown agents
 }
 
 // MergeWithPreset applies preset defaults to a RuntimeConfig.

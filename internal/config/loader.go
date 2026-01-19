@@ -1466,10 +1466,14 @@ func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 	if rc == nil || rc.Command == "" {
 		return nil
 	}
-	if filepath.Base(rc.Command) == "claude" {
+	base := filepath.Base(rc.Command)
+	// Node.js-based agents show "node" as the pane command
+	switch base {
+	case "claude", "cursor-agent":
 		return []string{"node"}
+	default:
+		return []string{base}
 	}
-	return []string{filepath.Base(rc.Command)}
 }
 
 // GetDefaultFormula returns the default formula for a rig from settings/config.json.

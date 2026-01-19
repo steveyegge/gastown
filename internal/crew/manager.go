@@ -12,7 +12,6 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -490,7 +489,6 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	}
 
 	// Build the startup beacon for predecessor discovery via /resume
-	// Pass it as Claude's initial prompt - processed when Claude is ready
 	address := fmt.Sprintf("%s/crew/%s", m.rig.Name, name)
 	topic := opts.Topic
 	if topic == "" {
@@ -502,37 +500,25 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		Topic:     topic,
 	})
 
-	// Build startup command first
-	// SessionStart hook handles context loading (gt prime --hook)
-	claudeCmd, err := config.BuildCrewStartupCommandWithAgentOverride(m.rig.Name, name, m.rig.Path, beacon, opts.AgentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
-	}
-
-	// For interactive/refresh mode, remove --dangerously-skip-permissions
-	if opts.Interactive {
-		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
-	}
-
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, worker.ClonePath, claudeCmd); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
 	townRoot := filepath.Dir(m.rig.Path)
-	envVars := config.AgentEnv(config.AgentEnvConfig{
+
+	// Create session using StartSession for consistent PTY handling
+	// StartSession handles PTY detection, beacon delivery, and interactive mode
+	if err := session.StartSession(t, session.StartSessionOpts{
+		SessionID:        sessionID,
+		WorkDir:          worker.ClonePath,
 		Role:             "crew",
 		Rig:              m.rig.Name,
 		AgentName:        name,
 		TownRoot:         townRoot,
+		RigPath:          m.rig.Path,
+		Beacon:           beacon,
+		AgentOverride:    opts.AgentOverride,
 		RuntimeConfigDir: opts.ClaudeConfigDir,
 		BeadsNoDaemon:    true,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
+		Interactive:      opts.Interactive,
+	}); err != nil {
+		return fmt.Errorf("creating session: %w", err)
 	}
 
 	// Apply rig-based theming (non-fatal: theming failure doesn't affect operation)

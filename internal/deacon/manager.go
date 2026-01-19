@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/claude"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -79,34 +78,26 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
-	// Build startup command first
-	// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", "", agentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
-	}
-
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, deaconDir, startupCmd); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "deacon",
-		TownRoot: m.townRoot,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
+	// Create session using PTY-aware helper
+	// StartSession handles PTY vs shell wrapper path based on agent flags
+	// Deacon sends nudges separately after startup (not embedded in command)
+	waitForReady := false // We'll wait ourselves below
+	if err := session.StartSession(t, session.StartSessionOpts{
+		SessionID:     sessionID,
+		WorkDir:       deaconDir,
+		Role:          "deacon",
+		TownRoot:      m.townRoot,
+		AgentOverride: agentOverride,
+		WaitForReady:  &waitForReady,
+	}); err != nil {
+		return fmt.Errorf("creating session: %w", err)
 	}
 
 	// Apply Deacon theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.DeaconTheme()
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Deacon", "health-check")
 
-	// Wait for Claude to start - fatal if Claude fails to launch
+	// Wait for agent to start - fatal if Claude fails to launch
 	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)

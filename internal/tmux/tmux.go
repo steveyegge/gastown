@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -104,6 +105,74 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 	args = append(args, command)
 	_, err := t.run(args...)
 	return err
+}
+
+// NewSessionWithEnvAndCommand creates a PTY-aware tmux session.
+// Unlike NewSessionWithCommand which uses a shell wrapper, this method:
+// 1. Creates session with default shell (giving the shell proper PTY)
+// 2. Sets environment variables via tmux set-environment
+// 3. Exports environment in the shell via send-keys
+// 4. Sends the agent command via send-keys
+//
+// This is necessary for agents like cursor-agent that require direct PTY access
+// for stdin to function correctly.
+func (t *Tmux) NewSessionWithEnvAndCommand(name, workDir string, env map[string]string, command string) error {
+	// 1. Create session with default shell (this shell has proper PTY)
+	if err := t.NewSession(name, workDir); err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	// 2. Set environment variables via tmux set-environment
+	// This makes them available to new panes, but doesn't export them in current shell
+	for k, v := range env {
+		if err := t.SetEnvironment(name, k, v); err != nil {
+			// Non-fatal: continue even if some env vars fail
+			continue
+		}
+	}
+
+	// 3. Build and send export command
+	// Sort keys for deterministic output
+	if len(env) > 0 {
+		keys := make([]string, 0, len(env))
+		for k := range env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		// Build export command with quoted values for safety
+		var exports []string
+		for _, k := range keys {
+			// Quote values to handle special characters
+			exports = append(exports, fmt.Sprintf("%s=%q", k, env[k]))
+		}
+		exportCmd := "export " + strings.Join(exports, " ")
+
+		// Send export command
+		if _, err := t.run("send-keys", "-t", name, "-l", exportCmd); err != nil {
+			return fmt.Errorf("sending export command: %w", err)
+		}
+		if _, err := t.run("send-keys", "-t", name, "Enter"); err != nil {
+			return fmt.Errorf("sending export enter: %w", err)
+		}
+
+		// Wait for shell to process export
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// 4. Send the agent command with exec to replace shell
+	// Using exec ensures the agent IS the pane's main process, not a child of the shell.
+	// This is critical for PTY-sensitive agents like cursor-agent that need to be
+	// the foreground process to properly receive stdin.
+	execCommand := "exec " + command
+	if _, err := t.run("send-keys", "-t", name, "-l", execCommand); err != nil {
+		return fmt.Errorf("sending command: %w", err)
+	}
+	if _, err := t.run("send-keys", "-t", name, "Enter"); err != nil {
+		return fmt.Errorf("sending command enter: %w", err)
+	}
+
+	return nil
 }
 
 // EnsureSessionFresh ensures a session is available and healthy.
@@ -480,8 +549,13 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
-	_, _ = t.run("send-keys", "-t", session, "Escape")
-	time.Sleep(100 * time.Millisecond)
+	// NOTE: Skip Escape for cursor-agent as it may interfere with its UI
+	// cursor-agent shows as "node" in tmux since it's a Node.js app
+	paneCmd, _ := t.GetPaneCommand(session)
+	if paneCmd != "cursor-agent" && paneCmd != "node" {
+		_, _ = t.run("send-keys", "-t", session, "Escape")
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	// 4. Send Enter with retry (critical for message submission)
 	var lastErr error

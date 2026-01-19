@@ -173,40 +173,22 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
 	townRoot := filepath.Dir(m.rig.Path)
-	var command string
-	if agentOverride != "" {
-		var err error
-		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, "", agentOverride)
-		if err != nil {
-			return fmt.Errorf("building startup command with agent override: %w", err)
-		}
-	} else {
-		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, "")
-	}
 
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, refineryRigDir, command); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
+	// Create session using StartSession for consistent PTY handling
+	// StartSession handles PTY detection and proper exec shell wrapper
+	if err := session.StartSession(t, session.StartSessionOpts{
+		SessionID:     sessionID,
+		WorkDir:       refineryRigDir,
 		Role:          "refinery",
 		Rig:           m.rig.Name,
 		TownRoot:      townRoot,
+		RigPath:       m.rig.Path,
+		AgentOverride: agentOverride,
 		BeadsNoDaemon: true,
-	})
-
-	// Add refinery-specific flag
-	envVars["GT_REFINERY"] = "1"
-
-	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
+		ExtraEnv:      map[string]string{"GT_REFINERY": "1"}, // Refinery-specific flag
+	}); err != nil {
+		return fmt.Errorf("creating session: %w", err)
 	}
 
 	// Apply theme (non-fatal: theming failure doesn't affect operation)
