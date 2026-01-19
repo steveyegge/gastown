@@ -1,6 +1,9 @@
 # OpenCode Integration - Upstream Repository Review
 
-## Executive Summary
+> **📁 Archive Notice**: This is a point-in-time review document from the initial PR. For current status, see [integration-summary.md](../integration-summary.md).
+
+**Date**: 2026-01-17  
+**Related Commits**: `74ac9bf5`, `a08d4974`  
 
 This document analyzes the OpenCode integration PR from the perspective of an upstream repository (Gastown) that is primarily focused on Claude Code. This review identifies potential concerns, risks, and recommended mitigations for maintainers.
 
@@ -66,7 +69,7 @@ This document analyzes the OpenCode integration PR from the perspective of an up
 - Complex use cases (multi-session, compaction, fork)
 - All 6 roles tested (Mayor, Deacon, Witness, Refinery, Polecat, Crew)
 
-**Documentation**: See `docs/opencode/E2E_TEST_RESULTS.md`
+**Documentation**: See `docs/opencode/archive/e2e-test-results.md`
 
 **Upstream Concern**: ✅ **None** - Testing is thorough and well-documented.
 
@@ -250,7 +253,7 @@ This document analyzes the OpenCode integration PR from the perspective of an up
 
 **Impact**:
 - OpenCode users cannot use `gt seance` command
-- Documented in `OPENCODE_IMPACT_ANALYSIS.md`
+- Documented in `archive/impact-analysis.md`
 
 **Workaround**: OpenCode fork available via HTTP API (requires `opencode serve`)
 

@@ -44,7 +44,7 @@ OpenCode support is a community-contributed, experimental feature that extends G
 2. Check plugin API compatibility
 3. Run test suite: `go test ./internal/opencode/... ./internal/config/...`
 4. Update version in documentation if changed
-5. Test integration scenarios from `docs/opencode/E2E_TEST_RESULTS.md`
+5. Test integration scenarios from `docs/opencode/archive/e2e-test-results.md`
 
 **Major Version (1.x → 2.x)**:
 1. Thorough review of breaking changes
@@ -117,7 +117,7 @@ gt prime  # Reinstalls plugin via runtime.EnsureSettingsForRole
 - Verify session exists: `opencode session list`
 - Check HTTP endpoint: `curl http://localhost:4096/health`
 
-**Solution**: See `docs/opencode/SESSION_FORK_TEST_RESULTS.md`
+**Solution**: See `docs/opencode/archive/session-fork-test-results.md`
 
 ### Issue: Model Not Available
 

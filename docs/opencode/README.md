@@ -19,7 +19,7 @@
 
 ### Executive Summary
 
-**[Integration Summary](OPENCODE_INTEGRATION_SUMMARY.md)** ⭐ **START HERE** - Executive summary of completed implementation
+**[Integration Summary](integration-summary.md)** ⭐ **START HERE** - Executive summary of completed implementation
 - All achievements, changes, and decisions
 - Feature parity matrix (100% complete)
 - Architecture decisions and rationale
@@ -61,24 +61,24 @@
 
 ### Implementation Results
 
-**[Impact Analysis](OPENCODE_IMPACT_ANALYSIS.md)** - Comprehensive impact and feature parity analysis
+**[Impact Analysis](archive/impact-analysis.md)** - Comprehensive impact and feature parity analysis
 - How OpenCode integration affects other agent runtimes
 - Detailed feature parity matrix
 - End-to-end workflow traces
 - Claude-specific feature identification
 
-**[Session Fork Test Results](SESSION_FORK_TEST_RESULTS.md)** - Session fork testing and validation
+**[Session Fork Test Results](archive/session-fork-test-results.md)** - Session fork testing and validation
 - HTTP API fork testing (POST `/session/{id}/fork`)
 - Interactive TUI `/fork` command verification
 - Source code references and examples
 - Implementation guidance for `gt seance`
 
-**[Integration Test Results](INTEGRATION_TEST_RESULTS.md)** - E2E integration testing
+**[Integration Test Results](archive/integration-test-results.md)** - E2E integration testing
 - 7 integration test scenarios executed
 - Plugin gap analysis and identification
 - Production readiness assessment
 
-**[Plugin Implementation Guide](PLUGIN_IMPLEMENTATION_GUIDE.md)** - Complete plugin development guide
+**[Plugin Implementation Guide](plugin-guide.md)** - Complete plugin development guide
 - Solutions for all plugin gaps
 - OpenCode event system overview (30+ events)
 - Enhanced plugin with 100% Claude parity
@@ -129,11 +129,11 @@
 
 | Want to... | Read This |
 |------------|-----------|
-| **See what was accomplished** | [Integration Summary](OPENCODE_INTEGRATION_SUMMARY.md) ⭐ **START HERE** |
-| Understand feature parity | [Impact Analysis](OPENCODE_IMPACT_ANALYSIS.md) |
-| Learn about session forking | [Session Fork Test Results](SESSION_FORK_TEST_RESULTS.md) |
-| See integration test results | [Integration Test Results](INTEGRATION_TEST_RESULTS.md) |
-| Implement plugins | [Plugin Implementation Guide](PLUGIN_IMPLEMENTATION_GUIDE.md) |
+| **See what was accomplished** | [Integration Summary](integration-summary.md) ⭐ **START HERE** |
+| Understand feature parity | [Impact Analysis](archive/impact-analysis.md) |
+| Learn about session forking | [Session Fork Test Results](archive/session-fork-test-results.md) |
+| See integration test results | [Integration Test Results](archive/integration-test-results.md) |
+| Implement plugins | [Plugin Implementation Guide](plugin-guide.md) |
 | Get oriented quickly | [Quickstart](opencode-quickstart.md) (5 min) |
 | Understand concept coupling | [Concept Analysis](opencode-concept-analysis.md) |
 | Learn how Opencode works | [Technical Research](technical-research.md) |
@@ -255,7 +255,7 @@
 **Latest Changes** (2026-01-17):
 - ✅ **Implementation Complete** - All phases finished
 - ✅ Added Integration Summary (executive overview)
-- ✅ Moved OPENCODE_IMPACT_ANALYSIS.md to docs/opencode/
+- ✅ Moved archive/impact-analysis.md to docs/opencode/
 - ✅ Added Session Fork Test Results
 - ✅ Added Integration Test Results  
 - ✅ Added Plugin Implementation Guide

@@ -1,7 +1,10 @@
 # OpenCode Session Fork Testing Results
 
+> **📁 Archive Notice**: This is a point-in-time test results document. For current status, see [integration-summary.md](../integration-summary.md).
+
 **Date**: 2026-01-17  
 **OpenCode Version**: 1.1.25  
+**Related Commits**: `74ac9bf5`, `a08d4974`  
 **Tester**: Copilot Agent  
 **Reference**: PR #2 research on session forking
 
@@ -270,7 +273,7 @@ OpenCode handoffs have TWO options:
    - Document as "query mode" vs "fork mode"
 
 2. **Update Impact Analysis (Priority: High)**
-   - ✅ Updated `docs/opencode/OPENCODE_IMPACT_ANALYSIS.md`
+   - ✅ Updated `docs/opencode/archive/impact-analysis.md`
    - Session fork: ✅ SUPPORTED via HTTP API
    - Session export/import: ✅ SUPPORTED
    - Handoffs: ✅ FULLY SUPPORTED via resume
@@ -342,7 +345,7 @@ OpenCode handoffs have TWO options:
 
 1. ✅ Document findings (this file)
 2. ✅ Test ACP protocol thoroughly (multiple endpoints, WebSocket, CLI commands)
-3. ⬜ Update `OPENCODE_IMPACT_ANALYSIS.md` with test results
+3. ⬜ Update `archive/impact-analysis.md` with test results
 4. ⬜ Implement export/import pattern in `gt seance`
 5. ⬜ Test `opencode import` command end-to-end
 6. ⬜ Investigate HTTP API (`opencode serve`) for fork capability

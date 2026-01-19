@@ -1,7 +1,10 @@
 # OpenCode Integration Test Results
 
+> **📁 Archive Notice**: This is a point-in-time test results document. For current status, see [integration-summary.md](../integration-summary.md).
+
 **Date**: 2026-01-17  
 **OpenCode Version**: 1.1.25  
+**Related Commits**: `74ac9bf5`, `a08d4974`  
 **Tester**: Copilot Agent  
 **Purpose**: E2E testing of OpenCode integration with Gastown
 
@@ -476,14 +479,14 @@ export const EventLogger = async () => {
 ## Files Modified
 
 - `internal/config/agents.go` - Set `SupportsForkSession: true`
-- `docs/opencode/INTEGRATION_TEST_RESULTS.md` - This document
+- `docs/opencode/archive/integration-test-results.md` - This document
 
 ---
 
 ## Related Documentation
 
 - **Setup**: `scripts/setup-opencode.sh`
-- **Fork Testing**: `docs/opencode/SESSION_FORK_TEST_RESULTS.md`
-- **Impact Analysis**: `docs/opencode/OPENCODE_IMPACT_ANALYSIS.md`
+- **Fork Testing**: `docs/opencode/archive/session-fork-test-results.md`
+- **Impact Analysis**: `docs/opencode/archive/impact-analysis.md`
 - **Plugin Template**: `internal/opencode/plugin/gastown.js`
 - **Claude Hooks**: `internal/claude/config/settings-*.json`

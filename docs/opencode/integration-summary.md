@@ -45,11 +45,11 @@ OpenCode has been successfully integrated as a **first-class orchestration layer
 - `test-opencode-integration.sh` - Integration test suite (+79 lines)
 
 **Documentation** (7 new files):
-- `OPENCODE_IMPACT_ANALYSIS.md` (498 lines) - Impact analysis and feature parity
-- `docs/opencode/SESSION_FORK_TEST_RESULTS.md` (437 lines) - Fork testing results
-- `docs/opencode/INTEGRATION_TEST_RESULTS.md` (487 lines) - E2E integration tests
-- `docs/opencode/PLUGIN_IMPLEMENTATION_GUIDE.md` (582 lines) - Plugin development guide
-- `docs/opencode/OPENCODE_INTEGRATION_SUMMARY.md` (this file)
+- `archive/impact-analysis.md` (498 lines) - Impact analysis and feature parity
+- `docs/opencode/archive/session-fork-test-results.md` (437 lines) - Fork testing results
+- `docs/opencode/archive/integration-test-results.md` (487 lines) - E2E integration tests
+- `docs/opencode/plugin-guide.md` (582 lines) - Plugin development guide
+- `docs/opencode/integration-summary.md` (this file)
 
 **Repository Changes**:
 - `README.md` - Added opencode to supported runtimes (+2/-1 lines)
@@ -309,32 +309,32 @@ During integration testing, several **general Gastown bugs** were discovered and
 
 ### Primary Documents
 
-1. **[OPENCODE_IMPACT_ANALYSIS.md](../../OPENCODE_IMPACT_ANALYSIS.md)** (498 lines)
+1. **[archive/impact-analysis.md](../../archive/impact-analysis.md)** (498 lines)
    - Comprehensive impact analysis on all agent runtimes
    - Feature parity matrix with detailed comparisons
    - End-to-end workflow traces
    - Production readiness assessment
 
-2. **[SESSION_FORK_TEST_RESULTS.md](SESSION_FORK_TEST_RESULTS.md)** (437 lines)
+2. **[archive/session-fork-test-results.md](archive/session-fork-test-results.md)** (437 lines)
    - Fork testing via HTTP API and TUI
    - Implementation guidance for `gt seance`
    - Source code references and examples
    - Alternative approaches (export/import)
 
-3. **[INTEGRATION_TEST_RESULTS.md](INTEGRATION_TEST_RESULTS.md)** (487 lines)
+3. **[archive/integration-test-results.md](archive/integration-test-results.md)** (487 lines)
    - E2E integration test execution
    - Plugin gap analysis and identification
    - Enhanced plugin implementation (initial)
    - Production readiness for autonomous roles
 
-4. **[PLUGIN_IMPLEMENTATION_GUIDE.md](PLUGIN_IMPLEMENTATION_GUIDE.md)** (582 lines)
+4. **[plugin-guide.md](plugin-guide.md)** (582 lines)
    - Complete OpenCode event system overview
    - Solutions for all plugin gaps
    - Enhanced plugin implementation (final)
    - Testing checklist and troubleshooting
    - Best practices for plugin development
 
-5. **[OPENCODE_INTEGRATION_SUMMARY.md](OPENCODE_INTEGRATION_SUMMARY.md)** (this file)
+5. **[integration-summary.md](integration-summary.md)** (this file)
    - Executive summary and decisions
    - Consolidated findings across all phases
    - Architecture decisions and rationale

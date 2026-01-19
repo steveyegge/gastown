@@ -1,8 +1,11 @@
 # OpenCode End-to-End Testing Results
 
+> **📁 Archive Notice**: This is a point-in-time analysis document. For current status, see [integration-summary.md](../integration-summary.md).
+
 **Date**: 2026-01-17  
 **OpenCode Version**: 1.1.25  
-**Gastown Branch**: copilot/add-opencode-orchestration-layer-again
+**Gastown Branch**: copilot/add-opencode-orchestration-layer-again  
+**Related Commits**: `74ac9bf5`, `a08d4974`
 
 ## Executive Summary
 
@@ -65,7 +68,7 @@
 
 **Result**: All config tests passing (94/94 + 4 new OpenCode tests)
 
-### 2. Integration Tests (from INTEGRATION_TEST_RESULTS.md)
+### 2. Integration Tests (from archive/integration-test-results.md)
 
 #### Basic Functionality
 - ✅ Session creation via CLI
@@ -111,7 +114,7 @@ opencode models
 - ✅ Environment variable: GT_ROLE detection
 - ✅ Role-based behavior: Correct mail injection timing
 
-### 4. Fork Session Testing (from SESSION_FORK_TEST_RESULTS.md)
+### 4. Fork Session Testing (from archive/session-fork-test-results.md)
 
 #### HTTP API Fork
 - ✅ POST `/session/{sessionID}/fork` endpoint works

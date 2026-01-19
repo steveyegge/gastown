@@ -296,8 +296,8 @@ opencode_server_url = "http://localhost:4096"
 
 ## Related Documentation
 
-- [OpenCode Integration Summary](./OPENCODE_INTEGRATION_SUMMARY.md)
-- [E2E Test Results](./E2E_TEST_RESULTS.md)
+- [OpenCode Integration Summary](./integration-summary.md)
+- [E2E Test Results](./archive/e2e-test-results.md)
 - [OpenCode Experiments](./opencode-experiments.md)
 - [Technical Research](./technical-research.md)
 

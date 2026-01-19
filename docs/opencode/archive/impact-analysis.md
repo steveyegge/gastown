@@ -1,7 +1,10 @@
 # OpenCode Integration: Impact Analysis & Feature Parity
 
-**Created**: 2026-01-17  
+> **📁 Archive Notice**: This is a point-in-time analysis document. For current status, see [integration-summary.md](../integration-summary.md).
+
+**Date**: 2026-01-17  
 **Status**: Complete Analysis  
+**Related Commits**: `2c108bc`, `61ec66a`, `e760589`  
 **Purpose**: Comprehensive review of how OpenCode integration impacts other agent runtimes and identifies Claude-specific features
 
 ---

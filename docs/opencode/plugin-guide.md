@@ -578,5 +578,5 @@ const run = async (cmd) => {
 ## Related Files
 
 - `internal/opencode/plugin/gastown.js` - Current plugin (needs update)
-- `docs/opencode/INTEGRATION_TEST_RESULTS.md` - Gap analysis
+- `docs/opencode/archive/integration-test-results.md` - Gap analysis
 - `internal/claude/config/settings-*.json` - Claude hooks for comparison
