@@ -617,16 +617,20 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// hasClaudeChild checks if a process has a child running claude/node.
-// Used when the pane command is a shell (bash, zsh) that launched claude.
-func hasClaudeChild(pid string) bool {
+// hasAgentChild checks if a process has a child running one of the specified agent processes.
+// Used when the pane command is a shell (bash, zsh) that launched the agent.
+func hasAgentChild(pid string, processNames []string) bool {
+	if len(processNames) == 0 {
+		// Default to Claude/node for backwards compatibility
+		processNames = []string{"node", "claude"}
+	}
 	// Use pgrep to find child processes
 	cmd := exec.Command("pgrep", "-P", pid, "-l")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}
-	// Check if any child is node or claude
+	// Check if any child matches the expected process names
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -637,12 +641,19 @@ func hasClaudeChild(pid string) bool {
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
 			name := parts[1]
-			if name == "node" || name == "claude" {
-				return true
+			for _, expected := range processNames {
+				if name == expected {
+					return true
+				}
 			}
 		}
 	}
 	return false
+}
+
+// hasClaudeChild is a backwards-compatible alias for hasAgentChild.
+func hasClaudeChild(pid string) bool {
+	return hasAgentChild(pid, []string{"node", "claude"})
 }
 
 // FindSessionByWorkDir finds tmux sessions where the pane's current working directory
@@ -873,6 +884,7 @@ func (t *Tmux) IsClaudeRunning(session string) bool {
 // IsRuntimeRunning checks if a runtime appears to be running in the session.
 // Only trusts the pane command - UI markers in scrollback cause false positives.
 // This is the runtime-config-aware version of IsAgentRunning.
+// Also checks child processes when the pane command is a shell (for "bash -c" patterns).
 func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 	if len(processNames) == 0 {
 		return false
@@ -884,6 +896,17 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 	for _, name := range processNames {
 		if cmd == name {
 			return true
+		}
+	}
+	// If pane command is a shell, check for child processes.
+	// This handles the case where sessions are started with "bash -c 'export ... && agent ...'"
+	for _, shell := range constants.SupportedShells {
+		if cmd == shell {
+			pid, err := t.GetPanePID(session)
+			if err == nil && pid != "" {
+				return hasAgentChild(pid, processNames)
+			}
+			break
 		}
 	}
 	return false
