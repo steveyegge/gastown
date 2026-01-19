@@ -102,6 +102,8 @@ docs/opencode/
 | [tools.md](reference/tools.md) | Built-in tools, custom tool options |
 | [best-practices.md](reference/best-practices.md) | Performance, tool management |
 | [integration-guide.md](reference/integration-guide.md) | CLI, SDK, API, Plugin integration |
+| [plugin-implementation.md](reference/plugin-implementation.md) | How gastown.js plugin works |
+| [maintenance.md](reference/maintenance.md) | Version compatibility, troubleshooting |
 | [events.md](reference/events.md) | Event types for plugins/SDK |
 | [external-resources.md](reference/external-resources.md) | Links to official docs, GitHub |
 
@@ -150,7 +152,7 @@ Analysis, research, and test results organized by phase. See [archive/README.md]
 | **Current status** | [archive/integration-summary.md](archive/integration-summary.md) | - |
 | **Project plan** | [design/phase1/project-plan.md](design/phase1/project-plan.md) | - |
 | **API reference** | [reference/external-resources.md](reference/external-resources.md) | - |
-| **Work on plugin** | [design/gastown-plugin.md](design/gastown-plugin.md) | `internal/opencode/plugin/gastown.js` |
+| **Work on plugin** | [reference/plugin-implementation.md](reference/plugin-implementation.md) | `internal/opencode/plugin/gastown.js` |
 | **Work on config** | [reference/external-resources.md](reference/external-resources.md) | `internal/config/agents.go` |
 | **Work on tests** | [design/phase1/project-plan.md](design/phase1/project-plan.md) | `internal/opencode/integration_test.go` |
 

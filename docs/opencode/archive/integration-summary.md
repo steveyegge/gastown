@@ -48,7 +48,7 @@ OpenCode has been successfully integrated as a **first-class orchestration layer
 - `archive/impact-analysis.md` (498 lines) - Impact analysis and feature parity
 - `docs/opencode/session-fork-test-results.md` (437 lines) - Fork testing results
 - `docs/opencode/integration-test-results.md` (487 lines) - E2E integration tests
-- `docs/opencode/design/gastown-plugin.md` (560 lines) - Plugin implementation plan
+- `docs/opencode/reference/plugin-implementation.md` (560 lines) - Plugin implementation plan
 - `docs/opencointegration-summary.md` (this file)
 
 **Repository Changes**:
@@ -327,7 +327,7 @@ During integration testing, several **general Gastown bugs** were discovered and
    - Enhanced plugin implementation (initial)
    - Production readiness for autonomous roles
 
-4. **[gastown-plugin.md](../design/gastown-plugin.md)** (560 lines)
+4. **[gastown-plugin.md](../reference/plugin-implementation.md)** (560 lines)
    - Complete OpenCode event system overview
    - Solutions for all plugin gaps
    - Enhanced plugin implementation (final)

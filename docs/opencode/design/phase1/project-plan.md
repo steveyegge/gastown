@@ -236,7 +236,7 @@ When working on OpenCode integration in Gastown, follow these links:
 ### Implementation
 | Task | Document |
 |------|----------|
-| How plugins work | [../gastown-plugin.md](../gastown-plugin.md) |
+| How plugins work | [../../reference/plugin-implementation.md](../../reference/plugin-implementation.md) |
 | Plugin source | `internal/opencode/plugin/gastown.js` |
 | Agent preset | `internal/config/agents.go` → `AgentOpencode` |
 | Runtime config | `internal/config/loader.go` → `BuildStartupCommandWithAgentOverride` |

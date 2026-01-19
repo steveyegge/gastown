@@ -164,4 +164,4 @@ for await (const event of events.stream) {
 | `PreCompact` | `experimental.session.compacting` hook | Named hook |
 | `Stop` | `session.idle` event | `event` handler with debounce |
 
-See [integration-guide.md](integration-guide.md#plugins) for plugin implementation details and [../design/gastown-plugin.md](../design/gastown-plugin.md) for Gastown-specific patterns.
+See [integration-guide.md](integration-guide.md#plugins) for plugin implementation details and [../reference/plugin-implementation.md](../reference/plugin-implementation.md) for Gastown-specific patterns.

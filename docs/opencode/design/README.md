@@ -1,27 +1,43 @@
 # OpenCode Design Documents
 
-> **Purpose**: Design decisions, implementation strategies, and project roadmaps  
-> **Scope**: Future work, integration patterns, and operational strategies
+> **Purpose**: Design decisions, proposals, and project roadmaps  
+> **Scope**: Planning documents for future work and architectural decisions
 
 ---
 
 ## ⚠️ Maintenance Notice
 
-**This README should be reviewed and updated when any document in `design/` is created, modified, or removed.**
+**This README should be reviewed when any document in `design/` is created, modified, or removed.**
+
+---
+
+## What Belongs Here
+
+| Type | Examples | Belongs in `design/`? |
+|------|----------|----------------------|
+| **Decisions** | Architectural choices, constraints | ✅ Yes |
+| **Proposals** | Permission strategies, integration approaches | ✅ Yes |
+| **Roadmaps** | Phase plans, next steps | ✅ Yes |
+| **Implementation Guides** | How to build plugins | ❌ No → `reference/` |
+| **Operational Docs** | Maintenance, troubleshooting | ❌ No → `reference/` |
+| **Stable Reference** | Config options, events | ❌ No → `reference/` |
 
 ---
 
 ## Contents
 
-### Standalone Documents
+### Core Design Documents
 
-| Document | Purpose | Status |
-|----------|---------|--------|
-| [design-decisions.md](design-decisions.md) | **Core design decisions, constraints, assumptions** | Active |
-| [next-steps.md](next-steps.md) | What to work on next | Active |
-| [maintenance.md](maintenance.md) | Version compatibility, update procedures | Active |
-| [gastown-plugin.md](gastown-plugin.md) | Gastown plugin implementation strategy | Active |
-| [role-permissions.md](role-permissions.md) | Role-based permission profiles across runtimes | Active |
+| Document | Purpose |
+|----------|---------|
+| [design-decisions.md](design-decisions.md) | **Core decisions, constraints, assumptions** |
+| [next-steps.md](next-steps.md) | What to work on next (agent handoff) |
+
+### Proposals (Under Consideration)
+
+| Document | Proposal | Status |
+|----------|----------|--------|
+| [role-permissions.md](role-permissions.md) | Permission profiles per role per runtime | 🔄 Draft |
 
 ### Project Phases
 
@@ -32,34 +48,33 @@
 
 ---
 
-## Document Types
+## Document Flow
 
-This directory contains:
+```
+Proposal (design/) → Decision (design/) → Implementation (code) → Reference (reference/)
+```
 
-1. **Design Documents** - Implementation strategies and architecture decisions
-2. **Roadmaps** - Project phases with milestones
-3. **Operational Strategies** - Maintenance, compatibility, update procedures
-
----
-
-## When to Add Documents Here
-
-Add a document to `design/` when it:
-- Proposes a new feature or integration approach
-- Documents architectural decisions not yet implemented
-- Defines project phases or milestones
-- Outlines operational procedures that may change
-
-**Do NOT add here**:
-- Stable reference documentation → use `reference/`
-- Point-in-time snapshots or test results → use `archive/`
+1. **Proposals** start in `design/` as ideas
+2. **Decisions** are captured in `design-decisions.md`
+3. **Implementation** happens in code
+4. **Reference** docs in `reference/` document the result
 
 ---
 
-## Related
+## Recently Moved to Reference
+
+These were moved from `design/` to `reference/` since they're implementation/operational docs:
+
+| Document | New Location |
+|----------|--------------|
+| `gastown-plugin.md` | `reference/plugin-implementation.md` |
+| `maintenance.md` | `reference/maintenance.md` |
+
+---
+
+## Related Directories
 
 | Directory | Purpose |
 |-----------|---------|
 | `reference/` | Stable, evergreen documentation |
 | `archive/` | Point-in-time snapshots, test results |
-| `HISTORY.md` | Chronological log of all changes |

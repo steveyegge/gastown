@@ -183,7 +183,7 @@ These are the guiding principles for OpenCode integration:
 | Document | Purpose |
 |----------|---------|
 | [phase1/decisions.md](phase1/decisions.md) | Phase 1 detailed decisions and experiments |
-| [gastown-plugin.md](gastown-plugin.md) | Plugin implementation details |
+| [plugin-implementation.md](../reference/plugin-implementation.md) | Plugin implementation details |
 | [role-permissions.md](role-permissions.md) | Permission profiles per role |
 | [next-steps.md](next-steps.md) | What to work on next |
 | `../reference/customization.md` | How to configure custom agents |

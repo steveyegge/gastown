@@ -328,7 +328,7 @@ For Gastown-specific integration patterns:
 | Topic | Document |
 |-------|----------|
 | **Gastown Plugin** | `internal/opencode/plugin/gastown.js` |
-| **Hook Mapping** | [design/gastown-plugin.md](../design/gastown-plugin.md) |
+| **Hook Mapping** | [reference/plugin-implementation.md](../reference/plugin-implementation.md) |
 | **Integration Status** | [../archive/integration-summary.md](../archive/integration-summary.md) |
 
 ---

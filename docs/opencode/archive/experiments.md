@@ -3,7 +3,7 @@
 > Hands-on experiments to validate Opencode orchestration assumptions
 > 
 > **Purpose**: Answer open questions before full implementation
-> **Related**: [../design/phase2/orchestration-plan.md](../design/phase2/orchestration-plan.md), [../design/gastown-plugin.md](../design/gastown-plugin.md)
+> **Related**: [../design/phase2/orchestration-plan.md](../design/phase2/orchestration-plan.md), [../reference/plugin-implementation.md](../reference/plugin-implementation.md)
 > **Status**: Planning
 > **Updated**: 2026-01-15
 

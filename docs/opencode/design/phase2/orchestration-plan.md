@@ -4,7 +4,7 @@
 > 
 > **Status**: Planning
 > **Created**: 2026-01-15
-> **Related**: [integration-architecture.md](integration-architecture.md), [gastown-plugin.md](../gastown-plugin.md)
+> **Related**: [integration-architecture.md](integration-architecture.md), [gastown-plugin.md](../../reference/plugin-implementation.md)
 
 ## Executive Summary
 
@@ -563,7 +563,7 @@ CLAUDE.md → AGENTS.md  # Symlink for compatibility
 ### Internal Documentation
 
 - [integration-architecture.md](integration-architecture.md) - Core Gastown architecture
-- [gastown-plugin.md](../gastown-plugin.md) - Plugin design principles
+- [gastown-plugin.md](../../reference/plugin-implementation.md) - Plugin design principles
 
 ### External Resources
 

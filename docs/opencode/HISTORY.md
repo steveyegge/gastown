@@ -19,8 +19,8 @@ Reorganized the entire `docs/opencode/` structure for clarity and discoverabilit
 - Rewrote `quickstart.md` - Practical getting-started guide
 
 **Moved to Design** (formerly `planning/`):
-- `plugin-guide.md` → `design/gastown-plugin.md` - Gastown-specific implementation plan
-- `maintenance.md` → `design/maintenance.md` - Version compatibility, update procedures
+- `plugin-guide.md` → `reference/plugin-implementation.md` - Gastown-specific implementation plan
+- `maintenance.md` → `reference/maintenance.md` - Version compatibility, update procedures
 
 **Moved to Archive**:
 - `integration-summary.md` - Point-in-time status report (dated 2026-01-17)
@@ -197,7 +197,7 @@ Completed OpenCode integration with full Claude Code hook parity.
 - `archive/integration-summary.md` - Executive summary
 - `archive/session-fork-test-results.md` - Fork testing
 - `archive/integration-test-results.md` - E2E testing
-- `design/gastown-plugin.md` - Plugin implementation guide
+- `reference/plugin-implementation.md` - Plugin implementation guide
 
 See: `archive/integration-summary.md`
 

@@ -106,7 +106,7 @@ This approach:
 - [ ] Create role instruction files (can reuse/adapt `CLAUDE.md` templates)
 - [ ] Define custom agents in `.opencode/config.jsonc` per role
 - [ ] OR extend plugin to inject role context based on `GT_ROLE`
-- [ ] Document approach in `design/gastown-plugin.md` and `reference/customization.md`
+- [ ] Document approach in `reference/plugin-implementation.md` and `reference/customization.md`
 
 ### 3. Formula/Specialized Agent Support
 
@@ -230,7 +230,7 @@ GT_FORMULA=polecat opencode
 | Need | Document |
 |------|----------|
 | **Understand OpenCode integration** | `docs/opencode/README.md` |
-| **Work on plugin** | `design/gastown-plugin.md` + `internal/opencode/plugin/gastown.js` |
+| **Work on plugin** | `reference/plugin-implementation.md` + `internal/opencode/plugin/gastown.js` |
 | **Understand events/hooks** | `reference/events.md` |
 | **Run tests** | `scripts/test-runtime-e2e.sh`, `scripts/test-opencode-*.sh` |
 | **Check docs** | `scripts/validate-opencode-docs.sh` |

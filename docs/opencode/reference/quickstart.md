@@ -70,7 +70,7 @@ In `<rig>/settings/config.json`:
 | **Integration Guide** | [integration-guide.md](integration-guide.md) |
 | **Events Reference** | [events.md](events.md) |
 | **External Resources** | [external-resources.md](external-resources.md) |
-| **Maintenance** | [../design/maintenance.md](../design/maintenance.md) |
+| **Maintenance** | [../reference/maintenance.md](../reference/maintenance.md) |
 
 ---
 
@@ -96,4 +96,4 @@ opencode session list
 opencode --session <session-id>
 ```
 
-See [../design/maintenance.md](../design/maintenance.md) for more troubleshooting guidance.
+See [../reference/maintenance.md](../reference/maintenance.md) for more troubleshooting guidance.

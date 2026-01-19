@@ -33,7 +33,7 @@ All internal links should be relative:
 ```markdown
 # ✅ Good
 [events.md](reference/events.md)
-[design/gastown-plugin.md](design/gastown-plugin.md)
+[reference/plugin-implementation.md](reference/plugin-implementation.md)
 
 # ❌ Bad  
 [events.md](/docs/opencode/reference/events.md)  # Absolute path
@@ -54,8 +54,8 @@ Use ISO 8601 in archive docs:
 
 | Code Path | Docs to Review |
 |-----------|----------------|
-| `internal/opencode/**` | `reference/integration-guide.md`, `design/gastown-plugin.md` |
-| `internal/opencode/plugin/**` | `reference/events.md`, `design/gastown-plugin.md` |
+| `internal/opencode/**` | `reference/integration-guide.md`, `reference/plugin-implementation.md` |
+| `internal/opencode/plugin/**` | `reference/events.md`, `reference/plugin-implementation.md` |
 | `internal/config/agents.go` (OpenCode section) | `reference/configuration.md`, `design/role-permissions.md` |
 
 ### When OpenCode Updates
@@ -65,7 +65,7 @@ Use ISO 8601 in archive docs:
 | New event types | `reference/events.md` |
 | New tools | `reference/tools.md` |
 | Config schema changes | `reference/configuration.md`, `reference/customization.md` |
-| Breaking changes | `design/maintenance.md`, `HISTORY.md` |
+| Breaking changes | `reference/maintenance.md`, `HISTORY.md` |
 
 ### When Docs Change
 
