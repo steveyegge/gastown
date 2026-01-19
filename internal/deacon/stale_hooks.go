@@ -1,3 +1,6 @@
+// stale_hooks.go detects and cleans up hooked beads whose assigned agents have died,
+// allowing orphaned work items to be reassigned to healthy workers.
+
 // Package deacon provides the Deacon agent infrastructure.
 package deacon
 
