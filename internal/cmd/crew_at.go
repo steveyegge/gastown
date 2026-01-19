@@ -205,6 +205,15 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("building startup command: %w", err)
 		}
+		if err := config.EnsureCopilotTrustedFolder(config.CopilotTrustConfig{
+			Role:          "crew",
+			TownRoot:      townRoot,
+			RigPath:       r.Path,
+			WorkDir:       worker.ClonePath,
+			AgentOverride: crewAgentOverride,
+		}); err != nil {
+			return err
+		}
 		// Prepend config dir env if available
 		if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {
 			startupCmd = config.PrependEnv(startupCmd, map[string]string{runtimeConfig.Session.ConfigDirEnv: claudeConfigDir})
@@ -247,6 +256,15 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, beacon, crewAgentOverride)
 			if err != nil {
 				return fmt.Errorf("building startup command: %w", err)
+			}
+			if err := config.EnsureCopilotTrustedFolder(config.CopilotTrustConfig{
+				Role:          "crew",
+				TownRoot:      townRoot,
+				RigPath:       r.Path,
+				WorkDir:       worker.ClonePath,
+				AgentOverride: crewAgentOverride,
+			}); err != nil {
+				return err
 			}
 			// Prepend config dir env if available
 			if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && claudeConfigDir != "" {

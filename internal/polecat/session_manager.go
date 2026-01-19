@@ -26,6 +26,17 @@ func debugSession(context string, err error) {
 	}
 }
 
+func defaultAgentOverride(command string) string {
+	if command == "" {
+		return ""
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	return filepath.Base(fields[0])
+}
+
 // Session errors
 var (
 	ErrSessionRunning  = errors.New("session already running")
@@ -64,6 +75,9 @@ type SessionStartOptions struct {
 	// RuntimeConfigDir is resolved config directory for the runtime account.
 	// If set, this is injected as an environment variable.
 	RuntimeConfigDir string
+
+	// AgentOverride specifies an alternate agent alias.
+	AgentOverride string
 }
 
 // SessionInfo contains information about a running polecat session.
@@ -162,6 +176,9 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if workDir == "" {
 		workDir = m.clonePath(polecat)
 	}
+	if opts.AgentOverride == "" {
+		opts.AgentOverride = defaultAgentOverride(opts.Command)
+	}
 
 	// Validate issue exists and isn't tombstoned BEFORE creating session.
 	// This prevents CPU spin loops from agents retrying work on invalid issues.
@@ -187,9 +204,22 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if command == "" {
 		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
 	}
+	if opts.AgentOverride == "" {
+		opts.AgentOverride = defaultAgentOverride(command)
+	}
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
 		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
+	}
+
+	if err := config.EnsureCopilotTrustedFolder(config.CopilotTrustConfig{
+		Role:          "polecat",
+		TownRoot:      townRoot,
+		RigPath:       m.rig.Path,
+		WorkDir:       workDir,
+		AgentOverride: opts.AgentOverride,
+	}); err != nil {
+		return err
 	}
 
 	// Create session with command directly to avoid send-keys race condition.

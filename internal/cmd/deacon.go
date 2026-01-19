@@ -388,6 +388,15 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
+	if err := config.EnsureCopilotTrustedFolder(config.CopilotTrustConfig{
+		Role:          "deacon",
+		TownRoot:      townRoot,
+		WorkDir:       deaconDir,
+		AgentOverride: agentOverride,
+	}); err != nil {
+		return err
+	}
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	fmt.Println("Starting Deacon session...")

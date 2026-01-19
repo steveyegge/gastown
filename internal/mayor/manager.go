@@ -93,6 +93,15 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
+	if err := config.EnsureCopilotTrustedFolder(config.CopilotTrustConfig{
+		Role:          "mayor",
+		TownRoot:      m.townRoot,
+		WorkDir:       m.townRoot,
+		AgentOverride: agentOverride,
+	}); err != nil {
+		return err
+	}
+
 	// Create session in townRoot (not mayorDir) to match gt handoff behavior
 	// This ensures Mayor works from the town root where all tools work correctly
 	// See: https://github.com/anthropics/gastown/issues/280
