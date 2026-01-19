@@ -249,7 +249,7 @@ func runMigrateExecute(engine *migrate.Engine, migration *migrate.Migration, che
 		response = strings.TrimSpace(strings.ToLower(response))
 
 		if response != "y" && response != "yes" {
-			fmt.Println("Migration cancelled")
+			fmt.Println("Migration canceled")
 			return nil
 		}
 	}
@@ -301,7 +301,7 @@ func runMigrateRollback(engine *migrate.Engine) error {
 		response = strings.TrimSpace(strings.ToLower(response))
 
 		if response != "y" && response != "yes" {
-			fmt.Println("Rollback cancelled")
+			fmt.Println("Rollback canceled")
 			return nil
 		}
 	}

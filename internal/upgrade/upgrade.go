@@ -449,8 +449,8 @@ func extractTarGz(archivePath string) (string, error) {
 		}
 
 		binaryPath = filepath.Join(extractDir, binaryName)
-		// Mask mode to avoid integer overflow (G115) and use safe permissions (no world-writable)
-		mode := os.FileMode(header.Mode & 0o755)
+		// Mask mode to safe permissions (no world-writable)
+		mode := os.FileMode(uint32(header.Mode) & 0o755) //nolint:gosec // G115: masked to 0o755
 		outFile, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_WRONLY, mode)
 		if err != nil {
 			_ = os.RemoveAll(extractDir)
