@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,23 +26,26 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
-	startAll               bool
-	startAgentOverride     string
-	startCrewRig           string
-	startCrewAccount       string
-	startCrewAgentOverride string
-	shutdownGraceful       bool
-	shutdownWait           int
-	shutdownAll            bool
-	shutdownForce          bool
-	shutdownYes            bool
-	shutdownPolecatsOnly   bool
-	shutdownNuclear        bool
+	startAll                    bool
+	startAgentOverride          string
+	startCrewRig                string
+	startCrewAccount            string
+	startCrewAgentOverride      string
+	shutdownGraceful            bool
+	shutdownWait                int
+	shutdownAll                 bool
+	shutdownForce               bool
+	shutdownYes                 bool
+	shutdownPolecatsOnly        bool
+	shutdownNuclear             bool
+	shutdownCleanupOrphans      bool
+	shutdownCleanupOrphansGrace int
 )
 
 var startCmd = &cobra.Command{
@@ -90,7 +94,9 @@ Shutdown levels (progressively more aggressive):
 
 Use --force or --yes to skip confirmation prompt.
 Use --graceful to allow agents time to save state before killing.
-Use --nuclear to force cleanup even if polecats have uncommitted work (DANGER).`,
+Use --nuclear to force cleanup even if polecats have uncommitted work (DANGER).
+Use --cleanup-orphans to kill orphaned Claude processes (TTY-less, older than 60s).
+Use --cleanup-orphans-grace-secs to set the grace period (default 60s).`,
 	RunE: runShutdown,
 }
 
@@ -137,6 +143,10 @@ func init() {
 		"Only stop polecats (minimal shutdown)")
 	shutdownCmd.Flags().BoolVar(&shutdownNuclear, "nuclear", false,
 		"Force cleanup even if polecats have uncommitted work (DANGER: may lose work)")
+	shutdownCmd.Flags().BoolVar(&shutdownCleanupOrphans, "cleanup-orphans", false,
+		"Clean up orphaned Claude processes (TTY-less processes older than 60s)")
+	shutdownCmd.Flags().IntVar(&shutdownCleanupOrphansGrace, "cleanup-orphans-grace-secs", 60,
+		"Grace period in seconds between SIGTERM and SIGKILL when cleaning orphans (default 60)")
 
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(shutdownCmd)
@@ -563,14 +573,20 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 	deaconSession := getDeaconSessionName()
 	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
 
-	// Phase 5: Cleanup polecat worktrees and branches
-	fmt.Printf("\nPhase 5: Cleaning up polecats...\n")
+	// Phase 5: Cleanup orphaned Claude processes if requested
+	if shutdownCleanupOrphans {
+		fmt.Printf("\nPhase 5: Cleaning up orphaned Claude processes...\n")
+		cleanupOrphanedClaude(shutdownCleanupOrphansGrace)
+	}
+
+	// Phase 6: Cleanup polecat worktrees and branches
+	fmt.Printf("\nPhase 6: Cleaning up polecats...\n")
 	if townRoot != "" {
 		cleanupPolecats(townRoot)
 	}
 
-	// Phase 6: Stop the daemon
-	fmt.Printf("\nPhase 6: Stopping daemon...\n")
+	// Phase 7: Stop the daemon
+	fmt.Printf("\nPhase 7: Stopping daemon...\n")
 	if townRoot != "" {
 		stopDaemonIfRunning(townRoot)
 	}
@@ -586,6 +602,13 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
 	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
+
+	// Cleanup orphaned Claude processes if requested
+	if shutdownCleanupOrphans {
+		fmt.Println()
+		fmt.Println("Cleaning up orphaned Claude processes...")
+		cleanupOrphanedClaude(shutdownCleanupOrphansGrace)
+	}
 
 	// Cleanup polecat worktrees and branches
 	if townRoot != "" {
@@ -612,6 +635,9 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 // 2. Everything except Mayor
 // 3. Mayor last
 // mayorSession and deaconSession are the dynamic session names for the current town.
+//
+// Returns the count of sessions that were successfully stopped (verified by checking
+// if the session no longer exists after the kill attempt).
 func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSession string) int {
 	stopped := 0
 
@@ -625,10 +651,31 @@ func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSe
 		return false
 	}
 
+	// Helper to kill a session and verify it was stopped
+	killAndVerify := func(sess string) bool {
+		// Check if session exists before attempting to kill
+		exists, _ := t.HasSession(sess)
+		if !exists {
+			return false // Session already gone
+		}
+
+		// Attempt to kill the session and its processes
+		_ = t.KillSessionWithProcesses(sess)
+
+		// Verify the session is actually gone (ignore error, check existence)
+		// KillSessionWithProcesses might return an error even if it successfully
+		// killed the processes and the session auto-closed
+		stillExists, _ := t.HasSession(sess)
+		if !stillExists {
+			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), sess)
+			return true
+		}
+		return false
+	}
+
 	// 1. Stop Deacon first
 	if inList(deaconSession) {
-		if err := t.KillSessionWithProcesses(deaconSession); err == nil {
-			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), deaconSession)
+		if killAndVerify(deaconSession) {
 			stopped++
 		}
 	}
@@ -638,16 +685,14 @@ func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSe
 		if sess == deaconSession || sess == mayorSession {
 			continue
 		}
-		if err := t.KillSessionWithProcesses(sess); err == nil {
-			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), sess)
+		if killAndVerify(sess) {
 			stopped++
 		}
 	}
 
 	// 3. Stop Mayor last
 	if inList(mayorSession) {
-		if err := t.KillSessionWithProcesses(mayorSession); err == nil {
-			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), mayorSession)
+		if killAndVerify(mayorSession) {
 			stopped++
 		}
 	}
@@ -919,4 +964,80 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 	}
 
 	return nil
+}
+
+// cleanupOrphanedClaude finds and kills orphaned Claude processes with a grace period.
+// This is a simpler synchronous implementation that:
+// 1. Finds orphaned processes (TTY-less, older than 60s, not in Gas Town sessions)
+// 2. Sends SIGTERM to all of them
+// 3. Waits for the grace period
+// 4. Sends SIGKILL to any that are still alive
+func cleanupOrphanedClaude(graceSecs int) {
+	// Find orphaned processes
+	orphans, err := util.FindOrphanedClaudeProcesses()
+	if err != nil {
+		fmt.Printf("  %s Warning: %v\n", style.Bold.Render("⚠"), err)
+		return
+	}
+
+	if len(orphans) == 0 {
+		fmt.Printf("  %s No orphaned processes found\n", style.Dim.Render("○"))
+		return
+	}
+
+	// Send SIGTERM to all orphans
+	var termPIDs []int
+	for _, orphan := range orphans {
+		if err := syscall.Kill(orphan.PID, syscall.SIGTERM); err != nil {
+			if err != syscall.ESRCH {
+				fmt.Printf("  %s PID %d: failed to send SIGTERM: %v\n",
+					style.Bold.Render("⚠"), orphan.PID, err)
+			}
+			continue
+		}
+		termPIDs = append(termPIDs, orphan.PID)
+		fmt.Printf("  %s PID %d: sent SIGTERM (waiting %ds before SIGKILL)\n",
+			style.Bold.Render("→"), orphan.PID, graceSecs)
+	}
+
+	if len(termPIDs) == 0 {
+		return
+	}
+
+	// Wait for grace period
+	fmt.Printf("  %s Waiting %d seconds for processes to terminate gracefully...\n",
+		style.Dim.Render("⏳"), graceSecs)
+	time.Sleep(time.Duration(graceSecs) * time.Second)
+
+	// Check which processes are still alive and send SIGKILL
+	var killedCount, alreadyDeadCount int
+	for _, pid := range termPIDs {
+		// Check if process still exists
+		if err := syscall.Kill(pid, 0); err != nil {
+			// Process is gone (either died from SIGTERM or doesn't exist)
+			alreadyDeadCount++
+			continue
+		}
+
+		// Process still alive - send SIGKILL
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+			if err != syscall.ESRCH {
+				fmt.Printf("  %s PID %d: failed to send SIGKILL: %v\n",
+					style.Bold.Render("⚠"), pid, err)
+			}
+			continue
+		}
+		killedCount++
+		fmt.Printf("  %s PID %d: sent SIGKILL (did not respond to SIGTERM)\n",
+			style.Bold.Render("✓"), pid)
+	}
+
+	if alreadyDeadCount > 0 {
+		fmt.Printf("  %s %d process(es) terminated gracefully from SIGTERM\n",
+			style.Bold.Render("✓"), alreadyDeadCount)
+	}
+	if killedCount == 0 && alreadyDeadCount > 0 {
+		fmt.Printf("  %s All processes cleaned up successfully\n",
+			style.Bold.Render("✓"))
+	}
 }
