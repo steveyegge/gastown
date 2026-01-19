@@ -890,7 +890,8 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 		}
 		// Then check built-in presets
 		if preset := GetAgentPresetByName(agentName); preset != nil {
-			return RuntimeConfigFromPreset(AgentPreset(agentName)), agentName, nil
+			// normalizeRuntimeConfig fills in Hooks and other fields based on Provider
+			return normalizeRuntimeConfig(RuntimeConfigFromPreset(AgentPreset(agentName))), agentName, nil
 		}
 		return nil, "", fmt.Errorf("agent '%s' not found", agentName)
 	}
@@ -1321,11 +1322,19 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			rc = DefaultRuntimeConfig()
-		} else {
+		// Try GT_ROOT from envVars first (set by caller like mayor.Manager or handoff)
+		// This is more reliable than findTownRootFromCwd() in test environments and
+		// when the command is built from a different directory than the town root.
+		townRoot = envVars["GT_ROOT"]
+		if townRoot == "" {
+			var err error
+			townRoot, err = findTownRootFromCwd()
+			if err != nil {
+				// No town root found - use Claude defaults
+				rc = DefaultRuntimeConfig()
+			}
+		}
+		if rc == nil && townRoot != "" {
 			if agentOverride != "" {
 				var resolveErr error
 				rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)

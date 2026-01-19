@@ -345,9 +345,18 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		return DefaultRuntimeConfig()
 	}
 
+	// Copy args slice. Note: append([]string(nil), slice...) returns nil for empty slice,
+	// but we need to preserve the distinction between nil (use defaults) and empty (no args).
+	var args []string
+	if info.Args != nil {
+		args = make([]string, len(info.Args))
+		copy(args, info.Args)
+	}
+
 	return &RuntimeConfig{
-		Command: info.Command,
-		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
+		Command:  info.Command,
+		Args:     args,
+		Provider: string(preset), // Set provider so normalizeRuntimeConfig uses correct defaults
 	}
 }
 
