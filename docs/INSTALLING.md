@@ -44,8 +44,8 @@ sudo apt update
 sudo apt install -y git
 
 # Install Go (apt version may be outdated, use official installer)
-wget https://go.dev/dl/go1.24.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.24.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.24.12.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.24.12.linux-amd64.tar.gz
 echo 'export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin' >> ~/.bashrc
 source ~/.bashrc
 
