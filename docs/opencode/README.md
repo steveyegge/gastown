@@ -81,6 +81,7 @@ Project direction and future work:
 
 | File | Purpose |
 |------|---------|
+| [project-plan.md](project-plan.md) | **Current project plan** - phases, testing requirements, compatibility layer |
 | [opencode-decisions.md](opencode-decisions.md) | Decision points and open questions |
 | [opencode-orchestration.md](opencode-orchestration.md) | High-level architecture vision |
 | [opencode-integration-architecture.md](opencode-integration-architecture.md) | Detailed integration strategy |
@@ -122,16 +123,37 @@ OpenCode achieves 100% feature parity with Claude Code:
 
 ---
 
-## For Agents
+## For Agents: Navigation
 
-Update **frontmatter** when:
-- OpenCode version changes (`opencode_version_tested`)
-- Status changes (`status`, `production_ready`)
-- Making documentation changes (`last_updated`)
+### Stable Links (Start Here)
 
-Update **document tables** when:
-- Adding/removing/renaming documentation files
+When working on OpenCode integration, use these entry points:
 
-Update [integration-summary.md](integration-summary.md) when:
-- Fixing bugs in the integration
-- Adding new features
+| Task | Primary Document | Implementation |
+|------|------------------|----------------|
+| **Understand current status** | [integration-summary.md](integration-summary.md) | - |
+| **See the project plan** | [project-plan.md](project-plan.md) | - |
+| **Look up OpenCode APIs** | [opencode-reference.md](opencode-reference.md) | - |
+| **Work on plugin** | [plugin-guide.md](plugin-guide.md) | `internal/opencode/plugin/gastown.js` |
+| **Work on agent config** | [opencode-reference.md](opencode-reference.md) | `internal/config/agents.go` |
+| **Work on tests** | [project-plan.md](project-plan.md) | `internal/opencode/integration_test.go` |
+| **Find external source** | [opencode-reference.md](opencode-reference.md) | GitHub/Docs links |
+
+### What to Update
+
+| When... | Update... |
+|---------|-----------|
+| **Fixing bugs** | [integration-summary.md](integration-summary.md) → Bugs Fixed section |
+| **Adding features** | [integration-summary.md](integration-summary.md), [project-plan.md](project-plan.md) |
+| **Changing OpenCode version** | Frontmatter `opencode_version_tested` in README.md |
+| **Completing a phase** | [project-plan.md](project-plan.md) → checkboxes and status |
+| **Adding docs** | README.md → document tables |
+| **Adding tests** | [project-plan.md](project-plan.md) → Test Status section |
+
+### External Sources (Authoritative)
+
+| Resource | When to Use |
+|----------|-------------|
+| [OpenCode Repo](https://github.com/anomalyco/opencode) | Source code, latest features |
+| [Awesome OpenCode](https://github.com/awesome-opencode/awesome-opencode) | Community plugins before building |
+| [opencode.ai/docs/ecosystem](https://opencode.ai/docs/ecosystem/) | Official extensions |
