@@ -9,6 +9,8 @@ func TestClassifyMessage(t *testing.T) {
 		subject  string
 		expected ProtocolType
 	}{
+		{"POLECAT_STARTED nux", ProtoPolecatStarted},
+		{"POLECAT_STARTED ace", ProtoPolecatStarted},
 		{"POLECAT_DONE nux", ProtoPolecatDone},
 		{"POLECAT_DONE ace", ProtoPolecatDone},
 		{"LIFECYCLE:Shutdown nux", ProtoLifecycleShutdown},
