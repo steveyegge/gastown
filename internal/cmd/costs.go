@@ -437,7 +437,7 @@ func querySessionEventsFromLocation(location string) ([]CostEntry, error) {
 		"--json",
 	}
 
-	listCmd := exec.Command("bd", listArgs...)
+	listCmd := exec.Command("bd", append([]string{"--no-daemon"}, listArgs...)...)
 	listCmd.Dir = location
 	listOutput, err := listCmd.Output()
 	if err != nil {
@@ -461,7 +461,7 @@ func querySessionEventsFromLocation(location string) ([]CostEntry, error) {
 		showArgs = append(showArgs, item.ID)
 	}
 
-	showCmd := exec.Command("bd", showArgs...)
+	showCmd := exec.Command("bd", append([]string{"--no-daemon"}, showArgs...)...)
 	showCmd.Dir = location
 	showOutput, err := showCmd.Output()
 	if err != nil {
