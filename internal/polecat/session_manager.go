@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -178,6 +179,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	polecatsDir := filepath.Join(m.rig.Path, "polecats")
 	if err := runtime.EnsureSettingsForRole(polecatsDir, "polecat", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
+	}
+
+	// Regenerate CLAUDE.md with config overrides (supports town/rig context customization).
+	// This writes to polecats/.claude/CLAUDE.md, shared by all polecats.
+	if err := templates.CreatePolecatCLAUDEmd(polecatsDir, m.rig.Path, m.rig.Name); err != nil {
+		return fmt.Errorf("creating polecat CLAUDE.md: %w", err)
 	}
 
 	// Build startup command first

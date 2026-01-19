@@ -272,6 +272,41 @@ func CreateCrewCLAUDEmd(workDir, rigPath, rigName, crewName string) error {
 	return os.WriteFile(claudePath, []byte(content), 0644)
 }
 
+// CreatePolecatCLAUDEmd creates the Polecat CLAUDE.md file at the specified directory.
+// Uses config overrides if available (rig → town → default template).
+// Unlike other roles, this writes to polecats/.claude/CLAUDE.md (shared by all polecats)
+// rather than individual worktrees to avoid polluting source repos.
+func CreatePolecatCLAUDEmd(polecatsDir, rigPath, rigName string) error {
+	townRoot := filepath.Dir(rigPath)
+	townName := filepath.Base(townRoot)
+
+	data := RoleData{
+		Role:     "polecat",
+		RigName:  rigName,
+		TownRoot: townRoot,
+		TownName: townName,
+		WorkDir:  polecatsDir,
+	}
+
+	// Load settings for config override resolution
+	townSettings, _ := config.LoadOrCreateTownSettings(config.TownSettingsPath(townRoot))
+	rigSettings, _ := config.LoadRigSettings(config.RigSettingsPath(rigPath))
+
+	content, err := GetRoleContent("polecat", data, townSettings, rigSettings)
+	if err != nil {
+		return err
+	}
+
+	// Write to polecats/.claude/CLAUDE.md (shared location outside git repos)
+	claudeDir := filepath.Join(polecatsDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		return fmt.Errorf("creating .claude directory: %w", err)
+	}
+
+	claudePath := filepath.Join(claudeDir, "CLAUDE.md")
+	return os.WriteFile(claudePath, []byte(content), 0644)
+}
+
 // GetAllRoleTemplates returns all role templates as a map of filename to content.
 func GetAllRoleTemplates() (map[string][]byte, error) {
 	entries, err := templateFS.ReadDir("roles")
