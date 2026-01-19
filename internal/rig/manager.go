@@ -413,6 +413,19 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 			fmt.Printf("  Using prefix '%s' for tracked beads (no existing issues to detect from)\n", opts.BeadsPrefix)
 		}
 
+		// Remove stale redirect files from cloned repos.
+		// Redirect files are installation-specific (contain relative paths to a specific
+		// Gas Town installation). If this repo was a rig elsewhere, it may have a redirect
+		// that points to a non-existent location. Remove it so we use the local beads data.
+		sourceRedirect := filepath.Join(sourceBeadsDir, "redirect")
+		if data, err := os.ReadFile(sourceRedirect); err == nil {
+			target := filepath.Clean(filepath.Join(mayorRigPath, strings.TrimSpace(string(data))))
+			if _, err := os.Stat(target); os.IsNotExist(err) {
+				// Redirect points to non-existent location - remove it
+				_ = os.Remove(sourceRedirect)
+			}
+		}
+
 		// Initialize bd database if it doesn't exist.
 		// beads.db is gitignored so it won't exist after clone - we need to create it.
 		// bd init --prefix will create the database and auto-import from issues.jsonl.
