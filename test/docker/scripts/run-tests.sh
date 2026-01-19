@@ -159,7 +159,7 @@ test_session_id_env() {
     log_info "Testing copilot session ID env var..."
     cd ~/gastown-src
     
-    if go test -run TestGetSessionIDEnvVar ./internal/config/... -v 2>&1 | grep -q "copilot.*PASS"; then
+    if go test -run TestGetSessionIDEnvVar ./internal/config/... -v; then
         log_pass "COPILOT_SESSION_ID env var configured"
     else
         log_fail "Session ID env var test failed"
@@ -173,7 +173,7 @@ test_process_names() {
     log_info "Testing copilot process names..."
     cd ~/gastown-src
     
-    if go test -run TestGetProcessNames ./internal/config/... -v 2>&1 | grep -q "copilot.*PASS"; then
+    if go test -run TestGetProcessNames ./internal/config/... -v; then
         log_pass "Copilot process names configured"
     else
         log_fail "Process names test failed"
@@ -187,7 +187,7 @@ test_resume_command() {
     log_info "Testing resume command for copilot..."
     cd ~/gastown-src
     
-    if go test -run TestSupportsSessionResume ./internal/config/... -v 2>&1 | grep -q "copilot.*PASS"; then
+    if go test -run TestSupportsSessionResume ./internal/config/... -v; then
         log_pass "Copilot resume support configured"
     else
         log_fail "Resume command test failed"
