@@ -47,8 +47,8 @@ The **OpenCode repository** is the authoritative source - documentation often la
 |------|----------|
 | **Get oriented** | [reference/quickstart.md](reference/quickstart.md) |
 | **See current status** | [reference/integration-summary.md](reference/integration-summary.md) |
-| **Topic reference** | [reference/api-reference.md](reference/api-reference.md) |
-| **See project plan** | [planning/project-plan.md](planning/project-plan.md) |
+| **Concept index** | [reference/api-reference.md](reference/api-reference.md) |
+| **Project plan** | [planning/phase1/project-plan.md](planning/phase1/project-plan.md) |
 
 ---
 
@@ -57,21 +57,20 @@ The **OpenCode repository** is the authoritative source - documentation often la
 ```
 docs/opencode/
 ├── README.md              # This landing page
-├── index.md               # Detailed navigation by role/goal
 ├── reference/             # Stable documentation
+│   ├── api-reference.md   # Concept index with all sources
 │   ├── integration-summary.md
 │   ├── plugin-guide.md
-│   ├── api-reference.md
 │   ├── maintenance.md
 │   └── quickstart.md
-├── planning/              # Project direction (organized by phase)
+├── planning/              # Project direction (by phase)
 │   ├── phase1/            # Claude Code parity (current)
 │   │   ├── project-plan.md
 │   │   └── decisions.md
 │   └── phase2/            # SDK orchestration (future)
 │       ├── sdk-plan.md
 │       ├── orchestrator-api.md
-│       ├── architecture.md
+│       ├── orchestration-plan.md
 │       └── integration-architecture.md
 ├── research/              # Analysis & experiments
 │   ├── technical-research.md
