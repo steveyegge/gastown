@@ -204,6 +204,111 @@ test_full_config_suite() {
 }
 
 # ============================================================
+# Test: gt up starts services + startup messages
+# ============================================================
+test_gt_up_startup_messages() {
+    log_info "Testing gt up startup messages..."
+
+    local test_root="$HOME/gt-e2e"
+    local town_root="$test_root/town"
+    local rig_repo="$test_root/rig-repo"
+
+    rm -rf "$test_root" 2>/dev/null || true
+    mkdir -p "$town_root" "$rig_repo"
+
+    # Ensure town structure
+    mkdir -p "$town_root/mayor" "$town_root/deacon"
+
+    # Initialize town if needed
+    if ! [ -f "$town_root/mayor/town.json" ]; then
+        gt install "$town_root" --git >/dev/null 2>&1 || true
+        mkdir -p "$town_root/settings"
+        cat > "$town_root/settings/config.json" << 'EOF'
+{
+  "default_agent": "copilot"
+}
+EOF
+    fi
+
+    # Create a local repo to add as a rig
+    cd "$rig_repo"
+    git init -q
+    git config user.email "test@gastown.dev"
+    git config user.name "E2E Test"
+    echo "# Rig Repo" > README.md
+    git add . && git commit -q -m "Initial commit"
+
+    # Add rig if missing
+    cd "$town_root"
+    if ! gt rig list 2>/dev/null | grep -q "testrig"; then
+        gt rig add testrig "$rig_repo" >/dev/null 2>&1 || true
+    fi
+
+    # Start services
+    cd "$town_root"
+    if ! gt up >/dev/null 2>&1; then
+        log_fail "gt up failed"
+        return
+    fi
+
+    # Validate tmux sessions are running for town + rig services
+    if tmux has-session -t hq-mayor 2>/dev/null; then
+        log_pass "Mayor tmux session running"
+    else
+        log_fail "Mayor tmux session missing"
+    fi
+
+    if tmux has-session -t hq-deacon 2>/dev/null; then
+        log_pass "Deacon tmux session running"
+    else
+        log_fail "Deacon tmux session missing"
+    fi
+
+    if tmux has-session -t gt-testrig-witness 2>/dev/null; then
+        log_pass "Witness tmux session running"
+    else
+        log_fail "Witness tmux session missing"
+    fi
+
+    if tmux has-session -t gt-testrig-refinery 2>/dev/null; then
+        log_pass "Refinery tmux session running"
+    else
+        log_fail "Refinery tmux session missing"
+    fi
+
+    # Send startup instructions via mail (used for prompt_mode none like copilot)
+    gt mail send mayor/ -s "Mayor startup instructions [HIGH PRIORITY]" -m "[GAS TOWN] mayor <- test • startup • cold-start" --notify >/dev/null 2>&1
+    gt mail send deacon/ -s "Deacon startup instructions [HIGH PRIORITY]" -m "[GAS TOWN] deacon <- test • startup • patrol" --notify >/dev/null 2>&1
+    gt mail send testrig/witness -s "Witness startup instructions [HIGH PRIORITY]" -m "[GAS TOWN] testrig/witness <- test • startup • patrol" --notify >/dev/null 2>&1
+    gt mail send testrig/refinery -s "Refinery startup instructions [HIGH PRIORITY]" -m "[GAS TOWN] testrig/refinery <- test • startup • patrol" --notify >/dev/null 2>&1
+
+    # Verify inboxes show startup messages
+    if gt mail inbox mayor/ 2>&1 | grep -q "startup instructions"; then
+        log_pass "Mayor startup message delivered"
+    else
+        log_fail "Mayor startup message missing"
+    fi
+
+    if gt mail inbox deacon/ 2>&1 | grep -q "startup instructions"; then
+        log_pass "Deacon startup message delivered"
+    else
+        log_fail "Deacon startup message missing"
+    fi
+
+    if gt mail inbox testrig/witness 2>&1 | grep -q "startup instructions"; then
+        log_pass "Witness startup message delivered"
+    else
+        log_fail "Witness startup message missing"
+    fi
+
+    if gt mail inbox testrig/refinery 2>&1 | grep -q "startup instructions"; then
+        log_pass "Refinery startup message delivered"
+    else
+        log_fail "Refinery startup message missing"
+    fi
+}
+
+# ============================================================
 # Main test runner
 # ============================================================
 main() {
@@ -221,6 +326,7 @@ main() {
     test_process_names
     test_resume_command
     test_full_config_suite
+    test_gt_up_startup_messages
     test_rig_init
     test_beads_operations
     

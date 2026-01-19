@@ -350,6 +350,7 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	}
 
 	return &RuntimeConfig{
+		Provider:   string(info.Name),
 		Command:    info.Command,
 		Args:       append([]string(nil), info.Args...), // Copy to avoid mutation
 		PromptMode: info.PromptMode,
