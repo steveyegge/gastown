@@ -30,6 +30,8 @@ var beadsExemptCommands = map[string]bool{
 	"version":    true,
 	"help":       true,
 	"completion": true,
+	"upgrade":    true,
+	"migrate":    true,
 }
 
 // Commands exempt from the town root branch warning.
@@ -41,6 +43,8 @@ var branchCheckExemptCommands = map[string]bool{
 	"doctor":     true, // Used to fix the problem
 	"install":    true, // Initial setup
 	"git-init":   true, // Git setup
+	"upgrade":    true, // Self-update
+	"migrate":    true, // Workspace migration
 }
 
 // persistentPreRun runs before every command.

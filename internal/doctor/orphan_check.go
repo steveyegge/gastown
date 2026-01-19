@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -96,7 +95,7 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 
 		// Only check gt-* sessions (Gas Town sessions)
-		if !strings.HasPrefix(sess, "gt-") {
+		if !strings.HasPrefix(sess, GastownSessionPrefix) {
 			continue
 		}
 
@@ -164,37 +163,20 @@ func isCrewSession(session string) bool {
 	// Pattern: gt-<rig>-crew-<name>
 	// Example: gt-gastown-crew-joe
 	parts := strings.Split(session, "-")
-	if len(parts) >= 4 && parts[0] == "gt" && parts[2] == "crew" {
+	if len(parts) >= 4 && parts[0] == "gt" && parts[2] == CrewMarker {
 		return true
 	}
 	return false
 }
 
 // getValidRigs returns a list of valid rig names from the workspace.
+// Uses the shared findAllRigs utility and extracts just the rig names.
 func (c *OrphanSessionCheck) getValidRigs(townRoot string) []string {
-	var rigs []string
-
-	// Read rigs.json if it exists
-	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
-	if _, err := os.Stat(rigsPath); err == nil {
-		// For simplicity, just scan directories at town root that look like rigs
-		entries, err := os.ReadDir(townRoot)
-		if err == nil {
-			for _, entry := range entries {
-				if entry.IsDir() && entry.Name() != "mayor" && entry.Name() != ".beads" && !strings.HasPrefix(entry.Name(), ".") {
-					// Check if it looks like a rig (has polecats/ or crew/ directory)
-					polecatsDir := filepath.Join(townRoot, entry.Name(), "polecats")
-					crewDir := filepath.Join(townRoot, entry.Name(), "crew")
-					if _, err := os.Stat(polecatsDir); err == nil {
-						rigs = append(rigs, entry.Name())
-					} else if _, err := os.Stat(crewDir); err == nil {
-						rigs = append(rigs, entry.Name())
-					}
-				}
-			}
-		}
+	rigPaths := findAllRigs(townRoot)
+	rigs := make([]string, len(rigPaths))
+	for i, rigPath := range rigPaths {
+		rigs[i] = filepath.Base(rigPath)
 	}
-
 	return rigs
 }
 
@@ -245,7 +227,7 @@ func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, may
 	role := parts[2]
 
 	// witness and refinery are valid roles
-	if role == "witness" || role == "refinery" {
+	if role == RoleWitness || role == RoleRefinery {
 		return true
 	}
 
