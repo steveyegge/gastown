@@ -1353,6 +1353,10 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
+	// Record agent override so handoff can preserve it
+	if agentOverride != "" {
+		resolvedEnv["GT_AGENT"] = agentOverride
+	}
 
 	// Build environment export prefix
 	var exports []string
