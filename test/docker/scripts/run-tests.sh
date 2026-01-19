@@ -62,7 +62,7 @@ test_copilot_preset() {
     log_info "Testing copilot preset in agent registry..."
     # Run a simple Go test to verify the preset exists
     cd ~/gastown-src
-    if go test -run TestCopilotAgentPreset ./internal/config/... -v 2>&1 | grep -q "PASS"; then
+    if go test -run TestCopilotAgentPreset ./internal/config/... -v 2>&1 | grep -q "^--- PASS: TestCopilotAgentPreset"; then
         log_pass "Copilot preset exists in agent registry"
     else
         log_fail "Copilot preset test failed"
