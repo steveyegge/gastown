@@ -903,6 +903,68 @@ func TestAttachmentFieldsRoundTrip(t *testing.T) {
 	}
 }
 
+// attachMoleculeForTest mirrors AttachMolecule but uses injected show/update hooks.
+func attachMoleculeForTest(pinnedBeadID, moleculeID string, show func(string) (*Issue, error), update func(string, UpdateOptions) error) (*Issue, error) {
+	issue, err := show(pinnedBeadID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching pinned bead: %w", err)
+	}
+
+	if issue.Status != StatusPinned && issue.Status != StatusHooked {
+		return nil, fmt.Errorf("issue %s is not pinned or hooked (status: %s)", pinnedBeadID, issue.Status)
+	}
+
+	fields := &AttachmentFields{
+		AttachedMolecule: moleculeID,
+		AttachedAt:       currentTimestamp(),
+	}
+	newDesc := SetAttachmentFields(issue, fields)
+
+	if err := update(pinnedBeadID, UpdateOptions{Description: &newDesc}); err != nil {
+		return nil, fmt.Errorf("updating pinned bead: %w", err)
+	}
+
+	return show(pinnedBeadID)
+}
+
+func TestAttachMoleculeAllowsHookedStatus(t *testing.T) {
+	issue := &Issue{
+		ID:     "gt-hooked",
+		Status: StatusHooked,
+	}
+	updated := &Issue{
+		ID:          issue.ID,
+		Status:      issue.Status,
+		Description: "attached_molecule: mol-xyz\nattached_at: 2025-12-21T15:30:00Z",
+	}
+
+	showCalls := 0
+	show := func(id string) (*Issue, error) {
+		showCalls++
+		if showCalls == 1 {
+			return issue, nil
+		}
+		return updated, nil
+	}
+	update := func(id string, opts UpdateOptions) error {
+		if opts.Description == nil {
+			t.Fatal("Update called without description")
+		}
+		if !strings.Contains(*opts.Description, "attached_molecule: mol-xyz") {
+			t.Fatalf("expected attached_molecule in description, got %q", *opts.Description)
+		}
+		return nil
+	}
+
+	got, err := attachMoleculeForTest(issue.ID, "mol-xyz", show, update)
+	if err != nil {
+		t.Fatalf("AttachMolecule returned error: %v", err)
+	}
+	if got.ID != issue.ID {
+		t.Fatalf("AttachMolecule returned issue %q, want %q", got.ID, issue.ID)
+	}
+}
+
 // TestResolveBeadsDir tests the redirect following logic.
 func TestResolveBeadsDir(t *testing.T) {
 	// Create temp directory structure
