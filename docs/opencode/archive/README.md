@@ -1,6 +1,14 @@
 # Archive: Point-in-Time Documentation
 
-This directory contains analysis, research, and test results that are snapshots from specific points in time.
+This directory contains analysis, research, and test results that are **snapshots from specific points in time**.
+
+> ⚠️ **Warning**: Documents here may contain outdated information about features or capabilities.
+> 
+> **For current feature status**, see:
+> - [Agent Feature Comparison](../../agent-features.md) - Authoritative feature matrix
+> - [reference/](../reference/) - Current stable documentation
+>
+> Archive docs record **verified findings at a point in time**, not ongoing truth.
 
 ## Required Frontmatter
 
