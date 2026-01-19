@@ -103,6 +103,27 @@ This index provides navigation across all Opencode orchestration planning docume
 
 ---
 
+#### [Stage 2: SDK-Based Orchestration Layer](stage2-sdk-orchestration.md) 🆕
+**Purpose**: Future architecture plan using OpenCode Go SDK for programmatic orchestration
+
+**Use When**:
+- Planning next-phase OpenCode integration
+- Understanding SDK vs CLI trade-offs
+- Designing the Orchestrator interface
+- Evaluating vendor lock-in risks
+
+**Key Sections**:
+- Current Architecture Limitations
+- Proposed SDK Architecture
+- Orchestrator Interface Design
+- Implementation Phases (4 phases, 2-3 weeks)
+- Benefits vs Risks Analysis
+- Decision Points
+
+**Audience**: Architects, engineers planning Stage 2 work
+
+---
+
 ### 🔬 Experimentation & Research
 
 #### [Opencode Experiments Checklist](opencode-experiments.md)
