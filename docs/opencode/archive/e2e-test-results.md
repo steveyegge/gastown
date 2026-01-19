@@ -1,6 +1,6 @@
 # OpenCode End-to-End Testing Results
 
-> **📁 Archive Notice**: This is a point-in-time analysis document. For current status, see [integration-summary.md](../integration-summary.md).
+> **📁 Archive Notice**: This is a point-in-time analysis document. For current status, see [integration-summary.md](integration-summary.md).
 
 **Date**: 2026-01-17  
 **OpenCode Version**: 1.1.25  

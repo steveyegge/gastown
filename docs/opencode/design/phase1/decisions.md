@@ -3,7 +3,7 @@
 > Quick reference for decisions needed and questions to answer
 > 
 > **Purpose**: Track uncertain areas requiring input, research, or experimentation
-> **Related**: [orchestration.md](orchestration.md), [../research/experiments.md](../research/experiments.md)
+> **Related**: [../phase2/orchestration-plan.md](../phase2/orchestration-plan.md), [../../archive/experiments.md](../../archive/experiments.md)
 > **Status**: Living Document
 > **Updated**: 2026-01-15
 

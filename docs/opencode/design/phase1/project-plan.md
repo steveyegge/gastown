@@ -175,7 +175,7 @@ After parity is achieved, consider OpenCode-specific features:
 | Multi-model routing | Use different models per task | Medium |
 | Plugin hot-reload | Faster development | Low |
 
-See [stage2-sdk.md](stage2-sdk.md) for SDK plans.
+See [../phase2/sdk-plan.md](../phase2/sdk-plan.md) for SDK plans.
 
 ---
 
@@ -229,8 +229,8 @@ When working on OpenCode integration in Gastown, follow these links:
 ### Quick Reference
 | Need | Document |
 |------|----------|
-| External sources & topic reference | [opencode-reference.md](opencode-reference.md) |
-| Current integration status | [integration-summary.md](integration-summary.md) |
+| External sources & topic reference | [../../reference/external-resources.md](../../reference/external-resources.md) |
+| Current integration status | [../../archive/integration-summary.md](../../archive/integration-summary.md) |
 | This project plan | You're reading it |
 
 ### Implementation

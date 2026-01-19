@@ -1,6 +1,6 @@
 # OpenCode Integration: Impact Analysis & Feature Parity
 
-> **📁 Archive Notice**: This is a point-in-time analysis document. For current status, see [integration-summary.md](../integration-summary.md).
+> **📁 Archive Notice**: This is a point-in-time analysis document. For current status, see [integration-summary.md](integration-summary.md).
 
 **Date**: 2026-01-17  
 **Status**: Complete Analysis  

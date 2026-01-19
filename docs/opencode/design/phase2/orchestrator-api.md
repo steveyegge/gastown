@@ -2,7 +2,7 @@
 
 > Practical implementation details for Opencode orchestration in Gastown
 > 
-> **Companion to**: [orchestration.md](orchestration.md)
+> **Companion to**: [orchestration-plan.md](orchestration-plan.md)
 > **Status**: Planning
 > **Updated**: 2026-01-15
 
@@ -659,4 +659,4 @@ log.Printf("[orchestration] session %s state: %s → %s", sessionID, oldState, n
 
 **Last Updated**: 2026-01-15
 **Owner**: Gastown Team
-**Related**: [orchestration.md](orchestration.md)
+**Related**: [orchestration-plan.md](orchestration-plan.md)

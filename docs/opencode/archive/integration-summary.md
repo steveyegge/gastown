@@ -46,10 +46,10 @@ OpenCode has been successfully integrated as a **first-class orchestration layer
 
 **Documentation** (7 new files):
 - `archive/impact-analysis.md` (498 lines) - Impact analysis and feature parity
-- `docs/opencode/archive/session-fork-test-results.md` (437 lines) - Fork testing results
-- `docs/opencode/archive/integration-test-results.md` (487 lines) - E2E integration tests
+- `docs/opencode/session-fork-test-results.md` (437 lines) - Fork testing results
+- `docs/opencode/integration-test-results.md` (487 lines) - E2E integration tests
 - `docs/opencode/design/gastown-plugin.md` (560 lines) - Plugin implementation plan
-- `docs/opencode/integration-summary.md` (this file)
+- `docs/opencointegration-summary.md` (this file)
 
 **Repository Changes**:
 - `README.md` - Added opencode to supported runtimes (+2/-1 lines)
@@ -309,19 +309,19 @@ During integration testing, several **general Gastown bugs** were discovered and
 
 ### Primary Documents
 
-1. **[archive/impact-analysis.md](../../archive/impact-analysis.md)** (498 lines)
+1. **[archive/impact-analysis.md](impact-analysis.md)** (498 lines)
    - Comprehensive impact analysis on all agent runtimes
    - Feature parity matrix with detailed comparisons
    - End-to-end workflow traces
    - Production readiness assessment
 
-2. **[archive/session-fork-test-results.md](archive/session-fork-test-results.md)** (437 lines)
+2. **[session-fork-test-results.md](session-fork-test-results.md)** (437 lines)
    - Fork testing via HTTP API and TUI
    - Implementation guidance for `gt seance`
    - Source code references and examples
    - Alternative approaches (export/import)
 
-3. **[archive/integration-test-results.md](archive/integration-test-results.md)** (487 lines)
+3. **[integration-test-results.md](integration-test-results.md)** (487 lines)
    - E2E integration test execution
    - Plugin gap analysis and identification
    - Enhanced plugin implementation (initial)

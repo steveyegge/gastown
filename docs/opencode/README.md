@@ -147,18 +147,18 @@ Analysis, research, and test results organized by phase. See [archive/README.md]
 
 | Task | Document | Implementation |
 |------|----------|----------------|
-| **Current status** | [reference/integration-summary.md](reference/integration-summary.md) | - |
+| **Current status** | [archive/integration-summary.md](archive/integration-summary.md) | - |
 | **Project plan** | [design/phase1/project-plan.md](design/phase1/project-plan.md) | - |
-| **API reference** | [reference/api-reference.md](reference/api-reference.md) | - |
+| **API reference** | [reference/external-resources.md](reference/external-resources.md) | - |
 | **Work on plugin** | [design/gastown-plugin.md](design/gastown-plugin.md) | `internal/opencode/plugin/gastown.js` |
-| **Work on config** | [reference/api-reference.md](reference/api-reference.md) | `internal/config/agents.go` |
+| **Work on config** | [reference/external-resources.md](reference/external-resources.md) | `internal/config/agents.go` |
 | **Work on tests** | [design/phase1/project-plan.md](design/phase1/project-plan.md) | `internal/opencode/integration_test.go` |
 
 ### What to Update
 
 | When... | Update... |
 |---------|-----------|
-| **Fixing bugs** | `reference/integration-summary.md` |
-| **Adding features** | `reference/integration-summary.md`, `design/phase1/project-plan.md` |
+| **Fixing bugs** | `archive/integration-summary.md` |
+| **Adding features** | `archive/integration-summary.md`, `design/phase1/project-plan.md` |
 | **Adding docs** | This README → document tables |
 | **Completing a phase** | `design/phase1/project-plan.md` or `design/phase2/` |

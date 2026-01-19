@@ -2,7 +2,7 @@
 
 > **Purpose**: Implementation guide for Gastown's OpenCode plugin  
 > **Status**: ✅ Complete - All Claude hook equivalents implemented  
-> **See Also**: [events.md](events.md) for event reference
+> **See Also**: [events.md](../reference/events.md) for event reference
 
 ---
 
@@ -14,7 +14,7 @@ After investigating the OpenCode repository, **all three plugin gaps identified 
 
 ## Event System
 
-For the complete list of available events, see **[events.md](events.md)**.
+For the complete list of available events, see **[events.md](../reference/events.md)**.
 
 This guide focuses on how Gastown uses specific events to achieve Claude hook parity.
 

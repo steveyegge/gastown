@@ -4,7 +4,7 @@
 > 
 > **Status**: Planning
 > **Created**: 2026-01-15
-> **Related**: [architecture.md](architecture.md), [plugin-system.md](plugin-system.md)
+> **Related**: [integration-architecture.md](integration-architecture.md), [gastown-plugin.md](../gastown-plugin.md)
 
 ## Executive Summary
 
@@ -562,10 +562,8 @@ CLAUDE.md → AGENTS.md  # Symlink for compatibility
 
 ### Internal Documentation
 
-- [architecture.md](architecture.md) - Core Gastown architecture
-- [plugin-system.md](plugin-system.md) - Plugin design principles
-- [federation.md](federation.md) - Multi-workspace coordination
-- [operational-state.md](operational-state.md) - State management
+- [integration-architecture.md](integration-architecture.md) - Core Gastown architecture
+- [gastown-plugin.md](../gastown-plugin.md) - Plugin design principles
 
 ### External Resources
 

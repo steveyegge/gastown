@@ -32,8 +32,8 @@ All docs should have a header with:
 All internal links should be relative:
 ```markdown
 # ✅ Good
-[events.md](events.md)
-[../design/gastown-plugin.md](../design/gastown-plugin.md)
+[events.md](reference/events.md)
+[design/gastown-plugin.md](design/gastown-plugin.md)
 
 # ❌ Bad  
 [events.md](/docs/opencode/reference/events.md)  # Absolute path

@@ -1,6 +1,6 @@
 # OpenCode Integration - Upstream Repository Review
 
-> **📁 Archive Notice**: This is a point-in-time review document from the initial PR. For current status, see [integration-summary.md](../integration-summary.md).
+> **📁 Archive Notice**: This is a point-in-time review document from the initial PR. For current status, see [integration-summary.md](integration-summary.md).
 
 **Date**: 2026-01-17  
 **Related Commits**: `74ac9bf5`, `a08d4974`  

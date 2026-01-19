@@ -296,10 +296,10 @@ opencode_server_url = "http://localhost:4096"
 
 ## Related Documentation
 
-- [OpenCode Integration Summary](./integration-summary.md)
-- [E2E Test Results](./archive/e2e-test-results.md)
-- [OpenCode Experiments](./../research/experiments.md)
-- [Technical Research](./technical-research.md)
+- [OpenCode Integration Summary](../../archive/integration-summary.md)
+- [E2E Test Results](../../archive/e2e-test-results.md)
+- [OpenCode Experiments](../../archive/experiments.md)
+- [Technical Research](../../archive/technical-research.md)
 
 ---
 
