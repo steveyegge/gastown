@@ -7,7 +7,35 @@
 
 ## 2026-01-19
 
-### Documentation Reorganization
+### Code Organization (Afternoon)
+
+**OpenCode Package Cleanup**:
+- Renamed `plugin.go` → `embed.go` (it embeds/installs, not the plugin)
+- Consolidated `plugin_test.go` + `plugin_content_test.go` → `embed_test.go`
+- Follows `internal/plugin/` pattern (file.go + file_test.go)
+
+**Design Directory Reorganization**:
+- Moved `maintenance.md` to `reference/` (operational, not design)
+- Moved `gastown-plugin.md` to `reference/plugin-implementation.md`
+- Created `design-decisions.md` for core integration patterns
+- Updated `design/README.md` with clear criteria for what belongs where
+
+**Plugin Simplification Analysis** (design-decisions.md P4):
+- Identified core architecture issue: PATH set in each runtime's hooks, not once in core
+- Proposed fix: Add PATH to `AgentEnv()` in `internal/config/env.go`
+- Target plugin: ~15 lines vs current ~190 lines
+- Tasks documented for simplifying both Claude hooks and gastown.js
+
+**Test Infrastructure Plan** (next-steps.md):
+- Proposed `internal/testutil/` package with fixtures
+- Extract constants, logging, session waiting patterns
+- Apply to all E2E tests for consistency
+
+**Validation Script Improvement**:
+- Git-based HISTORY.md change detection (replaces date-based check)
+- No more "forever nag" - compares against last HISTORY.md commit
+
+### Documentation Reorganization (Morning)
 
 Reorganized the entire `docs/opencode/` structure for clarity and discoverability.
 
