@@ -10,6 +10,9 @@ import (
 
 // Protocol message patterns for Witness inbox routing.
 var (
+	// POLECAT_STARTED <name> - polecat signaling work started
+	PatternPolecatStarted = regexp.MustCompile(`^POLECAT_STARTED\s+(\S+)`)
+
 	// POLECAT_DONE <name> - polecat signaling work completion
 	PatternPolecatDone = regexp.MustCompile(`^POLECAT_DONE\s+(\S+)`)
 
@@ -36,6 +39,7 @@ var (
 type ProtocolType string
 
 const (
+	ProtoPolecatStarted    ProtocolType = "polecat_started"
 	ProtoPolecatDone       ProtocolType = "polecat_done"
 	ProtoLifecycleShutdown ProtocolType = "lifecycle_shutdown"
 	ProtoHelp              ProtocolType = "help"
@@ -95,6 +99,8 @@ type SwarmStartPayload struct {
 // ClassifyMessage determines the protocol type from a message subject.
 func ClassifyMessage(subject string) ProtocolType {
 	switch {
+	case PatternPolecatStarted.MatchString(subject):
+		return ProtoPolecatStarted
 	case PatternPolecatDone.MatchString(subject):
 		return ProtoPolecatDone
 	case PatternLifecycleShutdown.MatchString(subject):
