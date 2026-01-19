@@ -1,275 +1,129 @@
+---
 # OpenCode Integration Documentation
+# This is the landing page for all OpenCode-related docs in Gastown.
+# Agents should update the fields below when making changes.
+
+last_updated: 2026-01-19
+status: experimental  # experimental | stable | deprecated
+production_ready: true
+opencode_version_tested: 1.1.25
+gastown_branch: copilot/add-opencode-orchestration-layer-again
+
+# Documentation organization guidelines for agents:
+# - Active guides go in docs/opencode/ root
+# - Point-in-time analysis/reports go in docs/opencode/archive/
+# - Archive files must have date and commit metadata in their header
+# - Use lowercase-with-dashes for all filenames (except README.md)
+# - Update this README when adding/removing/renaming docs
+---
+
+# OpenCode Integration
 
 > **Status**: ⚠️ **Experimental** - Community-contributed feature  
 > **Primary Runtime**: Claude Code (recommended for production)  
 > **This Integration**: Optional extension for users preferring OpenCode
 
-## Important Notes
+This directory contains all documentation for OpenCode integration with Gastown.
 
-- **Default**: Gastown is designed for and tested primarily with Claude Code
-- **Optional**: OpenCode support is an opt-in extension
-- **Community Maintained**: While thoroughly tested, this is a community contribution
-- **Production**: Claude Code recommended; OpenCode for experimental/alternative use cases
-
-**Repository Source**: Based on [anomalyco/opencode](https://github.com/anomalyco/opencode)
+**Repository Source**: [anomalyco/opencode](https://github.com/anomalyco/opencode)
 
 ---
 
-## 📚 Documentation Index
+## Quick Start
 
-### Executive Summary
-
-**[Integration Summary](integration-summary.md)** ⭐ **START HERE** - Executive summary of completed implementation
-- All achievements, changes, and decisions
-- Feature parity matrix (100% complete)
-- Architecture decisions and rationale
-- Testing results and validation
-- Quick reference for all key information
-
-### Quick Start
-
-**[Quickstart Guide](opencode-quickstart.md)** - One-page summary to get oriented quickly
+| Goal | Document |
+|------|----------|
+| **Get oriented** | [opencode-quickstart.md](opencode-quickstart.md) |
+| **See current status** | [integration-summary.md](integration-summary.md) ⭐ |
+| **Develop plugins** | [plugin-guide.md](plugin-guide.md) |
+| **Maintain the integration** | [maintenance.md](maintenance.md) |
 
 ---
 
-### Core Planning & Architecture
+## Documentation Structure
 
-**[Concept Analysis](opencode-concept-analysis.md)** - Analysis of all 23 Gastown concepts and Claude Code coupling
-- Identifies which concepts need abstraction
-- Coupling levels: 13 runtime-agnostic, 2 low, 4 medium, 4 high
-- Priority list with effort estimates
+### Active Documentation (root)
 
-**[Integration Architecture](opencode-integration-architecture.md)** - Detailed integration strategy leveraging Opencode features
-- Opencode research findings (plugins, SDK, tools, agents)
-- Core logic extraction pattern
-- Concept-by-concept integration with code examples
-- 4-phase implementation roadmap
+Core guides that are actively maintained:
 
-**[Orchestration Plan](opencode-orchestration.md)** - High-level architecture and strategy
-- Executive summary
-- Current state vs future state
-- Design goals and architecture
-- Integration points and workflow patterns
+| File | Purpose |
+|------|---------|
+| `README.md` | This landing page and organization guide |
+| `integration-summary.md` | Current status, achievements, bugs fixed |
+| `plugin-guide.md` | Plugin development and event system |
+| `maintenance.md` | Keeping the integration up-to-date |
+| `opencode-quickstart.md` | Quick orientation guide |
+| `opencode-reference.md` | CLI/SDK/Server/Plugin reference |
 
-**[Implementation Guide](opencode-implementation-guide.md)** - Technical specifications
-- Go interface definitions
-- Code structure and organization
-- Configuration examples
-- Testing strategy
+### Planning & Architecture
 
----
+Technical planning documents:
 
-### Implementation Results
+| File | Purpose |
+|------|---------|
+| `opencode-integration-architecture.md` | Detailed integration strategy |
+| `opencode-orchestration.md` | High-level architecture |
+| `opencode-implementation-guide.md` | Technical specifications |
+| `opencode-concept-analysis.md` | Concept coupling analysis |
+| `opencode-decisions.md` | Decisions and open questions |
+| `opencode-experiments.md` | Validation experiments |
+| `technical-research.md` | Research from OpenCode repo |
+| `stage2-sdk-orchestration.md` | Future SDK-based plans |
+| `opencode-index.md` | Comprehensive navigation hub |
 
-**[Impact Analysis](archive/impact-analysis.md)** - Comprehensive impact and feature parity analysis
-- How OpenCode integration affects other agent runtimes
-- Detailed feature parity matrix
-- End-to-end workflow traces
-- Claude-specific feature identification
+### Archive (`archive/`)
 
-**[Session Fork Test Results](archive/session-fork-test-results.md)** - Session fork testing and validation
-- HTTP API fork testing (POST `/session/{id}/fork`)
-- Interactive TUI `/fork` command verification
-- Source code references and examples
-- Implementation guidance for `gt seance`
+Point-in-time analysis and test results. Each file includes date and commit metadata:
 
-**[Integration Test Results](archive/integration-test-results.md)** - E2E integration testing
-- 7 integration test scenarios executed
-- Plugin gap analysis and identification
-- Production readiness assessment
-
-**[Plugin Implementation Guide](plugin-guide.md)** - Complete plugin development guide
-- Solutions for all plugin gaps
-- OpenCode event system overview (30+ events)
-- Enhanced plugin with 100% Claude parity
-- Testing checklist and troubleshooting
+| File | Purpose |
+|------|---------|
+| `e2e-test-results.md` | E2E testing results (2026-01-17) |
+| `integration-test-results.md` | Integration test results (2026-01-17) |
+| `session-fork-test-results.md` | Fork testing results (2026-01-17) |
+| `impact-analysis.md` | Feature parity analysis (2026-01-17) |
+| `upstream-review.md` | PR review notes (2026-01-17) |
 
 ---
 
-### Technical Research
+## Key Information
 
-**[Technical Research](technical-research.md)** - Deep dive into Opencode repository
-- Session forking (`session/fork`) from ACP draft spec
-- Configuration schema ([https://opencode.ai/config.json](https://opencode.ai/config.json))
-- ACP (Agent Client Protocol) integration
-- Plugin system internals with code examples
-- HTTP API endpoints and usage
-- Remote orchestration patterns
-- Research gaps and experiments needed
+### Feature Parity
 
----
+OpenCode achieves 100% feature parity with Claude Code:
 
-### Research & Decision Support
+- ✅ All 4 Claude hooks have OpenCode equivalents
+- ✅ All 6 roles support OpenCode (Mayor, Deacon, Witness, Refinery, Polecat, Crew)
+- ✅ Session resume, fork (via HTTP API), export/import
+- ✅ Plugin system with event handlers
 
-**[Experiments Checklist](opencode-experiments.md)** - 12 validation experiments
-- 5 basic experiments (MVP requirements)
-- 4 advanced experiments (design improvements)
-- 3 blocking experiments (must resolve)
-- Procedures and success criteria for each
+### Known Issues
 
-**[Decisions & Questions](opencode-decisions.md)** - Decision points and open questions
-- 5 critical architectural decisions
-- 10 open questions requiring research
-- Known divergences between Claude and Opencode
-- Assumptions registry with validation status
+- **OpenCode tmux crash**: OpenCode may crash inside tmux due to upstream `proper-lockfile/onExit` bug. This is an OpenCode issue, not Gastown.
 
 ---
 
-### Navigation
+## External References
 
-**[Index & Reading Paths](opencode-index.md)** - Comprehensive navigation hub
-- Reading paths by role (Architects, Engineers, PMs, Users, Researchers)
-- Reading paths by goal
-- Documentation status tracking
-- Implementation timeline
-
----
-
-## 🎯 Quick Navigation
-
-| Want to... | Read This |
-|------------|-----------|
-| **See what was accomplished** | [Integration Summary](integration-summary.md) ⭐ **START HERE** |
-| Understand feature parity | [Impact Analysis](archive/impact-analysis.md) |
-| Learn about session forking | [Session Fork Test Results](archive/session-fork-test-results.md) |
-| See integration test results | [Integration Test Results](archive/integration-test-results.md) |
-| Implement plugins | [Plugin Implementation Guide](plugin-guide.md) |
-| Get oriented quickly | [Quickstart](opencode-quickstart.md) (5 min) |
-| Understand concept coupling | [Concept Analysis](opencode-concept-analysis.md) |
-| Learn how Opencode works | [Technical Research](technical-research.md) |
-| See integration patterns | [Integration Architecture](opencode-integration-architecture.md) |
-| Understand the big picture | [Orchestration Plan](opencode-orchestration.md) |
-| Get implementation details | [Implementation Guide](opencode-implementation-guide.md) |
-| Run experiments | [Experiments Checklist](opencode-experiments.md) |
-| Make decisions | [Decisions & Questions](opencode-decisions.md) |
-| Navigate everything | [Full Index](opencode-index.md) |
+- [OpenCode Repository](https://github.com/anomalyco/opencode)
+- [OpenCode Documentation](https://opencode.ai/docs/)
+- [ACP Specification](https://agentclientprotocol.com/)
+- [Configuration Schema](https://opencode.ai/config.json)
 
 ---
 
-## 📊 Documentation Stats
+## For Agents: When to Update This README
 
-### Implementation Documents (New)
+Update the **frontmatter** when:
+- OpenCode version changes (`opencode_version_tested`)
+- Status changes (`status`, `production_ready`)
+- Making significant documentation changes (`last_updated`)
 
-| Document | Lines | Purpose |
-|----------|-------|---------|
-| Integration Summary | 423 | Executive summary and consolidation |
-| Impact Analysis | 498 | Feature parity and runtime impact |
-| Session Fork Test Results | 437 | Fork testing and validation |
-| Integration Test Results | 487 | E2E integration testing |
-| Plugin Implementation Guide | 582 | Complete plugin development guide |
+Update the **document tables** when:
+- Adding new documentation files
+- Moving files to/from archive
+- Renaming files
 
-**Implementation Total**: 5 documents, 2,427 lines
-
-### Planning Documents (Pre-existing)
-
-| Document | Lines | Purpose |
-|----------|-------|---------|
-| Concept Analysis | 730 | Coupling analysis of all Gastown concepts |
-| Integration Architecture | 940 | Integration strategy with code examples |
-| Technical Research | 670 | Deep dive into Opencode repository |
-| Orchestration Plan | 620 | High-level architecture |
-| Implementation Guide | 550 | Technical specifications |
-| Experiments | 600 | Validation experiments |
-| Decisions | 450 | Decision points and questions |
-| Index | 320 | Navigation hub |
-| Quickstart | 150 | One-page summary |
-| README | 230 | Documentation index |
-
-**Planning Total**: 10 documents, 5,260 lines
-
-**Grand Total**: 15 documents, 7,687 lines
-
----
-
-## 🔍 Key Insights
-
-### Implementation Achievements (2026-01-17)
-- **✅ 100% Feature Parity Achieved** - All Claude hooks have OpenCode equivalents
-- **✅ All Roles Support OpenCode** - Mayor, Deacon, Witness, Refinery, Polecat, Crew
-- **✅ Session Fork via HTTP API** - Superior to Claude's CLI-only approach
-- **✅ Production Ready** - Comprehensive testing completed
-
-### From Concept Analysis
-- **13/23 Gastown concepts already runtime-agnostic**
-- **Runtime config abstraction already exists** - just needs adoption
-- **Minimal changes required**: ~200-300 LOC in 5 manager files
-
-### From Integration Architecture
-- **Core logic extraction pattern**: Extract once, adapt twice (Claude + Opencode)
-- **Mail already works cross-runtime**: Same CLI command for both
-- **Opencode provides natural integration points**: Plugins, tools, HTTP API
-
-### From Technical Research
-- **Session fork exists**: `session/fork` in ACP draft spec (needs verification)
-- **Configuration schema**: [https://opencode.ai/config.json](https://opencode.ai/config.json)
-- **Plugin events**: `session.created`, `tool.execute.before/after`, `stop`, etc.
-- **HTTP API**: RESTful endpoints for remote orchestration
-- **Permissions**: Fine-grained with wildcards (`"git *": "allow"`, `"rm *": "deny"`)
-
----
-
-## 🚀 Implementation Status
-
-### ✅ Completed (2026-01-17)
-
-**Phase 1: Core Logic Extraction**
-- ✅ Runtime abstraction adopted across all managers
-- ✅ OpenCode agent preset created with full configuration
-
-**Phase 2: OpenCode Adapters**
-- ✅ Enhanced `gastown.js` plugin with 4 hooks
-- ✅ Automated setup script with authentication support
-
-**Phase 3: Unified Interface**
-- ✅ Updated 5 agent managers (Mayor, Witness, Deacon + 2 existing)
-- ✅ Replaced `claude.EnsureSettings` with `runtime.EnsureSettingsForRole`
-
-**Phase 4: Testing & Documentation**
-- ✅ Integration tests (7 scenarios)
-- ✅ Session fork testing (HTTP API + TUI)
-- ✅ Plugin gap analysis and resolution
-- ✅ Comprehensive documentation (7 new files)
-
-**Total Effort**: Completed in 1 implementation session
-
----
-
-## 🔗 External References
-
-### Primary Sources
-- [Opencode Repository](https://github.com/anomalyco/opencode) - Source of truth
-- [ACP Specification](https://agentclientprotocol.com/) - Agent Client Protocol
-- [Configuration Schema](https://opencode.ai/config.json) - Official schema
-- [OpenCode Documentation](https://opencode.ai/docs/) - Official docs
-- [DeepWiki](https://deepwiki.com/anomalyco/opencode/) - Technical deep dives
-
-### Key Issues & RFCs
-- [Issue #7978](https://github.com/anomalyco/opencode/issues/7978) - ACP draft methods (session/fork, session/list)
-- [ACP RFC: Session Fork](https://agentclientprotocol.com/rfds/session-fork) - Fork specification
-- [Issue #1473](https://github.com/anomalyco/opencode/issues/1473) - Hooks support discussion
-
----
-
-## 📝 Document Updates
-
-**Latest Changes** (2026-01-17):
-- ✅ **Implementation Complete** - All phases finished
-- ✅ Added Integration Summary (executive overview)
-- ✅ Moved archive/impact-analysis.md to docs/opencode/
-- ✅ Added Session Fork Test Results
-- ✅ Added Integration Test Results  
-- ✅ Added Plugin Implementation Guide
-- ✅ Updated all cross-references
-- ✅ Consolidated findings across all documents
-
-**Previous Changes** (2026-01-16):
-- ✅ Reorganized all documentation under `docs/opencode/`
-- ✅ Added comprehensive technical research from Opencode repository
-- ✅ Documented `session/fork` from ACP draft spec
-- ✅ Added configuration schema references
-
----
-
-**Last Updated**: 2026-01-19  
-**Status**: ✅ **Implementation Complete - Production Ready**  
-**Maintainer**: Gastown Team
+Update `integration-summary.md` when:
+- Fixing bugs in the integration
+- Adding new features
+- Changing tested versions
