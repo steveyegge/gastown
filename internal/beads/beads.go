@@ -18,7 +18,7 @@ import (
 // ZFC: Only define errors that don't require stderr parsing for decisions.
 // ErrNotARepo and ErrSyncConflict were removed - agents should handle these directly.
 var (
-	ErrNotInstalled = errors.New("bd not installed: run 'pip install beads-cli' or see https://github.com/anthropics/beads")
+	ErrNotInstalled = errors.New("bd not installed: run 'pip install beads-cli' or see https://github.com/groblegark/beads")
 	ErrNotFound     = errors.New("issue not found")
 )
 

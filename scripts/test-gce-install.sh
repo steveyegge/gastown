@@ -90,7 +90,7 @@ if command -v bd &> /dev/null; then
     check "beads already installed: $(bd --version)"
 else
     # Install via go install
-    go install github.com/steveyegge/beads/cmd/bd@latest
+    go install github.com/groblegark/beads/cmd/bd@latest
     if command -v bd &> /dev/null; then
         check "beads installed: $(bd --version)"
     else
@@ -175,7 +175,7 @@ fi
 log "Testing rig add with sample repo..."
 
 # Use a small public repo for testing
-if gt rig add test-rig --remote=https://github.com/steveyegge/beads.git 2>&1; then
+if gt rig add test-rig --remote=https://github.com/groblegark/beads.git 2>&1; then
     check "gt rig add works"
 
     # Verify rig structure

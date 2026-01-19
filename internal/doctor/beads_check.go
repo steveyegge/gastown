@@ -91,13 +91,13 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 
 	// Check based on backend type
 	if backend == "dolt" {
-		return c.checkDoltBackend(beadsDir)
+		return c.checkDoltBackend(beadsDir, ctx)
 	}
-	return c.checkSqliteBackend(beadsDir)
+	return c.checkSqliteBackend(beadsDir, ctx)
 }
 
 // checkDoltBackend checks Dolt-specific database health.
-func (c *BeadsDatabaseCheck) checkDoltBackend(beadsDir string) *CheckResult {
+func (c *BeadsDatabaseCheck) checkDoltBackend(beadsDir string, ctx *CheckContext) *CheckResult {
 	doltDir := filepath.Join(beadsDir, "dolt")
 	if _, err := os.Stat(doltDir); os.IsNotExist(err) {
 		return &CheckResult{
@@ -128,7 +128,7 @@ func (c *BeadsDatabaseCheck) checkDoltBackend(beadsDir string) *CheckResult {
 }
 
 // checkSqliteBackend checks SQLite-specific database health.
-func (c *BeadsDatabaseCheck) checkSqliteBackend(beadsDir string) *CheckResult {
+func (c *BeadsDatabaseCheck) checkSqliteBackend(beadsDir string, ctx *CheckContext) *CheckResult {
 	// Check if issues.db exists and has content
 	issuesDB := filepath.Join(beadsDir, "issues.db")
 	issuesJSONL := filepath.Join(beadsDir, "issues.jsonl")
