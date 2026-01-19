@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/runtime"
 )
@@ -20,6 +21,19 @@ import (
 var (
 	ErrNotInstalled = errors.New("bd not installed: run 'pip install beads-cli' or see https://github.com/groblegark/beads")
 	ErrNotFound     = errors.New("issue not found")
+)
+
+// Retry configuration for Dolt lock contention (rig-358fc7)
+const (
+	// MaxRetryAttempts is the maximum number of retry attempts for Dolt lock contention.
+	// Default: 30 attempts with exponential backoff = ~6 seconds total
+	MaxRetryAttempts = 30
+
+	// InitialRetryDelay is the starting delay for exponential backoff
+	InitialRetryDelay = 100 * time.Millisecond
+
+	// MaxRetryDelay caps the exponential backoff to prevent excessive waits
+	MaxRetryDelay = 1 * time.Second
 )
 
 // Issue represents a beads issue.
@@ -144,6 +158,22 @@ func (b *Beads) getActor() string {
 	return os.Getenv("BD_ACTOR")
 }
 
+// isRetryableError checks if an error from bd is retryable due to Dolt lock contention.
+// Dolt-specific errors that indicate transient lock contention:
+// - "database is read only" - Dolt couldn't acquire write lock
+// - "cannot update manifest" - Dolt manifest locked by another process
+//
+// Note: This does NOT help with bd daemon/Dolt incompatibility (rig-0eec57)
+// which causes permanent read-only state requiring daemon fix.
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "database is read only") ||
+		strings.Contains(errStr, "cannot update manifest")
+}
+
 // Init initializes a new beads database in the working directory.
 // This uses the same environment isolation as other commands.
 func (b *Beads) Init(prefix string) error {
@@ -152,7 +182,47 @@ func (b *Beads) Init(prefix string) error {
 }
 
 // run executes a bd command and returns stdout.
+// Implements retry logic with exponential backoff for Dolt lock contention (rig-358fc7).
 func (b *Beads) run(args ...string) ([]byte, error) {
+	var lastErr error
+	delay := InitialRetryDelay
+
+	for attempt := 0; attempt <= MaxRetryAttempts; attempt++ {
+		stdout, err := b.runOnce(args...)
+		if err == nil {
+			return stdout, nil
+		}
+
+		lastErr = err
+
+		// Check if this is a retryable error (Dolt lock contention)
+		if !isRetryableError(err) {
+			// Non-retryable error, fail immediately
+			return nil, err
+		}
+
+		// Don't sleep after the last attempt
+		if attempt < MaxRetryAttempts {
+			if attempt == 0 {
+				// Log first retry for debugging
+				fmt.Fprintf(os.Stderr, "Dolt lock contention detected, retrying (attempt %d/%d)...\n", attempt+1, MaxRetryAttempts)
+			}
+			time.Sleep(delay)
+
+			// Exponential backoff with cap
+			delay *= 2
+			if delay > MaxRetryDelay {
+				delay = MaxRetryDelay
+			}
+		}
+	}
+
+	// All retries exhausted
+	return nil, fmt.Errorf("failed after %d retries: %w", MaxRetryAttempts, lastErr)
+}
+
+// runOnce executes a bd command once without retry logic.
+func (b *Beads) runOnce(args ...string) ([]byte, error) {
 	// Use --no-daemon for faster read operations (avoids daemon IPC overhead)
 	// The daemon is primarily useful for write coalescing, not reads.
 	// Use --allow-stale to prevent failures when db is out of sync with JSONL

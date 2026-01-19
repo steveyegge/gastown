@@ -161,7 +161,11 @@ bd diff <commit1> <commit2>
 - SQLite: Lock failure → wait/retry → success
 - Dolt: Lock failure → readonly mode → error on write attempt
 
-**Known Issue:** No automatic retry logic for Dolt lock contention (see rig-358fc7).
+**Retry Logic (rig-358fc7):** Dolt lock contention now has automatic retry with exponential backoff (30 attempts, ~6s total). Retryable errors:
+- "database is read only" - transient lock contention
+- "cannot update manifest" - manifest locked by another process
+
+**Important:** Retry logic does NOT fix bd daemon incompatibility (rig-0eec57) which causes permanent read-only state.
 
 ## Migration Guide
 
