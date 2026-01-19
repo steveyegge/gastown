@@ -6,9 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/opencode"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -22,14 +21,12 @@ func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error
 		return nil
 	}
 
-	switch rc.Hooks.Provider {
-	case "claude":
-		return claude.EnsureSettingsForRoleAt(workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile)
-	case "opencode":
-		return opencode.EnsurePluginAt(workDir, rc.Hooks.Dir, rc.Hooks.SettingsFile)
-	default:
+	provider := hooks.Get(rc.Hooks.Provider)
+	if provider == nil {
+		// Unknown provider treated as "none" - no hooks to install.
 		return nil
 	}
+	return provider.EnsureHooks(workDir, role, rc.Hooks)
 }
 
 // SessionIDFromEnv returns the runtime session ID, if present.
