@@ -1,189 +1,163 @@
-package agent
+package agent_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/agent"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestStateConstants(t *testing.T) {
-	tests := []struct {
-		name  string
-		state State
-		value string
-	}{
-		{"StateStopped", StateStopped, "stopped"},
-		{"StateRunning", StateRunning, "running"},
-		{"StatePaused", StatePaused, "paused"},
-	}
+// =============================================================================
+// StateManager Tests
+// =============================================================================
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if string(tt.state) != tt.value {
-				t.Errorf("State constant = %q, want %q", tt.state, tt.value)
-			}
-		})
-	}
-}
-
-func TestStateManager_StateFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	manager := NewStateManager[TestState](tmpDir, "test-state.json", func() *TestState {
-		return &TestState{Value: "default"}
-	})
-
-	expectedPath := filepath.Join(tmpDir, ".runtime", "test-state.json")
-	if manager.StateFile() != expectedPath {
-		t.Errorf("StateFile() = %q, want %q", manager.StateFile(), expectedPath)
-	}
-}
-
-func TestStateManager_Load_NoFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	manager := NewStateManager[TestState](tmpDir, "nonexistent.json", func() *TestState {
-		return &TestState{Value: "default"}
-	})
-
-	state, err := manager.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if state.Value != "default" {
-		t.Errorf("Load() value = %q, want %q", state.Value, "default")
-	}
-}
-
-func TestStateManager_Load_Save_Load(t *testing.T) {
-	tmpDir := t.TempDir()
-	manager := NewStateManager[TestState](tmpDir, "test-state.json", func() *TestState {
-		return &TestState{Value: "default"}
-	})
-
-	// Save initial state
-	state := &TestState{Value: "test-value", Count: 42}
-	if err := manager.Save(state); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-
-	// Load it back
-	loaded, err := manager.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if loaded.Value != state.Value {
-		t.Errorf("Load() value = %q, want %q", loaded.Value, state.Value)
-	}
-	if loaded.Count != state.Count {
-		t.Errorf("Load() count = %d, want %d", loaded.Count, state.Count)
-	}
-}
-
-func TestStateManager_Load_CreatesDirectory(t *testing.T) {
-	tmpDir := t.TempDir()
-	manager := NewStateManager[TestState](tmpDir, "test-state.json", func() *TestState {
-		return &TestState{Value: "default"}
-	})
-
-	// Save should create .runtime directory
-	state := &TestState{Value: "test"}
-	if err := manager.Save(state); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-
-	// Verify directory was created
-	runtimeDir := filepath.Join(tmpDir, ".runtime")
-	if _, err := os.Stat(runtimeDir); err != nil {
-		t.Errorf("Save() should create .runtime directory: %v", err)
-	}
-}
-
-func TestStateManager_Load_InvalidJSON(t *testing.T) {
-	tmpDir := t.TempDir()
-	manager := NewStateManager[TestState](tmpDir, "test-state.json", func() *TestState {
-		return &TestState{Value: "default"}
-	})
-
-	// Write invalid JSON
-	statePath := manager.StateFile()
-	if err := os.MkdirAll(filepath.Dir(statePath), 0755); err != nil {
-		t.Fatalf("Failed to create directory: %v", err)
-	}
-	if err := os.WriteFile(statePath, []byte("invalid json"), 0644); err != nil {
-		t.Fatalf("Failed to write file: %v", err)
-	}
-
-	_, err := manager.Load()
-	if err == nil {
-		t.Error("Load() with invalid JSON should return error")
-	}
-}
-
-func TestState_String(t *testing.T) {
-	tests := []struct {
-		state State
-		want  string
-	}{
-		{StateStopped, "stopped"},
-		{StateRunning, "running"},
-		{StatePaused, "paused"},
-	}
-
-	for _, tt := range tests {
-		if string(tt.state) != tt.want {
-			t.Errorf("State(%q) = %q, want %q", tt.state, string(tt.state), tt.want)
-		}
-	}
-}
-
-func TestStateManager_GenericType(t *testing.T) {
-	// Test that StateManager works with different types
-
-	type ComplexState struct {
-		Name      string   `json:"name"`
-		Values    []int    `json:"values"`
-		Enabled   bool     `json:"enabled"`
-		Nested    struct {
-			X int `json:"x"`
-		} `json:"nested"`
-	}
-
-	tmpDir := t.TempDir()
-	manager := NewStateManager[ComplexState](tmpDir, "complex.json", func() *ComplexState {
-		return &ComplexState{Name: "default", Values: []int{}}
-	})
-
-	original := &ComplexState{
-		Name:    "test",
-		Values:  []int{1, 2, 3},
-		Enabled: true,
-	}
-	original.Nested.X = 42
-
-	if err := manager.Save(original); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-
-	loaded, err := manager.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-
-	if loaded.Name != original.Name {
-		t.Errorf("Name = %q, want %q", loaded.Name, original.Name)
-	}
-	if len(loaded.Values) != len(original.Values) {
-		t.Errorf("Values length = %d, want %d", len(loaded.Values), len(original.Values))
-	}
-	if loaded.Enabled != original.Enabled {
-		t.Errorf("Enabled = %v, want %v", loaded.Enabled, original.Enabled)
-	}
-	if loaded.Nested.X != original.Nested.X {
-		t.Errorf("Nested.X = %d, want %d", loaded.Nested.X, original.Nested.X)
-	}
-}
-
-// TestState is a simple type for testing
+// TestState is a simple struct for testing StateManager generics
 type TestState struct {
-	Value string `json:"value"`
+	Name  string `json:"name"`
 	Count int    `json:"count"`
+	State agent.State `json:"state"`
+}
+
+func defaultTestState() *TestState {
+	return &TestState{
+		Name:  "default",
+		Count: 0,
+		State: agent.StateStopped,
+	}
+}
+
+func TestStateManager_NewStateManager_CreatesManager(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := agent.NewStateManager(tmpDir, "test-state.json", defaultTestState)
+
+	assert.NotNil(t, mgr)
+}
+
+func TestStateManager_StateFile_ReturnsCorrectPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := agent.NewStateManager(tmpDir, "test-state.json", defaultTestState)
+
+	expected := filepath.Join(tmpDir, ".runtime", "test-state.json")
+	assert.Equal(t, expected, mgr.StateFile())
+}
+
+func TestStateManager_Load_WhenFileNotExists_ReturnsDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := agent.NewStateManager(tmpDir, "nonexistent.json", defaultTestState)
+
+	state, err := mgr.Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, "default", state.Name)
+	assert.Equal(t, 0, state.Count)
+	assert.Equal(t, agent.StateStopped, state.State)
+}
+
+func TestStateManager_Save_CreatesDirectoryAndFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := agent.NewStateManager(tmpDir, "test-state.json", defaultTestState)
+
+	state := &TestState{
+		Name:  "test",
+		Count: 42,
+		State: agent.StateRunning,
+	}
+
+	err := mgr.Save(state)
+
+	require.NoError(t, err)
+
+	// Verify file exists
+	_, err = os.Stat(mgr.StateFile())
+	assert.NoError(t, err)
+}
+
+func TestStateManager_SaveAndLoad_RoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := agent.NewStateManager(tmpDir, "test-state.json", defaultTestState)
+
+	original := &TestState{
+		Name:  "myagent",
+		Count: 123,
+		State: agent.StateRunning,
+	}
+
+	err := mgr.Save(original)
+	require.NoError(t, err)
+
+	loaded, err := mgr.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, original.Name, loaded.Name)
+	assert.Equal(t, original.Count, loaded.Count)
+	assert.Equal(t, original.State, loaded.State)
+}
+
+func TestStateManager_Load_WhenFileCorrupted_ReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := agent.NewStateManager(tmpDir, "corrupted.json", defaultTestState)
+
+	// Create corrupted file
+	runtimeDir := filepath.Join(tmpDir, ".runtime")
+	err := os.MkdirAll(runtimeDir, 0755)
+	require.NoError(t, err)
+
+	corruptedPath := filepath.Join(runtimeDir, "corrupted.json")
+	err = os.WriteFile(corruptedPath, []byte("not valid json{{{"), 0644)
+	require.NoError(t, err)
+
+	_, err = mgr.Load()
+	assert.Error(t, err)
+}
+
+func TestStateManager_Load_WhenReadError_ReturnsError(t *testing.T) {
+	// Use a path that will cause a read error (directory as file)
+	tmpDir := t.TempDir()
+	runtimeDir := filepath.Join(tmpDir, ".runtime")
+	err := os.MkdirAll(runtimeDir, 0755)
+	require.NoError(t, err)
+
+	// Create a directory where the file should be
+	dirAsFile := filepath.Join(runtimeDir, "isadirectory.json")
+	err = os.MkdirAll(dirAsFile, 0755)
+	require.NoError(t, err)
+
+	mgr := agent.NewStateManager(tmpDir, "isadirectory.json", defaultTestState)
+
+	_, err = mgr.Load()
+	assert.Error(t, err)
+}
+
+func TestStateManager_Save_WhenDirectoryCreationFails_ReturnsError(t *testing.T) {
+	// Use a path where we can't create directories
+	// This is platform-specific and tricky to test reliably
+	// Skip if we can't set up the conditions
+
+	if os.Getuid() == 0 {
+		t.Skip("cannot test permission errors as root")
+	}
+
+	tmpDir := t.TempDir()
+
+	// Create a file where .runtime directory should go
+	runtimePath := filepath.Join(tmpDir, ".runtime")
+	err := os.WriteFile(runtimePath, []byte("file"), 0644)
+	require.NoError(t, err)
+
+	mgr := agent.NewStateManager(tmpDir, "test.json", defaultTestState)
+
+	err = mgr.Save(&TestState{})
+	assert.Error(t, err)
+}
+
+// --- State Constants Tests ---
+
+func TestState_Constants(t *testing.T) {
+	// Verify state constants have expected values
+	assert.Equal(t, agent.State("stopped"), agent.StateStopped)
+	assert.Equal(t, agent.State("running"), agent.StateRunning)
+	assert.Equal(t, agent.State("paused"), agent.StatePaused)
 }

@@ -477,19 +477,19 @@ func runEscalateShow(cmd *cobra.Command, args []string) error {
 
 	if escalateJSON {
 		data := map[string]interface{}{
-			"id":          issue.ID,
-			"title":       issue.Title,
-			"status":      issue.Status,
-			"created_at":  issue.CreatedAt,
-			"severity":    fields.Severity,
-			"reason":      fields.Reason,
-			"escalatedBy": fields.EscalatedBy,
-			"escalatedAt": fields.EscalatedAt,
-			"ackedBy":     fields.AckedBy,
-			"ackedAt":     fields.AckedAt,
-			"closedBy":    fields.ClosedBy,
+			"id":           issue.ID,
+			"title":        issue.Title,
+			"status":       issue.Status,
+			"created_at":   issue.CreatedAt,
+			"severity":     fields.Severity,
+			"reason":       fields.Reason,
+			"escalatedBy":  fields.EscalatedBy,
+			"escalatedAt":  fields.EscalatedAt,
+			"ackedBy":      fields.AckedBy,
+			"ackedAt":      fields.AckedAt,
+			"closedBy":     fields.ClosedBy,
 			"closedReason": fields.ClosedReason,
-			"relatedBead": fields.RelatedBead,
+			"relatedBead":  fields.RelatedBead,
 		}
 		out, _ := json.MarshalIndent(data, "", "  ")
 		fmt.Println(string(out))

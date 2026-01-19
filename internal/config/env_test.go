@@ -213,48 +213,6 @@ func TestExportPrefix(t *testing.T) {
 	}
 }
 
-func TestBuildStartupCommandWithEnv(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		env      map[string]string
-		agentCmd string
-		prompt   string
-		expected string
-	}{
-		{
-			name:     "no env no prompt",
-			env:      map[string]string{},
-			agentCmd: "claude",
-			prompt:   "",
-			expected: "claude",
-		},
-		{
-			name:     "env no prompt",
-			env:      map[string]string{"GT_ROLE": "polecat"},
-			agentCmd: "claude",
-			prompt:   "",
-			expected: "export GT_ROLE=polecat && claude",
-		},
-		{
-			name:     "env with prompt",
-			env:      map[string]string{"GT_ROLE": "polecat"},
-			agentCmd: "claude",
-			prompt:   "gt prime",
-			expected: `export GT_ROLE=polecat && claude "gt prime"`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := BuildStartupCommandWithEnv(tt.env, tt.agentCmd, tt.prompt)
-			if result != tt.expected {
-				t.Errorf("BuildStartupCommandWithEnv() = %q, want %q", result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestMergeEnv(t *testing.T) {
 	t.Parallel()
 	a := map[string]string{"A": "1", "B": "2"}

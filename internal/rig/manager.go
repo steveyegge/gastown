@@ -162,6 +162,14 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 	}
 
 	// Scan for polecats
+	// Reserved names that conflict with rig-level agents
+	reservedNames := map[string]bool{
+		"witness":  true,
+		"refinery": true,
+		"crew":     true,
+		"mayor":    true,
+		"deacon":   true,
+	}
 	polecatsDir := filepath.Join(rigPath, "polecats")
 	if entries, err := os.ReadDir(polecatsDir); err == nil {
 		for _, e := range entries {
@@ -170,6 +178,10 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 			}
 			name := e.Name()
 			if strings.HasPrefix(name, ".") {
+				continue
+			}
+			// Skip reserved names that conflict with rig-level agents
+			if reservedNames[name] {
 				continue
 			}
 			rig.Polecats = append(rig.Polecats, name)

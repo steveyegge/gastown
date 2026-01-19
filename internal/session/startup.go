@@ -4,9 +4,12 @@ package session
 import (
 	"fmt"
 	"time"
-
-	"github.com/steveyegge/gastown/internal/tmux"
 )
+
+// SessionNudger provides the ability to nudge a terminal session.
+type SessionNudger interface {
+	NudgeSession(session, message string) error
+}
 
 // StartupNudgeConfig configures a startup nudge message.
 type StartupNudgeConfig struct {
@@ -40,7 +43,7 @@ type StartupNudgeConfig struct {
 //
 // The message content doesn't trigger GUPP - CLAUDE.md and hooks handle that.
 // The metadata makes sessions identifiable in /resume.
-func StartupNudge(t *tmux.Tmux, session string, cfg StartupNudgeConfig) error {
+func StartupNudge(t SessionNudger, session string, cfg StartupNudgeConfig) error {
 	message := FormatStartupNudge(cfg)
 	return t.NudgeSession(session, message)
 }

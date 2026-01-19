@@ -3,13 +3,11 @@ package polecat
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/mail"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // PendingSpawn represents a polecat that has been spawned but not yet triggered.
@@ -115,23 +113,19 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 		return nil, nil
 	}
 
-	t := tmux.NewTmux()
+	agents := agent.Default()
 	var results []TriggerResult
 
 	for _, ps := range pending {
 		result := TriggerResult{Spawn: ps}
 
-		// Check if session still exists (ZFC: query tmux directly)
-		running, err := t.HasSession(ps.Session)
-		if err != nil {
-			result.Error = fmt.Errorf("checking session: %w", err)
-			results = append(results, result)
-			continue
-		}
+		// Construct AgentID from rig and polecat name
+		id := agent.PolecatAddress(ps.Rig, ps.Polecat)
 
-		if !running {
-			// Session gone - archive the mail (spawn is dead)
-			result.Error = fmt.Errorf("session no longer exists")
+		// Check if agent still exists
+		if !agents.Exists(id) {
+			// Agent gone - archive the mail (spawn is dead)
+			result.Error = fmt.Errorf("agent no longer exists")
 			if ps.mailbox != nil {
 				_ = ps.mailbox.Archive(ps.MailID)
 			}
@@ -139,19 +133,15 @@ func TriggerPendingSpawns(townRoot string, timeout time.Duration) ([]TriggerResu
 			continue
 		}
 
-		// Check if runtime is ready (non-blocking poll)
-		rigPath := filepath.Join(townRoot, ps.Rig)
-		runtimeConfig := config.LoadRuntimeConfig(rigPath)
-		err = t.WaitForRuntimeReady(ps.Session, runtimeConfig, timeout)
-		if err != nil {
+		// Wait for runtime to be ready (non-blocking poll with timeout)
+		if err := agents.WaitReady(id); err != nil {
 			// Not ready yet - leave mail in inbox for next poll
 			continue
 		}
 
 		// Runtime is ready - send trigger
-		triggerMsg := "Begin."
-		if err := t.NudgeSession(ps.Session, triggerMsg); err != nil {
-			result.Error = fmt.Errorf("nudging session: %w", err)
+		if err := agents.Nudge(id, "Begin."); err != nil {
+			result.Error = fmt.Errorf("nudging agent: %w", err)
 			results = append(results, result)
 			continue
 		}

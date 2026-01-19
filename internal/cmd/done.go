@@ -7,14 +7,15 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/townlog"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -692,7 +693,7 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 	}
 
 	// Get polecat manager using existing helper
-	mgr, _, err := getPolecatManager(roleInfo.Rig)
+	mgr, _, _, err := getPolecatManager(roleInfo.Rig)
 	if err != nil {
 		return fmt.Errorf("getting polecat manager: %w", err)
 	}
@@ -743,11 +744,11 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 	_ = events.LogFeed(events.TypeSessionDeath, agentID,
 		events.SessionDeathPayload(sessionName, agentID, "self-clean: done means gone", "gt done"))
 
-	// Kill our own tmux session with proper process cleanup
+	// Kill our own session through factory.Agents() for consistency
 	// This will terminate Claude and all child processes, completing the self-cleaning cycle.
-	// We use KillSessionWithProcesses to ensure no orphaned processes are left behind.
-	t := tmux.NewTmux()
-	if err := t.KillSessionWithProcesses(sessionName); err != nil {
+	// Agents.Stop() recursively kills all descendant processes to prevent orphans.
+	polecatID := agent.PolecatAddress(rigName, polecatName)
+	if err := factory.Agents().Stop(polecatID, true); err != nil {
 		return fmt.Errorf("killing session %s: %w", sessionName, err)
 	}
 

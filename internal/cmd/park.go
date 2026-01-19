@@ -105,9 +105,15 @@ func runPark(cmd *cobra.Command, args []string) error {
 	}
 
 	// Detect agent identity
-	agentID, _, cloneRoot, err := resolveSelfTarget()
+	agentID, err := resolveSelfTarget()
 	if err != nil {
 		return fmt.Errorf("detecting agent identity: %w", err)
+	}
+
+	// Detect clone root for parked work storage
+	cloneRoot, err := detectCloneRoot()
+	if err != nil {
+		return fmt.Errorf("detecting clone root: %w", err)
 	}
 
 	// Read current pinned bead (if any)

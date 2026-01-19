@@ -12,15 +12,15 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 	"golang.org/x/term"
 )
@@ -213,14 +213,12 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
 
-	// Create tmux instance for runtime checks
-	t := tmux.NewTmux()
-
-	// Pre-fetch all tmux sessions for O(1) lookup
+	// Pre-fetch all running agents for O(1) lookup
 	allSessions := make(map[string]bool)
-	if sessions, err := t.ListSessions(); err == nil {
-		for _, s := range sessions {
-			allSessions[s] = true
+	agents := agent.Default()
+	if agentIDs, err := agents.List(); err == nil {
+		for _, id := range agentIDs {
+			allSessions[id.String()] = true
 		}
 	}
 
@@ -351,8 +349,8 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 			}
 
 			// Count crew workers
-			crewGit := git.NewGit(r.Path)
-			crewMgr := crew.NewManager(r, crewGit)
+			agentName, _ := config.ResolveRoleAgentName("crew", townRoot, r.Path)
+			crewMgr := factory.New(townRoot).CrewManager(r, agentName)
 			if workers, err := crewMgr.List(); err == nil {
 				for _, w := range workers {
 					rs.Crews = append(rs.Crews, w.Name)
@@ -612,8 +610,8 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 	case "muted", "paused", "degraded":
 		// Other intentional non-observable states
 		stateInfo = style.Dim.Render(fmt.Sprintf(" [%s]", beadState))
-	// Ignore observable states: "running", "idle", "dead", "done", "stopped", ""
-	// These should be derived from tmux, not bead.
+		// Ignore observable states: "running", "idle", "dead", "done", "stopped", ""
+		// These should be derived from tmux, not bead.
 	}
 
 	// Build agent bead ID using canonical naming: prefix-rig-role-name
@@ -836,7 +834,7 @@ func buildStatusIndicator(agent AgentRuntime) string {
 		indicator += style.Dim.Render(" gate")
 	case "muted", "paused", "degraded":
 		indicator += style.Dim.Render(" " + beadState)
-	// Ignore observable states: running, idle, dead, done, stopped, ""
+		// Ignore observable states: running, idle, dead, done, stopped, ""
 	}
 
 	return indicator
@@ -914,21 +912,17 @@ func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
 // allAgentBeads is a preloaded map of agent beads for O(1) lookup.
 // allHookBeads is a preloaded map of hook beads for O(1) lookup.
 func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]*beads.Issue, allHookBeads map[string]*beads.Issue, mailRouter *mail.Router, skipMail bool) []AgentRuntime {
-	// Get session names dynamically
-	mayorSession := getMayorSessionName()
-	deaconSession := getDeaconSessionName()
-
 	// Define agents to discover
 	// Note: Mayor and Deacon are town-level agents with hq- prefix bead IDs
+	// The allSessions map contains AgentIDs (e.g., "mayor"), not session names
 	agentDefs := []struct {
 		name    string
 		address string
-		session string
 		role    string
 		beadID  string
 	}{
-		{"mayor", "mayor/", mayorSession, "coordinator", beads.MayorBeadIDTown()},
-		{"deacon", "deacon/", deaconSession, "health-check", beads.DeaconBeadIDTown()},
+		{"mayor", "mayor/", "coordinator", beads.MayorBeadIDTown()},
+		{"deacon", "deacon/", "health-check", beads.DeaconBeadIDTown()},
 	}
 
 	agents := make([]AgentRuntime, len(agentDefs))
@@ -939,7 +933,6 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 		go func(idx int, d struct {
 			name    string
 			address string
-			session string
 			role    string
 			beadID  string
 		}) {
@@ -948,12 +941,12 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 			agent := AgentRuntime{
 				Name:    d.name,
 				Address: d.address,
-				Session: d.session,
 				Role:    d.role,
 			}
 
-			// Check tmux session from preloaded map (O(1))
-			agent.Running = allSessions[d.session]
+			// Check if agent is running from preloaded map (O(1))
+			// allSessions contains AgentIDs like "mayor", "deacon"
+			agent.Running = allSessions[d.name]
 
 			// Look up agent bead from preloaded map (O(1))
 			if issue, ok := allAgentBeads[d.beadID]; ok {
@@ -1092,8 +1085,9 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 				Role:    d.role,
 			}
 
-			// Check tmux session from preloaded map (O(1))
-			agent.Running = allSessions[d.session]
+			// Check if agent is running from preloaded map (O(1))
+			// allSessions contains AgentID strings like "gastown/refinery"
+			agent.Running = allSessions[d.address]
 
 			// Look up agent bead from preloaded map (O(1))
 			if issue, ok := allAgentBeads[d.beadID]; ok {
