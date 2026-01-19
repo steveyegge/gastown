@@ -55,7 +55,32 @@
 - [ ] Create L2-L5 test scenarios
 - [ ] Test mixed primary/secondary runtime scenarios
 
-### 2. Formula/Specialized Agent Support
+### 2. Role Templates (CLAUDE.md → OPENCODE.md)
+
+**Current State**:
+- Claude Code uses `CLAUDE.md` files with role-specific instructions
+- Templates are at `internal/templates/roles/*.md.tmpl` (embedded)
+- Claude Code renders these and writes to workspace as `CLAUDE.md`
+- OpenCode has no equivalent - test scripts create minimal `OPENCODE.md` manually
+
+**Gap**: OpenCode doesn't get the full role instructions like Claude Code does.
+
+**Implementation Options**:
+
+| Option | How | Pros | Cons |
+|--------|-----|------|------|
+| **A: OPENCODE.md templates** | Create `internal/templates/roles/*-opencode.md.tmpl`, write as `OPENCODE.md` | Mirrors Claude pattern | Duplicates templates |
+| **B: Unified templates** | Single template, write as runtime-appropriate file | No duplication | Need runtime detection |
+| **C: Plugin injection** | Plugin injects role context via `chat.message` hook | Dynamic, no files | More complex plugin |
+
+**Recommended**: Option B - Detect runtime, write to `CLAUDE.md` or `OPENCODE.md`.
+
+**Tasks**:
+- [ ] Add runtime detection to template rendering
+- [ ] Create `OPENCODE.md` during workspace setup (rig creation, crew add)
+- [ ] Verify plugin can read role from `OPENCODE.md` or environment
+
+### 3. Formula/Specialized Agent Support
 
 **Goal**: Use formulas (`-F`) to prompt specialized agents through OpenCode.
 
@@ -76,13 +101,13 @@ opencode --agent polecat
 # Option B: Environment variable
 GT_FORMULA=polecat opencode
 
-# Option C: Plugin injects prompt on session.created
-# (current approach)
+# Option C: Plugin injects prompt on session.created + OPENCODE.md
+# (requires Option 2 above)
 ```
 
 **Implementation**: Update `design/role-permissions.md` with formula strategy.
 
-### 3. Compaction Management
+### 4. Compaction Management
 
 **Goal**: Detect when context is getting full and manage compaction proactively.
 
@@ -106,7 +131,7 @@ GT_FORMULA=polecat opencode
 - [ ] Add message count monitoring to plugin
 - [ ] Document compaction strategy in `design/`
 
-### 4. Session Lifecycle Management
+### 5. Session Lifecycle Management
 
 **Goal**: Know when to safely start a new session vs continue existing.
 
@@ -136,7 +161,7 @@ GT_FORMULA=polecat opencode
 
 **Implementation**: Add lifecycle state machine to plugin or document pattern.
 
-### 5. Claude Code Regression Testing
+### 6. Claude Code Regression Testing
 
 **Goal**: Verify Claude Code hasn't broken after OpenCode integration.
 
