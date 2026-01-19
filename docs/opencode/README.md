@@ -57,27 +57,27 @@ The **OpenCode repository** is the authoritative source - documentation often la
 ```
 docs/opencode/
 ├── README.md              # This landing page
-├── index.md      # Detailed navigation by role/goal
+├── index.md               # Detailed navigation by role/goal
 ├── reference/             # Stable documentation
 │   ├── integration-summary.md
 │   ├── plugin-guide.md
 │   ├── api-reference.md
 │   ├── maintenance.md
 │   └── quickstart.md
-├── planning/              # Project direction
-│   ├── project-plan.md
-│   ├── decisions.md
-│   ├── orchestration.md
-│   ├── integration-architecture.md
-│   ├── implementation-guide.md
-│   └── stage2-sdk.md
+├── planning/              # Project direction (organized by phase)
+│   ├── phase1/            # Claude Code parity (current)
+│   │   ├── project-plan.md
+│   │   └── decisions.md
+│   └── phase2/            # SDK orchestration (future)
+│       ├── sdk-plan.md
+│       ├── orchestrator-api.md
+│       ├── architecture.md
+│       └── integration-architecture.md
 ├── research/              # Analysis & experiments
 │   ├── technical-research.md
 │   ├── concept-analysis.md
 │   └── experiments.md
 └── archive/               # Point-in-time results
-    ├── e2e-test-results.md
-    ├── integration-test-results.md
     └── ...
 ```
 
@@ -97,14 +97,23 @@ docs/opencode/
 
 ### planning/ - Project Direction
 
+Organized by phase:
+
+**Phase 1: Claude Code Parity** (Current)
+
 | File | Purpose |
 |------|---------|
-| [project-plan.md](planning/project-plan.md) | **Current plan** - phases, testing, compatibility |
-| [decisions.md](planning/decisions.md) | Decision points and questions |
-| [orchestration.md](planning/orchestration.md) | High-level architecture |
-| [integration-architecture.md](planning/integration-architecture.md) | Detailed strategy |
-| [implementation-guide.md](planning/implementation-guide.md) | Technical specs |
-| [stage2-sdk.md](planning/stage2-sdk.md) | Future SDK plans |
+| [phase1/project-plan.md](planning/phase1/project-plan.md) | Current plan, testing, compatibility |
+| [phase1/decisions.md](planning/phase1/decisions.md) | Decision points and questions |
+
+**Phase 2: SDK Orchestration** (Future)
+
+| File | Purpose |
+|------|---------|
+| [phase2/sdk-plan.md](planning/phase2/sdk-plan.md) | SDK migration plan |
+| [phase2/orchestrator-api.md](planning/phase2/orchestrator-api.md) | Orchestrator interface design |
+| [phase2/architecture.md](planning/phase2/architecture.md) | High-level architecture |
+| [phase2/integration-architecture.md](planning/phase2/integration-architecture.md) | Detailed strategy |
 
 ### research/ - Analysis & Experiments
 
@@ -135,17 +144,17 @@ Point-in-time results with date and commit metadata.
 | Task | Document | Implementation |
 |------|----------|----------------|
 | **Current status** | [reference/integration-summary.md](reference/integration-summary.md) | - |
-| **Project plan** | [planning/project-plan.md](planning/project-plan.md) | - |
+| **Project plan** | [planning/phase1/project-plan.md](planning/phase1/project-plan.md) | - |
 | **API reference** | [reference/api-reference.md](reference/api-reference.md) | - |
 | **Work on plugin** | [reference/plugin-guide.md](reference/plugin-guide.md) | `internal/opencode/plugin/gastown.js` |
 | **Work on config** | [reference/api-reference.md](reference/api-reference.md) | `internal/config/agents.go` |
-| **Work on tests** | [planning/project-plan.md](planning/project-plan.md) | `internal/opencode/integration_test.go` |
+| **Work on tests** | [planning/phase1/project-plan.md](planning/phase1/project-plan.md) | `internal/opencode/integration_test.go` |
 
 ### What to Update
 
 | When... | Update... |
 |---------|-----------|
 | **Fixing bugs** | `reference/integration-summary.md` |
-| **Adding features** | `reference/integration-summary.md`, `planning/project-plan.md` |
+| **Adding features** | `reference/integration-summary.md`, `planning/phase1/project-plan.md` |
 | **Adding docs** | This README → document tables |
-| **Completing a phase** | `planning/project-plan.md` |
+| **Completing a phase** | `planning/phase1/project-plan.md` or `planning/phase2/` |
