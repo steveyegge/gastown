@@ -429,8 +429,10 @@ func querySessionEvents() []CostEntry {
 // querySessionEventsFromLocation queries a single beads location for session.ended events.
 func querySessionEventsFromLocation(location string) ([]CostEntry, error) {
 	// Step 1: Get list of event IDs
+	// Use --no-daemon for read-only queries to avoid daemon autostart issues
 	listArgs := []string{
 		"list",
+		"--no-daemon",
 		"--type=event",
 		"--all",
 		"--limit=0",
@@ -456,7 +458,8 @@ func querySessionEventsFromLocation(location string) ([]CostEntry, error) {
 
 	// Step 2: Get full details for all events using bd show
 	// (bd list doesn't include event_kind, actor, payload)
-	showArgs := []string{"show", "--json"}
+	// Use --no-daemon for read-only queries to avoid daemon autostart issues
+	showArgs := []string{"show", "--no-daemon", "--json"}
 	for _, item := range listItems {
 		showArgs = append(showArgs, item.ID)
 	}
