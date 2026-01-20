@@ -27,3 +27,30 @@ func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 func CleanupOrphanedClaudeProcesses() ([]CleanupResult, error) {
 	return nil, nil
 }
+
+// ZombieProcess represents a Claude process NOT in any active tmux session.
+// On Windows, zombie cleanup is not supported, so this is a stub definition.
+type ZombieProcess struct {
+	PID int
+	Cmd string
+	Age int    // Age in seconds
+	TTY string // TTY column from ps
+}
+
+// ZombieCleanupResult describes what happened to a zombie process.
+// On Windows, cleanup is a no-op.
+type ZombieCleanupResult struct {
+	Process ZombieProcess
+	Signal  string // "SIGTERM", "SIGKILL", or "UNKILLABLE"
+	Error   error
+}
+
+// FindZombieClaudeProcesses is a Windows stub.
+func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
+	return nil, nil
+}
+
+// CleanupZombieClaudeProcesses is a Windows stub.
+func CleanupZombieClaudeProcesses() ([]ZombieCleanupResult, error) {
+	return nil, nil
+}
