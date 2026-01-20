@@ -304,11 +304,15 @@ func formatEventTime(ts string) string {
 }
 
 // sessionsIndex represents the structure of sessions-index.json files.
+// We use json.RawMessage for entries to preserve all fields when copying.
 type sessionsIndex struct {
-	Version int `json:"version"`
-	Entries []struct {
-		SessionID string `json:"sessionId"`
-	} `json:"entries"`
+	Version int               `json:"version"`
+	Entries []json.RawMessage `json:"entries"`
+}
+
+// sessionsIndexEntry is a minimal struct to extract just the sessionId from an entry.
+type sessionsIndexEntry struct {
+	SessionID string `json:"sessionId"`
 }
 
 // sessionLocation contains the location info for a session.
@@ -378,8 +382,9 @@ func findSessionLocation(townRoot, sessionID string) *sessionLocation {
 			}
 
 			// Check if this index contains our session
-			for _, e := range index.Entries {
-				if e.SessionID == sessionID {
+			for _, rawEntry := range index.Entries {
+				var e sessionsIndexEntry
+				if json.Unmarshal(rawEntry, &e) == nil && e.SessionID == sessionID {
 					return &sessionLocation{
 						configDir:  configDir,
 						projectDir: entry.Name(),
@@ -393,7 +398,7 @@ func findSessionLocation(townRoot, sessionID string) *sessionLocation {
 }
 
 // symlinkSessionToCurrentAccount finds a session in any account and symlinks
-// the project directory to the current account so Claude can access it.
+// it to the current account so Claude can access it.
 // Returns a cleanup function to remove the symlink after use.
 func symlinkSessionToCurrentAccount(townRoot, sessionID string) (cleanup func(), err error) {
 	// Find where the session lives
@@ -420,42 +425,138 @@ func symlinkSessionToCurrentAccount(townRoot, sessionID string) (cleanup func(),
 		return nil, nil
 	}
 
-	// Source: the project directory in the other account
-	sourceProjectDir := filepath.Join(loc.configDir, "projects", loc.projectDir)
+	// Source: the session file in the other account
+	sourceSessionFile := filepath.Join(loc.configDir, "projects", loc.projectDir, sessionID+".jsonl")
 
-	// Target: symlink in current account's projects directory
-	currentProjectsDir := filepath.Join(currentConfigDir, "projects")
-	if err := os.MkdirAll(currentProjectsDir, 0755); err != nil {
-		return nil, fmt.Errorf("creating projects directory: %w", err)
+	// Check source exists
+	if _, err := os.Stat(sourceSessionFile); os.IsNotExist(err) {
+		return nil, fmt.Errorf("session file not found: %s", sourceSessionFile)
 	}
 
-	targetSymlink := filepath.Join(currentProjectsDir, loc.projectDir)
+	// Target: the project directory in current account
+	currentProjectDir := filepath.Join(currentConfigDir, "projects", loc.projectDir)
 
-	// Check if target already exists
-	if info, err := os.Lstat(targetSymlink); err == nil {
+	// Create project directory if it doesn't exist
+	if err := os.MkdirAll(currentProjectDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating project directory: %w", err)
+	}
+
+	// Symlink the specific session file
+	targetSessionFile := filepath.Join(currentProjectDir, sessionID+".jsonl")
+
+	// Check if target session file already exists
+	if info, err := os.Lstat(targetSessionFile); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			// Already a symlink - check if it points to the right place
-			existing, _ := os.Readlink(targetSymlink)
-			if existing == sourceProjectDir {
+			existing, _ := os.Readlink(targetSessionFile)
+			if existing == sourceSessionFile {
 				// Already symlinked correctly, no cleanup needed
 				return nil, nil
 			}
 			// Different symlink, remove it
-			_ = os.Remove(targetSymlink)
+			_ = os.Remove(targetSessionFile)
 		} else {
-			// Real directory exists - don't overwrite it
-			return nil, fmt.Errorf("project directory already exists in current account")
+			// Real file exists - session already in current account
+			return nil, nil
 		}
 	}
 
-	// Create the symlink
-	if err := os.Symlink(sourceProjectDir, targetSymlink); err != nil {
+	// Create the symlink to the session file
+	if err := os.Symlink(sourceSessionFile, targetSessionFile); err != nil {
 		return nil, fmt.Errorf("creating symlink: %w", err)
 	}
 
-	// Return cleanup function to remove the symlink
+	// Also need to update/create sessions-index.json so Claude can find the session
+	// Read source index to get the session entry
+	sourceIndexPath := filepath.Join(loc.configDir, "projects", loc.projectDir, "sessions-index.json")
+	sourceIndexData, err := os.ReadFile(sourceIndexPath)
+	if err != nil {
+		// Clean up the symlink we just created
+		_ = os.Remove(targetSessionFile)
+		return nil, fmt.Errorf("reading source sessions index: %w", err)
+	}
+
+	var sourceIndex sessionsIndex
+	if err := json.Unmarshal(sourceIndexData, &sourceIndex); err != nil {
+		_ = os.Remove(targetSessionFile)
+		return nil, fmt.Errorf("parsing source sessions index: %w", err)
+	}
+
+	// Find the session entry (as raw JSON to preserve all fields)
+	var sessionEntry json.RawMessage
+	for _, rawEntry := range sourceIndex.Entries {
+		var e sessionsIndexEntry
+		if json.Unmarshal(rawEntry, &e) == nil && e.SessionID == sessionID {
+			sessionEntry = rawEntry
+			break
+		}
+	}
+
+	if sessionEntry == nil {
+		_ = os.Remove(targetSessionFile)
+		return nil, fmt.Errorf("session not found in source index")
+	}
+
+	// Read or create target index
+	targetIndexPath := filepath.Join(currentProjectDir, "sessions-index.json")
+	var targetIndex sessionsIndex
+	if targetIndexData, err := os.ReadFile(targetIndexPath); err == nil {
+		_ = json.Unmarshal(targetIndexData, &targetIndex)
+	} else {
+		targetIndex.Version = 1
+	}
+
+	// Check if session already in target index
+	sessionInIndex := false
+	for _, rawEntry := range targetIndex.Entries {
+		var e sessionsIndexEntry
+		if json.Unmarshal(rawEntry, &e) == nil && e.SessionID == sessionID {
+			sessionInIndex = true
+			break
+		}
+	}
+
+	// Add session to target index if not present
+	indexModified := false
+	if !sessionInIndex {
+		targetIndex.Entries = append(targetIndex.Entries, sessionEntry)
+		indexModified = true
+
+		// Write updated index
+		targetIndexData, err := json.MarshalIndent(targetIndex, "", "  ")
+		if err != nil {
+			_ = os.Remove(targetSessionFile)
+			return nil, fmt.Errorf("encoding target sessions index: %w", err)
+		}
+		if err := os.WriteFile(targetIndexPath, targetIndexData, 0600); err != nil {
+			_ = os.Remove(targetSessionFile)
+			return nil, fmt.Errorf("writing target sessions index: %w", err)
+		}
+	}
+
+	// Return cleanup function
 	cleanup = func() {
-		_ = os.Remove(targetSymlink)
+		_ = os.Remove(targetSessionFile)
+		// If we modified the index, remove the entry we added
+		if indexModified {
+			// Re-read index, remove our entry, write it back
+			if data, err := os.ReadFile(targetIndexPath); err == nil {
+				var idx sessionsIndex
+				if json.Unmarshal(data, &idx) == nil {
+					newEntries := make([]json.RawMessage, 0, len(idx.Entries))
+					for _, rawEntry := range idx.Entries {
+						var e sessionsIndexEntry
+						if json.Unmarshal(rawEntry, &e) == nil && e.SessionID != sessionID {
+							newEntries = append(newEntries, rawEntry)
+						}
+					}
+					idx.Entries = newEntries
+					if newData, err := json.MarshalIndent(idx, "", "  "); err == nil {
+						_ = os.WriteFile(targetIndexPath, newData, 0600)
+					}
+				}
+			}
+		}
 	}
 
 	return cleanup, nil
