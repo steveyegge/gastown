@@ -463,27 +463,28 @@ func runDone(cmd *cobra.Command, args []string) error {
 	// This is the self-cleaning model - polecats clean up after themselves
 	// "done means gone" - both worktree and session are terminated
 	selfCleanAttempted := false
-	if exitType == ExitCompleted {
-		if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
-			selfCleanAttempted = true
+	if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
+		selfCleanAttempted = true
 
-			// Step 1: Nuke the worktree
+		// Step 1: Nuke the worktree (only for COMPLETED - other statuses preserve work)
+		if exitType == ExitCompleted {
 			if err := selfNukePolecat(roleInfo, townRoot); err != nil {
 				// Non-fatal: Witness will clean up if we fail
 				style.PrintWarning("worktree nuke failed: %v (Witness will clean up)", err)
 			} else {
 				fmt.Printf("%s Worktree nuked\n", style.Bold.Render("✓"))
 			}
-
-			// Step 2: Kill our own session (this terminates Claude and the shell)
-			// This is the last thing we do - the process will be killed when tmux session dies
-			fmt.Printf("%s Terminating session (done means gone)\n", style.Bold.Render("→"))
-			if err := selfKillSession(townRoot, roleInfo); err != nil {
-				// If session kill fails, fall through to os.Exit
-				style.PrintWarning("session kill failed: %v", err)
-			}
-			// If selfKillSession succeeds, we won't reach here (process killed by tmux)
 		}
+
+		// Step 2: Kill our own session (this terminates Claude and the shell)
+		// This is the last thing we do - the process will be killed when tmux session dies
+		// All exit types kill the session - "done means gone"
+		fmt.Printf("%s Terminating session (done means gone)\n", style.Bold.Render("→"))
+		if err := selfKillSession(townRoot, roleInfo); err != nil {
+			// If session kill fails, fall through to os.Exit
+			style.PrintWarning("session kill failed: %v", err)
+		}
+		// If selfKillSession succeeds, we won't reach here (process killed by tmux)
 	}
 
 	// Fallback exit for non-polecats or if self-clean failed
