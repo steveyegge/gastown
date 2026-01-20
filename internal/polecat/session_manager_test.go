@@ -46,7 +46,7 @@ func TestSessionManagerPolecatDir(t *testing.T) {
 
 	dir := m.polecatDir("Toast")
 	expected := "/home/user/ai/gastown/polecats/Toast"
-	if dir != expected {
+	if filepath.ToSlash(dir) != expected {
 		t.Errorf("polecatDir = %q, want %q", dir, expected)
 	}
 }
