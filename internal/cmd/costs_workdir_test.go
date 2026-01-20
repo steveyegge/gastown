@@ -42,16 +42,14 @@ func testSubprocessEnv() []string {
 // 2. Creates session.ended events in both town and rig beads
 // 3. Verifies querySessionEvents finds events from both locations
 func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
-	// Skip if gt and bd are not installed
-	if _, err := exec.LookPath("gt"); err != nil {
-		t.Skip("gt not installed, skipping integration test")
-	}
+	// Skip if bd is not installed
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not installed, skipping integration test")
 	}
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed, skipping integration test")
 	}
+	gtBinary := buildGT(t)
 
 	// Skip when running inside a Gas Town workspace - this integration test
 	// creates a separate workspace and the subprocesses can interact with
@@ -59,6 +57,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	if os.Getenv("GT_TOWN_ROOT") != "" || os.Getenv("BD_ACTOR") != "" {
 		t.Skip("skipping integration test inside Gas Town workspace (use 'go test' outside workspace)")
 	}
+	t.Setenv("BEADS_NO_DAEMON", "1")
 
 	// Create a temporary directory structure
 	tmpDir := t.TempDir()
@@ -78,7 +77,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 
 	// Use gt install to set up the town
 	// Clear GT environment variables to isolate test from parent workspace
-	gtInstallCmd := exec.Command("gt", "install")
+	gtInstallCmd := exec.Command(gtBinary, "install")
 	gtInstallCmd.Dir = townRoot
 	gtInstallCmd.Env = testSubprocessEnv()
 	if out, err := gtInstallCmd.CombinedOutput(); err != nil {
@@ -134,7 +133,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	}
 
 	// Add rig using gt rig add
-	rigAddCmd := exec.Command("gt", "rig", "add", "testrig", bareRepo, "--prefix=tr")
+	rigAddCmd := exec.Command(gtBinary, "rig", "add", "testrig", bareRepo, "--prefix=tr")
 	rigAddCmd.Dir = townRoot
 	rigAddCmd.Env = testSubprocessEnv()
 	if out, err := rigAddCmd.CombinedOutput(); err != nil {

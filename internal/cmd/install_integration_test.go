@@ -327,54 +327,6 @@ func TestInstallNoBeadsFlag(t *testing.T) {
 	}
 }
 
-// buildGT builds the gt binary and returns its path.
-// It caches the build across tests in the same run.
-var cachedGTBinary string
-
-func buildGT(t *testing.T) string {
-	t.Helper()
-
-	if cachedGTBinary != "" {
-		// Verify cached binary still exists
-		if _, err := os.Stat(cachedGTBinary); err == nil {
-			return cachedGTBinary
-		}
-		// Binary was cleaned up, rebuild
-		cachedGTBinary = ""
-	}
-
-	// Find project root (where go.mod is)
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-
-	// Walk up to find go.mod
-	projectRoot := wd
-	for {
-		if _, err := os.Stat(filepath.Join(projectRoot, "go.mod")); err == nil {
-			break
-		}
-		parent := filepath.Dir(projectRoot)
-		if parent == projectRoot {
-			t.Fatal("could not find project root (go.mod)")
-		}
-		projectRoot = parent
-	}
-
-	// Build gt binary to a persistent temp location (not per-test)
-	tmpDir := os.TempDir()
-	tmpBinary := filepath.Join(tmpDir, "gt-integration-test")
-	cmd := exec.Command("go", "build", "-o", tmpBinary, "./cmd/gt")
-	cmd.Dir = projectRoot
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to build gt: %v\nOutput: %s", err, output)
-	}
-
-	cachedGTBinary = tmpBinary
-	return tmpBinary
-}
-
 // assertDirExists checks that the given path exists and is a directory.
 func assertDirExists(t *testing.T, path, name string) {
 	t.Helper()
