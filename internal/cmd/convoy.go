@@ -403,6 +403,10 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("convoy '%s' not found", convoyID)
 	}
 
+	// Handle empty stdout (bd show --json may return empty string for non-existent issues)
+	if len(stdout.Bytes()) == 0 {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
 	var convoys []struct {
 		ID     string `json:"id"`
 		Title  string `json:"title"`
@@ -513,6 +517,10 @@ func runConvoyClose(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("convoy '%s' not found", convoyID)
 	}
 
+	// Handle empty stdout (bd show --json may return empty string for non-existent issues)
+	if len(stdout.Bytes()) == 0 {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
 	var convoys []struct {
 		ID          string `json:"id"`
 		Title       string `json:"title"`
@@ -898,6 +906,10 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse convoy data
+	// Handle empty stdout (bd show --json may return empty string for non-existent issues)
+	if len(stdout.Bytes()) == 0 {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
 	var convoys []struct {
 		ID          string   `json:"id"`
 		Title       string   `json:"title"`
