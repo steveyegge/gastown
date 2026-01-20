@@ -332,7 +332,7 @@ func provisionLaunchd(data SupervisorData) (string, error) {
 	}
 
 	// Unload if already loaded (ignore errors)
-	exec.Command("launchctl", "unload", plistPath).Run()
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
 
 	// Load the service
 	if output, err := exec.Command("launchctl", "load", plistPath).CombinedOutput(); err != nil {
