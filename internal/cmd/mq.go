@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/refinery"
@@ -29,6 +30,9 @@ var (
 	// Reject flags
 	mqRejectReason string
 	mqRejectNotify bool
+
+	// Close flags
+	mqCloseMerged bool
 
 	// List command flags
 	mqListReady  bool
@@ -156,6 +160,20 @@ Examples:
   gt mq reject greenplace mr-Nux-12345 --reason "Superseded by other work" --notify`,
 	Args: cobra.ExactArgs(2),
 	RunE: runMQReject,
+}
+
+var mqCloseCmd = &cobra.Command{
+	Use:   "close <mr-id>",
+	Short: "Close a merge request",
+	Long: `Close a merge request with a specific close reason.
+
+Use --merged to indicate the MR was successfully merged (typically called
+by the refinery after pushing to main).
+
+Examples:
+  gt mq close mr-Nux-12345 --merged   # Mark as successfully merged`,
+	Args: cobra.ExactArgs(1),
+	RunE: runMQClose,
 }
 
 var mqStatusCmd = &cobra.Command{
@@ -292,6 +310,9 @@ func init() {
 	mqRejectCmd.Flags().BoolVar(&mqRejectNotify, "notify", false, "Send mail notification to worker")
 	_ = mqRejectCmd.MarkFlagRequired("reason") // cobra flags: error only at runtime if missing
 
+	// Close flags
+	mqCloseCmd.Flags().BoolVar(&mqCloseMerged, "merged", false, "Mark the MR as successfully merged")
+
 	// Status flags
 	mqStatusCmd.Flags().BoolVar(&mqStatusJSON, "json", false, "Output as JSON")
 
@@ -300,6 +321,7 @@ func init() {
 	mqCmd.AddCommand(mqRetryCmd)
 	mqCmd.AddCommand(mqListCmd)
 	mqCmd.AddCommand(mqRejectCmd)
+	mqCmd.AddCommand(mqCloseCmd)
 	mqCmd.AddCommand(mqStatusCmd)
 
 	// Integration branch subcommands
@@ -440,5 +462,35 @@ func runMQReject(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s\n", style.Dim.Render("Worker notified via mail"))
 	}
 
+	return nil
+}
+
+func runMQClose(cmd *cobra.Command, args []string) error {
+	mrID := args[0]
+
+	// Require at least one close reason flag
+	if !mqCloseMerged {
+		return fmt.Errorf("must specify a close reason (e.g., --merged)")
+	}
+
+	// Determine close reason
+	var closeReason string
+	if mqCloseMerged {
+		closeReason = "merged"
+	}
+
+	// Use current working directory for beads operations
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	// Initialize beads client and close the MR
+	bd := beads.New(workDir)
+	if err := bd.CloseWithReason(closeReason, mrID); err != nil {
+		return fmt.Errorf("closing MR: %w", err)
+	}
+
+	fmt.Printf("%s Closed: %s (reason: %s)\n", style.Bold.Render("✓"), mrID, closeReason)
 	return nil
 }
