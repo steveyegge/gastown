@@ -536,7 +536,7 @@ func TestDefaultRigAgentRegistryPath(t *testing.T) {
 		t.Run(tt.rigPath, func(t *testing.T) {
 			got := DefaultRigAgentRegistryPath(tt.rigPath)
 			want := tt.expectedPath
-			if got != want {
+			if filepath.ToSlash(got) != filepath.ToSlash(want) {
 				t.Errorf("DefaultRigAgentRegistryPath(%s) = %s, want %s", tt.rigPath, got, want)
 			}
 		})

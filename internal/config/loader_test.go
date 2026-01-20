@@ -810,7 +810,7 @@ func TestMessagingConfigPath(t *testing.T) {
 	t.Parallel()
 	path := MessagingConfigPath("/home/user/gt")
 	expected := "/home/user/gt/config/messaging.json"
-	if path != expected {
+	if filepath.ToSlash(path) != expected {
 		t.Errorf("MessagingConfigPath = %q, want %q", path, expected)
 	}
 }
@@ -1603,7 +1603,7 @@ func TestDaemonPatrolConfigPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.townRoot, func(t *testing.T) {
 			path := DaemonPatrolConfigPath(tt.townRoot)
-			if path != tt.expected {
+			if filepath.ToSlash(path) != filepath.ToSlash(tt.expected) {
 				t.Errorf("DaemonPatrolConfigPath(%q) = %q, want %q", tt.townRoot, path, tt.expected)
 			}
 		})
@@ -2537,7 +2537,7 @@ func TestEscalationConfigPath(t *testing.T) {
 
 	path := EscalationConfigPath("/home/user/gt")
 	expected := "/home/user/gt/settings/escalation.json"
-	if path != expected {
+	if filepath.ToSlash(path) != expected {
 		t.Errorf("EscalationConfigPath = %q, want %q", path, expected)
 	}
 }
