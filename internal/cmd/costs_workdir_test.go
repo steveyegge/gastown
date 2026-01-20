@@ -44,6 +44,9 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not installed, skipping integration test")
 	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed, skipping integration test")
+	}
 
 	// Skip when running inside a Gas Town workspace - this integration test
 	// creates a separate workspace and the subprocesses can interact with
@@ -92,10 +95,27 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	}
 
 	// Add initial commit to bare repo
-	initFileCmd := exec.Command("bash", "-c", "echo 'test' > README.md && git add . && git commit -m 'init'")
-	initFileCmd.Dir = tempClone
-	if out, err := initFileCmd.CombinedOutput(); err != nil {
-		t.Fatalf("initial commit: %v\n%s", err, out)
+	readmePath := filepath.Join(tempClone, "README.md")
+	if err := os.WriteFile(readmePath, []byte("test\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+
+	gitAddCmd := exec.Command("git", "add", ".")
+	gitAddCmd.Dir = tempClone
+	if out, err := gitAddCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+
+	gitCommitCmd := exec.Command("git", "commit", "-m", "init")
+	gitCommitCmd.Dir = tempClone
+	gitCommitCmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	if out, err := gitCommitCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
 	}
 	pushCmd := exec.Command("git", "push", "origin", "main")
 	pushCmd.Dir = tempClone
