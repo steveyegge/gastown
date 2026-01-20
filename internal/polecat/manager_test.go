@@ -133,7 +133,7 @@ func TestPolecatDir(t *testing.T) {
 
 	dir := m.polecatDir("Toast")
 	expected := "/home/user/ai/test-rig/polecats/Toast"
-	if dir != expected {
+	if filepath.ToSlash(dir) != expected {
 		t.Errorf("polecatDir = %q, want %q", dir, expected)
 	}
 }
@@ -366,8 +366,10 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read worktree AGENTS.md: %v", err)
 	}
-	if string(content) != string(agentsMDContent) {
-		t.Errorf("AGENTS.md content = %q, want %q", string(content), string(agentsMDContent))
+	gotContent := strings.ReplaceAll(string(content), "\r\n", "\n")
+	wantContent := strings.ReplaceAll(string(agentsMDContent), "\r\n", "\n")
+	if gotContent != wantContent {
+		t.Errorf("AGENTS.md content = %q, want %q", gotContent, wantContent)
 	}
 }
 
@@ -449,8 +451,10 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read worktree AGENTS.md: %v", err)
 	}
-	if string(content) != string(agentsMDContent) {
-		t.Errorf("AGENTS.md content = %q, want %q", string(content), string(agentsMDContent))
+	gotContent := strings.ReplaceAll(string(content), "\r\n", "\n")
+	wantContent := strings.ReplaceAll(string(agentsMDContent), "\r\n", "\n")
+	if gotContent != wantContent {
+		t.Errorf("AGENTS.md content = %q, want %q", gotContent, wantContent)
 	}
 }
 

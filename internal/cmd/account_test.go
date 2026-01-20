@@ -3,6 +3,8 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,15 +56,33 @@ func setupTestTownForAccount(t *testing.T) (townRoot string, accountsDir string)
 	return townRoot, accountsDir
 }
 
+func setTestHome(t *testing.T, fakeHome string) {
+	t.Helper()
+
+	t.Setenv("HOME", fakeHome)
+
+	if runtime.GOOS != "windows" {
+		return
+	}
+
+	t.Setenv("USERPROFILE", fakeHome)
+
+	drive := filepath.VolumeName(fakeHome)
+	if drive == "" {
+		return
+	}
+
+	t.Setenv("HOMEDRIVE", drive)
+	t.Setenv("HOMEPATH", strings.TrimPrefix(fakeHome, drive))
+}
+
 func TestAccountSwitch(t *testing.T) {
 	t.Run("switch between accounts", func(t *testing.T) {
 		townRoot, accountsDir := setupTestTownForAccount(t)
 
 		// Create fake home directory for ~/.claude
 		fakeHome := t.TempDir()
-		originalHome := os.Getenv("HOME")
-		os.Setenv("HOME", fakeHome)
-		defer os.Setenv("HOME", originalHome)
+		setTestHome(t, fakeHome)
 
 		// Create account config directories
 		workConfigDir := filepath.Join(accountsDir, "work")
@@ -133,9 +153,7 @@ func TestAccountSwitch(t *testing.T) {
 		townRoot, accountsDir := setupTestTownForAccount(t)
 
 		fakeHome := t.TempDir()
-		originalHome := os.Getenv("HOME")
-		os.Setenv("HOME", fakeHome)
-		defer os.Setenv("HOME", originalHome)
+		setTestHome(t, fakeHome)
 
 		workConfigDir := filepath.Join(accountsDir, "work")
 		if err := os.MkdirAll(workConfigDir, 0755); err != nil {
@@ -186,9 +204,7 @@ func TestAccountSwitch(t *testing.T) {
 		townRoot, accountsDir := setupTestTownForAccount(t)
 
 		fakeHome := t.TempDir()
-		originalHome := os.Getenv("HOME")
-		os.Setenv("HOME", fakeHome)
-		defer os.Setenv("HOME", originalHome)
+		setTestHome(t, fakeHome)
 
 		workConfigDir := filepath.Join(accountsDir, "work")
 		if err := os.MkdirAll(workConfigDir, 0755); err != nil {
@@ -224,9 +240,7 @@ func TestAccountSwitch(t *testing.T) {
 		townRoot, accountsDir := setupTestTownForAccount(t)
 
 		fakeHome := t.TempDir()
-		originalHome := os.Getenv("HOME")
-		os.Setenv("HOME", fakeHome)
-		defer os.Setenv("HOME", originalHome)
+		setTestHome(t, fakeHome)
 
 		workConfigDir := filepath.Join(accountsDir, "work")
 		personalConfigDir := filepath.Join(accountsDir, "personal")

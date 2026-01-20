@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -43,6 +44,10 @@ func TestNewOrphanProcessCheck(t *testing.T) {
 }
 
 func TestOrphanProcessCheck_Run(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("orphan process detection is not supported on Windows")
+	}
+
 	// This test verifies the check runs without error.
 	// Results depend on whether Claude processes exist in the test environment.
 	check := NewOrphanProcessCheck()

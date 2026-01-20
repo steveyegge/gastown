@@ -2,7 +2,9 @@ package polecat
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/agent"
@@ -16,6 +18,17 @@ import (
 // Note: Start operations are handled by factory.Start().
 // The SessionManager handles status queries, enumeration, and session operations.
 // =============================================================================
+
+func requireTmux(t *testing.T) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("tmux not supported on Windows")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+}
 
 func TestSessionName(t *testing.T) {
 	r := &rig.Rig{
@@ -42,7 +55,7 @@ func TestSessionManagerPolecatDir(t *testing.T) {
 
 	dir := m.polecatDir("Toast")
 	expected := "/home/user/ai/gastown/polecats/Toast"
-	if dir != expected {
+	if filepath.ToSlash(dir) != expected {
 		t.Errorf("polecatDir = %q, want %q", dir, expected)
 	}
 }
@@ -76,6 +89,8 @@ func TestHasPolecat(t *testing.T) {
 }
 
 func TestIsRunningNoSession(t *testing.T) {
+	requireTmux(t)
+
 	r := &rig.Rig{
 		Name:     "gastown",
 		Polecats: []string{"Toast"},
@@ -114,6 +129,8 @@ func TestIsRunning_WhenAgentExists_ReturnsTrue(t *testing.T) {
 }
 
 func TestSessionManagerListEmpty(t *testing.T) {
+	requireTmux(t)
+
 	r := &rig.Rig{
 		Name:     "test-rig-unlikely-name",
 		Polecats: []string{},
@@ -152,6 +169,8 @@ func TestSessionManagerList_WithRunningAgents(t *testing.T) {
 }
 
 func TestStopNotFound(t *testing.T) {
+	requireTmux(t)
+
 	r := &rig.Rig{
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
@@ -197,6 +216,8 @@ func TestStop_WhenAgentExists_StopsIt(t *testing.T) {
 }
 
 func TestCaptureNotFound(t *testing.T) {
+	requireTmux(t)
+
 	r := &rig.Rig{
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
@@ -211,6 +232,8 @@ func TestCaptureNotFound(t *testing.T) {
 }
 
 func TestInjectNotFound(t *testing.T) {
+	requireTmux(t)
+
 	r := &rig.Rig{
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},

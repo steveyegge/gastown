@@ -11,7 +11,7 @@ import (
 
 func TestNewMailbox(t *testing.T) {
 	m := NewMailbox("/tmp/test")
-	if m.path != "/tmp/test/inbox.jsonl" {
+	if filepath.ToSlash(m.path) != "/tmp/test/inbox.jsonl" {
 		t.Errorf("NewMailbox path = %q, want %q", m.path, "/tmp/test/inbox.jsonl")
 	}
 	if !m.legacy {
@@ -332,7 +332,7 @@ func TestMailboxIdentityAndPath(t *testing.T) {
 	if legacy.Identity() != "" {
 		t.Errorf("Legacy mailbox identity = %q, want empty", legacy.Identity())
 	}
-	if legacy.Path() != "/tmp/test/inbox.jsonl" {
+	if filepath.ToSlash(legacy.Path()) != "/tmp/test/inbox.jsonl" {
 		t.Errorf("Legacy mailbox path = %q, want /tmp/test/inbox.jsonl", legacy.Path())
 	}
 
@@ -379,7 +379,7 @@ func TestNewMailboxWithBeadsDir(t *testing.T) {
 	if m.identity != "gastown/Toast" {
 		t.Errorf("identity = %q, want 'gastown/Toast'", m.identity)
 	}
-	if m.beadsDir != "/custom/.beads" {
+	if filepath.ToSlash(m.beadsDir) != "/custom/.beads" {
 		t.Errorf("beadsDir = %q, want '/custom/.beads'", m.beadsDir)
 	}
 }

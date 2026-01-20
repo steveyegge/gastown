@@ -63,10 +63,10 @@ func TestManagerCreation(t *testing.T) {
 
 	m := NewManager("/tmp/test-town", rigsConfig)
 
-	if m.townRoot != "/tmp/test-town" {
+	if filepath.ToSlash(m.townRoot) != "/tmp/test-town" {
 		t.Errorf("expected townRoot '/tmp/test-town', got %q", m.townRoot)
 	}
-	if m.kennelPath != "/tmp/test-town/deacon/dogs" {
+	if filepath.ToSlash(m.kennelPath) != "/tmp/test-town/deacon/dogs" {
 		t.Errorf("expected kennelPath '/tmp/test-town/deacon/dogs', got %q", m.kennelPath)
 	}
 }
@@ -81,7 +81,7 @@ func TestDogDir(t *testing.T) {
 
 	path := m.dogDir("alpha")
 	expected := "/home/user/gt/deacon/dogs/alpha"
-	if path != expected {
+	if filepath.ToSlash(path) != expected {
 		t.Errorf("expected %q, got %q", expected, path)
 	}
 }

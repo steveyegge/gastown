@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -41,6 +42,10 @@ func TestEnsureDir(t *testing.T) {
 }
 
 func TestEnsureDir_Permissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permission bits are not reliable on Windows")
+	}
+
 	tmpDir := t.TempDir()
 
 	dir, err := EnsureDir(tmpDir)
@@ -90,7 +95,7 @@ func TestWispPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := WispPath(tt.root, tt.filename)
-			if got != tt.want {
+			if filepath.ToSlash(got) != tt.want {
 				t.Errorf("WispPath() = %q, want %q", got, tt.want)
 			}
 		})
