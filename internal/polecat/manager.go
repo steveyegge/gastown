@@ -353,7 +353,6 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
-		RoleBead:   beads.RoleBeadIDTown("polecat"),
 		HookBead:   opts.HookBead, // Set atomically at spawn time
 	})
 	if err != nil {
@@ -648,7 +647,6 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
-		RoleBead:   beads.RoleBeadIDTown("polecat"),
 		HookBead:   opts.HookBead, // Set atomically at spawn time
 	})
 	if err != nil {

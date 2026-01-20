@@ -750,14 +750,12 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string) error {
 			continue // Already exists
 		}
 
-		// RoleBead points to the shared role definition bead for this agent type.
-		// Role beads are in town beads with hq- prefix (e.g., hq-witness-role).
+		// Note: RoleBead field removed - role definitions are now config-based
 		fields := &beads.AgentFields{
 			RoleType:   agent.roleType,
 			Rig:        agent.rig,
 			AgentState: "idle",
 			HookBead:   "",
-			RoleBead:   beads.RoleBeadIDTown(agent.roleType),
 		}
 
 		if _, err := bd.CreateAgentBead(agent.id, agent.desc, fields); err != nil {

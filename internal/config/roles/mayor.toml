@@ -1,0 +1,23 @@
+# Mayor role definition
+# Global coordinator for cross-rig work. One per town.
+
+role = "mayor"
+scope = "town"
+nudge = "Check mail and hook status, then act accordingly."
+prompt_template = "mayor.md.tmpl"
+
+[session]
+pattern = "hq-mayor"
+work_dir = "{town}"
+needs_pre_sync = false
+start_command = "exec claude --dangerously-skip-permissions"
+
+[env]
+GT_ROLE = "mayor"
+GT_SCOPE = "town"
+
+[health]
+ping_timeout = "30s"
+consecutive_failures = 3
+kill_cooldown = "5m"
+stuck_threshold = "1h"

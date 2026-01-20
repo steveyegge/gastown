@@ -170,7 +170,6 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			RoleType:   "deacon",
 			Rig:        "",
 			AgentState: "idle",
-			RoleBead:   beads.DeaconRoleBeadIDTown(),
 		}
 		desc := "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring."
 		if _, err := townBd.CreateAgentBead(deaconID, desc, fields); err != nil {
@@ -184,7 +183,6 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			RoleType:   "mayor",
 			Rig:        "",
 			AgentState: "idle",
-			RoleBead:   beads.MayorRoleBeadIDTown(),
 		}
 		desc := "Mayor - global coordinator, handles cross-rig communication and escalations."
 		if _, err := townBd.CreateAgentBead(mayorID, desc, fields); err != nil {
@@ -231,7 +229,6 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 				RoleType:   "witness",
 				Rig:        rigName,
 				AgentState: "idle",
-				RoleBead:   beads.RoleBeadIDTown("witness"),
 			}
 			desc := fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName)
 			if _, err := bd.CreateAgentBead(witnessID, desc, fields); err != nil {
@@ -245,7 +242,6 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 				RoleType:   "refinery",
 				Rig:        rigName,
 				AgentState: "idle",
-				RoleBead:   beads.RoleBeadIDTown("refinery"),
 			}
 			desc := fmt.Sprintf("Refinery for %s - processes merge queue.", rigName)
 			if _, err := bd.CreateAgentBead(refineryID, desc, fields); err != nil {
@@ -262,7 +258,6 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 					RoleType:   "crew",
 					Rig:        rigName,
 					AgentState: "idle",
-					RoleBead:   beads.RoleBeadIDTown("crew"),
 				}
 				desc := fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName)
 				if _, err := bd.CreateAgentBead(crewID, desc, fields); err != nil {

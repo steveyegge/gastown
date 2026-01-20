@@ -15,10 +15,11 @@ type AgentFields struct {
 	Rig               string // Rig name (empty for global agents like mayor/deacon)
 	AgentState        string // spawning, working, done, stuck
 	HookBead          string // Currently pinned work bead ID
-	RoleBead          string // Role definition bead ID (canonical location; may not exist yet)
 	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
 	ActiveMR          string // Currently active merge request bead ID (for traceability)
 	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
+	// Note: RoleBead field removed - role definitions are now config-based.
+	// See internal/config/roles/*.toml and config-based-roles.md.
 }
 
 // Notification level constants
@@ -53,11 +54,7 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, "hook_bead: null")
 	}
 
-	if fields.RoleBead != "" {
-		lines = append(lines, fmt.Sprintf("role_bead: %s", fields.RoleBead))
-	} else {
-		lines = append(lines, "role_bead: null")
-	}
+	// Note: role_bead field no longer written - role definitions are config-based
 
 	if fields.CleanupStatus != "" {
 		lines = append(lines, fmt.Sprintf("cleanup_status: %s", fields.CleanupStatus))
@@ -111,7 +108,7 @@ func ParseAgentFields(description string) *AgentFields {
 		case "hook_bead":
 			fields.HookBead = value
 		case "role_bead":
-			fields.RoleBead = value
+			// Ignored - role definitions are now config-based (backward compat)
 		case "cleanup_status":
 			fields.CleanupStatus = value
 		case "active_mr":
@@ -158,13 +155,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return nil, fmt.Errorf("parsing bd create output: %w", err)
 	}
 
-	// Set the role slot if specified (this is the authoritative storage)
-	if fields != nil && fields.RoleBead != "" {
-		if _, err := b.run("slot", "set", id, "role", fields.RoleBead); err != nil {
-			// Non-fatal: warn but continue
-			fmt.Printf("Warning: could not set role slot: %v\n", err)
-		}
-	}
+	// Note: role slot no longer set - role definitions are config-based
 
 	// Set the hook slot if specified (this is the authoritative storage)
 	// This fixes the slot inconsistency bug where bead status is 'hooked' but
@@ -223,13 +214,7 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		return nil, fmt.Errorf("updating reopened agent bead: %w", err)
 	}
 
-	// Set the role slot if specified
-	if fields != nil && fields.RoleBead != "" {
-		if _, err := b.run("slot", "set", id, "role", fields.RoleBead); err != nil {
-			// Non-fatal: warn but continue
-			fmt.Printf("Warning: could not set role slot: %v\n", err)
-		}
-	}
+	// Note: role slot no longer set - role definitions are config-based
 
 	// Clear any existing hook slot (handles stale state from previous lifecycle)
 	_, _ = b.run("slot", "clear", id, "hook")

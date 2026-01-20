@@ -258,6 +258,11 @@ func runSlingFormula(args []string) error {
 		return nil
 	}
 
+	// Skip nudge during tests to prevent agent self-interruption
+	if os.Getenv("GT_TEST_NO_NUDGE") != "" {
+		return nil
+	}
+
 	var prompt string
 	if slingArgs != "" {
 		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `gt hook` to see your hook, then execute using these args.", formulaName, slingArgs)

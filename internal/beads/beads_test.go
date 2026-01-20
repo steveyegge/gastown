@@ -1972,7 +1972,6 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 		Rig:        "testrig",
 		AgentState: "spawning",
 		HookBead:   "test-task-1",
-		RoleBead:   "test-polecat-role",
 	})
 	if err != nil {
 		t.Fatalf("Spawn 1 - CreateOrReopenAgentBead: %v", err)
@@ -1993,7 +1992,6 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 		Rig:        "testrig",
 		AgentState: "spawning",
 		HookBead:   "test-task-2", // Different task
-		RoleBead:   "test-polecat-role",
 	})
 	if err != nil {
 		t.Fatalf("Spawn 2 - CreateOrReopenAgentBead: %v", err)
@@ -2020,7 +2018,6 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 		Rig:        "testrig",
 		AgentState: "spawning",
 		HookBead:   "test-task-3",
-		RoleBead:   "test-polecat-role",
 	})
 	if err != nil {
 		t.Fatalf("Spawn 3 - CreateOrReopenAgentBead: %v", err)
@@ -2059,7 +2056,6 @@ func TestCloseAndClearAgentBead_FieldClearing(t *testing.T) {
 				Rig:               "testrig",
 				AgentState:        "running",
 				HookBead:          "test-issue-123",
-				RoleBead:          "test-polecat-role",
 				CleanupStatus:     "clean",
 				ActiveMR:          "test-mr-456",
 				NotificationLevel: "normal",
@@ -2279,7 +2275,6 @@ func TestCloseAndClearAgentBead_ReopenHasCleanState(t *testing.T) {
 		Rig:               "testrig",
 		AgentState:        "running",
 		HookBead:          "test-old-issue",
-		RoleBead:          "test-polecat-role",
 		CleanupStatus:     "clean",
 		ActiveMR:          "test-old-mr",
 		NotificationLevel: "normal",
@@ -2300,7 +2295,6 @@ func TestCloseAndClearAgentBead_ReopenHasCleanState(t *testing.T) {
 		Rig:        "testrig",
 		AgentState: "spawning",
 		HookBead:   "test-new-issue",
-		RoleBead:   "test-polecat-role",
 	})
 	if err != nil {
 		t.Fatalf("CreateOrReopenAgentBead: %v", err)
