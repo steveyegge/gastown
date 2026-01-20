@@ -2195,3 +2195,62 @@ func TestEscalationConfigPath(t *testing.T) {
 // NOTE: TestBuildStartupCommandWithAgentOverride_PriorityOverRoleAgents and
 // TestBuildStartupCommandWithAgentOverride_IncludesGTRoot were removed - they tested
 // upstream functions that don't exist in the working-tree architecture.
+
+func TestQuoteForShell(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "simple string",
+			input: "hello",
+			want:  `"hello"`,
+		},
+		{
+			name:  "string with double quote",
+			input: `say "hello"`,
+			want:  `"say \"hello\""`,
+		},
+		{
+			name:  "string with backslash",
+			input: `path\to\file`,
+			want:  `"path\\to\\file"`,
+		},
+		{
+			name:  "string with backtick",
+			input: "run `cmd`",
+			want:  "\"run \\`cmd\\`\"",
+		},
+		{
+			name:  "string with dollar sign",
+			input: "cost is $100",
+			want:  `"cost is \$100"`,
+		},
+		{
+			name:  "variable expansion prevented",
+			input: "$HOME/path",
+			want:  `"\$HOME/path"`,
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  `""`,
+		},
+		{
+			name:  "combined special chars",
+			input: "`$HOME`",
+			want:  "\"\\`\\$HOME\\`\"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := quoteForShell(tt.input)
+			if got != tt.want {
+				t.Errorf("quoteForShell(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
