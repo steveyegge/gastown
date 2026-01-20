@@ -80,38 +80,78 @@ func init() {
 	rootCmd.AddCommand(doneCmd)
 }
 
-func runDone(cmd *cobra.Command, args []string) error {
-	// Handle --phase-complete flag (overrides --status)
-	var exitType string
+// validateExitType validates and returns the exit type from flags.
+func validateExitType() (string, error) {
 	if donePhaseComplete {
-		exitType = ExitPhaseComplete
 		if doneGate == "" {
-			return fmt.Errorf("--phase-complete requires --gate <gate-id>")
+			return "", fmt.Errorf("--phase-complete requires --gate <gate-id>")
 		}
-	} else {
-		// Validate exit status
-		exitType = strings.ToUpper(doneStatus)
-		if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
-			return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneStatus)
-		}
+		return ExitPhaseComplete, nil
 	}
+	exitType := strings.ToUpper(doneStatus)
+	if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
+		return "", fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneStatus)
+	}
+	return exitType, nil
+}
 
-	// Find workspace with fallback for deleted worktrees (hq-3xaxy)
-	// If the polecat's worktree was deleted by Witness before gt done finishes,
-	// getcwd will fail. We fall back to GT_TOWN_ROOT env var in that case.
-	townRoot, cwd, err := workspace.FindFromCwdWithFallback()
+// resolveWorkingDirectory finds the workspace with fallback for deleted worktrees.
+func resolveWorkingDirectory() (townRoot, cwd string, cwdAvailable bool, err error) {
+	townRoot, cwd, err = workspace.FindFromCwdWithFallback()
 	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		return "", "", false, fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
-
-	// Track if cwd is available - affects which operations we can do
-	cwdAvailable := cwd != ""
+	cwdAvailable = cwd != ""
 	if !cwdAvailable {
 		style.PrintWarning("working directory deleted (worktree nuked?), using fallback paths")
-		// Try to get cwd from GT_POLECAT_PATH env var (set by session manager)
 		if polecatPath := os.Getenv("GT_POLECAT_PATH"); polecatPath != "" {
-			cwd = polecatPath // May still be gone, but we have a path to use
+			cwd = polecatPath
 		}
+	}
+	return townRoot, cwd, cwdAvailable, nil
+}
+
+// detectCleanupStatusAuto auto-detects git cleanup status if not explicitly provided.
+func detectCleanupStatusAuto(g *git.Git, cwdAvailable bool, branch string) string {
+	if doneCleanupStatus != "" {
+		return doneCleanupStatus
+	}
+	if !cwdAvailable {
+		style.PrintWarning("cannot detect cleanup status - working directory deleted")
+		return "unknown"
+	}
+	workStatus, err := g.CheckUncommittedWork()
+	if err != nil {
+		style.PrintWarning("could not auto-detect cleanup status: %v", err)
+		return ""
+	}
+	switch {
+	case workStatus.HasUncommittedChanges:
+		return "uncommitted"
+	case workStatus.StashCount > 0:
+		return "stash"
+	default:
+		pushed, unpushedCount, err := g.BranchPushedToRemote(branch, "origin")
+		if err != nil {
+			style.PrintWarning("could not check if branch is pushed: %v", err)
+			return "unpushed"
+		}
+		if !pushed || unpushedCount > 0 {
+			return "unpushed"
+		}
+		return "clean"
+	}
+}
+
+func runDone(cmd *cobra.Command, args []string) error {
+	exitType, err := validateExitType()
+	if err != nil {
+		return err
+	}
+
+	townRoot, cwd, cwdAvailable, err := resolveWorkingDirectory()
+	if err != nil {
+		return err
 	}
 
 	// Find current rig
@@ -151,39 +191,7 @@ func runDone(cmd *cobra.Command, args []string) error {
 	}
 
 	// Auto-detect cleanup status if not explicitly provided
-	// This prevents premature polecat cleanup by ensuring witness knows git state
-	if doneCleanupStatus == "" {
-		if !cwdAvailable {
-			// Can't detect git state without working directory, default to unknown
-			doneCleanupStatus = "unknown"
-			style.PrintWarning("cannot detect cleanup status - working directory deleted")
-		} else {
-			workStatus, err := g.CheckUncommittedWork()
-			if err != nil {
-				style.PrintWarning("could not auto-detect cleanup status: %v", err)
-			} else {
-				switch {
-				case workStatus.HasUncommittedChanges:
-					doneCleanupStatus = "uncommitted"
-				case workStatus.StashCount > 0:
-					doneCleanupStatus = "stash"
-				default:
-					// CheckUncommittedWork.UnpushedCommits doesn't work for branches
-					// without upstream tracking (common for polecats). Use the more
-					// robust BranchPushedToRemote which compares against origin/main.
-					pushed, unpushedCount, err := g.BranchPushedToRemote(branch, "origin")
-					if err != nil {
-						style.PrintWarning("could not check if branch is pushed: %v", err)
-						doneCleanupStatus = "unpushed" // err on side of caution
-					} else if !pushed || unpushedCount > 0 {
-						doneCleanupStatus = "unpushed"
-					} else {
-						doneCleanupStatus = "clean"
-					}
-				}
-			}
-		}
-	}
+	doneCleanupStatus = detectCleanupStatusAuto(g, cwdAvailable, branch)
 
 	// Parse branch info
 	info := parseBranchName(branch)

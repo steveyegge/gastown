@@ -115,23 +115,52 @@ func init() {
 	rootCmd.AddCommand(slingCmd)
 }
 
-func runSling(cmd *cobra.Command, args []string) error {
-	// Polecats cannot sling - check early before writing anything
+// validateSlingPreconditions checks that sling can run and returns town root.
+func validateSlingPreconditions() (townRoot string, townBeadsDir string, err error) {
 	if polecatName := os.Getenv("GT_POLECAT"); polecatName != "" {
-		return fmt.Errorf("polecats cannot sling (use gt done for handoff)")
+		return "", "", fmt.Errorf("polecats cannot sling (use gt done for handoff)")
 	}
-
-	// Get town root early - needed for BEADS_DIR when running bd commands
-	// This ensures hq-* beads are accessible even when running from polecat worktree
-	townRoot, err := workspace.FindFromCwd()
+	townRoot, err = workspace.FindFromCwd()
 	if err != nil {
-		return fmt.Errorf("finding town root: %w", err)
+		return "", "", fmt.Errorf("finding town root: %w", err)
 	}
-	townBeadsDir := filepath.Join(townRoot, ".beads")
-
-	// --var is only for standalone formula mode, not formula-on-bead mode
 	if slingOnTarget != "" && len(slingVars) > 0 {
-		return fmt.Errorf("--var cannot be used with --on (formula-on-bead mode doesn't support variables)")
+		return "", "", fmt.Errorf("--var cannot be used with --on (formula-on-bead mode doesn't support variables)")
+	}
+	return townRoot, filepath.Join(townRoot, ".beads"), nil
+}
+
+// resolveBeadOrFormula determines if first arg is a bead or formula.
+func resolveBeadOrFormula(firstArg string) (beadID, formulaName string, err error) {
+	if slingOnTarget != "" {
+		// Formula-on-bead mode
+		if err := verifyBeadExists(slingOnTarget); err != nil {
+			return "", "", err
+		}
+		if err := verifyFormulaExists(firstArg); err != nil {
+			return "", "", err
+		}
+		return slingOnTarget, firstArg, nil
+	}
+	// Try as bead first
+	if err := verifyBeadExists(firstArg); err == nil {
+		return firstArg, "", nil
+	}
+	// Try as standalone formula
+	if err := verifyFormulaExists(firstArg); err == nil {
+		return "", firstArg, nil
+	}
+	// Check if it looks like a bead ID (routing workaround)
+	if looksLikeBeadID(firstArg) {
+		return firstArg, "", nil
+	}
+	return "", "", fmt.Errorf("'%s' is not a valid bead or formula", firstArg)
+}
+
+func runSling(cmd *cobra.Command, args []string) error {
+	townRoot, townBeadsDir, err := validateSlingPreconditions()
+	if err != nil {
+		return err
 	}
 
 	// Batch mode detection: multiple beads with rig target
@@ -145,44 +174,13 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine mode based on flags and argument types
-	var beadID string
-	var formulaName string
-
-	if slingOnTarget != "" {
-		// Formula-on-bead mode: gt sling <formula> --on <bead>
-		formulaName = args[0]
-		beadID = slingOnTarget
-		// Verify both exist
-		if err := verifyBeadExists(beadID); err != nil {
-			return err
-		}
-		if err := verifyFormulaExists(formulaName); err != nil {
-			return err
-		}
-	} else {
-		// Could be bead mode or standalone formula mode
-		firstArg := args[0]
-
-		// Try as bead first
-		if err := verifyBeadExists(firstArg); err == nil {
-			// It's a verified bead
-			beadID = firstArg
-		} else {
-			// Not a verified bead - try as standalone formula
-			if err := verifyFormulaExists(firstArg); err == nil {
-				// Standalone formula mode: gt sling <formula> [target]
-				return runSlingFormula(args)
-			}
-			// Not a formula either - check if it looks like a bead ID (routing issue workaround).
-			// Accept it and let the actual bd update fail later if the bead doesn't exist.
-			// This fixes: gt sling bd-ka761 beads/crew/dave failing with 'not a valid bead or formula'
-			if looksLikeBeadID(firstArg) {
-				beadID = firstArg
-			} else {
-				// Neither bead nor formula
-				return fmt.Errorf("'%s' is not a valid bead or formula", firstArg)
-			}
-		}
+	beadID, formulaName, err := resolveBeadOrFormula(args[0])
+	if err != nil {
+		return err
+	}
+	// Standalone formula mode
+	if beadID == "" && formulaName != "" {
+		return runSlingFormula(args)
 	}
 
 	// Determine target agent (self or specified)
