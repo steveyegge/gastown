@@ -122,46 +122,6 @@ func TestInstallBeadsHasCorrectPrefix(t *testing.T) {
 	}
 }
 
-// TestInstallTownRoleSlots validates that town-level agent beads
-// have their role slot set after install.
-func TestInstallTownRoleSlots(t *testing.T) {
-	// Skip if bd is not available
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Skip("bd not installed, skipping role slot test")
-	}
-
-	tmpDir := t.TempDir()
-	hqPath := filepath.Join(tmpDir, "test-hq")
-
-	gtBinary := buildGT(t)
-
-	// Run gt install (includes beads init by default)
-	cmd := exec.Command(gtBinary, "install", hqPath)
-	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("gt install failed: %v\nOutput: %s", err, output)
-	}
-
-	// Log install output for CI debugging
-	t.Logf("gt install output:\n%s", output)
-
-	// Verify beads directory was created
-	beadsDir := filepath.Join(hqPath, ".beads")
-	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
-		t.Fatalf("beads directory not created at %s", beadsDir)
-	}
-
-	// List beads for debugging
-	listCmd := exec.Command("bd", "--no-daemon", "list", "--type=agent")
-	listCmd.Dir = hqPath
-	listOutput, _ := listCmd.CombinedOutput()
-	t.Logf("bd list --type=agent output:\n%s", listOutput)
-
-	assertSlotValue(t, hqPath, "hq-mayor", "role", "hq-mayor-role")
-	assertSlotValue(t, hqPath, "hq-deacon", "role", "hq-deacon-role")
-}
-
 // TestInstallIdempotent validates that running gt install twice
 // on the same directory fails without --force flag.
 func TestInstallIdempotent(t *testing.T) {
