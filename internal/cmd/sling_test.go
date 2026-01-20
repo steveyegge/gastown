@@ -27,6 +27,15 @@ func writeBDStub(t *testing.T, binDir string, unixScript string, windowsScript s
 	return path
 }
 
+func containsVarArg(line, key, value string) bool {
+	plain := "--var " + key + "=" + value
+	if strings.Contains(line, plain) {
+		return true
+	}
+	quoted := "--var \"" + key + "=" + value + "\""
+	return strings.Contains(line, quoted)
+}
+
 func TestParseWispIDFromJSON(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -556,12 +565,12 @@ exit /b 0
 	}
 
 	// Verify --var feature=<title> is present
-	if !strings.Contains(wispLine, "--var feature=My Test Feature") {
+	if !containsVarArg(wispLine, "feature", "My Test Feature") {
 		t.Errorf("mol wisp missing --var feature=<title>\ngot: %s", wispLine)
 	}
 
 	// Verify --var issue=<beadID> is present
-	if !strings.Contains(wispLine, "--var issue=gt-abc123") {
+	if !containsVarArg(wispLine, "issue", "gt-abc123") {
 		t.Errorf("mol wisp missing --var issue=<beadID>\ngot: %s", wispLine)
 	}
 }
