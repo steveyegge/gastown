@@ -25,6 +25,7 @@ var (
 	feedNoFollow bool
 	feedWindow   bool
 	feedPlain    bool
+	feedProblems bool
 )
 
 func init() {
@@ -39,6 +40,7 @@ func init() {
 	feedCmd.Flags().StringVar(&feedRig, "rig", "", "Run from specific rig's beads directory")
 	feedCmd.Flags().BoolVarP(&feedWindow, "window", "w", false, "Open in dedicated tmux window (creates 'feed' window)")
 	feedCmd.Flags().BoolVar(&feedPlain, "plain", false, "Use plain text output (bd activity) instead of TUI")
+	feedCmd.Flags().BoolVarP(&feedProblems, "problems", "p", false, "Start in problems view (shows stuck agents)")
 }
 
 var feedCmd = &cobra.Command{
@@ -52,6 +54,13 @@ By default, launches an interactive TUI dashboard with:
   - Convoy panel (middle): Shows in-progress and recently landed convoys
   - Event stream (bottom): Chronological feed you can scroll through
   - Vim-style navigation: j/k to scroll, tab to switch panels, 1/2/3 for panels, q to quit
+
+Problems View (--problems/-p):
+  A problem-first view that surfaces agents needing attention:
+  - Detects stuck agents via tmux pattern matching (prompts, [Y/n], etc.)
+  - Shows GUPP violations (hooked work + 30m no progress)
+  - Keyboard actions: Enter=attach, n=nudge, h=handoff, r=restart
+  - Press 'p' to toggle between activity and problems view
 
 The feed combines multiple event sources:
   - Beads activity: Issue creates, updates, completions (from bd activity)
@@ -75,6 +84,14 @@ Event symbols:
   🎯  sling            - Work was slung to worker
   🤝  handoff          - Session handed off
 
+Agent state symbols (problems view):
+  🔥  GUPP violation   - Hooked work + 30m no progress (critical)
+  ⌨   INPUT required   - Waiting for user input (prompt, [Y/n], etc.)
+  ⚠   STALLED          - No progress for 15+ minutes
+  ●   Working          - Actively producing output
+  ○   Idle             - No hooked work
+  💀  Zombie           - Dead/crashed session
+
 MQ (Merge Queue) event symbols:
   ⚙  merge_started   - Refinery began processing an MR
   ✓  merged          - MR successfully merged (green)
@@ -83,10 +100,12 @@ MQ (Merge Queue) event symbols:
 
 Examples:
   gt feed                       # Launch TUI dashboard
+  gt feed --problems            # Start in problems view
+  gt feed -p                    # Short flag for problems view
   gt feed --plain               # Plain text output (bd activity)
   gt feed --window              # Open in dedicated tmux window
   gt feed --since 1h            # Events from last hour
-  gt feed --rig greenplace         # Use gastown rig's beads`,
+  gt feed --rig greenplace      # Use gastown rig's beads`,
 	RunE: runFeed,
 }
 
@@ -137,7 +156,7 @@ func runFeed(cmd *cobra.Command, args []string) error {
 	useTUI := !feedPlain && term.IsTerminal(int(os.Stdout.Fd()))
 
 	if useTUI {
-		return runFeedTUI(workDir)
+		return runFeedTUI(workDir, feedProblems)
 	}
 
 	// Plain mode: exec bd activity directly
@@ -196,7 +215,7 @@ func runFeedDirect(workDir string, bdArgs []string) error {
 }
 
 // runFeedTUI runs the interactive TUI feed.
-func runFeedTUI(workDir string) error {
+func runFeedTUI(workDir string, problemsView bool) error {
 	// Must be in a Gas Town workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -229,7 +248,12 @@ func runFeedTUI(workDir string) error {
 	defer func() { _ = multiSource.Close() }()
 
 	// Create model and connect event source
-	m := feed.NewModel()
+	var m *feed.Model
+	if problemsView {
+		m = feed.NewModelWithProblemsView()
+	} else {
+		m = feed.NewModel()
+	}
 	m.SetEventChannel(multiSource.Events())
 	m.SetTownRoot(townRoot)
 

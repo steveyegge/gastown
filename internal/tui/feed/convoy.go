@@ -350,4 +350,3 @@ func renderProgressBar(completed, total int) string {
 	bar := strings.Repeat("●", filled) + strings.Repeat("○", displayTotal-filled)
 	return ConvoyProgressStyle.Render(bar)
 }
-

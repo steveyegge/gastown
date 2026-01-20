@@ -9,11 +9,11 @@ import (
 
 // Color palette using Ayu theme colors from ui package
 var (
-	colorPrimary   = ui.ColorAccent // Blue
-	colorSuccess   = ui.ColorPass   // Green
-	colorWarning   = ui.ColorWarn   // Yellow
-	colorError     = ui.ColorFail   // Red
-	colorDim       = ui.ColorMuted  // Gray
+	colorPrimary   = ui.ColorAccent                                            // Blue
+	colorSuccess   = ui.ColorPass                                              // Green
+	colorWarning   = ui.ColorWarn                                              // Yellow
+	colorError     = ui.ColorFail                                              // Red
+	colorDim       = ui.ColorMuted                                             // Gray
 	colorHighlight = lipgloss.AdaptiveColor{Light: "#59c2ff", Dark: "#59c2ff"} // Cyan (Ayu)
 	colorAccent    = lipgloss.AdaptiveColor{Light: "#d2a6ff", Dark: "#d2a6ff"} // Purple (Ayu)
 )
@@ -124,6 +124,47 @@ var (
 
 	EventMergeSkippedStyle = lipgloss.NewStyle().
 				Foreground(colorWarning)
+
+	// Problems view styles
+	ProblemsModeStyle = lipgloss.NewStyle().
+				Foreground(colorError).
+				Bold(true)
+
+	ProblemsPanelStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorDim).
+				Padding(0, 1)
+
+	ProblemsHeaderStyle = lipgloss.NewStyle().
+				Foreground(colorError).
+				Bold(true)
+
+	WorkingHeaderStyle = lipgloss.NewStyle().
+				Foreground(colorSuccess).
+				Bold(true)
+
+	IdleHeaderStyle = lipgloss.NewStyle().
+			Foreground(colorDim).
+			Bold(true)
+
+	SelectedStyle = lipgloss.NewStyle().
+			Foreground(colorHighlight).
+			Bold(true)
+
+	// Agent state styles
+	GUPPStyle = lipgloss.NewStyle().
+			Foreground(colorError).
+			Bold(true)
+
+	InputRequiredStyle = lipgloss.NewStyle().
+				Foreground(colorWarning).
+				Bold(true)
+
+	StalledStyle = lipgloss.NewStyle().
+			Foreground(colorError)
+
+	ZombieStyle = lipgloss.NewStyle().
+			Foreground(colorDim)
 
 	// Event symbols
 	EventSymbols = map[string]string{

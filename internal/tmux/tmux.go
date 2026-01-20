@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -282,6 +283,18 @@ func (t *Tmux) ListSessions() ([]string, error) {
 // Use this when you need to check multiple sessions to avoid N+1 subprocess calls.
 type SessionSet struct {
 	sessions map[string]struct{}
+}
+
+// NewSessionSet creates a SessionSet from a list of session names.
+// This is useful for testing or when session names are known from another source.
+func NewSessionSet(names []string) *SessionSet {
+	set := &SessionSet{
+		sessions: make(map[string]struct{}, len(names)),
+	}
+	for _, name := range names {
+		set.sessions[name] = struct{}{}
+	}
+	return set
 }
 
 // GetSessionSet returns a SessionSet containing all current sessions.
@@ -615,6 +628,21 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// GetSessionActivity returns the last activity time for a session.
+// This is updated whenever there's any activity in the session (input/output).
+func (t *Tmux) GetSessionActivity(session string) (time.Time, error) {
+	out, err := t.run("display-message", "-t", session, "-p", "#{session_activity}")
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	timestamp, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing session activity: %w", err)
+	}
+	return time.Unix(timestamp, 0), nil
 }
 
 // hasClaudeChild checks if a process has a child running claude/node.

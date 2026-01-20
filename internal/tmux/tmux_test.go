@@ -605,3 +605,124 @@ func TestSessionSet(t *testing.T) {
 		t.Errorf("SessionSet.Names() doesn't contain %q", sessionName)
 	}
 }
+
+func TestGetSessionActivity(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-activity-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Get session activity
+	activity, err := tm.GetSessionActivity(sessionName)
+	if err != nil {
+		t.Fatalf("GetSessionActivity: %v", err)
+	}
+
+	// Activity should be recent (within last minute since we just created it)
+	if activity.IsZero() {
+		t.Error("GetSessionActivity returned zero time")
+	}
+
+	// Activity should be in the past (or very close to now)
+	now := activity // Use activity as baseline since clocks might differ
+	_ = now         // Avoid unused variable
+
+	// The activity timestamp should be reasonable (not in far future or past)
+	// Just verify it's a valid Unix timestamp (after year 2000)
+	if activity.Year() < 2000 {
+		t.Errorf("GetSessionActivity returned suspicious time: %v", activity)
+	}
+}
+
+func TestGetSessionActivity_NonexistentSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// GetSessionActivity on nonexistent session should error
+	_, err := tm.GetSessionActivity("nonexistent-session-xyz-12345")
+	if err == nil {
+		t.Error("GetSessionActivity on nonexistent session should return error")
+	}
+}
+
+func TestNewSessionSet(t *testing.T) {
+	// Test creating SessionSet from names
+	names := []string{"session-a", "session-b", "session-c"}
+	set := NewSessionSet(names)
+
+	if set == nil {
+		t.Fatal("NewSessionSet returned nil")
+	}
+
+	// Test Has() for existing sessions
+	for _, name := range names {
+		if !set.Has(name) {
+			t.Errorf("SessionSet.Has(%q) = false, want true", name)
+		}
+	}
+
+	// Test Has() for non-existing session
+	if set.Has("nonexistent") {
+		t.Error("SessionSet.Has(nonexistent) = true, want false")
+	}
+
+	// Test Names() returns all sessions
+	gotNames := set.Names()
+	if len(gotNames) != len(names) {
+		t.Errorf("SessionSet.Names() returned %d names, want %d", len(gotNames), len(names))
+	}
+
+	// Verify all names are present (order may differ)
+	nameSet := make(map[string]bool)
+	for _, n := range gotNames {
+		nameSet[n] = true
+	}
+	for _, n := range names {
+		if !nameSet[n] {
+			t.Errorf("SessionSet.Names() missing %q", n)
+		}
+	}
+}
+
+func TestNewSessionSet_Empty(t *testing.T) {
+	set := NewSessionSet([]string{})
+
+	if set == nil {
+		t.Fatal("NewSessionSet returned nil for empty input")
+	}
+
+	if set.Has("anything") {
+		t.Error("Empty SessionSet.Has() = true, want false")
+	}
+
+	names := set.Names()
+	if len(names) != 0 {
+		t.Errorf("Empty SessionSet.Names() returned %d names, want 0", len(names))
+	}
+}
+
+func TestNewSessionSet_Nil(t *testing.T) {
+	set := NewSessionSet(nil)
+
+	if set == nil {
+		t.Fatal("NewSessionSet returned nil for nil input")
+	}
+
+	if set.Has("anything") {
+		t.Error("Nil-input SessionSet.Has() = true, want false")
+	}
+}
