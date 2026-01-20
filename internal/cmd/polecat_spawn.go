@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -175,4 +176,64 @@ func IsRigName(target string) (string, bool) {
 	}
 
 	return target, true
+}
+
+// SpawnAndHookOptions contains options for spawning and hooking a bead.
+type SpawnAndHookOptions struct {
+	Force    bool   // Force spawn even if polecat has uncommitted work
+	Account  string // Claude Code account handle to use
+	Create   bool   // Create polecat if it doesn't exist
+	Agent    string // Agent override for this spawn
+	Subject  string // Subject for the nudge prompt
+	Args     string // Args to pass to the polecat
+	LogEvent bool   // Whether to log a sling event
+}
+
+// SpawnAndHookBead spawns a polecat and hooks a bead to it.
+// This is the common function used by batch slinging operations.
+func SpawnAndHookBead(townRoot, rigName, beadID string, opts SpawnAndHookOptions) (*SpawnedPolecatInfo, error) {
+	// Spawn polecat with hook_bead set atomically
+	spawnOpts := SlingSpawnOptions{
+		Force:    opts.Force,
+		Account:  opts.Account,
+		Create:   opts.Create,
+		HookBead: beadID,
+		Agent:    opts.Agent,
+	}
+	spawnInfo, err := SpawnPolecatForSling(rigName, spawnOpts)
+	if err != nil {
+		return nil, fmt.Errorf("spawning polecat: %w", err)
+	}
+
+	targetAgent := spawnInfo.AgentID()
+	hookWorkDir := spawnInfo.ClonePath
+	townBeadsDir := townRoot + "/.beads"
+
+	// Hook the bead using bd update
+	hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+	hookCmd.Dir = hookWorkDir
+	if err := hookCmd.Run(); err != nil {
+		return nil, fmt.Errorf("hooking bead: %w", err)
+	}
+
+	// Log sling event
+	if opts.LogEvent {
+		actor := detectActor()
+		_ = events.LogFeed(events.TypeSling, actor, events.SlingPayload(beadID, targetAgent))
+	}
+
+	// Update agent bead state
+	updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
+
+	// Auto-attach work molecule
+	_ = attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot)
+
+	// Nudge the polecat
+	agentID, err := addressToAgentID(targetAgent)
+	if err == nil {
+		_ = ensureAgentReady(townRoot, agentID)
+		_ = injectStartPrompt(townRoot, agentID, beadID, opts.Subject, opts.Args)
+	}
+
+	return spawnInfo, nil
 }

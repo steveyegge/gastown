@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/factory"
@@ -140,7 +139,7 @@ func runQueueStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Count running polecats
-	running := countRunningPolecats(townRoot)
+	running := countRunningPolecats()
 
 	// Get capacity from config
 	capacity := config.GetQueueMaxPolecats(townRoot)
@@ -292,7 +291,7 @@ func runQueueRun(cmd *cobra.Command, args []string) error {
 	// Apply capacity limit if set
 	if capacity > 0 {
 		// Count running polecats and calculate available slots
-		running := countRunningPolecats(townRoot)
+		running := countRunningPolecats()
 		available := capacity - running
 		if available <= 0 {
 			fmt.Printf("Capacity reached: %d/%d polecats running\n", running, capacity)
@@ -352,28 +351,18 @@ func runQueueClear(cmd *cobra.Command, args []string) error {
 }
 
 // countRunningPolecats counts the number of active polecat sessions across all rigs.
-func countRunningPolecats(townRoot string) int {
-	// Load rigs config to iterate through each rig
-	rigsConfigPath := townRoot + "/mayor/rigs.json"
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+func countRunningPolecats() int {
+	// Use factory.Agents() for local polecats (global across all rigs)
+	agents := factory.Agents()
+	agentIDs, err := agents.List()
 	if err != nil {
 		return 0
 	}
 
 	count := 0
-	for rigName := range rigsConfig.Rigs {
-		// Use AgentsFor with real rig name to get proper MirroredSessions for remote rigs
-		id := agent.PolecatAddress(rigName, "_")
-		agents := factory.AgentsFor(townRoot, id)
-		agentIDs, err := agents.List()
-		if err != nil {
-			continue
-		}
-
-		for _, aid := range agentIDs {
-			if aid.Role == "polecat" {
-				count++
-			}
+	for _, aid := range agentIDs {
+		if aid.Role == "polecat" {
+			count++
 		}
 	}
 	return count

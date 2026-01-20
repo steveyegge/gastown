@@ -110,7 +110,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 	townRoot := filepath.Dir(townBeadsDir)
 
 	// Dispatch all beads (parallel handles both parallel and sequential via parallelism setting)
-	err := runBatchSlingParallel(beadIDs, rigName, townRoot, townBeadsDir)
+	err := runBatchSlingParallel(beadIDs, rigName, townRoot)
 
 	// Print convoy ID at end for easy tracking
 	if convoyID != "" {
@@ -122,7 +122,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 
 // runBatchSlingParallel handles slinging multiple beads in parallel.
 // Uses a worker pool with batchParallelism() workers.
-func runBatchSlingParallel(beadIDs []string, rigName, townRoot, townBeadsDir string) error {
+func runBatchSlingParallel(beadIDs []string, rigName, townRoot string) error {
 	parallelism := batchParallelism()
 	fmt.Printf("%s Parallel batch slinging %d beads (parallelism=%d)...\n",
 		style.Bold.Render("🚀"), len(beadIDs), parallelism)
@@ -143,7 +143,7 @@ func runBatchSlingParallel(beadIDs []string, rigName, townRoot, townBeadsDir str
 	var wg sync.WaitGroup
 	for w := 0; w < parallelism; w++ {
 		wg.Add(1)
-		go func(workerID int) {
+		go func() {
 			defer wg.Done()
 			for idx := range jobs {
 				beadID := beadIDs[idx]
@@ -184,7 +184,7 @@ func runBatchSlingParallel(beadIDs []string, rigName, townRoot, townBeadsDir str
 				result.success = true
 				results <- result
 			}
-		}(w)
+		}()
 	}
 
 	// Send jobs to workers
@@ -278,7 +278,7 @@ func runBatchSlingFormulaOn(formulaName string, beadIDs []string, rigName string
 
 	// --queue mode: create wisps+bonds, queue compound beads, then dispatch
 	if slingQueue {
-		return runBatchSlingFormulaOnQueue(formulaName, beadIDs, rigName, townRoot, townBeadsDir)
+		return runBatchSlingFormulaOnQueue(formulaName, beadIDs, rigName, townRoot)
 	}
 
 	// Dispatch all beads (parallel handles both parallel and sequential via parallelism setting)
@@ -316,7 +316,7 @@ func runBatchSlingFormulaOnParallel(formulaName string, beadIDs []string, rigNam
 	var wg sync.WaitGroup
 	for w := 0; w < parallelism; w++ {
 		wg.Add(1)
-		go func(workerID int) {
+		go func() {
 			defer wg.Done()
 			for idx := range jobs {
 				beadID := beadIDs[idx]
@@ -423,7 +423,7 @@ func runBatchSlingFormulaOnParallel(formulaName string, beadIDs []string, rigNam
 				result.success = true
 				results <- result
 			}
-		}(w)
+		}()
 	}
 
 	// Send jobs to workers
@@ -528,7 +528,7 @@ func runBatchSlingQueue(beadIDs []string, rigName string, townBeadsDir string) e
 	// Calculate dispatch limit based on capacity
 	limit := 0 // 0 means unlimited
 	if slingCapacity > 0 {
-		running := countRunningPolecats(townRoot)
+		running := countRunningPolecats()
 		slots := slingCapacity - running
 		if slots <= 0 {
 			fmt.Printf("At capacity: %d polecats running (capacity=%d)\n", running, slingCapacity)
@@ -562,7 +562,7 @@ func runBatchSlingQueue(beadIDs []string, rigName string, townBeadsDir string) e
 
 // runBatchSlingFormulaOnQueue handles formula-on-bead batch slinging with queue.
 // Creates wisps+bonds for all beads, queues the compound beads, then dispatches.
-func runBatchSlingFormulaOnQueue(formulaName string, beadIDs []string, rigName, townRoot, townBeadsDir string) error {
+func runBatchSlingFormulaOnQueue(formulaName string, beadIDs []string, rigName, townRoot string) error {
 	fmt.Printf("%s Creating formula instances and queueing...\n", style.Bold.Render("🔧"))
 
 	// Create queue with town-wide ops
@@ -658,7 +658,7 @@ func runBatchSlingFormulaOnQueue(formulaName string, beadIDs []string, rigName, 
 	// Calculate dispatch limit based on capacity
 	limit := 0 // 0 means unlimited
 	if slingCapacity > 0 {
-		running := countRunningPolecats(townRoot)
+		running := countRunningPolecats()
 		slots := slingCapacity - running
 		if slots <= 0 {
 			fmt.Printf("At capacity: %d polecats running (capacity=%d)\n", running, slingCapacity)

@@ -58,7 +58,7 @@ func TestDiscoverRigAgents_UsesRigPrefix(t *testing.T) {
 		"bd-hook": {ID: "bd-hook", Title: "Pinned"},
 	}
 
-	agents := discoverRigAgents(map[string]bool{}, r, nil, allAgentBeads, allHookBeads, nil, true)
+	agents := discoverRigAgents(map[string]bool{}, r, nil, nil, allAgentBeads, allHookBeads, nil, true)
 	if len(agents) != 1 {
 		t.Fatalf("discoverRigAgents() returned %d agents, want 1", len(agents))
 	}

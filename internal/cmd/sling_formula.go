@@ -11,7 +11,6 @@ import (
 	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
-	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/queue"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
