@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -193,6 +195,19 @@ func runSeanceTalk(sessionID, prompt string) error {
 
 	fmt.Printf("%s Summoning session %s...\n\n", style.Bold.Render("🔮"), sessionID)
 
+	// Find the session in another account and symlink it to the current account
+	// This allows Claude to load sessions from any account while keeping
+	// the forked session in the current account
+	townRoot, _ := workspace.FindFromCwd()
+	cleanup, err := symlinkSessionToCurrentAccount(townRoot, sessionID)
+	if err != nil {
+		// Not fatal - session might already be in current account
+		fmt.Printf("%s\n", style.Dim.Render("Note: "+err.Error()))
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
 	// Build the command
 	args := []string{"--fork-session", "--resume", sessionID}
 
@@ -286,4 +301,162 @@ func formatEventTime(ts string) string {
 		return ts
 	}
 	return t.Local().Format("2006-01-02 15:04")
+}
+
+// sessionsIndex represents the structure of sessions-index.json files.
+type sessionsIndex struct {
+	Version int `json:"version"`
+	Entries []struct {
+		SessionID string `json:"sessionId"`
+	} `json:"entries"`
+}
+
+// sessionLocation contains the location info for a session.
+type sessionLocation struct {
+	configDir  string // The account's config directory
+	projectDir string // The project directory name (e.g., "-Users-jv-gt-gastown-crew-propane")
+}
+
+// findSessionLocation searches all account config directories for a session.
+// Returns the config directory and project directory that contain the session.
+func findSessionLocation(townRoot, sessionID string) *sessionLocation {
+	if townRoot == "" {
+		return nil
+	}
+
+	// Load accounts config
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	cfg, err := config.LoadAccountsConfig(accountsPath)
+	if err != nil {
+		return nil
+	}
+
+	// Search each account's config directory
+	for _, acct := range cfg.Accounts {
+		if acct.ConfigDir == "" {
+			continue
+		}
+
+		// Expand ~ in path
+		configDir := acct.ConfigDir
+		if strings.HasPrefix(configDir, "~/") {
+			home, _ := os.UserHomeDir()
+			configDir = filepath.Join(home, configDir[2:])
+		}
+
+		// Search all sessions-index.json files in this account
+		projectsDir := filepath.Join(configDir, "projects")
+		if _, err := os.Stat(projectsDir); os.IsNotExist(err) {
+			continue
+		}
+
+		// Walk through project directories
+		entries, err := os.ReadDir(projectsDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			indexPath := filepath.Join(projectsDir, entry.Name(), "sessions-index.json")
+			if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+				continue
+			}
+
+			// Read and parse the sessions index
+			data, err := os.ReadFile(indexPath)
+			if err != nil {
+				continue
+			}
+
+			var index sessionsIndex
+			if err := json.Unmarshal(data, &index); err != nil {
+				continue
+			}
+
+			// Check if this index contains our session
+			for _, e := range index.Entries {
+				if e.SessionID == sessionID {
+					return &sessionLocation{
+						configDir:  configDir,
+						projectDir: entry.Name(),
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// symlinkSessionToCurrentAccount finds a session in any account and symlinks
+// the project directory to the current account so Claude can access it.
+// Returns a cleanup function to remove the symlink after use.
+func symlinkSessionToCurrentAccount(townRoot, sessionID string) (cleanup func(), err error) {
+	// Find where the session lives
+	loc := findSessionLocation(townRoot, sessionID)
+	if loc == nil {
+		return nil, fmt.Errorf("session not found in any account")
+	}
+
+	// Get current account's config directory (resolve ~/.claude symlink)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("getting home directory: %w", err)
+	}
+
+	claudeDir := filepath.Join(home, ".claude")
+	currentConfigDir, err := filepath.EvalSymlinks(claudeDir)
+	if err != nil {
+		// ~/.claude might not be a symlink, use it directly
+		currentConfigDir = claudeDir
+	}
+
+	// If session is already in current account, nothing to do
+	if loc.configDir == currentConfigDir {
+		return nil, nil
+	}
+
+	// Source: the project directory in the other account
+	sourceProjectDir := filepath.Join(loc.configDir, "projects", loc.projectDir)
+
+	// Target: symlink in current account's projects directory
+	currentProjectsDir := filepath.Join(currentConfigDir, "projects")
+	if err := os.MkdirAll(currentProjectsDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating projects directory: %w", err)
+	}
+
+	targetSymlink := filepath.Join(currentProjectsDir, loc.projectDir)
+
+	// Check if target already exists
+	if info, err := os.Lstat(targetSymlink); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			// Already a symlink - check if it points to the right place
+			existing, _ := os.Readlink(targetSymlink)
+			if existing == sourceProjectDir {
+				// Already symlinked correctly, no cleanup needed
+				return nil, nil
+			}
+			// Different symlink, remove it
+			_ = os.Remove(targetSymlink)
+		} else {
+			// Real directory exists - don't overwrite it
+			return nil, fmt.Errorf("project directory already exists in current account")
+		}
+	}
+
+	// Create the symlink
+	if err := os.Symlink(sourceProjectDir, targetSymlink); err != nil {
+		return nil, fmt.Errorf("creating symlink: %w", err)
+	}
+
+	// Return cleanup function to remove the symlink
+	cleanup = func() {
+		_ = os.Remove(targetSymlink)
+	}
+
+	return cleanup, nil
 }
