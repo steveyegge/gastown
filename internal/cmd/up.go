@@ -47,6 +47,7 @@ This is the idempotent "boot" command for Gas Town. It ensures all
 infrastructure agents are running:
 
   • Daemon     - Go background process that pokes agents
+  • Boot       - Watchdog that triages Deacon health (the dog)
   • Deacon     - Health orchestrator (monitors Mayor/Witnesses)
   • Mayor      - Global work coordinator
   • Witnesses  - Per-rig polecat managers
@@ -197,7 +198,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// 7. Polecats with pinned work (if --restore)
+		// 8. Polecats with pinned work (if --restore)
 		for _, rigName := range rigs {
 			polecatsStarted, polecatErrors := startPolecatsWithWork(townRoot, rigName)
 			for _, name := range polecatsStarted {
@@ -214,7 +215,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	if allOK {
 		fmt.Printf("%s All services running\n", style.Bold.Render("✓"))
 		// Log boot event with started services
-		startedServices := []string{"daemon", "deacon", "mayor"}
+		startedServices := []string{"daemon", "boot", "deacon", "mayor"}
 		for _, rigName := range rigs {
 			startedServices = append(startedServices, fmt.Sprintf("%s/witness", rigName))
 			startedServices = append(startedServices, fmt.Sprintf("%s/refinery", rigName))

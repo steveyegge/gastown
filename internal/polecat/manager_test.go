@@ -293,8 +293,8 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
 
-	// Initialize git repo in mayor/rig
-	cmd := exec.Command("git", "init")
+	// Initialize git repo in mayor/rig with main branch
+	cmd := exec.Command("git", "init", "-b", "main")
 	cmd.Dir = mayorRig
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
@@ -307,8 +307,16 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		t.Fatalf("write AGENTS.md: %v", err)
 	}
 
-	// Commit AGENTS.md so it's part of the repo
+	// Checkout main branch to ensure it exists (needed for origin/main remote tracking)
+	cmd = exec.Command("git", "checkout", "-b", "main")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b main: %v\n%s", err, out)
+	}
+
 	mayorGit := git.NewGit(mayorRig)
+
+	// Commit AGENTS.md so it's part of the repo
 	if err := mayorGit.Add("AGENTS.md"); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
@@ -372,7 +380,7 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	}
 
 	// Initialize git repo in mayor/rig WITHOUT AGENTS.md in git
-	cmd := exec.Command("git", "init")
+	cmd := exec.Command("git", "init", "-b", "main")
 	cmd.Dir = mayorRig
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
@@ -383,6 +391,13 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	if err := os.WriteFile(dummyPath, []byte("# Test\n"), 0644); err != nil {
 		t.Fatalf("write README.md: %v", err)
 	}
+	// Checkout main branch to ensure it exists (needed for origin/main remote tracking)
+	cmd = exec.Command("git", "checkout", "-b", "main")
+	cmd.Dir = mayorRig
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b main: %v\n%s", err, out)
+	}
+
 	mayorGit := git.NewGit(mayorRig)
 	if err := mayorGit.Add("README.md"); err != nil {
 		t.Fatalf("git add: %v", err)
@@ -647,5 +662,59 @@ func TestReconcilePoolWith_OrphanDoesNotBlockAllocation(t *testing.T) {
 
 	if name != "furiosa" {
 		t.Errorf("expected furiosa (orphan freed), got %q", name)
+	}
+}
+
+// TestAllocateName_ConcurrentAllocationUnique verifies that concurrent calls
+// to AllocateName() return unique names (no race condition).
+// This tests the fix for the parallel sling race condition bug (gt-27eer).
+func TestAllocateName_ConcurrentAllocationUnique(t *testing.T) {
+	t.Parallel()
+
+	tmpDir, err := os.MkdirTemp("", "concurrent-alloc-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	r := &rig.Rig{
+		Name: "testrig",
+		Path: tmpDir,
+	}
+	m := NewManager(r, nil, nil)
+
+	// Run 10 concurrent allocations
+	const numAllocs = 10
+	names := make(chan string, numAllocs)
+	errs := make(chan error, numAllocs)
+
+	for i := 0; i < numAllocs; i++ {
+		go func() {
+			name, err := m.AllocateName()
+			if err != nil {
+				errs <- err
+				return
+			}
+			names <- name
+		}()
+	}
+
+	// Collect results
+	allocatedNames := make(map[string]bool)
+	for i := 0; i < numAllocs; i++ {
+		select {
+		case name := <-names:
+			if allocatedNames[name] {
+				t.Errorf("duplicate name allocated: %q (race condition!)", name)
+			}
+			allocatedNames[name] = true
+		case err := <-errs:
+			t.Errorf("allocation error: %v", err)
+		}
+	}
+
+	// Should have exactly numAllocs unique names
+	if len(allocatedNames) != numAllocs {
+		t.Errorf("expected %d unique names, got %d", numAllocs, len(allocatedNames))
 	}
 }

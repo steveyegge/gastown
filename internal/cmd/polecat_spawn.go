@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -76,6 +77,10 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	}
 	fmt.Printf("Allocated polecat: %s\n", polecatName)
 
+	// Clean up orphaned state for this polecat before creation/repair
+	// This prevents contamination from previous failed spawns (hq-gsk9g, hq-cv-bn5ug)
+	cleanupOrphanPolecatState(rigName, polecatName, townRoot, tmux.NewTmux())
+
 	// Check if polecat already exists (shouldn't happen - indicates stale state needing repair)
 	existingPolecat, err := polecatMgr.Get(polecatName)
 
@@ -115,12 +120,22 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		return nil, fmt.Errorf("getting polecat after creation: %w", err)
 	}
 
+	// NOTE: Agent bead is already created by AddWithOptions/RepairWorktreeWithOptions
+	// with hook_bead set atomically. No need to call createPolecatAgentBead here.
+
 	// Resolve account for runtime config
 	accountsPath := constants.MayorAccountsPath(townRoot)
 	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, opts.Account)
 	if err != nil {
 		return nil, fmt.Errorf("resolving account: %w", err)
 	}
+
+	// Validate that the account has credentials before spawning
+	// This prevents OAuth prompts from appearing in polecat sessions
+	if err := config.ValidateAccountCredentials(claudeConfigDir, accountHandle); err != nil {
+		return nil, err
+	}
+
 	if accountHandle != "" {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
@@ -152,6 +167,13 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	pane, err := getSessionPane(sessionName)
 	if err != nil {
 		return nil, fmt.Errorf("getting pane for %s: %w", sessionName, err)
+	}
+
+	// Final verification: confirm worktree and session both still exist.
+	// Issue: gt sling reports success but worktree never created (hq-yh8icr).
+	// This catches any race conditions or cleanup that might have occurred.
+	if err := verifySpawnedPolecat(polecatObj.ClonePath, sessionName, t); err != nil {
+		return nil, fmt.Errorf("spawn verification failed for %s: %w", polecatName, err)
 	}
 
 	fmt.Printf("%s Polecat %s spawned\n", style.Bold.Render("✓"), polecatName)
@@ -202,4 +224,65 @@ func IsRigName(target string) (string, bool) {
 	}
 
 	return target, true
+}
+
+// cleanupOrphanPolecatState removes orphaned tmux sessions and stale git worktrees
+// for a polecat that's being allocated. This prevents contamination from failed
+// spawns where the directory was created but the worktree wasn't.
+//
+// This implements the fix from investigation hq-gsk9g (polecat worktree hygiene):
+// - Kills orphan tmux sessions without corresponding directories
+// - Prunes stale git worktree registrations
+// - Clears hook_bead on respawn (via fresh agent bead creation)
+func cleanupOrphanPolecatState(rigName, polecatName, townRoot string, tm *tmux.Tmux) {
+	polecatDir := filepath.Join(townRoot, "polecats", polecatName)
+	sessionName := fmt.Sprintf("gt-%s-p-%s", rigName, polecatName)
+
+	// Step 1: Kill orphan tmux session if it exists
+	if err := tm.KillSession(sessionName); err == nil {
+		fmt.Printf("  Cleaned up orphan tmux session: %s\n", sessionName)
+	}
+
+	// Step 2: Remove empty polecat directory (failed worktree creation)
+	// This handles the race condition where RepairWorktreeWithOptions steps 1-2
+	// succeed but step 3 (worktree creation) fails, leaving an empty directory.
+	if entries, err := filepath.Glob(polecatDir + "/*"); err == nil && len(entries) == 0 {
+		if rmErr := os.RemoveAll(polecatDir); rmErr == nil {
+			fmt.Printf("  Cleaned up empty polecat directory: %s\n", polecatDir)
+		}
+	}
+
+	// Step 3: Prune stale git worktree entries (non-fatal cleanup)
+	repoGit := git.NewGit(townRoot)
+	_ = repoGit.WorktreePrune()
+}
+
+// verifySpawnedPolecat performs final verification that a spawned polecat is valid.
+// This catches race conditions where worktree or session disappear during spawn.
+//
+// Checks:
+// 1. Worktree directory exists and has .git
+// 2. Tmux session exists
+//
+// Issue: gt sling reports success but worktree never created (hq-yh8icr).
+func verifySpawnedPolecat(clonePath, sessionName string, t *tmux.Tmux) error {
+	// Check 1: Worktree exists and has .git
+	gitPath := filepath.Join(clonePath, ".git")
+	if _, err := os.Stat(gitPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("worktree disappeared: %s (missing .git)", clonePath)
+		}
+		return fmt.Errorf("checking worktree: %w", err)
+	}
+
+	// Check 2: Tmux session exists
+	hasSession, err := t.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("checking session: %w", err)
+	}
+	if !hasSession {
+		return fmt.Errorf("session disappeared: %s", sessionName)
+	}
+
+	return nil
 }

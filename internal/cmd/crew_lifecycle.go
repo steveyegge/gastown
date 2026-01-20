@@ -309,7 +309,16 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		townRoot = filepath.Dir(r.Path)
 	}
 	accountsPath := constants.MayorAccountsPath(townRoot)
-	claudeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, crewAccount)
+	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, crewAccount)
+	if err != nil {
+		return fmt.Errorf("resolving account: %w", err)
+	}
+
+	// Validate that the account has credentials before starting
+	// This prevents OAuth prompts from appearing in crew sessions
+	if err := config.ValidateAccountCredentials(claudeConfigDir, accountHandle); err != nil {
+		return err
+	}
 
 	// Build start options (shared across all crew members)
 	opts := crew.StartOptions{

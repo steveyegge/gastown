@@ -5,8 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/steveyegge/gastown/internal/session"
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // Peek command flags
@@ -18,9 +19,9 @@ func init() {
 }
 
 var peekCmd = &cobra.Command{
-	Use:     "peek <rig/polecat> [count]",
+	Use:     "peek <target> [count]",
 	GroupID: GroupComm,
-	Short:   "View recent output from a polecat or crew session",
+	Short:   "View recent output from an agent session",
 	Long: `Capture and display recent terminal output from an agent session.
 
 This is the ergonomic alias for 'gt session capture'. Use it to check
@@ -30,11 +31,15 @@ The nudge/peek pair provides the canonical interface for agent sessions:
   gt nudge - send messages TO a session (reliable delivery)
   gt peek  - read output FROM a session (capture-pane wrapper)
 
-Supports both polecats and crew workers:
+Supports town-level agents, polecats, and crew workers:
+  - Town-level: mayor, deacon, boot (no rig prefix needed)
   - Polecats: rig/name format (e.g., greenplace/furiosa)
   - Crew: rig/crew/name format (e.g., beads/crew/dave)
 
 Examples:
+  gt peek mayor                      # Town-level: Mayor agent
+  gt peek deacon                     # Town-level: Deacon agent
+  gt peek boot                       # Town-level: Boot watchdog
   gt peek greenplace/furiosa         # Polecat: last 100 lines (default)
   gt peek greenplace/furiosa 50      # Polecat: last 50 lines
   gt peek beads/crew/dave            # Crew: last 100 lines
@@ -56,6 +61,36 @@ func runPeek(cmd *cobra.Command, args []string) error {
 		lines = n
 	}
 
+	// Handle town-level agents (no rig prefix needed)
+	var sessionName string
+	switch address {
+	case "mayor":
+		sessionName = session.MayorSessionName()
+	case "deacon":
+		sessionName = session.DeaconSessionName()
+	case "boot":
+		sessionName = "gt-boot" // Boot watchdog session
+	}
+
+	if sessionName != "" {
+		// Town-level agent - capture directly via tmux
+		t := tmux.NewTmux()
+		exists, err := t.HasSession(sessionName)
+		if err != nil {
+			return fmt.Errorf("checking %s session: %w", address, err)
+		}
+		if !exists {
+			return fmt.Errorf("%s session not running (expected %s)", address, sessionName)
+		}
+		output, err := t.CapturePane(sessionName, lines)
+		if err != nil {
+			return fmt.Errorf("capturing %s output: %w", address, err)
+		}
+		fmt.Print(output)
+		return nil
+	}
+
+	// Standard rig/polecat format
 	rigName, polecatName, err := parseAddress(address)
 	if err != nil {
 		return err

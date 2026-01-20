@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/tui/feed"
+	"github.com/steveyegge/gastown/internal/ui"
 	"github.com/steveyegge/gastown/internal/workspace"
 	"golang.org/x/term"
 )
@@ -91,6 +92,16 @@ Examples:
 }
 
 func runFeed(cmd *cobra.Command, args []string) error {
+	// Detect Claude Code environment - require --no-follow to prevent infinite streaming
+	if ui.IsAgentMode() && !feedNoFollow {
+		return fmt.Errorf(`gt feed streams forever by default, which hangs Claude Code
+
+Use --no-follow to get a snapshot instead:
+  gt feed --plain --no-follow              # Recent events as plain text
+  gt feed --plain --no-follow --since 5m   # Events from last 5 minutes
+  gt feed --plain --no-follow --limit 20   # Last 20 events`)
+	}
+
 	// Must be in a Gas Town workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
