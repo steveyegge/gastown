@@ -86,7 +86,7 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 	}
 
 	createCmd := exec.Command("bd", append([]string{"--no-daemon"}, createArgs...)...)
-	createCmd.Dir = townBeads
+	createCmd.Dir = townRoot // Run from town root so bd can find .beads/config.yaml
 	createCmd.Stderr = os.Stderr
 
 	if err := createCmd.Run(); err != nil {
@@ -97,7 +97,7 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 	trackBeadID := formatTrackBeadID(beadID)
 	depArgs := []string{"--no-daemon", "dep", "add", convoyID, trackBeadID, "--type=tracks"}
 	depCmd := exec.Command("bd", depArgs...)
-	depCmd.Dir = townBeads
+	depCmd.Dir = townRoot // Run from town root so bd can find .beads/config.yaml
 	depCmd.Stderr = os.Stderr
 
 	if err := depCmd.Run(); err != nil {
