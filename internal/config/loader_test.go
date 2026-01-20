@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1217,6 +1218,13 @@ func TestBuildStartupCommand_UsesRoleAgentsFromTownSettings(t *testing.T) {
 
 	binDir := t.TempDir()
 	for _, name := range []string{"gemini", "codex"} {
+		if runtime.GOOS == "windows" {
+			path := filepath.Join(binDir, name+".cmd")
+			if err := os.WriteFile(path, []byte("@echo off\r\nexit /b 0\r\n"), 0644); err != nil {
+				t.Fatalf("write %s stub: %v", name, err)
+			}
+			continue
+		}
 		path := filepath.Join(binDir, name)
 		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 			t.Fatalf("write %s stub: %v", name, err)
