@@ -103,14 +103,20 @@ if [[ "$CHECK_LINKS" == true ]]; then
         dir=$(dirname "$file")
         
         # Extract markdown links [text](path)
-        # Skip external URLs (http://, https://)
-        grep -oE '\[.+\]\([^)]+\)' "$file" 2>/dev/null | while read -r link; do
-            path=$(echo "$link" | sed -E 's/.*\(([^)#]+).*/\1/')
+        # Skip content in code blocks and inline code to avoid false positives
+        # We strip triple-backtick blocks first, then inline backticks
+        content=$(sed '/^```/,/^```/d' "$file" | sed -E 's/`[^`]+`//g')
+        
+        echo "$content" | grep -oE '\[.+\]\([^)]+\)' 2>/dev/null | while read -r link; do
+            path=$(echo "$link" | sed -E 's/.*\[.*\]\(([^)]+)\).*/\1/')
             
-            # Skip external links and anchors
-            if [[ "$path" =~ ^https?:// ]] || [[ "$path" =~ ^#  ]] || [[ -z "$path" ]]; then
+            # Skip external links, anchors (starts with #), and empty paths
+            if [[ "$path" =~ ^https?:// ]] || [[ "$path" == "#"* ]] || [[ -z "$path" ]]; then
                 continue
             fi
+            
+            # Strip anchors from local paths for existence check
+            path=$(echo "$path" | cut -d'#' -f1)
             
             # Resolve relative path
             if [[ "$path" =~ ^\.\./ ]] || [[ "$path" =~ ^\./ ]]; then

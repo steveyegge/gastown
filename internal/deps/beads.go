@@ -3,10 +3,13 @@ package deps
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // MinBeadsVersion is the minimum compatible beads version for this Gas Town release.
@@ -16,14 +19,94 @@ const MinBeadsVersion = "0.43.0"
 // BeadsInstallPath is the go install path for beads.
 const BeadsInstallPath = "github.com/steveyegge/beads/cmd/bd@latest"
 
+var (
+	// resolvedBeadsPath caches the resolved beads binary path
+	resolvedBeadsPath string
+	beadsPathOnce     sync.Once
+	beadsPathErr      error
+)
+
+// BeadsPath returns the absolute path to the beads (bd) binary.
+// This ensures consistent use of the correct version across all calls.
+// Priority order:
+// 1. $BEADS_BIN environment variable (explicit override)
+// 2. ~/go/bin/bd (canonical Go install location)
+// 3. First bd in PATH that meets version requirements
+func BeadsPath() (string, error) {
+	beadsPathOnce.Do(func() {
+		resolvedBeadsPath, beadsPathErr = resolveBeadsPath()
+	})
+	return resolvedBeadsPath, beadsPathErr
+}
+
+// resolveBeadsPath finds the correct beads binary.
+func resolveBeadsPath() (string, error) {
+	// 1. Check explicit override
+	if envPath := os.Getenv("BEADS_BIN"); envPath != "" {
+		if _, err := os.Stat(envPath); err == nil {
+			version := getVersionAt(envPath)
+			if version != "" && compareVersions(version, MinBeadsVersion) >= 0 {
+				return envPath, nil
+			}
+			if version != "" {
+				return "", fmt.Errorf("BEADS_BIN points to bd %s (minimum: %s)", version, MinBeadsVersion)
+			}
+		}
+		return "", fmt.Errorf("BEADS_BIN points to non-existent file: %s", envPath)
+	}
+
+	// 2. Check canonical Go install location
+	home, _ := os.UserHomeDir()
+	goPath := filepath.Join(home, "go", "bin", "bd")
+	if _, err := os.Stat(goPath); err == nil {
+		version := getVersionAt(goPath)
+		if version != "" && compareVersions(version, MinBeadsVersion) >= 0 {
+			return goPath, nil
+		}
+		// Fall through if ~/go/bin/bd is too old
+	}
+
+	// 3. Search PATH for compatible version
+	pathEnv := os.Getenv("PATH")
+	for _, dir := range filepath.SplitList(pathEnv) {
+		candidate := filepath.Join(dir, "bd")
+		if _, err := os.Stat(candidate); err == nil {
+			version := getVersionAt(candidate)
+			if version != "" && compareVersions(version, MinBeadsVersion) >= 0 {
+				return candidate, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no compatible beads (bd) found (minimum: %s)\n\nInstall with: go install %s",
+		MinBeadsVersion, BeadsInstallPath)
+}
+
+// getVersionAt runs the specified bd binary and returns its version.
+func getVersionAt(path string) string {
+	cmd := exec.Command(path, "version")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return parseBeadsVersion(string(output))
+}
+
+// ResetBeadsPath clears the cached beads path (for testing).
+func ResetBeadsPath() {
+	beadsPathOnce = sync.Once{}
+	resolvedBeadsPath = ""
+	beadsPathErr = nil
+}
+
 // BeadsStatus represents the state of the beads installation.
 type BeadsStatus int
 
 const (
-	BeadsOK          BeadsStatus = iota // bd found, version compatible
-	BeadsNotFound                       // bd not in PATH
-	BeadsTooOld                         // bd found but version too old
-	BeadsUnknown                        // bd found but couldn't parse version
+	BeadsOK       BeadsStatus = iota // bd found, version compatible
+	BeadsNotFound                    // bd not in PATH
+	BeadsTooOld                      // bd found but version too old
+	BeadsUnknown                     // bd found but couldn't parse version
 )
 
 // CheckBeads checks if bd is installed and compatible.

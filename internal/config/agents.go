@@ -132,7 +132,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Command:             "codex",
 		Args:                []string{"--yolo"},
 		ProcessNames:        []string{"codex"}, // Codex CLI binary
-		SessionIDEnv:        "", // Codex captures from JSONL output
+		SessionIDEnv:        "",                // Codex captures from JSONL output
 		ResumeFlag:          "resume",
 		ResumeStyle:         "subcommand",
 		SupportsHooks:       false, // Use env/files instead
@@ -182,9 +182,9 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentOpencode: {
 		Name:                AgentOpencode,
 		Command:             "opencode",
-		Args:                []string{}, // opencode uses config file for settings
+		Args:                []string{},                   // opencode uses config file for settings
 		ProcessNames:        []string{"node", "opencode"}, // opencode can appear as node or opencode depending on startup
-		SessionIDEnv:        "", // opencode manages sessions internally
+		SessionIDEnv:        "",                           // opencode manages sessions internally
 		ResumeFlag:          "--session",
 		ResumeStyle:         "flag",
 		SupportsHooks:       true, // via plugin system
@@ -356,7 +356,7 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	return &RuntimeConfig{
 		Command:  info.Command,
 		Args:     args,
-		Provider: string(preset), // Set provider so normalizeRuntimeConfig uses correct defaults
+		Provider: string(preset), // Set provider so NormalizeRuntimeConfig uses correct defaults
 	}
 }
 

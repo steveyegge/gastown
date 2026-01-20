@@ -2,8 +2,8 @@
 package config
 
 import (
-	"path/filepath"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -328,13 +328,13 @@ type RuntimeInstructionsConfig struct {
 
 // DefaultRuntimeConfig returns a RuntimeConfig with sensible defaults.
 func DefaultRuntimeConfig() *RuntimeConfig {
-	return normalizeRuntimeConfig(&RuntimeConfig{Provider: "claude"})
+	return NormalizeRuntimeConfig(&RuntimeConfig{Provider: "claude"})
 }
 
 // BuildCommand returns the full command line string.
 // For use with tmux SendKeys.
 func (rc *RuntimeConfig) BuildCommand() string {
-	resolved := normalizeRuntimeConfig(rc)
+	resolved := NormalizeRuntimeConfig(rc)
 
 	cmd := resolved.Command
 	args := resolved.Args
@@ -350,7 +350,7 @@ func (rc *RuntimeConfig) BuildCommand() string {
 // If the config has an InitialPrompt, it's appended as a quoted argument.
 // If prompt is provided, it overrides the config's InitialPrompt.
 func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
-	resolved := normalizeRuntimeConfig(rc)
+	resolved := NormalizeRuntimeConfig(rc)
 	base := resolved.BuildCommand()
 
 	// Use provided prompt or fall back to config
@@ -369,7 +369,7 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 
 // BuildArgsWithPrompt returns the runtime command and args suitable for exec.
 func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
-	resolved := normalizeRuntimeConfig(rc)
+	resolved := NormalizeRuntimeConfig(rc)
 	args := append([]string{resolved.Command}, resolved.Args...)
 
 	p := prompt
@@ -384,7 +384,7 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	return args
 }
 
-func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
+func NormalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 	if rc == nil {
 		rc = &RuntimeConfig{}
 	}
@@ -554,6 +554,7 @@ func defaultReadyPromptPrefix(provider string) string {
 	if provider == "claude" {
 		return "> "
 	}
+	// opencode uses a TUI without a standard shell prompt, so we rely on delay
 	return ""
 }
 
@@ -563,6 +564,10 @@ func defaultReadyDelayMs(provider string) int {
 	}
 	if provider == "codex" {
 		return 3000
+	}
+	if provider == "opencode" {
+		// Give opencode TUI ample time to initialize
+		return 5000
 	}
 	return 0
 }

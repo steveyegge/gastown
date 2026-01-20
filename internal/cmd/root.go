@@ -30,6 +30,7 @@ var beadsExemptCommands = map[string]bool{
 	"version":    true,
 	"help":       true,
 	"completion": true,
+	"install":    true,
 }
 
 // Commands exempt from the town root branch warning.

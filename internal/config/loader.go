@@ -727,7 +727,7 @@ func LoadRuntimeConfig(rigPath string) *RuntimeConfig {
 	if settings.Runtime == nil {
 		return DefaultRuntimeConfig()
 	}
-	return normalizeRuntimeConfig(settings.Runtime)
+	return NormalizeRuntimeConfig(settings.Runtime)
 }
 
 // TownSettingsPath returns the path to town settings file.
@@ -890,8 +890,8 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 		}
 		// Then check built-in presets
 		if preset := GetAgentPresetByName(agentName); preset != nil {
-			// normalizeRuntimeConfig fills in Hooks and other fields based on Provider
-			return normalizeRuntimeConfig(RuntimeConfigFromPreset(AgentPreset(agentName))), agentName, nil
+			// NormalizeRuntimeConfig fills in Hooks and other fields based on Provider
+			return NormalizeRuntimeConfig(RuntimeConfigFromPreset(AgentPreset(agentName))), agentName, nil
 		}
 		return nil, "", fmt.Errorf("agent '%s' not found", agentName)
 	}
@@ -1253,6 +1253,10 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
+	// Add GT_BINARY_PATH to ensure agents can find the gt binary in tests
+	if binPath := os.Getenv("GT_BINARY_PATH"); binPath != "" {
+		resolvedEnv["GT_BINARY_PATH"] = binPath
+	}
 
 	// Build environment export prefix
 	var exports []string
@@ -1361,6 +1365,10 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	}
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
+	}
+	// Add GT_BINARY_PATH to ensure agents can find the gt binary in tests
+	if binPath := os.Getenv("GT_BINARY_PATH"); binPath != "" {
+		resolvedEnv["GT_BINARY_PATH"] = binPath
 	}
 
 	// Build environment export prefix

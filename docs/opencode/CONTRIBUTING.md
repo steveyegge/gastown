@@ -36,8 +36,9 @@ All internal links should be relative:
 [reference/plugin-implementation.md](reference/plugin-implementation.md)
 
 # ❌ Bad  
-[events.md](/docs/opencode/reference/events.md)  # Absolute path
+[events.md](/absolute/path/to/events.md)
 ```
+
 
 ### Date Format
 
@@ -83,7 +84,7 @@ The validation script checks:
 
 ### 1. Broken Links
 
-All `[text](path)` links should resolve to existing files.
+All `[text](file.md)` links should resolve to existing files.
 
 ### 2. Missing README Updates
 

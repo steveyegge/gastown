@@ -285,8 +285,8 @@ func TestPluginUsesCorrectDirectory(t *testing.T) {
 	contentStr := string(content)
 
 	// Test directory parameter is used
-	if !strings.Contains(contentStr, "{ $, directory }") {
-		t.Error("Plugin should accept $ and directory parameters")
+	if !strings.Contains(contentStr, "{ $, directory, client }") {
+		t.Error("Plugin should accept $, directory and client parameters")
 	}
 
 	// Test cwd is set to directory

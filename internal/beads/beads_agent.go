@@ -150,6 +150,11 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 
 	out, err := b.run(args...)
 	if err != nil {
+		// Handle beads list/show bug where issue exists but is not found,
+		// causing create to fail with UNIQUE constraint.
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return &Issue{ID: id}, nil
+		}
 		return nil, err
 	}
 
@@ -187,7 +192,6 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 // NOTE: This does NOT handle tombstones. If the old bead was hard-deleted (creating
 // a tombstone), this function will fail. Use CloseAndClearAgentBead instead of DeleteAgentBead
 // when cleaning up agent beads to ensure they can be reopened later.
-//
 //
 // The function:
 // 1. Tries to create the agent bead
@@ -414,7 +418,6 @@ func (b *Beads) GetAgentNotificationLevel(id string) (string, error) {
 // truly deleting. This breaks CreateOrReopenAgentBead because tombstones are
 // invisible to bd show/reopen but still block bd create via UNIQUE constraint.
 //
-//
 // WORKAROUND: Use CloseAndClearAgentBead instead, which allows CreateOrReopenAgentBead
 // to reopen the bead on re-spawn.
 func (b *Beads) DeleteAgentBead(id string) error {
@@ -449,8 +452,8 @@ func (b *Beads) CloseAndClearAgentBead(id, reason string) error {
 
 	// Parse existing fields and clear mutable ones
 	fields := ParseAgentFields(issue.Description)
-	fields.HookBead = ""     // Clear hook_bead
-	fields.ActiveMR = ""     // Clear active_mr
+	fields.HookBead = ""      // Clear hook_bead
+	fields.ActiveMR = ""      // Clear active_mr
 	fields.CleanupStatus = "" // Clear cleanup_status
 	fields.AgentState = "closed"
 

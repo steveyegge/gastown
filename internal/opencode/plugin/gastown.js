@@ -1,190 +1,296 @@
-// Gas Town OpenCode plugin: Full parity with Claude hooks via OpenCode events.
-// 
-// Provides equivalent functionality to Claude's hooks:
-// - SessionStart → session.created event
-// - UserPromptSubmit → message.updated event (user role filter)
-// - PreCompact → experimental.session.compacting hook
-// - Stop → session.idle event
-//
-// Instrumentation: All actions logged with timestamps for E2E test analysis
+import fs from 'fs';
+import path from 'path';
 
-export const GasTown = async ({ $, directory }) => {
+/**
+ * Gas Town OpenCode plugin: Full parity with Claude hooks via OpenCode events.
+ */
+export const GasTown = async (args) => {
+  const { $, directory, client } = args;
   const role = (process.env.GT_ROLE || "").toLowerCase();
-  const sessionId = process.env.OPENCODE_SESSION_ID || "unknown";
+  let sessionId = process.env.OPENCODE_SESSION_ID || "unknown";
   const autonomousRoles = new Set(["polecat", "witness", "refinery", "deacon"]);
   const interactiveRoles = new Set(["mayor", "crew"]);
   let didInit = false;
+  let promptSent = false;
   let lastIdleTime = 0;
+  let idleCount = 0;
   let gtPath = null;
+  const pluginLogFile = process.env.GASTOWN_PLUGIN_LOG;
 
-  // Structured logging with timestamps
-  const log = (level, event, message, data = {}) => {
+    const log = (level, event, message, data = {}) => {
     const ts = new Date().toISOString();
-    const payload = {
-      ts,
-      level,
-      event,
-      message,
-      role,
-      session: sessionId,
-      ...data
-    };
     const prefix = `[gastown] ${ts}`;
+    
+    // Truncate message and data for logging
+    const truncate = (str, max = 500) => {
+      if (typeof str !== 'string') str = JSON.stringify(str);
+      return str.length > max ? str.substring(0, max) + '...' : str;
+    };
+
+    const displayMessage = truncate(message);
+    const dataStr = Object.keys(data).length ? JSON.stringify(data, (key, value) => {
+      if (typeof value === 'string') return truncate(value, 200);
+      return value;
+    }) : '';
+    
+    const logLine = `${prefix} [${level.toUpperCase()}] ${event}: ${displayMessage} ${dataStr}`;
+    
+    if (pluginLogFile) {
+      try {
+        fs.appendFileSync(pluginLogFile, logLine + '\n');
+      } catch (e) {}
+    }
+    
     if (level === 'error') {
-      console.error(`${prefix} [ERROR] ${event}: ${message}`, data.error || '');
+      console.error(logLine);
     } else {
-      console.log(`${prefix} [${level.toUpperCase()}] ${event}: ${message}`);
+      console.log(logLine);
     }
   };
 
-  // Find gt binary - check common locations first
+  log('info', 'init', 'Plugin initializing', { 
+    role, 
+    directory, 
+    GT_BINARY_PATH: process.env.GT_BINARY_PATH,
+    GASTOWN_PLUGIN_LOG: pluginLogFile,
+    cwd: process.cwd()
+  });
+
   const findGt = async () => {
     if (gtPath) return gtPath;
-    
-    const candidates = [
-      process.env.GT_BINARY_PATH,           // Explicit override
-      `${process.env.HOME}/go/bin/gt`,      // Default GOPATH
-      `${process.env.HOME}/.local/bin/gt`,  // User local
-      `${process.env.GOPATH || ""}/bin/gt`, // Custom GOPATH
-      "/usr/local/bin/gt",                  // System install
-    ].filter(Boolean);
-    
+    const candidates = [process.env.GT_BINARY_PATH, `${process.env.HOME}/go/bin/gt`, `${process.env.HOME}/.local/bin/gt`, "/usr/local/bin/gt"].filter(Boolean);
     for (const candidate of candidates) {
-      try {
-        await $`${candidate} version`.quiet();
-        gtPath = candidate;
-        log('info', 'init', `Found gt binary at: ${gtPath}`);
-        return gtPath;
-      } catch {
-        // Continue to next candidate
+      if (fs.existsSync(candidate)) {
+        if (candidate === process.env.GT_BINARY_PATH) {
+          gtPath = candidate;
+          return gtPath;
+        }
+        try {
+          if (typeof $ === 'function') {
+            const { exitCode } = await $`${candidate} version`.quiet();
+            if (exitCode === 0) {
+              gtPath = candidate;
+              return gtPath;
+            }
+          } else {
+            gtPath = candidate;
+            return gtPath;
+          }
+        } catch (e) {}
       }
     }
-    
-    log('error', 'init', 'gt binary not found', { 
-      checked: candidates,
-      hint: 'Set GT_BINARY_PATH env var to specify location'
-    });
     return null;
   };
 
   const run = async (cmd) => {
-    const startTime = Date.now();
     try {
       const gt = await findGt();
       if (!gt) {
         log('warn', 'run', `Skipping: ${cmd} (gt not found)`);
-        return { success: false, skipped: true };
+        return;
       }
-      // Replace "gt" at start of command with full path
       const fullCmd = cmd.replace(/^gt(\s|$)/, `${gt}$1`);
       log('info', 'run', `Executing: ${cmd}`);
-      
-      const result = await $`/bin/sh -c ${fullCmd}`.cwd(directory);
-      const duration = Date.now() - startTime;
-      
-      log('info', 'run', `Success: ${cmd}`, { duration_ms: duration, exit: 0 });
-      return { success: true, duration };
+      if (typeof $ === 'function') {
+        await $`/bin/sh -c ${fullCmd}`.cwd(directory);
+        log('info', 'run', `Success: ${cmd}`);
+      }
     } catch (err) {
-      const duration = Date.now() - startTime;
-      log('error', 'run', `Failed: ${cmd}`, { 
-        duration_ms: duration,
-        error: err?.message || String(err),
-        exit: err?.exitCode
-      });
-      return { success: false, duration, error: err?.message };
+      log('error', 'run', `Failed: ${cmd}`, { error: err?.message || String(err) });
     }
   };
 
-  // SessionStart equivalent
+  const inspectState = async () => {
+    log('info', 'init', `Inspecting state in ${directory}`);
+    try {
+      const files = fs.readdirSync(directory);
+      log('info', 'init', `Files: ${files.join(', ')}`);
+      
+      if (typeof $ === 'function') {
+        const status = await $`git status`.cwd(directory).quiet();
+        log('info', 'init', `Git Status: ${String(status.stdout).trim()}`);
+        
+        const branch = await $`git branch --show-current`.cwd(directory).quiet();
+        log('info', 'init', `Git Branch: ${String(branch.stdout).trim()}`);
+
+        if (files.filter(f => !f.startsWith('.')).length === 0 && fs.existsSync(path.join(directory, '.git'))) {
+           log('warn', 'init', 'Directory appears empty but .git exists. Attempting checkout...');
+           try {
+             // Use --force to ensure we overwrite anything or fix partial checkouts
+             await $`git checkout -f main || git checkout -f master || git checkout -f -b main`.cwd(directory).quiet();
+             const newFiles = fs.readdirSync(directory);
+             log('info', 'init', `Files after checkout: ${newFiles.join(', ')}`);
+             
+             // If still empty, try to see all branches
+             if (newFiles.filter(f => !f.startsWith('.')).length === 0) {
+                const branches = await $`git branch -a`.cwd(directory).quiet();
+                log('info', 'init', `Available branches:\n${String(branches.stdout).trim()}`);
+                
+                const remoteBranches = await $`git branch -r`.cwd(directory).quiet();
+                if (String(remoteBranches.stdout).includes('origin/main')) {
+                   await $`git checkout -f main`.cwd(directory).quiet();
+                } else if (String(remoteBranches.stdout).includes('origin/master')) {
+                   await $`git checkout -f master`.cwd(directory).quiet();
+                }
+                
+                const finalFiles = fs.readdirSync(directory);
+                log('info', 'init', `Files after secondary checkout: ${finalFiles.join(', ')}`);
+              }
+            } catch (checkoutErr) {
+              log('error', 'init', 'Checkout failed', { error: String(checkoutErr) });
+            }
+         }
+      }
+    } catch (e) {
+      log('error', 'init', 'State inspection failed', { error: String(e) });
+    }
+  };
+
+  const injectPrompt = async () => {
+    if (promptSent) return false;
+    const xdgConfig = process.env.XDG_CONFIG_HOME;
+    if (!xdgConfig) return false;
+    const promptFile = path.join(xdgConfig, "gastown_prompt.txt");
+    if (!fs.existsSync(promptFile)) return false;
+    const prompt = fs.readFileSync(promptFile, 'utf8');
+    log('info', 'test', `Injecting prompt from file (session: ${sessionId})`);
+    if (!client) {
+      log('error', 'test', 'Cannot inject prompt: client is undefined');
+      return false;
+    }
+    let sent = false;
+    if (typeof client.sendUserMessage === 'function') {
+      try {
+        await client.sendUserMessage(prompt);
+        sent = true;
+        log('info', 'test', 'Prompt injected via client.sendUserMessage');
+      } catch (e) { log('error', 'test', 'client.sendUserMessage failed', { error: String(e) }); }
+    }
+    if (!sent && client.tui?.appendPrompt && client.tui?.submitPrompt) {
+      try {
+        await client.tui.appendPrompt({ body: { text: prompt } });
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await client.tui.submitPrompt();
+        sent = true;
+        log('info', 'test', 'Prompt injected via TUI API');
+      } catch (e) { log('error', 'test', 'TUI API failed', { error: String(e) }); }
+    }
+    if (!sent && sessionId !== "unknown" && client.session?.prompt) {
+      try {
+        await client.session.prompt({ 
+          path: { id: sessionId }, 
+          body: { parts: [{ type: 'text', text: prompt }] } 
+        });
+        sent = true;
+        log('info', 'test', 'Prompt injected via session.prompt');
+      } catch (e) { log('error', 'test', 'session.prompt failed', { error: String(e) }); }
+    }
+    if (sent) {
+      promptSent = true;
+      console.log("GASTOWN_READY >");
+      return true;
+    }
+    return false;
+  };
+
   const onSessionCreated = async () => {
     if (didInit) return;
     didInit = true;
-    
-    log('info', 'hook', 'session.created triggered');
-    
+    console.log("GASTOWN_READY >");
+    await inspectState();
+    await injectPrompt();
     await run("gt prime");
-    
-    if (autonomousRoles.has(role)) {
-      log('info', 'hook', `Autonomous role (${role}): checking mail`);
-      await run("gt mail check --inject");
-    }
-    
+    if (autonomousRoles.has(role)) await run("gt mail check --inject");
     await run("gt nudge deacon session-started");
-    
-    log('info', 'hook', 'session.created complete');
   };
 
-  // UserPromptSubmit equivalent for interactive roles
-  const onUserMessage = async () => {
-    if (interactiveRoles.has(role)) {
-      log('info', 'hook', `message.updated triggered for interactive role (${role})`);
-      await run("gt mail check --inject");
+  let initAttempts = 0;
+  const proactiveInit = async () => {
+    if (didInit && promptSent) return;
+    initAttempts++;
+    if (!promptSent) await injectPrompt();
+    if (!didInit && promptSent) await onSessionCreated();
+    if (!didInit || !promptSent) {
+      if (initAttempts < 60) setTimeout(proactiveInit, 1000);
     }
   };
 
-  // PreCompact equivalent
-  const onPreCompact = async () => {
-    log('info', 'hook', 'pre-compact triggered');
-    await run("gt prime");
-    log('info', 'hook', 'pre-compact complete');
-  };
-
-  // Stop equivalent (with debouncing)
-  const onIdle = async () => {
-    const now = Date.now();
-    const timeSinceLastIdle = now - lastIdleTime;
-    
-    // Debounce: only run if idle for > 5 seconds
-    if (timeSinceLastIdle > 5000) {
-      log('info', 'hook', 'session.idle triggered', { debounce_ms: timeSinceLastIdle });
-      await run("gt costs record");
-      lastIdleTime = now;
-    } else {
-      log('debug', 'hook', 'session.idle debounced', { ms_remaining: 5000 - timeSinceLastIdle });
-    }
-  };
-
-  // Log plugin initialization
-  log('info', 'init', 'Plugin loaded', { 
-    role, 
-    directory, 
-    GT_BINARY_PATH: process.env.GT_BINARY_PATH || '(not set)',
-    autonomousRoles: [...autonomousRoles],
-    interactiveRoles: [...interactiveRoles]
-  });
+  setTimeout(proactiveInit, 3000);
 
   return {
-    // Event-based hooks
     event: async ({ event }) => {
+      log('debug', 'event', `Received event: ${event?.type}`, { props: Object.keys(event?.properties || {}) });
       switch (event?.type) {
         case "session.created":
-          await onSessionCreated();
-          break;
-        
-        case "message.updated":
-          // Check if it's a user message (not assistant)
-          if (event.properties?.info?.role === "user") {
-            await onUserMessage();
+        case "session.updated":
+        case "session.status":
+          if (!didInit && event.properties?.status !== "error") {
+            sessionId = event.properties?.sessionID || event.properties?.info?.id || event.properties?.id || sessionId;
+            log('info', 'hook', `Session event: ${event.type}, sessionId: ${sessionId}`);
+            await onSessionCreated();
           }
           break;
-        
         case "session.idle":
-          await onIdle();
-          break;
-          
-        default:
-          // Log unhandled events for debugging
-          if (event?.type) {
-            log('debug', 'event', `Unhandled event: ${event.type}`);
+          idleCount++;
+          log('info', 'idle', `Session idle detected (count: ${idleCount})`);
+          if (role === "polecat") {
+            await run("gt costs record");
+            if (idleCount >= 3) {
+              log('info', 'completion', 'GASTOWN_TASK_COMPLETE: Multiple idle events detected');
+            }
           }
+          break;
+        case "session.error":
+          const errObj = event.properties?.error || {};
+          const errName = errObj.name || 'UnknownError';
+          const errDataFields = errObj.data || {};
+          const errMessage = errDataFields.message || errDataFields.providerID || JSON.stringify(errDataFields);
+          const statusCode = errDataFields.statusCode ? ` (HTTP ${errDataFields.statusCode})` : '';
+          const retryable = errDataFields.isRetryable ? ' [retryable]' : '';
+          log('error', 'session', `GASTOWN_ERROR: ${errName}${statusCode}${retryable}: ${errMessage}`);
+          break;
+        case "message.updated":
+          const msgInfo = event.properties?.info || {};
+          log('debug', 'message', `Message from ${msgInfo?.role}`, { id: msgInfo?.id });
+          break;
+        case "message.part.updated":
+          // This is where actual message content lives!
+          const part = event.properties?.part;
+          const delta = event.properties?.delta;
+          const msgId = event.properties?.messageID || event.properties?.id;
+          
+          if (part?.type === 'text' && part?.text) {
+            const textSnippet = part.text.length > 200 ? part.text.substring(0, 200) + '...' : part.text;
+            log('info', 'content', `[Msg: ${msgId}] [${part.text.length} chars] ${textSnippet}`);
+            
+            // Check for completion indicators in the text
+            const completionPatterns = [
+              /tests?\s+(pass|passed|passing|succeed|success)/i,
+              /fix(ed)?\s+(the\s+)?(bug|issue|problem)/i,
+              /change.*complete/i,
+              /successfully\s+(fixed|changed|updated)/i,
+              /\ba\s*-\s*b\b/,  // The actual fix: a - b
+              /subtraction.*instead.*addition/i,
+              /done.*with.*task/i,
+              /all\s+tests\s+passed/i,
+              /bug\s+has\s+been\s+fixed/i
+            ];
+            
+            for (const pattern of completionPatterns) {
+              if (pattern.test(part.text)) {
+                log('info', 'completion', `GASTOWN_TASK_COMPLETE: Matched pattern ${pattern} in message ${msgId}`);
+                break;
+              }
+            }
+          }
+          if (delta) {
+            log('debug', 'delta', `Delta [Msg: ${msgId}]: ${delta.length > 100 ? delta.substring(0, 100) + '...' : delta}`);
+          }
+          break;
+        case "session.compacted":
+          await run("gt prime");
+          break;
       }
-    },
-    
-    // Pre-compaction hook (runs BEFORE compaction starts)
-    "experimental.session.compacting": async (input, output) => {
-      await onPreCompact();
-      // Can customize compaction prompt if needed:
-      // output.context.push("Additional context");
     },
   };
 };

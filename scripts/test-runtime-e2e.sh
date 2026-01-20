@@ -177,6 +177,12 @@ EOF
         mayor)
             run_mayor_test "$runtime" "$test_work_dir"
             ;;
+        l2)
+            run_l2_test "$runtime" "$test_work_dir"
+            ;;
+        l3)
+            run_l3_test "$runtime" "$test_work_dir"
+            ;;
         *)
             log_error "Unknown test: $test"
             return 1
@@ -262,7 +268,73 @@ run_mayor_test() {
     local work_dir=$2
     
     log_detail "Mayor workflow test with $runtime"
-    log_success "[$runtime] Mayor test placeholder"
+    
+    if [[ "$runtime" == "opencode" ]]; then
+        (cd "$work_dir" && "$GT_BINARY" mayor start --agent opencode > "$LOG_DIR/$runtime-mayor.log" 2>&1)
+        
+        if tmux has-session -t "gt-mayor" 2>/dev/null; then
+            log_success "[$runtime] Mayor tmux session started"
+        else
+            log_error "[$runtime] Mayor failed to start (no tmux session)"
+            return 1
+        fi
+    else
+        log_warn "[$runtime] Mayor test not implemented for Claude Code"
+    fi
+}
+
+run_l2_test() {
+    local runtime=$1
+    local work_dir=$2
+    
+    log_detail "L2 test: Create a file with $runtime"
+    
+    if [[ "$runtime" == "opencode" ]]; then
+        (cd "$work_dir" && opencode run --prompt "Create a file named 'L2_SUCCESS.txt' with content 'L2 SUCCESS'" > "$LOG_DIR/$runtime-l2.log" 2>&1)
+        
+        if [[ -f "$work_dir/L2_SUCCESS.txt" ]] && grep -q "L2 SUCCESS" "$work_dir/L2_SUCCESS.txt"; then
+            log_success "[$runtime] L2 test: File created successfully"
+        else
+            log_error "[$runtime] L2 test: File not created or content incorrect"
+            log_detail "See $LOG_DIR/$runtime-l2.log for details"
+            return 1
+        fi
+    else
+        log_warn "[$runtime] L2 test not implemented for Claude Code"
+    fi
+}
+
+run_l3_test() {
+    local runtime=$1
+    local work_dir=$2
+    
+    log_detail "L3 test: Fix a bug with $runtime"
+    
+    cat > "$work_dir/bug.py" <<EOF
+def main():
+    print("This script has a bug")
+    # Intentional bug: division by zero
+    x = 1 / 0
+    print("Fixed!")
+
+if __name__ == "__main__":
+    main()
+EOF
+    (cd "$work_dir" && git add bug.py && git commit -m "add buggy script" --quiet)
+
+    if [[ "$runtime" == "opencode" ]]; then
+        (cd "$work_dir" && opencode run --prompt "Fix the division by zero bug in bug.py" > "$LOG_DIR/$runtime-l3.log" 2>&1)
+        
+        if ! grep -q "1 / 0" "$work_dir/bug.py"; then
+            log_success "[$runtime] L3 test: Bug fixed successfully"
+        else
+            log_error "[$runtime] L3 test: Bug still exists"
+            log_detail "See $LOG_DIR/$runtime-l3.log for details"
+            return 1
+        fi
+    else
+        log_warn "[$runtime] L3 test not implemented for Claude Code"
+    fi
 }
 
 # ═══════════════════════════════════════════════════════════════════

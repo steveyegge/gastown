@@ -507,8 +507,10 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	lock.Lock()
 	defer lock.Unlock()
 
-	// 1. Send text in literal mode (handles special characters)
-	if _, err := t.run("send-keys", "-t", pane, "-l", message); err != nil {
+	// 1. Send text using paste buffer to avoid TUI issues with rapid keystrokes
+	// and ensure reliable text insertion (like pasting).
+	_, _ = t.run("set-buffer", message)
+	if _, err := t.run("paste-buffer", "-t", pane); err != nil {
 		return err
 	}
 

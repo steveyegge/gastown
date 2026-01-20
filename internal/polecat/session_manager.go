@@ -192,6 +192,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
+	fmt.Printf("DEBUG: NewSessionWithCommand sessionID=%s dir=%s cmd=%s\n", sessionID, workDir, command)
 	if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}

@@ -5,6 +5,91 @@
 
 ---
 
+## 2026-01-20
+
+### E2E Test Robustness - Session Completion & Precise Logging
+
+Improved the E2E testing infrastructure and OpenCode plugin to ensure reliable task completion detection and better debuggability.
+
+**Root Cause of Hangs**:
+The FixBug E2E test was hanging because completion detection relied on multiple idle events, which could be delayed or inconsistent depending on model speed and TUI behavior.
+
+**Improvements**:
+1. **Completion Detection**: Added regex-based message analysis in `gastown.js`. The plugin now scans message content for indicators of success (e.g., "tests passed", "bug fixed", "a - b") and emits `GASTOWN_TASK_COMPLETE` immediately.
+2. **Precise Logging**:
+   - `gastown.js` now truncates logged messages to 500 characters and data values to 200 characters to prevent log bloat.
+   - Added `messageID` logging to `message.part.updated` events for easier tracing.
+3. **Model Switch**: Changed default OpenCode model in `internal/e2e/runner.go` to `github-copilot/gpt-5-mini` for faster, more reliable results in test environments.
+4. **Direct Execution**: Optimized `runner.go` to support direct `opencode run <prompt>` execution for non-interactive E2E validation.
+5. **Orphan Cleanup**: Enhanced `cleanupTestProcesses()` in `runner.go` to use `pgrep -f` on both `sessionName` and `tmuxDir`, ensuring no zombie processes survive test completion or failure.
+
+**Files Changed**:
+- `internal/e2e/runner.go`: Updated default model, improved process cleanup, added direct run support.
+- `internal/opencode/plugin/gastown.js`: Implemented log truncation, message content analysis, and completion signaling.
+
+**Test Results**:
+- `TestGastown_FixBug/opencode`: PASS
+- `TestGastown_CreateFile/opencode`: PASS
+
+---
+
+## 2026-01-19 (Late Evening)
+
+### Documentation Validation and contributing.md Cleanup
+
+Fixed issues in the documentation validation system and improved the quality of OpenCode integration docs.
+
+**Actions**:
+- Improved `scripts/validate-opencode-docs.sh` to strip triple-backtick blocks and inline code before link extraction.
+- Enhanced `scripts/validate-opencode-docs.sh` to correctly handle and skip anchors (e.g., `#section`) in local paths.
+- Fixed a broken link in `docs/opencode/CONTRIBUTING.md`.
+- Updated `docs/opencode/CONTRIBUTING.md` example formatting to properly demonstrate bad links without triggering validation errors.
+- Verified all OpenCode L1-L5 E2E tests PASS in quick mode.
+
+**Bug Fixes**:
+- Validation script no longer extracts links from explanatory text or code blocks.
+- Relative paths with anchors now resolve correctly (ignoring the anchor for file existence checks).
+
+---
+
+## 2026-01-19 (Evening)
+
+### Comprehensive Testing Infrastructure
+
+Completed full E2E testing infrastructure for OpenCode integration.
+
+**Test Infrastructure Created**:
+- `internal/testutil/fixtures.go` - Town fixture with proper PATH management
+- `internal/testutil/wait.go` - Session waiting and diagnostic utilities
+- `internal/integration/mayor_test.go` - Runtime-agnostic mayor workflow tests
+- `internal/integration/fixture_test.go` - Town fixture and runtime settings tests
+
+**Test Scripts Created**:
+- `scripts/test-opencode-comprehensive-e2e.sh` - L1-L5 progression tests
+- `scripts/test-opencode-formula-e2e.sh` - Formula/specialized agent tests
+- `scripts/test-opencode-compaction-e2e.sh` - Compaction behavior tests
+- `scripts/test-claude-regression.sh` - Claude Code regression tests
+
+**Bug Fixes**:
+- Added `install` to beadsExemptCommands in root.go (install shouldn't require beads check)
+- Exported `NormalizeRuntimeConfig` for testutil (was internal `normalizeRuntimeConfig`)
+- Fixed PATH management in testutil to prefer `~/go/bin` over fnm shell (beads version conflict)
+
+**Key Decisions**:
+- Use Go testing patterns instead of bash scripts for integration tests
+- Testutil uses `gt install` and `runtime.EnsureSettingsForRole` instead of duplicating logic
+- PATH explicitly managed in tests to ensure correct binary versions
+
+**Global Git Configuration**:
+- Added `sisyphus/` and `.sisyphus/` to global gitignore (`~/.gitignore_global`)
+
+**Test Results**:
+- All integration tests PASS (TestTownFixtureCreation, TestRuntimeSettings)
+- All Claude regression tests PASS (7/7)
+- All unit tests PASS across internal packages
+
+---
+
 ## 2026-01-19
 
 ### Code Organization (Afternoon)
