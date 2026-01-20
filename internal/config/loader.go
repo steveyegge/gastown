@@ -740,6 +740,26 @@ func RigSettingsPath(rigPath string) string {
 	return filepath.Join(rigPath, "settings", "config.json")
 }
 
+// ResolveRoleContext resolves the custom context for a role.
+// Resolution order: Rig → Town → Default (first match wins, no merging).
+// Returns empty string if no override is configured (use default template).
+func ResolveRoleContext(townSettings *TownSettings, rigSettings *RigSettings, role string) string {
+	// Check rig-level override first
+	if rigSettings != nil && rigSettings.Context != nil {
+		if content, ok := rigSettings.Context.Roles[role]; ok {
+			return content
+		}
+	}
+	// Check town-level override
+	if townSettings != nil && townSettings.Context != nil {
+		if content, ok := townSettings.Context.Roles[role]; ok {
+			return content
+		}
+	}
+	// No override - return empty to signal use of default template
+	return ""
+}
+
 // LoadOrCreateTownSettings loads town settings or creates defaults if missing.
 func LoadOrCreateTownSettings(path string) (*TownSettings, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed internally

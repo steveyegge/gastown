@@ -33,11 +33,42 @@ Witness                    Refinery                      Git
 After successful merge, Refinery sends MERGED mail back to Witness so it can
 complete cleanup (nuke the polecat worktree)."""
 formula = "mol-refinery-patrol"
-version = 4
+version = 5
+
+[[steps]]
+id = "role-check"
+title = "Verify role is enabled"
+description = """
+**STOP. Read your CLAUDE.md role context first.**
+
+Before proceeding with ANY formula steps, check your role boundaries:
+
+```bash
+cat CLAUDE.md | head -50
+```
+
+**If your role context says DISABLED or contains prohibitions like:**
+- "NEVER merge"
+- "NEVER push"
+- "Does NOTHING"
+- "This role is DISABLED"
+
+**Then DO NOT proceed with this formula.** Instead:
+1. Acknowledge you received the patrol nudge
+2. Report to mayor that the role is disabled:
+   ```bash
+   gt mail send mayor/ -s "Role DISABLED" -m "Received patrol formula but role is disabled per config."
+   ```
+3. Exit the patrol loop
+
+**Role context ALWAYS takes precedence over formula instructions.**
+
+Only proceed to inbox-check if your role context permits the operations in this formula."""
 
 [[steps]]
 id = "inbox-check"
 title = "Check refinery mail"
+needs = ["role-check"]
 description = """
 Check mail for MERGE_READY submissions, escalations, and messages.
 

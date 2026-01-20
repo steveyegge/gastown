@@ -3,11 +3,14 @@ package cmd
 import (
 	"fmt"
 
+	"path/filepath"
+
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -181,6 +184,13 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 			// Runtime has exited, restart it with proper context
 			fmt.Println("Runtime exited, restarting with context...")
+
+			// Regenerate CLAUDE.md with config overrides (supports town context customization)
+			mayorDir := filepath.Join(townRoot, "mayor")
+			townName := filepath.Base(townRoot)
+			if err := templates.CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mgr.SessionName(), "gt-"+townName+"-deacon"); err != nil {
+				return fmt.Errorf("creating CLAUDE.md: %w", err)
+			}
 
 			paneID, err := t.GetPaneID(sessionID)
 			if err != nil {

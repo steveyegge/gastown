@@ -8,6 +8,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/deacon"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -16,15 +17,9 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-// outputPrimeContext outputs the role-specific context using templates or fallback.
+// outputPrimeContext outputs the role-specific context using config overrides or templates.
+// Resolution order: Rig settings → Town settings → Embedded template → Hardcoded fallback
 func outputPrimeContext(ctx RoleContext) error {
-	// Try to use templates first
-	tmpl, err := templates.New()
-	if err != nil {
-		// Fall back to hardcoded output if templates fail
-		return outputPrimeContextFallback(ctx)
-	}
-
 	// Map role to template name
 	var roleName string
 	switch ctx.Role {
@@ -51,8 +46,9 @@ func outputPrimeContext(ctx RoleContext) error {
 
 	// Get default branch from rig config (default to "main" if not set)
 	defaultBranch := "main"
+	rigPath := ""
 	if ctx.Rig != "" && ctx.TownRoot != "" {
-		rigPath := filepath.Join(ctx.TownRoot, ctx.Rig)
+		rigPath = filepath.Join(ctx.TownRoot, ctx.Rig)
 		if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
 			defaultBranch = rigCfg.DefaultBranch
 		}
@@ -70,10 +66,21 @@ func outputPrimeContext(ctx RoleContext) error {
 		DeaconSession: session.DeaconSessionName(),
 	}
 
-	// Render and output
-	output, err := tmpl.RenderRole(roleName, data)
+	// Load settings for config override resolution
+	var townSettings *config.TownSettings
+	var rigSettings *config.RigSettings
+	if ctx.TownRoot != "" {
+		townSettings, _ = config.LoadOrCreateTownSettings(config.TownSettingsPath(ctx.TownRoot))
+	}
+	if rigPath != "" {
+		rigSettings, _ = config.LoadRigSettings(config.RigSettingsPath(rigPath))
+	}
+
+	// Use GetRoleContent which checks config overrides first, then falls back to embedded template
+	output, err := templates.GetRoleContent(roleName, data, townSettings, rigSettings)
 	if err != nil {
-		return fmt.Errorf("rendering template: %w", err)
+		// Fall back to hardcoded output if both config and templates fail
+		return outputPrimeContextFallback(ctx)
 	}
 
 	fmt.Print(output)

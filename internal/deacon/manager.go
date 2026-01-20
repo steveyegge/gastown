@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -77,6 +78,11 @@ func (m *Manager) Start(agentOverride string) error {
 	// Ensure Claude settings exist
 	if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
+	}
+
+	// Regenerate CLAUDE.md with config overrides (supports town context customization)
+	if err := templates.CreateDeaconCLAUDEmd(deaconDir, m.townRoot); err != nil {
+		return fmt.Errorf("creating CLAUDE.md: %w", err)
 	}
 
 	// Build startup command first

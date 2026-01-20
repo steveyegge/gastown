@@ -21,6 +21,7 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -379,6 +380,11 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
 	if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
 		return fmt.Errorf("creating deacon settings: %w", err)
+	}
+
+	// Regenerate CLAUDE.md with config overrides (supports town context customization)
+	if err := templates.CreateDeaconCLAUDEmd(deaconDir, townRoot); err != nil {
+		return fmt.Errorf("creating CLAUDE.md: %w", err)
 	}
 
 	// Build startup command first
