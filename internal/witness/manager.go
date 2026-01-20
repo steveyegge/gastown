@@ -102,6 +102,10 @@ func (m *Manager) LoadState() (*Witness, error) {
 	return m.stateManager.Load()
 }
 
+// NOTE: buildWitnessStartCommand was removed in the agent refactor.
+// The GUPP initial prompt feature (from fd612593) should be added to
+// factory.Start() if needed - agents should start patrol immediately.
+
 // SaveState persists the witness state to disk.
 func (m *Manager) SaveState(w *Witness) error {
 	return m.stateManager.Save(w)
