@@ -752,30 +752,68 @@ id = "patrol-cleanup"
 title = "End-of-cycle inbox hygiene"
 needs = ["log-maintenance"]
 description = """
-Verify inbox hygiene before ending patrol cycle.
+⚠️ CRITICAL: Complete ALL hygiene before proceeding.
 
-**Step 1: Check inbox state**
+This step is MANDATORY - do not skip or defer.
+
+**Step 1: Archive ALL processed messages**
+
 ```bash
 gt mail inbox
 ```
 
-Inbox should be EMPTY or contain only just-arrived unprocessed messages.
-
-**Step 2: Archive any remaining processed messages**
-
-All message types should have been archived during inbox-check processing:
-- WITNESS_PING → archived after acknowledging
-- HELP/Escalation → archived after handling
-- LIFECYCLE → archived after processing
-
-If any were missed:
+For EACH message you processed this cycle:
 ```bash
-# For each stale message found:
 gt mail archive <message-id>
 ```
 
-**Goal**: Inbox should have ≤2 active messages at end of cycle.
-Deacon mail should flow through quickly - no accumulation."""
+⛔ DO NOT proceed to loop-or-exit with >2 messages in inbox.
+
+**Step 2: Check and close completed convoys**
+
+```bash
+gt convoy list
+```
+
+For each active convoy:
+```bash
+gt convoy status <convoy-id>
+```
+
+If all tracked issues are closed (100% complete):
+```bash
+bd close <convoy-id> --reason "All tracked issues complete"
+gt mail send mayor/ -s "Convoy complete: <title>" -m "All work finished."
+```
+
+**Step 3: Squash patrol wisps**
+
+```bash
+bd list --wisp --status=open | grep deacon
+```
+
+If old patrol wisps exist (from previous cycles):
+```bash
+bd close <wisp-id> --reason "Superseded by current patrol"
+```
+
+**Step 4: Verify inbox is clean**
+
+```bash
+gt mail inbox
+```
+
+Expected: 0-2 messages (only truly unprocessed items).
+
+**HYGIENE CHECKLIST (verify before proceeding)**:
+- [ ] All WITNESS_PING messages archived
+- [ ] All LIFECYCLE messages archived
+- [ ] Completed convoys closed and mayor notified
+- [ ] Inbox has ≤2 messages
+- [ ] No orphaned patrol wisps
+
+**Why this matters**: The Deacon is the hygiene enforcer. If YOU don't clean up,
+convoys stay open forever and mail accumulates across the system."""
 
 [[steps]]
 id = "context-check"
