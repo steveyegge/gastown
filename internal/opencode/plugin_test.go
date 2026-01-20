@@ -3,6 +3,7 @@ package opencode
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -128,6 +129,10 @@ func TestEnsurePluginAt_CreatesDirectory(t *testing.T) {
 }
 
 func TestEnsurePluginAt_FilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file mode checks are not reliable on Windows")
+	}
+
 	// Create a temporary directory
 	tmpDir := t.TempDir()
 

@@ -213,7 +213,7 @@ func TestFindPreservesSymlinkPath(t *testing.T) {
 		t.Fatalf("Rel: %v", err)
 	}
 
-	if relPath != "rigs/project/polecats/worker" {
+	if filepath.ToSlash(relPath) != "rigs/project/polecats/worker" {
 		t.Errorf("Rel = %q, want 'rigs/project/polecats/worker'", relPath)
 	}
 }
@@ -246,7 +246,7 @@ func TestFindSkipsNestedWorkspaceInWorktree(t *testing.T) {
 	}
 
 	rel, _ := filepath.Rel(found, polecatDir)
-	if rel != "myrig/polecats/worker" {
+	if filepath.ToSlash(rel) != "myrig/polecats/worker" {
 		t.Errorf("Rel = %q, want 'myrig/polecats/worker'", rel)
 	}
 }

@@ -3,9 +3,38 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func writeBDStub(t *testing.T, binDir string, unixScript string, windowsScript string) string {
+	t.Helper()
+
+	var path string
+	if runtime.GOOS == "windows" {
+		path = filepath.Join(binDir, "bd.cmd")
+		if err := os.WriteFile(path, []byte(windowsScript), 0644); err != nil {
+			t.Fatalf("write bd stub: %v", err)
+		}
+		return path
+	}
+
+	path = filepath.Join(binDir, "bd")
+	if err := os.WriteFile(path, []byte(unixScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	return path
+}
+
+func containsVarArg(line, key, value string) bool {
+	plain := "--var " + key + "=" + value
+	if strings.Contains(line, plain) {
+		return true
+	}
+	quoted := "--var \"" + key + "=" + value + "\""
+	return strings.Contains(line, quoted)
+}
 
 func TestParseWispIDFromJSON(t *testing.T) {
 	tests := []struct {
@@ -220,7 +249,6 @@ func TestSlingFormulaOnBeadRoutesBDCommandsToTargetRig(t *testing.T) {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
 	logPath := filepath.Join(townRoot, "bd.log")
-	bdPath := filepath.Join(binDir, "bd")
 	bdScript := `#!/bin/sh
 set -e
 echo "$(pwd)|$*" >> "${BD_LOG}"
@@ -256,11 +284,41 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+echo %CD%^|%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  set "sub=%3"
+)
+if "%cmd%"=="show" (
+  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+  exit /b 0
+)
+if "%cmd%"=="formula" (
+  echo {"name":"test-formula"}
+  exit /b 0
+)
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {"new_epic_id":"gt-wisp-xyz"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    echo {"root_id":"gt-wisp-xyz"}
+    exit /b 0
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
@@ -381,7 +439,6 @@ func TestSlingFormulaOnBeadPassesFeatureAndIssueVars(t *testing.T) {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
 	logPath := filepath.Join(townRoot, "bd.log")
-	bdPath := filepath.Join(binDir, "bd")
 	// The stub returns a specific title so we can verify it appears in --var feature=
 	bdScript := `#!/bin/sh
 set -e
@@ -418,11 +475,41 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+echo ARGS:%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  set "sub=%3"
+)
+if "%cmd%"=="show" (
+  echo [{^"title^":^"My Test Feature^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
+  exit /b 0
+)
+if "%cmd%"=="formula" (
+  echo {^"name^":^"mol-review^"}
+  exit /b 0
+)
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    echo {^"root_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
@@ -482,12 +569,12 @@ exit 0
 	}
 
 	// Verify --var feature=<title> is present
-	if !strings.Contains(wispLine, "--var feature=My Test Feature") {
+	if !containsVarArg(wispLine, "feature", "My Test Feature") {
 		t.Errorf("mol wisp missing --var feature=<title>\ngot: %s", wispLine)
 	}
 
 	// Verify --var issue=<beadID> is present
-	if !strings.Contains(wispLine, "--var issue=gt-abc123") {
+	if !containsVarArg(wispLine, "issue", "gt-abc123") {
 		t.Errorf("mol wisp missing --var issue=<beadID>\ngot: %s", wispLine)
 	}
 }
@@ -510,7 +597,6 @@ func TestVerifyBeadExistsAllowStale(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
-	bdPath := filepath.Join(binDir, "bd")
 	bdScript := `#!/bin/sh
 # Check for --allow-stale flag
 allow_stale=false
@@ -535,9 +621,24 @@ fi
 echo '[{"title":"Test bead","status":"open","assignee":""}]'
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+set "allow=false"
+for %%A in (%*) do (
+  if "%%~A"=="--allow-stale" set "allow=true"
+)
+if "%1"=="--no-daemon" (
+  if "%allow%"=="true" (
+    echo [{"title":"Test bead","status":"open","assignee":""}]
+    exit /b 0
+  )
+  echo {"error":"Database out of sync with JSONL."}
+  exit /b 1
+)
+echo [{"title":"Test bead","status":"open","assignee":""}]
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -573,7 +674,6 @@ func TestSlingWithAllowStale(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
-	bdPath := filepath.Join(binDir, "bd")
 	bdScript := `#!/bin/sh
 # Check for --allow-stale flag
 allow_stale=false
@@ -608,9 +708,34 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+set "allow=false"
+for %%A in (%*) do (
+  if "%%~A"=="--allow-stale" set "allow=true"
+)
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  if "%cmd%"=="show" (
+    if "%allow%"=="true" (
+      echo [{"title":"Synced bead","status":"open","assignee":""}]
+      exit /b 0
+    )
+    echo {"error":"Database out of sync"}
+    exit /b 1
+  )
+  exit /b 0
+)
+set "cmd=%1"
+if "%cmd%"=="show" (
+  echo [{"title":"Synced bead","status":"open","assignee":""}]
+  exit /b 0
+)
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "crew")
@@ -747,7 +872,6 @@ func TestSlingFormulaOnBeadSetsAttachedMolecule(t *testing.T) {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
 	logPath := filepath.Join(townRoot, "bd.log")
-	bdPath := filepath.Join(binDir, "bd")
 	// The stub logs all commands to a file for verification
 	bdScript := `#!/bin/sh
 set -e
@@ -787,11 +911,42 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+echo %CD%^|%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  set "sub=%3"
+)
+if "%cmd%"=="show" (
+  echo [{^"title^":^"Bug to fix^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
+  exit /b 0
+)
+if "%cmd%"=="formula" (
+  echo {^"name^":^"mol-polecat-work^"}
+  exit /b 0
+)
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    echo {^"root_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+)
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
@@ -862,8 +1017,20 @@ exit 0
 	}
 
 	if !foundAttachedMolecule {
+		if descBytes, err := os.ReadFile(attachedLogPath); err == nil {
+			if strings.Contains(string(descBytes), "attached_molecule") {
+				foundAttachedMolecule = true
+			}
+		}
+	}
+
+	if !foundAttachedMolecule {
+		attachedLog := "<missing>"
+		if descBytes, err := os.ReadFile(attachedLogPath); err == nil {
+			attachedLog = string(descBytes)
+		}
 		t.Errorf("after mol bond, expected update with attached_molecule in description\n"+
 			"This is required for gt hook to recognize the molecule attachment.\n"+
-			"Log output:\n%s", string(logBytes))
+			"Log output:\n%s\nAttached log:\n%s", string(logBytes), attachedLog)
 	}
 }

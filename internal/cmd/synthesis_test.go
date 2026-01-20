@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -42,7 +43,7 @@ func TestExpandOutputPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := expandOutputPath(tt.directory, tt.pattern, tt.reviewID, tt.legID)
-			if got != tt.want {
+			if filepath.ToSlash(got) != tt.want {
 				t.Errorf("expandOutputPath() = %q, want %q", got, tt.want)
 			}
 		})

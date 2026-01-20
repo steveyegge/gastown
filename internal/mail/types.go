@@ -488,7 +488,7 @@ func ParseMessageType(s string) MessageType {
 	}
 }
 
-// addressToIdentity converts a GGT address to a beads identity.
+// AddressToIdentity converts a GGT address to a beads identity.
 //
 // Liberal normalization: accepts multiple address formats and normalizes
 // to canonical form (Postel's Law - be liberal in what you accept).
@@ -504,7 +504,7 @@ func ParseMessageType(s string) MessageType {
 //   - "gastown/Toast" → "gastown/Toast" (already canonical)
 //   - "gastown/refinery" → "gastown/refinery"
 //   - "gastown/" → "gastown" (rig broadcast)
-func addressToIdentity(address string) string {
+func AddressToIdentity(address string) string {
 	// Overseer (human operator) - no trailing slash, distinct from agents
 	if address == "overseer" {
 		return "overseer"

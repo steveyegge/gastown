@@ -147,6 +147,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine mode based on flags and argument types
 	var beadID string
 	var formulaName string
+	attachedMoleculeID := ""
 
 	if slingOnTarget != "" {
 		// Formula-on-bead mode: gt sling <formula> --on <bead>
@@ -434,12 +435,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("%s Formula bonded to %s\n", style.Bold.Render("✓"), beadID)
 
-		// Record the attached molecule in the wisp's description.
-		// This is required for gt hook to recognize the molecule attachment.
-		if err := storeAttachedMoleculeInBead(wispRootID, wispRootID); err != nil {
-			// Warn but don't fail - polecat can still work through steps
-			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
-		}
+		// Record attached molecule after other description updates to avoid overwrite.
+		attachedMoleculeID = wispRootID
 
 		// Update beadID to hook the compound root instead of bare bead
 		beadID = wispRootID
@@ -485,6 +482,15 @@ func runSling(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
 		} else {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Record the attached molecule in the wisp's description.
+	// This is required for gt hook to recognize the molecule attachment.
+	if attachedMoleculeID != "" {
+		if err := storeAttachedMoleculeInBead(beadID, attachedMoleculeID); err != nil {
+			// Warn but don't fail - polecat can still work through steps
+			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
 		}
 	}
 

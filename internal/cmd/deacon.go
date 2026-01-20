@@ -264,6 +264,30 @@ Example:
 	RunE: runDeaconCleanupOrphans,
 }
 
+var deaconZombieScanCmd = &cobra.Command{
+	Use:   "zombie-scan",
+	Short: "Find and clean zombie Claude processes not in active tmux sessions",
+	Long: `Find and clean zombie Claude processes not in active tmux sessions.
+
+Unlike cleanup-orphans (which uses TTY detection), zombie-scan uses tmux
+verification: it checks if each Claude process is in an active tmux session
+by comparing against actual pane PIDs.
+
+A process is a zombie if:
+- It's a Claude/codex process
+- It's NOT the pane PID of any active tmux session
+- It's NOT a child of any pane PID
+- It's older than 60 seconds
+
+This catches "ghost" processes that have a TTY (from a dead tmux session)
+but are no longer part of any active Gas Town session.
+
+Examples:
+  gt deacon zombie-scan           # Find and kill zombies
+  gt deacon zombie-scan --dry-run # Just list zombies, don't kill`,
+	RunE: runDeaconZombieScan,
+}
+
 var (
 	triggerTimeout time.Duration
 
@@ -282,6 +306,9 @@ var (
 
 	// Pause flags
 	pauseReason string
+
+	// Zombie scan flags
+	zombieScanDryRun bool
 )
 
 func init() {
@@ -299,6 +326,7 @@ func init() {
 	deaconCmd.AddCommand(deaconPauseCmd)
 	deaconCmd.AddCommand(deaconResumeCmd)
 	deaconCmd.AddCommand(deaconCleanupOrphansCmd)
+	deaconCmd.AddCommand(deaconZombieScanCmd)
 
 	// Flags for trigger-pending
 	deaconTriggerPendingCmd.Flags().DurationVar(&triggerTimeout, "timeout", 2*time.Second,
@@ -327,6 +355,10 @@ func init() {
 	// Flags for pause
 	deaconPauseCmd.Flags().StringVar(&pauseReason, "reason", "",
 		"Reason for pausing the Deacon")
+
+	// Flags for zombie-scan
+	deaconZombieScanCmd.Flags().BoolVar(&zombieScanDryRun, "dry-run", false,
+		"List zombies without killing them")
 
 	deaconStartCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
 	deaconAttachCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
@@ -1174,6 +1206,71 @@ func runDeaconCleanupOrphans(cmd *cobra.Command, args []string) error {
 
 	if len(results) > 0 {
 		summary := fmt.Sprintf("Processed %d orphan(s)", len(results))
+		if escalated > 0 {
+			summary += fmt.Sprintf(" (%d escalated to SIGKILL)", escalated)
+		}
+		if unkillable > 0 {
+			summary += fmt.Sprintf(" (%d unkillable)", unkillable)
+		}
+		fmt.Printf("%s %s\n", style.Bold.Render("✓"), summary)
+	}
+
+	return nil
+}
+
+// runDeaconZombieScan finds and cleans zombie Claude processes not in active tmux sessions.
+func runDeaconZombieScan(cmd *cobra.Command, args []string) error {
+	// Find zombies using tmux verification
+	zombies, err := util.FindZombieClaudeProcesses()
+	if err != nil {
+		return fmt.Errorf("finding zombie processes: %w", err)
+	}
+
+	if len(zombies) == 0 {
+		fmt.Printf("%s No zombie claude processes found\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	fmt.Printf("%s Found %d zombie claude process(es)\n", style.Bold.Render("●"), len(zombies))
+
+	// In dry-run mode, just list them
+	if zombieScanDryRun {
+		for _, z := range zombies {
+			ageStr := fmt.Sprintf("%dm", z.Age/60)
+			fmt.Printf("  %s PID %d (%s) TTY=%s age=%s\n",
+				style.Dim.Render("→"), z.PID, z.Cmd, z.TTY, ageStr)
+		}
+		fmt.Printf("%s Dry run - no processes killed\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	// Process them with signal escalation
+	results, err := util.CleanupZombieClaudeProcesses()
+	if err != nil {
+		style.PrintWarning("cleanup had errors: %v", err)
+	}
+
+	// Report results
+	var terminated, escalated, unkillable int
+	for _, r := range results {
+		switch r.Signal {
+		case "SIGTERM":
+			fmt.Printf("  %s Sent SIGTERM to PID %d (%s) TTY=%s\n",
+				style.Bold.Render("→"), r.Process.PID, r.Process.Cmd, r.Process.TTY)
+			terminated++
+		case "SIGKILL":
+			fmt.Printf("  %s Escalated to SIGKILL for PID %d (%s)\n",
+				style.Bold.Render("!"), r.Process.PID, r.Process.Cmd)
+			escalated++
+		case "UNKILLABLE":
+			fmt.Printf("  %s WARNING: PID %d (%s) survived SIGKILL\n",
+				style.Bold.Render("⚠"), r.Process.PID, r.Process.Cmd)
+			unkillable++
+		}
+	}
+
+	if len(results) > 0 {
+		summary := fmt.Sprintf("Processed %d zombie(s)", len(results))
 		if escalated > 0 {
 			summary += fmt.Sprintf(" (%d escalated to SIGKILL)", escalated)
 		}
