@@ -209,13 +209,7 @@ func runSlingFormula(args []string) error {
 	}
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
-
-	// Record the attached molecule in the wisp's description.
-	// This is required for gt hook to recognize the molecule attachment.
-	if err := storeAttachedMoleculeInBead(wispRootID, wispRootID); err != nil {
-		// Warn but don't fail - polecat can still work through steps
-		fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
-	}
+	attachedMoleculeID := wispRootID
 
 	// Step 3: Hook the wisp bead using bd update.
 	// See: https://github.com/steveyegge/gastown/issues/148
@@ -249,6 +243,14 @@ func runSlingFormula(args []string) error {
 			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
 		} else {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Record the attached molecule after other description updates to avoid overwrite.
+	if attachedMoleculeID != "" {
+		if err := storeAttachedMoleculeInBead(wispRootID, attachedMoleculeID); err != nil {
+			// Warn but don't fail - polecat can still work through steps
+			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
 		}
 	}
 

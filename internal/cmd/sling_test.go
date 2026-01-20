@@ -317,6 +317,8 @@ exit /b 0
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
@@ -483,21 +485,21 @@ if "%cmd%"=="--no-daemon" (
   set "sub=%3"
 )
 if "%cmd%"=="show" (
-  echo [{"title":"My Test Feature","status":"open","assignee":"","description":""}]
+  echo [{^"title^":^"My Test Feature^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
   exit /b 0
 )
 if "%cmd%"=="formula" (
-  echo {"name":"mol-review"}
+  echo {^"name^":^"mol-review^"}
   exit /b 0
 )
 if "%cmd%"=="cook" exit /b 0
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (
-    echo {"new_epic_id":"gt-wisp-xyz"}
+    echo {^"new_epic_id^":^"gt-wisp-xyz^"}
     exit /b 0
   )
   if "%sub%"=="bond" (
-    echo {"root_id":"gt-wisp-xyz"}
+    echo {^"root_id^":^"gt-wisp-xyz^"}
     exit /b 0
   )
 )
@@ -506,6 +508,8 @@ exit /b 0
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
@@ -917,21 +921,21 @@ if "%cmd%"=="--no-daemon" (
   set "sub=%3"
 )
 if "%cmd%"=="show" (
-  echo [{"title":"Bug to fix","status":"open","assignee":"","description":""}]
+  echo [{^"title^":^"Bug to fix^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
   exit /b 0
 )
 if "%cmd%"=="formula" (
-  echo {"name":"mol-polecat-work"}
+  echo {^"name^":^"mol-polecat-work^"}
   exit /b 0
 )
 if "%cmd%"=="cook" exit /b 0
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (
-    echo {"new_epic_id":"gt-wisp-xyz"}
+    echo {^"new_epic_id^":^"gt-wisp-xyz^"}
     exit /b 0
   )
   if "%sub%"=="bond" (
-    echo {"root_id":"gt-wisp-xyz"}
+    echo {^"root_id^":^"gt-wisp-xyz^"}
     exit /b 0
   )
 )
@@ -941,6 +945,8 @@ exit /b 0
 	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
@@ -1011,8 +1017,20 @@ exit /b 0
 	}
 
 	if !foundAttachedMolecule {
+		if descBytes, err := os.ReadFile(attachedLogPath); err == nil {
+			if strings.Contains(string(descBytes), "attached_molecule") {
+				foundAttachedMolecule = true
+			}
+		}
+	}
+
+	if !foundAttachedMolecule {
+		attachedLog := "<missing>"
+		if descBytes, err := os.ReadFile(attachedLogPath); err == nil {
+			attachedLog = string(descBytes)
+		}
 		t.Errorf("after mol bond, expected update with attached_molecule in description\n"+
 			"This is required for gt hook to recognize the molecule attachment.\n"+
-			"Log output:\n%s", string(logBytes))
+			"Log output:\n%s\nAttached log:\n%s", string(logBytes), attachedLog)
 	}
 }
