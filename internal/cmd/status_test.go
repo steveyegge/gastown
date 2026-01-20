@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -156,5 +157,133 @@ func TestRunStatusWatch_RejectsJSONCombo(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot be used together") {
 		t.Errorf("error %q should mention 'cannot be used together'", err.Error())
+	}
+}
+
+func TestBuildStatusIndicator_DisabledAgent(t *testing.T) {
+	agent := AgentRuntime{
+		Name:     "refinery",
+		Role:     "refinery",
+		Running:  true,
+		Disabled: true,
+	}
+
+	indicator := buildStatusIndicator(agent)
+	if !strings.Contains(indicator, "disabled") {
+		t.Errorf("buildStatusIndicator() = %q, want to contain 'disabled'", indicator)
+	}
+}
+
+func TestBuildStatusIndicator_EnabledAgent(t *testing.T) {
+	agent := AgentRuntime{
+		Name:     "refinery",
+		Role:     "refinery",
+		Running:  true,
+		Disabled: false,
+	}
+
+	indicator := buildStatusIndicator(agent)
+	if strings.Contains(indicator, "disabled") {
+		t.Errorf("buildStatusIndicator() = %q, should not contain 'disabled'", indicator)
+	}
+}
+
+func TestDiscoverRigAgents_RefineryDisabled(t *testing.T) {
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	rigPath := filepath.Join(townRoot, rigName)
+
+	// Create rig directory structure
+	if err := os.MkdirAll(filepath.Join(rigPath, "refinery", "rig"), 0755); err != nil {
+		t.Fatalf("create refinery dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigPath, "settings"), 0755); err != nil {
+		t.Fatalf("create settings dir: %v", err)
+	}
+
+	// Write settings with refinery disabled
+	settings := map[string]interface{}{
+		"type":    "rig-settings",
+		"version": 1,
+		"refinery": map[string]interface{}{
+			"enabled": false,
+		},
+	}
+	settingsData, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rigPath, "settings", "config.json"), settingsData, 0644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	// Write routes for prefix resolution
+	writeTestRoutes(t, townRoot, []beads.Route{
+		{Prefix: "bd-", Path: rigName + "/mayor/rig"},
+	})
+
+	r := &rig.Rig{
+		Name:        rigName,
+		Path:        rigPath,
+		HasRefinery: true,
+	}
+
+	agents := discoverRigAgents(map[string]bool{}, r, nil, nil, nil, nil, true)
+	if len(agents) != 1 {
+		t.Fatalf("discoverRigAgents() returned %d agents, want 1", len(agents))
+	}
+
+	if agents[0].Role != "refinery" {
+		t.Errorf("agent role = %q, want 'refinery'", agents[0].Role)
+	}
+	if !agents[0].Disabled {
+		t.Errorf("agent Disabled = false, want true (refinery is disabled in settings)")
+	}
+}
+
+func TestDiscoverRigAgents_RefineryEnabled(t *testing.T) {
+	townRoot := t.TempDir()
+	rigName := "testrig"
+	rigPath := filepath.Join(townRoot, rigName)
+
+	// Create rig directory structure
+	if err := os.MkdirAll(filepath.Join(rigPath, "refinery", "rig"), 0755); err != nil {
+		t.Fatalf("create refinery dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigPath, "settings"), 0755); err != nil {
+		t.Fatalf("create settings dir: %v", err)
+	}
+
+	// Write settings with refinery enabled (default)
+	settings := map[string]interface{}{
+		"type":    "rig-settings",
+		"version": 1,
+	}
+	settingsData, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rigPath, "settings", "config.json"), settingsData, 0644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	// Write routes for prefix resolution
+	writeTestRoutes(t, townRoot, []beads.Route{
+		{Prefix: "bd-", Path: rigName + "/mayor/rig"},
+	})
+
+	r := &rig.Rig{
+		Name:        rigName,
+		Path:        rigPath,
+		HasRefinery: true,
+	}
+
+	agents := discoverRigAgents(map[string]bool{}, r, nil, nil, nil, nil, true)
+	if len(agents) != 1 {
+		t.Fatalf("discoverRigAgents() returned %d agents, want 1", len(agents))
+	}
+
+	if agents[0].Disabled {
+		t.Errorf("agent Disabled = true, want false (refinery is enabled by default)")
 	}
 }

@@ -452,6 +452,26 @@ For OpenCode autonomous mode, set env var in your shell profile:
 export OPENCODE_PERMISSION='{"*":"allow"}'
 ```
 
+### Disabling Agents Per-Rig
+
+Some rigs may not need all infrastructure agents. The refinery can be disabled
+per-rig via `settings/config.json`:
+
+```json
+{
+  "type": "rig-settings",
+  "version": 1,
+  "refinery": {
+    "enabled": false
+  }
+}
+```
+
+When disabled, `gt up` shows "disabled" instead of starting the refinery session.
+This is useful for rigs that don't use the merge queue workflow.
+
+**Note**: This pattern could be extended to witness in the future if needed.
+
 ### Rig Management
 
 ```bash
