@@ -453,6 +453,10 @@ exit 1
 }
 
 func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake bd stub is not compatible with multiline descriptions on Windows")
+	}
+
 	// Rig-level agent beads (witness, refinery) are stored in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
 	// This test verifies that rig agent beads are created in the rig directory,
