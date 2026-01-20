@@ -188,14 +188,14 @@ func configureHooksPath(repoPath string) error {
 // and origin/main never appears in refs/remotes/origin/main.
 // See: https://github.com/anthropics/gastown/issues/286
 func configureRefspec(repoPath string) error {
-	cmd := exec.Command("git", "-C", repoPath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	cmd := exec.Command("git", "--git-dir", repoPath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("configuring refspec: %s", strings.TrimSpace(stderr.String()))
 	}
 	// Fetch to populate refs/remotes/origin/* so worktrees can use origin/main
-	fetchCmd := exec.Command("git", "-C", repoPath, "fetch", "origin")
+	fetchCmd := exec.Command("git", "--git-dir", repoPath, "fetch", "origin")
 	fetchCmd.Stderr = &stderr
 	if err := fetchCmd.Run(); err != nil {
 		return fmt.Errorf("fetching origin: %s", strings.TrimSpace(stderr.String()))

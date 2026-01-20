@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -443,7 +444,7 @@ func TestCloneBareHasOriginRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git branch --show-current: %v", err)
 	}
-	mainBranch := string(out[:len(out)-1]) // trim newline
+	mainBranch := strings.TrimSpace(string(out))
 
 	// Clone as bare repo using our CloneBare function
 	bareDir := filepath.Join(tmp, "bare.git")
@@ -454,8 +455,7 @@ func TestCloneBareHasOriginRefs(t *testing.T) {
 
 	// Verify origin/main exists (this was the bug - it didn't exist before the fix)
 	bareGit := NewGitWithDir(bareDir, "")
-	cmd = exec.Command("git", "branch", "-r")
-	cmd.Dir = bareDir
+	cmd = exec.Command("git", "--git-dir", bareDir, "branch", "-r")
 	out, err = cmd.Output()
 	if err != nil {
 		t.Fatalf("git branch -r: %v", err)
