@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -376,6 +377,9 @@ func sendHandoffMail(subject, message string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("detecting agent identity: %w", err)
 	}
+
+	// Normalize identity to match mailbox query format
+	agentID = mail.AddressToIdentity(agentID)
 
 	// Detect town root for beads location
 	townRoot := detectTownRootFromCwd()

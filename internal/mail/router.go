@@ -568,7 +568,7 @@ func (r *Router) sendToGroup(msg *Message) error {
 // sendToSingle sends a message to a single recipient.
 func (r *Router) sendToSingle(msg *Message) error {
 	// Convert addresses to beads identities
-	toIdentity := addressToIdentity(msg.To)
+	toIdentity := AddressToIdentity(msg.To)
 
 	// Build labels for from/thread/reply-to/cc
 	var labels []string
@@ -581,7 +581,7 @@ func (r *Router) sendToSingle(msg *Message) error {
 	}
 	// Add CC labels (one per recipient)
 	for _, cc := range msg.CC {
-		ccIdentity := addressToIdentity(cc)
+		ccIdentity := AddressToIdentity(cc)
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
@@ -691,7 +691,7 @@ func (r *Router) sendToQueue(msg *Message) error {
 		labels = append(labels, "reply-to:"+msg.ReplyTo)
 	}
 	for _, cc := range msg.CC {
-		ccIdentity := addressToIdentity(cc)
+		ccIdentity := AddressToIdentity(cc)
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
@@ -762,7 +762,7 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 		labels = append(labels, "reply-to:"+msg.ReplyTo)
 	}
 	for _, cc := range msg.CC {
-		ccIdentity := addressToIdentity(cc)
+		ccIdentity := AddressToIdentity(cc)
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
@@ -834,7 +834,7 @@ func (r *Router) sendToChannel(msg *Message) error {
 		labels = append(labels, "reply-to:"+msg.ReplyTo)
 	}
 	for _, cc := range msg.CC {
-		ccIdentity := addressToIdentity(cc)
+		ccIdentity := AddressToIdentity(cc)
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
