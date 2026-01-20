@@ -340,9 +340,12 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		return DefaultRuntimeConfig()
 	}
 
+	// Copy Args to avoid mutation. Use []string{} as base instead of nil to ensure
+	// empty slices stay empty (not nil). This prevents normalizeRuntimeConfig from
+	// adding default Claude args to agents that intentionally have no args (like opencode).
 	return &RuntimeConfig{
 		Command: info.Command,
-		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
+		Args:    append([]string{}, info.Args...),
 	}
 }
 
