@@ -4,6 +4,7 @@ package config
 import (
 	"path/filepath"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -552,7 +553,11 @@ func defaultProcessNames(provider, command string) []string {
 
 func defaultReadyPromptPrefix(provider string) string {
 	if provider == "claude" {
-		// Claude Code uses ❯ (U+276F) as the prompt character
+		// Claude Code uses ❯ (U+276F) as the prompt character on Unix,
+		// but > on Windows for better terminal compatibility
+		if runtime.GOOS == "windows" {
+			return "> "
+		}
 		return "❯ "
 	}
 	return ""
