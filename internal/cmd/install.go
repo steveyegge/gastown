@@ -472,7 +472,8 @@ func initTownAgentBeads(townPath string) error {
 	// bd init doesn't enable "custom" issue types by default, but Gas Town uses
 	// agent/role beads during install and runtime. Ensure these types are enabled
 	// before attempting to create any town-level system beads.
-	if err := ensureBeadsCustomTypes(townPath, []string{"agent", "role", "rig", "convoy", "slot"}); err != nil {
+	// NOTE: Use constants.BeadsCustomTypesList() to stay in sync with initTownBeads().
+	if err := ensureBeadsCustomTypes(townPath, constants.BeadsCustomTypesList()); err != nil {
 		return err
 	}
 
