@@ -8,14 +8,15 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/factory"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var (
-	themeListFlag    bool
-	themeApplyFlag   bool
+	themeListFlag     bool
+	themeApplyFlag    bool
 	themeApplyAllFlag bool
 )
 
@@ -43,7 +44,7 @@ var themeApplyCmd = &cobra.Command{
 
 By default, only applies to sessions in the current rig.
 Use --all to apply to sessions across all rigs.`,
-	RunE:  runThemeApply,
+	RunE: runThemeApply,
 }
 
 func init() {
@@ -107,89 +108,73 @@ func runTheme(cmd *cobra.Command, args []string) error {
 
 func runThemeApply(cmd *cobra.Command, args []string) error {
 	t := tmux.NewTmux()
+	agents := factory.Agents()
 
-	// Get all sessions
-	sessions, err := t.ListSessions()
+	// Get all running agents
+	agentIDs, err := agents.List()
 	if err != nil {
-		return fmt.Errorf("listing sessions: %w", err)
+		return fmt.Errorf("listing agents: %w", err)
 	}
 
-	// Determine current rig
-	rigName := detectCurrentRig()
+	// Determine current rig for filtering
+	currentRig := detectCurrentRig()
 
-	// Get session names for comparison
-	mayorSession := session.MayorSessionName()
-	deaconSession := session.DeaconSessionName()
-
-	// Apply to matching sessions
+	// Apply theme to each agent
 	applied := 0
-	for _, sess := range sessions {
-		if !strings.HasPrefix(sess, "gt-") {
+	for _, id := range agentIDs {
+		role, rig, worker := id.Parse()
+
+		// Skip if not matching current rig (unless --all flag)
+		if !themeApplyAllFlag && currentRig != "" && rig != "" && rig != currentRig {
 			continue
 		}
 
-		// Determine theme and identity for this session
+		// Determine theme based on role
 		var theme tmux.Theme
-		var rig, worker, role string
+		var displayWorker string
 
-		if sess == mayorSession {
+		switch role {
+		case constants.RoleMayor:
 			theme = tmux.MayorTheme()
-			worker = "Mayor"
-			role = "coordinator"
-		} else if sess == deaconSession {
+			displayWorker = "Mayor"
+		case constants.RoleDeacon:
 			theme = tmux.DeaconTheme()
-			worker = "Deacon"
-			role = "health-check"
-		} else if strings.HasSuffix(sess, "-witness") && strings.HasPrefix(sess, "gt-") {
-			// Witness sessions: gt-<rig>-witness
-			rig = strings.TrimPrefix(strings.TrimSuffix(sess, "-witness"), "gt-")
-			theme = getThemeForRole(rig, "witness")
-			worker = "witness"
-			role = "witness"
-		} else {
-			// Parse session name: gt-<rig>-<worker> or gt-<rig>-crew-<name>
-			parts := strings.SplitN(sess, "-", 3)
-			if len(parts) < 3 {
-				continue
-			}
-			rig = parts[1]
-
-			// Skip if not matching current rig (unless --all flag)
-			if !themeApplyAllFlag && rigName != "" && rig != rigName {
-				continue
-			}
-
-			workerPart := parts[2]
-			if strings.HasPrefix(workerPart, "crew-") {
-				worker = strings.TrimPrefix(workerPart, "crew-")
-				role = "crew"
-			} else if workerPart == "refinery" {
-				worker = "refinery"
-				role = "refinery"
-			} else {
-				worker = workerPart
-				role = "polecat"
-			}
-
-			// Use role-based theme resolution
+			displayWorker = "Deacon"
+		case constants.RoleWitness:
 			theme = getThemeForRole(rig, role)
+			displayWorker = "witness"
+		case constants.RoleRefinery:
+			theme = getThemeForRole(rig, role)
+			displayWorker = "refinery"
+		case constants.RoleCrew:
+			theme = getThemeForRole(rig, role)
+			displayWorker = worker
+		case constants.RolePolecat:
+			theme = getThemeForRole(rig, role)
+			displayWorker = worker
+		default:
+			continue
 		}
+
+		// Get session ID for this agent
+		sessionID := t.SessionIDForAgent(id)
+		sess := string(sessionID)
 
 		// Apply theme and status format
 		if err := t.ApplyTheme(sess, theme); err != nil {
-			fmt.Printf("  %s: failed (%v)\n", sess, err)
+			fmt.Printf("  %s: failed (%v)\n", id.String(), err)
 			continue
 		}
-		if err := t.SetStatusFormat(sess, rig, worker, role); err != nil {
-			fmt.Printf("  %s: failed to set format (%v)\n", sess, err)
+		if err := t.SetStatusFormat(sess, rig, displayWorker, role); err != nil {
+			fmt.Printf("  %s: failed to set format (%v)\n", id.String(), err)
 			continue
 		}
 		if err := t.SetDynamicStatus(sess); err != nil {
-			fmt.Printf("  %s: failed to set dynamic status (%v)\n", sess, err)
+			fmt.Printf("  %s: failed to set dynamic status (%v)\n", id.String(), err)
 			continue
 		}
 
-		fmt.Printf("  %s: applied %s theme\n", sess, theme.Name)
+		fmt.Printf("  %s: applied %s theme\n", id.String(), theme.Name)
 		applied++
 	}
 
@@ -210,9 +195,10 @@ func detectCurrentRig() string {
 	}
 
 	// Try to extract from tmux session name
-	if session := detectCurrentSession(); session != "" {
+	t := tmux.NewTmux()
+	if sessName, err := t.CurrentSessionName(); err == nil {
 		// Extract rig from session name: gt-<rig>-...
-		parts := strings.SplitN(session, "-", 3)
+		parts := strings.SplitN(sessName, "-", 3)
 		if len(parts) >= 2 && parts[0] == "gt" && parts[1] != "mayor" && parts[1] != "deacon" {
 			return parts[1]
 		}

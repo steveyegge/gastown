@@ -33,7 +33,7 @@ func NewLinkedPaneCheck() *LinkedPaneCheck {
 func (c *LinkedPaneCheck) Run(ctx *CheckContext) *CheckResult {
 	t := tmux.NewTmux()
 
-	sessions, err := t.ListSessions()
+	sessions, err := t.List()
 	if err != nil {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -43,12 +43,14 @@ func (c *LinkedPaneCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Filter to gt-* sessions only
+	// Filter to Gas Town sessions (gt-* for rig agents, hq-* for town agents)
 	var gtSessions []string
-	for _, session := range sessions {
-		if strings.HasPrefix(session, "gt-") {
-			gtSessions = append(gtSessions, session)
+	for _, sessionID := range sessions {
+		sessionName := string(sessionID)
+		if !strings.HasPrefix(sessionName, session.Prefix) && !strings.HasPrefix(sessionName, session.HQPrefix) {
+			continue
 		}
+		gtSessions = append(gtSessions, sessionName)
 	}
 
 	if len(gtSessions) < 2 {
@@ -86,11 +88,11 @@ func (c *LinkedPaneCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Cache for Fix (exclude mayor session since we don't want to kill it)
-	mayorSession := session.MayorSessionName()
+	mayorSessionBase := session.MayorSessionName()
 
 	c.linkedSessions = nil
 	for sess := range linkedSessionSet {
-		if mayorSession == "" || sess != mayorSession {
+		if mayorSessionBase == "" || sess != mayorSessionBase {
 			c.linkedSessions = append(c.linkedSessions, sess)
 		}
 	}
@@ -122,8 +124,8 @@ func (c *LinkedPaneCheck) Fix(ctx *CheckContext) error {
 	t := tmux.NewTmux()
 	var lastErr error
 
-	for _, session := range c.linkedSessions {
-		if err := t.KillSession(session); err != nil {
+	for _, sess := range c.linkedSessions {
+		if err := t.Stop(session.SessionID(sess)); err != nil {
 			lastErr = err
 		}
 	}

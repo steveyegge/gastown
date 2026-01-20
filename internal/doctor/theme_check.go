@@ -31,7 +31,7 @@ func (c *ThemeCheck) Run(ctx *CheckContext) *CheckResult {
 	t := tmux.NewTmux()
 
 	// List all sessions
-	sessions, err := t.ListSessions()
+	sessions, err := t.List()
 	if err != nil {
 		// No tmux server or error - not a problem, just skip
 		return &CheckResult{
@@ -44,8 +44,9 @@ func (c *ThemeCheck) Run(ctx *CheckContext) *CheckResult {
 	// Check for Gas Town sessions
 	var gtSessions []string
 	for _, s := range sessions {
-		if strings.HasPrefix(s, "gt-") {
-			gtSessions = append(gtSessions, s)
+		sessionName := string(s)
+		if strings.HasPrefix(sessionName, "gt-") {
+			gtSessions = append(gtSessions, sessionName)
 		}
 	}
 

@@ -4,11 +4,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/refinery"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/wisp"
-	"github.com/steveyegge/gastown/internal/witness"
 )
 
 // RigStatusKey is the wisp config key for rig operational status.
@@ -83,7 +81,7 @@ func runRigPark(cmd *cobra.Command, args []string) error {
 
 func parkOneRig(rigName string) error {
 	// Get rig and town root
-	townRoot, r, err := getRig(rigName)
+	townRoot, _, err := getRig(rigName)
 	if err != nil {
 		return err
 	}
@@ -91,16 +89,13 @@ func parkOneRig(rigName string) error {
 	fmt.Printf("Parking rig %s...\n", style.Bold.Render(rigName))
 
 	var stoppedAgents []string
-
-	t := tmux.NewTmux()
+	agents := agent.Default()
 
 	// Stop witness if running
-	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-	witnessRunning, _ := t.HasSession(witnessSession)
-	if witnessRunning {
+	witnessID := agent.WitnessAddress(rigName)
+	if agents.Exists(witnessID) {
 		fmt.Printf("  Stopping witness...\n")
-		witMgr := witness.NewManager(r)
-		if err := witMgr.Stop(); err != nil {
+		if err := agents.Stop(witnessID, true); err != nil {
 			fmt.Printf("  %s Failed to stop witness: %v\n", style.Warning.Render("!"), err)
 		} else {
 			stoppedAgents = append(stoppedAgents, "Witness stopped")
@@ -108,12 +103,10 @@ func parkOneRig(rigName string) error {
 	}
 
 	// Stop refinery if running
-	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
-	refineryRunning, _ := t.HasSession(refinerySession)
-	if refineryRunning {
+	refineryID := agent.RefineryAddress(rigName)
+	if agents.Exists(refineryID) {
 		fmt.Printf("  Stopping refinery...\n")
-		refMgr := refinery.NewManager(r)
-		if err := refMgr.Stop(); err != nil {
+		if err := agents.Stop(refineryID, true); err != nil {
 			fmt.Printf("  %s Failed to stop refinery: %v\n", style.Warning.Render("!"), err)
 		} else {
 			stoppedAgents = append(stoppedAgents, "Refinery stopped")

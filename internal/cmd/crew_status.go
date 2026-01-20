@@ -12,7 +12,6 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
 // CrewStatusItem represents detailed status for a crew worker.
@@ -50,7 +49,7 @@ func runCrewStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	crewMgr, r, err := getCrewManager(crewRig)
+	crewMgr, r, err := getCrewManager(crewRig, "")
 	if err != nil {
 		return err
 	}
@@ -80,12 +79,11 @@ func runCrewStatus(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	t := tmux.NewTmux()
 	var items []CrewStatusItem
 
 	for _, w := range workers {
-		sessionID := crewSessionName(r.Name, w.Name)
-		hasSession, _ := t.HasSession(sessionID)
+		sessionName := crewSessionName(r.Name, w.Name)
+		hasSession, _ := crewMgr.IsRunning(w.Name)
 
 		// Git status
 		crewGit := git.NewGit(w.ClonePath)
@@ -122,7 +120,7 @@ func runCrewStatus(cmd *cobra.Command, args []string) error {
 			MailUnread:   mailUnread,
 		}
 		if hasSession {
-			item.SessionID = sessionID
+			item.SessionID = sessionName
 		}
 
 		items = append(items, item)

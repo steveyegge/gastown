@@ -98,21 +98,14 @@ func SaveState(townRoot string, state *State) error {
 
 // PatrolConfig holds configuration for a single patrol.
 type PatrolConfig struct {
-	// Enabled controls whether this patrol runs during heartbeat.
 	Enabled bool `json:"enabled"`
-
-	// Interval is how often to run this patrol (not used yet).
-	Interval string `json:"interval,omitempty"`
-
-	// Agent is the agent type for this patrol (not used yet).
-	Agent string `json:"agent,omitempty"`
 }
 
-// PatrolsConfig holds configuration for all patrols.
+// PatrolsConfig holds per-patrol configuration.
 type PatrolsConfig struct {
-	Refinery *PatrolConfig `json:"refinery,omitempty"`
-	Witness  *PatrolConfig `json:"witness,omitempty"`
 	Deacon   *PatrolConfig `json:"deacon,omitempty"`
+	Witness  *PatrolConfig `json:"witness,omitempty"`
+	Refinery *PatrolConfig `json:"refinery,omitempty"`
 }
 
 // DaemonPatrolConfig is the structure of mayor/daemon.json.

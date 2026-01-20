@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -13,6 +14,7 @@ import (
 // These occur when Claude exits or crashes but the tmux session remains.
 type ZombieSessionCheck struct {
 	FixableCheck
+	sessionLister  SessionLister
 	zombieSessions []string // Cached during Run for use in Fix
 }
 
@@ -29,31 +31,47 @@ func NewZombieSessionCheck() *ZombieSessionCheck {
 	}
 }
 
+// NewZombieSessionCheckWithLister creates a check with a custom session lister (for testing).
+func NewZombieSessionCheckWithLister(lister SessionLister) *ZombieSessionCheck {
+	check := NewZombieSessionCheck()
+	check.sessionLister = lister
+	return check
+}
+
 // Run checks for zombie Gas Town sessions (tmux alive but Claude dead).
 func (c *ZombieSessionCheck) Run(ctx *CheckContext) *CheckResult {
 	t := tmux.NewTmux()
+	lister := c.sessionLister
+	if lister == nil {
+		lister = &realSessionLister{t: t}
+	}
 
-	sessions, err := t.ListSessions()
+	sessions, err := lister.List()
 	if err != nil {
 		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusWarning,
-			Message: "Could not list tmux sessions",
-			Details: []string{err.Error()},
+			Name:     c.Name(),
+			Status:   StatusWarning,
+			Message:  "Could not list tmux sessions",
+			Details:  []string{err.Error()},
+			Category: c.CheckCategory,
 		}
 	}
 
 	if len(sessions) == 0 {
 		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusOK,
-			Message: "No tmux sessions found",
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "No tmux sessions found",
+			Category: c.CheckCategory,
 		}
 	}
 
 	// Check each Gas Town session for zombie status
 	var zombies []string
 	var healthyCount int
+
+	// Process names to check for (Claude CLI)
+	processNames := []string{"claude", "node"}
 
 	for _, sess := range sessions {
 		if sess == "" {
@@ -72,7 +90,8 @@ func (c *ZombieSessionCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 
 		// Check if Claude is running in this session
-		if t.IsClaudeRunning(sess) {
+		sessionID := session.SessionID(sess)
+		if t.IsRunning(sessionID, processNames...) {
 			healthyCount++
 		} else {
 			zombies = append(zombies, sess)
@@ -88,23 +107,25 @@ func (c *ZombieSessionCheck) Run(ctx *CheckContext) *CheckResult {
 			msg = fmt.Sprintf("All %d Gas Town sessions have running Claude processes", healthyCount)
 		}
 		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusOK,
-			Message: msg,
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  msg,
+			Category: c.CheckCategory,
 		}
 	}
 
 	details := make([]string, len(zombies))
-	for i, session := range zombies {
-		details[i] = fmt.Sprintf("Zombie: %s (tmux alive, Claude dead)", session)
+	for i, sess := range zombies {
+		details[i] = fmt.Sprintf("Zombie: %s (tmux alive, Claude dead)", sess)
 	}
 
 	return &CheckResult{
-		Name:    c.Name(),
-		Status:  StatusWarning,
-		Message: fmt.Sprintf("Found %d zombie session(s)", len(zombies)),
-		Details: details,
-		FixHint: "Run 'gt doctor --fix' to kill zombie sessions",
+		Name:     c.Name(),
+		Status:   StatusWarning,
+		Message:  fmt.Sprintf("Found %d zombie session(s)", len(zombies)),
+		Details:  details,
+		FixHint:  "Run 'gt doctor --fix' to kill zombie sessions",
+		Category: c.CheckCategory,
 	}
 }
 

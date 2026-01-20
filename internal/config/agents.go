@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 )
 
@@ -102,7 +101,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentClaude,
 		Command:             "claude",
 		Args:                []string{"--dangerously-skip-permissions"},
-		ProcessNames:        []string{"node"}, // Claude runs as Node.js
+		ProcessNames:        []string{"claude", "node"}, // "claude" for native binary, "node" for legacy
 		SessionIDEnv:        "CLAUDE_SESSION_ID",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
@@ -333,34 +332,18 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	}
 }
 
-// BuildResumeCommand builds a command to resume an agent session.
-// Returns the full command string including any YOLO/autonomous flags.
-// If sessionID is empty or the agent doesn't support resume, returns empty string.
-func BuildResumeCommand(agentName, sessionID string) string {
-	if sessionID == "" {
-		return ""
+// BuildAgentCommand builds a startup command for an already-resolved agent name.
+// This is the preferred method when the agent name has already been resolved
+// (e.g., via ResolveRoleAgentName at manager construction time).
+// Use this instead of BuildAgentStartupCommandWithAgentOverride to avoid
+// redundant agent resolution.
+// If prompt is empty, defaults to "gt prime" for propulsion.
+func BuildAgentCommand(agentName, prompt string) string {
+	rc := RuntimeConfigFromPreset(AgentPreset(agentName))
+	if prompt == "" {
+		prompt = "gt prime"
 	}
-
-	info := GetAgentPresetByName(agentName)
-	if info == nil || info.ResumeFlag == "" {
-		return ""
-	}
-
-	// Build base command with args
-	args := append([]string(nil), info.Args...)
-
-	// Add resume based on style
-	switch info.ResumeStyle {
-	case "subcommand":
-		// e.g., "codex resume <session_id> --yolo"
-		return info.Command + " " + info.ResumeFlag + " " + sessionID + " " + strings.Join(args, " ")
-	case "flag":
-		fallthrough
-	default:
-		// e.g., "claude --dangerously-skip-permissions --resume <session_id>"
-		args = append(args, info.ResumeFlag, sessionID)
-		return info.Command + " " + strings.Join(args, " ")
-	}
+	return rc.BuildCommandWithPrompt(prompt)
 }
 
 // SupportsSessionResume checks if an agent supports session resumption.
@@ -381,12 +364,12 @@ func GetSessionIDEnvVar(agentName string) string {
 
 // GetProcessNames returns the process names used to detect if an agent is running.
 // Used by tmux.IsAgentRunning to check pane_current_command.
-// Returns ["node"] for Claude (default) if agent is not found or has no ProcessNames.
+// Returns ["claude", "node"] for Claude (default) if agent is not found or has no ProcessNames.
 func GetProcessNames(agentName string) []string {
 	info := GetAgentPresetByName(agentName)
 	if info == nil || len(info.ProcessNames) == 0 {
-		// Default to Claude's process name for backwards compatibility
-		return []string{"node"}
+		// Default to Claude's process names for backwards compatibility
+		return []string{"claude", "node"}
 	}
 	return info.ProcessNames
 }

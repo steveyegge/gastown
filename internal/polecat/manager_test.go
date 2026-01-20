@@ -5,11 +5,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 )
+
+// extractPolecatName extracts the polecat name from an AgentID string.
+// AgentID format for polecats is "rig/polecat/name".
+func extractPolecatName(agentID string) string {
+	parts := strings.Split(agentID, "/")
+	if len(parts) >= 3 {
+		return parts[len(parts)-1]
+	}
+	return agentID
+}
 
 func TestStateIsActive(t *testing.T) {
 	tests := []struct {
@@ -73,7 +85,7 @@ func TestListEmpty(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(nil, r, git.NewGit(root))
 
 	polecats, err := m.List()
 	if err != nil {
@@ -90,7 +102,7 @@ func TestGetNotFound(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(nil, r, git.NewGit(root))
 
 	_, err := m.Get("nonexistent")
 	if err != ErrPolecatNotFound {
@@ -104,7 +116,7 @@ func TestRemoveNotFound(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(nil, r, git.NewGit(root))
 
 	err := m.Remove("nonexistent", false)
 	if err != ErrPolecatNotFound {
@@ -117,7 +129,7 @@ func TestPolecatDir(t *testing.T) {
 		Name: "test-rig",
 		Path: "/home/user/ai/test-rig",
 	}
-	m := NewManager(r, git.NewGit(r.Path), nil)
+	m := NewManager(nil, r, git.NewGit(r.Path))
 
 	dir := m.polecatDir("Toast")
 	expected := "/home/user/ai/test-rig/polecats/Toast"
@@ -131,7 +143,7 @@ func TestAssigneeID(t *testing.T) {
 		Name: "test-rig",
 		Path: "/home/user/ai/test-rig",
 	}
-	m := NewManager(r, git.NewGit(r.Path), nil)
+	m := NewManager(nil, r, git.NewGit(r.Path))
 
 	id := m.assigneeID("Toast")
 	expected := "test-rig/Toast"
@@ -169,7 +181,7 @@ func TestGetReturnsWorkingWithoutBeads(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(nil, r, git.NewGit(root))
 
 	// Get should return polecat with StateWorking (assume active if beads unavailable)
 	polecat, err := m.Get("Test")
@@ -208,7 +220,7 @@ func TestListWithPolecats(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(nil, r, git.NewGit(root))
 
 	polecats, err := m.List()
 	if err != nil {
@@ -241,7 +253,7 @@ func TestSetStateWithoutBeads(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(nil, r, git.NewGit(root))
 
 	// SetState should succeed (no-op when no issue assigned)
 	err := m.SetState("Test", StateActive)
@@ -267,7 +279,7 @@ func TestClearIssueWithoutAssignment(t *testing.T) {
 		Name: "test-rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(nil, r, git.NewGit(root))
 
 	// ClearIssue should succeed even when no issue assigned
 	err := m.ClearIssue("Test")
@@ -335,7 +347,7 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		Name: "rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(nil, r, git.NewGit(root))
 
 	// Create polecat via AddWithOptions
 	polecat, err := m.AddWithOptions("TestAgent", AddOptions{})
@@ -418,7 +430,7 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 		Name: "rig",
 		Path: root,
 	}
-	m := NewManager(r, git.NewGit(root), nil)
+	m := NewManager(nil, r, git.NewGit(root))
 
 	// Create polecat via AddWithOptions
 	polecat, err := m.AddWithOptions("TestFallback", AddOptions{})
@@ -441,81 +453,29 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 		t.Errorf("AGENTS.md content = %q, want %q", string(content), string(agentsMDContent))
 	}
 }
-// TestReconcilePoolWith tests all permutations of directory and session existence.
-// This is the core allocation policy logic.
-//
-// Truth table:
-//   HasDir | HasSession | Result
-//   -------|------------|------------------
-//   false  | false      | available (not in-use)
-//   true   | false      | in-use (normal finished polecat)
-//   false  | true       | orphan → kill session, available
-//   true   | true       | in-use (normal working polecat)
+
 func TestReconcilePoolWith(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name             string
-		namesWithDirs    []string
-		namesWithSessions []string
-		wantInUse        []string // names that should be marked in-use
-		wantOrphans      []string // sessions that should be killed
+		name          string
+		namesWithDirs []string
+		wantInUse     []string // names that should be marked in-use
 	}{
 		{
-			name:             "no dirs, no sessions - all available",
-			namesWithDirs:    []string{},
-			namesWithSessions: []string{},
-			wantInUse:        []string{},
-			wantOrphans:      []string{},
+			name:          "no dirs - all available",
+			namesWithDirs: []string{},
+			wantInUse:     []string{},
 		},
 		{
-			name:             "has dir, no session - in use",
-			namesWithDirs:    []string{"toast"},
-			namesWithSessions: []string{},
-			wantInUse:        []string{"toast"},
-			wantOrphans:      []string{},
+			name:          "one dir - marked in use",
+			namesWithDirs: []string{"toast"},
+			wantInUse:     []string{"toast"},
 		},
 		{
-			name:             "no dir, has session - orphan killed",
-			namesWithDirs:    []string{},
-			namesWithSessions: []string{"nux"},
-			wantInUse:        []string{},
-			wantOrphans:      []string{"nux"},
-		},
-		{
-			name:             "has dir, has session - in use",
-			namesWithDirs:    []string{"capable"},
-			namesWithSessions: []string{"capable"},
-			wantInUse:        []string{"capable"},
-			wantOrphans:      []string{},
-		},
-		{
-			name:             "mixed: one with dir, one orphan session",
-			namesWithDirs:    []string{"toast"},
-			namesWithSessions: []string{"toast", "nux"},
-			wantInUse:        []string{"toast"},
-			wantOrphans:      []string{"nux"},
-		},
-		{
-			name:             "multiple dirs, no sessions",
-			namesWithDirs:    []string{"toast", "nux", "capable"},
-			namesWithSessions: []string{},
-			wantInUse:        []string{"capable", "nux", "toast"},
-			wantOrphans:      []string{},
-		},
-		{
-			name:             "multiple orphan sessions",
-			namesWithDirs:    []string{},
-			namesWithSessions: []string{"slit", "rictus"},
-			wantInUse:        []string{},
-			wantOrphans:      []string{"rictus", "slit"},
-		},
-		{
-			name:             "complex: dirs, valid sessions, orphan sessions",
-			namesWithDirs:    []string{"toast", "capable"},
-			namesWithSessions: []string{"toast", "nux", "slit"},
-			wantInUse:        []string{"capable", "toast"},
-			wantOrphans:      []string{"nux", "slit"},
+			name:          "multiple dirs - all marked in use",
+			namesWithDirs: []string{"toast", "nux", "capable"},
+			wantInUse:     []string{"capable", "nux", "toast"},
 		},
 	}
 
@@ -528,16 +488,16 @@ func TestReconcilePoolWith(t *testing.T) {
 			}
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
-			// Create rig and manager (nil tmux for unit test)
+			// Create rig and manager (nil agents for unit test)
 			// Use "myrig" which hashes to mad-max theme
 			r := &rig.Rig{
 				Name: "myrig",
 				Path: tmpDir,
 			}
-			m := NewManager(r, nil, nil)
+			m := NewManager(nil, r, nil)
 
 			// Call ReconcilePoolWith
-			m.ReconcilePoolWith(tt.namesWithDirs, tt.namesWithSessions)
+			m.ReconcilePoolWith(tt.namesWithDirs)
 
 			// Verify in-use names
 			gotInUse := m.namePool.ActiveNames()
@@ -550,31 +510,6 @@ func TestReconcilePoolWith(t *testing.T) {
 			for i := range tt.wantInUse {
 				if i >= len(gotInUse) || gotInUse[i] != tt.wantInUse[i] {
 					t.Errorf("in-use names: got %v, want %v", gotInUse, tt.wantInUse)
-					break
-				}
-			}
-
-			// Verify orphans would be identified correctly
-			// (actual killing requires tmux, tested separately)
-			dirSet := make(map[string]bool)
-			for _, name := range tt.namesWithDirs {
-				dirSet[name] = true
-			}
-			var gotOrphans []string
-			for _, name := range tt.namesWithSessions {
-				if !dirSet[name] {
-					gotOrphans = append(gotOrphans, name)
-				}
-			}
-			sort.Strings(gotOrphans)
-			sort.Strings(tt.wantOrphans)
-
-			if len(gotOrphans) != len(tt.wantOrphans) {
-				t.Errorf("orphan count: got %d, want %d", len(gotOrphans), len(tt.wantOrphans))
-			}
-			for i := range tt.wantOrphans {
-				if i >= len(gotOrphans) || gotOrphans[i] != tt.wantOrphans[i] {
-					t.Errorf("orphans: got %v, want %v", gotOrphans, tt.wantOrphans)
 					break
 				}
 			}
@@ -597,11 +532,11 @@ func TestReconcilePoolWith_Allocation(t *testing.T) {
 		Name: "myrig",
 		Path: tmpDir,
 	}
-	m := NewManager(r, nil, nil)
+	m := NewManager(nil, r, nil)
 
 	// Mark first few pool names as in-use via directories
 	// (furiosa, nux, slit are first 3 in mad-max theme)
-	m.ReconcilePoolWith([]string{"furiosa", "nux", "slit"}, []string{})
+	m.ReconcilePoolWith([]string{"furiosa", "nux", "slit"})
 
 	// First allocation should skip in-use names
 	name, err := m.namePool.Allocate()
@@ -618,9 +553,9 @@ func TestReconcilePoolWith_Allocation(t *testing.T) {
 	}
 }
 
-// TestReconcilePoolWith_OrphanDoesNotBlockAllocation verifies orphan sessions
-// don't prevent name allocation (they're killed, freeing the name).
-func TestReconcilePoolWith_OrphanDoesNotBlockAllocation(t *testing.T) {
+// TestReconcilePoolWith_CallsStopForNamesWithoutDirs verifies Stop() is called
+// for pool names that don't have directories (orphan cleanup).
+func TestReconcilePoolWith_CallsStopForNamesWithoutDirs(t *testing.T) {
 	t.Parallel()
 
 	tmpDir, err := os.MkdirTemp("", "reconcile-orphan-test-*")
@@ -634,18 +569,34 @@ func TestReconcilePoolWith_OrphanDoesNotBlockAllocation(t *testing.T) {
 		Name: "myrig",
 		Path: tmpDir,
 	}
-	m := NewManager(r, nil, nil)
 
-	// furiosa has orphan session (no dir) - should NOT block allocation
-	m.ReconcilePoolWith([]string{}, []string{"furiosa"})
+	// Use agent.Double to track Stop() calls
+	agents := agent.NewDouble()
+	m := NewManager(agents, r, nil)
 
-	// furiosa should be available (orphan session killed, name freed)
-	name, err := m.namePool.Allocate()
-	if err != nil {
-		t.Fatalf("Allocate: %v", err)
+	// "toast" has a directory, others don't
+	m.ReconcilePoolWith([]string{"toast"})
+
+	// Verify Stop() was called for pool names without directories
+	// (furiosa is first pool name, should have Stop called since no dir)
+	// Stop is idempotent - even if no session exists, the call is made
+	stopCalls := agents.StopCalls()
+
+	// Should have Stop() called for all pool names except "toast"
+	// The pool has many names, but at minimum furiosa should be stopped
+	foundFuriosa := false
+	for _, call := range stopCalls {
+		// Extract name from AgentID (format: "rig/polecat/name")
+		name := extractPolecatName(call.ID.String())
+		if name == "furiosa" {
+			foundFuriosa = true
+		}
+		// Verify "toast" was NOT stopped (has directory)
+		if name == "toast" {
+			t.Errorf("Stop() called for toast which has a directory")
+		}
 	}
-
-	if name != "furiosa" {
-		t.Errorf("expected furiosa (orphan freed), got %q", name)
+	if !foundFuriosa {
+		t.Errorf("Stop() not called for furiosa (no directory)")
 	}
 }

@@ -2,11 +2,17 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/ids"
 )
+
+// ErrSessionNotFound is returned when a session cannot be found.
+var ErrSessionNotFound = errors.New("session not found")
 
 // Prefix is the common prefix for rig-level Gas Town tmux sessions.
 const Prefix = "gt-"
@@ -15,16 +21,17 @@ const Prefix = "gt-"
 const HQPrefix = "hq-"
 
 // MayorSessionName returns the session name for the Mayor agent.
-// One mayor per machine - multi-town requires containers/VMs for isolation.
 func MayorSessionName() string {
 	return HQPrefix + "mayor"
 }
 
 // DeaconSessionName returns the session name for the Deacon agent.
-// One deacon per machine - multi-town requires containers/VMs for isolation.
 func DeaconSessionName() string {
 	return HQPrefix + "deacon"
 }
+
+// BootSessionName is the session name for the Boot watchdog.
+const BootSessionName = Prefix + "boot"
 
 // WitnessSessionName returns the session name for a rig's Witness agent.
 func WitnessSessionName(rig string) string {
@@ -44,6 +51,30 @@ func CrewSessionName(rig, name string) string {
 // PolecatSessionName returns the session name for a polecat in a rig.
 func PolecatSessionName(rig, name string) string {
 	return fmt.Sprintf("%s%s-%s", Prefix, rig, name)
+}
+
+// SessionNameFromAgentID converts an AgentID to a session name.
+// Internal helper for Sessions implementations. External callers should use
+// Sessions.SessionIDForAgent() instead.
+func SessionNameFromAgentID(id ids.AgentID) string {
+	switch id.Role {
+	case "mayor":
+		return MayorSessionName()
+	case "deacon":
+		return DeaconSessionName()
+	case "boot":
+		return BootSessionName
+	case "witness":
+		return WitnessSessionName(id.Rig)
+	case "refinery":
+		return RefinerySessionName(id.Rig)
+	case "crew":
+		return CrewSessionName(id.Rig, id.Worker)
+	case "polecat":
+		return PolecatSessionName(id.Rig, id.Worker)
+	default:
+		return "" // Unknown
+	}
 }
 
 // PropulsionNudge generates the GUPP (Gas Town Universal Propulsion Principle) nudge.

@@ -40,6 +40,9 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 	}
 	results := make([]slingResult, 0, len(beadIDs))
 
+	// Get town root from beads dir (needed for agent ID resolution)
+	townRoot := filepath.Dir(townBeadsDir)
+
 	// Spawn a polecat for each bead and sling it
 	for i, beadID := range beadIDs {
 		fmt.Printf("\n[%d/%d] Slinging %s...\n", i+1, len(beadIDs), beadID)
@@ -92,7 +95,6 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		}
 
 		// Hook the bead. See: https://github.com/steveyegge/gastown/issues/148
-		townRoot := filepath.Dir(townBeadsDir)
 		hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
 		hookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 		hookCmd.Stderr = os.Stderr
@@ -123,9 +125,16 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			}
 		}
 
-		// Nudge the polecat
-		if spawnInfo.Pane != "" {
-			if err := injectStartPrompt(spawnInfo.Pane, beadID, slingSubject, slingArgs); err != nil {
+		// Nudge the polecat using logical AgentID (translation to tmux happens in session layer)
+		agentID, err := addressToAgentID(targetAgent)
+		if err != nil {
+			fmt.Printf("  %s Could not resolve agent address: %v\n", style.Dim.Render("○"), err)
+		} else {
+			// Ensure agent is ready before nudging
+			if err := ensureAgentReady(townRoot, agentID); err != nil {
+				fmt.Printf("  %s Could not verify agent ready: %v\n", style.Dim.Render("○"), err)
+			}
+			if err := injectStartPrompt(townRoot, agentID, beadID, slingSubject, slingArgs); err != nil {
 				fmt.Printf("  %s Could not nudge (agent will discover via gt prime)\n", style.Dim.Render("○"))
 			} else {
 				fmt.Printf("  %s Start prompt sent\n", style.Bold.Render("▶"))
@@ -136,7 +145,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 	}
 
 	// Wake witness and refinery once at the end
-	wakeRigAgents(rigName)
+	wakeRigAgents(townRoot, rigName)
 
 	// Print summary
 	successCount := 0

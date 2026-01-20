@@ -54,9 +54,9 @@ func (c *IdentityCollisionCheck) Run(ctx *CheckContext) *CheckResult {
 	sessionSet := make(map[string]bool)
 
 	// Get session names
-	sessions, _ := t.ListSessions() // Returns session names
+	sessions, _ := t.List() // Returns session names
 	for _, s := range sessions {
-		sessionSet[s] = true
+		sessionSet[string(s)] = true
 	}
 
 	// Also get session IDs to handle locks that store ID instead of name

@@ -145,12 +145,12 @@ func makeStepIssue(id, title, parent, status string, dependsOn []string) *beads.
 
 func TestFindNextReadyStep(t *testing.T) {
 	tests := []struct {
-		name           string
-		moleculeID     string
-		setupFunc      func(*mockBeadsForStep)
-		wantStepID     string
-		wantComplete   bool
-		wantNilStep    bool
+		name         string
+		moleculeID   string
+		setupFunc    func(*mockBeadsForStep)
+		wantStepID   string
+		wantComplete bool
+		wantNilStep  bool
 	}{
 		{
 			name:       "no steps - molecule complete",
@@ -308,11 +308,11 @@ func TestFindNextReadyStep(t *testing.T) {
 // TestStepDoneScenarios tests complete step-done scenarios
 func TestStepDoneScenarios(t *testing.T) {
 	tests := []struct {
-		name           string
-		stepID         string
-		setupFunc      func(*mockBeadsForStep)
-		wantAction     string // "continue", "done", "no_more_ready"
-		wantNextStep   string
+		name         string
+		stepID       string
+		setupFunc    func(*mockBeadsForStep)
+		wantAction   string // "continue", "done", "no_more_ready"
+		wantNextStep string
 	}{
 		{
 			name:   "complete step, continue to next",

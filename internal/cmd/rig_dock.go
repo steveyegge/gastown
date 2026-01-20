@@ -5,11 +5,9 @@ import (
 	"os/exec"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/witness"
 )
 
 // RigDockedLabel is the label set on rig identity beads when docked.
@@ -108,16 +106,13 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Docking rig %s...\n", style.Bold.Render(rigName))
 
 	var stoppedAgents []string
-
-	t := tmux.NewTmux()
+	agentsAPI := agent.Default()
 
 	// Stop witness if running
-	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-	witnessRunning, _ := t.HasSession(witnessSession)
-	if witnessRunning {
+	witnessID := agent.WitnessAddress(rigName)
+	if agentsAPI.Exists(witnessID) {
 		fmt.Printf("  Stopping witness...\n")
-		witMgr := witness.NewManager(r)
-		if err := witMgr.Stop(); err != nil {
+		if err := agentsAPI.Stop(witnessID, true); err != nil {
 			fmt.Printf("  %s Failed to stop witness: %v\n", style.Warning.Render("!"), err)
 		} else {
 			stoppedAgents = append(stoppedAgents, "Witness stopped")
@@ -125,12 +120,10 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	}
 
 	// Stop refinery if running
-	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
-	refineryRunning, _ := t.HasSession(refinerySession)
-	if refineryRunning {
+	refineryID := agent.RefineryAddress(rigName)
+	if agentsAPI.Exists(refineryID) {
 		fmt.Printf("  Stopping refinery...\n")
-		refMgr := refinery.NewManager(r)
-		if err := refMgr.Stop(); err != nil {
+		if err := agentsAPI.Stop(refineryID, true); err != nil {
 			fmt.Printf("  %s Failed to stop refinery: %v\n", style.Warning.Render("!"), err)
 		} else {
 			stoppedAgents = append(stoppedAgents, "Refinery stopped")

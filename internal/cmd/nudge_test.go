@@ -27,52 +27,52 @@ func TestResolveNudgePattern(t *testing.T) {
 		{
 			name:     "mayor special case",
 			pattern:  "mayor",
-			expected: []string{"hq-mayor"},
+			expected: []string{"mayor"}, // agent address, not session name
 		},
 		{
 			name:     "deacon special case",
 			pattern:  "deacon",
-			expected: []string{"hq-deacon"},
+			expected: []string{"deacon"}, // agent address, not session name
 		},
 		{
 			name:     "specific witness",
 			pattern:  "gastown/witness",
-			expected: []string{"gt-gastown-witness"},
+			expected: []string{"gastown/witness"},
 		},
 		{
 			name:     "all witnesses",
 			pattern:  "*/witness",
-			expected: []string{"gt-gastown-witness", "gt-beads-witness"},
+			expected: []string{"gastown/witness", "beads/witness"},
 		},
 		{
 			name:     "specific refinery",
 			pattern:  "gastown/refinery",
-			expected: []string{"gt-gastown-refinery"},
+			expected: []string{"gastown/refinery"},
 		},
 		{
 			name:     "all polecats in rig",
 			pattern:  "gastown/polecats/*",
-			expected: []string{"gt-gastown-alpha", "gt-gastown-beta"},
+			expected: []string{"gastown/polecat/alpha", "gastown/polecat/beta"},
 		},
 		{
 			name:     "specific polecat",
 			pattern:  "gastown/polecats/alpha",
-			expected: []string{"gt-gastown-alpha"},
+			expected: []string{"gastown/polecat/alpha"},
 		},
 		{
 			name:     "all crew in rig",
 			pattern:  "gastown/crew/*",
-			expected: []string{"gt-gastown-crew-max", "gt-gastown-crew-jack"},
+			expected: []string{"gastown/crew/max", "gastown/crew/jack"},
 		},
 		{
 			name:     "specific crew member",
 			pattern:  "gastown/crew/max",
-			expected: []string{"gt-gastown-crew-max"},
+			expected: []string{"gastown/crew/max"},
 		},
 		{
 			name:     "legacy polecat format",
 			pattern:  "gastown/alpha",
-			expected: []string{"gt-gastown-alpha"},
+			expected: []string{"gastown/polecat/alpha"},
 		},
 		{
 			name:     "no matches",

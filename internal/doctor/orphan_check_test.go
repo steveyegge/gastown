@@ -13,7 +13,7 @@ type mockSessionLister struct {
 	err      error
 }
 
-func (m *mockSessionLister) ListSessions() ([]string, error) {
+func (m *mockSessionLister) List() ([]string, error) {
 	return m.sessions, m.err
 }
 
@@ -406,3 +406,4 @@ func TestOrphanSessionCheck_Run_Deterministic(t *testing.T) {
 		t.Fatalf("details = %v, want %v", result.Details, expectedDetails)
 	}
 }
+
