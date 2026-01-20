@@ -27,6 +27,8 @@ const (
 	AgentAuggie AgentPreset = "auggie"
 	// AgentAmp is Sourcegraph AMP.
 	AgentAmp AgentPreset = "amp"
+	// AgentGoose is Block Goose.
+	AgentGoose AgentPreset = "goose"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -130,7 +132,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Command:             "codex",
 		Args:                []string{"--yolo"},
 		ProcessNames:        []string{"codex"}, // Codex CLI binary
-		SessionIDEnv:        "", // Codex captures from JSONL output
+		SessionIDEnv:        "",                // Codex captures from JSONL output
 		ResumeFlag:          "resume",
 		ResumeStyle:         "subcommand",
 		SupportsHooks:       false, // Use env/files instead
@@ -176,6 +178,22 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeStyle:         "subcommand", // 'amp threads continue <threadId>'
 		SupportsHooks:       false,
 		SupportsForkSession: false,
+	},
+	AgentGoose: {
+		Name:                AgentGoose,
+		Command:             "goose",
+		Args:                []string{},
+		ProcessNames:        []string{"goose"},
+		SessionIDEnv:        "GOOSE_SESSION_ID",
+		ResumeFlag:          "session -r --session-id",
+		ResumeStyle:         "subcommand",
+		SupportsHooks:       false,
+		SupportsForkSession: false,
+		NonInteractive: &NonInteractiveConfig{
+			Subcommand: "run",
+			PromptFlag: "-t",
+			OutputFlag: "--output-format json",
+		},
 	},
 }
 
