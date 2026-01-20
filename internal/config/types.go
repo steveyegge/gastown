@@ -61,6 +61,17 @@ type TownSettings struct {
 	// Agent addresses like "gastown/crew/jack" become "gastown.crew.jack@{domain}".
 	// Default: "gastown.local"
 	AgentEmailDomain string `json:"agent_email_domain,omitempty"`
+
+	// QueueMaxPolecats is the maximum number of polecats that can run concurrently
+	// across all rigs in the town. When gt queue run or gt sling --queue dispatches
+	// work, it will only spawn polecats up to this limit.
+	// Default: 0 (unlimited)
+	QueueMaxPolecats int `json:"queue_max_polecats,omitempty"`
+
+	// PolecatSpawnBatchSize is the number of polecats to spawn in each batch when
+	// running gt queue run. This controls parallelism of the spawn operations.
+	// Default: 5
+	PolecatSpawnBatchSize int `json:"polecat_spawn_batch_size,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.

@@ -781,6 +781,29 @@ func SaveTownSettings(path string, settings *TownSettings) error {
 	return nil
 }
 
+// GetQueueMaxPolecats returns the maximum polecats setting for a town.
+// Returns 0 if not set (meaning unlimited).
+func GetQueueMaxPolecats(townRoot string) int {
+	settings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		return 0 // Default to unlimited on error
+	}
+	return settings.QueueMaxPolecats
+}
+
+// GetPolecatSpawnBatchSize returns the polecat spawn batch size setting for a town.
+// Returns 5 if not set (default batch size).
+func GetPolecatSpawnBatchSize(townRoot string) int {
+	settings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		return 5 // Default batch size on error
+	}
+	if settings.PolecatSpawnBatchSize <= 0 {
+		return 5 // Default batch size
+	}
+	return settings.PolecatSpawnBatchSize
+}
+
 // ResolveAgentConfig resolves the agent configuration for a rig.
 // It looks up the agent by name in town settings (custom agents) and built-in presets.
 //
