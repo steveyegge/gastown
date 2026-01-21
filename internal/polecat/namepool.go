@@ -22,6 +22,15 @@ const (
 	DefaultTheme = "mad-max"
 )
 
+// ReservedInfraAgentNames contains names reserved for infrastructure agents.
+// These names must never be allocated to polecats.
+var ReservedInfraAgentNames = map[string]bool{
+	"witness": true,
+	"mayor":   true,
+	"deacon":  true,
+	"refinery": true,
+}
+
 // Built-in themes with themed polecat names.
 var BuiltinThemes = map[string][]string{
 	"mad-max": {
@@ -132,19 +141,34 @@ func NewNamePoolWithConfig(rigPath, rigName, theme string, customNames []string,
 }
 
 // getNames returns the list of names to use for the pool.
+// Reserved infrastructure agent names are filtered out.
 func (p *NamePool) getNames() []string {
+	var names []string
+
 	// Custom names take precedence
 	if len(p.CustomNames) > 0 {
-		return p.CustomNames
+		names = p.CustomNames
+	} else if themeNames, ok := BuiltinThemes[p.Theme]; ok {
+		// Look up built-in theme
+		names = themeNames
+	} else {
+		// Fall back to default theme
+		names = BuiltinThemes[DefaultTheme]
 	}
 
-	// Look up built-in theme
-	if names, ok := BuiltinThemes[p.Theme]; ok {
-		return names
-	}
+	// Filter out reserved infrastructure agent names
+	return filterReservedNames(names)
+}
 
-	// Fall back to default theme
-	return BuiltinThemes[DefaultTheme]
+// filterReservedNames removes reserved infrastructure agent names from a name list.
+func filterReservedNames(names []string) []string {
+	filtered := make([]string, 0, len(names))
+	for _, name := range names {
+		if !ReservedInfraAgentNames[name] {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
 }
 
 // Load loads the pool state from disk.
