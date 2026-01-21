@@ -164,25 +164,26 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return nil, fmt.Errorf("parsing bd create output: %w", err)
 	}
 
-	// Force a refresh of the beads database state
-	_, _ = b.run("list", "--limit=1")
+	// Force JSONL→SQLite sync and verify the bead is visible
+	for i := 0; i < 30; i++ {
+		_, _ = b.run("sync", "--import")
+		if showOut, err := b.run("show", id, "--json"); err == nil && len(showOut) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	// Set the role slot if specified (this is the authoritative storage)
 	if fields != nil && fields.RoleBead != "" {
 		var slotErr error
-		for i := 0; i < 20; i++ {
-			// Try to 'show' the bead first to ensure it's in the index
-			_, _ = b.run("show", id)
+		for i := 0; i < 5; i++ {
 			_, slotErr = b.run("slot", "set", id, "role", fields.RoleBead)
 			if slotErr == nil {
 				break
 			}
-			// Use more generic check or just retry on any error for a few times
-			// as the database might be locked or not yet visible.
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 		if slotErr != nil {
-			// Non-fatal: warn but continue
 			fmt.Printf("Warning: could not set role slot for ID '%s': %v\n", id, slotErr)
 		}
 	}
@@ -192,16 +193,14 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// agent's hook slot is empty. See mi-619.
 	if fields != nil && fields.HookBead != "" {
 		var slotErr error
-		for i := 0; i < 20; i++ {
-			_, _ = b.run("show", id)
+		for i := 0; i < 5; i++ {
 			_, slotErr = b.run("slot", "set", id, "hook", fields.HookBead)
 			if slotErr == nil {
 				break
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 		if slotErr != nil {
-			// Non-fatal: warn but continue - description text has the backup
 			fmt.Printf("Warning: could not set hook slot for ID '%s': %v\n", id, slotErr)
 		}
 	}
@@ -252,19 +251,20 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		return nil, fmt.Errorf("updating reopened agent bead: %w", err)
 	}
 
+	// Force JSONL→SQLite sync
+	_, _ = b.run("sync", "--import")
+
 	// Set the role slot if specified
 	if fields != nil && fields.RoleBead != "" {
 		var slotErr error
-		for i := 0; i < 20; i++ {
-			_, _ = b.run("show", id)
+		for i := 0; i < 5; i++ {
 			_, slotErr = b.run("slot", "set", id, "role", fields.RoleBead)
 			if slotErr == nil {
 				break
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 		if slotErr != nil {
-			// Non-fatal: warn but continue
 			fmt.Printf("Warning: could not set role slot for ID '%s': %v\n", id, slotErr)
 		}
 	}
@@ -275,17 +275,15 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	// Set the hook slot if specified
 	if fields != nil && fields.HookBead != "" {
 		var slotErr error
-		for i := 0; i < 20; i++ {
-			_, _ = b.run("show", id)
+		for i := 0; i < 5; i++ {
 			_, slotErr = b.run("slot", "set", id, "hook", fields.HookBead)
 			if slotErr == nil {
 				break
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 		if slotErr != nil {
-			// Non-fatal: warn but continue
-			fmt.Printf("Warning: could not set hook slot for ID '%s' (hook: '%s'): %v\n", id, fields.HookBead, slotErr)
+			fmt.Printf("Warning: could not set hook slot for ID '%s': %v\n", id, slotErr)
 		}
 	}
 

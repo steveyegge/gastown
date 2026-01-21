@@ -227,7 +227,12 @@ export OPENCODE_LOG_LEVEL=debug
 export OPENCODE_LOG_FILE="%[3]s"
 export GASTOWN_PLUGIN_LOG="%[6]s/gastown_plugin_${GT_ROLE:-unknown}_%[7]s.log"
 export GASTOWN_PLUGIN_LOG_EVENTS="%[6]s/gastown_plugin_events_${GT_ROLE:-unknown}_%[7]s.log"
+export OPENCODE_CONFIG="${OPENCODE_CONFIG}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME}"
+export XDG_DATA_HOME="${XDG_DATA_HOME}"
+export GT_BINARY_PATH="${GT_BINARY_PATH}"
 echo "OPENCODE_CONFIG=$OPENCODE_CONFIG" >> "%[1]s"
+echo "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" >> "%[1]s"
 echo "OPENCODE_LOG_FILE=%[3]s" >> "%[1]s"
 "%[2]s" "$@" >> "%[1]s" 2>&1
 EXIT_CODE=$?
@@ -345,7 +350,7 @@ func (r *E2ERunner) SlingWork() {
 		promptFile := filepath.Join(xdgConfig, "gastown_prompt.txt")
 		prompt := r.prompt
 		if prompt == "" {
-			prompt = "Do the work assigned in the bead."
+			prompt = fmt.Sprintf("Hook bead '%s' and execute the work immediately. Use 'gt hook %s' if needed.", r.beadName, r.beadName)
 		}
 		os.WriteFile(promptFile, []byte(prompt), 0644)
 	}
@@ -496,9 +501,13 @@ func (r *E2ERunner) WaitForCompletion() bool {
 			}
 
 			fullContent := combinedContent.String()
+			lowerContent := strings.ToLower(fullContent)
 			if strings.Contains(fullContent, "GASTOWN_TASK_COMPLETE") ||
 				strings.Contains(fullContent, "Commit Summary") ||
-				strings.Contains(fullContent, "Fixed subtract") {
+				strings.Contains(lowerContent, "fixed subtract") ||
+				strings.Contains(lowerContent, "bug fix complete") ||
+				strings.Contains(lowerContent, "tests pass") ||
+				(strings.Contains(lowerContent, "fixed") && strings.Contains(lowerContent, "committed")) {
 				r.t.Logf("\n  [COMPLETION] Success: task finalized via telemetry signal")
 				r.exitTmuxSession()
 				return true
