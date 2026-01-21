@@ -1480,7 +1480,9 @@ func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 		return nil
 	}
 	if filepath.Base(rc.Command) == "claude" {
-		return []string{"node", "claude"}
+		return []string{"node"}
+	} else if filepath.Base(rc.Command) == "cursor-agent" || filepath.Base(rc.Command) == "agent" {
+		return []string{"node", "cursor-agent", "agent"}
 	}
 	return []string{filepath.Base(rc.Command)}
 }

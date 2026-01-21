@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/claude"
-	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -86,35 +85,25 @@ func (m *Manager) Start(agentOverride string) error {
 		Topic:     "cold-start",
 	})
 
-	// Build startup command WITH the beacon prompt - the startup hook handles 'gt prime' automatically
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", m.townRoot, "", beacon, agentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
-	}
-
-	// Create session in townRoot (not mayorDir) to match gt handoff behavior
-	// This ensures Mayor works from the town root where all tools work correctly
+	// Create session using PTY-aware helper
+	// StartSession handles PTY vs shell wrapper path and beacon delivery based on agent flags
 	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, m.townRoot, startupCmd); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Set environment variables (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
-	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "mayor",
-		TownRoot: m.townRoot,
-	})
-	for k, v := range envVars {
-		_ = t.SetEnvironment(sessionID, k, v)
+	if err := session.StartSession(t, session.StartSessionOpts{
+		SessionID:     sessionID,
+		WorkDir:       m.townRoot, // Use townRoot to match gt handoff behavior
+		Role:          "mayor",
+		TownRoot:      m.townRoot,
+		Beacon:        beacon,
+		AgentOverride: agentOverride,
+	}); err != nil {
+		return fmt.Errorf("creating session: %w", err)
 	}
 
 	// Apply Mayor theming (non-fatal: theming failure doesn't affect operation)
 	theme := tmux.MayorTheme()
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Mayor", "coordinator")
 
-	// Wait for Claude to start - fatal if Claude fails to launch
+	// Wait for agent to start - fatal if Claude fails to launch - needed for bypass warning check
 	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
@@ -125,9 +114,6 @@ func (m *Manager) Start(agentOverride string) error {
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
 	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Startup beacon with instructions is now included in the initial command,
-	// so no separate nudge needed. The agent starts with full context immediately.
 
 	return nil
 }

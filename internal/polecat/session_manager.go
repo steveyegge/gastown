@@ -180,24 +180,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
-	command := opts.Command
-	if command == "" {
-		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
-	}
-	// Prepend runtime config dir env if needed
-	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
-		command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
-	}
-
-	// Create session with command directly to avoid send-keys race condition.
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
-		return fmt.Errorf("creating session: %w", err)
-	}
-
-	// Set environment (non-fatal: session works without these)
-	// Use centralized AgentEnv for consistency across all role startup paths
+	// Build environment variables
 	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:             "polecat",
@@ -207,6 +190,44 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		RuntimeConfigDir: opts.RuntimeConfigDir,
 		BeadsNoDaemon:    true,
 	})
+
+	// Custom command provided → use shell wrapper (bypass PTY check)
+	// Standard agent → check NeedsPTY flag for PTY-aware startup
+	if opts.Command != "" {
+		// Custom command provided - use shell wrapper
+		command := opts.Command
+		// Prepend runtime config dir env if needed
+		if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
+			command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
+		}
+		if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
+			return fmt.Errorf("creating session: %w", err)
+		}
+	} else {
+		// Standard agent - check for PTY requirements
+		agentName, _ := config.ResolveRoleAgentName("polecat", townRoot, m.rig.Path)
+
+		if config.GetNeedsPTY(agentName) {
+			// PTY-aware path: create shell, export env, send command via send-keys
+			rc := config.ResolveRoleAgentConfig("polecat", townRoot, m.rig.Path)
+			agentCmd := rc.BuildCommand()
+			if err := m.tmux.NewSessionWithEnvAndCommand(sessionID, workDir, envVars, agentCmd); err != nil {
+				return fmt.Errorf("creating PTY session: %w", err)
+			}
+		} else {
+			// Standard path: shell wrapper with env exports
+			command := config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
+			// Prepend runtime config dir env if needed
+			if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
+				command = config.PrependEnv(command, map[string]string{runtimeConfig.Session.ConfigDirEnv: opts.RuntimeConfigDir})
+			}
+			if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
+				return fmt.Errorf("creating session: %w", err)
+			}
+		}
+	}
+
+	// Set environment in tmux (for new panes)
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
 	}
