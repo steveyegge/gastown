@@ -14,15 +14,14 @@ set -e
 # WHAT IT UPDATES:
 #   - internal/cmd/version.go   - CLI version constant
 #   - npm-package/package.json  - npm package version
+#   - flake.nix                 - Nix flake package version and vendorHash (if nix available)
 #   - CHANGELOG.md              - Creates release entry from [Unreleased]
 #
 # =============================================================================
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Source common functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/common.sh"
 
 # Usage message
 usage() {
@@ -36,6 +35,8 @@ usage() {
     echo "  --tag            Create annotated git tag (requires --commit)"
     echo "  --push           Push commit and tag to origin (requires --tag)"
     echo "  --install        Rebuild and install gt binary to GOPATH/bin"
+    echo ""
+    echo "Note: flake.nix version and vendorHash are updated automatically if nix is available."
     echo ""
     echo "Examples:"
     echo "  $0 0.2.0                        # Update versions and show diff"
@@ -64,19 +65,6 @@ get_current_version() {
     grep 'Version = ' internal/cmd/version.go | sed 's/.*"\(.*\)".*/\1/'
 }
 
-# Update a file with sed (cross-platform compatible)
-update_file() {
-    local file=$1
-    local old_pattern=$2
-    local new_text=$3
-
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s|$old_pattern|$new_text|g" "$file"
-    else
-        sed -i "s|$old_pattern|$new_text|g" "$file"
-    fi
-}
-
 # Update CHANGELOG.md: move [Unreleased] to [version]
 update_changelog() {
     local version=$1
@@ -94,11 +82,7 @@ update_changelog() {
         return
     fi
 
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s/## \[Unreleased\]/## [Unreleased]\n\n## [$version] - $date/" CHANGELOG.md
-    else
-        sed -i "s/## \[Unreleased\]/## [Unreleased]\n\n## [$version] - $date/" CHANGELOG.md
-    fi
+    sed_i "s/## \[Unreleased\]/## [Unreleased]\n\n## [$version] - $date/" CHANGELOG.md
 }
 
 # Main script
@@ -190,7 +174,24 @@ main() {
         "\"version\": \"$CURRENT_VERSION\"" \
         "\"version\": \"$NEW_VERSION\""
 
-    # 3. Update CHANGELOG.md
+    # 3. Update flake.nix (if nix is available)
+    if command -v nix &> /dev/null; then
+        echo "  • flake.nix (version)"
+        update_file "flake.nix" \
+            "version = \"$CURRENT_VERSION\"" \
+            "version = \"$NEW_VERSION\""
+
+        echo "  • flake.nix (vendorHash)"
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if ! "$SCRIPT_DIR/update-nix-flake.sh"; then
+            echo -e "${RED}Error: Failed to update vendorHash${NC}"
+            exit 1
+        fi
+    else
+        echo -e "  ${YELLOW}• flake.nix (skipped - nix not in PATH)${NC}"
+    fi
+
+    # 4. Update CHANGELOG.md
     echo "  • CHANGELOG.md"
     update_changelog "$NEW_VERSION"
 
@@ -208,13 +209,26 @@ main() {
     VERSION_GO=$(grep 'Version = ' internal/cmd/version.go | sed 's/.*"\(.*\)".*/\1/')
     VERSION_NPM=$(grep '"version"' npm-package/package.json | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/')
 
-    if [ "$VERSION_GO" = "$NEW_VERSION" ] && [ "$VERSION_NPM" = "$NEW_VERSION" ]; then
-        echo -e "${GREEN}✓ All versions match: $NEW_VERSION${NC}"
+    if command -v nix &> /dev/null; then
+        VERSION_NIX=$(grep 'version = ' flake.nix | head -1 | sed 's/.*"\(.*\)".*/\1/')
+        if [ "$VERSION_GO" = "$NEW_VERSION" ] && [ "$VERSION_NPM" = "$NEW_VERSION" ] && [ "$VERSION_NIX" = "$NEW_VERSION" ]; then
+            echo -e "${GREEN}✓ All versions match: $NEW_VERSION${NC}"
+        else
+            echo -e "${RED}✗ Version mismatch detected!${NC}"
+            echo "  version.go: $VERSION_GO"
+            echo "  package.json: $VERSION_NPM"
+            echo "  flake.nix: $VERSION_NIX"
+            exit 1
+        fi
     else
-        echo -e "${RED}✗ Version mismatch detected!${NC}"
-        echo "  version.go: $VERSION_GO"
-        echo "  package.json: $VERSION_NPM"
-        exit 1
+        if [ "$VERSION_GO" = "$NEW_VERSION" ] && [ "$VERSION_NPM" = "$NEW_VERSION" ]; then
+            echo -e "${GREEN}✓ All versions match: $NEW_VERSION${NC}"
+        else
+            echo -e "${RED}✗ Version mismatch detected!${NC}"
+            echo "  version.go: $VERSION_GO"
+            echo "  package.json: $VERSION_NPM"
+            exit 1
+        fi
     fi
 
     echo ""
@@ -259,7 +273,8 @@ main() {
         echo "Creating git commit..."
 
         git add internal/cmd/version.go \
-                npm-package/package.json
+                npm-package/package.json \
+                flake.nix
 
         if [ -f "CHANGELOG.md" ]; then
             git add CHANGELOG.md
@@ -270,6 +285,7 @@ main() {
 Updated all component versions:
 - gt CLI: $CURRENT_VERSION → $NEW_VERSION
 - npm package: $CURRENT_VERSION → $NEW_VERSION
+- flake.nix: $CURRENT_VERSION → $NEW_VERSION
 
 Generated by scripts/bump-version.sh"
 
