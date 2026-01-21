@@ -566,3 +566,207 @@ func TestGetAllDescendants(t *testing.T) {
 		}
 	}
 }
+
+func TestKillSessionWithProcesses(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-killproc-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session with a long-running process
+	cmd := `sleep 300`
+	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+
+	// Verify session exists
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Fatal("expected session to exist after creation")
+	}
+
+	// Kill with processes
+	if err := tm.KillSessionWithProcesses(sessionName); err != nil {
+		t.Fatalf("KillSessionWithProcesses: %v", err)
+	}
+
+	// Verify session is gone
+	has, err = tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession after kill: %v", err)
+	}
+	if has {
+		t.Error("expected session to not exist after KillSessionWithProcesses")
+		_ = tm.KillSession(sessionName) // cleanup
+	}
+}
+
+func TestKillSessionWithProcesses_NonexistentSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Killing nonexistent session should not panic, just return error or nil
+	err := tm.KillSessionWithProcesses("nonexistent-session-xyz-12345")
+	// We don't care about the error value, just that it doesn't panic
+	_ = err
+}
+
+func TestKillSessionWithProcessesExcluding(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-killexcl-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session with a long-running process
+	cmd := `sleep 300`
+	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+
+	// Verify session exists
+	has, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !has {
+		t.Fatal("expected session to exist after creation")
+	}
+
+	// Kill with empty excludePIDs (should behave like KillSessionWithProcesses)
+	if err := tm.KillSessionWithProcessesExcluding(sessionName, nil); err != nil {
+		t.Fatalf("KillSessionWithProcessesExcluding: %v", err)
+	}
+
+	// Verify session is gone
+	has, err = tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession after kill: %v", err)
+	}
+	if has {
+		t.Error("expected session to not exist after KillSessionWithProcessesExcluding")
+		_ = tm.KillSession(sessionName) // cleanup
+	}
+}
+
+func TestKillSessionWithProcessesExcluding_WithExcludePID(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-killexcl2-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session with a long-running process
+	cmd := `sleep 300`
+	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Get the pane PID
+	panePID, err := tm.GetPanePID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPanePID: %v", err)
+	}
+	if panePID == "" {
+		t.Skip("could not get pane PID")
+	}
+
+	// Kill with the pane PID excluded - the function should still kill the session
+	// but should not kill the excluded PID before the session is destroyed
+	err = tm.KillSessionWithProcessesExcluding(sessionName, []string{panePID})
+	if err != nil {
+		t.Fatalf("KillSessionWithProcessesExcluding: %v", err)
+	}
+
+	// Session should be gone (the final KillSession always happens)
+	has, _ := tm.HasSession(sessionName)
+	if has {
+		t.Error("expected session to not exist after KillSessionWithProcessesExcluding")
+	}
+}
+
+func TestKillSessionWithProcessesExcluding_NonexistentSession(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Killing nonexistent session should not panic
+	err := tm.KillSessionWithProcessesExcluding("nonexistent-session-xyz-12345", []string{"12345"})
+	// We don't care about the error value, just that it doesn't panic
+	_ = err
+}
+
+func TestSessionSet(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-sessionset-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create a test session
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Get the session set
+	set, err := tm.GetSessionSet()
+	if err != nil {
+		t.Fatalf("GetSessionSet: %v", err)
+	}
+
+	// Test Has() for existing session
+	if !set.Has(sessionName) {
+		t.Errorf("SessionSet.Has(%q) = false, want true", sessionName)
+	}
+
+	// Test Has() for non-existing session
+	if set.Has("nonexistent-session-xyz-12345") {
+		t.Error("SessionSet.Has(nonexistent) = true, want false")
+	}
+
+	// Test nil safety
+	var nilSet *SessionSet
+	if nilSet.Has("anything") {
+		t.Error("nil SessionSet.Has() = true, want false")
+	}
+
+	// Test Names() returns the session
+	names := set.Names()
+	found := false
+	for _, n := range names {
+		if n == sessionName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("SessionSet.Names() doesn't contain %q", sessionName)
+	}
+}

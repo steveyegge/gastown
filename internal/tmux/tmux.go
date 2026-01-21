@@ -256,9 +256,71 @@ func (t *Tmux) Stop(id session.SessionID) error {
 	// Kill the tmux session
 	// Note: If killing descendants caused the main process to exit, tmux may have
 	// already destroyed the session (when remain-on-exit is off). That's fine.
-	_, err = t.run("kill-session", "-t", name)
-	if errors.Is(err, ErrSessionNotFound) {
+	err = t.KillSession(name)
+	if err == ErrSessionNotFound {
 		return nil // Session already gone, which is what we wanted
+	}
+	return err
+}
+
+// KillSessionWithProcessesExcluding is like KillSessionWithProcesses but excludes
+// specified PIDs from being killed. This is essential for self-kill scenarios where
+// the calling process (e.g., gt done) is running inside the session it's terminating.
+// Without exclusion, the caller would be killed before completing the cleanup.
+func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []string) error {
+	// Build exclusion set for O(1) lookup
+	exclude := make(map[string]bool)
+	for _, pid := range excludePIDs {
+		exclude[pid] = true
+	}
+
+	// Get the pane PID
+	pid, err := t.GetPanePID(name)
+	if err != nil {
+		// Session might not exist or be in bad state, try direct kill
+		return t.KillSession(name)
+	}
+
+	if pid != "" {
+		// Get all descendant PIDs recursively (returns deepest-first order)
+		descendants := getAllDescendants(pid)
+
+		// Filter out excluded PIDs
+		var filtered []string
+		for _, dpid := range descendants {
+			if !exclude[dpid] {
+				filtered = append(filtered, dpid)
+			}
+		}
+
+		// Send SIGTERM to all non-excluded descendants (deepest first to avoid orphaning)
+		for _, dpid := range filtered {
+			_ = exec.Command("kill", "-TERM", dpid).Run()
+		}
+
+		// Wait for graceful shutdown
+		time.Sleep(100 * time.Millisecond)
+
+		// Send SIGKILL to any remaining non-excluded descendants
+		for _, dpid := range filtered {
+			_ = exec.Command("kill", "-KILL", dpid).Run()
+		}
+
+		// Kill the pane process itself (may have called setsid() and detached)
+		// Only if not excluded
+		if !exclude[pid] {
+			_ = exec.Command("kill", "-TERM", pid).Run()
+			time.Sleep(100 * time.Millisecond)
+			_ = exec.Command("kill", "-KILL", pid).Run()
+		}
+	}
+
+	// Kill the tmux session - this will terminate the excluded process too
+	// Ignore "session not found" - if we killed all non-excluded processes,
+	// tmux may have already destroyed the session automatically
+	err = t.KillSession(name)
+	if err == ErrSessionNotFound {
+		return nil
 	}
 	return err
 }
