@@ -1152,8 +1152,7 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 	if result.Args == nil {
 		result.Args = []string{"--dangerously-skip-permissions"}
 	}
-
-	return result
+	return normalizeRuntimeConfig(result)
 }
 
 // GetRuntimeCommand is a convenience function that returns the full command string
@@ -1424,7 +1423,7 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
-	// Record agent override so handoff can preserve it
+// Record agent override so handoff can preserve it
 	if agentOverride != "" {
 		resolvedEnv["GT_AGENT"] = agentOverride
 	}

@@ -237,3 +237,24 @@ func EnvToSlice(env map[string]string) []string {
 	}
 	return result
 }
+
+// providerEnv returns provider-specific environment variables.
+// This keeps provider-specific logic separate from base agent env.
+func providerEnv(provider, role string) map[string]string {
+	switch provider {
+	case "opencode":
+		return openCodeEnv(role)
+	default:
+		return nil
+	}
+}
+
+// openCodeEnv returns OpenCode-specific environment variables.
+// GT_AUTO_INIT enables the plugin to replace [GT_AGENT_INIT] trigger with context.
+// This applies to ALL roles using OpenCode - the plugin internally handles
+// role-specific behavior (e.g., only autonomous roles get mail checked).
+func openCodeEnv(role string) map[string]string {
+	return map[string]string{
+		"GT_AUTO_INIT": "1",
+	}
+}

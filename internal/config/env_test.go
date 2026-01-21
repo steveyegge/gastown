@@ -435,3 +435,62 @@ func assertNotSet(t *testing.T, env map[string]string, key string) {
 		t.Errorf("env[%q] should not be set, but is %q", key, env[key])
 	}
 }
+
+func TestProviderEnv_OpenCode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		role string
+	}{
+		{"mayor", "mayor"},
+		{"deacon", "deacon"},
+		{"witness", "witness"},
+		{"refinery", "refinery"},
+		{"polecat", "polecat"},
+		{"crew", "crew"},
+		{"boot", "boot"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := providerEnv("opencode", tt.role)
+			assertEnv(t, env, "GT_AUTO_INIT", "1")
+		})
+	}
+}
+
+func TestProviderEnv_Claude(t *testing.T) {
+	t.Parallel()
+	env := providerEnv("claude", "polecat")
+	if env != nil && len(env) > 0 {
+		t.Errorf("providerEnv(claude) should return nil or empty, got %v", env)
+	}
+}
+
+func TestProviderEnv_Unknown(t *testing.T) {
+	t.Parallel()
+	env := providerEnv("unknown-provider", "polecat")
+	if env != nil && len(env) > 0 {
+		t.Errorf("providerEnv(unknown) should return nil or empty, got %v", env)
+	}
+}
+
+func TestProviderEnv_EmptyProvider(t *testing.T) {
+	t.Parallel()
+	env := providerEnv("", "polecat")
+	if env != nil && len(env) > 0 {
+		t.Errorf("providerEnv(\"\") should return nil or empty, got %v", env)
+	}
+}
+
+func TestOpenCodeEnv(t *testing.T) {
+	t.Parallel()
+	// openCodeEnv should return GT_AUTO_INIT=1 for any role
+	env := openCodeEnv("polecat")
+	assertEnv(t, env, "GT_AUTO_INIT", "1")
+
+	// Verify it's the only key
+	if len(env) != 1 {
+		t.Errorf("openCodeEnv should return exactly 1 key, got %d: %v", len(env), env)
+	}
+}
