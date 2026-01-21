@@ -575,6 +575,11 @@ func defaultProcessNames(provider, command string) []string {
 	if provider == "claude" {
 		return []string{"node"}
 	}
+	if provider == "opencode" {
+		// OpenCode runs as Node.js process, need both for IsAgentRunning detection.
+		// tmux pane_current_command may show "node" or "opencode" depending on how invoked.
+		return []string{"opencode", "node"}
+	}
 	if command != "" {
 		return []string{filepath.Base(command)}
 	}
@@ -595,6 +600,12 @@ func defaultReadyDelayMs(provider string) int {
 	}
 	if provider == "codex" {
 		return 3000
+	}
+	if provider == "opencode" {
+		// OpenCode requires delay-based detection because its TUI uses
+		// box-drawing characters (┃) that break prompt prefix matching.
+		// 8000ms provides reliable startup detection across models.
+		return 8000
 	}
 	return 0
 }

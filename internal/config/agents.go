@@ -27,6 +27,8 @@ const (
 	AgentAuggie AgentPreset = "auggie"
 	// AgentAmp is Sourcegraph AMP.
 	AgentAmp AgentPreset = "amp"
+	// AgentOpenCode is OpenCode multi-model CLI.
+	AgentOpenCode AgentPreset = "opencode"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -181,6 +183,25 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeStyle:         "subcommand", // 'amp threads continue <threadId>'
 		SupportsHooks:       false,
 		SupportsForkSession: false,
+	},
+	AgentOpenCode: {
+		Name:    AgentOpenCode,
+		Command: "opencode",
+		Args:    []string{}, // No CLI flags needed, YOLO via OPENCODE_PERMISSION env
+		Env: map[string]string{
+			// Auto-approve all tool calls (equivalent to --dangerously-skip-permissions)
+			"OPENCODE_PERMISSION": `{"*":"allow"}`,
+		},
+		ProcessNames:        []string{"opencode", "node"}, // Runs as Node.js
+		SessionIDEnv:        "",                           // OpenCode manages sessions internally
+		ResumeFlag:          "",                           // No resume support yet
+		ResumeStyle:         "",
+		SupportsHooks:       true,  // Uses .opencode/plugin/gastown.js
+		SupportsForkSession: false,
+		NonInteractive: &NonInteractiveConfig{
+			Subcommand: "run",
+			OutputFlag: "--format json",
+		},
 	},
 }
 
