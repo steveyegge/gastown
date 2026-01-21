@@ -736,10 +736,7 @@ func TestBuildBranchName(t *testing.T) {
 			g := git.NewGit(tmpDir)
 			m := NewManager(r, g, nil)
 
-			got, err := m.buildBranchName("alpha", tt.issue)
-			if err != nil {
-				t.Fatalf("buildBranchName: %v", err)
-			}
+			got := m.buildBranchName("alpha", tt.issue)
 
 			// For default templates, just check prefix since timestamp varies
 			if tt.template == "" {

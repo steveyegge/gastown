@@ -240,16 +240,16 @@ type AddOptions struct {
 // If no template is configured or template is empty, uses default format:
 // - polecat/{name}/{issue}@{timestamp} when issue is available
 // - polecat/{name}-{timestamp} otherwise
-func (m *Manager) buildBranchName(name, issue string) (string, error) {
+func (m *Manager) buildBranchName(name, issue string) string {
 	template := m.rig.GetStringConfig("polecat_branch_template")
 
 	// No template configured - use default behavior for backward compatibility
 	if template == "" {
 		timestamp := strconv.FormatInt(time.Now().UnixMilli(), 36)
 		if issue != "" {
-			return fmt.Sprintf("polecat/%s/%s@%s", name, issue, timestamp), nil
+			return fmt.Sprintf("polecat/%s/%s@%s", name, issue, timestamp)
 		}
-		return fmt.Sprintf("polecat/%s-%s", name, timestamp), nil
+		return fmt.Sprintf("polecat/%s-%s", name, timestamp)
 	}
 
 	// Build template variables
@@ -329,7 +329,7 @@ func (m *Manager) buildBranchName(name, issue string) (string, error) {
 	}
 	result = strings.Join(cleanParts, "/")
 
-	return result, nil
+	return result
 }
 
 // Polecat state is derived from beads assignee field, not state.json.
@@ -355,10 +355,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	clonePath := filepath.Join(polecatDir, m.rig.Name)
 
 	// Build branch name using configured template or default format
-	branchName, err := m.buildBranchName(name, opts.HookBead)
-	if err != nil {
-		return nil, fmt.Errorf("building branch name: %w", err)
-	}
+	branchName := m.buildBranchName(name, opts.HookBead)
 
 	// Create polecat directory (polecats/<name>/)
 	if err := os.MkdirAll(polecatDir, 0755); err != nil {
@@ -699,10 +696,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Create fresh worktree with unique branch name, starting from origin's default branch
 	// Old branches are left behind - they're ephemeral (never pushed to origin)
 	// and will be cleaned up by garbage collection
-	branchName, err := m.buildBranchName(name, opts.HookBead)
-	if err != nil {
-		return nil, fmt.Errorf("building branch name: %w", err)
-	}
+	branchName := m.buildBranchName(name, opts.HookBead)
 	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
