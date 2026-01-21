@@ -3,6 +3,35 @@
     "beads@beads-marketplace": false
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash(gh pr create*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git checkout -b*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git switch -c*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "",
