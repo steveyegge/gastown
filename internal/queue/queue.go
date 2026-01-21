@@ -53,11 +53,12 @@ func (q *Queue) Add(beadID string) error {
 	return nil
 }
 
-// Load loads all queued beads from all rigs.
+// Load loads all READY queued beads from all rigs.
+// Ready means: status=open AND no open blockers (dependencies satisfied).
 // Returns the loaded items and updates internal state.
 func (q *Queue) Load() ([]QueueItem, error) {
-	// Query all rigs for queued beads
-	rigBeads, err := q.ops.ListByLabelAllRigs(QueueLabel)
+	// Query all rigs for ready queued beads (excludes blocked beads)
+	rigBeads, err := q.ops.ListReadyByLabel(QueueLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -66,10 +67,6 @@ func (q *Queue) Load() ([]QueueItem, error) {
 	q.items = []QueueItem{}
 	for rigName, beadList := range rigBeads {
 		for _, bead := range beadList {
-			// Only include open beads
-			if bead.Status != "open" {
-				continue
-			}
 			q.items = append(q.items, QueueItem{
 				BeadID:  bead.ID,
 				Title:   bead.Title,

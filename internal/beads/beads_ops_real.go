@@ -55,42 +55,6 @@ func (r *RealBeadsOps) LabelRemove(beadID, label string) error {
 	return r.runBd(rigPath, "update", beadID, "--remove-label", label)
 }
 
-// ListByLabelAllRigs returns all beads with the given label across all rigs.
-func (r *RealBeadsOps) ListByLabelAllRigs(label string) (map[string][]BeadInfo, error) {
-	result := make(map[string][]BeadInfo)
-
-	// Get all rigs from rigs.json
-	rigs, err := r.getAllRigs()
-	if err != nil {
-		return nil, err
-	}
-
-	// Query each rig for beads with the label
-	for rigName, rigPath := range rigs {
-		issues, err := r.listBeads(rigPath, "open", label)
-		if err != nil {
-			// Skip rigs that fail - they might not have the label or beads DB
-			continue
-		}
-
-		var beads []BeadInfo
-		for _, issue := range issues {
-			beads = append(beads, BeadInfo{
-				ID:     issue.ID,
-				Title:  issue.Title,
-				Status: issue.Status,
-				Labels: issue.Labels,
-			})
-		}
-
-		if len(beads) > 0 {
-			result[rigName] = beads
-		}
-	}
-
-	return result, nil
-}
-
 // getAllRigs returns a map of rig name to rig path from rigs.json.
 func (r *RealBeadsOps) getAllRigs() (map[string]string, error) {
 	rigsConfigPath := filepath.Join(r.townRoot, "mayor", "rigs.json")
@@ -148,6 +112,70 @@ func (r *RealBeadsOps) listBeads(dir, status, label string) ([]*Issue, error) {
 	var issues []*Issue
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
 		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	}
+
+	return issues, nil
+}
+
+// ListReadyByLabel returns all READY beads with the given label across all rigs.
+// Ready means: status=open AND no open blockers (uses bd ready which checks blocked_issues_cache).
+func (r *RealBeadsOps) ListReadyByLabel(label string) (map[string][]BeadInfo, error) {
+	result := make(map[string][]BeadInfo)
+
+	// Get all rigs from rigs.json
+	rigs, err := r.getAllRigs()
+	if err != nil {
+		return nil, err
+	}
+
+	// Query each rig for ready beads with the label
+	for rigName, rigPath := range rigs {
+		issues, err := r.listReadyBeads(rigPath, label)
+		if err != nil {
+			// Skip rigs that fail - they might not have the label or beads DB
+			continue
+		}
+
+		var beads []BeadInfo
+		for _, issue := range issues {
+			beads = append(beads, BeadInfo{
+				ID:     issue.ID,
+				Title:  issue.Title,
+				Status: issue.Status,
+				Labels: issue.Labels,
+			})
+		}
+
+		if len(beads) > 0 {
+			result[rigName] = beads
+		}
+	}
+
+	return result, nil
+}
+
+// listReadyBeads runs bd ready in the specified directory and returns parsed issues.
+// bd ready returns only beads that have no open blockers (not in blocked_issues_cache).
+func (r *RealBeadsOps) listReadyBeads(dir, label string) ([]*Issue, error) {
+	args := []string{"--no-daemon", "ready", "--json"}
+	if label != "" {
+		args = append(args, "--label="+label)
+	}
+
+	cmd := exec.Command("bd", args...)
+	cmd.Dir = dir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("bd ready: %s", stderr.String())
+	}
+
+	var issues []*Issue
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return nil, fmt.Errorf("parsing bd ready output: %w", err)
 	}
 
 	return issues, nil

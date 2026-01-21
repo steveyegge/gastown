@@ -10,11 +10,12 @@ import (
 
 // BeadsOpsTestEnv holds the test environment for BeadsOps conformance tests.
 type BeadsOpsTestEnv struct {
-	Ops      BeadsOps
-	AddBead  func(beadID, status string, labels []string) // Add a bead to the store
-	TownRoot string                                       // Town root path (for Real implementations)
-	RigPath  string                                       // Rig path (for Real implementations)
-	Cleanup  func()
+	Ops           BeadsOps
+	AddBead       func(beadID, status string, labels []string)  // Add a bead to the store
+	AddDependency func(beadID, blockedBy string)                // Add a dependency (beadID is blocked by blockedBy)
+	TownRoot      string                                        // Town root path (for Real implementations)
+	RigPath       string                                        // Rig path (for Real implementations)
+	Cleanup       func()
 }
 
 // BeadsOpsFactory creates a BeadsOps implementation for testing.
@@ -44,8 +45,8 @@ func RunConformanceTests(t *testing.T, factory BeadsOpsFactory) {
 		runLabelRemoveTests(t, factory)
 	})
 
-	t.Run("ListByLabelAllRigs", func(t *testing.T) {
-		runListByLabelAllRigsTests(t, factory)
+	t.Run("ListReadyByLabel", func(t *testing.T) {
+		runListReadyByLabelTests(t, factory)
 	})
 }
 
@@ -184,23 +185,23 @@ func runLabelRemoveTests(t *testing.T, factory BeadsOpsFactory) {
 	})
 }
 
-// --- ListByLabelAllRigs tests ---
+// --- ListReadyByLabel tests ---
 
-func runListByLabelAllRigsTests(t *testing.T, factory BeadsOpsFactory) {
+func runListReadyByLabelTests(t *testing.T, factory BeadsOpsFactory) {
 	t.Run("returns empty map when no beads have label", func(t *testing.T) {
 		env := factory(t)
 		defer env.Cleanup()
 
-		result, err := env.Ops.ListByLabelAllRigs("queued")
+		result, err := env.Ops.ListReadyByLabel("queued")
 		if err != nil {
-			t.Fatalf("ListByLabelAllRigs failed: %v", err)
+			t.Fatalf("ListReadyByLabel failed: %v", err)
 		}
 		if len(result) != 0 {
 			t.Errorf("expected empty map, got %v", result)
 		}
 	})
 
-	t.Run("returns beads with matching label", func(t *testing.T) {
+	t.Run("returns ready beads with matching label", func(t *testing.T) {
 		env := factory(t)
 		defer env.Cleanup()
 
@@ -208,9 +209,9 @@ func runListByLabelAllRigsTests(t *testing.T, factory BeadsOpsFactory) {
 		env.AddBead("tr-queued", "open", []string{"queued"})
 		env.AddBead("tr-other", "open", []string{"other"})
 
-		result, err := env.Ops.ListByLabelAllRigs("queued")
+		result, err := env.Ops.ListReadyByLabel("queued")
 		if err != nil {
-			t.Fatalf("ListByLabelAllRigs failed: %v", err)
+			t.Fatalf("ListReadyByLabel failed: %v", err)
 		}
 
 		// Should have at least one rig with beads
@@ -224,7 +225,7 @@ func runListByLabelAllRigsTests(t *testing.T, factory BeadsOpsFactory) {
 		}
 	})
 
-	t.Run("only returns open beads", func(t *testing.T) {
+	t.Run("excludes closed beads", func(t *testing.T) {
 		env := factory(t)
 		defer env.Cleanup()
 
@@ -232,9 +233,9 @@ func runListByLabelAllRigsTests(t *testing.T, factory BeadsOpsFactory) {
 		env.AddBead("tr-open", "open", []string{"queued"})
 		env.AddBead("tr-closed", "closed", []string{"queued"})
 
-		result, err := env.Ops.ListByLabelAllRigs("queued")
+		result, err := env.Ops.ListReadyByLabel("queued")
 		if err != nil {
-			t.Fatalf("ListByLabelAllRigs failed: %v", err)
+			t.Fatalf("ListReadyByLabel failed: %v", err)
 		}
 
 		// Check that closed bead is not in results
@@ -244,6 +245,79 @@ func runListByLabelAllRigsTests(t *testing.T, factory BeadsOpsFactory) {
 					t.Error("closed bead should not be in results")
 				}
 			}
+		}
+	})
+
+	t.Run("excludes blocked beads", func(t *testing.T) {
+		env := factory(t)
+		defer env.Cleanup()
+
+		if env.AddDependency == nil {
+			t.Skip("AddDependency not implemented for this factory")
+		}
+
+		// Create two beads: one blocker and one blocked
+		env.AddBead("tr-blocker", "open", []string{"queued"})
+		env.AddBead("tr-blocked", "open", []string{"queued"})
+		env.AddDependency("tr-blocked", "tr-blocker") // tr-blocked depends on tr-blocker
+
+		result, err := env.Ops.ListReadyByLabel("queued")
+		if err != nil {
+			t.Fatalf("ListReadyByLabel failed: %v", err)
+		}
+
+		// Should find tr-blocker (it's ready - no dependencies)
+		foundBlocker := false
+		foundBlocked := false
+		for _, beadList := range result {
+			for _, bead := range beadList {
+				if bead.ID == "tr-blocker" {
+					foundBlocker = true
+				}
+				if bead.ID == "tr-blocked" {
+					foundBlocked = true
+				}
+			}
+		}
+
+		if !foundBlocker {
+			t.Error("expected tr-blocker to be in ready results (it has no dependencies)")
+		}
+		if foundBlocked {
+			t.Error("tr-blocked should NOT be in ready results (it's blocked by tr-blocker)")
+		}
+	})
+
+	t.Run("includes bead when blocker is closed", func(t *testing.T) {
+		env := factory(t)
+		defer env.Cleanup()
+
+		if env.AddDependency == nil {
+			t.Skip("AddDependency not implemented for this factory")
+		}
+
+		// Create blocker (closed) and blocked bead
+		env.AddBead("tr-blocker", "closed", []string{})        // closed, so not blocking
+		env.AddBead("tr-dependent", "open", []string{"queued"})
+		env.AddDependency("tr-dependent", "tr-blocker") // depends on closed bead
+
+		result, err := env.Ops.ListReadyByLabel("queued")
+		if err != nil {
+			t.Fatalf("ListReadyByLabel failed: %v", err)
+		}
+
+		// tr-dependent should be ready now since tr-blocker is closed
+		foundDependent := false
+		for _, beadList := range result {
+			for _, bead := range beadList {
+				if bead.ID == "tr-dependent" {
+					foundDependent = true
+				}
+			}
+		}
+
+		if !foundDependent {
+			t.Error("expected tr-dependent to be ready (its blocker is closed)")
 		}
 	})
 }
@@ -310,17 +384,17 @@ func TestBeadsOps_CrossContext_Conformance(t *testing.T) {
 }
 
 func runCrossContextTests(t *testing.T, factory CrossContextFactory) {
-	t.Run("rig beads visible from town ListByLabelAllRigs", func(t *testing.T) {
+	t.Run("rig beads visible from town ListReadyByLabel", func(t *testing.T) {
 		env := factory(t)
 		defer env.Cleanup()
 
 		// Add bead to rig
 		env.AddToBead("tr-rigbead", "open", []string{"queued"}, true)
 
-		// ListByLabelAllRigs from town SHOULD see rig bead (it iterates all rigs)
-		result, err := env.TownOps.ListByLabelAllRigs("queued")
+		// ListReadyByLabel from town SHOULD see rig bead (it iterates all rigs)
+		result, err := env.TownOps.ListReadyByLabel("queued")
 		if err != nil {
-			t.Fatalf("ListByLabelAllRigs failed: %v", err)
+			t.Fatalf("ListReadyByLabel failed: %v", err)
 		}
 
 		found := false
@@ -332,28 +406,28 @@ func runCrossContextTests(t *testing.T, factory CrossContextFactory) {
 			}
 		}
 		if !found {
-			t.Error("expected ListByLabelAllRigs to find rig bead (it iterates all rigs)")
+			t.Error("expected ListReadyByLabel to find rig bead (it iterates all rigs)")
 		}
 	})
 
-	t.Run("town beads not visible from rig ListByLabelAllRigs", func(t *testing.T) {
+	t.Run("town beads not visible from rig ListReadyByLabel", func(t *testing.T) {
 		env := factory(t)
 		defer env.Cleanup()
 
 		// Add bead to town
 		env.AddToBead("hq-townbead", "open", []string{"queued"}, false)
 
-		// ListByLabelAllRigs from rig should NOT see town bead
+		// ListReadyByLabel from rig should NOT see town bead
 		// (rig ops only knows about rigs, not town)
-		result, err := env.RigOps.ListByLabelAllRigs("queued")
+		result, err := env.RigOps.ListReadyByLabel("queued")
 		if err != nil {
-			t.Fatalf("ListByLabelAllRigs failed: %v", err)
+			t.Fatalf("ListReadyByLabel failed: %v", err)
 		}
 
 		for _, beads := range result {
 			for _, b := range beads {
 				if b.ID == "hq-townbead" {
-					t.Error("rig ListByLabelAllRigs should not see town bead")
+					t.Error("rig ListReadyByLabel should not see town bead")
 				}
 			}
 		}
@@ -372,6 +446,9 @@ func newFakeBeadsOpsFactory(t *testing.T) *BeadsOpsTestEnv {
 		Ops: ops,
 		AddBead: func(beadID, status string, labels []string) {
 			ops.AddBead(beadID, status, labels)
+		},
+		AddDependency: func(beadID, blockedBy string) {
+			ops.AddDependency(beadID, blockedBy)
 		},
 		Cleanup: func() {},
 	}
@@ -423,6 +500,9 @@ func newRealBeadsOpsFromRigFactory(t *testing.T) *BeadsOpsTestEnv {
 		AddBead: func(beadID, status string, labels []string) {
 			addBeadWithBd(t, rigPath, beadID, status, labels)
 		},
+		AddDependency: func(beadID, blockedBy string) {
+			addDependencyWithBd(t, rigPath, beadID, blockedBy)
+		},
 		Cleanup: cleanup,
 	}
 }
@@ -439,6 +519,9 @@ func newRealBeadsOpsFromTownFactory(t *testing.T) *BeadsOpsTestEnv {
 		AddBead: func(beadID, status string, labels []string) {
 			// Add beads to the rig (tr- prefix routes there)
 			addBeadWithBd(t, rigPath, beadID, status, labels)
+		},
+		AddDependency: func(beadID, blockedBy string) {
+			addDependencyWithBd(t, rigPath, beadID, blockedBy)
 		},
 		Cleanup: cleanup,
 	}
@@ -584,6 +667,18 @@ func addBeadWithBd(t *testing.T, dir, beadID, status string, labels []string) {
 	}
 }
 
+func addDependencyWithBd(t *testing.T, dir, beadID, blockedBy string) {
+	t.Helper()
+
+	// Add dependency using bd dep add: beadID depends on blockedBy
+	// This means blockedBy blocks beadID
+	cmd := exec.Command("bd", "--no-daemon", "dep", "add", beadID, blockedBy)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("bd dep add failed for %s -> %s: %v\n%s", beadID, blockedBy, err, output)
+	}
+}
+
 // =============================================================================
 // Additional Fake-specific tests (for test double verification)
 // =============================================================================
@@ -641,7 +736,7 @@ func TestBeadsOps_Fake_LabelAdd_CreatesLabels(t *testing.T) {
 	}
 }
 
-func TestBeadsOps_Fake_ListByLabelAllRigs_MultiRig(t *testing.T) {
+func TestBeadsOps_Fake_ListReadyByLabel_MultiRig(t *testing.T) {
 	// Create two separate fake ops (simulating two rigs)
 	gasOps := NewFakeBeadsOpsForRig("gastown")
 	greenOps := NewFakeBeadsOpsForRig("greenplace")
@@ -655,9 +750,9 @@ func TestBeadsOps_Fake_ListByLabelAllRigs_MultiRig(t *testing.T) {
 	greenOps.AddBead("gp-xyz", "open", []string{"queued"})
 
 	// List should find beads from both rigs
-	result, err := gasOps.ListByLabelAllRigs("queued")
+	result, err := gasOps.ListReadyByLabel("queued")
 	if err != nil {
-		t.Fatalf("ListByLabelAllRigs failed: %v", err)
+		t.Fatalf("ListReadyByLabel failed: %v", err)
 	}
 
 	if len(result) != 2 {

@@ -7,9 +7,10 @@ import (
 
 // FakeBeadsOps implements BeadsOps for testing.
 type FakeBeadsOps struct {
-	rigName string
-	beads   map[string]*fakeBead // beadID -> bead
-	routes  map[string]routeInfo // prefix -> route info
+	rigName      string
+	beads        map[string]*fakeBead  // beadID -> bead
+	routes       map[string]routeInfo  // prefix -> route info
+	dependencies map[string][]string   // beadID -> list of beads it depends on (blockers)
 }
 
 type fakeBead struct {
@@ -26,10 +27,17 @@ type routeInfo struct {
 // NewFakeBeadsOpsForRig creates a new FakeBeadsOps for testing.
 func NewFakeBeadsOpsForRig(rigName string) *FakeBeadsOps {
 	return &FakeBeadsOps{
-		rigName: rigName,
-		beads:   make(map[string]*fakeBead),
-		routes:  make(map[string]routeInfo),
+		rigName:      rigName,
+		beads:        make(map[string]*fakeBead),
+		routes:       make(map[string]routeInfo),
+		dependencies: make(map[string][]string),
 	}
+}
+
+// AddDependency adds a dependency: beadID is blocked by blockedBy.
+// The bead won't be considered "ready" until blockedBy is closed.
+func (f *FakeBeadsOps) AddDependency(beadID, blockedBy string) {
+	f.dependencies[beadID] = append(f.dependencies[beadID], blockedBy)
 }
 
 // AddRouteWithRig adds a route mapping from prefix to rig.
@@ -136,8 +144,9 @@ func (f *FakeBeadsOps) getOpsForBead(beadID string) BeadsOps {
 	return nil
 }
 
-// ListByLabelAllRigs returns all beads with the given label across all rigs.
-func (f *FakeBeadsOps) ListByLabelAllRigs(label string) (map[string][]BeadInfo, error) {
+// ListReadyByLabel returns all READY beads with the given label across all rigs.
+// Ready means: status=open AND no open blockers.
+func (f *FakeBeadsOps) ListReadyByLabel(label string) (map[string][]BeadInfo, error) {
 	result := make(map[string][]BeadInfo)
 
 	// Collect all unique ops from routes
@@ -158,19 +167,30 @@ func (f *FakeBeadsOps) ListByLabelAllRigs(label string) (map[string][]BeadInfo, 
 
 		var beads []BeadInfo
 		for _, bead := range fakeOps.beads {
+			// Must be open
 			if bead.status != "open" {
 				continue
 			}
+			// Must have the label
+			hasLabel := false
 			for _, l := range bead.labels {
 				if l == label {
-					beads = append(beads, BeadInfo{
-						ID:     bead.id,
-						Status: bead.status,
-						Labels: bead.labels,
-					})
+					hasLabel = true
 					break
 				}
 			}
+			if !hasLabel {
+				continue
+			}
+			// Must not be blocked (all blockers must be closed)
+			if fakeOps.isBlocked(bead.id) {
+				continue
+			}
+			beads = append(beads, BeadInfo{
+				ID:     bead.id,
+				Status: bead.status,
+				Labels: bead.labels,
+			})
 		}
 
 		if len(beads) > 0 {
@@ -179,6 +199,44 @@ func (f *FakeBeadsOps) ListByLabelAllRigs(label string) (map[string][]BeadInfo, 
 	}
 
 	return result, nil
+}
+
+// isBlocked returns true if the bead has any open blockers.
+func (f *FakeBeadsOps) isBlocked(beadID string) bool {
+	blockers, ok := f.dependencies[beadID]
+	if !ok {
+		return false // No dependencies
+	}
+	for _, blockerID := range blockers {
+		blocker, exists := f.beads[blockerID]
+		if !exists {
+			// Blocker doesn't exist in this rig - check other rigs via routes
+			if f.isBlockerOpenInAnyRig(blockerID) {
+				return true
+			}
+			continue
+		}
+		if blocker.status != "closed" {
+			return true // Has an open blocker
+		}
+	}
+	return false
+}
+
+// isBlockerOpenInAnyRig checks if a blocker is open in any routed rig.
+func (f *FakeBeadsOps) isBlockerOpenInAnyRig(blockerID string) bool {
+	for _, route := range f.routes {
+		fakeOps, ok := route.ops.(*FakeBeadsOps)
+		if !ok || fakeOps == f {
+			continue
+		}
+		if blocker, exists := fakeOps.beads[blockerID]; exists {
+			if blocker.status != "closed" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // extractPrefix extracts the prefix from a bead ID (e.g., "gt-abc" -> "gt-").

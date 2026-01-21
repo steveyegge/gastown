@@ -28,7 +28,9 @@ type BeadsOps interface {
 	// LabelRemove removes a label from a bead.
 	LabelRemove(beadID, label string) error
 
-	// ListByLabelAllRigs returns all beads with the given label across all rigs.
+	// ListReadyByLabel returns all READY beads with the given label across all rigs.
+	// Ready means: status=open AND no open blockers (dependencies are satisfied).
+	// This is the correct method for queue dispatch - blocked beads are excluded.
 	// The result is a map of rig name to slice of beads.
-	ListByLabelAllRigs(label string) (map[string][]BeadInfo, error)
+	ListReadyByLabel(label string) (map[string][]BeadInfo, error)
 }

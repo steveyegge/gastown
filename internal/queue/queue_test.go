@@ -236,7 +236,7 @@ func TestQueue_Clear_Empty(t *testing.T) {
 }
 
 // Tests below demonstrate a bug in FakeBeadsOps where LabelAdd/LabelRemove
-// don't route through configured routes like ListByLabelAllRigs does.
+// don't route through configured routes like ListReadyByLabel does.
 // These tests SHOULD pass but currently FAIL due to the routing bug.
 
 func TestQueue_Remove_MultipleRigs(t *testing.T) {
