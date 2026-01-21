@@ -43,6 +43,40 @@ func TestNewOrphanProcessCheck(t *testing.T) {
 	}
 }
 
+// mockProcessLister allows deterministic testing of orphan process detection.
+type mockProcessLister struct {
+	tmuxServerPIDs   []int
+	panePIDs         []int
+	runtimeProcesses []processInfo
+	parentPIDs       map[int]int // child PID -> parent PID
+	listServerErr    error
+	listPaneErr      error
+	listRuntimeErr   error
+	getParentErr     error
+}
+
+func (m *mockProcessLister) ListTmuxServerPIDs() ([]int, error) {
+	return m.tmuxServerPIDs, m.listServerErr
+}
+
+func (m *mockProcessLister) ListPanePIDs() ([]int, error) {
+	return m.panePIDs, m.listPaneErr
+}
+
+func (m *mockProcessLister) ListRuntimeProcesses() ([]processInfo, error) {
+	return m.runtimeProcesses, m.listRuntimeErr
+}
+
+func (m *mockProcessLister) GetParentPID(pid int) (int, error) {
+	if m.getParentErr != nil {
+		return 0, m.getParentErr
+	}
+	if ppid, ok := m.parentPIDs[pid]; ok {
+		return ppid, nil
+	}
+	return 1, nil // Default to init
+}
+
 func TestOrphanProcessCheck_Run(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("orphan process detection is not supported on Windows")
@@ -409,5 +443,198 @@ func TestOrphanSessionCheck_Run_Deterministic(t *testing.T) {
 	expectedDetails := []string{"Orphan: gt-unknown-witness", "Orphan: gt-missing-crew-joe"}
 	if !reflect.DeepEqual(result.Details, expectedDetails) {
 		t.Fatalf("details = %v, want %v", result.Details, expectedDetails)
+	}
+}
+
+// TestOrphanProcessCheck_TmuxServerDetection tests that processes with tmux server
+// ancestors are correctly identified as NOT orphaned. This tests the fix for the bug
+// where "tmux: server" processes (Linux format) were not being detected, causing
+// false positives for processes running inside tmux.
+func TestOrphanProcessCheck_TmuxServerDetection(t *testing.T) {
+	// Scenario: A Claude process (PID 55717) is running inside a tmux session.
+	// Its parent is the tmux server (PID 55153), whose parent is init (PID 1).
+	// The tmux server should be detected, so Claude should NOT be flagged as orphaned.
+
+	lister := &mockProcessLister{
+		// The tmux server PID is reported (simulates fixed detection)
+		tmuxServerPIDs: []int{55153},
+		panePIDs:       []int{}, // No pane PIDs needed for this test
+		runtimeProcesses: []processInfo{
+			{pid: 55717, ppid: 55153, cmd: "claude"},
+		},
+		parentPIDs: map[int]int{
+			55717: 55153, // Claude's parent is tmux server
+			55153: 1,     // tmux server's parent is init
+		},
+	}
+
+	check := NewOrphanProcessCheckWithProcessLister(lister)
+	ctx := &CheckContext{TownRoot: t.TempDir()}
+	result := check.Run(ctx)
+
+	// Should report all processes inside tmux (no orphans)
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK (no orphans), got %v: %s", result.Status, result.Message)
+		for _, d := range result.Details {
+			t.Logf("  detail: %s", d)
+		}
+	}
+
+	if result.Message != "All 1 runtime processes are inside tmux" {
+		t.Errorf("unexpected message: %q", result.Message)
+	}
+}
+
+// TestOrphanProcessCheck_TmuxServerNotDetected_Bug demonstrates the bug scenario
+// where the tmux server PID was NOT being detected (because "tmux: server" didn't
+// match the old regex pattern), causing false orphan detection.
+func TestOrphanProcessCheck_TmuxServerNotDetected_Bug(t *testing.T) {
+	// Scenario: Same as above, but the tmux server PID is NOT reported
+	// (simulates the bug where "tmux: server" wasn't matched).
+	// This causes the Claude process to be incorrectly flagged as orphaned.
+
+	lister := &mockProcessLister{
+		// BUG: tmux server PID is NOT reported (old broken behavior)
+		tmuxServerPIDs: []int{}, // Empty! Server not detected
+		panePIDs:       []int{}, // Pane PIDs also empty
+		runtimeProcesses: []processInfo{
+			{pid: 55717, ppid: 55153, cmd: "claude"},
+		},
+		parentPIDs: map[int]int{
+			55717: 55153,
+			55153: 1,
+		},
+	}
+
+	check := NewOrphanProcessCheckWithProcessLister(lister)
+	ctx := &CheckContext{TownRoot: t.TempDir()}
+	result := check.Run(ctx)
+
+	// With the bug, the process IS incorrectly flagged as orphaned
+	if result.Status != StatusWarning {
+		t.Errorf("expected StatusWarning (false positive orphan), got %v: %s", result.Status, result.Message)
+	}
+
+	// This demonstrates the bug: process is flagged as orphan when it shouldn't be
+	if result.Message != "Found 1 runtime process(es) running outside tmux" {
+		t.Errorf("unexpected message: %q", result.Message)
+	}
+}
+
+// TestOrphanProcessCheck_MultipleTmuxSessions tests correct detection when
+// multiple tmux sessions exist with different processes.
+func TestOrphanProcessCheck_MultipleTmuxSessions(t *testing.T) {
+	lister := &mockProcessLister{
+		tmuxServerPIDs: []int{1000, 2000}, // Two tmux servers
+		panePIDs:       []int{1001, 2001}, // Pane shells
+		runtimeProcesses: []processInfo{
+			{pid: 1002, ppid: 1001, cmd: "claude"},      // Inside tmux via pane
+			{pid: 2002, ppid: 2000, cmd: "claude"},      // Inside tmux via server
+			{pid: 3000, ppid: 1, cmd: "claude"},         // Orphan (parent is init)
+			{pid: 4000, ppid: 3500, cmd: "claude-code"}, // Orphan (parent not tmux)
+		},
+		parentPIDs: map[int]int{
+			1002: 1001,
+			1001: 1000,
+			1000: 1,
+			2002: 2000,
+			2000: 1,
+			3000: 1,
+			4000: 3500,
+			3500: 1,
+		},
+	}
+
+	check := NewOrphanProcessCheckWithProcessLister(lister)
+	ctx := &CheckContext{TownRoot: t.TempDir()}
+	result := check.Run(ctx)
+
+	// Should find 2 orphans (PID 3000 and 4000)
+	if result.Status != StatusWarning {
+		t.Errorf("expected StatusWarning, got %v: %s", result.Status, result.Message)
+	}
+
+	if result.Message != "Found 2 runtime process(es) running outside tmux" {
+		t.Errorf("unexpected message: %q", result.Message)
+	}
+}
+
+// TestOrphanProcessCheck_DeepAncestorChain tests that processes with tmux
+// ancestors several levels up are correctly identified.
+func TestOrphanProcessCheck_DeepAncestorChain(t *testing.T) {
+	// Process tree: init(1) -> tmux(100) -> bash(200) -> bash(300) -> claude(400)
+	lister := &mockProcessLister{
+		tmuxServerPIDs: []int{100},
+		panePIDs:       []int{200},
+		runtimeProcesses: []processInfo{
+			{pid: 400, ppid: 300, cmd: "claude"},
+		},
+		parentPIDs: map[int]int{
+			400: 300,
+			300: 200,
+			200: 100,
+			100: 1,
+		},
+	}
+
+	check := NewOrphanProcessCheckWithProcessLister(lister)
+	ctx := &CheckContext{TownRoot: t.TempDir()}
+	result := check.Run(ctx)
+
+	// Should detect tmux ancestor via pane PID (200)
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK (process has tmux ancestor), got %v: %s", result.Status, result.Message)
+	}
+}
+
+// TestOrphanProcessCheck_NoRuntimeProcesses tests behavior when no runtime
+// processes are found.
+func TestOrphanProcessCheck_NoRuntimeProcesses(t *testing.T) {
+	lister := &mockProcessLister{
+		tmuxServerPIDs:   []int{100},
+		panePIDs:         []int{},
+		runtimeProcesses: []processInfo{}, // No Claude/codex processes
+		parentPIDs:       map[int]int{},
+	}
+
+	check := NewOrphanProcessCheckWithProcessLister(lister)
+	ctx := &CheckContext{TownRoot: t.TempDir()}
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK, got %v: %s", result.Status, result.Message)
+	}
+
+	if result.Message != "No runtime processes found" {
+		t.Errorf("unexpected message: %q", result.Message)
+	}
+}
+
+// TestOrphanProcessCheck_ScreenSession tests that processes inside screen
+// (not tmux) are correctly identified as orphans from tmux's perspective.
+func TestOrphanProcessCheck_ScreenSession(t *testing.T) {
+	// Process tree: init(1) -> screen(500) -> bash(501) -> claude(502)
+	// Screen is NOT tmux, so this should be flagged as orphan
+	lister := &mockProcessLister{
+		tmuxServerPIDs: []int{100}, // tmux exists but is not ancestor
+		panePIDs:       []int{},
+		runtimeProcesses: []processInfo{
+			{pid: 502, ppid: 501, cmd: "claude"},
+		},
+		parentPIDs: map[int]int{
+			502: 501,
+			501: 500, // screen server
+			500: 1,
+		},
+	}
+
+	check := NewOrphanProcessCheckWithProcessLister(lister)
+	ctx := &CheckContext{TownRoot: t.TempDir()}
+	result := check.Run(ctx)
+
+	// Screen processes ARE flagged as orphans (from tmux perspective)
+	// This is expected behavior - the check is specifically for tmux
+	if result.Status != StatusWarning {
+		t.Errorf("expected StatusWarning (screen process is orphan from tmux view), got %v", result.Status)
 	}
 }
