@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
@@ -331,10 +330,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if info.Status == "hooked" && slingForce && info.Assignee != "" {
 		fmt.Printf("%s Bead already hooked to %s, forcing reassignment...\n", style.Warning.Render("⚠"), info.Assignee)
 
-		// Determine requester identity from env vars, fall back to "unknown"
-		requester := "unknown"
-		if selfID, err := agent.Self(); err == nil {
-			requester = selfID.String()
+		// Determine requester identity from env vars, fall back to "gt-sling"
+		requester := "gt-sling"
+		if polecat := os.Getenv("GT_POLECAT"); polecat != "" {
+			requester = polecat
+		} else if user := os.Getenv("USER"); user != "" {
+			requester = user
 		}
 
 		// Extract rig name from assignee (e.g., "gastown/polecats/Toast" -> "gastown")
