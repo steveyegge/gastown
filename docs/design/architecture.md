@@ -80,17 +80,30 @@ Each agent bead references its role bead via the `role_bead` field.
 │   ├── config.yaml             Beads configuration
 │   ├── issues.jsonl            Town issues (mail, agents, convoys)
 │   └── routes.jsonl            Prefix → rig routing table
-├── mayor/                      Mayor config
-│   └── town.json               Town configuration
+├── mayor/                      Mayor agent home
+│   ├── town.json               Town configuration
+│   ├── CLAUDE.md               Bootstrap pointer
+│   └── AGENTS.md               Bootstrap pointer (multi-provider)
 └── <rig>/                      Project container (NOT a git clone)
     ├── config.json             Rig identity and beads prefix
-    ├── mayor/rig/              Canonical clone (beads live here)
+    ├── mayor/rig/              Canonical clone (beads live here, NOT an agent)
     │   └── .beads/             Rig-level beads database
-    ├── refinery/rig/           Worktree from mayor/rig
-    ├── witness/                No clone (monitors only)
-    ├── crew/<name>/            Human workspaces (full clones)
-    └── polecats/<name>/        Worker worktrees from mayor/rig
+    ├── refinery/               Refinery agent home
+    │   ├── CLAUDE.md           Bootstrap pointer
+    │   └── rig/                Worktree from mayor/rig
+    ├── witness/                Witness agent home (no clone)
+    │   └── CLAUDE.md           Bootstrap pointer
+    ├── crew/                   Crew parent (shared settings)
+    │   ├── CLAUDE.md           Bootstrap pointer (shared by all crew)
+    │   └── <name>/             Human workspaces (worktrees)
+    └── polecats/               Polecats parent (shared settings)
+        ├── CLAUDE.md           Bootstrap pointer (shared by all polecats)
+        └── <name>/<rigname>/   Worker worktrees from mayor/rig
 ```
+
+**Note**: Per-rig `mayor/rig/` does NOT have CLAUDE.md - it's a source clone for
+beads operations, not an agent directory. Bootstrap files (CLAUDE.md/AGENTS.md)
+are placed at agent directory level so Claude finds them via upward traversal.
 
 ### Worktree Architecture
 
