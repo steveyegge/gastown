@@ -103,7 +103,7 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 // Returns the patrol ID or an error.
 func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	// Find the proto ID for the patrol molecule
-	cmdCatalog := exec.Command("bd", "--no-daemon", "mol", "catalog")
+	cmdCatalog := exec.Command("gt", "formula", "list")
 	cmdCatalog.Dir = cfg.BeadsDir
 	var stdoutCatalog, stderrCatalog bytes.Buffer
 	cmdCatalog.Stdout = &stdoutCatalog
@@ -112,20 +112,20 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	if err := cmdCatalog.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderrCatalog.String())
 		if errMsg != "" {
-			return "", fmt.Errorf("failed to list molecule catalog: %s", errMsg)
+			return "", fmt.Errorf("failed to list formulas: %s", errMsg)
 		}
-		return "", fmt.Errorf("failed to list molecule catalog: %w", err)
+		return "", fmt.Errorf("failed to list formulas: %w", err)
 	}
 
-	// Find patrol molecule in catalog
+	// Find patrol molecule in formula list
+	// Format: "formula-name         description"
 	var protoID string
 	catalogLines := strings.Split(stdoutCatalog.String(), "\n")
 	for _, line := range catalogLines {
 		if strings.Contains(line, cfg.PatrolMolName) {
 			parts := strings.Fields(line)
 			if len(parts) > 0 {
-				// Strip trailing colon from ID (catalog format: "gt-xxx: title")
-				protoID = strings.TrimSuffix(parts[0], ":")
+				protoID = parts[0]
 				break
 			}
 		}
@@ -196,7 +196,7 @@ func outputPatrolContext(cfg PatrolConfig) {
 				fmt.Printf("⚠ %s\n", err.Error())
 			} else {
 				fmt.Println(style.Dim.Render(err.Error()))
-				fmt.Println(style.Dim.Render(fmt.Sprintf("Run `bd mol catalog` to troubleshoot.")))
+				fmt.Println(style.Dim.Render(fmt.Sprintf("Run `gt formula list` to troubleshoot.")))
 				return
 			}
 		} else {
