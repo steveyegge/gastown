@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -83,12 +82,13 @@ Batch Slinging:
 }
 
 var (
-	slingSubject  string
-	slingMessage  string
-	slingDryRun   bool
-	slingOnTarget string   // --on flag: target bead when slinging a formula
-	slingVars     []string // --var flag: formula variables (key=value)
-	slingArgs     string   // --args flag: natural language instructions for executor
+	slingSubject     string
+	slingMessage     string
+	slingDryRun      bool
+	slingOnTarget    string   // --on flag: target bead when slinging a formula
+	slingVars        []string // --var flag: formula variables (key=value)
+	slingArgs        string   // --args flag: natural language instructions for executor
+	slingHookRawBead bool     // --hook-raw-bead: hook raw bead without default formula (expert mode)
 
 	// Flags migrated for polecat spawning (used by sling for work assignment)
 	slingCreate   bool   // --create: create polecat if it doesn't exist
@@ -112,6 +112,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
 	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
+	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -395,6 +396,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Issue #288: Auto-apply mol-polecat-work when slinging bare bead to polecat.
+	// This ensures polecats get structured work guidance through formula-on-bead.
+	// Use --hook-raw-bead to bypass for expert/debugging scenarios.
+	if formulaName == "" && !slingHookRawBead && strings.Contains(targetAgent, "/polecats/") {
+		formulaName = "mol-polecat-work"
+		fmt.Printf("  Auto-applying %s for polecat work...\n", formulaName)
+	}
+
 	if slingDryRun {
 		if formulaName != "" {
 			fmt.Printf("Would instantiate formula %s:\n", formulaName)
@@ -422,71 +431,19 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if formulaName != "" {
 		fmt.Printf("  Instantiating formula %s...\n", formulaName)
 
-		// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
-		// Some bd mol commands don't support prefix routing, so we must run them from the
-		// rig directory that owns the bead's database.
-		formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
-
-		// Step 1: Cook the formula (ensures proto exists)
-		// Cook runs from rig directory to access the correct formula database
-		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
-		cookCmd.Dir = formulaWorkDir
-		cookCmd.Stderr = os.Stderr
-		if err := cookCmd.Run(); err != nil {
-			return fmt.Errorf("cooking formula %s: %w", formulaName, err)
-		}
-
-		// Step 2: Create wisp with feature and issue variables from bead
-		// Run from rig directory so wisp is created in correct database
-		featureVar := fmt.Sprintf("feature=%s", info.Title)
-		issueVar := fmt.Sprintf("issue=%s", beadID)
-		wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar, "--json"}
-		wispCmd := exec.Command("bd", wispArgs...)
-		wispCmd.Dir = formulaWorkDir
-		wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
-		wispCmd.Stderr = os.Stderr
-		wispOut, err := wispCmd.Output()
+		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false)
 		if err != nil {
-			return fmt.Errorf("creating wisp for formula %s: %w", formulaName, err)
+			return fmt.Errorf("instantiating formula %s: %w", formulaName, err)
 		}
 
-		// Parse wisp output to get the root ID
-		wispRootID, err := parseWispIDFromJSON(wispOut)
-		if err != nil {
-			return fmt.Errorf("parsing wisp output: %w", err)
-		}
-		fmt.Printf("%s Formula wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
-
-		// Step 3: Bond wisp to original bead (creates compound)
-		// Use --no-daemon for mol bond (requires direct database access)
-		bondArgs := []string{"--no-daemon", "mol", "bond", wispRootID, beadID, "--json"}
-		bondCmd := exec.Command("bd", bondArgs...)
-		bondCmd.Dir = formulaWorkDir
-		bondCmd.Stderr = os.Stderr
-		bondOut, err := bondCmd.Output()
-		if err != nil {
-			return fmt.Errorf("bonding formula to bead: %w", err)
-		}
-
-		// Parse bond output - the wisp root becomes the compound root
-		// After bonding, we hook the wisp root (which now contains the original bead)
-		var bondResult struct {
-			RootID string `json:"root_id"`
-		}
-		if err := json.Unmarshal(bondOut, &bondResult); err != nil {
-			// Fallback: use wisp root as the compound root
-			fmt.Printf("%s Could not parse bond output, using wisp root\n", style.Dim.Render("Warning:"))
-		} else if bondResult.RootID != "" {
-			wispRootID = bondResult.RootID
-		}
-
+		fmt.Printf("%s Formula wisp created: %s\n", style.Bold.Render("✓"), result.WispRootID)
 		fmt.Printf("%s Formula bonded to %s\n", style.Bold.Render("✓"), beadID)
 
 		// Record attached molecule after other description updates to avoid overwrite.
-		attachedMoleculeID = wispRootID
+		attachedMoleculeID = result.WispRootID
 
 		// Update beadID to hook the compound root instead of bare bead
-		beadID = wispRootID
+		beadID = result.BeadToHook
 	}
 
 	// Hook the bead using bd update.
@@ -506,17 +463,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
-
-	// Auto-attach mol-polecat-work to polecat agent beads
-	// This ensures polecats have the standard work molecule attached for guidance.
-	// Only do this for bare beads (no --on formula), since formula-on-bead
-	// mode already attaches the formula as a molecule.
-	if formulaName == "" && strings.Contains(targetAgent, "/polecats/") {
-		if err := attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot); err != nil {
-			// Warn but don't fail - polecat will still work without molecule
-			fmt.Printf("%s Could not attach work molecule: %v\n", style.Dim.Render("Warning:"), err)
-		}
-	}
 
 	// Store dispatcher in bead description (enables completion notification to dispatcher)
 	if err := storeDispatcherInBead(beadID, actor); err != nil {
