@@ -334,6 +334,14 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
+	// Set up .claude symlink so polecat inherits shared hook configuration.
+	// Claude Code doesn't traverse parent directories for settings.json, so the symlink
+	// makes polecats/.claude/settings.json visible in the worktree's CWD.
+	if err := m.setupClaudeSymlink(clonePath); err != nil {
+		// Non-fatal - polecat can still work without hooks (uses PRIME.md fallback)
+		fmt.Printf("Warning: could not set up .claude symlink: %v\n", err)
+	}
+
 	// Provision PRIME.md with Gas Town context for this worker.
 	// This is the fallback if SessionStart hook fails - ensures polecats
 	// always have GUPP and essential Gas Town context.
@@ -678,6 +686,11 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
+	// Set up .claude symlink for shared hook configuration
+	if err := m.setupClaudeSymlink(newClonePath); err != nil {
+		fmt.Printf("Warning: could not set up .claude symlink: %v\n", err)
+	}
+
 	// Copy overlay files from .runtime/overlay/ to polecat root.
 	if err := rig.CopyOverlay(m.rig.Path, newClonePath); err != nil {
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
@@ -993,6 +1006,59 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		Branch:    branchName,
 		Issue:     issueID,
 	}, nil
+}
+
+// setupClaudeSymlink creates a symlink from the worktree's .claude directory to the shared
+// polecats/.claude directory. Claude Code only looks in the current working directory for
+// .claude/settings.json (no parent directory traversal), so this symlink is required for
+// polecats to inherit the shared hook configuration.
+//
+// The symlink is relative to work across different mount points and locations.
+// Fix for: hq-cc7214.22 (polecats not loading Claude hooks)
+func (m *Manager) setupClaudeSymlink(clonePath string) error {
+	symlinkPath := filepath.Join(clonePath, ".claude")
+
+	// Check if something already exists at .claude
+	if info, err := os.Lstat(symlinkPath); err == nil {
+		// If it's already a symlink, check if it points to the right place
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(symlinkPath)
+			if err == nil {
+				// Calculate expected relative path to polecats/.claude
+				// From: polecats/<name>/<rigname>/.claude
+				// To: polecats/.claude
+				// Relative: ../../.claude
+				expectedTarget := filepath.Join("..", "..", ".claude")
+				if target == expectedTarget {
+					return nil // Already correctly set up
+				}
+			}
+			// Wrong target - remove and recreate
+			if err := os.Remove(symlinkPath); err != nil {
+				return fmt.Errorf("removing stale .claude symlink: %w", err)
+			}
+		} else {
+			// It's a regular file or directory - don't touch it
+			// This could be a legitimate .claude directory from the source repo
+			return nil
+		}
+	}
+
+	// Check if the target .claude directory exists
+	targetDir := filepath.Join(m.rig.Path, "polecats", ".claude")
+	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
+		// Target doesn't exist - nothing to symlink to
+		return nil
+	}
+
+	// Create relative symlink: ../../.claude
+	// From: polecats/<name>/<rigname>/.claude -> polecats/.claude
+	relTarget := filepath.Join("..", "..", ".claude")
+	if err := os.Symlink(relTarget, symlinkPath); err != nil {
+		return fmt.Errorf("creating .claude symlink: %w", err)
+	}
+
+	return nil
 }
 
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.

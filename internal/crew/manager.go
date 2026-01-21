@@ -173,6 +173,14 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
+	// Set up .claude symlink so crew worker inherits shared hook configuration.
+	// Claude Code doesn't traverse parent directories for settings.json, so the symlink
+	// makes crew/.claude/settings.json visible in the worker's CWD.
+	if err := m.setupClaudeSymlink(crewPath); err != nil {
+		// Non-fatal - crew can still work without hooks (uses PRIME.md fallback)
+		fmt.Printf("Warning: could not set up .claude symlink: %v\n", err)
+	}
+
 	// Provision PRIME.md with Gas Town context for this worker.
 	// This is the fallback if SessionStart hook fails - ensures crew workers
 	// always have GUPP and essential Gas Town context.
@@ -422,6 +430,59 @@ type PristineResult struct {
 	PullError  string `json:"pull_error,omitempty"`
 	Synced     bool   `json:"synced"`
 	SyncError  string `json:"sync_error,omitempty"`
+}
+
+// setupClaudeSymlink creates a symlink from the crew worker's .claude directory to the shared
+// crew/.claude directory. Claude Code only looks in the current working directory for
+// .claude/settings.json (no parent directory traversal), so this symlink is required for
+// crew workers to inherit the shared hook configuration.
+//
+// The symlink is relative to work across different mount points and locations.
+// Fix for: hq-cc7214.22 (crew not loading Claude hooks)
+func (m *Manager) setupClaudeSymlink(crewPath string) error {
+	symlinkPath := filepath.Join(crewPath, ".claude")
+
+	// Check if something already exists at .claude
+	if info, err := os.Lstat(symlinkPath); err == nil {
+		// If it's already a symlink, check if it points to the right place
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(symlinkPath)
+			if err == nil {
+				// Calculate expected relative path to crew/.claude
+				// From: crew/<name>/.claude
+				// To: crew/.claude
+				// Relative: ../.claude
+				expectedTarget := filepath.Join("..", ".claude")
+				if target == expectedTarget {
+					return nil // Already correctly set up
+				}
+			}
+			// Wrong target - remove and recreate
+			if err := os.Remove(symlinkPath); err != nil {
+				return fmt.Errorf("removing stale .claude symlink: %w", err)
+			}
+		} else {
+			// It's a regular file or directory - don't touch it
+			// This could be a legitimate .claude directory from the source repo
+			return nil
+		}
+	}
+
+	// Check if the target .claude directory exists
+	targetDir := filepath.Join(m.rig.Path, "crew", ".claude")
+	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
+		// Target doesn't exist - nothing to symlink to
+		return nil
+	}
+
+	// Create relative symlink: ../.claude
+	// From: crew/<name>/.claude -> crew/.claude
+	relTarget := filepath.Join("..", ".claude")
+	if err := os.Symlink(relTarget, symlinkPath); err != nil {
+		return fmt.Errorf("creating .claude symlink: %w", err)
+	}
+
+	return nil
 }
 
 // setupSharedBeads creates a redirect file so the crew worker uses the rig's shared .beads database.
