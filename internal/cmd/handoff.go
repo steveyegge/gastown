@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -384,7 +385,20 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// 3. export Claude-related env vars (not inherited by fresh shell)
 	// 4. run claude with the startup beacon (triggers immediate context loading)
 	// Use exec to ensure clean process replacement.
-	runtimeCmd := config.GetRuntimeCommandWithPrompt("", beacon)
+	//
+	// Check if current session is using a non-default agent (GT_AGENT env var).
+	// If so, preserve it across handoff by using the override variant.
+	currentAgent := os.Getenv("GT_AGENT")
+	var runtimeCmd string
+	if currentAgent != "" {
+		var err error
+		runtimeCmd, err = config.GetRuntimeCommandWithPromptAndAgentOverride("", beacon, currentAgent)
+		if err != nil {
+			return "", fmt.Errorf("resolving agent config: %w", err)
+		}
+	} else {
+		runtimeCmd = config.GetRuntimeCommandWithPrompt("", beacon)
+	}
 
 	// Build environment exports - role vars first, then Claude vars
 	var exports []string
@@ -396,6 +410,11 @@ func buildRestartCommand(sessionName string) (string, error) {
 		if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
 			exports = append(exports, "GT_SESSION_ID_ENV="+runtimeConfig.Session.SessionIDEnv)
 		}
+	}
+
+	// Preserve GT_AGENT across handoff so agent override persists
+	if currentAgent != "" {
+		exports = append(exports, "GT_AGENT="+currentAgent)
 	}
 
 	// Add Claude-related env vars from current environment
@@ -601,6 +620,9 @@ func sendHandoffMail(subject, message string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("detecting agent identity: %w", err)
 	}
+
+	// Normalize identity to match mailbox query format
+	agentID = mail.AddressToIdentity(agentID)
 
 	// Detect town root for beads location
 	townRoot := detectTownRootFromCwd()

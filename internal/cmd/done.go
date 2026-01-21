@@ -488,41 +488,28 @@ func runDone(cmd *cobra.Command, args []string) error {
 	// This is the self-cleaning model - polecats clean up after themselves
 	// "done means gone" - both worktree and session are terminated
 	selfCleanAttempted := false
-	if exitType == ExitCompleted {
-		if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
-			// CRITICAL: Push branch to origin before self-nuking
-			// The Refinery needs the branch to be accessible after the polecat's
-			// worktree is deleted. Without this push, the branch only exists locally
-			// in the polecat's worktree and will be lost when self-nuke removes it.
-			fmt.Printf("\nPushing branch to origin before self-nuke...\n")
-			if err := g.Push("origin", branch, false); err != nil {
-				// Push failure is fatal - we cannot self-nuke without pushing
-				// The work must be preserved for the Refinery to process
-				fmt.Fprintf(os.Stderr, "Error: failed to push branch to origin: %v\n", err)
-				fmt.Fprintf(os.Stderr, "Error: cannot self-nuke without pushing - worktree preserved for manual intervention\n")
-				return fmt.Errorf("push to origin failed (self-nuke aborted): %w", err)
-			}
-			fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
+	if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
+		selfCleanAttempted = true
 
-			selfCleanAttempted = true
-
-			// Step 1: Nuke the worktree
+		// Step 1: Nuke the worktree (only for COMPLETED - other statuses preserve work)
+		if exitType == ExitCompleted {
 			if err := selfNukePolecat(roleInfo, townRoot); err != nil {
 				// Non-fatal: Witness will clean up if we fail
 				style.PrintWarning("worktree nuke failed: %v (Witness will clean up)", err)
 			} else {
 				fmt.Printf("%s Worktree nuked\n", style.Bold.Render("✓"))
 			}
-
-			// Step 2: Kill our own session (this terminates Claude and the shell)
-			// This is the last thing we do - the process will be killed when tmux session dies
-			fmt.Printf("%s Terminating session (done means gone)\n", style.Bold.Render("→"))
-			if err := selfKillSession(townRoot, roleInfo); err != nil {
-				// If session kill fails, fall through to os.Exit
-				style.PrintWarning("session kill failed: %v", err)
-			}
-			// If selfKillSession succeeds, we won't reach here (process killed by tmux)
 		}
+
+		// Step 2: Kill our own session (this terminates Claude and the shell)
+		// This is the last thing we do - the process will be killed when tmux session dies
+		// All exit types kill the session - "done means gone"
+		fmt.Printf("%s Terminating session (done means gone)\n", style.Bold.Render("→"))
+		if err := selfKillSession(townRoot, roleInfo); err != nil {
+			// If session kill fails, fall through to os.Exit
+			style.PrintWarning("session kill failed: %v", err)
+		}
+		// If selfKillSession succeeds, we won't reach here (process killed by tmux)
 	}
 
 	// Fallback exit for non-polecats or if self-clean failed

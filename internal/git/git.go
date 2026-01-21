@@ -188,18 +188,25 @@ func configureHooksPath(repoPath string) error {
 // and origin/main never appears in refs/remotes/origin/main.
 // See: https://github.com/anthropics/gastown/issues/286
 func configureRefspec(repoPath string) error {
-	cmd := exec.Command("git", "-C", repoPath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	gitDir := repoPath
+	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err == nil {
+		gitDir = filepath.Join(repoPath, ".git")
+	}
+	gitDir = filepath.Clean(gitDir)
+
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	configCmd := exec.Command("git", "--git-dir", gitDir, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	configCmd.Stderr = &stderr
+	if err := configCmd.Run(); err != nil {
 		return fmt.Errorf("configuring refspec: %s", strings.TrimSpace(stderr.String()))
 	}
-	// Fetch to populate refs/remotes/origin/* so worktrees can use origin/main
-	fetchCmd := exec.Command("git", "-C", repoPath, "fetch", "origin")
+
+	fetchCmd := exec.Command("git", "--git-dir", gitDir, "fetch", "origin")
 	fetchCmd.Stderr = &stderr
 	if err := fetchCmd.Run(); err != nil {
 		return fmt.Errorf("fetching origin: %s", strings.TrimSpace(stderr.String()))
 	}
+
 	return nil
 }
 

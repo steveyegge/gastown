@@ -2,13 +2,26 @@ package polecat
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
+
+func requireTmux(t *testing.T) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("tmux not supported on Windows")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+}
 
 func TestSessionName(t *testing.T) {
 	r := &rig.Rig{
@@ -33,7 +46,7 @@ func TestSessionManagerPolecatDir(t *testing.T) {
 
 	dir := m.polecatDir("Toast")
 	expected := "/home/user/ai/gastown/polecats/Toast"
-	if dir != expected {
+	if filepath.ToSlash(dir) != expected {
 		t.Errorf("polecatDir = %q, want %q", dir, expected)
 	}
 }
@@ -79,6 +92,8 @@ func TestStartPolecatNotFound(t *testing.T) {
 }
 
 func TestIsRunningNoSession(t *testing.T) {
+	requireTmux(t)
+
 	r := &rig.Rig{
 		Name:     "gastown",
 		Polecats: []string{"Toast"},
@@ -95,6 +110,8 @@ func TestIsRunningNoSession(t *testing.T) {
 }
 
 func TestSessionManagerListEmpty(t *testing.T) {
+	requireTmux(t)
+
 	r := &rig.Rig{
 		Name:     "test-rig-unlikely-name",
 		Polecats: []string{},
@@ -111,6 +128,8 @@ func TestSessionManagerListEmpty(t *testing.T) {
 }
 
 func TestStopNotFound(t *testing.T) {
+	requireTmux(t)
+
 	r := &rig.Rig{
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
@@ -124,6 +143,8 @@ func TestStopNotFound(t *testing.T) {
 }
 
 func TestCaptureNotFound(t *testing.T) {
+	requireTmux(t)
+
 	r := &rig.Rig{
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
@@ -137,6 +158,8 @@ func TestCaptureNotFound(t *testing.T) {
 }
 
 func TestInjectNotFound(t *testing.T) {
+	requireTmux(t)
+
 	r := &rig.Rig{
 		Name:     "test-rig",
 		Polecats: []string{"Toast"},
