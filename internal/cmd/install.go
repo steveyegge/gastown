@@ -11,11 +11,11 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/formula"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/shell"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -198,27 +198,32 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   ✓ Created mayor/CLAUDE.md\n")
 	}
 
-	// Create mayor settings (mayor runs from ~/gt/mayor/)
-	// IMPORTANT: Settings must be in ~/gt/mayor/.claude/, NOT ~/gt/.claude/
-	// Settings at town root would be found by ALL agents via directory traversal,
-	// causing crew/polecat/etc to cd to town root before running commands.
-	// mayorDir already defined above
+	// Create mayor settings (mayor runs from town root ~/gt)
+	// Settings must be in town root because OpenCode looks for plugins
+	// relative to the working directory, not by directory traversal.
+	// mayorDir already defined above for CLAUDE.md
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		fmt.Printf("   %s Could not create mayor directory: %v\n", style.Dim.Render("⚠"), err)
-	} else if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
-		fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
 	} else {
-		fmt.Printf("   ✓ Created mayor/.claude/settings.json\n")
+		mayorConfig := config.ResolveAgentConfig(absPath, filepath.Join(absPath, "mayor"))
+		if err := runtime.EnsureSettingsForRole(absPath, "mayor", mayorConfig); err != nil {
+			fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Created mayor settings in town root\n")
+		}
 	}
 
 	// Create deacon directory and settings (deacon runs from ~/gt/deacon/)
 	deaconDir := filepath.Join(absPath, "deacon")
 	if err := os.MkdirAll(deaconDir, 0755); err != nil {
 		fmt.Printf("   %s Could not create deacon directory: %v\n", style.Dim.Render("⚠"), err)
-	} else if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
-		fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
 	} else {
-		fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
+		deaconConfig := config.ResolveAgentConfig(absPath, deaconDir)
+		if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", deaconConfig); err != nil {
+			fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
+		}
 	}
 
 	// Create boot directory (deacon/dogs/boot/) for Boot watchdog.
@@ -365,7 +370,23 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 - Start patrol: ` + "`gt patrol start`" + `
 `
 	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
-	return os.WriteFile(claudePath, []byte(bootstrap), 0644)
+	if err := os.WriteFile(claudePath, []byte(bootstrap), 0644); err != nil {
+		return err
+	}
+
+	// Create AGENTS.md as pointer to CLAUDE.md for compatibility with OpenCode/Codex
+	agentsContent := `# Agent Instructions
+
+See **CLAUDE.md** for complete agent context and instructions.
+
+This file exists for compatibility with tools that look for AGENTS.md.
+
+> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+
+Full context is injected by ` + "`gt prime`" + ` at session start.
+`
+	agentsPath := filepath.Join(mayorDir, "AGENTS.md")
+	return os.WriteFile(agentsPath, []byte(agentsContent), 0644)
 }
 
 func writeJSON(path string, data interface{}) error {

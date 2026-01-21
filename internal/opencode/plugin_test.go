@@ -156,3 +156,35 @@ func TestEnsurePluginAt_FilePermissions(t *testing.T) {
 		t.Errorf("Plugin file mode = %v, want %v", info.Mode(), expectedMode)
 	}
 }
+
+func TestEnsurePluginAt_InstallsDependencies(t *testing.T) {
+	// Create a temporary directory
+	tmpDir := t.TempDir()
+
+	// Use OpenCode-style path structure
+	pluginDir := ".opencode/plugins"
+	pluginFile := "gastown.js"
+
+	err := EnsurePluginAt(tmpDir, pluginDir, pluginFile)
+	if err != nil {
+		t.Fatalf("EnsurePluginAt() error = %v", err)
+	}
+
+	// Check package.json was created in .opencode (parent of plugin dir)
+	packageJsonPath := filepath.Join(tmpDir, ".opencode", "package.json")
+	if _, err := os.Stat(packageJsonPath); err != nil {
+		t.Errorf("package.json not created at %s: %v", packageJsonPath, err)
+	}
+
+	// Check node_modules was created
+	nodeModulesPath := filepath.Join(tmpDir, ".opencode", "node_modules")
+	if _, err := os.Stat(nodeModulesPath); err != nil {
+		t.Errorf("node_modules not created at %s: %v", nodeModulesPath, err)
+	}
+
+	// Check @opencode-ai/plugin package was installed
+	pluginPkgPath := filepath.Join(nodeModulesPath, "@opencode-ai", "plugin")
+	if _, err := os.Stat(pluginPkgPath); err != nil {
+		t.Errorf("@opencode-ai/plugin not installed at %s: %v", pluginPkgPath, err)
+	}
+}
