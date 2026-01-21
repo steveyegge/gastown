@@ -164,10 +164,15 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return nil, fmt.Errorf("parsing bd create output: %w", err)
 	}
 
+	// Force a refresh of the beads database state
+	_, _ = b.run("list", "--limit=1")
+
 	// Set the role slot if specified (this is the authoritative storage)
 	if fields != nil && fields.RoleBead != "" {
 		var slotErr error
 		for i := 0; i < 20; i++ {
+			// Try to 'show' the bead first to ensure it's in the index
+			_, _ = b.run("show", id)
 			_, slotErr = b.run("slot", "set", id, "role", fields.RoleBead)
 			if slotErr == nil {
 				break
@@ -188,6 +193,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	if fields != nil && fields.HookBead != "" {
 		var slotErr error
 		for i := 0; i < 20; i++ {
+			_, _ = b.run("show", id)
 			_, slotErr = b.run("slot", "set", id, "hook", fields.HookBead)
 			if slotErr == nil {
 				break
@@ -342,17 +348,34 @@ func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) erro
 func (b *Beads) SetHookBead(agentBeadID, hookBeadID string) error {
 	// Set the hook using bd slot set
 	// This updates the hook_bead column directly in SQLite
-	_, err := b.run("slot", "set", agentBeadID, "hook", hookBeadID)
-	if err != nil {
+	var err error
+	for i := 0; i < 10; i++ {
+		// Try to 'show' the bead first to ensure it's in the index
+		_, _ = b.run("show", agentBeadID)
+		_, err = b.run("slot", "set", agentBeadID, "hook", hookBeadID)
+		if err == nil {
+			return nil
+		}
+
 		// If slot is already occupied, clear it first then retry
 		errStr := err.Error()
 		if strings.Contains(errStr, "already occupied") {
 			_, _ = b.run("slot", "clear", agentBeadID, "hook")
 			_, err = b.run("slot", "set", agentBeadID, "hook", hookBeadID)
+			if err == nil {
+				return nil
+			}
 		}
-		if err != nil {
-			return fmt.Errorf("setting hook: %w", err)
+
+		// Only retry on "not found" errors (race condition with creation)
+		if !strings.Contains(err.Error(), "not found") {
+			break
 		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	if err != nil {
+		return fmt.Errorf("setting hook: %w", err)
 	}
 	return nil
 }
