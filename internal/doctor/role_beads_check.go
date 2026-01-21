@@ -2,119 +2,116 @@ package doctor
 
 import (
 	"fmt"
-	"os/exec"
-	"strings"
+	"os"
+	"path/filepath"
 
-	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/BurntSushi/toml"
+	"github.com/steveyegge/gastown/internal/config"
 )
 
-// RoleBeadsCheck verifies that role definition beads exist.
-// Role beads are templates that define role characteristics and lifecycle hooks.
-// They are stored in town beads (~/.beads/) with hq- prefix:
-//   - hq-mayor-role, hq-deacon-role, hq-dog-role
-//   - hq-witness-role, hq-refinery-role, hq-polecat-role, hq-crew-role
-//
-// Role beads are created by gt install, but creation may fail silently.
-// Without role beads, agents fall back to defaults which may differ from
-// user expectations.
-type RoleBeadsCheck struct {
-	FixableCheck
-	missing []string // Track missing role beads for fix
+// RoleConfigCheck verifies that role configuration is valid.
+// Role definitions are now config-based (internal/config/roles/*.toml),
+// not stored as beads. Built-in defaults are embedded in the binary.
+// This check validates any user-provided overrides at:
+//   - <town>/roles/<role>.toml (town-level overrides)
+//   - <rig>/roles/<role>.toml (rig-level overrides)
+type RoleConfigCheck struct {
+	BaseCheck
 }
 
-// NewRoleBeadsCheck creates a new role beads check.
-func NewRoleBeadsCheck() *RoleBeadsCheck {
-	return &RoleBeadsCheck{
-		FixableCheck: FixableCheck{
-			BaseCheck: BaseCheck{
-				CheckName:        "role-beads-exist",
-				CheckDescription: "Verify role definition beads exist",
-				CheckCategory:    CategoryConfig,
-			},
+// NewRoleBeadsCheck creates a new role config check.
+// Note: Function name kept as NewRoleBeadsCheck for backward compatibility
+// with existing doctor.go registration code.
+func NewRoleBeadsCheck() *RoleConfigCheck {
+	return &RoleConfigCheck{
+		BaseCheck: BaseCheck{
+			CheckName:        "role-config-valid",
+			CheckDescription: "Verify role configuration is valid",
+			CheckCategory:    CategoryConfig,
 		},
 	}
 }
 
-// Run checks if role beads exist.
-func (c *RoleBeadsCheck) Run(ctx *CheckContext) *CheckResult {
-	c.missing = nil // Reset
+// Run checks if role config is valid.
+func (c *RoleConfigCheck) Run(ctx *CheckContext) *CheckResult {
+	var warnings []string
+	var overrideCount int
 
-	townBeadsPath := beads.GetTownBeadsPath(ctx.TownRoot)
-	bd := beads.New(townBeadsPath)
-
-	var missing []string
-	roleDefs := beads.AllRoleBeadDefs()
-
-	for _, role := range roleDefs {
-		if _, err := bd.Show(role.ID); err != nil {
-			missing = append(missing, role.ID)
+	// Check town-level overrides
+	townRolesDir := filepath.Join(ctx.TownRoot, "roles")
+	if entries, err := os.ReadDir(townRolesDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".toml" {
+				overrideCount++
+				path := filepath.Join(townRolesDir, entry.Name())
+				if err := validateRoleOverride(path); err != nil {
+					warnings = append(warnings, fmt.Sprintf("town override %s: %v", entry.Name(), err))
+				}
+			}
 		}
 	}
 
-	c.missing = missing
+	// Check rig-level overrides for each rig
+	// Discover rigs by looking for directories with rig.json
+	if entries, err := os.ReadDir(ctx.TownRoot); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			rigName := entry.Name()
+			// Check if this is a rig (has rig.json)
+			if _, err := os.Stat(filepath.Join(ctx.TownRoot, rigName, "rig.json")); err != nil {
+				continue
+			}
+			rigRolesDir := filepath.Join(ctx.TownRoot, rigName, "roles")
+			if roleEntries, err := os.ReadDir(rigRolesDir); err == nil {
+				for _, roleEntry := range roleEntries {
+					if !roleEntry.IsDir() && filepath.Ext(roleEntry.Name()) == ".toml" {
+						overrideCount++
+						path := filepath.Join(rigRolesDir, roleEntry.Name())
+						if err := validateRoleOverride(path); err != nil {
+							warnings = append(warnings, fmt.Sprintf("rig %s override %s: %v", rigName, roleEntry.Name(), err))
+						}
+					}
+				}
+			}
+		}
+	}
 
-	if len(missing) == 0 {
+	if len(warnings) > 0 {
 		return &CheckResult{
 			Name:     c.Name(),
-			Status:   StatusOK,
-			Message:  fmt.Sprintf("All %d role beads exist", len(roleDefs)),
+			Status:   StatusWarning,
+			Message:  fmt.Sprintf("%d role config override(s) have issues", len(warnings)),
+			Details:  warnings,
+			FixHint:  "Check TOML syntax in role override files",
 			Category: c.Category(),
 		}
 	}
 
+	msg := "Role config uses built-in defaults"
+	if overrideCount > 0 {
+		msg = fmt.Sprintf("Role config valid (%d override file(s))", overrideCount)
+	}
+
 	return &CheckResult{
 		Name:     c.Name(),
-		Status:   StatusWarning, // Warning, not error - agents work without role beads
-		Message:  fmt.Sprintf("%d role bead(s) missing (agents will use defaults)", len(missing)),
-		Details:  missing,
-		FixHint:  "Run 'gt doctor --fix' to create missing role beads",
+		Status:   StatusOK,
+		Message:  msg,
 		Category: c.Category(),
 	}
 }
 
-// Fix creates missing role beads.
-func (c *RoleBeadsCheck) Fix(ctx *CheckContext) error {
-	// Re-run check to populate missing if needed
-	if c.missing == nil {
-		result := c.Run(ctx)
-		if result.Status == StatusOK {
-			return nil // Nothing to fix
-		}
+// validateRoleOverride checks if a role override file is valid TOML.
+func validateRoleOverride(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
 	}
 
-	if len(c.missing) == 0 {
-		return nil
-	}
-
-	// Build lookup map for role definitions
-	roleDefMap := make(map[string]beads.RoleBeadDef)
-	for _, role := range beads.AllRoleBeadDefs() {
-		roleDefMap[role.ID] = role
-	}
-
-	// Create missing role beads
-	for _, id := range c.missing {
-		role, ok := roleDefMap[id]
-		if !ok {
-			continue // Shouldn't happen
-		}
-
-		// Create role bead using bd create --type=role
-		args := []string{
-			"create",
-			"--type=role",
-			"--id=" + role.ID,
-			"--title=" + role.Title,
-			"--description=" + role.Desc,
-		}
-		if beads.NeedsForceForID(role.ID) {
-			args = append(args, "--force")
-		}
-		cmd := exec.Command("bd", args...)
-		cmd.Dir = ctx.TownRoot
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("creating %s: %s", role.ID, strings.TrimSpace(string(output)))
-		}
+	var def config.RoleDefinition
+	if err := toml.Unmarshal(data, &def); err != nil {
+		return fmt.Errorf("invalid TOML: %w", err)
 	}
 
 	return nil

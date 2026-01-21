@@ -1,4 +1,11 @@
 // Package beads provides role bead management.
+//
+// DEPRECATED: Role beads are deprecated. Role definitions are now config-based.
+// See internal/config/roles/*.toml and config-based-roles.md for the new system.
+//
+// This file is kept for backward compatibility with existing role beads but
+// new code should use config.LoadRoleDefinition() instead of reading role beads.
+// The daemon no longer uses role beads as of Phase 2 (config-based roles).
 package beads
 
 import (
@@ -6,10 +13,12 @@ import (
 	"fmt"
 )
 
-// Role bead ID naming convention:
-// Role beads are stored in town beads (~/.beads/) with hq- prefix.
+// DEPRECATED: Role bead ID naming convention is no longer used.
+// Role definitions are now config-based (internal/config/roles/*.toml).
 //
-// Canonical format: hq-<role>-role
+// Role beads were stored in town beads (~/.beads/) with hq- prefix.
+//
+// Canonical format was: hq-<role>-role
 //
 // Examples:
 //   - hq-mayor-role
@@ -19,8 +28,8 @@ import (
 //   - hq-crew-role
 //   - hq-polecat-role
 //
-// Use RoleBeadIDTown() to get canonical role bead IDs.
-// The legacy RoleBeadID() function returns gt-<role>-role for backward compatibility.
+// Legacy functions RoleBeadID() and RoleBeadIDTown() still work for
+// backward compatibility but should not be used in new code.
 
 // RoleBeadID returns the role bead ID for a given role type.
 // Role beads define lifecycle configuration for each agent type.
@@ -67,6 +76,9 @@ func PolecatRoleBeadID() string {
 
 // GetRoleConfig looks up a role bead and returns its parsed RoleConfig.
 // Returns nil, nil if the role bead doesn't exist or has no config.
+//
+// Deprecated: Use config.LoadRoleDefinition() instead. Role definitions
+// are now config-based, not stored as beads.
 func (b *Beads) GetRoleConfig(roleBeadID string) (*RoleConfig, error) {
 	issue, err := b.Show(roleBeadID)
 	if err != nil {
@@ -94,7 +106,9 @@ func HasLabel(issue *Issue, label string) bool {
 }
 
 // RoleBeadDef defines a role bead's metadata.
-// Used by gt install and gt doctor to create missing role beads.
+//
+// Deprecated: Role beads are no longer created. Role definitions are
+// now config-based (internal/config/roles/*.toml).
 type RoleBeadDef struct {
 	ID    string // e.g., "hq-witness-role"
 	Title string // e.g., "Witness Role"
@@ -102,8 +116,9 @@ type RoleBeadDef struct {
 }
 
 // AllRoleBeadDefs returns all role bead definitions.
-// This is the single source of truth for role beads used by both
-// gt install (initial creation) and gt doctor --fix (repair).
+//
+// Deprecated: Role beads are no longer created by gt install or gt doctor.
+// This function is kept for backward compatibility only.
 func AllRoleBeadDefs() []RoleBeadDef {
 	return []RoleBeadDef{
 		{

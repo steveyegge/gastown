@@ -223,6 +223,12 @@ func createGitHubRepo(hqRoot, repo string, private bool) error {
 	}
 	fmt.Printf("   → Creating %s GitHub repository %s...\n", visibility, repo)
 
+	// Ensure there's at least one commit before pushing.
+	// gh repo create --push fails on empty repos with no commits.
+	if err := ensureInitialCommit(hqRoot); err != nil {
+		return fmt.Errorf("creating initial commit: %w", err)
+	}
+
 	// Build gh repo create command
 	args := []string{"repo", "create", repo, "--source", hqRoot}
 	if private {
@@ -244,6 +250,33 @@ func createGitHubRepo(hqRoot, repo string, private bool) error {
 	if private {
 		fmt.Printf("   ℹ To make this repo public: %s\n", style.Dim.Render("gh repo edit "+repo+" --visibility public"))
 	}
+	return nil
+}
+
+// ensureInitialCommit creates an initial commit if the repo has no commits.
+// gh repo create --push requires at least one commit to push.
+func ensureInitialCommit(hqRoot string) error {
+	// Check if commits exist
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = hqRoot
+	if cmd.Run() == nil {
+		return nil
+	}
+
+	// Stage and commit
+	addCmd := exec.Command("git", "add", ".")
+	addCmd.Dir = hqRoot
+	if err := addCmd.Run(); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+
+	commitCmd := exec.Command("git", "commit", "-m", "Initial Gas Town HQ")
+	commitCmd.Dir = hqRoot
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %s", strings.TrimSpace(string(output)))
+	}
+
+	fmt.Printf("   ✓ Created initial commit\n")
 	return nil
 }
 

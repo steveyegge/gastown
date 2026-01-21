@@ -510,8 +510,9 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 				sf.agentType == "deacon" || sf.agentType == "mayor" {
 				running, _ := t.HasSession(sf.sessionName)
 				if running {
-					// Cycle the agent by killing and letting gt up restart it
-					_ = t.KillSession(sf.sessionName)
+					// Cycle the agent by killing and letting gt up restart it.
+					// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+					_ = t.KillSessionWithProcesses(sf.sessionName)
 				}
 			}
 		}

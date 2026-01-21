@@ -30,6 +30,11 @@ func getMailbox(address string) (*mail.Mailbox, error) {
 }
 
 func runMailInbox(cmd *cobra.Command, args []string) error {
+	// Check for mutually exclusive flags
+	if mailInboxAll && mailInboxUnread {
+		return errors.New("--all and --unread are mutually exclusive")
+	}
+
 	// Determine which inbox to check (priority: --identity flag, positional arg, auto-detect)
 	address := ""
 	if mailInboxIdentity != "" {
@@ -46,6 +51,8 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get messages
+	// --all is the default behavior (shows all messages)
+	// --unread filters to only unread messages
 	var messages []*mail.Message
 	if mailInboxUnread {
 		messages, err = mailbox.ListUnread()

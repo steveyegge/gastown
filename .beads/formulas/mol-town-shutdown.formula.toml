@@ -132,7 +132,7 @@ gt daemon rotate-logs
 gt doctor --fix
 ```
 
-Old logs are moved to `~/gt/logs/archive/` with timestamps.
+Old logs are moved to `$GT_ROOT/logs/archive/` with timestamps.
 """
 
 [[steps]]

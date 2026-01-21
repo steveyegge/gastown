@@ -198,7 +198,7 @@ func TestResolveBeadsDir(t *testing.T) {
 	r := NewRouterWithTownRoot("/work/dir", "/home/user/gt")
 	got := r.resolveBeadsDir("gastown/Toast")
 	want := "/home/user/gt/.beads"
-	if got != want {
+	if filepath.ToSlash(got) != want {
 		t.Errorf("resolveBeadsDir with townRoot = %q, want %q", got, want)
 	}
 
@@ -206,17 +206,17 @@ func TestResolveBeadsDir(t *testing.T) {
 	r2 := &Router{workDir: "/work/dir", townRoot: ""}
 	got2 := r2.resolveBeadsDir("mayor/")
 	want2 := "/work/dir/.beads"
-	if got2 != want2 {
+	if filepath.ToSlash(got2) != want2 {
 		t.Errorf("resolveBeadsDir without townRoot = %q, want %q", got2, want2)
 	}
 }
 
 func TestNewRouterWithTownRoot(t *testing.T) {
 	r := NewRouterWithTownRoot("/work/rig", "/home/gt")
-	if r.workDir != "/work/rig" {
+	if filepath.ToSlash(r.workDir) != "/work/rig" {
 		t.Errorf("workDir = %q, want '/work/rig'", r.workDir)
 	}
-	if r.townRoot != "/home/gt" {
+	if filepath.ToSlash(r.townRoot) != "/home/gt" {
 		t.Errorf("townRoot = %q, want '/home/gt'", r.townRoot)
 	}
 }

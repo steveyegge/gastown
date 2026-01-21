@@ -1353,6 +1353,10 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
+	// Record agent override so handoff can preserve it
+	if agentOverride != "" {
+		resolvedEnv["GT_AGENT"] = agentOverride
+	}
 
 	// Build environment export prefix
 	var exports []string
@@ -1461,19 +1465,18 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 }
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
-// For example, Claude runs as "node", while most other runtimes report their executable name.
+// Claude can report as "node" (older versions) or "claude" (newer versions).
+// Other runtimes typically report their executable name.
 func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 	if rc == nil || rc.Command == "" {
 		return nil
 	}
-	base := filepath.Base(rc.Command)
-	// Node.js-based agents show "node" as the pane command
-	switch base {
-	case "claude", "cursor-agent":
+	if filepath.Base(rc.Command) == "claude" {
 		return []string{"node"}
-	default:
-		return []string{base}
+	} else if filepath.Base(rc.Command) == "cursor-agent" || filepath.Base(rc.Command) == "agent" {
+		return []string{"node", "cursor-agent", "agent"}
 	}
+	return []string{filepath.Base(rc.Command)}
 }
 
 // GetDefaultFormula returns the default formula for a rig from settings/config.json.

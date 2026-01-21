@@ -977,8 +977,7 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 
 	// 2. Stop the refinery
 	refMgr := refinery.NewManager(r)
-	refStatus, err := refMgr.Status()
-	if err == nil && refStatus.State == refinery.StateRunning {
+	if running, _ := refMgr.IsRunning(); running {
 		fmt.Printf("  Stopping refinery...\n")
 		if err := refMgr.Stop(); err != nil {
 			errors = append(errors, fmt.Sprintf("refinery: %v", err))
@@ -987,8 +986,7 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 
 	// 3. Stop the witness
 	witMgr := witness.NewManager(r)
-	witStatus, err := witMgr.Status()
-	if err == nil && witStatus.State == witness.StateRunning {
+	if running, _ := witMgr.IsRunning(); running {
 		fmt.Printf("  Stopping witness...\n")
 		if err := witMgr.Stop(); err != nil {
 			errors = append(errors, fmt.Sprintf("witness: %v", err))
@@ -1075,16 +1073,10 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 
 	// Witness status
 	fmt.Printf("%s\n", style.Bold.Render("Witness"))
-	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-	witnessRunning, _ := t.HasSession(witnessSession)
 	witMgr := witness.NewManager(r)
-	witStatus, _ := witMgr.Status()
+	witnessRunning, _ := witMgr.IsRunning()
 	if witnessRunning {
-		fmt.Printf("  %s running", style.Success.Render("●"))
-		if witStatus != nil && witStatus.StartedAt != nil {
-			fmt.Printf(" (uptime: %s)", formatDuration(time.Since(*witStatus.StartedAt)))
-		}
-		fmt.Printf("\n")
+		fmt.Printf("  %s running\n", style.Success.Render("●"))
 	} else {
 		fmt.Printf("  %s stopped\n", style.Dim.Render("○"))
 	}
@@ -1092,16 +1084,10 @@ func runRigStatus(cmd *cobra.Command, args []string) error {
 
 	// Refinery status
 	fmt.Printf("%s\n", style.Bold.Render("Refinery"))
-	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
-	refineryRunning, _ := t.HasSession(refinerySession)
 	refMgr := refinery.NewManager(r)
-	refStatus, _ := refMgr.Status()
+	refineryRunning, _ := refMgr.IsRunning()
 	if refineryRunning {
-		fmt.Printf("  %s running", style.Success.Render("●"))
-		if refStatus != nil && refStatus.StartedAt != nil {
-			fmt.Printf(" (uptime: %s)", formatDuration(time.Since(*refStatus.StartedAt)))
-		}
-		fmt.Printf("\n")
+		fmt.Printf("  %s running\n", style.Success.Render("●"))
 		// Show queue size
 		queue, err := refMgr.Queue()
 		if err == nil && len(queue) > 0 {
@@ -1254,8 +1240,7 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 
 		// 2. Stop the refinery
 		refMgr := refinery.NewManager(r)
-		refStatus, err := refMgr.Status()
-		if err == nil && refStatus.State == refinery.StateRunning {
+		if running, _ := refMgr.IsRunning(); running {
 			fmt.Printf("  Stopping refinery...\n")
 			if err := refMgr.Stop(); err != nil {
 				errors = append(errors, fmt.Sprintf("refinery: %v", err))
@@ -1264,8 +1249,7 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 
 		// 3. Stop the witness
 		witMgr := witness.NewManager(r)
-		witStatus, err := witMgr.Status()
-		if err == nil && witStatus.State == witness.StateRunning {
+		if running, _ := witMgr.IsRunning(); running {
 			fmt.Printf("  Stopping witness...\n")
 			if err := witMgr.Stop(); err != nil {
 				errors = append(errors, fmt.Sprintf("witness: %v", err))
@@ -1387,8 +1371,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 
 		// 2. Stop the refinery
 		refMgr := refinery.NewManager(r)
-		refStatus, err := refMgr.Status()
-		if err == nil && refStatus.State == refinery.StateRunning {
+		if running, _ := refMgr.IsRunning(); running {
 			fmt.Printf("    Stopping refinery...\n")
 			if err := refMgr.Stop(); err != nil {
 				stopErrors = append(stopErrors, fmt.Sprintf("refinery: %v", err))
@@ -1397,8 +1380,7 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 
 		// 3. Stop the witness
 		witMgr := witness.NewManager(r)
-		witStatus, err := witMgr.Status()
-		if err == nil && witStatus.State == witness.StateRunning {
+		if running, _ := witMgr.IsRunning(); running {
 			fmt.Printf("    Stopping witness...\n")
 			if err := witMgr.Stop(); err != nil {
 				stopErrors = append(stopErrors, fmt.Sprintf("witness: %v", err))

@@ -30,18 +30,20 @@ import (
 )
 
 var (
-	startAll               bool
-	startAgentOverride     string
-	startCrewRig           string
-	startCrewAccount       string
-	startCrewAgentOverride string
-	shutdownGraceful       bool
-	shutdownWait           int
-	shutdownAll            bool
-	shutdownForce          bool
-	shutdownYes            bool
-	shutdownPolecatsOnly   bool
-	shutdownNuclear        bool
+	startAll                    bool
+	startAgentOverride          string
+	startCrewRig                string
+	startCrewAccount            string
+	startCrewAgentOverride      string
+	shutdownGraceful            bool
+	shutdownWait                int
+	shutdownAll                 bool
+	shutdownForce               bool
+	shutdownYes                 bool
+	shutdownPolecatsOnly        bool
+	shutdownNuclear             bool
+	shutdownCleanupOrphans      bool
+	shutdownCleanupOrphansGrace int
 )
 
 var startCmd = &cobra.Command{
@@ -90,7 +92,9 @@ Shutdown levels (progressively more aggressive):
 
 Use --force or --yes to skip confirmation prompt.
 Use --graceful to allow agents time to save state before killing.
-Use --nuclear to force cleanup even if polecats have uncommitted work (DANGER).`,
+Use --nuclear to force cleanup even if polecats have uncommitted work (DANGER).
+Use --cleanup-orphans to kill orphaned Claude processes (TTY-less, older than 60s).
+Use --cleanup-orphans-grace-secs to set the grace period (default 60s).`,
 	RunE: runShutdown,
 }
 
@@ -137,6 +141,10 @@ func init() {
 		"Only stop polecats (minimal shutdown)")
 	shutdownCmd.Flags().BoolVar(&shutdownNuclear, "nuclear", false,
 		"Force cleanup even if polecats have uncommitted work (DANGER: may lose work)")
+	shutdownCmd.Flags().BoolVar(&shutdownCleanupOrphans, "cleanup-orphans", false,
+		"Clean up orphaned Claude processes (TTY-less processes older than 60s)")
+	shutdownCmd.Flags().IntVar(&shutdownCleanupOrphansGrace, "cleanup-orphans-grace-secs", 60,
+		"Grace period in seconds between SIGTERM and SIGKILL when cleaning orphans (default 60)")
 
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(shutdownCmd)
@@ -440,6 +448,14 @@ func runShutdown(cmd *cobra.Command, args []string) error {
 
 	if len(toStop) == 0 {
 		fmt.Printf("%s Gas Town was not running\n", style.Dim.Render("○"))
+
+		// Still check for orphaned daemons even if no sessions are running
+		if townRoot != "" {
+			fmt.Println()
+			fmt.Println("Checking for orphaned daemon...")
+			stopDaemonIfRunning(townRoot)
+		}
+
 		return nil
 	}
 
@@ -563,14 +579,20 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 	deaconSession := getDeaconSessionName()
 	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
 
-	// Phase 5: Cleanup polecat worktrees and branches
-	fmt.Printf("\nPhase 5: Cleaning up polecats...\n")
+	// Phase 5: Cleanup orphaned Claude processes if requested
+	if shutdownCleanupOrphans {
+		fmt.Printf("\nPhase 5: Cleaning up orphaned Claude processes...\n")
+		cleanupOrphanedClaude(shutdownCleanupOrphansGrace)
+	}
+
+	// Phase 6: Cleanup polecat worktrees and branches
+	fmt.Printf("\nPhase 6: Cleaning up polecats...\n")
 	if townRoot != "" {
 		cleanupPolecats(townRoot)
 	}
 
-	// Phase 6: Stop the daemon
-	fmt.Printf("\nPhase 6: Stopping daemon...\n")
+	// Phase 7: Stop the daemon
+	fmt.Printf("\nPhase 7: Stopping daemon...\n")
 	if townRoot != "" {
 		stopDaemonIfRunning(townRoot)
 	}
@@ -586,6 +608,13 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
 	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
+
+	// Cleanup orphaned Claude processes if requested
+	if shutdownCleanupOrphans {
+		fmt.Println()
+		fmt.Println("Cleaning up orphaned Claude processes...")
+		cleanupOrphanedClaude(shutdownCleanupOrphansGrace)
+	}
 
 	// Cleanup polecat worktrees and branches
 	if townRoot != "" {
@@ -612,6 +641,9 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 // 2. Everything except Mayor
 // 3. Mayor last
 // mayorSession and deaconSession are the dynamic session names for the current town.
+//
+// Returns the count of sessions that were successfully stopped (verified by checking
+// if the session no longer exists after the kill attempt).
 func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSession string) int {
 	stopped := 0
 
@@ -625,10 +657,31 @@ func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSe
 		return false
 	}
 
+	// Helper to kill a session and verify it was stopped
+	killAndVerify := func(sess string) bool {
+		// Check if session exists before attempting to kill
+		exists, _ := t.HasSession(sess)
+		if !exists {
+			return false // Session already gone
+		}
+
+		// Attempt to kill the session and its processes
+		_ = t.KillSessionWithProcesses(sess)
+
+		// Verify the session is actually gone (ignore error, check existence)
+		// KillSessionWithProcesses might return an error even if it successfully
+		// killed the processes and the session auto-closed
+		stillExists, _ := t.HasSession(sess)
+		if !stillExists {
+			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), sess)
+			return true
+		}
+		return false
+	}
+
 	// 1. Stop Deacon first
 	if inList(deaconSession) {
-		if err := t.KillSessionWithProcesses(deaconSession); err == nil {
-			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), deaconSession)
+		if killAndVerify(deaconSession) {
 			stopped++
 		}
 	}
@@ -638,16 +691,14 @@ func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSe
 		if sess == deaconSession || sess == mayorSession {
 			continue
 		}
-		if err := t.KillSessionWithProcesses(sess); err == nil {
-			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), sess)
+		if killAndVerify(sess) {
 			stopped++
 		}
 	}
 
 	// 3. Stop Mayor last
 	if inList(mayorSession) {
-		if err := t.KillSessionWithProcesses(mayorSession); err == nil {
-			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), mayorSession)
+		if killAndVerify(mayorSession) {
 			stopped++
 		}
 	}
@@ -752,16 +803,48 @@ func cleanupPolecats(townRoot string) {
 
 // stopDaemonIfRunning stops the daemon if it is running.
 // This prevents the daemon from restarting agents after shutdown.
+// Uses robust detection with fallback to process search.
 func stopDaemonIfRunning(townRoot string) {
-	running, _, _ := daemon.IsRunning(townRoot)
+	// Primary detection: PID file
+	running, pid, err := daemon.IsRunning(townRoot)
+
+	if err != nil {
+		// Detection error - report it but continue with fallback
+		fmt.Printf("  %s Daemon detection warning: %s\n", style.Bold.Render("⚠"), err.Error())
+	}
+
 	if running {
+		// PID file points to live daemon - stop it
 		if err := daemon.StopDaemon(townRoot); err != nil {
-			fmt.Printf("  %s Daemon: %s\n", style.Dim.Render("○"), err.Error())
+			fmt.Printf("  %s Failed to stop daemon (PID %d): %s\n",
+				style.Bold.Render("✗"), pid, err.Error())
 		} else {
-			fmt.Printf("  %s Daemon stopped\n", style.Bold.Render("✓"))
+			fmt.Printf("  %s Daemon stopped (was PID %d)\n", style.Bold.Render("✓"), pid)
 		}
 	} else {
-		fmt.Printf("  %s Daemon not running\n", style.Dim.Render("○"))
+		fmt.Printf("  %s Daemon not tracked by PID file\n", style.Dim.Render("○"))
+	}
+
+	// Fallback: Search for orphaned daemon processes
+	orphaned, err := daemon.FindOrphanedDaemons()
+	if err != nil {
+		fmt.Printf("  %s Warning: failed to search for orphaned daemons: %v\n",
+			style.Dim.Render("○"), err)
+		return
+	}
+
+	if len(orphaned) > 0 {
+		fmt.Printf("  %s Found %d orphaned daemon process(es): %v\n",
+			style.Bold.Render("⚠"), len(orphaned), orphaned)
+
+		killed, err := daemon.KillOrphanedDaemons()
+		if err != nil {
+			fmt.Printf("  %s Failed to kill orphaned daemons: %v\n",
+				style.Bold.Render("✗"), err)
+		} else if killed > 0 {
+			fmt.Printf("  %s Killed %d orphaned daemon(s)\n",
+				style.Bold.Render("✓"), killed)
+		}
 	}
 }
 

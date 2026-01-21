@@ -158,8 +158,12 @@ func (b *Beads) AttachMolecule(pinnedBeadID, moleculeID string) (*Issue, error) 
 		return nil, fmt.Errorf("fetching pinned bead: %w", err)
 	}
 
+	// Allow pinned beads OR open polecat agent beads (polecats have a lifecycle, not permanent)
 	if issue.Status != StatusPinned {
-		return nil, fmt.Errorf("issue %s is not pinned (status: %s)", pinnedBeadID, issue.Status)
+		_, role, _, ok := ParseAgentBeadID(pinnedBeadID)
+		if !(issue.Status == "open" && ok && role == "polecat") {
+			return nil, fmt.Errorf("issue %s is not pinned or open polecat (status: %s)", pinnedBeadID, issue.Status)
+		}
 	}
 
 	// Build attachment fields with current timestamp

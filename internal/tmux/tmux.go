@@ -64,7 +64,8 @@ func (t *Tmux) wrapError(err error, stderr string, args []string) error {
 
 	// Detect specific error types
 	if strings.Contains(stderr, "no server running") ||
-		strings.Contains(stderr, "error connecting to") {
+		strings.Contains(stderr, "error connecting to") ||
+		strings.Contains(stderr, "no current target") {
 		return ErrNoServer
 	}
 	if strings.Contains(stderr, "duplicate session") {
@@ -259,7 +260,75 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	// Kill the tmux session
-	return t.KillSession(name)
+	// Ignore "session not found" - killing the pane process may have already
+	// caused tmux to destroy the session automatically
+	err = t.KillSession(name)
+	if err == ErrSessionNotFound {
+		return nil
+	}
+	return err
+}
+
+// KillSessionWithProcessesExcluding is like KillSessionWithProcesses but excludes
+// specified PIDs from being killed. This is essential for self-kill scenarios where
+// the calling process (e.g., gt done) is running inside the session it's terminating.
+// Without exclusion, the caller would be killed before completing the cleanup.
+func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []string) error {
+	// Build exclusion set for O(1) lookup
+	exclude := make(map[string]bool)
+	for _, pid := range excludePIDs {
+		exclude[pid] = true
+	}
+
+	// Get the pane PID
+	pid, err := t.GetPanePID(name)
+	if err != nil {
+		// Session might not exist or be in bad state, try direct kill
+		return t.KillSession(name)
+	}
+
+	if pid != "" {
+		// Get all descendant PIDs recursively (returns deepest-first order)
+		descendants := getAllDescendants(pid)
+
+		// Filter out excluded PIDs
+		var filtered []string
+		for _, dpid := range descendants {
+			if !exclude[dpid] {
+				filtered = append(filtered, dpid)
+			}
+		}
+
+		// Send SIGTERM to all non-excluded descendants (deepest first to avoid orphaning)
+		for _, dpid := range filtered {
+			_ = exec.Command("kill", "-TERM", dpid).Run()
+		}
+
+		// Wait for graceful shutdown
+		time.Sleep(100 * time.Millisecond)
+
+		// Send SIGKILL to any remaining non-excluded descendants
+		for _, dpid := range filtered {
+			_ = exec.Command("kill", "-KILL", dpid).Run()
+		}
+
+		// Kill the pane process itself (may have called setsid() and detached)
+		// Only if not excluded
+		if !exclude[pid] {
+			_ = exec.Command("kill", "-TERM", pid).Run()
+			time.Sleep(100 * time.Millisecond)
+			_ = exec.Command("kill", "-KILL", pid).Run()
+		}
+	}
+
+	// Kill the tmux session - this will terminate the excluded process too
+	// Ignore "session not found" - if we killed all non-excluded processes,
+	// tmux may have already destroyed the session automatically
+	err = t.KillSession(name)
+	if err == ErrSessionNotFound {
+		return nil
+	}
+	return err
 }
 
 // getAllDescendants recursively finds all descendant PIDs of a process.
@@ -282,6 +351,48 @@ func getAllDescendants(pid string) []string {
 	}
 
 	return result
+}
+
+// KillPaneProcesses explicitly kills all processes associated with a tmux pane.
+// This prevents orphan processes that survive pane respawn due to SIGHUP being ignored.
+//
+// Process:
+// 1. Get the pane's main process PID
+// 2. Find all descendant processes recursively (not just direct children)
+// 3. Send SIGTERM to all descendants (deepest first)
+// 4. Wait 100ms for graceful shutdown
+// 5. Send SIGKILL to any remaining descendants
+//
+// This ensures Claude processes and all their children are properly terminated
+// before respawning the pane.
+func (t *Tmux) KillPaneProcesses(pane string) error {
+	// Get the pane PID
+	pid, err := t.GetPanePID(pane)
+	if err != nil {
+		return fmt.Errorf("getting pane PID: %w", err)
+	}
+
+	if pid == "" {
+		return fmt.Errorf("pane PID is empty")
+	}
+
+	// Get all descendant PIDs recursively (returns deepest-first order)
+	descendants := getAllDescendants(pid)
+
+	// Send SIGTERM to all descendants (deepest first to avoid orphaning)
+	for _, dpid := range descendants {
+		_ = exec.Command("kill", "-TERM", dpid).Run()
+	}
+
+	// Wait for graceful shutdown
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGKILL to any remaining descendants
+	for _, dpid := range descendants {
+		_ = exec.Command("kill", "-KILL", dpid).Run()
+	}
+
+	return nil
 }
 
 // KillServer terminates the entire tmux server and all sessions.

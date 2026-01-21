@@ -3,6 +3,7 @@ package rig
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -23,9 +24,21 @@ func setupTestTown(t *testing.T) (string, *config.RigsConfig) {
 	return root, rigsConfig
 }
 
-func writeFakeBD(t *testing.T, script string) string {
+func writeFakeBD(t *testing.T, script string, windowsScript string) string {
 	t.Helper()
 	binDir := t.TempDir()
+
+	if runtime.GOOS == "windows" {
+		if windowsScript == "" {
+			t.Fatal("windows script is required on Windows")
+		}
+		scriptPath := filepath.Join(binDir, "bd.cmd")
+		if err := os.WriteFile(scriptPath, []byte(windowsScript), 0644); err != nil {
+			t.Fatalf("write fake bd: %v", err)
+		}
+		return binDir
+	}
+
 	scriptPath := filepath.Join(binDir, "bd")
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write fake bd: %v", err)
@@ -44,8 +57,9 @@ func assertBeadsDirLog(t *testing.T, logPath, want string) {
 		t.Fatalf("expected beads dir log entries, got none")
 	}
 	for _, line := range lines {
-		if line != want {
-			t.Fatalf("BEADS_DIR = %q, want %q", line, want)
+		trimmed := strings.TrimSuffix(line, "\r")
+		if trimmed != want {
+			t.Fatalf("BEADS_DIR = %q, want %q", trimmed, want)
 		}
 	}
 }
@@ -367,7 +381,7 @@ func TestInitBeads_LocalBeads_CreatesDatabase(t *testing.T) {
 	}
 
 	// Use fake bd that succeeds
-	script := `#!/usr/bin/env bash
+script := `#!/usr/bin/env bash
 set -e
 if [[ "$1" == "init" ]]; then
   # Simulate successful bd init
@@ -375,7 +389,8 @@ if [[ "$1" == "init" ]]; then
 fi
 exit 0
 `
-	binDir := writeFakeBD(t, script)
+	windowsScript := "@echo off\r\nif \"%1\"==\"init\" exit /b 0\r\nexit /b 0\r\n"
+	binDir := writeFakeBD(t, script, windowsScript)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	manager := &Manager{}
@@ -400,7 +415,7 @@ func TestInitBeadsWritesConfigOnFailure(t *testing.T) {
 	rigPath := t.TempDir()
 	beadsDir := filepath.Join(rigPath, ".beads")
 
-	script := `#!/usr/bin/env bash
+script := `#!/usr/bin/env bash
 set -e
 if [[ -n "$BEADS_DIR_LOG" ]]; then
   echo "${BEADS_DIR:-<unset>}" >> "$BEADS_DIR_LOG"
@@ -414,8 +429,9 @@ fi
 echo "unexpected command: $cmd" >&2
 exit 1
 `
+	windowsScript := "@echo off\r\nif defined BEADS_DIR_LOG (\r\n  if defined BEADS_DIR (\r\n    echo %BEADS_DIR%>>\"%BEADS_DIR_LOG%\"\r\n  ) else (\r\n    echo ^<unset^> >>\"%BEADS_DIR_LOG%\"\r\n  )\r\n)\r\nif \"%1\"==\"init\" (\r\n  exit /b 1\r\n)\r\nexit /b 1\r\n"
 
-	binDir := writeFakeBD(t, script)
+	binDir := writeFakeBD(t, script, windowsScript)
 	beadsDirLog := filepath.Join(t.TempDir(), "beads-dir.log")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("BEADS_DIR_LOG", beadsDirLog)
@@ -437,6 +453,10 @@ exit 1
 }
 
 func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake bd stub is not compatible with multiline descriptions on Windows")
+	}
+
 	// Rig-level agent beads (witness, refinery) are stored in rig beads.
 	// Town-level agents (mayor, deacon) are created by gt install in town beads.
 	// This test verifies that rig agent beads are created in the rig directory,
@@ -452,7 +472,7 @@ func TestInitAgentBeadsUsesRigBeadsDir(t *testing.T) {
 	// Track which agent IDs were created
 	var createdAgents []string
 
-	script := `#!/usr/bin/env bash
+script := `#!/usr/bin/env bash
 set -e
 if [[ -n "$BEADS_DIR_LOG" ]]; then
   echo "${BEADS_DIR:-<unset>}" >> "$BEADS_DIR_LOG"
@@ -492,8 +512,9 @@ case "$cmd" in
     ;;
 esac
 `
+	windowsScript := "@echo off\r\nsetlocal enabledelayedexpansion\r\nif defined BEADS_DIR_LOG (\r\n  if defined BEADS_DIR (\r\n    echo %BEADS_DIR%>>\"%BEADS_DIR_LOG%\"\r\n  ) else (\r\n    echo ^<unset^> >>\"%BEADS_DIR_LOG%\"\r\n  )\r\n)\r\nset \"cmd=%1\"\r\nset \"arg2=%2\"\r\nset \"arg3=%3\"\r\nif \"%cmd%\"==\"--no-daemon\" (\r\n  set \"cmd=%2\"\r\n  set \"arg2=%3\"\r\n  set \"arg3=%4\"\r\n)\r\nif \"%cmd%\"==\"--allow-stale\" (\r\n  set \"cmd=%2\"\r\n  set \"arg2=%3\"\r\n  set \"arg3=%4\"\r\n)\r\nif \"%cmd%\"==\"show\" (\r\n  echo []\r\n  exit /b 0\r\n)\r\nif \"%cmd%\"==\"create\" (\r\n  set \"id=\"\r\n  set \"title=\"\r\n  for %%A in (%*) do (\r\n    set \"arg=%%~A\"\r\n    if /i \"!arg:~0,5!\"==\"--id=\" set \"id=!arg:~5!\"\r\n    if /i \"!arg:~0,8!\"==\"--title=\" set \"title=!arg:~8!\"\r\n  )\r\n  if defined AGENT_LOG (\r\n    echo !id!>>\"%AGENT_LOG%\"\r\n  )\r\n  echo {\"id\":\"!id!\",\"title\":\"!title!\",\"description\":\"\",\"issue_type\":\"agent\"}\r\n  exit /b 0\r\n)\r\nif \"%cmd%\"==\"slot\" exit /b 0\r\nexit /b 1\r\n"
 
-	binDir := writeFakeBD(t, script)
+	binDir := writeFakeBD(t, script, windowsScript)
 	agentLog := filepath.Join(t.TempDir(), "agents.log")
 	beadsDirLog := filepath.Join(t.TempDir(), "beads-dir.log")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))

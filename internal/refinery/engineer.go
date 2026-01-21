@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/protocol"
@@ -449,6 +450,12 @@ func (e *Engineer) handleSuccess(mr *beads.Issue, result ProcessResult) {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mrFields.SourceIssue, err)
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mrFields.SourceIssue)
+
+			// Redundant convoy observer: check if merged issue is tracked by a convoy
+			logger := func(format string, args ...interface{}) {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] "+format+"\n", args...)
+			}
+			convoy.CheckConvoysForIssue(e.rig.Path, mrFields.SourceIssue, "refinery", logger)
 		}
 	}
 
@@ -557,6 +564,12 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mr.SourceIssue, err)
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mr.SourceIssue)
+
+			// Redundant convoy observer: check if merged issue is tracked by a convoy
+			logger := func(format string, args ...interface{}) {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] "+format+"\n", args...)
+			}
+			convoy.CheckConvoysForIssue(e.rig.Path, mr.SourceIssue, "refinery", logger)
 		}
 	}
 

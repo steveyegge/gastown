@@ -59,18 +59,53 @@ func getGasTownSessionPIDs() map[int]bool {
 // addChildPIDs adds all descendant PIDs of a process to the set.
 // This catches Claude processes spawned by the shell in a tmux pane.
 func addChildPIDs(parentPID int, pids map[int]bool) {
-	// Use pgrep to find children (more reliable than parsing ps output)
-	out, err := exec.Command("pgrep", "-P", strconv.Itoa(parentPID)).Output()
-	if err != nil {
-		return
+	childPIDs := getChildPIDs(parentPID)
+	for _, pid := range childPIDs {
+		pids[pid] = true
+		// Recurse to get grandchildren
+		addChildPIDs(pid, pids)
 	}
-	for _, pidStr := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
-			pids[pid] = true
-			// Recurse to get grandchildren
-			addChildPIDs(pid, pids)
+}
+
+// getChildPIDs returns direct child PIDs of a process.
+// Tries pgrep first, falls back to parsing ps output.
+func getChildPIDs(parentPID int) []int {
+	var childPIDs []int
+
+	// Try pgrep first (faster, more reliable when available)
+	out, err := exec.Command("pgrep", "-P", strconv.Itoa(parentPID)).Output()
+	if err == nil {
+		for _, pidStr := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
+				childPIDs = append(childPIDs, pid)
+			}
+		}
+		return childPIDs
+	}
+
+	// Fallback: parse ps output to find children
+	// ps -eo pid,ppid gives us all processes with their parent PIDs
+	out, err = exec.Command("ps", "-eo", "pid,ppid").Output()
+	if err != nil {
+		return childPIDs
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err1 := strconv.Atoi(fields[0])
+		ppid, err2 := strconv.Atoi(fields[1])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		if ppid == parentPID && pid > 0 {
+			childPIDs = append(childPIDs, pid)
 		}
 	}
+
+	return childPIDs
 }
 
 // sigkillGracePeriod is how long (in seconds) we wait after sending SIGTERM
@@ -78,32 +113,39 @@ func addChildPIDs(parentPID int, pids map[int]bool) {
 // around after this period, we use SIGKILL on the next cleanup cycle.
 const sigkillGracePeriod = 60
 
-// orphanStateFile returns the path to the state file that tracks PIDs we've
-// sent signals to. Uses $XDG_RUNTIME_DIR if available, otherwise /tmp.
-func orphanStateFile() string {
-	dir := os.Getenv("XDG_RUNTIME_DIR")
-	if dir == "" {
-		dir = "/tmp"
-	}
-	return filepath.Join(dir, "gastown-orphan-state")
-}
-
 // signalState tracks what signal was last sent to a PID and when.
 type signalState struct {
 	Signal    string    // "SIGTERM" or "SIGKILL"
 	Timestamp time.Time // When the signal was sent
 }
 
-// loadOrphanState reads the state file and returns the current signal state
+// stateFileDir returns the directory for state files.
+func stateFileDir() string {
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir == "" {
+		dir = "/tmp"
+	}
+	return dir
+}
+
+// loadSignalState reads a state file and returns the current signal state
 // for each tracked PID. Automatically cleans up entries for dead processes.
-func loadOrphanState() map[int]signalState {
+// Uses file locking to prevent concurrent access.
+func loadSignalState(filename string) map[int]signalState {
 	state := make(map[int]signalState)
 
-	f, err := os.Open(orphanStateFile())
+	path := filepath.Join(stateFileDir(), filename)
+	f, err := os.Open(path)
 	if err != nil {
 		return state // File doesn't exist yet, that's fine
 	}
 	defer f.Close()
+
+	// Acquire shared lock for reading
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+		return state
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -130,18 +172,39 @@ func loadOrphanState() map[int]signalState {
 	return state
 }
 
-// saveOrphanState writes the current signal state to the state file.
-func saveOrphanState(state map[int]signalState) error {
-	f, err := os.Create(orphanStateFile())
+// saveSignalState writes the current signal state to a state file.
+// Uses file locking to prevent concurrent access.
+func saveSignalState(filename string, state map[int]signalState) error {
+	path := filepath.Join(stateFileDir(), filename)
+	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
+	// Acquire exclusive lock for writing
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("acquiring lock: %w", err)
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+
 	for pid, s := range state {
 		fmt.Fprintf(f, "%d %s %d\n", pid, s.Signal, s.Timestamp.Unix())
 	}
 	return nil
+}
+
+// orphanStateFile is the filename for orphan process tracking state.
+const orphanStateFile = "gastown-orphan-state"
+
+// loadOrphanState reads the orphan state file.
+func loadOrphanState() map[int]signalState {
+	return loadSignalState(orphanStateFile)
+}
+
+// saveOrphanState writes the orphan state file.
+func saveOrphanState(state map[int]signalState) error {
+	return saveSignalState(orphanStateFile, state)
 }
 
 // processExists checks if a process is still running.
@@ -292,6 +355,206 @@ type CleanupResult struct {
 	Process OrphanedProcess
 	Signal  string // "SIGTERM", "SIGKILL", or "UNKILLABLE"
 	Error   error
+}
+
+// ZombieProcess represents a claude process not in any active tmux session.
+type ZombieProcess struct {
+	PID int
+	Cmd string
+	Age int    // Age in seconds
+	TTY string // TTY column from ps (may be "?" or a session like "s024")
+}
+
+// FindZombieClaudeProcesses finds Claude processes NOT in any active tmux session.
+// This catches "zombie" processes that have a TTY but whose tmux session is dead.
+//
+// Unlike FindOrphanedClaudeProcesses (which uses TTY="?" detection), this function
+// uses tmux pane verification: a process is a zombie if it's NOT the pane PID of
+// any active tmux session AND not a child of any pane PID.
+//
+// This is the definitive zombie check because it verifies against tmux reality.
+func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
+	// Get ALL valid PIDs (panes + their children) from active tmux sessions
+	validPIDs := getGasTownSessionPIDs()
+
+	// SAFETY CHECK: If no valid PIDs found, tmux might be down or no sessions exist.
+	// Returning empty is safer than marking all Claude processes as zombies.
+	if len(validPIDs) == 0 {
+		// Check if tmux is even running
+		if err := exec.Command("tmux", "list-sessions").Run(); err != nil {
+			return nil, fmt.Errorf("tmux not available: %w", err)
+		}
+		// tmux is running but no gt-*/hq-* sessions - that's a valid state,
+		// but we can't safely determine zombies without reference sessions.
+		// Return empty rather than marking everything as zombie.
+		return nil, nil
+	}
+
+	// Use ps to get PID, TTY, command, and elapsed time for all claude processes
+	out, err := exec.Command("ps", "-eo", "pid,tty,comm,etime").Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing processes: %w", err)
+	}
+
+	var zombies []ZombieProcess
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue // Header line or invalid PID
+		}
+
+		tty := fields[1]
+		cmd := fields[2]
+		etimeStr := fields[3]
+
+		// Match claude or codex command names
+		cmdLower := strings.ToLower(cmd)
+		if cmdLower != "claude" && cmdLower != "claude-code" && cmdLower != "codex" {
+			continue
+		}
+
+		// Skip processes that belong to valid Gas Town tmux sessions
+		if validPIDs[pid] {
+			continue
+		}
+
+		// Skip processes younger than minOrphanAge seconds
+		age, err := parseEtime(etimeStr)
+		if err != nil {
+			continue
+		}
+		if age < minOrphanAge {
+			continue
+		}
+
+		// This process is NOT in any active tmux session - it's a zombie
+		zombies = append(zombies, ZombieProcess{
+			PID: pid,
+			Cmd: cmd,
+			Age: age,
+			TTY: tty,
+		})
+	}
+
+	return zombies, nil
+}
+
+// zombieStateFile is the filename for zombie process tracking state.
+const zombieStateFile = "gastown-zombie-state"
+
+// loadZombieState reads the zombie state file.
+func loadZombieState() map[int]signalState {
+	return loadSignalState(zombieStateFile)
+}
+
+// saveZombieState writes the zombie state file.
+func saveZombieState(state map[int]signalState) error {
+	return saveSignalState(zombieStateFile, state)
+}
+
+// ZombieCleanupResult describes what happened to a zombie process.
+type ZombieCleanupResult struct {
+	Process ZombieProcess
+	Signal  string // "SIGTERM", "SIGKILL", or "UNKILLABLE"
+	Error   error
+}
+
+// CleanupZombieClaudeProcesses finds and kills zombie Claude processes.
+// Uses tmux verification to ensure we never kill processes in active sessions.
+//
+// Uses the same graceful escalation as orphan cleanup:
+//  1. First encounter → SIGTERM, record in state file
+//  2. Next cycle, still alive after grace period → SIGKILL
+//  3. Next cycle, still alive after SIGKILL → log as unkillable
+func CleanupZombieClaudeProcesses() ([]ZombieCleanupResult, error) {
+	zombies, err := FindZombieClaudeProcesses()
+	if err != nil {
+		return nil, err
+	}
+
+	state := loadZombieState()
+	now := time.Now()
+
+	var results []ZombieCleanupResult
+	var lastErr error
+
+	activeZombies := make(map[int]bool)
+	for _, z := range zombies {
+		activeZombies[z.PID] = true
+	}
+
+	// Check state for PIDs that died or need escalation
+	for pid, s := range state {
+		if !activeZombies[pid] {
+			delete(state, pid)
+			continue
+		}
+
+		elapsed := now.Sub(s.Timestamp).Seconds()
+
+		if s.Signal == "SIGKILL" {
+			results = append(results, ZombieCleanupResult{
+				Process: ZombieProcess{PID: pid, Cmd: "claude"},
+				Signal:  "UNKILLABLE",
+				Error:   fmt.Errorf("process %d survived SIGKILL", pid),
+			})
+			delete(state, pid)
+			delete(activeZombies, pid)
+			continue
+		}
+
+		if s.Signal == "SIGTERM" && elapsed >= float64(sigkillGracePeriod) {
+			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+				if err != syscall.ESRCH {
+					lastErr = fmt.Errorf("SIGKILL PID %d: %w", pid, err)
+				}
+				delete(state, pid)
+				delete(activeZombies, pid)
+				continue
+			}
+			state[pid] = signalState{Signal: "SIGKILL", Timestamp: now}
+			results = append(results, ZombieCleanupResult{
+				Process: ZombieProcess{PID: pid, Cmd: "claude"},
+				Signal:  "SIGKILL",
+			})
+			delete(activeZombies, pid)
+		}
+	}
+
+	// Send SIGTERM to new zombies
+	for _, zombie := range zombies {
+		if !activeZombies[zombie.PID] {
+			continue
+		}
+		if _, exists := state[zombie.PID]; exists {
+			continue
+		}
+
+		if err := syscall.Kill(zombie.PID, syscall.SIGTERM); err != nil {
+			if err != syscall.ESRCH {
+				lastErr = fmt.Errorf("SIGTERM PID %d: %w", zombie.PID, err)
+			}
+			continue
+		}
+		state[zombie.PID] = signalState{Signal: "SIGTERM", Timestamp: now}
+		results = append(results, ZombieCleanupResult{
+			Process: zombie,
+			Signal:  "SIGTERM",
+		})
+	}
+
+	if err := saveZombieState(state); err != nil {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("saving zombie state: %w", err)
+		}
+	}
+
+	return results, lastErr
 }
 
 // CleanupOrphanedClaudeProcesses finds and kills orphaned claude/codex processes.

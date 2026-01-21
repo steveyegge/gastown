@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -264,6 +265,14 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 			result.Handled = true
 			result.WispCreated = wispID
 			result.Action = fmt.Sprintf("auto-nuked %s (cleanup_status=clean, wisp=%s)", payload.PolecatName, wispID)
+
+			// Redundant convoy observer: check if completed issue is tracked by a convoy
+			if payload.IssueID != "" {
+				townRoot, _ := workspace.Find(workDir)
+				if townRoot != "" {
+					convoy.CheckConvoysForIssue(townRoot, payload.IssueID, "witness", nil)
+				}
+			}
 		}
 
 	case "has_uncommitted":
@@ -299,6 +308,14 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 			result.Handled = true
 			result.WispCreated = wispID
 			result.Action = fmt.Sprintf("auto-nuked %s (commit on main, cleanup_status=%s, wisp=%s)", payload.PolecatName, cleanupStatus, wispID)
+
+			// Redundant convoy observer: check if completed issue is tracked by a convoy
+			if payload.IssueID != "" {
+				townRoot, _ := workspace.Find(workDir)
+				if townRoot != "" {
+					convoy.CheckConvoysForIssue(townRoot, payload.IssueID, "witness", nil)
+				}
+			}
 		}
 	}
 

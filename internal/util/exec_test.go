@@ -2,13 +2,20 @@ package util
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestExecWithOutput(t *testing.T) {
 	// Test successful command
-	output, err := ExecWithOutput(".", "echo", "hello")
+	var output string
+	var err error
+	if runtime.GOOS == "windows" {
+		output, err = ExecWithOutput(".", "cmd", "/c", "echo hello")
+	} else {
+		output, err = ExecWithOutput(".", "echo", "hello")
+	}
 	if err != nil {
 		t.Fatalf("ExecWithOutput failed: %v", err)
 	}
@@ -17,7 +24,11 @@ func TestExecWithOutput(t *testing.T) {
 	}
 
 	// Test command that fails
-	_, err = ExecWithOutput(".", "false")
+	if runtime.GOOS == "windows" {
+		_, err = ExecWithOutput(".", "cmd", "/c", "exit /b 1")
+	} else {
+		_, err = ExecWithOutput(".", "false")
+	}
 	if err == nil {
 		t.Error("expected error for failing command")
 	}
@@ -25,13 +36,22 @@ func TestExecWithOutput(t *testing.T) {
 
 func TestExecRun(t *testing.T) {
 	// Test successful command
-	err := ExecRun(".", "true")
+	var err error
+	if runtime.GOOS == "windows" {
+		err = ExecRun(".", "cmd", "/c", "exit /b 0")
+	} else {
+		err = ExecRun(".", "true")
+	}
 	if err != nil {
 		t.Fatalf("ExecRun failed: %v", err)
 	}
 
 	// Test command that fails
-	err = ExecRun(".", "false")
+	if runtime.GOOS == "windows" {
+		err = ExecRun(".", "cmd", "/c", "exit /b 1")
+	} else {
+		err = ExecRun(".", "false")
+	}
 	if err == nil {
 		t.Error("expected error for failing command")
 	}
@@ -46,7 +66,12 @@ func TestExecWithOutput_WorkDir(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Test that workDir is respected
-	output, err := ExecWithOutput(tmpDir, "pwd")
+	var output string
+	if runtime.GOOS == "windows" {
+		output, err = ExecWithOutput(tmpDir, "cmd", "/c", "cd")
+	} else {
+		output, err = ExecWithOutput(tmpDir, "pwd")
+	}
 	if err != nil {
 		t.Fatalf("ExecWithOutput failed: %v", err)
 	}
@@ -57,7 +82,12 @@ func TestExecWithOutput_WorkDir(t *testing.T) {
 
 func TestExecWithOutput_StderrInError(t *testing.T) {
 	// Test that stderr is captured in error
-	_, err := ExecWithOutput(".", "sh", "-c", "echo 'error message' >&2; exit 1")
+	var err error
+	if runtime.GOOS == "windows" {
+		_, err = ExecWithOutput(".", "cmd", "/c", "echo error message 1>&2 & exit /b 1")
+	} else {
+		_, err = ExecWithOutput(".", "sh", "-c", "echo 'error message' >&2; exit 1")
+	}
 	if err == nil {
 		t.Error("expected error")
 	}

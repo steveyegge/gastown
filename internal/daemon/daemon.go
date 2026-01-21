@@ -430,9 +430,10 @@ func (d *Daemon) checkDeaconHeartbeat() {
 
 	// Session exists but heartbeat is stale - Deacon is stuck
 	if age > 30*time.Minute {
-		// Very stuck - restart the session
+		// Very stuck - restart the session.
+		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 		d.logger.Printf("Deacon stuck for %s - restarting session", age.Round(time.Minute))
-		if err := d.tmux.KillSession(sessionName); err != nil {
+		if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
 			d.logger.Printf("Error killing stuck Deacon: %v", err)
 		}
 		// ensureDeaconRunning will restart on next heartbeat
@@ -680,29 +681,60 @@ func IsRunning(townRoot string) (bool, int, error) {
 		if os.IsNotExist(err) {
 			return false, 0, nil
 		}
-		return false, 0, err
+		// Return error for other failures (permissions, I/O)
+		return false, 0, fmt.Errorf("reading PID file: %w", err)
 	}
 
-	pid, err := strconv.Atoi(string(data))
+	pidStr := strings.TrimSpace(string(data))
+	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
-		return false, 0, nil
+		// Corrupted PID file - return error, not silent false
+		return false, 0, fmt.Errorf("invalid PID in file %q: %w", pidStr, err)
 	}
 
-	// Check if process is running
+	// Check if process is alive
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return false, 0, nil
 	}
 
 	// On Unix, FindProcess always succeeds. Send signal 0 to check if alive.
-	err = process.Signal(syscall.Signal(0))
-	if err != nil {
+	if err := process.Signal(syscall.Signal(0)); err != nil {
 		// Process not running, clean up stale PID file
-		_ = os.Remove(pidFile)
+		if err := os.Remove(pidFile); err == nil {
+			// Successfully cleaned up stale file
+			return false, 0, fmt.Errorf("removed stale PID file (process %d not found)", pid)
+		}
+		return false, 0, nil
+	}
+
+	// CRITICAL: Verify it's actually our daemon, not PID reuse
+	if !isGasTownDaemon(pid) {
+		// PID reused by different process
+		if err := os.Remove(pidFile); err == nil {
+			return false, 0, fmt.Errorf("removed stale PID file (PID %d is not gt daemon)", pid)
+		}
 		return false, 0, nil
 	}
 
 	return true, pid, nil
+}
+
+// isGasTownDaemon checks if a PID is actually a gt daemon run process.
+// This prevents false positives from PID reuse.
+// Uses ps command for cross-platform compatibility (Linux, macOS).
+func isGasTownDaemon(pid int) bool {
+	// Use ps to get command for the PID (works on Linux and macOS)
+	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=")
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	cmdline := strings.TrimSpace(string(output))
+
+	// Check if it's "gt daemon run" or "/path/to/gt daemon run"
+	return strings.Contains(cmdline, "gt") && strings.Contains(cmdline, "daemon") && strings.Contains(cmdline, "run")
 }
 
 // StopDaemon stops the running daemon for the given town.
@@ -741,6 +773,74 @@ func StopDaemon(townRoot string) error {
 	_ = os.Remove(pidFile)
 
 	return nil
+}
+
+// FindOrphanedDaemons finds all gt daemon run processes that aren't tracked by PID file.
+// Returns list of orphaned PIDs.
+func FindOrphanedDaemons() ([]int, error) {
+	// Use pgrep to find all "daemon run" processes (broad search, then verify with isGasTownDaemon)
+	cmd := exec.Command("pgrep", "-f", "daemon run")
+	output, err := cmd.Output()
+	if err != nil {
+		// Exit code 1 means no processes found - that's OK
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("pgrep failed: %w", err)
+	}
+
+	// Parse PIDs
+	var pids []int
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+		// Verify it's actually gt daemon (filters out unrelated processes)
+		if isGasTownDaemon(pid) {
+			pids = append(pids, pid)
+		}
+	}
+
+	return pids, nil
+}
+
+// KillOrphanedDaemons finds and kills any orphaned gt daemon processes.
+// Returns number of processes killed.
+func KillOrphanedDaemons() (int, error) {
+	pids, err := FindOrphanedDaemons()
+	if err != nil {
+		return 0, err
+	}
+
+	killed := 0
+	for _, pid := range pids {
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+
+		// Try SIGTERM first
+		if err := process.Signal(syscall.SIGTERM); err != nil {
+			continue
+		}
+
+		// Wait for graceful shutdown
+		time.Sleep(200 * time.Millisecond)
+
+		// Check if still alive
+		if err := process.Signal(syscall.Signal(0)); err == nil {
+			// Still alive, force kill
+			_ = process.Signal(syscall.SIGKILL)
+		}
+
+		killed++
+	}
+
+	return killed, nil
 }
 
 // checkPolecatSessionHealth proactively validates polecat tmux sessions.

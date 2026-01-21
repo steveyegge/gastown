@@ -128,7 +128,8 @@ func (c *ZombieSessionCheck) Fix(ctx *CheckContext) error {
 		_ = events.LogFeed(events.TypeSessionDeath, sess,
 			events.SessionDeathPayload(sess, "unknown", "zombie cleanup", "gt doctor"))
 
-		if err := t.KillSession(sess); err != nil {
+		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+		if err := t.KillSessionWithProcesses(sess); err != nil {
 			lastErr = err
 		}
 	}

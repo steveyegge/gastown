@@ -47,7 +47,7 @@ bd show hq-deacon 2>/dev/null
 gt feed --since 10m --plain | head -20
 
 # Recent wisps (operational state)
-ls -lt ~/gt/.beads-wisp/*.wisp.json 2>/dev/null | head -5
+ls -lt $GT_ROOT/.beads-wisp/*.wisp.json 2>/dev/null | head -5
 ```
 
 **Step 4: Check Deacon mail**
@@ -221,7 +221,7 @@ Then exit. The next daemon tick will spawn a fresh Boot.
 **Update status file**
 ```bash
 # The gt boot command handles this automatically
-# Status is written to ~/gt/deacon/dogs/boot/.boot-status.json
+# Status is written to $GT_ROOT/deacon/dogs/boot/.boot-status.json
 ```
 
 Boot is ephemeral by design. Each instance runs fresh.

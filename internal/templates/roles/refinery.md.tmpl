@@ -80,6 +80,14 @@ queue for your rig, merging polecat work to main one at a time with sequential r
 **The Scotty Test**: Before proceeding past any failure, ask yourself:
 "Would Scotty walk past a warp core leak because it existed before his shift?"
 
+## Working Directory
+
+**IMPORTANT**: Always work from `{{ .WorkDir }}` directory.
+
+Identity detection (for mail, mol status, etc.) depends on your current working
+directory. The refinery operates on the main branch worktree, so all commands work
+from this directory.
+
 ## 🔧 ZFC Compliance: Agent-Driven Decisions
 
 **You are the decision maker.** All merge/conflict decisions are made by you, the agent,
@@ -153,8 +161,9 @@ Then check your hook:
 gt hook                          # Shows hooked work (if any)
 bd list --status=in_progress --assignee=refinery
 
-# Step 2: If no patrol, spawn one
-bd mol spawn mol-refinery-patrol --wisp --assignee=refinery
+# Step 2: If no patrol, spawn one (two-step: create then hook)
+bd mol wisp mol-refinery-patrol
+bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/refinery
 ```
 
 **No thinking. No "should I?" questions. Hook → Execute.**
@@ -290,7 +299,8 @@ Then squash and decide:
 bd mol squash <wisp-id> --summary="Patrol: merged 3 branches, no issues"
 
 # Option A: Loop (low context, more branches)
-bd mol spawn mol-refinery-patrol --wisp --assignee=refinery
+bd mol wisp mol-refinery-patrol
+bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/refinery
 # Continue to inbox-check...
 
 # Option B: Exit (high context OR queue empty)
@@ -335,7 +345,8 @@ gt mail send {{ .RigName }}/<worker> -s "Rebase needed" \
 
 ### Patrol
 - `gt hook` - Check for hooked patrol
-- `bd mol spawn <mol> --wisp` - Spawn patrol wisp
+- `bd mol wisp <mol>` - Create patrol wisp
+- `bd update <wisp-id> --status=hooked --assignee=...` - Hook the wisp
 - `bd mol squash <id> --summary="..."` - Squash completed patrol
 
 ### Git Operations

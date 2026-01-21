@@ -187,6 +187,12 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
+	// Ensure .gitignore has required Gas Town patterns
+	if err := rig.EnsureGitignorePatterns(crewPath); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+	}
+
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
@@ -314,15 +320,14 @@ func (m *Manager) loadState(name string) (*CrewWorker, error) {
 		return nil, fmt.Errorf("parsing state: %w", err)
 	}
 
-	// Backfill essential fields if missing (handles empty or incomplete state.json)
-	if crew.Name == "" {
-		crew.Name = name
-	}
+	// Directory name is source of truth for Name and ClonePath.
+	// state.json can become stale after directory rename, copy, or corruption.
+	crew.Name = name
+	crew.ClonePath = m.crewDir(name)
+
+	// Rig only needs backfill when empty (less likely to drift)
 	if crew.Rig == "" {
 		crew.Rig = m.rig.Name
-	}
-	if crew.ClonePath == "" {
-		crew.ClonePath = m.crewDir(name)
 	}
 
 	return &crew, nil
@@ -464,8 +469,9 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	}
 	if running {
 		if opts.KillExisting {
-			// Restart mode - kill existing session
-			if err := t.KillSession(sessionID); err != nil {
+			// Restart mode - kill existing session.
+			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
 		} else {
@@ -473,8 +479,9 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 			if t.IsClaudeRunning(sessionID) {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
-			// Zombie session - kill and recreate
-			if err := t.KillSession(sessionID); err != nil {
+			// Zombie session - kill and recreate.
+			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
 		}
@@ -554,8 +561,10 @@ func (m *Manager) Stop(name string) error {
 		return ErrSessionNotFound
 	}
 
-	// Kill the session
-	if err := t.KillSession(sessionID); err != nil {
+	// Kill the session.
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+	// This prevents orphan bash processes from Claude's Bash tool surviving session termination.
+	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
@@ -568,3 +577,4 @@ func (m *Manager) IsRunning(name string) (bool, error) {
 	sessionID := m.SessionName(name)
 	return t.HasSession(sessionID)
 }
+

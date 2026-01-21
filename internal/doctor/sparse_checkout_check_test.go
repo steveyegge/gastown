@@ -120,7 +120,7 @@ func TestSparseCheckoutCheck_MayorRigMissingSparseCheckout(t *testing.T) {
 	if !strings.Contains(result.Message, "1 repo(s) missing") {
 		t.Errorf("expected message about missing config, got %q", result.Message)
 	}
-	if len(result.Details) != 1 || !strings.Contains(result.Details[0], "mayor/rig") {
+	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "mayor/rig") {
 		t.Errorf("expected details to contain mayor/rig, got %v", result.Details)
 	}
 }
@@ -164,7 +164,7 @@ func TestSparseCheckoutCheck_CrewMissingSparseCheckout(t *testing.T) {
 	if result.Status != StatusError {
 		t.Errorf("expected StatusError for missing sparse checkout, got %v", result.Status)
 	}
-	if len(result.Details) != 1 || !strings.Contains(result.Details[0], "crew/agent1") {
+	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "crew/agent1") {
 		t.Errorf("expected details to contain crew/agent1, got %v", result.Details)
 	}
 }
@@ -186,7 +186,7 @@ func TestSparseCheckoutCheck_PolecatMissingSparseCheckout(t *testing.T) {
 	if result.Status != StatusError {
 		t.Errorf("expected StatusError for missing sparse checkout, got %v", result.Status)
 	}
-	if len(result.Details) != 1 || !strings.Contains(result.Details[0], "polecats/pc1") {
+	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "polecats/pc1") {
 		t.Errorf("expected details to contain polecats/pc1, got %v", result.Details)
 	}
 }
@@ -244,7 +244,7 @@ func TestSparseCheckoutCheck_MixedConfigured(t *testing.T) {
 	if !strings.Contains(result.Message, "1 repo(s) missing") {
 		t.Errorf("expected message about 1 missing repo, got %q", result.Message)
 	}
-	if len(result.Details) != 1 || !strings.Contains(result.Details[0], "crew/agent1") {
+	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "crew/agent1") {
 		t.Errorf("expected details to contain only crew/agent1, got %v", result.Details)
 	}
 }

@@ -195,6 +195,22 @@ gt worktree remove beads
 **Note**: Dogs are Deacon infrastructure helpers (like Boot). They're NOT for user-facing
 work. If you need to fix something in another rig, use worktrees, not dogs.
 
+## Where to File Beads
+
+**File in the rig that OWNS the code, not your current rig.**
+
+You're working in **{{ .RigName }}** (prefix `{{ .IssuePrefix }}-`). Issues about THIS rig's code
+go here by default. But if you discover bugs/issues in OTHER projects:
+
+| Issue is about... | File in | Command |
+|-------------------|---------|---------|
+| This rig's code ({{ .RigName }}) | Here (default) | `bd create "..."` |
+| `bd` CLI (beads tool) | **beads** | `bd create --rig beads "..."` |
+| `gt` CLI (gas town tool) | **gastown** | `bd create --rig gastown "..."` |
+| Cross-rig coordination | **HQ** | `bd create --prefix hq- "..."` |
+
+**The test**: "Which repo would the fix be committed to?"
+
 ## Gotchas when Filing Beads
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.

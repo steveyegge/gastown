@@ -21,6 +21,7 @@ var (
 	mailInboxJSON     bool
 	mailReadJSON      bool
 	mailInboxUnread   bool
+	mailInboxAll      bool
 	mailInboxIdentity string
 	mailCheckInject   bool
 	mailCheckJSON     bool
@@ -138,8 +139,13 @@ var mailInboxCmd = &cobra.Command{
 If no address is specified, shows the current context's inbox.
 Use --identity for polecats to explicitly specify their identity.
 
+By default, shows all messages. Use --unread to filter to unread only,
+or --all to explicitly show all messages (read and unread).
+
 Examples:
   gt mail inbox                       # Current context (auto-detected)
+  gt mail inbox --all                 # Explicitly show all messages
+  gt mail inbox --unread              # Show only unread messages
   gt mail inbox mayor/                # Mayor's inbox
   gt mail inbox greenplace/Toast         # Polecat's inbox
   gt mail inbox --identity greenplace/Toast  # Explicit polecat identity`,
@@ -433,6 +439,7 @@ func init() {
 	// Inbox flags
 	mailInboxCmd.Flags().BoolVar(&mailInboxJSON, "json", false, "Output as JSON")
 	mailInboxCmd.Flags().BoolVarP(&mailInboxUnread, "unread", "u", false, "Show only unread messages")
+	mailInboxCmd.Flags().BoolVarP(&mailInboxAll, "all", "a", false, "Show all messages (read and unread)")
 	mailInboxCmd.Flags().StringVar(&mailInboxIdentity, "identity", "", "Explicit identity for inbox (e.g., greenplace/Toast)")
 	mailInboxCmd.Flags().StringVar(&mailInboxIdentity, "address", "", "Alias for --identity")
 

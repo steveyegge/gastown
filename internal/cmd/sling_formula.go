@@ -209,13 +209,7 @@ func runSlingFormula(args []string) error {
 	}
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
-
-	// Record the attached molecule in the wisp's description.
-	// This is required for gt hook to recognize the molecule attachment.
-	if err := storeAttachedMoleculeInBead(wispRootID, wispRootID); err != nil {
-		// Warn but don't fail - polecat can still work through steps
-		fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
-	}
+	attachedMoleculeID := wispRootID
 
 	// Step 3: Hook the wisp bead using bd update.
 	// See: https://github.com/steveyegge/gastown/issues/148
@@ -252,9 +246,22 @@ func runSlingFormula(args []string) error {
 		}
 	}
 
+	// Record the attached molecule after other description updates to avoid overwrite.
+	if attachedMoleculeID != "" {
+		if err := storeAttachedMoleculeInBead(wispRootID, attachedMoleculeID); err != nil {
+			// Warn but don't fail - polecat can still work through steps
+			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
+		}
+	}
+
 	// Step 4: Nudge to start (graceful if no tmux)
 	if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	// Skip nudge during tests to prevent agent self-interruption
+	if os.Getenv("GT_TEST_NO_NUDGE") != "" {
 		return nil
 	}
 
