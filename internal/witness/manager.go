@@ -114,8 +114,14 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	if foreground {
 		// Foreground mode is deprecated - patrol logic moved to mol-witness-patrol
 		// Just check tmux session (no PID inference per ZFC)
-		if running, _ := t.HasSession(sessionID); running && t.IsClaudeRunning(sessionID) {
-			return ErrAlreadyRunning
+		if running, _ := t.HasSession(sessionID); running {
+			// Resolve agent config to get expected process names
+			townRoot := m.townRoot()
+			agentConfig := config.ResolveRoleAgentConfig("witness", townRoot, m.rig.Path)
+			processNames := config.ExpectedPaneCommands(agentConfig)
+			if t.IsRuntimeRunning(sessionID, processNames) {
+				return ErrAlreadyRunning
+			}
 		}
 
 		now := time.Now()
@@ -130,9 +136,13 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Background mode: check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
-			// Healthy - Claude is running
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		// Resolve agent config to get expected process names
+		townRoot := m.townRoot()
+		agentConfig := config.ResolveRoleAgentConfig("witness", townRoot, m.rig.Path)
+		processNames := config.ExpectedPaneCommands(agentConfig)
+		if t.IsRuntimeRunning(sessionID, processNames) {
+			// Healthy - agent is running
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but Claude dead. Kill and recreate.

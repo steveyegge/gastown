@@ -827,7 +827,7 @@ func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
 	} else if townSettings.DefaultAgent != "" {
 		agentName = townSettings.DefaultAgent
 	} else {
-		agentName = "claude" // ultimate fallback
+		agentName = string(DefaultAgentPreset()) // ultimate fallback
 	}
 
 	return lookupAgentConfig(agentName, townSettings, rigSettings)
@@ -871,7 +871,7 @@ func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*R
 	} else if townSettings.DefaultAgent != "" {
 		agentName = townSettings.DefaultAgent
 	} else {
-		agentName = "claude" // ultimate fallback
+		agentName = string(DefaultAgentPreset()) // ultimate fallback
 	}
 
 	// If an override is requested, validate it exists
@@ -1045,7 +1045,7 @@ func ResolveRoleAgentName(role, townRoot, rigPath string) (agentName string, isR
 	if townSettings.DefaultAgent != "" {
 		return townSettings.DefaultAgent, false
 	}
-	return "claude", false
+	return string(DefaultAgentPreset()), false
 }
 
 // lookupAgentConfig looks up an agent by name.
@@ -1075,6 +1075,7 @@ func lookupAgentConfig(name string, townSettings *TownSettings, rigSettings *Rig
 }
 
 // fillRuntimeDefaults fills in default values for empty RuntimeConfig fields.
+// Uses the default agent preset (claude) for fallback values.
 func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 	if rc == nil {
 		return DefaultRuntimeConfig()
@@ -1085,11 +1086,19 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		Args:          rc.Args,
 		InitialPrompt: rc.InitialPrompt,
 	}
+	// Get default values from the default agent preset
+	defaultPreset := GetAgentPreset(DefaultAgentPreset())
 	if result.Command == "" {
-		result.Command = "claude"
+		if defaultPreset != nil {
+			result.Command = defaultPreset.Command
+		} else {
+			result.Command = string(DefaultAgentPreset())
+		}
 	}
 	if result.Args == nil {
-		result.Args = []string{"--dangerously-skip-permissions"}
+		if defaultPreset != nil {
+			result.Args = defaultPreset.Args
+		}
 	}
 	return result
 }
