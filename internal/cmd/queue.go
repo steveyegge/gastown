@@ -71,16 +71,16 @@ var queueRunCmd = &cobra.Command{
 	Short: "Dispatch queued beads to polecats",
 	Long: `Dispatch queued beads to polecats.
 
-Each queued bead gets its own polecat. The --capacity flag limits the total
-number of polecats that can be running at once (checks current count and
-spawns up to the limit). The --parallel flag controls how many polecats
-spawn concurrently.
+Each queued bead gets its own polecat. The --queue-max-polecats flag limits
+the total number of polecats that can be running at once (checks current
+count and spawns up to the limit). The --spawn-batch-size flag controls how
+many polecats spawn concurrently.
 
 Examples:
-  gt queue run                      # Dispatch all queued beads
-  gt queue run --capacity 10        # Only spawn up to 10 total polecats
-  gt queue run --parallel 3         # Spawn 3 at a time
-  gt queue run --dry-run            # Show what would be dispatched`,
+  gt queue run                           # Dispatch all queued beads
+  gt queue run --queue-max-polecats 10   # Only spawn up to 10 total polecats
+  gt queue run --spawn-batch-size 3      # Spawn 3 at a time
+  gt queue run --dry-run                 # Show what would be dispatched`,
 	Args: cobra.NoArgs,
 	RunE: runQueueRun,
 }
@@ -96,21 +96,21 @@ This removes the "queued" label from all queued beads without dispatching them.`
 }
 
 var (
-	queueRunDryRun   bool
-	queueRunCapacity int
-	queueRunParallel int
-	queueRunAgent    string
-	queueRunAccount  string
-	queueRunForce    bool
-	queueListJSON    bool
-	queueListPending bool
-	queueListRunning bool
+	queueRunDryRun         bool
+	queueRunMaxPolecats    int
+	queueRunSpawnBatchSize int
+	queueRunAgent          string
+	queueRunAccount        string
+	queueRunForce          bool
+	queueListJSON          bool
+	queueListPending       bool
+	queueListRunning       bool
 )
 
 func init() {
 	queueRunCmd.Flags().BoolVarP(&queueRunDryRun, "dry-run", "n", false, "Show what would be dispatched")
-	queueRunCmd.Flags().IntVar(&queueRunCapacity, "capacity", 0, "Max total polecats running (0 = use config or unlimited)")
-	queueRunCmd.Flags().IntVar(&queueRunParallel, "parallel", 0, "Number of concurrent dispatches (0 = use default)")
+	queueRunCmd.Flags().IntVar(&queueRunMaxPolecats, "queue-max-polecats", 0, "Max total polecats running (0 = use config or unlimited)")
+	queueRunCmd.Flags().IntVar(&queueRunSpawnBatchSize, "spawn-batch-size", 0, "Number of polecats to spawn concurrently (0 = use config default)")
 	queueRunCmd.Flags().StringVar(&queueRunAgent, "agent", "", "Override agent/runtime for spawned polecats")
 	queueRunCmd.Flags().StringVar(&queueRunAccount, "account", "", "Claude Code account handle to use")
 	queueRunCmd.Flags().BoolVar(&queueRunForce, "force", false, "Force spawn even if polecat has unread mail")
@@ -254,7 +254,7 @@ func runQueueRun(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Found %d queued bead(s)\n", len(items))
 
 	// Determine capacity: flag > config > unlimited
-	capacity := queueRunCapacity
+	capacity := queueRunMaxPolecats
 	if capacity == 0 {
 		capacity = config.GetQueueMaxPolecats(townRoot)
 	}
@@ -295,7 +295,7 @@ func runQueueRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine parallelism: flag > config > default (5)
-	parallelism := queueRunParallel
+	parallelism := queueRunSpawnBatchSize
 	if parallelism <= 0 {
 		parallelism = config.GetPolecatSpawnBatchSize(townRoot)
 	}

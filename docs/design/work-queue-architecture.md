@@ -32,10 +32,10 @@ The work queue provides:
 gt sling mol-review --batch --on @beads.txt gastown --queue
 
 # Dispatch up to 10 at a time (respecting capacity)
-gt queue run --capacity 10
+gt queue run --queue-max-polecats 10
 
 # Later, as polecats complete, dispatch more
-gt queue run --capacity 10
+gt queue run --queue-max-polecats 10
 ```
 
 ## Architecture Diagram
@@ -324,7 +324,7 @@ User: gt sling gt-abc gastown --queue
 ### Dispatching Queued Beads
 
 ```
-User: gt queue run --capacity 10 --parallel 3
+User: gt queue run --queue-max-polecats 10 --spawn-batch-size 3
                 │
                 ▼
 ┌─────────────────────────────────┐
@@ -469,13 +469,13 @@ Both settings can be overridden via command-line flags:
 
 ```bash
 # Override max polecats (capacity)
-gt queue run --capacity 20
+gt queue run --queue-max-polecats 20
 
 # Override parallelism
-gt queue run --parallel 8
+gt queue run --spawn-batch-size 8
 
 # Both
-gt queue run --capacity 20 --parallel 8
+gt queue run --queue-max-polecats 20 --spawn-batch-size 8
 ```
 
 Flag precedence: flag > config > default.
@@ -599,7 +599,7 @@ beads (4):
 Dispatches queued beads to polecats.
 
 ```bash
-$ gt queue run --capacity 10 --parallel 3
+$ gt queue run --queue-max-polecats 10 --spawn-batch-size 3
 Found 12 queued bead(s)
 Capacity: 3/10 polecats running, 7 slots available
 Dispatched: 7

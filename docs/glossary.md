@@ -75,7 +75,7 @@ A special pinned Bead for each agent. The Hook is an agent's primary work queue 
 Primary work-order wrapping related Beads. Convoys group related tasks together and can be assigned to multiple workers. Created with `gt convoy create`.
 
 ### Slinging
-Assigning work to agents via `gt sling`. When you sling work to a Polecat or Crew member, you're putting it on their Hook for execution. Supports batch mode (`--batch --on bead1,bead2`) for multiple assignments, queue mode (`--queue`) for deferred dispatch, and parallelism control (`--parallel`, `--capacity`).
+Assigning work to agents via `gt sling`. When you sling work to a Polecat or Crew member, you're putting it on their Hook for execution. Supports batch mode (`--batch --on bead1,bead2`) for multiple assignments, queue mode (`--queue`) for deferred dispatch, and parallelism control (`--spawn-batch-size`, `--queue-max-polecats`).
 
 ### Nudging
 Real-time messaging between agents with `gt nudge`. Nudges allow immediate communication without going through the mail system.

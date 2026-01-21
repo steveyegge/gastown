@@ -503,8 +503,8 @@ gt sling gt-abc <rig> --queue            # Add to queue instead of immediate dis
 gt sling gt-abc <rig> -q                 # Short form
 
 # Parallelism control
-gt sling gt-abc <rig> --parallel 3       # Spawn up to 3 polecats concurrently
-gt sling gt-abc <rig> --capacity 5       # Limit total running polecats to 5
+gt sling gt-abc <rig> --spawn-batch-size 3       # Spawn up to 3 polecats concurrently
+gt sling gt-abc <rig> --queue-max-polecats 5     # Limit total running polecats to 5
 ```
 
 Agent overrides:
