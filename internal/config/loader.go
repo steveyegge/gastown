@@ -1264,7 +1264,11 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 
 	var cmd string
 	if len(exports) > 0 {
-		cmd = "export " + strings.Join(exports, " ") + " && "
+		// Use 'exec env' instead of 'export ... &&' so the agent process
+		// replaces the shell. This allows WaitForCommand to detect the
+		// running agent via pane_current_command (which shows the direct
+		// process, not child processes).
+		cmd = "exec env " + strings.Join(exports, " ") + " "
 	}
 
 	// Add runtime command
@@ -1367,7 +1371,11 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 
 	var cmd string
 	if len(exports) > 0 {
-		cmd = "export " + strings.Join(exports, " ") + " && "
+		// Use 'exec env' instead of 'export ... &&' so the agent process
+		// replaces the shell. This allows WaitForCommand to detect the
+		// running agent via pane_current_command (which shows the direct
+		// process, not child processes).
+		cmd = "exec env " + strings.Join(exports, " ") + " "
 	}
 
 	if prompt != "" {
