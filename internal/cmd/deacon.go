@@ -13,7 +13,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
@@ -409,7 +408,9 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	}
 
 	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
+	// Load town settings to get role-specific agent config (e.g., role_agents["deacon"] = "glm-air")
+	rc := config.ResolveAgentConfig(townRoot, deaconDir)
+	if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", rc); err != nil {
 		return fmt.Errorf("creating deacon settings: %w", err)
 	}
 
