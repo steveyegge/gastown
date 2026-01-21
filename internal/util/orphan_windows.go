@@ -18,18 +18,8 @@ type CleanupResult struct {
 	Error   error
 }
 
-// FindOrphanedClaudeProcesses is a Windows stub.
-func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
-	return nil, nil
-}
-
-// CleanupOrphanedClaudeProcesses is a Windows stub.
-func CleanupOrphanedClaudeProcesses() ([]CleanupResult, error) {
-	return nil, nil
-}
-
-// ZombieProcess represents a Claude process not in any active tmux session.
-// On Windows, zombie detection is not supported, so this is a stub definition.
+// ZombieProcess represents a claude process not in any active tmux session.
+// On Windows, zombie cleanup is not supported, so this is a stub definition.
 type ZombieProcess struct {
 	PID int
 	Cmd string
@@ -43,6 +33,16 @@ type ZombieCleanupResult struct {
 	Process ZombieProcess
 	Signal  string // "SIGTERM", "SIGKILL", or "UNKILLABLE"
 	Error   error
+}
+
+// FindOrphanedClaudeProcesses is a Windows stub.
+func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
+	return nil, nil
+}
+
+// CleanupOrphanedClaudeProcesses is a Windows stub.
+func CleanupOrphanedClaudeProcesses() ([]CleanupResult, error) {
+	return nil, nil
 }
 
 // FindZombieClaudeProcesses is a Windows stub.
