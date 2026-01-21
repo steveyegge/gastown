@@ -175,7 +175,6 @@ Patrol agents (Witness, Refinery, Deacon) use **wisps** to prevent accumulation.
 gt hook                        # What's on MY hook?
 gt mol attach-from-mail <id>   # Attach work from mail message
 gt done                        # Signal completion (syncs, submits to MQ, notifies Witness)
-gt done --skip-merge           # Complete without submitting to merge queue
 ```
 
 ### Polecat Workflow Summary

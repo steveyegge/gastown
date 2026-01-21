@@ -211,16 +211,9 @@ gt polecat reset Toast   # DON'T: manual lifecycle control
 # Polecat signals its own completion:
 gt done  # (from inside the polecat session)
 
-# Skip merge queue for branch-only workflows:
-gt done --skip-merge  # Keep branch but don't submit to merge queue
-
 # Only Witness nukes polecats:
 gt polecat nuke Toast  # (from Witness, after verification)
 ```
-
-The `--skip-merge` flag is useful when you want the polecat to complete without
-submitting work to the Refinery's merge queue. The branch remains available for
-manual review, cherry-picking, or alternative merge processes.
 
 Polecats manage their own session lifecycle. The Witness manages sandbox lifecycle.
 External manipulation bypasses verification.

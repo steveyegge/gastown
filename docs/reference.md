@@ -194,16 +194,6 @@ gt mol step done <step>      # Complete a molecule step
 6. Witness removes worktree + branch
 ```
 
-**Skip merge for branch-only workflows:**
-
-```bash
-gt done --skip-merge            # Skip merge queue submission, keep branch only
-```
-
-Use `--skip-merge` when you want the polecat to complete without submitting work
-to the merge queue. The branch remains available for manual review or alternative
-merge processes.
-
 ### Session Cycling
 
 ```
@@ -494,17 +484,6 @@ gt sling <proto> --on gt-def <rig>       # With workflow template
 
 # Quick sling (auto-creates convoy)
 gt sling <bead> <rig>                    # Auto-convoy for dashboard visibility
-
-# Batch sling: assign multiple beads at once
-gt sling <formula> --batch --on bead1,bead2,bead3 <rig>
-
-# Queue management: defer dispatch instead of immediate spawn
-gt sling gt-abc <rig> --queue            # Add to queue instead of immediate dispatch
-gt sling gt-abc <rig> -q                 # Short form
-
-# Parallelism control
-gt sling gt-abc <rig> --spawn-batch-size 3       # Spawn up to 3 polecats concurrently
-gt sling gt-abc <rig> --queue-max-polecats 5     # Limit total running polecats to 5
 ```
 
 Agent overrides:
@@ -512,22 +491,6 @@ Agent overrides:
 - `gt start --agent <alias>` overrides the Mayor/Deacon runtime for this launch.
 - `gt mayor start|attach|restart --agent <alias>` and `gt deacon start|attach|restart --agent <alias>` do the same.
 - `gt start crew <name> --agent <alias>` and `gt crew at <name> --agent <alias>` override the crew worker runtime.
-
-### Work Queue Management
-
-```bash
-gt queue status                  # Quick status: pending + running counts
-gt queue list                    # List all queued work
-gt queue list --pending          # Only pending items
-gt queue list --running          # Only running items
-gt queue run                     # Process next item from queue
-gt queue clear                   # Clear all pending items from queue
-gt queue clear --rig gastown     # Clear only items for specific rig
-```
-
-The work queue provides controlled dispatch of work to polecats. Use `gt sling --queue`
-to add work to the queue instead of immediate dispatch, then use `gt queue run` to
-process items (or let the Deacon process automatically).
 
 ### Communication
 
