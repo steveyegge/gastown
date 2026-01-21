@@ -168,13 +168,16 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Ensure runtime settings exist in refinery/ (not refinery/rig/) so we don't
 	// write into the source repo. Runtime walks up the tree to find settings.
 	refineryParentDir := filepath.Join(m.rig.Path, "refinery")
-	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
+	townRoot := filepath.Dir(m.rig.Path)
+	// Use ResolveRoleAgentConfig to get role-specific runtime settings (e.g., ready_prompt_prefix)
+	// instead of LoadRuntimeConfig which only loads from rig settings.
+	// See: https://github.com/steveyegge/gastown/issues/756
+	runtimeConfig := config.ResolveRoleAgentConfig("refinery", townRoot, m.rig.Path)
 	if err := runtime.EnsureSettingsForRole(refineryParentDir, "refinery", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
-	townRoot := filepath.Dir(m.rig.Path)
+	// Build startup command
 	var command string
 	if agentOverride != "" {
 		var err error
