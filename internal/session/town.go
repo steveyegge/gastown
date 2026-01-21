@@ -39,6 +39,21 @@ func StopTownSession(t *tmux.Tmux, ts TownSession, force bool) (bool, error) {
 		return false, nil
 	}
 
+	return stopTownSessionInternal(t, ts, force)
+}
+
+// StopTownSessionWithCache is like StopTownSession but uses a pre-fetched
+// SessionSet for O(1) existence check instead of spawning a subprocess.
+func StopTownSessionWithCache(t *tmux.Tmux, ts TownSession, force bool, cache *tmux.SessionSet) (bool, error) {
+	if !cache.Has(ts.SessionID) {
+		return false, nil
+	}
+
+	return stopTownSessionInternal(t, ts, force)
+}
+
+// stopTownSessionInternal performs the actual session stop.
+func stopTownSessionInternal(t *tmux.Tmux, ts TownSession, force bool) (bool, error) {
 	// Try graceful shutdown first (unless forced)
 	if !force {
 		_ = t.SendKeysRaw(ts.SessionID, "C-c")
@@ -53,8 +68,9 @@ func StopTownSession(t *tmux.Tmux, ts TownSession, force bool) (bool, error) {
 	_ = events.LogFeed(events.TypeSessionDeath, ts.SessionID,
 		events.SessionDeathPayload(ts.SessionID, ts.Name, reason, "gt down"))
 
-	// Kill the session
-	if err := t.KillSession(ts.SessionID); err != nil {
+	// Kill the session.
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+	if err := t.KillSessionWithProcesses(ts.SessionID); err != nil {
 		return false, fmt.Errorf("killing %s session: %w", ts.Name, err)
 	}
 

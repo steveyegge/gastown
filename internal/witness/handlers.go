@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -244,6 +245,17 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 		result.Error = fmt.Errorf("polecat %s commit is NOT on main - MERGED signal may be stale, DO NOT NUKE", payload.PolecatName)
 		result.Action = fmt.Sprintf("BLOCKED: %s commit not verified on main, merge may have failed", payload.PolecatName)
 		return result
+	}
+
+	// Redundant convoy observer: check if completed issue is tracked by a convoy.
+	// Run this after verifyCommitOnMain succeeds, regardless of cleanup status.
+	// The work is confirmed merged at this point, so convoys tracking this issue
+	// can potentially close even if polecat cleanup is blocked.
+	if onMain && payload.IssueID != "" {
+		townRoot, _ := workspace.Find(workDir)
+		if townRoot != "" {
+			convoy.CheckConvoysForIssue(townRoot, payload.IssueID, "witness", nil)
+		}
 	}
 
 	// ZFC #10: Check cleanup_status before allowing nuke

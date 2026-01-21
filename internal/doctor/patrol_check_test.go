@@ -75,14 +75,12 @@ func TestPatrolRolesHavePromptsCheck_NoTemplatesDir(t *testing.T) {
 
 	result := check.Run(ctx)
 
-	if result.Status != StatusWarning {
-		t.Errorf("Status = %v, want Warning", result.Status)
+	// Rigs without templates directory use embedded templates - this is OK
+	if result.Status != StatusOK {
+		t.Errorf("Status = %v, want OK (using embedded templates)", result.Status)
 	}
-	if len(check.missingByRig) != 1 {
-		t.Errorf("missingByRig count = %d, want 1", len(check.missingByRig))
-	}
-	if len(check.missingByRig["myproject"]) != 3 {
-		t.Errorf("missing templates for myproject = %d, want 3", len(check.missingByRig["myproject"]))
+	if len(check.missingByRig) != 0 {
+		t.Errorf("missingByRig count = %d, want 0 (rig skipped)", len(check.missingByRig))
 	}
 }
 
@@ -100,8 +98,9 @@ func TestPatrolRolesHavePromptsCheck_SomeTemplatesMissing(t *testing.T) {
 
 	result := check.Run(ctx)
 
-	if result.Status != StatusWarning {
-		t.Errorf("Status = %v, want Warning", result.Status)
+	// Missing templates in custom override dir is OK - embedded templates fill the gap
+	if result.Status != StatusOK {
+		t.Errorf("Status = %v, want OK (embedded templates fill gaps)", result.Status)
 	}
 	if len(check.missingByRig["myproject"]) != 2 {
 		t.Errorf("missing templates = %d, want 2 (witness, refinery)", len(check.missingByRig["myproject"]))
@@ -135,21 +134,25 @@ func TestPatrolRolesHavePromptsCheck_AllTemplatesExist(t *testing.T) {
 func TestPatrolRolesHavePromptsCheck_Fix(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupRigConfig(t, tmpDir, []string{"myproject"})
+	// Create templates dir so rig is checked (not skipped)
+	templatesDir := setupRigTemplatesDir(t, tmpDir, "myproject")
 
 	check := NewPatrolRolesHavePromptsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
-	if result.Status != StatusWarning {
-		t.Fatalf("Initial Status = %v, want Warning", result.Status)
+	// Status is OK (embedded templates fill gaps) but missingByRig is populated
+	if result.Status != StatusOK {
+		t.Fatalf("Initial Status = %v, want OK", result.Status)
+	}
+	if len(check.missingByRig["myproject"]) != 3 {
+		t.Fatalf("missingByRig = %d, want 3", len(check.missingByRig["myproject"]))
 	}
 
 	err := check.Fix(ctx)
 	if err != nil {
 		t.Fatalf("Fix() error = %v", err)
 	}
-
-	templatesDir := filepath.Join(tmpDir, "myproject", "mayor", "rig", "internal", "templates", "roles")
 	for _, tmpl := range requiredRolePrompts {
 		path := filepath.Join(templatesDir, tmpl)
 		info, err := os.Stat(path)
@@ -182,8 +185,9 @@ func TestPatrolRolesHavePromptsCheck_FixPartial(t *testing.T) {
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
-	if result.Status != StatusWarning {
-		t.Fatalf("Initial Status = %v, want Warning", result.Status)
+	// Status is OK (embedded templates fill gaps) but missingByRig is populated
+	if result.Status != StatusOK {
+		t.Fatalf("Initial Status = %v, want OK", result.Status)
 	}
 	if len(check.missingByRig["myproject"]) != 2 {
 		t.Fatalf("missing = %d, want 2", len(check.missingByRig["myproject"]))
@@ -214,6 +218,7 @@ func TestPatrolRolesHavePromptsCheck_MultipleRigs(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupRigConfig(t, tmpDir, []string{"project1", "project2"})
 
+	// project1 has templates dir with all templates
 	templatesDir1 := setupRigTemplatesDir(t, tmpDir, "project1")
 	for _, tmpl := range requiredRolePrompts {
 		if err := os.WriteFile(filepath.Join(templatesDir1, tmpl), []byte("test"), 0644); err != nil {
@@ -221,13 +226,17 @@ func TestPatrolRolesHavePromptsCheck_MultipleRigs(t *testing.T) {
 		}
 	}
 
+	// project2 has templates dir but no files (missing all)
+	setupRigTemplatesDir(t, tmpDir, "project2")
+
 	check := NewPatrolRolesHavePromptsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
 
-	if result.Status != StatusWarning {
-		t.Errorf("Status = %v, want Warning (project2 missing)", result.Status)
+	// Status is OK (embedded templates fill gaps)
+	if result.Status != StatusOK {
+		t.Errorf("Status = %v, want OK", result.Status)
 	}
 	if _, ok := check.missingByRig["project1"]; ok {
 		t.Error("project1 should not be in missingByRig")
@@ -240,17 +249,21 @@ func TestPatrolRolesHavePromptsCheck_MultipleRigs(t *testing.T) {
 func TestPatrolRolesHavePromptsCheck_FixHint(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupRigConfig(t, tmpDir, []string{"myproject"})
+	// Create templates dir so rig is checked (not skipped)
+	setupRigTemplatesDir(t, tmpDir, "myproject")
 
 	check := NewPatrolRolesHavePromptsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
 
-	if result.FixHint == "" {
-		t.Error("FixHint should not be empty for warning status")
+	// Status is now OK (embedded templates are fine), so no FixHint
+	if result.Status != StatusOK {
+		t.Errorf("Status = %v, want OK", result.Status)
 	}
-	if result.FixHint != "Run 'gt doctor --fix' to copy embedded templates to rig repos" {
-		t.Errorf("FixHint = %q, unexpected value", result.FixHint)
+	// FixHint is empty for OK status since nothing is broken
+	if result.FixHint != "" {
+		t.Errorf("FixHint = %q, want empty for OK status", result.FixHint)
 	}
 }
 
@@ -258,6 +271,7 @@ func TestPatrolRolesHavePromptsCheck_FixMultipleRigs(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupRigConfig(t, tmpDir, []string{"project1", "project2", "project3"})
 
+	// project1 has all templates
 	templatesDir1 := setupRigTemplatesDir(t, tmpDir, "project1")
 	for _, tmpl := range requiredRolePrompts {
 		if err := os.WriteFile(filepath.Join(templatesDir1, tmpl), []byte("existing"), 0644); err != nil {
@@ -265,12 +279,17 @@ func TestPatrolRolesHavePromptsCheck_FixMultipleRigs(t *testing.T) {
 		}
 	}
 
+	// project2 and project3 have templates dir but no files
+	setupRigTemplatesDir(t, tmpDir, "project2")
+	setupRigTemplatesDir(t, tmpDir, "project3")
+
 	check := NewPatrolRolesHavePromptsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)
-	if result.Status != StatusWarning {
-		t.Fatalf("Initial Status = %v, want Warning", result.Status)
+	// Status is OK (embedded templates fill gaps) but missingByRig is populated
+	if result.Status != StatusOK {
+		t.Fatalf("Initial Status = %v, want OK", result.Status)
 	}
 	if len(check.missingByRig) != 2 {
 		t.Fatalf("missingByRig count = %d, want 2 (project2, project3)", len(check.missingByRig))
@@ -300,20 +319,17 @@ func TestPatrolRolesHavePromptsCheck_FixMultipleRigs(t *testing.T) {
 func TestPatrolRolesHavePromptsCheck_DetailsFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupRigConfig(t, tmpDir, []string{"myproject"})
+	// Create templates dir so rig is checked (not skipped)
+	setupRigTemplatesDir(t, tmpDir, "myproject")
 
 	check := NewPatrolRolesHavePromptsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
 
-	result := check.Run(ctx)
+	_ = check.Run(ctx)
 
-	if len(result.Details) != 3 {
-		t.Fatalf("Details count = %d, want 3", len(result.Details))
-	}
-
-	for _, detail := range result.Details {
-		if detail[:10] != "myproject:" {
-			t.Errorf("Detail %q should be prefixed with 'myproject:'", detail)
-		}
+	// Status is OK now, but missingByRig should be populated with 3 templates
+	if len(check.missingByRig["myproject"]) != 3 {
+		t.Fatalf("missingByRig count = %d, want 3", len(check.missingByRig["myproject"]))
 	}
 }
 

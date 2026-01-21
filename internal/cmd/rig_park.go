@@ -18,9 +18,9 @@ const RigStatusKey = "status"
 const RigStatusParked = "parked"
 
 var rigParkCmd = &cobra.Command{
-	Use:   "park <rig>",
-	Short: "Park a rig (stops agents, daemon won't auto-restart)",
-	Long: `Park a rig to temporarily disable it.
+	Use:   "park <rig>...",
+	Short: "Park one or more rigs (stops agents, daemon won't auto-restart)",
+	Long: `Park rigs to temporarily disable them.
 
 Parking a rig:
   - Stops the witness if running
@@ -35,15 +35,15 @@ This is a Level 1 (local/ephemeral) operation:
 
 Examples:
   gt rig park gastown
-  gt rig park beads`,
-	Args: cobra.ExactArgs(1),
+  gt rig park beads gastown mayor`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: runRigPark,
 }
 
 var rigUnparkCmd = &cobra.Command{
-	Use:   "unpark <rig>",
-	Short: "Unpark a rig (allow daemon to auto-restart agents)",
-	Long: `Unpark a rig to resume normal operation.
+	Use:   "unpark <rig>...",
+	Short: "Unpark one or more rigs (allow daemon to auto-restart agents)",
+	Long: `Unpark rigs to resume normal operation.
 
 Unparking a rig:
   - Removes the parked status from the wisp layer
@@ -52,8 +52,8 @@ Unparking a rig:
 
 Examples:
   gt rig unpark gastown
-  gt rig unpark beads`,
-	Args: cobra.ExactArgs(1),
+  gt rig unpark beads gastown mayor`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: runRigUnpark,
 }
 
@@ -63,8 +63,25 @@ func init() {
 }
 
 func runRigPark(cmd *cobra.Command, args []string) error {
-	rigName := args[0]
+	var errs []error
 
+	for _, rigName := range args {
+		if err := parkOneRig(rigName); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", rigName, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		for _, err := range errs {
+			fmt.Printf("%s %v\n", style.Error.Render("✗"), err)
+		}
+		return fmt.Errorf("failed to park %d rig(s)", len(errs))
+	}
+
+	return nil
+}
+
+func parkOneRig(rigName string) error {
 	// Get rig and town root
 	townRoot, r, err := getRig(rigName)
 	if err != nil {
@@ -120,8 +137,25 @@ func runRigPark(cmd *cobra.Command, args []string) error {
 }
 
 func runRigUnpark(cmd *cobra.Command, args []string) error {
-	rigName := args[0]
+	var errs []error
 
+	for _, rigName := range args {
+		if err := unparkOneRig(rigName); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", rigName, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		for _, err := range errs {
+			fmt.Printf("%s %v\n", style.Error.Render("✗"), err)
+		}
+		return fmt.Errorf("failed to unpark %d rig(s)", len(errs))
+	}
+
+	return nil
+}
+
+func unparkOneRig(rigName string) error {
 	// Get rig and town root
 	townRoot, _, err := getRig(rigName)
 	if err != nil {

@@ -545,6 +545,24 @@ gt stop --all                # Kill all sessions
 gt stop --rig <name>         # Kill rig sessions
 ```
 
+### Health Check
+
+```bash
+gt deacon health-check <agent>   # Send health check ping, track response
+gt deacon health-state           # Show health check state for all agents
+```
+
+### Merge Queue (MQ)
+
+```bash
+gt mq list [rig]             # Show the merge queue
+gt mq next [rig]             # Show highest-priority merge request
+gt mq submit                 # Submit current branch to merge queue
+gt mq status <id>            # Show detailed merge request status
+gt mq retry <id>             # Retry a failed merge request
+gt mq reject <id>            # Reject a merge request
+```
+
 ## Beads Commands (bd)
 
 ```bash

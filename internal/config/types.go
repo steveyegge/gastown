@@ -2,8 +2,9 @@
 package config
 
 import (
-	"path/filepath"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -56,6 +57,11 @@ type TownSettings struct {
 	// This allows cost optimization by using different models for different roles.
 	// Example: {"mayor": "claude-opus", "witness": "claude-haiku", "polecat": "claude-sonnet"}
 	RoleAgents map[string]string `json:"role_agents,omitempty"`
+
+	// AgentEmailDomain is the domain used for agent git identity emails.
+	// Agent addresses like "gastown/crew/jack" become "gastown.crew.jack@{domain}".
+	// Default: "gastown.local"
+	AgentEmailDomain string `json:"agent_email_domain,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -464,8 +470,33 @@ func defaultRuntimeCommand(provider string) string {
 	case "generic":
 		return ""
 	default:
-		return "claude"
+		return resolveClaudePath()
 	}
+}
+
+// resolveClaudePath finds the claude binary, checking PATH first then common installation locations.
+// This handles the case where claude is installed as an alias (not in PATH) which doesn't work
+// in non-interactive shells spawned by tmux.
+func resolveClaudePath() string {
+	// First, try to find claude in PATH
+	if path, err := exec.LookPath("claude"); err == nil {
+		return path
+	}
+
+	// Check common Claude Code installation locations
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "claude" // Fall back to bare command
+	}
+
+	// Standard Claude Code installation path
+	claudePath := filepath.Join(home, ".claude", "local", "claude")
+	if _, err := os.Stat(claudePath); err == nil {
+		return claudePath
+	}
+
+	// Fall back to bare command (might work if PATH is set differently in tmux)
+	return "claude"
 }
 
 func defaultRuntimeArgs(provider string) []string {
@@ -547,7 +578,8 @@ func defaultProcessNames(provider, command string) []string {
 
 func defaultReadyPromptPrefix(provider string) string {
 	if provider == "claude" {
-		return "> "
+		// Claude Code uses ❯ (U+276F) as the prompt character
+		return "❯ "
 	}
 	return ""
 }
@@ -574,9 +606,15 @@ func defaultInstructionsFile(provider string) string {
 
 // quoteForShell quotes a string for safe shell usage.
 func quoteForShell(s string) string {
-	// Simple quoting: wrap in double quotes, escape internal quotes
+	// Wrap in double quotes, escaping characters that are special in double-quoted strings:
+	// - backslash (escape character)
+	// - double quote (string delimiter)
+	// - backtick (command substitution)
+	// - dollar sign (variable expansion)
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	escaped = strings.ReplaceAll(escaped, "`", "\\`")
+	escaped = strings.ReplaceAll(escaped, "$", `\$`)
 	return `"` + escaped + `"`
 }
 

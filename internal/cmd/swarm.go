@@ -494,7 +494,7 @@ func spawnSwarmWorkersFromBeads(r *rig.Rig, townRoot string, swarmID string, wor
 	t := tmux.NewTmux()
 	polecatSessMgr := polecat.NewSessionManager(t, r)
 	polecatGit := git.NewGit(r.Path)
-	polecatMgr := polecat.NewManager(r, polecatGit)
+	polecatMgr := polecat.NewManager(r, polecatGit, t)
 
 	// Pair workers with tasks (round-robin if more tasks than workers)
 	workerIdx := 0

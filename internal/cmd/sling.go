@@ -6,10 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -146,6 +148,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine mode based on flags and argument types
 	var beadID string
 	var formulaName string
+	attachedMoleculeID := ""
 
 	if slingOnTarget != "" {
 		// Formula-on-bead mode: gt sling <formula> --on <bead>
@@ -253,7 +256,37 @@ func runSling(cmd *cobra.Command, args []string) error {
 			var targetWorkDir string
 			targetAgent, targetPane, targetWorkDir, err = resolveTargetAgent(target)
 			if err != nil {
-				return fmt.Errorf("resolving target: %w", err)
+				// Check if this is a dead polecat (no active session)
+				// If so, spawn a fresh polecat instead of failing
+				if isPolecatTarget(target) {
+					// Extract rig name from polecat target (format: rig/polecats/name)
+					parts := strings.Split(target, "/")
+					if len(parts) >= 3 && parts[1] == "polecats" {
+						rigName := parts[0]
+						fmt.Printf("Target polecat has no active session, spawning fresh polecat in rig '%s'...\n", rigName)
+						spawnOpts := SlingSpawnOptions{
+							Force:    slingForce,
+							Account:  slingAccount,
+							Create:   slingCreate,
+							HookBead: beadID,
+							Agent:    slingAgent,
+						}
+						spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
+						if spawnErr != nil {
+							return fmt.Errorf("spawning polecat to replace dead polecat: %w", spawnErr)
+						}
+						targetAgent = spawnInfo.AgentID()
+						targetPane = spawnInfo.Pane
+						hookWorkDir = spawnInfo.ClonePath
+
+						// Wake witness and refinery to monitor the new polecat
+						wakeRigAgents(rigName)
+					} else {
+						return fmt.Errorf("resolving target: %w", err)
+					}
+				} else {
+					return fmt.Errorf("resolving target: %w", err)
+				}
 			}
 			// Use target's working directory for bd commands (needed for redirect-based routing)
 			if targetWorkDir != "" {
@@ -280,17 +313,63 @@ func runSling(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Slinging %s to %s...\n", style.Bold.Render("🎯"), beadID, targetAgent)
 	}
 
-	// Check if bead is already pinned (guard against accidental re-sling)
+	// Check if bead is already assigned (guard against accidental re-sling)
 	info, err := getBeadInfo(beadID)
 	if err != nil {
 		return fmt.Errorf("checking bead status: %w", err)
 	}
-	if info.Status == "pinned" && !slingForce {
+	if (info.Status == "pinned" || info.Status == "hooked") && !slingForce {
 		assignee := info.Assignee
 		if assignee == "" {
 			assignee = "(unknown)"
 		}
-		return fmt.Errorf("bead %s is already pinned to %s\nUse --force to re-sling", beadID, assignee)
+		return fmt.Errorf("bead %s is already %s to %s\nUse --force to re-sling", beadID, info.Status, assignee)
+	}
+
+	// Handle --force when bead is already hooked: send shutdown to old polecat and unhook
+	if info.Status == "hooked" && slingForce && info.Assignee != "" {
+		fmt.Printf("%s Bead already hooked to %s, forcing reassignment...\n", style.Warning.Render("⚠"), info.Assignee)
+
+		// Determine requester identity from env vars, fall back to "gt-sling"
+		requester := "gt-sling"
+		if polecat := os.Getenv("GT_POLECAT"); polecat != "" {
+			requester = polecat
+		} else if user := os.Getenv("USER"); user != "" {
+			requester = user
+		}
+
+		// Extract rig name from assignee (e.g., "gastown/polecats/Toast" -> "gastown")
+		assigneeParts := strings.Split(info.Assignee, "/")
+		if len(assigneeParts) >= 3 && assigneeParts[1] == "polecats" {
+			oldRigName := assigneeParts[0]
+			oldPolecatName := assigneeParts[2]
+
+			// Send LIFECYCLE:Shutdown to witness - will auto-nuke if clean,
+			// otherwise create cleanup wisp for manual intervention
+			if townRoot != "" {
+				router := mail.NewRouter(townRoot)
+				shutdownMsg := &mail.Message{
+					From:     "gt-sling",
+					To:       fmt.Sprintf("%s/witness", oldRigName),
+					Subject:  fmt.Sprintf("LIFECYCLE:Shutdown %s", oldPolecatName),
+					Body:     fmt.Sprintf("Reason: work_reassigned\nRequestedBy: %s\nBead: %s\nNewAssignee: %s", requester, beadID, targetAgent),
+					Type:     mail.TypeTask,
+					Priority: mail.PriorityHigh,
+				}
+				if err := router.Send(shutdownMsg); err != nil {
+					fmt.Printf("%s Could not send shutdown to witness: %v\n", style.Dim.Render("Warning:"), err)
+				} else {
+					fmt.Printf("%s Sent LIFECYCLE:Shutdown to %s/witness for %s\n", style.Bold.Render("→"), oldRigName, oldPolecatName)
+				}
+			}
+		}
+
+		// Unhook the bead from old owner (set status back to open)
+		unhookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=open", "--assignee=")
+		unhookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, "")
+		if err := unhookCmd.Run(); err != nil {
+			fmt.Printf("%s Could not unhook bead from old owner: %v\n", style.Dim.Render("Warning:"), err)
+		}
 	}
 
 	// Auto-convoy: check if issue is already tracked by a convoy
@@ -343,12 +422,13 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if formulaName != "" {
 		fmt.Printf("  Instantiating formula %s...\n", formulaName)
 
-		// Route bd mutations (cook/wisp/bond) to the correct beads context for the target bead.
+		// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
 		// Some bd mol commands don't support prefix routing, so we must run them from the
 		// rig directory that owns the bead's database.
 		formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 
 		// Step 1: Cook the formula (ensures proto exists)
+		// Cook runs from rig directory to access the correct formula database
 		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
 		cookCmd.Dir = formulaWorkDir
 		cookCmd.Stderr = os.Stderr
@@ -357,11 +437,13 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 
 		// Step 2: Create wisp with feature and issue variables from bead
+		// Run from rig directory so wisp is created in correct database
 		featureVar := fmt.Sprintf("feature=%s", info.Title)
 		issueVar := fmt.Sprintf("issue=%s", beadID)
 		wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar, "--json"}
 		wispCmd := exec.Command("bd", wispArgs...)
 		wispCmd.Dir = formulaWorkDir
+		wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
 		wispCmd.Stderr = os.Stderr
 		wispOut, err := wispCmd.Output()
 		if err != nil {
@@ -400,6 +482,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("%s Formula bonded to %s\n", style.Bold.Render("✓"), beadID)
 
+		// Record attached molecule after other description updates to avoid overwrite.
+		attachedMoleculeID = wispRootID
+
 		// Update beadID to hook the compound root instead of bare bead
 		beadID = wispRootID
 	}
@@ -422,6 +507,17 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)
 	updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
 
+	// Auto-attach mol-polecat-work to polecat agent beads
+	// This ensures polecats have the standard work molecule attached for guidance.
+	// Only do this for bare beads (no --on formula), since formula-on-bead
+	// mode already attaches the formula as a molecule.
+	if formulaName == "" && strings.Contains(targetAgent, "/polecats/") {
+		if err := attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot); err != nil {
+			// Warn but don't fail - polecat will still work without molecule
+			fmt.Printf("%s Could not attach work molecule: %v\n", style.Dim.Render("Warning:"), err)
+		}
+	}
+
 	// Store dispatcher in bead description (enables completion notification to dispatcher)
 	if err := storeDispatcherInBead(beadID, actor); err != nil {
 		// Warn but don't fail - polecat will still complete work
@@ -435,6 +531,15 @@ func runSling(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
 		} else {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Record the attached molecule in the wisp's description.
+	// This is required for gt hook to recognize the molecule attachment.
+	if attachedMoleculeID != "" {
+		if err := storeAttachedMoleculeInBead(beadID, attachedMoleculeID); err != nil {
+			// Warn but don't fail - polecat can still work through steps
+			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
 		}
 	}
 

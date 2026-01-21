@@ -119,6 +119,27 @@ Examples:
 	RunE: runConfigDefaultAgent,
 }
 
+var configAgentEmailDomainCmd = &cobra.Command{
+	Use:   "agent-email-domain [domain]",
+	Short: "Get or set agent email domain",
+	Long: `Get or set the domain used for agent git commit emails.
+
+When agents commit code via 'gt commit', their identity is converted
+to a git email address. For example, "gastown/crew/jack" becomes
+"gastown.crew.jack@{domain}".
+
+With no arguments, shows the current domain.
+With an argument, sets the domain.
+
+Default: gastown.local
+
+Examples:
+  gt config agent-email-domain                 # Show current domain
+  gt config agent-email-domain gastown.local   # Set to gastown.local
+  gt config agent-email-domain example.com     # Set custom domain`,
+	RunE: runConfigAgentEmailDomain,
+}
+
 // Flags
 var (
 	configAgentListJSON bool
@@ -444,6 +465,54 @@ func runConfigDefaultAgent(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runConfigAgentEmailDomain(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Load town settings
+	settingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	if len(args) == 0 {
+		// Show current domain
+		domain := townSettings.AgentEmailDomain
+		if domain == "" {
+			domain = DefaultAgentEmailDomain
+		}
+		fmt.Printf("Agent email domain: %s\n", style.Bold.Render(domain))
+		fmt.Printf("\nExample: gastown/crew/jack → gastown.crew.jack@%s\n", domain)
+		return nil
+	}
+
+	// Set new domain
+	domain := args[0]
+
+	// Basic validation - domain should not be empty and should not start with @
+	if domain == "" {
+		return fmt.Errorf("domain cannot be empty")
+	}
+	if strings.HasPrefix(domain, "@") {
+		return fmt.Errorf("domain should not include @: use '%s' instead", strings.TrimPrefix(domain, "@"))
+	}
+
+	// Set domain
+	townSettings.AgentEmailDomain = domain
+
+	// Save settings
+	if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
+		return fmt.Errorf("saving town settings: %w", err)
+	}
+
+	fmt.Printf("Agent email domain set to '%s'\n", style.Bold.Render(domain))
+	fmt.Printf("\nExample: gastown/crew/jack → gastown.crew.jack@%s\n", domain)
+	return nil
+}
+
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
@@ -462,6 +531,7 @@ func init() {
 	// Add subcommands to config
 	configCmd.AddCommand(configAgentCmd)
 	configCmd.AddCommand(configDefaultAgentCmd)
+	configCmd.AddCommand(configAgentEmailDomainCmd)
 
 	// Register with root
 	rootCmd.AddCommand(configCmd)

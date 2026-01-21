@@ -327,10 +327,18 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		return DefaultRuntimeConfig()
 	}
 
-	return &RuntimeConfig{
+	rc := &RuntimeConfig{
 		Command: info.Command,
 		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
 	}
+
+	// Resolve command path for claude preset (handles alias installations)
+	// Uses resolveClaudePath() from types.go which finds ~/.claude/local/claude
+	if preset == AgentClaude && rc.Command == "claude" {
+		rc.Command = resolveClaudePath()
+	}
+
+	return rc
 }
 
 // BuildResumeCommand builds a command to resume an agent session.

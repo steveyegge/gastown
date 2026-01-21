@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -55,6 +56,9 @@ func runBroadcast(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("listing sessions: %w", err)
 	}
 
+	// Get sender identity to exclude self
+	sender := os.Getenv("BD_ACTOR")
+
 	// Filter to target agents
 	var targets []*AgentSession
 	for _, agent := range agents {
@@ -68,6 +72,11 @@ func runBroadcast(cmd *cobra.Command, args []string) error {
 			if agent.Type != AgentCrew && agent.Type != AgentPolecat {
 				continue
 			}
+		}
+
+		// Skip self to avoid interrupting own session
+		if sender != "" && formatAgentName(agent) == sender {
+			continue
 		}
 
 		targets = append(targets, agent)

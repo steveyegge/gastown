@@ -1,6 +1,9 @@
 package cmd
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // SilentExitError signals that the command should exit with a specific code
 // without printing an error message. This is used for scripting purposes
@@ -19,12 +22,14 @@ func NewSilentExit(code int) *SilentExitError {
 }
 
 // IsSilentExit checks if an error is a SilentExitError and returns its code.
+// Uses errors.As to properly handle wrapped errors.
 // Returns 0 and false if err is nil or not a SilentExitError.
 func IsSilentExit(err error) (int, bool) {
 	if err == nil {
 		return 0, false
 	}
-	if se, ok := err.(*SilentExitError); ok {
+	var se *SilentExitError
+	if errors.As(err, &se) {
 		return se.Code, true
 	}
 	return 0, false

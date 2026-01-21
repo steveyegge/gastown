@@ -71,11 +71,13 @@ Git worktree-based persistent storage for agent work. Survives crashes and resta
 
 ### Convoys 🚚
 
-Work tracking units. Bundle multiple issues/tasks that get assigned to agents.
+Work tracking units. Bundle multiple beads that get assigned to agents.
 
 ### Beads Integration 📿
 
 Git-backed issue tracking system that stores work state as structured data.
+
+**Bead IDs** (also called **issue IDs**) use a prefix + 5-character alphanumeric format (e.g., `gt-abc12`, `hq-x7k2m`). The prefix indicates the item's origin or rig. Commands like `gt sling` and `gt convoy` accept these IDs to reference specific work items. The terms "bead" and "issue" are used interchangeably—beads are the underlying data format, while issues are the work items stored as beads.
 
 > **New to Gas Town?** See the [Glossary](docs/glossary.md) for a complete guide to terminology and concepts.
 
@@ -86,6 +88,7 @@ Git-backed issue tracking system that stores work state as structured data.
 - **Go 1.23+** - [go.dev/dl](https://go.dev/dl/)
 - **Git 2.25+** - for worktree support
 - **beads (bd) 0.44.0+** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads) (required for custom type support)
+- **sqlite3** - for convoy database queries (usually pre-installed on macOS/Linux)
 - **tmux 3.0+** - recommended for full experience
 - **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
 - **Codex CLI** (optional runtime) - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
@@ -116,6 +119,18 @@ gt mayor attach
 
 ## Quick Start Guide
 
+### Getting Started
+Run 
+```shell
+gt install ~/gt --git && 
+cd ~/gt && 
+gt config agent list && 
+gt mayor attach
+```
+and tell the Mayor what you want to build!
+
+---
+
 ### Basic Workflow
 
 ```mermaid
@@ -127,8 +142,8 @@ sequenceDiagram
     participant Hook
 
     You->>Mayor: Tell Mayor what to build
-    Mayor->>Convoy: Create convoy with issues
-    Mayor->>Agent: Sling issue to agent
+    Mayor->>Convoy: Create convoy with beads
+    Mayor->>Agent: Sling bead to agent
     Agent->>Hook: Store work state
     Agent->>Agent: Complete work
     Agent->>Convoy: Report completion
@@ -141,11 +156,11 @@ sequenceDiagram
 # 1. Start the Mayor
 gt mayor attach
 
-# 2. In Mayor session, create a convoy
-gt convoy create "Feature X" issue-123 issue-456 --notify --human
+# 2. In Mayor session, create a convoy with bead IDs
+gt convoy create "Feature X" gt-abc12 gt-def34 --notify --human
 
 # 3. Assign work to an agent
-gt sling issue-123 myproject
+gt sling gt-abc12 myproject
 
 # 4. Track progress
 gt convoy list
@@ -177,7 +192,7 @@ flowchart LR
 gt mayor attach
 
 # In Mayor, create convoy and let it orchestrate
-gt convoy create "Auth System" issue-101 issue-102 --notify
+gt convoy create "Auth System" gt-x7k2m gt-p9n4q --notify
 
 # Track progress
 gt convoy list
@@ -188,8 +203,8 @@ gt convoy list
 Run individual runtime instances manually. Gas Town just tracks state.
 
 ```bash
-gt convoy create "Fix bugs" issue-123  # Create convoy (sling auto-creates if skipped)
-gt sling issue-123 myproject           # Assign to worker
+gt convoy create "Fix bugs" gt-abc12   # Create convoy (sling auto-creates if skipped)
+gt sling gt-abc12 myproject            # Assign to worker
 claude --resume                        # Agent reads mail, runs work (Claude)
 # or: codex                            # Start Codex in the workspace
 gt convoy list                         # Check progress
@@ -263,11 +278,11 @@ bd mol pour release --var version=1.2.0
 # Create convoy manually
 gt convoy create "Bug Fixes" --human
 
-# Add issues
-gt convoy add-issue bug-101 bug-102
+# Add issues to existing convoy
+gt convoy add hq-cv-abc gt-m3k9p gt-w5t2x
 
 # Assign to specific agents
-gt sling bug-101 myproject/my-agent
+gt sling gt-m3k9p myproject/my-agent
 
 # Check status
 gt convoy show
@@ -312,8 +327,8 @@ gt crew add <name> --rig <rig>  # Create crew workspace
 
 ```bash
 gt agents                   # List active agents
-gt sling <issue> <rig>      # Assign work to agent
-gt sling <issue> <rig> --agent cursor   # Override runtime for this sling/spawn
+gt sling <bead-id> <rig>    # Assign work to agent
+gt sling <bead-id> <rig> --agent cursor   # Override runtime for this sling/spawn
 gt mayor attach             # Start Mayor session
 gt mayor start --agent auggie           # Run Mayor with a specific agent alias
 gt prime                    # Context recovery (run inside existing session)
@@ -324,10 +339,10 @@ gt prime                    # Context recovery (run inside existing session)
 ### Convoy (Work Tracking)
 
 ```bash
-gt convoy create <name> [issues...] # Create convoy
+gt convoy create <name> [issues...]   # Create convoy with issues
 gt convoy list              # List all convoys
 gt convoy show [id]         # Show convoy details
-gt convoy add-issue <issue> # Add issue to convoy
+gt convoy add <convoy-id> <issue-id...>  # Add issues to convoy
 ```
 
 ### Configuration
@@ -406,9 +421,9 @@ MEOW is the recommended pattern:
 
 1. **Tell the Mayor** - Describe what you want
 2. **Mayor analyzes** - Breaks down into tasks
-3. **Convoy creation** - Mayor creates convoy with issues
+3. **Convoy creation** - Mayor creates convoy with beads
 4. **Agent spawning** - Mayor spawns appropriate agents
-5. **Work distribution** - Issues slung to agents via hooks
+5. **Work distribution** - Beads slung to agents via hooks
 6. **Progress monitoring** - Track through convoy status
 7. **Completion** - Mayor summarizes results
 
@@ -475,7 +490,3 @@ gt mayor attach
 ## License
 
 MIT License - see LICENSE file for details
-
----
-
-**Getting Started:** Run `gt install ~/gt --git && cd ~/gt && gt config agent list && gt mayor attach` (or `gt mayor attach --agent codex`) and tell the Mayor what you want to build!

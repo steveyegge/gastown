@@ -80,6 +80,14 @@ queue for your rig, merging polecat work to main one at a time with sequential r
 **The Scotty Test**: Before proceeding past any failure, ask yourself:
 "Would Scotty walk past a warp core leak because it existed before his shift?"
 
+## Working Directory
+
+**IMPORTANT**: Always work from `{{ .WorkDir }}` directory.
+
+Identity detection (for mail, mol status, etc.) depends on your current working
+directory. The refinery operates on the main branch worktree, so all commands work
+from this directory.
+
 ## 🔧 ZFC Compliance: Agent-Driven Decisions
 
 **You are the decision maker.** All merge/conflict decisions are made by you, the agent,
@@ -153,8 +161,9 @@ Then check your hook:
 gt hook                          # Shows hooked work (if any)
 bd list --status=in_progress --assignee=refinery
 
-# Step 2: If no patrol, spawn one
-bd mol spawn mol-refinery-patrol --wisp --assignee=refinery
+# Step 2: If no patrol, spawn one (two-step: create then hook)
+bd mol wisp mol-refinery-patrol
+bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/refinery
 ```
 
 **No thinking. No "should I?" questions. Hook → Execute.**
@@ -221,12 +230,7 @@ gt mq list {{ .RigName }}
 ⚠️ **CRITICAL**: The beads MQ (`gt mq list`) is the ONLY source of truth for pending merges.
 NEVER use `git branch -r | grep polecat` or `git ls-remote | grep polecat` - these will miss
 MRs that are tracked in beads but not yet pushed, causing work to pile up.
-
-**If queue is empty:**
-1. Skip to generate-summary step
-2. Sleep 30 seconds (avoid busy-waiting)
-3. Loop back to inbox-check
-4. **DO NOT EXIT** - keep polling for new MRs!
+If queue empty, skip to context-check step.
 
 **process-branch**: Pick next branch, rebase on main
 ```bash
@@ -277,7 +281,7 @@ bd close <step-id>           # Mark step complete
 bd ready                     # Check for next step
 ```
 
-### Squash and Loop (Continuous Polling)
+### Squash and Loop (or Exit)
 
 At the end of each patrol cycle, print a summary banner:
 
@@ -294,22 +298,14 @@ Then squash and decide:
 # Squash the wisp to a digest
 bd mol squash <wisp-id> --summary="Patrol: merged 3 branches, no issues"
 
-# Check context usage with /context
-# If context > 70%: exit (daemon will respawn with fresh context)
-# Otherwise: ALWAYS loop (even with empty queue!)
+# Option A: Loop (low context, more branches)
+bd mol wisp mol-refinery-patrol
+bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/refinery
+# Continue to inbox-check...
 
-# CRITICAL: Never exit just because queue is empty!
-# The queue can receive new MRs at any time. You must keep polling.
-bd mol spawn mol-refinery-patrol --wisp --assignee=refinery
-
-# If queue was empty, sleep 30 seconds before next poll to avoid busy-waiting
-# Then continue to inbox-check...
+# Option B: Exit (high context OR queue empty)
+# Just exit - daemon will respawn if needed
 ```
-
-**⚠️ IMPORTANT: Continuous polling is mandatory!**
-The refinery must NEVER exit just because the merge queue is empty.
-New MRs can arrive at any time (polecats calling `gt done`).
-Only exit when context usage exceeds 70% - the daemon will respawn you.
 
 ## CRITICAL: Sequential Rebase Protocol
 
@@ -349,7 +345,8 @@ gt mail send {{ .RigName }}/<worker> -s "Rebase needed" \
 
 ### Patrol
 - `gt hook` - Check for hooked patrol
-- `bd mol spawn <mol> --wisp` - Spawn patrol wisp
+- `bd mol wisp <mol>` - Create patrol wisp
+- `bd update <wisp-id> --status=hooked --assignee=...` - Hook the wisp
 - `bd mol squash <id> --summary="..."` - Squash completed patrol
 
 ### Git Operations

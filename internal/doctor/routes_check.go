@@ -75,6 +75,7 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 
 	var details []string
 	var missingTownRoute bool
+	var missingConvoyRoute bool
 
 	// Check town root route exists (hq- -> .)
 	if _, hasTownRoute := routeByPrefix["hq-"]; !hasTownRoute {
@@ -82,16 +83,22 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 		details = append(details, "Town root route (hq- -> .) is missing")
 	}
 
+	// Check convoy route exists (hq-cv- -> .)
+	if _, hasConvoyRoute := routeByPrefix["hq-cv-"]; !hasConvoyRoute {
+		missingConvoyRoute = true
+		details = append(details, "Convoy route (hq-cv- -> .) is missing")
+	}
+
 	// Load rigs registry
 	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
 	rigsConfig, err := config.LoadRigsConfig(rigsPath)
 	if err != nil {
-		// No rigs config - check for missing town route and validate existing routes
-		if missingTownRoute {
+		// No rigs config - check for missing town/convoy routes and validate existing routes
+		if missingTownRoute || missingConvoyRoute {
 			return &CheckResult{
 				Name:    c.Name(),
 				Status:  StatusWarning,
-				Message: "Town root route is missing",
+				Message: "Required town routes are missing",
 				Details: details,
 				FixHint: "Run 'gt doctor --fix' to add missing routes",
 			}
@@ -155,12 +162,15 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Determine result
-	if missingTownRoute || len(missingRigs) > 0 || len(invalidRoutes) > 0 {
+	if missingTownRoute || missingConvoyRoute || len(missingRigs) > 0 || len(invalidRoutes) > 0 {
 		status := StatusWarning
 		var messageParts []string
 
 		if missingTownRoute {
 			messageParts = append(messageParts, "town root route missing")
+		}
+		if missingConvoyRoute {
+			messageParts = append(messageParts, "convoy route missing")
 		}
 		if len(missingRigs) > 0 {
 			messageParts = append(messageParts, fmt.Sprintf("%d rig(s) missing routes", len(missingRigs)))
@@ -246,6 +256,14 @@ func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 	if !routeMap["hq-"] {
 		routes = append(routes, beads.Route{Prefix: "hq-", Path: "."})
 		routeMap["hq-"] = true
+		modified = true
+	}
+
+	// Ensure convoy route exists (hq-cv- -> .)
+	// Convoys use hq-cv-* IDs for visual distinction from other town beads
+	if !routeMap["hq-cv-"] {
+		routes = append(routes, beads.Route{Prefix: "hq-cv-", Path: "."})
+		routeMap["hq-cv-"] = true
 		modified = true
 	}
 

@@ -184,10 +184,9 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 
 	// Track per-rig status for LED indicators and sorting
 	type rigStatus struct {
-		hasWitness   bool
-		hasRefinery  bool
-		polecatCount int
-		opState      string // "OPERATIONAL", "PARKED", or "DOCKED"
+		hasWitness  bool
+		hasRefinery bool
+		opState     string // "OPERATIONAL", "PARKED", or "DOCKED"
 	}
 	rigStatuses := make(map[string]*rigStatus)
 
@@ -202,10 +201,8 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		working int
 	}
 	healthByType := map[AgentType]*agentHealth{
-		AgentPolecat:  {},
 		AgentWitness:  {},
 		AgentRefinery: {},
-		AgentDeacon:   {},
 	}
 
 	// Single pass: track rig status AND agent health
@@ -215,7 +212,8 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 			continue
 		}
 
-		// Track rig-level status (witness/refinery/polecat presence)
+		// Track rig-level status (witness/refinery presence)
+		// Polecats are not tracked in tmux - they're a GC concern, not a display concern
 		if agent.Rig != "" && registeredRigs[agent.Rig] {
 			if rigStatuses[agent.Rig] == nil {
 				rigStatuses[agent.Rig] = &rigStatus{}
@@ -225,8 +223,6 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 				rigStatuses[agent.Rig].hasWitness = true
 			case AgentRefinery:
 				rigStatuses[agent.Rig].hasRefinery = true
-			case AgentPolecat:
-				rigStatuses[agent.Rig].polecatCount++
 			}
 		}
 
@@ -254,9 +250,10 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	var parts []string
 
 	// Add per-agent-type health in consistent order
-	// Format: "1/10 😺" = 1 working out of 10 total
+	// Format: "1/3 👁️" = 1 working out of 3 total
 	// Only show agent types that have sessions
-	agentOrder := []AgentType{AgentPolecat, AgentWitness, AgentRefinery, AgentDeacon}
+	// Note: Polecats and Deacon excluded - idle state display is misleading noise
+	agentOrder := []AgentType{AgentWitness, AgentRefinery}
 	var agentParts []string
 	for _, agentType := range agentOrder {
 		health := healthByType[agentType]
@@ -287,7 +284,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		rigs = append(rigs, rigInfo{name: rigName, status: status})
 	}
 
-	// Sort by: 1) running state, 2) polecat count (desc), 3) operational state, 4) alphabetical
+	// Sort by: 1) running state, 2) operational state, 3) alphabetical
 	sort.Slice(rigs, func(i, j int) bool {
 		isRunningI := rigs[i].status.hasWitness || rigs[i].status.hasRefinery
 		isRunningJ := rigs[j].status.hasWitness || rigs[j].status.hasRefinery
@@ -297,12 +294,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 			return isRunningI
 		}
 
-		// Secondary sort: polecat count (descending)
-		if rigs[i].status.polecatCount != rigs[j].status.polecatCount {
-			return rigs[i].status.polecatCount > rigs[j].status.polecatCount
-		}
-
-		// Tertiary sort: operational state (for non-running rigs: OPERATIONAL < PARKED < DOCKED)
+		// Secondary sort: operational state (for non-running rigs: OPERATIONAL < PARKED < DOCKED)
 		stateOrder := map[string]int{"OPERATIONAL": 0, "PARKED": 1, "DOCKED": 2}
 		stateI := stateOrder[rigs[i].status.opState]
 		stateJ := stateOrder[rigs[j].status.opState]
@@ -310,7 +302,7 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 			return stateI < stateJ
 		}
 
-		// Quaternary sort: alphabetical
+		// Tertiary sort: alphabetical
 		return rigs[i].name < rigs[j].name
 	})
 
@@ -352,17 +344,12 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 			}
 		}
 
-		// Show polecat count if > 0
 		// All icons get 1 space, Park gets 2
 		space := " "
 		if led == "🅿️" {
 			space = "  "
 		}
-		display := led + space + rig.name
-		if status.polecatCount > 0 {
-			display += fmt.Sprintf("(%d)", status.polecatCount)
-		}
-		rigParts = append(rigParts, display)
+		rigParts = append(rigParts, led+space+rig.name)
 	}
 
 	if len(rigParts) > 0 {
@@ -421,7 +408,6 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 	}
 
 	rigs := make(map[string]bool)
-	polecatCount := 0
 	for _, s := range sessions {
 		agent := categorizeSession(s)
 		if agent == nil {
@@ -431,16 +417,13 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 		if agent.Rig != "" && registeredRigs[agent.Rig] {
 			rigs[agent.Rig] = true
 		}
-		if agent.Type == AgentPolecat && registeredRigs[agent.Rig] {
-			polecatCount++
-		}
 	}
 	rigCount := len(rigs)
 
 	// Build status
+	// Note: Polecats excluded - they're ephemeral and idle detection is a GC concern
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%d rigs", rigCount))
-	parts = append(parts, fmt.Sprintf("%d 😺", polecatCount))
 
 	// Priority 1: Check for hooked work (town beads for deacon)
 	hookedWork := ""
@@ -466,7 +449,8 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 }
 
 // runWitnessStatusLine outputs status for a witness session.
-// Shows: polecat count, crew count, hook or mail preview
+// Shows: crew count, hook or mail preview
+// Note: Polecats excluded - they're ephemeral and idle detection is a GC concern
 func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 	if rigName == "" {
 		// Try to extract from session name: gt-<rig>-witness
@@ -483,25 +467,20 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 		townRoot, _ = workspace.Find(paneDir)
 	}
 
-	// Count polecats and crew in this rig
+	// Count crew in this rig (crew are persistent, worth tracking)
 	sessions, err := t.ListSessions()
 	if err != nil {
 		return nil // Silent fail
 	}
 
-	polecatCount := 0
 	crewCount := 0
 	for _, s := range sessions {
 		agent := categorizeSession(s)
 		if agent == nil {
 			continue
 		}
-		if agent.Rig == rigName {
-			if agent.Type == AgentPolecat {
-				polecatCount++
-			} else if agent.Type == AgentCrew {
-				crewCount++
-			}
+		if agent.Rig == rigName && agent.Type == AgentCrew {
+			crewCount++
 		}
 	}
 
@@ -509,7 +488,6 @@ func runWitnessStatusLine(t *tmux.Tmux, rigName string) error {
 
 	// Build status
 	var parts []string
-	parts = append(parts, fmt.Sprintf("%d 😺", polecatCount))
 	if crewCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d crew", crewCount))
 	}

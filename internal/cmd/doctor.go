@@ -118,6 +118,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Register built-in checks
 	d.Register(doctor.NewStaleBinaryCheck())
+	d.Register(doctor.NewSqlite3Check())
 	d.Register(doctor.NewTownGitCheck())
 	d.Register(doctor.NewTownRootBranchCheck())
 	d.Register(doctor.NewPreCheckoutHookCheck())
@@ -133,9 +134,12 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewPrefixMismatchCheck())
 	d.Register(doctor.NewRoutesCheck())
 	d.Register(doctor.NewRigRoutesJSONLCheck())
+	d.Register(doctor.NewRoutingModeCheck())
 	d.Register(doctor.NewOrphanSessionCheck())
+	d.Register(doctor.NewZombieSessionCheck())
 	d.Register(doctor.NewOrphanProcessCheck())
 	d.Register(doctor.NewWispGCCheck())
+	d.Register(doctor.NewCheckMisclassifiedWisps())
 	d.Register(doctor.NewBranchCheck())
 	d.Register(doctor.NewBeadsSyncOrphanCheck())
 	d.Register(doctor.NewCloneDivergenceCheck())

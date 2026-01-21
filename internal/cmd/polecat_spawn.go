@@ -64,9 +64,10 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		return nil, fmt.Errorf("rig '%s' not found", rigName)
 	}
 
-	// Get polecat manager
+	// Get polecat manager (with tmux for session-aware allocation)
 	polecatGit := git.NewGit(r.Path)
-	polecatMgr := polecat.NewManager(r, polecatGit)
+	t := tmux.NewTmux()
+	polecatMgr := polecat.NewManager(r, polecatGit, t)
 
 	// Allocate a new polecat name
 	polecatName, err := polecatMgr.AllocateName()
@@ -124,8 +125,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
 
-	// Start session
-	t := tmux.NewTmux()
+	// Start session (reuse tmux from manager)
 	polecatSessMgr := polecat.NewSessionManager(t, r)
 
 	// Check if already running

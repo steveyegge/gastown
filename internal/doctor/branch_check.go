@@ -527,12 +527,7 @@ func (c *CloneDivergenceCheck) getCloneInfo(path string) (cloneInfo, error) {
 	}
 	info.headSHA = strings.TrimSpace(string(out))
 
-	// Fetch to make sure we have latest refs (silent, ignore errors)
-	cmd = exec.Command("git", "fetch", "--quiet")
-	cmd.Dir = path
-	_ = cmd.Run()
-
-	// Count commits behind origin/main
+	// Count commits behind origin/main (uses existing refs, may be stale)
 	cmd = exec.Command("git", "rev-list", "--count", "HEAD..origin/main")
 	cmd.Dir = path
 	out, err = cmd.Output()

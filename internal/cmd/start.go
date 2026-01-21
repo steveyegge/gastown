@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -29,18 +30,20 @@ import (
 )
 
 var (
-	startAll               bool
-	startAgentOverride     string
-	startCrewRig           string
-	startCrewAccount       string
-	startCrewAgentOverride string
-	shutdownGraceful       bool
-	shutdownWait           int
-	shutdownAll            bool
-	shutdownForce          bool
-	shutdownYes            bool
-	shutdownPolecatsOnly   bool
-	shutdownNuclear        bool
+	startAll                    bool
+	startAgentOverride          string
+	startCrewRig                string
+	startCrewAccount            string
+	startCrewAgentOverride      string
+	shutdownGraceful            bool
+	shutdownWait                int
+	shutdownAll                 bool
+	shutdownForce               bool
+	shutdownYes                 bool
+	shutdownPolecatsOnly        bool
+	shutdownNuclear             bool
+	shutdownCleanupOrphans      bool
+	shutdownCleanupOrphansGrace int
 )
 
 var startCmd = &cobra.Command{
@@ -89,7 +92,9 @@ Shutdown levels (progressively more aggressive):
 
 Use --force or --yes to skip confirmation prompt.
 Use --graceful to allow agents time to save state before killing.
-Use --nuclear to force cleanup even if polecats have uncommitted work (DANGER).`,
+Use --nuclear to force cleanup even if polecats have uncommitted work (DANGER).
+Use --cleanup-orphans to kill orphaned Claude processes (TTY-less, older than 60s).
+Use --cleanup-orphans-grace-secs to set the grace period (default 60s).`,
 	RunE: runShutdown,
 }
 
@@ -136,6 +141,10 @@ func init() {
 		"Only stop polecats (minimal shutdown)")
 	shutdownCmd.Flags().BoolVar(&shutdownNuclear, "nuclear", false,
 		"Force cleanup even if polecats have uncommitted work (DANGER: may lose work)")
+	shutdownCmd.Flags().BoolVar(&shutdownCleanupOrphans, "cleanup-orphans", false,
+		"Clean up orphaned Claude processes (TTY-less processes older than 60s)")
+	shutdownCmd.Flags().IntVar(&shutdownCleanupOrphansGrace, "cleanup-orphans-grace-secs", 60,
+		"Grace period in seconds between SIGTERM and SIGKILL when cleaning orphans (default 60)")
 
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(shutdownCmd)
@@ -169,6 +178,13 @@ func runStart(cmd *cobra.Command, args []string) error {
 	fmt.Println("Starting all agents in parallel...")
 	fmt.Println()
 
+	// Discover rigs once upfront to avoid redundant calls from parallel goroutines
+	rigs, rigsErr := discoverAllRigs(townRoot)
+	if rigsErr != nil {
+		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), rigsErr)
+		// Continue anyway - core agents don't need rigs
+	}
+
 	// Start all agent groups in parallel for maximum speed
 	var wg sync.WaitGroup
 	var mu sync.Mutex // Protects stdout
@@ -178,7 +194,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := startCoreAgentsParallel(townRoot, startAgentOverride, &mu); err != nil {
+		if err := startCoreAgents(townRoot, startAgentOverride, &mu); err != nil {
 			mu.Lock()
 			coreErr = err
 			mu.Unlock()
@@ -186,20 +202,22 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Start rig agents (witnesses, refineries) if --all
-	if startAll {
+	if startAll && rigs != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			startRigAgentsParallel(t, townRoot, &mu)
+			startRigAgents(rigs, &mu)
 		}()
 	}
 
 	// Start configured crew
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		startConfiguredCrewParallel(t, townRoot, &mu)
-	}()
+	if rigs != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startConfiguredCrew(t, rigs, townRoot, &mu)
+		}()
+	}
 
 	wg.Wait()
 
@@ -217,9 +235,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// startCoreAgentsParallel starts Mayor and Deacon sessions in parallel using the Manager pattern.
+// startCoreAgents starts Mayor and Deacon sessions in parallel using the Manager pattern.
 // The mutex is used to synchronize output with other parallel startup operations.
-func startCoreAgentsParallel(townRoot string, agentOverride string, mu *sync.Mutex) error {
+func startCoreAgents(townRoot string, agentOverride string, mu *sync.Mutex) error {
 	var wg sync.WaitGroup
 	var firstErr error
 	var errMu sync.Mutex
@@ -230,7 +248,7 @@ func startCoreAgentsParallel(townRoot string, agentOverride string, mu *sync.Mut
 		defer wg.Done()
 		mayorMgr := mayor.NewManager(townRoot)
 		if err := mayorMgr.Start(agentOverride); err != nil {
-			if err == mayor.ErrAlreadyRunning {
+			if errors.Is(err, mayor.ErrAlreadyRunning) {
 				mu.Lock()
 				fmt.Printf("  %s Mayor already running\n", style.Dim.Render("○"))
 				mu.Unlock()
@@ -257,7 +275,7 @@ func startCoreAgentsParallel(townRoot string, agentOverride string, mu *sync.Mut
 		defer wg.Done()
 		deaconMgr := deacon.NewManager(townRoot)
 		if err := deaconMgr.Start(agentOverride); err != nil {
-			if err == deacon.ErrAlreadyRunning {
+			if errors.Is(err, deacon.ErrAlreadyRunning) {
 				mu.Lock()
 				fmt.Printf("  %s Deacon already running\n", style.Dim.Render("○"))
 				mu.Unlock()
@@ -284,15 +302,8 @@ func startCoreAgentsParallel(townRoot string, agentOverride string, mu *sync.Mut
 
 // startRigAgents starts witness and refinery for all rigs in parallel.
 // Called when --all flag is passed to gt start.
-func startRigAgents(t *tmux.Tmux, townRoot string) {
-	rigs, err := discoverAllRigs(townRoot)
-	if err != nil {
-		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), err)
-		return
-	}
-
+func startRigAgents(rigs []*rig.Rig, mu *sync.Mutex) {
 	var wg sync.WaitGroup
-	var mu sync.Mutex // Protects stdout
 
 	for _, r := range rigs {
 		wg.Add(2) // Witness + Refinery
@@ -300,7 +311,7 @@ func startRigAgents(t *tmux.Tmux, townRoot string) {
 		// Start Witness in goroutine
 		go func(r *rig.Rig) {
 			defer wg.Done()
-			msg := startWitnessForRig(t, r)
+			msg := startWitnessForRig(r)
 			mu.Lock()
 			fmt.Print(msg)
 			mu.Unlock()
@@ -320,16 +331,10 @@ func startRigAgents(t *tmux.Tmux, townRoot string) {
 }
 
 // startWitnessForRig starts the witness for a single rig and returns a status message.
-func startWitnessForRig(t *tmux.Tmux, r *rig.Rig) string {
-	witnessSession := fmt.Sprintf("gt-%s-witness", r.Name)
-	witnessRunning, _ := t.HasSession(witnessSession)
-	if witnessRunning {
-		return fmt.Sprintf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
-	}
-
+func startWitnessForRig(r *rig.Rig) string {
 	witMgr := witness.NewManager(r)
 	if err := witMgr.Start(false, "", nil); err != nil {
-		if err == witness.ErrAlreadyRunning {
+		if errors.Is(err, witness.ErrAlreadyRunning) {
 			return fmt.Sprintf("  %s %s witness already running\n", style.Dim.Render("○"), r.Name)
 		}
 		return fmt.Sprintf("  %s %s witness failed: %v\n", style.Dim.Render("○"), r.Name, err)
@@ -340,7 +345,7 @@ func startWitnessForRig(t *tmux.Tmux, r *rig.Rig) string {
 // startRefineryForRig starts the refinery for a single rig and returns a status message.
 func startRefineryForRig(r *rig.Rig) string {
 	refineryMgr := refinery.NewManager(r)
-	if err := refineryMgr.Start(false); err != nil {
+	if err := refineryMgr.Start(false, ""); err != nil {
 		if errors.Is(err, refinery.ErrAlreadyRunning) {
 			return fmt.Sprintf("  %s %s refinery already running\n", style.Dim.Render("○"), r.Name)
 		}
@@ -350,93 +355,9 @@ func startRefineryForRig(r *rig.Rig) string {
 }
 
 // startConfiguredCrew starts crew members configured in rig settings in parallel.
-func startConfiguredCrew(t *tmux.Tmux, townRoot string) {
-	rigs, err := discoverAllRigs(townRoot)
-	if err != nil {
-		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), err)
-		return
-	}
-
+func startConfiguredCrew(t *tmux.Tmux, rigs []*rig.Rig, townRoot string, mu *sync.Mutex) {
 	var wg sync.WaitGroup
-	var mu sync.Mutex // Protects stdout and startedAny
-	startedAny := false
-
-	for _, r := range rigs {
-		crewToStart := getCrewToStart(r)
-		for _, crewName := range crewToStart {
-			wg.Add(1)
-			go func(r *rig.Rig, crewName string) {
-				defer wg.Done()
-				msg, started := startOrRestartCrewMember(t, r, crewName, townRoot)
-				mu.Lock()
-				fmt.Print(msg)
-				if started {
-					startedAny = true
-				}
-				mu.Unlock()
-			}(r, crewName)
-		}
-	}
-
-	wg.Wait()
-
-	if !startedAny {
-		fmt.Printf("  %s No crew configured or all already running\n", style.Dim.Render("○"))
-	}
-}
-
-// startRigAgentsParallel starts witness and refinery for all rigs in parallel.
-// Uses the provided mutex for synchronized output with other parallel operations.
-func startRigAgentsParallel(t *tmux.Tmux, townRoot string, mu *sync.Mutex) {
-	rigs, err := discoverAllRigs(townRoot)
-	if err != nil {
-		mu.Lock()
-		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), err)
-		mu.Unlock()
-		return
-	}
-
-	var wg sync.WaitGroup
-
-	for _, r := range rigs {
-		wg.Add(2) // Witness + Refinery
-
-		// Start Witness in goroutine
-		go func(r *rig.Rig) {
-			defer wg.Done()
-			msg := startWitnessForRig(t, r)
-			mu.Lock()
-			fmt.Print(msg)
-			mu.Unlock()
-		}(r)
-
-		// Start Refinery in goroutine
-		go func(r *rig.Rig) {
-			defer wg.Done()
-			msg := startRefineryForRig(r)
-			mu.Lock()
-			fmt.Print(msg)
-			mu.Unlock()
-		}(r)
-	}
-
-	wg.Wait()
-}
-
-// startConfiguredCrewParallel starts crew members configured in rig settings in parallel.
-// Uses the provided mutex for synchronized output with other parallel operations.
-func startConfiguredCrewParallel(t *tmux.Tmux, townRoot string, mu *sync.Mutex) {
-	rigs, err := discoverAllRigs(townRoot)
-	if err != nil {
-		mu.Lock()
-		fmt.Printf("  %s Could not discover rigs: %v\n", style.Dim.Render("○"), err)
-		mu.Unlock()
-		return
-	}
-
-	var wg sync.WaitGroup
-	startedAny := false
-	var startedMu sync.Mutex // Protects startedAny
+	var startedAny int32 // Use atomic for thread-safe flag
 
 	for _, r := range rigs {
 		crewToStart := getCrewToStart(r)
@@ -449,9 +370,7 @@ func startConfiguredCrewParallel(t *tmux.Tmux, townRoot string, mu *sync.Mutex) 
 				fmt.Print(msg)
 				mu.Unlock()
 				if started {
-					startedMu.Lock()
-					startedAny = true
-					startedMu.Unlock()
+					atomic.StoreInt32(&startedAny, 1)
 				}
 			}(r, crewName)
 		}
@@ -459,7 +378,7 @@ func startConfiguredCrewParallel(t *tmux.Tmux, townRoot string, mu *sync.Mutex) 
 
 	wg.Wait()
 
-	if !startedAny {
+	if atomic.LoadInt32(&startedAny) == 0 {
 		mu.Lock()
 		fmt.Printf("  %s No crew configured or all already running\n", style.Dim.Render("○"))
 		mu.Unlock()
@@ -470,10 +389,10 @@ func startConfiguredCrewParallel(t *tmux.Tmux, townRoot string, mu *sync.Mutex) 
 func startOrRestartCrewMember(t *tmux.Tmux, r *rig.Rig, crewName, townRoot string) (msg string, started bool) {
 	sessionID := crewSessionName(r.Name, crewName)
 	if running, _ := t.HasSession(sessionID); running {
-		// Session exists - check if Claude is still running
-		agentCfg := config.ResolveAgentConfig(townRoot, r.Path)
+		// Session exists - check if agent is still running
+		agentCfg := config.ResolveRoleAgentConfig(constants.RoleCrew, townRoot, r.Path)
 		if !t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
-			// Claude has exited, restart it
+			// Agent has exited, restart it
 			// Build startup beacon for predecessor discovery via /resume
 			address := fmt.Sprintf("%s/crew/%s", r.Name, crewName)
 			beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
@@ -481,11 +400,11 @@ func startOrRestartCrewMember(t *tmux.Tmux, r *rig.Rig, crewName, townRoot strin
 				Sender:    "human",
 				Topic:     "restart",
 			})
-			claudeCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, beacon)
-			if err := t.SendKeys(sessionID, claudeCmd); err != nil {
+			agentCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, beacon)
+			if err := t.SendKeys(sessionID, agentCmd); err != nil {
 				return fmt.Sprintf("  %s %s/%s restart failed: %v\n", style.Dim.Render("○"), r.Name, crewName, err), false
 			}
-			return fmt.Sprintf("  %s %s/%s Claude restarted\n", style.Bold.Render("✓"), r.Name, crewName), true
+			return fmt.Sprintf("  %s %s/%s agent restarted\n", style.Bold.Render("✓"), r.Name, crewName), true
 		}
 		return fmt.Sprintf("  %s %s/%s already running\n", style.Dim.Render("○"), r.Name, crewName), false
 	}
@@ -529,6 +448,14 @@ func runShutdown(cmd *cobra.Command, args []string) error {
 
 	if len(toStop) == 0 {
 		fmt.Printf("%s Gas Town was not running\n", style.Dim.Render("○"))
+
+		// Still check for orphaned daemons even if no sessions are running
+		if townRoot != "" {
+			fmt.Println()
+			fmt.Println("Checking for orphaned daemon...")
+			stopDaemonIfRunning(townRoot)
+		}
+
 		return nil
 	}
 
@@ -652,14 +579,20 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 	deaconSession := getDeaconSessionName()
 	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
 
-	// Phase 5: Cleanup polecat worktrees and branches
-	fmt.Printf("\nPhase 5: Cleaning up polecats...\n")
+	// Phase 5: Cleanup orphaned Claude processes if requested
+	if shutdownCleanupOrphans {
+		fmt.Printf("\nPhase 5: Cleaning up orphaned Claude processes...\n")
+		cleanupOrphanedClaude(shutdownCleanupOrphansGrace)
+	}
+
+	// Phase 6: Cleanup polecat worktrees and branches
+	fmt.Printf("\nPhase 6: Cleaning up polecats...\n")
 	if townRoot != "" {
 		cleanupPolecats(townRoot)
 	}
 
-	// Phase 6: Stop the daemon
-	fmt.Printf("\nPhase 6: Stopping daemon...\n")
+	// Phase 7: Stop the daemon
+	fmt.Printf("\nPhase 7: Stopping daemon...\n")
 	if townRoot != "" {
 		stopDaemonIfRunning(townRoot)
 	}
@@ -675,6 +608,13 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
 	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
+
+	// Cleanup orphaned Claude processes if requested
+	if shutdownCleanupOrphans {
+		fmt.Println()
+		fmt.Println("Cleaning up orphaned Claude processes...")
+		cleanupOrphanedClaude(shutdownCleanupOrphansGrace)
+	}
 
 	// Cleanup polecat worktrees and branches
 	if townRoot != "" {
@@ -701,6 +641,9 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 // 2. Everything except Mayor
 // 3. Mayor last
 // mayorSession and deaconSession are the dynamic session names for the current town.
+//
+// Returns the count of sessions that were successfully stopped (verified by checking
+// if the session no longer exists after the kill attempt).
 func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSession string) int {
 	stopped := 0
 
@@ -714,10 +657,31 @@ func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSe
 		return false
 	}
 
+	// Helper to kill a session and verify it was stopped
+	killAndVerify := func(sess string) bool {
+		// Check if session exists before attempting to kill
+		exists, _ := t.HasSession(sess)
+		if !exists {
+			return false // Session already gone
+		}
+
+		// Attempt to kill the session and its processes
+		_ = t.KillSessionWithProcesses(sess)
+
+		// Verify the session is actually gone (ignore error, check existence)
+		// KillSessionWithProcesses might return an error even if it successfully
+		// killed the processes and the session auto-closed
+		stillExists, _ := t.HasSession(sess)
+		if !stillExists {
+			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), sess)
+			return true
+		}
+		return false
+	}
+
 	// 1. Stop Deacon first
 	if inList(deaconSession) {
-		if err := t.KillSession(deaconSession); err == nil {
-			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), deaconSession)
+		if killAndVerify(deaconSession) {
 			stopped++
 		}
 	}
@@ -727,16 +691,14 @@ func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSe
 		if sess == deaconSession || sess == mayorSession {
 			continue
 		}
-		if err := t.KillSession(sess); err == nil {
-			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), sess)
+		if killAndVerify(sess) {
 			stopped++
 		}
 	}
 
 	// 3. Stop Mayor last
 	if inList(mayorSession) {
-		if err := t.KillSession(mayorSession); err == nil {
-			fmt.Printf("  %s %s stopped\n", style.Bold.Render("✓"), mayorSession)
+		if killAndVerify(mayorSession) {
 			stopped++
 		}
 	}
@@ -771,7 +733,7 @@ func cleanupPolecats(townRoot string) {
 
 	for _, r := range rigs {
 		polecatGit := git.NewGit(r.Path)
-		polecatMgr := polecat.NewManager(r, polecatGit)
+		polecatMgr := polecat.NewManager(r, polecatGit, nil) // nil tmux: just listing, not allocating
 
 		polecats, err := polecatMgr.List()
 		if err != nil {
@@ -841,16 +803,48 @@ func cleanupPolecats(townRoot string) {
 
 // stopDaemonIfRunning stops the daemon if it is running.
 // This prevents the daemon from restarting agents after shutdown.
+// Uses robust detection with fallback to process search.
 func stopDaemonIfRunning(townRoot string) {
-	running, _, _ := daemon.IsRunning(townRoot)
+	// Primary detection: PID file
+	running, pid, err := daemon.IsRunning(townRoot)
+
+	if err != nil {
+		// Detection error - report it but continue with fallback
+		fmt.Printf("  %s Daemon detection warning: %s\n", style.Bold.Render("⚠"), err.Error())
+	}
+
 	if running {
+		// PID file points to live daemon - stop it
 		if err := daemon.StopDaemon(townRoot); err != nil {
-			fmt.Printf("  %s Daemon: %s\n", style.Dim.Render("○"), err.Error())
+			fmt.Printf("  %s Failed to stop daemon (PID %d): %s\n",
+				style.Bold.Render("✗"), pid, err.Error())
 		} else {
-			fmt.Printf("  %s Daemon stopped\n", style.Bold.Render("✓"))
+			fmt.Printf("  %s Daemon stopped (was PID %d)\n", style.Bold.Render("✓"), pid)
 		}
 	} else {
-		fmt.Printf("  %s Daemon not running\n", style.Dim.Render("○"))
+		fmt.Printf("  %s Daemon not tracked by PID file\n", style.Dim.Render("○"))
+	}
+
+	// Fallback: Search for orphaned daemon processes
+	orphaned, err := daemon.FindOrphanedDaemons()
+	if err != nil {
+		fmt.Printf("  %s Warning: failed to search for orphaned daemons: %v\n",
+			style.Dim.Render("○"), err)
+		return
+	}
+
+	if len(orphaned) > 0 {
+		fmt.Printf("  %s Found %d orphaned daemon process(es): %v\n",
+			style.Bold.Render("⚠"), len(orphaned), orphaned)
+
+		killed, err := daemon.KillOrphanedDaemons()
+		if err != nil {
+			fmt.Printf("  %s Failed to kill orphaned daemons: %v\n",
+				style.Bold.Render("✗"), err)
+		} else if killed > 0 {
+			fmt.Printf("  %s Killed %d orphaned daemon(s)\n",
+				style.Bold.Render("✓"), killed)
+		}
 	}
 }
 

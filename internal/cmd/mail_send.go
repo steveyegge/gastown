@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
@@ -109,21 +110,55 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 		msg.ThreadID = generateThreadID()
 	}
 
-	// Send via router
-	router := mail.NewRouter(workDir)
+	// Use address resolver for new address types
+	townRoot, _ := workspace.FindFromCwd()
+	b := beads.New(townRoot)
+	resolver := mail.NewResolver(b, townRoot)
 
-	// Check if this is a list address to show fan-out details
-	var listRecipients []string
-	if strings.HasPrefix(to, "list:") {
-		var err error
-		listRecipients, err = router.ExpandListAddress(to)
-		if err != nil {
+	recipients, err := resolver.Resolve(to)
+	if err != nil {
+		// Fall back to legacy routing if resolver fails
+		router := mail.NewRouter(workDir)
+		if err := router.Send(msg); err != nil {
 			return fmt.Errorf("sending message: %w", err)
 		}
+		_ = events.LogFeed(events.TypeMail, from, events.MailPayload(to, mailSubject))
+		fmt.Printf("%s Message sent to %s\n", style.Bold.Render("✓"), to)
+		fmt.Printf("  Subject: %s\n", mailSubject)
+		return nil
 	}
 
-	if err := router.Send(msg); err != nil {
-		return fmt.Errorf("sending message: %w", err)
+	// Route based on recipient type
+	router := mail.NewRouter(workDir)
+	var recipientAddrs []string
+
+	for _, rec := range recipients {
+		switch rec.Type {
+		case mail.RecipientQueue:
+			// Queue messages: single message, workers claim
+			msg.To = rec.Address
+			if err := router.Send(msg); err != nil {
+				return fmt.Errorf("sending to queue: %w", err)
+			}
+			recipientAddrs = append(recipientAddrs, rec.Address)
+
+		case mail.RecipientChannel:
+			// Channel messages: single message, broadcast
+			msg.To = rec.Address
+			if err := router.Send(msg); err != nil {
+				return fmt.Errorf("sending to channel: %w", err)
+			}
+			recipientAddrs = append(recipientAddrs, rec.Address)
+
+		default:
+			// Direct/agent messages: fan out to each recipient
+			msgCopy := *msg
+			msgCopy.To = rec.Address
+			if err := router.Send(&msgCopy); err != nil {
+				return fmt.Errorf("sending to %s: %w", rec.Address, err)
+			}
+			recipientAddrs = append(recipientAddrs, rec.Address)
+		}
 	}
 
 	// Log mail event to activity feed
@@ -132,9 +167,9 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Message sent to %s\n", style.Bold.Render("✓"), to)
 	fmt.Printf("  Subject: %s\n", mailSubject)
 
-	// Show fan-out recipients for list addresses
-	if len(listRecipients) > 0 {
-		fmt.Printf("  Recipients: %s\n", strings.Join(listRecipients, ", "))
+	// Show resolved recipients if fan-out occurred
+	if len(recipientAddrs) > 1 || (len(recipientAddrs) == 1 && recipientAddrs[0] != to) {
+		fmt.Printf("  Recipients: %s\n", strings.Join(recipientAddrs, ", "))
 	}
 
 	if len(msg.CC) > 0 {

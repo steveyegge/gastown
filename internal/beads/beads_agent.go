@@ -5,9 +5,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
+	"os/exec"
 	"strings"
 )
+
+// runSlotSet runs `bd slot set` from a specific directory.
+// This is needed when the agent bead was created via routing to a different
+// database than the Beads wrapper's default directory.
+func runSlotSet(workDir, beadID, slotName, slotValue string) error {
+	cmd := exec.Command("bd", "slot", "set", beadID, slotName, slotValue)
+	cmd.Dir = workDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
+// runSlotClear runs `bd slot clear` from a specific directory.
+func runSlotClear(workDir, beadID, slotName string) error {
+	cmd := exec.Command("bd", "slot", "clear", beadID, slotName)
+	cmd.Dir = workDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
 
 // AgentFields holds structured fields for agent beads.
 // These are stored as "key: value" lines in the description.
@@ -16,10 +38,11 @@ type AgentFields struct {
 	Rig               string // Rig name (empty for global agents like mayor/deacon)
 	AgentState        string // spawning, working, done, stuck
 	HookBead          string // Currently pinned work bead ID
-	RoleBead          string // Role definition bead ID (canonical location; may not exist yet)
 	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
 	ActiveMR          string // Currently active merge request bead ID (for traceability)
 	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
+	// Note: RoleBead field removed - role definitions are now config-based.
+	// See internal/config/roles/*.toml and config-based-roles.md.
 }
 
 // Notification level constants
@@ -54,11 +77,7 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, "hook_bead: null")
 	}
 
-	if fields.RoleBead != "" {
-		lines = append(lines, fmt.Sprintf("role_bead: %s", fields.RoleBead))
-	} else {
-		lines = append(lines, "role_bead: null")
-	}
+	// Note: role_bead field no longer written - role definitions are config-based
 
 	if fields.CleanupStatus != "" {
 		lines = append(lines, fmt.Sprintf("cleanup_status: %s", fields.CleanupStatus))
@@ -112,7 +131,7 @@ func ParseAgentFields(description string) *AgentFields {
 		case "hook_bead":
 			fields.HookBead = value
 		case "role_bead":
-			fields.RoleBead = value
+			// Ignored - role definitions are now config-based (backward compat)
 		case "cleanup_status":
 			fields.CleanupStatus = value
 		case "active_mr":
@@ -129,7 +148,21 @@ func ParseAgentFields(description string) *AgentFields {
 // The ID format is: <prefix>-<rig>-<role>-<name> (e.g., gt-gastown-polecat-Toast)
 // Use AgentBeadID() helper to generate correct IDs.
 // The created_by field is populated from BD_ACTOR env var for provenance tracking.
+//
+// This function automatically ensures custom types are configured in the target
+// database before creating the bead. This handles multi-repo routing scenarios
+// where the bead may be routed to a different database than the one this wrapper
+// is connected to.
 func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, error) {
+	// Resolve where this bead will actually be written (handles multi-repo routing)
+	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
+
+	// Ensure target database has custom types configured
+	// This is cached (sentinel file + in-memory) so repeated calls are fast
+	if err := EnsureCustomTypes(targetDir); err != nil {
+		return nil, fmt.Errorf("prepare target for agent bead %s: %w", id, err)
+	}
+
 	description := FormatAgentDescription(title, fields)
 
 	args := []string{"create", "--json",
@@ -139,9 +172,13 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--type=agent",
 		"--labels=gt:agent",
 	}
+	if NeedsForceForID(id) {
+		args = append(args, "--force")
+	}
 
 	// Default actor from BD_ACTOR env var for provenance tracking
-	if actor := os.Getenv("BD_ACTOR"); actor != "" {
+	// Uses getActor() to respect isolated mode (tests)
+	if actor := b.getActor(); actor != "" {
 		args = append(args, "--actor="+actor)
 	}
 
@@ -155,19 +192,14 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return nil, fmt.Errorf("parsing bd create output: %w", err)
 	}
 
-	// Set the role slot if specified (this is the authoritative storage)
-	if fields != nil && fields.RoleBead != "" {
-		if _, err := b.run("slot", "set", id, "role", fields.RoleBead); err != nil {
-			// Non-fatal: warn but continue
-			fmt.Printf("Warning: could not set role slot: %v\n", err)
-		}
-	}
+	// Note: role slot no longer set - role definitions are config-based
 
 	// Set the hook slot if specified (this is the authoritative storage)
 	// This fixes the slot inconsistency bug where bead status is 'hooked' but
 	// agent's hook slot is empty. See mi-619.
+	// Must run from targetDir since that's where the agent bead was created
 	if fields != nil && fields.HookBead != "" {
-		if _, err := b.run("slot", "set", id, "hook", fields.HookBead); err != nil {
+		if err := runSlotSet(targetDir, id, "hook", fields.HookBead); err != nil {
 			// Non-fatal: warn but continue - description text has the backup
 			fmt.Printf("Warning: could not set hook slot: %v\n", err)
 		}
@@ -178,8 +210,13 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 
 // CreateOrReopenAgentBead creates an agent bead or reopens an existing one.
 // This handles the case where a polecat is nuked and re-spawned with the same name:
-// the old agent bead exists as a tombstone, so we reopen and update it instead of
+// the old agent bead exists as a closed bead, so we reopen and update it instead of
 // failing with a UNIQUE constraint error.
+//
+// NOTE: This does NOT handle tombstones. If the old bead was hard-deleted (creating
+// a tombstone), this function will fail. Use CloseAndClearAgentBead instead of DeleteAgentBead
+// when cleaning up agent beads to ensure they can be reopened later.
+//
 //
 // The function:
 // 1. Tries to create the agent bead
@@ -196,7 +233,10 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		return nil, err
 	}
 
-	// The bead already exists (likely a tombstone from a previous nuked polecat)
+	// Resolve where this bead lives (for slot operations)
+	targetDir := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
+
+	// The bead already exists (should be closed from previous polecat lifecycle)
 	// Reopen it and update its fields
 	if _, reopenErr := b.run("reopen", id, "--reason=re-spawning agent"); reopenErr != nil {
 		// If reopen fails, the bead might already be open - continue with update
@@ -215,20 +255,17 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		return nil, fmt.Errorf("updating reopened agent bead: %w", err)
 	}
 
-	// Set the role slot if specified
-	if fields != nil && fields.RoleBead != "" {
-		if _, err := b.run("slot", "set", id, "role", fields.RoleBead); err != nil {
-			// Non-fatal: warn but continue
-			fmt.Printf("Warning: could not set role slot: %v\n", err)
-		}
-	}
+	// Note: role slot no longer set - role definitions are config-based
+
+	// Clear any existing hook slot (handles stale state from previous lifecycle)
+	// Must run from targetDir since that's where the agent bead lives
+	_ = runSlotClear(targetDir, id, "hook")
 
 	// Set the hook slot if specified
+	// Must run from targetDir since that's where the agent bead lives
 	if fields != nil && fields.HookBead != "" {
-		// Clear any existing hook first, then set new one
-		_, _ = b.run("slot", "clear", id, "hook")
-		if _, err := b.run("slot", "set", id, "hook", fields.HookBead); err != nil {
-			// Non-fatal: warn but continue
+		if err := runSlotSet(targetDir, id, "hook", fields.HookBead); err != nil {
+			// Non-fatal: warn but continue - description text has the backup
 			fmt.Printf("Warning: could not set hook slot: %v\n", err)
 		}
 	}
@@ -400,8 +437,67 @@ func (b *Beads) GetAgentNotificationLevel(id string) (string, error) {
 
 // DeleteAgentBead permanently deletes an agent bead.
 // Uses --hard --force for immediate permanent deletion (no tombstone).
+//
+// WARNING: Due to a bd bug, --hard --force still creates tombstones instead of
+// truly deleting. This breaks CreateOrReopenAgentBead because tombstones are
+// invisible to bd show/reopen but still block bd create via UNIQUE constraint.
+//
+//
+// WORKAROUND: Use CloseAndClearAgentBead instead, which allows CreateOrReopenAgentBead
+// to reopen the bead on re-spawn.
 func (b *Beads) DeleteAgentBead(id string) error {
 	_, err := b.run("delete", id, "--hard", "--force")
+	return err
+}
+
+// CloseAndClearAgentBead closes an agent bead (soft delete).
+// This is the recommended way to clean up agent beads because CreateOrReopenAgentBead
+// can reopen closed beads when re-spawning polecats with the same name.
+//
+// This is a workaround for the bd tombstone bug where DeleteAgentBead creates
+// tombstones that cannot be reopened.
+//
+// To emulate the clean slate of delete --force --hard, this clears all mutable
+// fields (hook_bead, active_mr, cleanup_status, agent_state) before closing.
+func (b *Beads) CloseAndClearAgentBead(id, reason string) error {
+	// Clear mutable fields to emulate delete --force --hard behavior.
+	// This ensures reopened agent beads don't have stale state.
+
+	// First get current issue to preserve immutable fields
+	issue, err := b.Show(id)
+	if err != nil {
+		// If we can't read the issue, still attempt to close
+		args := []string{"close", id}
+		if reason != "" {
+			args = append(args, "--reason="+reason)
+		}
+		_, closeErr := b.run(args...)
+		return closeErr
+	}
+
+	// Parse existing fields and clear mutable ones
+	fields := ParseAgentFields(issue.Description)
+	fields.HookBead = ""     // Clear hook_bead
+	fields.ActiveMR = ""     // Clear active_mr
+	fields.CleanupStatus = "" // Clear cleanup_status
+	fields.AgentState = "closed"
+
+	// Update description with cleared fields
+	description := FormatAgentDescription(issue.Title, fields)
+	if err := b.Update(id, UpdateOptions{Description: &description}); err != nil {
+		// Non-fatal: continue with close even if update fails
+	}
+
+	// Also clear the hook slot in the database
+	if err := b.ClearHookBead(id); err != nil {
+		// Non-fatal
+	}
+
+	args := []string{"close", id}
+	if reason != "" {
+		args = append(args, "--reason="+reason)
+	}
+	_, err = b.run(args...)
 	return err
 }
 

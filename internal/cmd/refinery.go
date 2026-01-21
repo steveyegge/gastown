@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/mrqueue"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
@@ -16,21 +16,33 @@ import (
 
 // Refinery command flags
 var (
-	refineryForeground bool
-	refineryStatusJSON bool
-	refineryQueueJSON  bool
+	refineryForeground    bool
+	refineryStatusJSON    bool
+	refineryQueueJSON     bool
+	refineryAgentOverride string
 )
 
 var refineryCmd = &cobra.Command{
 	Use:     "refinery",
 	Aliases: []string{"ref"},
 	GroupID: GroupAgents,
-	Short:   "Manage the merge queue processor",
+	Short:   "Manage the Refinery (merge queue processor)",
 	RunE:    requireSubcommand,
-	Long: `Manage the Refinery merge queue processor for a rig.
+	Long: `Manage the Refinery - the per-rig merge queue processor.
 
-The Refinery processes merge requests from polecats, merging their work
-into integration branches and ultimately to main.`,
+The Refinery serializes all merges to main for a rig:
+  - Receives MRs submitted by polecats (via gt done)
+  - Rebases work branches onto latest main
+  - Runs validation (tests, builds, checks)
+  - Merges to main when clear
+  - If conflict: spawns FRESH polecat to re-implement (original is gone)
+
+Work flows: Polecat completes → gt done → MR in queue → Refinery merges.
+The polecat is already nuked by the time the Refinery processes.
+
+One Refinery per rig. Persistent agent that processes work as it arrives.
+
+Role shortcuts: "refinery" in mail/nudge addresses resolves to this rig's Refinery.`,
 }
 
 var refineryStartCmd = &cobra.Command{
@@ -208,6 +220,13 @@ var refineryBlockedJSON bool
 func init() {
 	// Start flags
 	refineryStartCmd.Flags().BoolVar(&refineryForeground, "foreground", false, "Run in foreground (default: background)")
+	refineryStartCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
+
+	// Attach flags
+	refineryAttachCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
+
+	// Restart flags
+	refineryRestartCmd.Flags().StringVar(&refineryAgentOverride, "agent", "", "Agent alias to run the Refinery with (overrides town default)")
 
 	// Status flags
 	refineryStatusCmd.Flags().BoolVar(&refineryStatusJSON, "json", false, "Output as JSON")
@@ -277,7 +296,7 @@ func runRefineryStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Starting refinery for %s...\n", rigName)
 
-	if err := mgr.Start(refineryForeground); err != nil {
+	if err := mgr.Start(refineryForeground, refineryAgentOverride); err != nil {
 		if err == refinery.ErrAlreadyRunning {
 			fmt.Printf("%s Refinery is already running\n", style.Dim.Render("⚠"))
 			return nil
@@ -318,6 +337,14 @@ func runRefineryStop(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// RefineryStatusOutput is the JSON output format for refinery status.
+type RefineryStatusOutput struct {
+	Running     bool   `json:"running"`
+	RigName     string `json:"rig_name"`
+	Session     string `json:"session,omitempty"`
+	QueueLength int    `json:"queue_length"`
+}
+
 func runRefineryStatus(cmd *cobra.Command, args []string) error {
 	rigName := ""
 	if len(args) > 0 {
@@ -329,58 +356,42 @@ func runRefineryStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ref, err := mgr.Status()
-	if err != nil {
-		return fmt.Errorf("getting status: %w", err)
-	}
+	// ZFC: tmux is source of truth for running state
+	running, _ := mgr.IsRunning()
+	sessionInfo, _ := mgr.Status() // may be nil if not running
+
+	// Get queue from beads
+	queue, _ := mgr.Queue()
+	queueLen := len(queue)
 
 	// JSON output
 	if refineryStatusJSON {
+		output := RefineryStatusOutput{
+			Running:     running,
+			RigName:     rigName,
+			QueueLength: queueLen,
+		}
+		if sessionInfo != nil {
+			output.Session = sessionInfo.Name
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(ref)
+		return enc.Encode(output)
 	}
 
 	// Human-readable output
 	fmt.Printf("%s Refinery: %s\n\n", style.Bold.Render("⚙"), rigName)
 
-	stateStr := string(ref.State)
-	switch ref.State {
-	case refinery.StateRunning:
-		stateStr = style.Bold.Render("● running")
-	case refinery.StateStopped:
-		stateStr = style.Dim.Render("○ stopped")
-	case refinery.StatePaused:
-		stateStr = style.Dim.Render("⏸ paused")
-	}
-	fmt.Printf("  State: %s\n", stateStr)
-
-	if ref.StartedAt != nil {
-		fmt.Printf("  Started: %s\n", ref.StartedAt.Format("2006-01-02 15:04:05"))
-	}
-
-	if ref.CurrentMR != nil {
-		fmt.Printf("\n  %s\n", style.Bold.Render("Currently Processing:"))
-		fmt.Printf("    Branch: %s\n", ref.CurrentMR.Branch)
-		fmt.Printf("    Worker: %s\n", ref.CurrentMR.Worker)
-		if ref.CurrentMR.IssueID != "" {
-			fmt.Printf("    Issue:  %s\n", ref.CurrentMR.IssueID)
+	if running {
+		fmt.Printf("  State: %s\n", style.Bold.Render("● running"))
+		if sessionInfo != nil {
+			fmt.Printf("  Session: %s\n", sessionInfo.Name)
 		}
+	} else {
+		fmt.Printf("  State: %s\n", style.Dim.Render("○ stopped"))
 	}
 
-	// Get queue length
-	queue, _ := mgr.Queue()
-	pendingCount := 0
-	for _, item := range queue {
-		if item.Position > 0 { // Not currently processing
-			pendingCount++
-		}
-	}
-	fmt.Printf("\n  Queue: %d pending\n", pendingCount)
-
-	if ref.LastMergeAt != nil {
-		fmt.Printf("  Last merge: %s\n", ref.LastMergeAt.Format("2006-01-02 15:04:05"))
-	}
+	fmt.Printf("\n  Queue: %d pending\n", queueLen)
 
 	return nil
 }
@@ -490,7 +501,7 @@ func runRefineryAttach(cmd *cobra.Command, args []string) error {
 	if !running {
 		// Auto-start if not running
 		fmt.Printf("Refinery not running for %s, starting...\n", rigName)
-		if err := mgr.Start(false); err != nil {
+		if err := mgr.Start(false, refineryAgentOverride); err != nil {
 			return fmt.Errorf("starting refinery: %w", err)
 		}
 		fmt.Printf("%s Refinery started\n", style.Bold.Render("✓"))
@@ -519,7 +530,7 @@ func runRefineryRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start fresh
-	if err := mgr.Start(false); err != nil {
+	if err := mgr.Start(false, refineryAgentOverride); err != nil {
 		return fmt.Errorf("starting refinery: %w", err)
 	}
 
@@ -540,19 +551,23 @@ func runRefineryClaim(cmd *cobra.Command, args []string) error {
 	mrID := args[0]
 	workerID := getWorkerID()
 
-	// Find the queue from current working directory
-	q, err := mrqueue.NewFromWorkdir(".")
+	// Find beads from current working directory
+	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("finding merge queue: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+	rigName, err := inferRigFromCwd(townRoot)
+	if err != nil {
+		return fmt.Errorf("could not determine rig: %w", err)
 	}
 
-	if err := q.Claim(mrID, workerID); err != nil {
-		if err == mrqueue.ErrNotFound {
-			return fmt.Errorf("MR %s not found in queue", mrID)
-		}
-		if err == mrqueue.ErrAlreadyClaimed {
-			return fmt.Errorf("MR %s is already claimed by another worker", mrID)
-		}
+	_, r, err := getRig(rigName)
+	if err != nil {
+		return err
+	}
+
+	eng := refinery.NewEngineer(r)
+	if err := eng.ClaimMR(mrID, workerID); err != nil {
 		return fmt.Errorf("claiming MR: %w", err)
 	}
 
@@ -563,12 +578,23 @@ func runRefineryClaim(cmd *cobra.Command, args []string) error {
 func runRefineryRelease(cmd *cobra.Command, args []string) error {
 	mrID := args[0]
 
-	q, err := mrqueue.NewFromWorkdir(".")
+	// Find beads from current working directory
+	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("finding merge queue: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+	rigName, err := inferRigFromCwd(townRoot)
+	if err != nil {
+		return fmt.Errorf("could not determine rig: %w", err)
 	}
 
-	if err := q.Release(mrID); err != nil {
+	_, r, err := getRig(rigName)
+	if err != nil {
+		return err
+	}
+
+	eng := refinery.NewEngineer(r)
+	if err := eng.ReleaseMR(mrID); err != nil {
 		return fmt.Errorf("releasing MR: %w", err)
 	}
 
@@ -587,10 +613,35 @@ func runRefineryUnclaimed(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	q := mrqueue.New(r.Path)
-	unclaimed, err := q.ListUnclaimed()
+	// Query beads for merge-request issues without assignee
+	b := beads.New(r.Path)
+	issues, err := b.List(beads.ListOptions{
+		Status:   "open",
+		Label:    "gt:merge-request",
+		Priority: -1,
+	})
 	if err != nil {
-		return fmt.Errorf("listing unclaimed MRs: %w", err)
+		return fmt.Errorf("listing merge requests: %w", err)
+	}
+
+	// Filter for unclaimed (no assignee)
+	var unclaimed []*refinery.MRInfo
+	for _, issue := range issues {
+		if issue.Assignee != "" {
+			continue
+		}
+		fields := beads.ParseMRFields(issue)
+		if fields == nil {
+			continue
+		}
+		mr := &refinery.MRInfo{
+			ID:       issue.ID,
+			Branch:   fields.Branch,
+			Target:   fields.Target,
+			Worker:   fields.Worker,
+			Priority: issue.Priority,
+		}
+		unclaimed = append(unclaimed, mr)
 	}
 
 	// JSON output

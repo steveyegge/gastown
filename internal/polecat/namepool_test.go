@@ -13,7 +13,7 @@ func TestNamePool_Allocate(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// First allocation should be first themed name (furiosa)
 	name, err := pool.Allocate()
@@ -41,7 +41,7 @@ func TestNamePool_Release(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// Allocate first two
 	name1, _ := pool.Allocate()
@@ -68,7 +68,7 @@ func TestNamePool_PrefersOrder(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// Allocate first 5
 	for i := 0; i < 5; i++ {
@@ -160,13 +160,18 @@ func TestNamePool_SaveLoad(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	// Use config to set MaxSize from the start (affects OverflowNext initialization)
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, 3)
 
-	// Allocate some names
+	// Exhaust the pool to trigger overflow, which increments OverflowNext
 	pool.Allocate() // furiosa
 	pool.Allocate() // nux
 	pool.Allocate() // slit
-	pool.Release("nux")
+	overflowName, _ := pool.Allocate() // testrig-4 (overflow)
+
+	if overflowName != "testrig-4" {
+		t.Errorf("expected testrig-4 for first overflow, got %s", overflowName)
+	}
 
 	// Save state
 	if err := pool.Save(); err != nil {
@@ -174,20 +179,26 @@ func TestNamePool_SaveLoad(t *testing.T) {
 	}
 
 	// Create new pool and load
-	pool2 := NewNamePool(tmpDir, "testrig")
+	pool2 := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, 3)
 	if err := pool2.Load(); err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
 
-	// Should have furiosa and slit in use
-	if pool2.ActiveCount() != 2 {
-		t.Errorf("expected 2 active, got %d", pool2.ActiveCount())
+	// ZFC: InUse is NOT persisted - it's transient state derived from filesystem.
+	// After Load(), InUse should be empty (0 active).
+	if pool2.ActiveCount() != 0 {
+		t.Errorf("expected 0 active after Load (ZFC: InUse is transient), got %d", pool2.ActiveCount())
 	}
 
-	// Next allocation should be nux (released slot)
-	name, _ := pool2.Allocate()
-	if name != "nux" {
-		t.Errorf("expected nux, got %s", name)
+	// OverflowNext SHOULD persist - it's the one piece of state that can't be derived.
+	// Next overflow should be testrig-5, not testrig-4.
+	pool2.Allocate() // furiosa (InUse empty, so starts from beginning)
+	pool2.Allocate() // nux
+	pool2.Allocate() // slit
+	overflowName2, _ := pool2.Allocate() // Should be testrig-5
+
+	if overflowName2 != "testrig-5" {
+		t.Errorf("expected testrig-5 (OverflowNext persisted), got %s", overflowName2)
 	}
 }
 
@@ -198,7 +209,7 @@ func TestNamePool_Reconcile(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// Simulate existing polecats from filesystem
 	existing := []string{"slit", "valkyrie", "some-other-name"}
@@ -223,7 +234,7 @@ func TestNamePool_IsPoolName(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	tests := []struct {
 		name     string
@@ -252,7 +263,7 @@ func TestNamePool_ActiveNames(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	pool.Allocate() // furiosa
 	pool.Allocate() // nux
@@ -276,7 +287,7 @@ func TestNamePool_MarkInUse(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// Mark some slots as in use
 	pool.MarkInUse("dementus")
@@ -406,7 +417,7 @@ func TestNamePool_Reset(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	pool := NewNamePool(tmpDir, "testrig")
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "mad-max", nil, DefaultPoolSize)
 
 	// Allocate several names
 	for i := 0; i < 10; i++ {
@@ -428,5 +439,89 @@ func TestNamePool_Reset(t *testing.T) {
 	name, _ := pool.Allocate()
 	if name != "furiosa" {
 		t.Errorf("expected furiosa after reset, got %s", name)
+	}
+}
+
+func TestThemeForRig(t *testing.T) {
+	// Different rigs should get different themes (with high probability)
+	themes := make(map[string]bool)
+	for _, rigName := range []string{"gastown", "beads", "myproject", "webapp"} {
+		themes[ThemeForRig(rigName)] = true
+	}
+	// Should have at least 2 different themes across 4 rigs
+	if len(themes) < 2 {
+		t.Errorf("expected variety in themes, got only %d unique theme(s)", len(themes))
+	}
+}
+
+func TestThemeForRigDeterministic(t *testing.T) {
+	// Same rig name should always get same theme
+	theme1 := ThemeForRig("myrig")
+	theme2 := ThemeForRig("myrig")
+	if theme1 != theme2 {
+		t.Errorf("theme not deterministic: got %q and %q", theme1, theme2)
+	}
+}
+
+func TestNamePool_ReservedNamesExcluded(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "namepool-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Test all themes to ensure reserved names are excluded
+	for themeName := range BuiltinThemes {
+		pool := NewNamePoolWithConfig(tmpDir, "testrig", themeName, nil, 100)
+
+		// Allocate all available names (up to 100)
+		allocated := make(map[string]bool)
+		for i := 0; i < 100; i++ {
+			name, err := pool.Allocate()
+			if err != nil {
+				t.Fatalf("Allocate error: %v", err)
+			}
+			allocated[name] = true
+		}
+
+		// Verify no reserved names were allocated
+		for reserved := range ReservedInfraAgentNames {
+			if allocated[reserved] {
+				t.Errorf("theme %q allocated reserved name %q", themeName, reserved)
+			}
+		}
+
+		pool.Reset()
+	}
+}
+
+func TestNamePool_ReservedNamesInCustomNames(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "namepool-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Custom names that include reserved names should have them filtered out
+	custom := []string{"alpha", "witness", "beta", "mayor", "gamma"}
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "", custom, 10)
+
+	// Allocate all names
+	allocated := make(map[string]bool)
+	for i := 0; i < 5; i++ {
+		name, _ := pool.Allocate()
+		allocated[name] = true
+	}
+
+	// Should only get alpha, beta, gamma (3 non-reserved names)
+	// Then overflow names for the remaining allocations
+	if allocated["witness"] {
+		t.Error("allocated reserved name 'witness' from custom names")
+	}
+	if allocated["mayor"] {
+		t.Error("allocated reserved name 'mayor' from custom names")
+	}
+	if !allocated["alpha"] || !allocated["beta"] || !allocated["gamma"] {
+		t.Errorf("expected alpha, beta, gamma to be allocated, got %v", allocated)
 	}
 }

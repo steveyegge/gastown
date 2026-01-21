@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -68,7 +67,7 @@ func (m *Manager) Start(agentOverride string) error {
 		}
 	}
 
-	// Ensure mayor directory exists
+	// Ensure mayor directory exists (for Claude settings)
 	mayorDir := m.mayorDir()
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		return fmt.Errorf("creating mayor directory: %w", err)
@@ -79,18 +78,25 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
-	// Build startup command first - the startup hook handles 'gt prime' automatically
+	// Build startup beacon with explicit instructions (matches gt handoff behavior)
+	// This ensures the agent has clear context immediately, not after nudges arrive
+	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		Recipient: "mayor",
+		Sender:    "human",
+		Topic:     "cold-start",
+	})
+
+	// Build startup command WITH the beacon prompt - the startup hook handles 'gt prime' automatically
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "mayor", "", "", agentOverride)
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("mayor", "", m.townRoot, "", beacon, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
-	// Create session with command directly to avoid send-keys race condition.
-	// This runs the command as the pane's initial process, avoiding the shell
-	// readiness timing issues that cause "bad pattern" and command-not-found errors.
+	// Create session in townRoot (not mayorDir) to match gt handoff behavior
+	// This ensures Mayor works from the town root where all tools work correctly
 	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, mayorDir, startupCmd); err != nil {
+	if err := t.NewSessionWithCommand(sessionID, m.townRoot, startupCmd); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
@@ -99,7 +105,6 @@ func (m *Manager) Start(agentOverride string) error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "mayor",
 		TownRoot: m.townRoot,
-		BeadsDir: beads.ResolveBeadsDir(m.townRoot),
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
@@ -109,9 +114,11 @@ func (m *Manager) Start(agentOverride string) error {
 	theme := tmux.MayorTheme()
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Mayor", "coordinator")
 
-	// Wait for Claude to start (non-fatal)
+	// Wait for Claude to start - fatal if Claude fails to launch
 	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal - try to continue anyway
+		// Kill the zombie session before returning error
+		_ = t.KillSessionWithProcesses(sessionID)
+		return fmt.Errorf("waiting for mayor to start: %w", err)
 	}
 
 	// Accept bypass permissions warning dialog if it appears.
@@ -119,18 +126,8 @@ func (m *Manager) Start(agentOverride string) error {
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// Inject startup nudge for predecessor discovery via /resume
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: "mayor",
-		Sender:    "human",
-		Topic:     "cold-start",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous coordination.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("mayor", mayorDir)) // Non-fatal
+	// Startup beacon with instructions is now included in the initial command,
+	// so no separate nudge needed. The agent starts with full context immediately.
 
 	return nil
 }

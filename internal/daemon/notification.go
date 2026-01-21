@@ -115,7 +115,7 @@ func (m *NotificationManager) RecordSend(session, slot, message string) error {
 		return err
 	}
 
-	return os.WriteFile(m.slotPath(session, slot), data, 0644)
+	return os.WriteFile(m.slotPath(session, slot), data, 0600)
 }
 
 // MarkConsumed marks a slot's notification as consumed (agent responded).
@@ -137,7 +137,7 @@ func (m *NotificationManager) MarkConsumed(session, slot string) error {
 		return err
 	}
 
-	return os.WriteFile(m.slotPath(session, slot), data, 0644)
+	return os.WriteFile(m.slotPath(session, slot), data, 0600)
 }
 
 // MarkSessionActive marks all slots for a session as consumed.

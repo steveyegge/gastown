@@ -5,10 +5,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// filterGTEnv removes GT_* and BD_* environment variables to isolate test subprocess.
+// This prevents tests from inheriting the parent workspace's Gas Town configuration.
+func filterGTEnv(env []string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, "GT_") || strings.HasPrefix(e, "BD_") {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	return filtered
+}
 
 // TestQuerySessionEvents_FindsEventsFromAllLocations verifies that querySessionEvents
 // finds session.ended events from both town-level and rig-level beads databases.
@@ -23,13 +37,10 @@ import (
 // 2. Creates session.ended events in both town and rig beads
 // 3. Verifies querySessionEvents finds events from both locations
 func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
-	// TODO(go-mmpj): This test causes a stack overflow in beads-cli (bd).
-	// Root cause: bd's daemon_autostart.go:228 acquireStartLock() recursively
-	// calls itself when the lock file exists but the daemon isn't running.
-	// This is a beads-cli bug, not a gastown bug.
-	// The test triggers it via `bd create` in a temp directory environment.
-	// Fix required in: github.com/anthropics/beads cmd/bd/daemon_autostart.go
-	t.Skip("SKIP: beads-cli acquireStartLock infinite recursion - see go-mmpj")
+	// Skip: bd CLI 0.47.2 has a bug where database writes don't commit
+	// ("sql: database is closed" during auto-flush). This affects all tests
+	// that create issues via bd create. See gt-lnn1xn for tracking.
+	t.Skip("bd CLI 0.47.2 bug: database writes don't commit")
 
 	// Skip if gt and bd are not installed
 	if _, err := exec.LookPath("gt"); err != nil {
@@ -37,6 +48,13 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	}
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not installed, skipping integration test")
+	}
+
+	// Skip when running inside a Gas Town workspace - this integration test
+	// creates a separate workspace and the subprocesses can interact with
+	// the parent workspace's daemon, causing hangs.
+	if os.Getenv("GT_TOWN_ROOT") != "" || os.Getenv("BD_ACTOR") != "" {
+		t.Skip("skipping integration test inside Gas Town workspace (use 'go test' outside workspace)")
 	}
 
 	// Create a temporary directory structure
@@ -56,8 +74,10 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	}
 
 	// Use gt install to set up the town
+	// Clear GT environment variables to isolate test from parent workspace
 	gtInstallCmd := exec.Command("gt", "install")
 	gtInstallCmd.Dir = townRoot
+	gtInstallCmd.Env = filterGTEnv(os.Environ())
 	if out, err := gtInstallCmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt install: %v\n%s", err, out)
 	}
@@ -96,6 +116,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	// Add rig using gt rig add
 	rigAddCmd := exec.Command("gt", "rig", "add", "testrig", bareRepo, "--prefix=tr")
 	rigAddCmd.Dir = townRoot
+	rigAddCmd.Env = filterGTEnv(os.Environ())
 	if out, err := rigAddCmd.CombinedOutput(); err != nil {
 		t.Fatalf("gt rig add: %v\n%s", err, out)
 	}
@@ -119,6 +140,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 		"--json",
 	)
 	townEventCmd.Dir = townRoot
+	townEventCmd.Env = filterGTEnv(os.Environ())
 	townOut, err := townEventCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("creating town event: %v\n%s", err, townOut)
@@ -135,6 +157,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 		"--json",
 	)
 	rigEventCmd.Dir = rigPath
+	rigEventCmd.Env = filterGTEnv(os.Environ())
 	rigOut, err := rigEventCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("creating rig event: %v\n%s", err, rigOut)
@@ -144,6 +167,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	// Verify events are in separate databases by querying each directly
 	townListCmd := exec.Command("bd", "list", "--type=event", "--all", "--json")
 	townListCmd.Dir = townRoot
+	townListCmd.Env = filterGTEnv(os.Environ())
 	townListOut, err := townListCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("listing town events: %v\n%s", err, townListOut)
@@ -151,6 +175,7 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 
 	rigListCmd := exec.Command("bd", "list", "--type=event", "--all", "--json")
 	rigListCmd.Dir = rigPath
+	rigListCmd.Env = filterGTEnv(os.Environ())
 	rigListOut, err := rigListCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("listing rig events: %v\n%s", err, rigListOut)
@@ -191,7 +216,14 @@ func TestQuerySessionEvents_FindsEventsFromAllLocations(t *testing.T) {
 	if wsErr != nil {
 		t.Fatalf("workspace.FindFromCwdOrError failed: %v", wsErr)
 	}
-	if foundTownRoot != townRoot {
+	normalizePath := func(path string) string {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return filepath.Clean(path)
+		}
+		return resolved
+	}
+	if normalizePath(foundTownRoot) != normalizePath(townRoot) {
 		t.Errorf("workspace.FindFromCwdOrError returned %s, expected %s", foundTownRoot, townRoot)
 	}
 

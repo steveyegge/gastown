@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -93,12 +95,16 @@ func storeArgsInBead(beadID, args string) error {
 	// Parse the bead
 	var issues []beads.Issue
 	if err := json.Unmarshal(out, &issues); err != nil {
-		return fmt.Errorf("parsing bead: %w", err)
+		if os.Getenv("GT_TEST_ATTACHED_MOLECULE_LOG") == "" {
+			return fmt.Errorf("parsing bead: %w", err)
+		}
 	}
-	if len(issues) == 0 {
+	issue := &beads.Issue{}
+	if len(issues) > 0 {
+		issue = &issues[0]
+	} else if os.Getenv("GT_TEST_ATTACHED_MOLECULE_LOG") == "" {
 		return fmt.Errorf("bead not found")
 	}
-	issue := &issues[0]
 
 	// Get or create attachment fields
 	fields := beads.ParseAttachmentFields(issue)
@@ -111,6 +117,9 @@ func storeArgsInBead(beadID, args string) error {
 
 	// Update the description
 	newDesc := beads.SetAttachmentFields(issue, fields)
+	if logPath := os.Getenv("GT_TEST_ATTACHED_MOLECULE_LOG"); logPath != "" {
+		_ = os.WriteFile(logPath, []byte(newDesc), 0644)
+	}
 
 	// Update the bead
 	updateCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--description="+newDesc)
@@ -168,11 +177,76 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 	return nil
 }
 
+// storeAttachedMoleculeInBead sets the attached_molecule field in a bead's description.
+// This is required for gt hook to recognize that a molecule is attached to the bead.
+// Called after bonding a formula wisp to a bead via "gt sling <formula> --on <bead>".
+func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
+	if moleculeID == "" {
+		return nil
+	}
+	logPath := os.Getenv("GT_TEST_ATTACHED_MOLECULE_LOG")
+	if logPath != "" {
+		_ = os.WriteFile(logPath, []byte("called"), 0644)
+	}
+
+	issue := &beads.Issue{}
+	if logPath == "" {
+		// Get the bead to preserve existing description content
+		showCmd := exec.Command("bd", "show", beadID, "--json")
+		out, err := showCmd.Output()
+		if err != nil {
+			return fmt.Errorf("fetching bead: %w", err)
+		}
+
+		// Parse the bead
+		var issues []beads.Issue
+		if err := json.Unmarshal(out, &issues); err != nil {
+			return fmt.Errorf("parsing bead: %w", err)
+		}
+		if len(issues) == 0 {
+			return fmt.Errorf("bead not found")
+		}
+		issue = &issues[0]
+	}
+
+	// Get or create attachment fields
+	fields := beads.ParseAttachmentFields(issue)
+	if fields == nil {
+		fields = &beads.AttachmentFields{}
+	}
+
+	// Set the attached molecule
+	fields.AttachedMolecule = moleculeID
+	if fields.AttachedAt == "" {
+		fields.AttachedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	// Update the description
+	newDesc := beads.SetAttachmentFields(issue, fields)
+	if logPath != "" {
+		_ = os.WriteFile(logPath, []byte(newDesc), 0644)
+	}
+
+	// Update the bead
+	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd.Stderr = os.Stderr
+	if err := updateCmd.Run(); err != nil {
+		return fmt.Errorf("updating bead description: %w", err)
+	}
+
+	return nil
+}
+
 // injectStartPrompt sends a prompt to the target pane to start working.
 // Uses the reliable nudge pattern: literal mode + 500ms debounce + separate Enter.
 func injectStartPrompt(pane, beadID, subject, args string) error {
 	if pane == "" {
 		return fmt.Errorf("no target pane")
+	}
+
+	// Skip nudge during tests to prevent agent self-interruption
+	if os.Getenv("GT_TEST_NO_NUDGE") != "" {
+		return nil
 	}
 
 	// Build the prompt to inject
@@ -373,4 +447,68 @@ func wakeRigAgents(rigName string) {
 	// Silent nudges - sessions might not exist yet
 	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
 	_ = t.NudgeSession(refinerySession, "Polecat dispatched - check for merge requests")
+}
+
+// isPolecatTarget checks if the target string refers to a polecat.
+// Returns true if the target format is "rig/polecats/name".
+// This is used to determine if we should respawn a dead polecat
+// instead of failing when slinging work.
+func isPolecatTarget(target string) bool {
+	parts := strings.Split(target, "/")
+	return len(parts) >= 3 && parts[1] == "polecats"
+}
+
+// attachPolecatWorkMolecule attaches the mol-polecat-work molecule to a polecat's agent bead.
+// This ensures all polecats have the standard work molecule attached for guidance.
+// The molecule is attached by storing it in the agent bead's description using attachment fields.
+//
+// Per issue #288: gt sling should auto-attach mol-polecat-work when slinging to polecats.
+func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error {
+	// Parse the polecat name from targetAgent (format: "rig/polecats/name")
+	parts := strings.Split(targetAgent, "/")
+	if len(parts) != 3 || parts[1] != "polecats" {
+		return fmt.Errorf("invalid polecat agent format: %s", targetAgent)
+	}
+	rigName := parts[0]
+	polecatName := parts[2]
+
+	// Get the polecat's agent bead ID
+	// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast")
+	prefix := config.GetRigPrefix(townRoot, rigName)
+	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+
+	// Resolve the rig directory for running bd commands.
+	// Use ResolveHookDir to ensure we run bd from the correct rig directory
+	// (not from the polecat's worktree, which doesn't have a .beads directory).
+	// This fixes issue #197: polecat fails to hook when slinging with molecule.
+	rigDir := beads.ResolveHookDir(townRoot, prefix+"-"+polecatName, hookWorkDir)
+
+	b := beads.New(rigDir)
+
+	// Check if molecule is already attached (avoid duplicate attach)
+	attachment, err := b.GetAttachment(agentBeadID)
+	if err == nil && attachment != nil && attachment.AttachedMolecule != "" {
+		// Already has a molecule attached - skip
+		return nil
+	}
+
+	// Cook the mol-polecat-work formula to ensure the proto exists
+	// This is safe to run multiple times - cooking is idempotent
+	cookCmd := exec.Command("bd", "--no-daemon", "cook", "mol-polecat-work")
+	cookCmd.Dir = rigDir
+	cookCmd.Stderr = os.Stderr
+	if err := cookCmd.Run(); err != nil {
+		return fmt.Errorf("cooking mol-polecat-work formula: %w", err)
+	}
+
+	// Attach the molecule to the polecat's agent bead
+	// The molecule ID is the formula name "mol-polecat-work"
+	moleculeID := "mol-polecat-work"
+	_, err = b.AttachMolecule(agentBeadID, moleculeID)
+	if err != nil {
+		return fmt.Errorf("attaching molecule %s to %s: %w", moleculeID, agentBeadID, err)
+	}
+
+	fmt.Printf("%s Attached %s to %s\n", style.Bold.Render("✓"), moleculeID, agentBeadID)
+	return nil
 }

@@ -4,11 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -98,6 +95,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cannot proceed: %w", err)
 		}
 		defer func() { _ = lock.Unlock() }()
+
+		// Prevent tmux server from exiting when all sessions are killed.
+		// By default, tmux exits when there are no sessions (exit-empty on).
+		// This ensures the server stays running for subsequent `gt up`.
+		// Ignore errors - if there's no server, nothing to configure.
+		_ = t.SetExitEmpty(false)
 	}
 	allOK := true
 
@@ -107,6 +110,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	rigs := discoverRigs(townRoot)
+
+	// Pre-fetch all sessions once for O(1) lookups (avoids N+1 subprocess calls)
+	sessionSet, _ := t.GetSessionSet() // Ignore error - empty set is safe fallback
 
 	// Phase 0.5: Stop polecats if --polecats
 	if downPolecats {
@@ -164,12 +170,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
 		if downDryRun {
-			if running, _ := t.HasSession(sessionName); running {
+			if sessionSet.Has(sessionName) {
 				printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "would stop")
 			}
 			continue
 		}
-		wasRunning, err := stopSession(t, sessionName)
+		wasRunning, err := stopSessionWithCache(t, sessionName, sessionSet)
 		if err != nil {
 			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
 			allOK = false
@@ -184,12 +190,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-witness", rigName)
 		if downDryRun {
-			if running, _ := t.HasSession(sessionName); running {
+			if sessionSet.Has(sessionName) {
 				printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "would stop")
 			}
 			continue
 		}
-		wasRunning, err := stopSession(t, sessionName)
+		wasRunning, err := stopSessionWithCache(t, sessionName, sessionSet)
 		if err != nil {
 			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), false, err.Error())
 			allOK = false
@@ -203,12 +209,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 	// Phase 3: Stop town-level sessions (Mayor, Boot, Deacon)
 	for _, ts := range session.TownSessions() {
 		if downDryRun {
-			if running, _ := t.HasSession(ts.SessionID); running {
+			if sessionSet.Has(ts.SessionID) {
 				printDownStatus(ts.Name, true, "would stop")
 			}
 			continue
 		}
-		stopped, err := session.StopTownSession(t, ts, downForce)
+		stopped, err := session.StopTownSessionWithCache(t, ts, downForce, sessionSet)
 		if err != nil {
 			printDownStatus(ts.Name, false, err.Error())
 			allOK = false
@@ -260,13 +266,6 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 5.5: TTY-based orphan sweep (--force only, safety net)
-	if downForce && !downDryRun {
-		if killed := sweepOrphansByTTY(t); killed > 0 {
-			printDownStatus("Orphan sweep", true, fmt.Sprintf("%d process(es) killed", killed))
-		}
-	}
-
 	// Phase 6: Nuke tmux server (--nuke only, DESTRUCTIVE)
 	if downNuke {
 		if downDryRun {
@@ -286,11 +285,6 @@ func runDown(cmd *cobra.Command, args []string) error {
 				allOK = false
 			} else {
 				printDownStatus("Tmux server", true, "killed (all tmux sessions destroyed)")
-				// Kill any Claude/node processes that became orphans when tmux died
-				// tmux sends SIGHUP which Claude ignores, leaving orphaned processes
-				if orphanCount := cleanupOrphanedClaude(); orphanCount > 0 {
-					printDownStatus("Orphan cleanup", true, fmt.Sprintf("%d process(es) killed", orphanCount))
-				}
 			}
 		}
 	}
@@ -384,119 +378,6 @@ func printDownStatus(name string, ok bool, detail string) {
 	}
 }
 
-// killOrphanProcesses terminates all processes in the same process group as tmux pane shells.
-// This uses PGID-based kill to catch ALL descendants (not just direct children),
-// preventing orphan Claude/node processes that can accumulate and drain resources.
-func killOrphanProcesses(t *tmux.Tmux, sessionName string) {
-	// Get the shell PID(s) running in the tmux pane(s)
-	panePIDsRaw, err := t.GetPanePID(sessionName)
-	if err != nil || panePIDsRaw == "" {
-		return // No pane PIDs, nothing to kill
-	}
-
-	// Collect unique PGIDs from all pane PIDs
-	pgidSet := make(map[int]bool)
-	for _, pidStr := range strings.Split(strings.TrimSpace(panePIDsRaw), "\n") {
-		pidStr = strings.TrimSpace(pidStr)
-		if pidStr == "" {
-			continue
-		}
-		var pid int
-		if _, err := fmt.Sscanf(pidStr, "%d", &pid); err != nil || pid <= 0 {
-			continue
-		}
-
-		// Get the process group ID for this pane's shell
-		pgid, err := syscall.Getpgid(pid)
-		if err != nil || pgid <= 0 {
-			continue
-		}
-		pgidSet[pgid] = true
-	}
-
-	if len(pgidSet) == 0 {
-		return
-	}
-
-	// SIGTERM entire process groups for graceful shutdown
-	for pgid := range pgidSet {
-		// Negative PID signals the entire process group
-		_ = syscall.Kill(-pgid, syscall.SIGTERM)
-	}
-
-	// Wait 2 seconds for graceful termination
-	time.Sleep(2 * time.Second)
-
-	// SIGKILL survivors in each process group
-	for pgid := range pgidSet {
-		// Check if any process in the group is still running
-		// (we check the PGID leader, but kill targets the whole group)
-		if isProcessRunning(pgid) {
-			_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		}
-	}
-}
-
-// sweepOrphansByTTY finds and kills Claude processes whose TTYs are not attached
-// to any active tmux pane. This catches orphans that escaped PGID-based cleanup.
-// Returns the number of orphan processes killed.
-func sweepOrphansByTTY(t *tmux.Tmux) int {
-	// Get all active tmux pane TTYs
-	activeTTYs := make(map[string]bool)
-	output, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_tty}").Output()
-	if err == nil {
-		for _, tty := range strings.Split(string(output), "\n") {
-			tty = strings.TrimSpace(tty)
-			if tty != "" {
-				activeTTYs[tty] = true
-			}
-		}
-	}
-
-	// Find Claude processes with TTYs not in active panes
-	killed := 0
-	claudePIDs, err := exec.Command("pgrep", "claude").Output()
-	if err != nil {
-		return 0 // No Claude processes running
-	}
-
-	for _, pidStr := range strings.Split(string(claudePIDs), "\n") {
-		pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
-		if err != nil || pid <= 0 {
-			continue
-		}
-
-		// Get process TTY
-		ttyOut, err := exec.Command("ps", "-o", "tty=", "-p", strconv.Itoa(pid)).Output()
-		if err != nil {
-			continue
-		}
-		tty := strings.TrimSpace(string(ttyOut))
-
-		// Skip processes with no TTY (might be legitimate background processes)
-		if tty == "" || tty == "??" {
-			continue
-		}
-
-		// Construct full TTY path and check if it's in active panes
-		ttyPath := "/dev/" + tty
-		if !activeTTYs[ttyPath] {
-			// This process has a TTY but no active tmux pane - it's an orphan
-			if err := syscall.Kill(pid, syscall.SIGTERM); err == nil {
-				killed++
-			}
-		}
-	}
-
-	return killed
-}
-
-// runCommand executes a command and returns stdout.
-func runCommand(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).Output()
-	return string(out), err
-}
-
 // stopSession gracefully stops a tmux session.
 // Returns (wasRunning, error) - wasRunning is true if session existed and was stopped.
 func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
@@ -508,8 +389,22 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 		return false, nil // Already stopped
 	}
 
-	// Kill orphan Claude/node processes before destroying the session
-	killOrphanProcesses(t, sessionName)
+	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
+	if !downForce {
+		_ = t.SendKeysRaw(sessionName, "C-c")
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Kill the session (with explicit process termination to prevent orphans)
+	return true, t.KillSessionWithProcesses(sessionName)
+}
+
+// stopSessionWithCache is like stopSession but uses a pre-fetched SessionSet
+// for O(1) existence check instead of spawning a subprocess.
+func stopSessionWithCache(t *tmux.Tmux, sessionName string, cache *tmux.SessionSet) (bool, error) {
+	if !cache.Has(sessionName) {
+		return false, nil // Already stopped
+	}
 
 	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
 	if !downForce {
@@ -517,8 +412,8 @@ func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Kill the session
-	return true, t.KillSession(sessionName)
+	// Kill the session (with explicit process termination to prevent orphans)
+	return true, t.KillSessionWithProcesses(sessionName)
 }
 
 // acquireShutdownLock prevents concurrent shutdowns.
@@ -580,20 +475,4 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 	}
 
 	return respawned
-}
-
-// isProcessRunning checks if a process with the given PID exists.
-func isProcessRunning(pid int) bool {
-	if pid <= 0 {
-		return false // Invalid PID
-	}
-	err := syscall.Kill(pid, 0)
-	if err == nil {
-		return true
-	}
-	// EPERM means process exists but we don't have permission to signal it
-	if err == syscall.EPERM {
-		return true
-	}
-	return false
 }

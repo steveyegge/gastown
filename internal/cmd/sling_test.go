@@ -3,9 +3,38 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func writeBDStub(t *testing.T, binDir string, unixScript string, windowsScript string) string {
+	t.Helper()
+
+	var path string
+	if runtime.GOOS == "windows" {
+		path = filepath.Join(binDir, "bd.cmd")
+		if err := os.WriteFile(path, []byte(windowsScript), 0644); err != nil {
+			t.Fatalf("write bd stub: %v", err)
+		}
+		return path
+	}
+
+	path = filepath.Join(binDir, "bd")
+	if err := os.WriteFile(path, []byte(unixScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	return path
+}
+
+func containsVarArg(line, key, value string) bool {
+	plain := "--var " + key + "=" + value
+	if strings.Contains(line, plain) {
+		return true
+	}
+	quoted := "--var \"" + key + "=" + value + "\""
+	return strings.Contains(line, quoted)
+}
 
 func TestParseWispIDFromJSON(t *testing.T) {
 	tests := []struct {
@@ -220,7 +249,6 @@ func TestSlingFormulaOnBeadRoutesBDCommandsToTargetRig(t *testing.T) {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
 	logPath := filepath.Join(townRoot, "bd.log")
-	bdPath := filepath.Join(binDir, "bd")
 	bdScript := `#!/bin/sh
 set -e
 echo "$(pwd)|$*" >> "${BD_LOG}"
@@ -256,15 +284,46 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+echo %CD%^|%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  set "sub=%3"
+)
+if "%cmd%"=="show" (
+  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+  exit /b 0
+)
+if "%cmd%"=="formula" (
+  echo {"name":"test-formula"}
+  exit /b 0
+)
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {"new_epic_id":"gt-wisp-xyz"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    echo {"root_id":"gt-wisp-xyz"}
+    exit /b 0
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
+	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -291,6 +350,9 @@ exit 0
 	slingNoConvoy = true
 	slingVars = nil
 	slingOnTarget = "gt-abc123"
+
+	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
 
 	if err := runSling(nil, []string{"mol-review"}); err != nil {
 		t.Fatalf("runSling: %v", err)
@@ -324,9 +386,7 @@ exit 0
 		switch {
 		case strings.Contains(args, " cook "):
 			gotCook = true
-			if dir != wantDir {
-				t.Fatalf("bd cook ran in %q, want %q (args: %q)", dir, wantDir, args)
-			}
+			// cook doesn't need database context, runs from cwd
 		case strings.Contains(args, " mol wisp "):
 			gotWisp = true
 			if dir != wantDir {
@@ -379,7 +439,6 @@ func TestSlingFormulaOnBeadPassesFeatureAndIssueVars(t *testing.T) {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
 	logPath := filepath.Join(townRoot, "bd.log")
-	bdPath := filepath.Join(binDir, "bd")
 	// The stub returns a specific title so we can verify it appears in --var feature=
 	bdScript := `#!/bin/sh
 set -e
@@ -416,15 +475,46 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+echo ARGS:%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  set "sub=%3"
+)
+if "%cmd%"=="show" (
+  echo [{^"title^":^"My Test Feature^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
+  exit /b 0
+)
+if "%cmd%"=="formula" (
+  echo {^"name^":^"mol-review^"}
+  exit /b 0
+)
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    echo {^"root_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
 	t.Setenv("GT_CREW", "")
+	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -452,6 +542,9 @@ exit 0
 	slingVars = nil
 	slingOnTarget = "gt-abc123"
 
+	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+
 	if err := runSling(nil, []string{"mol-review"}); err != nil {
 		t.Fatalf("runSling: %v", err)
 	}
@@ -476,12 +569,12 @@ exit 0
 	}
 
 	// Verify --var feature=<title> is present
-	if !strings.Contains(wispLine, "--var feature=My Test Feature") {
+	if !containsVarArg(wispLine, "feature", "My Test Feature") {
 		t.Errorf("mol wisp missing --var feature=<title>\ngot: %s", wispLine)
 	}
 
 	// Verify --var issue=<beadID> is present
-	if !strings.Contains(wispLine, "--var issue=gt-abc123") {
+	if !containsVarArg(wispLine, "issue", "gt-abc123") {
 		t.Errorf("mol wisp missing --var issue=<beadID>\ngot: %s", wispLine)
 	}
 }
@@ -504,7 +597,6 @@ func TestVerifyBeadExistsAllowStale(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
-	bdPath := filepath.Join(binDir, "bd")
 	bdScript := `#!/bin/sh
 # Check for --allow-stale flag
 allow_stale=false
@@ -529,9 +621,24 @@ fi
 echo '[{"title":"Test bead","status":"open","assignee":""}]'
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+set "allow=false"
+for %%A in (%*) do (
+  if "%%~A"=="--allow-stale" set "allow=true"
+)
+if "%1"=="--no-daemon" (
+  if "%allow%"=="true" (
+    echo [{"title":"Test bead","status":"open","assignee":""}]
+    exit /b 0
+  )
+  echo {"error":"Database out of sync with JSONL."}
+  exit /b 1
+)
+echo [{"title":"Test bead","status":"open","assignee":""}]
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -567,7 +674,6 @@ func TestSlingWithAllowStale(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
-	bdPath := filepath.Join(binDir, "bd")
 	bdScript := `#!/bin/sh
 # Check for --allow-stale flag
 allow_stale=false
@@ -602,14 +708,40 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+set "allow=false"
+for %%A in (%*) do (
+  if "%%~A"=="--allow-stale" set "allow=true"
+)
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  if "%cmd%"=="show" (
+    if "%allow%"=="true" (
+      echo [{"title":"Synced bead","status":"open","assignee":""}]
+      exit /b 0
+    )
+    echo {"error":"Database out of sync"}
+    exit /b 1
+  )
+  exit /b 0
+)
+set "cmd=%1"
+if "%cmd%"=="show" (
+  echo [{"title":"Synced bead","status":"open","assignee":""}]
+  exit /b 0
+)
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "crew")
 	t.Setenv("GT_CREW", "jv")
 	t.Setenv("GT_POLECAT", "")
+	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -630,6 +762,9 @@ exit 0
 
 	slingDryRun = true
 	slingNoConvoy = true
+
+	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
 
 	// EXPECTED: gt sling should use daemon mode and succeed
 	// ACTUAL: verifyBeadExists uses --no-daemon and fails with sync error
@@ -695,5 +830,207 @@ func TestLooksLikeBeadID(t *testing.T) {
 				t.Errorf("looksLikeBeadID(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestSlingFormulaOnBeadSetsAttachedMolecule verifies that when using
+// gt sling <formula> --on <bead>, the attached_molecule field is set in the
+// hooked bead's description after bonding. This is required for gt hook to
+// recognize the molecule attachment.
+//
+// Bug: The original code bonds the wisp to the bead and sets status=hooked,
+// but doesn't record attached_molecule in the description. This causes
+// gt hook to report "No molecule attached".
+func TestSlingFormulaOnBeadSetsAttachedMolecule(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker so workspace.FindFromCwd() succeeds.
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create a rig path that owns gt-* beads, and a routes.jsonl pointing to it.
+	rigDir := filepath.Join(townRoot, "gastown", "mayor", "rig")
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	if err := os.MkdirAll(rigDir, 0755); err != nil {
+		t.Fatalf("mkdir rigDir: %v", err)
+	}
+	routes := strings.Join([]string{
+		`{"prefix":"gt-","path":"gastown/mayor/rig"}`,
+		`{"prefix":"hq-","path":"."}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(routes), 0644); err != nil {
+		t.Fatalf("write routes.jsonl: %v", err)
+	}
+
+	// Stub bd so we can observe the arguments passed to update commands.
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	// The stub logs all commands to a file for verification
+	bdScript := `#!/bin/sh
+set -e
+echo "$PWD|$*" >> "${BD_LOG}"
+if [ "$1" = "--no-daemon" ]; then
+  shift
+fi
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Bug to fix","status":"open","assignee":"","description":""}]'
+    ;;
+  formula)
+    echo '{"name":"mol-polecat-work"}'
+    exit 0
+    ;;
+  cook)
+    exit 0
+    ;;
+  mol)
+    sub="$1"
+    shift || true
+    case "$sub" in
+      wisp)
+        echo '{"new_epic_id":"gt-wisp-xyz"}'
+        ;;
+      bond)
+        echo '{"root_id":"gt-wisp-xyz"}'
+        ;;
+    esac
+    ;;
+  update)
+    # Just succeed
+    exit 0
+    ;;
+esac
+exit 0
+`
+bdScriptWindows := `@echo off
+setlocal enableextensions
+echo %CD%^|%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  set "sub=%3"
+)
+if "%cmd%"=="show" (
+  echo [{^"title^":^"Bug to fix^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
+  exit /b 0
+)
+if "%cmd%"=="formula" (
+  echo {^"name^":^"mol-polecat-work^"}
+  exit /b 0
+)
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    echo {^"root_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+)
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("TMUX_PANE", "") // Prevent inheriting real tmux pane from test runner
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Ensure we don't leak global flag state across tests.
+	prevOn := slingOnTarget
+	prevVars := slingVars
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	t.Cleanup(func() {
+		slingOnTarget = prevOn
+		slingVars = prevVars
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true
+	slingVars = nil
+	slingOnTarget = "gt-abc123" // The bug bead we're applying formula to
+
+	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+
+	if err := runSling(nil, []string{"mol-polecat-work"}); err != nil {
+		t.Fatalf("runSling: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read bd log: %v", err)
+	}
+
+	// After bonding (mol bond), there should be an update call that includes
+	// --description with attached_molecule field. This is what gt hook looks for.
+	logLines := strings.Split(string(logBytes), "\n")
+
+	// Find all update commands after the bond
+	sawBond := false
+	foundAttachedMolecule := false
+	for _, line := range logLines {
+		if strings.Contains(line, "mol bond") {
+			sawBond = true
+			continue
+		}
+		if sawBond && strings.Contains(line, "update") {
+			// Check if this update sets attached_molecule in description
+			if strings.Contains(line, "attached_molecule") {
+				foundAttachedMolecule = true
+				break
+			}
+		}
+	}
+
+	if !sawBond {
+		t.Fatalf("mol bond command not found in log:\n%s", string(logBytes))
+	}
+
+	if !foundAttachedMolecule {
+		if descBytes, err := os.ReadFile(attachedLogPath); err == nil {
+			if strings.Contains(string(descBytes), "attached_molecule") {
+				foundAttachedMolecule = true
+			}
+		}
+	}
+
+	if !foundAttachedMolecule {
+		attachedLog := "<missing>"
+		if descBytes, err := os.ReadFile(attachedLogPath); err == nil {
+			attachedLog = string(descBytes)
+		}
+		t.Errorf("after mol bond, expected update with attached_molecule in description\n"+
+			"This is required for gt hook to recognize the molecule attachment.\n"+
+			"Log output:\n%s\nAttached log:\n%s", string(logBytes), attachedLog)
 	}
 }

@@ -187,8 +187,17 @@ func runNamepoolSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving pool: %w", err)
 	}
 
-	// Also save to rig config
-	if err := saveRigNamepoolConfig(rigPath, theme, nil); err != nil {
+	// Load existing settings to preserve custom names when changing theme
+	settingsPath := filepath.Join(rigPath, "settings", "config.json")
+	var existingNames []string
+	if existingSettings, err := config.LoadRigSettings(settingsPath); err == nil {
+		if existingSettings.Namepool != nil {
+			existingNames = existingSettings.Namepool.Names
+		}
+	}
+
+	// Also save to rig config, preserving existing custom names
+	if err := saveRigNamepoolConfig(rigPath, theme, existingNames); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}
 
@@ -206,17 +215,41 @@ func runNamepoolAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a rig directory")
 	}
 
-	// Load pool
-	pool := polecat.NewNamePool(rigPath, rigName)
-	if err := pool.Load(); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("loading pool: %w", err)
+	// Load existing rig settings to get current theme and custom names
+	settingsPath := filepath.Join(rigPath, "settings", "config.json")
+	settings, err := config.LoadRigSettings(settingsPath)
+	if err != nil {
+		if os.IsNotExist(err) || strings.Contains(err.Error(), "not found") {
+			settings = config.NewRigSettings()
+		} else {
+			return fmt.Errorf("loading settings: %w", err)
+		}
 	}
 
-	pool.AddCustomName(name)
-	
-	if err := pool.Save(); err != nil {
-		return fmt.Errorf("saving pool: %w", err)
+	// Initialize namepool config if needed
+	if settings.Namepool == nil {
+		settings.Namepool = config.DefaultNamepoolConfig()
 	}
+
+	// Check if name already exists
+	for _, n := range settings.Namepool.Names {
+		if n == name {
+			fmt.Printf("Name '%s' already in pool\n", name)
+			return nil
+		}
+	}
+
+	// Append new name to existing custom names
+	settings.Namepool.Names = append(settings.Namepool.Names, name)
+
+	// Save to settings/config.json (the source of truth for config)
+	if err := config.SaveRigSettings(settingsPath, settings); err != nil {
+		return fmt.Errorf("saving settings: %w", err)
+	}
+
+	// Note: No need to update runtime pool state - the settings file is the source
+	// of truth for custom names. The pool state file only persists OverflowNext/MaxSize.
+	// New managers will load custom names from settings/config.json.
 
 	fmt.Printf("Added '%s' to the name pool\n", name)
 	return nil

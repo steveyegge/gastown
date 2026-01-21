@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -33,14 +35,20 @@ var deaconCmd = &cobra.Command{
 	Use:     "deacon",
 	Aliases: []string{"dea"},
 	GroupID: GroupAgents,
-	Short:   "Manage the Deacon session",
+	Short:   "Manage the Deacon (town-level watchdog)",
 	RunE:    requireSubcommand,
-	Long: `Manage the Deacon tmux session.
+	Long: `Manage the Deacon - the town-level watchdog for Gas Town.
 
-The Deacon is the hierarchical health-check orchestrator for Gas Town.
-It monitors the Mayor and Witnesses, handles lifecycle requests, and
-keeps the town running. Use the subcommands to start, stop, attach,
-and check status.`,
+The Deacon ("daemon beacon") is the only agent that receives mechanical
+heartbeats from the daemon. It monitors system health across all rigs:
+  - Watches all Witnesses (are they alive? stuck? responsive?)
+  - Manages Dogs for cross-rig infrastructure work
+  - Handles lifecycle requests (respawns, restarts)
+  - Receives heartbeat pokes and decides what needs attention
+
+The Deacon patrols the town; Witnesses patrol their rigs; Polecats work.
+
+Role shortcuts: "deacon" in mail/nudge addresses resolves to this agent.`,
 }
 
 var deaconStartCmd = &cobra.Command{
@@ -235,6 +243,51 @@ This removes the pause file and allows the Deacon to work normally.`,
 	RunE: runDeaconResume,
 }
 
+var deaconCleanupOrphansCmd = &cobra.Command{
+	Use:   "cleanup-orphans",
+	Short: "Clean up orphaned claude subagent processes",
+	Long: `Clean up orphaned claude subagent processes.
+
+Claude Code's Task tool spawns subagent processes that sometimes don't clean up
+properly after completion. These accumulate and consume significant memory.
+
+Detection is based on TTY column: processes with TTY "?" have no controlling
+terminal. Legitimate claude instances in terminals have a TTY like "pts/0".
+
+This is safe because:
+- Processes in terminals (your personal sessions) have a TTY - won't be touched
+- Only kills processes that have no controlling terminal
+- These orphans are children of the tmux server with no TTY
+
+Example:
+  gt deacon cleanup-orphans`,
+	RunE: runDeaconCleanupOrphans,
+}
+
+var deaconZombieScanCmd = &cobra.Command{
+	Use:   "zombie-scan",
+	Short: "Find and clean zombie Claude processes not in active tmux sessions",
+	Long: `Find and clean zombie Claude processes not in active tmux sessions.
+
+Unlike cleanup-orphans (which uses TTY detection), zombie-scan uses tmux
+verification: it checks if each Claude process is in an active tmux session
+by comparing against actual pane PIDs.
+
+A process is a zombie if:
+- It's a Claude/codex process
+- It's NOT the pane PID of any active tmux session
+- It's NOT a child of any pane PID
+- It's older than 60 seconds
+
+This catches "ghost" processes that have a TTY (from a dead tmux session)
+but are no longer part of any active Gas Town session.
+
+Examples:
+  gt deacon zombie-scan           # Find and kill zombies
+  gt deacon zombie-scan --dry-run # Just list zombies, don't kill`,
+	RunE: runDeaconZombieScan,
+}
+
 var (
 	triggerTimeout time.Duration
 
@@ -253,6 +306,9 @@ var (
 
 	// Pause flags
 	pauseReason string
+
+	// Zombie scan flags
+	zombieScanDryRun bool
 )
 
 func init() {
@@ -269,6 +325,8 @@ func init() {
 	deaconCmd.AddCommand(deaconStaleHooksCmd)
 	deaconCmd.AddCommand(deaconPauseCmd)
 	deaconCmd.AddCommand(deaconResumeCmd)
+	deaconCmd.AddCommand(deaconCleanupOrphansCmd)
+	deaconCmd.AddCommand(deaconZombieScanCmd)
 
 	// Flags for trigger-pending
 	deaconTriggerPendingCmd.Flags().DurationVar(&triggerTimeout, "timeout", 2*time.Second,
@@ -297,6 +355,10 @@ func init() {
 	// Flags for pause
 	deaconPauseCmd.Flags().StringVar(&pauseReason, "reason", "",
 		"Reason for pausing the Deacon")
+
+	// Flags for zombie-scan
+	deaconZombieScanCmd.Flags().BoolVar(&zombieScanDryRun, "dry-run", false,
+		"List zombies without killing them")
 
 	deaconStartCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
 	deaconAttachCmd.Flags().StringVar(&deaconAgentOverride, "agent", "", "Agent alias to run the Deacon with (overrides town default)")
@@ -348,12 +410,20 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
 	if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
-		style.PrintWarning("Could not create deacon settings: %v", err)
+		return fmt.Errorf("creating deacon settings: %w", err)
 	}
 
-	// Create session in deacon directory
+	// Build startup command first
+	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", "", agentOverride)
+	if err != nil {
+		return fmt.Errorf("building startup command: %w", err)
+	}
+
+	// Create session with command directly to avoid send-keys race condition.
+	// See: https://github.com/anthropics/gastown/issues/280
 	fmt.Println("Starting Deacon session...")
-	if err := t.NewSession(sessionName, deaconDir); err != nil {
+	if err := t.NewSessionWithCommand(sessionName, deaconDir, startupCmd); err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
@@ -362,7 +432,6 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "deacon",
 		TownRoot: townRoot,
-		BeadsDir: beads.ResolveBeadsDir(townRoot),
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionName, k, v)
@@ -373,21 +442,9 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	theme := tmux.DeaconTheme()
 	_ = t.ConfigureGasTownSession(sessionName, theme, "", "Deacon", "health-check")
 
-	// Launch Claude directly (no shell respawn loop)
-	// Restarts are handled by daemon via ensureDeaconRunning on each heartbeat
-	// The startup hook handles context loading automatically
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "deacon", "", "", agentOverride)
-	if err != nil {
-		return fmt.Errorf("building startup command: %w", err)
-	}
-	if err := t.SendKeys(sessionName, startupCmd); err != nil {
-		return fmt.Errorf("sending command: %w", err)
-	}
-
-	// Wait for Claude to start (non-fatal)
+	// Wait for Claude to start
 	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal
+		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
 
@@ -395,17 +452,21 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
 
 	// Inject startup nudge for predecessor discovery via /resume
-	_ = session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
+	if err := session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
 		Recipient: "deacon",
 		Sender:    "daemon",
 		Topic:     "patrol",
-	}) // Non-fatal
+	}); err != nil {
+		style.PrintWarning("failed to send startup nudge: %v", err)
+	}
 
 	// GUPP: Gas Town Universal Propulsion Principle
 	// Send the propulsion nudge to trigger autonomous patrol execution.
 	// Wait for beacon to be fully processed (needs to be separate prompt)
 	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionName, session.PropulsionNudgeForRole("deacon", deaconDir)) // Non-fatal
+	if err := t.NudgeSession(sessionName, session.PropulsionNudgeForRole("deacon", deaconDir)); err != nil {
+		return fmt.Errorf("sending propulsion nudge: %w", err)
+	}
 
 	return nil
 }
@@ -430,8 +491,9 @@ func runDeaconStop(cmd *cobra.Command, args []string) error {
 	_ = t.SendKeysRaw(sessionName, "C-c")
 	time.Sleep(100 * time.Millisecond)
 
-	// Kill the session
-	if err := t.KillSession(sessionName); err != nil {
+	// Kill the session.
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
@@ -531,8 +593,9 @@ func runDeaconRestart(cmd *cobra.Command, args []string) error {
 	fmt.Println("Restarting Deacon...")
 
 	if running {
-		// Kill existing session
-		if err := t.KillSession(sessionName); err != nil {
+		// Kill existing session.
+		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+		if err := t.KillSessionWithProcesses(sessionName); err != nil {
 			style.PrintWarning("failed to kill session: %v", err)
 		}
 	}
@@ -703,25 +766,35 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Sent HEALTH_CHECK to %s, waiting %s...\n",
 		style.Bold.Render("→"), agent, healthCheckTimeout)
 
-	// Wait for response
-	deadline := time.Now().Add(healthCheckTimeout)
+	// Wait for response using context and ticker for reliability
+	// This prevents loop hangs if system clock changes
+	ctx, cancel := context.WithTimeout(context.Background(), healthCheckTimeout)
+	defer cancel()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
 	responded := false
 
-	for time.Now().Before(deadline) {
-		time.Sleep(2 * time.Second) // Check every 2 seconds
+	for {
+		select {
+		case <-ctx.Done():
+			goto Done
+		case <-ticker.C:
+			newTime, err := getAgentBeadUpdateTime(townRoot, beadID)
+			if err != nil {
+				continue
+			}
 
-		newTime, err := getAgentBeadUpdateTime(townRoot, beadID)
-		if err != nil {
-			continue
-		}
-
-		// If bead was updated after our baseline, agent responded
-		if newTime.After(baselineTime) {
-			responded = true
-			break
+			// If bead was updated after our baseline, agent responded
+			if newTime.After(baselineTime) {
+				responded = true
+				goto Done
+			}
 		}
 	}
 
+Done:
 	// Record result
 	if responded {
 		agentState.RecordResponse()
@@ -805,9 +878,10 @@ func runDeaconForceKill(cmd *cobra.Command, args []string) error {
 	mailBody := fmt.Sprintf("Deacon detected %s as unresponsive.\nReason: %s\nAction: force-killing session", agent, reason)
 	sendMail(townRoot, agent, "FORCE_KILL: unresponsive", mailBody)
 
-	// Step 2: Kill the tmux session
+	// Step 2: Kill the tmux session.
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 	fmt.Printf("%s Killing tmux session %s...\n", style.Dim.Render("2."), sessionName)
-	if err := t.KillSession(sessionName); err != nil {
+	if err := t.KillSessionWithProcesses(sessionName); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
@@ -1092,6 +1166,122 @@ func runDeaconResume(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Deacon resumed\n", style.Bold.Render("▶️"))
 	fmt.Println("The Deacon can now perform patrol actions.")
+
+	return nil
+}
+
+// runDeaconCleanupOrphans cleans up orphaned claude subagent processes.
+func runDeaconCleanupOrphans(cmd *cobra.Command, args []string) error {
+	// First, find orphans
+	orphans, err := util.FindOrphanedClaudeProcesses()
+	if err != nil {
+		return fmt.Errorf("finding orphaned processes: %w", err)
+	}
+
+	if len(orphans) == 0 {
+		fmt.Printf("%s No orphaned claude processes found\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	fmt.Printf("%s Found %d orphaned claude process(es)\n", style.Bold.Render("●"), len(orphans))
+
+	// Process them with signal escalation
+	results, err := util.CleanupOrphanedClaudeProcesses()
+	if err != nil {
+		style.PrintWarning("cleanup had errors: %v", err)
+	}
+
+	// Report results
+	var terminated, escalated, unkillable int
+	for _, r := range results {
+		switch r.Signal {
+		case "SIGTERM":
+			fmt.Printf("  %s Sent SIGTERM to PID %d (%s)\n", style.Bold.Render("→"), r.Process.PID, r.Process.Cmd)
+			terminated++
+		case "SIGKILL":
+			fmt.Printf("  %s Escalated to SIGKILL for PID %d (%s)\n", style.Bold.Render("!"), r.Process.PID, r.Process.Cmd)
+			escalated++
+		case "UNKILLABLE":
+			fmt.Printf("  %s WARNING: PID %d (%s) survived SIGKILL\n", style.Bold.Render("⚠"), r.Process.PID, r.Process.Cmd)
+			unkillable++
+		}
+	}
+
+	if len(results) > 0 {
+		summary := fmt.Sprintf("Processed %d orphan(s)", len(results))
+		if escalated > 0 {
+			summary += fmt.Sprintf(" (%d escalated to SIGKILL)", escalated)
+		}
+		if unkillable > 0 {
+			summary += fmt.Sprintf(" (%d unkillable)", unkillable)
+		}
+		fmt.Printf("%s %s\n", style.Bold.Render("✓"), summary)
+	}
+
+	return nil
+}
+
+// runDeaconZombieScan finds and cleans zombie Claude processes not in active tmux sessions.
+func runDeaconZombieScan(cmd *cobra.Command, args []string) error {
+	// Find zombies using tmux verification
+	zombies, err := util.FindZombieClaudeProcesses()
+	if err != nil {
+		return fmt.Errorf("finding zombie processes: %w", err)
+	}
+
+	if len(zombies) == 0 {
+		fmt.Printf("%s No zombie claude processes found\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	fmt.Printf("%s Found %d zombie claude process(es)\n", style.Bold.Render("●"), len(zombies))
+
+	// In dry-run mode, just list them
+	if zombieScanDryRun {
+		for _, z := range zombies {
+			ageStr := fmt.Sprintf("%dm", z.Age/60)
+			fmt.Printf("  %s PID %d (%s) TTY=%s age=%s\n",
+				style.Dim.Render("→"), z.PID, z.Cmd, z.TTY, ageStr)
+		}
+		fmt.Printf("%s Dry run - no processes killed\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	// Process them with signal escalation
+	results, err := util.CleanupZombieClaudeProcesses()
+	if err != nil {
+		style.PrintWarning("cleanup had errors: %v", err)
+	}
+
+	// Report results
+	var terminated, escalated, unkillable int
+	for _, r := range results {
+		switch r.Signal {
+		case "SIGTERM":
+			fmt.Printf("  %s Sent SIGTERM to PID %d (%s) TTY=%s\n",
+				style.Bold.Render("→"), r.Process.PID, r.Process.Cmd, r.Process.TTY)
+			terminated++
+		case "SIGKILL":
+			fmt.Printf("  %s Escalated to SIGKILL for PID %d (%s)\n",
+				style.Bold.Render("!"), r.Process.PID, r.Process.Cmd)
+			escalated++
+		case "UNKILLABLE":
+			fmt.Printf("  %s WARNING: PID %d (%s) survived SIGKILL\n",
+				style.Bold.Render("⚠"), r.Process.PID, r.Process.Cmd)
+			unkillable++
+		}
+	}
+
+	if len(results) > 0 {
+		summary := fmt.Sprintf("Processed %d zombie(s)", len(results))
+		if escalated > 0 {
+			summary += fmt.Sprintf(" (%d escalated to SIGKILL)", escalated)
+		}
+		if unkillable > 0 {
+			summary += fmt.Sprintf(" (%d unkillable)", unkillable)
+		}
+		fmt.Printf("%s %s\n", style.Bold.Render("✓"), summary)
+	}
 
 	return nil
 }

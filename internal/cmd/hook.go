@@ -60,9 +60,11 @@ Examples:
 
 // hookShowCmd shows hook status in compact one-line format
 var hookShowCmd = &cobra.Command{
-	Use:   "show <agent>",
+	Use:   "show [agent]",
 	Short: "Show what's on an agent's hook (compact)",
 	Long: `Show what's on any agent's hook in compact one-line format.
+
+With no argument, shows your own hook status (auto-detected from context).
 
 Use cases:
 - Mayor checking what polecats are working on
@@ -71,13 +73,14 @@ Use cases:
 - Quick status overview
 
 Examples:
+  gt hook show                         # What's on MY hook? (auto-detect)
   gt hook show gastown/polecats/nux    # What's nux working on?
   gt hook show gastown/witness         # What's the witness hooked to?
   gt hook show mayor                   # What's the mayor working on?
 
 Output format (one line):
   gastown/polecats/nux: gt-abc123 'Fix the widget bug' [in_progress]`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runHookShow,
 }
 
@@ -86,6 +89,7 @@ var (
 	hookMessage string
 	hookDryRun  bool
 	hookForce   bool
+	hookClear   bool
 )
 
 func init() {
@@ -94,6 +98,7 @@ func init() {
 	hookCmd.Flags().StringVarP(&hookMessage, "message", "m", "", "Message for handoff mail (optional)")
 	hookCmd.Flags().BoolVarP(&hookDryRun, "dry-run", "n", false, "Show what would be done")
 	hookCmd.Flags().BoolVarP(&hookForce, "force", "f", false, "Replace existing incomplete hooked bead")
+	hookCmd.Flags().BoolVar(&hookClear, "clear", false, "Clear your hook (alias for 'gt unhook')")
 
 	// --json flag for status output (used when no args, i.e., gt hook --json)
 	hookCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON (for status)")
@@ -105,8 +110,15 @@ func init() {
 	rootCmd.AddCommand(hookCmd)
 }
 
-// runHookOrStatus dispatches to status or hook based on args
+// runHookOrStatus dispatches to status, clear, or hook based on args/flags
 func runHookOrStatus(cmd *cobra.Command, args []string) error {
+	// --clear flag is alias for 'gt unhook'
+	if hookClear {
+		// Pass through dry-run and force flags
+		unslingDryRun = hookDryRun
+		unslingForce = hookForce
+		return runUnsling(cmd, args)
+	}
 	if len(args) == 0 {
 		// No args - show status
 		return runMoleculeStatus(cmd, args)
@@ -230,8 +242,10 @@ func runHook(_ *cobra.Command, args []string) error {
 	fmt.Printf("  Use 'gt handoff' to restart with this work\n")
 	fmt.Printf("  Use 'gt hook' to see hook status\n")
 
-	// Log hook event to activity feed
-	_ = events.LogFeed(events.TypeHook, agentID, events.HookPayload(beadID))
+	// Log hook event to activity feed (non-fatal)
+	if err := events.LogFeed(events.TypeHook, agentID, events.HookPayload(beadID)); err != nil {
+		fmt.Fprintf(os.Stderr, "%s Warning: failed to log hook event: %v\n", style.Dim.Render("⚠"), err)
+	}
 
 	return nil
 }
@@ -265,7 +279,17 @@ func checkPinnedBeadComplete(b *beads.Beads, issue *beads.Issue) (isComplete boo
 
 // runHookShow displays another agent's hook in compact one-line format.
 func runHookShow(cmd *cobra.Command, args []string) error {
-	target := args[0]
+	var target string
+	if len(args) > 0 {
+		target = args[0]
+	} else {
+		// Auto-detect current agent from context
+		agentID, _, _, err := resolveSelfTarget()
+		if err != nil {
+			return fmt.Errorf("auto-detecting agent (use explicit argument): %w", err)
+		}
+		target = agentID
+	}
 
 	// Find beads directory
 	workDir, err := findLocalBeadsDir()

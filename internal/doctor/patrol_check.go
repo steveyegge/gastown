@@ -458,10 +458,19 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	var missingPrompts []string
+	rigsChecked := 0
 	for _, rigName := range rigs {
 		// Check in mayor's clone (canonical for the rig)
 		mayorRig := filepath.Join(ctx.TownRoot, rigName, "mayor", "rig")
 		templatesDir := filepath.Join(mayorRig, "internal", "templates", "roles")
+
+		// Skip rigs that don't have internal/templates structure.
+		// Most repos won't have this - templates are embedded in gastown binary.
+		// Only check rigs that explicitly have their own template overrides.
+		if _, err := os.Stat(filepath.Join(mayorRig, "internal", "templates")); os.IsNotExist(err) {
+			continue
+		}
+		rigsChecked++
 
 		var rigMissing []string
 		for _, roleFile := range requiredRolePrompts {
@@ -476,13 +485,21 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
+	// Templates are embedded in gastown binary - missing files in rig repos is normal.
+	// Only report as informational, not a warning.
+	if rigsChecked == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "Using embedded role templates (no custom overrides)",
+		}
+	}
+
 	if len(missingPrompts) > 0 {
 		return &CheckResult{
 			Name:    c.Name(),
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("%d role prompt template(s) missing", len(missingPrompts)),
-			Details: missingPrompts,
-			FixHint: "Run 'gt doctor --fix' to copy embedded templates to rig repos",
+			Status:  StatusOK,
+			Message: fmt.Sprintf("%d rig(s) using embedded templates for some roles", len(c.missingByRig)),
 		}
 	}
 

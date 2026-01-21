@@ -407,7 +407,7 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 	// Show bd daemon warning at the end if there were issues
 	if bdWarning != "" {
 		fmt.Printf("%s %s\n", style.Warning.Render("⚠"), bdWarning)
-		fmt.Printf("  Run 'bd daemon killall && bd daemon --start' to restart daemons\n")
+		fmt.Printf("  Run 'bd daemon killall && bd daemon start' to restart daemons\n")
 	}
 
 	return nil

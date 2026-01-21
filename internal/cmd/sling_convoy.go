@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -65,7 +66,8 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 
 	townBeads := filepath.Join(townRoot, ".beads")
 
-	// Generate convoy ID with cv- prefix
+	// Generate convoy ID with hq-cv- prefix for visual distinction
+	// The hq-cv- prefix is registered in routes during gt install
 	convoyID := fmt.Sprintf("hq-cv-%s", slingGenerateShortID())
 
 	// Create convoy with title "Work: <issue-title>"
@@ -78,6 +80,9 @@ func createAutoConvoy(beadID, beadTitle string) (string, error) {
 		"--id=" + convoyID,
 		"--title=" + convoyTitle,
 		"--description=" + description,
+	}
+	if beads.NeedsForceForID(convoyID) {
+		createArgs = append(createArgs, "--force")
 	}
 
 	createCmd := exec.Command("bd", append([]string{"--no-daemon"}, createArgs...)...)

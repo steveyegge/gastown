@@ -24,16 +24,23 @@ var (
 var witnessCmd = &cobra.Command{
 	Use:     "witness",
 	GroupID: GroupAgents,
-	Short:   "Manage the polecat monitoring agent",
+	Short:   "Manage the Witness (per-rig polecat health monitor)",
 	RunE:    requireSubcommand,
-	Long: `Manage the Witness monitoring agent for a rig.
+	Long: `Manage the Witness - the per-rig polecat health monitor.
 
-The Witness monitors polecats for stuck states and orphaned sandboxes,
-nudges polecats that seem blocked, and reports status to the mayor.
+The Witness patrols a single rig, watching over its polecats:
+  - Detects stalled polecats (crashed or stuck mid-work)
+  - Nudges unresponsive sessions back to life
+  - Cleans up zombie polecats (finished but failed to exit)
+  - Nukes sandboxes when polecats complete via 'gt done'
 
-In the self-cleaning model, polecats nuke themselves after work completion.
-The Witness handles edge cases: crashed sessions, orphaned worktrees, and
-stuck polecats that need intervention.`,
+The Witness does NOT force session cycles or interrupt working polecats.
+Polecats manage their own sessions (via gt handoff). The Witness handles
+failures and edge cases only.
+
+One Witness per rig. The Deacon monitors all Witnesses.
+
+Role shortcuts: "witness" in mail/nudge addresses resolves to this rig's Witness.`,
 }
 
 var witnessStartCmd = &cobra.Command{
@@ -185,12 +192,13 @@ func runWitnessStop(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Kill tmux session if it exists
+	// Kill tmux session if it exists.
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 	t := tmux.NewTmux()
 	sessionName := witnessSessionName(rigName)
 	running, _ := t.HasSession(sessionName)
 	if running {
-		if err := t.KillSession(sessionName); err != nil {
+		if err := t.KillSessionWithProcesses(sessionName); err != nil {
 			style.PrintWarning("failed to kill session: %v", err)
 		}
 	}
@@ -211,65 +219,65 @@ func runWitnessStop(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// WitnessStatusOutput is the JSON output format for witness status.
+type WitnessStatusOutput struct {
+	Running           bool     `json:"running"`
+	RigName           string   `json:"rig_name"`
+	Session           string   `json:"session,omitempty"`
+	MonitoredPolecats []string `json:"monitored_polecats,omitempty"`
+}
+
 func runWitnessStatus(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
-	mgr, err := getWitnessManager(rigName)
+	// Get rig for polecat info
+	_, r, err := getRig(rigName)
 	if err != nil {
 		return err
 	}
 
-	w, err := mgr.Status()
-	if err != nil {
-		return fmt.Errorf("getting status: %w", err)
-	}
+	mgr := witness.NewManager(r)
 
-	// Check actual tmux session state (more reliable than state file)
-	t := tmux.NewTmux()
-	sessionName := witnessSessionName(rigName)
-	sessionRunning, _ := t.HasSession(sessionName)
+	// ZFC: tmux is source of truth for running state
+	running, _ := mgr.IsRunning()
+	sessionInfo, _ := mgr.Status() // may be nil if not running
 
-	// Reconcile state: tmux session is the source of truth for background mode
-	if sessionRunning && w.State != witness.StateRunning {
-		w.State = witness.StateRunning
-	} else if !sessionRunning && w.State == witness.StateRunning {
-		w.State = witness.StateStopped
-	}
+	// Polecats come from rig config, not state file
+	polecats := r.Polecats
 
 	// JSON output
 	if witnessStatusJSON {
+		output := WitnessStatusOutput{
+			Running:           running,
+			RigName:           rigName,
+			MonitoredPolecats: polecats,
+		}
+		if sessionInfo != nil {
+			output.Session = sessionInfo.Name
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(w)
+		return enc.Encode(output)
 	}
 
 	// Human-readable output
 	fmt.Printf("%s Witness: %s\n\n", style.Bold.Render(AgentTypeIcons[AgentWitness]), rigName)
 
-	stateStr := string(w.State)
-	switch w.State {
-	case witness.StateRunning:
-		stateStr = style.Bold.Render("● running")
-	case witness.StateStopped:
-		stateStr = style.Dim.Render("○ stopped")
-	case witness.StatePaused:
-		stateStr = style.Dim.Render("⏸ paused")
-	}
-	fmt.Printf("  State: %s\n", stateStr)
-	if sessionRunning {
-		fmt.Printf("  Session: %s\n", sessionName)
-	}
-
-	if w.StartedAt != nil {
-		fmt.Printf("  Started: %s\n", w.StartedAt.Format("2006-01-02 15:04:05"))
+	if running {
+		fmt.Printf("  State: %s\n", style.Bold.Render("● running"))
+		if sessionInfo != nil {
+			fmt.Printf("  Session: %s\n", sessionInfo.Name)
+		}
+	} else {
+		fmt.Printf("  State: %s\n", style.Dim.Render("○ stopped"))
 	}
 
 	// Show monitored polecats
 	fmt.Printf("\n  %s\n", style.Bold.Render("Monitored Polecats:"))
-	if len(w.MonitoredPolecats) == 0 {
+	if len(polecats) == 0 {
 		fmt.Printf("    %s\n", style.Dim.Render("(none)"))
 	} else {
-		for _, p := range w.MonitoredPolecats {
+		for _, p := range polecats {
 			fmt.Printf("    • %s\n", p)
 		}
 	}

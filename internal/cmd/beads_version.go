@@ -2,11 +2,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // MinBeadsVersion is the minimum required beads version for Gas Town.
@@ -84,10 +87,19 @@ func (v beadsVersion) compare(other beadsVersion) int {
 	return 0
 }
 
+// Pre-compiled regex for beads version parsing
+var beadsVersionRe = regexp.MustCompile(`bd version (\d+\.\d+(?:\.\d+)?(?:-\w+)?)`)
+
 func getBeadsVersion() (string, error) {
-	cmd := exec.Command("bd", "version")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", "version")
 	output, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("bd version check timed out")
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return "", fmt.Errorf("bd version failed: %s", string(exitErr.Stderr))
 		}
@@ -96,8 +108,7 @@ func getBeadsVersion() (string, error) {
 
 	// Parse output like "bd version 0.44.0 (dev)"
 	// or "bd version 0.44.0"
-	re := regexp.MustCompile(`bd version (\d+\.\d+(?:\.\d+)?(?:-\w+)?)`)
-	matches := re.FindStringSubmatch(string(output))
+	matches := beadsVersionRe.FindStringSubmatch(string(output))
 	if len(matches) < 2 {
 		return "", fmt.Errorf("could not parse beads version from: %s", strings.TrimSpace(string(output)))
 	}
@@ -105,9 +116,22 @@ func getBeadsVersion() (string, error) {
 	return matches[1], nil
 }
 
+var (
+	cachedVersionCheckResult error
+	versionCheckOnce         sync.Once
+)
+
 // CheckBeadsVersion verifies that the installed beads version meets the minimum requirement.
 // Returns nil if the version is sufficient, or an error with details if not.
+// The check is performed only once per process execution.
 func CheckBeadsVersion() error {
+	versionCheckOnce.Do(func() {
+		cachedVersionCheckResult = checkBeadsVersionInternal()
+	})
+	return cachedVersionCheckResult
+}
+
+func checkBeadsVersionInternal() error {
 	installedStr, err := getBeadsVersion()
 	if err != nil {
 		return fmt.Errorf("cannot verify beads version: %w", err)

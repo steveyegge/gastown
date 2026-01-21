@@ -44,8 +44,8 @@ type Issue struct {
 
 	// Agent bead slots (type=agent only)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
-	RoleBead   string `json:"role_bead,omitempty"`   // Role definition bead (shared)
 	AgentState string `json:"agent_state,omitempty"` // Agent lifecycle state (spawning, working, done, stuck)
+	// Note: role_bead field removed - role definitions are now config-based
 
 	// Counts from list output
 	DependencyCount int `json:"dependency_count,omitempty"`
@@ -113,11 +113,24 @@ type SyncStatus struct {
 type Beads struct {
 	workDir  string
 	beadsDir string // Optional BEADS_DIR override for cross-database access
+	isolated bool   // If true, suppress inherited beads env vars (for test isolation)
+
+	// Lazy-cached town root for routing resolution.
+	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
+	townRoot     string
+	searchedRoot bool
 }
 
 // New creates a new Beads wrapper for the given directory.
 func New(workDir string) *Beads {
 	return &Beads{workDir: workDir}
+}
+
+// NewIsolated creates a Beads wrapper for test isolation.
+// This suppresses inherited beads env vars (BD_ACTOR, BEADS_DB) to prevent
+// tests from accidentally routing to production databases.
+func NewIsolated(workDir string) *Beads {
+	return &Beads{workDir: workDir, isolated: true}
 }
 
 // NewWithBeadsDir creates a Beads wrapper with an explicit BEADS_DIR.
@@ -126,13 +139,50 @@ func NewWithBeadsDir(workDir, beadsDir string) *Beads {
 	return &Beads{workDir: workDir, beadsDir: beadsDir}
 }
 
+// getActor returns the BD_ACTOR value for this context.
+// Returns empty string when in isolated mode (tests) to prevent
+// inherited actors from routing to production databases.
+func (b *Beads) getActor() string {
+	if b.isolated {
+		return ""
+	}
+	return os.Getenv("BD_ACTOR")
+}
+
+// getTownRoot returns the Gas Town root directory, using lazy caching.
+// The town root is found by walking up from workDir looking for mayor/town.json.
+// Returns empty string if not in a Gas Town project.
+func (b *Beads) getTownRoot() string {
+	if !b.searchedRoot {
+		b.townRoot = FindTownRoot(b.workDir)
+		b.searchedRoot = true
+	}
+	return b.townRoot
+}
+
+// getResolvedBeadsDir returns the beads directory this wrapper is operating on.
+// This follows any redirects and returns the actual beads directory path.
+func (b *Beads) getResolvedBeadsDir() string {
+	if b.beadsDir != "" {
+		return b.beadsDir
+	}
+	return ResolveBeadsDir(b.workDir)
+}
+
+// Init initializes a new beads database in the working directory.
+// This uses the same environment isolation as other commands.
+func (b *Beads) Init(prefix string) error {
+	_, err := b.run("init", "--prefix", prefix, "--quiet")
+	return err
+}
+
 // run executes a bd command and returns stdout.
 func (b *Beads) run(args ...string) ([]byte, error) {
 	// Use --no-daemon for faster read operations (avoids daemon IPC overhead)
-	// The daemon is primarily useful for write coalescing, not reads
-	fullArgs := append([]string{"--no-daemon"}, args...)
-	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
-	cmd.Dir = b.workDir
+	// The daemon is primarily useful for write coalescing, not reads.
+	// Use --allow-stale to prevent failures when db is out of sync with JSONL
+	// (e.g., after daemon is killed during shutdown before syncing).
+	fullArgs := append([]string{"--no-daemon", "--allow-stale"}, args...)
 
 	// Always explicitly set BEADS_DIR to prevent inherited env vars from
 	// causing prefix mismatches. Use explicit beadsDir if set, otherwise
@@ -141,7 +191,28 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	if beadsDir == "" {
 		beadsDir = ResolveBeadsDir(b.workDir)
 	}
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+
+	// In isolated mode, use --db flag to force specific database path
+	// This bypasses bd's routing logic that can redirect to .beads-planning
+	// Skip --db for init command since it creates the database
+	isInit := len(args) > 0 && args[0] == "init"
+	if b.isolated && !isInit {
+		beadsDB := filepath.Join(beadsDir, "beads.db")
+		fullArgs = append([]string{"--db", beadsDB}, fullArgs...)
+	}
+
+	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
+	cmd.Dir = b.workDir
+
+	// Build environment: filter beads env vars when in isolated mode (tests)
+	// to prevent routing to production databases.
+	var env []string
+	if b.isolated {
+		env = filterBeadsEnv(os.Environ())
+	} else {
+		env = os.Environ()
+	}
+	cmd.Env = append(env, "BEADS_DIR="+beadsDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -192,6 +263,27 @@ func (b *Beads) wrapError(err error, stderr string, args []string) error {
 		return fmt.Errorf("bd %s: %s", strings.Join(args, " "), stderr)
 	}
 	return fmt.Errorf("bd %s: %w", strings.Join(args, " "), err)
+}
+
+// filterBeadsEnv removes beads-related environment variables from the given
+// environment slice. This ensures test isolation by preventing inherited
+// BD_ACTOR, BEADS_DB, GT_ROOT, HOME etc. from routing commands to production databases.
+func filterBeadsEnv(environ []string) []string {
+	filtered := make([]string, 0, len(environ))
+	for _, env := range environ {
+		// Skip beads-related env vars that could interfere with test isolation
+		// BD_ACTOR, BEADS_* - direct beads config
+		// GT_ROOT - causes bd to find global routes file
+		// HOME - causes bd to find ~/.beads-planning routing
+		if strings.HasPrefix(env, "BD_ACTOR=") ||
+			strings.HasPrefix(env, "BEADS_") ||
+			strings.HasPrefix(env, "GT_ROOT=") ||
+			strings.HasPrefix(env, "HOME=") {
+			continue
+		}
+		filtered = append(filtered, env)
+	}
+	return filtered
 }
 
 // List returns issues matching the given options.
@@ -396,9 +488,10 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 		args = append(args, "--ephemeral")
 	}
 	// Default Actor from BD_ACTOR env var if not specified
+	// Uses getActor() to respect isolated mode (tests)
 	actor := opts.Actor
 	if actor == "" {
-		actor = os.Getenv("BD_ACTOR")
+		actor = b.getActor()
 	}
 	if actor != "" {
 		args = append(args, "--actor="+actor)
@@ -422,6 +515,9 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 // deterministic IDs rather than auto-generated ones.
 func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	args := []string{"create", "--json", "--id=" + id}
+	if NeedsForceForID(id) {
+		args = append(args, "--force")
+	}
 
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
@@ -440,9 +536,10 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 		args = append(args, "--parent="+opts.Parent)
 	}
 	// Default Actor from BD_ACTOR env var if not specified
+	// Uses getActor() to respect isolated mode (tests)
 	actor := opts.Actor
 	if actor == "" {
-		actor = os.Getenv("BD_ACTOR")
+		actor = b.getActor()
 	}
 	if actor != "" {
 		args = append(args, "--actor="+actor)
@@ -654,15 +751,16 @@ This is physics, not politeness. Gas Town is a steam engine - you are a piston.
 
 ## Session Close Protocol
 
-Before saying "done":
+Before signaling completion:
 1. git status (check what changed)
 2. git add <files> (stage code changes)
 3. bd sync (commit beads changes)
 4. git commit -m "..." (commit code)
 5. bd sync (commit any new beads changes)
 6. git push (push to remote)
+7. ` + "`gt done`" + ` (submit to merge queue and exit)
 
-**Work is not done until pushed.**
+**Polecats MUST call ` + "`gt done`" + ` - this submits work and exits the session.**
 `
 
 // ProvisionPrimeMD writes the Gas Town PRIME.md file to the specified beads directory.

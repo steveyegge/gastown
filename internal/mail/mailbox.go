@@ -57,7 +57,7 @@ func NewMailboxBeads(identity, workDir string) *Mailbox {
 func NewMailboxFromAddress(address, workDir string) *Mailbox {
 	beadsDir := beads.ResolveBeadsDir(workDir)
 	return &Mailbox{
-		identity: addressToIdentity(address),
+		identity: AddressToIdentity(address),
 		workDir:  workDir,
 		beadsDir: beadsDir,
 		legacy:   false,
@@ -67,7 +67,7 @@ func NewMailboxFromAddress(address, workDir string) *Mailbox {
 // NewMailboxWithBeadsDir creates a mailbox with an explicit beads directory.
 func NewMailboxWithBeadsDir(address, workDir, beadsDir string) *Mailbox {
 	return &Mailbox{
-		identity: addressToIdentity(address),
+		identity: AddressToIdentity(address),
 		workDir:  workDir,
 		beadsDir: beadsDir,
 		legacy:   false,
@@ -282,21 +282,17 @@ func (m *Mailbox) listLegacy() ([]*Message, error) {
 
 // ListUnread returns unread (open) messages.
 func (m *Mailbox) ListUnread() ([]*Message, error) {
-	if m.legacy {
-		all, err := m.List()
-		if err != nil {
-			return nil, err
-		}
-		var unread []*Message
-		for _, msg := range all {
-			if !msg.Read {
-				unread = append(unread, msg)
-			}
-		}
-		return unread, nil
+	all, err := m.List()
+	if err != nil {
+		return nil, err
 	}
-	// For beads, inbox only returns open (unread) messages
-	return m.List()
+	var unread []*Message
+	for _, msg := range all {
+		if !msg.Read {
+			unread = append(unread, msg)
+		}
+	}
+	return unread, nil
 }
 
 // Get returns a message by ID.

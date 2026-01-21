@@ -181,9 +181,9 @@ func (cp *Checkpoint) Age() time.Duration {
 	return time.Since(cp.Timestamp)
 }
 
-// IsStale returns true if the checkpoint is older than the threshold.
+// IsStale returns true if the checkpoint is at or older than the threshold.
 func (cp *Checkpoint) IsStale(threshold time.Duration) bool {
-	return cp.Age() > threshold
+	return cp.Age() >= threshold
 }
 
 // Summary returns a concise summary of the checkpoint.

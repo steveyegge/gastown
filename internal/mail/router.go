@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // ErrUnknownList indicates a mailing list name was not found in configuration.
@@ -85,6 +86,16 @@ func parseAnnounceName(address string) string {
 	return strings.TrimPrefix(address, "announce:")
 }
 
+// isChannelAddress returns true if the address uses channel:name syntax (beads-native channels).
+func isChannelAddress(address string) bool {
+	return strings.HasPrefix(address, "channel:")
+}
+
+// parseChannelName extracts the channel name from a channel:name address.
+func parseChannelName(address string) string {
+	return strings.TrimPrefix(address, "channel:")
+}
+
 // expandFromConfig is a generic helper for config-based expansion.
 // It loads the messaging config and calls the getter to extract the desired value.
 // This consolidates the common pattern of: check townRoot, load config, lookup in map.
@@ -150,24 +161,15 @@ func (r *Router) expandAnnounce(announceName string) (*config.AnnounceConfig, er
 	}, ErrUnknownAnnounce)
 }
 
-// detectTownRoot finds the town root by looking for mayor/town.json.
+// detectTownRoot finds the town root using workspace.Find.
+// This ensures consistent detection with the rest of the codebase,
+// supporting both primary (mayor/town.json) and secondary (mayor/) markers.
 func detectTownRoot(startDir string) string {
-	dir := startDir
-	for {
-		// Check for primary marker (mayor/town.json)
-		markerPath := filepath.Join(dir, "mayor", "town.json")
-		if _, err := os.Stat(markerPath); err == nil {
-			return dir
-		}
-
-		// Move up
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
+	townRoot, err := workspace.Find(startDir)
+	if err != nil {
+		return ""
 	}
-	return ""
+	return townRoot
 }
 
 // resolveBeadsDir returns the correct .beads directory for the given address.
@@ -515,6 +517,11 @@ func (r *Router) Send(msg *Message) error {
 		return r.sendToAnnounce(msg)
 	}
 
+	// Check for beads-native channel address - broadcast with retention
+	if isChannelAddress(msg.To) {
+		return r.sendToChannel(msg)
+	}
+
 	// Check for @group address - resolve and fan-out
 	if isGroupAddress(msg.To) {
 		return r.sendToGroup(msg)
@@ -562,7 +569,7 @@ func (r *Router) sendToGroup(msg *Message) error {
 // sendToSingle sends a message to a single recipient.
 func (r *Router) sendToSingle(msg *Message) error {
 	// Convert addresses to beads identities
-	toIdentity := addressToIdentity(msg.To)
+	toIdentity := AddressToIdentity(msg.To)
 
 	// Build labels for from/thread/reply-to/cc
 	var labels []string
@@ -575,7 +582,7 @@ func (r *Router) sendToSingle(msg *Message) error {
 	}
 	// Add CC labels (one per recipient)
 	for _, cc := range msg.CC {
-		ccIdentity := addressToIdentity(cc)
+		ccIdentity := AddressToIdentity(cc)
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
@@ -685,7 +692,7 @@ func (r *Router) sendToQueue(msg *Message) error {
 		labels = append(labels, "reply-to:"+msg.ReplyTo)
 	}
 	for _, cc := range msg.CC {
-		ccIdentity := addressToIdentity(cc)
+		ccIdentity := AddressToIdentity(cc)
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
@@ -756,7 +763,7 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 		labels = append(labels, "reply-to:"+msg.ReplyTo)
 	}
 	for _, cc := range msg.CC {
-		ccIdentity := addressToIdentity(cc)
+		ccIdentity := AddressToIdentity(cc)
 		labels = append(labels, "cc:"+ccIdentity)
 	}
 
@@ -791,6 +798,98 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 	}
 
 	// No notification for announce messages - readers poll or check on their own schedule
+
+	return nil
+}
+
+// sendToChannel delivers a message to a beads-native channel.
+// Creates a message with channel:<name> label for channel queries.
+// Also fans out delivery to each subscriber's inbox.
+// Retention is enforced by the channel's EnforceChannelRetention after message creation.
+func (r *Router) sendToChannel(msg *Message) error {
+	channelName := parseChannelName(msg.To)
+
+	// Validate channel exists as a beads-native channel
+	if r.townRoot == "" {
+		return fmt.Errorf("town root not set, cannot send to channel: %s", channelName)
+	}
+	b := beads.New(r.townRoot)
+	_, fields, err := b.GetChannelBead(channelName)
+	if err != nil {
+		return fmt.Errorf("getting channel %s: %w", channelName, err)
+	}
+	if fields == nil {
+		return fmt.Errorf("channel not found: %s", channelName)
+	}
+	if fields.Status == beads.ChannelStatusClosed {
+		return fmt.Errorf("channel %s is closed", channelName)
+	}
+
+	// Build labels for from/thread/reply-to/cc plus channel metadata
+	var labels []string
+	labels = append(labels, "from:"+msg.From)
+	labels = append(labels, "channel:"+channelName)
+	if msg.ThreadID != "" {
+		labels = append(labels, "thread:"+msg.ThreadID)
+	}
+	if msg.ReplyTo != "" {
+		labels = append(labels, "reply-to:"+msg.ReplyTo)
+	}
+	for _, cc := range msg.CC {
+		ccIdentity := AddressToIdentity(cc)
+		labels = append(labels, "cc:"+ccIdentity)
+	}
+
+	// Build command: bd create <subject> --type=message --assignee=channel:<name> -d <body>
+	// Use channel:<name> as assignee so queries can filter by channel
+	args := []string{"create", msg.Subject,
+		"--type", "message",
+		"--assignee", msg.To, // channel:name
+		"-d", msg.Body,
+	}
+
+	// Add priority flag
+	beadsPriority := PriorityToBeads(msg.Priority)
+	args = append(args, "--priority", fmt.Sprintf("%d", beadsPriority))
+
+	// Add labels (includes channel name for filtering)
+	if len(labels) > 0 {
+		args = append(args, "--labels", strings.Join(labels, ","))
+	}
+
+	// Add actor for attribution (sender identity)
+	args = append(args, "--actor", msg.From)
+
+	// Channel messages are never ephemeral - they persist according to retention policy
+	// (deliberately not checking shouldBeWisp)
+
+	// Channel messages go to town-level beads (shared location)
+	beadsDir := r.resolveBeadsDir("")
+	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
+	if err != nil {
+		return fmt.Errorf("sending to channel %s: %w", channelName, err)
+	}
+
+	// Enforce channel retention policy (on-write cleanup)
+	_ = b.EnforceChannelRetention(channelName)
+
+	// Fan-out delivery: send a copy to each subscriber's inbox
+	if len(fields.Subscribers) > 0 {
+		for _, subscriber := range fields.Subscribers {
+			// Skip self-delivery (don't notify the sender)
+			if isSelfMail(msg.From, subscriber) {
+				continue
+			}
+
+			// Create a copy for this subscriber with channel context in subject
+			msgCopy := *msg
+			msgCopy.To = subscriber
+			msgCopy.Subject = fmt.Sprintf("[channel:%s] %s", channelName, msg.Subject)
+
+			// Best-effort delivery - don't fail the channel send if one subscriber fails
+			_ = r.sendToSingle(&msgCopy)
+		}
+	}
 
 	return nil
 }

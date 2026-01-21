@@ -21,6 +21,7 @@ var (
 	mailInboxJSON     bool
 	mailReadJSON      bool
 	mailInboxUnread   bool
+	mailInboxAll      bool
 	mailInboxIdentity string
 	mailCheckInject   bool
 	mailCheckJSON     bool
@@ -138,8 +139,13 @@ var mailInboxCmd = &cobra.Command{
 If no address is specified, shows the current context's inbox.
 Use --identity for polecats to explicitly specify their identity.
 
+By default, shows all messages. Use --unread to filter to unread only,
+or --all to explicitly show all messages (read and unread).
+
 Examples:
   gt mail inbox                       # Current context (auto-detected)
+  gt mail inbox --all                 # Explicitly show all messages
+  gt mail inbox --unread              # Show only unread messages
   gt mail inbox mayor/                # Mayor's inbox
   gt mail inbox greenplace/Toast         # Polecat's inbox
   gt mail inbox --identity greenplace/Toast  # Explicit polecat identity`,
@@ -150,9 +156,10 @@ Examples:
 var mailReadCmd = &cobra.Command{
 	Use:   "read <message-id>",
 	Short: "Read a message",
-	Long: `Read a specific message and mark it as read.
+	Long: `Read a specific message (does not mark as read).
 
-The message ID can be found from 'gt mail inbox'.`,
+The message ID can be found from 'gt mail inbox'.
+Use 'gt mail mark-read' to mark messages as read.`,
 	Aliases: []string{"show"},
 	Args: cobra.ExactArgs(1),
 	RunE: runMailRead,
@@ -193,8 +200,9 @@ Examples:
 }
 
 var mailMarkReadCmd = &cobra.Command{
-	Use:   "mark-read <message-id> [message-id...]",
-	Short: "Mark messages as read without archiving",
+	Use:     "mark-read <message-id> [message-id...]",
+	Aliases: []string{"ack"},
+	Short:   "Mark messages as read without archiving",
 	Long: `Mark one or more messages as read without removing them from inbox.
 
 This adds a 'read' label to the message, which is reflected in the inbox display.
@@ -277,27 +285,27 @@ Examples:
 }
 
 var mailClaimCmd = &cobra.Command{
-	Use:   "claim <queue-name>",
+	Use:   "claim [queue-name]",
 	Short: "Claim a message from a queue",
 	Long: `Claim the oldest unclaimed message from a work queue.
 
 SYNTAX:
-  gt mail claim <queue-name>
+  gt mail claim [queue-name]
 
 BEHAVIOR:
-1. List unclaimed messages in the queue
-2. Pick the oldest unclaimed message
-3. Set assignee to caller identity
-4. Set status to in_progress
-5. Print claimed message details
+1. If queue specified, claim from that queue
+2. If no queue specified, claim from any eligible queue
+3. Add claimed-by and claimed-at labels to the message
+4. Print claimed message details
 
 ELIGIBILITY:
-The caller must match a pattern in the queue's workers list
-(defined in ~/gt/config/messaging.json).
+The caller must match the queue's claim_pattern (stored in the queue bead).
+Pattern examples: "*" (anyone), "gastown/polecats/*" (specific rig crew).
 
 Examples:
-  gt mail claim work/gastown    # Claim from gastown work queue`,
-	Args: cobra.ExactArgs(1),
+  gt mail claim work-requests   # Claim from specific queue
+  gt mail claim                 # Claim from any eligible queue`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runMailClaim,
 }
 
@@ -311,14 +319,14 @@ SYNTAX:
 
 BEHAVIOR:
 1. Find the message by ID
-2. Verify caller is the one who claimed it (assignee matches)
-3. Set assignee back to queue:<name> (from message labels)
-4. Set status back to open
-5. Message returns to queue for others to claim
+2. Verify caller is the one who claimed it (claimed-by label matches)
+3. Remove claimed-by and claimed-at labels
+4. Message returns to queue for others to claim
 
 ERROR CASES:
 - Message not found
-- Message not claimed (still assigned to queue)
+- Message is not a queue message
+- Message not claimed
 - Caller did not claim this message
 
 Examples:
@@ -431,6 +439,7 @@ func init() {
 	// Inbox flags
 	mailInboxCmd.Flags().BoolVar(&mailInboxJSON, "json", false, "Output as JSON")
 	mailInboxCmd.Flags().BoolVarP(&mailInboxUnread, "unread", "u", false, "Show only unread messages")
+	mailInboxCmd.Flags().BoolVarP(&mailInboxAll, "all", "a", false, "Show all messages (read and unread)")
 	mailInboxCmd.Flags().StringVar(&mailInboxIdentity, "identity", "", "Explicit identity for inbox (e.g., greenplace/Toast)")
 	mailInboxCmd.Flags().StringVar(&mailInboxIdentity, "address", "", "Alias for --identity")
 
