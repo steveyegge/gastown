@@ -218,11 +218,11 @@ func (w *ConvoyWatcher) checkConvoyCompletion(convoyID string) {
 		return // Already closed
 	}
 
-	// Run gt convoy check to handle the completion
+	// Run gt convoy check with specific convoy ID for targeted check
 	// This reuses the existing logic which handles notifications, etc.
 	w.logger("convoy watcher: running completion check for %s", convoyID)
 
-	checkCmd := exec.Command("gt", "convoy", "check")
+	checkCmd := exec.Command("gt", "convoy", "check", convoyID)
 	checkCmd.Dir = w.townRoot
 	var checkStdout, checkStderr bytes.Buffer
 	checkCmd.Stdout = &checkStdout
