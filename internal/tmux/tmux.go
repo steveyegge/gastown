@@ -117,6 +117,19 @@ func (t *Tmux) NewSession(name, workDir string) error {
 	return err
 }
 
+// NewSessionWithCommand creates a new detached tmux session with an initial command.
+// This is equivalent to Start() but returns only an error (for compatibility with upstream).
+func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
+	args := []string{"new-session", "-d", "-s", name}
+	if workDir != "" {
+		args = append(args, "-c", workDir)
+	}
+	// Add the command as the last argument - tmux runs it as the pane's initial process
+	args = append(args, command)
+	_, err := t.run(args...)
+	return err
+}
+
 // Start creates a new detached terminal session that immediately runs a command.
 // Unlike NewSession + Send, this avoids race conditions where the shell isn't ready
 // or the command arrives before the shell prompt. The command runs directly as the
@@ -216,74 +229,63 @@ func (t *Tmux) EnsureSessionFresh(name, workDir string) error {
 // Stop terminates a terminal session, killing all descendant processes first.
 // This prevents orphan processes that survive session termination due to SIGHUP being ignored.
 //
+// Self-kill detection: If the caller is running inside the session being terminated,
+// Stop() automatically excludes the caller's PID from the kill sequence. This allows
+// cleanup code (like gt done) to complete before being terminated by the final kill-session.
+//
 // Process:
 // 1. Get the pane's main process PID
 // 2. Find all descendant processes recursively (not just direct children)
-// 3. Send SIGTERM to all descendants (deepest first)
-// 4. Wait 100ms for graceful shutdown
-// 5. Send SIGKILL to any remaining descendants
-// 6. Kill the session (if not already gone)
+// 3. Auto-detect if caller is a descendant and exclude it
+// 4. Send SIGTERM to all (non-excluded) descendants (deepest first)
+// 5. Wait 100ms for graceful shutdown
+// 6. Send SIGKILL to any remaining (non-excluded) descendants
+// 7. Kill the session (if not already gone) - this terminates excluded processes too
 //
 // This ensures agent processes and all their children are properly terminated.
 // Returns nil if the session was successfully stopped or was already gone.
 func (t *Tmux) Stop(id session.SessionID) error {
 	name := string(id)
-	// Get the pane PID - if this fails, session might not exist, try direct kill
-	pid, err := t.GetPanePID(name)
-	if err == nil && pid != "" {
-		// Get all descendant PIDs recursively (returns deepest-first order)
-		descendants := getAllDescendants(pid)
-
-		// Send SIGTERM to all descendants (deepest first to avoid orphaning)
-		for _, dpid := range descendants {
-			_ = exec.Command("kill", "-TERM", dpid).Run()
-		}
-
-		// Wait for graceful shutdown
-		time.Sleep(100 * time.Millisecond)
-
-		// Send SIGKILL to any remaining descendants
-		for _, dpid := range descendants {
-			_ = exec.Command("kill", "-KILL", dpid).Run()
-		}
-
-		// Kill the pane process itself (may have called setsid() and detached)
-		_ = exec.Command("kill", "-TERM", pid).Run()
-		time.Sleep(100 * time.Millisecond)
-		_ = exec.Command("kill", "-KILL", pid).Run()
-	}
-
-	// Kill the tmux session
-	// Note: If killing descendants caused the main process to exit, tmux may have
-	// already destroyed the session (when remain-on-exit is off). That's fine.
-	err = t.KillSession(name)
-	if err == ErrSessionNotFound {
-		return nil // Session already gone, which is what we wanted
-	}
-	return err
+	return t.stopWithExclusions(name)
 }
 
-// KillSessionWithProcessesExcluding is like KillSessionWithProcesses but excludes
-// specified PIDs from being killed. This is essential for self-kill scenarios where
-// the calling process (e.g., gt done) is running inside the session it's terminating.
-// Without exclusion, the caller would be killed before completing the cleanup.
-func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []string) error {
-	// Build exclusion set for O(1) lookup
+// KillSessionWithProcesses terminates a tmux session and all its descendant processes.
+// This is an alias for Stop() with a string parameter (for compatibility with upstream).
+func (t *Tmux) KillSessionWithProcesses(name string) error {
+	return t.Stop(session.SessionID(name))
+}
+
+// stopWithExclusions is the internal implementation that handles process termination.
+// It auto-detects if the caller is inside the session and excludes itself.
+func (t *Tmux) stopWithExclusions(name string) error {
+	// Build exclusion set for auto-detected self
 	exclude := make(map[string]bool)
-	for _, pid := range excludePIDs {
-		exclude[pid] = true
-	}
+
+	// Auto-detect self: add caller's PID if it's a descendant of this session
+	myPID := fmt.Sprintf("%d", os.Getpid())
 
 	// Get the pane PID
-	pid, err := t.GetPanePID(name)
+	panePID, err := t.GetPanePID(name)
 	if err != nil {
 		// Session might not exist or be in bad state, try direct kill
 		return t.KillSession(name)
 	}
 
-	if pid != "" {
+	if panePID != "" {
 		// Get all descendant PIDs recursively (returns deepest-first order)
-		descendants := getAllDescendants(pid)
+		descendants := getAllDescendants(panePID)
+
+		// Check if caller is a descendant of this session (self-kill scenario)
+		for _, dpid := range descendants {
+			if dpid == myPID {
+				exclude[myPID] = true
+				break
+			}
+		}
+		// Also check if caller IS the pane process
+		if panePID == myPID {
+			exclude[myPID] = true
+		}
 
 		// Filter out excluded PIDs
 		var filtered []string
@@ -308,14 +310,14 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 
 		// Kill the pane process itself (may have called setsid() and detached)
 		// Only if not excluded
-		if !exclude[pid] {
-			_ = exec.Command("kill", "-TERM", pid).Run()
+		if !exclude[panePID] {
+			_ = exec.Command("kill", "-TERM", panePID).Run()
 			time.Sleep(100 * time.Millisecond)
-			_ = exec.Command("kill", "-KILL", pid).Run()
+			_ = exec.Command("kill", "-KILL", panePID).Run()
 		}
 	}
 
-	// Kill the tmux session - this will terminate the excluded process too
+	// Kill the tmux session - this terminates any excluded processes too
 	// Ignore "session not found" - if we killed all non-excluded processes,
 	// tmux may have already destroyed the session automatically
 	err = t.KillSession(name)
@@ -437,6 +439,52 @@ func (t *Tmux) List() ([]session.SessionID, error) {
 // SessionIDForAgent converts an agent address to its SessionID.
 func (t *Tmux) SessionIDForAgent(id ids.AgentID) session.SessionID {
 	return session.SessionID(session.SessionNameFromAgentID(id))
+}
+
+// SessionSet provides O(1) session existence checks by caching session names.
+// Use this when you need to check multiple sessions to avoid N+1 subprocess calls.
+type SessionSet struct {
+	sessions map[string]struct{}
+}
+
+// GetSessionSet returns a SessionSet containing all current sessions.
+// Call this once at the start of an operation, then use Has() for O(1) checks.
+// This replaces multiple HasSession() calls with a single List() call.
+func (t *Tmux) GetSessionSet() (*SessionSet, error) {
+	ids, err := t.List()
+	if err != nil {
+		return nil, err
+	}
+
+	set := &SessionSet{
+		sessions: make(map[string]struct{}, len(ids)),
+	}
+	for _, id := range ids {
+		set.sessions[string(id)] = struct{}{}
+	}
+	return set, nil
+}
+
+// Has returns true if the session exists in the set.
+// This is an O(1) lookup - no subprocess is spawned.
+func (s *SessionSet) Has(name string) bool {
+	if s == nil {
+		return false
+	}
+	_, ok := s.sessions[name]
+	return ok
+}
+
+// Names returns all session names in the set.
+func (s *SessionSet) Names() []string {
+	if s == nil || len(s.sessions) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(s.sessions))
+	for name := range s.sessions {
+		names = append(names, name)
+	}
+	return names
 }
 
 // ListSessionIDs returns a map of session name to session ID.

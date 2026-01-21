@@ -1,0 +1,519 @@
+description = """
+Polecat work lifecycle with design-first approach and mandatory tests.
+
+This is v2 of mol-polecat-branch-only, adding:
+- **Design step**: Rule-of-Five iterative design before coding
+- **Mandatory tests**: Explicit test writing step, not just running existing tests
+
+The molecule guides a polecat through a complete work assignment, pushing to
+a branch (NOT merging to main). Use this for:
+- Convoy work where you want separate branches reviewed before merging
+- Work that targets an integration branch later
+- Creating PR-ready branches without auto-merge
+
+## Polecat Contract (Self-Cleaning Model)
+
+You are a self-cleaning worker. You:
+1. Receive work via your hook (pinned molecule + issue)
+2. **Design your approach first** (Rule of Five)
+3. Implement with **tests for your changes**
+4. Work through molecule steps using `bd ready` / `bd close <step>`
+5. Complete via branch push + issue close + `gt done --status DEFERRED`
+6. You are GONE - branch is on origin, issue is closed, no MR created
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| issue | hook_bead | The issue ID you're assigned to work on |
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| Tests fail | Fix them. Do not proceed with failures. |
+| Design unclear | Iterate on design. Ask Witness if stuck. |
+| Blocked on external | Mail Witness for help, mark yourself stuck |
+| Context filling | Use gt handoff to cycle to fresh session |
+| Unsure what to do | Mail Witness, don't guess |"""
+formula = "mol-polecat-branch-only-v2"
+version = 2
+
+[[steps]]
+id = "load-context"
+title = "Load context and verify assignment"
+description = """
+Initialize your session and understand your assignment.
+
+**1. Prime your environment:**
+```bash
+gt prime                    # Load role context
+bd prime                    # Load beads context
+```
+
+**2. Check your hook:**
+```bash
+gt hook               # Shows your pinned molecule and hook_bead
+```
+
+The hook_bead is your assigned issue. Read it carefully:
+```bash
+bd show {{issue}}           # Full issue details
+```
+
+**3. Check inbox for additional context:**
+```bash
+gt mail inbox
+# Read any HANDOFF or assignment messages
+```
+
+**4. Understand the requirements:**
+- What exactly needs to be done?
+- What files are likely involved?
+- Are there dependencies or blockers?
+- What does "done" look like?
+
+**5. Verify you can proceed:**
+- No unresolved blockers on the issue
+- You understand what to do
+- Required resources are available
+
+If blocked or unclear, mail Witness immediately:
+```bash
+gt mail send <rig>/witness -s "HELP: Unclear requirements" -m "Issue: {{issue}}
+Question: <what you need clarified>"
+```
+
+**Exit criteria:** You understand the work and can begin design."""
+
+[[steps]]
+id = "design-approach"
+title = "Design the solution approach"
+needs = ["load-context"]
+description = """
+Before writing code, design your approach using the Rule of Five pattern.
+
+**The Rule of Five:** LLMs produce best work through iterative refinement.
+Don't try to nail it on the first pass. Iterate through these lenses:
+
+## Pass 1: Draft (breadth over depth)
+- What files need to change?
+- What's the high-level strategy?
+- What are the main components/functions involved?
+- Don't aim for perfection. Get the shape right.
+
+## Pass 2: Correctness
+- Is the logic sound?
+- Will this actually fix the issue?
+- Are there obvious bugs in the plan?
+- What assumptions are you making?
+
+## Pass 3: Clarity
+- Can you explain this approach in one sentence?
+- Is there a simpler way?
+- Are you overcomplicating it?
+
+## Pass 4: Edge Cases
+- What could go wrong?
+- What inputs/states haven't you considered?
+- How will errors be handled?
+- What happens under load/scale?
+
+## Pass 5: Final Check
+- Is this the smallest change that solves the problem?
+- Are you gold-plating or scope-creeping?
+- Would you be confident explaining this in a code review?
+
+**Document your design in the issue:**
+```bash
+bd comment {{issue}} "## Proposed Approach
+
+**Strategy:** <1-2 sentences summarizing the fix>
+
+**Files to modify:**
+- `<file1>`: <what changes and why>
+- `<file2>`: <what changes and why>
+
+**Key considerations:**
+- <important thing 1>
+- <important thing 2>
+
+**Edge cases to handle:**
+- <edge case 1>: <how handled>
+- <edge case 2>: <how handled>
+
+**Tests to add:**
+- <test 1>: verifies <what>
+- <test 2>: verifies <what>
+"
+```
+
+**Exit criteria:** Design approach documented in issue comment, including planned tests."""
+
+[[steps]]
+id = "branch-setup"
+title = "Set up working branch"
+needs = ["design-approach"]
+description = """
+Ensure you're on a clean feature branch ready for work.
+
+**1. Check current branch state:**
+```bash
+git status
+git branch --show-current
+```
+
+**2. If not on a feature branch, create one:**
+```bash
+# Standard naming: polecat/<your-name> or fix/<issue-id>
+git checkout -b polecat/<name>
+```
+
+**3. Ensure clean working state:**
+```bash
+git status                  # Should show "working tree clean"
+```
+
+If dirty state from previous work:
+```bash
+# If changes are relevant to this issue:
+git add -A && git commit -m "WIP: <description>"
+
+# If changes are unrelated cruft:
+git stash push -m "unrelated changes before {{issue}}"
+```
+
+**4. Sync with main:**
+```bash
+git fetch origin
+git rebase origin/main      # Get latest, rebase your branch
+```
+
+If rebase conflicts:
+- Resolve them carefully
+- Test after resolution
+- If stuck, mail Witness
+
+**Exit criteria:** You're on a clean feature branch, rebased on latest main."""
+
+[[steps]]
+id = "implement"
+title = "Implement the solution"
+needs = ["branch-setup"]
+description = """
+Implement the solution according to your design.
+
+**Follow your design:**
+- Stick to the approach you documented
+- If you discover the design was wrong, go back and update it first
+- Don't improvise major changes without updating the design comment
+
+**Working principles:**
+- Follow existing codebase conventions
+- Make atomic, focused commits
+- Keep changes scoped to the assigned issue
+- Don't gold-plate or scope-creep
+
+**Commit frequently:**
+```bash
+# After each logical unit of work:
+git add <files>
+git commit -m "<type>(<scope>): <description>
+
+Refs {{issue}}"
+```
+
+Commit types: feat, fix, refactor, test, docs, chore
+
+**Discovered work:**
+If you find bugs or improvements outside your scope:
+```bash
+bd create "<description>" --type bug --labels "discovered"
+# Note the ID, continue with your work
+```
+
+Do NOT fix unrelated issues in this branch.
+
+**If stuck:**
+Don't spin for more than 15 minutes. Mail Witness:
+```bash
+gt mail send <rig>/witness -s "HELP: Stuck on implementation" -m "Issue: {{issue}}
+Trying to: <what you're attempting>
+Problem: <what's blocking you>
+Tried: <what you've attempted>"
+```
+
+**Exit criteria:** Implementation complete, all changes committed."""
+
+[[steps]]
+id = "write-tests"
+title = "Write tests for your changes"
+needs = ["implement"]
+description = """
+Every change needs test coverage. No exceptions.
+
+**Why tests matter:**
+- Proves your fix actually works
+- Prevents regression when others change this code
+- Documents expected behavior
+- Required for PR approval
+
+## 1. Identify what needs testing
+
+| Change Type | Required Tests |
+|-------------|----------------|
+| New function | Unit test for happy path + edge cases |
+| Bug fix | Regression test that reproduces the original bug |
+| Behavior change | Update existing tests + new tests for new behavior |
+| Refactor | Existing tests should still pass (no new tests needed) |
+
+## 2. Write the tests
+
+```bash
+# For Go: create/update test file alongside implementation
+# e.g., foo.go → foo_test.go
+
+# Test naming convention:
+# TestFunctionName_Scenario_ExpectedBehavior
+# Example: TestMergeSlot_AlreadyHeld_ReturnsFalse
+```
+
+**Test structure:**
+```go
+func TestYourFunction_Scenario(t *testing.T) {
+    // Arrange: set up test data
+    // Act: call the function
+    // Assert: verify the result
+}
+```
+
+## 3. Verify tests actually test your changes
+
+```bash
+# Run just your new tests first:
+go test -v -run TestYourNewFunction ./path/to/package
+
+# Sanity check: temporarily break your implementation
+# Your new tests MUST fail
+# Then fix it back
+```
+
+## 4. Test the edge cases from your design
+
+Go back to your design comment. For each edge case listed,
+ensure there's a test that covers it.
+
+**Exit criteria:** New/updated tests exist for your changes and pass."""
+
+[[steps]]
+id = "run-all-tests"
+title = "Run full test suite"
+needs = ["write-tests"]
+description = """
+Verify your changes don't break anything else.
+
+**1. Run the full test suite:**
+```bash
+go test ./...
+```
+
+**ALL TESTS MUST PASS.** Do not proceed with failures.
+
+**2. If tests fail, determine the cause:**
+
+| Failure Type | Action |
+|--------------|--------|
+| Test you broke | Fix your code, return to implement step |
+| Flaky test | Run again. If consistent, investigate. |
+| Unrelated failure | Investigate before proceeding - don't ignore |
+
+**3. Run build and lint checks:**
+```bash
+go build ./...           # Must succeed
+golangci-lint run ./...  # Fix any new warnings (if configured)
+```
+
+**4. Final verification:**
+```bash
+git status               # All changes committed?
+git log --oneline -5     # Commits look reasonable?
+```
+
+**Exit criteria:** All tests pass, build succeeds, lint clean."""
+
+[[steps]]
+id = "push-branch"
+title = "Push branch to origin"
+needs = ["run-all-tests"]
+description = """
+Push your completed work to origin.
+
+**1. Check for uncommitted changes:**
+```bash
+git status
+```
+Must show "working tree clean". If not, commit or discard.
+
+**2. Push your branch:**
+```bash
+git push -u origin $(git branch --show-current)
+```
+
+**3. Verify push succeeded:**
+```bash
+git log origin/$(git branch --show-current) --oneline -3
+```
+
+**Exit criteria:** Branch pushed to origin with all commits."""
+
+[[steps]]
+id = "generate-pr-content"
+title = "Generate PR title and description"
+needs = ["push-branch"]
+description = """
+Create a PR title and description following project conventions.
+
+**1. Read the project conventions (if they exist):**
+```bash
+cat CONTRIBUTING.md 2>/dev/null || echo "No CONTRIBUTING.md"
+cat .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null || echo "No PR template"
+```
+
+**2. Review your changes:**
+```bash
+git log origin/main..HEAD --oneline
+git diff origin/main..HEAD --stat
+```
+
+**3. Generate the PR title:**
+Follow conventional commits: `type(scope): description`
+```bash
+echo "fix(refinery): <description>" > .pr-title.txt
+```
+
+**4. Generate the PR description:**
+```bash
+cat > .pr-body.md << 'PREOF'
+## Summary
+
+<1-2 sentences describing what this PR does>
+
+## Problem
+
+<What issue/bug this fixes, link to {{issue}}>
+
+## Solution
+
+<Brief description of the approach taken>
+
+## Changes
+
+- <change 1>
+- <change 2>
+
+## Testing
+
+- [ ] New tests added for the changes
+- [ ] All existing tests pass
+- [ ] Manually verified <specific behavior>
+
+## Related Issues
+
+Fixes {{issue}}
+PREOF
+```
+
+**5. Review what you wrote:**
+```bash
+cat .pr-title.txt
+cat .pr-body.md
+```
+
+**Exit criteria:** `.pr-title.txt` and `.pr-body.md` created with proper content."""
+
+[[steps]]
+id = "create-pr"
+title = "Create pull request"
+needs = ["generate-pr-content"]
+description = """
+Create the GitHub pull request.
+
+**Create the PR:**
+```bash
+gh pr create --title "$(cat .pr-title.txt)" --body-file .pr-body.md --base main
+```
+
+**Save the PR URL:**
+```bash
+PR_URL=$(gh pr view --json url -q '.url')
+echo "PR created: $PR_URL"
+```
+
+**Clean up temp files:**
+```bash
+rm -f .pr-title.txt .pr-body.md
+```
+
+**Exit criteria:** PR created on GitHub, targeting main."""
+
+[[steps]]
+id = "update-issue"
+title = "Update issue with PR info"
+needs = ["create-pr"]
+description = """
+Link the PR to the issue and mark ready for review.
+
+**1. Add PR link to the issue:**
+```bash
+bd comment {{issue}} "PR ready for review: <pr-url>
+
+**Branch:** $(git branch --show-current)
+**Commits:** $(git log origin/main..HEAD --oneline | wc -l)
+
+Tests added:
+- <list the tests you added>
+"
+```
+
+**2. Add needs-review label:**
+```bash
+bd label add {{issue}} "needs-review"
+```
+
+The issue stays OPEN with `needs-review` label. It will be closed when PR merges.
+
+**Exit criteria:** Issue updated with PR reference and needs-review label."""
+
+[[steps]]
+id = "exit-deferred"
+title = "Exit without merge queue"
+needs = ["update-issue"]
+description = """
+Self-clean and exit WITHOUT submitting to merge queue.
+
+**Important:** We use `--status DEFERRED` to skip MR creation. The branch
+is already pushed and PR is already created.
+
+**Run gt done with DEFERRED status:**
+```bash
+gt done --status DEFERRED --cleanup-status clean
+```
+
+This will:
+1. Notify Witness of completion
+2. Nuke your sandbox (worktree removal)
+3. Exit your session
+
+**What happens next:**
+- Your PR is on GitHub awaiting review
+- Someone reviews and merges (or requests changes)
+- The issue closes automatically when PR merges (via "Fixes" keyword)
+
+You are GONE after this step.
+
+**Exit criteria:** Sandbox nuked, session exited."""
+
+[vars]
+[vars.issue]
+description = "The issue ID assigned to this polecat"
+required = true

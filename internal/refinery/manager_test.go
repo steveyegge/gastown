@@ -34,147 +34,36 @@ func setupTestManager(t *testing.T) (*Manager, *agent.Double, string) {
 	return NewManager(agents, r), agents, rigPath
 }
 
-func TestManager_GetMR(t *testing.T) {
+// =============================================================================
+// ZFC-Compliant Tests: Deprecated Methods
+// RegisterMR and Retry are deprecated in favor of beads as source of truth.
+// =============================================================================
+
+func TestManager_RegisterMR_ReturnsDeprecatedError(t *testing.T) {
 	mgr, _, _ := setupTestManager(t)
 
-	// Create a test MR in the pending queue
 	mr := &MergeRequest{
-		ID:      "gt-mr-abc123",
-		Branch:  "polecat/Toast/gt-xyz",
-		Worker:  "Toast",
-		IssueID: "gt-xyz",
-		Status:  MROpen,
-		Error:   "test failure",
+		ID:     "gt-mr-new",
+		Branch: "polecat/Cheedo/gt-123",
+		Worker: "Cheedo",
+		Status: MROpen,
 	}
 
-	if err := mgr.RegisterMR(mr); err != nil {
-		t.Fatalf("RegisterMR: %v", err)
-	}
-
-	t.Run("find existing MR", func(t *testing.T) {
-		found, err := mgr.GetMR("gt-mr-abc123")
-		if err != nil {
-			t.Errorf("GetMR() unexpected error: %v", err)
-		}
-		if found == nil {
-			t.Fatal("GetMR() returned nil")
-		}
-		if found.ID != mr.ID {
-			t.Errorf("GetMR() ID = %s, want %s", found.ID, mr.ID)
-		}
-	})
-
-	t.Run("MR not found", func(t *testing.T) {
-		_, err := mgr.GetMR("nonexistent-mr")
-		if err != ErrMRNotFound {
-			t.Errorf("GetMR() error = %v, want %v", err, ErrMRNotFound)
-		}
-	})
+	err := mgr.RegisterMR(mr)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "deprecated")
 }
 
-func TestManager_Retry(t *testing.T) {
-	t.Run("retry failed MR clears error", func(t *testing.T) {
-		mgr, _, _ := setupTestManager(t)
+func TestManager_Retry_ReturnsNilAndPrintsDeprecation(t *testing.T) {
+	mgr, _, _ := setupTestManager(t)
 
-		// Create a failed MR
-		mr := &MergeRequest{
-			ID:     "gt-mr-failed",
-			Branch: "polecat/Toast/gt-xyz",
-			Worker: "Toast",
-			Status: MROpen,
-			Error:  "merge conflict",
-		}
+	var buf bytes.Buffer
+	mgr.SetOutput(&buf)
 
-		if err := mgr.RegisterMR(mr); err != nil {
-			t.Fatalf("RegisterMR: %v", err)
-		}
-
-		// Retry without processing
-		err := mgr.Retry("gt-mr-failed", false)
-		if err != nil {
-			t.Errorf("Retry() unexpected error: %v", err)
-		}
-
-		// Verify error was cleared
-		found, _ := mgr.GetMR("gt-mr-failed")
-		if found.Error != "" {
-			t.Errorf("Retry() error not cleared, got %s", found.Error)
-		}
-	})
-
-	t.Run("retry non-failed MR fails", func(t *testing.T) {
-		mgr, _, _ := setupTestManager(t)
-
-		// Create a successful MR (no error)
-		mr := &MergeRequest{
-			ID:     "gt-mr-success",
-			Branch: "polecat/Toast/gt-abc",
-			Worker: "Toast",
-			Status: MROpen,
-			Error:  "", // No error
-		}
-
-		if err := mgr.RegisterMR(mr); err != nil {
-			t.Fatalf("RegisterMR: %v", err)
-		}
-
-		err := mgr.Retry("gt-mr-success", false)
-		if err != ErrMRNotFailed {
-			t.Errorf("Retry() error = %v, want %v", err, ErrMRNotFailed)
-		}
-	})
-
-	t.Run("retry nonexistent MR fails", func(t *testing.T) {
-		mgr, _, _ := setupTestManager(t)
-
-		err := mgr.Retry("nonexistent", false)
-		if err != ErrMRNotFound {
-			t.Errorf("Retry() error = %v, want %v", err, ErrMRNotFound)
-		}
-	})
-}
-
-func TestManager_RegisterMR(t *testing.T) {
-	mgr, _, rigPath := setupTestManager(t)
-
-	mr := &MergeRequest{
-		ID:           "gt-mr-new",
-		Branch:       "polecat/Cheedo/gt-123",
-		Worker:       "Cheedo",
-		IssueID:      "gt-123",
-		TargetBranch: "main",
-		CreatedAt:    time.Now(),
-		Status:       MROpen,
-	}
-
-	if err := mgr.RegisterMR(mr); err != nil {
-		t.Fatalf("RegisterMR: %v", err)
-	}
-
-	// Verify it was saved to disk
-	stateFile := filepath.Join(rigPath, ".runtime", "refinery.json")
-	data, err := os.ReadFile(stateFile)
-	if err != nil {
-		t.Fatalf("reading state file: %v", err)
-	}
-
-	var ref Refinery
-	if err := json.Unmarshal(data, &ref); err != nil {
-		t.Fatalf("unmarshal state: %v", err)
-	}
-
-	if ref.PendingMRs == nil {
-		t.Fatal("PendingMRs is nil")
-	}
-
-	saved, ok := ref.PendingMRs["gt-mr-new"]
-	if !ok {
-		t.Fatal("MR not found in PendingMRs")
-	}
-
-	if saved.Worker != "Cheedo" {
-		t.Errorf("saved MR worker = %s, want Cheedo", saved.Worker)
-	}
+	// Retry is deprecated - always returns nil and prints message
+	err := mgr.Retry("any-id", false)
+	assert.NoError(t, err)
+	assert.Contains(t, buf.String(), "deprecated")
 }
 
 // =============================================================================
@@ -376,14 +265,8 @@ func TestManager_SetOutput(t *testing.T) {
 	var buf bytes.Buffer
 	mgr.SetOutput(&buf)
 
-	// Trigger output via Retry with processNow
-	mr := &MergeRequest{
-		ID:     "gt-mr-test",
-		Status: MROpen,
-		Error:  "test error",
-	}
-	_ = mgr.RegisterMR(mr)
-	_ = mgr.Retry("gt-mr-test", true) // processNow triggers output
+	// Trigger output via Retry (deprecated, always prints message)
+	_ = mgr.Retry("any-id", false)
 
 	assert.Contains(t, buf.String(), "deprecated")
 }
@@ -506,36 +389,6 @@ func TestManager_GetMR_ReturnsCurrentMR(t *testing.T) {
 	assert.Equal(t, MRInProgress, found.Status)
 }
 
-// =============================================================================
-// Retry Tests - Additional Coverage
-// =============================================================================
-
-func TestManager_Retry_WithProcessNow_PrintsDeprecationNotice(t *testing.T) {
-	mgr, _, _ := setupTestManager(t)
-
-	// Capture output
-	var buf bytes.Buffer
-	mgr.SetOutput(&buf)
-
-	// Create a failed MR
-	mr := &MergeRequest{
-		ID:     "gt-mr-retry",
-		Status: MROpen,
-		Error:  "previous error",
-	}
-	require.NoError(t, mgr.RegisterMR(mr))
-
-	// Retry with processNow=true
-	err := mgr.Retry("gt-mr-retry", true)
-	require.NoError(t, err)
-
-	assert.Contains(t, buf.String(), "deprecated")
-}
-
-// =============================================================================
-// GetMR/Retry Edge Cases
-// =============================================================================
-
 func TestManager_GetMR_WhenLoadStateFails_ReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigPath := filepath.Join(tmpDir, "testrig")
@@ -552,84 +405,8 @@ func TestManager_GetMR_WhenLoadStateFails_ReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestManager_Retry_WhenLoadStateFails_ReturnsError(t *testing.T) {
-	tmpDir := t.TempDir()
-	rigPath := filepath.Join(tmpDir, "testrig")
-	require.NoError(t, os.MkdirAll(filepath.Join(rigPath, ".runtime"), 0755))
-
-	// Write invalid JSON
-	stateFile := filepath.Join(rigPath, ".runtime", "refinery.json")
-	require.NoError(t, os.WriteFile(stateFile, []byte("invalid"), 0644))
-
-	r := &rig.Rig{Name: "testrig", Path: rigPath}
-	mgr := NewManager(agent.NewDouble(), r)
-
-	err := mgr.Retry("any-id", false)
-	assert.Error(t, err)
-}
-
-func TestManager_Retry_WhenSaveStateFails_ReturnsError(t *testing.T) {
-	tmpDir := t.TempDir()
-	rigPath := filepath.Join(tmpDir, "testrig")
-	runtimeDir := filepath.Join(rigPath, ".runtime")
-	require.NoError(t, os.MkdirAll(runtimeDir, 0755))
-
-	r := &rig.Rig{Name: "testrig", Path: rigPath}
-	mgr := NewManager(agent.NewDouble(), r)
-
-	// Create a failed MR
-	mr := &MergeRequest{
-		ID:     "gt-mr-retry-fail",
-		Status: MROpen,
-		Error:  "some error",
-	}
-	require.NoError(t, mgr.RegisterMR(mr))
-
-	// Make the runtime directory read-only
-	require.NoError(t, os.Chmod(runtimeDir, 0555))
-	defer os.Chmod(runtimeDir, 0755)
-
-	err := mgr.Retry("gt-mr-retry-fail", false)
-	assert.Error(t, err)
-}
-
-func TestManager_RegisterMR_WhenLoadStateFails_ReturnsError(t *testing.T) {
-	tmpDir := t.TempDir()
-	rigPath := filepath.Join(tmpDir, "testrig")
-	require.NoError(t, os.MkdirAll(filepath.Join(rigPath, ".runtime"), 0755))
-
-	// Write invalid JSON
-	stateFile := filepath.Join(rigPath, ".runtime", "refinery.json")
-	require.NoError(t, os.WriteFile(stateFile, []byte("invalid"), 0644))
-
-	r := &rig.Rig{Name: "testrig", Path: rigPath}
-	mgr := NewManager(agent.NewDouble(), r)
-
-	mr := &MergeRequest{ID: "test-mr"}
-	err := mgr.RegisterMR(mr)
-	assert.Error(t, err)
-}
-
-func TestManager_RegisterMR_WhenSaveStateFails_ReturnsError(t *testing.T) {
-	tmpDir := t.TempDir()
-	rigPath := filepath.Join(tmpDir, "testrig")
-	runtimeDir := filepath.Join(rigPath, ".runtime")
-	require.NoError(t, os.MkdirAll(runtimeDir, 0755))
-
-	r := &rig.Rig{Name: "testrig", Path: rigPath}
-	mgr := NewManager(agent.NewDouble(), r)
-
-	// Initialize state first
-	_, _ = mgr.Status()
-
-	// Make the runtime directory read-only
-	require.NoError(t, os.Chmod(runtimeDir, 0555))
-	defer os.Chmod(runtimeDir, 0755)
-
-	mr := &MergeRequest{ID: "test-mr"}
-	err := mgr.RegisterMR(mr)
-	assert.Error(t, err)
-}
+// NOTE: Tests for Retry/RegisterMR state-file error handling removed.
+// These methods are now deprecated (ZFC-compliant) and always return fixed responses.
 
 // =============================================================================
 // calculateIssueScore and issueToMR Tests

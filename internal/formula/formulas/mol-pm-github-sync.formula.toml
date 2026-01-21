@@ -1,0 +1,305 @@
+description = """
+Sync GitHub issues to the rig's beads database.
+
+This formula queries open GitHub issues and ensures each has a corresponding
+bead in the rig's database for tracking. It maps GitHub labels to beads types:
+
+| GitHub Label | Beads Type |
+|--------------|------------|
+| bug          | bug        |
+| enhancement  | feature    |
+| documentation| chore      |
+| (other)      | task       |
+
+External references are stored using the `external_ref` field (e.g., 'gh-123')
+so duplicate checking works across syncs.
+
+## Fork/Upstream Support
+
+When working from a fork, you can track the upstream repository's issues by
+passing the `repo` variable explicitly:
+
+```bash
+gt sling mol-pm-github-sync crew --var repo=anthropics/claude-code
+```
+
+This allows crew members working in a fork to track issues from upstream.
+
+## Crew Contract
+
+This is PM work assigned to a crew member. You:
+1. Determine the target GitHub repository (from {{repo}} variable or rig config)
+2. Query GitHub for open issues
+3. Check each against existing beads (by external_ref)
+4. Create beads for any missing issues
+5. Report sync results
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| repo | **--var or config** | GitHub repo in owner/repo format. Pass explicitly to track upstream from a fork. |
+| rig | context | Rig name (auto-detected from cwd or GT_RIG) |
+| labels | optional | Filter GitHub issues by label (comma-separated) |
+"""
+formula = "mol-pm-github-sync"
+version = 1
+
+[squash]
+trigger = "on_complete"
+template_type = "work"
+include_metrics = true
+
+[[steps]]
+id = "determine-context"
+title = "Determine rig and repository"
+description = """
+Establish which rig we're syncing and the target GitHub repository.
+
+**1. Check for explicit repo variable (for upstream tracking from fork):**
+
+First, check if `{{repo}}` was passed via `--var repo=owner/repo`:
+```bash
+# The {{repo}} variable will be set if passed
+# Example: gt sling mol-pm-github-sync crew --var repo=anthropics/claude-code
+```
+
+If `{{repo}}` is set and non-empty, use it directly. This is the fork/upstream case.
+
+**2. If no explicit repo, detect from rig:**
+```bash
+# Get rig context from environment or cwd
+echo $GT_RIG
+# Or detect from working directory
+pwd | grep -o '/[^/]*/crew/' | cut -d'/' -f2
+```
+
+**3. Get repository URL from rig config (fallback):**
+```bash
+# Check rig's config.json for git_url
+cat ~/gt/<rig>/config.json | jq -r '.git_url'
+# Or check the mayor/rig remote
+cd ~/gt/<rig>/mayor/rig && git remote get-url origin
+```
+
+**4. Extract owner/repo format from git URL:**
+```bash
+# From: git@github.com:owner/repo.git
+# Or:   https://github.com/owner/repo.git
+# Extract: owner/repo
+git remote get-url origin | sed 's/.*github.com[:/]//' | sed 's/.git$//'
+```
+
+**Decision:**
+- If `{{repo}}` is set → use it (tracking upstream from fork)
+- Otherwise → derive from rig's git remote
+
+**Exit criteria:** Target GitHub repo (owner/repo format) determined."""
+
+[[steps]]
+id = "fetch-github-issues"
+title = "Query open GitHub issues"
+needs = ["determine-context"]
+description = """
+Fetch all open issues from the target GitHub repository.
+
+**Query and store issues:**
+```bash
+# If a labels filter was requested, add: --label "bug,enhancement" etc.
+gh issue list --repo {{repo}} --state open --json number,title,body,labels --limit 100 > /tmp/gh-issues.json
+```
+
+The JSON output contains:
+- `number`: Issue number (for external_ref as 'gh-<number>')
+- `title`: Issue title
+- `body`: Issue description
+- `labels`: Array of label objects with `name` field
+
+**Exit criteria:** GitHub issues fetched and stored in /tmp/gh-issues.json."""
+
+[[steps]]
+id = "check-existing-beads"
+title = "Find existing beads with GitHub references"
+needs = ["determine-context"]
+description = """
+Query beads database for issues already synced from GitHub.
+
+**1. List beads with external refs:**
+```bash
+# List all beads and filter for gh-* external refs
+bd list --json | jq '[.[] | select(.external_ref != null and (.external_ref | startswith("gh-")))]'
+```
+
+**2. Build lookup set:**
+Extract the GitHub issue numbers already tracked:
+```bash
+bd list --json | jq -r '.[] | select(.external_ref != null) | .external_ref' | grep '^gh-' | sed 's/gh-//'
+```
+
+This gives us a list of GitHub issue numbers that already have beads.
+
+**3. Store for comparison:**
+Save the list of known issue numbers.
+
+**Exit criteria:** Set of already-tracked GitHub issue numbers identified."""
+
+[[steps]]
+id = "sync-issues"
+title = "Create beads for new GitHub issues"
+needs = ["fetch-github-issues", "check-existing-beads"]
+description = """
+For each GitHub issue not in beads, create a corresponding bead.
+
+**1. For each GitHub issue, check if already tracked:**
+```bash
+# If gh-<number> not in existing set, create bead
+```
+
+**2. Map GitHub labels to beads type:**
+```bash
+# Mapping logic:
+# - If labels contain "bug" -> --type=bug
+# - If labels contain "enhancement" -> --type=feature
+# - If labels contain "documentation" -> --type=chore
+# - Otherwise -> --type=task
+```
+
+**3. Create bead for each new issue:**
+```bash
+bd create "<title>" \
+  --type=<mapped-type> \
+  --external-ref="gh-<number>" \
+  --description="<body>" \
+  --labels="source:github,gh:open" \
+  --silent
+```
+
+**4. Add GitHub labels as beads labels:**
+```bash
+# For each GitHub label, add to bead
+bd label add <bead-id> "gh:<label-name>"
+```
+
+**Example creation:**
+```bash
+# For GitHub issue #42 with labels ["bug", "priority:high"]
+bd create "Fix login timeout" \
+  --type=bug \
+  --external-ref="gh-42" \
+  --description="Users report login times out after 30 seconds..." \
+  --labels="source:github,gh:open,gh:priority:high" \
+  --silent
+```
+
+**5. Track created beads:**
+Record each bead created for the report.
+
+**Exit criteria:** All new GitHub issues have corresponding beads."""
+
+[[steps]]
+id = "update-existing-beads"
+title = "Update status of existing tracked issues"
+needs = ["fetch-github-issues", "check-existing-beads"]
+description = """
+For beads that track GitHub issues, check if GitHub issue was closed.
+
+**1. For each bead with gh-* external_ref:**
+```bash
+bd list --json | jq '.[] | select(.external_ref | startswith("gh-"))'
+```
+
+**2. Check if GitHub issue is still open:**
+```bash
+gh issue view <number> --repo {{repo}} --json state -q '.state'
+```
+
+**3. If GitHub issue closed but bead open:**
+```bash
+# Close the bead to match GitHub state
+bd close <bead-id> --reason "Closed on GitHub"
+```
+
+**4. Track updates:**
+Record status changes for the report.
+
+**Note:** This step is optional for the initial sync. Focus on creating
+new beads first, then enhance with bidirectional status sync later.
+
+**Exit criteria:** Existing beads checked for status updates."""
+
+[[steps]]
+id = "generate-report"
+title = "Generate sync report"
+needs = ["sync-issues", "update-existing-beads"]
+description = """
+Create summary of the GitHub sync operation.
+
+**1. Compile statistics:**
+- GitHub issues found: <count>
+- Already tracked: <count>
+- New beads created: <count>
+- Status updates: <count>
+
+**2. List new beads created:**
+```markdown
+## New Beads Created
+
+| Bead ID | GitHub # | Type | Title |
+|---------|----------|------|-------|
+| gt-abc  | gh-42    | bug  | Fix login timeout |
+| gt-def  | gh-43    | feature | Add dark mode |
+```
+
+**3. List any issues:**
+- GitHub API errors
+- Beads creation failures
+- Mapping ambiguities
+
+**4. Output report:**
+```bash
+echo "GitHub Sync Complete"
+echo "===================="
+echo "Repository: {{repo}}"
+echo "Issues found: <N>"
+echo "New beads: <M>"
+echo ""
+echo "New beads:"
+# List each new bead
+```
+
+**Exit criteria:** Sync report generated and displayed."""
+
+[[steps]]
+id = "signal-completion"
+title = "Mark work complete"
+needs = ["generate-report"]
+description = """
+Signal that the sync is complete.
+
+**1. Update hook status:**
+```bash
+gt done --success
+```
+
+Or if there were errors:
+```bash
+gt done --note "Sync completed with <N> errors"
+```
+
+**Exit criteria:** Work marked complete, crew member available for next task."""
+
+[vars]
+[vars.rig]
+description = "Rig name to sync (auto-detected if not provided)"
+required = false
+default = ""
+
+[vars.repo]
+description = "GitHub repository in owner/repo format (auto-detected from rig config if not provided)"
+required = false
+default = ""
+
+[vars.labels]
+description = "Filter GitHub issues by labels (comma-separated)"
+required = false
+default = ""

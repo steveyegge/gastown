@@ -122,6 +122,7 @@ func (m *Manager) SaveState(ref *Refinery) error {
 
 // Queue returns the current merge queue.
 // Uses beads merge-request issues as the source of truth (not git branches).
+// ZFC-compliant: beads is the source of truth, no state file.
 func (m *Manager) Queue() ([]QueueItem, error) {
 	// Query beads for open merge-request type issues
 	// BeadsPath() returns the git-synced beads location
@@ -133,25 +134,6 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("querying merge queue from beads: %w", err)
-	}
-
-	// Load any current processing state
-	ref, err := m.LoadState()
-	if err != nil {
-		return nil, err
-	}
-
-	// Build queue items
-	var items []QueueItem
-	pos := 1
-
-	// Add current processing item
-	if ref.CurrentMR != nil {
-		items = append(items, QueueItem{
-			Position: 0, // 0 = currently processing
-			MR:       ref.CurrentMR,
-			Age:      formatAge(ref.CurrentMR.CreatedAt),
-		})
 	}
 
 	// Score and sort issues by priority score (highest first)
@@ -171,13 +153,11 @@ func (m *Manager) Queue() ([]QueueItem, error) {
 	})
 
 	// Convert scored issues to queue items
+	var items []QueueItem
+	pos := 1
 	for _, s := range scored {
 		mr := m.issueToMR(s.issue)
 		if mr != nil {
-			// Skip if this is the currently processing MR
-			if ref.CurrentMR != nil && ref.CurrentMR.ID == mr.ID {
-				continue
-			}
 			items = append(items, QueueItem{
 				Position: pos,
 				MR:       mr,
@@ -398,60 +378,23 @@ func (m *Manager) FindMR(idOrBranch string) (*MergeRequest, error) {
 	return nil, ErrMRNotFound
 }
 
-// Retry resets a failed merge request so it can be processed again.
-// The processNow parameter is deprecated - the Refinery agent handles processing.
-// Clearing the error is sufficient; the agent will pick up the MR in its next patrol cycle.
-func (m *Manager) Retry(id string, processNow bool) error {
-	ref, err := m.LoadState()
-	if err != nil {
-		return err
-	}
-
-	// Find the MR
-	var mr *MergeRequest
-	if ref.PendingMRs != nil {
-		mr = ref.PendingMRs[id]
-	}
-	if mr == nil {
-		return ErrMRNotFound
-	}
-
-	// Verify it's in a failed state (open with an error)
-	if mr.Status != MROpen || mr.Error == "" {
-		return ErrMRNotFailed
-	}
-
-	// Clear the error to mark as ready for retry
-	mr.Error = ""
-
-	// Save the state
-	if err := m.SaveState(ref); err != nil {
-		return err
-	}
-
-	// Note: processNow is deprecated (ZFC #5).
-	// The Refinery agent handles merge processing.
-	// It will pick up this MR in its next patrol cycle.
-	if processNow {
-		_, _ = fmt.Fprintln(m.output, "Note: --now is deprecated. The Refinery agent will process this MR in its next patrol cycle.")
-	}
-
+// Retry is deprecated - the Refinery agent handles retry logic autonomously.
+// ZFC-compliant: no state file, agent uses beads issue status.
+// The agent will automatically retry failed MRs in its patrol cycle.
+//
+// Deprecated: The Refinery agent handles retries autonomously via beads.
+func (m *Manager) Retry(_ string, _ bool) error {
+	_, _ = fmt.Fprintln(m.output, "Note: Retry is deprecated. The Refinery agent handles retries autonomously via beads.")
 	return nil
 }
 
-// RegisterMR adds a merge request to the pending queue.
-func (m *Manager) RegisterMR(mr *MergeRequest) error {
-	ref, err := m.LoadState()
-	if err != nil {
-		return err
-	}
-
-	if ref.PendingMRs == nil {
-		ref.PendingMRs = make(map[string]*MergeRequest)
-	}
-
-	ref.PendingMRs[mr.ID] = mr
-	return m.SaveState(ref)
+// RegisterMR is deprecated - MRs are registered via beads merge-request issues.
+// ZFC-compliant: beads is the source of truth, not state file.
+// Use 'gt mr create' or create a merge-request type bead directly.
+//
+// Deprecated: Use beads to create merge-request issues.
+func (m *Manager) RegisterMR(_ *MergeRequest) error {
+	return fmt.Errorf("RegisterMR is deprecated: use beads to create merge-request issues")
 }
 
 // RejectMR manually rejects a merge request.
