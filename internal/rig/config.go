@@ -31,11 +31,12 @@ type ConfigResult struct {
 // SystemDefaults contains compiled-in default values.
 // These are the fallback when no other layer provides a value.
 var SystemDefaults = map[string]interface{}{
-	"status":              "operational",
-	"auto_restart":        true,
-	"max_polecats":        10,
-	"priority_adjustment": 0,
-	"dnd":                 false,
+	"status":                  "operational",
+	"auto_restart":            true,
+	"max_polecats":            10,
+	"priority_adjustment":     0,
+	"dnd":                     false,
+	"polecat_branch_template": "", // Empty = use default behavior (polecat/{name}/...)
 }
 
 // StackingKeys defines which keys use stacking semantics (values add up).

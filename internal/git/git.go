@@ -394,6 +394,17 @@ func (g *Git) Remotes() ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
+// ConfigGet returns the value of a git config key.
+// Returns empty string if the key is not set.
+func (g *Git) ConfigGet(key string) (string, error) {
+	out, err := g.run("config", "--get", key)
+	if err != nil {
+		// git config --get returns exit code 1 if key not found
+		return "", nil
+	}
+	return out, nil
+}
+
 // Merge merges the given branch into the current branch.
 func (g *Git) Merge(branch string) error {
 	_, err := g.run("merge", branch)

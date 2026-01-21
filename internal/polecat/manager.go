@@ -227,6 +227,111 @@ type AddOptions struct {
 // Add creates a new polecat as a git worktree from the repo base.
 // Uses the shared bare repo (.repo.git) if available, otherwise mayor/rig.
 // This is much faster than a full clone and shares objects with all worktrees.
+// buildBranchName creates a branch name using the configured template or default format.
+// Supported template variables:
+// - {user}: git config user.name
+// - {year}: current year (YY format)
+// - {month}: current month (MM format)
+// - {name}: polecat name
+// - {issue}: issue ID (without prefix)
+// - {description}: sanitized issue title
+// - {timestamp}: unique timestamp
+//
+// If no template is configured or template is empty, uses default format:
+// - polecat/{name}/{issue}@{timestamp} when issue is available
+// - polecat/{name}-{timestamp} otherwise
+func (m *Manager) buildBranchName(name, issue string) (string, error) {
+	template := m.rig.GetStringConfig("polecat_branch_template")
+
+	// No template configured - use default behavior for backward compatibility
+	if template == "" {
+		timestamp := strconv.FormatInt(time.Now().UnixMilli(), 36)
+		if issue != "" {
+			return fmt.Sprintf("polecat/%s/%s@%s", name, issue, timestamp), nil
+		}
+		return fmt.Sprintf("polecat/%s-%s", name, timestamp), nil
+	}
+
+	// Build template variables
+	vars := make(map[string]string)
+
+	// {user} - from git config user.name
+	if userName, err := m.git.ConfigGet("user.name"); err == nil && userName != "" {
+		vars["{user}"] = userName
+	} else {
+		vars["{user}"] = "unknown"
+	}
+
+	// {year} and {month}
+	now := time.Now()
+	vars["{year}"] = now.Format("06")   // YY format
+	vars["{month}"] = now.Format("01")  // MM format
+
+	// {name}
+	vars["{name}"] = name
+
+	// {timestamp}
+	vars["{timestamp}"] = strconv.FormatInt(now.UnixMilli(), 36)
+
+	// {issue} - issue ID without prefix
+	if issue != "" {
+		// Strip prefix (e.g., "gt-123" -> "123")
+		if idx := strings.Index(issue, "-"); idx >= 0 {
+			vars["{issue}"] = issue[idx+1:]
+		} else {
+			vars["{issue}"] = issue
+		}
+	} else {
+		vars["{issue}"] = ""
+	}
+
+	// {description} - try to get from beads if issue is set
+	if issue != "" {
+		if issueData, err := m.beads.Show(issue); err == nil && issueData.Title != "" {
+			// Sanitize title for branch name: lowercase, replace spaces/special chars with hyphens
+			desc := strings.ToLower(issueData.Title)
+			desc = strings.Map(func(r rune) rune {
+				if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+					return r
+				}
+				return '-'
+			}, desc)
+			// Remove consecutive hyphens and trim
+			desc = strings.Trim(desc, "-")
+			for strings.Contains(desc, "--") {
+				desc = strings.ReplaceAll(desc, "--", "-")
+			}
+			// Limit length to keep branch names reasonable
+			if len(desc) > 40 {
+				desc = desc[:40]
+			}
+			vars["{description}"] = desc
+		} else {
+			vars["{description}"] = ""
+		}
+	} else {
+		vars["{description}"] = ""
+	}
+
+	// Replace all variables in template
+	result := template
+	for key, value := range vars {
+		result = strings.ReplaceAll(result, key, value)
+	}
+
+	// Clean up any remaining empty segments (e.g., "adam///" -> "adam")
+	parts := strings.Split(result, "/")
+	cleanParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			cleanParts = append(cleanParts, part)
+		}
+	}
+	result = strings.Join(cleanParts, "/")
+
+	return result, nil
+}
+
 // Polecat state is derived from beads assignee field, not state.json.
 //
 // Branch naming: Each polecat run gets a unique branch (polecat/<name>-<timestamp>).
@@ -249,17 +354,10 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	polecatDir := m.polecatDir(name)
 	clonePath := filepath.Join(polecatDir, m.rig.Name)
 
-	// Branch naming: include issue ID when available for better traceability.
-	// Format: polecat/<worker>/<issue>@<timestamp> when HookBead is set
-	// The @timestamp suffix ensures uniqueness if the same issue is re-slung.
-	// parseBranchName strips the @suffix to extract the issue ID.
-	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 36)
-	var branchName string
-	if opts.HookBead != "" {
-		branchName = fmt.Sprintf("polecat/%s/%s@%s", name, opts.HookBead, timestamp)
-	} else {
-		// Fallback to timestamp format when no issue is known at spawn time
-		branchName = fmt.Sprintf("polecat/%s-%s", name, timestamp)
+	// Build branch name using configured template or default format
+	branchName, err := m.buildBranchName(name, opts.HookBead)
+	if err != nil {
+		return nil, fmt.Errorf("building branch name: %w", err)
 	}
 
 	// Create polecat directory (polecats/<name>/)
@@ -601,13 +699,9 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Create fresh worktree with unique branch name, starting from origin's default branch
 	// Old branches are left behind - they're ephemeral (never pushed to origin)
 	// and will be cleaned up by garbage collection
-	// Branch naming: include issue ID when available for better traceability.
-	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 36)
-	var branchName string
-	if opts.HookBead != "" {
-		branchName = fmt.Sprintf("polecat/%s/%s@%s", name, opts.HookBead, timestamp)
-	} else {
-		branchName = fmt.Sprintf("polecat/%s-%s", name, timestamp)
+	branchName, err := m.buildBranchName(name, opts.HookBead)
+	if err != nil {
+		return nil, fmt.Errorf("building branch name: %w", err)
 	}
 	if err := repoGit.WorktreeAddFromRef(newClonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)

@@ -654,3 +654,104 @@ func TestReconcilePoolWith_OrphanDoesNotBlockAllocation(t *testing.T) {
 		t.Errorf("expected furiosa (orphan freed), got %q", name)
 	}
 }
+
+func TestBuildBranchName(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Initialize a git repo for config access
+	gitCmd := exec.Command("git", "init")
+	gitCmd.Dir = tmpDir
+	if err := gitCmd.Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
+	// Set git user.name for testing
+	configCmd := exec.Command("git", "config", "user.name", "testuser")
+	configCmd.Dir = tmpDir
+	if err := configCmd.Run(); err != nil {
+		t.Fatalf("git config: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		template string
+		issue    string
+		want     string
+	}{
+		{
+			name:     "default_with_issue",
+			template: "", // Empty template = default behavior
+			issue:    "gt-123",
+			want:     "polecat/alpha/gt-123@", // timestamp suffix varies
+		},
+		{
+			name:     "default_without_issue",
+			template: "",
+			issue:    "",
+			want:     "polecat/alpha-", // timestamp suffix varies
+		},
+		{
+			name:     "custom_template_user_year_month",
+			template: "{user}/{year}/{month}/fix",
+			issue:    "",
+			want:     "testuser/", // year/month will vary
+		},
+		{
+			name:     "custom_template_with_name",
+			template: "feature/{name}",
+			issue:    "",
+			want:     "feature/alpha",
+		},
+		{
+			name:     "custom_template_with_issue",
+			template: "work/{issue}",
+			issue:    "gt-456",
+			want:     "work/456",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create rig with test template
+			r := &rig.Rig{
+				Name: "test-rig",
+				Path: tmpDir,
+			}
+
+			// Override system defaults for this test if template is set
+			if tt.template != "" {
+				origDefault := rig.SystemDefaults["polecat_branch_template"]
+				rig.SystemDefaults["polecat_branch_template"] = tt.template
+				defer func() {
+					rig.SystemDefaults["polecat_branch_template"] = origDefault
+				}()
+			}
+
+			g := git.NewGit(tmpDir)
+			m := NewManager(r, g, nil)
+
+			got, err := m.buildBranchName("alpha", tt.issue)
+			if err != nil {
+				t.Fatalf("buildBranchName: %v", err)
+			}
+
+			// For default templates, just check prefix since timestamp varies
+			if tt.template == "" {
+				if !strings.HasPrefix(got, tt.want) {
+					t.Errorf("buildBranchName() = %q, want prefix %q", got, tt.want)
+				}
+			} else {
+				// For custom templates with time-varying fields, check prefix
+				if strings.Contains(tt.template, "{year}") || strings.Contains(tt.template, "{month}") {
+					if !strings.HasPrefix(got, tt.want) {
+						t.Errorf("buildBranchName() = %q, want prefix %q", got, tt.want)
+					}
+				} else {
+					if got != tt.want {
+						t.Errorf("buildBranchName() = %q, want %q", got, tt.want)
+					}
+				}
+			}
+		})
+	}
+}
