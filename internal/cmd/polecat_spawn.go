@@ -43,7 +43,61 @@ type SlingSpawnOptions struct {
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
 // This is used by gt sling when the target is a rig name.
 // The caller (sling) handles hook attachment and nudging.
+//
+// This is a convenience wrapper that allocates a name and delegates to SpawnPolecatForSlingWithName.
+// For batch operations, use SpawnPolecatForSlingWithName directly with pre-allocated names to avoid races.
 func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolecatInfo, error) {
+	// Find workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return nil, fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Allocate a name using the common function
+	polecatName, err := allocatePolecatName(townRoot, rigName)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("Allocated polecat: %s\n", polecatName)
+
+	return SpawnPolecatForSlingWithName(rigName, polecatName, opts)
+}
+
+// allocatePolecatName allocates a single polecat name for a rig.
+// This is used by SpawnPolecatForSling for single spawns.
+func allocatePolecatName(townRoot, rigName string) (string, error) {
+	// Load rig config
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+	r, err := rigMgr.GetRig(rigName)
+	if err != nil {
+		return "", fmt.Errorf("rig '%s' not found", rigName)
+	}
+
+	// Get polecat manager (with agents for session-aware allocation)
+	polecatGit := git.NewGit(r.Path)
+	agents := agent.Default()
+	polecatMgr := polecat.NewManager(agents, r, polecatGit)
+
+	// Allocate a new polecat name
+	polecatName, err := polecatMgr.AllocateName()
+	if err != nil {
+		return "", fmt.Errorf("allocating polecat name: %w", err)
+	}
+
+	return polecatName, nil
+}
+
+// SpawnPolecatForSlingWithName creates a polecat with a pre-allocated name.
+// This is used by gt queue run to avoid race conditions when spawning in parallel.
+// The name should have been allocated upfront by the caller using a shared NamePool.
+func SpawnPolecatForSlingWithName(rigName, polecatName string, opts SlingSpawnOptions) (*SpawnedPolecatInfo, error) {
 	// Find workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -64,17 +118,12 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		return nil, fmt.Errorf("rig '%s' not found", rigName)
 	}
 
-	// Get polecat manager (with agents for session-aware allocation)
+	// Get polecat manager (name already allocated, no need for session-aware allocation)
 	polecatGit := git.NewGit(r.Path)
 	agents := agent.Default()
 	polecatMgr := polecat.NewManager(agents, r, polecatGit)
 
-	// Allocate a new polecat name
-	polecatName, err := polecatMgr.AllocateName()
-	if err != nil {
-		return nil, fmt.Errorf("allocating polecat name: %w", err)
-	}
-	fmt.Printf("Allocated polecat: %s\n", polecatName)
+	fmt.Printf("Using pre-allocated polecat: %s\n", polecatName)
 
 	// Check if polecat already exists (shouldn't happen - indicates stale state needing repair)
 	existingPolecat, err := polecatMgr.Get(polecatName)
@@ -239,9 +288,25 @@ func HookBeadToAgent(townRoot, beadID, targetAgent, hookWorkDir string, opts Hoo
 }
 
 // SpawnAndHookBead spawns a polecat and hooks a bead to it.
-// This is the common function used by single and batch slinging operations.
+// This is the common function used by single slinging operations.
+//
+// This is a convenience wrapper that allocates a name and delegates to SpawnAndHookBeadWithName.
+// For batch operations, use SpawnAndHookBeadWithName directly with pre-allocated names to avoid races.
 func SpawnAndHookBead(townRoot, rigName, beadID string, opts SpawnAndHookOptions) (*SpawnedPolecatInfo, error) {
-	// Spawn polecat with hook_bead set atomically
+	// Allocate a name
+	polecatName, err := allocatePolecatName(townRoot, rigName)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("Allocated polecat: %s\n", polecatName)
+
+	return SpawnAndHookBeadWithName(townRoot, rigName, polecatName, beadID, opts)
+}
+
+// SpawnAndHookBeadWithName spawns a polecat with a pre-allocated name and hooks a bead to it.
+// This is used by batch operations to avoid race conditions when spawning in parallel.
+func SpawnAndHookBeadWithName(townRoot, rigName, polecatName, beadID string, opts SpawnAndHookOptions) (*SpawnedPolecatInfo, error) {
+	// Spawn polecat with pre-allocated name and hook_bead set atomically
 	spawnOpts := SlingSpawnOptions{
 		Force:    opts.Force,
 		Account:  opts.Account,
@@ -249,7 +314,7 @@ func SpawnAndHookBead(townRoot, rigName, beadID string, opts SpawnAndHookOptions
 		HookBead: beadID,
 		Agent:    opts.Agent,
 	}
-	spawnInfo, err := SpawnPolecatForSling(rigName, spawnOpts)
+	spawnInfo, err := SpawnPolecatForSlingWithName(rigName, polecatName, spawnOpts)
 	if err != nil {
 		return nil, fmt.Errorf("spawning polecat: %w", err)
 	}

@@ -8,10 +8,14 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/factory"
+	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/queue"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -255,9 +259,22 @@ func runQueueRun(cmd *cobra.Command, args []string) error {
 		capacity = config.GetQueueMaxPolecats(townRoot)
 	}
 
-	// Create spawner
+	// Pre-allocate polecat names to avoid race condition when spawning in parallel.
+	// Each rig has its own name pool, so we group by rig and allocate upfront.
+	preAllocatedNames, err := preAllocatePolecatNames(townRoot, items)
+	if err != nil {
+		return fmt.Errorf("pre-allocating names: %w", err)
+	}
+
+	// Create spawner that uses pre-allocated names
 	spawner := &queue.RealSpawner{
 		SpawnInFunc: func(rigName, beadID string) error {
+			// Look up pre-allocated name for this bead
+			polecatName, ok := preAllocatedNames[beadID]
+			if !ok {
+				return fmt.Errorf("no pre-allocated name for bead %s", beadID)
+			}
+
 			spawnOpts := SlingSpawnOptions{
 				Force:    queueRunForce,
 				Account:  queueRunAccount,
@@ -265,7 +282,7 @@ func runQueueRun(cmd *cobra.Command, args []string) error {
 				Agent:    queueRunAgent,
 				Create:   true,
 			}
-			info, err := SpawnPolecatForSling(rigName, spawnOpts)
+			info, err := SpawnPolecatForSlingWithName(rigName, polecatName, spawnOpts)
 			if err != nil {
 				return err
 			}
@@ -411,4 +428,61 @@ func getBondedBeadTitles(townRoot string, beadIDs []string) map[string]string {
 	}
 
 	return result
+}
+
+// preAllocatePolecatNames allocates polecat names for all queue items upfront.
+// This prevents race conditions when spawning polecats in parallel, since each
+// call to SpawnPolecatForSling would otherwise create its own NamePool instance
+// and potentially allocate the same name.
+//
+// Uses AllocateNames() which reconciles the pool state only once, then allocates
+// all names without re-reconciling. This is critical because ReconcilePool()
+// resets InUse based on existing directories, and no directories exist until
+// polecats are actually created.
+//
+// Returns a map of beadID -> polecatName.
+func preAllocatePolecatNames(townRoot string, items []queue.QueueItem) (map[string]string, error) {
+	result := make(map[string]string)
+
+	// Group items by rig - each rig has its own name pool
+	byRig := make(map[string][]string) // rigName -> []beadID
+	for _, item := range items {
+		byRig[item.RigName] = append(byRig[item.RigName], item.BeadID)
+	}
+
+	// Load rig config for rig lookups
+	rigsConfigPath := townRoot + "/mayor/rigs.json"
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+
+	// For each rig, allocate all names at once using AllocateNames
+	for rigName, beadIDs := range byRig {
+		r, err := rigMgr.GetRig(rigName)
+		if err != nil {
+			return nil, fmt.Errorf("rig '%s' not found: %w", rigName, err)
+		}
+
+		// Create ONE manager per rig
+		polecatGit := git.NewGit(r.Path)
+		agents := agent.Default()
+		polecatMgr := polecat.NewManager(agents, r, polecatGit)
+
+		// Allocate all names at once - this reconciles once then allocates N names
+		names, err := polecatMgr.AllocateNames(len(beadIDs))
+		if err != nil {
+			return nil, fmt.Errorf("allocating names for rig %s: %w", rigName, err)
+		}
+
+		// Map bead IDs to allocated names
+		for i, beadID := range beadIDs {
+			result[beadID] = names[i]
+		}
+	}
+
+	return result, nil
 }

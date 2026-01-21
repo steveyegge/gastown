@@ -515,6 +515,36 @@ func (m *Manager) AllocateName() (string, error) {
 	return name, nil
 }
 
+// AllocateNames allocates multiple names from the name pool at once.
+// This is used for batch operations where multiple polecats will be spawned.
+// Unlike calling AllocateName() in a loop, this reconciles only once at the start,
+// preventing the race where each call would reset the InUse state before any
+// directories are created.
+func (m *Manager) AllocateNames(count int) ([]string, error) {
+	if count <= 0 {
+		return nil, nil
+	}
+
+	// Reconcile once at the start
+	m.ReconcilePool()
+
+	names := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		name, err := m.namePool.Allocate()
+		if err != nil {
+			return nil, fmt.Errorf("allocating name %d of %d: %w", i+1, count, err)
+		}
+		names = append(names, name)
+	}
+
+	// Save once at the end
+	if err := m.namePool.Save(); err != nil {
+		return nil, fmt.Errorf("saving pool state: %w", err)
+	}
+
+	return names, nil
+}
+
 // ReleaseName releases a name back to the pool.
 // This is called when a polecat is removed.
 func (m *Manager) ReleaseName(name string) {

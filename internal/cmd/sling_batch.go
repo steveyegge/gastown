@@ -131,6 +131,17 @@ func runBatchSlingParallel(beadIDs []string, rigName, townRoot string) error {
 	fmt.Printf("%s Parallel batch slinging %d beads (parallelism=%d)...\n",
 		style.Bold.Render("🚀"), len(beadIDs), parallelism)
 
+	// Pre-allocate polecat names to avoid race condition when spawning in parallel.
+	// Convert beadIDs to queue items for the common function.
+	queueItems := make([]queue.QueueItem, len(beadIDs))
+	for i, beadID := range beadIDs {
+		queueItems[i] = queue.QueueItem{BeadID: beadID, RigName: rigName}
+	}
+	preAllocatedNames, err := preAllocatePolecatNames(townRoot, queueItems)
+	if err != nil {
+		return fmt.Errorf("pre-allocating names: %w", err)
+	}
+
 	type slingResult struct {
 		index   int
 		beadID  string
@@ -167,8 +178,16 @@ func runBatchSlingParallel(beadIDs []string, rigName, townRoot string) error {
 					continue
 				}
 
-				// Spawn polecat and hook bead using common function
-				spawnResult, err := SpawnAndHookBead(townRoot, rigName, beadID, SpawnAndHookOptions{
+				// Get pre-allocated name
+				polecatName, ok := preAllocatedNames[beadID]
+				if !ok {
+					result.errMsg = "no pre-allocated name"
+					results <- result
+					continue
+				}
+
+				// Spawn polecat with pre-allocated name and hook bead
+				spawnResult, err := SpawnAndHookBeadWithName(townRoot, rigName, polecatName, beadID, SpawnAndHookOptions{
 					Force:    slingForce,
 					Account:  slingAccount,
 					Create:   slingCreate,
@@ -341,6 +360,17 @@ func runBatchSlingFormulaOnParallel(formulaName string, beadIDs []string, rigNam
 	fmt.Printf("%s Parallel batch formula slinging %d beads (parallelism=%d)...\n",
 		style.Bold.Render("🚀"), len(beadIDs), parallelism)
 
+	// Pre-allocate polecat names to avoid race condition when spawning in parallel.
+	// We use the original bead IDs as keys since we need one name per bead.
+	queueItems := make([]queue.QueueItem, len(beadIDs))
+	for i, beadID := range beadIDs {
+		queueItems[i] = queue.QueueItem{BeadID: beadID, RigName: rigName}
+	}
+	preAllocatedNames, err := preAllocatePolecatNames(townRoot, queueItems)
+	if err != nil {
+		return fmt.Errorf("pre-allocating names: %w", err)
+	}
+
 	type slingResult struct {
 		index      int
 		beadID     string
@@ -374,6 +404,14 @@ func runBatchSlingFormulaOnParallel(formulaName string, beadIDs []string, rigNam
 
 				if info.Status == "pinned" && !slingForce {
 					result.errMsg = "already pinned"
+					results <- result
+					continue
+				}
+
+				// Get pre-allocated name
+				polecatName, ok := preAllocatedNames[beadID]
+				if !ok {
+					result.errMsg = "no pre-allocated name"
 					results <- result
 					continue
 				}
@@ -417,7 +455,7 @@ func runBatchSlingFormulaOnParallel(formulaName string, beadIDs []string, rigNam
 
 				result.compoundID = wispRootID
 
-				// Spawn polecat
+				// Spawn polecat with pre-allocated name
 				spawnOpts := SlingSpawnOptions{
 					Force:    slingForce,
 					Account:  slingAccount,
@@ -425,7 +463,7 @@ func runBatchSlingFormulaOnParallel(formulaName string, beadIDs []string, rigNam
 					HookBead: wispRootID,
 					Agent:    slingAgent,
 				}
-				spawnInfo, err := SpawnPolecatForSling(rigName, spawnOpts)
+				spawnInfo, err := SpawnPolecatForSlingWithName(rigName, polecatName, spawnOpts)
 				if err != nil {
 					result.errMsg = fmt.Sprintf("spawn failed: %v", err)
 					results <- result
