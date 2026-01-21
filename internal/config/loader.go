@@ -1256,7 +1256,7 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	// Build environment export prefix
 	var exports []string
 	for k, v := range resolvedEnv {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
 	}
 
 	// Sort for deterministic output
@@ -1278,6 +1278,7 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 }
 
 // PrependEnv prepends export statements to a command string.
+// Values containing special characters are properly shell-quoted.
 func PrependEnv(command string, envVars map[string]string) string {
 	if len(envVars) == 0 {
 		return command
@@ -1285,7 +1286,7 @@ func PrependEnv(command string, envVars map[string]string) string {
 
 	var exports []string
 	for k, v := range envVars {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
 	}
 
 	sort.Strings(exports)
@@ -1361,7 +1362,7 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	// Build environment export prefix
 	var exports []string
 	for k, v := range resolvedEnv {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
 	}
 	sort.Strings(exports)
 

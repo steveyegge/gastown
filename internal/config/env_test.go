@@ -175,6 +175,101 @@ func TestAgentEnv_EmptyTownRootOmitted(t *testing.T) {
 	assertEnv(t, env, "GT_RIG", "myrig")
 }
 
+func TestShellQuote(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple value no quoting",
+			input:    "foobar",
+			expected: "foobar",
+		},
+		{
+			name:     "alphanumeric and underscore",
+			input:    "FOO_BAR_123",
+			expected: "FOO_BAR_123",
+		},
+		// CRITICAL: These values are used by existing agents and must NOT be quoted
+		{
+			name:     "path with slashes (GT_ROOT, CLAUDE_CONFIG_DIR)",
+			input:    "/home/user/.config/claude",
+			expected: "/home/user/.config/claude", // NOT quoted
+		},
+		{
+			name:     "BD_ACTOR with slashes",
+			input:    "myrig/polecats/Toast",
+			expected: "myrig/polecats/Toast", // NOT quoted
+		},
+		{
+			name:     "value with hyphen",
+			input:    "deacon-boot",
+			expected: "deacon-boot", // NOT quoted
+		},
+		{
+			name:     "value with dots",
+			input:    "user.name",
+			expected: "user.name", // NOT quoted
+		},
+		{
+			name:     "value with spaces",
+			input:    "hello world",
+			expected: "'hello world'",
+		},
+		{
+			name:     "value with double quotes",
+			input:    `say "hello"`,
+			expected: `'say "hello"'`,
+		},
+		{
+			name:     "JSON object",
+			input:    `{"*":"allow"}`,
+			expected: `'{"*":"allow"}'`,
+		},
+		{
+			name:     "OPENCODE_PERMISSION value",
+			input:    `{"*":"allow"}`,
+			expected: `'{"*":"allow"}'`,
+		},
+		{
+			name:     "value with single quote",
+			input:    "it's a test",
+			expected: `'it'\''s a test'`,
+		},
+		{
+			name:     "value with dollar sign",
+			input:    "$HOME",
+			expected: "'$HOME'",
+		},
+		{
+			name:     "value with backticks",
+			input:    "`whoami`",
+			expected: "'`whoami`'",
+		},
+		{
+			name:     "value with asterisk",
+			input:    "*.txt",
+			expected: "'*.txt'",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ShellQuote(tt.input)
+			if result != tt.expected {
+				t.Errorf("ShellQuote(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestExportPrefix(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -200,6 +295,22 @@ func TestExportPrefix(t *testing.T) {
 				"MMM": "middle",
 			},
 			expected: "export AAA=first MMM=middle ZZZ=last && ",
+		},
+		{
+			name: "JSON value is quoted",
+			env: map[string]string{
+				"OPENCODE_PERMISSION": `{"*":"allow"}`,
+			},
+			expected: `export OPENCODE_PERMISSION='{"*":"allow"}' && `,
+		},
+		{
+			name: "mixed simple and complex values",
+			env: map[string]string{
+				"SIMPLE":  "value",
+				"COMPLEX": `{"key":"val"}`,
+				"GT_ROLE": "polecat",
+			},
+			expected: `export COMPLEX='{"key":"val"}' GT_ROLE=polecat SIMPLE=value && `,
 		},
 	}
 
