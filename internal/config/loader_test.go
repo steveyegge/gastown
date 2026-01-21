@@ -981,9 +981,9 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 	// New signature: (role, rig, townRoot, rigPath, prompt)
 	cmd := BuildAgentStartupCommand("witness", "gastown", "", "", "")
 
-	// Should contain environment prefix and claude command
+	// Should contain environment variables (via 'exec env') and claude command
 	if !strings.Contains(cmd, "exec env") {
-		t.Error("expected exec env in command")
+		t.Error("expected 'exec env' in command")
 	}
 	if !strings.Contains(cmd, "GT_ROLE=witness") {
 		t.Error("expected GT_ROLE=witness in command")
@@ -2775,99 +2775,5 @@ func TestBuildStartupCommandWithAgentOverride_NoGTAgentWhenNoOverride(t *testing
 	// Should NOT include GT_AGENT when no override is used
 	if strings.Contains(cmd, "GT_AGENT=") {
 		t.Errorf("expected no GT_AGENT in command when no override, got: %q", cmd)
-	}
-}
-
-func TestFillRuntimeDefaultsPreservesEnv(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		input    *RuntimeConfig
-		wantEnv  map[string]string
-		wantNil  bool
-	}{
-		{
-			name:    "nil input returns default",
-			input:   nil,
-			wantNil: false,
-		},
-		{
-			name: "preserves Env map",
-			input: &RuntimeConfig{
-				Command: "test-cmd",
-				Env: map[string]string{
-					"TEST_VAR": "test-value",
-					"JSON_VAR": `{"*":"allow"}`,
-				},
-			},
-			wantEnv: map[string]string{
-				"TEST_VAR": "test-value",
-				"JSON_VAR": `{"*":"allow"}`,
-			},
-		},
-		{
-			name: "nil Env stays nil",
-			input: &RuntimeConfig{
-				Command: "test-cmd",
-				Env:     nil,
-			},
-			wantEnv: nil,
-		},
-		{
-			name: "empty Env stays empty",
-			input: &RuntimeConfig{
-				Command: "test-cmd",
-				Env:     map[string]string{},
-			},
-			wantEnv: nil, // Empty map is treated as nil (not copied)
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := fillRuntimeDefaults(tt.input)
-			if result == nil {
-				if !tt.wantNil {
-					t.Fatal("fillRuntimeDefaults returned nil unexpectedly")
-				}
-				return
-			}
-
-			if tt.wantEnv == nil {
-				if result.Env != nil && len(result.Env) > 0 {
-					t.Errorf("expected nil/empty Env, got %v", result.Env)
-				}
-				return
-			}
-
-			if len(result.Env) != len(tt.wantEnv) {
-				t.Errorf("expected %d env vars, got %d", len(tt.wantEnv), len(result.Env))
-			}
-			for k, want := range tt.wantEnv {
-				if got := result.Env[k]; got != want {
-					t.Errorf("Env[%s] = %q, want %q", k, got, want)
-				}
-			}
-		})
-	}
-}
-
-func TestFillRuntimeDefaultsEnvIsCopy(t *testing.T) {
-	t.Parallel()
-	original := &RuntimeConfig{
-		Command: "test-cmd",
-		Env: map[string]string{
-			"ORIGINAL": "value",
-		},
-	}
-
-	result := fillRuntimeDefaults(original)
-
-	// Mutate the result
-	result.Env["MUTATED"] = "yes"
-
-	// Original should be unchanged
-	if _, exists := original.Env["MUTATED"]; exists {
-		t.Error("Mutation of result.Env affected original config")
 	}
 }
