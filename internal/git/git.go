@@ -4,6 +4,7 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +32,81 @@ func (e *GitError) Error() string {
 
 func (e *GitError) Unwrap() error {
 	return e.Err
+}
+
+// moveDir moves a directory from src to dest. It first tries os.Rename for
+// efficiency, but falls back to copy+delete if src and dest are on different
+// filesystems (which causes EXDEV error on rename).
+func moveDir(src, dest string) error {
+	// Try rename first - works if same filesystem
+	if err := os.Rename(src, dest); err == nil {
+		return nil
+	}
+
+	// Rename failed, try copy+delete as fallback for cross-filesystem moves
+	if err := copyDir(src, dest); err != nil {
+		return fmt.Errorf("copying directory: %w", err)
+	}
+	if err := os.RemoveAll(src); err != nil {
+		return fmt.Errorf("removing source after copy: %w", err)
+	}
+	return nil
+}
+
+// copyDir recursively copies a directory from src to dest.
+func copyDir(src, dest string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dest, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		destPath := filepath.Join(dest, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, destPath); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(srcPath, destPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// copyFile copies a single file from src to dest, preserving permissions.
+func copyFile(src, dest string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return err
+	}
+
+	destFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, srcFile)
+	return err
 }
 
 // Git wraps git operations for a working directory.
@@ -140,8 +216,8 @@ func (g *Git) Clone(url, dest string) error {
 		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", url})
 	}
 
-	// Move to final destination
-	if err := os.Rename(tmpDest, dest); err != nil {
+	// Move to final destination (handles cross-filesystem moves)
+	if err := moveDir(tmpDest, dest); err != nil {
 		return fmt.Errorf("moving clone to destination: %w", err)
 	}
 
@@ -180,8 +256,8 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--reference-if-able", url})
 	}
 
-	// Move to final destination
-	if err := os.Rename(tmpDest, dest); err != nil {
+	// Move to final destination (handles cross-filesystem moves)
+	if err := moveDir(tmpDest, dest); err != nil {
 		return fmt.Errorf("moving clone to destination: %w", err)
 	}
 
@@ -220,8 +296,8 @@ func (g *Git) CloneBare(url, dest string) error {
 		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--bare", url})
 	}
 
-	// Move to final destination
-	if err := os.Rename(tmpDest, dest); err != nil {
+	// Move to final destination (handles cross-filesystem moves)
+	if err := moveDir(tmpDest, dest); err != nil {
 		return fmt.Errorf("moving clone to destination: %w", err)
 	}
 
@@ -302,8 +378,8 @@ func (g *Git) CloneBareWithReference(url, dest, reference string) error {
 		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--bare", "--reference-if-able", url})
 	}
 
-	// Move to final destination
-	if err := os.Rename(tmpDest, dest); err != nil {
+	// Move to final destination (handles cross-filesystem moves)
+	if err := moveDir(tmpDest, dest); err != nil {
 		return fmt.Errorf("moving clone to destination: %w", err)
 	}
 
