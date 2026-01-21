@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -372,6 +373,93 @@ func TestUnit_TmuxIsolation(t *testing.T) {
 	}
 
 	t.Logf("Tmux sessions in isolated env:\n%s", listOut)
+}
+
+// TestUnit_PolecatListParsing tests the regex and logic for parsing gt polecat list output
+func TestUnit_PolecatListParsing(t *testing.T) {
+	runner := &E2ERunner{
+		t:         t,
+		rigName:   "testrig_5b4d_123",
+		ansiRegex: regexp.MustCompile(`[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]`),
+	}
+
+	tests := []struct {
+		name           string
+		output         string
+		expectedStatus string
+		expectedBusy   bool
+	}{
+		{
+			name: "Simple active",
+			output: "Active Polecats\n" +
+				"  ● testrig_5b4d_123/rust  busy",
+			expectedStatus: "busy",
+			expectedBusy:   true,
+		},
+		{
+			name: "With ANSI and noise",
+			output: "\x1b[32mActive Polecats\x1b[0m\n" +
+				"  \x1b[1m●\x1b[0m testrig_5b4d_123/furiosa  \x1b[33mactive\x1b[0m",
+			expectedStatus: "active",
+			expectedBusy:   true,
+		},
+		{
+			name: "Done state",
+			output: "Active Polecats\n" +
+				"  ● testrig_5b4d_123/obsidian  done",
+			expectedStatus: "done",
+			expectedBusy:   false,
+		},
+		{
+			name: "Multiple polecats",
+			output: "Active Polecats\n" +
+				"  ● other_rig/rust  busy\n" +
+				"  ● testrig_5b4d_123/rust  idle",
+			expectedStatus: "idle",
+			expectedBusy:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanOutput := runner.ansiRegex.ReplaceAllString(tt.output, "")
+			polecatStatus := "unknown"
+			seenBusy := false
+
+			lines := strings.Split(cleanOutput, "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "Active") || (strings.HasPrefix(line, "●") && len(strings.Fields(line)) < 2) {
+					continue
+				}
+				parts := strings.Fields(line)
+				name := ""
+				status := ""
+				if parts[0] == "●" && len(parts) >= 3 {
+					name = parts[1]
+					status = parts[len(parts)-1]
+				} else if len(parts) >= 2 {
+					name = strings.TrimPrefix(parts[0], "●")
+					status = parts[len(parts)-1]
+				}
+
+				if name != "" && strings.Contains(name, runner.rigName) {
+					polecatStatus = status
+				}
+			}
+
+			if polecatStatus == "busy" || polecatStatus == "active" {
+				seenBusy = true
+			}
+
+			if polecatStatus != tt.expectedStatus {
+				t.Errorf("Expected status %s, got %s", tt.expectedStatus, polecatStatus)
+			}
+			if seenBusy != tt.expectedBusy {
+				t.Errorf("Expected seenBusy %v, got %v", tt.expectedBusy, seenBusy)
+			}
+		})
+	}
 }
 
 func runTestCmd(t *testing.T, dir string, name string, args ...string) {

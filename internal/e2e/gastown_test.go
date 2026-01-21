@@ -4,14 +4,33 @@ package e2e
 
 import (
 	"testing"
+	"time"
 )
 
 func TestGastown_CreateFile(t *testing.T) {
 	for _, rt := range []string{"claude", "opencode"} {
 		t.Run(rt, func(t *testing.T) {
 			r := NewE2ERunner(t, rt)
+
+			t.Logf("\n"+
+				"============================================================\n"+
+				" [TEST CASE] CreateFile (%s)\n"+
+				" PURPOSE: Verifies agent can create a new file and satisfy \n"+
+				"          build/run criteria.\n"+
+				" SCENARIO:\n"+
+				"   1. Establish test rig and source repository.\n"+
+				"   2. Create work bead for 'hello.go'.\n"+
+				"   3. Dispatch work via 'gt sling'.\n"+
+				"   4. Monitor agent telemetry for completion.\n"+
+				"   5. Verify file existence and build status.\n"+
+				"============================================================", rt)
+
+			t.Log("\n[PHASE 1: RIG PREPARATION] Establishing test environment...")
 			r.CreateRig()
+
+			t.Log("\n[PHASE 2: TASK ASSIGNMENT] Creating work bead for file creation...")
 			r.CreateBead("create-hello", "Create hello.go that prints Hello World. Use /exit to finish.")
+
 			r.SlingWork()
 
 			completed := r.WaitForCompletion()
@@ -19,6 +38,7 @@ func TestGastown_CreateFile(t *testing.T) {
 				t.Log("[WARN] Timed out, but checking results anyway...")
 			}
 
+			t.Log("\n[PHASE 3: VERIFICATION] Validating agent output...")
 			passed := r.Verify(
 				r.FileExists("hello.go"),
 				r.FileContains("hello.go", "func main"),
@@ -30,7 +50,7 @@ func TestGastown_CreateFile(t *testing.T) {
 				t.Fatal("Verification failed")
 			}
 
-			t.Logf("[RESULT] %s CreateFile: PASS", rt)
+			t.Logf("\n[RESULT] %s CreateFile: PASS", rt)
 		})
 	}
 }
@@ -40,6 +60,20 @@ func TestGastown_FixBug(t *testing.T) {
 		t.Run(rt, func(t *testing.T) {
 			r := NewE2ERunner(t, rt)
 
+			t.Logf("\n"+
+				"============================================================\n"+
+				" [TEST CASE] FixBug (%s)\n"+
+				" PURPOSE: Verifies agent can identify buggy logic (a+b instead\n"+
+				"          of a-b), fix it, and verify via existing tests.\n"+
+				" SCENARIO:\n"+
+				"   1. Setup repository with buggy 'subtract' function.\n"+
+				"   2. Create work bead with explicit fix instructions.\n"+
+				"   3. Dispatch work to autonomous agent via 'gt sling'.\n"+
+				"   4. Monitor hierarchical telemetry for 'done' signal.\n"+
+				"   5. Verify logic fix and unit test passage.\n"+
+				"============================================================", rt)
+
+			t.Log("\n[PHASE 1: SOURCE SETUP] Creating buggy repository state...")
 			// Setup source repo with buggy code BEFORE creating rig
 			r.SetupSourceRepo(func(sourceDir string) {
 				r.writeFileTo(sourceDir, "math.go", `package main
@@ -64,15 +98,19 @@ func TestSubtract(t *testing.T) {
 				r.runCmd(sourceDir, "git", "commit", "-m", "add buggy code")
 			})
 
+			t.Log("\n[PHASE 2: RIG PREPARATION] Establishing test environment...")
 			r.CreateRig()
 
-			r.CreateBead("fix-subtract", "Fix subtract function in math.go - it adds instead of subtracts. Verify with tests and then call 'gt done' or type '/exit' to finish.")
+			t.Log("\n[PHASE 3: TASK ASSIGNMENT] Creating work bead for bug fix...")
+			r.CreateBead("fix-subtract", "Fix subtract function in math.go - it adds instead of subtracts. Verify with tests and then call 'gt_done' tool.")
+			time.Sleep(2 * time.Second)
 			r.SlingWork()
 
 			if !r.WaitForCompletion() {
 				t.Fatal("Timed out waiting for work completion")
 			}
 
+			t.Log("\n[PHASE 4: VERIFICATION] Validating agent fix...")
 			if !r.Verify(
 				r.FileContains("math.go", "a - b"),
 				r.TestsPass(),
@@ -80,7 +118,7 @@ func TestSubtract(t *testing.T) {
 				t.Fatal("Verification failed")
 			}
 
-			t.Logf("[RESULT] %s FixBug: PASS", rt)
+			t.Logf("\n[RESULT] %s FixBug: PASS", rt)
 		})
 	}
 }
