@@ -190,6 +190,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	var targetPane string
 	var hookWorkDir string     // Working directory for running bd hook commands
 	var hookSetAtomically bool // True if hook was set during polecat spawn (skip redundant update)
+	var targetProvider string  // Agent provider for OpenCode-specific nudge handling
 
 	if len(args) > 1 {
 		target := args[1]
@@ -247,6 +248,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 				targetPane = spawnInfo.Pane
 				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
 				hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
+				targetProvider = spawnInfo.Provider
 
 				// Wake witness and refinery to monitor the new polecat
 				wakeRigAgents(rigName)
@@ -278,7 +280,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 						targetAgent = spawnInfo.AgentID()
 						targetPane = spawnInfo.Pane
 						hookWorkDir = spawnInfo.ClonePath
-						hookSetAtomically = true // Hook was set during spawn (GH #gt-mzyk5)
+						hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
+						targetProvider = spawnInfo.Provider
 
 						// Wake witness and refinery to monitor the new polecat
 						wakeRigAgents(rigName)
@@ -531,7 +534,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		if err := injectStartPrompt(targetPane, beadID, slingSubject, slingArgs); err != nil {
+		// Use provider from spawn if available, otherwise resolve from session config
+		provider := targetProvider
+		if provider == "" {
+			provider = resolveProviderForSession(townRoot, sessionName)
+		}
+		if err := injectStartPrompt(targetPane, beadID, slingSubject, slingArgs, provider); err != nil {
 			// Graceful fallback for no-tmux mode
 			fmt.Printf("%s Could not nudge (no tmux?): %v\n", style.Dim.Render("○"), err)
 			fmt.Printf("  Agent will discover work via gt prime / bd show\n")

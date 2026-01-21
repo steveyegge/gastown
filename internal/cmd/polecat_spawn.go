@@ -24,6 +24,7 @@ type SpawnedPolecatInfo struct {
 	ClonePath   string // Path to polecat's git worktree
 	SessionName string // Tmux session name (e.g., "gt-gastown-p-Toast")
 	Pane        string // Tmux pane ID
+	Provider    string // Agent provider (e.g., "claude", "opencode")
 }
 
 // AgentID returns the agent identifier (e.g., "gastown/polecats/Toast")
@@ -154,6 +155,17 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		return nil, fmt.Errorf("getting pane for %s: %w", sessionName, err)
 	}
 
+	provider := ""
+	runtimeConfig := config.ResolveRoleAgentConfig(constants.RolePolecat, townRoot, r.Path)
+	if runtimeConfig != nil {
+		provider = runtimeConfig.Provider
+	}
+	if opts.Agent != "" {
+		if overrideConfig, _, resolveErr := config.ResolveAgentConfigWithOverride(townRoot, r.Path, opts.Agent); resolveErr == nil && overrideConfig != nil {
+			provider = overrideConfig.Provider
+		}
+	}
+
 	fmt.Printf("%s Polecat %s spawned\n", style.Bold.Render("✓"), polecatName)
 
 	// Log spawn event to activity feed
@@ -165,6 +177,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		ClonePath:   polecatObj.ClonePath,
 		SessionName: sessionName,
 		Pane:        pane,
+		Provider:    provider,
 	}, nil
 }
 

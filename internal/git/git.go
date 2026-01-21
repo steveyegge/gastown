@@ -225,7 +225,7 @@ func (g *Git) Clone(url, dest string) error {
 	if err := configureHooksPath(dest); err != nil {
 		return err
 	}
-	// Configure sparse checkout to exclude .claude/ from source repo
+	// Configure sparse checkout to exclude agent context files from source repo
 	return ConfigureSparseCheckout(dest)
 }
 
@@ -265,7 +265,7 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 	if err := configureHooksPath(dest); err != nil {
 		return err
 	}
-	// Configure sparse checkout to exclude .claude/ from source repo
+	// Configure sparse checkout to exclude agent context files from source repo
 	return ConfigureSparseCheckout(dest)
 }
 
@@ -801,7 +801,7 @@ func (g *Git) IsAncestor(ancestor, descendant string) (bool, error) {
 
 // WorktreeAdd creates a new worktree at the given path with a new branch.
 // The new branch is created from the current HEAD.
-// Sparse checkout is enabled to exclude .claude/ from source repos.
+// Sparse checkout is enabled to exclude agent context files from source repos.
 func (g *Git) WorktreeAdd(path, branch string) error {
 	if _, err := g.run("worktree", "add", "-b", branch, path); err != nil {
 		return err
@@ -811,7 +811,7 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 
 // WorktreeAddFromRef creates a new worktree at the given path with a new branch
 // starting from the specified ref (e.g., "origin/main").
-// Sparse checkout is enabled to exclude .claude/ from source repos.
+// Sparse checkout is enabled to exclude agent context files from source repos.
 func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
 	if _, err := g.run("worktree", "add", "-b", branch, path, startPoint); err != nil {
 		return err
@@ -820,7 +820,7 @@ func (g *Git) WorktreeAddFromRef(path, branch, startPoint string) error {
 }
 
 // WorktreeAddDetached creates a new worktree at the given path with a detached HEAD.
-// Sparse checkout is enabled to exclude .claude/ from source repos.
+// Sparse checkout is enabled to exclude agent context files from source repos.
 func (g *Git) WorktreeAddDetached(path, ref string) error {
 	if _, err := g.run("worktree", "add", "--detach", path, ref); err != nil {
 		return err
@@ -829,7 +829,7 @@ func (g *Git) WorktreeAddDetached(path, ref string) error {
 }
 
 // WorktreeAddExisting creates a new worktree at the given path for an existing branch.
-// Sparse checkout is enabled to exclude .claude/ from source repos.
+// Sparse checkout is enabled to exclude agent context files from source repos.
 func (g *Git) WorktreeAddExisting(path, branch string) error {
 	if _, err := g.run("worktree", "add", path, branch); err != nil {
 		return err
@@ -839,7 +839,7 @@ func (g *Git) WorktreeAddExisting(path, branch string) error {
 
 // WorktreeAddExistingForce creates a new worktree even if the branch is already checked out elsewhere.
 // This is useful for cross-rig worktrees where multiple clones need to be on main.
-// Sparse checkout is enabled to exclude .claude/ from source repos.
+// Sparse checkout is enabled to exclude agent context files from source repos.
 func (g *Git) WorktreeAddExistingForce(path, branch string) error {
 	if _, err := g.run("worktree", "add", "--force", path, branch); err != nil {
 		return err
@@ -847,7 +847,7 @@ func (g *Git) WorktreeAddExistingForce(path, branch string) error {
 	return ConfigureSparseCheckout(path)
 }
 
-// ConfigureSparseCheckout sets up sparse checkout for a clone or worktree to exclude .claude/.
+// ConfigureSparseCheckout sets up sparse checkout for a clone or worktree to exclude agent context files.
 // This ensures source repo settings don't override Gas Town agent settings.
 // Exported for use by doctor checks.
 func ConfigureSparseCheckout(repoPath string) error {
@@ -875,18 +875,20 @@ func ConfigureSparseCheckout(repoPath string) error {
 
 	// Write patterns directly to sparse-checkout file
 	// (git sparse-checkout set --stdin escapes the ! character incorrectly)
-	// Exclude all Claude Code context files to prevent source repo instructions
+	// Exclude all agent context files to prevent source repo instructions
 	// from interfering with Gas Town agent context:
-	// - .claude/      : settings, rules, agents, commands
-	// - CLAUDE.md     : primary context file
+	// - .claude/        : Claude Code settings, rules, agents, commands
+	// - .opencode/      : OpenCode settings and plugins
+	// - CLAUDE.md       : Claude primary context file
+	// - AGENTS.md       : OpenCode/agent instructions file
 	// - CLAUDE.local.md : personal context file
-	// - .mcp.json     : MCP server configuration
+	// - .mcp.json       : MCP server configuration
 	infoDir := filepath.Join(gitDir, "info")
 	if err := os.MkdirAll(infoDir, 0755); err != nil {
 		return fmt.Errorf("creating info dir: %w", err)
 	}
 	sparseFile := filepath.Join(infoDir, "sparse-checkout")
-	sparsePatterns := "/*\n!/.claude/\n!/CLAUDE.md\n!/CLAUDE.local.md\n!/.mcp.json\n"
+	sparsePatterns := "/*\n!/.claude/\n!/.opencode/\n!/CLAUDE.md\n!/AGENTS.md\n!/CLAUDE.local.md\n!/.mcp.json\n"
 	if err := os.WriteFile(sparseFile, []byte(sparsePatterns), 0644); err != nil {
 		return fmt.Errorf("writing sparse-checkout: %w", err)
 	}
@@ -909,15 +911,17 @@ func ConfigureSparseCheckout(repoPath string) error {
 	return nil
 }
 
-// ExcludedContextFiles lists all Claude context files that should be excluded by sparse checkout.
+// ExcludedContextFiles lists all agent context files that should be excluded by sparse checkout.
 var ExcludedContextFiles = []string{
 	".claude",
+	".opencode",
 	"CLAUDE.md",
+	"AGENTS.md",
 	"CLAUDE.local.md",
 	".mcp.json",
 }
 
-// CheckExcludedFilesExist checks if any Claude context files still exist in the repo
+// CheckExcludedFilesExist checks if any agent context files still exist in the repo
 // after sparse checkout was configured. These files should have been removed by
 // git read-tree, but may remain if they were untracked or modified.
 // Returns a list of files that still exist and should be manually removed.
@@ -933,7 +937,7 @@ func CheckExcludedFilesExist(repoPath string) []string {
 }
 
 // IsSparseCheckoutConfigured checks if sparse checkout is enabled and configured
-// to exclude Claude Code context files for a given repo/worktree.
+// to exclude agent context files for a given repo/worktree.
 // Returns true only if both core.sparseCheckout is true AND the sparse-checkout
 // file contains all required exclusion patterns.
 func IsSparseCheckoutConfigured(repoPath string) bool {
@@ -955,14 +959,16 @@ func IsSparseCheckoutConfigured(repoPath string) bool {
 		gitDir = filepath.Join(repoPath, gitDir)
 	}
 
-	// Check if sparse-checkout file exists and excludes Claude context files
+	// Check if sparse-checkout file exists and excludes agent context files
 	sparseFile := filepath.Join(gitDir, "info", "sparse-checkout")
 	content, err := os.ReadFile(sparseFile)
 	if err != nil {
 		return false
 	}
 
-	// Check for all required exclusion patterns
+	// Check for required exclusion patterns (at minimum .claude/ or .opencode/)
+	// We only require at least one of these to be present, as workspaces may use
+	// different providers. CLAUDE.md is also checked for backward compatibility.
 	contentStr := string(content)
 	requiredPatterns := []string{
 		"!/.claude/",  // or legacy "!.claude/"

@@ -270,8 +270,10 @@ func TestRigAddCreatesCorrectStructure(t *testing.T) {
 	}
 
 	// Verify Claude settings are created in correct locations (outside git repos).
-	// Settings in parent directories are inherited by agents via directory traversal,
-	// without polluting the source repos.
+	// NOTE: These settings are placed by gt rig add for initial setup.
+	// At session start time, settings are re-installed in the actual working directory
+	// because neither Claude Code nor OpenCode traverse parent directories.
+	// See: https://github.com/anthropics/claude-code/issues/12962
 	expectedSettings := []struct {
 		path string
 		desc string

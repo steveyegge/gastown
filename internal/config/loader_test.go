@@ -3490,9 +3490,9 @@ func TestBuildStartupCommand_IncludesProviderEnvForOpenCode(t *testing.T) {
 
 	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "polecat"}, rigPath, "")
 
-	// Should include GT_AUTO_INIT=1 for OpenCode
-	if !strings.Contains(cmd, "GT_AUTO_INIT=1") {
-		t.Errorf("expected GT_AUTO_INIT=1 for opencode provider, got: %q", cmd)
+	// Should include OPENCODE_PERMISSION for OpenCode (YOLO mode)
+	if !strings.Contains(cmd, "OPENCODE_PERMISSION=") {
+		t.Errorf("expected OPENCODE_PERMISSION for opencode provider, got: %q", cmd)
 	}
 }
 
@@ -3516,9 +3516,9 @@ func TestBuildStartupCommand_NoProviderEnvForClaude(t *testing.T) {
 
 	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "polecat"}, rigPath, "")
 
-	// Should NOT include GT_AUTO_INIT for Claude
-	if strings.Contains(cmd, "GT_AUTO_INIT") {
-		t.Errorf("did not expect GT_AUTO_INIT for claude provider, got: %q", cmd)
+	// Should NOT include OPENCODE_PERMISSION for Claude
+	if strings.Contains(cmd, "OPENCODE_PERMISSION") {
+		t.Errorf("did not expect OPENCODE_PERMISSION for claude provider, got: %q", cmd)
 	}
 }
 
@@ -3548,9 +3548,9 @@ func TestBuildStartupCommandWithAgentOverride_IncludesProviderEnvForOpenCode(t *
 		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
 	}
 
-	// Should include GT_AUTO_INIT=1 for OpenCode override
-	if !strings.Contains(cmd, "GT_AUTO_INIT=1") {
-		t.Errorf("expected GT_AUTO_INIT=1 for opencode override, got: %q", cmd)
+	// Should include OPENCODE_PERMISSION for OpenCode override (YOLO mode)
+	if !strings.Contains(cmd, "OPENCODE_PERMISSION=") {
+		t.Errorf("expected OPENCODE_PERMISSION for opencode override, got: %q", cmd)
 	}
 }
 
