@@ -2653,7 +2653,6 @@ func TestBuildStartupCommandWithAgentOverride_IncludesGTRoot(t *testing.T) {
 		t.Errorf("expected GT_ROOT=%s in command, got: %q", townRoot, cmd)
 	}
 }
-}
 
 // TestBuildStartupCommand_UsesGTRootFromEnvVars tests that when rigPath is empty
 // but GT_ROOT is provided in envVars, the function uses GT_ROOT to find town settings
