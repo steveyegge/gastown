@@ -99,6 +99,9 @@ Git-backed issue tracking system that stores work state as structured data.
 # Install Gas Town
 go install github.com/steveyegge/gastown/cmd/gt@latest
 
+# For subsequent updates, use:
+gt upgrade
+
 # Add Go binaries to PATH (add to ~/.zshrc or ~/.bashrc)
 export PATH="$PATH:$HOME/go/bin"
 
@@ -366,6 +369,17 @@ bd formula list             # List formulas
 bd cook <formula>           # Execute formula
 bd mol pour <formula>       # Create trackable instance
 bd mol list                 # List active instances
+```
+
+### Self-Update
+
+```bash
+gt upgrade                  # Update gt to latest version
+gt upgrade --check          # Check for updates without installing
+gt upgrade --dry-run        # Preview what would happen
+gt migrate                  # Run workspace migrations
+gt migrate --status         # Show migration status
+gt migrate --rollback       # Restore from backup
 ```
 
 ## Cooking Formulas

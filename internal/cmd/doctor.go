@@ -31,6 +31,7 @@ Workspace checks:
   - rigs-registry-exists     Check mayor/rigs.json exists (fixable)
   - rigs-registry-valid      Check registered rigs exist (fixable)
   - mayor-exists             Check mayor/ directory structure
+  - migration                Check if workspace migration is needed
 
 Town root protection:
   - town-git                 Verify town root is under version control
@@ -113,6 +114,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Register workspace-level checks first (fundamental)
 	d.RegisterAll(doctor.WorkspaceChecks()...)
+
+	// Migration check - early warning if workspace layout needs updating
+	d.Register(doctor.NewMigrationCheck())
 
 	d.Register(doctor.NewGlobalStateCheck())
 

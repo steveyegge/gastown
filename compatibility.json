@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "min_workspace_version": "0.1.0",
+  "breaking_changes": [
+    "two-level-beads-architecture",
+    "directory-reorganization",
+    "three-tier-config"
+  ],
+  "migration_required_from": ["0.1.x"],
+  "migration_guide_url": "https://github.com/steveyegge/gastown/blob/main/docs/migrations/0.2.0.md",
+  "migrations": [
+    {
+      "from_pattern": "0.1.x",
+      "id": "v0_1_to_v0_2",
+      "description": "Migrate to two-level beads and directory reorganization"
+    }
+  ]
+}
