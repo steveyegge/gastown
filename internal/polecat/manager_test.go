@@ -708,6 +708,12 @@ func TestBuildBranchName(t *testing.T) {
 			issue:    "gt-456",
 			want:     "work/456",
 		},
+		{
+			name:     "custom_template_with_timestamp",
+			template: "feature/{name}-{timestamp}",
+			issue:    "",
+			want:     "feature/alpha-", // timestamp suffix varies
+		},
 	}
 
 	for _, tt := range tests {
@@ -742,7 +748,7 @@ func TestBuildBranchName(t *testing.T) {
 				}
 			} else {
 				// For custom templates with time-varying fields, check prefix
-				if strings.Contains(tt.template, "{year}") || strings.Contains(tt.template, "{month}") {
+				if strings.Contains(tt.template, "{year}") || strings.Contains(tt.template, "{month}") || strings.Contains(tt.template, "{timestamp}") {
 					if !strings.HasPrefix(got, tt.want) {
 						t.Errorf("buildBranchName() = %q, want prefix %q", got, tt.want)
 					}
