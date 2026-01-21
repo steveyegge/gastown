@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/events"
@@ -407,23 +406,16 @@ func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //noli
 	return pids, nil
 }
 
-// findRuntimeProcesses finds all running runtime CLI processes.
-// Excludes Claude.app desktop application and its helpers.
+// findRuntimeProcesses finds Gas Town Claude processes (those with --dangerously-skip-permissions).
+// Only detects processes started by Gas Town, not user's personal Claude sessions.
 func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
 	var procs []processInfo
 
-	// Use ps to find runtime processes
-	out, err := exec.Command("ps", "-eo", "pid,ppid,comm").Output()
+	// Use ps with args to get full command line (needed to check for Gas Town signature)
+	out, err := exec.Command("ps", "-eo", "pid,ppid,args").Output()
 	if err != nil {
 		return nil, err
 	}
-
-	// Regex to match runtime CLI processes (not Claude.app)
-	// Match: "claude", "claude-code", or "codex" (or paths ending in those)
-	runtimePattern := regexp.MustCompile(`(?i)(^claude$|/claude$|^claude-code$|/claude-code$|^codex$|/codex$)`)
-
-	// Pattern to exclude Claude.app and related desktop processes
-	excludePattern := regexp.MustCompile(`(?i)(Claude\.app|claude-native|chrome-native)`)
 
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
@@ -431,16 +423,24 @@ func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
 			continue
 		}
 
-		// Check if command matches runtime CLI
-		cmd := strings.Join(fields[2:], " ")
+		// Extract command name (without path)
+		cmd := fields[2]
+		if idx := strings.LastIndex(cmd, "/"); idx >= 0 {
+			cmd = cmd[idx+1:]
+		}
 
-		// Skip desktop app processes
-		if excludePattern.MatchString(cmd) {
+		// Only match claude/codex processes, not tmux or other launchers
+		// (tmux command line may contain --dangerously-skip-permissions as part of the launched command)
+		if cmd != "claude" && cmd != "claude-code" && cmd != "codex" {
 			continue
 		}
 
-		// Only match CLI runtime processes
-		if !runtimePattern.MatchString(cmd) {
+		// Get full args
+		args := strings.Join(fields[2:], " ")
+
+		// Only match Gas Town Claude processes (have --dangerously-skip-permissions)
+		// This excludes user's personal Claude sessions
+		if !strings.Contains(args, "--dangerously-skip-permissions") {
 			continue
 		}
 
@@ -455,7 +455,7 @@ func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
 		procs = append(procs, processInfo{
 			pid:  pid,
 			ppid: ppid,
-			cmd:  cmd,
+			cmd:  args,
 		})
 	}
 
