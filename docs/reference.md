@@ -38,7 +38,7 @@ Technical reference for Gas Town internals. Read the README first.
 - Rig root is a container, not a clone
 - `.repo.git/` is bare - refinery and polecats are worktrees
 - Per-rig `mayor/rig/` holds canonical `.beads/`, others inherit via redirect
-- Settings placed in parent dirs (not git clones) for upward traversal
+- Settings placed in each agent's working directory (no parent traversal)
 
 ## Beads Routing
 
@@ -334,26 +334,31 @@ a git clone that holds the canonical `.beads/` database for that rig.
 
 ### Settings File Locations
 
-Claude Code searches for `.claude/settings.json` starting from the working
-directory and traversing upward. Settings are placed in **parent directories**
-(not inside git clones) so they're found via directory traversal without
-polluting source repositories:
+Claude Code and OpenCode look for settings in the **current working directory
+only** (no directory traversal). Settings must be placed in the same directory
+where the agent session runs:
 
 ```
 ~/gt/
-├── mayor/.claude/settings.json          # Mayor settings
+├── .claude/settings.json                # Mayor settings (Mayor runs from ~/gt)
+├── .opencode/plugins/gastown.js         # Mayor OpenCode plugin
 ├── deacon/.claude/settings.json         # Deacon settings
 └── <rig>/
-    ├── witness/.claude/settings.json    # Witness settings (no rig/ subdir)
-    ├── refinery/.claude/settings.json   # Found by refinery/rig/ via traversal
-    ├── crew/.claude/settings.json       # Shared by all crew/<name>/rig/
-    └── polecats/.claude/settings.json   # Shared by all polecats/<name>/rig/
+    ├── witness/rig/.claude/settings.json    # Witness settings (if rig/ exists)
+    ├── refinery/rig/.claude/settings.json   # Refinery settings
+    ├── crew/<name>/.claude/settings.json    # Crew settings (in clone path)
+    └── polecats/<name>/.claude/settings.json # Polecat settings (in work dir)
 ```
 
-**Why parent directories?** Agents working in git clones (like `refinery/rig/`)
-would pollute the source repo if settings were placed there. By putting settings
-one level up, Claude finds them via upward traversal, and all workers of the
-same type share the same settings.
+**Why in working directory?** Neither Claude Code nor OpenCode traverse up the
+directory tree to find settings. Each agent must have settings in its own
+working directory. Git sparse checkout prevents settings from polluting source
+repositories when agents work in git clones.
+
+**References:**
+- [Claude Code settings documentation](https://code.claude.com/docs/en/settings) - confirms project settings are in `.claude/settings.json`
+- [GitHub Issue #12962](https://github.com/anthropics/claude-code/issues/12962) - feature request for parent directory traversal (not implemented)
+- Note: Only `CLAUDE.md` files support parent directory traversal in Claude Code
 
 ### CLAUDE.md Locations
 
@@ -398,16 +403,16 @@ This ensures agents use Gas Town's context, not the source repo's instructions.
 **Doctor check**: `gt doctor` verifies sparse checkout is configured correctly.
 Run `gt doctor --fix` to update legacy configurations missing the newer patterns.
 
-### Settings Inheritance
+### Settings Discovery
 
 Claude Code's settings search order (first match wins):
 
 1. `.claude/settings.json` in current working directory
-2. `.claude/settings.json` in parent directories (traversing up)
-3. `~/.claude/settings.json` (user global settings)
+2. `~/.claude/settings.json` (user global settings)
 
-Gas Town places settings at each agent's working directory root, so agents
-find their role-specific settings before reaching any parent or global config.
+**Note:** Claude Code does NOT traverse up the directory tree (see [Issue #12962](https://github.com/anthropics/claude-code/issues/12962)).
+Settings must be placed directly in the agent's working directory. Gas Town
+ensures each agent has settings in its session working directory.
 
 ### Settings Templates
 

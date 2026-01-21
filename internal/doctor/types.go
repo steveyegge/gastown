@@ -4,6 +4,8 @@ package doctor
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -73,6 +75,19 @@ func (ctx *CheckContext) RigPath() string {
 		return ""
 	}
 	return ctx.TownRoot + "/" + ctx.RigName
+}
+
+// DetectHooksDir returns the hooks directory for an agent path.
+// Checks for existing directories first (.claude, .opencode), then defaults to .claude.
+// This allows doctor to work with both Claude and OpenCode providers.
+func DetectHooksDir(agentPath string) string {
+	if _, err := os.Stat(filepath.Join(agentPath, ".claude")); err == nil {
+		return ".claude"
+	}
+	if _, err := os.Stat(filepath.Join(agentPath, ".opencode")); err == nil {
+		return ".opencode"
+	}
+	return ".claude" // default for backward compatibility
 }
 
 // CheckResult represents the outcome of a health check.

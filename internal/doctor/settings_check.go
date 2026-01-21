@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/steveyegge/gastown/internal/claude"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
@@ -26,9 +27,10 @@ const (
 	gitStatusUnknown         gitFileStatus = "unknown"          // Not in a git repo or error
 )
 
-// ClaudeSettingsCheck verifies that Claude settings.json files match the expected templates.
+// AgentSettingsCheck verifies that agent settings files match the expected templates.
+// Supports both .claude and .opencode directories for different providers.
 // Detects stale settings files that are missing required hooks or configuration.
-type ClaudeSettingsCheck struct {
+type AgentSettingsCheck struct {
 	FixableCheck
 	staleSettings []staleSettingsInfo
 }
@@ -43,21 +45,21 @@ type staleSettingsInfo struct {
 	gitStatus     gitFileStatus // Git status for wrong-location files (for safe deletion)
 }
 
-// NewClaudeSettingsCheck creates a new Claude settings validation check.
-func NewClaudeSettingsCheck() *ClaudeSettingsCheck {
-	return &ClaudeSettingsCheck{
+// NewAgentSettingsCheck creates a new settings validation check.
+func NewAgentSettingsCheck() *AgentSettingsCheck {
+	return &AgentSettingsCheck{
 		FixableCheck: FixableCheck{
 			BaseCheck: BaseCheck{
-				CheckName:        "claude-settings",
-				CheckDescription: "Verify Claude settings.json files match expected templates",
+				CheckName:        "settings",
+				CheckDescription: "Verify settings files match expected templates",
 				CheckCategory:    CategoryConfig,
 			},
 		},
 	}
 }
 
-// Run checks all Claude settings.json files for staleness.
-func (c *ClaudeSettingsCheck) Run(ctx *CheckContext) *CheckResult {
+// Run checks all settings files for staleness.
+func (c *AgentSettingsCheck) Run(ctx *CheckContext) *CheckResult {
 	c.staleSettings = nil
 
 	var details []string
@@ -103,7 +105,7 @@ func (c *ClaudeSettingsCheck) Run(ctx *CheckContext) *CheckResult {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: "All Claude settings.json files are up to date",
+			Message: "All settings files are up to date",
 		}
 	}
 
@@ -115,29 +117,33 @@ func (c *ClaudeSettingsCheck) Run(ctx *CheckContext) *CheckResult {
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusError,
-		Message: fmt.Sprintf("Found %d stale Claude config file(s) in wrong location", len(c.staleSettings)),
+		Message: fmt.Sprintf("Found %d stale config file(s) in wrong location", len(c.staleSettings)),
 		Details: details,
 		FixHint: fixHint,
 	}
 }
 
-// findSettingsFiles locates all .claude/settings.json files and identifies their agent type.
-func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettingsInfo {
+// knownHooksDirs lists all provider hook directories to check for stale settings.
+var knownHooksDirs = []string{".claude", ".opencode"}
+
+// findSettingsFiles locates all settings files and identifies their agent type.
+// Checks for both .claude and .opencode directories to support multiple providers.
+func (c *AgentSettingsCheck) findSettingsFiles(townRoot string) []staleSettingsInfo {
 	var files []staleSettingsInfo
 
-	// Check for STALE settings at town root (~/gt/.claude/settings.json)
-	// This is WRONG - settings here pollute ALL child workspaces via directory traversal.
-	// Mayor settings should be at ~/gt/mayor/.claude/ instead.
-	staleTownRootSettings := filepath.Join(townRoot, ".claude", "settings.json")
-	if fileExists(staleTownRootSettings) {
-		files = append(files, staleSettingsInfo{
-			path:          staleTownRootSettings,
-			agentType:     "mayor",
-			sessionName:   "hq-mayor",
-			wrongLocation: true,
-			gitStatus:     c.getGitFileStatus(staleTownRootSettings),
-			missing:       []string{"should be at mayor/.claude/settings.json, not town root"},
-		})
+	// Town-level: mayor settings at town root (~/gt/.claude/ or ~/gt/.opencode/)
+	// This is CORRECT - Mayor runs from town root, so settings must be here.
+	// Neither Claude Code nor OpenCode do directory traversal to find settings.
+	for _, hooksDir := range knownHooksDirs {
+		mayorTownRootSettings := filepath.Join(townRoot, hooksDir, "settings.json")
+		if fileExists(mayorTownRootSettings) {
+			files = append(files, staleSettingsInfo{
+				path:        mayorTownRootSettings,
+				agentType:   "mayor",
+				sessionName: "hq-mayor",
+				gitStatus:   c.getGitFileStatus(mayorTownRootSettings),
+			})
+		}
 	}
 
 	// Check for STALE CLAUDE.md at town root (~/gt/CLAUDE.md)
@@ -156,18 +162,13 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 		})
 	}
 
-	// Town-level: mayor (~/gt/mayor/.claude/settings.json) - CORRECT location
-	mayorSettings := filepath.Join(townRoot, "mayor", ".claude", "settings.json")
-	if fileExists(mayorSettings) {
-		files = append(files, staleSettingsInfo{
-			path:        mayorSettings,
-			agentType:   "mayor",
-			sessionName: "hq-mayor",
-		})
-	}
+	// Note: Mayor settings in ~/gt/mayor/ are legacy (pre-OpenCode).
+	// Mayor now runs from town root, so settings there are handled above.
 
-	// Town-level: deacon (~/gt/deacon/.claude/settings.json)
-	deaconSettings := filepath.Join(townRoot, "deacon", ".claude", "settings.json")
+	// Town-level: deacon (~/gt/deacon/<hooksDir>/settings.json)
+	deaconDir := filepath.Join(townRoot, "deacon")
+	deaconHooksDir := DetectHooksDir(deaconDir)
+	deaconSettings := filepath.Join(deaconDir, deaconHooksDir, "settings.json")
 	if fileExists(deaconSettings) {
 		files = append(files, staleSettingsInfo{
 			path:        deaconSettings,
@@ -196,9 +197,11 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 			continue
 		}
 
-		// Check for witness settings - witness/.claude/ is correct (outside git repo)
-		// Settings in witness/rig/.claude/ are wrong (inside source repo)
-		witnessSettings := filepath.Join(rigPath, "witness", ".claude", "settings.json")
+		// Check for witness settings - witness/<hooksDir>/ is correct (outside git repo)
+		// Settings in witness/rig/<hooksDir>/ are wrong (inside source repo)
+		witnessDir := filepath.Join(rigPath, "witness")
+		witnessHooksDir := DetectHooksDir(witnessDir)
+		witnessSettings := filepath.Join(witnessDir, witnessHooksDir, "settings.json")
 		if fileExists(witnessSettings) {
 			files = append(files, staleSettingsInfo{
 				path:        witnessSettings,
@@ -207,20 +210,25 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 				sessionName: fmt.Sprintf("gt-%s-witness", rigName),
 			})
 		}
-		witnessWrongSettings := filepath.Join(rigPath, "witness", "rig", ".claude", "settings.json")
-		if fileExists(witnessWrongSettings) {
-			files = append(files, staleSettingsInfo{
-				path:          witnessWrongSettings,
-				agentType:     "witness",
-				rigName:       rigName,
-				sessionName:   fmt.Sprintf("gt-%s-witness", rigName),
-				wrongLocation: true,
-			})
+		// Check for wrong settings inside git repo (both providers)
+		for _, hooksDir := range knownHooksDirs {
+			witnessWrongSettings := filepath.Join(witnessDir, "rig", hooksDir, "settings.json")
+			if fileExists(witnessWrongSettings) {
+				files = append(files, staleSettingsInfo{
+					path:          witnessWrongSettings,
+					agentType:     "witness",
+					rigName:       rigName,
+					sessionName:   fmt.Sprintf("gt-%s-witness", rigName),
+					wrongLocation: true,
+				})
+			}
 		}
 
-		// Check for refinery settings - refinery/.claude/ is correct (outside git repo)
-		// Settings in refinery/rig/.claude/ are wrong (inside source repo)
-		refinerySettings := filepath.Join(rigPath, "refinery", ".claude", "settings.json")
+		// Check for refinery settings - refinery/<hooksDir>/ is correct (outside git repo)
+		// Settings in refinery/rig/<hooksDir>/ are wrong (inside source repo)
+		refineryDir := filepath.Join(rigPath, "refinery")
+		refineryHooksDir := DetectHooksDir(refineryDir)
+		refinerySettings := filepath.Join(refineryDir, refineryHooksDir, "settings.json")
 		if fileExists(refinerySettings) {
 			files = append(files, staleSettingsInfo{
 				path:        refinerySettings,
@@ -229,21 +237,25 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 				sessionName: fmt.Sprintf("gt-%s-refinery", rigName),
 			})
 		}
-		refineryWrongSettings := filepath.Join(rigPath, "refinery", "rig", ".claude", "settings.json")
-		if fileExists(refineryWrongSettings) {
-			files = append(files, staleSettingsInfo{
-				path:          refineryWrongSettings,
-				agentType:     "refinery",
-				rigName:       rigName,
-				sessionName:   fmt.Sprintf("gt-%s-refinery", rigName),
-				wrongLocation: true,
-			})
+		// Check for wrong settings inside git repo (both providers)
+		for _, hooksDir := range knownHooksDirs {
+			refineryWrongSettings := filepath.Join(refineryDir, "rig", hooksDir, "settings.json")
+			if fileExists(refineryWrongSettings) {
+				files = append(files, staleSettingsInfo{
+					path:          refineryWrongSettings,
+					agentType:     "refinery",
+					rigName:       rigName,
+					sessionName:   fmt.Sprintf("gt-%s-refinery", rigName),
+					wrongLocation: true,
+				})
+			}
 		}
 
-		// Check for crew settings - crew/.claude/ is correct (shared by all crew, outside git repos)
-		// Settings in crew/<name>/.claude/ are wrong (inside git repos)
+		// Check for crew settings - crew/<hooksDir>/ is correct (shared by all crew, outside git repos)
+		// Settings in crew/<name>/<hooksDir>/ are wrong (inside git repos)
 		crewDir := filepath.Join(rigPath, "crew")
-		crewSettings := filepath.Join(crewDir, ".claude", "settings.json")
+		crewHooksDir := DetectHooksDir(crewDir)
+		crewSettings := filepath.Join(crewDir, crewHooksDir, "settings.json")
 		if fileExists(crewSettings) {
 			files = append(files, staleSettingsInfo{
 				path:        crewSettings,
@@ -255,26 +267,35 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 		if dirExists(crewDir) {
 			crewEntries, _ := os.ReadDir(crewDir)
 			for _, crewEntry := range crewEntries {
-				if !crewEntry.IsDir() || crewEntry.Name() == ".claude" {
+				// Skip non-directories and hooks directories
+				if !crewEntry.IsDir() {
 					continue
 				}
-				crewWrongSettings := filepath.Join(crewDir, crewEntry.Name(), ".claude", "settings.json")
-				if fileExists(crewWrongSettings) {
-					files = append(files, staleSettingsInfo{
-						path:          crewWrongSettings,
-						agentType:     "crew",
-						rigName:       rigName,
-						sessionName:   fmt.Sprintf("gt-%s-crew-%s", rigName, crewEntry.Name()),
-						wrongLocation: true,
-					})
+				name := crewEntry.Name()
+				if name == ".claude" || name == ".opencode" {
+					continue
+				}
+				// Check for wrong settings inside git repos (both providers)
+				for _, hooksDir := range knownHooksDirs {
+					crewWrongSettings := filepath.Join(crewDir, name, hooksDir, "settings.json")
+					if fileExists(crewWrongSettings) {
+						files = append(files, staleSettingsInfo{
+							path:          crewWrongSettings,
+							agentType:     "crew",
+							rigName:       rigName,
+							sessionName:   fmt.Sprintf("gt-%s-crew-%s", rigName, name),
+							wrongLocation: true,
+						})
+					}
 				}
 			}
 		}
 
-		// Check for polecat settings - polecats/.claude/ is correct (shared by all polecats, outside git repos)
-		// Settings in polecats/<name>/.claude/ are wrong (inside git repos)
+		// Check for polecat settings - polecats/<hooksDir>/ is correct (shared by all polecats, outside git repos)
+		// Settings in polecats/<name>/<hooksDir>/ are wrong (inside git repos)
 		polecatsDir := filepath.Join(rigPath, "polecats")
-		polecatsSettings := filepath.Join(polecatsDir, ".claude", "settings.json")
+		polecatsHooksDir := DetectHooksDir(polecatsDir)
+		polecatsSettings := filepath.Join(polecatsDir, polecatsHooksDir, "settings.json")
 		if fileExists(polecatsSettings) {
 			files = append(files, staleSettingsInfo{
 				path:        polecatsSettings,
@@ -286,25 +307,32 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 		if dirExists(polecatsDir) {
 			polecatEntries, _ := os.ReadDir(polecatsDir)
 			for _, pcEntry := range polecatEntries {
-				if !pcEntry.IsDir() || pcEntry.Name() == ".claude" {
+				// Skip non-directories and hooks directories
+				if !pcEntry.IsDir() {
 					continue
 				}
-				// Check for wrong settings in both structures:
-				// Old structure: polecats/<name>/.claude/settings.json
-				// New structure: polecats/<name>/<rigname>/.claude/settings.json
-				wrongPaths := []string{
-					filepath.Join(polecatsDir, pcEntry.Name(), ".claude", "settings.json"),
-					filepath.Join(polecatsDir, pcEntry.Name(), rigName, ".claude", "settings.json"),
+				pcName := pcEntry.Name()
+				if pcName == ".claude" || pcName == ".opencode" {
+					continue
 				}
-				for _, pcWrongSettings := range wrongPaths {
-					if fileExists(pcWrongSettings) {
-						files = append(files, staleSettingsInfo{
-							path:          pcWrongSettings,
-							agentType:     "polecat",
-							rigName:       rigName,
-							sessionName:   fmt.Sprintf("gt-%s-%s", rigName, pcEntry.Name()),
-							wrongLocation: true,
-						})
+				// Check for wrong settings in both structures (both providers):
+				// Old structure: polecats/<name>/<hooksDir>/settings.json
+				// New structure: polecats/<name>/<rigname>/<hooksDir>/settings.json
+				for _, hooksDir := range knownHooksDirs {
+					wrongPaths := []string{
+						filepath.Join(polecatsDir, pcName, hooksDir, "settings.json"),
+						filepath.Join(polecatsDir, pcName, rigName, hooksDir, "settings.json"),
+					}
+					for _, pcWrongSettings := range wrongPaths {
+						if fileExists(pcWrongSettings) {
+							files = append(files, staleSettingsInfo{
+								path:          pcWrongSettings,
+								agentType:     "polecat",
+								rigName:       rigName,
+								sessionName:   fmt.Sprintf("gt-%s-%s", rigName, pcName),
+								wrongLocation: true,
+							})
+						}
 					}
 				}
 			}
@@ -317,7 +345,7 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 // checkSettings compares a settings file against the expected template.
 // Returns a list of what's missing.
 // agentType is reserved for future role-specific validation.
-func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
+func (c *AgentSettingsCheck) checkSettings(path, _ string) []string {
 	var missing []string
 
 	// Read the actual settings
@@ -369,7 +397,7 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 
 // getGitFileStatus determines the git status of a file.
 // Returns untracked, tracked-clean, tracked-modified, or unknown.
-func (c *ClaudeSettingsCheck) getGitFileStatus(filePath string) gitFileStatus {
+func (c *AgentSettingsCheck) getGitFileStatus(filePath string) gitFileStatus {
 	dir := filepath.Dir(filePath)
 	fileName := filepath.Base(filePath)
 
@@ -408,7 +436,7 @@ func (c *ClaudeSettingsCheck) getGitFileStatus(filePath string) gitFileStatus {
 }
 
 // hookHasPattern checks if a hook contains a specific pattern.
-func (c *ClaudeSettingsCheck) hookHasPattern(hooks map[string]any, hookName, pattern string) bool {
+func (c *AgentSettingsCheck) hookHasPattern(hooks map[string]any, hookName, pattern string) bool {
 	hookList, ok := hooks[hookName].([]any)
 	if !ok {
 		return false
@@ -439,7 +467,7 @@ func (c *ClaudeSettingsCheck) hookHasPattern(hooks map[string]any, hookName, pat
 
 // Fix deletes stale settings files and restarts affected agents.
 // Files with local modifications are skipped to avoid losing user changes.
-func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
+func (c *AgentSettingsCheck) Fix(ctx *CheckContext) error {
 	var errors []string
 	var skipped []string
 	t := tmux.NewTmux()
@@ -457,22 +485,16 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 			continue
 		}
 
-		// Also delete parent .claude directory if empty
-		claudeDir := filepath.Dir(sf.path)
-		_ = os.Remove(claudeDir) // Best-effort, will fail if not empty
+		// Also delete parent hooks directory if empty
+		hooksDir := filepath.Dir(sf.path)
+		_ = os.Remove(hooksDir) // Best-effort, will fail if not empty
 
 		// For files in wrong locations, delete and create at correct location
 		if sf.wrongLocation {
 			mayorDir := filepath.Join(ctx.TownRoot, "mayor")
 
-			// For mayor settings.json at town root, create at mayor/.claude/
-			if sf.agentType == "mayor" && strings.HasSuffix(claudeDir, ".claude") && !strings.Contains(sf.path, "/mayor/") {
-				if err := os.MkdirAll(mayorDir, 0755); err == nil {
-					_ = claude.EnsureSettingsForRole(mayorDir, "mayor")
-				}
-			}
-
 			// For mayor CLAUDE.md at town root, create at mayor/
+			// Note: Mayor settings.json at town root are now CORRECT (Mayor runs from townRoot)
 			if sf.agentType == "mayor" && strings.HasSuffix(sf.path, "CLAUDE.md") && !strings.Contains(sf.path, "/mayor/") {
 				townName, _ := workspace.GetTownName(ctx.TownRoot)
 				if err := templates.CreateMayorCLAUDEmd(
@@ -486,18 +508,15 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 				}
 			}
 
-			// Town-root files were inherited by ALL agents via directory traversal.
-			// Warn user to restart agents - don't auto-kill sessions as that's too disruptive,
-			// especially since deacon runs gt doctor automatically which would create a loop.
-			// Settings are only read at startup, so running agents already have config loaded.
-			fmt.Printf("\n  %s Town-root settings were moved. Restart agents to pick up new config:\n", style.Warning.Render("⚠"))
-			fmt.Printf("      gt up --restart\n\n")
+			fmt.Printf("\n  %s File was in wrong location and has been moved.\n", style.Warning.Render("⚠"))
+			fmt.Printf("      Restart affected agents to pick up new config: gt up --restart\n\n")
 			continue
 		}
 
-		// Recreate settings using EnsureSettingsForRole
-		workDir := filepath.Dir(claudeDir) // agent work directory
-		if err := claude.EnsureSettingsForRole(workDir, sf.agentType); err != nil {
+		// Recreate settings using runtime.EnsureSettingsForRole for OpenCode support
+		workDir := filepath.Dir(hooksDir) // agent work directory
+		runtimeConfig := config.ResolveAgentConfig(ctx.TownRoot, workDir)
+		if err := runtime.EnsureSettingsForRole(workDir, sf.agentType, runtimeConfig); err != nil {
 			errors = append(errors, fmt.Sprintf("failed to recreate settings for %s: %v", sf.path, err))
 			continue
 		}
