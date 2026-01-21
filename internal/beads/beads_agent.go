@@ -316,18 +316,26 @@ func (b *Beads) UpdateAgentState(id string, state string, hookBead *string) erro
 		if *hookBead != "" {
 			// Set the hook using bd slot set
 			// This updates the hook_bead column directly in SQLite
-			_, err = b.run("slot", "set", id, "hook", *hookBead)
-			if err != nil {
+			var err error
+			for i := 0; i < 20; i++ {
+				_, _ = b.run("show", id)
+				_, err = b.run("slot", "set", id, "hook", *hookBead)
+				if err == nil {
+					break
+				}
 				// If slot is already occupied, clear it first then retry
-				// This handles re-slinging scenarios where we're updating the hook
 				errStr := err.Error()
 				if strings.Contains(errStr, "already occupied") {
 					_, _ = b.run("slot", "clear", id, "hook")
 					_, err = b.run("slot", "set", id, "hook", *hookBead)
+					if err == nil {
+						break
+					}
 				}
-				if err != nil {
-					return fmt.Errorf("setting hook: %w", err)
-				}
+				time.Sleep(500 * time.Millisecond)
+			}
+			if err != nil {
+				return fmt.Errorf("setting hook: %w", err)
 			}
 		} else {
 			// Clear the hook
