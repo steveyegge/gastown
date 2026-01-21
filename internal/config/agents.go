@@ -41,6 +41,11 @@ type AgentPresetInfo struct {
 	// Args are the default command-line arguments for autonomous mode.
 	Args []string `json:"args"`
 
+	// Env are environment variables to set when starting the agent.
+	// These are merged with the standard GT_* variables.
+	// Used for agent-specific configuration like OPENCODE_PERMISSION.
+	Env map[string]string `json:"env,omitempty"`
+
 	// ProcessNames are the process names to look for when detecting if the agent is running.
 	// Used by tmux.IsAgentRunning to check pane_current_command.
 	// E.g., ["node"] for Claude, ["cursor-agent"] for Cursor.
@@ -318,7 +323,7 @@ func DefaultAgentPreset() AgentPreset {
 }
 
 // RuntimeConfigFromPreset creates a RuntimeConfig from an agent preset.
-// This provides the basic Command/Args; additional fields from AgentPresetInfo
+// This provides the basic Command/Args/Env; additional fields from AgentPresetInfo
 // can be accessed separately for extended functionality.
 func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	info := GetAgentPreset(preset)
@@ -327,9 +332,19 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		return DefaultRuntimeConfig()
 	}
 
+	// Copy Env map to avoid mutation
+	var envCopy map[string]string
+	if len(info.Env) > 0 {
+		envCopy = make(map[string]string, len(info.Env))
+		for k, v := range info.Env {
+			envCopy[k] = v
+		}
+	}
+
 	rc := &RuntimeConfig{
 		Command: info.Command,
 		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
+		Env:     envCopy,
 	}
 
 	// Resolve command path for claude preset (handles alias installations)

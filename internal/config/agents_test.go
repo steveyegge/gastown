@@ -102,6 +102,21 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigFromPresetReturnsNilEnvForPresetsWithoutEnv(t *testing.T) {
+	t.Parallel()
+	// Built-in presets like Claude don't have Env set
+	// This verifies nil Env handling in RuntimeConfigFromPreset
+	rc := RuntimeConfigFromPreset(AgentClaude)
+	if rc == nil {
+		t.Fatal("RuntimeConfigFromPreset returned nil")
+	}
+
+	// Claude preset doesn't have Env, so it should be nil
+	if rc.Env != nil && len(rc.Env) > 0 {
+		t.Errorf("Expected nil/empty Env for Claude preset, got %v", rc.Env)
+	}
+}
+
 func TestIsKnownPreset(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

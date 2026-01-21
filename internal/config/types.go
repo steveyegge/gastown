@@ -263,6 +263,11 @@ type RuntimeConfig struct {
 	// Empty array [] means no args (not "use defaults").
 	Args []string `json:"args"`
 
+	// Env are environment variables to set when starting the agent.
+	// These are merged with the standard GT_* variables.
+	// Used for agent-specific configuration like OPENCODE_PERMISSION.
+	Env map[string]string `json:"env,omitempty"`
+
 	// InitialPrompt is an optional first message to send after startup.
 	// For claude, this is passed as the prompt argument.
 	// Empty by default (hooks handle context).
