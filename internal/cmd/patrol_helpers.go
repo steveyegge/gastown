@@ -145,6 +145,10 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	// Create the patrol wisp
 	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
 	cmdSpawn.Dir = cfg.BeadsDir
+	// Pass GT_ROOT to subprocess for formula discovery during wisp creation
+	if cfg.TownRoot != "" {
+		cmdSpawn.Env = append(os.Environ(), "GT_ROOT="+cfg.TownRoot)
+	}
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
 	cmdSpawn.Stderr = &stderrSpawn
