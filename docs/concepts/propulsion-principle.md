@@ -91,6 +91,38 @@ Polecat restarts with work on hook
 even if no molecule is attached. Don't confuse with "pinned" which is for
 permanent reference beads.
 
+## Hook vs Mail: Two Discovery Paths
+
+Hook and mail are **intentionally separate** discovery mechanisms:
+
+| Aspect | Hook (`gt hook`) | Mail (`gt mail inbox`) |
+|--------|------------------|------------------------|
+| **Purpose** | Work dispatch | Inter-agent communication |
+| **Contains** | Tasks, bugs, epics, molecules | Messages, notifications, handoffs |
+| **Bead types** | Any (`type=task`, `type=bug`, etc.) | Only `type=message` |
+| **Durability** | Persists until explicitly unhooked | Persists until acknowledged |
+| **Use case** | "What am I working on?" | "What messages do I have?" |
+
+### Why This Matters
+
+When a polecat is spawned with work:
+- The work item (task/bug/epic) is **hooked** to the agent
+- It appears via `gt hook`, NOT in `gt mail inbox`
+- This is correct behavior, not a bug
+
+Mail is for **notifications about work**, not the work itself:
+- `POLECAT_DONE` - Notification that work completed
+- `MERGE_READY` - Notification to process a branch
+- `HANDOFF` - Session continuity notes
+
+### Common Confusion
+
+> "Why doesn't my hooked work show in `gt mail inbox`?"
+
+Because hooked work items are not messages. They're work assignments visible
+via `gt hook`. The propulsion principle startup checks hook first precisely
+because that's where work lives.
+
 ## The Capability Ledger
 
 Every completion is recorded. Every handoff is logged. Every bead you close
