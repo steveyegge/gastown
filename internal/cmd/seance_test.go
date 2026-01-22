@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -163,6 +164,10 @@ func TestFindSessionLocation(t *testing.T) {
 }
 
 func TestSymlinkSessionToCurrentAccount(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require elevated privileges on Windows")
+	}
+
 	t.Run("creates symlink for session in other account", func(t *testing.T) {
 		townRoot, fakeHome, cleanup := setupSeanceTestEnv(t)
 		defer cleanup()
@@ -264,6 +269,10 @@ func TestSymlinkSessionToCurrentAccount(t *testing.T) {
 }
 
 func TestCleanupOrphanedSessionSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require elevated privileges on Windows")
+	}
+
 	t.Run("removes orphaned symlinks", func(t *testing.T) {
 		_, fakeHome, cleanup := setupSeanceTestEnv(t)
 		defer cleanup()
