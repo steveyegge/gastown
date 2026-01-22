@@ -535,6 +535,125 @@ func TestConfigAgent(t *testing.T) {
 	})
 }
 
+func TestConfigAgents(t *testing.T) {
+	t.Run("lists all agents and role assignments", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{}
+		err := runConfigAgents(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigAgents failed: %v", err)
+		}
+	})
+
+	t.Run("shows custom agents and role assignments", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Create settings with custom agent and role assignment
+		settings := &config.TownSettings{
+			Type:         "town-settings",
+			Version:      config.CurrentTownSettingsVersion,
+			DefaultAgent: "claude",
+			Agents: map[string]*config.RuntimeConfig{
+				"my-custom": {
+					Command: "my-agent",
+					Args:    []string{"--flag"},
+				},
+			},
+			RoleAgents: map[string]string{
+				"witness": "gemini",
+				"polecat": "my-custom",
+			},
+		}
+		if err := config.SaveTownSettings(settingsPath, settings); err != nil {
+			t.Fatalf("save settings: %v", err)
+		}
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{}
+		err := runConfigAgents(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigAgents failed: %v", err)
+		}
+	})
+
+	t.Run("JSON output", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Create settings with role assignments
+		settings := &config.TownSettings{
+			Type:         "town-settings",
+			Version:      config.CurrentTownSettingsVersion,
+			DefaultAgent: "claude",
+			RoleAgents: map[string]string{
+				"witness": "gemini",
+			},
+		}
+		if err := config.SaveTownSettings(settingsPath, settings); err != nil {
+			t.Fatalf("save settings: %v", err)
+		}
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Set JSON flag
+		configAgentsListJSON = true
+		defer func() { configAgentsListJSON = false }()
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{}
+		err := runConfigAgents(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigAgents failed: %v", err)
+		}
+	})
+}
+
 func TestConfigDefaultAgent(t *testing.T) {
 	t.Run("gets default agent (shows current)", func(t *testing.T) {
 		townRoot := setupTestTownForConfig(t)
@@ -650,6 +769,588 @@ func TestConfigDefaultAgent(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "not found") {
 			t.Errorf("error = %v, want 'not found'", err)
+		}
+	})
+}
+
+func TestConfigAddAgent(t *testing.T) {
+	t.Run("adds custom agent with command", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Set flags
+		addAgentCommand = "kiro-cli"
+		addAgentArgs = ""
+		addAgentProcessNames = ""
+		addAgentSessionIDEnv = ""
+		addAgentResumeFlag = ""
+		addAgentResumeStyle = ""
+		addAgentSupportsHooks = false
+		addAgentHooksProvider = ""
+		addAgentHooksDir = ""
+		addAgentHooksSettingsFile = ""
+		defer func() {
+			addAgentCommand = ""
+		}()
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{"kiro"}
+		err := runConfigAddAgent(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigAddAgent failed: %v", err)
+		}
+
+		// Verify agent was added to settings
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		if loaded.Agents == nil {
+			t.Fatal("Agents map is nil")
+		}
+		agent, ok := loaded.Agents["kiro"]
+		if !ok {
+			t.Fatal("agent 'kiro' not found in settings")
+		}
+		if agent.Command != "kiro-cli" {
+			t.Errorf("Command = %q, want 'kiro-cli'", agent.Command)
+		}
+	})
+
+	t.Run("adds custom agent with full configuration", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Set flags for full config
+		addAgentCommand = "my-agent-cli"
+		addAgentArgs = "--autonomous,--no-confirm"
+		addAgentProcessNames = "my-agent,my-agent-cli"
+		addAgentSessionIDEnv = "MY_AGENT_SESSION_ID"
+		addAgentResumeFlag = "--resume"
+		addAgentResumeStyle = "flag"
+		addAgentSupportsHooks = true
+		addAgentHooksProvider = "my-agent"
+		addAgentHooksDir = ".my-agent"
+		addAgentHooksSettingsFile = "settings.json"
+		defer func() {
+			addAgentCommand = ""
+			addAgentArgs = ""
+			addAgentProcessNames = ""
+			addAgentSessionIDEnv = ""
+			addAgentResumeFlag = ""
+			addAgentResumeStyle = ""
+			addAgentSupportsHooks = false
+			addAgentHooksProvider = ""
+			addAgentHooksDir = ""
+			addAgentHooksSettingsFile = ""
+		}()
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{"my-agent"}
+		err := runConfigAddAgent(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigAddAgent failed: %v", err)
+		}
+
+		// Verify agent was added to settings
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		agent := loaded.Agents["my-agent"]
+		if agent == nil {
+			t.Fatal("agent 'my-agent' not found")
+		}
+		if agent.Command != "my-agent-cli" {
+			t.Errorf("Command = %q, want 'my-agent-cli'", agent.Command)
+		}
+		if len(agent.Args) != 2 {
+			t.Errorf("Args count = %d, want 2", len(agent.Args))
+		}
+		if agent.Hooks == nil {
+			t.Fatal("Hooks config is nil")
+		}
+		if agent.Hooks.Provider != "my-agent" {
+			t.Errorf("Hooks.Provider = %q, want 'my-agent'", agent.Hooks.Provider)
+		}
+		if agent.Hooks.Dir != ".my-agent" {
+			t.Errorf("Hooks.Dir = %q, want '.my-agent'", agent.Hooks.Dir)
+		}
+	})
+
+	t.Run("returns error when command not provided", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Clear command flag
+		addAgentCommand = ""
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{"test-agent"}
+		err := runConfigAddAgent(cmd, args)
+		if err == nil {
+			t.Fatal("expected error when command not provided")
+		}
+		if !strings.Contains(err.Error(), "--command is required") {
+			t.Errorf("error = %v, want '--command is required'", err)
+		}
+	})
+
+	t.Run("returns error for invalid resume style", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Set invalid resume style
+		addAgentCommand = "test-cli"
+		addAgentResumeStyle = "invalid"
+		defer func() {
+			addAgentCommand = ""
+			addAgentResumeStyle = ""
+		}()
+
+		// Run the command
+		cmd := &cobra.Command{}
+		args := []string{"test-agent"}
+		err := runConfigAddAgent(cmd, args)
+		if err == nil {
+			t.Fatal("expected error for invalid resume style")
+		}
+		if !strings.Contains(err.Error(), "must be 'flag' or 'subcommand'") {
+			t.Errorf("error = %v, want 'must be flag or subcommand'", err)
+		}
+	})
+
+	t.Run("overwrites existing agent", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Create initial settings with agent
+		settings := &config.TownSettings{
+			Type:         "town-settings",
+			Version:      config.CurrentTownSettingsVersion,
+			DefaultAgent: "claude",
+			Agents: map[string]*config.RuntimeConfig{
+				"my-agent": {
+					Command: "old-command",
+					Args:    []string{"--old"},
+				},
+			},
+		}
+		if err := config.SaveTownSettings(settingsPath, settings); err != nil {
+			t.Fatalf("save initial settings: %v", err)
+		}
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Set flags for new command
+		addAgentCommand = "new-command"
+		addAgentArgs = "--new"
+		defer func() {
+			addAgentCommand = ""
+			addAgentArgs = ""
+		}()
+
+		// Run the command to overwrite
+		cmd := &cobra.Command{}
+		args := []string{"my-agent"}
+		err := runConfigAddAgent(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigAddAgent failed: %v", err)
+		}
+
+		// Verify settings were updated
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		agent := loaded.Agents["my-agent"]
+		if agent.Command != "new-command" {
+			t.Errorf("Command = %q, want 'new-command'", agent.Command)
+		}
+	})
+}
+
+func TestConfigRoleAgent(t *testing.T) {
+	t.Run("gets role agent (shows current)", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Run the command with just role (should show current)
+		cmd := &cobra.Command{}
+		args := []string{"witness"}
+		err := runConfigRoleAgent(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigRoleAgent failed: %v", err)
+		}
+	})
+
+	t.Run("sets role agent to built-in", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Set witness role to gemini
+		cmd := &cobra.Command{}
+		args := []string{"witness", "gemini"}
+		err := runConfigRoleAgent(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigRoleAgent failed: %v", err)
+		}
+
+		// Verify settings were saved
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		if loaded.RoleAgents == nil {
+			t.Fatal("RoleAgents map is nil")
+		}
+		if loaded.RoleAgents["witness"] != "gemini" {
+			t.Errorf("RoleAgents[witness] = %q, want 'gemini'", loaded.RoleAgents["witness"])
+		}
+	})
+
+	t.Run("sets role agent to custom", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Create settings with custom agent
+		settings := &config.TownSettings{
+			Type:         "town-settings",
+			Version:      config.CurrentTownSettingsVersion,
+			DefaultAgent: "claude",
+			Agents: map[string]*config.RuntimeConfig{
+				"my-custom": {
+					Command: "my-agent",
+					Args:    []string{},
+				},
+			},
+		}
+		if err := config.SaveTownSettings(settingsPath, settings); err != nil {
+			t.Fatalf("save settings: %v", err)
+		}
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Set polecat role to custom agent
+		cmd := &cobra.Command{}
+		args := []string{"polecat", "my-custom"}
+		err := runConfigRoleAgent(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigRoleAgent failed: %v", err)
+		}
+
+		// Verify settings were saved
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		if loaded.RoleAgents["polecat"] != "my-custom" {
+			t.Errorf("RoleAgents[polecat] = %q, want 'my-custom'", loaded.RoleAgents["polecat"])
+		}
+	})
+
+	t.Run("sets role agent with model syntax", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Set witness role to claude:haiku
+		cmd := &cobra.Command{}
+		args := []string{"witness", "claude:haiku"}
+		err := runConfigRoleAgent(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigRoleAgent failed: %v", err)
+		}
+
+		// Verify settings were saved
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		// Should have created claude-haiku agent and set role to it
+		if loaded.RoleAgents["witness"] != "claude-haiku" {
+			t.Errorf("RoleAgents[witness] = %q, want 'claude-haiku'", loaded.RoleAgents["witness"])
+		}
+
+		// Verify custom agent was created
+		if loaded.Agents == nil {
+			t.Fatal("Agents map is nil")
+		}
+		agent, ok := loaded.Agents["claude-haiku"]
+		if !ok {
+			t.Fatal("claude-haiku agent not found")
+		}
+		// Verify model arg was added
+		foundModel := false
+		for i, arg := range agent.Args {
+			if arg == "--model" && i+1 < len(agent.Args) && agent.Args[i+1] == "haiku" {
+				foundModel = true
+				break
+			}
+		}
+		if !foundModel {
+			t.Errorf("model arg not found in args: %v", agent.Args)
+		}
+	})
+
+	t.Run("returns error for invalid role", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Try to set invalid role
+		cmd := &cobra.Command{}
+		args := []string{"invalid-role", "claude"}
+		err := runConfigRoleAgent(cmd, args)
+		if err == nil {
+			t.Fatal("expected error for invalid role")
+		}
+		if !strings.Contains(err.Error(), "invalid role") {
+			t.Errorf("error = %v, want 'invalid role'", err)
+		}
+	})
+
+	t.Run("returns error for unknown agent", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Try to set role to unknown agent
+		cmd := &cobra.Command{}
+		args := []string{"witness", "unknown-agent"}
+		err := runConfigRoleAgent(cmd, args)
+		if err == nil {
+			t.Fatal("expected error for unknown agent")
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			t.Errorf("error = %v, want 'not found'", err)
+		}
+	})
+
+	t.Run("shows existing role assignment", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Create settings with role assignment
+		settings := &config.TownSettings{
+			Type:         "town-settings",
+			Version:      config.CurrentTownSettingsVersion,
+			DefaultAgent: "claude",
+			RoleAgents: map[string]string{
+				"witness": "gemini",
+			},
+		}
+		if err := config.SaveTownSettings(settingsPath, settings); err != nil {
+			t.Fatalf("save settings: %v", err)
+		}
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset and load agent registry
+		config.ResetRegistryForTesting()
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Run the command to show witness role
+		cmd := &cobra.Command{}
+		args := []string{"witness"}
+		err := runConfigRoleAgent(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigRoleAgent failed: %v", err)
+		}
+	})
+
+	t.Run("all valid roles work", func(t *testing.T) {
+		roles := []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"}
+
+		for _, role := range roles {
+			t.Run(role, func(t *testing.T) {
+				townRoot := setupTestTownForConfig(t)
+				settingsPath := config.TownSettingsPath(townRoot)
+
+				// Change to town root
+				originalWd, _ := os.Getwd()
+				defer os.Chdir(originalWd)
+				if err := os.Chdir(townRoot); err != nil {
+					t.Fatalf("chdir: %v", err)
+				}
+
+				// Reset and load agent registry
+				config.ResetRegistryForTesting()
+				registryPath := config.DefaultAgentRegistryPath(townRoot)
+				if err := config.LoadAgentRegistry(registryPath); err != nil {
+					t.Fatalf("load agent registry: %v", err)
+				}
+
+				// Set role to gemini
+				cmd := &cobra.Command{}
+				args := []string{role, "gemini"}
+				err := runConfigRoleAgent(cmd, args)
+				if err != nil {
+					t.Fatalf("runConfigRoleAgent failed for role %s: %v", role, err)
+				}
+
+				// Verify
+				loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+				if err != nil {
+					t.Fatalf("load settings: %v", err)
+				}
+
+				if loaded.RoleAgents[role] != "gemini" {
+					t.Errorf("RoleAgents[%s] = %q, want 'gemini'", role, loaded.RoleAgents[role])
+				}
+			})
 		}
 	})
 }
