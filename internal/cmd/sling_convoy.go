@@ -181,17 +181,31 @@ func parseJSON(data []byte, target interface{}) error {
 // Cross-rig beads (non-hq- prefixed) are formatted as external references
 // so the bd tool can resolve them when running from HQ context.
 //
-// Examples:
+// The external ref format is "external:<project>:<bead-id>" where project
+// is derived from routes.jsonl (e.g., "gastown", "beads"), not from the
+// bead ID prefix. This aligns with bd's routing.ResolveToExternalRef().
+//
+// Examples (with routes {"prefix":"gt-","path":"gastown/mayor/rig"}):
 //   - "hq-abc123" -> "hq-abc123" (HQ beads unchanged)
-//   - "foo-bar" -> "external:foo-bar:foo-bar" (two segments - whole ID as prefix)
-//   - "gt-mol-abc123" -> "external:gt-mol:gt-mol-abc123" (three+ segments - first two as prefix)
+//   - "gt-mol-abc123" -> "external:gastown:gt-mol-abc123"
+//   - "bd-xyz" -> "external:beads:bd-xyz"
+//
+// Falls back to legacy prefix-based format if routes lookup fails.
 func formatTrackBeadID(beadID string) string {
 	if strings.HasPrefix(beadID, "hq-") {
 		return beadID
 	}
-	// Extract the rig prefix (first two segments before hyphen for 3+ segment IDs)
-	// gt-mol-abc123 -> "gt-mol", beads-task-xyz -> "beads-task"
-	// For two-segment IDs like "foo-bar", use the whole ID as the prefix
+
+	// Try to resolve via routes.jsonl for proper external ref format
+	townRoot, err := workspace.FindFromCwd()
+	if err == nil {
+		if extRef := beads.ResolveToExternalRef(townRoot, beadID); extRef != "" {
+			return extRef
+		}
+	}
+
+	// Fallback: if no route found, use legacy prefix-based format
+	// This maintains backwards compatibility for repos without routes.jsonl
 	parts := strings.SplitN(beadID, "-", 3)
 	switch len(parts) {
 	case 0, 1:
