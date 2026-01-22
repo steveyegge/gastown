@@ -1434,7 +1434,7 @@ type workerInfo struct {
 // Returns a map from issue ID to worker info.
 //
 // Optimized to batch queries per rig (O(R) instead of O(N×R)) and
-// parallelize across rigs.
+// parallelize across rigs. Supports both SQLite and Dolt backends.
 func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 	result := make(map[string]*workerInfo)
 	if len(issueIDs) == 0 {
@@ -1447,18 +1447,9 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		return result
 	}
 
-	// Discover rigs with beads databases
-	rigDirs, _ := filepath.Glob(filepath.Join(townRoot, "*", "polecats"))
-	var beadsDBS []string
-	for _, polecatsDir := range rigDirs {
-		rigDir := filepath.Dir(polecatsDir)
-		beadsDB := filepath.Join(rigDir, "mayor", "rig", ".beads", "beads.db")
-		if _, err := os.Stat(beadsDB); err == nil {
-			beadsDBS = append(beadsDBS, beadsDB)
-		}
-	}
-
-	if len(beadsDBS) == 0 {
+	// Discover rigs with beads databases (respects backend config)
+	beadsDirs, err := beads.FindBeadsDBsInRigs(townRoot)
+	if err != nil || len(beadsDirs) == 0 {
 		return result
 	}
 
@@ -1477,36 +1468,25 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 
 	// Query all rigs in parallel
 	type rigResult struct {
-		agents []struct {
-			ID           string `json:"id"`
-			HookBead     string `json:"hook_bead"`
-			LastActivity string `json:"last_activity"`
-		}
+		agents []beads.QueryResult
 	}
 
-	resultChan := make(chan rigResult, len(beadsDBS))
+	resultChan := make(chan rigResult, len(beadsDirs))
 	var wg sync.WaitGroup
 
-	for _, beadsDB := range beadsDBS {
+	for _, beadsDir := range beadsDirs {
 		wg.Add(1)
-		go func(db string) {
+		go func(dir string) {
 			defer wg.Done()
 
-			queryCmd := exec.Command("sqlite3", "-json", db, query)
-			var stdout bytes.Buffer
-			queryCmd.Stdout = &stdout
-			if err := queryCmd.Run(); err != nil {
+			// Use backend-aware query (works with SQLite or Dolt)
+			agents, err := beads.RunQuery(dir, query)
+			if err != nil {
 				resultChan <- rigResult{}
 				return
 			}
-
-			var rr rigResult
-			if err := json.Unmarshal(stdout.Bytes(), &rr.agents); err != nil {
-				resultChan <- rigResult{}
-				return
-			}
-			resultChan <- rr
-		}(beadsDB)
+			resultChan <- rigResult{agents: agents}
+		}(beadsDir)
 	}
 
 	// Wait for all queries to complete
@@ -1518,26 +1498,34 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 	// Collect results from all rigs
 	for rr := range resultChan {
 		for _, agent := range rr.agents {
-			// Skip if we already found a worker for this issue
-			if _, ok := result[agent.HookBead]; ok {
+			// Extract fields from query result
+			hookBead, _ := agent["hook_bead"].(string)
+			agentID, _ := agent["id"].(string)
+			lastActivity, _ := agent["last_activity"].(string)
+
+			// Skip if no hook_bead or we already found a worker for this issue
+			if hookBead == "" {
+				continue
+			}
+			if _, ok := result[hookBead]; ok {
 				continue
 			}
 
 			// Parse agent ID to get worker identity
-			workerID := parseWorkerFromAgentBead(agent.ID)
+			workerID := parseWorkerFromAgentBead(agentID)
 			if workerID == "" {
 				continue
 			}
 
 			// Calculate age from last_activity
 			age := ""
-			if agent.LastActivity != "" {
-				if t, err := time.Parse(time.RFC3339, agent.LastActivity); err == nil {
+			if lastActivity != "" {
+				if t, err := time.Parse(time.RFC3339, lastActivity); err == nil {
 					age = formatWorkerAge(time.Since(t))
 				}
 			}
 
-			result[agent.HookBead] = &workerInfo{
+			result[hookBead] = &workerInfo{
 				Worker: workerID,
 				Age:    age,
 			}

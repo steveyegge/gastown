@@ -240,9 +240,10 @@ func (b *Beads) runOnce(args ...string) ([]byte, error) {
 	// In isolated mode, use --db flag to force specific database path
 	// This bypasses bd's routing logic that can redirect to .beads-planning
 	// Skip --db for init command since it creates the database
+	// Note: GetDatabasePath respects the storage backend (SQLite vs Dolt)
 	isInit := len(args) > 0 && args[0] == "init"
 	if b.isolated && !isInit {
-		beadsDB := filepath.Join(beadsDir, "beads.db")
+		beadsDB := GetDatabasePath(beadsDir)
 		fullArgs = append([]string{"--db", beadsDB}, fullArgs...)
 	}
 

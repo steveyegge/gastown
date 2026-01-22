@@ -23,6 +23,7 @@ func slingGenerateShortID() string {
 
 // isTrackedByConvoy checks if an issue is already being tracked by a convoy.
 // Returns the convoy ID if tracked, empty string otherwise.
+// Supports both SQLite and Dolt backends via beads.RunQuery.
 func isTrackedByConvoy(beadID string) string {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
@@ -32,7 +33,6 @@ func isTrackedByConvoy(beadID string) string {
 	// Query town beads for any convoy that tracks this issue
 	// Convoys use "tracks" dependency type: convoy -> tracked issue
 	townBeads := filepath.Join(townRoot, ".beads")
-	dbPath := filepath.Join(townBeads, "beads.db")
 
 	// Query dependencies where this bead is being tracked
 	// Also check for external reference format: external:rig:issue-id
@@ -46,14 +46,14 @@ func isTrackedByConvoy(beadID string) string {
 		LIMIT 1
 	`, beadID, beadID)
 
-	queryCmd := exec.Command("sqlite3", dbPath, query)
-	out, err := queryCmd.Output()
-	if err != nil {
+	// Use backend-aware query (works with SQLite or Dolt)
+	results, err := beads.RunQuery(townBeads, query)
+	if err != nil || len(results) == 0 {
 		return ""
 	}
 
-	convoyID := strings.TrimSpace(string(out))
-	return convoyID
+	convoyID, _ := results[0]["issue_id"].(string)
+	return strings.TrimSpace(convoyID)
 }
 
 // createAutoConvoy creates an auto-convoy for a single issue and tracks it.
