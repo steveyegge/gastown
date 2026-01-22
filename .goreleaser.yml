@@ -164,7 +164,7 @@ release:
 
     **Homebrew (macOS/Linux):**
     ```bash
-    brew install steveyegge/gastown/gt
+    brew install gastown
     ```
 
     **npm (Node.js):**
