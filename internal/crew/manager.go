@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -463,6 +463,10 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	if err != nil {
 		return fmt.Errorf("checking session: %w", err)
 	}
+	// Resolve agent configuration for the crew role
+	townRoot := filepath.Dir(m.rig.Path)
+	agentCfg := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path)
+
 	if running {
 		if opts.KillExisting {
 			// Restart mode - kill existing session
@@ -470,8 +474,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
 		} else {
-			// Normal start - session exists, check if Claude is actually running
-			if t.IsClaudeRunning(sessionID) {
+			// Normal start - session exists, check if agent is actually running
+			if t.IsAgentRunning(sessionID, config.ExpectedPaneCommands(agentCfg)...) {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
 			// Zombie session - kill and recreate
@@ -481,12 +485,12 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		}
 	}
 
-	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
+	// Ensure agent settings exist in crew/ (not crew/<name>/) so we don't
+	// write into the source repo. Agent walks up the tree to find settings.
 	// All crew members share the same settings file.
 	crewBaseDir := filepath.Join(m.rig.Path, "crew")
-	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	if err := runtime.EnsureSettingsForRole(crewBaseDir, "crew", agentCfg); err != nil {
+		return fmt.Errorf("ensuring agent settings: %w", err)
 	}
 
 	// Build the startup beacon for predecessor discovery via /resume

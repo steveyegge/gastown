@@ -38,7 +38,7 @@ Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
 - [x] 1.4 Update `internal/runtime/runtime.go` to use Provider interface
 
 ### Phase 2: Role Managers
-- [ ] 2.1 Update crew manager with `ResolveAgentConfig("crew")`
+- [x] 2.1 Update crew manager with `ResolveAgentConfig("crew")`
 - [ ] 2.2 Update deacon manager
 - [ ] 2.3 Update autonomous managers (polecat, witness, refinery)
 - [ ] 2.4 Update mayor and rig managers
@@ -76,6 +76,8 @@ _Agents: Add notes here after completing tasks._
 - **Phase 1.1-1.3**: Most of the foundation was already implemented. The `RoleAgents` map, `ResolveRoleAgentConfig()`, and agent registry existed. Created `internal/hooks/` package with Provider interface and implementations wrapping existing `claude` and `opencode` packages.
 
 - **Phase 1.4**: Runtime package now uses `hooks.Get(provider).EnsureHooks()` instead of switch statement. `StartupFallbackCommands` now uses `provider.SupportsHooks()` and `provider.GetHooksFallback()` for cleaner extensibility. Removed direct imports of `claude` and `opencode` packages from runtime.
+
+- **Phase 2.1**: Updated crew manager to use `config.ResolveRoleAgentConfig("crew", townRoot, rigPath)` instead of hardcoded Claude. Replaced `claude.EnsureSettingsForRole()` with `runtime.EnsureSettingsForRole()` which uses the Provider interface. Replaced `t.IsClaudeRunning()` with `t.IsAgentRunning()` using `config.ExpectedPaneCommands()` for agent-agnostic process detection.
 
 ---
 
