@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base32"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -236,7 +237,9 @@ func promptCreateCrew(rigName string) (string, error) {
 	fmt.Printf("Would you like to create one? [Y/n] ")
 
 	var response string
-	fmt.Scanln(&response)
+	if _, err := fmt.Scanln(&response); err != nil && err != io.EOF {
+		return "", fmt.Errorf("reading response: %w", err)
+	}
 
 	response = strings.ToLower(strings.TrimSpace(response))
 	if response == "n" || response == "no" {
@@ -248,7 +251,9 @@ func promptCreateCrew(rigName string) (string, error) {
 	fmt.Printf("Crew member name [%s]: ", suggestedName)
 
 	var name string
-	fmt.Scanln(&name)
+	if _, err := fmt.Scanln(&name); err != nil && err != io.EOF {
+		return "", fmt.Errorf("reading crew name: %w", err)
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = suggestedName
@@ -276,7 +281,9 @@ func promptSelectCrew(members []string) (string, error) {
 	fmt.Print("\nSelect crew member [1]: ")
 
 	var response string
-	fmt.Scanln(&response)
+	if _, err := fmt.Scanln(&response); err != nil && err != io.EOF {
+		return "", fmt.Errorf("reading crew selection: %w", err)
+	}
 	response = strings.TrimSpace(response)
 
 	if response == "" {

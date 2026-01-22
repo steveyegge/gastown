@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -117,9 +118,13 @@ func ParseEpicFields(description string) *EpicFields {
 		case "integration_branch":
 			fields.IntegrationBr = value
 		case "subtask_count":
-			fmt.Sscanf(value, "%d", &fields.SubtaskCount)
+			if count, err := strconv.Atoi(value); err == nil {
+				fields.SubtaskCount = count
+			}
 		case "completed_count":
-			fmt.Sscanf(value, "%d", &fields.CompletedCount)
+			if count, err := strconv.Atoi(value); err == nil {
+				fields.CompletedCount = count
+			}
 		}
 	}
 

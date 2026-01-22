@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -184,21 +188,33 @@ func runEpicPRCheck(cmd *cobra.Command, args []string) error {
 // checkPRConflicts checks if a PR has merge conflicts.
 // Returns nil if no conflicts.
 func checkPRConflicts(repoDir string, prNum int) (*epicpkg.ConflictInfo, error) {
-	// Get PR's head and base branches
-	prInfo, err := getPRDetails(repoDir, prNum)
-	if err != nil {
-		return nil, err
+	cmd := exec.Command("gh", "pr", "view", fmt.Sprintf("%d", prNum), "--json", "mergeable,baseRefName,headRefName")
+	cmd.Dir = repoDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("checking PR mergeability: %w (%s)", err, strings.TrimSpace(stderr.String()))
 	}
 
-	// For now, we rely on gh pr view to tell us about conflicts
-	// A full implementation would fetch branches and attempt merge
-	// GitHub's API includes mergeable state which we could check
+	var result struct {
+		Mergeable string `json:"mergeable"`
+		BaseRef   string `json:"baseRefName"`
+		HeadRef   string `json:"headRefName"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		return nil, fmt.Errorf("parsing PR mergeable state: %w", err)
+	}
 
-	// This is a placeholder - in a real implementation you'd:
-	// 1. Fetch the PR's head branch
-	// 2. Attempt to merge base into head with --no-commit
-	// 3. Report any conflicts
+	if strings.EqualFold(result.Mergeable, "CONFLICTING") {
+		return &epicpkg.ConflictInfo{
+			Branch:     result.HeadRef,
+			BaseBranch: result.BaseRef,
+			PRNumber:   prNum,
+		}, nil
+	}
 
-	_ = prInfo
 	return nil, nil
 }

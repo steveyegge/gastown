@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -174,7 +175,9 @@ conflict_pr: %d
 		// Offer to start
 		fmt.Print("Start resolution now (checkout branch)? [y/N] ")
 		var response string
-		fmt.Scanln(&response)
+		if _, err := fmt.Scanln(&response); err != nil && err != io.EOF {
+			return fmt.Errorf("reading response: %w", err)
+		}
 
 		if strings.ToLower(strings.TrimSpace(response)) == "y" {
 			checkoutCmd := exec.Command("gh", "pr", "checkout", fmt.Sprintf("%d", prNum))

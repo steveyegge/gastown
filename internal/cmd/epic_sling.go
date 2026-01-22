@@ -111,7 +111,7 @@ func runEpicSling(cmd *cobra.Command, args []string) error {
 		}
 
 		// Check if blocked
-		blocked, _ := isBeadBlocked(st.ID)
+		blocked := isBeadBlocked(st.ID)
 		if !blocked {
 			readySubtasks = append(readySubtasks, st)
 		}
@@ -257,13 +257,13 @@ func listCrewMembers(rigPath string) []string {
 }
 
 // isBeadBlocked checks if a bead is blocked by dependencies.
-func isBeadBlocked(beadID string) (bool, error) {
+func isBeadBlocked(beadID string) bool {
 	// Run bd blocked and check if this bead is in the output
 	blockedCmd := exec.Command("bd", "blocked", "--json")
 	out, err := blockedCmd.Output()
 	if err != nil {
-		return false, nil // Assume not blocked on error
+		return false // Assume not blocked on error
 	}
 
-	return strings.Contains(string(out), beadID), nil
+	return strings.Contains(string(out), beadID)
 }

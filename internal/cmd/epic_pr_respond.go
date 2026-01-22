@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -153,7 +154,9 @@ func runEpicPRRespond(cmd *cobra.Command, args []string) error {
 	fmt.Print("\nChoice [1]: ")
 
 	var choice string
-	fmt.Scanln(&choice)
+	if _, err := fmt.Scanln(&choice); err != nil && err != io.EOF {
+		return fmt.Errorf("reading choice: %w", err)
+	}
 	choice = strings.TrimSpace(choice)
 
 	switch choice {
@@ -184,7 +187,9 @@ func runEpicPRRespond(cmd *cobra.Command, args []string) error {
 			fmt.Print("\nSelect crew member [1]: ")
 
 			var resp string
-			fmt.Scanln(&resp)
+			if _, err := fmt.Scanln(&resp); err != nil && err != io.EOF {
+				return fmt.Errorf("reading crew selection: %w", err)
+			}
 			resp = strings.TrimSpace(resp)
 
 			if resp == "" {
