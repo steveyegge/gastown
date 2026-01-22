@@ -39,7 +39,7 @@ Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
 
 ### Phase 2: Role Managers
 - [x] 2.1 Update crew manager with `ResolveAgentConfig("crew")`
-- [ ] 2.2 Update deacon manager
+- [x] 2.2 Update deacon manager
 - [ ] 2.3 Update autonomous managers (polecat, witness, refinery)
 - [ ] 2.4 Update mayor and rig managers
 
@@ -78,6 +78,8 @@ _Agents: Add notes here after completing tasks._
 - **Phase 1.4**: Runtime package now uses `hooks.Get(provider).EnsureHooks()` instead of switch statement. `StartupFallbackCommands` now uses `provider.SupportsHooks()` and `provider.GetHooksFallback()` for cleaner extensibility. Removed direct imports of `claude` and `opencode` packages from runtime.
 
 - **Phase 2.1**: Updated crew manager to use `config.ResolveRoleAgentConfig("crew", townRoot, rigPath)` instead of hardcoded Claude. Replaced `claude.EnsureSettingsForRole()` with `runtime.EnsureSettingsForRole()` which uses the Provider interface. Replaced `t.IsClaudeRunning()` with `t.IsAgentRunning()` using `config.ExpectedPaneCommands()` for agent-agnostic process detection.
+
+- **Phase 2.2**: Updated deacon manager (`internal/cmd/deacon.go`). Removed `internal/claude` import. Now uses `config.ResolveRoleAgentConfig("deacon", townRoot, "")` and `runtime.EnsureSettingsForRole()`. Deacon is a town-level role so it passes empty string for rigPath.
 
 ---
 

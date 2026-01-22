@@ -13,7 +13,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
@@ -376,8 +375,11 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		return fmt.Errorf("creating deacon directory: %w", err)
 	}
 
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
+	// Resolve agent configuration for the deacon role
+	agentCfg := config.ResolveRoleAgentConfig("deacon", townRoot, "")
+
+	// Ensure agent settings exist (autonomous role needs mail in SessionStart)
+	if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", agentCfg); err != nil {
 		return fmt.Errorf("creating deacon settings: %w", err)
 	}
 
@@ -416,8 +418,7 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	runtimeConfig := config.LoadRuntimeConfig("")
-	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
+	_ = runtime.RunStartupFallback(t, sessionName, "deacon", agentCfg)
 
 	// Inject startup nudge for predecessor discovery via /resume
 	if err := session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
