@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -312,24 +313,58 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 	// Get all descendant PIDs recursively (returns deepest-first order)
 	descendants := getAllDescendants(pid)
 
+	// Build set of PIDs to exclude: current process and all ancestors up to pane PID.
+	// This prevents self-handoff from killing itself before RespawnPane runs.
+	excludePIDs := make(map[string]bool)
+	currentPID := os.Getpid()
+	excludePIDs[fmt.Sprintf("%d", currentPID)] = true
+	// Walk up the process tree to find ancestors
+	for ancestorPID := currentPID; ancestorPID > 1; {
+		ppidBytes, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", ancestorPID))
+		if err != nil {
+			break
+		}
+		// Parse PPID from stat file (4th field)
+		fields := strings.Fields(string(ppidBytes))
+		if len(fields) < 4 {
+			break
+		}
+		ppid, err := strconv.Atoi(fields[3])
+		if err != nil || ppid <= 1 {
+			break
+		}
+		excludePIDs[fmt.Sprintf("%d", ppid)] = true
+		ancestorPID = ppid
+	}
+
 	// Send SIGTERM to all descendants (deepest first to avoid orphaning)
+	// but skip the current process and its ancestors
 	for _, dpid := range descendants {
+		if excludePIDs[dpid] {
+			continue
+		}
 		_ = exec.Command("kill", "-TERM", dpid).Run()
 	}
 
 	// Wait for graceful shutdown
 	time.Sleep(100 * time.Millisecond)
 
-	// Send SIGKILL to any remaining descendants
+	// Send SIGKILL to any remaining descendants (skip excluded PIDs)
 	for _, dpid := range descendants {
+		if excludePIDs[dpid] {
+			continue
+		}
 		_ = exec.Command("kill", "-KILL", dpid).Run()
 	}
 
 	// Kill the pane process itself (may have called setsid() and detached,
 	// or may have no children like Claude Code)
-	_ = exec.Command("kill", "-TERM", pid).Run()
-	time.Sleep(100 * time.Millisecond)
-	_ = exec.Command("kill", "-KILL", pid).Run()
+	// Skip if pane PID is in exclude list (self-handoff case)
+	if !excludePIDs[pid] {
+		_ = exec.Command("kill", "-TERM", pid).Run()
+		time.Sleep(100 * time.Millisecond)
+		_ = exec.Command("kill", "-KILL", pid).Run()
+	}
 
 	return nil
 }
