@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -387,7 +386,7 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	// Agent beads with rig-level prefixes (e.g., go-) live in rig databases,
 	// not the town database. Use prefix-based resolution to find the correct path.
 	// This fixes go-19z: bd slot commands failing for go-* prefixed beads.
-	agentWorkDir := beads.ResolveHookDir(townRoot, agentBeadID, bdWorkDir)
+	agentWorkDir := beads.ResolveHookDir(townRoot, agentBeadID, workDir)
 
 	// Run from agentWorkDir WITHOUT BEADS_DIR to enable redirect-based routing.
 	// Set hook_bead to the slung work (gt-zecmc: removed agent_state update).

@@ -1,3 +1,5 @@
+//go:build !windows
+
 // flock.go provides cross-process file locking using flock(2).
 // This is used for synchronizing resource allocation across multiple processes.
 

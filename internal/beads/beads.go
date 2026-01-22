@@ -183,6 +183,17 @@ func (b *Beads) getResolvedBeadsDir() string {
 	return ResolveBeadsDir(b.workDir)
 }
 
+// isRetryableError checks if an error is a transient Dolt lock contention error.
+// These errors can occur during concurrent writes and typically resolve on retry.
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "database is read only") ||
+		strings.Contains(errStr, "cannot update manifest")
+}
+
 // Init initializes a new beads database in the working directory.
 // This uses the same environment isolation as other commands.
 func (b *Beads) Init(prefix string) error {

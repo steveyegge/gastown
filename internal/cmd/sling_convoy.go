@@ -183,19 +183,26 @@ func parseJSON(data []byte, target interface{}) error {
 //
 // Examples:
 //   - "hq-abc123" -> "hq-abc123" (HQ beads unchanged)
-//   - "bd-28b703" -> "external:bd:bd-28b703"
-//   - "gt-mol-xyz" -> "external:gt:gt-mol-xyz"
+//   - "foo-bar" -> "external:foo-bar:foo-bar" (two segments - whole ID as prefix)
+//   - "gt-mol-abc123" -> "external:gt-mol:gt-mol-abc123" (three+ segments - first two as prefix)
 func formatTrackBeadID(beadID string) string {
 	if strings.HasPrefix(beadID, "hq-") {
 		return beadID
 	}
-	// Extract the rig prefix (first segment before hyphen)
-	// bd-28b703 -> "bd", gt-mol-xyz -> "gt"
-	parts := strings.SplitN(beadID, "-", 2)
-	if len(parts) >= 1 && parts[0] != "" {
-		rigPrefix := parts[0]
+	// Extract the rig prefix (first two segments before hyphen for 3+ segment IDs)
+	// gt-mol-abc123 -> "gt-mol", beads-task-xyz -> "beads-task"
+	// For two-segment IDs like "foo-bar", use the whole ID as the prefix
+	parts := strings.SplitN(beadID, "-", 3)
+	switch len(parts) {
+	case 0, 1:
+		// Single segment or empty - return as-is (fallback)
+		return beadID
+	case 2:
+		// Two segments - use the whole ID as the prefix
+		return fmt.Sprintf("external:%s:%s", beadID, beadID)
+	default:
+		// Three+ segments - use first two as the prefix
+		rigPrefix := parts[0] + "-" + parts[1]
 		return fmt.Sprintf("external:%s:%s", rigPrefix, beadID)
 	}
-	// Fallback for malformed IDs (single segment or empty)
-	return beadID
 }
