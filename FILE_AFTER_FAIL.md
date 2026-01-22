@@ -24,3 +24,20 @@ And the way we are going to bootstrap this process, is to create a crew responsi
 2. The file_after_fail crew must always strive to be a good file after failer itself.
 
 
+
+## bd-3q6.6-1: Foreign key violation when slinging cross-rig beads
+
+**Fixed in beads repo commit:** dd21ae43
+
+**Problem:** The Dolt schema had a foreign key constraint on `dependencies.depends_on_id`
+that referenced `issues.id`. This prevented storing external references
+(`external:<project>:<capability>`) which by design don't exist in the local issues table.
+
+**Solution:**
+1. Removed the FK constraint from the Dolt schema (new databases)
+2. Added an idempotent migration to drop the FK from existing databases
+3. Matches the SQLite migration `025_remove_depends_on_fk.go`
+
+**Files changed (in beads repo):**
+- `internal/storage/dolt/schema.go` - Removed FK constraint
+- `internal/storage/dolt/store.go` - Added migration to drop existing FK
