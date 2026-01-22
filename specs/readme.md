@@ -1,3 +1,82 @@
+# Gas Town Specifications
+
+## Active Specifications
+
+| Document | Description | Status |
+|----------|-------------|--------|
+| [Multi-LLM Integration Plan](./multi-llm-integration-plan.md) | Merging PR #775 & #794 for provider-agnostic architecture | **Active** |
+| ESP32S3 Specifications (below) | Hardware-specific testing requirements | Reference |
+
+---
+
+# Multi-LLM Integration Summary
+
+This section summarizes the plan to merge PR #775 (Complete OpenCode Support) and PR #794 (Multi-LLM CLI Tool Support) into a unified, provider-agnostic architecture.
+
+**See full plan**: [multi-llm-integration-plan.md](./multi-llm-integration-plan.md)
+
+### Key Features
+- **Provider Interface**: Pluggable system for arbitrary CLI tools
+- **Per-Role Configuration**: Assign different agents/models to each role (cost optimization)
+- **Built-in Presets**: Claude, Gemini, Codex, Cursor, Auggie, Amp, OpenCode, Kiro
+- **Hooks Fallback**: Tmux-based fallback for tools without native hook support
+
+### Priority E2E Testing
+1. OpenCode
+2. Kiro CLI
+
+---
+
+## Tasks
+
+Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
+
+### Phase 1: Foundation
+- [x] 1.1 Merge `internal/config/agents.go` - combine PR 775's RoleAgents + PR 794's registry
+- [x] 1.2 Create Provider interface in `internal/hooks/provider.go`
+- [x] 1.3 Create provider implementations (claude.go, opencode.go, none.go)
+- [ ] 1.4 Update `internal/runtime/runtime.go` to use Provider interface
+
+### Phase 2: Role Managers
+- [ ] 2.1 Update crew manager with `ResolveAgentConfig("crew")`
+- [ ] 2.2 Update deacon manager
+- [ ] 2.3 Update autonomous managers (polecat, witness, refinery)
+- [ ] 2.4 Update mayor and rig managers
+
+### Phase 3: CLI Commands
+- [ ] 3.1 Add `gt config agent <name>` command
+- [ ] 3.2 Add `gt config role-agent <role> <agent>` command
+- [ ] 3.3 Add `gt config add-agent` command
+- [ ] 3.4 Add `gt config agents` listing command
+
+### Phase 4: Kiro CLI
+- [ ] 4.1 Research kiro-cli hooks system
+- [ ] 4.2 Create kiro provider
+- [ ] 4.3 Add kiro preset to agent registry
+- [ ] 4.4 Create kiro plugin if needed
+
+### Phase 5: Testing
+- [ ] 5.1 Unit tests for Provider interface
+- [ ] 5.2 Integration tests for agent switching
+- [ ] 5.3 E2E tests for OpenCode
+- [ ] 5.4 E2E tests for Kiro CLI
+
+### Phase 6: Documentation
+- [ ] 6.1 Update docs/custom-agents.md
+- [ ] 6.2 Update doctor checks
+- [ ] 6.3 Write migration guide
+- [ ] 6.4 Clean up deprecated code
+
+---
+
+## Lessons Learned
+
+_Agents: Add notes here after completing tasks._
+
+- **Phase 1.1-1.3**: Most of the foundation was already implemented. The `RoleAgents` map, `ResolveRoleAgentConfig()`, and agent registry existed. Created `internal/hooks/` package with Provider interface and implementations wrapping existing `claude` and `opencode` packages.
+
+---
+
 # ESP32S3 Gas Town Agent Specifications
 
 ## Overview
