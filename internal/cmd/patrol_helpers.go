@@ -103,9 +103,41 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 // autoSpawnPatrol creates and pins a new patrol wisp.
 // Returns the patrol ID or an error.
 func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
-	// Create the patrol wisp directly using the formula name.
-	// bd mol wisp create accepts formula names directly (e.g., "mol-refinery-patrol").
-	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", cfg.PatrolMolName, "--actor", cfg.RoleName)
+	// Find the proto ID for the patrol molecule
+	cmdCatalog := exec.Command("gt", "formula", "list")
+	cmdCatalog.Dir = cfg.BeadsDir
+	var stdoutCatalog, stderrCatalog bytes.Buffer
+	cmdCatalog.Stdout = &stdoutCatalog
+	cmdCatalog.Stderr = &stderrCatalog
+
+	if err := cmdCatalog.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderrCatalog.String())
+		if errMsg != "" {
+			return "", fmt.Errorf("failed to list formulas: %s", errMsg)
+		}
+		return "", fmt.Errorf("failed to list formulas: %w", err)
+	}
+
+	// Find patrol molecule in formula list
+	// Format: "formula-name         description"
+	var protoID string
+	catalogLines := strings.Split(stdoutCatalog.String(), "\n")
+	for _, line := range catalogLines {
+		if strings.Contains(line, cfg.PatrolMolName) {
+			parts := strings.Fields(line)
+			if len(parts) > 0 {
+				protoID = parts[0]
+				break
+			}
+		}
+	}
+
+	if protoID == "" {
+		return "", fmt.Errorf("proto %s not found in catalog", cfg.PatrolMolName)
+	}
+
+	// Create the patrol wisp
+	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
 	cmdSpawn.Dir = cfg.BeadsDir
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
@@ -171,7 +203,7 @@ func outputPatrolContext(cfg PatrolConfig) {
 				fmt.Printf("⚠ %s\n", err.Error())
 			} else {
 				fmt.Println(style.Dim.Render(err.Error()))
-				fmt.Println(style.Dim.Render(fmt.Sprintf("Run `bd mol catalog` to troubleshoot.")))
+				fmt.Println(style.Dim.Render(fmt.Sprintf("Run `gt formula list` to troubleshoot.")))
 				return
 			}
 		} else {

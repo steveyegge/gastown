@@ -51,6 +51,7 @@ so you can see when it lands and what was included.
 |---------|-------------|-----|-------------|
 | **Convoy** | Yes | hq-cv-* | Tracking unit. What you create, track, get notified about. |
 | **Swarm** | No | None | Ephemeral. "The workers currently on this convoy's issues." |
+| **Stranded Convoy** | Yes | hq-cv-* | A convoy with ready work but no polecats assigned. Needs attention. |
 
 When you "kick off a swarm", you're really:
 1. Creating a convoy (the tracking unit)

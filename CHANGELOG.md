@@ -7,9 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-01-22
+
+### Added
+
+#### Mail Improvements
+- **Numeric index support for `gt mail read`** - Read messages by inbox position (e.g., `gt mail read 1`)
+- **`gt mail hook` alias** - Shortcut for `gt hook attach` from mail context
+- **`--body` alias for `--message`** - More intuitive flag in `gt mail send` and `gt mail reply`
+- **Multiple message IDs in delete** - `gt mail delete msg1 msg2 msg3`
+- **Positional message arg in reply** - `gt mail reply <id> "message"` without --message flag
+- **`--all` flag for inbox** - Show all messages including read
+- **Parallel inbox queries** - ~6x speedup for mail inbox
+
+#### Command Aliases
+- **`gt bd`** - Alias for `gt bead`
+- **`gt work`** - Alias for `gt hook`
+- **`--comment` alias for `--reason`** - In `gt close`
+- **`read` alias for `show`** - In `gt bead`
+
+#### Configuration & Agents
+- **OpenCode as built-in agent preset** - Configure with `gt config set agent opencode`
+- **Config-based role definition system** - Roles defined in config, not beads
+- **Env field in RuntimeConfig** - Custom environment variables for agent presets
+- **ShellQuote helper** - Safe env var escaping for shell commands
+
+#### Infrastructure
+- **Deacon status line display** - Shows deacon icon in mayor status line
+- **Configurable polecat branch naming** - Template-based branch naming
+- **Hook registry and install command** - Manage Claude Code hooks via `gt hooks`
+- **Doctor auto-fix capability** - SessionHookCheck can auto-repair
+- **`gt orphans kill` command** - Clean up orphaned Claude processes
+- **Zombie-scan command for deacon** - tmux-verified process cleanup
+- **Initial prompt for autonomous patrol startup** - Better agent priming
+
+#### Refinery & Merging
+- **Squash merge for cleaner history** - Eliminates redundant merge commits
+- **Redundant observers** - Witness and Refinery both watch convoys
+
 ### Fixed
 
-- **Orphan cleanup skips valid tmux sessions** - `gt orphans kill` and automatic orphan cleanup now check for Claude processes belonging to valid Gas Town tmux sessions (gt-*/hq-*) before killing. This prevents false kills of witnesses, refineries, and deacon during startup when they may temporarily show TTY "?"
+#### Crew & Session Stability
+- **Don't kill pane processes on new sessions** - Prevents destroying fresh shells
+- **Auto-recover from stale tmux pane references** - Recreates sessions automatically
+- **Preserve GT_AGENT across session restarts** - Handoff maintains identity
+
+#### Process Management
+- **KillPaneProcesses kills pane process itself** - Not just descendants
+- **Kill pane processes before all RespawnPane calls** - Prevents orphan leaks
+- **Shutdown reliability improvements** - Multiple fixes for clean shutdown
+- **Deacon spawns immediately after killing stuck session**
+
+#### Convoy & Routing
+- **Pass convoy ID to convoy check command** - Correct ID propagation
+- **Multi-repo routing for custom types** - Correct beads routing across repos
+- **Normalize agent ID trailing slash** - Consistent ID handling
+
+#### Miscellaneous
+- **Sling auto-apply mol-polecat-work** - Auto-attach on open polecat beads
+- **Wisp orphan lifecycle bug** - Proper cleanup of abandoned wisps
+- **Misclassified wisp detection** - Defense-in-depth filtering
+- **Cross-account session access in seance** - Talk to predecessors across accounts
+- **Many more bug fixes** - See git log for full details
+
+## [0.4.0] - 2026-01-19
+
+_Changelog not documented at release time. See git log v0.3.1..v0.4.0 for changes._
+
+## [0.3.1] - 2026-01-18
+
+_Changelog not documented at release time. See git log v0.3.0..v0.3.1 for changes._
 
 ## [0.3.0] - 2026-01-17
 

@@ -128,6 +128,11 @@ type Beads struct {
 	workDir  string
 	beadsDir string // Optional BEADS_DIR override for cross-database access
 	isolated bool   // If true, suppress inherited beads env vars (for test isolation)
+
+	// Lazy-cached town root for routing resolution.
+	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
+	townRoot     string
+	searchedRoot bool
 }
 
 // New creates a new Beads wrapper for the given directory.
@@ -158,20 +163,24 @@ func (b *Beads) getActor() string {
 	return os.Getenv("BD_ACTOR")
 }
 
-// isRetryableError checks if an error from bd is retryable due to Dolt lock contention.
-// Dolt-specific errors that indicate transient lock contention:
-// - "database is read only" - Dolt couldn't acquire write lock
-// - "cannot update manifest" - Dolt manifest locked by another process
-//
-// Note: This does NOT help with bd daemon/Dolt incompatibility (rig-0eec57)
-// which causes permanent read-only state requiring daemon fix.
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
+// getTownRoot returns the Gas Town root directory, using lazy caching.
+// The town root is found by walking up from workDir looking for mayor/town.json.
+// Returns empty string if not in a Gas Town project.
+func (b *Beads) getTownRoot() string {
+	if !b.searchedRoot {
+		b.townRoot = FindTownRoot(b.workDir)
+		b.searchedRoot = true
 	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "database is read only") ||
-		strings.Contains(errStr, "cannot update manifest")
+	return b.townRoot
+}
+
+// getResolvedBeadsDir returns the beads directory this wrapper is operating on.
+// This follows any redirects and returns the actual beads directory path.
+func (b *Beads) getResolvedBeadsDir() string {
+	if b.beadsDir != "" {
+		return b.beadsDir
+	}
+	return ResolveBeadsDir(b.workDir)
 }
 
 // Init initializes a new beads database in the working directory.

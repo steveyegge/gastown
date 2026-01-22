@@ -280,6 +280,8 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+	// This prevents orphan bash processes from Claude's Bash tool surviving session termination.
 	if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}

@@ -15,6 +15,8 @@ Each leg examines the code from a different perspective. Findings are
 collected and synthesized into a prioritized, actionable review.
 
 ## Legs (parallel execution)
+
+### Analysis Legs (read and analyze code)
 - **correctness**: Logic errors, bugs, edge cases
 - **performance**: Bottlenecks, efficiency issues
 - **security**: Vulnerabilities, OWASP concerns
@@ -22,6 +24,16 @@ collected and synthesized into a prioritized, actionable review.
 - **resilience**: Error handling, failure modes
 - **style**: Convention compliance, consistency
 - **smells**: Anti-patterns, technical debt
+
+### Verification Legs (check implementation quality)
+- **wiring**: Installed-but-not-wired gaps (deps added but not used)
+- **commit-discipline**: Commit quality and atomicity
+- **test-quality**: Test meaningfulness, not just coverage
+
+## Presets
+- **gate**: Light review for automatic flow (wiring, security, smells, test-quality)
+- **full**: Comprehensive review (all 10 legs)
+- **custom**: Select specific legs via --legs flag
 
 ## Execution Model
 1. Each leg spawns as a separate polecat
@@ -293,6 +305,125 @@ Review the code for code smells and anti-patterns.
 - Is technical debt being added or paid down?
 """
 
+# ============================================================================
+# VERIFICATION LEGS - Check implementation quality (not just code analysis)
+# ============================================================================
+
+[[legs]]
+id = "wiring"
+title = "Wiring Review"
+focus = "Installed-but-not-wired gaps"
+description = """
+Detect dependencies, configs, or libraries that were added but not actually used.
+
+This catches subtle bugs where the implementer THINKS they integrated something,
+but the old implementation is still being used.
+
+**Look for:**
+- New dependency in manifest but never imported
+  - Go: module in go.mod but no import
+  - Rust: crate in Cargo.toml but no `use`
+  - Node: package in package.json but no import/require
+
+- SDK added but old implementation remains
+  - Added Sentry but still using console.error for errors
+  - Added Zod but still using manual typeof validation
+
+- Config/env var defined but never loaded
+  - New .env var that isn't accessed in code
+
+**Questions to answer:**
+- Is every new dependency actually used?
+- Are there old patterns that should have been replaced?
+- Is there dead config that suggests incomplete migration?
+"""
+
+[[legs]]
+id = "commit-discipline"
+title = "Commit Discipline Review"
+focus = "Commit quality and atomicity"
+description = """
+Review commit history for good practices.
+
+Good commits make the codebase easier to understand, bisect, and revert.
+
+**Look for:**
+- Giant "WIP" or "fix" commits
+  - Multiple unrelated changes in one commit
+  - Commits that touch 20+ files across different features
+
+- Poor commit messages
+  - "stuff", "update", "asdf", "fix"
+  - No context about WHY the change was made
+
+- Unatomic commits
+  - Feature + refactor + bugfix in same commit
+  - Should be separable logical units
+
+- Missing type prefixes (if project uses conventional commits)
+  - feat:, fix:, refactor:, test:, docs:, chore:
+
+**Questions to answer:**
+- Could this history be bisected effectively?
+- Would a reviewer understand the progression?
+- Are commits atomic (one logical change each)?
+"""
+
+[[legs]]
+id = "test-quality"
+title = "Test Quality Review"
+focus = "Test meaningfulness, not just coverage"
+description = """
+Verify tests are actually testing something meaningful.
+
+Coverage numbers lie. A test that can't fail provides no value.
+
+**Look for:**
+- Weak assertions
+  - Only checking != nil / !== null / is not None
+  - Using .is_ok() without checking the value
+  - assertTrue(true) or equivalent
+
+- Missing negative test cases
+  - Happy path only, no error cases
+  - No boundary testing
+  - No invalid input testing
+
+- Tests that can't fail
+  - Mocked so heavily the test is meaningless
+  - Testing implementation details, not behavior
+
+- Flaky test indicators
+  - Sleep/delay in tests
+  - Time-dependent assertions
+
+**Questions to answer:**
+- Do these tests actually verify behavior?
+- Would a bug in the implementation cause a test failure?
+- Are edge cases and error paths tested?
+"""
+
+# ============================================================================
+# PRESETS - Configurable leg selection
+# ============================================================================
+
+[presets]
+[presets.gate]
+description = "Light review for automatic flow - fast, focused on blockers"
+legs = ["wiring", "security", "smells", "test-quality"]
+
+[presets.full]
+description = "Comprehensive review - all legs, for major features"
+legs = ["correctness", "performance", "security", "elegance", "resilience", "style", "smells", "wiring", "commit-discipline", "test-quality"]
+
+[presets.security-focused]
+description = "Security-heavy review for sensitive changes"
+legs = ["security", "resilience", "correctness", "wiring"]
+
+[presets.refactor]
+description = "Review focused on code quality during refactoring"
+legs = ["elegance", "smells", "style", "commit-discipline"]
+
 # Synthesis step - combines all leg outputs
 [synthesis]
 title = "Review Synthesis"
@@ -310,10 +441,13 @@ A synthesized review at: {{.output.directory}}/{{.output.synthesis}}
 2. **Critical Issues** - P0 items from all legs, deduplicated
 3. **Major Issues** - P1 items, grouped by theme
 4. **Minor Issues** - P2 items, briefly listed
-5. **Positive Observations** - What's done well
-6. **Recommendations** - Actionable next steps
+5. **Wiring Gaps** - Dependencies added but not used (from wiring leg)
+6. **Commit Quality** - Notes on commit discipline
+7. **Test Quality** - Assessment of test meaningfulness
+8. **Positive Observations** - What's done well
+9. **Recommendations** - Actionable next steps
 
 Deduplicate issues found by multiple legs (note which legs found them).
 Prioritize by impact and effort. Be actionable.
 """
-depends_on = ["correctness", "performance", "security", "elegance", "resilience", "style", "smells"]
+depends_on = ["correctness", "performance", "security", "elegance", "resilience", "style", "smells", "wiring", "commit-discipline", "test-quality"]

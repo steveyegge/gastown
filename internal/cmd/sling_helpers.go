@@ -11,7 +11,6 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
-	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -324,6 +323,9 @@ func detectActor() string {
 // prefix/database mismatch issues (fix for loc-1augh, hq-cc7214.2).
 // This matches polecat/manager.go which creates agent beads with *Town functions.
 func agentIDToBeadID(agentID, townRoot string) string {
+	// Normalize: strip trailing slash (resolveSelfTarget returns "mayor/" not "mayor")
+	agentID = strings.TrimSuffix(agentID, "/")
+
 	// Handle simple cases (town-level agents with hq- prefix)
 	if agentID == "mayor" {
 		return beads.MayorBeadIDTown()
@@ -381,8 +383,17 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 		return
 	}
 
-	// All agent beads are stored in town beads (hq- prefix)
-	bd := beads.NewWithBeadsDir(townRoot, townBeadsDir)
+	// Resolve the correct working directory for the agent bead.
+	// Agent beads with rig-level prefixes (e.g., go-) live in rig databases,
+	// not the town database. Use prefix-based resolution to find the correct path.
+	// This fixes go-19z: bd slot commands failing for go-* prefixed beads.
+	agentWorkDir := beads.ResolveHookDir(townRoot, agentBeadID, bdWorkDir)
+
+	// Run from agentWorkDir WITHOUT BEADS_DIR to enable redirect-based routing.
+	// Set hook_bead to the slung work (gt-zecmc: removed agent_state update).
+	// Agent liveness is observable from tmux - no need to record it in bead.
+	// For cross-database scenarios, slot set may fail gracefully (warning only).
+	bd := beads.New(agentWorkDir)
 	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
@@ -433,55 +444,86 @@ func isPolecatTarget(target string) bool {
 	return len(parts) >= 3 && parts[1] == "polecats"
 }
 
-// attachPolecatWorkMolecule attaches the mol-polecat-work molecule to a polecat's agent bead.
-// This ensures all polecats have the standard work molecule attached for guidance.
-// The molecule is attached by storing it in the agent bead's description using attachment fields.
+// FormulaOnBeadResult contains the result of instantiating a formula on a bead.
+type FormulaOnBeadResult struct {
+	WispRootID string // The wisp root ID (compound root after bonding)
+	BeadToHook string // The bead ID to hook (BASE bead, not wisp - lifecycle fix)
+}
+
+// InstantiateFormulaOnBead creates a wisp from a formula, bonds it to a bead.
+// This is the formula-on-bead pattern used by issue #288 for auto-applying mol-polecat-work.
 //
-// Per issue #288: gt sling should auto-attach mol-polecat-work when slinging to polecats.
-// Agent beads use hq- prefix and are stored in town beads (fix for hq-cc7214.2).
-func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error {
-	// Parse the polecat name from targetAgent (format: "rig/polecats/name")
-	parts := strings.Split(targetAgent, "/")
-	if len(parts) != 3 || parts[1] != "polecats" {
-		return fmt.Errorf("invalid polecat agent format: %s", targetAgent)
-	}
-	rigName := parts[0]
-	polecatName := parts[2]
+// Parameters:
+//   - formulaName: the formula to instantiate (e.g., "mol-polecat-work")
+//   - beadID: the base bead to bond the wisp to
+//   - title: the bead title (used for --var feature=<title>)
+//   - hookWorkDir: working directory for bd commands (polecat's worktree)
+//   - townRoot: the town root directory
+//   - skipCook: if true, skip cooking (for batch mode optimization where cook happens once)
+//
+// Returns the wisp root ID which should be hooked.
+func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot string, skipCook bool) (*FormulaOnBeadResult, error) {
+	// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
+	formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 
-	// Get the polecat's agent bead ID using town-level prefix
-	// Format: "hq-<rig>-polecat-<name>" (e.g., "hq-gastown-polecat-Toast")
-	// This matches polecat/manager.go which creates agent beads in townBeads.
-	agentBeadID := beads.PolecatBeadIDTown(rigName, polecatName)
-
-	// Agent beads are stored in town beads (hq- prefix)
-	townBeadsDir := filepath.Join(townRoot, ".beads")
-	b := beads.NewWithBeadsDir(townRoot, townBeadsDir)
-
-	// Check if molecule is already attached (avoid duplicate attach)
-	attachment, err := b.GetAttachment(agentBeadID)
-	if err == nil && attachment != nil && attachment.AttachedMolecule != "" {
-		// Already has a molecule attached - skip
-		return nil
+	// Step 1: Cook the formula (ensures proto exists)
+	if !skipCook {
+		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
+		cookCmd.Dir = formulaWorkDir
+		cookCmd.Stderr = os.Stderr
+		if err := cookCmd.Run(); err != nil {
+			return nil, fmt.Errorf("cooking formula %s: %w", formulaName, err)
+		}
 	}
 
-	// Cook the mol-polecat-work formula to ensure the proto exists
-	// This is safe to run multiple times - cooking is idempotent
-	// Cook from town root since formulas are defined at town level
-	cookCmd := exec.Command("bd", "--no-daemon", "cook", "mol-polecat-work")
-	cookCmd.Dir = townRoot
-	cookCmd.Stderr = os.Stderr
-	if err := cookCmd.Run(); err != nil {
-		return fmt.Errorf("cooking mol-polecat-work formula: %w", err)
-	}
-
-	// Attach the molecule to the polecat's agent bead
-	// The molecule ID is the formula name "mol-polecat-work"
-	moleculeID := "mol-polecat-work"
-	_, err = b.AttachMolecule(agentBeadID, moleculeID)
+	// Step 2: Create wisp with feature and issue variables from bead
+	featureVar := fmt.Sprintf("feature=%s", title)
+	issueVar := fmt.Sprintf("issue=%s", beadID)
+	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar, "--json"}
+	wispCmd := exec.Command("bd", wispArgs...)
+	wispCmd.Dir = formulaWorkDir
+	wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
+	wispCmd.Stderr = os.Stderr
+	wispOut, err := wispCmd.Output()
 	if err != nil {
-		return fmt.Errorf("attaching molecule %s to %s: %w", moleculeID, agentBeadID, err)
+		return nil, fmt.Errorf("creating wisp for formula %s: %w", formulaName, err)
 	}
 
-	fmt.Printf("%s Attached %s to %s\n", style.Bold.Render("✓"), moleculeID, agentBeadID)
-	return nil
+	// Parse wisp output to get the root ID
+	wispRootID, err := parseWispIDFromJSON(wispOut)
+	if err != nil {
+		return nil, fmt.Errorf("parsing wisp output: %w", err)
+	}
+
+	// Step 3: Bond wisp to original bead (creates compound)
+	bondArgs := []string{"--no-daemon", "mol", "bond", wispRootID, beadID, "--json"}
+	bondCmd := exec.Command("bd", bondArgs...)
+	bondCmd.Dir = formulaWorkDir
+	bondCmd.Stderr = os.Stderr
+	bondOut, err := bondCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("bonding formula to bead: %w", err)
+	}
+
+	// Parse bond output - the wisp root becomes the compound root
+	var bondResult struct {
+		RootID string `json:"root_id"`
+	}
+	if err := json.Unmarshal(bondOut, &bondResult); err == nil && bondResult.RootID != "" {
+		wispRootID = bondResult.RootID
+	}
+
+	return &FormulaOnBeadResult{
+		WispRootID: wispRootID,
+		BeadToHook: beadID, // Hook the BASE bead (lifecycle fix: wisp is attached_molecule)
+	}, nil
+}
+
+// CookFormula cooks a formula to ensure its proto exists.
+// This is useful for batch mode where we cook once before processing multiple beads.
+func CookFormula(formulaName, workDir string) error {
+	cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
+	cookCmd.Dir = workDir
+	cookCmd.Stderr = os.Stderr
+	return cookCmd.Run()
 }

@@ -196,6 +196,12 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
+	// Ensure .gitignore has required Gas Town patterns
+	if err := rig.EnsureGitignorePatterns(crewPath); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+	}
+
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
@@ -537,7 +543,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	}
 	if running {
 		if opts.KillExisting {
-			// Restart mode - kill existing session
+			// Restart mode - kill existing session.
+			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
@@ -546,7 +553,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 			if t.IsClaudeRunning(sessionID) {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
-			// Zombie session - kill and recreate
+			// Zombie session - kill and recreate.
+			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
@@ -641,7 +649,9 @@ func (m *Manager) Stop(name string) error {
 		return ErrSessionNotFound
 	}
 
-	// Kill the session
+	// Kill the session.
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+	// This prevents orphan bash processes from Claude's Bash tool surviving session termination.
 	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
@@ -655,3 +665,4 @@ func (m *Manager) IsRunning(name string) (bool, error) {
 	sessionID := m.SessionName(name)
 	return t.HasSession(sessionID)
 }
+

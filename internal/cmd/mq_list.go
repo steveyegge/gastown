@@ -48,9 +48,9 @@ func runMQList(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("querying ready MRs: %w", err)
 		}
-		// Filter to only merge-request type
+		// Filter to only merge-request label (issue_type field is deprecated)
 		for _, issue := range allReady {
-			if issue.Type == "merge-request" {
+			if beads.HasLabel(issue, "gt:merge-request") {
 				issues = append(issues, issue)
 			}
 		}

@@ -341,3 +341,39 @@ func TestGetIssueFromAgentHook(t *testing.T) {
 		})
 	}
 }
+
+// TestIsPolecatActor verifies that isPolecatActor correctly identifies
+// polecat actors vs other roles based on the BD_ACTOR format.
+func TestIsPolecatActor(t *testing.T) {
+	tests := []struct {
+		actor string
+		want  bool
+	}{
+		// Polecats: rigname/polecats/polecatname
+		{"testrig/polecats/furiosa", true},
+		{"testrig/polecats/nux", true},
+		{"myrig/polecats/witness", true}, // even if named "witness", still a polecat
+
+		// Non-polecats
+		{"gastown/crew/george", false},
+		{"gastown/crew/max", false},
+		{"testrig/witness", false},
+		{"testrig/deacon", false},
+		{"testrig/mayor", false},
+		{"gastown/refinery", false},
+
+		// Edge cases
+		{"", false},
+		{"single", false},
+		{"polecats/name", false}, // needs rig prefix
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.actor, func(t *testing.T) {
+			got := isPolecatActor(tt.actor)
+			if got != tt.want {
+				t.Errorf("isPolecatActor(%q) = %v, want %v", tt.actor, got, tt.want)
+			}
+		})
+	}
+}

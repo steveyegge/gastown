@@ -358,6 +358,37 @@ func TestIsCrewSession_ComprehensivePatterns(t *testing.T) {
 	}
 }
 
+// TestOrphanSessionCheck_HQSessions tests that hq-* sessions are properly recognized as valid.
+func TestOrphanSessionCheck_HQSessions(t *testing.T) {
+	townRoot := t.TempDir()
+	mayorDir := filepath.Join(townRoot, "mayor")
+	if err := os.MkdirAll(mayorDir, 0o755); err != nil {
+		t.Fatalf("create mayor dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("create rigs.json: %v", err)
+	}
+
+	lister := &mockSessionLister{
+		sessions: []string{
+			"hq-mayor",   // valid: headquarters mayor session
+			"hq-deacon",  // valid: headquarters deacon session
+		},
+	}
+	check := NewOrphanSessionCheckWithSessionLister(lister)
+	result := check.Run(&CheckContext{TownRoot: townRoot})
+
+	if result.Status != StatusOK {
+		t.Fatalf("expected StatusOK for valid hq sessions, got %v: %s", result.Status, result.Message)
+	}
+	if result.Message != "All 2 Gas Town sessions are valid" {
+		t.Fatalf("unexpected message: %q", result.Message)
+	}
+	if len(check.orphanSessions) != 0 {
+		t.Fatalf("expected no orphan sessions, got %v", check.orphanSessions)
+	}
+}
+
 // TestOrphanSessionCheck_Run_Deterministic tests the full Run path with a mock session
 // lister, ensuring deterministic behavior without depending on real tmux state.
 func TestOrphanSessionCheck_Run_Deterministic(t *testing.T) {
@@ -383,9 +414,11 @@ func TestOrphanSessionCheck_Run_Deterministic(t *testing.T) {
 			"gt-gastown-witness",      // valid: gastown rig exists
 			"gt-gastown-polecat1",     // valid: gastown rig exists
 			"gt-beads-refinery",       // valid: beads rig exists
+			"hq-mayor",                // valid: hq-mayor is recognized
+			"hq-deacon",               // valid: hq-deacon is recognized
 			"gt-unknown-witness",      // orphan: unknown rig doesn't exist
 			"gt-missing-crew-joe",     // orphan: missing rig doesn't exist
-			"random-session",          // ignored: doesn't match gt-* pattern
+			"random-session",          // ignored: doesn't match gt-*/hq-* pattern
 		},
 	}
 	check := NewOrphanSessionCheckWithSessionLister(lister)

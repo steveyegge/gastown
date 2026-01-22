@@ -205,6 +205,13 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
 	}
 
+	// Kill all processes in the pane before respawning to prevent orphan leaks
+	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
+	if err := t.KillPaneProcesses(pane); err != nil {
+		// Non-fatal but log the warning
+		style.PrintWarning("could not kill pane processes: %v", err)
+	}
+
 	// Use exec to respawn the pane - this kills us and restarts
 	return t.RespawnPane(pane, restartCmd)
 }
@@ -412,6 +419,10 @@ func buildRestartCommand(sessionName string) (string, error) {
 		}
 	}
 
+	// Propagate GT_ROOT so subsequent handoffs can use it as fallback
+	// when cwd-based detection fails (broken state recovery)
+	exports = append(exports, "GT_ROOT="+townRoot)
+
 	// Preserve GT_AGENT across handoff so agent override persists
 	if currentAgent != "" {
 		exports = append(exports, "GT_AGENT="+currentAgent)
@@ -499,14 +510,33 @@ func sessionToGTRole(sessionName string) string {
 }
 
 // detectTownRootFromCwd walks up from the current directory to find the town root.
+// Falls back to GT_TOWN_ROOT or GT_ROOT env vars if cwd detection fails (broken state recovery).
 func detectTownRootFromCwd() string {
 	// Use workspace.FindFromCwd which handles both primary (mayor/town.json)
 	// and secondary (mayor/ directory) markers
 	townRoot, err := workspace.FindFromCwd()
-	if err != nil {
-		return ""
+	if err == nil && townRoot != "" {
+		return townRoot
 	}
-	return townRoot
+
+	// Fallback: try environment variables for town root
+	// GT_TOWN_ROOT is set by shell integration, GT_ROOT is set by session manager
+	// This enables handoff to work even when cwd detection fails due to
+	// detached HEAD, wrong branch, deleted worktree, etc.
+	for _, envName := range []string{"GT_TOWN_ROOT", "GT_ROOT"} {
+		if envRoot := os.Getenv(envName); envRoot != "" {
+			// Verify it's actually a workspace
+			if _, statErr := os.Stat(filepath.Join(envRoot, workspace.PrimaryMarker)); statErr == nil {
+				return envRoot
+			}
+			// Try secondary marker too
+			if info, statErr := os.Stat(filepath.Join(envRoot, workspace.SecondaryMarker)); statErr == nil && info.IsDir() {
+				return envRoot
+			}
+		}
+	}
+
+	return ""
 }
 
 // handoffRemoteSession respawns a different session and optionally switches to it.
@@ -536,6 +566,13 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 			fmt.Printf("Would execute: tmux switch-client -t %s\n", targetSession)
 		}
 		return nil
+	}
+
+	// Kill all processes in the pane before respawning to prevent orphan leaks
+	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
+	if err := t.KillPaneProcesses(targetPane); err != nil {
+		// Non-fatal but log the warning
+		style.PrintWarning("could not kill pane processes: %v", err)
 	}
 
 	// Clear scrollback history before respawn (resets copy-mode from [0/N] to [0/0])

@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "description": "OpenCode model presets with recommended delay settings for gastown integration",
+  "usage": "Use ready_delay_ms values when configuring runtime.tmux.ready_delay_ms in agents.json",
+  "models_api": "https://models.dev/api.json",
+  "models_api_note": "LLMs should fetch current model list from models_api. The 'models' below are fallback examples with gastown-specific delay recommendations.",
+  "models": {
+    "openai": {
+      "gpt-5.2": {
+        "description": "GPT-5.2 chat model",
+        "ready_delay_ms": 5000
+      },
+      "gpt-5.2-codex": {
+        "description": "GPT-5.2 Codex for code tasks",
+        "ready_delay_ms": 8000
+      },
+      "codex-1": {
+        "description": "Codex-1 extended context",
+        "ready_delay_ms": 10000
+      }
+    },
+    "google": {
+      "gemini-3-pro-high": {
+        "description": "Gemini 3 Pro High quality",
+        "ready_delay_ms": 6000
+      }
+    },
+    "xai": {
+      "grok-code-fast-1": {
+        "description": "Grok Code Fast",
+        "ready_delay_ms": 4000
+      }
+    },
+    "github-copilot": {
+      "gpt-5.2-codex": {
+        "description": "GitHub Copilot GPT-5.2 Codex",
+        "ready_delay_ms": 8000
+      }
+    },
+    "opencode": {
+      "glm-4.7-free": {
+        "description": "GLM 4.7 Free tier (may timeout, needs longer delay)",
+        "ready_delay_ms": 15000
+      },
+      "minimax-m2.1-free": {
+        "description": "MiniMax M2.1 Free tier",
+        "ready_delay_ms": 10000
+      },
+      "big-pickle": {
+        "description": "Big Pickle experimental",
+        "ready_delay_ms": 12000
+      }
+    }
+  },
+  "notes": {
+    "why_delay_based": "OpenCode TUI uses box-drawing characters that break prompt prefix matching. Delay-based detection is required.",
+    "free_tier_warning": "Free tier models may have longer cold start times. Increase delay if timeout errors occur.",
+    "default_delay": 8000
+  }
+}

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/agent"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
@@ -25,39 +24,23 @@ var (
 )
 
 // Manager handles witness lifecycle and monitoring operations.
+// ZFC-compliant: tmux session is the source of truth for running state.
 type Manager struct {
-	rig          *rig.Rig
-	workDir      string
-	stateManager *agent.StateManager[Witness]
+	rig *rig.Rig
 }
 
 // NewManager creates a new witness manager for a rig.
 func NewManager(r *rig.Rig) *Manager {
 	return &Manager{
-		rig:     r,
-		workDir: r.Path,
-		stateManager: agent.NewStateManager[Witness](r.Path, "witness.json", func() *Witness {
-			return &Witness{
-				RigName: r.Name,
-				State:   StateStopped,
-			}
-		}),
+		rig: r,
 	}
 }
 
-// stateFile returns the path to the witness state file.
-func (m *Manager) stateFile() string {
-	return m.stateManager.StateFile()
-}
-
-// loadState loads witness state from disk.
-func (m *Manager) loadState() (*Witness, error) {
-	return m.stateManager.Load()
-}
-
-// saveState persists witness state to disk using atomic write.
-func (m *Manager) saveState(w *Witness) error {
-	return m.stateManager.Save(w)
+// IsRunning checks if the witness session is active.
+// ZFC: tmux session existence is the source of truth.
+func (m *Manager) IsRunning() (bool, error) {
+	t := tmux.NewTmux()
+	return t.HasSession(m.SessionName())
 }
 
 // SessionName returns the tmux session name for this witness.
@@ -65,19 +48,21 @@ func (m *Manager) SessionName() string {
 	return fmt.Sprintf("gt-%s-witness", m.rig.Name)
 }
 
-// Status returns the current witness status.
-// ZFC-compliant: trusts agent-reported state, no PID inference.
-// The daemon reads agent bead state for liveness checks.
-func (m *Manager) Status() (*Witness, error) {
-	w, err := m.loadState()
+// Status returns information about the witness session.
+// ZFC-compliant: tmux session is the source of truth.
+func (m *Manager) Status() (*tmux.SessionInfo, error) {
+	t := tmux.NewTmux()
+	sessionID := m.SessionName()
+
+	running, err := t.HasSession(sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("checking session: %w", err)
+	}
+	if !running {
+		return nil, ErrNotRunning
 	}
 
-	// Update monitored polecats list (still useful for display)
-	w.MonitoredPolecats = m.rig.Polecats
-
-	return w, nil
+	return t.GetSessionInfo(sessionID)
 }
 
 // witnessDir returns the working directory for the witness.
@@ -97,36 +82,21 @@ func (m *Manager) witnessDir() string {
 }
 
 // Start starts the witness.
-// If foreground is true, only updates state (no tmux session - deprecated).
+// If foreground is true, returns an error (foreground mode deprecated).
 // Otherwise, spawns a Claude agent in a tmux session.
 // agentOverride optionally specifies a different agent alias to use.
 // envOverrides are KEY=VALUE pairs that override all other env var sources.
+// ZFC-compliant: no state file, tmux session is source of truth.
 func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []string) error {
-	w, err := m.loadState()
-	if err != nil {
-		return err
-	}
-
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
 	if foreground {
 		// Foreground mode is deprecated - patrol logic moved to mol-witness-patrol
-		// Just check tmux session (no PID inference per ZFC)
-		if running, _ := t.HasSession(sessionID); running && t.IsClaudeRunning(sessionID) {
-			return ErrAlreadyRunning
-		}
-
-		now := time.Now()
-		w.State = StateRunning
-		w.StartedAt = &now
-		w.PID = 0 // No longer track PID (ZFC)
-		w.MonitoredPolecats = m.rig.Polecats
-
-		return m.saveState(w)
+		return fmt.Errorf("foreground mode is deprecated; use background mode (remove --foreground flag)")
 	}
 
-	// Background mode: check if session already exists
+	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
 		// Session exists - check if Claude is actually running (healthy vs zombie)
@@ -199,17 +169,6 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	theme := tmux.AssignTheme(m.rig.Name)
 	_ = t.ConfigureGasTownSession(sessionID, theme, m.rig.Name, "witness", "witness")
 
-	// Update state to running
-	now := time.Now()
-	w.State = StateRunning
-	w.StartedAt = &now
-	w.PID = 0 // Claude agent doesn't have a PID we track
-	w.MonitoredPolecats = m.rig.Polecats
-	if err := m.saveState(w); err != nil {
-		_ = t.KillSessionWithProcesses(sessionID) // best-effort cleanup on state save failure
-		return fmt.Errorf("saving state: %w", err)
-	}
-
 	// Wait for Claude to start - fatal if Claude fails to launch
 	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
@@ -275,31 +234,17 @@ func buildWitnessStartCommand(rigPath, rigName, townRoot, agentOverride string, 
 }
 
 // Stop stops the witness.
+// ZFC-compliant: tmux session is the source of truth.
 func (m *Manager) Stop() error {
-	w, err := m.loadState()
-	if err != nil {
-		return err
-	}
-
-	// Check if tmux session exists
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
-	sessionRunning, _ := t.HasSession(sessionID)
 
-	// If neither state nor session indicates running, it's not running
-	if w.State != StateRunning && !sessionRunning {
+	// Check if tmux session exists
+	running, _ := t.HasSession(sessionID)
+	if !running {
 		return ErrNotRunning
 	}
 
-	// Kill tmux session if it exists (best-effort: may already be dead)
-	if sessionRunning {
-		_ = t.KillSessionWithProcesses(sessionID)
-	}
-
-	// Note: No PID-based stop per ZFC - tmux session kill is sufficient
-
-	w.State = StateStopped
-	w.PID = 0
-
-	return m.saveState(w)
+	// Kill the tmux session
+	return t.KillSession(sessionID)
 }

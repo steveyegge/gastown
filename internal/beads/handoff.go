@@ -158,6 +158,7 @@ func (b *Beads) AttachMolecule(pinnedBeadID, moleculeID string) (*Issue, error) 
 		return nil, fmt.Errorf("fetching pinned bead: %w", err)
 	}
 
+	// Only allow pinned beads (permanent records like role definitions)
 	if issue.Status != StatusPinned {
 		return nil, fmt.Errorf("issue %s is not pinned (status: %s)", pinnedBeadID, issue.Status)
 	}

@@ -232,6 +232,30 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
 	}
 
+	// Create boot directory (deacon/dogs/boot/) for Boot watchdog.
+	// This avoids gt doctor warning on fresh install.
+	bootDir := filepath.Join(deaconDir, "dogs", "boot")
+	if err := os.MkdirAll(bootDir, 0755); err != nil {
+		fmt.Printf("   %s Could not create boot directory: %v\n", style.Dim.Render("⚠"), err)
+	}
+
+	// Create plugins directory for town-level patrol plugins.
+	// This avoids gt doctor warning on fresh install.
+	pluginsDir := filepath.Join(absPath, "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		fmt.Printf("   %s Could not create plugins directory: %v\n", style.Dim.Render("⚠"), err)
+	} else {
+		fmt.Printf("   ✓ Created plugins/\n")
+	}
+
+	// Create daemon.json patrol config.
+	// This avoids gt doctor warning on fresh install.
+	if err := config.EnsureDaemonPatrolConfig(absPath); err != nil {
+		fmt.Printf("   %s Could not create daemon.json: %v\n", style.Dim.Render("⚠"), err)
+	} else {
+		fmt.Printf("   ✓ Created mayor/daemon.json\n")
+	}
+
 	// Initialize git BEFORE beads so that bd can compute repository fingerprint.
 	// The fingerprint is required for the daemon to start properly.
 	if installGit || installGitHub != "" {
@@ -245,6 +269,12 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Town beads (hq- prefix) stores mayor mail, cross-rig coordination, and handoffs.
 	// Rig beads are separate and have their own prefixes.
 	if !installNoBeads {
+		// Kill any orphaned bd daemons before initializing beads.
+		// Stale daemons can interfere with fresh database creation.
+		if killed, _, _ := beads.StopAllBdProcesses(false, true); killed > 0 {
+			fmt.Printf("   ✓ Stopped %d orphaned bd daemon(s)\n", killed)
+		}
+
 		if err := initTownBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
@@ -389,6 +419,19 @@ func initTownBeads(townPath string) error {
 		}
 	}
 
+	// Verify .beads directory was actually created (bd init can exit 0 without creating it)
+	beadsDir := filepath.Join(townPath, ".beads")
+	if _, statErr := os.Stat(beadsDir); os.IsNotExist(statErr) {
+		return fmt.Errorf("bd init succeeded but .beads directory not created (check bd daemon interference)")
+	}
+
+	// Explicitly set issue_prefix config (bd init --prefix may not persist it in newer versions).
+	prefixSetCmd := exec.Command("bd", "config", "set", "issue_prefix", "hq")
+	prefixSetCmd.Dir = townPath
+	if prefixOutput, prefixErr := prefixSetCmd.CombinedOutput(); prefixErr != nil {
+		return fmt.Errorf("bd config set issue_prefix failed: %s", strings.TrimSpace(string(prefixOutput)))
+	}
+
 	// Configure custom types for Gas Town (agent, role, rig, convoy, slot).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
 	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
@@ -495,7 +538,7 @@ func initTownAgentBeads(townPath string) error {
 	// bd init doesn't enable "custom" issue types by default, but Gas Town uses
 	// agent beads during install and runtime. Ensure these types are enabled
 	// before attempting to create any town-level system beads.
-	if err := ensureBeadsCustomTypes(townPath, []string{"agent", "rig", "convoy", "slot"}); err != nil {
+	if err := ensureBeadsCustomTypes(townPath, constants.BeadsCustomTypesList()); err != nil {
 		return err
 	}
 

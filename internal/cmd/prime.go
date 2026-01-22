@@ -502,6 +502,23 @@ func checkSlungWork(ctx RoleContext) bool {
 	}
 	fmt.Println()
 
+	// Check for attached molecule and show execution prompt
+	// This was missing for hooked beads (only worked for pinned beads).
+	// With formula-on-bead, the base bead is hooked with attached_molecule pointing to wisp.
+	attachment := beads.ParseAttachmentFields(hookedBead)
+	if attachment != nil && attachment.AttachedMolecule != "" {
+		fmt.Printf("%s\n\n", style.Bold.Render("## 🎯 ATTACHED MOLECULE"))
+		fmt.Printf("Molecule: %s\n", attachment.AttachedMolecule)
+		if attachment.AttachedArgs != "" {
+			fmt.Printf("\n%s\n", style.Bold.Render("📋 ARGS (use these to guide execution):"))
+			fmt.Printf("  %s\n", attachment.AttachedArgs)
+		}
+		fmt.Println()
+
+		// Show current step from molecule
+		showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
+	}
+
 	return true
 }
 

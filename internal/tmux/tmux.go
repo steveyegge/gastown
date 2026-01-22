@@ -192,11 +192,73 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	// Kill the tmux session
-	// Note: If we killed the pane process, tmux may have already terminated
-	// the session automatically. Ignore "session not found" errors.
+	// Ignore "session not found" - killing the pane process may have already
+	// caused tmux to destroy the session automatically
 	err = t.KillSession(name)
-	if err != nil && errors.Is(err, ErrSessionNotFound) {
-		return nil // Session already gone, which is what we wanted
+	if err == ErrSessionNotFound {
+		return nil
+	}
+	return err
+}
+
+// KillSessionWithProcessesExcluding is like KillSessionWithProcesses but excludes
+// specified PIDs from being killed. This is essential for self-kill scenarios where
+// the calling process (e.g., gt done) is running inside the session it's terminating.
+// Without exclusion, the caller would be killed before completing the cleanup.
+func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []string) error {
+	// Build exclusion set for O(1) lookup
+	exclude := make(map[string]bool)
+	for _, pid := range excludePIDs {
+		exclude[pid] = true
+	}
+
+	// Get the pane PID
+	pid, err := t.GetPanePID(name)
+	if err != nil {
+		// Session might not exist or be in bad state, try direct kill
+		return t.KillSession(name)
+	}
+
+	if pid != "" {
+		// Get all descendant PIDs recursively (returns deepest-first order)
+		descendants := getAllDescendants(pid)
+
+		// Filter out excluded PIDs
+		var filtered []string
+		for _, dpid := range descendants {
+			if !exclude[dpid] {
+				filtered = append(filtered, dpid)
+			}
+		}
+
+		// Send SIGTERM to all non-excluded descendants (deepest first to avoid orphaning)
+		for _, dpid := range filtered {
+			_ = exec.Command("kill", "-TERM", dpid).Run()
+		}
+
+		// Wait for graceful shutdown
+		time.Sleep(100 * time.Millisecond)
+
+		// Send SIGKILL to any remaining non-excluded descendants
+		for _, dpid := range filtered {
+			_ = exec.Command("kill", "-KILL", dpid).Run()
+		}
+
+		// Kill the pane process itself (may have called setsid() and detached)
+		// Only if not excluded
+		if !exclude[pid] {
+			_ = exec.Command("kill", "-TERM", pid).Run()
+			time.Sleep(100 * time.Millisecond)
+			_ = exec.Command("kill", "-KILL", pid).Run()
+		}
+	}
+
+	// Kill the tmux session - this will terminate the excluded process too
+	// Ignore "session not found" - if we killed all non-excluded processes,
+	// tmux may have already destroyed the session automatically
+	err = t.KillSession(name)
+	if err == ErrSessionNotFound {
+		return nil
 	}
 	return err
 }
@@ -223,100 +285,51 @@ func getAllDescendants(pid string) []string {
 	return result
 }
 
-// isDescendantOf checks if a process is a descendant of an ancestor PID.
-// It does this by walking up the process tree using parent PIDs.
-func isDescendantOf(pid, ancestorPID string) bool {
-	currentPID := pid
-	maxIterations := 50 // Prevent infinite loops
-
-	for i := 0; i < maxIterations; i++ {
-		if currentPID == ancestorPID {
-			return true
-		}
-
-		// Get the parent PID
-		ppid, err := getParentPID(currentPID)
-		if err != nil {
-			return false
-		}
-
-		// If we reached PID 1 (init), we've gone too far
-		if ppid == "1" || ppid == "0" {
-			return false
-		}
-
-		currentPID = ppid
-	}
-
-	return false
-}
-
-// getParentPID gets the parent PID of a process using ps.
-func getParentPID(pid string) (string, error) {
-	out, err := exec.Command("ps", "-o", "ppid=", "-p", pid).Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// findClaudeProcessesDescendantsOf finds all Claude processes that are descendants of a PID.
-func findClaudeProcessesDescendantsOf(ancestorPID string) []string {
-	var result []string
-
-	// Find all processes with "claude" or "node" in their command line
-	pgrepCmd := exec.Command("pgrep", "-f", "claude")
-	claudeOut, err := pgrepCmd.Output()
-	if err != nil {
-		// No claude processes found, try "node" as fallback
-		pgrepCmd = exec.Command("pgrep", "-f", "node")
-		claudeOut, err = pgrepCmd.Output()
-		if err != nil {
-			return result
-		}
-	}
-
-	// For each Claude process, check if it's a descendant of the ancestor PID
-	claudePIDs := strings.Fields(strings.TrimSpace(string(claudeOut)))
-	for _, pid := range claudePIDs {
-		if isDescendantOf(pid, ancestorPID) {
-			result = append(result, pid)
-		}
-	}
-
-	return result
-}
-
-// KillPaneProcesses kills all Claude processes in a pane without killing the pane itself.
-// This is useful before respawn-pane to ensure the old process is actually terminated.
-// The pane parameter should be a pane ID (e.g., "%0") or session:window.pane format.
+// KillPaneProcesses explicitly kills all processes associated with a tmux pane.
+// This prevents orphan processes that survive pane respawn due to SIGHUP being ignored.
+//
+// Process:
+// 1. Get the pane's main process PID
+// 2. Find all descendant processes recursively (not just direct children)
+// 3. Send SIGTERM to all descendants (deepest first)
+// 4. Wait 100ms for graceful shutdown
+// 5. Send SIGKILL to any remaining descendants
+// 6. Kill the pane process itself
+//
+// This ensures Claude processes and all their children are properly terminated
+// before respawning the pane.
 func (t *Tmux) KillPaneProcesses(pane string) error {
 	// Get the pane PID
-	pid, err := t.run("list-panes", "-t", pane, "-F", "#{pane_pid}")
+	pid, err := t.GetPanePID(pane)
 	if err != nil {
-		return err
+		return fmt.Errorf("getting pane PID: %w", err)
 	}
 
-	panePID := strings.TrimSpace(pid)
-	if panePID == "" {
-		return nil // No pane PID, nothing to kill
+	if pid == "" {
+		return fmt.Errorf("pane PID is empty")
 	}
 
-	// Find all Claude/node processes that are descendants of the pane PID
-	claudePIDs := findClaudeProcessesDescendantsOf(panePID)
+	// Get all descendant PIDs recursively (returns deepest-first order)
+	descendants := getAllDescendants(pid)
 
-	// Send SIGTERM to all Claude processes
-	for _, pid := range claudePIDs {
-		_ = exec.Command("kill", "-TERM", pid).Run()
+	// Send SIGTERM to all descendants (deepest first to avoid orphaning)
+	for _, dpid := range descendants {
+		_ = exec.Command("kill", "-TERM", dpid).Run()
 	}
 
 	// Wait for graceful shutdown
 	time.Sleep(100 * time.Millisecond)
 
-	// Send SIGKILL to any remaining Claude processes
-	for _, pid := range claudePIDs {
-		_ = exec.Command("kill", "-KILL", pid).Run()
+	// Send SIGKILL to any remaining descendants
+	for _, dpid := range descendants {
+		_ = exec.Command("kill", "-KILL", dpid).Run()
 	}
+
+	// Kill the pane process itself (may have called setsid() and detached,
+	// or may have no children like Claude Code)
+	_ = exec.Command("kill", "-TERM", pid).Run()
+	time.Sleep(100 * time.Millisecond)
+	_ = exec.Command("kill", "-KILL", pid).Run()
 
 	return nil
 }

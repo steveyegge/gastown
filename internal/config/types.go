@@ -2,8 +2,9 @@
 package config
 
 import (
-	"path/filepath"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -262,6 +263,11 @@ type RuntimeConfig struct {
 	// Empty array [] means no args (not "use defaults").
 	Args []string `json:"args"`
 
+	// Env are environment variables to set when starting the agent.
+	// These are merged with the standard GT_* variables.
+	// Used for agent-specific configuration like OPENCODE_PERMISSION.
+	Env map[string]string `json:"env,omitempty"`
+
 	// InitialPrompt is an optional first message to send after startup.
 	// For claude, this is passed as the prompt argument.
 	// Empty by default (hooks handle context).
@@ -469,8 +475,33 @@ func defaultRuntimeCommand(provider string) string {
 	case "generic":
 		return ""
 	default:
-		return "claude"
+		return resolveClaudePath()
 	}
+}
+
+// resolveClaudePath finds the claude binary, checking PATH first then common installation locations.
+// This handles the case where claude is installed as an alias (not in PATH) which doesn't work
+// in non-interactive shells spawned by tmux.
+func resolveClaudePath() string {
+	// First, try to find claude in PATH
+	if path, err := exec.LookPath("claude"); err == nil {
+		return path
+	}
+
+	// Check common Claude Code installation locations
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "claude" // Fall back to bare command
+	}
+
+	// Standard Claude Code installation path
+	claudePath := filepath.Join(home, ".claude", "local", "claude")
+	if _, err := os.Stat(claudePath); err == nil {
+		return claudePath
+	}
+
+	// Fall back to bare command (might work if PATH is set differently in tmux)
+	return "claude"
 }
 
 func defaultRuntimeArgs(provider string) []string {
@@ -544,6 +575,11 @@ func defaultProcessNames(provider, command string) []string {
 	if provider == "claude" {
 		return []string{"node"}
 	}
+	if provider == "opencode" {
+		// OpenCode runs as Node.js process, need both for IsAgentRunning detection.
+		// tmux pane_current_command may show "node" or "opencode" depending on how invoked.
+		return []string{"opencode", "node"}
+	}
 	if command != "" {
 		return []string{filepath.Base(command)}
 	}
@@ -564,6 +600,12 @@ func defaultReadyDelayMs(provider string) int {
 	}
 	if provider == "codex" {
 		return 3000
+	}
+	if provider == "opencode" {
+		// OpenCode requires delay-based detection because its TUI uses
+		// box-drawing characters (┃) that break prompt prefix matching.
+		// 8000ms provides reliable startup detection across models.
+		return 8000
 	}
 	return 0
 }

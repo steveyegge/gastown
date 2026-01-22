@@ -138,6 +138,11 @@ func runGitInit(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   ✓ Git repository already exists\n")
 	}
 
+	// Install pre-checkout hook to prevent accidental branch switches
+	if err := InstallPreCheckoutHook(hqRoot); err != nil {
+		fmt.Printf("   %s Could not install pre-checkout hook: %v\n", style.Dim.Render("⚠"), err)
+	}
+
 	// Create GitHub repo if requested
 	if gitInitGitHub != "" {
 		if err := createGitHubRepo(hqRoot, gitInitGitHub, !gitInitPublic); err != nil {

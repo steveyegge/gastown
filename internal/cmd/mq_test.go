@@ -740,3 +740,64 @@ func TestPolecatCleanupTimeoutConstant(t *testing.T) {
 		t.Errorf("expectedMaxCleanupWait = %v, want 5m", expectedMaxCleanupWait)
 	}
 }
+
+// TestMRFilteringByLabel verifies that MRs are identified by their gt:merge-request
+// label rather than the deprecated issue_type field. This is the fix for #816 where
+// MRs created by `gt done` have issue_type='task' but correct gt:merge-request label.
+func TestMRFilteringByLabel(t *testing.T) {
+	tests := []struct {
+		name     string
+		issue    *beads.Issue
+		wantIsMR bool
+	}{
+		{
+			name: "MR with correct label and wrong type (bug #816 scenario)",
+			issue: &beads.Issue{
+				ID:     "mr-1",
+				Title:  "Merge: test-branch",
+				Type:   "task", // Wrong type (default from bd create)
+				Labels: []string{"gt:merge-request"}, // Correct label
+			},
+			wantIsMR: true,
+		},
+		{
+			name: "MR with correct label and correct type",
+			issue: &beads.Issue{
+				ID:     "mr-2",
+				Title:  "Merge: another-branch",
+				Type:   "merge-request",
+				Labels: []string{"gt:merge-request"},
+			},
+			wantIsMR: true,
+		},
+		{
+			name: "Task without MR label",
+			issue: &beads.Issue{
+				ID:     "task-1",
+				Title:  "Regular task",
+				Type:   "task",
+				Labels: []string{"other-label"},
+			},
+			wantIsMR: false,
+		},
+		{
+			name: "Issue with no labels",
+			issue: &beads.Issue{
+				ID:    "issue-1",
+				Title: "No labels",
+				Type:  "task",
+			},
+			wantIsMR: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := beads.HasLabel(tt.issue, "gt:merge-request")
+			if got != tt.wantIsMR {
+				t.Errorf("HasLabel(%q, \"gt:merge-request\") = %v, want %v",
+					tt.issue.ID, got, tt.wantIsMR)
+			}
+		})
+	}
+}

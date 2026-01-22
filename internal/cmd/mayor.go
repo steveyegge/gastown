@@ -200,6 +200,13 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("building startup command: %w", err)
 			}
 
+			// Kill all processes in the pane before respawning to prevent orphan leaks
+			// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
+			if err := t.KillPaneProcesses(paneID); err != nil {
+				// Non-fatal but log the warning
+				style.PrintWarning("could not kill pane processes: %v", err)
+			}
+
 			if err := t.RespawnPane(paneID, startupCmd); err != nil {
 				return fmt.Errorf("restarting runtime: %w", err)
 			}

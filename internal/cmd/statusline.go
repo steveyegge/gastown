@@ -205,6 +205,9 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 		AgentRefinery: {},
 	}
 
+	// Track deacon presence (just icon, no count)
+	hasDeacon := false
+
 	// Single pass: track rig status AND agent health
 	for _, s := range sessions {
 		agent := categorizeSession(s)
@@ -234,6 +237,11 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 				health.working++
 			}
 		}
+
+		// Track deacon presence (just the icon, no count)
+		if agent.Type == AgentDeacon {
+			hasDeacon = true
+		}
 	}
 
 	// Get operational state for each rig
@@ -252,7 +260,8 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	// Add per-agent-type health in consistent order
 	// Format: "1/3 👁️" = 1 working out of 3 total
 	// Only show agent types that have sessions
-	// Note: Polecats and Deacon excluded - idle state display is misleading noise
+	// Note: Polecats excluded - idle state is misleading noise
+	// Deacon gets just an icon (no count) - shown separately below
 	agentOrder := []AgentType{AgentWitness, AgentRefinery}
 	var agentParts []string
 	for _, agentType := range agentOrder {
@@ -265,6 +274,11 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	}
 	if len(agentParts) > 0 {
 		parts = append(parts, strings.Join(agentParts, " "))
+	}
+
+	// Add deacon icon if running (just presence, no count)
+	if hasDeacon {
+		parts = append(parts, AgentTypeIcons[AgentDeacon])
 	}
 
 	// Build rig status display with LED indicators

@@ -23,22 +23,35 @@ just `gt done`.
 ### The Self-Cleaning Model
 
 Polecats are **self-cleaning**. When you run `gt done`:
-1. Your branch is pushed to origin
-2. An MR is created in the Refinery merge queue
-3. Your sandbox gets nuked
-4. Your session exits
-5. **You cease to exist**
+1. Syncs beads
+2. Nukes your sandbox
+3. Exits your session
+4. **You cease to exist**
 
-The **Refinery** handles all merging to main. It serializes concurrent work, rebases,
-and resolves conflicts. You NEVER push directly to main - that's the Refinery's job.
+There is no "idle" state. There is no "waiting for more work". Done means GONE.
+
+**Two workflow types:**
+
+**1. Merge Queue Workflow (gastown, beads repos):**
+- Push branch to origin
+- `gt done` submits to Refinery merge queue
+- Refinery handles merge to main
+
+**2. PR Workflow (longeye and similar repos):**
+- Create GitHub PR
+- Monitor for CI and review feedback
+- Address any issues
+- `gt done` when PR is approved and CI green
+- Maintainer or Refinery merges the PR
+
+**In both cases, you still run `gt done` at the end.** The difference is WHEN:
+- Merge queue: After implementation and tests pass
+- PR workflow: After PR is approved and CI is green
 
 **Polecats do NOT:**
 - Push directly to main (`git push origin main` - WRONG)
-- Create pull requests (you're not an external contributor)
-- Wait around to see if their work merges
-
-There is no "idle" state. There is no "waiting for more work". Done means GONE.
-The Refinery will handle the merge. You will not be there to see it.
+- Merge their own PRs (maintainer or Refinery does this)
+- Wait around after running `gt done`
 
 **If you have finished your implementation work, your ONLY next action is:**
 ```bash
@@ -180,6 +193,22 @@ bd show hq-abc      # Routes to town beads
 - Each rig's prefix (e.g., `gt-`) maps to its beads location
 - Debug with: `BD_DEBUG_ROUTING=1 bd show <id>`
 
+## Where to File Beads
+
+**File in the rig that OWNS the code, not your current rig.**
+
+You're working in **{{ .RigName }}** (prefix `{{ .IssuePrefix }}-`). Issues about THIS rig's code
+go here by default. But if you discover bugs/issues in OTHER projects:
+
+| Issue is about... | File in | Command |
+|-------------------|---------|---------|
+| This rig's code ({{ .RigName }}) | Here (default) | `bd create "..."` |
+| `bd` CLI (beads tool) | **beads** | `bd create --rig beads "..."` |
+| `gt` CLI (gas town tool) | **gastown** | `bd create --rig gastown "..."` |
+| Cross-rig coordination | **HQ** | `bd create --prefix hq- "..."` |
+
+**The test**: "Which repo would the fix be committed to?"
+
 ## Gotchas when Filing Beads
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
@@ -276,35 +305,48 @@ bd ready                   # See next step
 
 When all steps are done, the molecule gets squashed automatically when you run `gt done`.
 
-## Formula Feedback Loop
+## PR Workflow (for repos that use pull requests)
 
-**Crew build formulas, you run them.**
+**Applies to:** longeye and other repos that require code review via GitHub PRs
 
-As a polecat, you execute formula instances (molecules/wisps). When you encounter
-formula issues:
+The **mol-polecat-work** molecule now includes PR creation and monitoring steps for
+repos that use PR-based workflows. Here's what's different:
 
-**Report to the owning crew:**
+### Old Workflow (Merge Queue)
+1. Implement → Test → `gt done` → Refinery merges
+
+### New Workflow (PR-based)
+1. Implement → Test
+2. **Create PR** (with branch naming: adam/YY/M/description)
+3. **Monitor PR** - Check CI and review status
+4. **Address feedback** - Fix issues if CI fails or reviewers comment
+5. **Verify ready** - Confirm CI green and PR approved
+6. **`gt done`** - Mark complete and exit (maintainer will merge)
+
+### Key Differences
+
+**You keep the bead OPEN** during PR review. Don't mark complete until:
+- ✓ All CI checks passing
+- ✓ Review comments addressed
+- ✓ PR approved by reviewer
+
+**You may cycle multiple times** while waiting for review or fixing feedback:
 ```bash
-gt mail send {{ .RigName }}/crew/<formula-owner> -s "Formula issue: <formula-name>" -m "
-Step: <which step failed>
-Molecule: <mol-id>
-Error: <what went wrong>
-Suggested fix: <if obvious>
-"
+# If context filling while waiting for review
+gt handoff -s "Waiting for PR review" -m "Issue: <issue>
+PR: #<number>
+Status: <current state>
+Next: Continue monitoring"
 ```
 
-**What to report:**
-- Steps that fail in edge cases
-- Unclear step instructions
-- Missing steps for common scenarios
-- Steps that could be automated better
+Your next session resumes from the current molecule step.
 
-**What NOT to do:**
-- Don't try to fix the formula yourself (that's crew's job)
-- Don't skip the report if the issue is minor (crew needs feedback)
+**Branch naming is critical:**
+- Format: `adam/YY/M/<short-description>`
+- Example: `adam/26/1/fix-social-media-parser`
+- This matches the user convention for the repo
 
-This feedback loop keeps formulas improving: you execute and report, crew maintains
-and enhances.
+**You do NOT merge the PR** - a maintainer or Refinery does that.
 
 ## Before Signaling Done (MANDATORY)
 

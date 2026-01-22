@@ -25,6 +25,7 @@ Protomolecule (frozen template) ─── Solid
 | **Molecule** | Active workflow instance with trackable steps |
 | **Wisp** | Ephemeral molecule for patrol cycles (never synced) |
 | **Digest** | Squashed summary of completed molecule |
+| **Shiny Workflow** | Canonical polecat formula: design → implement → review → test → submit |
 
 ## Common Mistake: Reading Formulas Directly
 

@@ -84,26 +84,24 @@ const (
 	// Gas Town registers with beads. These types were extracted from beads core
 	// in v0.46.0 and now require explicit configuration.
 	//
-	// Types:
-	//   agent        - Agent identity beads (polecat, crew, witness, etc.)
-	//   role         - Role definitions
-	//   rig          - Rig registration beads
-	//   convoy       - Work convoys (grouped beads)
-	//   slot         - Agent work slots
-	//   queue        - Work queues
-	//   message      - Mail messages
-	//   molecule     - Workflow molecules
-	//   event        - Activity events
-	//   wisp         - Ephemeral workflow instances
-	//   merge-request - GitLab/GitHub MRs
-	//   gate         - Timer gates for workflows
-	//   warrant      - Session termination warrants
-	BeadsCustomTypes = "agent,role,rig,convoy,slot,queue,message,molecule,event,wisp,merge-request,gate,warrant"
+	// Type origins:
+	//   agent         - Agent identity beads (gt install, rig init)
+	//   role          - Agent role definitions (gt doctor role checks)
+	//   rig           - Rig identity beads (gt rig init)
+	//   convoy        - Cross-project work tracking
+	//   slot          - Exclusive access / merge slots
+	//   queue         - Message queue routing (gt mail queue)
+	//   event         - Session/cost events (gt costs record)
+	//   message       - Mail system (gt mail send, mailbox, router)
+	//   molecule      - Work decomposition (patrol checks, gt swarm)
+	//   gate          - Async coordination (bd gate wait, park/resume)
+	//   merge-request - Refinery MR processing (gt done, refinery)
+	BeadsCustomTypes = "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"
 )
 
 // BeadsCustomTypesList returns the custom types as a slice.
 func BeadsCustomTypesList() []string {
-	return []string{"agent", "role", "rig", "convoy", "slot", "queue", "message", "molecule", "event", "wisp", "merge-request", "gate", "warrant"}
+	return []string{"agent", "role", "rig", "convoy", "slot", "queue", "event", "message", "molecule", "gate", "merge-request"}
 }
 
 // Git branch names.
