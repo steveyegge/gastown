@@ -63,8 +63,18 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 // storeArgsInBead stores args in the bead's description using attached_args field.
 // This enables no-tmux mode where agents discover args via gt prime / bd show.
 func storeArgsInBead(beadID, args string) error {
+	// Resolve the correct rig directory for this bead's prefix.
+	// This ensures bd can find the bead in cross-rig scenarios (e.g., bd- beads from gastown).
+	workDir := ""
+	if townRoot, err := workspace.FindFromCwd(); err == nil {
+		workDir = beads.ResolveHookDir(townRoot, beadID, "")
+	}
+
 	// Get the bead to preserve existing description content
 	showCmd := exec.Command("bd", "show", beadID, "--json")
+	if workDir != "" {
+		showCmd.Dir = workDir
+	}
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -99,8 +109,11 @@ func storeArgsInBead(beadID, args string) error {
 		_ = os.WriteFile(logPath, []byte(newDesc), 0644)
 	}
 
-	// Update the bead
+	// Update the bead (use same workDir as the show command)
 	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	if workDir != "" {
+		updateCmd.Dir = workDir
+	}
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -116,8 +129,18 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 		return nil
 	}
 
+	// Resolve the correct rig directory for this bead's prefix.
+	// This ensures bd can find the bead in cross-rig scenarios (e.g., bd- beads from gastown).
+	workDir := ""
+	if townRoot, err := workspace.FindFromCwd(); err == nil {
+		workDir = beads.ResolveHookDir(townRoot, beadID, "")
+	}
+
 	// Get the bead to preserve existing description content
 	showCmd := exec.Command("bd", "show", beadID, "--json")
+	if workDir != "" {
+		showCmd.Dir = workDir
+	}
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -145,8 +168,11 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 	// Update the description
 	newDesc := beads.SetAttachmentFields(issue, fields)
 
-	// Update the bead
+	// Update the bead (use same workDir as the show command)
 	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	if workDir != "" {
+		updateCmd.Dir = workDir
+	}
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -167,10 +193,20 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 		_ = os.WriteFile(logPath, []byte("called"), 0644)
 	}
 
+	// Resolve the correct rig directory for this bead's prefix.
+	// This ensures bd can find the bead in cross-rig scenarios (e.g., bd- beads from gastown).
+	workDir := ""
+	if townRoot, err := workspace.FindFromCwd(); err == nil {
+		workDir = beads.ResolveHookDir(townRoot, beadID, "")
+	}
+
 	issue := &beads.Issue{}
 	if logPath == "" {
 		// Get the bead to preserve existing description content
 		showCmd := exec.Command("bd", "show", beadID, "--json")
+		if workDir != "" {
+			showCmd.Dir = workDir
+		}
 		out, err := showCmd.Output()
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
@@ -205,8 +241,11 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 		_ = os.WriteFile(logPath, []byte(newDesc), 0644)
 	}
 
-	// Update the bead
+	// Update the bead (use same workDir as the show command)
 	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	if workDir != "" {
+		updateCmd.Dir = workDir
+	}
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
