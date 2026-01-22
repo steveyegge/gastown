@@ -189,9 +189,10 @@ gt config agents
   - Set per-role agent configuration
   - Support `<agent>:<model>` syntax (e.g., `claude:haiku`)
 
-- [ ] **3.3** Add `gt config add-agent` command
+- [x] **3.3** Add `gt config add-agent` command
   - Register custom agents via CLI
   - Generate template configuration in settings/agents.json
+  - *Completed: Implemented with comprehensive flags for command, args, hooks, session management, and process detection*
 
 - [ ] **3.4** Add `gt config agents` listing command
   - Show all registered agents (built-in + custom)
