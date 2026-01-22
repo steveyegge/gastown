@@ -519,9 +519,9 @@ func runMqIntegrationLand(cmd *cobra.Command, args []string) error {
 
 // findOpenMRsForIntegration finds all open merge requests targeting an integration branch.
 func findOpenMRsForIntegration(bd *beads.Beads, targetBranch string) ([]*beads.Issue, error) {
-	// List all open MRs by label (bd-3q6.10: MRs now use type=task)
+	// List all open merge requests
 	opts := beads.ListOptions{
-		Label:  "gt:merge-request",
+		Type:   "merge-request",
 		Status: "open",
 	}
 	allMRs, err := bd.List(opts)
@@ -654,9 +654,9 @@ func runMqIntegrationStatus(cmd *cobra.Command, args []string) error {
 	// Query for MRs targeting this integration branch (use resolved name)
 	targetBranch := branchName
 
-	// Get all MRs by label (bd-3q6.10: MRs now use type=task)
+	// Get all merge-request issues
 	allMRs, err := bd.List(beads.ListOptions{
-		Label:  "gt:merge-request",
+		Type:   "merge-request",
 		Status: "", // all statuses
 	})
 	if err != nil {

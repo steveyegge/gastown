@@ -416,12 +416,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 
 		// Initialize bd database if it doesn't exist.
 		// beads.db is gitignored so it won't exist after clone - we need to create it.
-		// bd init --prefix will create the database and auto-import from issues.jsonl.
+		// Use --no-auto-import to configure custom types BEFORE importing (bd-3q6.10).
 		if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
 			// Check if town-level beads uses Dolt backend - inherit it
 			townBeadsDir := filepath.Join(m.townRoot, ".beads")
 			townBackend := beads.GetStorageBackend(townBeadsDir)
-			initArgs := []string{"init", "--prefix", opts.BeadsPrefix} // opts.BeadsPrefix validated earlier
+			initArgs := []string{"init", "--prefix", opts.BeadsPrefix, "--no-auto-import"} // opts.BeadsPrefix validated earlier
 			if townBackend == "dolt" {
 				initArgs = append(initArgs, "--backend", "dolt")
 			}
@@ -431,9 +431,15 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 				fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
 			}
 			// Configure custom types for Gas Town (beads v0.46.0+)
+			// IMPORTANT: This must run BEFORE any auto-import to avoid validation failures (bd-3q6.10).
 			configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 			configCmd.Dir = mayorRigPath
 			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
+
+			// Trigger JSONL import now that custom types are configured.
+			syncCmd := exec.Command("bd", "sync")
+			syncCmd.Dir = mayorRigPath
+			_, _ = syncCmd.CombinedOutput() // Ignore errors - JSONL might not exist yet
 		}
 	}
 
@@ -661,8 +667,10 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	townBeadsDir := filepath.Join(m.townRoot, ".beads")
 	townBackend := beads.GetStorageBackend(townBeadsDir)
 
-	// Run bd init if available
-	initArgs := []string{"init", "--prefix", prefix}
+	// Run bd init with --no-auto-import to create database WITHOUT importing from JSONL.
+	// This allows us to configure custom types BEFORE the import runs (bd-3q6.10).
+	// Without this, auto-import fails when issues.jsonl contains custom types like merge-request.
+	initArgs := []string{"init", "--prefix", prefix, "--no-auto-import"}
 	if townBackend == "dolt" {
 		initArgs = append(initArgs, "--backend", "dolt")
 	}
@@ -680,13 +688,21 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		}
 	}
 
-	// Configure custom types for Gas Town (agent, role, rig, convoy).
+	// Configure custom types for Gas Town (agent, role, rig, convoy, merge-request, etc).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
+	// IMPORTANT: This must run BEFORE any auto-import to avoid validation failures (bd-3q6.10).
 	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	configCmd.Dir = rigPath
 	configCmd.Env = filteredEnv
 	// Ignore errors - older beads versions don't need this
 	_, _ = configCmd.CombinedOutput()
+
+	// Trigger JSONL import now that custom types are configured.
+	// bd sync will import from issues.jsonl and validate types correctly.
+	syncCmd := exec.Command("bd", "sync")
+	syncCmd.Dir = rigPath
+	syncCmd.Env = filteredEnv
+	_, _ = syncCmd.CombinedOutput() // Ignore errors - JSONL might not exist yet
 
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.

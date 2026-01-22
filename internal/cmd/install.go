@@ -405,8 +405,11 @@ func writeJSON(path string, data interface{}) error {
 // initTownBeads initializes town-level beads database using bd init.
 // Town beads use the "hq-" prefix for mayor mail and cross-rig coordination.
 func initTownBeads(townPath string) error {
-	// Run: bd init --prefix hq
-	cmd := exec.Command("bd", "init", "--prefix", "hq")
+	// Run: bd init --prefix hq --no-auto-import
+	// Use --no-auto-import to create database WITHOUT importing from JSONL.
+	// This allows us to configure custom types BEFORE the import runs (bd-3q6.10).
+	// Without this, auto-import fails when issues.jsonl contains custom types like merge-request.
+	cmd := exec.Command("bd", "init", "--prefix", "hq", "--no-auto-import")
 	cmd.Dir = townPath
 
 	output, err := cmd.CombinedOutput()
@@ -432,14 +435,21 @@ func initTownBeads(townPath string) error {
 		return fmt.Errorf("bd config set issue_prefix failed: %s", strings.TrimSpace(string(prefixOutput)))
 	}
 
-	// Configure custom types for Gas Town (agent, role, rig, convoy, slot).
+	// Configure custom types for Gas Town (agent, role, rig, convoy, slot, merge-request, etc).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
+	// IMPORTANT: This must run BEFORE any auto-import to avoid validation failures (bd-3q6.10).
 	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	configCmd.Dir = townPath
 	if configOutput, configErr := configCmd.CombinedOutput(); configErr != nil {
 		// Non-fatal: older beads versions don't need this, newer ones do
 		fmt.Printf("   %s Could not set custom types: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(configOutput)))
 	}
+
+	// Trigger JSONL import now that custom types are configured.
+	// bd sync will import from issues.jsonl and validate types correctly.
+	syncCmd := exec.Command("bd", "sync")
+	syncCmd.Dir = townPath
+	_, _ = syncCmd.CombinedOutput() // Ignore errors - JSONL might not exist yet
 
 	// Configure allowed_prefixes for convoy beads (hq-cv-* IDs).
 	// This allows bd create --id=hq-cv-xxx to pass prefix validation.

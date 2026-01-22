@@ -1143,9 +1143,9 @@ func getMQSummary(r *rig.Rig) *MQSummary {
 	// Create beads instance for the rig
 	b := beads.New(r.BeadsPath())
 
-	// Query for all open MRs by label (bd-3q6.10: MRs now use type=task)
+	// Query for all open merge-request type issues
 	opts := beads.ListOptions{
-		Label:    "gt:merge-request",
+		Type:     "merge-request",
 		Status:   "open",
 		Priority: -1, // No priority filter
 	}
