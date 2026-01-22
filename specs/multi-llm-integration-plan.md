@@ -232,7 +232,7 @@ gt config agents
   - Add tests for per-role configuration
   - Test Claude -> OpenCode -> Kiro switching
 
-- [ ] **5.3** E2E tests for OpenCode
+- [x] **5.3** E2E tests for OpenCode
   - Session creation and resume
   - Hook execution verification
   - Process detection in tmux

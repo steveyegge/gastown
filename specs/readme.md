@@ -47,7 +47,7 @@ Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
 - [x] 3.1 Add `gt config agent <name>` command
 - [x] 3.2 Add `gt config role-agent <role> <agent>` command
 - [x] 3.3 Add `gt config add-agent` command
-- [ ] 3.4 Add `gt config agents` listing command
+- [x] 3.4 Add `gt config agents` listing command
 
 ### Phase 4: Kiro CLI
 - [ ] 4.1 Research kiro-cli hooks system
@@ -58,7 +58,7 @@ Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
 ### Phase 5: Testing
 - [ ] 5.1 Unit tests for Provider interface
 - [ ] 5.2 Integration tests for agent switching
-- [ ] 5.3 E2E tests for OpenCode
+- [x] 5.3 E2E tests for OpenCode
 - [ ] 5.4 E2E tests for Kiro CLI
 
 ### Phase 6: Documentation
