@@ -17,8 +17,9 @@
 .DS_Store
 Thumbs.db
 
-# Claude Code local state
+# Claude Code local state (directory and symlink)
 .claude/
+.claude
 
 # Test
 coverage.out
