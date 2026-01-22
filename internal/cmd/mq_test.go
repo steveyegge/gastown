@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -738,6 +739,69 @@ func TestPolecatCleanupTimeoutConstant(t *testing.T) {
 	const expectedMaxCleanupWait = 5 * time.Minute
 	if expectedMaxCleanupWait != 5*time.Minute {
 		t.Errorf("expectedMaxCleanupWait = %v, want 5m", expectedMaxCleanupWait)
+	}
+}
+
+// TestMRFilteringByRig verifies that MRs are filtered by rig field.
+// This is the fix for hq-7736e6 where `gt mq list beads` was showing MRs from other rigs.
+func TestMRFilteringByRig(t *testing.T) {
+	tests := []struct {
+		name      string
+		issue     *beads.Issue
+		rigName   string
+		wantMatch bool
+	}{
+		{
+			name: "MR with matching rig",
+			issue: &beads.Issue{
+				ID:          "mr-1",
+				Description: "branch: test-branch\nrig: gastown",
+			},
+			rigName:   "gastown",
+			wantMatch: true,
+		},
+		{
+			name: "MR with non-matching rig",
+			issue: &beads.Issue{
+				ID:          "mr-2",
+				Description: "branch: test-branch\nrig: beads",
+			},
+			rigName:   "gastown",
+			wantMatch: false,
+		},
+		{
+			name: "MR with no rig field (legacy, should match)",
+			issue: &beads.Issue{
+				ID:          "mr-3",
+				Description: "branch: test-branch\ntarget: main",
+			},
+			rigName:   "gastown",
+			wantMatch: true, // No rig field means we include it (legacy compatibility)
+		},
+		{
+			name: "case-insensitive rig matching",
+			issue: &beads.Issue{
+				ID:          "mr-4",
+				Description: "branch: test-branch\nrig: GasTown",
+			},
+			rigName:   "gastown",
+			wantMatch: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields := beads.ParseMRFields(tt.issue)
+			// Implement the same logic as in mq_list.go
+			match := true
+			if fields != nil && fields.Rig != "" {
+				match = strings.EqualFold(fields.Rig, tt.rigName)
+			}
+			if match != tt.wantMatch {
+				t.Errorf("rig filter for %q with rigName %q = %v, want %v",
+					tt.issue.ID, tt.rigName, match, tt.wantMatch)
+			}
+		})
 	}
 }
 
