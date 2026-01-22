@@ -44,7 +44,7 @@ Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
 - [x] 2.4 Update mayor and rig managers
 
 ### Phase 3: CLI Commands
-- [ ] 3.1 Add `gt config agent <name>` command
+- [x] 3.1 Add `gt config agent <name>` command
 - [x] 3.2 Add `gt config role-agent <role> <agent>` command
 - [ ] 3.3 Add `gt config add-agent` command
 - [ ] 3.4 Add `gt config agents` listing command
