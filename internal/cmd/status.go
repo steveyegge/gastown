@@ -636,8 +636,8 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 			} else if parts[1] == "refinery" {
 				agentBeadID = beads.RefineryBeadIDWithPrefix(prefix, rig)
 			} else if len(parts) == 2 {
-				// polecat: rig/name
-				agentBeadID = beads.PolecatBeadIDWithPrefix(prefix, rig, parts[1])
+				// polecat: rig/name - uses hq- prefix for town beads (fix for gt-myc)
+				agentBeadID = beads.PolecatBeadIDTown(rig, parts[1])
 			}
 		}
 	}
@@ -1053,14 +1053,14 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 		})
 	}
 
-	// Polecats
+	// Polecats - use hq- prefix for town beads (fix for gt-myc)
 	for _, name := range r.Polecats {
 		defs = append(defs, agentDef{
 			name:    name,
 			address: r.Name + "/" + name,
 			session: fmt.Sprintf("gt-%s-%s", r.Name, name),
 			role:    "polecat",
-			beadID:  beads.PolecatBeadIDWithPrefix(prefix, r.Name, name),
+			beadID:  beads.PolecatBeadIDTown(r.Name, name),
 		})
 	}
 

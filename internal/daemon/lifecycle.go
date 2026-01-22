@@ -734,8 +734,8 @@ func (d *Daemon) identityToAgentBeadID(identity string) string {
 		prefix := config.GetRigPrefix(d.config.TownRoot, parsed.RigName)
 		return beads.CrewBeadIDWithPrefix(prefix, parsed.RigName, parsed.AgentName)
 	case "polecat":
-		prefix := config.GetRigPrefix(d.config.TownRoot, parsed.RigName)
-		return beads.PolecatBeadIDWithPrefix(prefix, parsed.RigName, parsed.AgentName)
+		// Polecat agent beads use hq- prefix and are stored in town beads (fix for gt-myc).
+		return beads.PolecatBeadIDTown(parsed.RigName, parsed.AgentName)
 	default:
 		return ""
 	}

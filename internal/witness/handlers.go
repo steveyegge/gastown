@@ -495,15 +495,9 @@ type agentBeadResponse struct {
 // ZFC #10: This enables the Witness to verify it's safe to nuke before proceeding.
 // The polecat self-reports its git state when running `gt done`, and we trust that report.
 func getCleanupStatus(workDir, rigName, polecatName string) string {
-	// Construct agent bead ID using the rig's configured prefix
-	// This supports non-gt prefixes like "bd-" for the beads rig
-	townRoot, err := workspace.Find(workDir)
-	if err != nil || townRoot == "" {
-		// Fall back to default prefix
-		townRoot = workDir
-	}
-	prefix := beads.GetPrefixForRig(townRoot, rigName)
-	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+	// Construct agent bead ID using hq- prefix for town-level storage (fix for gt-myc).
+	// All polecat agent beads are stored in town beads with hq- prefix to match manager.go.
+	agentBeadID := beads.PolecatBeadIDTown(rigName, polecatName)
 
 	output, err := util.ExecWithOutput(workDir, "bd", "show", agentBeadID, "--json")
 	if err != nil {
@@ -917,9 +911,9 @@ func RespawnPolecatWithHookedWork(workDir, rigName, polecatName string) error {
 	t := tmux.NewTmux()
 	mgr := polecat.NewManager(r, g, t)
 
-	// Get the hook_bead from the agent bead
-	prefix := beads.GetPrefixForRig(townRoot, rigName)
-	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+	// Get the hook_bead from the agent bead.
+	// All polecat agent beads use hq- prefix and are stored in town beads (fix for gt-myc).
+	agentBeadID := beads.PolecatBeadIDTown(rigName, polecatName)
 	bd := beads.New(rigPath)
 	_, fields, err := bd.GetAgentBead(agentBeadID)
 	if err != nil || fields == nil {

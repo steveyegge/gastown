@@ -183,7 +183,8 @@ func rigPrefix(r *rig.Rig) string {
 }
 
 func polecatBeadIDForRig(r *rig.Rig, rigName, polecatName string) string {
-	return beads.PolecatBeadIDWithPrefix(rigPrefix(r), rigName, polecatName)
+	// All polecat agent beads use hq- prefix and are stored in town beads (fix for gt-myc).
+	return beads.PolecatBeadIDTown(rigName, polecatName)
 }
 
 // displaySafetyCheckBlocked prints blocked polecats and guidance.
