@@ -407,8 +407,8 @@ func agentIDToBeadID(agentID, townRoot string) string {
 // updateAgentHookBead updates the agent bead's state and hook when work is slung.
 // This enables the witness to see that each agent is working.
 //
-// All agent beads are stored at town level with hq- prefix to avoid
-// prefix/database mismatch issues (fix for loc-1augh, hq-cc7214.2).
+// Fix hq-cc7214.26: Auto-create agent bead if it doesn't exist.
+// This handles cases where crew members exist but their agent beads weren't created.
 func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
@@ -418,11 +418,11 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	}
 
 	// Convert agent ID to agent bead ID
-	// All agent beads now use hq- prefix and are stored in town beads:
-	//   greenplace/crew/max -> hq-greenplace-crew-max
-	//   greenplace/polecats/Toast -> hq-greenplace-polecat-Toast
-	//   mayor -> hq-mayor
-	//   greenplace/witness -> hq-greenplace-witness
+	// Agent bead prefixes depend on agent type:
+	//   - Crew: uses rig prefix (e.g., gt-gastown-crew-max)
+	//   - Polecats: uses hq- prefix (e.g., hq-gastown-polecat-Toast)
+	//   - Witness/Refinery: uses hq- prefix
+	//   - Mayor/Deacon: uses hq- prefix
 	agentBeadID := agentIDToBeadID(agentID, townRoot)
 	if agentBeadID == "" {
 		return
@@ -440,10 +440,79 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	// For cross-database scenarios, slot set may fail gracefully (warning only).
 	bd := beads.New(agentWorkDir)
 	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
+		// Fix hq-cc7214.26: If the agent bead doesn't exist, try to auto-create it
+		if strings.Contains(err.Error(), "issue not found") || strings.Contains(err.Error(), "no issue found") {
+			if autoCreated := ensureAgentBeadExists(bd, agentID, agentBeadID, townRoot); autoCreated {
+				// Retry setting the hook after creating the bead
+				if retryErr := bd.SetHookBead(agentBeadID, beadID); retryErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook after creating bead: %v\n", agentBeadID, retryErr)
+				}
+				return
+			}
+		}
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
 		return
 	}
+}
+
+// ensureAgentBeadExists creates an agent bead if it doesn't exist.
+// Returns true if a bead was created, false otherwise.
+// Fix for hq-cc7214.26: Sling fails when agent bead doesn't exist.
+func ensureAgentBeadExists(bd *beads.Beads, agentID, agentBeadID, townRoot string) bool {
+	// Parse agent ID to determine role type
+	parts := strings.Split(strings.TrimSuffix(agentID, "/"), "/")
+	if len(parts) < 2 {
+		return false
+	}
+
+	var roleType, rigName, agentName string
+
+	switch {
+	case len(parts) == 3 && parts[1] == "crew":
+		roleType = "crew"
+		rigName = parts[0]
+		agentName = parts[2]
+	case len(parts) == 3 && parts[1] == "polecats":
+		roleType = "polecat"
+		rigName = parts[0]
+		agentName = parts[2]
+	case len(parts) == 2 && parts[1] == "witness":
+		roleType = "witness"
+		rigName = parts[0]
+	case len(parts) == 2 && parts[1] == "refinery":
+		roleType = "refinery"
+		rigName = parts[0]
+	default:
+		return false
+	}
+
+	// Build description based on role type
+	var desc string
+	switch roleType {
+	case "crew":
+		desc = fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", agentName, rigName)
+	case "polecat":
+		desc = fmt.Sprintf("Polecat %s in %s - ephemeral worker agent.", agentName, rigName)
+	case "witness":
+		desc = fmt.Sprintf("Witness for %s - monitors polecats and handles escalations.", rigName)
+	case "refinery":
+		desc = fmt.Sprintf("Refinery for %s - merges completed work to main.", rigName)
+	}
+
+	fields := &beads.AgentFields{
+		RoleType:   roleType,
+		Rig:        rigName,
+		AgentState: "idle",
+	}
+
+	if _, err := bd.CreateAgentBead(agentBeadID, desc, fields); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: couldn't auto-create agent bead %s: %v\n", agentBeadID, err)
+		return false
+	}
+
+	fmt.Printf("  Auto-created agent bead: %s\n", agentBeadID)
+	return true
 }
 
 // wakeRigAgents wakes the witness and refinery for a rig after polecat dispatch.
