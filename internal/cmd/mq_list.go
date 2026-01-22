@@ -25,10 +25,11 @@ func runMQList(cmd *cobra.Command, args []string) error {
 	// Create beads wrapper for the rig - use BeadsPath() to get the git-synced location
 	b := beads.New(r.BeadsPath())
 
-	// Build list options - query for merge-request type
+	// Build list options - query for gt:merge-request label
 	// Priority -1 means no priority filter (otherwise 0 would filter to P0 only)
+	// Use Label filter instead of Type (bd-3q6.10: MRs now use type=task)
 	opts := beads.ListOptions{
-		Type:     "merge-request",
+		Label:    "gt:merge-request",
 		Priority: -1,
 	}
 

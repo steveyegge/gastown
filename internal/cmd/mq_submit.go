@@ -176,15 +176,20 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s MR already exists (idempotent)\n", style.Bold.Render("✓"))
 	} else {
 		// Create MR bead (ephemeral wisp - will be cleaned up after merge)
+		// Use type=task with gt:merge-request label (bd-3q6.10)
 		mrIssue, err = bd.Create(beads.CreateOptions{
 			Title:       title,
-			Type:        "merge-request",
+			Type:        "task",
 			Priority:    priority,
 			Description: description,
 			Ephemeral:   true,
 		})
 		if err != nil {
 			return fmt.Errorf("creating merge request bead: %w", err)
+		}
+		// Add gt:merge-request label to identify this as an MR bead
+		if _, err := bd.Run("label", "add", mrIssue.ID, "gt:merge-request"); err != nil {
+			style.PrintWarning("could not add gt:merge-request label: %v", err)
 		}
 	}
 

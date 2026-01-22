@@ -160,13 +160,17 @@ func (c *CheckMisclassifiedWisps) findMisclassifiedWisps(path string, rigName st
 // shouldBeWisp checks if an issue has characteristics indicating it should be a wisp.
 // Returns the reason string if it should be a wisp, empty string otherwise.
 func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labels []string) string {
-	// Check for merge-request type - these should always be wisps
+	// Check for merge-request type (legacy) - these should always be wisps
 	if issueType == "merge-request" {
 		return "merge-request type should be ephemeral"
 	}
 
-	// Check for patrol-related labels
+	// Check for patrol-related labels and MR label
 	for _, label := range labels {
+		// MRs are identified by gt:merge-request label (bd-3q6.10)
+		if label == "gt:merge-request" {
+			return "merge-request label indicates ephemeral MR"
+		}
 		if strings.Contains(label, "patrol") {
 			return "patrol label indicates ephemeral workflow"
 		}

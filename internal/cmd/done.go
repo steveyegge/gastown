@@ -357,9 +357,11 @@ func runDone(cmd *cobra.Command, args []string) error {
 			description += "\nconflict_task_id: null"
 
 			// Create MR bead (ephemeral wisp - will be cleaned up after merge)
+			// Use type=task with gt:merge-request label (not type=merge-request) to avoid
+			// auto-import validation failures in new worktrees (bd-3q6.10).
 			mrIssue, err := bd.Create(beads.CreateOptions{
 				Title:       title,
-				Type:        "merge-request",
+				Type:        "task",
 				Priority:    priority,
 				Description: description,
 				Ephemeral:   true,
@@ -369,15 +371,10 @@ func runDone(cmd *cobra.Command, args []string) error {
 			}
 			mrID = mrIssue.ID
 
-			// Ensure gt:merge-request label is present (bd-hdzi)
-			// The Type field should auto-convert to this label, but we verify as a safety check.
-			// If the bead doesn't have the label, gt mq list won't find it.
-			if !hasLabel(mrIssue, "gt:merge-request") {
-				style.PrintWarning("MR bead missing gt:merge-request label, adding explicitly")
-				if _, err := bd.Run("label", "add", mrID, "gt:merge-request"); err != nil {
-					// Non-fatal but concerning - log warning
-					style.PrintWarning("could not add gt:merge-request label: %v", err)
-				}
+			// Add gt:merge-request label to identify this as an MR bead
+			if _, err := bd.Run("label", "add", mrID, "gt:merge-request"); err != nil {
+				// Non-fatal but concerning - log warning
+				style.PrintWarning("could not add gt:merge-request label: %v", err)
 			}
 
 			// Update agent bead with active_mr reference (for traceability)

@@ -440,12 +440,13 @@ func TestFilterMRsByTarget_EmptyInput(t *testing.T) {
 }
 
 func TestFilterMRsByTarget_NoMRFields(t *testing.T) {
-	// Issue without MR fields in description
+	// Issue without MR fields in description (but with MR label)
 	plainIssue := &beads.Issue{
 		ID:          "issue-1",
 		Title:       "Not an MR",
-		Type:        "merge-request",
+		Type:        "task",
 		Status:      "open",
+		Labels:      []string{"gt:merge-request"},
 		Description: "Just a plain description with no MR fields",
 	}
 

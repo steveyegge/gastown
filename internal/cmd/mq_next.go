@@ -59,8 +59,9 @@ func runMQNext(cmd *cobra.Command, args []string) error {
 	b := beads.New(r.BeadsPath())
 
 	// Query for open merge-requests (ready to process)
+	// Use Label filter instead of Type (bd-3q6.10: MRs now use type=task)
 	opts := beads.ListOptions{
-		Type:     "merge-request",
+		Label:    "gt:merge-request",
 		Status:   "open",
 		Priority: -1, // No priority filter
 	}

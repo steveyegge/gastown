@@ -75,6 +75,7 @@ func makeTestIssue(id, title, issueType, status string) *beads.Issue {
 }
 
 // makeTestMR creates a test merge request issue
+// Uses type=task with gt:merge-request label (bd-3q6.10)
 func makeTestMR(id, branch, target, worker string, status string) *beads.Issue {
 	desc := beads.FormatMRFields(&beads.MRFields{
 		Branch:      branch,
@@ -86,10 +87,11 @@ func makeTestMR(id, branch, target, worker string, status string) *beads.Issue {
 	return &beads.Issue{
 		ID:          id,
 		Title:       "Merge: " + branch,
-		Type:        "merge-request",
+		Type:        "task",
 		Status:      status,
 		Priority:    2,
 		Description: desc,
+		Labels:      []string{"gt:merge-request"},
 		CreatedAt:   "2025-01-01T12:00:00Z",
 		UpdatedAt:   "2025-01-01T12:00:00Z",
 	}

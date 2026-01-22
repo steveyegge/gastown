@@ -215,11 +215,11 @@ func (m *Manager) Stop() error {
 // Uses beads merge-request issues as the source of truth (not git branches).
 // ZFC-compliant: beads is the source of truth, no state file.
 func (m *Manager) Queue() ([]QueueItem, error) {
-	// Query beads for open merge-request type issues
+	// Query beads for open MRs by label (bd-3q6.10: MRs now use type=task)
 	// BeadsPath() returns the git-synced beads location
 	b := beads.New(m.rig.BeadsPath())
 	issues, err := b.List(beads.ListOptions{
-		Type:     "merge-request",
+		Label:    "gt:merge-request",
 		Status:   "open",
 		Priority: -1, // No priority filter
 	})
