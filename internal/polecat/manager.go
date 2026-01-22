@@ -1080,20 +1080,20 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		state = StateWorking
 	}
 
-	// FIX (hq-50u3h): Also check agent bead's hook_bead field.
-	// If hook_bead is set, the polecat has work waiting and should be "working".
-	// This prevents polecats from showing as "done" when new work is hooked via gt sling.
-	// gt sling sets hook_bead atomically, so this is the reliable signal for pending work.
+	// FIX (hq-50u3h, bd-3q6.7-1): Check agent bead's hook_bead field.
+	// hook_bead is the AUTHORITATIVE source for what the polecat is working on.
+	// It's set atomically during gt sling, while assignee fields may be stale
+	// (e.g., from previous polecat lifecycle before nuke).
+	// ALWAYS use hook_bead when set, overriding any stale assignee.
 	agentBeadID := m.agentBeadID(name)
 	if _, fields, err := m.townBeads.GetAgentBead(agentBeadID); err == nil && fields != nil {
 		if fields.HookBead != "" {
 			// Polecat has hooked work - should be working, not done
 			state = StateWorking
-			// If issueID is empty, use the hook_bead as the issue reference
-			// This ensures the hooked work is visible in listings
-			if issueID == "" {
-				issueID = fields.HookBead
-			}
+			// FIX (bd-3q6.7-1): ALWAYS use hook_bead as the issue reference.
+			// Stale assignee fields from previous lifecycle must not override
+			// the newly hooked work. hook_bead is the authoritative source.
+			issueID = fields.HookBead
 		}
 	}
 
