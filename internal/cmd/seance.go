@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
@@ -324,6 +326,35 @@ type sessionLocation struct {
 	projectDir string // The project directory name (e.g., "-Users-jv-gt-gastown-crew-propane")
 }
 
+// sessionsIndexLockTimeout is how long to wait for the index lock.
+const sessionsIndexLockTimeout = 5 * time.Second
+
+// lockSessionsIndex acquires an exclusive lock on the sessions index file.
+// Returns the lock (caller must unlock) or error if lock cannot be acquired.
+// The lock file is created adjacent to the index file with a .lock suffix.
+func lockSessionsIndex(indexPath string) (*flock.Flock, error) {
+	lockPath := indexPath + ".lock"
+
+	// Ensure the directory exists
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+		return nil, fmt.Errorf("creating lock directory: %w", err)
+	}
+
+	lock := flock.New(lockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), sessionsIndexLockTimeout)
+	defer cancel()
+
+	locked, err := lock.TryLockContext(ctx, 100*time.Millisecond)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring lock: %w", err)
+	}
+	if !locked {
+		return nil, fmt.Errorf("timeout waiting for sessions index lock")
+	}
+
+	return lock, nil
+}
+
 // findSessionLocation searches all account config directories for a session.
 // Returns the config directory and project directory that contain the session.
 func findSessionLocation(townRoot, sessionID string) *sessionLocation {
@@ -500,8 +531,17 @@ func symlinkSessionToCurrentAccount(townRoot, sessionID string) (cleanup func(),
 		return nil, fmt.Errorf("session not found in source index")
 	}
 
-	// Read or create target index
+	// Read or create target index (with file locking to prevent race conditions)
 	targetIndexPath := filepath.Join(currentProjectDir, "sessions-index.json")
+
+	// Acquire lock for read-modify-write operation
+	lock, err := lockSessionsIndex(targetIndexPath)
+	if err != nil {
+		_ = os.Remove(targetSessionFile)
+		return nil, fmt.Errorf("locking sessions index: %w", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
 	var targetIndex sessionsIndex
 	if targetIndexData, err := os.ReadFile(targetIndexPath); err == nil {
 		_ = json.Unmarshal(targetIndexData, &targetIndex)
@@ -542,6 +582,14 @@ func symlinkSessionToCurrentAccount(townRoot, sessionID string) (cleanup func(),
 		_ = os.Remove(targetSessionFile)
 		// If we modified the index, remove the entry we added
 		if indexModified {
+			// Acquire lock for read-modify-write operation
+			cleanupLock, lockErr := lockSessionsIndex(targetIndexPath)
+			if lockErr != nil {
+				// Best effort cleanup - proceed without lock
+				return
+			}
+			defer func() { _ = cleanupLock.Unlock() }()
+
 			// Re-read index, remove our entry, write it back
 			if data, err := os.ReadFile(targetIndexPath); err == nil {
 				var idx sessionsIndex
@@ -637,13 +685,23 @@ func cleanupOrphanedSessionSymlinks() {
 		// Clean up orphaned entries from sessions-index.json
 		if len(orphanedSessionIDs) > 0 {
 			indexPath := filepath.Join(projPath, "sessions-index.json")
+
+			// Acquire lock for read-modify-write operation
+			lock, lockErr := lockSessionsIndex(indexPath)
+			if lockErr != nil {
+				// Best effort cleanup - skip this project if lock fails
+				continue
+			}
+
 			data, err := os.ReadFile(indexPath)
 			if err != nil {
+				_ = lock.Unlock()
 				continue
 			}
 
 			var index sessionsIndex
 			if err := json.Unmarshal(data, &index); err != nil {
+				_ = lock.Unlock()
 				continue
 			}
 
@@ -668,6 +726,8 @@ func cleanupOrphanedSessionSymlinks() {
 					_ = os.WriteFile(indexPath, newData, 0600)
 				}
 			}
+
+			_ = lock.Unlock()
 		}
 	}
 }
