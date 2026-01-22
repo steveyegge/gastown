@@ -41,7 +41,7 @@ Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
 - [x] 2.1 Update crew manager with `ResolveAgentConfig("crew")`
 - [x] 2.2 Update deacon manager
 - [x] 2.3 Update autonomous managers (polecat, witness, refinery)
-- [ ] 2.4 Update mayor and rig managers
+- [x] 2.4 Update mayor and rig managers
 
 ### Phase 3: CLI Commands
 - [ ] 3.1 Add `gt config agent <name>` command
@@ -82,6 +82,8 @@ _Agents: Add notes here after completing tasks._
 - **Phase 2.2**: Updated deacon manager (`internal/cmd/deacon.go`). Removed `internal/claude` import. Now uses `config.ResolveRoleAgentConfig("deacon", townRoot, "")` and `runtime.EnsureSettingsForRole()`. Deacon is a town-level role so it passes empty string for rigPath.
 
 - **Phase 2.3**: Updated witness and refinery managers. Polecat manager was already updated. For witness (`internal/witness/manager.go`): removed `internal/claude` import, added `runtime` import, replaced `claude.EnsureSettingsForRole()` with `runtime.EnsureSettingsForRole()` using runtimeConfig. For refinery (`internal/refinery/manager.go`): replaced `t.IsClaudeRunning(sessionID)` calls with agent-agnostic detection using `config.ResolveRoleAgentConfig()`, `config.ExpectedPaneCommands()`, and `t.IsRuntimeRunning()`. Moved `townRoot` computation earlier in `Start()` function to share it across both agent detection checks and startup command building.
+
+- **Phase 2.4**: Updated mayor manager (`internal/mayor/manager.go`): removed `internal/claude` import, added `runtime` import, replaced `claude.EnsureSettingsForRole()` with `runtime.EnsureSettingsForRole()` using runtimeConfig. Agent detection was already updated. The rig.go CLI file delegates to already-updated managers, no changes needed.
 
 ---
 
