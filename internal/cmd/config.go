@@ -30,6 +30,7 @@ Commands:
   gt config agent get <name>         Show agent configuration
   gt config agent set <name> <cmd>   Set custom agent command
   gt config agent remove <name>      Remove custom agent
+  gt config add-agent <name>         Add custom agent with full configuration
   gt config default-agent [name]     Get or set default agent`,
 }
 
@@ -96,6 +97,40 @@ Examples:
   gt config agent remove claude-glm`,
 	Args: cobra.ExactArgs(1),
 	RunE: runConfigAgentRemove,
+}
+
+var configAddAgentCmd = &cobra.Command{
+	Use:   "add-agent <name>",
+	Short: "Add a custom agent with full configuration",
+	Long: `Add a custom agent with comprehensive configuration options.
+
+This command allows you to define a new agent with all configuration options
+including hooks, session management, and process detection settings.
+
+The agent will be saved to settings/agents.json and become available for
+use with role assignments and as the default agent.
+
+Examples:
+  # Add a basic custom agent
+  gt config add-agent kiro --command kiro-cli
+
+  # Add an agent with hooks support
+  gt config add-agent kiro --command kiro-cli --hooks-provider kiro --supports-hooks
+
+  # Add an agent with full configuration
+  gt config add-agent my-agent \
+    --command my-agent-cli \
+    --args "--autonomous,--no-confirm" \
+    --process-names "my-agent,my-agent-cli" \
+    --session-id-env MY_AGENT_SESSION_ID \
+    --resume-flag "--resume" \
+    --resume-style flag \
+    --supports-hooks \
+    --hooks-provider my-agent \
+    --hooks-dir ".my-agent" \
+    --hooks-settings-file "settings.json"`,
+	Args: cobra.ExactArgs(1),
+	RunE: runConfigAddAgent,
 }
 
 // Default-agent subcommand
@@ -177,6 +212,18 @@ Examples:
 // Flags
 var (
 	configAgentListJSON bool
+
+	// add-agent flags
+	addAgentCommand          string
+	addAgentArgs             string
+	addAgentProcessNames     string
+	addAgentSessionIDEnv     string
+	addAgentResumeFlag       string
+	addAgentResumeStyle      string
+	addAgentSupportsHooks    bool
+	addAgentHooksProvider    string
+	addAgentHooksDir         string
+	addAgentHooksSettingsFile string
 )
 
 // AgentListItem represents an agent in list output.
@@ -433,6 +480,144 @@ func runConfigAgentRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Removed custom agent '%s'\n", style.Bold.Render(name))
+	return nil
+}
+
+func runConfigAddAgent(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	// Validate required flags
+	if addAgentCommand == "" {
+		return fmt.Errorf("--command is required")
+	}
+
+	// Validate resume style if provided
+	if addAgentResumeStyle != "" && addAgentResumeStyle != "flag" && addAgentResumeStyle != "subcommand" {
+		return fmt.Errorf("--resume-style must be 'flag' or 'subcommand'")
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Build the AgentPresetInfo
+	agentInfo := &config.AgentPresetInfo{
+		Name:          config.AgentPreset(name),
+		Command:       addAgentCommand,
+		SessionIDEnv:  addAgentSessionIDEnv,
+		ResumeFlag:    addAgentResumeFlag,
+		ResumeStyle:   addAgentResumeStyle,
+		SupportsHooks: addAgentSupportsHooks,
+	}
+
+	// Parse comma-separated args
+	if addAgentArgs != "" {
+		agentInfo.Args = strings.Split(addAgentArgs, ",")
+	}
+
+	// Parse comma-separated process names
+	if addAgentProcessNames != "" {
+		agentInfo.ProcessNames = strings.Split(addAgentProcessNames, ",")
+	}
+
+	// Load or create agent registry
+	registryPath := config.DefaultAgentRegistryPath(townRoot)
+	if err := config.LoadAgentRegistry(registryPath); err != nil {
+		return fmt.Errorf("loading agent registry: %w", err)
+	}
+
+	// Check if agent already exists (warn if overwriting)
+	existingPreset := config.GetAgentPresetByName(name)
+	isOverwrite := existingPreset != nil
+
+	// Build the registry entry
+	registry := &config.AgentRegistry{
+		Version: config.CurrentAgentRegistryVersion,
+		Agents:  make(map[string]*config.AgentPresetInfo),
+	}
+
+	// Load existing custom agents from file if it exists
+	existingData, err := os.ReadFile(registryPath)
+	if err == nil {
+		if jsonErr := json.Unmarshal(existingData, registry); jsonErr != nil {
+			// File exists but is invalid, start fresh
+			registry.Agents = make(map[string]*config.AgentPresetInfo)
+		}
+	}
+
+	// Add the new agent
+	registry.Agents[name] = agentInfo
+
+	// Save to registry file
+	if err := config.SaveAgentRegistry(registryPath, registry); err != nil {
+		return fmt.Errorf("saving agent registry: %w", err)
+	}
+
+	// Also add to town settings for RuntimeConfig compatibility
+	settingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	if townSettings.Agents == nil {
+		townSettings.Agents = make(map[string]*config.RuntimeConfig)
+	}
+
+	// Create RuntimeConfig from AgentPresetInfo
+	runtimeConfig := &config.RuntimeConfig{
+		Command: agentInfo.Command,
+		Args:    agentInfo.Args,
+	}
+
+	// Set hooks config if provided
+	if addAgentHooksProvider != "" || addAgentHooksDir != "" || addAgentHooksSettingsFile != "" {
+		runtimeConfig.Hooks = &config.RuntimeHooksConfig{
+			Provider:     addAgentHooksProvider,
+			Dir:          addAgentHooksDir,
+			SettingsFile: addAgentHooksSettingsFile,
+		}
+	}
+
+	townSettings.Agents[name] = runtimeConfig
+
+	if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
+		return fmt.Errorf("saving town settings: %w", err)
+	}
+
+	// Output result
+	if isOverwrite {
+		fmt.Printf("Updated agent '%s'\n", style.Bold.Render(name))
+	} else {
+		fmt.Printf("Added agent '%s'\n", style.Bold.Render(name))
+	}
+
+	fmt.Printf("  Command: %s\n", agentInfo.Command)
+	if len(agentInfo.Args) > 0 {
+		fmt.Printf("  Args: %s\n", strings.Join(agentInfo.Args, " "))
+	}
+	if len(agentInfo.ProcessNames) > 0 {
+		fmt.Printf("  Process names: %s\n", strings.Join(agentInfo.ProcessNames, ", "))
+	}
+	if agentInfo.SessionIDEnv != "" {
+		fmt.Printf("  Session ID env: %s\n", agentInfo.SessionIDEnv)
+	}
+	if agentInfo.ResumeFlag != "" {
+		fmt.Printf("  Resume: %s (%s)\n", agentInfo.ResumeFlag, agentInfo.ResumeStyle)
+	}
+	if agentInfo.SupportsHooks {
+		fmt.Printf("  Hooks: enabled\n")
+		if addAgentHooksProvider != "" {
+			fmt.Printf("    Provider: %s\n", addAgentHooksProvider)
+		}
+		if addAgentHooksDir != "" {
+			fmt.Printf("    Dir: %s\n", addAgentHooksDir)
+		}
+	}
+
+	fmt.Printf("\nSaved to: %s\n", style.Dim.Render(registryPath))
+
 	return nil
 }
 
@@ -700,6 +885,19 @@ func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
 
+	// Add add-agent flags
+	configAddAgentCmd.Flags().StringVar(&addAgentCommand, "command", "", "CLI command to invoke (required)")
+	configAddAgentCmd.Flags().StringVar(&addAgentArgs, "args", "", "Default arguments (comma-separated)")
+	configAddAgentCmd.Flags().StringVar(&addAgentProcessNames, "process-names", "", "Process names for detection (comma-separated)")
+	configAddAgentCmd.Flags().StringVar(&addAgentSessionIDEnv, "session-id-env", "", "Environment variable for session ID")
+	configAddAgentCmd.Flags().StringVar(&addAgentResumeFlag, "resume-flag", "", "Flag or subcommand for resuming sessions")
+	configAddAgentCmd.Flags().StringVar(&addAgentResumeStyle, "resume-style", "", "Resume style: 'flag' or 'subcommand'")
+	configAddAgentCmd.Flags().BoolVar(&addAgentSupportsHooks, "supports-hooks", false, "Whether agent supports hooks system")
+	configAddAgentCmd.Flags().StringVar(&addAgentHooksProvider, "hooks-provider", "", "Hooks provider name")
+	configAddAgentCmd.Flags().StringVar(&addAgentHooksDir, "hooks-dir", "", "Hooks directory (e.g., '.kiro')")
+	configAddAgentCmd.Flags().StringVar(&addAgentHooksSettingsFile, "hooks-settings-file", "", "Hooks settings file name")
+	_ = configAddAgentCmd.MarkFlagRequired("command")
+
 	// Add agent subcommands
 	configAgentCmd := &cobra.Command{
 		Use:   "agent [name]",
@@ -724,6 +922,7 @@ Subcommands for agent management:
 
 	// Add subcommands to config
 	configCmd.AddCommand(configAgentCmd)
+	configCmd.AddCommand(configAddAgentCmd)
 	configCmd.AddCommand(configDefaultAgentCmd)
 	configCmd.AddCommand(configAgentEmailDomainCmd)
 	configCmd.AddCommand(configRoleAgentCmd)
