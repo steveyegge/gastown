@@ -104,7 +104,41 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 	// Add the command as the last argument - tmux runs it as the pane's initial process
 	args = append(args, command)
 	_, err := t.run(args...)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Enable remain-on-exit to preserve pane after command exits.
+	// This allows capturing diagnostic output if the agent command crashes during startup.
+	// The zombie pane is cleaned up when we detect it in startup verification.
+	// Use set-window-option for the window-level option.
+	_, _ = t.run("set-window-option", "-t", name, "remain-on-exit", "on")
+
+	return nil
+}
+
+// IsPaneDead checks if the pane's command has exited (pane_dead=1).
+// With remain-on-exit enabled, the pane stays around after command exit,
+// allowing us to capture diagnostic output before cleanup.
+func (t *Tmux) IsPaneDead(session string) (bool, error) {
+	out, err := t.run("display-message", "-t", session, "-p", "#{pane_dead}")
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrNoServer) {
+			return false, err
+		}
+		return false, err
+	}
+	return strings.TrimSpace(out) == "1", nil
+}
+
+// CaptureDeadPaneOutput captures output from a dead pane for diagnostics.
+// Returns empty string if capture fails (non-fatal since this is for debugging).
+func (t *Tmux) CaptureDeadPaneOutput(session string, lines int) string {
+	output, err := t.CapturePane(session, lines)
+	if err != nil {
+		return ""
+	}
+	return output
 }
 
 // EnsureSessionFresh ensures a session is available and healthy.

@@ -252,15 +252,34 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Verify session survived startup - if the command crashed, the session may have died.
 	// Without this check, Start() would return success even if the pane died during initialization.
+	//
+	// With remain-on-exit enabled, if the command crashes the pane stays around, allowing
+	// us to capture diagnostic output. We check for this "zombie pane" state specifically.
 	running, err = m.tmux.HasSession(sessionID)
 	if err != nil {
 		return fmt.Errorf("verifying session: %w", err)
 	}
-	if !running {
-		return fmt.Errorf("session %s died during startup (agent command may have failed)", sessionID)
+
+	if running {
+		// Session exists - check if pane is dead (command exited but pane preserved)
+		dead, err := m.tmux.IsPaneDead(sessionID)
+		if err == nil && dead {
+			// Capture diagnostic output before cleanup
+			diagnosticOutput := m.tmux.CaptureDeadPaneOutput(sessionID, 50)
+			// Kill the zombie session
+			_ = m.tmux.KillSession(sessionID)
+			// Return error with diagnostics
+			if diagnosticOutput != "" {
+				return fmt.Errorf("session %s died during startup. Diagnostic output:\n%s", sessionID, diagnosticOutput)
+			}
+			return fmt.Errorf("session %s died during startup (agent command may have failed)", sessionID)
+		}
+		// Session is alive and pane is not dead - success
+		return nil
 	}
 
-	return nil
+	// Session doesn't exist at all (remain-on-exit may not have taken effect)
+	return fmt.Errorf("session %s died during startup (agent command may have failed)", sessionID)
 }
 
 // Stop terminates a polecat session.

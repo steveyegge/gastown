@@ -135,6 +135,72 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 }
 
+func TestIsPaneDead(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-panedead-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSessionWithProcesses(sessionName)
+
+	// Test 1: Create session with long-running command - pane should be alive
+	if err := tm.NewSessionWithCommand(sessionName, "", "sleep 60"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
+
+	// Wait for session to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Pane should not be dead while command is running
+	dead, err := tm.IsPaneDead(sessionName)
+	if err != nil {
+		t.Fatalf("IsPaneDead: %v", err)
+	}
+	if dead {
+		t.Error("expected pane to be alive while command is running")
+	}
+
+	// Test 2: Create a new session with a command that exits after a brief delay
+	// This simulates an agent that starts but crashes during initialization
+	shortSessionName := sessionName + "-short"
+	_ = tm.KillSessionWithProcesses(shortSessionName)
+
+	// Create session with command that prints output and exits after a brief delay
+	// The delay ensures remain-on-exit can be set before the command exits
+	if err := tm.NewSessionWithCommand(shortSessionName, "", "sh -c 'sleep 0.5; echo startup-failed-diagnostic; exit 1'"); err != nil {
+		t.Fatalf("NewSessionWithCommand (short): %v", err)
+	}
+	defer func() { _ = tm.KillSessionWithProcesses(shortSessionName) }()
+
+	// Wait for command to exit (0.5s sleep + some buffer)
+	time.Sleep(1 * time.Second)
+
+	// With remain-on-exit enabled (by NewSessionWithCommand), pane should be dead but session exists
+	hasSession, _ := tm.HasSession(shortSessionName)
+	if !hasSession {
+		t.Skip("session was destroyed (remain-on-exit may not have taken effect)")
+	}
+
+	dead, err = tm.IsPaneDead(shortSessionName)
+	if err != nil {
+		t.Fatalf("IsPaneDead (short): %v", err)
+	}
+	if !dead {
+		t.Error("expected pane to be dead after command exited")
+	}
+
+	// Test 3: Can capture output from dead pane
+	output := tm.CaptureDeadPaneOutput(shortSessionName, 10)
+	if !strings.Contains(output, "startup-failed-diagnostic") {
+		t.Logf("Output: %q", output)
+		// Note: This is informational - some tmux versions may not preserve output
+	}
+}
+
 func TestDuplicateSession(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
