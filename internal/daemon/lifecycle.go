@@ -40,6 +40,7 @@ func (d *Daemon) ProcessLifecycleRequests() {
 	// Get mail for deacon identity (using gt mail, not bd mail)
 	cmd := exec.Command("gt", "mail", "inbox", "--identity", "deacon/", "--json")
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -576,6 +577,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	fetchCmd := exec.Command("git", "fetch", "origin")
 	fetchCmd.Dir = workDir
 	fetchCmd.Stderr = &stderr
+	fetchCmd.Env = os.Environ() // Inherit PATH to find git executable
 	if err := fetchCmd.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
@@ -592,6 +594,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	pullCmd := exec.Command("git", "pull", "--rebase", "origin", defaultBranch)
 	pullCmd.Dir = workDir
 	pullCmd.Stderr = &stderr
+	pullCmd.Env = os.Environ() // Inherit PATH to find git executable
 	if err := pullCmd.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
@@ -608,6 +611,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 	bdCmd := exec.Command("bd", "sync")
 	bdCmd.Dir = workDir
 	bdCmd.Stderr = &stderr
+	bdCmd.Env = os.Environ() // Inherit PATH to find bd executable
 	if err := bdCmd.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
@@ -625,6 +629,7 @@ func (d *Daemon) closeMessage(id string) error {
 	// Use gt mail delete to actually remove the message
 	cmd := exec.Command("gt", "mail", "delete", id)
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -662,6 +667,7 @@ func (d *Daemon) getAgentBeadState(agentBeadID string) (string, error) {
 func (d *Daemon) getAgentBeadInfo(agentBeadID string) (*AgentBeadInfo, error) {
 	cmd := exec.Command("bd", "show", agentBeadID, "--json")
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -799,6 +805,7 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 	// Pattern: <prefix>-<rig>-polecat-<name> (e.g., gt-gastown-polecat-Toast)
 	cmd := exec.Command("bd", "list", "--type=agent", "--json")
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -874,6 +881,7 @@ Action needed: Check if agent is alive and responsive. Consider restarting if st
 
 	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body)
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of GUPP violation: %v", err)
@@ -897,6 +905,7 @@ func (d *Daemon) checkOrphanedWork() {
 func (d *Daemon) checkRigOrphanedWork(rigName string) {
 	cmd := exec.Command("bd", "list", "--type=agent", "--json")
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -970,6 +979,7 @@ Action needed: Either restart the agent or reassign the work.`,
 
 	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body)
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of orphaned work: %v", err)

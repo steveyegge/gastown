@@ -1101,6 +1101,7 @@ Manual intervention may be required.`,
 
 	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body) //nolint:gosec // G204: args are constructed internally
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of crashed polecat: %v", err)
 	}
