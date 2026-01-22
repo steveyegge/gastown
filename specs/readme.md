@@ -35,7 +35,7 @@ Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
 - [x] 1.1 Merge `internal/config/agents.go` - combine PR 775's RoleAgents + PR 794's registry
 - [x] 1.2 Create Provider interface in `internal/hooks/provider.go`
 - [x] 1.3 Create provider implementations (claude.go, opencode.go, none.go)
-- [ ] 1.4 Update `internal/runtime/runtime.go` to use Provider interface
+- [x] 1.4 Update `internal/runtime/runtime.go` to use Provider interface
 
 ### Phase 2: Role Managers
 - [ ] 2.1 Update crew manager with `ResolveAgentConfig("crew")`
@@ -74,6 +74,8 @@ Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
 _Agents: Add notes here after completing tasks._
 
 - **Phase 1.1-1.3**: Most of the foundation was already implemented. The `RoleAgents` map, `ResolveRoleAgentConfig()`, and agent registry existed. Created `internal/hooks/` package with Provider interface and implementations wrapping existing `claude` and `opencode` packages.
+
+- **Phase 1.4**: Runtime package now uses `hooks.Get(provider).EnsureHooks()` instead of switch statement. `StartupFallbackCommands` now uses `provider.SupportsHooks()` and `provider.GetHooksFallback()` for cleaner extensibility. Removed direct imports of `claude` and `opencode` packages from runtime.
 
 ---
 

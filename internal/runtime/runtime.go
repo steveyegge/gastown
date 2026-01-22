@@ -12,6 +12,7 @@ import (
 )
 
 // EnsureSettingsForRole installs runtime hook settings when supported.
+// It uses the Provider interface to delegate to the appropriate hook provider.
 func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error {
 	if rc == nil {
 		rc = config.DefaultRuntimeConfig()
@@ -23,9 +24,10 @@ func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error
 
 	provider := hooks.Get(rc.Hooks.Provider)
 	if provider == nil {
-		// Unknown provider treated as "none" - no hooks to install.
+		// Unknown provider - treat as no-op
 		return nil
 	}
+
 	return provider.EnsureHooks(workDir, role, rc.Hooks)
 }
 
@@ -51,16 +53,33 @@ func SleepForReadyDelay(rc *config.RuntimeConfig) {
 	time.Sleep(time.Duration(rc.Tmux.ReadyDelayMs) * time.Millisecond)
 }
 
-// StartupFallbackCommands returns commands that approximate Claude hooks when hooks are unavailable.
+// StartupFallbackCommands returns commands to emulate hooks when native hooks are unavailable.
+// It uses the Provider interface to get provider-specific fallback commands.
 func StartupFallbackCommands(role string, rc *config.RuntimeConfig) []string {
 	if rc == nil {
 		rc = config.DefaultRuntimeConfig()
 	}
-	if rc.Hooks != nil && rc.Hooks.Provider != "" && rc.Hooks.Provider != "none" {
-		return nil
-	}
 
 	role = strings.ToLower(role)
+
+	// If a provider is configured, check if it supports native hooks
+	if rc.Hooks != nil && rc.Hooks.Provider != "" {
+		provider := hooks.Get(rc.Hooks.Provider)
+		if provider != nil {
+			if provider.SupportsHooks() {
+				// Provider has native hooks, no fallback needed
+				return nil
+			}
+			// Use provider-specific fallback commands
+			fallbackCmds := provider.GetHooksFallback(role)
+			if len(fallbackCmds) > 0 {
+				// Add deacon notification to the last command
+				return appendDeaconNotification(fallbackCmds, role)
+			}
+		}
+	}
+
+	// Default fallback when no provider is configured
 	command := "gt prime"
 	if isAutonomousRole(role) {
 		command += " && gt mail check --inject"
@@ -68,6 +87,17 @@ func StartupFallbackCommands(role string, rc *config.RuntimeConfig) []string {
 	command += " && gt nudge deacon session-started"
 
 	return []string{command}
+}
+
+// appendDeaconNotification appends deacon notification to fallback commands.
+// Combines all commands into a single chained command for tmux.
+func appendDeaconNotification(cmds []string, role string) []string {
+	if len(cmds) == 0 {
+		return cmds
+	}
+	// Chain all commands together with deacon notification at the end
+	combined := strings.Join(cmds, " && ") + " && gt nudge deacon session-started"
+	return []string{combined}
 }
 
 // RunStartupFallback sends the startup fallback commands via tmux.
