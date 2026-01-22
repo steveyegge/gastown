@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -13,9 +12,6 @@ import (
 )
 
 func TestRunPSJSONIncludesAgentDetails(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping on Windows: requires tmux/bd")
-	}
 	townRoot := t.TempDir()
 
 	mayorDir := filepath.Join(townRoot, "mayor")
@@ -98,7 +94,60 @@ case "$cmd" in
 esac
 exit 0
 `
-	writeScript(t, binDir, "tmux", tmuxScript)
+	tmuxScriptWindows := `@echo off
+setlocal enabledelayedexpansion
+set "cmd=%1"
+shift
+if "%cmd%"=="list-sessions" (
+  if "%1"=="-F" if "%2"=="#{session_name}" (
+    echo gt-beads-Toast
+    echo gt-beads-witness
+    echo hq-mayor
+    echo random
+    exit /b 0
+  )
+  set "args=%1 %2 %3 %4 %5"
+  echo !args! | findstr /C:"#{==:#{session_name}," >nul
+  if !errorlevel!==0 (
+    echo !args! | findstr /C:"gt-beads-Toast" >nul && echo gt-beads-Toast^|1^|now^|0^| && exit /b 0
+    echo !args! | findstr /C:"gt-beads-witness" >nul && echo gt-beads-witness^|1^|now^|1^| && exit /b 0
+    echo !args! | findstr /C:"hq-mayor" >nul && echo hq-mayor^|1^|now^|1^| && exit /b 0
+  )
+  exit /b 0
+)
+if "%cmd%"=="list-panes" (
+  set "session="
+  set "format="
+  :parse_panes
+  if "%1"=="" goto :done_panes
+  if "%1"=="-t" (
+    set "session=%2"
+    shift
+    shift
+    goto :parse_panes
+  )
+  if "%1"=="-F" (
+    set "format=%2"
+    shift
+    shift
+    goto :parse_panes
+  )
+  shift
+  goto :parse_panes
+  :done_panes
+  if "!format!"=="#{pane_current_command}" (
+    if "!session!"=="gt-beads-Toast" echo node && exit /b 0
+    if "!session!"=="gt-beads-witness" echo bash && exit /b 0
+    if "!session!"=="hq-mayor" echo node && exit /b 0
+    echo bash
+    exit /b 0
+  )
+  if "!format!"=="#{pane_pid}" echo 111 && exit /b 0
+  if "!format!"=="#{pane_current_path}" echo /tmp && exit /b 0
+)
+exit /b 0
+`
+	writeScript(t, binDir, "tmux", tmuxScript, tmuxScriptWindows)
 
 	bdScript := `#!/bin/sh
 if [ "$1" = "--no-daemon" ]; then
@@ -112,7 +161,15 @@ case "$cmd" in
 esac
 exit 0
 `
-	writeScript(t, binDir, "bd", bdScript)
+	bdScriptWindows := `@echo off
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" set "cmd=%2"
+if "%cmd%"=="list" (
+  echo [{"id":"bd-beads-polecat-Toast","hook_bead":"bd-hook"},{"id":"hq-mayor","hook_bead":"hq-hook"}]
+)
+exit /b 0
+`
+	writeScript(t, binDir, "bd", bdScript, bdScriptWindows)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -188,9 +245,6 @@ exit 0
 }
 
 func TestCleanupOrphansDryRunReports(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping on Windows: requires tmux/bd")
-	}
 	townRoot := t.TempDir()
 
 	mayorDir := filepath.Join(townRoot, "mayor")
@@ -235,12 +289,45 @@ case "$cmd" in
 esac
 exit 0
 `
-	writeScript(t, binDir, "tmux", tmuxScript)
+	tmuxScriptWindows := `@echo off
+setlocal enabledelayedexpansion
+set "cmd=%1"
+if "%cmd%"=="list-panes" (
+  set "session="
+  set "format="
+  :parse_args
+  shift
+  if "%1"=="" goto :done_args
+  if "%1"=="-t" (
+    set "session=%2"
+    shift
+    goto :parse_args
+  )
+  if "%1"=="-F" (
+    set "format=%2"
+    shift
+    goto :parse_args
+  )
+  goto :parse_args
+  :done_args
+  if "!format!"=="#{pane_current_command}" (
+    if "!session!"=="gt-beads-Toast" echo bash && exit /b 0
+    echo node
+    exit /b 0
+  )
+  if "!format!"=="#{pane_pid}" echo 999 && exit /b 0
+)
+exit /b 0
+`
+	writeScript(t, binDir, "tmux", tmuxScript, tmuxScriptWindows)
 
 	pgrepScript := `#!/bin/sh
 exit 1
 `
-	writeScript(t, binDir, "pgrep", pgrepScript)
+	pgrepScriptWindows := `@echo off
+exit /b 1
+`
+	writeScript(t, binDir, "pgrep", pgrepScript, pgrepScriptWindows)
 
 	bdScript := `#!/bin/sh
 if [ "$1" = "--no-daemon" ]; then
@@ -254,7 +341,15 @@ case "$cmd" in
 esac
 exit 0
 `
-	writeScript(t, binDir, "bd", bdScript)
+	bdScriptWindows := `@echo off
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" set "cmd=%2"
+if "%cmd%"=="list" (
+  echo [{"id":"bd-beads-polecat-Toast","hook_bead":"bd-123"},{"id":"bd-beads-crew-amy","hook_bead":"bd-234"}]
+)
+exit /b 0
+`
+	writeScript(t, binDir, "bd", bdScript, bdScriptWindows)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -289,9 +384,6 @@ exit 0
 }
 
 func TestCleanupSessionsDryRunReportsZombies(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping on Windows: requires tmux/bd")
-	}
 	townRoot := t.TempDir()
 
 	mayorDir := filepath.Join(townRoot, "mayor")
@@ -350,7 +442,54 @@ case "$cmd" in
 esac
 exit 0
 `
-	writeScript(t, binDir, "tmux", tmuxScript)
+	tmuxScriptWindows := `@echo off
+setlocal enabledelayedexpansion
+set "cmd=%1"
+shift
+if "%cmd%"=="list-sessions" (
+  if "%1"=="-F" if "%2"=="#{session_name}" (
+    echo gt-gastown-Toast
+    echo gt-gastown-crew-amy
+    echo random
+    exit /b 0
+  )
+  exit /b 0
+)
+if "%cmd%"=="has-session" exit /b 0
+if "%cmd%"=="list-panes" (
+  set "session="
+  set "format="
+  :parse_panes
+  if "%1"=="" goto :done_panes
+  if "%1"=="-t" (
+    set "session=%2"
+    shift
+    shift
+    goto :parse_panes
+  )
+  if "%1"=="-F" (
+    set "format=%2"
+    shift
+    shift
+    goto :parse_panes
+  )
+  shift
+  goto :parse_panes
+  :done_panes
+  if "!format!"=="#{pane_current_command}" (
+    if "!session!"=="gt-gastown-Toast" echo bash && exit /b 0
+    if "!session!"=="gt-gastown-crew-amy" echo node && exit /b 0
+    echo bash
+    exit /b 0
+  )
+)
+if "%cmd%"=="kill-session" (
+  echo %1 %2 %3 %4 >> "%TMUX_LOG%"
+  exit /b 0
+)
+exit /b 0
+`
+	writeScript(t, binDir, "tmux", tmuxScript, tmuxScriptWindows)
 	t.Setenv("TMUX_LOG", logPath)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -393,9 +532,6 @@ exit 0
 }
 
 func TestCleanupStaleRunsPolecatStale(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping on Windows: requires tmux/bd")
-	}
 	townRoot := t.TempDir()
 
 	mayorDir := filepath.Join(townRoot, "mayor")
@@ -423,7 +559,11 @@ func TestCleanupStaleRunsPolecatStale(t *testing.T) {
 echo "$*" >> "$GT_LOG"
 exit 0
 `
-	writeScript(t, binDir, "gt", gtScript)
+	gtScriptWindows := `@echo off
+echo %* >> "%GT_LOG%"
+exit /b 0
+`
+	writeScript(t, binDir, "gt", gtScript, gtScriptWindows)
 	t.Setenv("GT_LOG", logPath)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))

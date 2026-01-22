@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +70,22 @@ case "$cmd" in
     ;;
 esac
 `
-	writeScript(t, binDir, "bd", bdScript)
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" set "cmd=%2"
+if "%cmd%"=="list" (
+  for %%I in ("%CD%") do set "dirname=%%~nxI"
+  if "!dirname!"==".claude" (
+    echo [{"id":"gt-1"}]
+  ) else (
+    echo []
+  )
+  exit /b 0
+)
+exit /b 0
+`
+	writeScript(t, binDir, "bd", bdScript, bdScriptWindows)
 
 	tmuxScript := `#!/bin/sh
 if [ "$1" = "has-session" ]; then
@@ -79,9 +94,16 @@ if [ "$1" = "has-session" ]; then
 fi
 exit 0
 `
-	writeScript(t, binDir, "tmux", tmuxScript)
+	tmuxScriptWindows := `@echo off
+if "%1"=="has-session" (
+  echo tmux error 1>&2
+  exit /b 1
+)
+exit /b 0
+`
+	writeScript(t, binDir, "tmux", tmuxScript, tmuxScriptWindows)
 
-	t.Setenv("PATH", fmt.Sprintf("%s:%s", binDir, os.Getenv("PATH")))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -121,8 +143,15 @@ if [ "$1" = "has-session" ]; then
 fi
 exit 0
 `
-	writeScript(t, binDir, "tmux", tmuxScript)
-	t.Setenv("PATH", fmt.Sprintf("%s:%s", binDir, os.Getenv("PATH")))
+	tmuxScriptWindows := `@echo off
+if "%1"=="has-session" (
+  echo can't find session 1>&2
+  exit /b 1
+)
+exit /b 0
+`
+	writeScript(t, binDir, "tmux", tmuxScript, tmuxScriptWindows)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -191,11 +220,27 @@ func setupTestTownForDotDir(t *testing.T) string {
 	return townRoot
 }
 
-func writeScript(t *testing.T, dir, name, content string) {
+// writeScript writes a cross-platform script to dir.
+// If windowsScript is non-empty and we're on Windows, it writes name.cmd with windowsScript content.
+// Otherwise, it writes name with unixScript content.
+func writeScript(t *testing.T, dir, name, unixScript, windowsScript string) {
 	t.Helper()
 
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
+	var path string
+	var content string
+	var perm os.FileMode
+
+	if runtime.GOOS == "windows" && windowsScript != "" {
+		path = filepath.Join(dir, name+".cmd")
+		content = windowsScript
+		perm = 0644
+	} else {
+		path = filepath.Join(dir, name)
+		content = unixScript
+		perm = 0755
+	}
+
+	if err := os.WriteFile(path, []byte(content), perm); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
 }
