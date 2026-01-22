@@ -115,6 +115,114 @@ codex resume session-123 --yolo
 amp threads continue thread-123 --args
 ```
 
+## Managing Agents with `gt config`
+
+Gas Town provides CLI commands for managing agent configuration without editing JSON files directly.
+
+### Listing Agents and Role Assignments
+
+```bash
+# Show all agents AND role assignments
+gt config agents
+
+# JSON output for scripting
+gt config agents --json
+```
+
+Example output:
+```
+Available Agents
+
+  amp [built-in] amp
+  auggie [built-in] auggie
+  claude [built-in] claude --dangerously-skip-permissions
+  codex [built-in] codex
+  cursor [built-in] cursor-agent
+  gemini [built-in] gemini --sandbox=permissive
+  opencode [built-in] opencode
+
+Default: claude
+
+Role Assignments
+  mayor:      claude (default)
+  deacon:     claude (default)
+  witness:    claude:haiku
+  refinery:   claude (default)
+  polecat:    claude (default)
+  crew:       claude (default)
+```
+
+### Adding Custom Agents
+
+```bash
+# Simple agent with just a command
+gt config add-agent kiro --command kiro-cli
+
+# Agent with hooks support
+gt config add-agent kiro --command kiro-cli --hooks-provider kiro --supports-hooks
+
+# Full configuration
+gt config add-agent my-agent \
+  --command my-agent-cli \
+  --args "--autonomous,--no-confirm" \
+  --process-names "my-agent,my-agent-cli" \
+  --session-id-env MY_AGENT_SESSION_ID \
+  --resume-flag "--resume" \
+  --resume-style flag \
+  --supports-hooks \
+  --hooks-provider my-agent \
+  --hooks-dir ".my-agent" \
+  --hooks-settings-file "settings.json"
+```
+
+### Setting Default and Role-Specific Agents
+
+```bash
+# Set default agent for all roles
+gt config default-agent opencode
+
+# Set agent for specific roles (cost optimization)
+gt config role-agent witness claude:haiku    # Cheaper model for monitoring
+gt config role-agent polecat claude:opus     # Capable model for coding
+gt config role-agent deacon opencode         # Use opencode for deacon
+```
+
+When you use model syntax (`agent:model`), Gas Town automatically creates a custom agent entry with the appropriate model flag.
+
+## Per-Role Agent Configuration
+
+Gas Town supports assigning different agents to different roles, enabling cost optimization and capability matching.
+
+### Valid Roles
+
+| Role | Purpose | Recommended Agent |
+|------|---------|-------------------|
+| `mayor` | Town orchestration | Default (claude) |
+| `deacon` | Rig coordination | Default or faster model |
+| `witness` | Monitoring, health checks | Cheaper model (haiku) |
+| `refinery` | Background processing | Configurable |
+| `polecat` | Active coding work | Capable model (opus) |
+| `crew` | Worker processes | Task-dependent |
+
+### Configuration via Settings
+
+Role agents can also be set in `settings/config.yaml`:
+
+```yaml
+default_agent: claude
+
+role_agents:
+  witness: claude-haiku
+  polecat: claude-opus
+  deacon: opencode
+```
+
+### How Role Resolution Works
+
+1. If a role has an explicit agent assignment, use it
+2. Otherwise, use the town's `default_agent`
+3. If no default is set, fall back to `claude`
+
 ## Example Configurations
 
 ### Adding Aider
@@ -151,6 +259,64 @@ amp threads continue thread-123 --args
   }
 }
 ```
+
+### OpenCode Configuration
+
+OpenCode is a built-in agent preset. Here's how to customize it or use it with specific configurations:
+
+**Using the built-in preset:**
+```bash
+# Set opencode as default
+gt config default-agent opencode
+
+# Assign opencode to specific roles
+gt config role-agent deacon opencode
+gt config role-agent polecat opencode
+```
+
+**Custom OpenCode configuration:**
+```json
+{
+  "version": 1,
+  "agents": {
+    "opencode-custom": {
+      "command": "opencode",
+      "args": ["--session"],
+      "process_names": ["opencode"],
+      "session_id_env": "OPENCODE_SESSION_ID",
+      "resume_flag": "--resume",
+      "resume_style": "flag",
+      "supports_hooks": true,
+      "non_interactive": {
+        "subcommand": "run",
+        "prompt_flag": "-p"
+      }
+    }
+  }
+}
+```
+
+**OpenCode hooks configuration:**
+
+OpenCode supports Gas Town hooks. The hooks directory is `.opencode/plugin` with settings in `gastown.js`:
+
+```bash
+gt config add-agent opencode-custom \
+  --command opencode \
+  --supports-hooks \
+  --hooks-provider opencode \
+  --hooks-dir ".opencode/plugin" \
+  --hooks-settings-file "gastown.js"
+```
+
+**Built-in OpenCode preset details:**
+| Setting | Value |
+|---------|-------|
+| Command | `opencode` |
+| Session ID Env | `OPENCODE_SESSION_ID` |
+| Resume Flag | `--resume` |
+| Resume Style | `flag` |
+| Supports Hooks | `true` |
 
 ### Adding a Custom Internal Tool
 
