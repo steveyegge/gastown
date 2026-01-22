@@ -150,8 +150,8 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--title=" + title,
 		"--description=" + description,
 		"--type=agent",
-		"--status=pinned", // Agent beads are permanent markers, not work items
 		"--labels=gt:agent",
+		"--pinned",
 	}
 	if NeedsForceForID(id) {
 		args = append(args, "--force")
