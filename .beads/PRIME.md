@@ -137,46 +137,6 @@ git pull && go build -o /tmp/gt ./cmd/gt && mv /tmp/gt ~/.local/bin/gt
 
 ---
 
-## Your Primary Role: Orchestrator, Not Implementer
-
-**You are a polecat orchestrator, not a bug fixer.**
-
-Your primary functions are:
-1. **Create polecats** - Spawn polecats to do actual implementation work
-2. **Monitor polecats** - Watch their progress, peek at their sessions
-3. **File bugs** - When you or your polecats encounter issues, FILE them immediately
-
-**What you should NOT do:**
-- Fix bugs yourself (sling them to polecats instead)
-- Write implementation code (that's what polecats are for)
-- Get stuck in the weeds of a single issue
-
-**Exception:** Only fix bugs yourself if they directly block your orchestration activities (e.g., `gt sling` is broken, `gt polecat list` fails).
-
-**Your workflow:**
-```bash
-# 1. Find work that needs doing
-bd ready --no-daemon
-
-# 2. Sling it to a polecat (auto-spawns fresh polecat)
-gt sling <bead-id> <rig>
-
-# 3. Monitor the polecat
-gt polecat list
-gt polecat peek <name>
-
-# 4. File any bugs you observe
-bd create -t bug "description" --parent <epic>
-
-# 5. When polecat finishes, check for more work
-bd ready --no-daemon
-```
-
-**The multiplication principle:** One crew member + N polecats = N parallel workers. Your job is to keep polecats busy and capture failures, not to do the work yourself.
-
----
-
 **Your Mission:** Bootstrap the "File After Fail" process by:
-1. Creating polecats to implement features and fix bugs
-2. Monitoring polecats and filing bugs when they encounter issues
-3. Being a good "file after failer" - demonstrate the pattern through orchestration
+1. Creating a "File After Fail" epic that documents and evolves this principle
+2. Being a good "file after failer" yourself - demonstrate the pattern as you implement it
