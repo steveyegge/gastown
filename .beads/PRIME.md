@@ -118,22 +118,27 @@ After `git push`, if your changes affect `cmd/gt` or `cmd/bd`:
 # 1. Pull latest (in case of concurrent pushes)
 git pull origin main
 
-# 2. Build to temp location
+# 2. Build to temp location and record hash
 go build -o /tmp/gt ./cmd/gt   # for gastown
 go build -o /tmp/bd ./cmd/bd   # for beads
+sha256sum /tmp/gt /tmp/bd      # Record pre-deploy hashes
 
 # 3. Deploy using mv (avoids "binary file in use" error)
 mv /tmp/gt ~/.local/bin/gt
 mv /tmp/bd ~/.local/bin/bd
 
-# 4. Verify deployment
+# 4. Verify deployment with hash check
 which gt && gt --version
+sha256sum ~/.local/bin/gt ~/.local/bin/bd   # Verify hashes match step 2
 ```
 
 **Quick one-liner for gastown:**
 ```bash
-git pull && go build -o /tmp/gt ./cmd/gt && mv /tmp/gt ~/.local/bin/gt
+git pull && go build -o /tmp/gt ./cmd/gt && HASH=$(sha256sum /tmp/gt | cut -d' ' -f1) && mv /tmp/gt ~/.local/bin/gt && echo "Deployed gt: $HASH" && [ "$(sha256sum ~/.local/bin/gt | cut -d' ' -f1)" = "$HASH" ] && echo "Hash verified ✓"
 ```
+
+**Why verify hashes?** Ensures the deployed binary is identical to what was built.
+Catches filesystem corruption, incomplete transfers, or tampering.
 
 ---
 
