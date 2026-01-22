@@ -25,7 +25,8 @@ This command allows you to view and modify configuration settings
 for your Gas Town workspace, including agent aliases and defaults.
 
 Commands:
-  gt config agent list              List all agents (built-in and custom)
+  gt config agent <name>             Set default agent (shorthand)
+  gt config agent list               List all agents (built-in and custom)
   gt config agent get <name>         Show agent configuration
   gt config agent set <name> <cmd>   Set custom agent command
   gt config agent remove <name>      Remove custom agent
@@ -682,15 +683,39 @@ func runConfigRoleAgent(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runConfigAgent handles the 'gt config agent' command.
+// When called with an argument, sets the default agent.
+// When called without arguments, shows help.
+func runConfigAgent(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
+
+	// With an argument, treat as setting the default agent
+	// This provides the shorthand: gt config agent claude
+	return runConfigDefaultAgent(cmd, args)
+}
+
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
 
 	// Add agent subcommands
 	configAgentCmd := &cobra.Command{
-		Use:   "agent",
-		Short: "Manage agent configuration",
-		RunE:  requireSubcommand,
+		Use:   "agent [name]",
+		Short: "Manage agent configuration or set default agent",
+		Long: `Manage agent configuration or set the default agent.
+
+When called with an agent name, sets that agent as the default:
+  gt config agent claude      Set claude as default agent
+  gt config agent gemini      Set gemini as default agent
+
+Subcommands for agent management:
+  gt config agent list        List all agents (built-in and custom)
+  gt config agent get <name>  Show agent configuration
+  gt config agent set <name> <cmd>   Set custom agent command
+  gt config agent remove <name>      Remove custom agent`,
+		RunE: runConfigAgent,
 	}
 	configAgentCmd.AddCommand(configAgentListCmd)
 	configAgentCmd.AddCommand(configAgentGetCmd)

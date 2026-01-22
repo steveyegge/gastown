@@ -463,6 +463,78 @@ func TestConfigAgentRemove(t *testing.T) {
 	})
 }
 
+func TestConfigAgent(t *testing.T) {
+	t.Run("sets default agent via shorthand", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+		settingsPath := config.TownSettingsPath(townRoot)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset agent registry to ensure clean state
+		config.ResetRegistryForTesting()
+
+		// Load agent registry
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Run 'gt config agent gemini' (shorthand for setting default)
+		cmd := &cobra.Command{}
+		args := []string{"gemini"}
+		err := runConfigAgent(cmd, args)
+		if err != nil {
+			t.Fatalf("runConfigAgent failed: %v", err)
+		}
+
+		// Verify settings were saved
+		loaded, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+
+		if loaded.DefaultAgent != "gemini" {
+			t.Errorf("DefaultAgent = %q, want 'gemini'", loaded.DefaultAgent)
+		}
+	})
+
+	t.Run("rejects unknown agent in shorthand", func(t *testing.T) {
+		townRoot := setupTestTownForConfig(t)
+
+		// Change to town root
+		originalWd, _ := os.Getwd()
+		defer os.Chdir(originalWd)
+		if err := os.Chdir(townRoot); err != nil {
+			t.Fatalf("chdir: %v", err)
+		}
+
+		// Reset agent registry to ensure clean state
+		config.ResetRegistryForTesting()
+
+		// Load agent registry
+		registryPath := config.DefaultAgentRegistryPath(townRoot)
+		if err := config.LoadAgentRegistry(registryPath); err != nil {
+			t.Fatalf("load agent registry: %v", err)
+		}
+
+		// Try to set default to unknown agent
+		cmd := &cobra.Command{}
+		args := []string{"unknown-agent"}
+		err := runConfigAgent(cmd, args)
+		if err == nil {
+			t.Fatal("expected error for unknown agent")
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			t.Errorf("error = %v, want 'not found'", err)
+		}
+	})
+}
+
 func TestConfigDefaultAgent(t *testing.T) {
 	t.Run("gets default agent (shows current)", func(t *testing.T) {
 		townRoot := setupTestTownForConfig(t)
