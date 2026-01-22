@@ -185,9 +185,10 @@ gt config agents
   - Set default agent in town_settings.json
   - Validate agent exists in registry
 
-- [ ] **3.2** Add `gt config role-agent <role> <agent>` command
+- [x] **3.2** Add `gt config role-agent <role> <agent>` command
   - Set per-role agent configuration
   - Support `<agent>:<model>` syntax (e.g., `claude:haiku`)
+  - *Completed: Implemented with get/set functionality, model suffix parsing, and auto-creation of model-specific agent configs*
 
 - [x] **3.3** Add `gt config add-agent` command
   - Register custom agents via CLI
