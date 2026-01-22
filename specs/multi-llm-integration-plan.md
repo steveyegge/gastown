@@ -194,9 +194,10 @@ gt config agents
   - Generate template configuration in settings/agents.json
   - *Completed: Implemented with comprehensive flags for command, args, hooks, session management, and process detection*
 
-- [ ] **3.4** Add `gt config agents` listing command
+- [x] **3.4** Add `gt config agents` listing command
   - Show all registered agents (built-in + custom)
   - Display current role assignments
+  - *Completed: Shows agents with text/JSON output, includes role assignments with default indicators*
 
 ### Phase 4: Kiro CLI Integration
 > Add support for kiro-cli as a third provider
