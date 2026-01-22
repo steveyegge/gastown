@@ -140,6 +140,39 @@ Examples:
 	RunE: runConfigAgentEmailDomain,
 }
 
+// validRoles defines the valid role names for per-role agent configuration.
+var validRoles = []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew"}
+
+var configRoleAgentCmd = &cobra.Command{
+	Use:   "role-agent <role> [agent]",
+	Short: "Get or set agent for a specific role",
+	Long: `Get or set the agent used for a specific role.
+
+With one argument (role), shows the current agent for that role.
+With two arguments (role, agent), sets the agent for that role.
+
+This allows cost optimization by assigning different agents or models
+to different roles. For example, use a cheaper model for witness
+(which does monitoring) and a more capable model for polecats
+(which do complex coding tasks).
+
+Valid roles: mayor, deacon, witness, refinery, polecat, crew
+
+The agent can include a model suffix using colon syntax:
+  <agent>:<model>  e.g., "claude:haiku" or "claude:opus"
+
+When model syntax is used, a custom agent entry is created combining
+the base agent's settings with the model name as a suffix.
+
+Examples:
+  gt config role-agent witness                  # Show witness agent
+  gt config role-agent deacon opencode          # Set deacon to opencode
+  gt config role-agent witness claude:haiku     # Set witness to claude:haiku
+  gt config role-agent polecat claude:opus      # Set polecat to claude:opus`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: runConfigRoleAgent,
+}
+
 // Flags
 var (
 	configAgentListJSON bool
@@ -513,6 +546,142 @@ func runConfigAgentEmailDomain(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runConfigRoleAgent(cmd *cobra.Command, args []string) error {
+	role := args[0]
+
+	// Validate role
+	isValidRole := false
+	for _, r := range validRoles {
+		if role == r {
+			isValidRole = true
+			break
+		}
+	}
+	if !isValidRole {
+		return fmt.Errorf("invalid role '%s' (valid roles: %s)", role, strings.Join(validRoles, ", "))
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Load town settings
+	settingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	// Load agent registry
+	registryPath := config.DefaultAgentRegistryPath(townRoot)
+	if err := config.LoadAgentRegistry(registryPath); err != nil {
+		return fmt.Errorf("loading agent registry: %w", err)
+	}
+
+	if len(args) == 1 {
+		// Show current agent for role
+		agentName := ""
+		if townSettings.RoleAgents != nil {
+			agentName = townSettings.RoleAgents[role]
+		}
+		if agentName == "" {
+			defaultAgent := townSettings.DefaultAgent
+			if defaultAgent == "" {
+				defaultAgent = "claude"
+			}
+			fmt.Printf("Role %s: %s %s\n", style.Bold.Render(role), defaultAgent, style.Dim.Render("(default)"))
+		} else {
+			fmt.Printf("Role %s: %s\n", style.Bold.Render(role), style.Bold.Render(agentName))
+		}
+		return nil
+	}
+
+	// Set agent for role
+	agentArg := args[1]
+
+	// Parse agent:model syntax
+	agentName := agentArg
+	modelSuffix := ""
+	if colonIdx := strings.Index(agentArg, ":"); colonIdx > 0 {
+		agentName = agentArg[:colonIdx]
+		modelSuffix = agentArg[colonIdx+1:]
+	}
+
+	// Verify base agent exists
+	isValid := false
+	builtInAgents := config.ListAgentPresets()
+	for _, builtin := range builtInAgents {
+		if agentName == builtin {
+			isValid = true
+			break
+		}
+	}
+	if !isValid && townSettings.Agents != nil {
+		if _, ok := townSettings.Agents[agentName]; ok {
+			isValid = true
+		}
+	}
+
+	if !isValid {
+		return fmt.Errorf("agent '%s' not found (use 'gt config agent list' to see available agents)", agentName)
+	}
+
+	// If model suffix is provided, create a custom agent entry
+	finalAgentName := agentArg
+	if modelSuffix != "" {
+		// Create custom agent name like "claude-haiku"
+		customAgentName := agentName + "-" + modelSuffix
+
+		// Initialize agents map if needed
+		if townSettings.Agents == nil {
+			townSettings.Agents = make(map[string]*config.RuntimeConfig)
+		}
+
+		// Only create if it doesn't already exist
+		if _, exists := townSettings.Agents[customAgentName]; !exists {
+			// Get base agent config
+			basePreset := config.GetAgentPresetByName(agentName)
+			if basePreset != nil {
+				// Create new config with model in args
+				newArgs := append([]string{}, basePreset.Args...)
+				// Add model argument (agent-specific handling)
+				switch agentName {
+				case "claude":
+					newArgs = append(newArgs, "--model", modelSuffix)
+				case "gemini":
+					newArgs = append(newArgs, "--model", modelSuffix)
+				default:
+					// Generic: just append as model arg
+					newArgs = append(newArgs, "--model", modelSuffix)
+				}
+				townSettings.Agents[customAgentName] = &config.RuntimeConfig{
+					Command: basePreset.Command,
+					Args:    newArgs,
+				}
+				fmt.Printf("Created custom agent '%s' with model '%s'\n", style.Bold.Render(customAgentName), modelSuffix)
+			}
+		}
+		finalAgentName = customAgentName
+	}
+
+	// Initialize RoleAgents map if needed
+	if townSettings.RoleAgents == nil {
+		townSettings.RoleAgents = make(map[string]string)
+	}
+
+	// Set role agent
+	townSettings.RoleAgents[role] = finalAgentName
+
+	// Save settings
+	if err := config.SaveTownSettings(settingsPath, townSettings); err != nil {
+		return fmt.Errorf("saving town settings: %w", err)
+	}
+
+	fmt.Printf("Role '%s' set to agent '%s'\n", style.Bold.Render(role), style.Bold.Render(finalAgentName))
+	return nil
+}
+
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
@@ -532,6 +701,7 @@ func init() {
 	configCmd.AddCommand(configAgentCmd)
 	configCmd.AddCommand(configDefaultAgentCmd)
 	configCmd.AddCommand(configAgentEmailDomainCmd)
+	configCmd.AddCommand(configRoleAgentCmd)
 
 	// Register with root
 	rootCmd.AddCommand(configCmd)

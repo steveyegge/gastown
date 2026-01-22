@@ -45,7 +45,7 @@ Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
 
 ### Phase 3: CLI Commands
 - [ ] 3.1 Add `gt config agent <name>` command
-- [ ] 3.2 Add `gt config role-agent <role> <agent>` command
+- [x] 3.2 Add `gt config role-agent <role> <agent>` command
 - [ ] 3.3 Add `gt config add-agent` command
 - [ ] 3.4 Add `gt config agents` listing command
 
@@ -84,6 +84,8 @@ _Agents: Add notes here after completing tasks._
 - **Phase 2.3**: Updated witness and refinery managers. Polecat manager was already updated. For witness (`internal/witness/manager.go`): removed `internal/claude` import, added `runtime` import, replaced `claude.EnsureSettingsForRole()` with `runtime.EnsureSettingsForRole()` using runtimeConfig. For refinery (`internal/refinery/manager.go`): replaced `t.IsClaudeRunning(sessionID)` calls with agent-agnostic detection using `config.ResolveRoleAgentConfig()`, `config.ExpectedPaneCommands()`, and `t.IsRuntimeRunning()`. Moved `townRoot` computation earlier in `Start()` function to share it across both agent detection checks and startup command building.
 
 - **Phase 2.4**: Updated mayor manager (`internal/mayor/manager.go`): removed `internal/claude` import, added `runtime` import, replaced `claude.EnsureSettingsForRole()` with `runtime.EnsureSettingsForRole()` using runtimeConfig. Agent detection was already updated. The rig.go CLI file delegates to already-updated managers, no changes needed.
+
+- **Phase 3.2**: Added `gt config role-agent <role> <agent>` command to `internal/cmd/config.go`. Supports viewing and setting per-role agents with `<agent>:<model>` syntax (e.g., `claude:haiku`). When model syntax is used, automatically creates a custom agent entry with the model flag. Valid roles: mayor, deacon, witness, refinery, polecat, crew. Updates RoleAgents map in TownSettings.
 
 ---
 
