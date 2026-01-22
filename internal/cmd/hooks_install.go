@@ -189,7 +189,7 @@ func determineTargets(townRoot, role string, allRigs bool, allowedRoles []string
 }
 
 // installHookTo installs a hook to a specific worktree.
-func installHookTo(worktreePath, hookName string, hookDef HookDefinition, dryRun bool) error {
+func installHookTo(worktreePath, _ string, hookDef HookDefinition, dryRun bool) error {
 	settingsPath := filepath.Join(worktreePath, ".claude", "settings.json")
 
 	// Load existing settings or create new
