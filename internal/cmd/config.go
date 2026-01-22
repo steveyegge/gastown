@@ -25,13 +25,15 @@ This command allows you to view and modify configuration settings
 for your Gas Town workspace, including agent aliases and defaults.
 
 Commands:
+  gt config agents                   List all agents and role assignments
   gt config agent <name>             Set default agent (shorthand)
   gt config agent list               List all agents (built-in and custom)
   gt config agent get <name>         Show agent configuration
   gt config agent set <name> <cmd>   Set custom agent command
   gt config agent remove <name>      Remove custom agent
   gt config add-agent <name>         Add custom agent with full configuration
-  gt config default-agent [name]     Get or set default agent`,
+  gt config default-agent [name]     Get or set default agent
+  gt config role-agent <role> [agent] Get or set agent for a specific role`,
 }
 
 // Agent subcommands
@@ -209,9 +211,27 @@ Examples:
 	RunE: runConfigRoleAgent,
 }
 
+// configAgentsCmd is the top-level "gt config agents" command that shows
+// all agents AND role assignments (unlike "gt config agent list" which only shows agents).
+var configAgentsCmd = &cobra.Command{
+	Use:   "agents",
+	Short: "List all agents and role assignments",
+	Long: `List all available agents and their role assignments.
+
+Shows all built-in agent presets (claude, gemini, codex) and any
+custom agents defined in your town settings, along with which agent
+is assigned to each role.
+
+Examples:
+  gt config agents           # Text output
+  gt config agents --json    # JSON output`,
+	RunE: runConfigAgents,
+}
+
 // Flags
 var (
-	configAgentListJSON bool
+	configAgentListJSON  bool
+	configAgentsListJSON bool
 
 	// add-agent flags
 	addAgentCommand          string
@@ -319,6 +339,139 @@ func runConfigAgentList(cmd *cobra.Command, args []string) error {
 		defaultAgent = "claude"
 	}
 	fmt.Printf("\nDefault: %s\n", style.Bold.Render(defaultAgent))
+
+	return nil
+}
+
+// AgentsOutput represents the full output for gt config agents --json.
+type AgentsOutput struct {
+	Agents        []AgentListItem          `json:"agents"`
+	DefaultAgent  string                   `json:"default_agent"`
+	RoleAgents    map[string]string        `json:"role_agents"`
+}
+
+func runConfigAgents(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Load town settings
+	settingsPath := config.TownSettingsPath(townRoot)
+	townSettings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading town settings: %w", err)
+	}
+
+	// Load agent registry
+	registryPath := config.DefaultAgentRegistryPath(townRoot)
+	if err := config.LoadAgentRegistry(registryPath); err != nil {
+		return fmt.Errorf("loading agent registry: %w", err)
+	}
+
+	// Collect all agents
+	builtInAgents := config.ListAgentPresets()
+	customAgents := make(map[string]*config.RuntimeConfig)
+	if townSettings.Agents != nil {
+		for name, runtime := range townSettings.Agents {
+			customAgents[name] = runtime
+		}
+	}
+
+	// Build list items
+	var items []AgentListItem
+	for _, name := range builtInAgents {
+		preset := config.GetAgentPresetByName(name)
+		if preset != nil {
+			items = append(items, AgentListItem{
+				Name:     name,
+				Command:  preset.Command,
+				Args:     strings.Join(preset.Args, " "),
+				Type:     "built-in",
+				IsCustom: false,
+			})
+		}
+	}
+	for name, runtime := range customAgents {
+		argsStr := ""
+		if runtime.Args != nil {
+			argsStr = strings.Join(runtime.Args, " ")
+		}
+		items = append(items, AgentListItem{
+			Name:     name,
+			Command:  runtime.Command,
+			Args:     argsStr,
+			Type:     "custom",
+			IsCustom: true,
+		})
+	}
+
+	// Sort by name
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Name < items[j].Name
+	})
+
+	// Get default agent
+	defaultAgent := townSettings.DefaultAgent
+	if defaultAgent == "" {
+		defaultAgent = "claude"
+	}
+
+	// Get role agents (with defaults filled in)
+	roleAgents := make(map[string]string)
+	for _, role := range validRoles {
+		if townSettings.RoleAgents != nil {
+			if agent, ok := townSettings.RoleAgents[role]; ok && agent != "" {
+				roleAgents[role] = agent
+				continue
+			}
+		}
+		roleAgents[role] = defaultAgent + " (default)"
+	}
+
+	if configAgentsListJSON {
+		// For JSON output, show actual assignments without "(default)" suffix
+		jsonRoleAgents := make(map[string]string)
+		for _, role := range validRoles {
+			if townSettings.RoleAgents != nil {
+				if agent, ok := townSettings.RoleAgents[role]; ok && agent != "" {
+					jsonRoleAgents[role] = agent
+					continue
+				}
+			}
+			jsonRoleAgents[role] = defaultAgent
+		}
+
+		output := AgentsOutput{
+			Agents:       items,
+			DefaultAgent: defaultAgent,
+			RoleAgents:   jsonRoleAgents,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(output)
+	}
+
+	// Text output
+	fmt.Printf("%s\n\n", style.Bold.Render("Available Agents"))
+	for _, item := range items {
+		typeLabel := style.Dim.Render("[" + item.Type + "]")
+		fmt.Printf("  %s %s %s", style.Bold.Render(item.Name), typeLabel, item.Command)
+		if item.Args != "" {
+			fmt.Printf(" %s", item.Args)
+		}
+		fmt.Println()
+	}
+
+	// Show default
+	fmt.Printf("\n%s %s\n", style.Bold.Render("Default:"), defaultAgent)
+
+	// Show role assignments
+	fmt.Printf("\n%s\n", style.Bold.Render("Role Assignments"))
+	for _, role := range validRoles {
+		agent := roleAgents[role]
+		fmt.Printf("  %-10s %s\n", role+":", agent)
+	}
 
 	return nil
 }
@@ -884,6 +1037,7 @@ func runConfigAgent(cmd *cobra.Command, args []string) error {
 func init() {
 	// Add flags
 	configAgentListCmd.Flags().BoolVar(&configAgentListJSON, "json", false, "Output as JSON")
+	configAgentsCmd.Flags().BoolVar(&configAgentsListJSON, "json", false, "Output as JSON")
 
 	// Add add-agent flags
 	configAddAgentCmd.Flags().StringVar(&addAgentCommand, "command", "", "CLI command to invoke (required)")
@@ -922,6 +1076,7 @@ Subcommands for agent management:
 
 	// Add subcommands to config
 	configCmd.AddCommand(configAgentCmd)
+	configCmd.AddCommand(configAgentsCmd)
 	configCmd.AddCommand(configAddAgentCmd)
 	configCmd.AddCommand(configDefaultAgentCmd)
 	configCmd.AddCommand(configAgentEmailDomainCmd)
