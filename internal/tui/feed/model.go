@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"os/exec"
 	"sync"
 	"time"
 
@@ -18,18 +19,27 @@ const (
 	PanelTree Panel = iota
 	PanelConvoy
 	PanelFeed
+	PanelProblems // Problems panel in problems view
+)
+
+// ViewMode represents which view is active
+type ViewMode int
+
+const (
+	ViewActivity ViewMode = iota // Default activity stream view
+	ViewProblems                 // Problem-first view
 )
 
 // Event represents an activity event
 type Event struct {
-	Time     time.Time
-	Type     string // create, update, complete, fail, delete
-	Actor    string // who did it (e.g., "gastown/crew/joe")
-	Target   string // what was affected (e.g., "gt-xyz")
-	Message  string // human-readable description
-	Rig      string // which rig
-	Role     string // actor's role
-	Raw      string // raw line for fallback display
+	Time    time.Time
+	Type    string // create, update, complete, fail, delete
+	Actor   string // who did it (e.g., "gastown/crew/joe")
+	Target  string // what was affected (e.g., "gt-xyz")
+	Message string // human-readable description
+	Rig     string // which rig
+	Role    string // actor's role
+	Raw     string // raw line for fallback display
 }
 
 // Agent represents an agent in the tree
@@ -75,6 +85,16 @@ type Model struct {
 	showHelp bool
 	filter   string
 
+	// View mode
+	viewMode ViewMode
+
+	// Problems view state
+	problemAgents     []*ProblemAgent
+	selectedProblem   int
+	problemsViewport  viewport.Model
+	stuckDetector     *StuckDetector
+	lastProblemsCheck time.Time
+
 	// Event source
 	eventChan <-chan Event
 	done      chan struct{}
@@ -87,16 +107,28 @@ func NewModel() *Model {
 	h.ShowAll = false
 
 	return &Model{
-		focusedPanel:   PanelTree,
-		treeViewport:   viewport.New(0, 0),
-		convoyViewport: viewport.New(0, 0),
-		feedViewport:   viewport.New(0, 0),
-		rigs:           make(map[string]*Rig),
-		events:         make([]Event, 0, 1000),
-		keys:           DefaultKeyMap(),
-		help:           h,
-		done:           make(chan struct{}),
+		focusedPanel:     PanelTree,
+		treeViewport:     viewport.New(0, 0),
+		convoyViewport:   viewport.New(0, 0),
+		feedViewport:     viewport.New(0, 0),
+		problemsViewport: viewport.New(0, 0),
+		rigs:             make(map[string]*Rig),
+		events:           make([]Event, 0, 1000),
+		problemAgents:    make([]*ProblemAgent, 0),
+		keys:             DefaultKeyMap(),
+		help:             h,
+		done:             make(chan struct{}),
+		viewMode:         ViewActivity,
+		stuckDetector:    NewStuckDetector(),
 	}
+}
+
+// NewModelWithProblemsView creates a new feed TUI model starting in problems view
+func NewModelWithProblemsView() *Model {
+	m := NewModel()
+	m.viewMode = ViewProblems
+	m.focusedPanel = PanelProblems
+	return m
 }
 
 // SetTownRoot sets the town root for convoy fetching
@@ -106,11 +138,16 @@ func (m *Model) SetTownRoot(townRoot string) {
 
 // Init initializes the model
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.listenForEvents(),
 		m.fetchConvoys(),
 		tea.SetWindowTitle("GT Feed"),
-	)
+	}
+	// If starting in problems view, fetch problems immediately
+	if m.viewMode == ViewProblems {
+		cmds = append(cmds, m.fetchProblems())
+	}
+	return tea.Batch(cmds...)
 }
 
 // eventMsg is sent when a new event arrives
@@ -119,6 +156,11 @@ type eventMsg Event
 // convoyUpdateMsg is sent when convoy data is refreshed
 type convoyUpdateMsg struct {
 	state *ConvoyState
+}
+
+// problemsUpdateMsg is sent when problems data is refreshed
+type problemsUpdateMsg struct {
+	agents []*ProblemAgent
 }
 
 // tickMsg is sent periodically to refresh the view
@@ -171,6 +213,53 @@ func (m *Model) convoyRefreshTick() tea.Cmd {
 	})
 }
 
+// fetchProblems returns a command that fetches problem agent data
+func (m *Model) fetchProblems() tea.Cmd {
+	detector := m.stuckDetector
+	return func() tea.Msg {
+		sessions, err := detector.FindGasTownSessions()
+		if err != nil {
+			return problemsUpdateMsg{agents: nil}
+		}
+
+		var problems []*ProblemAgent
+		for _, sessionID := range sessions {
+			agent := detector.AnalyzeSession(sessionID)
+			problems = append(problems, agent)
+		}
+
+		// Sort by priority (problems first)
+		sortProblemAgents(problems)
+
+		return problemsUpdateMsg{agents: problems}
+	}
+}
+
+// problemsRefreshTick returns a command that schedules the next problems refresh
+func (m *Model) problemsRefreshTick() tea.Cmd {
+	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+		return problemsUpdateMsg{} // Empty triggers refresh
+	})
+}
+
+// sortProblemAgents sorts agents by state priority (problems first)
+func sortProblemAgents(agents []*ProblemAgent) {
+	// Sort by state priority, then by idle time (longest first)
+	for i := 0; i < len(agents); i++ {
+		for j := i + 1; j < len(agents); j++ {
+			// Compare by state priority first
+			if agents[i].State.Priority() > agents[j].State.Priority() {
+				agents[i], agents[j] = agents[j], agents[i]
+			} else if agents[i].State.Priority() == agents[j].State.Priority() {
+				// Same state - sort by idle time (longer first)
+				if agents[i].IdleMinutes < agents[j].IdleMinutes {
+					agents[i], agents[j] = agents[j], agents[i]
+				}
+			}
+		}
+	}
+}
+
 // Update handles messages
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -199,6 +288,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.fetchConvoys())
 		}
 
+	case problemsUpdateMsg:
+		if msg.agents != nil {
+			// Fresh data arrived - update state and schedule next tick
+			m.problemAgents = msg.agents
+			m.lastProblemsCheck = time.Now()
+			// Keep selection in bounds
+			if m.selectedProblem >= len(m.problemAgents) {
+				m.selectedProblem = len(m.problemAgents) - 1
+			}
+			if m.selectedProblem < 0 {
+				m.selectedProblem = 0
+			}
+			m.updateViewContent()
+			if m.viewMode == ViewProblems {
+				cmds = append(cmds, m.problemsRefreshTick())
+			}
+		} else {
+			// Tick fired - fetch new data if in problems view
+			if m.viewMode == ViewProblems {
+				cmds = append(cmds, m.fetchProblems())
+			}
+		}
+
 	case tickMsg:
 		cmds = append(cmds, tick())
 	}
@@ -212,6 +324,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.convoyViewport, cmd = m.convoyViewport.Update(msg)
 	case PanelFeed:
 		m.feedViewport, cmd = m.feedViewport.Update(msg)
+	case PanelProblems:
+		m.problemsViewport, cmd = m.problemsViewport.Update(msg)
 	}
 	cmds = append(cmds, cmd)
 
@@ -230,33 +344,66 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help.ShowAll = m.showHelp
 		return m, nil
 
+	case key.Matches(msg, m.keys.ToggleProblems):
+		return m.toggleProblemsView()
+
 	case key.Matches(msg, m.keys.Tab):
-		// Cycle: Tree -> Convoy -> Feed -> Tree
-		switch m.focusedPanel {
-		case PanelTree:
-			m.focusedPanel = PanelConvoy
-		case PanelConvoy:
-			m.focusedPanel = PanelFeed
-		case PanelFeed:
+		return m.handleTabKey()
+
+	case key.Matches(msg, m.keys.FocusTree):
+		if m.viewMode == ViewActivity {
 			m.focusedPanel = PanelTree
 		}
 		return m, nil
 
-	case key.Matches(msg, m.keys.FocusTree):
-		m.focusedPanel = PanelTree
-		return m, nil
-
 	case key.Matches(msg, m.keys.FocusFeed):
-		m.focusedPanel = PanelFeed
+		if m.viewMode == ViewActivity {
+			m.focusedPanel = PanelFeed
+		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.FocusConvoy):
-		m.focusedPanel = PanelConvoy
+		if m.viewMode == ViewActivity {
+			m.focusedPanel = PanelConvoy
+		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.Refresh):
 		m.updateViewContent()
+		if m.viewMode == ViewProblems {
+			return m, m.fetchProblems()
+		}
 		return m, nil
+
+	case key.Matches(msg, m.keys.Enter):
+		if m.viewMode == ViewProblems {
+			return m.attachToSelected()
+		}
+
+	case key.Matches(msg, m.keys.Nudge):
+		if m.viewMode == ViewProblems {
+			return m.nudgeSelected()
+		}
+
+	case key.Matches(msg, m.keys.Handoff):
+		if m.viewMode == ViewProblems {
+			return m.handoffSelected()
+		}
+
+	case key.Matches(msg, m.keys.Restart):
+		if m.viewMode == ViewProblems {
+			return m.restartSelected()
+		}
+
+	case key.Matches(msg, m.keys.Up):
+		if m.viewMode == ViewProblems {
+			return m.selectPrevProblem()
+		}
+
+	case key.Matches(msg, m.keys.Down):
+		if m.viewMode == ViewProblems {
+			return m.selectNextProblem()
+		}
 	}
 
 	// Pass to focused viewport
@@ -268,8 +415,165 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.convoyViewport, cmd = m.convoyViewport.Update(msg)
 	case PanelFeed:
 		m.feedViewport, cmd = m.feedViewport.Update(msg)
+	case PanelProblems:
+		m.problemsViewport, cmd = m.problemsViewport.Update(msg)
 	}
 	return m, cmd
+}
+
+// toggleProblemsView switches between activity and problems view
+func (m *Model) toggleProblemsView() (tea.Model, tea.Cmd) {
+	if m.viewMode == ViewProblems {
+		m.viewMode = ViewActivity
+		m.focusedPanel = PanelTree
+		m.updateViewportSizes()
+		return m, nil
+	}
+	m.viewMode = ViewProblems
+	m.focusedPanel = PanelProblems
+	m.updateViewportSizes()
+	// Fetch problems if we haven't recently
+	if time.Since(m.lastProblemsCheck) > 5*time.Second {
+		return m, m.fetchProblems()
+	}
+	return m, nil
+}
+
+// handleTabKey handles Tab key for panel/problem cycling
+func (m *Model) handleTabKey() (tea.Model, tea.Cmd) {
+	if m.viewMode == ViewProblems {
+		// In problems view, Tab cycles through problem agents
+		return m.selectNextProblem()
+	}
+	// In activity view, Tab cycles panels
+	switch m.focusedPanel {
+	case PanelTree:
+		m.focusedPanel = PanelConvoy
+	case PanelConvoy:
+		m.focusedPanel = PanelFeed
+	case PanelFeed:
+		m.focusedPanel = PanelTree
+	}
+	return m, nil
+}
+
+// selectNextProblem moves selection to next problem agent
+func (m *Model) selectNextProblem() (tea.Model, tea.Cmd) {
+	if len(m.problemAgents) == 0 {
+		return m, nil
+	}
+	// Count problem agents
+	problemCount := 0
+	for _, agent := range m.problemAgents {
+		if agent.State.NeedsAttention() {
+			problemCount++
+		}
+	}
+	if problemCount == 0 {
+		return m, nil
+	}
+	m.selectedProblem++
+	if m.selectedProblem >= problemCount {
+		m.selectedProblem = 0
+	}
+	m.updateViewContent()
+	return m, nil
+}
+
+// selectPrevProblem moves selection to previous problem agent
+func (m *Model) selectPrevProblem() (tea.Model, tea.Cmd) {
+	if len(m.problemAgents) == 0 {
+		return m, nil
+	}
+	// Count problem agents
+	problemCount := 0
+	for _, agent := range m.problemAgents {
+		if agent.State.NeedsAttention() {
+			problemCount++
+		}
+	}
+	if problemCount == 0 {
+		return m, nil
+	}
+	m.selectedProblem--
+	if m.selectedProblem < 0 {
+		m.selectedProblem = problemCount - 1
+	}
+	m.updateViewContent()
+	return m, nil
+}
+
+// getSelectedProblemAgent returns the currently selected problem agent
+func (m *Model) getSelectedProblemAgent() *ProblemAgent {
+	if m.selectedProblem < 0 || len(m.problemAgents) == 0 {
+		return nil
+	}
+	// Find the nth problem agent
+	idx := 0
+	for _, agent := range m.problemAgents {
+		if agent.State.NeedsAttention() {
+			if idx == m.selectedProblem {
+				return agent
+			}
+			idx++
+		}
+	}
+	return nil
+}
+
+// attachToSelected attaches to the selected agent's tmux session
+func (m *Model) attachToSelected() (tea.Model, tea.Cmd) {
+	agent := m.getSelectedProblemAgent()
+	if agent == nil {
+		return m, nil
+	}
+	// Exit TUI and attach to tmux session
+	m.closeOnce.Do(func() { close(m.done) })
+	c := exec.Command("tmux", "attach-session", "-t", agent.SessionID)
+	return m, tea.Sequence(
+		tea.ExitAltScreen,
+		tea.ExecProcess(c, nil),
+	)
+}
+
+// nudgeSelected sends a nudge to the selected agent
+func (m *Model) nudgeSelected() (tea.Model, tea.Cmd) {
+	agent := m.getSelectedProblemAgent()
+	if agent == nil {
+		return m, nil
+	}
+	// Run gt nudge in background
+	c := exec.Command("gt", "nudge", agent.Name, "continue")
+	return m, tea.ExecProcess(c, func(err error) tea.Msg {
+		// Refresh problems after nudge
+		return problemsUpdateMsg{}
+	})
+}
+
+// handoffSelected sends a handoff request to the selected agent
+func (m *Model) handoffSelected() (tea.Model, tea.Cmd) {
+	agent := m.getSelectedProblemAgent()
+	if agent == nil {
+		return m, nil
+	}
+	// Run gt nudge with handoff message
+	c := exec.Command("gt", "nudge", agent.Name, "handoff")
+	return m, tea.ExecProcess(c, func(err error) tea.Msg {
+		return problemsUpdateMsg{}
+	})
+}
+
+// restartSelected restarts the selected agent
+func (m *Model) restartSelected() (tea.Model, tea.Cmd) {
+	agent := m.getSelectedProblemAgent()
+	if agent == nil {
+		return m, nil
+	}
+	// Run gt polecat restart
+	c := exec.Command("gt", "polecat", "restart", agent.Name)
+	return m, tea.ExecProcess(c, func(err error) tea.Msg {
+		return problemsUpdateMsg{}
+	})
 }
 
 // updateViewportSizes recalculates viewport dimensions
@@ -288,42 +592,52 @@ func (m *Model) updateViewportSizes() {
 		availableHeight = 6
 	}
 
-	// Split: 30% tree, 25% convoy, 45% feed
-	treeHeight := availableHeight * 30 / 100
-	convoyHeight := availableHeight * 25 / 100
-	feedHeight := availableHeight - treeHeight - convoyHeight
-
-	// Ensure minimum heights
-	if treeHeight < 3 {
-		treeHeight = 3
-	}
-	if convoyHeight < 3 {
-		convoyHeight = 3
-	}
-	if feedHeight < 3 {
-		feedHeight = 3
-	}
-
 	contentWidth := m.width - 4 // borders and padding
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
 
-	m.treeViewport.Width = contentWidth
-	m.treeViewport.Height = treeHeight
-	m.convoyViewport.Width = contentWidth
-	m.convoyViewport.Height = convoyHeight
-	m.feedViewport.Width = contentWidth
-	m.feedViewport.Height = feedHeight
+	if m.viewMode == ViewProblems {
+		// Problems view: single large panel
+		m.problemsViewport.Width = contentWidth
+		m.problemsViewport.Height = availableHeight
+	} else {
+		// Activity view: 30% tree, 25% convoy, 45% feed
+		treeHeight := availableHeight * 30 / 100
+		convoyHeight := availableHeight * 25 / 100
+		feedHeight := availableHeight - treeHeight - convoyHeight
+
+		// Ensure minimum heights
+		if treeHeight < 3 {
+			treeHeight = 3
+		}
+		if convoyHeight < 3 {
+			convoyHeight = 3
+		}
+		if feedHeight < 3 {
+			feedHeight = 3
+		}
+
+		m.treeViewport.Width = contentWidth
+		m.treeViewport.Height = treeHeight
+		m.convoyViewport.Width = contentWidth
+		m.convoyViewport.Height = convoyHeight
+		m.feedViewport.Width = contentWidth
+		m.feedViewport.Height = feedHeight
+	}
 
 	m.updateViewContent()
 }
 
 // updateViewContent refreshes the content of all viewports
 func (m *Model) updateViewContent() {
-	m.treeViewport.SetContent(m.renderTree())
-	m.convoyViewport.SetContent(m.renderConvoys())
-	m.feedViewport.SetContent(m.renderFeed())
+	if m.viewMode == ViewProblems {
+		m.problemsViewport.SetContent(m.renderProblemsContent())
+	} else {
+		m.treeViewport.SetContent(m.renderTree())
+		m.convoyViewport.SetContent(m.renderConvoys())
+		m.feedViewport.SetContent(m.renderFeed())
+	}
 }
 
 // addEvent adds an event and updates the agent tree

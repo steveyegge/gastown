@@ -20,17 +20,24 @@ func (m *Model) render() string {
 	// Header
 	sections = append(sections, m.renderHeader())
 
-	// Tree panel (top)
-	treePanel := m.renderTreePanel()
-	sections = append(sections, treePanel)
+	if m.viewMode == ViewProblems {
+		// Problems view: single panel
+		problemsPanel := m.renderProblemsPanel()
+		sections = append(sections, problemsPanel)
+	} else {
+		// Activity view: three panels
+		// Tree panel (top)
+		treePanel := m.renderTreePanel()
+		sections = append(sections, treePanel)
 
-	// Convoy panel (middle)
-	convoyPanel := m.renderConvoyPanel()
-	sections = append(sections, convoyPanel)
+		// Convoy panel (middle)
+		convoyPanel := m.renderConvoyPanel()
+		sections = append(sections, convoyPanel)
 
-	// Feed panel (bottom)
-	feedPanel := m.renderFeedPanel()
-	sections = append(sections, feedPanel)
+		// Feed panel (bottom)
+		feedPanel := m.renderFeedPanel()
+		sections = append(sections, feedPanel)
+	}
 
 	// Status bar
 	sections = append(sections, m.renderStatusBar())
@@ -45,22 +52,50 @@ func (m *Model) render() string {
 
 // renderHeader renders the top header bar
 func (m *Model) renderHeader() string {
-	title := TitleStyle.Render("GT Feed")
-
-	filter := ""
-	if m.filter != "" {
-		filter = FilterStyle.Render(fmt.Sprintf("Filter: %s", m.filter))
+	var title string
+	if m.viewMode == ViewProblems {
+		title = TitleStyle.Render("GT Feed") + " " + ProblemsModeStyle.Render("[PROBLEMS]")
 	} else {
-		filter = FilterStyle.Render("Filter: all")
+		title = TitleStyle.Render("GT Feed")
 	}
 
-	// Right-align filter
-	gap := m.width - lipgloss.Width(title) - lipgloss.Width(filter) - 4
+	// Show summary stats on the right
+	var stats string
+	if m.viewMode == ViewProblems && len(m.problemAgents) > 0 {
+		ok, stuck, idle := m.countAgentStates()
+		stats = fmt.Sprintf("%d agents  %s %d ok │ %s %d stuck │ %d idle",
+			len(m.problemAgents),
+			AgentActiveStyle.Render("●"), ok,
+			EventFailStyle.Render("●"), stuck,
+			idle)
+	} else if m.filter != "" {
+		stats = FilterStyle.Render(fmt.Sprintf("Filter: %s", m.filter))
+	} else {
+		stats = FilterStyle.Render("Filter: all")
+	}
+
+	// Right-align stats
+	gap := m.width - lipgloss.Width(title) - lipgloss.Width(stats) - 4
 	if gap < 1 {
 		gap = 1
 	}
 
-	return HeaderStyle.Render(title + strings.Repeat(" ", gap) + filter)
+	return HeaderStyle.Render(title + strings.Repeat(" ", gap) + stats)
+}
+
+// countAgentStates returns counts of ok, stuck, and idle agents
+func (m *Model) countAgentStates() (ok, stuck, idle int) {
+	for _, agent := range m.problemAgents {
+		switch agent.State {
+		case StateWorking:
+			ok++
+		case StateIdle:
+			idle++
+		case StateGUPPViolation, StateInputRequired, StateStalled, StateZombie:
+			stuck++
+		}
+	}
+	return
 }
 
 // renderTreePanel renders the agent tree panel with border
@@ -79,6 +114,151 @@ func (m *Model) renderFeedPanel() string {
 		style = FocusedBorderStyle
 	}
 	return style.Width(m.width - 2).Render(m.feedViewport.View())
+}
+
+// renderProblemsPanel renders the problems view panel
+func (m *Model) renderProblemsPanel() string {
+	style := ProblemsPanelStyle
+	if m.focusedPanel == PanelProblems {
+		style = FocusedBorderStyle
+	}
+	return style.Width(m.width - 2).Render(m.problemsViewport.View())
+}
+
+// renderProblemsContent renders the problems view content
+func (m *Model) renderProblemsContent() string {
+	var lines []string
+
+	if len(m.problemAgents) == 0 {
+		return AgentIdleStyle.Render("No agents detected. Run gt feed in a GasTown workspace with active tmux sessions.")
+	}
+
+	// Count problems
+	var problemAgents []*ProblemAgent
+	var workingAgents []*ProblemAgent
+	var idleAgents []*ProblemAgent
+
+	for _, agent := range m.problemAgents {
+		switch {
+		case agent.State.NeedsAttention():
+			problemAgents = append(problemAgents, agent)
+		case agent.State == StateWorking:
+			workingAgents = append(workingAgents, agent)
+		default:
+			idleAgents = append(idleAgents, agent)
+		}
+	}
+
+	// NEEDS ATTENTION section
+	if len(problemAgents) > 0 {
+		lines = append(lines, ProblemsHeaderStyle.Render(fmt.Sprintf("NEEDS ATTENTION (%d)", len(problemAgents))))
+		lines = append(lines, "")
+		for i, agent := range problemAgents {
+			isSelected := i == m.selectedProblem
+			lines = append(lines, m.renderProblemAgent(agent, isSelected))
+		}
+		lines = append(lines, "")
+	} else {
+		lines = append(lines, ProblemsHeaderStyle.Render("NEEDS ATTENTION (0)"))
+		lines = append(lines, "  "+AgentActiveStyle.Render("All agents OK!"))
+		lines = append(lines, "")
+	}
+
+	// WORKING section (collapsed dots by rig)
+	if len(workingAgents) > 0 {
+		lines = append(lines, WorkingHeaderStyle.Render(fmt.Sprintf("WORKING (%d)", len(workingAgents))))
+		// Group by rig
+		byRig := make(map[string]int)
+		for _, agent := range workingAgents {
+			rig := agent.Rig
+			if rig == "" {
+				rig = "default"
+			}
+			byRig[rig]++
+		}
+		for rig, count := range byRig {
+			dots := strings.Repeat("●", count)
+			if count > 20 {
+				dots = strings.Repeat("●", 20) + fmt.Sprintf("+%d", count-20)
+			}
+			lines = append(lines, fmt.Sprintf("  %s %s (%d)",
+				AgentActiveStyle.Render(dots),
+				RigStyle.Render(rig),
+				count))
+		}
+		lines = append(lines, "")
+	}
+
+	// IDLE section (collapsed)
+	if len(idleAgents) > 0 {
+		lines = append(lines, IdleHeaderStyle.Render(fmt.Sprintf("IDLE (%d)", len(idleAgents))))
+		dots := strings.Repeat("○", len(idleAgents))
+		if len(idleAgents) > 20 {
+			dots = strings.Repeat("○", 20) + fmt.Sprintf("+%d", len(idleAgents)-20)
+		}
+		lines = append(lines, "  "+AgentIdleStyle.Render(dots))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// renderProblemAgent renders a single problem agent line
+func (m *Model) renderProblemAgent(agent *ProblemAgent, selected bool) string {
+	// Format: "▶polecat-12  🔥 GUPP!    45m (violation)  gt-xyz89   myproject"
+	prefix := "  "
+	if selected {
+		prefix = SelectedStyle.Render("▶ ")
+	}
+
+	// Name
+	name := agent.Name
+	if len(name) > 12 {
+		name = name[:12]
+	}
+	namePart := fmt.Sprintf("%-12s", name)
+
+	// State symbol and label
+	stateStyle := getStateStyle(agent.State)
+	statePart := stateStyle.Render(fmt.Sprintf("%s %-6s", agent.State.Symbol(), agent.State.Label()))
+
+	// Reason or duration
+	var reasonPart string
+	if agent.State == StateInputRequired {
+		reasonPart = fmt.Sprintf("%-8s %s", agent.InputReason.String(), agent.DurationDisplay()+" ago")
+	} else {
+		reasonPart = fmt.Sprintf("%s no progress", agent.DurationDisplay())
+	}
+	reasonPart = fmt.Sprintf("%-20s", reasonPart)
+
+	// Bead ID (if known)
+	beadPart := ""
+	if agent.CurrentBeadID != "" {
+		beadPart = ConvoyIDStyle.Render(agent.CurrentBeadID)
+	}
+
+	// Rig
+	rigPart := ""
+	if agent.Rig != "" {
+		rigPart = RigStyle.Render(agent.Rig)
+	}
+
+	return prefix + namePart + "  " + statePart + "  " + TimestampStyle.Render(reasonPart) + "  " + beadPart + "  " + rigPart
+}
+
+// getStateStyle returns the appropriate style for an agent state
+func getStateStyle(state AgentState) lipgloss.Style {
+	switch state {
+	case StateGUPPViolation:
+		return GUPPStyle
+	case StateInputRequired:
+		return InputRequiredStyle
+	case StateStalled:
+		return StalledStyle
+	case StateZombie:
+		return ZombieStyle
+	default:
+		return AgentIdleStyle
+	}
 }
 
 // renderTree renders the agent tree content
@@ -301,26 +481,37 @@ func (m *Model) renderEvent(e Event) string {
 
 // renderStatusBar renders the bottom status bar
 func (m *Model) renderStatusBar() string {
-	// Panel indicator
-	var panelName string
-	switch m.focusedPanel {
-	case PanelTree:
-		panelName = "tree"
-	case PanelConvoy:
-		panelName = "convoy"
-	case PanelFeed:
-		panelName = "feed"
+	var left string
+	if m.viewMode == ViewProblems {
+		// Problems view: show problem count and selected agent
+		problemCount := 0
+		for _, agent := range m.problemAgents {
+			if agent.State.NeedsAttention() {
+				problemCount++
+			}
+		}
+		left = fmt.Sprintf("[problems] %d need attention", problemCount)
+		if m.selectedProblem >= 0 && m.selectedProblem < len(m.problemAgents) {
+			left += fmt.Sprintf(" | selected: %s", m.problemAgents[m.selectedProblem].Name)
+		}
+	} else {
+		// Activity view: show panel and event count
+		var panelName string
+		switch m.focusedPanel {
+		case PanelTree:
+			panelName = "tree"
+		case PanelConvoy:
+			panelName = "convoy"
+		case PanelFeed:
+			panelName = "feed"
+		}
+		left = fmt.Sprintf("[%s] %d events", panelName, len(m.events))
 	}
-	panel := fmt.Sprintf("[%s]", panelName)
-
-	// Event count
-	count := fmt.Sprintf("%d events", len(m.events))
 
 	// Short help
 	help := m.renderShortHelp()
 
 	// Combine
-	left := panel + " " + count
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(help) - 4
 	if gap < 1 {
 		gap = 1
@@ -331,7 +522,20 @@ func (m *Model) renderStatusBar() string {
 
 // renderShortHelp renders abbreviated key hints
 func (m *Model) renderShortHelp() string {
+	if m.viewMode == ViewProblems {
+		hints := []string{
+			HelpKeyStyle.Render("p") + HelpDescStyle.Render(":activity"),
+			HelpKeyStyle.Render("⏎") + HelpDescStyle.Render(":attach"),
+			HelpKeyStyle.Render("n") + HelpDescStyle.Render(":nudge"),
+			HelpKeyStyle.Render("h") + HelpDescStyle.Render(":handoff"),
+			HelpKeyStyle.Render("Tab") + HelpDescStyle.Render(":next"),
+			HelpKeyStyle.Render("?") + HelpDescStyle.Render(":help"),
+			HelpKeyStyle.Render("q") + HelpDescStyle.Render(":quit"),
+		}
+		return strings.Join(hints, "  ")
+	}
 	hints := []string{
+		HelpKeyStyle.Render("p") + HelpDescStyle.Render(":problems"),
 		HelpKeyStyle.Render("j/k") + HelpDescStyle.Render(":scroll"),
 		HelpKeyStyle.Render("tab") + HelpDescStyle.Render(":switch"),
 		HelpKeyStyle.Render("/") + HelpDescStyle.Render(":search"),
