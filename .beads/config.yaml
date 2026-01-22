@@ -69,3 +69,5 @@ external_projects:
   beads: ../../../beads/mayor/rig
 
 routing.mode: "direct"
+# Storage backend: sqlite (default) or dolt (version-controlled)
+storage-backend: dolt
