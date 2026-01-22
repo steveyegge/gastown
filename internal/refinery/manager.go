@@ -113,10 +113,15 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
+	// Resolve agent config to get expected process names for agent-agnostic detection
+	townRoot := filepath.Dir(m.rig.Path)
+	agentConfig := config.ResolveRoleAgentConfig("refinery", townRoot, m.rig.Path)
+	processNames := config.ExpectedPaneCommands(agentConfig)
+
 	if foreground {
 		// In foreground mode, check tmux session (no PID inference per ZFC)
-		// Use IsClaudeRunning for robust detection (see gastown#566)
-		if running, _ := t.HasSession(sessionID); running && t.IsClaudeRunning(sessionID) {
+		// Use IsRuntimeRunning for agent-agnostic detection (see gastown#566)
+		if running, _ := t.HasSession(sessionID); running && t.IsRuntimeRunning(sessionID, processNames) {
 			return ErrAlreadyRunning
 		}
 
@@ -137,15 +142,14 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Background mode: check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		// Use IsClaudeRunning for robust detection: Claude can report as "node", "claude",
-		// or version number like "2.0.76". IsAgentRunning with just "node" was too strict
-		// and caused healthy sessions to be killed. See: gastown#566
-		if t.IsClaudeRunning(sessionID) {
-			// Healthy - Claude is running
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		// Use IsRuntimeRunning for agent-agnostic detection: the agent can report as
+		// various process names depending on the configured runtime. See: gastown#566
+		if t.IsRuntimeRunning(sessionID, processNames) {
+			// Healthy - agent is running
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		_, _ = fmt.Fprintln(m.output, "⚠ Detected zombie session (tmux alive, agent dead). Recreating...")
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
@@ -174,7 +178,6 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	}
 
 	// Build startup command first
-	townRoot := filepath.Dir(m.rig.Path)
 	var command string
 	if agentOverride != "" {
 		var err error

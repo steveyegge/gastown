@@ -40,7 +40,7 @@ Pick the next `[ ]` task. Mark `[x]` when done, `[!]` if blocked.
 ### Phase 2: Role Managers
 - [x] 2.1 Update crew manager with `ResolveAgentConfig("crew")`
 - [x] 2.2 Update deacon manager
-- [ ] 2.3 Update autonomous managers (polecat, witness, refinery)
+- [x] 2.3 Update autonomous managers (polecat, witness, refinery)
 - [ ] 2.4 Update mayor and rig managers
 
 ### Phase 3: CLI Commands
@@ -80,6 +80,8 @@ _Agents: Add notes here after completing tasks._
 - **Phase 2.1**: Updated crew manager to use `config.ResolveRoleAgentConfig("crew", townRoot, rigPath)` instead of hardcoded Claude. Replaced `claude.EnsureSettingsForRole()` with `runtime.EnsureSettingsForRole()` which uses the Provider interface. Replaced `t.IsClaudeRunning()` with `t.IsAgentRunning()` using `config.ExpectedPaneCommands()` for agent-agnostic process detection.
 
 - **Phase 2.2**: Updated deacon manager (`internal/cmd/deacon.go`). Removed `internal/claude` import. Now uses `config.ResolveRoleAgentConfig("deacon", townRoot, "")` and `runtime.EnsureSettingsForRole()`. Deacon is a town-level role so it passes empty string for rigPath.
+
+- **Phase 2.3**: Updated witness and refinery managers. Polecat manager was already updated. For witness (`internal/witness/manager.go`): removed `internal/claude` import, added `runtime` import, replaced `claude.EnsureSettingsForRole()` with `runtime.EnsureSettingsForRole()` using runtimeConfig. For refinery (`internal/refinery/manager.go`): replaced `t.IsClaudeRunning(sessionID)` calls with agent-agnostic detection using `config.ResolveRoleAgentConfig()`, `config.ExpectedPaneCommands()`, and `t.IsRuntimeRunning()`. Moved `townRoot` computation earlier in `Start()` function to share it across both agent detection checks and startup command building.
 
 ---
 
