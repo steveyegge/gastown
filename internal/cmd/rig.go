@@ -505,6 +505,12 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading rigs config: %w", err)
 	}
 
+	// Get the rig's beads prefix before removing (needed for route cleanup)
+	var beadsPrefix string
+	if entry, ok := rigsConfig.Rigs[name]; ok && entry.BeadsConfig != nil {
+		beadsPrefix = entry.BeadsConfig.Prefix
+	}
+
 	// Create rig manager
 	g := git.NewGit(townRoot)
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
@@ -516,6 +522,14 @@ func runRigRemove(cmd *cobra.Command, args []string) error {
 	// Save updated config
 	if err := config.SaveRigsConfig(rigsPath, rigsConfig); err != nil {
 		return fmt.Errorf("saving rigs config: %w", err)
+	}
+
+	// Remove route from routes.jsonl (issue #899)
+	if beadsPrefix != "" {
+		if err := beads.RemoveRoute(townRoot, beadsPrefix+"-"); err != nil {
+			// Non-fatal: log warning but continue
+			fmt.Printf("  %s Could not remove route from routes.jsonl: %v\n", style.Warning.Render("!"), err)
+		}
 	}
 
 	fmt.Printf("%s Rig %s removed from registry\n", style.Success.Render("✓"), name)
