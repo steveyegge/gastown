@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/state"
@@ -402,34 +403,58 @@ func checkSlungWork(ctx RoleContext) bool {
 		return false
 	}
 
-	// Check for hooked beads (work on the agent's hook)
 	b := beads.New(ctx.WorkDir)
-	hookedBeads, err := b.List(beads.ListOptions{
-		Status:   beads.StatusHooked,
-		Assignee: agentID,
-		Priority: -1,
-	})
-	if err != nil {
-		return false
+
+	// PREFERRED: Read hook_bead from agent bead (authoritative source)
+	// This prevents race conditions when polecat names are recycled - the old
+	// beads may still have assignee set to the recycled name, but the agent
+	// bead's hook_bead field is atomically updated by gt sling.
+	var hookedBead *beads.Issue
+	townRoot, _ := findTownRoot()
+	agentBeadID := buildAgentBeadIDFromContext(ctx, townRoot)
+	if agentBeadID != "" {
+		agentBead, err := b.Show(agentBeadID)
+		if err == nil && agentBead != nil && agentBead.Type == "agent" && agentBead.HookBead != "" {
+			// Found hook_bead in agent bead - fetch the actual bead
+			hookedBead, err = b.Show(agentBead.HookBead)
+			if err != nil && townRoot != "" {
+				// Try town beads if not found in rig beads
+				townB := beads.New(townRoot)
+				hookedBead, _ = townB.Show(agentBead.HookBead)
+			}
+		}
 	}
 
-	// If no hooked beads found, also check in_progress beads assigned to this agent.
-	// This handles the case where work was claimed (status changed to in_progress)
-	// but the session was interrupted before completion. The hook should persist.
-	if len(hookedBeads) == 0 {
-		inProgressBeads, err := b.List(beads.ListOptions{
-			Status:   "in_progress",
+	// FALLBACK: Query by assignee (legacy behavior, may have race conditions)
+	// Only used if hook_bead is not set or agent bead doesn't exist
+	if hookedBead == nil {
+		hookedBeads, err := b.List(beads.ListOptions{
+			Status:   beads.StatusHooked,
 			Assignee: agentID,
 			Priority: -1,
 		})
-		if err != nil || len(inProgressBeads) == 0 {
+		if err != nil {
 			return false
 		}
-		hookedBeads = inProgressBeads
-	}
 
-	// Use the first hooked bead (agents typically have one)
-	hookedBead := hookedBeads[0]
+		// If no hooked beads found, also check in_progress beads assigned to this agent.
+		// This handles the case where work was claimed (status changed to in_progress)
+		// but the session was interrupted before completion. The hook should persist.
+		if len(hookedBeads) == 0 {
+			inProgressBeads, err := b.List(beads.ListOptions{
+				Status:   "in_progress",
+				Assignee: agentID,
+				Priority: -1,
+			})
+			if err != nil || len(inProgressBeads) == 0 {
+				return false
+			}
+			hookedBeads = inProgressBeads
+		}
+
+		// Use the first hooked bead (agents typically have one)
+		hookedBead = hookedBeads[0]
+	}
 
 	// Build the role announcement string
 	roleAnnounce := buildRoleAnnouncement(ctx)
@@ -571,6 +596,44 @@ func getAgentIdentity(ctx RoleContext) string {
 		return fmt.Sprintf("%s/witness", ctx.Rig)
 	case RoleRefinery:
 		return fmt.Sprintf("%s/refinery", ctx.Rig)
+	default:
+		return ""
+	}
+}
+
+// buildAgentBeadIDFromContext constructs the agent bead ID from a RoleContext.
+// Uses canonical naming: prefix-rig-role-name
+// Town-level agents use hq- prefix; rig-level agents use rig's prefix.
+func buildAgentBeadIDFromContext(ctx RoleContext, townRoot string) string {
+	getPrefix := func(rig string) string {
+		return config.GetRigPrefix(townRoot, rig)
+	}
+
+	switch ctx.Role {
+	case RoleMayor:
+		return beads.MayorBeadIDTown()
+	case RoleDeacon:
+		return beads.DeaconBeadIDTown()
+	case RoleWitness:
+		if ctx.Rig != "" {
+			return beads.WitnessBeadIDWithPrefix(getPrefix(ctx.Rig), ctx.Rig)
+		}
+		return ""
+	case RoleRefinery:
+		if ctx.Rig != "" {
+			return beads.RefineryBeadIDWithPrefix(getPrefix(ctx.Rig), ctx.Rig)
+		}
+		return ""
+	case RolePolecat:
+		if ctx.Rig != "" && ctx.Polecat != "" {
+			return beads.PolecatBeadIDWithPrefix(getPrefix(ctx.Rig), ctx.Rig, ctx.Polecat)
+		}
+		return ""
+	case RoleCrew:
+		if ctx.Rig != "" && ctx.Polecat != "" {
+			return beads.CrewBeadIDWithPrefix(getPrefix(ctx.Rig), ctx.Rig, ctx.Polecat)
+		}
+		return ""
 	default:
 		return ""
 	}
