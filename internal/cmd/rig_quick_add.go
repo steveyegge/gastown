@@ -165,6 +165,19 @@ func sanitizeRigName(name string) string {
 }
 
 func findOrCreateTown() (string, error) {
+	// Priority 1: GT_TOWN_ROOT env var (explicit user preference)
+	if townRoot := os.Getenv("GT_TOWN_ROOT"); townRoot != "" {
+		if isValidTown(townRoot) {
+			return townRoot, nil
+		}
+	}
+
+	// Priority 2: Try to find from cwd (supports multiple town installations)
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		return townRoot, nil
+	}
+
+	// Priority 3: Fall back to well-known locations
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -176,11 +189,17 @@ func findOrCreateTown() (string, error) {
 	}
 
 	for _, path := range candidates {
-		mayorDir := filepath.Join(path, "mayor")
-		if _, err := os.Stat(mayorDir); err == nil {
+		if isValidTown(path) {
 			return path, nil
 		}
 	}
 
 	return "", fmt.Errorf("no Gas Town found - run 'gt install ~/gt' first")
+}
+
+// isValidTown checks if a path is a valid Gas Town installation.
+func isValidTown(path string) bool {
+	mayorDir := filepath.Join(path, "mayor")
+	_, err := os.Stat(mayorDir)
+	return err == nil
 }

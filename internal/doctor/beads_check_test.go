@@ -333,7 +333,12 @@ func TestNewRoleLabelCheck(t *testing.T) {
 func TestRoleLabelCheck_NoBeadsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
+	// Inject empty mock to skip exec.LookPath("bd") check
+	// (bd may not be installed on all CI platforms like Windows)
+	mock := &mockBeadShower{beads: map[string]*beads.Issue{}}
+
 	check := NewRoleLabelCheck()
+	check.beadShower = mock
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	result := check.Run(ctx)

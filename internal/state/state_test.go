@@ -20,7 +20,7 @@ func TestStateDir(t *testing.T) {
 
 	os.Setenv("XDG_STATE_HOME", "/custom/state")
 	defer os.Unsetenv("XDG_STATE_HOME")
-	if got := StateDir(); got != "/custom/state/gastown" {
+	if got := filepath.ToSlash(StateDir()); got != "/custom/state/gastown" {
 		t.Errorf("StateDir() with XDG = %q, want /custom/state/gastown", got)
 	}
 }
@@ -36,7 +36,7 @@ func TestConfigDir(t *testing.T) {
 
 	os.Setenv("XDG_CONFIG_HOME", "/custom/config")
 	defer os.Unsetenv("XDG_CONFIG_HOME")
-	if got := ConfigDir(); got != "/custom/config/gastown" {
+	if got := filepath.ToSlash(ConfigDir()); got != "/custom/config/gastown" {
 		t.Errorf("ConfigDir() with XDG = %q, want /custom/config/gastown", got)
 	}
 }
@@ -52,7 +52,7 @@ func TestCacheDir(t *testing.T) {
 
 	os.Setenv("XDG_CACHE_HOME", "/custom/cache")
 	defer os.Unsetenv("XDG_CACHE_HOME")
-	if got := CacheDir(); got != "/custom/cache/gastown" {
+	if got := filepath.ToSlash(CacheDir()); got != "/custom/cache/gastown" {
 		t.Errorf("CacheDir() with XDG = %q, want /custom/cache/gastown", got)
 	}
 }

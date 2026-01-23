@@ -23,13 +23,20 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 
 	if slingDryRun {
 		fmt.Printf("%s Batch slinging %d beads to rig '%s':\n", style.Bold.Render("🎯"), len(beadIDs), rigName)
+		fmt.Printf("  Would cook mol-polecat-work formula once\n")
 		for _, beadID := range beadIDs {
-			fmt.Printf("  Would spawn polecat for: %s\n", beadID)
+			fmt.Printf("  Would spawn polecat and apply mol-polecat-work to: %s\n", beadID)
 		}
 		return nil
 	}
 
 	fmt.Printf("%s Batch slinging %d beads to rig '%s'...\n", style.Bold.Render("🎯"), len(beadIDs), rigName)
+
+	// Issue #288: Auto-apply mol-polecat-work for batch sling
+	// Cook once before the loop for efficiency
+	townRoot := filepath.Dir(townBeadsDir)
+	formulaName := "mol-polecat-work"
+	formulaCooked := false
 
 	// Track results for summary
 	type slingResult struct {
@@ -91,10 +98,34 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 			}
 		}
 
-		// Hook the bead. See: https://github.com/steveyegge/gastown/issues/148
-		townRoot := filepath.Dir(townBeadsDir)
-		hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
-		hookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
+		// Issue #288: Apply mol-polecat-work via formula-on-bead pattern
+		// Cook once (lazy), then instantiate for each bead
+		if !formulaCooked {
+			workDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
+			if err := CookFormula(formulaName, workDir); err != nil {
+				fmt.Printf("  %s Could not cook formula %s: %v\n", style.Dim.Render("Warning:"), formulaName, err)
+				// Fall back to raw hook if formula cook fails
+			} else {
+				formulaCooked = true
+			}
+		}
+
+		beadToHook := beadID
+		attachedMoleculeID := ""
+		if formulaCooked {
+			result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, true)
+			if err != nil {
+				fmt.Printf("  %s Could not apply formula: %v (hooking raw bead)\n", style.Dim.Render("Warning:"), err)
+			} else {
+				fmt.Printf("  %s Formula %s applied\n", style.Bold.Render("✓"), formulaName)
+				beadToHook = result.BeadToHook
+				attachedMoleculeID = result.WispRootID
+			}
+		}
+
+		// Hook the bead (or wisp compound if formula was applied)
+		hookCmd := exec.Command("bd", "--no-daemon", "update", beadToHook, "--status=hooked", "--assignee="+targetAgent)
+		hookCmd.Dir = beads.ResolveHookDir(townRoot, beadToHook, hookWorkDir)
 		hookCmd.Stderr = os.Stderr
 		if err := hookCmd.Run(); err != nil {
 			results = append(results, slingResult{beadID: beadID, polecat: spawnInfo.PolecatName, success: false, errMsg: "hook failed"})
@@ -106,14 +137,16 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 
 		// Log sling event
 		actor := detectActor()
-		_ = events.LogFeed(events.TypeSling, actor, events.SlingPayload(beadID, targetAgent))
+		_ = events.LogFeed(events.TypeSling, actor, events.SlingPayload(beadToHook, targetAgent))
 
 		// Update agent bead state
-		updateAgentHookBead(targetAgent, beadID, hookWorkDir, townBeadsDir)
+		updateAgentHookBead(targetAgent, beadToHook, hookWorkDir, townBeadsDir)
 
-		// Auto-attach mol-polecat-work molecule to polecat agent bead
-		if err := attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot); err != nil {
-			fmt.Printf("  %s Could not attach work molecule: %v\n", style.Dim.Render("Warning:"), err)
+		// Store attached molecule in the hooked bead
+		if attachedMoleculeID != "" {
+			if err := storeAttachedMoleculeInBead(beadToHook, attachedMoleculeID); err != nil {
+				fmt.Printf("  %s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
+			}
 		}
 
 		// Store args if provided

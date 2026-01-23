@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -275,16 +276,19 @@ func (c *SettingsCheck) findRigs(townRoot string) []string {
 // Valid options: session-start.sh wrapper OR 'gt prime --hook'.
 // Without proper config, gt seance cannot discover sessions.
 type SessionHookCheck struct {
-	BaseCheck
+	FixableCheck
+	filesToFix []string // Cached during Run for use in Fix
 }
 
 // NewSessionHookCheck creates a new session hook check.
 func NewSessionHookCheck() *SessionHookCheck {
 	return &SessionHookCheck{
-		BaseCheck: BaseCheck{
-			CheckName:        "session-hooks",
-			CheckDescription: "Check that settings.json hooks use session-start.sh or --hook flag",
-			CheckCategory:    CategoryConfig,
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "session-hooks",
+				CheckDescription: "Check that settings.json hooks use session-start.sh or --hook flag",
+				CheckCategory:    CategoryConfig,
+			},
 		},
 	}
 }
@@ -293,6 +297,9 @@ func NewSessionHookCheck() *SessionHookCheck {
 func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 	var issues []string
 	var checked int
+
+	// Reset cache
+	c.filesToFix = nil
 
 	// Find all settings.json files in the town
 	settingsFiles := c.findSettingsFiles(ctx.TownRoot)
@@ -305,6 +312,8 @@ func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 			for _, problem := range problems {
 				issues = append(issues, fmt.Sprintf("%s: %s", relPath, problem))
 			}
+			// Cache file for Fix
+			c.filesToFix = append(c.filesToFix, settingsPath)
 		}
 		checked++
 	}
@@ -322,8 +331,103 @@ func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 		Status:  StatusWarning,
 		Message: fmt.Sprintf("%d hook issue(s) found across settings.json files", len(issues)),
 		Details: issues,
-		FixHint: "Update hooks to use 'gt prime --hook' or 'bash ~/.claude/hooks/session-start.sh' for session_id passthrough",
+		FixHint: "Run 'gt doctor --fix' to update hooks to use 'gt prime --hook'",
 	}
+}
+
+// Fix updates settings.json files to use 'gt prime --hook' instead of bare 'gt prime'.
+func (c *SessionHookCheck) Fix(ctx *CheckContext) error {
+	for _, path := range c.filesToFix {
+		if err := c.fixSettingsFile(path); err != nil {
+			return fmt.Errorf("failed to fix %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// fixSettingsFile updates a single settings.json file.
+func (c *SessionHookCheck) fixSettingsFile(path string) error {
+	// Read file
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	// Parse JSON to get structure
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+
+	// Get hooks section
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		return nil // No hooks section, nothing to fix
+	}
+
+	modified := false
+
+	// Fix SessionStart and PreCompact hooks
+	for _, hookType := range []string{"SessionStart", "PreCompact"} {
+		hookList, ok := hooks[hookType].([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, hookEntry := range hookList {
+			entry, ok := hookEntry.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			hooksList, ok := entry["hooks"].([]interface{})
+			if !ok {
+				continue
+			}
+
+			for _, hook := range hooksList {
+				hookMap, ok := hook.(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				command, ok := hookMap["command"].(string)
+				if !ok {
+					continue
+				}
+
+				// Check if command has 'gt prime' without --hook
+				if strings.Contains(command, "gt prime") && !containsFlag(command, "--hook") {
+					// Replace 'gt prime' with 'gt prime --hook'
+					newCommand := strings.Replace(command, "gt prime", "gt prime --hook", -1)
+					hookMap["command"] = newCommand
+					modified = true
+				}
+			}
+		}
+	}
+
+	if !modified {
+		return nil
+	}
+
+	// Marshal back to JSON with indentation, without HTML escaping
+	// (json.MarshalIndent escapes & as \u0026 which is valid but less readable)
+	buf := new(strings.Builder)
+	encoder := json.NewEncoder(buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(settings); err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+	newData := []byte(buf.String())
+
+	// Write back
+	if err := os.WriteFile(path, newData, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
 }
 
 // checkSettingsFile checks a single settings.json file for hook issues.

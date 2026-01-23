@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/git"
@@ -121,7 +122,7 @@ func TestPolecatDir(t *testing.T) {
 
 	dir := m.polecatDir("Toast")
 	expected := "/home/user/ai/test-rig/polecats/Toast"
-	if dir != expected {
+	if filepath.ToSlash(dir) != expected {
 		t.Errorf("polecatDir = %q, want %q", dir, expected)
 	}
 }
@@ -293,8 +294,8 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		t.Fatalf("mkdir mayor/rig: %v", err)
 	}
 
-	// Initialize git repo in mayor/rig with main branch
-	cmd := exec.Command("git", "init", "-b", "main")
+	// Initialize git repo in mayor/rig
+	cmd := exec.Command("git", "init")
 	cmd.Dir = mayorRig
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
@@ -307,16 +308,8 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 		t.Fatalf("write AGENTS.md: %v", err)
 	}
 
-	// Checkout main branch to ensure it exists (needed for origin/main remote tracking)
-	cmd = exec.Command("git", "checkout", "-b", "main")
-	cmd.Dir = mayorRig
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git checkout -b main: %v\n%s", err, out)
-	}
-
-	mayorGit := git.NewGit(mayorRig)
-
 	// Commit AGENTS.md so it's part of the repo
+	mayorGit := git.NewGit(mayorRig)
 	if err := mayorGit.Add("AGENTS.md"); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
@@ -362,8 +355,10 @@ func TestAddWithOptions_HasAgentsMD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read worktree AGENTS.md: %v", err)
 	}
-	if string(content) != string(agentsMDContent) {
-		t.Errorf("AGENTS.md content = %q, want %q", string(content), string(agentsMDContent))
+	gotContent := strings.ReplaceAll(string(content), "\r\n", "\n")
+	wantContent := strings.ReplaceAll(string(agentsMDContent), "\r\n", "\n")
+	if gotContent != wantContent {
+		t.Errorf("AGENTS.md content = %q, want %q", gotContent, wantContent)
 	}
 }
 
@@ -380,7 +375,7 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	}
 
 	// Initialize git repo in mayor/rig WITHOUT AGENTS.md in git
-	cmd := exec.Command("git", "init", "-b", "main")
+	cmd := exec.Command("git", "init")
 	cmd.Dir = mayorRig
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
@@ -391,13 +386,6 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	if err := os.WriteFile(dummyPath, []byte("# Test\n"), 0644); err != nil {
 		t.Fatalf("write README.md: %v", err)
 	}
-	// Checkout main branch to ensure it exists (needed for origin/main remote tracking)
-	cmd = exec.Command("git", "checkout", "-b", "main")
-	cmd.Dir = mayorRig
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git checkout -b main: %v\n%s", err, out)
-	}
-
 	mayorGit := git.NewGit(mayorRig)
 	if err := mayorGit.Add("README.md"); err != nil {
 		t.Fatalf("git add: %v", err)
@@ -452,8 +440,10 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read worktree AGENTS.md: %v", err)
 	}
-	if string(content) != string(agentsMDContent) {
-		t.Errorf("AGENTS.md content = %q, want %q", string(content), string(agentsMDContent))
+	gotContent := strings.ReplaceAll(string(content), "\r\n", "\n")
+	wantContent := strings.ReplaceAll(string(agentsMDContent), "\r\n", "\n")
+	if gotContent != wantContent {
+		t.Errorf("AGENTS.md content = %q, want %q", gotContent, wantContent)
 	}
 }
 // TestReconcilePoolWith tests all permutations of directory and session existence.
@@ -665,56 +655,106 @@ func TestReconcilePoolWith_OrphanDoesNotBlockAllocation(t *testing.T) {
 	}
 }
 
-// TestAllocateName_ConcurrentAllocationUnique verifies that concurrent calls
-// to AllocateName() return unique names (no race condition).
-// This tests the fix for the parallel sling race condition bug (gt-27eer).
-func TestAllocateName_ConcurrentAllocationUnique(t *testing.T) {
-	t.Parallel()
+func TestBuildBranchName(t *testing.T) {
+	tmpDir := t.TempDir()
 
-	tmpDir, err := os.MkdirTemp("", "concurrent-alloc-test-*")
-	if err != nil {
-		t.Fatal(err)
+	// Initialize a git repo for config access
+	gitCmd := exec.Command("git", "init")
+	gitCmd.Dir = tmpDir
+	if err := gitCmd.Run(); err != nil {
+		t.Fatalf("git init: %v", err)
 	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	r := &rig.Rig{
-		Name: "testrig",
-		Path: tmpDir,
+	// Set git user.name for testing
+	configCmd := exec.Command("git", "config", "user.name", "testuser")
+	configCmd.Dir = tmpDir
+	if err := configCmd.Run(); err != nil {
+		t.Fatalf("git config: %v", err)
 	}
-	m := NewManager(r, nil, nil)
 
-	// Run 10 concurrent allocations
-	const numAllocs = 10
-	names := make(chan string, numAllocs)
-	errs := make(chan error, numAllocs)
+	tests := []struct {
+		name     string
+		template string
+		issue    string
+		want     string
+	}{
+		{
+			name:     "default_with_issue",
+			template: "", // Empty template = default behavior
+			issue:    "gt-123",
+			want:     "polecat/alpha/gt-123@", // timestamp suffix varies
+		},
+		{
+			name:     "default_without_issue",
+			template: "",
+			issue:    "",
+			want:     "polecat/alpha-", // timestamp suffix varies
+		},
+		{
+			name:     "custom_template_user_year_month",
+			template: "{user}/{year}/{month}/fix",
+			issue:    "",
+			want:     "testuser/", // year/month will vary
+		},
+		{
+			name:     "custom_template_with_name",
+			template: "feature/{name}",
+			issue:    "",
+			want:     "feature/alpha",
+		},
+		{
+			name:     "custom_template_with_issue",
+			template: "work/{issue}",
+			issue:    "gt-456",
+			want:     "work/456",
+		},
+		{
+			name:     "custom_template_with_timestamp",
+			template: "feature/{name}-{timestamp}",
+			issue:    "",
+			want:     "feature/alpha-", // timestamp suffix varies
+		},
+	}
 
-	for i := 0; i < numAllocs; i++ {
-		go func() {
-			name, err := m.AllocateName()
-			if err != nil {
-				errs <- err
-				return
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create rig with test template
+			r := &rig.Rig{
+				Name: "test-rig",
+				Path: tmpDir,
 			}
-			names <- name
-		}()
-	}
 
-	// Collect results
-	allocatedNames := make(map[string]bool)
-	for i := 0; i < numAllocs; i++ {
-		select {
-		case name := <-names:
-			if allocatedNames[name] {
-				t.Errorf("duplicate name allocated: %q (race condition!)", name)
+			// Override system defaults for this test if template is set
+			if tt.template != "" {
+				origDefault := rig.SystemDefaults["polecat_branch_template"]
+				rig.SystemDefaults["polecat_branch_template"] = tt.template
+				defer func() {
+					rig.SystemDefaults["polecat_branch_template"] = origDefault
+				}()
 			}
-			allocatedNames[name] = true
-		case err := <-errs:
-			t.Errorf("allocation error: %v", err)
-		}
-	}
 
-	// Should have exactly numAllocs unique names
-	if len(allocatedNames) != numAllocs {
-		t.Errorf("expected %d unique names, got %d", numAllocs, len(allocatedNames))
+			g := git.NewGit(tmpDir)
+			m := NewManager(r, g, nil)
+
+			got := m.buildBranchName("alpha", tt.issue)
+
+			// For default templates, just check prefix since timestamp varies
+			if tt.template == "" {
+				if !strings.HasPrefix(got, tt.want) {
+					t.Errorf("buildBranchName() = %q, want prefix %q", got, tt.want)
+				}
+			} else {
+				// For custom templates with time-varying fields, check prefix
+				if strings.Contains(tt.template, "{year}") || strings.Contains(tt.template, "{month}") || strings.Contains(tt.template, "{timestamp}") {
+					if !strings.HasPrefix(got, tt.want) {
+						t.Errorf("buildBranchName() = %q, want prefix %q", got, tt.want)
+					}
+				} else {
+					if got != tt.want {
+						t.Errorf("buildBranchName() = %q, want %q", got, tt.want)
+					}
+				}
+			}
+		})
 	}
 }

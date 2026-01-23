@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/activity"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // LiveConvoyFetcher fetches convoy data from beads.
 type LiveConvoyFetcher struct {
+	townRoot  string
 	townBeads string
 }
 
@@ -26,6 +28,7 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 	}
 
 	return &LiveConvoyFetcher{
+		townRoot:  townRoot,
 		townBeads: filepath.Join(townRoot, ".beads"),
 	}, nil
 }
@@ -437,21 +440,25 @@ func calculateWorkStatus(completed, total int, activityColor string) string {
 	}
 }
 
-// FetchMergeQueue fetches open PRs from configured repos.
+// FetchMergeQueue fetches open PRs from registered rigs.
 func (f *LiveConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
-	// Repos to query for PRs
-	repos := []struct {
-		Full  string // Full repo path for gh CLI
-		Short string // Short name for display
-	}{
-		{"michaellady/roxas", "roxas"},
-		{"michaellady/gastown", "gastown"},
+	// Load registered rigs from config
+	rigsConfigPath := filepath.Join(f.townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading rigs config: %w", err)
 	}
 
 	var result []MergeQueueRow
 
-	for _, repo := range repos {
-		prs, err := f.fetchPRsForRepo(repo.Full, repo.Short)
+	for rigName, entry := range rigsConfig.Rigs {
+		// Convert git URL to owner/repo format for gh CLI
+		repoPath := gitURLToRepoPath(entry.GitURL)
+		if repoPath == "" {
+			continue
+		}
+
+		prs, err := f.fetchPRsForRepo(repoPath, rigName)
 		if err != nil {
 			// Non-fatal: continue with other repos
 			continue
@@ -460,6 +467,28 @@ func (f *LiveConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
 	}
 
 	return result, nil
+}
+
+// gitURLToRepoPath converts a git URL to owner/repo format.
+// Supports HTTPS (https://github.com/owner/repo.git) and
+// SSH (git@github.com:owner/repo.git) formats.
+func gitURLToRepoPath(gitURL string) string {
+	// Handle HTTPS format: https://github.com/owner/repo.git
+	if strings.HasPrefix(gitURL, "https://github.com/") {
+		path := strings.TrimPrefix(gitURL, "https://github.com/")
+		path = strings.TrimSuffix(path, ".git")
+		return path
+	}
+
+	// Handle SSH format: git@github.com:owner/repo.git
+	if strings.HasPrefix(gitURL, "git@github.com:") {
+		path := strings.TrimPrefix(gitURL, "git@github.com:")
+		path = strings.TrimSuffix(path, ".git")
+		return path
+	}
+
+	// Unsupported format
+	return ""
 }
 
 // prResponse represents the JSON response from gh pr list.
@@ -477,7 +506,7 @@ type prResponse struct {
 
 // fetchPRsForRepo fetches open PRs for a single repo.
 func (f *LiveConvoyFetcher) fetchPRsForRepo(repoFull, repoShort string) ([]MergeQueueRow, error) {
-	// #nosec G204 -- gh is a trusted CLI, repo is from hardcoded list
+	// #nosec G204 -- gh is a trusted CLI, repo is from registered rigs config
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", repoFull,
 		"--state", "open",
@@ -592,6 +621,19 @@ func determineColorClass(ciStatus, mergeable string) string {
 
 // FetchPolecats fetches all running polecat and refinery sessions with activity data.
 func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
+	// Load registered rigs to filter sessions
+	rigsConfigPath := filepath.Join(f.townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading rigs config: %w", err)
+	}
+
+	// Build set of registered rig names
+	registeredRigs := make(map[string]bool)
+	for rigName := range rigsConfig.Rigs {
+		registeredRigs[rigName] = true
+	}
+
 	// Query all tmux sessions with window_activity for more accurate timing
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}")
 	var stdout bytes.Buffer
@@ -631,6 +673,11 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		}
 		rig := nameParts[1]
 		polecat := nameParts[2]
+
+		// Skip rigs not registered in this workspace
+		if !registeredRigs[rig] {
+			continue
+		}
 
 		// Skip non-worker sessions (witness, mayor, deacon, boot)
 		// Note: refinery is included to show idle/processing status

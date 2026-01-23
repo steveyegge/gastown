@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
-	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
@@ -188,6 +188,12 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
+	// Ensure .gitignore has required Gas Town patterns
+	if err := rig.EnsureGitignorePatterns(crewPath); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+	}
+
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
@@ -315,15 +321,14 @@ func (m *Manager) loadState(name string) (*CrewWorker, error) {
 		return nil, fmt.Errorf("parsing state: %w", err)
 	}
 
-	// Backfill essential fields if missing (handles empty or incomplete state.json)
-	if crew.Name == "" {
-		crew.Name = name
-	}
+	// Directory name is source of truth for Name and ClonePath.
+	// state.json can become stale after directory rename, copy, or corruption.
+	crew.Name = name
+	crew.ClonePath = m.crewDir(name)
+
+	// Rig only needs backfill when empty (less likely to drift)
 	if crew.Rig == "" {
 		crew.Rig = m.rig.Name
-	}
-	if crew.ClonePath == "" {
-		crew.ClonePath = m.crewDir(name)
 	}
 
 	return &crew, nil
@@ -429,19 +434,7 @@ type PristineResult struct {
 // This eliminates the need for git sync between crew clones - all crew members share one database.
 func (m *Manager) setupSharedBeads(crewPath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
-	if err := beads.SetupRedirect(townRoot, crewPath); err != nil {
-		return err
-	}
-
-	// Set beads.role=maintainer to prevent beads from routing writes to ~/.beads-planning.
-	// Without this, HTTPS-cloned repos are treated as "contributor" and writes go to the
-	// wrong database, causing MR beads to be lost. See: gt-3ml66
-	crewGit := git.NewGit(crewPath)
-	if err := crewGit.SetConfig("beads.role", "maintainer"); err != nil {
-		return fmt.Errorf("setting beads.role config: %w", err)
-	}
-
-	return nil
+	return beads.SetupRedirect(townRoot, crewPath)
 }
 
 // SessionName returns the tmux session name for a crew member.
@@ -477,7 +470,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	}
 	if running {
 		if opts.KillExisting {
-			// Restart mode - kill existing session
+			// Restart mode - kill existing session.
+			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
@@ -486,20 +480,19 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 			if t.IsClaudeRunning(sessionID) {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
-			// Zombie session - kill and recreate
+			// Zombie session - kill and recreate.
+			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
 		}
 	}
 
-	// Ensure Claude settings exist.
-	// If an account is configured, settings are stored per-account (shared across all crew members).
-	// Otherwise, settings are stored in crew/ (legacy per-workspace behavior).
+	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
+	// write into the source repo. Claude walks up the tree to find settings.
+	// All crew members share the same settings file.
 	crewBaseDir := filepath.Join(m.rig.Path, "crew")
-	townRoot := filepath.Dir(m.rig.Path)
-	rigRC := config.ResolveAgentConfig(townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRoleWithAccount(crewBaseDir, "crew", opts.ClaudeConfigDir, rigRC); err != nil {
+	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
@@ -536,6 +529,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
+	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:             "crew",
 		Rig:              m.rig.Name,
@@ -581,7 +575,9 @@ func (m *Manager) Stop(name string) error {
 		return ErrSessionNotFound
 	}
 
-	// Kill the session
+	// Kill the session.
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+	// This prevents orphan bash processes from Claude's Bash tool surviving session termination.
 	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
@@ -595,3 +591,4 @@ func (m *Manager) IsRunning(name string) (bool, error) {
 	sessionID := m.SessionName(name)
 	return t.HasSession(sessionID)
 }
+

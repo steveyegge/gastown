@@ -66,6 +66,18 @@ func init() {
 func runRigDock(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
 
+	// Check we're on main branch - docking on other branches won't persist
+	branchCmd := exec.Command("git", "branch", "--show-current")
+	branchOutput, err := branchCmd.Output()
+	if err == nil {
+		currentBranch := string(branchOutput)
+		currentBranch = currentBranch[:len(currentBranch)-1] // trim newline
+		if currentBranch != "main" && currentBranch != "master" {
+			return fmt.Errorf("cannot dock: must be on main branch (currently on %s)\n"+
+				"Docking on other branches won't persist. Run: git checkout main", currentBranch)
+		}
+	}
+
 	// Get rig
 	_, r, err := getRig(rigName)
 	if err != nil {
@@ -165,6 +177,18 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 
 func runRigUndock(cmd *cobra.Command, args []string) error {
 	rigName := args[0]
+
+	// Check we're on main branch - undocking on other branches won't persist
+	branchCmd := exec.Command("git", "branch", "--show-current")
+	branchOutput, err := branchCmd.Output()
+	if err == nil {
+		currentBranch := string(branchOutput)
+		currentBranch = currentBranch[:len(currentBranch)-1] // trim newline
+		if currentBranch != "main" && currentBranch != "master" {
+			return fmt.Errorf("cannot undock: must be on main branch (currently on %s)\n"+
+				"Undocking on other branches won't persist. Run: git checkout main", currentBranch)
+		}
+	}
 
 	// Get rig and town root
 	_, r, err := getRig(rigName)

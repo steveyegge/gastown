@@ -13,6 +13,7 @@ import (
 
 var beadCmd = &cobra.Command{
 	Use:     "bead",
+	Aliases: []string{"bd"},
 	GroupID: GroupWork,
 	Short:   "Bead management utilities",
 	Long:    `Utilities for managing beads across repositories.`,
@@ -57,10 +58,29 @@ Examples:
 	},
 }
 
+var beadReadCmd = &cobra.Command{
+	Use:   "read <bead-id> [flags]",
+	Short: "Show details of a bead (alias for 'show')",
+	Long: `Displays the full details of a bead by ID.
+
+This is an alias for 'gt bead show'. All bd show flags are supported.
+
+Examples:
+  gt bead read gt-abc123          # Show a gastown issue
+  gt bead read hq-xyz789          # Show a town-level bead
+  gt bead read bd-def456          # Show a beads issue
+  gt bead read gt-abc123 --json   # Output as JSON`,
+	DisableFlagParsing: true, // Pass all flags through to bd show
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runShow(cmd, args)
+	},
+}
+
 func init() {
 	beadMoveCmd.Flags().BoolVarP(&beadMoveDryRun, "dry-run", "n", false, "Show what would be done")
 	beadCmd.AddCommand(beadMoveCmd)
 	beadCmd.AddCommand(beadShowCmd)
+	beadCmd.AddCommand(beadReadCmd)
 	rootCmd.AddCommand(beadCmd)
 }
 

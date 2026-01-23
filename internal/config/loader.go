@@ -578,22 +578,6 @@ func ResolveAccountConfigDir(accountsPath, accountFlag string) (configDir, handl
 	return "", "", nil
 }
 
-// ValidateAccountCredentials checks if an account has valid credentials.
-// Returns an error if the account's config directory doesn't have .credentials.json.
-// Returns nil if configDir is empty (no account configured).
-func ValidateAccountCredentials(configDir, handle string) error {
-	if configDir == "" {
-		return nil // No account configured, nothing to validate
-	}
-
-	credentialsPath := filepath.Join(configDir, ".credentials.json")
-	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
-		return fmt.Errorf("account '%s' is not authenticated (no credentials in %s)\n\nTo authenticate this account, run:\n  CLAUDE_CONFIG_DIR=%s claude\n\nThen use /login to complete the OAuth flow.",
-			handle, configDir, configDir)
-	}
-	return nil
-}
-
 // expandPath expands ~ to home directory.
 func expandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
@@ -1101,6 +1085,13 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		Args:          rc.Args,
 		InitialPrompt: rc.InitialPrompt,
 	}
+	// Copy Env map to avoid mutation and preserve agent-specific env vars
+	if len(rc.Env) > 0 {
+		result.Env = make(map[string]string, len(rc.Env))
+		for k, v := range rc.Env {
+			result.Env[k] = v
+		}
+	}
 	if result.Command == "" {
 		result.Command = "claude"
 	}
@@ -1241,29 +1232,18 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		// For town-level agents (mayor, deacon), use GT_ROOT from envVars if set.
-		// This ensures role_agents config is respected even when the daemon
-		// is running from a directory outside the town hierarchy.
-		// Fall back to findTownRootFromCwd() for backwards compatibility.
-		if gtRoot := envVars["GT_ROOT"]; gtRoot != "" {
-			townRoot = gtRoot
+		// Try to detect town root from cwd for town-level agents (mayor, deacon)
+		var err error
+		townRoot, err = findTownRootFromCwd()
+		if err != nil {
+			rc = DefaultRuntimeConfig()
 		} else {
-			var err error
-			townRoot, err = findTownRootFromCwd()
-			if err != nil {
-				rc = DefaultRuntimeConfig()
-			}
-		}
-		// Only resolve agent config if we found a townRoot and haven't already set rc
-		if rc == nil && townRoot != "" {
 			if role != "" {
 				// Use role-based agent resolution for per-role model selection
 				rc = ResolveRoleAgentConfig(role, townRoot, "")
 			} else {
 				rc = ResolveAgentConfig(townRoot, "")
 			}
-		} else if rc == nil {
-			rc = DefaultRuntimeConfig()
 		}
 	}
 
@@ -1279,11 +1259,15 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
+	// Merge agent-specific env vars (e.g., OPENCODE_PERMISSION for yolo mode)
+	for k, v := range rc.Env {
+		resolvedEnv[k] = v
+	}
 
 	// Build environment export prefix
 	var exports []string
 	for k, v := range resolvedEnv {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
 	}
 
 	// Sort for deterministic output
@@ -1291,7 +1275,11 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 
 	var cmd string
 	if len(exports) > 0 {
-		cmd = "export " + strings.Join(exports, " ") + " && "
+		// Use 'exec env' instead of 'export ... &&' so the agent process
+		// replaces the shell. This allows WaitForCommand to detect the
+		// running agent via pane_current_command (which shows the direct
+		// process, not child processes).
+		cmd = "exec env " + strings.Join(exports, " ") + " "
 	}
 
 	// Add runtime command
@@ -1305,6 +1293,7 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 }
 
 // PrependEnv prepends export statements to a command string.
+// Values containing special characters are properly shell-quoted.
 func PrependEnv(command string, envVars map[string]string) string {
 	if len(envVars) == 0 {
 		return command
@@ -1312,7 +1301,7 @@ func PrependEnv(command string, envVars map[string]string) string {
 
 	var exports []string
 	for k, v := range envVars {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
 	}
 
 	sort.Strings(exports)
@@ -1348,21 +1337,11 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		// For town-level agents (mayor, deacon), use GT_ROOT from envVars if set.
-		// This ensures role_agents config is respected even when the daemon
-		// is running from a directory outside the town hierarchy.
-		// Fall back to findTownRootFromCwd() for backwards compatibility.
-		if gtRoot := envVars["GT_ROOT"]; gtRoot != "" {
-			townRoot = gtRoot
+		var err error
+		townRoot, err = findTownRootFromCwd()
+		if err != nil {
+			rc = DefaultRuntimeConfig()
 		} else {
-			var err error
-			townRoot, err = findTownRootFromCwd()
-			if err != nil {
-				rc = DefaultRuntimeConfig()
-			}
-		}
-		// Only resolve agent config if we found a townRoot and haven't already set rc
-		if rc == nil && townRoot != "" {
 			if agentOverride != "" {
 				var resolveErr error
 				rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
@@ -1375,8 +1354,6 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			} else {
 				rc = ResolveAgentConfig(townRoot, "")
 			}
-		} else if rc == nil {
-			rc = DefaultRuntimeConfig()
 		}
 	}
 
@@ -1392,17 +1369,29 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
+	// Record agent override so handoff can preserve it
+	if agentOverride != "" {
+		resolvedEnv["GT_AGENT"] = agentOverride
+	}
+	// Merge agent-specific env vars (e.g., OPENCODE_PERMISSION for yolo mode)
+	for k, v := range rc.Env {
+		resolvedEnv[k] = v
+	}
 
 	// Build environment export prefix
 	var exports []string
 	for k, v := range resolvedEnv {
-		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
+		exports = append(exports, fmt.Sprintf("%s=%s", k, ShellQuote(v)))
 	}
 	sort.Strings(exports)
 
 	var cmd string
 	if len(exports) > 0 {
-		cmd = "export " + strings.Join(exports, " ") + " && "
+		// Use 'exec env' instead of 'export ... &&' so the agent process
+		// replaces the shell. This allows WaitForCommand to detect the
+		// running agent via pane_current_command (which shows the direct
+		// process, not child processes).
+		cmd = "exec env " + strings.Join(exports, " ") + " "
 	}
 
 	if prompt != "" {
@@ -1500,14 +1489,13 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 }
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
-// For example, Claude runs as "node", while most other runtimes report their executable name.
+// Claude can report as "node" (older versions) or "claude" (newer versions).
+// Other runtimes typically report their executable name.
 func ExpectedPaneCommands(rc *RuntimeConfig) []string {
 	if rc == nil || rc.Command == "" {
 		return nil
 	}
 	if filepath.Base(rc.Command) == "claude" {
-		// Claude can appear as either "node" or "claude" in tmux pane_current_command
-		// depending on how it's invoked and whether it's wrapped by Node.js
 		return []string{"node", "claude"}
 	}
 	return []string{filepath.Base(rc.Command)}

@@ -60,8 +60,8 @@ func verifyFormulaExists(formulaName string) error {
 		return nil
 	}
 
-	// Try with oc- prefix
-	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "oc-"+formulaName, "--allow-stale")
+	// Try with mol- prefix
+	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "mol-"+formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
@@ -71,7 +71,6 @@ func verifyFormulaExists(formulaName string) error {
 
 // runSlingFormula handles standalone formula slinging.
 // Flow: cook → wisp → attach to hook → nudge
-// IMPORTANT: For rig targets, wisp is created BEFORE spawning polecat to avoid race condition.
 func runSlingFormula(args []string) error {
 	formulaName := args[0]
 
@@ -91,10 +90,6 @@ func runSlingFormula(args []string) error {
 	// Resolve target agent and pane
 	var targetAgent string
 	var targetPane string
-
-	// Track if we need to spawn a polecat (deferred until after wisp creation)
-	var pendingRigSpawn string
-	var spawnOpts SlingSpawnOptions
 
 	if target != "" {
 		// Resolve "." to current agent identity (like git's "." meaning current directory)
@@ -133,17 +128,23 @@ func runSlingFormula(args []string) error {
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
 				targetPane = "<new-pane>"
 			} else {
-				// RACE CONDITION FIX: Don't spawn polecat here.
-				// Defer spawn until AFTER wisp is created, so polecat finds work on hook.
-				pendingRigSpawn = rigName
-				spawnOpts = SlingSpawnOptions{
+				// Spawn a fresh polecat in the rig
+				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
+				spawnOpts := SlingSpawnOptions{
 					Force:   slingForce,
 					Account: slingAccount,
 					Create:  slingCreate,
 					Agent:   slingAgent,
 				}
-				// Placeholder agent ID - will be updated after spawn
-				targetAgent = fmt.Sprintf("%s/polecats/<pending>", rigName)
+				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
+				if spawnErr != nil {
+					return fmt.Errorf("spawning polecat: %w", spawnErr)
+				}
+				targetAgent = spawnInfo.AgentID()
+				targetPane = spawnInfo.Pane
+
+				// Wake witness and refinery to monitor the new polecat
+				wakeRigAgents(rigName)
 			}
 		} else {
 			// Slinging to an existing agent
@@ -165,11 +166,7 @@ func runSlingFormula(args []string) error {
 		_ = selfWorkDir // Formula sling doesn't need hookWorkDir
 	}
 
-	if pendingRigSpawn != "" {
-		fmt.Printf("%s Slinging formula %s to %s (polecat pending)...\n", style.Bold.Render("🎯"), formulaName, pendingRigSpawn)
-	} else {
-		fmt.Printf("%s Slinging formula %s to %s...\n", style.Bold.Render("🎯"), formulaName, targetAgent)
-	}
+	fmt.Printf("%s Slinging formula %s to %s...\n", style.Bold.Render("🎯"), formulaName, targetAgent)
 
 	if slingDryRun {
 		fmt.Printf("Would cook formula: %s\n", formulaName)
@@ -191,7 +188,6 @@ func runSlingFormula(args []string) error {
 	}
 
 	// Step 2: Create wisp instance (ephemeral)
-	// NOTE: This happens BEFORE polecat spawn to avoid race condition
 	fmt.Printf("  Creating wisp...\n")
 	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName}
 	for _, v := range slingVars {
@@ -213,29 +209,7 @@ func runSlingFormula(args []string) error {
 	}
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
-
-	// Step 2.5: NOW spawn the polecat if we deferred it (race condition fix)
-	// The wisp exists, so the polecat will find work when it runs gt prime
-	if pendingRigSpawn != "" {
-		fmt.Printf("  Spawning polecat in rig '%s'...\n", pendingRigSpawn)
-		spawnInfo, spawnErr := SpawnPolecatForSling(pendingRigSpawn, spawnOpts)
-		if spawnErr != nil {
-			return fmt.Errorf("spawning polecat: %w", spawnErr)
-		}
-		targetAgent = spawnInfo.AgentID()
-		targetPane = spawnInfo.Pane
-		fmt.Printf("%s Polecat spawned: %s\n", style.Bold.Render("✓"), targetAgent)
-
-		// Wake witness and refinery to monitor the new polecat
-		wakeRigAgents(pendingRigSpawn)
-	}
-
-	// Record the attached molecule in the wisp's description.
-	// This is required for gt hook to recognize the molecule attachment.
-	if err := storeAttachedMoleculeInBead(wispRootID, wispRootID); err != nil {
-		// Warn but don't fail - polecat can still work through steps
-		fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
-	}
+	attachedMoleculeID := wispRootID
 
 	// Step 3: Hook the wisp bead using bd update.
 	// See: https://github.com/steveyegge/gastown/issues/148
@@ -272,9 +246,22 @@ func runSlingFormula(args []string) error {
 		}
 	}
 
+	// Record the attached molecule after other description updates to avoid overwrite.
+	if attachedMoleculeID != "" {
+		if err := storeAttachedMoleculeInBead(wispRootID, attachedMoleculeID); err != nil {
+			// Warn but don't fail - polecat can still work through steps
+			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
+		}
+	}
+
 	// Step 4: Nudge to start (graceful if no tmux)
 	if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	// Skip nudge during tests to prevent agent self-interruption
+	if os.Getenv("GT_TEST_NO_NUDGE") != "" {
 		return nil
 	}
 

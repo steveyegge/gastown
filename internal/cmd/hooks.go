@@ -135,8 +135,14 @@ func discoverHooks(townRoot string) ([]HookInfo, error) {
 			agent string
 		}{filepath.Join(rigPath, ".claude", "settings.json"), fmt.Sprintf("%s/rig", rigName)})
 
-		// Polecats
+		// Polecats-level hooks (inherited by all polecats)
 		polecatsDir := filepath.Join(rigPath, "polecats")
+		locations = append(locations, struct {
+			path  string
+			agent string
+		}{filepath.Join(polecatsDir, ".claude", "settings.json"), fmt.Sprintf("%s/polecats", rigName)})
+
+		// Individual polecat hooks
 		if polecats, err := os.ReadDir(polecatsDir); err == nil {
 			for _, p := range polecats {
 				if p.IsDir() && !strings.HasPrefix(p.Name(), ".") {
@@ -148,11 +154,17 @@ func discoverHooks(townRoot string) ([]HookInfo, error) {
 			}
 		}
 
-		// Crew members
+		// Crew-level hooks (inherited by all crew members)
 		crewDir := filepath.Join(rigPath, "crew")
+		locations = append(locations, struct {
+			path  string
+			agent string
+		}{filepath.Join(crewDir, ".claude", "settings.json"), fmt.Sprintf("%s/crew", rigName)})
+
+		// Individual crew member hooks
 		if crew, err := os.ReadDir(crewDir); err == nil {
 			for _, c := range crew {
-				if c.IsDir() {
+				if c.IsDir() && !strings.HasPrefix(c.Name(), ".") {
 					locations = append(locations, struct {
 						path  string
 						agent string

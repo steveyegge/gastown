@@ -162,6 +162,27 @@ bd show hq-abc      # Routes to town beads
 
 **Conflicts:** If two rigs share a prefix, use `bd rename-prefix <new>` to fix.
 
+## Where to File Beads (CRITICAL)
+
+**File in the rig that OWNS the code, not where you're standing.**
+
+| Issue is about... | File in | Command |
+|-------------------|---------|---------|
+| `bd` CLI (beads tool bugs, features, docs) | **beads** | `bd create --rig beads "..."` |
+| `gt` CLI (gas town tool bugs, features) | **gastown** | `bd create --rig gastown "..."` |
+| Polecat/witness/refinery/convoy code | **gastown** | `bd create --rig gastown "..."` |
+| Wyvern game features | **wyvern** | `bd create --rig wyvern "..."` |
+| Cross-rig coordination, convoys, mail threads | **HQ** | `bd create "..."` (default) |
+| Agent role descriptions, assignments | **HQ** | `bd create "..."` (default) |
+
+**The test**: "Which repo would the fix be committed to?"
+- Fix in `anthropics/beads` → file in beads rig
+- Fix in `anthropics/gas-town` → file in gastown rig
+- Pure coordination (no code) → file in HQ
+
+**Common mistake**: Filing `bd` CLI issues in HQ because you're "coordinating."
+Wrong. The issue is about beads code, so it goes in the beads rig.
+
 ## Gotchas when Filing Beads
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.

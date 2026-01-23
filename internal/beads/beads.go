@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/steveyegge/gastown/internal/runtime"
 )
@@ -19,21 +18,8 @@ import (
 // ZFC: Only define errors that don't require stderr parsing for decisions.
 // ErrNotARepo and ErrSyncConflict were removed - agents should handle these directly.
 var (
-	ErrNotInstalled = errors.New("bd not installed: run 'pip install beads-cli' or see https://github.com/groblegark/beads")
+	ErrNotInstalled = errors.New("bd not installed: run 'pip install beads-cli' or see https://github.com/anthropics/beads")
 	ErrNotFound     = errors.New("issue not found")
-)
-
-// Retry configuration for Dolt lock contention (rig-358fc7)
-const (
-	// MaxRetryAttempts is the maximum number of retry attempts for Dolt lock contention.
-	// Default: 30 attempts with exponential backoff = ~6 seconds total
-	MaxRetryAttempts = 30
-
-	// InitialRetryDelay is the starting delay for exponential backoff
-	InitialRetryDelay = 100 * time.Millisecond
-
-	// MaxRetryDelay caps the exponential backoff to prevent excessive waits
-	MaxRetryDelay = 1 * time.Second
 )
 
 // Issue represents a beads issue.
@@ -58,8 +44,8 @@ type Issue struct {
 
 	// Agent bead slots (type=agent only)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
-	RoleBead   string `json:"role_bead,omitempty"`   // Role definition bead (shared)
 	AgentState string `json:"agent_state,omitempty"` // Agent lifecycle state (spawning, working, done, stuck)
+	// Note: role_bead field removed - role definitions are now config-based
 
 	// Counts from list output
 	DependencyCount int `json:"dependency_count,omitempty"`
@@ -128,6 +114,11 @@ type Beads struct {
 	workDir  string
 	beadsDir string // Optional BEADS_DIR override for cross-database access
 	isolated bool   // If true, suppress inherited beads env vars (for test isolation)
+
+	// Lazy-cached town root for routing resolution.
+	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
+	townRoot     string
+	searchedRoot bool
 }
 
 // New creates a new Beads wrapper for the given directory.
@@ -158,20 +149,24 @@ func (b *Beads) getActor() string {
 	return os.Getenv("BD_ACTOR")
 }
 
-// isRetryableError checks if an error from bd is retryable due to Dolt lock contention.
-// Dolt-specific errors that indicate transient lock contention:
-// - "database is read only" - Dolt couldn't acquire write lock
-// - "cannot update manifest" - Dolt manifest locked by another process
-//
-// Note: This does NOT help with bd daemon/Dolt incompatibility (rig-0eec57)
-// which causes permanent read-only state requiring daemon fix.
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
+// getTownRoot returns the Gas Town root directory, using lazy caching.
+// The town root is found by walking up from workDir looking for mayor/town.json.
+// Returns empty string if not in a Gas Town project.
+func (b *Beads) getTownRoot() string {
+	if !b.searchedRoot {
+		b.townRoot = FindTownRoot(b.workDir)
+		b.searchedRoot = true
 	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "database is read only") ||
-		strings.Contains(errStr, "cannot update manifest")
+	return b.townRoot
+}
+
+// getResolvedBeadsDir returns the beads directory this wrapper is operating on.
+// This follows any redirects and returns the actual beads directory path.
+func (b *Beads) getResolvedBeadsDir() string {
+	if b.beadsDir != "" {
+		return b.beadsDir
+	}
+	return ResolveBeadsDir(b.workDir)
 }
 
 // Init initializes a new beads database in the working directory.
@@ -182,47 +177,7 @@ func (b *Beads) Init(prefix string) error {
 }
 
 // run executes a bd command and returns stdout.
-// Implements retry logic with exponential backoff for Dolt lock contention (rig-358fc7).
 func (b *Beads) run(args ...string) ([]byte, error) {
-	var lastErr error
-	delay := InitialRetryDelay
-
-	for attempt := 0; attempt <= MaxRetryAttempts; attempt++ {
-		stdout, err := b.runOnce(args...)
-		if err == nil {
-			return stdout, nil
-		}
-
-		lastErr = err
-
-		// Check if this is a retryable error (Dolt lock contention)
-		if !isRetryableError(err) {
-			// Non-retryable error, fail immediately
-			return nil, err
-		}
-
-		// Don't sleep after the last attempt
-		if attempt < MaxRetryAttempts {
-			if attempt == 0 {
-				// Log first retry for debugging
-				fmt.Fprintf(os.Stderr, "Dolt lock contention detected, retrying (attempt %d/%d)...\n", attempt+1, MaxRetryAttempts)
-			}
-			time.Sleep(delay)
-
-			// Exponential backoff with cap
-			delay *= 2
-			if delay > MaxRetryDelay {
-				delay = MaxRetryDelay
-			}
-		}
-	}
-
-	// All retries exhausted
-	return nil, fmt.Errorf("failed after %d retries: %w", MaxRetryAttempts, lastErr)
-}
-
-// runOnce executes a bd command once without retry logic.
-func (b *Beads) runOnce(args ...string) ([]byte, error) {
 	// Use --no-daemon for faster read operations (avoids daemon IPC overhead)
 	// The daemon is primarily useful for write coalescing, not reads.
 	// Use --allow-stale to prevent failures when db is out of sync with JSONL
@@ -718,13 +673,6 @@ func (b *Beads) Sync() error {
 	return err
 }
 
-// SyncImportOnly imports from JSONL without git operations.
-// Useful for ensuring database is up-to-date with JSONL after git pull.
-func (b *Beads) SyncImportOnly() error {
-	_, err := b.run("sync", "--import-only")
-	return err
-}
-
 // SyncFromMain syncs beads updates from main branch.
 func (b *Beads) SyncFromMain() error {
 	_, err := b.run("sync", "--from-main")
@@ -813,17 +761,6 @@ Before signaling completion:
 7. ` + "`gt done`" + ` (submit to merge queue and exit)
 
 **Polecats MUST call ` + "`gt done`" + ` - this submits work and exits the session.**
-
-## Non-Code Tasks (Reports, Validation, Research)
-
-If your task produces no code changes, you MUST still create a commit:
-
-1. Write findings to ` + "`docs/reports/<bead-id>.md`" + `
-2. Include: summary, findings, recommendations, any errors encountered
-3. Commit: ` + "`git add docs/reports/ && git commit -m \"docs(<bead-id>): <summary>\"`" + `
-4. Push and complete: ` + "`git push && gt done`" + `
-
-This ensures the merge queue has reviewable output and your work is recorded.
 `
 
 // ProvisionPrimeMD writes the Gas Town PRIME.md file to the specified beads directory.

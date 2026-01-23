@@ -11,18 +11,35 @@ import (
 // BootHealthCheck verifies Boot watchdog health.
 // "The vet checks on the dog."
 type BootHealthCheck struct {
-	BaseCheck
+	FixableCheck
+	missingDir bool // track if directory is missing for Fix()
 }
 
 // NewBootHealthCheck creates a new Boot health check.
 func NewBootHealthCheck() *BootHealthCheck {
 	return &BootHealthCheck{
-		BaseCheck: BaseCheck{
-			CheckName:        "boot-health",
-			CheckDescription: "Check Boot watchdog health (the vet checks on the dog)",
-			CheckCategory:    CategoryInfrastructure,
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "boot-health",
+				CheckDescription: "Check Boot watchdog health (the vet checks on the dog)",
+				CheckCategory:    CategoryInfrastructure,
+			},
 		},
 	}
+}
+
+// CanFix returns true only if the directory is missing (we can create it).
+func (c *BootHealthCheck) CanFix() bool {
+	return c.missingDir
+}
+
+// Fix creates the missing boot directory.
+func (c *BootHealthCheck) Fix(ctx *CheckContext) error {
+	if !c.missingDir {
+		return nil
+	}
+	b := boot.New(ctx.TownRoot)
+	return b.EnsureDir()
 }
 
 // Run checks Boot health: directory, session, status, and marker freshness.
@@ -33,12 +50,13 @@ func (c *BootHealthCheck) Run(ctx *CheckContext) *CheckResult {
 	// Check 1: Boot directory exists
 	bootDir := b.Dir()
 	if _, err := os.Stat(bootDir); os.IsNotExist(err) {
+		c.missingDir = true
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusWarning,
 			Message: "Boot directory not present",
 			Details: []string{fmt.Sprintf("Expected: %s", bootDir)},
-			FixHint: "Boot directory is created on first daemon run",
+			FixHint: "Run 'gt doctor --fix' to create it",
 		}
 	}
 

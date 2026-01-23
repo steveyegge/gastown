@@ -42,6 +42,7 @@ func isTrackedByConvoy(beadID string) string {
 		JOIN issues i ON d.issue_id = i.id
 		WHERE d.type = 'tracks'
 		AND i.issue_type = 'convoy'
+		AND i.status = 'open'
 		AND (d.depends_on_id = '%s' OR d.depends_on_id LIKE '%%:%s')
 		LIMIT 1
 	`, beadID, beadID)

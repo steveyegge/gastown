@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -86,6 +88,7 @@ func (w *ConvoyWatcher) run() {
 func (w *ConvoyWatcher) watchActivity() error {
 	cmd := exec.CommandContext(w.ctx, "bd", "activity", "--follow", "--town", "--json")
 	cmd.Dir = w.townRoot
+	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -151,57 +154,40 @@ func (w *ConvoyWatcher) processLine(line string) {
 
 // getTrackingConvoys returns convoy IDs that track the given issue.
 func (w *ConvoyWatcher) getTrackingConvoys(issueID string) []string {
-	// Use bd CLI instead of direct sqlite3 access to support both SQLite and Dolt backends
-	// Get all convoy-type issues, then filter for those that track this issue
-	cmd := exec.Command("bd", "list", "--type", "convoy", "--json", "--limit", "0")
-	cmd.Dir = w.townRoot
+	townBeads := filepath.Join(w.townRoot, ".beads")
+	dbPath := filepath.Join(townBeads, "beads.db")
+
+	// Query for convoys that track this issue
+	// Handle both direct ID and external reference format
+	safeIssueID := strings.ReplaceAll(issueID, "'", "''")
+
+	// Query for dependencies where this issue is the target
+	// Convoys use "tracks" type: convoy -> tracked issue (depends_on_id)
+	query := fmt.Sprintf(`
+		SELECT DISTINCT issue_id FROM dependencies
+		WHERE type = 'tracks'
+		AND (depends_on_id = '%s' OR depends_on_id LIKE '%%:%s')
+	`, safeIssueID, safeIssueID)
+
+	queryCmd := exec.Command("sqlite3", "-json", dbPath, query)
+	queryCmd.Env = os.Environ() // Inherit PATH to find sqlite3 executable
 	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
+	queryCmd.Stdout = &stdout
 
-	if err := cmd.Run(); err != nil {
+	if err := queryCmd.Run(); err != nil {
 		return nil
 	}
 
-	var convoys []struct {
-		ID           string   `json:"id"`
-		Dependencies []string `json:"dependencies,omitempty"`
+	var results []struct {
+		IssueID string `json:"issue_id"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
 		return nil
 	}
 
-	// For each convoy, check if it tracks the given issue
-	convoyIDs := make([]string, 0)
-	for _, convoy := range convoys {
-		// Get dependencies for this convoy
-		depCmd := exec.Command("bd", "dep", "list", convoy.ID, "--json")
-		depCmd.Dir = w.townRoot
-		var depStdout bytes.Buffer
-		depCmd.Stdout = &depStdout
-
-		if err := depCmd.Run(); err != nil {
-			continue
-		}
-
-		var deps []struct {
-			DependsOnID string `json:"depends_on_id"`
-			Type        string `json:"type"`
-		}
-		if err := json.Unmarshal(depStdout.Bytes(), &deps); err != nil {
-			continue
-		}
-
-		// Check if any "tracks" dependency matches our issueID
-		for _, dep := range deps {
-			if dep.Type == "tracks" {
-				// Handle both direct ID and external reference format
-				dependsOn := dep.DependsOnID
-				if dependsOn == issueID || strings.HasSuffix(dependsOn, ":"+issueID) {
-					convoyIDs = append(convoyIDs, convoy.ID)
-					break
-				}
-			}
-		}
+	convoyIDs := make([]string, 0, len(results))
+	for _, r := range results {
+		convoyIDs = append(convoyIDs, r.IssueID)
 	}
 	return convoyIDs
 }
@@ -209,33 +195,40 @@ func (w *ConvoyWatcher) getTrackingConvoys(issueID string) []string {
 // checkConvoyCompletion checks if all issues tracked by a convoy are closed.
 // If so, runs gt convoy check to close the convoy.
 func (w *ConvoyWatcher) checkConvoyCompletion(convoyID string) {
-	// Use bd CLI instead of direct sqlite3 access to support both SQLite and Dolt backends
-	cmd := exec.Command("bd", "show", "--json", convoyID)
-	cmd.Dir = w.townRoot
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
+	townBeads := filepath.Join(w.townRoot, ".beads")
+	dbPath := filepath.Join(townBeads, "beads.db")
 
-	if err := cmd.Run(); err != nil {
+	// First check if the convoy is still open
+	convoyQuery := fmt.Sprintf(`SELECT status FROM issues WHERE id = '%s'`,
+		strings.ReplaceAll(convoyID, "'", "''"))
+
+	queryCmd := exec.Command("sqlite3", "-json", dbPath, convoyQuery)
+	queryCmd.Env = os.Environ() // Inherit PATH to find sqlite3 executable
+	var stdout bytes.Buffer
+	queryCmd.Stdout = &stdout
+
+	if err := queryCmd.Run(); err != nil {
 		return
 	}
 
-	var convoy struct {
+	var convoyStatus []struct {
 		Status string `json:"status"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &convoy); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &convoyStatus); err != nil || len(convoyStatus) == 0 {
 		return
 	}
 
-	if convoy.Status == "closed" {
+	if convoyStatus[0].Status == "closed" {
 		return // Already closed
 	}
 
-	// Run gt convoy check to handle the completion
+	// Run gt convoy check with specific convoy ID for targeted check
 	// This reuses the existing logic which handles notifications, etc.
 	w.logger("convoy watcher: running completion check for %s", convoyID)
 
-	checkCmd := exec.Command("gt", "convoy", "check")
+	checkCmd := exec.Command("gt", "convoy", "check", convoyID)
 	checkCmd.Dir = w.townRoot
+	checkCmd.Env = os.Environ() // Inherit PATH to find gt executable
 	var checkStdout, checkStderr bytes.Buffer
 	checkCmd.Stdout = &checkStdout
 	checkCmd.Stderr = &checkStderr

@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -204,6 +205,13 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
 	}
 
+	// Kill all processes in the pane before respawning to prevent orphan leaks
+	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
+	if err := t.KillPaneProcesses(pane); err != nil {
+		// Non-fatal but log the warning
+		style.PrintWarning("could not kill pane processes: %v", err)
+	}
+
 	// Use exec to respawn the pane - this kills us and restarts
 	return t.RespawnPane(pane, restartCmd)
 }
@@ -384,7 +392,20 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// 3. export Claude-related env vars (not inherited by fresh shell)
 	// 4. run claude with the startup beacon (triggers immediate context loading)
 	// Use exec to ensure clean process replacement.
-	runtimeCmd := config.GetRuntimeCommandWithPrompt("", beacon)
+	//
+	// Check if current session is using a non-default agent (GT_AGENT env var).
+	// If so, preserve it across handoff by using the override variant.
+	currentAgent := os.Getenv("GT_AGENT")
+	var runtimeCmd string
+	if currentAgent != "" {
+		var err error
+		runtimeCmd, err = config.GetRuntimeCommandWithPromptAndAgentOverride("", beacon, currentAgent)
+		if err != nil {
+			return "", fmt.Errorf("resolving agent config: %w", err)
+		}
+	} else {
+		runtimeCmd = config.GetRuntimeCommandWithPrompt("", beacon)
+	}
 
 	// Build environment exports - role vars first, then Claude vars
 	var exports []string
@@ -396,6 +417,15 @@ func buildRestartCommand(sessionName string) (string, error) {
 		if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
 			exports = append(exports, "GT_SESSION_ID_ENV="+runtimeConfig.Session.SessionIDEnv)
 		}
+	}
+
+	// Propagate GT_ROOT so subsequent handoffs can use it as fallback
+	// when cwd-based detection fails (broken state recovery)
+	exports = append(exports, "GT_ROOT="+townRoot)
+
+	// Preserve GT_AGENT across handoff so agent override persists
+	if currentAgent != "" {
+		exports = append(exports, "GT_AGENT="+currentAgent)
 	}
 
 	// Add Claude-related env vars from current environment
@@ -480,14 +510,33 @@ func sessionToGTRole(sessionName string) string {
 }
 
 // detectTownRootFromCwd walks up from the current directory to find the town root.
+// Falls back to GT_TOWN_ROOT or GT_ROOT env vars if cwd detection fails (broken state recovery).
 func detectTownRootFromCwd() string {
 	// Use workspace.FindFromCwd which handles both primary (mayor/town.json)
 	// and secondary (mayor/ directory) markers
 	townRoot, err := workspace.FindFromCwd()
-	if err != nil {
-		return ""
+	if err == nil && townRoot != "" {
+		return townRoot
 	}
-	return townRoot
+
+	// Fallback: try environment variables for town root
+	// GT_TOWN_ROOT is set by shell integration, GT_ROOT is set by session manager
+	// This enables handoff to work even when cwd detection fails due to
+	// detached HEAD, wrong branch, deleted worktree, etc.
+	for _, envName := range []string{"GT_TOWN_ROOT", "GT_ROOT"} {
+		if envRoot := os.Getenv(envName); envRoot != "" {
+			// Verify it's actually a workspace
+			if _, statErr := os.Stat(filepath.Join(envRoot, workspace.PrimaryMarker)); statErr == nil {
+				return envRoot
+			}
+			// Try secondary marker too
+			if info, statErr := os.Stat(filepath.Join(envRoot, workspace.SecondaryMarker)); statErr == nil && info.IsDir() {
+				return envRoot
+			}
+		}
+	}
+
+	return ""
 }
 
 // handoffRemoteSession respawns a different session and optionally switches to it.
@@ -517,6 +566,13 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 			fmt.Printf("Would execute: tmux switch-client -t %s\n", targetSession)
 		}
 		return nil
+	}
+
+	// Kill all processes in the pane before respawning to prevent orphan leaks
+	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
+	if err := t.KillPaneProcesses(targetPane); err != nil {
+		// Non-fatal but log the warning
+		style.PrintWarning("could not kill pane processes: %v", err)
 	}
 
 	// Clear scrollback history before respawn (resets copy-mode from [0/N] to [0/0])
@@ -601,6 +657,9 @@ func sendHandoffMail(subject, message string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("detecting agent identity: %w", err)
 	}
+
+	// Normalize identity to match mailbox query format
+	agentID = mail.AddressToIdentity(agentID)
 
 	// Detect town root for beads location
 	townRoot := detectTownRootFromCwd()

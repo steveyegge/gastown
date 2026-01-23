@@ -97,9 +97,11 @@ Git-backed issue tracking system that stores work state as structured data.
 
 ```bash
 # Install Gas Town
-go install github.com/steveyegge/gastown/cmd/gt@latest
+$ brew tap steveyegge/gastown && brew install gt         # Homebrew (recommended)
+$ npm install -g @gastown/gt                              # npm
+$ go install github.com/steveyegge/gastown/cmd/gt@latest  # From source
 
-# Add Go binaries to PATH (add to ~/.zshrc or ~/.bashrc)
+# If using go install, add Go binaries to PATH (add to ~/.zshrc or ~/.bashrc)
 export PATH="$PATH:$HOME/go/bin"
 
 # Create workspace with git initialization
@@ -120,11 +122,11 @@ gt mayor attach
 ## Quick Start Guide
 
 ### Getting Started
-Run 
+Run
 ```shell
-gt install ~/gt --git && 
-cd ~/gt && 
-gt config agent list && 
+gt install ~/gt --git &&
+cd ~/gt &&
+gt config agent list &&
 gt mayor attach
 ```
 and tell the Mayor what you want to build!

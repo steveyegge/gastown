@@ -89,6 +89,58 @@ Debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
 
 Process state, PIDs, ephemeral data.
 
+### Rig-Level Configuration
+
+Rigs support layered configuration through:
+1. **Wisp layer** (`.beads-wisp/config/`) - transient, local overrides
+2. **Rig identity bead labels** - persistent rig settings
+3. **Town defaults** (`~/gt/settings/config.json`)
+4. **System defaults** - compiled-in fallbacks
+
+#### Polecat Branch Naming
+
+Configure custom branch name templates for polecats:
+
+```bash
+# Set via wisp (transient - for testing)
+echo '{"polecat_branch_template": "adam/{year}/{month}/{description}"}' > \
+  ~/gt/.beads-wisp/config/myrig.json
+
+# Or set via rig identity bead labels (persistent)
+bd update gt-rig-myrig --labels="polecat_branch_template:adam/{year}/{month}/{description}"
+```
+
+**Template Variables:**
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `{user}` | From `git config user.name` | `adam` |
+| `{year}` | Current year (YY format) | `26` |
+| `{month}` | Current month (MM format) | `01` |
+| `{name}` | Polecat name | `alpha` |
+| `{issue}` | Issue ID without prefix | `123` (from `gt-123`) |
+| `{description}` | Sanitized issue title | `fix-auth-bug` |
+| `{timestamp}` | Unique timestamp | `1ks7f9a` |
+
+**Default Behavior (backward compatible):**
+
+When `polecat_branch_template` is empty or not set:
+- With issue: `polecat/{name}/{issue}@{timestamp}`
+- Without issue: `polecat/{name}-{timestamp}`
+
+**Example Configurations:**
+
+```bash
+# GitHub enterprise format
+"adam/{year}/{month}/{description}"
+
+# Simple feature branches
+"feature/{issue}"
+
+# Include polecat name for clarity
+"work/{name}/{issue}"
+```
+
 ## Formula Format
 
 ```toml
@@ -543,6 +595,24 @@ Never use raw `tmux send-keys` - it doesn't handle Claude's input correctly.
 ```bash
 gt stop --all                # Kill all sessions
 gt stop --rig <name>         # Kill rig sessions
+```
+
+### Health Check
+
+```bash
+gt deacon health-check <agent>   # Send health check ping, track response
+gt deacon health-state           # Show health check state for all agents
+```
+
+### Merge Queue (MQ)
+
+```bash
+gt mq list [rig]             # Show the merge queue
+gt mq next [rig]             # Show highest-priority merge request
+gt mq submit                 # Submit current branch to merge queue
+gt mq status <id>            # Show detailed merge request status
+gt mq retry <id>             # Retry a failed merge request
+gt mq reject <id>            # Reject a merge request
 ```
 
 ## Beads Commands (bd)

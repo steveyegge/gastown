@@ -21,6 +21,7 @@ var (
 	mailInboxJSON     bool
 	mailReadJSON      bool
 	mailInboxUnread   bool
+	mailInboxAll      bool
 	mailInboxIdentity string
 	mailCheckInject   bool
 	mailCheckJSON     bool
@@ -138,8 +139,13 @@ var mailInboxCmd = &cobra.Command{
 If no address is specified, shows the current context's inbox.
 Use --identity for polecats to explicitly specify their identity.
 
+By default, shows all messages. Use --unread to filter to unread only,
+or --all to explicitly show all messages (read and unread).
+
 Examples:
   gt mail inbox                       # Current context (auto-detected)
+  gt mail inbox --all                 # Explicitly show all messages
+  gt mail inbox --unread              # Show only unread messages
   gt mail inbox mayor/                # Mayor's inbox
   gt mail inbox greenplace/Toast         # Polecat's inbox
   gt mail inbox --identity greenplace/Toast  # Explicit polecat identity`,
@@ -148,15 +154,21 @@ Examples:
 }
 
 var mailReadCmd = &cobra.Command{
-	Use:   "read <message-id>",
+	Use:   "read <message-id|index>",
 	Short: "Read a message",
 	Long: `Read a specific message (does not mark as read).
 
-The message ID can be found from 'gt mail inbox'.
+You can specify a message by its ID or by its numeric index from the inbox.
+The index corresponds to the number shown in 'gt mail inbox' (1-based).
+
+Examples:
+  gt mail read hq-abc123    # Read by message ID
+  gt mail read 3            # Read the 3rd message in inbox
+
 Use 'gt mail mark-read' to mark messages as read.`,
 	Aliases: []string{"show"},
-	Args: cobra.ExactArgs(1),
-	RunE: runMailRead,
+	Args:    cobra.ExactArgs(1),
+	RunE:    runMailRead,
 }
 
 var mailPeekCmd = &cobra.Command{
@@ -170,12 +182,16 @@ Exits silently with code 1 if no unread messages.`,
 }
 
 var mailDeleteCmd = &cobra.Command{
-	Use:   "delete <message-id>",
-	Short: "Delete a message",
-	Long: `Delete (acknowledge) a message.
+	Use:   "delete <message-id> [message-id...]",
+	Short: "Delete messages",
+	Long: `Delete (acknowledge) one or more messages.
 
-This closes the message in beads.`,
-	Args: cobra.ExactArgs(1),
+This closes the messages in beads.
+
+Examples:
+  gt mail delete hq-abc123
+  gt mail delete hq-abc123 hq-def456 hq-ghi789`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: runMailDelete,
 }
 
@@ -262,7 +278,7 @@ Examples:
 }
 
 var mailReplyCmd = &cobra.Command{
-	Use:   "reply <message-id>",
+	Use:   "reply <message-id> [message]",
 	Short: "Reply to a message",
 	Long: `Reply to a specific message.
 
@@ -271,10 +287,13 @@ This is a convenience command that automatically:
 - Prefixes the subject with "Re: " (if not already present)
 - Sends to the original sender
 
+The message body can be provided as a positional argument or via -m flag.
+
 Examples:
+  gt mail reply msg-abc123 "Thanks, working on it now"
   gt mail reply msg-abc123 -m "Thanks, working on it now"
   gt mail reply msg-abc123 -s "Custom subject" -m "Reply body"`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.RangeArgs(1, 2),
 	RunE: runMailReply,
 }
 
@@ -418,6 +437,7 @@ func init() {
 	// Send flags
 	mailSendCmd.Flags().StringVarP(&mailSubject, "subject", "s", "", "Message subject (required)")
 	mailSendCmd.Flags().StringVarP(&mailBody, "message", "m", "", "Message body")
+	mailSendCmd.Flags().StringVar(&mailBody, "body", "", "Alias for --message")
 	mailSendCmd.Flags().IntVar(&mailPriority, "priority", 2, "Message priority (0=urgent, 1=high, 2=normal, 3=low, 4=backlog)")
 	mailSendCmd.Flags().BoolVar(&mailUrgent, "urgent", false, "Set priority=0 (urgent)")
 	mailSendCmd.Flags().StringVar(&mailType, "type", "notification", "Message type (task, scavenge, notification, reply)")
@@ -433,6 +453,7 @@ func init() {
 	// Inbox flags
 	mailInboxCmd.Flags().BoolVar(&mailInboxJSON, "json", false, "Output as JSON")
 	mailInboxCmd.Flags().BoolVarP(&mailInboxUnread, "unread", "u", false, "Show only unread messages")
+	mailInboxCmd.Flags().BoolVarP(&mailInboxAll, "all", "a", false, "Show all messages (read and unread)")
 	mailInboxCmd.Flags().StringVar(&mailInboxIdentity, "identity", "", "Explicit identity for inbox (e.g., greenplace/Toast)")
 	mailInboxCmd.Flags().StringVar(&mailInboxIdentity, "address", "", "Alias for --identity")
 
@@ -450,8 +471,8 @@ func init() {
 
 	// Reply flags
 	mailReplyCmd.Flags().StringVarP(&mailReplySubject, "subject", "s", "", "Override reply subject (default: Re: <original>)")
-	mailReplyCmd.Flags().StringVarP(&mailReplyMessage, "message", "m", "", "Reply message body (required)")
-	_ = mailReplyCmd.MarkFlagRequired("message")
+	mailReplyCmd.Flags().StringVarP(&mailReplyMessage, "message", "m", "", "Reply message body")
+	mailReplyCmd.Flags().StringVar(&mailReplyMessage, "body", "", "Reply message body (alias for --message)")
 
 	// Search flags
 	mailSearchCmd.Flags().StringVar(&mailSearchFrom, "from", "", "Filter by sender address")

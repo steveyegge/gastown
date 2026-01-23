@@ -22,6 +22,15 @@ const (
 	DefaultTheme = "mad-max"
 )
 
+// ReservedInfraAgentNames contains names reserved for infrastructure agents.
+// These names must never be allocated to polecats.
+var ReservedInfraAgentNames = map[string]bool{
+	"witness": true,
+	"mayor":   true,
+	"deacon":  true,
+	"refinery": true,
+}
+
 // Built-in themes with themed polecat names.
 var BuiltinThemes = map[string][]string{
 	"mad-max": {
@@ -88,12 +97,6 @@ type NamePool struct {
 	// Never persist - always discover from existing polecat directories.
 	InUse map[string]bool `json:"-"`
 
-	// Reserved tracks names that have been allocated but not yet instantiated.
-	// This prevents race conditions when multiple processes allocate names
-	// before the polecat directories are created.
-	// Persisted to disk and loaded on startup.
-	Reserved map[string]bool `json:"reserved,omitempty"`
-
 	// OverflowNext is the next overflow sequence number.
 	// Starts at MaxSize+1 and increments.
 	OverflowNext int `json:"overflow_next"`
@@ -111,7 +114,6 @@ func NewNamePool(rigPath, rigName string) *NamePool {
 		RigName:      rigName,
 		Theme:        ThemeForRig(rigName),
 		InUse:        make(map[string]bool),
-		Reserved:     make(map[string]bool),
 		OverflowNext: DefaultPoolSize + 1,
 		MaxSize:      DefaultPoolSize,
 		stateFile:    filepath.Join(rigPath, ".runtime", "namepool-state.json"),
@@ -132,7 +134,6 @@ func NewNamePoolWithConfig(rigPath, rigName, theme string, customNames []string,
 		Theme:        theme,
 		CustomNames:  customNames,
 		InUse:        make(map[string]bool),
-		Reserved:     make(map[string]bool),
 		OverflowNext: maxSize + 1,
 		MaxSize:      maxSize,
 		stateFile:    filepath.Join(rigPath, ".runtime", "namepool-state.json"),
@@ -140,19 +141,34 @@ func NewNamePoolWithConfig(rigPath, rigName, theme string, customNames []string,
 }
 
 // getNames returns the list of names to use for the pool.
+// Reserved infrastructure agent names are filtered out.
 func (p *NamePool) getNames() []string {
+	var names []string
+
 	// Custom names take precedence
 	if len(p.CustomNames) > 0 {
-		return p.CustomNames
+		names = p.CustomNames
+	} else if themeNames, ok := BuiltinThemes[p.Theme]; ok {
+		// Look up built-in theme
+		names = themeNames
+	} else {
+		// Fall back to default theme
+		names = BuiltinThemes[DefaultTheme]
 	}
 
-	// Look up built-in theme
-	if names, ok := BuiltinThemes[p.Theme]; ok {
-		return names
-	}
+	// Filter out reserved infrastructure agent names
+	return filterReservedNames(names)
+}
 
-	// Fall back to default theme
-	return BuiltinThemes[DefaultTheme]
+// filterReservedNames removes reserved infrastructure agent names from a name list.
+func filterReservedNames(names []string) []string {
+	filtered := make([]string, 0, len(names))
+	for _, name := range names {
+		if !ReservedInfraAgentNames[name] {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
 }
 
 // Load loads the pool state from disk.
@@ -165,7 +181,6 @@ func (p *NamePool) Load() error {
 		if os.IsNotExist(err) {
 			// Initialize with empty state
 			p.InUse = make(map[string]bool)
-			p.Reserved = make(map[string]bool)
 			p.OverflowNext = p.MaxSize + 1
 			return nil
 		}
@@ -182,15 +197,6 @@ func (p *NamePool) Load() error {
 
 	p.InUse = make(map[string]bool)
 
-	// Reserved IS loaded from disk - it tracks names allocated but not yet
-	// instantiated (polecat directory not yet created). This prevents race
-	// conditions when multiple processes allocate names concurrently.
-	if loaded.Reserved != nil {
-		p.Reserved = loaded.Reserved
-	} else {
-		p.Reserved = make(map[string]bool)
-	}
-
 	p.OverflowNext = loaded.OverflowNext
 	if p.OverflowNext < p.MaxSize+1 {
 		p.OverflowNext = p.MaxSize + 1
@@ -205,10 +211,9 @@ func (p *NamePool) Load() error {
 // namePoolState is the subset of NamePool that is persisted to the state file.
 // Only runtime state is saved, not configuration (Theme, CustomNames come from settings).
 type namePoolState struct {
-	RigName      string          `json:"rig_name"`
-	OverflowNext int             `json:"overflow_next"`
-	MaxSize      int             `json:"max_size"`
-	Reserved     map[string]bool `json:"reserved,omitempty"`
+	RigName      string `json:"rig_name"`
+	OverflowNext int    `json:"overflow_next"`
+	MaxSize      int    `json:"max_size"`
 }
 
 // Save persists the pool state to disk using atomic write.
@@ -228,7 +233,6 @@ func (p *NamePool) Save() error {
 		RigName:      p.RigName,
 		OverflowNext: p.OverflowNext,
 		MaxSize:      p.MaxSize,
-		Reserved:     p.Reserved,
 	}
 
 	return util.AtomicWriteJSON(p.stateFile, state)
@@ -237,11 +241,6 @@ func (p *NamePool) Save() error {
 // Allocate returns a name from the pool.
 // It prefers names in order from the theme list, and falls back to overflow names
 // when the pool is exhausted.
-//
-// The allocated name is marked as both InUse (transient) and Reserved (persisted).
-// Reserved prevents race conditions when multiple processes allocate names before
-// the polecat directories are created. Call ClearReservation after the directory
-// is created, or Release when the polecat is removed.
 func (p *NamePool) Allocate() (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -249,12 +248,10 @@ func (p *NamePool) Allocate() (string, error) {
 	names := p.getNames()
 
 	// Try to find first available name from the theme
-	// A name is available if it's not InUse AND not Reserved
 	for i := 0; i < len(names) && i < p.MaxSize; i++ {
 		name := names[i]
-		if !p.InUse[name] && !p.Reserved[name] {
+		if !p.InUse[name] {
 			p.InUse[name] = true
-			p.Reserved[name] = true
 			return name, nil
 		}
 	}
@@ -269,7 +266,6 @@ func (p *NamePool) Allocate() (string, error) {
 // Called when a polecat is nuked - the name becomes available for new polecats.
 // NOTE: This releases the NAME, not the polecat. The polecat is gone (nuked).
 // For overflow names, this is a no-op (they are not reusable).
-// Also clears any reservation for the name.
 func (p *NamePool) Release(name string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -277,18 +273,8 @@ func (p *NamePool) Release(name string) {
 	// Check if it's a themed name
 	if p.isThemedName(name) {
 		delete(p.InUse, name)
-		delete(p.Reserved, name)
 	}
 	// Overflow names are not reusable, so we don't track them
-}
-
-// ClearReservation removes a name from the Reserved set.
-// Call this after the polecat directory is successfully created.
-// The name remains in InUse (derived from the directory via Reconcile).
-func (p *NamePool) ClearReservation(name string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	delete(p.Reserved, name)
 }
 
 // isThemedName checks if a name is in the theme pool.
@@ -339,32 +325,17 @@ func (p *NamePool) MarkInUse(name string) {
 
 // Reconcile updates the pool state based on existing polecat directories.
 // This should be called on startup to sync pool state with reality.
-// Also cleans up stale reservations for names that now have directories.
 func (p *NamePool) Reconcile(existingPolecats []string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Build set of existing polecats for lookup
-	existingSet := make(map[string]bool)
-	for _, name := range existingPolecats {
-		existingSet[name] = true
-	}
-
-	// Clear InUse and rebuild from directories
+	// Clear current state
 	p.InUse = make(map[string]bool)
 
 	// Mark all existing polecats as in use
 	for _, name := range existingPolecats {
 		if p.isThemedName(name) {
 			p.InUse[name] = true
-		}
-	}
-
-	// Clean up stale reservations: if a reserved name now has a directory,
-	// the reservation is no longer needed (polecat was successfully created)
-	for name := range p.Reserved {
-		if existingSet[name] {
-			delete(p.Reserved, name)
 		}
 	}
 }
@@ -393,28 +364,18 @@ func (p *NamePool) SetTheme(theme string) error {
 
 	// Preserve names that exist in both themes
 	newNames := BuiltinThemes[theme]
-	newNameSet := make(map[string]bool)
-	for _, n := range newNames {
-		newNameSet[n] = true
-	}
-
 	newInUse := make(map[string]bool)
 	for name := range p.InUse {
-		if newNameSet[name] {
-			newInUse[name] = true
-		}
-	}
-
-	newReserved := make(map[string]bool)
-	for name := range p.Reserved {
-		if newNameSet[name] {
-			newReserved[name] = true
+		for _, n := range newNames {
+			if n == name {
+				newInUse[name] = true
+				break
+			}
 		}
 	}
 
 	p.Theme = theme
 	p.InUse = newInUse
-	p.Reserved = newReserved
 	p.CustomNames = nil
 	return nil
 }
@@ -441,9 +402,7 @@ func ThemeForRig(rigName string) string {
 	for _, b := range []byte(rigName) {
 		hash = hash*31 + uint32(b)
 	}
-	// Safe: len(themes) is always positive (checked above)
-	n := uint32(len(themes)) //nolint:gosec // G115: len always >= 0
-	return themes[hash%n]
+	return themes[hash%uint32(len(themes))] //nolint:gosec // len(themes) is small constant
 }
 
 // GetThemeNames returns the names in a specific theme.
@@ -474,6 +433,5 @@ func (p *NamePool) Reset() {
 	defer p.mu.Unlock()
 
 	p.InUse = make(map[string]bool)
-	p.Reserved = make(map[string]bool)
 	p.OverflowNext = p.MaxSize + 1
 }

@@ -100,6 +100,23 @@ Examples:
 	RunE: runRoleEnv,
 }
 
+var roleDefCmd = &cobra.Command{
+	Use:   "def <role>",
+	Short: "Display role definition (session, health, env config)",
+	Long: `Display the effective role definition after all overrides are applied.
+
+Role configuration is layered:
+  1. Built-in defaults (embedded in binary)
+  2. Town-level overrides (~/.gt/roles/<role>.toml)
+  3. Rig-level overrides (<rig>/roles/<role>.toml)
+
+Examples:
+  gt role def witness    # Show witness role definition
+  gt role def crew       # Show crew role definition`,
+	Args: cobra.ExactArgs(1),
+	RunE: runRoleDef,
+}
+
 // Flags for role home command
 var (
 	roleRig     string
@@ -113,6 +130,7 @@ func init() {
 	roleCmd.AddCommand(roleDetectCmd)
 	roleCmd.AddCommand(roleListCmd)
 	roleCmd.AddCommand(roleEnvCmd)
+	roleCmd.AddCommand(roleDefCmd)
 
 	// Add --rig and --polecat flags to home command for overrides
 	roleHomeCmd.Flags().StringVar(&roleRig, "rig", "", "Rig name (required for rig-specific roles)")
@@ -522,6 +540,86 @@ func runRoleEnv(cmd *cobra.Command, args []string) error {
 	sort.Strings(keys)
 	for _, k := range keys {
 		fmt.Printf("export %s=%s\n", k, envVars[k])
+	}
+
+	return nil
+}
+
+func runRoleDef(cmd *cobra.Command, args []string) error {
+	roleName := args[0]
+
+	// Validate role name
+	validRoles := config.AllRoles()
+	isValid := false
+	for _, r := range validRoles {
+		if r == roleName {
+			isValid = true
+			break
+		}
+	}
+	if !isValid {
+		return fmt.Errorf("unknown role %q - valid roles: %s", roleName, strings.Join(validRoles, ", "))
+	}
+
+	// Determine town root and rig path
+	townRoot, _ := workspace.FindFromCwd()
+	rigPath := ""
+	if townRoot != "" {
+		// Try to get rig path if we're in a rig directory
+		if rigInfo, err := GetRole(); err == nil && rigInfo.Rig != "" {
+			rigPath = filepath.Join(townRoot, rigInfo.Rig)
+		}
+	}
+
+	// Load role definition with overrides
+	def, err := config.LoadRoleDefinition(townRoot, rigPath, roleName)
+	if err != nil {
+		return fmt.Errorf("loading role definition: %w", err)
+	}
+
+	// Display role info
+	fmt.Printf("%s %s\n", style.Bold.Render("Role:"), def.Role)
+	fmt.Printf("%s %s\n", style.Bold.Render("Scope:"), def.Scope)
+	fmt.Println()
+
+	// Session config
+	fmt.Println(style.Bold.Render("[session]"))
+	fmt.Printf("  pattern        = %q\n", def.Session.Pattern)
+	fmt.Printf("  work_dir       = %q\n", def.Session.WorkDir)
+	fmt.Printf("  needs_pre_sync = %v\n", def.Session.NeedsPreSync)
+	if def.Session.StartCommand != "" {
+		fmt.Printf("  start_command  = %q\n", def.Session.StartCommand)
+	}
+	fmt.Println()
+
+	// Environment variables
+	if len(def.Env) > 0 {
+		fmt.Println(style.Bold.Render("[env]"))
+		envKeys := make([]string, 0, len(def.Env))
+		for k := range def.Env {
+			envKeys = append(envKeys, k)
+		}
+		sort.Strings(envKeys)
+		for _, k := range envKeys {
+			fmt.Printf("  %s = %q\n", k, def.Env[k])
+		}
+		fmt.Println()
+	}
+
+	// Health config
+	fmt.Println(style.Bold.Render("[health]"))
+	fmt.Printf("  ping_timeout         = %q\n", def.Health.PingTimeout.String())
+	fmt.Printf("  consecutive_failures = %d\n", def.Health.ConsecutiveFailures)
+	fmt.Printf("  kill_cooldown        = %q\n", def.Health.KillCooldown.String())
+	fmt.Printf("  stuck_threshold      = %q\n", def.Health.StuckThreshold.String())
+	fmt.Println()
+
+	// Prompts
+	if def.Nudge != "" {
+		fmt.Printf("%s %s\n", style.Bold.Render("Nudge:"), def.Nudge)
+	}
+	if def.PromptTemplate != "" {
+		fmt.Printf("%s %s\n", style.Bold.Render("Template:"), def.PromptTemplate)
 	}
 
 	return nil

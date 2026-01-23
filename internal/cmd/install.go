@@ -232,6 +232,30 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
 	}
 
+	// Create boot directory (deacon/dogs/boot/) for Boot watchdog.
+	// This avoids gt doctor warning on fresh install.
+	bootDir := filepath.Join(deaconDir, "dogs", "boot")
+	if err := os.MkdirAll(bootDir, 0755); err != nil {
+		fmt.Printf("   %s Could not create boot directory: %v\n", style.Dim.Render("⚠"), err)
+	}
+
+	// Create plugins directory for town-level patrol plugins.
+	// This avoids gt doctor warning on fresh install.
+	pluginsDir := filepath.Join(absPath, "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		fmt.Printf("   %s Could not create plugins directory: %v\n", style.Dim.Render("⚠"), err)
+	} else {
+		fmt.Printf("   ✓ Created plugins/\n")
+	}
+
+	// Create daemon.json patrol config.
+	// This avoids gt doctor warning on fresh install.
+	if err := config.EnsureDaemonPatrolConfig(absPath); err != nil {
+		fmt.Printf("   %s Could not create daemon.json: %v\n", style.Dim.Render("⚠"), err)
+	} else {
+		fmt.Printf("   ✓ Created mayor/daemon.json\n")
+	}
+
 	// Initialize git BEFORE beads so that bd can compute repository fingerprint.
 	// The fingerprint is required for the daemon to start properly.
 	if installGit || installGitHub != "" {
@@ -245,6 +269,12 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Town beads (hq- prefix) stores mayor mail, cross-rig coordination, and handoffs.
 	// Rig beads are separate and have their own prefixes.
 	if !installNoBeads {
+		// Kill any orphaned bd daemons before initializing beads.
+		// Stale daemons can interfere with fresh database creation.
+		if killed, _, _ := beads.StopAllBdProcesses(false, true); killed > 0 {
+			fmt.Printf("   ✓ Stopped %d orphaned bd daemon(s)\n", killed)
+		}
+
 		if err := initTownBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
@@ -259,7 +289,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Create town-level agent beads (Mayor, Deacon) and role beads.
+		// Create town-level agent beads (Mayor, Deacon).
 		// These use hq- prefix and are stored in town beads for cross-rig coordination.
 		if err := initTownAgentBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not create town-level agent beads: %v\n", style.Dim.Render("⚠"), err)
@@ -389,6 +419,19 @@ func initTownBeads(townPath string) error {
 		}
 	}
 
+	// Verify .beads directory was actually created (bd init can exit 0 without creating it)
+	beadsDir := filepath.Join(townPath, ".beads")
+	if _, statErr := os.Stat(beadsDir); os.IsNotExist(statErr) {
+		return fmt.Errorf("bd init succeeded but .beads directory not created (check bd daemon interference)")
+	}
+
+	// Explicitly set issue_prefix config (bd init --prefix may not persist it in newer versions).
+	prefixSetCmd := exec.Command("bd", "config", "set", "issue_prefix", "hq")
+	prefixSetCmd.Dir = townPath
+	if prefixOutput, prefixErr := prefixSetCmd.CombinedOutput(); prefixErr != nil {
+		return fmt.Errorf("bd config set issue_prefix failed: %s", strings.TrimSpace(string(prefixOutput)))
+	}
+
 	// Configure custom types for Gas Town (agent, role, rig, convoy, slot).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
 	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
@@ -475,56 +518,28 @@ func ensureCustomTypes(beadsPath string) error {
 	return nil
 }
 
-// initTownAgentBeads creates town-level agent and role beads using hq- prefix.
+// initTownAgentBeads creates town-level agent beads using hq- prefix.
 // This creates:
 //   - hq-mayor, hq-deacon (agent beads for town-level agents)
-//   - hq-mayor-role, hq-deacon-role, hq-witness-role, hq-refinery-role,
-//     hq-polecat-role, hq-crew-role (role definition beads)
 //
 // These beads are stored in town beads (~/gt/.beads/) and are shared across all rigs.
 // Rig-level agent beads (witness, refinery) are created by gt rig add in rig beads.
 //
-// ERROR HANDLING ASYMMETRY:
-// Agent beads (Mayor, Deacon) use hard fail - installation aborts if creation fails.
-// Role beads use soft fail - logs warning and continues if creation fails.
+// Note: Role definitions are now config-based (internal/config/roles/*.toml),
+// not stored as beads. See config-based-roles.md for details.
 //
-// Rationale: Agent beads are identity beads that track agent state, hooks, and
+// Agent beads use hard fail - installation aborts if creation fails.
+// Agent beads are identity beads that track agent state, hooks, and
 // form the foundation of the CV/reputation ledger. Without them, agents cannot
-// be properly tracked or coordinated. Role beads are documentation templates
-// that define role characteristics but are not required for agent operation -
-// agents can function without their role bead existing.
+// be properly tracked or coordinated.
 func initTownAgentBeads(townPath string) error {
 	bd := beads.New(townPath)
 
 	// bd init doesn't enable "custom" issue types by default, but Gas Town uses
-	// agent/role beads during install and runtime. Ensure these types are enabled
+	// agent beads during install and runtime. Ensure these types are enabled
 	// before attempting to create any town-level system beads.
 	if err := ensureBeadsCustomTypes(townPath, constants.BeadsCustomTypesList()); err != nil {
 		return err
-	}
-
-	// Role beads (global templates) - use shared definitions from beads package
-	for _, role := range beads.AllRoleBeadDefs() {
-		// Check if already exists
-		if _, err := bd.Show(role.ID); err == nil {
-			continue // Already exists
-		}
-
-		// Create role bead using the beads API
-		// CreateWithID with Type: "role" automatically adds gt:role label
-		_, err := bd.CreateWithID(role.ID, beads.CreateOptions{
-			Title:       role.Title,
-			Type:        "role",
-			Description: role.Desc,
-			Priority:    -1, // No priority
-		})
-		if err != nil {
-			// Log but continue - role beads are optional
-			fmt.Printf("   %s Could not create role bead %s: %v\n",
-				style.Dim.Render("⚠"), role.ID, err)
-			continue
-		}
-		fmt.Printf("   ✓ Created role bead: %s\n", role.ID)
 	}
 
 	// Town-level agent beads
@@ -568,7 +583,7 @@ func initTownAgentBeads(townPath string) error {
 			Rig:        "", // Town-level agents have no rig
 			AgentState: "idle",
 			HookBead:   "",
-			RoleBead:   beads.RoleBeadIDTown(agent.roleType),
+			// Note: RoleBead field removed - role definitions are now config-based
 		}
 
 		if _, err := bd.CreateAgentBead(agent.id, agent.title, fields); err != nil {

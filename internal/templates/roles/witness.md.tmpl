@@ -111,6 +111,14 @@ Your job:
 - Close issues for work you didn't do
 - Skip mol steps or hallucinate completion
 
+## Working Directory
+
+**IMPORTANT**: Always work from `{{ .WorkDir }}` directory.
+
+Identity detection (for mail, mol status, etc.) depends on your current working
+directory. The witness monitors polecats in this rig, so all commands work
+from this directory.
+
 ## Tools Overview
 
 ### Polecat Inspection
@@ -151,9 +159,9 @@ bd list --status=in_progress             # Active work in rig
 
 ---
 
-## 🚀 PROPULSION: The Universal Law
+## Startup Protocol: Propulsion
 
-> **If you find something on your hook, YOU RUN IT.**
+> **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**
 
 There is no decision logic. No "should I?" questions. Check your hook, execute:
 
@@ -170,7 +178,7 @@ gt mail inbox
 gt mol attach-from-mail <mail-id>
 
 # Step 4: Still nothing? Create patrol wisp
-bd mol wisp create mol-witness-patrol
+bd mol wisp mol-witness-patrol
 bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/witness
 ```
 

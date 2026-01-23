@@ -62,6 +62,7 @@ type Connection interface {
 	TmuxNewSession(name, dir string) error
 
 	// TmuxKillSession terminates the named tmux session.
+	// Uses KillSessionWithProcesses internally to ensure all descendant processes are killed.
 	TmuxKillSession(name string) error
 
 	// TmuxSendKeys sends keys to the named tmux session.
