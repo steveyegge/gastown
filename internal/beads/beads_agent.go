@@ -210,6 +210,14 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		return nil, fmt.Errorf("parsing bd create output: %w", err)
 	}
 
+	// FIX (bd-3q6.7-1): Detect ID deduplication in Dolt backend.
+	// When bd create succeeds but returns a different ID (e.g., requested "hq-gastown-polecat-nux"
+	// but got "hq-gastown-polecat-nux-31"), this means an issue with the requested ID already exists.
+	// Return an error to trigger the reopen logic in CreateOrReopenAgentBead.
+	if issue.ID != id {
+		return nil, fmt.Errorf("UNIQUE constraint failed: requested ID %s but got %s (deduplication detected)", id, issue.ID)
+	}
+
 	// Note: role slot no longer set - role definitions are config-based
 
 	// Set the hook slot if specified (this is the authoritative storage)
@@ -276,6 +284,15 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	}
 	if err := b.Update(id, updateOpts); err != nil {
 		return nil, fmt.Errorf("updating reopened agent bead: %w", err)
+	}
+
+	// FIX (bd-3q6.7-1): Ensure gt:agent label exists on reopened beads.
+	// Old agent beads may not have this label, and GetAgentBead checks for it.
+	if _, labelErr := b.run("label", "add", id, "gt:agent"); labelErr != nil {
+		// Non-fatal: label might already exist
+		if !strings.Contains(labelErr.Error(), "already") {
+			fmt.Printf("Warning: could not add gt:agent label: %v\n", labelErr)
+		}
 	}
 
 	// Note: role slot no longer set - role definitions are config-based
