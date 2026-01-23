@@ -147,6 +147,11 @@ func (t *Tmux) KillSession(name string) error {
 	return err
 }
 
+// processKillGracePeriod is how long to wait after SIGTERM before sending SIGKILL.
+// 2 seconds gives processes time to clean up gracefully. The previous 100ms was too short
+// and caused Claude processes to become orphans when they couldn't shut down in time.
+const processKillGracePeriod = 2 * time.Second
+
 // KillSessionWithProcesses explicitly kills all processes in a session before terminating it.
 // This prevents orphan processes that survive tmux kill-session due to SIGHUP being ignored.
 //
@@ -154,7 +159,7 @@ func (t *Tmux) KillSession(name string) error {
 // 1. Get the pane's main process PID
 // 2. Find all descendant processes recursively (not just direct children)
 // 3. Send SIGTERM to all descendants (deepest first)
-// 4. Wait 100ms for graceful shutdown
+// 4. Wait 2s for graceful shutdown
 // 5. Send SIGKILL to any remaining descendants
 // 6. Kill the tmux session
 //
@@ -176,8 +181,8 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 			_ = exec.Command("kill", "-TERM", dpid).Run()
 		}
 
-		// Wait for graceful shutdown
-		time.Sleep(100 * time.Millisecond)
+		// Wait for graceful shutdown (2s gives processes time to clean up)
+		time.Sleep(processKillGracePeriod)
 
 		// Send SIGKILL to any remaining descendants
 		for _, dpid := range descendants {
@@ -186,7 +191,7 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 
 		// Kill the pane process itself (may have called setsid() and detached)
 		_ = exec.Command("kill", "-TERM", pid).Run()
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(processKillGracePeriod)
 		_ = exec.Command("kill", "-KILL", pid).Run()
 	}
 
@@ -235,8 +240,8 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 			_ = exec.Command("kill", "-TERM", dpid).Run()
 		}
 
-		// Wait for graceful shutdown
-		time.Sleep(100 * time.Millisecond)
+		// Wait for graceful shutdown (2s gives processes time to clean up)
+		time.Sleep(processKillGracePeriod)
 
 		// Send SIGKILL to any remaining non-excluded descendants
 		for _, dpid := range filtered {
@@ -247,7 +252,7 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 		// Only if not excluded
 		if !exclude[pid] {
 			_ = exec.Command("kill", "-TERM", pid).Run()
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(processKillGracePeriod)
 			_ = exec.Command("kill", "-KILL", pid).Run()
 		}
 	}
@@ -291,7 +296,7 @@ func getAllDescendants(pid string) []string {
 // 1. Get the pane's main process PID
 // 2. Find all descendant processes recursively (not just direct children)
 // 3. Send SIGTERM to all descendants (deepest first)
-// 4. Wait 100ms for graceful shutdown
+// 4. Wait 2s for graceful shutdown
 // 5. Send SIGKILL to any remaining descendants
 // 6. Kill the pane process itself
 //
@@ -316,8 +321,8 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 		_ = exec.Command("kill", "-TERM", dpid).Run()
 	}
 
-	// Wait for graceful shutdown
-	time.Sleep(100 * time.Millisecond)
+	// Wait for graceful shutdown (2s gives processes time to clean up)
+	time.Sleep(processKillGracePeriod)
 
 	// Send SIGKILL to any remaining descendants
 	for _, dpid := range descendants {
@@ -327,7 +332,7 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 	// Kill the pane process itself (may have called setsid() and detached,
 	// or may have no children like Claude Code)
 	_ = exec.Command("kill", "-TERM", pid).Run()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(processKillGracePeriod)
 	_ = exec.Command("kill", "-KILL", pid).Run()
 
 	return nil

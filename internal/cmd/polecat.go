@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Polecat command flags
@@ -1268,11 +1269,50 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\n%s Nuked %d polecat(s).\n", style.SuccessPrefix, nuked)
 	}
 
+	// Final cleanup: Kill any orphaned Claude processes that escaped the session termination.
+	// This catches processes that called setsid() or were reparented during session shutdown.
+	if !polecatNukeDryRun {
+		cleanupOrphanedProcesses()
+	}
+
 	if len(nukeErrors) > 0 {
 		return fmt.Errorf("%d nuke(s) failed", len(nukeErrors))
 	}
 
 	return nil
+}
+
+// cleanupOrphanedProcesses kills Claude processes that survived session termination.
+// Uses aggressive zombie detection via tmux session verification.
+func cleanupOrphanedProcesses() {
+	results, err := util.CleanupZombieClaudeProcesses()
+	if err != nil {
+		// Non-fatal: log and continue
+		fmt.Printf("  %s orphan cleanup check failed: %v\n", style.Dim.Render("○"), err)
+		return
+	}
+
+	if len(results) == 0 {
+		return
+	}
+
+	// Report what was cleaned up
+	var killed, escalated int
+	for _, r := range results {
+		switch r.Signal {
+		case "SIGTERM", "SIGKILL":
+			killed++
+		case "UNKILLABLE":
+			escalated++
+		}
+	}
+
+	if killed > 0 {
+		fmt.Printf("  %s cleaned up %d orphaned process(es)\n", style.Success.Render("✓"), killed)
+	}
+	if escalated > 0 {
+		fmt.Printf("  %s %d process(es) survived SIGKILL (unkillable)\n", style.Warning.Render("⚠"), escalated)
+	}
 }
 
 func runPolecatStale(cmd *cobra.Command, args []string) error {
