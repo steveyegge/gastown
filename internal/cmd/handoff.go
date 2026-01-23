@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -204,9 +205,17 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
 	}
 
-	// Kill all processes in the pane before respawning to prevent orphan leaks
-	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
-	if err := t.KillPaneProcesses(pane); err != nil {
+	// Kill all processes in the pane before respawning to prevent orphan leaks.
+	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore.
+	//
+	// IMPORTANT: For self-handoff, we must exclude our own process and parent (Claude Code)
+	// from being killed. Otherwise gt handoff dies before reaching RespawnPane.
+	// See: https://github.com/steveyegge/gastown/issues/881
+	excludePIDs := []string{
+		strconv.Itoa(os.Getpid()),  // gt handoff process
+		strconv.Itoa(os.Getppid()), // Claude Code (parent)
+	}
+	if err := t.KillPaneProcessesExcluding(pane, excludePIDs); err != nil {
 		// Non-fatal but log the warning
 		style.PrintWarning("could not kill pane processes: %v", err)
 	}
