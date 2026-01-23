@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -193,14 +194,30 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 	return ""
 }
 
-// Fix marks misclassified issues as wisps using bd update.
+// Fix marks misclassified issues as wisps using bd update --ephemeral.
 func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
-	// Note: bd doesn't have a direct flag to set wisp:true on existing issues.
-	// The proper fix is to ensure issues are created with --ephemeral flag.
-	// For now, we just report the issues - they'll be cleaned up by wisp-gc
-	// if they become abandoned, or manually closed.
-	//
-	// A true fix would require bd to support: bd update <id> --ephemeral
-	// Until then, this check serves as a diagnostic.
-	return nil
+	if len(c.misclassified) == 0 {
+		return nil
+	}
+
+	var lastErr error
+
+	for _, wisp := range c.misclassified {
+		// Determine working directory: town-level or rig-level
+		var workDir string
+		if wisp.rigName == "town" {
+			workDir = ctx.TownRoot
+		} else {
+			workDir = filepath.Join(ctx.TownRoot, wisp.rigName)
+		}
+
+		// Run bd update <id> --ephemeral
+		cmd := exec.Command("bd", "update", wisp.id, "--ephemeral")
+		cmd.Dir = workDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			lastErr = fmt.Errorf("%s/%s: %v (%s)", wisp.rigName, wisp.id, err, string(output))
+		}
+	}
+
+	return lastErr
 }
