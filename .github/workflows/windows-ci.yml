@@ -1,10 +1,27 @@
+# Windows CI - DISABLED
+#
+# Windows tests are disabled because Gas Town is a Unix-first system.
+# The tests require infrastructure that doesn't exist on Windows CI:
+# - bd binary not installed
+# - Symlinks require elevated permissions
+# - Shell script test stubs don't work
+# - File locking semantics differ
+#
+# See bugs: bd-b2z, bd-wxx, bd-up4, bd-1na, bd-vab, bd-brj, bd-pxx
+#
+# To re-enable, uncomment the 'on:' triggers below.
+
 name: Windows CI
 
+# Disabled - uncomment to re-enable
+# on:
+#   push:
+#     branches: [ main ]
+#   pull_request:
+#     branches: [ main ]
+
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  workflow_dispatch:  # Manual trigger only
 
 jobs:
   test:
