@@ -65,7 +65,6 @@ func EnsureGitignorePatterns(worktreePath string) error {
 	requiredPatterns := []string{
 		".runtime/",
 		".claude/",
-		".beads/",
 		".logs/",
 	}
 
