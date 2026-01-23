@@ -1,9 +1,10 @@
 description = """
-Goblin Scout patrol loop - surveys GitHub forks for interesting divergences.
+Goblin Scout patrol loop - surveys GitHub forks and PRs for interesting activity.
 
 The Goblin Scout is a research agent that monitors GitHub forks of configured
 repositories, identifying valuable commits worth cherry-picking or interesting
-divergent development that the upstream maintainers should know about.
+divergent development that the upstream maintainers should know about. It also
+monitors open PRs in steveyegge/gastown to flag stuck or stale contributions.
 
 ## Purpose
 
@@ -23,10 +24,14 @@ The Goblin Scout finds these hidden gems and creates research beads for review.
 - **Research beads**: Create beads for forks worth investigating
 - **Daily digest**: Summarize findings for the Mayor
 
-## Patrol Shape (Linear)
+## Patrol Shape
 
 ```
-load-state -> fetch-forks -> analyze-divergence -> detect-changes
+                 +-> fetch-forks -> analyze-divergence -+
+                 |                                      |
+load-state ------+                                      +-> detect-changes
+                 |                                      |
+                 +-> fetch-prs -------------------------+
                                                         |
      +--------------------------------------------------+
      v
@@ -110,6 +115,75 @@ EOF
   "scan_count": 42
 }
 ```
+"""
+
+[[steps]]
+id = "fetch-prs"
+title = "Check open PRs in gastown"
+needs = ["load-state"]
+description = """
+Check open pull requests in steveyegge/gastown and sync to Dolt database.
+
+**Database**: gastown rig Dolt at `~gastown/.beads/dolt/beads`
+**Table**: `github_prs` - tracks PR state, classifications, and scan history
+
+**Step 1: Sync PRs to Dolt**
+Use the sync script to fetch from GitHub and upsert into Dolt:
+```bash
+internal/formula/scripts/goblin-scout/sync_prs.sh steveyegge/gastown
+```
+
+This script:
+1. Fetches open PRs via `gh pr list`
+2. Upserts each PR into `github_prs` table
+3. Runs classification (stuck, stale, large)
+4. Prints summary stats
+
+**Step 2: Query PR summary from Dolt**
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT
+    COUNT(*) AS total_open,
+    SUM(CASE WHEN is_stuck = 1 THEN 1 ELSE 0 END) AS stuck,
+    SUM(CASE WHEN is_stale = 1 THEN 1 ELSE 0 END) AS stale,
+    SUM(CASE WHEN is_large = 1 THEN 1 ELSE 0 END) AS large,
+    SUM(CASE WHEN is_draft = 1 THEN 1 ELSE 0 END) AS draft
+FROM github_prs
+WHERE repo = 'steveyegge/gastown' AND state = 'open';
+"
+```
+
+**Step 3: Get stuck PRs needing attention**
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT pr_number, title, author, age_days, total_lines
+FROM github_prs
+WHERE repo = 'steveyegge/gastown'
+  AND state = 'open'
+  AND is_stuck = 1
+ORDER BY age_days DESC;
+"
+```
+
+**Step 4: Get stale PRs**
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT pr_number, title, author, age_days, stale_days
+FROM github_prs
+WHERE repo = 'steveyegge/gastown'
+  AND state = 'open'
+  AND is_stale = 1
+ORDER BY stale_days DESC;
+"
+```
+
+**Output**: PR data stored in Dolt, query results for report generation.
+
+**Scripts location**: `internal/formula/scripts/goblin-scout/` (git-tracked):
+- `sync_prs.sh` - Main sync script
+- `query_stuck_prs.sql` - Query for stuck PRs
+- `query_stale_prs.sql` - Query for stale PRs
+- `query_pr_summary.sql` - Summary statistics
 """
 
 [[steps]]
@@ -212,7 +286,7 @@ Each fork analysis is independent - ideal for parallel execution.
 [[steps]]
 id = "detect-changes"
 title = "Detect new and trending forks"
-needs = ["analyze-divergence"]
+needs = ["analyze-divergence", "fetch-prs"]
 description = """
 Compare current scan results to previous state to identify changes.
 
@@ -245,6 +319,20 @@ Trending forks: M
 Graduated (stale): P
 Total interesting: Q
 ```
+
+**Step 5: Compile PR summary (from fetch-prs)**
+```
+Open PRs in gastown: N
+  - Ready for review: X
+  - Stale (>30 days): Y
+  - Large (>500 lines): Z
+  - Stuck (no reviews): W
+```
+
+Flag PRs that need attention:
+- Stale PRs may need author ping or close decision
+- Stuck PRs (no reviews, >7 days) need reviewer assignment
+- Large PRs may need to be broken up
 
 This summary will be used for the digest email.
 """
@@ -354,6 +442,29 @@ cat > .beads/reports/goblin_scout_${DATE}.md << 'EOF'
 
 ---
 
+## Open PRs in steveyegge/gastown
+
+### PRs Needing Attention
+
+#### Stuck (no reviews, >7 days)
+| PR | Title | Author | Age | Size |
+|----|-------|--------|-----|------|
+| #<num> | <title> | @<author> | <days>d | +<add>/-<del> |
+
+#### Stale (>30 days)
+| PR | Title | Author | Age | Last Update |
+|----|-------|--------|-----|-------------|
+| #<num> | <title> | @<author> | <days>d | <date> |
+
+### All Open PRs
+
+| PR | Title | Author | Status | Age | Size |
+|----|-------|--------|--------|-----|------|
+| #<num> | <title> | @<author> | <ready/draft> | <days>d | +<add>/-<del> |
+| ... | ... | ... | ... | ... | ... |
+
+---
+
 Generated by Goblin Scout at <timestamp>
 EOF
 ```
@@ -375,6 +486,7 @@ If there are findings worth reporting, send a digest email to the Mayor.
 Skip if:
 - No new interesting forks
 - No trending forks
+- No PRs needing attention (stuck or stale)
 - Nothing notable changed
 
 **Step 2: Compose digest mail**
@@ -399,6 +511,26 @@ gt mail send mayor/ -s "GOBLIN_SCOUT: Fork digest - <date>" -m "
 <for each trending fork>
 - **<fork-full-name>**: +<commit-delta> commits, score now <score>
 </for>
+
+## PRs Needing Attention (steveyegge/gastown)
+
+**Open PRs**: <total_count>
+**Stuck (no reviews)**: <stuck_count>
+**Stale (>30 days)**: <stale_count>
+
+<if stuck_prs>
+### Stuck PRs (need reviewer)
+<for each stuck pr>
+- PR #<num>: <title> (@<author>, <age> days old)
+</for>
+</if>
+
+<if stale_prs>
+### Stale PRs (need decision)
+<for each stale pr>
+- PR #<num>: <title> (@<author>, <age> days)
+</for>
+</if>
 
 ---
 
