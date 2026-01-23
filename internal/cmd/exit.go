@@ -210,7 +210,7 @@ func clearAgentHook(cwd, townRoot string) {
 
 // selfKillExitSession terminates the polecat's own tmux session.
 // Similar to selfKillSession in done.go but with different logging.
-func selfKillExitSession(townRoot string, roleInfo RoleInfo) error {
+func selfKillExitSession(_ string, roleInfo RoleInfo) error {
 	rigName := os.Getenv("GT_RIG")
 	polecatName := os.Getenv("GT_POLECAT")
 

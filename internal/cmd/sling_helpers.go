@@ -409,7 +409,7 @@ func agentIDToBeadID(agentID, townRoot string) string {
 //
 // Fix hq-cc7214.26: Auto-create agent bead if it doesn't exist.
 // This handles cases where crew members exist but their agent beads weren't created.
-func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
+func updateAgentHookBead(agentID, beadID, workDir, _ string) {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		// Not in a Gas Town workspace - can't update agent bead
@@ -459,7 +459,7 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 // ensureAgentBeadExists creates an agent bead if it doesn't exist.
 // Returns true if a bead was created, false otherwise.
 // Fix for hq-cc7214.26: Sling fails when agent bead doesn't exist.
-func ensureAgentBeadExists(bd *beads.Beads, agentID, agentBeadID, townRoot string) bool {
+func ensureAgentBeadExists(bd *beads.Beads, agentID, agentBeadID, _ string) bool {
 	// Parse agent ID to determine role type
 	parts := strings.Split(strings.TrimSuffix(agentID, "/"), "/")
 	if len(parts) < 2 {

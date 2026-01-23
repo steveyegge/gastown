@@ -714,6 +714,8 @@ func runPolecatIdentityRemove(cmd *cobra.Command, args []string) error {
 }
 
 // buildCVSummary constructs the CV summary for a polecat.
+//
+//nolint:unparam // error return kept for future use
 func buildCVSummary(rigPath, rigName, polecatName, identityBeadID, clonePath string) (*CVSummary, error) {
 	cv := &CVSummary{
 		Identity:   identityBeadID,

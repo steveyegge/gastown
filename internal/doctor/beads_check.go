@@ -97,7 +97,7 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // checkDoltBackend checks Dolt-specific database health.
-func (c *BeadsDatabaseCheck) checkDoltBackend(beadsDir string, ctx *CheckContext) *CheckResult {
+func (c *BeadsDatabaseCheck) checkDoltBackend(beadsDir string, _ *CheckContext) *CheckResult {
 	doltDir := filepath.Join(beadsDir, "dolt")
 	if _, err := os.Stat(doltDir); os.IsNotExist(err) {
 		return &CheckResult{

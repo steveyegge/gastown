@@ -69,6 +69,6 @@ func (l *FileLock) WithLock(fn func() error) error {
 	if err := l.Lock(); err != nil {
 		return err
 	}
-	defer l.Unlock()
+	defer func() { _ = l.Unlock() }() // Unlock error ignored; fn() error takes precedence
 	return fn()
 }

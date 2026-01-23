@@ -130,6 +130,8 @@ func runWorkload(cmd *cobra.Command, args []string) error {
 
 // getHookedBeadsForAgent queries all hooked beads assigned to an agent.
 // Searches across all rig beads databases and town beads.
+//
+//nolint:unparam // error return kept for future use
 func getHookedBeadsForAgent(townRoot, agentID string) ([]hookedBeadInfo, error) {
 	var allHooked []hookedBeadInfo
 	seen := make(map[string]bool)
