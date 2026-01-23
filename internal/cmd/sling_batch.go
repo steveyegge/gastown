@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
@@ -19,6 +20,15 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		if err := verifyBeadExists(beadID); err != nil {
 			return fmt.Errorf("bead '%s' not found", beadID)
 		}
+	}
+
+	// Warn about convoy batching if slinging many beads without --convoy
+	const batchWarningThreshold = 3
+	if len(beadIDs) >= batchWarningThreshold && slingConvoy == "" && !slingNoConvoy {
+		fmt.Printf("%s Slinging %d beads will create %d separate convoys\n", style.Warning.Render("⚠"), len(beadIDs), len(beadIDs))
+		fmt.Printf("  To batch into a single convoy:\n")
+		fmt.Printf("    gt convoy create \"Batch name\" %s\n", strings.Join(beadIDs, " "))
+		fmt.Printf("  Or use --convoy <convoy-id> to add all to existing convoy\n\n")
 	}
 
 	if slingDryRun {
@@ -83,18 +93,27 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		targetAgent := spawnInfo.AgentID()
 		hookWorkDir := spawnInfo.ClonePath
 
-		// Auto-convoy: check if issue is already tracked
+		// Convoy handling: add to specified convoy, or auto-convoy
 		if !slingNoConvoy {
-			existingConvoy := isTrackedByConvoy(beadID)
-			if existingConvoy == "" {
-				convoyID, err := createAutoConvoy(beadID, info.Title)
-				if err != nil {
-					fmt.Printf("  %s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
+			if slingConvoy != "" {
+				// User specified convoy to add to
+				if err := addToConvoy(slingConvoy, beadID); err != nil {
+					fmt.Printf("  %s Could not add to convoy %s: %v\n", style.Dim.Render("Warning:"), slingConvoy, err)
 				} else {
-					fmt.Printf("  %s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
+					fmt.Printf("  %s Added to convoy 🚚 %s\n", style.Bold.Render("→"), slingConvoy)
 				}
 			} else {
-				fmt.Printf("  %s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
+				existingConvoy := isTrackedByConvoy(beadID)
+				if existingConvoy == "" {
+					convoyID, err := createAutoConvoy(beadID, info.Title, targetAgent)
+					if err != nil {
+						fmt.Printf("  %s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
+					} else {
+						fmt.Printf("  %s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
+					}
+				} else {
+					fmt.Printf("  %s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
+				}
 			}
 		}
 

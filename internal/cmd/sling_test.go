@@ -90,12 +90,44 @@ func TestParseWispIDFromJSON(t *testing.T) {
 }
 
 func TestFormatTrackBeadID(t *testing.T) {
+	// Set up a test town with routes.jsonl for proper routing-based tests
+	townRoot := t.TempDir()
+
+	// Create minimal workspace marker so workspace.FindFromCwd() succeeds
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	// Create routes.jsonl with standard mappings
+	routes := strings.Join([]string{
+		`{"prefix":"gt-","path":"gastown/mayor/rig"}`,
+		`{"prefix":"bd-","path":"beads/mayor/rig"}`,
+		`{"prefix":"hq-","path":"."}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(routes), 0644); err != nil {
+		t.Fatalf("write routes.jsonl: %v", err)
+	}
+
+	// Change to test directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
 	tests := []struct {
 		name     string
 		beadID   string
 		expected string
 	}{
-		// HQ beads should remain unchanged
+		// HQ beads should remain unchanged (local to town beads)
 		{
 			name:     "hq bead unchanged",
 			beadID:   "hq-abc123",
@@ -107,21 +139,33 @@ func TestFormatTrackBeadID(t *testing.T) {
 			expected: "hq-cv-xyz789",
 		},
 
-		// Cross-rig beads get external: prefix
+		// Cross-rig beads get external: prefix with PROJECT name (from routes.jsonl)
 		{
-			name:     "gastown rig bead",
+			name:     "gastown rig bead uses project name",
 			beadID:   "gt-mol-abc123",
-			expected: "external:gt-mol:gt-mol-abc123",
+			expected: "external:gastown:gt-mol-abc123",
 		},
 		{
-			name:     "beads rig task",
-			beadID:   "beads-task-xyz",
-			expected: "external:beads-task:beads-task-xyz",
+			name:     "beads rig bead uses project name",
+			beadID:   "bd-task-xyz",
+			expected: "external:beads:bd-task-xyz",
 		},
 		{
-			name:     "two segment ID",
+			name:     "gt prefix two segments",
+			beadID:   "gt-abc",
+			expected: "external:gastown:gt-abc",
+		},
+
+		// Beads without routes fall back to legacy prefix-based format
+		{
+			name:     "unknown prefix fallback two segments",
 			beadID:   "foo-bar",
 			expected: "external:foo-bar:foo-bar",
+		},
+		{
+			name:     "unknown prefix fallback three segments",
+			beadID:   "unk-mol-abc123",
+			expected: "external:unk-mol:unk-mol-abc123",
 		},
 
 		// Edge cases
@@ -134,11 +178,6 @@ func TestFormatTrackBeadID(t *testing.T) {
 			name:     "empty string fallback",
 			beadID:   "",
 			expected: "",
-		},
-		{
-			name:     "many segments",
-			beadID:   "a-b-c-d-e-f",
-			expected: "external:a-b:a-b-c-d-e-f",
 		},
 	}
 
@@ -156,6 +195,38 @@ func TestFormatTrackBeadID(t *testing.T) {
 // produced by formatTrackBeadID can be correctly parsed by the consumer pattern
 // used in convoy.go, model.go, feed/convoy.go, and web/fetcher.go.
 func TestFormatTrackBeadIDConsumerCompatibility(t *testing.T) {
+	// Set up a test town with routes.jsonl for proper routing
+	townRoot := t.TempDir()
+
+	// Create minimal workspace marker
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+
+	// Create routes.jsonl
+	routes := strings.Join([]string{
+		`{"prefix":"gt-","path":"gastown/mayor/rig"}`,
+		`{"prefix":"bd-","path":"beads/mayor/rig"}`,
+		`{"prefix":"hq-","path":"."}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(routes), 0644); err != nil {
+		t.Fatalf("write routes.jsonl: %v", err)
+	}
+
+	// Change to test directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
 	// Consumer pattern from convoy.go:1062-1068:
 	// if strings.HasPrefix(issueID, "external:") {
 	//     parts := strings.SplitN(issueID, ":", 3)
@@ -170,14 +241,14 @@ func TestFormatTrackBeadIDConsumerCompatibility(t *testing.T) {
 		wantOriginalID string
 	}{
 		{
-			name:           "cross-rig bead round-trips",
+			name:           "gastown bead round-trips",
 			beadID:         "gt-mol-abc123",
 			wantOriginalID: "gt-mol-abc123",
 		},
 		{
 			name:           "beads rig bead round-trips",
-			beadID:         "beads-task-xyz",
-			wantOriginalID: "beads-task-xyz",
+			beadID:         "bd-task-xyz",
+			wantOriginalID: "bd-task-xyz",
 		},
 		{
 			name:           "hq bead unchanged",

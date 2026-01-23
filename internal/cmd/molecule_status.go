@@ -50,14 +50,14 @@ func buildAgentBeadID(identity string, role Role, townRoot string) string {
 		case len(parts) == 2 && parts[1] == "refinery":
 			return beads.RefineryBeadIDWithPrefix(getPrefix(parts[0]), parts[0])
 		case len(parts) == 2:
-			// Assume rig/name is a polecat
-			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[1])
+			// Assume rig/name is a polecat - uses hq- prefix for town beads (fix for gt-myc)
+			return beads.PolecatBeadIDTown(parts[0], parts[1])
 		case len(parts) == 3 && parts[1] == "crew":
 			// rig/crew/name - crew member
 			return beads.CrewBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
 		case len(parts) == 3 && parts[1] == "polecats":
-			// rig/polecats/name - explicit polecat
-			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
+			// rig/polecats/name - explicit polecat - uses hq- prefix for town beads (fix for gt-myc)
+			return beads.PolecatBeadIDTown(parts[0], parts[2])
 		default:
 			return ""
 		}
@@ -80,11 +80,12 @@ func buildAgentBeadID(identity string, role Role, townRoot string) string {
 		return ""
 	case RolePolecat:
 		// Handle both 2-part (rig/name) and 3-part (rig/polecats/name) formats
+		// Polecat agent beads use hq- prefix for town beads (fix for gt-myc)
 		if len(parts) == 3 && parts[1] == "polecats" {
-			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
+			return beads.PolecatBeadIDTown(parts[0], parts[2])
 		}
 		if len(parts) >= 2 {
-			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[1])
+			return beads.PolecatBeadIDTown(parts[0], parts[1])
 		}
 		return ""
 	case RoleCrew:

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
@@ -79,7 +80,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 
 	// Clean up orphaned state for this polecat before creation/repair
 	// This prevents contamination from previous failed spawns (hq-gsk9g, hq-cv-bn5ug)
-	cleanupOrphanPolecatState(rigName, polecatName, townRoot, tmux.NewTmux())
+	cleanupOrphanPolecatState(rigName, polecatName, r.Path, tmux.NewTmux())
 
 	// Check if polecat already exists (shouldn't happen - indicates stale state needing repair)
 	existingPolecat, err := polecatMgr.Get(polecatName)
@@ -122,6 +123,16 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 
 	// NOTE: Agent bead is already created by AddWithOptions/RepairWorktreeWithOptions
 	// with hook_bead set atomically. No need to call createPolecatAgentBead here.
+
+	// Verify hook_bead is set before starting session (fix for bd-3q6.8-1).
+	// The slot set in CreateOrReopenAgentBead may fail silently. If HookBead was
+	// specified but not set, retry the slot set here before the session starts.
+	if opts.HookBead != "" {
+		if err := verifyAndSetHookBead(townRoot, rigName, polecatName, opts.HookBead); err != nil {
+			// Non-fatal warning - session will start but polecat may need to discover work via gt prime
+			fmt.Printf("Warning: could not verify hook_bead: %v\n", err)
+		}
+	}
 
 	// Resolve account for runtime config
 	accountsPath := constants.MayorAccountsPath(townRoot)
@@ -234,9 +245,9 @@ func IsRigName(target string) (string, bool) {
 // - Kills orphan tmux sessions without corresponding directories
 // - Prunes stale git worktree registrations
 // - Clears hook_bead on respawn (via fresh agent bead creation)
-func cleanupOrphanPolecatState(rigName, polecatName, townRoot string, tm *tmux.Tmux) {
-	polecatDir := filepath.Join(townRoot, "polecats", polecatName)
-	sessionName := fmt.Sprintf("gt-%s-p-%s", rigName, polecatName)
+func cleanupOrphanPolecatState(rigName, polecatName, rigPath string, tm *tmux.Tmux) {
+	polecatDir := filepath.Join(rigPath, "polecats", polecatName)
+	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
 	// Step 1: Kill orphan tmux session if it exists
 	if err := tm.KillSession(sessionName); err == nil {
@@ -253,7 +264,7 @@ func cleanupOrphanPolecatState(rigName, polecatName, townRoot string, tm *tmux.T
 	}
 
 	// Step 3: Prune stale git worktree entries (non-fatal cleanup)
-	repoGit := git.NewGit(townRoot)
+	repoGit := git.NewGit(rigPath)
 	_ = repoGit.WorktreePrune()
 }
 
@@ -282,6 +293,33 @@ func verifySpawnedPolecat(clonePath, sessionName string, t *tmux.Tmux) error {
 	}
 	if !hasSession {
 		return fmt.Errorf("session disappeared: %s", sessionName)
+	}
+
+	return nil
+}
+
+// verifyAndSetHookBead verifies the agent bead has hook_bead set, and retries if not.
+// This fixes bd-3q6.8-1 where the slot set in CreateOrReopenAgentBead may fail silently.
+func verifyAndSetHookBead(townRoot, rigName, polecatName, hookBead string) error {
+	// Agent bead uses hq- prefix and is stored in town beads
+	agentBeadID := beads.PolecatBeadIDTown(rigName, polecatName)
+
+	// Read the agent bead from town beads
+	townBeadsClient := beads.New(townRoot)
+	agentIssue, err := townBeadsClient.Show(agentBeadID)
+	if err != nil {
+		return fmt.Errorf("reading agent bead %s: %w", agentBeadID, err)
+	}
+
+	// Check if hook_bead is already set correctly
+	if agentIssue.HookBead == hookBead {
+		return nil // Already set correctly
+	}
+
+	// Hook not set or set to wrong value - retry setting it
+	fmt.Printf("  Retrying hook_bead set for %s...\n", agentBeadID)
+	if err := townBeadsClient.SetHookBead(agentBeadID, hookBead); err != nil {
+		return fmt.Errorf("retrying hook_bead set: %w", err)
 	}
 
 	return nil

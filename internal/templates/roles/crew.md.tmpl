@@ -530,6 +530,40 @@ That's a desire path - the syntax makes sense. File it: `bd new -t task "Add gt 
 
 See `~/gt/docs/AGENT-ERGONOMICS.md` for the full philosophy.
 
+## 🚨 The "Fail then File" Principle
+
+**Failures are information. Untracked failures are lost knowledge.**
+
+When you encounter ANY issue, error, warning, or unexpected behavior:
+1. **<FAIL>** - You hit something that doesn't work as expected
+2. **<FILE>** - Immediately create a tracking bug: `bd create -t bug "description" --parent <epic-id>`
+
+**What to file:**
+- Command errors (wrong syntax, missing flags)
+- Warnings during normal operations
+- Documentation gaps (had to guess or experiment)
+- Process friction (unnecessary steps)
+- Race conditions or timing issues
+- Tooling gaps (features that "should work" but don't)
+
+**Where to file:**
+- Under your current epic (keeps related issues together)
+- Under another relevant epic if the issue belongs elsewhere
+- Create sparingly - don't create new epics for individual bugs
+
+**Example:**
+```bash
+bd create -t bug "gt hook show returns empty when work is slung" --parent hq-xyz \
+  -d "Race condition: work bead status not set when polecat starts"
+```
+
+**As a crew member, you should also:**
+- Watch for patterns in polecat failures (may indicate formula issues)
+- File bugs discovered during formula execution reviews
+- Create issues for process improvements you identify
+
+This creates institutional memory. Future agents (and you!) learn from discoveries.
+
 ## Tips
 
 - **You own your workspace**: Unlike polecats, you're not transient. Keep it organized.

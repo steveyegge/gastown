@@ -78,4 +78,123 @@ bd create "Try out Beads"
 
 ---
 
+## Dolt-Native Sync Mode
+
+This repository uses **Dolt** as the storage backend for version-controlled issue tracking with AWS S3+DynamoDB as the remote.
+
+### Configuration
+
+The following settings in `config.yaml` enable Dolt-native mode:
+
+```yaml
+storage-backend: dolt
+sync.mode: "dolt-native"
+routing.mode: "direct"
+```
+
+### Architecture
+
+```
+townRoot/.beads/
+├── dolt/                    # Dolt database directory
+│   ├── beads/              # The actual Dolt repo
+│   ├── config.yaml         # Dolt SQL server config
+│   └── sql-server.log      # Server logs
+├── config.yaml             # Beads config (storage-backend: dolt)
+└── beads.db                # SQLite cache (syncs from Dolt)
+```
+
+**Remote**: `aws://[pihealth-dolt-beads:pihealth-dolt-beads]/gastown9`
+
+### Daily Workflow
+
+#### How the Daemon Manages Dolt
+
+1. **Connection Management**: The daemon holds a connection to Dolt SQL server
+2. **Idle Timeout**: After idle period, daemon releases locks to allow CLI operations
+3. **Auto-Restart**: Daemon restarts Dolt SQL server if needed
+
+#### Sync Operations
+
+```bash
+# Standard sync (commits to Dolt, pushes to AWS)
+bd sync
+
+# Manual Dolt operations (when daemon is idle)
+cd $TOWN_ROOT/.beads/dolt/beads
+dolt status
+dolt commit -m "manual commit"
+dolt push origin main
+```
+
+### Multi-Prefix Support
+
+Dolt-native mode supports multiple issue prefixes in a single database:
+
+| Prefix | Description |
+|--------|-------------|
+| `hq-*` | Town-level coordination |
+| `bd-*` | Beads tool issues |
+| `gt-*` | Gas Town tool issues |
+
+All prefixes coexist in the same Dolt database with:
+- Unified listing: `bd list --all`
+- Cross-prefix dependencies: `bd dep add hq-123 bd-456`
+- Agent bead routing across prefixes
+
+### Troubleshooting
+
+#### "Database is read only" Error
+
+The Dolt LOCK file may be stale:
+
+```bash
+# Check for stale LOCK file
+ls -la $TOWN_ROOT/.beads/dolt/beads/.dolt/LOCK
+
+# If daemon is not running, safe to remove
+rm $TOWN_ROOT/.beads/dolt/beads/.dolt/LOCK
+
+# Restart daemon
+bd daemon restart
+```
+
+#### Daemon Caching Stale Data
+
+If updates don't appear immediately:
+
+```bash
+# Force direct mode (bypass daemon)
+bd show <issue-id> --no-daemon
+
+# Or restart daemon
+bd daemon restart
+```
+
+#### Multi-Agent Lock Contention
+
+When multiple agents access Dolt simultaneously:
+
+1. Daemon uses idle timeout to release locks
+2. Each agent should use the daemon (not direct Dolt access)
+3. `bd sync` coordinates commits through the daemon
+
+### AWS Remote Setup
+
+The Dolt remote uses AWS S3 for storage and DynamoDB for versioning:
+
+- **S3 Bucket**: `pihealth-dolt-beads`
+- **DynamoDB Table**: `pihealth-dolt-beads`
+- **IAM User**: `dolt-beads-sync`
+
+Initial setup was done with:
+
+```bash
+bd init --backend dolt
+# AWS credentials configured via IAM user
+dolt remote add origin aws://[bucket:table]/database
+```
+
+---
+
 *Beads: Issue tracking that moves at the speed of thought* ⚡

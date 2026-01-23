@@ -1976,8 +1976,8 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn 1 - CreateOrReopenAgentBead: %v", err)
 	}
-	if issue1.Status != "open" {
-		t.Errorf("Spawn 1: status = %q, want 'open'", issue1.Status)
+	if issue1.Status != StatusPinned {
+		t.Errorf("Spawn 1: status = %q, want %q", issue1.Status, StatusPinned)
 	}
 
 	// Nuke 1: Close agent bead (workaround for tombstone bug)
@@ -1996,8 +1996,8 @@ func TestCreateOrReopenAgentBead_ClosedBead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn 2 - CreateOrReopenAgentBead: %v", err)
 	}
-	if issue2.Status != "open" {
-		t.Errorf("Spawn 2: status = %q, want 'open'", issue2.Status)
+	if issue2.Status != StatusPinned {
+		t.Errorf("Spawn 2: status = %q, want %q (bd-3q6.5-1: must be pinned for AttachMolecule)", issue2.Status, StatusPinned)
 	}
 
 	// Verify the hook was updated to the new task

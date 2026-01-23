@@ -30,6 +30,28 @@ func generateShortID() string {
 	return strings.ToLower(base32.StdEncoding.EncodeToString(b)[:5])
 }
 
+// newBdCmd creates a bd command with proper environment for the given beads directory.
+// This ensures bd commands respect the storage backend configuration (SQLite vs Dolt).
+//
+// IMPORTANT: cmd.Dir is set to the PARENT of beadsDir (e.g., townRoot), not beadsDir itself.
+// This is because bd discovers .beads relative to cwd, and if cwd is .beads itself,
+// it would find .beads/.beads/ (a nested directory) instead of the intended database.
+//
+// BEADS_DIR is set explicitly to ensure bd uses the correct beads directory and
+// respects the storage-backend setting in config.yaml.
+func newBdCmd(beadsDir string, args ...string) *exec.Cmd {
+	cmd := exec.Command("bd", args...)
+
+	// Set working directory to parent of beadsDir (e.g., townRoot)
+	// This prevents bd from finding nested .beads/.beads/ directories
+	cmd.Dir = filepath.Dir(beadsDir)
+
+	// Set BEADS_DIR so bd finds the configuration and respects storage-backend setting
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+
+	return cmd
+}
+
 // looksLikeIssueID checks if a string looks like a beads issue ID.
 // Issue IDs have the format: prefix-id (e.g., gt-abc, bd-xyz, hq-123).
 func looksLikeIssueID(s string) bool {
@@ -349,8 +371,7 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		createArgs = append(createArgs, "--force")
 	}
 
-	createCmd := exec.Command("bd", createArgs...)
-	createCmd.Dir = townBeads
+	createCmd := newBdCmd(townBeads, createArgs...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	createCmd.Stdout = &stdout
@@ -369,8 +390,7 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		// Format cross-rig beads as external references for proper resolution
 		trackID := formatTrackBeadID(issueID)
 		depArgs := []string{"dep", "add", convoyID, trackID, "--type=tracks"}
-		depCmd := exec.Command("bd", depArgs...)
-		depCmd.Dir = townBeads
+		depCmd := newBdCmd(townBeads, depArgs...)
 		var depStderr bytes.Buffer
 		depCmd.Stderr = &depStderr
 
@@ -418,8 +438,7 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 
 	// Validate convoy exists and get its status
 	showArgs := []string{"show", convoyID, "--json"}
-	showCmd := exec.Command("bd", showArgs...)
-	showCmd.Dir = townBeads
+	showCmd := newBdCmd(townBeads, showArgs...)
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 
@@ -456,8 +475,7 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 	reopened := false
 	if convoy.Status == "closed" {
 		reopenArgs := []string{"update", convoyID, "--status=open"}
-		reopenCmd := exec.Command("bd", reopenArgs...)
-		reopenCmd.Dir = townBeads
+		reopenCmd := newBdCmd(townBeads, reopenArgs...)
 		if err := reopenCmd.Run(); err != nil {
 			return fmt.Errorf("couldn't reopen convoy: %w", err)
 		}
@@ -471,8 +489,7 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 		// Format cross-rig beads as external references for proper resolution
 		trackID := formatTrackBeadID(issueID)
 		depArgs := []string{"dep", "add", convoyID, trackID, "--type=tracks"}
-		depCmd := exec.Command("bd", depArgs...)
-		depCmd.Dir = townBeads
+		depCmd := newBdCmd(townBeads, depArgs...)
 		var depStderr bytes.Buffer
 		depCmd.Stderr = &depStderr
 
@@ -629,8 +646,7 @@ func runConvoyClose(cmd *cobra.Command, args []string) error {
 
 	// Get convoy details
 	showArgs := []string{"show", convoyID, "--json"}
-	showCmd := exec.Command("bd", showArgs...)
-	showCmd.Dir = townBeads
+	showCmd := newBdCmd(townBeads, showArgs...)
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 
@@ -678,8 +694,7 @@ func runConvoyClose(cmd *cobra.Command, args []string) error {
 
 	// Close the convoy
 	closeArgs := []string{"close", convoyID, "-r", reason}
-	closeCmd := exec.Command("bd", closeArgs...)
-	closeCmd.Dir = townBeads
+	closeCmd := newBdCmd(townBeads, closeArgs...)
 
 	if err := closeCmd.Run(); err != nil {
 		return fmt.Errorf("closing convoy: %w", err)
@@ -779,8 +794,7 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 
 	// List all open convoys
 	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townBeads
+	listCmd := newBdCmd(townBeads, listArgs...)
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 
@@ -896,8 +910,7 @@ func checkAndCloseCompletedConvoys(townBeads string, dryRun bool) ([]struct{ ID,
 
 	// List all open convoys
 	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townBeads
+	listCmd := newBdCmd(townBeads, listArgs...)
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 
@@ -938,8 +951,7 @@ func checkAndCloseCompletedConvoys(townBeads string, dryRun bool) ([]struct{ ID,
 
 			// Close the convoy
 			closeArgs := []string{"close", convoy.ID, "-r", "All tracked issues completed"}
-			closeCmd := exec.Command("bd", closeArgs...)
-			closeCmd.Dir = townBeads
+			closeCmd := newBdCmd(townBeads, closeArgs...)
 
 			if err := closeCmd.Run(); err != nil {
 				style.PrintWarning("couldn't close convoy %s: %v", convoy.ID, err)
@@ -960,8 +972,7 @@ func checkAndCloseCompletedConvoys(townBeads string, dryRun bool) ([]struct{ ID,
 func notifyConvoyCompletion(townBeads, convoyID, title string) {
 	// Get convoy description to find owner and notify addresses
 	showArgs := []string{"show", convoyID, "--json"}
-	showCmd := exec.Command("bd", showArgs...)
-	showCmd.Dir = townBeads
+	showCmd := newBdCmd(townBeads, showArgs...)
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 
@@ -1024,8 +1035,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 
 	// Get convoy details
 	showArgs := []string{"show", convoyID, "--json"}
-	showCmd := exec.Command("bd", showArgs...)
-	showCmd.Dir = townBeads
+	showCmd := newBdCmd(townBeads, showArgs...)
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 
@@ -1057,7 +1067,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 
 	convoy := convoys[0]
 
-	// Get tracked issues by querying SQLite directly
+	// Get tracked issues (bd dep list doesn't properly show cross-rig external dependencies)
 	// (bd dep list doesn't properly show cross-rig external dependencies)
 	type trackedIssue struct {
 		ID        string `json:"id"`
@@ -1147,8 +1157,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 func showAllConvoyStatus(townBeads string) error {
 	// List all convoy-type issues
 	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townBeads
+	listCmd := newBdCmd(townBeads, listArgs...)
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 
@@ -1201,8 +1210,7 @@ func runConvoyList(cmd *cobra.Command, args []string) error {
 	}
 	// Default (no flags) = open only (bd's default behavior)
 
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townBeads
+	listCmd := newBdCmd(townBeads, listArgs...)
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 
@@ -1562,7 +1570,7 @@ type workerInfo struct {
 // Returns a map from issue ID to worker info.
 //
 // Optimized to batch queries per rig (O(R) instead of O(N×R)) and
-// parallelize across rigs.
+// parallelize across rigs. Supports both SQLite and Dolt backends.
 func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 	result := make(map[string]*workerInfo)
 	if len(issueIDs) == 0 {
@@ -1575,18 +1583,9 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		return result
 	}
 
-	// Discover rigs with beads databases
-	rigDirs, _ := filepath.Glob(filepath.Join(townRoot, "*", "polecats"))
-	var beadsDBS []string
-	for _, polecatsDir := range rigDirs {
-		rigDir := filepath.Dir(polecatsDir)
-		beadsDB := filepath.Join(rigDir, "mayor", "rig", ".beads", "beads.db")
-		if _, err := os.Stat(beadsDB); err == nil {
-			beadsDBS = append(beadsDBS, beadsDB)
-		}
-	}
-
-	if len(beadsDBS) == 0 {
+	// Discover rigs with beads databases (respects backend config)
+	beadsDirs, err := beads.FindBeadsDBsInRigs(townRoot)
+	if err != nil || len(beadsDirs) == 0 {
 		return result
 	}
 
@@ -1605,36 +1604,25 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 
 	// Query all rigs in parallel
 	type rigResult struct {
-		agents []struct {
-			ID           string `json:"id"`
-			HookBead     string `json:"hook_bead"`
-			LastActivity string `json:"last_activity"`
-		}
+		agents []beads.QueryResult
 	}
 
-	resultChan := make(chan rigResult, len(beadsDBS))
+	resultChan := make(chan rigResult, len(beadsDirs))
 	var wg sync.WaitGroup
 
-	for _, beadsDB := range beadsDBS {
+	for _, beadsDir := range beadsDirs {
 		wg.Add(1)
-		go func(db string) {
+		go func(dir string) {
 			defer wg.Done()
 
-			queryCmd := exec.Command("sqlite3", "-json", db, query)
-			var stdout bytes.Buffer
-			queryCmd.Stdout = &stdout
-			if err := queryCmd.Run(); err != nil {
+			// Use backend-aware query (works with SQLite or Dolt)
+			agents, err := beads.RunQuery(dir, query)
+			if err != nil {
 				resultChan <- rigResult{}
 				return
 			}
-
-			var rr rigResult
-			if err := json.Unmarshal(stdout.Bytes(), &rr.agents); err != nil {
-				resultChan <- rigResult{}
-				return
-			}
-			resultChan <- rr
-		}(beadsDB)
+			resultChan <- rigResult{agents: agents}
+		}(beadsDir)
 	}
 
 	// Wait for all queries to complete
@@ -1646,26 +1634,34 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 	// Collect results from all rigs
 	for rr := range resultChan {
 		for _, agent := range rr.agents {
-			// Skip if we already found a worker for this issue
-			if _, ok := result[agent.HookBead]; ok {
+			// Extract fields from query result
+			hookBead, _ := agent["hook_bead"].(string)
+			agentID, _ := agent["id"].(string)
+			lastActivity, _ := agent["last_activity"].(string)
+
+			// Skip if no hook_bead or we already found a worker for this issue
+			if hookBead == "" {
+				continue
+			}
+			if _, ok := result[hookBead]; ok {
 				continue
 			}
 
 			// Parse agent ID to get worker identity
-			workerID := parseWorkerFromAgentBead(agent.ID)
+			workerID := parseWorkerFromAgentBead(agentID)
 			if workerID == "" {
 				continue
 			}
 
 			// Calculate age from last_activity
 			age := ""
-			if agent.LastActivity != "" {
-				if t, err := time.Parse(time.RFC3339, agent.LastActivity); err == nil {
+			if lastActivity != "" {
+				if t, err := time.Parse(time.RFC3339, lastActivity); err == nil {
 					age = formatWorkerAge(time.Since(t))
 				}
 			}
 
-			result[agent.HookBead] = &workerInfo{
+			result[hookBead] = &workerInfo{
 				Worker: workerID,
 				Age:    age,
 			}
@@ -1724,8 +1720,7 @@ func runConvoyTUI() error {
 func resolveConvoyNumber(townBeads string, n int) (string, error) {
 	// Get convoy list (same query as runConvoyList)
 	listArgs := []string{"list", "--type=convoy", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townBeads
+	listCmd := newBdCmd(townBeads, listArgs...)
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 

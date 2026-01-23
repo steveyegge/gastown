@@ -314,22 +314,44 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 	}
 
 	b := beads.New(workDir)
+	townRoot, _ := findTownRoot()
 
-	// Query for hooked beads assigned to the target
-	hookedBeads, err := b.List(beads.ListOptions{
-		Status:   beads.StatusHooked,
-		Assignee: target,
-		Priority: -1,
-	})
-	if err != nil {
-		return fmt.Errorf("listing hooked beads: %w", err)
+	// PREFERRED: Read hook_bead from agent bead (authoritative source)
+	// This prevents race conditions when polecat names are recycled - the old
+	// beads may still have assignee set to the recycled name, but the agent
+	// bead's hook_bead field is atomically updated by gt sling.
+	var hookedBead *beads.Issue
+	agentBeadID := buildAgentBeadID(target, RoleUnknown, townRoot)
+	if agentBeadID != "" {
+		agentBead, err := b.Show(agentBeadID)
+		if err == nil && agentBead != nil && agentBead.Type == "agent" && agentBead.HookBead != "" {
+			// Found hook_bead in agent bead - fetch the actual bead
+			hookedBead, err = b.Show(agentBead.HookBead)
+			if err != nil && townRoot != "" {
+				// Try town beads if not found in rig beads
+				townB := beads.New(townRoot)
+				hookedBead, _ = townB.Show(agentBead.HookBead)
+			}
+		}
 	}
 
-	// If nothing found, try scanning all rigs for town-level roles
-	if len(hookedBeads) == 0 && isTownLevelRole(target) {
-		townRoot, err := findTownRoot()
-		if err == nil && townRoot != "" {
-			hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
+	// FALLBACK: Query by assignee (legacy behavior, may have race conditions)
+	var hookedBeads []*beads.Issue
+	if hookedBead == nil {
+		hookedBeads, err = b.List(beads.ListOptions{
+			Status:   beads.StatusHooked,
+			Assignee: target,
+			Priority: -1,
+		})
+		if err != nil {
+			return fmt.Errorf("listing hooked beads: %w", err)
+		}
+
+		// If nothing found, try scanning all rigs for town-level roles
+		if len(hookedBeads) == 0 && isTownLevelRole(target) {
+			if townRoot != "" {
+				hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
+			}
 		}
 	}
 
@@ -342,7 +364,11 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 			Status string `json:"status"`
 		}
 		info := compactInfo{Agent: target}
-		if len(hookedBeads) > 0 {
+		if hookedBead != nil {
+			info.BeadID = hookedBead.ID
+			info.Title = hookedBead.Title
+			info.Status = hookedBead.Status
+		} else if len(hookedBeads) > 0 {
 			info.BeadID = hookedBeads[0].ID
 			info.Title = hookedBeads[0].Title
 			info.Status = hookedBeads[0].Status
@@ -354,6 +380,10 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 	}
 
 	// Compact one-line output
+	if hookedBead != nil {
+		fmt.Printf("%s: %s '%s' [%s]\n", target, hookedBead.ID, hookedBead.Title, hookedBead.Status)
+		return nil
+	}
 	if len(hookedBeads) == 0 {
 		fmt.Printf("%s: (empty)\n", target)
 		return nil

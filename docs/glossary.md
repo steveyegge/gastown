@@ -67,7 +67,17 @@ Durable chained Bead workflows. Molecules represent multi-step processes where e
 Ephemeral Beads destroyed after runs. Wisps are lightweight work items used for transient operations that don't need permanent tracking.
 
 ### Hook
-A special pinned Bead for each agent. The Hook is an agent's primary work queue - when work appears on your Hook, GUPP dictates you must run it.
+A slot on each agent bead that references their current work assignment. When a bead
+(task, bug, epic, molecule) is hooked to an agent, it becomes their active work item
+discoverable via `gt hook`. The Hook is the primary work dispatch mechanism - when
+work appears on your Hook, GUPP dictates you must run it. **Note:** Hooked work
+items are distinct from mail; they appear via `gt hook`, not `gt mail inbox`.
+
+### Mail
+Inter-agent communication system using `type=message` beads. Mail handles
+notifications, handoffs, and status updates between agents. Accessed via
+`gt mail inbox`. **Note:** Mail is for messages, not work assignments - work items
+are dispatched via the Hook system.
 
 ## Workflow Commands
 

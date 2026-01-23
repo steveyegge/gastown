@@ -277,7 +277,25 @@ func resolveRoleToSession(role string) (string, error) {
 		return fmt.Sprintf("gt-%s-refinery", rig), nil
 
 	default:
-		// Assume it's a direct session name (e.g., gt-gastown-crew-max)
+		// FIX (hq-cc7214.25): Check if the name is a crew member in any rig
+		// Before assuming it's a direct session name, scan all rigs for crew/<name>
+		townRoot := detectTownRootFromCwd()
+		if townRoot != "" {
+			rigs, err := os.ReadDir(townRoot)
+			if err == nil {
+				for _, rigEntry := range rigs {
+					if !rigEntry.IsDir() || strings.HasPrefix(rigEntry.Name(), ".") {
+						continue
+					}
+					crewPath := filepath.Join(townRoot, rigEntry.Name(), "crew", role)
+					if info, err := os.Stat(crewPath); err == nil && info.IsDir() {
+						// Found a crew member with this name
+						return fmt.Sprintf("gt-%s-crew-%s", rigEntry.Name(), role), nil
+					}
+				}
+			}
+		}
+		// Not a crew member - assume it's a direct session name (e.g., gt-gastown-crew-max)
 		return role, nil
 	}
 }

@@ -4,14 +4,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // TestBackendDetection verifies that both SQLite and Dolt backends can be detected
 // from metadata.json configuration.
 func TestBackendDetection(t *testing.T) {
 	tests := []struct {
-		name           string
-		metadata       string
+		name            string
+		metadata        string
 		expectedBackend string
 	}{
 		{
@@ -52,10 +54,74 @@ func TestBackendDetection(t *testing.T) {
 				t.Fatalf("Failed to write metadata.json: %v", err)
 			}
 
-			// TODO: Add actual backend detection logic from beads package
-			// For now, this is a placeholder showing the test structure
-			t.Logf("Would detect backend: %s", tt.expectedBackend)
+			got := beads.GetStorageBackend(tmpDir)
+			if got != tt.expectedBackend {
+				t.Errorf("GetStorageBackend() = %q, want %q", got, tt.expectedBackend)
+			}
 		})
+	}
+}
+
+// TestGetStorageBackend_ConfigYAML tests backend detection from config.yaml
+func TestGetStorageBackend_ConfigYAML(t *testing.T) {
+	tests := []struct {
+		name            string
+		configYAML      string
+		expectedBackend string
+	}{
+		{
+			name:            "Dolt backend from config.yaml",
+			configYAML:      "prefix: hq\nstorage-backend: dolt\n",
+			expectedBackend: "dolt",
+		},
+		{
+			name:            "SQLite backend from config.yaml",
+			configYAML:      "prefix: hq\nstorage-backend: sqlite\n",
+			expectedBackend: "sqlite",
+		},
+		{
+			name:            "No backend in config.yaml defaults to sqlite",
+			configYAML:      "prefix: hq\n",
+			expectedBackend: "sqlite",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+
+			if err := os.WriteFile(configPath, []byte(tt.configYAML), 0644); err != nil {
+				t.Fatalf("Failed to write config.yaml: %v", err)
+			}
+
+			got := beads.GetStorageBackend(tmpDir)
+			if got != tt.expectedBackend {
+				t.Errorf("GetStorageBackend() = %q, want %q", got, tt.expectedBackend)
+			}
+		})
+	}
+}
+
+// TestGetStorageBackend_MetadataOverridesConfig tests that metadata.json takes precedence
+func TestGetStorageBackend_MetadataOverridesConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Write config.yaml with sqlite
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("storage-backend: sqlite\n"), 0644); err != nil {
+		t.Fatalf("Failed to write config.yaml: %v", err)
+	}
+
+	// Write metadata.json with dolt - should take precedence
+	metadataPath := filepath.Join(tmpDir, "metadata.json")
+	if err := os.WriteFile(metadataPath, []byte(`{"backend": "dolt"}`), 0644); err != nil {
+		t.Fatalf("Failed to write metadata.json: %v", err)
+	}
+
+	got := beads.GetStorageBackend(tmpDir)
+	if got != "dolt" {
+		t.Errorf("GetStorageBackend() = %q, want %q (metadata.json should override config.yaml)", got, "dolt")
 	}
 }
 

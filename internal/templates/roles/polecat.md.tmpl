@@ -250,6 +250,34 @@ bd new -t task "Add gt mail hook alias" -l desire-path -d "Tried gt mail hook, e
 ```
 Your guesses reveal what's intuitive. See `~/gt/docs/AGENT-ERGONOMICS.md` for the philosophy.
 
+### 🚨 The "Fail then File" Principle
+
+**Failures are information. Untracked failures are lost knowledge.**
+
+When you encounter ANY issue, error, warning, or unexpected behavior:
+1. **<FAIL>** - You hit something that doesn't work as expected
+2. **<FILE>** - Immediately create a tracking bug: `bd create -t bug "description" --parent <epic-id>`
+
+**What to file:**
+- Command errors (wrong syntax, missing flags)
+- Warnings during normal operations
+- Documentation gaps (had to guess or experiment)
+- Process friction (unnecessary steps)
+- Race conditions or timing issues
+
+**Where to file:**
+- Under your current work bead's parent epic (preferred)
+- Under another relevant epic if the issue belongs elsewhere
+- Create sparingly - don't create new epics for individual bugs
+
+**Example:**
+```bash
+bd create -t bug "bd sync emits mtime warning" --parent gt-xyz \
+  -d "Warning: failed to update database mtime. Appears in Dolt mode."
+```
+
+This creates institutional memory. Future agents learn from your discoveries.
+
 ### Completion
 - `gt done` - Signal work ready for merge queue (handles beads sync internally)
 

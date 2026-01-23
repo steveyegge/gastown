@@ -1,0 +1,656 @@
+description = """
+Goblin Scout patrol loop - surveys GitHub forks and PRs for interesting activity.
+
+The Goblin Scout is a research agent that monitors GitHub forks of configured
+repositories, identifying valuable commits worth cherry-picking or interesting
+divergent development that the upstream maintainers should know about. It also
+monitors open PRs in steveyegge/gastown to flag stuck or stale contributions.
+
+## Purpose
+
+Many forks contain valuable work that never gets upstreamed:
+- Bug fixes the author didn't PR
+- Features in active development
+- Performance improvements
+- Documentation enhancements
+
+The Goblin Scout finds these hidden gems and creates research beads for review.
+
+## Design Philosophy
+
+- **Discovery over tracking**: Score forks fresh each cycle using GitHub API
+- **Threshold-based interest**: Only flag forks scoring >= 5 points
+- **Differential updates**: Track new and trending forks since last scan
+- **Research beads**: Create beads for forks worth investigating
+- **Daily digest**: Summarize findings for the Mayor
+
+## Patrol Shape
+
+```
+                 +-> fetch-forks -> analyze-divergence -+
+                 |                                      |
+load-state ------+                                      +-> detect-changes
+                 |                                      |
+                 +-> fetch-prs -------------------------+
+                                                        |
+     +--------------------------------------------------+
+     v
+create-beads -> generate-report -> send-digest -> save-state -> schedule-next
+```
+
+## Scoring Heuristics
+
+| Factor                     | Points    |
+|---------------------------|-----------|
+| Commits ahead >20         | +3        |
+| Commits ahead >50         | +5        |
+| Commits ahead >100        | +10       |
+| Recent commit (<7 days)   | +3        |
+| Recent commit (<30 days)  | +2        |
+| 'feat' in commit msg      | +1 each   |
+| 'add' in commit msg       | +1 each   |
+| New directory added       | +3 each   |
+
+**Threshold**: Score >= 5 = "interesting"
+"""
+formula = "mol-goblin-scout-patrol"
+version = 1
+
+[[steps]]
+id = "load-state"
+title = "Load or initialize state"
+description = """
+Load the goblin scout state file, or initialize it if first run.
+
+**State file location**: `.beads/goblin_scout_state.json`
+
+**Step 1: Check if state file exists**
+```bash
+cat .beads/goblin_scout_state.json 2>/dev/null || echo "NOT_FOUND"
+```
+
+**Step 2: If NOT_FOUND, initialize default state**
+```bash
+mkdir -p .beads
+cat > .beads/goblin_scout_state.json << 'EOF'
+{
+  "repos": {},
+  "config": {
+    "min_score_threshold": 5,
+    "scan_repos": ["steveyegge/beads", "steveyegge/gastown"]
+  },
+  "last_scan": null,
+  "scan_count": 0
+}
+EOF
+```
+
+**Step 3: Parse state into working variables**
+- Extract `scan_repos` list for iteration
+- Extract `min_score_threshold` for scoring decisions
+- Note `last_scan` timestamp for differential detection
+
+**State Schema**:
+```json
+{
+  "repos": {
+    "<owner>/<repo>": {
+      "forks": {
+        "<fork-owner>/<fork-repo>": {
+          "score": 7,
+          "last_commit_sha": "abc123",
+          "commits_ahead": 45,
+          "research_bead": "gt-xyz789",
+          "first_seen": "2026-01-20T00:00:00Z",
+          "last_seen": "2026-01-23T00:00:00Z"
+        }
+      }
+    }
+  },
+  "config": {
+    "min_score_threshold": 5,
+    "scan_repos": ["steveyegge/beads", "steveyegge/gastown"]
+  },
+  "last_scan": "2026-01-22T00:00:00Z",
+  "scan_count": 42
+}
+```
+"""
+
+[[steps]]
+id = "fetch-prs"
+title = "Check open PRs in gastown"
+needs = ["load-state"]
+description = """
+Check open pull requests in steveyegge/gastown and sync to Dolt database.
+
+**Database**: gastown rig Dolt at `~gastown/.beads/dolt/beads`
+**Table**: `github_prs` - tracks PR state, classifications, and scan history
+
+**Step 1: Sync PRs to Dolt**
+Use the sync script to fetch from GitHub and upsert into Dolt:
+```bash
+internal/formula/scripts/goblin-scout/sync_prs.sh steveyegge/gastown
+```
+
+This script:
+1. Fetches open PRs via `gh pr list`
+2. Upserts each PR into `github_prs` table
+3. Runs classification (stuck, stale, large)
+4. Prints summary stats
+
+**Step 2: Query PR summary from Dolt**
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT
+    COUNT(*) AS total_open,
+    SUM(CASE WHEN is_stuck = 1 THEN 1 ELSE 0 END) AS stuck,
+    SUM(CASE WHEN is_stale = 1 THEN 1 ELSE 0 END) AS stale,
+    SUM(CASE WHEN is_large = 1 THEN 1 ELSE 0 END) AS large,
+    SUM(CASE WHEN is_draft = 1 THEN 1 ELSE 0 END) AS draft
+FROM github_prs
+WHERE repo = 'steveyegge/gastown' AND state = 'open';
+"
+```
+
+**Step 3: Get stuck PRs needing attention**
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT pr_number, title, author, age_days, total_lines
+FROM github_prs
+WHERE repo = 'steveyegge/gastown'
+  AND state = 'open'
+  AND is_stuck = 1
+ORDER BY age_days DESC;
+"
+```
+
+**Step 4: Get stale PRs**
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT pr_number, title, author, age_days, stale_days
+FROM github_prs
+WHERE repo = 'steveyegge/gastown'
+  AND state = 'open'
+  AND is_stale = 1
+ORDER BY stale_days DESC;
+"
+```
+
+**Output**: PR data stored in Dolt, query results for report generation.
+
+**Scripts location**: `internal/formula/scripts/goblin-scout/` (git-tracked):
+- `sync_prs.sh` - Main sync script
+- `query_stuck_prs.sql` - Query for stuck PRs
+- `query_stale_prs.sql` - Query for stale PRs
+- `query_pr_summary.sql` - Summary statistics
+"""
+
+[[steps]]
+id = "fetch-forks"
+title = "Fetch and analyze forks"
+needs = ["load-state"]
+description = """
+Fetch forks from GitHub and sync to Dolt database with divergence analysis.
+
+**Database**: gastown rig Dolt at `~gastown/.beads/dolt/beads`
+**Table**: `github_forks` - tracks fork state, divergence metrics, scoring
+
+**Step 1: Sync forks for each configured repo**
+For each repo in scan_repos (e.g., steveyegge/gastown, steveyegge/beads):
+```bash
+internal/formula/scripts/goblin-scout/sync_forks.sh steveyegge/gastown
+internal/formula/scripts/goblin-scout/sync_forks.sh steveyegge/beads
+```
+
+The sync script:
+1. Fetches all forks via `gh api repos/{owner}/{repo}/forks --paginate`
+2. Filters to active forks (pushed in last 180 days)
+3. Gets divergence info per fork (commits ahead/behind, line changes)
+4. Calculates score using formula heuristics
+5. Upserts all data to `github_forks` table in single transaction
+
+**Step 2: Query fork summary from Dolt**
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT
+    upstream_repo,
+    COUNT(*) AS total_forks,
+    SUM(CASE WHEN is_interesting = 1 THEN 1 ELSE 0 END) AS interesting,
+    SUM(commits_ahead) AS total_commits_ahead,
+    MAX(score) AS max_score
+FROM github_forks
+GROUP BY upstream_repo;
+"
+```
+
+**Step 3: Get interesting forks**
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT fork_repo, upstream_repo, commits_ahead, total_lines, score,
+       DATEDIFF(NOW(), last_commit_at) AS days_since_commit
+FROM github_forks
+WHERE is_interesting = 1
+ORDER BY score DESC, commits_ahead DESC;
+"
+```
+
+**Scoring heuristics** (calculated by sync script):
+- Commits ahead >100: +10 points
+- Commits ahead >50: +5 points
+- Commits ahead >20: +3 points
+- Last commit <7 days: +3 points
+- Last commit <30 days: +2 points
+- Score >= 5 = "interesting"
+
+**Scripts location**: `internal/formula/scripts/goblin-scout/`
+- `sync_forks.sh` - Main sync script (combines fetch + analyze)
+
+**Rate limiting**: The script makes 1 API call for fork list + 2 calls per active fork.
+For repos with many forks, consider spreading across multiple patrol cycles.
+"""
+
+[[steps]]
+id = "analyze-divergence"
+title = "Analyze divergence trends"
+needs = ["fetch-forks"]
+description = """
+Compare current fork state to previous scans to identify trends.
+
+Since fork data is now in Dolt, we can query historical trends directly.
+
+**Step 1: Identify new interesting forks**
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT fork_repo, upstream_repo, commits_ahead, score
+FROM github_forks
+WHERE is_interesting = 1
+  AND first_seen_at > DATE_SUB(NOW(), INTERVAL 1 DAY);
+"
+```
+
+**Step 2: Identify trending forks (score increasing)**
+Compare current score to previous (requires Dolt time-travel):
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT
+    curr.fork_repo,
+    curr.score AS current_score,
+    curr.commits_ahead AS current_ahead
+FROM github_forks curr
+WHERE curr.is_interesting = 1
+  AND curr.score >= 8;
+"
+```
+
+**Step 3: Identify forks with significant divergence**
+```bash
+cd /home/ubuntu/gastown9/gastown/.beads/dolt/beads && dolt sql -q "
+SELECT fork_repo, upstream_repo, commits_ahead, total_lines, last_commit_at
+FROM github_forks
+WHERE commits_ahead > 50 OR total_lines > 1000
+ORDER BY commits_ahead DESC;
+"
+```
+
+**Output**: Fork analysis data for report and digest generation.
+"""
+
+[[steps]]
+id = "detect-changes"
+title = "Detect new and trending forks"
+needs = ["analyze-divergence", "fetch-prs"]
+description = """
+Compare current scan results to previous state to identify changes.
+
+**Step 1: Identify NEW interesting forks**
+Forks that:
+- Score >= threshold now
+- Were NOT in previous state OR scored < threshold before
+
+Mark these as `new_forks` for bead creation.
+
+**Step 2: Identify TRENDING forks**
+Forks that:
+- Were interesting before (in state)
+- Commits ahead increased by >= 10 since last scan
+- Score increased by >= 3 since last scan
+
+Mark these as `trending_forks` for potential bead update.
+
+**Step 3: Identify GRADUATED forks**
+Forks that:
+- Were interesting before
+- Now score < threshold (went stale)
+
+These should be noted but no action needed.
+
+**Step 4: Compile change summary**
+```
+New interesting forks: N
+Trending forks: M
+Graduated (stale): P
+Total interesting: Q
+```
+
+**Step 5: Compile PR summary (from fetch-prs)**
+```
+Open PRs in gastown: N
+  - Ready for review: X
+  - Stale (>30 days): Y
+  - Large (>500 lines): Z
+  - Stuck (no reviews): W
+```
+
+Flag PRs that need attention:
+- Stale PRs may need author ping or close decision
+- Stuck PRs (no reviews, >7 days) need reviewer assignment
+- Large PRs may need to be broken up
+
+This summary will be used for the digest email.
+"""
+
+[[steps]]
+id = "create-beads"
+title = "Create research beads for findings"
+needs = ["detect-changes"]
+description = """
+Create research beads for new interesting forks.
+
+**For each fork in new_forks**:
+
+**Step 1: Create a research bead**
+```bash
+bd create --title "Fork research: <fork-full-name>" \
+  --description "Interesting fork of <upstream-repo> with <commits-ahead> commits ahead.
+
+## Key Commits
+<list of interesting commits with messages>
+
+## Scoring
+- Score: <score>
+- Commits ahead: <ahead_by>
+- Last activity: <last_commit_date>
+- New directories: <list if any>
+
+## Investigation Notes
+_To be filled by researcher_
+
+## Decision
+[ ] Cherry-pick specific commits
+[ ] Watch for future development
+[ ] Contact fork author
+[ ] Not actionable
+" \
+  --type=research \
+  --labels="goblin:fork,upstream:<upstream-repo>,fork:<fork-owner>"
+```
+
+**Step 2: Record bead ID in state**
+Store the bead ID in the fork's `research_bead` field for future reference.
+
+**For trending forks with existing beads**:
+
+Consider adding a comment to existing bead:
+```bash
+bd comment <research-bead-id> "Update: Fork now has <new-commits-ahead> commits ahead (+<delta>). Score: <new-score> (+<score-delta>)"
+```
+
+**Batching**: If many new forks, consider creating beads in batches to avoid
+overwhelming the research queue. Priority order by score (highest first).
+"""
+
+[[steps]]
+id = "generate-report"
+title = "Generate markdown report"
+needs = ["create-beads"]
+description = """
+Generate a markdown report of this scan's findings.
+
+**Step 1: Create reports directory if needed**
+```bash
+mkdir -p .beads/reports
+```
+
+**Step 2: Generate report file**
+```bash
+DATE=$(date +%Y-%m-%d)
+cat > .beads/reports/goblin_scout_${DATE}.md << 'EOF'
+# Goblin Scout Report - ${DATE}
+
+## Summary
+- Repositories scanned: <count>
+- Total forks analyzed: <count>
+- Interesting forks found: <count>
+- New since last scan: <count>
+- Trending forks: <count>
+
+## New Interesting Forks
+
+### <fork-full-name> (Score: <score>)
+- **Upstream**: <upstream-repo>
+- **Commits ahead**: <ahead_by>
+- **Last activity**: <last_commit_date>
+- **Research bead**: <bead-id>
+- **Key commits**:
+  - <commit-sha[:7]>: <commit-message>
+  - ...
+
+---
+
+## Trending Forks
+
+### <fork-full-name> (Score: <score>, +<delta>)
+- **Commits ahead**: <ahead_by> (+<commits-delta>)
+- **Last activity**: <last_commit_date>
+
+---
+
+## All Interesting Forks
+
+| Fork | Upstream | Score | Ahead | Last Activity |
+|------|----------|-------|-------|---------------|
+| <fork> | <upstream> | <score> | <ahead> | <date> |
+| ... | ... | ... | ... | ... |
+
+---
+
+## Open PRs in steveyegge/gastown
+
+### PRs Needing Attention
+
+#### Stuck (no reviews, >7 days)
+| PR | Title | Author | Age | Size |
+|----|-------|--------|-----|------|
+| #<num> | <title> | @<author> | <days>d | +<add>/-<del> |
+
+#### Stale (>30 days)
+| PR | Title | Author | Age | Last Update |
+|----|-------|--------|-----|-------------|
+| #<num> | <title> | @<author> | <days>d | <date> |
+
+### All Open PRs
+
+| PR | Title | Author | Status | Age | Size |
+|----|-------|--------|--------|-----|------|
+| #<num> | <title> | @<author> | <ready/draft> | <days>d | +<add>/-<del> |
+| ... | ... | ... | ... | ... | ... |
+
+---
+
+Generated by Goblin Scout at <timestamp>
+EOF
+```
+
+**Step 3: Symlink latest report**
+```bash
+ln -sf goblin_scout_${DATE}.md .beads/reports/goblin_scout_latest.md
+```
+"""
+
+[[steps]]
+id = "send-digest"
+title = "Send digest to Mayor"
+needs = ["generate-report"]
+description = """
+If there are findings worth reporting, send a digest email to the Mayor.
+
+**Step 1: Check if digest is needed**
+Skip if:
+- No new interesting forks
+- No trending forks
+- No PRs needing attention (stuck or stale)
+- Nothing notable changed
+
+**Step 2: Compose digest mail**
+```bash
+gt mail send mayor/ -s "GOBLIN_SCOUT: Fork digest - <date>" -m "
+# Fork Scan Summary
+
+**Repositories scanned**: <count>
+**New interesting forks**: <new_count>
+**Trending forks**: <trending_count>
+
+## Highlights
+
+### New Forks Worth Investigating
+<for each new fork>
+- **<fork-full-name>** (score: <score>)
+  - <commits_ahead> commits ahead of <upstream>
+  - Research bead: <bead-id>
+</for>
+
+### Trending Activity
+<for each trending fork>
+- **<fork-full-name>**: +<commit-delta> commits, score now <score>
+</for>
+
+## PRs Needing Attention (steveyegge/gastown)
+
+**Open PRs**: <total_count>
+**Stuck (no reviews)**: <stuck_count>
+**Stale (>30 days)**: <stale_count>
+
+<if stuck_prs>
+### Stuck PRs (need reviewer)
+<for each stuck pr>
+- PR #<num>: <title> (@<author>, <age> days old)
+</for>
+</if>
+
+<if stale_prs>
+### Stale PRs (need decision)
+<for each stale pr>
+- PR #<num>: <title> (@<author>, <age> days)
+</for>
+</if>
+
+---
+
+Full report: .beads/reports/goblin_scout_<date>.md
+"
+```
+
+**Step 3: Archive any replies**
+Check inbox for Mayor responses:
+```bash
+gt mail inbox
+```
+Handle any configuration changes or priority overrides from Mayor.
+"""
+
+[[steps]]
+id = "save-state"
+title = "Persist state for next scan"
+needs = ["send-digest"]
+description = """
+Save the updated state file for the next patrol cycle.
+
+**Step 1: Update state structure**
+- Update `repos.<repo>.forks` with current scan data
+- Update `last_scan` to current timestamp
+- Increment `scan_count`
+- Preserve fork history (first_seen dates, research_bead IDs)
+
+**Step 2: Write state file**
+```bash
+cat > .beads/goblin_scout_state.json << 'EOF'
+{
+  "repos": {
+    <updated repos data>
+  },
+  "config": {
+    "min_score_threshold": 5,
+    "scan_repos": ["steveyegge/beads", "steveyegge/gastown"]
+  },
+  "last_scan": "<current-timestamp>",
+  "scan_count": <previous + 1>
+}
+EOF
+```
+
+**Step 3: Validate state file**
+```bash
+jq . .beads/goblin_scout_state.json > /dev/null && echo "State valid"
+```
+
+**Cleanup old data**:
+- Remove forks from state that haven't been seen in 30+ days
+- This keeps state file manageable over time
+"""
+
+[[steps]]
+id = "schedule-next"
+title = "Schedule next patrol cycle"
+needs = ["save-state"]
+description = """
+End of patrol cycle - decide whether to continue or handoff.
+
+**Step 1: Check context usage**
+If context is HIGH (>80%):
+- Write handoff mail with scan summary
+- Exit for respawn
+
+If context is LOW:
+- Can continue to next cycle
+
+**Step 2: Calculate next scan time**
+Default: Daily scans (every 24 hours)
+If last scan was < 20 hours ago, sleep until 24h mark.
+
+**Step 3a: If context LOW and not time for next scan**
+Create a timer gate to wake up for next scan:
+```bash
+# Calculate seconds until next scan
+NEXT_SCAN=$(date -d "tomorrow 06:00" +%s)
+NOW=$(date +%s)
+SLEEP_SECS=$((NEXT_SCAN - NOW))
+
+# Handoff with wake time
+gt handoff -s "Goblin Scout sleeping until next scan" \
+  -m "Scan complete. <findings-summary>
+
+Next scan scheduled for: $(date -d @$NEXT_SCAN)
+
+State saved to: .beads/goblin_scout_state.json
+Latest report: .beads/reports/goblin_scout_latest.md"
+```
+
+**Step 3b: If time for next scan now**
+1. Squash current wisp:
+```bash
+bd mol squash <mol-id> --summary "<scan-summary>"
+```
+
+2. Create new patrol wisp:
+```bash
+bd mol wisp mol-goblin-scout-patrol
+```
+
+3. Continue from load-state step
+
+**IMPORTANT**: Never leave session idle. Either:
+- Continue patrol loop (context LOW, scan time)
+- Handoff with scheduled wake (context LOW, not scan time)
+- Exit for respawn (context HIGH)
+"""

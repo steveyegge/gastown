@@ -17,8 +17,9 @@
 .DS_Store
 Thumbs.db
 
-# Claude Code local state
+# Claude Code local state (directory and symlink)
 .claude/
+.claude
 
 # Test
 coverage.out
@@ -54,6 +55,7 @@ CLAUDE.md
 
 # Gas Town (added by gt)
 .beads/
+!.beads/routes.jsonl
 .logs/
 logs/
 settings/

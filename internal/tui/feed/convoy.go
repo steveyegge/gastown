@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // convoyIDPattern validates convoy IDs to prevent SQL injection
@@ -156,38 +157,26 @@ type trackedStatus struct {
 }
 
 // getTrackedIssueStatus queries tracked issues and their status
+// Supports both SQLite and Dolt backends via beads.RunQuery.
 func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
 	// Validate convoyID to prevent SQL injection
 	if !convoyIDPattern.MatchString(convoyID) {
 		return nil
 	}
 
-	dbPath := filepath.Join(beadsDir, "beads.db")
-
-	ctx, cancel := context.WithTimeout(context.Background(), convoySubprocessTimeout)
-	defer cancel()
-
-	// Query tracked dependencies from SQLite
-	// convoyID is validated above to match ^hq-[a-zA-Z0-9-]+$
-	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, //nolint:gosec // G204: convoyID is validated against strict pattern
-		fmt.Sprintf(`SELECT depends_on_id FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, convoyID))
-
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
-		return nil
-	}
-
-	var deps []struct {
-		DependsOnID string `json:"depends_on_id"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
+	// Query tracked dependencies using backend-aware query (works with SQLite or Dolt)
+	query := fmt.Sprintf(`SELECT depends_on_id FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, convoyID)
+	results, err := beads.RunQuery(beadsDir, query)
+	if err != nil {
 		return nil
 	}
 
 	var tracked []trackedStatus
-	for _, dep := range deps {
-		issueID := dep.DependsOnID
+	for _, row := range results {
+		issueID, _ := row["depends_on_id"].(string)
+		if issueID == "" {
+			continue
+		}
 
 		// Handle external reference format: external:rig:issue-id
 		if strings.HasPrefix(issueID, "external:") {

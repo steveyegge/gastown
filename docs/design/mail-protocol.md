@@ -7,6 +7,12 @@
 Gas Town agents coordinate via mail messages routed through the beads system.
 Mail uses `type=message` beads with routing handled by `gt mail`.
 
+**Important distinction:** Mail is for inter-agent **communication**, not work
+assignment. Work items (tasks, bugs, epics) are **hooked** to agents and
+discovered via `gt hook`, not `gt mail inbox`. See
+[Propulsion Principle](../concepts/propulsion-principle.md#hook-vs-mail-two-discovery-paths)
+for the full distinction.
+
 ## Message Types
 
 ### POLECAT_DONE

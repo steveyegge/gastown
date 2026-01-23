@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // convoyIDPattern validates convoy IDs to prevent SQL injection.
@@ -124,37 +124,36 @@ func loadConvoys(townBeads string) ([]ConvoyItem, error) {
 }
 
 // loadTrackedIssues loads issues tracked by a convoy.
+// Supports both SQLite and Dolt backends via beads.RunQuery.
 func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 	// Validate convoy ID to prevent SQL injection
 	if !convoyIDPattern.MatchString(convoyID) {
 		return nil, 0, 0
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), subprocessTimeout)
-	defer cancel()
-
-	dbPath := filepath.Join(townBeads, "beads.db")
-
-	// Query tracked issues from SQLite (ID validated above)
+	// Query tracked issues using backend-aware query (works with SQLite or Dolt)
 	query := fmt.Sprintf(`
-		SELECT d.depends_on_id
-		FROM dependencies d
-		WHERE d.issue_id = '%s' AND d.type = 'tracks'
+		SELECT depends_on_id
+		FROM dependencies
+		WHERE issue_id = '%s' AND type = 'tracks'
 	`, convoyID)
 
-	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, query) //nolint:gosec // G204: sqlite3 with controlled query
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
+	results, err := beads.RunQuery(townBeads, query)
+	if err != nil {
 		return nil, 0, 0
 	}
 
+	// Extract depends_on_id from results
 	var deps []struct {
 		DependsOnID string `json:"depends_on_id"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
-		return nil, 0, 0
+	for _, row := range results {
+		id, _ := row["depends_on_id"].(string)
+		if id != "" {
+			deps = append(deps, struct {
+				DependsOnID string `json:"depends_on_id"`
+			}{DependsOnID: id})
+		}
 	}
 
 	// Collect issue IDs, handling external references

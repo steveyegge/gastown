@@ -236,7 +236,8 @@ jobs:
 
       - name: Install beads (bd)
         # Pin to v0.47.1 - v0.47.2 has routing defaults that cause prefix mismatch errors
-        run: go install github.com/groblegark/beads/cmd/bd@v0.47.1
+        # Use steveyegge/beads (upstream) - groblegark fork has module path mismatch
+        run: go install github.com/steveyegge/beads/cmd/bd@v0.47.1
 
       - name: Build gt
         run: go build -v -o gt ./cmd/gt
