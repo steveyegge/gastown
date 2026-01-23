@@ -896,3 +896,4 @@ func TestKillPaneProcessesExcluding_FiltersPIDs(t *testing.T) {
 		}
 	}
 }
+

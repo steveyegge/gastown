@@ -220,7 +220,8 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		style.PrintWarning("could not kill pane processes: %v", err)
 	}
 
-	// Use exec to respawn the pane - this kills us and restarts
+	// Use respawn-pane -k to atomically kill current process and start new one
+	// Note: respawn-pane automatically resets remain-on-exit to off
 	return t.RespawnPane(pane, restartCmd)
 }
 
