@@ -7,7 +7,7 @@ Goblin Town is an unopinionated and experimental fork of Gas Town that tries to 
 
 Principles:
 
-* if it isn't broken don't test it
+* if it isn't broken don't add a test for it
 * if you do write a test, never read it
 * write the feature before you write the plan
 * somebody else will clean it up
@@ -18,8 +18,8 @@ Principles:
 * anything bigger than you is terrifying
 * most things are bigger than you
 * remain underground whenever possible
-
-how to say, these are not the goals of goblin town-- they are the conditions under which it was founded and continues to exist.  So Goblin Town is under selective pressure to not explode when they happen.  Like if you spill water in a fish tank, it's ok.
+ 
+how to say, these are not the goals of goblin town-- they are the conditions under it is operated.  So Goblin Town is under selective pressure to not explode when an operator does these things.  You, the operator, are the Goblin King, is what I'm trying to say; but the system should support your subordinate Goblin just as well, since it's made out of a big pile of Goblins!
 
 Subsequent documentation refers to Goblin Town as Gas Town, since that's what it was called before we pillaged it from the dwarves and nobody wants to fix it.
 
