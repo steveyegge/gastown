@@ -310,6 +310,23 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Issue #904: Warn when Mayor slings rig-level work to itself instead of spawning polecats.
+	// Mayor is a coordinator - rig work should be dispatched to polecats for parallel execution.
+	// Crew and other agents self-assigning is legitimate (long-running, exploratory work).
+	actor := detectActor()
+	isMayorSelfAssignment := (actor == "mayor" || strings.HasPrefix(actor, "mayor/")) &&
+		(targetAgent == "mayor" || targetAgent == "mayor/" ||
+			strings.HasSuffix(targetAgent, "mayor/") || strings.HasSuffix(targetAgent, "mayor"))
+	if isMayorSelfAssignment && !slingDryRun && !slingForce {
+		// Check if there's a rig that could spawn polecats
+		if rigName := detectRigFromBead(beadID); rigName != "" {
+			fmt.Fprintf(os.Stderr, "%s Mayor self-assignment detected. Consider spawning a polecat instead:\n",
+				style.Warning.Render("⚠"))
+			fmt.Fprintf(os.Stderr, "    gt sling %s %s\n", beadID, rigName)
+			fmt.Fprintf(os.Stderr, "  This enables parallel work execution.\n")
+		}
+	}
+
 	// Display what we're doing
 	if formulaName != "" {
 		fmt.Printf("%s Slinging formula %s on %s to %s...\n", style.Bold.Render("🎯"), formulaName, beadID, targetAgent)
@@ -471,8 +488,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Work attached to hook (status=hooked)\n", style.Bold.Render("✓"))
 
-	// Log sling event to activity feed
-	actor := detectActor()
+	// Log sling event to activity feed (actor was already detected for self-assignment check)
 	_ = events.LogFeed(events.TypeSling, actor, events.SlingPayload(beadID, targetAgent))
 
 	// Update agent bead's hook_bead field (ZFC: agents track their current work)

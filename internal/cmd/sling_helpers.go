@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -541,4 +542,44 @@ func CookFormula(formulaName, workDir string) error {
 	cookCmd.Dir = workDir
 	cookCmd.Stderr = os.Stderr
 	return cookCmd.Run()
+}
+
+// detectRigFromBead determines the rig name that a bead belongs to.
+// This is used for issue #904 to suggest polecat dispatch as an alternative to self-assignment.
+// Returns empty string if the bead is town-level (hq-) or rig cannot be determined.
+func detectRigFromBead(beadID string) string {
+	// Extract prefix from bead ID (e.g., "rp-abc" -> "rp-")
+	prefix := beads.ExtractPrefix(beadID)
+	if prefix == "" {
+		return ""
+	}
+
+	// Town-level beads (hq-) don't have a rig - self-assignment is appropriate
+	if prefix == "hq-" {
+		return ""
+	}
+
+	// Look up the route for this prefix
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return ""
+	}
+
+	routes, err := beads.LoadRoutes(filepath.Join(townRoot, ".beads"))
+	if err != nil || routes == nil {
+		return ""
+	}
+
+	// Find the route that matches this prefix and extract rig name
+	for _, r := range routes {
+		if r.Prefix == prefix {
+			// Route path format is "rigname/..." - extract first component
+			parts := strings.SplitN(r.Path, "/", 2)
+			if len(parts) > 0 && parts[0] != "." && parts[0] != "" {
+				return parts[0]
+			}
+		}
+	}
+
+	return ""
 }
