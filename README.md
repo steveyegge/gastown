@@ -473,14 +473,6 @@ Gas Town supports multiple AI agent runtimes:
 | **Amp** | ✅ Stable | Sourcegraph AMP |
 | **OpenCode** | ✅ Implemented | OpenCode CLI |
 
-### Hardware-Specific Specifications
-
-For ESP32S3 device deployment and testing requirements, see **[specs/readme.md](specs/readme.md)** which contains:
-- Device-specific configuration details
-- Memory and resource requirements
-- Testing checklists for embedded environments
-- Performance optimization guidelines
-
 ## Troubleshooting
 
 ### Agents lose connection
