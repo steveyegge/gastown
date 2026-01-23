@@ -14,14 +14,15 @@ import (
 
 // PatrolConfig holds role-specific patrol configuration.
 type PatrolConfig struct {
-	RoleName      string   // "deacon", "witness", "refinery"
-	PatrolMolName string   // "mol-deacon-patrol", etc.
-	BeadsDir      string   // where to look for beads
-	Assignee      string   // agent identity for pinning
-	HeaderEmoji   string   // display emoji
-	HeaderTitle   string   // "Patrol Status", etc.
-	WorkLoopSteps []string // role-specific instructions
-	CheckInProgress bool   // whether to check in_progress status first (witness/refinery do, deacon doesn't)
+	RoleName        string   // "deacon", "witness", "refinery"
+	PatrolMolName   string   // "mol-deacon-patrol", etc.
+	BeadsDir        string   // where to look for beads
+	TownRoot        string   // town root for GT_ROOT env var (needed for formula discovery)
+	Assignee        string   // agent identity for pinning
+	HeaderEmoji     string   // display emoji
+	HeaderTitle     string   // "Patrol Status", etc.
+	WorkLoopSteps   []string // role-specific instructions
+	CheckInProgress bool     // whether to check in_progress status first (witness/refinery do, deacon doesn't)
 }
 
 // findActivePatrol finds an active patrol molecule for the role.
@@ -105,6 +106,12 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	// Find the proto ID for the patrol molecule
 	cmdCatalog := exec.Command("gt", "formula", "list")
 	cmdCatalog.Dir = cfg.BeadsDir
+	// Pass GT_ROOT to subprocess for formula discovery.
+	// Without this, gt formula list only searches local .beads/formulas/ and ~/.beads/formulas/,
+	// missing $GT_ROOT/.beads/formulas/ which contains the patrol molecules.
+	if cfg.TownRoot != "" {
+		cmdCatalog.Env = append(os.Environ(), "GT_ROOT="+cfg.TownRoot)
+	}
 	var stdoutCatalog, stderrCatalog bytes.Buffer
 	cmdCatalog.Stdout = &stdoutCatalog
 	cmdCatalog.Stderr = &stderrCatalog
@@ -138,6 +145,10 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	// Create the patrol wisp
 	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
 	cmdSpawn.Dir = cfg.BeadsDir
+	// Pass GT_ROOT to subprocess for formula discovery during wisp creation
+	if cfg.TownRoot != "" {
+		cmdSpawn.Env = append(os.Environ(), "GT_ROOT="+cfg.TownRoot)
+	}
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
 	cmdSpawn.Stderr = &stderrSpawn
