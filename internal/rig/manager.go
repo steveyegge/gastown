@@ -647,7 +647,27 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		return nil
 	}
 
-	// No tracked beads - create local database
+	// Check if town-level uses Dolt server mode (centralized database).
+	// If so, create a redirect to town-level .beads instead of local database.
+	townBeadsDir := filepath.Join(m.townRoot, ".beads")
+	if beads.IsDoltServerMode(townBeadsDir) {
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			return err
+		}
+		// Calculate relative path from rig to town-level .beads
+		// rigPath is like ~/gt/gastown, town is ~/gt, so relative is ../.beads
+		relPath, err := filepath.Rel(rigPath, townBeadsDir)
+		if err != nil {
+			relPath = "../.beads" // Fallback to common case
+		}
+		redirectPath := filepath.Join(beadsDir, "redirect")
+		if err := os.WriteFile(redirectPath, []byte(relPath+"\n"), 0644); err != nil {
+			return fmt.Errorf("creating redirect file: %w", err)
+		}
+		return nil
+	}
+
+	// No tracked beads and no server mode - create local database
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		return err
 	}
@@ -664,7 +684,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
 	// Check if town-level beads uses Dolt backend - inherit it for new rigs
-	townBeadsDir := filepath.Join(m.townRoot, ".beads")
+	// Note: townBeadsDir is declared earlier for server mode check
 	townBackend := beads.GetStorageBackend(townBeadsDir)
 
 	// Run bd init with --no-auto-import to create database WITHOUT importing from JSONL.

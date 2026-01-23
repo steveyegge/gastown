@@ -21,10 +21,31 @@ const (
 
 // MetadataConfig represents the metadata.json configuration file.
 type MetadataConfig struct {
-	Database   string `json:"database"`
-	JSONLExport string `json:"jsonl_export"`
-	Backend    string `json:"backend"`
-	Prefix     string `json:"prefix"`
+	Database          string `json:"database"`
+	JSONLExport       string `json:"jsonl_export"`
+	Backend           string `json:"backend"`
+	Prefix            string `json:"prefix"`
+	DoltServerEnabled bool   `json:"dolt_server_enabled"`
+	DoltServerHost    string `json:"dolt_server_host"`
+	DoltServerPort    int    `json:"dolt_server_port"`
+	DoltServerUser    string `json:"dolt_server_user"`
+}
+
+// IsDoltServerMode returns true if the beads directory uses Dolt server mode.
+// Server mode connects to a centralized dolt sql-server instead of embedded driver.
+func IsDoltServerMode(beadsDir string) bool {
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		return false
+	}
+
+	var config MetadataConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return false
+	}
+
+	return config.Backend == BackendDolt && config.DoltServerEnabled
 }
 
 // DetectBackend reads metadata.json from the beads directory and returns the backend type.
