@@ -2,6 +2,7 @@ package mail
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -811,5 +812,109 @@ func TestExpandAnnounceNoTownRoot(t *testing.T) {
 	}
 	if !contains(err.Error(), "no town root") {
 		t.Errorf("expandAnnounce error = %v, want containing 'no town root'", err)
+	}
+}
+
+// ============ Recipient Validation Tests ============
+
+func TestValidateRecipient(t *testing.T) {
+	// Skip if bd CLI is not available (e.g., in CI environment)
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd CLI not available, skipping test")
+	}
+
+	// Create isolated beads environment for testing
+	tmpDir := t.TempDir()
+	townRoot := tmpDir
+
+	// Create .beads directory and initialize
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("creating beads dir: %v", err)
+	}
+
+	// Initialize beads database with "gt" prefix (matches agent bead IDs)
+	cmd := exec.Command("bd", "init", "gt")
+	cmd.Dir = townRoot
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("bd init failed: %v\n%s", err, out)
+	}
+
+	// Set issue prefix to "gt" (matches agent bead ID pattern)
+	cmd = exec.Command("bd", "config", "set", "issue_prefix", "gt")
+	cmd.Dir = townRoot
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("bd config set issue_prefix failed: %v\n%s", err, out)
+	}
+
+	// Register custom types (agent, message, etc.) - required before creating agents
+	cmd = exec.Command("bd", "config", "set", "types.custom", "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request")
+	cmd.Dir = townRoot
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("bd config set types.custom failed: %v\n%s", err, out)
+	}
+
+	// Create test agent beads
+	createAgent := func(id, title string) {
+		cmd := exec.Command("bd", "create", title, "--type=agent", "--id="+id, "--force")
+		cmd.Dir = townRoot
+		cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("creating agent %s: %v\n%s", id, err, out)
+		}
+	}
+
+	// Create agents that match expected bead ID patterns
+	createAgent("gt-mayor", "Mayor agent")
+	createAgent("gt-deacon", "Deacon agent")
+	createAgent("gt-testrig-witness", "Test witness")
+	createAgent("gt-testrig-crew-alice", "Test crew alice")
+	createAgent("gt-testrig-polecat-bob", "Test polecat bob")
+
+	r := NewRouterWithTownRoot(townRoot, townRoot)
+
+	tests := []struct {
+		name     string
+		identity string
+		wantErr  bool
+		errMsg   string
+	}{
+		// Overseer is always valid (human operator, no agent bead)
+		{"overseer", "overseer", false, ""},
+
+		// Town-level agents (validated against beads)
+		{"mayor", "mayor/", false, ""},
+		{"deacon", "deacon/", false, ""},
+
+		// Rig-level agents (validated against beads)
+		{"witness", "testrig/witness", false, ""},
+		{"crew member", "testrig/alice", false, ""},
+		{"polecat", "testrig/bob", false, ""},
+
+		// Invalid addresses - should fail
+		{"bare name", "ruby", true, "no agent found"},
+		{"nonexistent rig agent", "testrig/nonexistent", true, "no agent found"},
+		{"wrong rig", "wrongrig/alice", true, "no agent found"},
+		{"misrouted town agent", "testrig/mayor", true, "no agent found"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := r.validateRecipient(tt.identity)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("validateRecipient(%q) expected error, got nil", tt.identity)
+				} else if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+					t.Errorf("validateRecipient(%q) error = %v, want containing %q", tt.identity, err, tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("validateRecipient(%q) unexpected error: %v", tt.identity, err)
+				}
+			}
+		})
 	}
 }

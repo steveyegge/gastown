@@ -566,10 +566,38 @@ func (r *Router) sendToGroup(msg *Message) error {
 	return nil
 }
 
+// validateRecipient checks that the recipient identity corresponds to an existing agent.
+// Returns an error if the recipient is invalid or doesn't exist.
+func (r *Router) validateRecipient(identity string) error {
+	// Overseer is the human operator, not an agent bead
+	if identity == "overseer" {
+		return nil
+	}
+
+	// Query all agents and check if any match this identity
+	agents, err := r.queryAgents("")
+	if err != nil {
+		return fmt.Errorf("failed to query agents: %w", err)
+	}
+
+	for _, agent := range agents {
+		if agentBeadToAddress(agent) == identity {
+			return nil // Found matching agent
+		}
+	}
+
+	return fmt.Errorf("no agent found")
+}
+
 // sendToSingle sends a message to a single recipient.
 func (r *Router) sendToSingle(msg *Message) error {
 	// Convert addresses to beads identities
 	toIdentity := AddressToIdentity(msg.To)
+
+	// Validate recipient exists
+	if err := r.validateRecipient(toIdentity); err != nil {
+		return fmt.Errorf("invalid recipient %q: %w", msg.To, err)
+	}
 
 	// Build labels for from/thread/reply-to/cc
 	var labels []string
