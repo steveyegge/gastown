@@ -97,6 +97,9 @@ func TestAddressToSessionID(t *testing.T) {
 		{"gastown/refinery", "gt-gastown-refinery"},
 		{"gastown/Toast", "gt-gastown-Toast"},
 		{"beads/witness", "gt-beads-witness"},
+		{"gastown/crew/max", "gt-gastown-crew-max"},         // Crew address
+		{"beads/crew/wolf", "gt-beads-crew-wolf"},           // Crew with different rig
+		{"gastown/polecats/jade", "gt-gastown-polecats-jade"}, // Polecats long form
 		{"gastown/", ""},   // Empty target
 		{"gastown", ""},    // No slash
 		{"", ""},           // Empty address

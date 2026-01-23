@@ -1004,6 +1004,7 @@ func addressToSessionID(address string) string {
 	target := parts[1]
 
 	// Polecat: gt-rig-polecat
+	// Crew: gt-rig-crew-name (crew/name → crew-name)
 	// Refinery: gt-rig-refinery (if refinery has its own session)
-	return fmt.Sprintf("gt-%s-%s", rig, target)
+	return fmt.Sprintf("gt-%s-%s", rig, strings.ReplaceAll(target, "/", "-"))
 }
