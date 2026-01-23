@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var hookCmd = &cobra.Command{
@@ -233,7 +235,12 @@ func runHook(_ *cobra.Command, args []string) error {
 	}
 
 	// Hook the bead using bd update (discovery-based approach)
+	// Run from town root so bd can find routes.jsonl for prefix-based routing.
+	// This is essential for hooking convoys (hq-* prefix) stored in town beads.
 	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
+	if townRoot, err := workspace.FindFromCwd(); err == nil {
+		hookCmd.Dir = townRoot
+	}
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking bead: %w", err)
@@ -310,11 +317,30 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("listing hooked beads: %w", err)
 	}
 
-	// If nothing found, try scanning all rigs for town-level roles
-	if len(hookedBeads) == 0 && isTownLevelRole(target) {
+	// If nothing found in local beads, also check town beads for hooked convoys.
+	// Convoys (hq-cv-*) are stored in town beads (~/gt/.beads) and any agent
+	// can hook them for convoy-driver mode.
+	if len(hookedBeads) == 0 {
 		townRoot, err := findTownRoot()
 		if err == nil && townRoot != "" {
-			hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
+			// Check town beads for hooked items
+			townBeadsDir := filepath.Join(townRoot, ".beads")
+			if _, err := os.Stat(townBeadsDir); err == nil {
+				townBeads := beads.New(townBeadsDir)
+				townHooked, err := townBeads.List(beads.ListOptions{
+					Status:   beads.StatusHooked,
+					Assignee: target,
+					Priority: -1,
+				})
+				if err == nil && len(townHooked) > 0 {
+					hookedBeads = townHooked
+				}
+			}
+
+			// If still nothing found and town-level role, scan all rigs
+			if len(hookedBeads) == 0 && isTownLevelRole(target) {
+				hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
+			}
 		}
 	}
 
