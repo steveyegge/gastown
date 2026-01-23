@@ -433,6 +433,11 @@ func (b *Beads) GetAssignedIssue(assignee string) (*Issue, error) {
 	return issues[0], nil
 }
 
+// readyResponse wraps the bd ready --json output format.
+type readyResponse struct {
+	ReadyIssues []*Issue `json:"ready_issues"`
+}
+
 // Ready returns issues that are ready to work (not blocked).
 func (b *Beads) Ready() ([]*Issue, error) {
 	out, err := b.run("ready", "--json")
@@ -440,12 +445,12 @@ func (b *Beads) Ready() ([]*Issue, error) {
 		return nil, err
 	}
 
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
+	var resp readyResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
 		return nil, fmt.Errorf("parsing bd ready output: %w", err)
 	}
 
-	return issues, nil
+	return resp.ReadyIssues, nil
 }
 
 // ReadyWithType returns ready issues filtered by label.
@@ -457,12 +462,12 @@ func (b *Beads) ReadyWithType(issueType string) ([]*Issue, error) {
 		return nil, err
 	}
 
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
+	var resp readyResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
 		return nil, fmt.Errorf("parsing bd ready output: %w", err)
 	}
 
-	return issues, nil
+	return resp.ReadyIssues, nil
 }
 
 // Show returns detailed information about an issue.
