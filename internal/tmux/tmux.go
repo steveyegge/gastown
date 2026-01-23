@@ -418,6 +418,65 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 	return nil
 }
 
+// KillPaneProcessesExcluding is like KillPaneProcesses but excludes specified PIDs
+// from being killed. This is essential for self-handoff scenarios where the calling
+// process (e.g., gt handoff running inside Claude Code) needs to survive long enough
+// to call RespawnPane. Without exclusion, the caller would be killed before completing.
+//
+// The excluded PIDs should include the calling process and any ancestors that must
+// survive. After this function returns, RespawnPane's -k flag will send SIGHUP to
+// clean up the remaining processes.
+func (t *Tmux) KillPaneProcessesExcluding(pane string, excludePIDs []string) error {
+	// Build exclusion set for O(1) lookup
+	exclude := make(map[string]bool)
+	for _, pid := range excludePIDs {
+		exclude[pid] = true
+	}
+
+	// Get the pane PID
+	pid, err := t.GetPanePID(pane)
+	if err != nil {
+		return fmt.Errorf("getting pane PID: %w", err)
+	}
+
+	if pid == "" {
+		return fmt.Errorf("pane PID is empty")
+	}
+
+	// Get all descendant PIDs recursively (returns deepest-first order)
+	descendants := getAllDescendants(pid)
+
+	// Filter out excluded PIDs
+	var filtered []string
+	for _, dpid := range descendants {
+		if !exclude[dpid] {
+			filtered = append(filtered, dpid)
+		}
+	}
+
+	// Send SIGTERM to all non-excluded descendants (deepest first to avoid orphaning)
+	for _, dpid := range filtered {
+		_ = exec.Command("kill", "-TERM", dpid).Run()
+	}
+
+	// Wait for graceful shutdown
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGKILL to any remaining non-excluded descendants
+	for _, dpid := range filtered {
+		_ = exec.Command("kill", "-KILL", dpid).Run()
+	}
+
+	// Kill the pane process itself only if not excluded
+	if !exclude[pid] {
+		_ = exec.Command("kill", "-TERM", pid).Run()
+		time.Sleep(100 * time.Millisecond)
+		_ = exec.Command("kill", "-KILL", pid).Run()
+	}
+
+	return nil
+}
+
 // KillServer terminates the entire tmux server and all sessions.
 func (t *Tmux) KillServer() error {
 	_, err := t.run("kill-server")
