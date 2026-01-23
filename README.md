@@ -16,6 +16,8 @@ Principles:
 * anything bigger than you is terrifying
 * most things are bigger than you
 
+Subsequent documentation refers to Goblin Town as Gas Town, since this is what it was called before we pillaged it from the dwarves
+
 .  If you want it in your repo just spend the tokens yourself.  We try to merge in cool stuff from Gas Town's PRs as well, for extra goblin energy to tear the flesh and rip the bones
 
 ## Overview
