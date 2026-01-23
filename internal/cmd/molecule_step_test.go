@@ -151,7 +151,7 @@ func (m *mockBeadsForStep) Close(ids ...string) error {
 // makeStepIssue creates a test step issue with both DependsOn and Dependencies set.
 // In real usage:
 // - bd list returns issues with DependsOn empty
-// - bd show returns issues with Dependencies populated
+// - bd show returns issues with Dependencies populated (with DependencyType)
 // The mock simulates this: List() clears DependsOn, Show() returns the full issue.
 func makeStepIssue(id, title, parent, status string, dependsOn []string) *beads.Issue {
 	issue := &beads.Issue{
@@ -165,11 +165,14 @@ func makeStepIssue(id, title, parent, status string, dependsOn []string) *beads.
 		CreatedAt: "2025-01-01T12:00:00Z",
 		UpdatedAt: "2025-01-01T12:00:00Z",
 	}
-	// Also set Dependencies (what bd show returns) for proper testing
+	// Also set Dependencies (what bd show returns) for proper testing.
+	// Use "blocks" dependency type since that's what formula instantiation creates
+	// for inter-step dependencies (vs "parent-child" for parent relationships).
 	for _, depID := range dependsOn {
 		issue.Dependencies = append(issue.Dependencies, beads.IssueDep{
-			ID:    depID,
-			Title: "Dependency " + depID,
+			ID:             depID,
+			Title:          "Dependency " + depID,
+			DependencyType: "blocks", // Only "blocks" deps should block progress
 		})
 	}
 	return issue
@@ -302,6 +305,7 @@ func TestFindNextReadyStep(t *testing.T) {
 			openStepsMap, _ := m.ShowMultiple(openStepIDs)
 
 			// Find ready step using Dependencies (not DependsOn!)
+			// Only "blocks" type dependencies block progress - ignore "parent-child".
 			var readyStep *beads.Issue
 			for _, stepID := range openStepIDs {
 				step := openStepsMap[stepID]
@@ -311,13 +315,18 @@ func TestFindNextReadyStep(t *testing.T) {
 
 				// Use Dependencies (from bd show), NOT DependsOn (empty from bd list)
 				allDepsClosed := true
+				hasBlockingDeps := false
 				for _, dep := range step.Dependencies {
+					if dep.DependencyType != "blocks" {
+						continue // Skip parent-child and other non-blocking relationships
+					}
+					hasBlockingDeps = true
 					if !closedIDs[dep.ID] {
 						allDepsClosed = false
 						break
 					}
 				}
-				if len(step.Dependencies) == 0 || allDepsClosed {
+				if !hasBlockingDeps || allDepsClosed {
 					readyStep = step
 					break
 				}
@@ -442,6 +451,7 @@ func TestStepDoneScenarios(t *testing.T) {
 				openStepsMap, _ := m.ShowMultiple(openStepIDs)
 
 				// Find ready step using Dependencies (not DependsOn!)
+				// Only "blocks" type dependencies block progress - ignore "parent-child".
 				var readyStep *beads.Issue
 				for _, stepID := range openStepIDs {
 					step := openStepsMap[stepID]
@@ -451,13 +461,18 @@ func TestStepDoneScenarios(t *testing.T) {
 
 					// Use Dependencies (from bd show), NOT DependsOn (empty from bd list)
 					allDepsClosed := true
+					hasBlockingDeps := false
 					for _, dep := range step.Dependencies {
+						if dep.DependencyType != "blocks" {
+							continue // Skip parent-child and other non-blocking relationships
+						}
+						hasBlockingDeps = true
 						if !closedIDs[dep.ID] {
 							allDepsClosed = false
 							break
 						}
 					}
-					if len(step.Dependencies) == 0 || allDepsClosed {
+					if !hasBlockingDeps || allDepsClosed {
 						readyStep = step
 						break
 					}
@@ -599,6 +614,7 @@ func TestFindNextReadyStepWithBdListBehavior(t *testing.T) {
 			openStepsMap, _ := m.ShowMultiple(openStepIDs)
 
 			// Step 3: Find ready step using Dependencies (not DependsOn!)
+			// Only "blocks" type dependencies block progress - ignore "parent-child".
 			var readyStep *beads.Issue
 			for _, stepID := range openStepIDs {
 				step := openStepsMap[stepID]
@@ -608,14 +624,19 @@ func TestFindNextReadyStepWithBdListBehavior(t *testing.T) {
 
 				// Use Dependencies (from bd show), NOT DependsOn (empty from bd list)
 				allDepsClosed := true
+				hasBlockingDeps := false
 				for _, dep := range step.Dependencies {
+					if dep.DependencyType != "blocks" {
+						continue // Skip parent-child and other non-blocking relationships
+					}
+					hasBlockingDeps = true
 					if !closedIDs[dep.ID] {
 						allDepsClosed = false
 						break
 					}
 				}
 
-				if len(step.Dependencies) == 0 || allDepsClosed {
+				if !hasBlockingDeps || allDepsClosed {
 					readyStep = step
 					break
 				}

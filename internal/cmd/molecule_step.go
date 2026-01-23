@@ -250,16 +250,22 @@ func findNextReadyStep(b *beads.Beads, moleculeID string) (*beads.Issue, bool, e
 		}
 
 		// Check dependencies using the Dependencies field (from bd show),
-		// not DependsOn (which is empty from bd list)
+		// not DependsOn (which is empty from bd list).
+		// Only "blocks" type dependencies block progress - ignore "parent-child".
 		allDepsClosed := true
+		hasBlockingDeps := false
 		for _, dep := range step.Dependencies {
+			if dep.DependencyType != "blocks" {
+				continue // Skip parent-child and other non-blocking relationships
+			}
+			hasBlockingDeps = true
 			if !closedIDs[dep.ID] {
 				allDepsClosed = false
 				break
 			}
 		}
 
-		if len(step.Dependencies) == 0 || allDepsClosed {
+		if !hasBlockingDeps || allDepsClosed {
 			return step, false, nil
 		}
 	}
