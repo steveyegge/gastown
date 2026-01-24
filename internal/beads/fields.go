@@ -179,6 +179,11 @@ type MRFields struct {
 	CloseReason string // Reason for closing: merged, rejected, conflict, superseded
 	AgentBead   string // Agent bead ID that created this MR (for traceability)
 
+	// PR lifecycle tracking (for pr_to_main and pr_to_branch strategies)
+	PRUrl    string // GitHub PR URL (e.g., "https://github.com/owner/repo/pull/123")
+	PRNumber int    // GitHub PR number (e.g., 123)
+	PRState  string // PR state: open, merged, closed
+
 	// Conflict resolution fields (for priority scoring)
 	RetryCount      int    // Number of conflict-resolution cycles
 	LastConflictSHA string // SHA of main when conflict occurred
@@ -261,6 +266,17 @@ func ParseMRFields(issue *Issue) *MRFields {
 		case "convoy_created_at", "convoy-created-at", "convoycreatedat":
 			fields.ConvoyCreatedAt = value
 			hasFields = true
+		case "pr_url", "pr-url", "prurl":
+			fields.PRUrl = value
+			hasFields = true
+		case "pr_number", "pr-number", "prnumber":
+			if n, err := parseIntField(value); err == nil {
+				fields.PRNumber = n
+				hasFields = true
+			}
+		case "pr_state", "pr-state", "prstate":
+			fields.PRState = value
+			hasFields = true
 		}
 	}
 
@@ -309,6 +325,15 @@ func FormatMRFields(fields *MRFields) string {
 	}
 	if fields.AgentBead != "" {
 		lines = append(lines, "agent_bead: "+fields.AgentBead)
+	}
+	if fields.PRUrl != "" {
+		lines = append(lines, "pr_url: "+fields.PRUrl)
+	}
+	if fields.PRNumber > 0 {
+		lines = append(lines, fmt.Sprintf("pr_number: %d", fields.PRNumber))
+	}
+	if fields.PRState != "" {
+		lines = append(lines, "pr_state: "+fields.PRState)
 	}
 	if fields.RetryCount > 0 {
 		lines = append(lines, fmt.Sprintf("retry_count: %d", fields.RetryCount))
@@ -371,6 +396,15 @@ func SetMRFields(issue *Issue, fields *MRFields) string {
 		"convoy_created_at":  true,
 		"convoy-created-at":  true,
 		"convoycreatedat":    true,
+		"pr_url":             true,
+		"pr-url":             true,
+		"prurl":              true,
+		"pr_number":          true,
+		"pr-number":          true,
+		"prnumber":           true,
+		"pr_state":           true,
+		"pr-state":           true,
+		"prstate":            true,
 	}
 
 	// Collect non-MR lines from existing description

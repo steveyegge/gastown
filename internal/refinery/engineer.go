@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -550,7 +551,7 @@ func (e *Engineer) doPRMerge(ctx context.Context, branch, target, sourceIssue st
 	}
 
 	// Step 5: Create PR via gh CLI
-	prURL, err := e.createGitHubPR(ctx, branch, target, sourceIssue)
+	prInfo, err := e.createGitHubPR(ctx, branch, target, sourceIssue)
 	if err != nil {
 		return ProcessResult{
 			Success: false,
@@ -558,19 +559,27 @@ func (e *Engineer) doPRMerge(ctx context.Context, branch, target, sourceIssue st
 		}
 	}
 
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Created PR: %s\n", prURL)
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Created PR #%d: %s\n", prInfo.Number, prInfo.URL)
 
 	// For PR strategies, we return success but no merge commit
 	// The actual merge will happen via GitHub when the PR is approved
+	// Store PR URL for tracking - the MR bead will be updated with full PR info
+	// by the caller (HandleMRInfoSuccess or handleSuccess)
 	return ProcessResult{
 		Success:     true,
-		MergeCommit: prURL, // Store PR URL in MergeCommit field for tracking
+		MergeCommit: prInfo.URL, // Store PR URL for tracking (MergeCommit repurposed for PR workflows)
 	}
 }
 
+// PRInfo holds information about a created GitHub PR.
+type PRInfo struct {
+	URL    string // Full PR URL (e.g., "https://github.com/owner/repo/pull/123")
+	Number int    // PR number (e.g., 123)
+}
+
 // createGitHubPR creates a GitHub pull request using the gh CLI.
-// Returns the PR URL on success.
-func (e *Engineer) createGitHubPR(ctx context.Context, branch, target, sourceIssue string) (string, error) {
+// Returns PR info on success.
+func (e *Engineer) createGitHubPR(ctx context.Context, branch, target, sourceIssue string) (*PRInfo, error) {
 	// Build the gh pr create command
 	args := []string{"pr", "create", "--base", target, "--head", branch}
 
@@ -611,13 +620,21 @@ func (e *Engineer) createGitHubPR(ctx context.Context, branch, target, sourceIss
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Running: gh %s\n", strings.Join(args, " "))
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("gh pr create failed: %v\nstderr: %s", err, stderr.String())
+		return nil, fmt.Errorf("gh pr create failed: %v\nstderr: %s", err, stderr.String())
 	}
 
 	// Extract PR URL from stdout (gh pr create outputs the URL)
 	prURL := strings.TrimSpace(stdout.String())
 	if prURL == "" {
-		return "", fmt.Errorf("gh pr create did not return a PR URL")
+		return nil, fmt.Errorf("gh pr create did not return a PR URL")
+	}
+
+	// Parse PR number from URL (format: https://github.com/owner/repo/pull/123)
+	prNumber := parsePRNumber(prURL)
+
+	prInfo := &PRInfo{
+		URL:    prURL,
+		Number: prNumber,
 	}
 
 	// Enable auto-merge if configured
@@ -625,7 +642,23 @@ func (e *Engineer) createGitHubPR(ctx context.Context, branch, target, sourceIss
 		e.enableAutoMerge(ctx, prURL)
 	}
 
-	return prURL, nil
+	return prInfo, nil
+}
+
+// parsePRNumber extracts the PR number from a GitHub PR URL.
+// Returns 0 if parsing fails.
+func parsePRNumber(prURL string) int {
+	// URL format: https://github.com/owner/repo/pull/123
+	parts := strings.Split(prURL, "/")
+	if len(parts) < 2 {
+		return 0
+	}
+	numStr := parts[len(parts)-1]
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0
+	}
+	return num
 }
 
 // enableAutoMerge enables GitHub auto-merge on a PR.
@@ -789,7 +822,12 @@ func (e *Engineer) ProcessMRInfo(ctx context.Context, mr *MRInfo) ProcessResult 
 }
 
 // HandleMRInfoSuccess handles a successful merge from MRInfo.
+// For PR strategies, the MR is updated with PR info but not closed (awaiting external merge).
+// For direct strategies, the MR is closed immediately.
 func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
+	// Determine if this was a PR-based merge
+	isPRStrategy := IsPRStrategy(e.config.Strategy)
+
 	// Release merge slot if this was a conflict resolution
 	// The slot is held while conflict resolution is in progress
 	holder := e.rig.Name + "/refinery"
@@ -804,77 +842,101 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		_, _ = fmt.Fprintf(e.output, "[Engineer] Released merge slot\n")
 	}
 
-	// Update and close the MR bead
+	// Update and possibly close the MR bead
 	if mr.ID != "" {
 		// Fetch the MR bead to update its fields
 		mrBead, err := e.beads.Show(mr.ID)
 		if err != nil {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to fetch MR bead %s: %v\n", mr.ID, err)
 		} else {
-			// Update MR with merge_commit SHA and close_reason
+			// Update MR fields
 			mrFields := beads.ParseMRFields(mrBead)
 			if mrFields == nil {
 				mrFields = &beads.MRFields{}
 			}
-			mrFields.MergeCommit = result.MergeCommit
-			mrFields.CloseReason = "merged"
+
+			if isPRStrategy {
+				// For PR strategies: set PR lifecycle fields, don't close yet
+				mrFields.PRUrl = result.MergeCommit // MergeCommit holds PR URL for PR strategies
+				mrFields.PRNumber = parsePRNumber(result.MergeCommit)
+				mrFields.PRState = "open"
+				_, _ = fmt.Fprintf(e.output, "[Engineer] PR created, MR awaiting external merge\n")
+			} else {
+				// For direct strategies: set merge commit and close reason
+				mrFields.MergeCommit = result.MergeCommit
+				mrFields.CloseReason = "merged"
+			}
+
 			newDesc := beads.SetMRFields(mrBead, mrFields)
 			if err := e.beads.Update(mr.ID, beads.UpdateOptions{Description: &newDesc}); err != nil {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to update MR %s with merge commit: %v\n", mr.ID, err)
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to update MR %s: %v\n", mr.ID, err)
 			}
 		}
 
-		// Close MR bead with reason 'merged'
-		if err := e.beads.CloseWithReason("merged", mr.ID); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close MR %s: %v\n", mr.ID, err)
-		} else {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed MR bead: %s\n", mr.ID)
-		}
-	}
-
-	// 1. Close source issue with reference to MR
-	if mr.SourceIssue != "" {
-		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
-		if err := e.beads.CloseWithReason(closeReason, mr.SourceIssue); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mr.SourceIssue, err)
-		} else {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mr.SourceIssue)
-
-			// Redundant convoy observer: check if merged issue is tracked by a convoy
-			logger := func(format string, args ...interface{}) {
-				_, _ = fmt.Fprintf(e.output, "[Engineer] "+format+"\n", args...)
+		// For direct strategies, close the MR bead immediately
+		// For PR strategies, leave it open - it will be closed when PR merges
+		if !isPRStrategy {
+			if err := e.beads.CloseWithReason("merged", mr.ID); err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close MR %s: %v\n", mr.ID, err)
+			} else {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Closed MR bead: %s\n", mr.ID)
 			}
-			convoy.CheckConvoysForIssue(e.rig.Path, mr.SourceIssue, "refinery", logger)
+		} else {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] MR bead %s left open (awaiting PR merge)\n", mr.ID)
 		}
 	}
 
-	// 1.5. Clear agent bead's active_mr reference (traceability cleanup)
-	if mr.AgentBead != "" {
-		if err := e.beads.UpdateAgentActiveMR(mr.AgentBead, ""); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to clear agent bead %s active_mr: %v\n", mr.AgentBead, err)
-		}
-	}
+	// For direct strategies: close source issue and clean up branches immediately
+	// For PR strategies: these actions happen when the PR merges externally
+	if !isPRStrategy {
+		// Close source issue with reference to MR
+		if mr.SourceIssue != "" {
+			closeReason := fmt.Sprintf("Merged in %s", mr.ID)
+			if err := e.beads.CloseWithReason(closeReason, mr.SourceIssue); err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mr.SourceIssue, err)
+			} else {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mr.SourceIssue)
 
-	// 2. Delete source branch if configured (both local and remote)
-	// After the polecat self-nuke fix, branches are pushed to origin before the
-	// worktree is deleted, so we need to clean up both local and remote copies.
-	if e.config.DeleteMergedBranches && mr.Branch != "" {
-		// Delete local branch
-		if err := e.git.DeleteBranch(mr.Branch, true); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete local branch %s: %v\n", mr.Branch, err)
-		} else {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted local branch: %s\n", mr.Branch)
+				// Redundant convoy observer: check if merged issue is tracked by a convoy
+				logger := func(format string, args ...interface{}) {
+					_, _ = fmt.Fprintf(e.output, "[Engineer] "+format+"\n", args...)
+				}
+				convoy.CheckConvoysForIssue(e.rig.Path, mr.SourceIssue, "refinery", logger)
+			}
 		}
-		// Delete remote branch from origin
-		if err := e.git.DeleteRemoteBranch("origin", mr.Branch); err != nil {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete remote branch %s from origin: %v\n", mr.Branch, err)
-		} else {
-			_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted remote branch: %s\n", mr.Branch)
+
+		// Clear agent bead's active_mr reference (traceability cleanup)
+		if mr.AgentBead != "" {
+			if err := e.beads.UpdateAgentActiveMR(mr.AgentBead, ""); err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to clear agent bead %s active_mr: %v\n", mr.AgentBead, err)
+			}
+		}
+
+		// Delete source branch if configured (both local and remote)
+		// After the polecat self-nuke fix, branches are pushed to origin before the
+		// worktree is deleted, so we need to clean up both local and remote copies.
+		if e.config.DeleteMergedBranches && mr.Branch != "" {
+			// Delete local branch
+			if err := e.git.DeleteBranch(mr.Branch, true); err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete local branch %s: %v\n", mr.Branch, err)
+			} else {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted local branch: %s\n", mr.Branch)
+			}
+			// Delete remote branch from origin
+			if err := e.git.DeleteRemoteBranch("origin", mr.Branch); err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to delete remote branch %s from origin: %v\n", mr.Branch, err)
+			} else {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Deleted remote branch: %s\n", mr.Branch)
+			}
 		}
 	}
 
 	// 3. Log success
-	_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
+	if isPRStrategy {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ PR created: %s (PR: %s)\n", mr.ID, result.MergeCommit)
+	} else {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] ✓ Merged: %s (commit: %s)\n", mr.ID, result.MergeCommit)
+	}
 }
 
 // HandleMRInfoFailure handles a failed merge from MRInfo.
