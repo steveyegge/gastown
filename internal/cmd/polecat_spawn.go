@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -75,6 +76,10 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		return nil, fmt.Errorf("allocating polecat name: %w", err)
 	}
 	fmt.Printf("Allocated polecat: %s\n", polecatName)
+
+	// Clean up orphaned state for this polecat before creation/repair
+	// This prevents contamination from previous failed spawns (hq-gsk9g, hq-cv-bn5ug)
+	cleanupOrphanPolecatState(rigName, polecatName, townRoot, tmux.NewTmux())
 
 	// Check if polecat already exists (shouldn't happen - indicates stale state needing repair)
 	existingPolecat, err := polecatMgr.Get(polecatName)
@@ -202,4 +207,35 @@ func IsRigName(target string) (string, bool) {
 	}
 
 	return target, true
+}
+
+// cleanupOrphanPolecatState removes orphaned tmux sessions and stale git worktrees
+// for a polecat that's being allocated. This prevents contamination from failed
+// spawns where the directory was created but the worktree wasn't.
+//
+// This implements the fix from investigation hq-gsk9g (polecat worktree hygiene):
+// - Kills orphan tmux sessions without corresponding directories
+// - Prunes stale git worktree registrations
+// - Clears hook_bead on respawn (via fresh agent bead creation)
+func cleanupOrphanPolecatState(rigName, polecatName, townRoot string, tm *tmux.Tmux) {
+	polecatDir := filepath.Join(townRoot, "polecats", polecatName)
+	sessionName := fmt.Sprintf("gt-%s-p-%s", rigName, polecatName)
+
+	// Step 1: Kill orphan tmux session if it exists
+	if err := tm.KillSession(sessionName); err == nil {
+		fmt.Printf("  Cleaned up orphan tmux session: %s\n", sessionName)
+	}
+
+	// Step 2: Remove empty polecat directory (failed worktree creation)
+	// This handles the race condition where RepairWorktreeWithOptions steps 1-2
+	// succeed but step 3 (worktree creation) fails, leaving an empty directory.
+	if entries, err := filepath.Glob(polecatDir + "/*"); err == nil && len(entries) == 0 {
+		if rmErr := os.RemoveAll(polecatDir); rmErr == nil {
+			fmt.Printf("  Cleaned up empty polecat directory: %s\n", polecatDir)
+		}
+	}
+
+	// Step 3: Prune stale git worktree entries (non-fatal cleanup)
+	repoGit := git.NewGit(townRoot)
+	_ = repoGit.WorktreePrune()
 }
