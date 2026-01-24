@@ -27,6 +27,8 @@ const (
 	AgentAuggie AgentPreset = "auggie"
 	// AgentAmp is Sourcegraph AMP.
 	AgentAmp AgentPreset = "amp"
+	// AgentCopilot is GitHub Copilot CLI.
+	AgentCopilot AgentPreset = "copilot"
 	// AgentOpenCode is OpenCode multi-model CLI.
 	AgentOpenCode AgentPreset = "opencode"
 )
@@ -66,6 +68,9 @@ type AgentPresetInfo struct {
 	// "flag" - pass as --resume <id> argument
 	// "subcommand" - pass as 'codex resume <id>'
 	ResumeStyle string `json:"resume_style,omitempty"`
+
+	// InteractivePromptFlag is the flag for passing interactive prompts (e.g., "-i" for copilot).
+	InteractivePromptFlag string `json:"interactive_prompt_flag,omitempty"`
 
 	// SupportsHooks indicates if the agent supports hooks system.
 	SupportsHooks bool `json:"supports_hooks,omitempty"`
@@ -183,6 +188,22 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeStyle:         "subcommand", // 'amp threads continue <threadId>'
 		SupportsHooks:       false,
 		SupportsForkSession: false,
+	},
+	AgentCopilot: {
+		Name:                  AgentCopilot,
+		Command:               "copilot",
+		Args:                  []string{"--allow-all", "--no-ask-user"},
+		ProcessNames:          []string{"copilot", "node"},
+		SessionIDEnv:          "",
+		ResumeFlag:            "--resume",
+		ResumeStyle:           "flag",
+		InteractivePromptFlag: "-i",
+		SupportsHooks:         false,
+		SupportsForkSession:   false,
+		NonInteractive: &NonInteractiveConfig{
+			PromptFlag: "-p",
+			OutputFlag: "--silent",
+		},
 	},
 	AgentOpenCode: {
 		Name:    AgentOpenCode,
@@ -367,6 +388,7 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		Command: info.Command,
 		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
 		Env:     envCopy,
+		InteractivePromptFlag: info.InteractivePromptFlag,
 	}
 
 	// Resolve command path for claude preset (handles alias installations)
@@ -450,9 +472,10 @@ func (rc *RuntimeConfig) MergeWithPreset(preset AgentPreset) *RuntimeConfig {
 	}
 
 	result := &RuntimeConfig{
-		Command:       rc.Command,
-		Args:          append([]string(nil), rc.Args...),
-		InitialPrompt: rc.InitialPrompt,
+		Command:               rc.Command,
+		Args:                  append([]string(nil), rc.Args...),
+		InitialPrompt:         rc.InitialPrompt,
+		InteractivePromptFlag: rc.InteractivePromptFlag,
 	}
 
 	// Apply preset defaults only if not overridden

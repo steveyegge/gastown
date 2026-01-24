@@ -46,7 +46,7 @@ type TownSettings struct {
 	CLITheme string `json:"cli_theme,omitempty"`
 
 	// DefaultAgent is the name of the agent preset to use by default.
-	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp")
+	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp", "copilot", "opencode")
 	// or a custom agent name defined in settings/agents.json.
 	// Default: "claude"
 	DefaultAgent string `json:"default_agent,omitempty"`
@@ -219,7 +219,7 @@ type RigSettings struct {
 	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
 
 	// Agent selects which agent preset to use for this rig.
-	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp")
+	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp", "copilot", "opencode")
 	// or a custom agent defined in settings/agents.json.
 	// If empty, uses the town's default_agent setting.
 	// Takes precedence over Runtime if both are set.
@@ -283,6 +283,10 @@ type RuntimeConfig struct {
 	// Supported values: "arg" (append prompt arg), "none" (ignore prompt).
 	// Default: "arg" for claude/generic, "none" for codex.
 	PromptMode string `json:"prompt_mode,omitempty"`
+
+	// InteractivePromptFlag is an optional flag for passing interactive prompts.
+	// When set, prompts are passed as "<flag> <prompt>" instead of a positional arg.
+	InteractivePromptFlag string `json:"interactive_prompt_flag,omitempty"`
 
 	// Session config controls environment integration for runtime session IDs.
 	Session *RuntimeSessionConfig `json:"session,omitempty"`
@@ -376,6 +380,9 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 	}
 
 	// Quote the prompt for shell safety
+	if resolved.InteractivePromptFlag != "" {
+		return base + " " + resolved.InteractivePromptFlag + " " + quoteForShell(p)
+	}
 	return base + " " + quoteForShell(p)
 }
 
@@ -390,7 +397,11 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	}
 
 	if p != "" && resolved.PromptMode != "none" {
-		args = append(args, p)
+		if resolved.InteractivePromptFlag != "" {
+			args = append(args, resolved.InteractivePromptFlag, p)
+		} else {
+			args = append(args, p)
+		}
 	}
 
 	return args

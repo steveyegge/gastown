@@ -336,7 +336,7 @@ gt mayor start --agent auggie           # Run Mayor with a specific agent alias
 gt prime                    # Context recovery (run inside existing session)
 ```
 
-**Built-in agent presets**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
+**Built-in agent presets**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `copilot`, `opencode`
 
 ### Convoy (Work Tracking)
 

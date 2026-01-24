@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -945,6 +946,13 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 			wantContains: []string{"aider", `"custom prompt"`},
 			isClaudeCmd:  false,
 		},
+		{
+			name:         "interactive prompt flag",
+			rc:           &RuntimeConfig{Command: "copilot", Args: []string{"--allow-all"}, InteractivePromptFlag: "-i"},
+			prompt:       "hello world",
+			wantContains: []string{"copilot", "--allow-all", `-i "hello world"`},
+			isClaudeCmd:  false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -964,6 +972,20 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRuntimeConfigBuildArgsWithPrompt(t *testing.T) {
+	t.Parallel()
+	rc := &RuntimeConfig{
+		Command:               "copilot",
+		Args:                  []string{"--allow-all"},
+		InteractivePromptFlag: "-i",
+	}
+	got := rc.BuildArgsWithPrompt("hello world")
+	want := []string{"copilot", "--allow-all", "-i", "hello world"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("BuildArgsWithPrompt() = %v, want %v", got, want)
 	}
 }
 
