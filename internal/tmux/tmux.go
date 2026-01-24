@@ -187,11 +187,8 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 		// Note: Processes that called setsid() will have a new PGID and won't be killed here
 		pgid := getProcessGroupID(pid)
 		if pgid != "" && pgid != "0" && pgid != "1" {
-			// Kill process group using syscall.Kill() directly.
-			// CRITICAL: We cannot use exec.Command("kill", "-TERM", "-"+pgid) because
-			// /usr/bin/kill does NOT support the -<pgid> syntax - it interprets any
-			// negative number as -1 (broadcast to ALL processes), which kills systemd!
-			// The shell builtin 'kill' supports -<pgid>, but the binary does not.
+			// Kill process group using syscall.Kill() directly, rather than messing
+			// with argument parsing that varies across systems.
 			pgidInt, _ := strconv.Atoi(pgid)
 			_ = syscall.Kill(-pgidInt, syscall.SIGTERM) // negative PID = process group
 			time.Sleep(100 * time.Millisecond)
