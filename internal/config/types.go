@@ -39,6 +39,12 @@ type TownSettings struct {
 	Type    string `json:"type"`    // "town-settings"
 	Version int    `json:"version"` // schema version
 
+	// CLITheme controls CLI output color scheme.
+	// Values: "dark", "light", "auto" (default).
+	// "auto" lets the terminal emulator's background color guide the choice.
+	// Can be overridden by GT_THEME environment variable.
+	CLITheme string `json:"cli_theme,omitempty"`
+
 	// DefaultAgent is the name of the agent preset to use by default.
 	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp")
 	// or a custom agent name defined in settings/agents.json.
