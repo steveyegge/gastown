@@ -985,6 +985,17 @@
         <div id="tab-dashboard" class="tab-content active" hx-get="/" hx-trigger="every 10s" hx-swap="innerHTML" hx-select="#tab-dashboard-inner">
             <div id="tab-dashboard-inner">
 
+        {{if .Errors}}
+        <div class="error-banner" style="background: rgba(255,100,100,0.15); border: 1px solid var(--red, #f66); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+            <strong style="color: var(--red, #f66);">⚠️ Some data failed to load:</strong>
+            <ul style="margin: 8px 0 0 20px; padding: 0;">
+            {{range .Errors}}
+                <li style="color: var(--text-secondary); font-size: 0.9em;">{{.}}</li>
+            {{end}}
+            </ul>
+        </div>
+        {{end}}
+
         {{if .HQAgents}}
         <h2 class="section-header">🏛️ Town Agents</h2>
         <table class="convoy-table">
@@ -1003,7 +1014,8 @@
                     hx-get="/hq/{{.SessionID}}/details"
                     hx-trigger="click once"
                     hx-target="#hq-detail-{{.SessionID}} td"
-                    hx-swap="innerHTML">
+                    hx-swap="innerHTML"
+                    hx-select="unset">
                     <td>
                         <span class="expand-indicator">▸</span>
                         <span class="convoy-id">{{if eq .Name "mayor"}}🎩{{else if eq .Name "deacon"}}📜{{end}} {{.Name}}</span>
@@ -1050,7 +1062,8 @@
                     hx-get="/convoy/{{.ID}}/details"
                     hx-trigger="click once"
                     hx-target="#convoy-detail-{{.ID}} td"
-                    hx-swap="innerHTML">
+                    hx-swap="innerHTML"
+                    hx-select="unset">
                     <td>
                         <span class="expand-indicator">▸</span>
                         <span class="work-status">{{.WorkStatus}}</span>
@@ -1190,7 +1203,8 @@
                     hx-get="/polecat/{{.SessionID}}/details"
                     hx-trigger="click once"
                     hx-target="#polecat-detail-{{.SessionID}} td"
-                    hx-swap="innerHTML">
+                    hx-swap="innerHTML"
+                    hx-select="unset">
                     <td>
                         <span class="expand-indicator">▸</span>
                         <span class="convoy-id">{{.Name}}</span>
@@ -1232,13 +1246,23 @@
 
         <div id="tab-beads" class="tab-content">
             <div class="beads-iframe-container">
+                {{if .BeadsUIPort}}
                 <iframe
                     id="beads-iframe"
                     class="beads-iframe"
-                    src="/beads-ui/"
+                    src="http://localhost:{{.BeadsUIPort}}/"
                     onload="beadsLoaded()"
                     onerror="beadsError()">
                 </iframe>
+                {{else}}
+                <div class="beads-loading">
+                    <p>Beads UI is not available</p>
+                    <div class="beads-loading-hint">
+                        Install it with: <code>npm install -g beads-ui</code>
+                    </div>
+                    <p style="margin-top: 12px; font-size: 0.8rem;">Then restart the dashboard</p>
+                </div>
+                {{end}}
             </div>
             <noscript>
                 <div class="beads-loading">
@@ -1295,11 +1319,20 @@
             `;
         }
 
+        // Track expanded detail rows to preserve across refresh
+        const expandedDetails = new Set();
+
         function toggleDetail(row, detailId) {
             const detailRow = document.getElementById(detailId);
             if (detailRow) {
                 const isOpen = detailRow.classList.toggle('open');
                 row.classList.toggle('expanded', isOpen);
+                // Track expanded state
+                if (isOpen) {
+                    expandedDetails.add(detailId);
+                } else {
+                    expandedDetails.delete(detailId);
+                }
             }
         }
 
@@ -1313,6 +1346,27 @@
                     row.classList.toggle('expanded', isOpen);
                 }
             }
+        }
+
+        // Restore expanded state after htmx refresh
+        function restoreExpandedState() {
+            expandedDetails.forEach(function(detailId) {
+                const detailRow = document.getElementById(detailId);
+                if (detailRow) {
+                    detailRow.classList.add('open');
+                    // Find and mark the parent expandable row
+                    const expandableRow = detailRow.previousElementSibling;
+                    if (expandableRow && expandableRow.classList.contains('expandable-row')) {
+                        expandableRow.classList.add('expanded');
+                        // Use htmx.ajax to fetch content directly without triggering onclick
+                        const url = expandableRow.getAttribute('hx-get');
+                        const targetSelector = expandableRow.getAttribute('hx-target');
+                        if (url && targetSelector) {
+                            htmx.ajax('GET', url, {target: targetSelector, swap: 'innerHTML'});
+                        }
+                    }
+                }
+            });
         }
 
         function copyToClipboard(text, btn) {
@@ -1337,6 +1391,16 @@
             const terminal = event.target.querySelector('.terminal-content');
             if (terminal) {
                 terminal.scrollTop = terminal.scrollHeight;
+            }
+        });
+
+        // Restore expanded state after dashboard refresh settles
+        document.body.addEventListener('htmx:afterSettle', function(event) {
+            // Only restore on main dashboard refresh, not on detail fetches
+            const elt = event.detail.elt || event.target;
+            if (elt && elt.id === 'tab-dashboard' && expandedDetails.size > 0) {
+                // Delay slightly to ensure DOM is fully ready
+                requestAnimationFrame(restoreExpandedState);
             }
         });
     </script>

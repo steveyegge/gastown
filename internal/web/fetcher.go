@@ -1364,9 +1364,11 @@ func (f *LiveConvoyFetcher) FetchActivity(limit int) ([]ActivityEvent, error) {
 	mainCommits := f.fetchMainBranchCommits(limit)
 	events = append(events, mainCommits...)
 
-	// Sort by timestamp descending
+	// Sort by timestamp descending (parse to handle format variations)
 	sort.Slice(events, func(i, j int) bool {
-		return events[i].Timestamp > events[j].Timestamp
+		ti, _ := time.Parse(time.RFC3339, events[i].Timestamp)
+		tj, _ := time.Parse(time.RFC3339, events[j].Timestamp)
+		return ti.After(tj)
 	})
 
 	// Limit results

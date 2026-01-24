@@ -33,11 +33,31 @@ Witness                    Refinery                      Git
 After successful merge, Refinery sends MERGED mail back to Witness so it can
 complete cleanup (nuke the polecat worktree)."""
 formula = "mol-refinery-patrol"
-version = 4
+version = 5
+
+[[steps]]
+id = "heartbeat"
+title = "Update heartbeat"
+description = """
+Signal to the daemon that this Refinery is alive and patrolling.
+
+```bash
+gt refinery heartbeat
+```
+
+The daemon monitors this heartbeat file. If the heartbeat becomes stale:
+- 15-30 minutes: daemon nudges the session
+- 30+ minutes: daemon kills and restarts the session
+
+This prevents stuck Refineries from blocking the merge queue indefinitely.
+
+**IMPORTANT**: Run this at the START of each patrol cycle, not the end.
+This ensures a stuck Refinery is detected even if it crashes mid-patrol."""
 
 [[steps]]
 id = "inbox-check"
 title = "Check refinery mail"
+needs = ["heartbeat"]
 description = """
 Check mail for MERGE_READY submissions, escalations, and messages.
 

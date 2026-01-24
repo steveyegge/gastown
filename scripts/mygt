@@ -7,7 +7,7 @@
 
 set -e
 
-# Resolve symlinks to get actual script location
+# Resolve symlinks to get actual script location, then find repo root
 SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SOURCE" ]; do
     DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
@@ -16,19 +16,17 @@ while [ -L "$SOURCE" ]; do
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 BINARY="$REPO_ROOT/bin/gt"
 
 # Ensure bin directory exists
 mkdir -p "$REPO_ROOT/bin"
 
 # Build if binary doesn't exist or source is newer
-if [[ ! -f "$BINARY" ]] || [[ $(find "$REPO_ROOT" -name "*.go" -newer "$BINARY" 2>/dev/null | head -1) ]]; then
+# Check .go, .html (templates), and .toml (formulas) files
+if [[ ! -f "$BINARY" ]] || [[ $(find "$REPO_ROOT" \( -name "*.go" -o -name "*.html" -o -name "*.toml" \) -newer "$BINARY" 2>/dev/null | head -1) ]]; then
     echo "Building gt from $REPO_ROOT..." >&2
     (cd "$REPO_ROOT" && go build -o "$BINARY" ./cmd/gt)
-
-    # Ensure mygt is available in PATH
-    mkdir -p "$HOME/.local/bin"
-    ln -sf "$SCRIPT_DIR/mygt" "$HOME/.local/bin/mygt"
 fi
 
 # Run with all arguments

@@ -217,6 +217,35 @@ Examples:
 
 var refineryBlockedJSON bool
 
+var refineryHeartbeatCmd = &cobra.Command{
+	Use:   "heartbeat [rig]",
+	Short: "Update refinery heartbeat (for daemon monitoring)",
+	Long: `Update the Refinery heartbeat file.
+
+Called by the Refinery at the start of each patrol cycle to signal it's alive.
+The daemon monitors this heartbeat and restarts stuck Refineries.
+
+If rig is not specified, infers it from the current directory.
+
+Options:
+  --action    Description of current action (optional)
+  --queue     Queue length (optional)
+  --processed Number of MRs processed this cycle (optional)
+
+Examples:
+  gt refinery heartbeat
+  gt refinery heartbeat --action "processing MR gt-abc123"
+  gt refinery heartbeat greenplace --queue 3`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runRefineryHeartbeat,
+}
+
+var (
+	refineryHeartbeatAction    string
+	refineryHeartbeatQueue     int
+	refineryHeartbeatProcessed int
+)
+
 func init() {
 	// Start flags
 	refineryStartCmd.Flags().BoolVar(&refineryForeground, "foreground", false, "Run in foreground (default: background)")
@@ -243,6 +272,11 @@ func init() {
 	// Blocked flags
 	refineryBlockedCmd.Flags().BoolVar(&refineryBlockedJSON, "json", false, "Output as JSON")
 
+	// Heartbeat flags
+	refineryHeartbeatCmd.Flags().StringVar(&refineryHeartbeatAction, "action", "", "Description of current action")
+	refineryHeartbeatCmd.Flags().IntVar(&refineryHeartbeatQueue, "queue", 0, "Queue length")
+	refineryHeartbeatCmd.Flags().IntVar(&refineryHeartbeatProcessed, "processed", 0, "MRs processed this cycle")
+
 	// Add subcommands
 	refineryCmd.AddCommand(refineryStartCmd)
 	refineryCmd.AddCommand(refineryStopCmd)
@@ -255,6 +289,7 @@ func init() {
 	refineryCmd.AddCommand(refineryUnclaimedCmd)
 	refineryCmd.AddCommand(refineryReadyCmd)
 	refineryCmd.AddCommand(refineryBlockedCmd)
+	refineryCmd.AddCommand(refineryHeartbeatCmd)
 
 	rootCmd.AddCommand(refineryCmd)
 }
@@ -756,5 +791,39 @@ func runRefineryBlocked(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	return nil
+}
+
+func runRefineryHeartbeat(cmd *cobra.Command, args []string) error {
+	rigName := ""
+	if len(args) > 0 {
+		rigName = args[0]
+	}
+
+	// Find town root and rig
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	if rigName == "" {
+		rigName, err = inferRigFromCwd(townRoot)
+		if err != nil {
+			return fmt.Errorf("could not determine rig: %w\nUsage: gt refinery heartbeat <rig>", err)
+		}
+	}
+
+	// Write heartbeat
+	if refineryHeartbeatAction != "" || refineryHeartbeatQueue > 0 || refineryHeartbeatProcessed > 0 {
+		err = refinery.TouchWithAction(townRoot, rigName, refineryHeartbeatAction, refineryHeartbeatQueue, refineryHeartbeatProcessed)
+	} else {
+		err = refinery.Touch(townRoot, rigName)
+	}
+
+	if err != nil {
+		return fmt.Errorf("writing heartbeat: %w", err)
+	}
+
+	fmt.Printf("%s Heartbeat updated for %s/refinery\n", style.Dim.Render("♥"), rigName)
 	return nil
 }

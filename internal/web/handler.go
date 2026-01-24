@@ -2,11 +2,24 @@ package web
 
 import (
 	"bytes"
+	"fmt"
+	"html"
 	"html/template"
 	"log"
 	"net/http"
 	"strings"
 )
+
+// renderDetailError writes an HTML error message that htmx will display.
+// Uses 200 status because htmx ignores non-2xx responses by default.
+func renderDetailError(w http.ResponseWriter, context string, err error) {
+	log.Printf("Error %s : %v", context, err)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<div class="detail-error" style="padding: 16px; background: rgba(255,100,100,0.1); border-left: 3px solid var(--red, #f66); margin: 8px 0;">
+		<strong style="color: var(--red, #f66);">Error %s:</strong>
+		<pre style="margin: 8px 0 0 0; white-space: pre-wrap; font-size: 0.85em;">%s</pre>
+	</div>`, html.EscapeString(context), html.EscapeString(err.Error()))
+}
 
 // ConvoyFetcher defines the interface for fetching convoy data.
 type ConvoyFetcher interface {
@@ -29,8 +42,9 @@ type DetailFetcher interface {
 
 // ConvoyHandler handles HTTP requests for the convoy dashboard.
 type ConvoyHandler struct {
-	fetcher  DetailFetcher
-	template *template.Template
+	fetcher     DetailFetcher
+	template    *template.Template
+	beadsUIPort int // Port for beads-ui iframe (0 if not available)
 }
 
 // NewConvoyHandler creates a new convoy handler with the given fetcher.
@@ -46,12 +60,20 @@ func NewConvoyHandler(fetcher DetailFetcher) (*ConvoyHandler, error) {
 	}, nil
 }
 
+// SetBeadsUIPort sets the port for the beads-ui iframe.
+func (h *ConvoyHandler) SetBeadsUIPort(port int) {
+	h.beadsUIPort = port
+}
+
 // ServeHTTP handles GET / requests and renders the convoy dashboard.
 func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var errors []string
+
 	convoys, err := h.fetcher.FetchConvoys()
 	if err != nil {
-		http.Error(w, "Failed to fetch convoys", http.StatusInternalServerError)
-		return
+		log.Printf("Error fetching convoys: %v", err)
+		errors = append(errors, fmt.Sprintf("Convoys: %v", err))
+		convoys = nil // Show empty instead of crashing
 	}
 
 	// Note: MergeQueue (GitHub PRs) is deprecated in favor of InternalMRs (beads)
@@ -59,31 +81,36 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	polecats, err := h.fetcher.FetchPolecats()
 	if err != nil {
-		// Non-fatal: show convoys even if polecats fail
+		log.Printf("Error fetching polecats: %v", err)
+		errors = append(errors, fmt.Sprintf("Polecats: %v", err))
 		polecats = nil
 	}
 
 	mergeHistory, err := h.fetcher.FetchMergeHistory(10)
 	if err != nil {
-		// Non-fatal: show dashboard even if merge history fails
+		log.Printf("Error fetching merge history: %v", err)
+		errors = append(errors, fmt.Sprintf("Merge History: %v", err))
 		mergeHistory = nil
 	}
 
 	activity, err := h.fetcher.FetchActivity(20)
 	if err != nil {
-		// Non-fatal: show dashboard even if activity fails
+		log.Printf("Error fetching activity: %v", err)
+		errors = append(errors, fmt.Sprintf("Activity: %v", err))
 		activity = nil
 	}
 
 	hqAgents, err := h.fetcher.FetchHQAgents()
 	if err != nil {
-		// Non-fatal: show dashboard even if HQ agents fail
+		log.Printf("Error fetching HQ agents: %v", err)
+		errors = append(errors, fmt.Sprintf("HQ Agents: %v", err))
 		hqAgents = nil
 	}
 
 	internalMRs, err := h.fetcher.FetchInternalMRs()
 	if err != nil {
-		// Non-fatal: show dashboard even if internal MRs fail
+		log.Printf("Error fetching internal MRs: %v", err)
+		errors = append(errors, fmt.Sprintf("Internal MRs: %v", err))
 		internalMRs = nil
 	}
 
@@ -94,6 +121,8 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Polecats:     polecats,
 		Activity:     activity,
 		HQAgents:     hqAgents,
+		BeadsUIPort:  h.beadsUIPort,
+		Errors:       errors,
 	}
 
 	// Execute to buffer first to avoid partial writes on error
@@ -121,7 +150,7 @@ func (h *ConvoyHandler) ServePolecatDetail(w http.ResponseWriter, r *http.Reques
 
 	detail, err := h.fetcher.FetchPolecatDetail(sessionID)
 	if err != nil {
-		http.Error(w, "Failed to fetch polecat details", http.StatusInternalServerError)
+		renderDetailError(w, "fetching polecat "+sessionID, err)
 		return
 	}
 
@@ -149,7 +178,7 @@ func (h *ConvoyHandler) ServeConvoyDetail(w http.ResponseWriter, r *http.Request
 
 	detail, err := h.fetcher.FetchConvoyDetail(convoyID)
 	if err != nil {
-		http.Error(w, "Failed to fetch convoy details", http.StatusInternalServerError)
+		renderDetailError(w, "fetching convoy "+convoyID, err)
 		return
 	}
 
@@ -177,7 +206,7 @@ func (h *ConvoyHandler) ServeHQDetail(w http.ResponseWriter, r *http.Request) {
 
 	detail, err := h.fetcher.FetchHQAgentDetail(sessionID)
 	if err != nil {
-		http.Error(w, "Failed to fetch HQ agent details", http.StatusInternalServerError)
+		renderDetailError(w, "fetching HQ agent "+sessionID, err)
 		return
 	}
 

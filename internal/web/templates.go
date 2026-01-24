@@ -21,6 +21,8 @@ type ConvoyData struct {
 	Polecats     []PolecatRow
 	HQAgents     []HQAgentRow
 	Activity     []ActivityEvent
+	BeadsUIPort  int               // Port for beads-ui iframe (0 if not available)
+	Errors       []string          // Non-fatal errors to display in UI
 }
 
 // HQAgentRow represents a town-level agent (Mayor, Deacon) in the dashboard.

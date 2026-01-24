@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -71,6 +69,11 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	// Start beads-ui subprocess
 	beadsUIProcess, beadsUIAvailable := startBeadsUI(townRoot)
 
+	// Set beads-ui port on handler for direct iframe embedding
+	if beadsUIAvailable {
+		handler.SetBeadsUIPort(beadsUIPort)
+	}
+
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -94,19 +97,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	mux.HandleFunc("/convoy/", handler.ServeConvoyDetail)
 	mux.HandleFunc("/hq/", handler.ServeHQDetail)
 
-	// Set up reverse proxy for beads-ui
-	if beadsUIAvailable {
-		beadsTarget, _ := url.Parse(fmt.Sprintf("http://localhost:%d", beadsUIPort))
-		beadsProxy := httputil.NewSingleHostReverseProxy(beadsTarget)
-		mux.HandleFunc("/beads-ui/", func(w http.ResponseWriter, r *http.Request) {
-			// Strip /beads-ui prefix
-			r.URL.Path = r.URL.Path[len("/beads-ui"):]
-			if r.URL.Path == "" {
-				r.URL.Path = "/"
-			}
-			beadsProxy.ServeHTTP(w, r)
-		})
-	}
+	// No reverse proxy needed - iframe points directly to bdui port
 
 	// Build the URL
 	dashURL := fmt.Sprintf("http://localhost:%d", dashboardPort)
