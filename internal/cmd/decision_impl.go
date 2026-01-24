@@ -423,6 +423,143 @@ func runDecisionResolve(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runDecisionDashboard(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	bd := beads.New(beads.ResolveBeadsDir(townRoot))
+
+	// Get pending decisions grouped by urgency
+	pendingHigh, _ := bd.ListDecisionsByUrgency(beads.UrgencyHigh)
+	pendingMedium, _ := bd.ListDecisionsByUrgency(beads.UrgencyMedium)
+	pendingLow, _ := bd.ListDecisionsByUrgency(beads.UrgencyLow)
+
+	// Get recently resolved (last 7 days)
+	recentlyResolved, _ := bd.ListRecentlyResolvedDecisions(7 * 24 * time.Hour)
+
+	// Get stale decisions (older than 24 hours)
+	staleDecisions, _ := bd.ListStaleDecisions(24 * time.Hour)
+
+	totalPending := len(pendingHigh) + len(pendingMedium) + len(pendingLow)
+
+	if decisionDashboardJSON {
+		result := map[string]interface{}{
+			"pending": map[string]interface{}{
+				"high":   formatDecisionsList(pendingHigh),
+				"medium": formatDecisionsList(pendingMedium),
+				"low":    formatDecisionsList(pendingLow),
+				"total":  totalPending,
+			},
+			"recently_resolved": formatDecisionsList(recentlyResolved),
+			"stale":             formatDecisionsList(staleDecisions),
+		}
+		out, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(out))
+		return nil
+	}
+
+	fmt.Println("📋 Decision Dashboard")
+	fmt.Println()
+
+	// Pending section
+	fmt.Printf("Pending (%d)\n", totalPending)
+	if totalPending == 0 {
+		fmt.Println("  (none)")
+	} else {
+		// High urgency first
+		for _, issue := range pendingHigh {
+			fields := beads.ParseDecisionFields(issue.Description)
+			age := formatDecisionAge(issue.CreatedAt)
+			fmt.Printf("  🔴 [HIGH] %s: %s (%s)\n", issue.ID, truncateString(fields.Question, 40), age)
+		}
+		// Medium urgency
+		for _, issue := range pendingMedium {
+			fields := beads.ParseDecisionFields(issue.Description)
+			age := formatDecisionAge(issue.CreatedAt)
+			fmt.Printf("  🟡 [MEDIUM] %s: %s (%s)\n", issue.ID, truncateString(fields.Question, 40), age)
+		}
+		// Low urgency
+		for _, issue := range pendingLow {
+			fields := beads.ParseDecisionFields(issue.Description)
+			age := formatDecisionAge(issue.CreatedAt)
+			fmt.Printf("  🟢 [LOW] %s: %s (%s)\n", issue.ID, truncateString(fields.Question, 40), age)
+		}
+	}
+	fmt.Println()
+
+	// Recently resolved section
+	fmt.Printf("Recently Resolved (%d)\n", len(recentlyResolved))
+	if len(recentlyResolved) == 0 {
+		fmt.Println("  (none in last 7 days)")
+	} else {
+		for i, issue := range recentlyResolved {
+			if i >= 5 {
+				fmt.Printf("  ... and %d more\n", len(recentlyResolved)-5)
+				break
+			}
+			fields := beads.ParseDecisionFields(issue.Description)
+			chosen := "?"
+			if fields.ChosenIndex > 0 && fields.ChosenIndex <= len(fields.Options) {
+				chosen = fields.Options[fields.ChosenIndex-1].Label
+			}
+			age := formatDecisionAge(issue.ClosedAt)
+			fmt.Printf("  ✓ %s: %s → \"%s\" (%s)\n", issue.ID, truncateString(fields.Question, 30), chosen, age)
+		}
+	}
+	fmt.Println()
+
+	// Stale section
+	if len(staleDecisions) > 0 {
+		fmt.Printf("⚠️  Stale (unresolved > 24h): %d\n", len(staleDecisions))
+		for _, issue := range staleDecisions {
+			fields := beads.ParseDecisionFields(issue.Description)
+			age := formatDecisionAge(issue.CreatedAt)
+			fmt.Printf("  ⚠️  %s: %s (%s old)\n", issue.ID, truncateString(fields.Question, 40), age)
+		}
+		fmt.Println()
+	}
+
+	fmt.Println("Run 'gt decision list' for details")
+
+	return nil
+}
+
+func formatDecisionsList(issues []*beads.Issue) []map[string]interface{} {
+	var result []map[string]interface{}
+	for _, issue := range issues {
+		fields := beads.ParseDecisionFields(issue.Description)
+		item := map[string]interface{}{
+			"id":           issue.ID,
+			"question":     fields.Question,
+			"urgency":      fields.Urgency,
+			"requested_by": fields.RequestedBy,
+			"created_at":   issue.CreatedAt,
+		}
+		if fields.ChosenIndex > 0 && fields.ChosenIndex <= len(fields.Options) {
+			item["chosen"] = fields.Options[fields.ChosenIndex-1].Label
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+func formatDecisionAge(timestamp string) string {
+	t, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		return "?"
+	}
+	d := time.Since(t)
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
 // Helper functions
 
 func formatDecisionMailBody(beadID string, fields *beads.DecisionFields) string {

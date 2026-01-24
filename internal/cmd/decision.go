@@ -124,6 +124,23 @@ Examples:
 	RunE: runDecisionResolve,
 }
 
+var decisionDashboardCmd = &cobra.Command{
+	Use:   "dashboard",
+	Short: "Show decision dashboard summary",
+	Long: `Display a summary dashboard of decision status.
+
+Shows pending decisions grouped by urgency, recently resolved decisions,
+and stale decisions that may need attention.
+
+Examples:
+  gt decision dashboard
+  gt decision dashboard --json`,
+	RunE: runDecisionDashboard,
+}
+
+// Dashboard-specific flags
+var decisionDashboardJSON bool
+
 func init() {
 	// Request subcommand flags
 	decisionRequestCmd.Flags().StringVarP(&decisionQuestion, "question", "q", "", "The decision to be made (required)")
@@ -148,11 +165,15 @@ func init() {
 	decisionResolveCmd.Flags().BoolVar(&decisionJSON, "json", false, "Output as JSON")
 	_ = decisionResolveCmd.MarkFlagRequired("choice")
 
+	// Dashboard subcommand flags
+	decisionDashboardCmd.Flags().BoolVar(&decisionDashboardJSON, "json", false, "Output as JSON")
+
 	// Add subcommands
 	decisionCmd.AddCommand(decisionRequestCmd)
 	decisionCmd.AddCommand(decisionListCmd)
 	decisionCmd.AddCommand(decisionShowCmd)
 	decisionCmd.AddCommand(decisionResolveCmd)
+	decisionCmd.AddCommand(decisionDashboardCmd)
 
 	rootCmd.AddCommand(decisionCmd)
 }

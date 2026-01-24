@@ -393,3 +393,62 @@ func (b *Beads) AddDecisionBlocker(decisionID, blockedWorkID string) error {
 func (b *Beads) RemoveDecisionBlocker(decisionID, blockedWorkID string) error {
 	return b.RemoveDependency(blockedWorkID, decisionID)
 }
+
+// ListStaleDecisions returns pending decisions older than the given threshold.
+func (b *Beads) ListStaleDecisions(threshold time.Duration) ([]*Issue, error) {
+	// Get all pending decisions
+	decisions, err := b.ListDecisions()
+	if err != nil {
+		return nil, err
+	}
+
+	cutoff := time.Now().Add(-threshold)
+	var stale []*Issue
+
+	for _, issue := range decisions {
+		createdAt, err := time.Parse(time.RFC3339, issue.CreatedAt)
+		if err != nil {
+			continue
+		}
+
+		if createdAt.Before(cutoff) {
+			stale = append(stale, issue)
+		}
+	}
+
+	return stale, nil
+}
+
+// ListRecentlyResolvedDecisions returns decisions resolved within the given duration.
+func (b *Beads) ListRecentlyResolvedDecisions(within time.Duration) ([]*Issue, error) {
+	// Get all decisions
+	decisions, err := b.ListAllDecisions()
+	if err != nil {
+		return nil, err
+	}
+
+	cutoff := time.Now().Add(-within)
+	var recent []*Issue
+
+	for _, issue := range decisions {
+		// Only resolved ones
+		if !HasLabel(issue, "decision:resolved") {
+			continue
+		}
+
+		// Check closed_at timestamp
+		if issue.ClosedAt == "" {
+			continue
+		}
+		closedAt, err := time.Parse(time.RFC3339, issue.ClosedAt)
+		if err != nil {
+			continue
+		}
+
+		if closedAt.After(cutoff) {
+			recent = append(recent, issue)
+		}
+	}
+
+	return recent, nil
+}
