@@ -648,6 +648,110 @@ Also see http://localhost:8080/api`,
 	}
 }
 
+// TestMRFieldsPRLifecycle tests parsing and formatting PR lifecycle fields.
+func TestMRFieldsPRLifecycle(t *testing.T) {
+	// Test parsing PR fields
+	description := `branch: polecat/Nux/gt-xyz
+target: main
+source_issue: gt-xyz
+worker: Nux
+pr_url: https://github.com/owner/repo/pull/123
+pr_number: 123
+pr_state: open`
+
+	issue := &Issue{Description: description}
+	fields := ParseMRFields(issue)
+
+	if fields == nil {
+		t.Fatal("ParseMRFields returned nil for PR lifecycle example")
+	}
+
+	// Verify PR lifecycle fields
+	if fields.PRUrl != "https://github.com/owner/repo/pull/123" {
+		t.Errorf("PRUrl = %q, want https://github.com/owner/repo/pull/123", fields.PRUrl)
+	}
+	if fields.PRNumber != 123 {
+		t.Errorf("PRNumber = %d, want 123", fields.PRNumber)
+	}
+	if fields.PRState != "open" {
+		t.Errorf("PRState = %q, want open", fields.PRState)
+	}
+
+	// Test formatting PR fields
+	formatted := FormatMRFields(fields)
+	if !strings.Contains(formatted, "pr_url: https://github.com/owner/repo/pull/123") {
+		t.Error("formatted output missing pr_url")
+	}
+	if !strings.Contains(formatted, "pr_number: 123") {
+		t.Error("formatted output missing pr_number")
+	}
+	if !strings.Contains(formatted, "pr_state: open") {
+		t.Error("formatted output missing pr_state")
+	}
+
+	// Test round-trip
+	issue2 := &Issue{Description: formatted}
+	parsed := ParseMRFields(issue2)
+	if parsed == nil {
+		t.Fatal("round-trip parse returned nil")
+	}
+	if parsed.PRUrl != fields.PRUrl {
+		t.Errorf("round-trip PRUrl mismatch: got %q, want %q", parsed.PRUrl, fields.PRUrl)
+	}
+	if parsed.PRNumber != fields.PRNumber {
+		t.Errorf("round-trip PRNumber mismatch: got %d, want %d", parsed.PRNumber, fields.PRNumber)
+	}
+	if parsed.PRState != fields.PRState {
+		t.Errorf("round-trip PRState mismatch: got %q, want %q", parsed.PRState, fields.PRState)
+	}
+}
+
+// TestMRFieldsPRLifecycleAlternateFormats tests alternate key formats for PR fields.
+func TestMRFieldsPRLifecycleAlternateFormats(t *testing.T) {
+	tests := []struct {
+		name    string
+		desc    string
+		wantURL string
+		wantNum int
+	}{
+		{
+			name:    "underscore format",
+			desc:    "pr_url: https://example.com/pull/1\npr_number: 1",
+			wantURL: "https://example.com/pull/1",
+			wantNum: 1,
+		},
+		{
+			name:    "hyphen format",
+			desc:    "pr-url: https://example.com/pull/2\npr-number: 2",
+			wantURL: "https://example.com/pull/2",
+			wantNum: 2,
+		},
+		{
+			name:    "no separator format",
+			desc:    "prurl: https://example.com/pull/3\nprnumber: 3",
+			wantURL: "https://example.com/pull/3",
+			wantNum: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issue := &Issue{Description: tt.desc}
+			fields := ParseMRFields(issue)
+
+			if fields == nil {
+				t.Fatal("ParseMRFields returned nil")
+			}
+			if fields.PRUrl != tt.wantURL {
+				t.Errorf("PRUrl = %q, want %q", fields.PRUrl, tt.wantURL)
+			}
+			if fields.PRNumber != tt.wantNum {
+				t.Errorf("PRNumber = %d, want %d", fields.PRNumber, tt.wantNum)
+			}
+		})
+	}
+}
+
 // TestParseAttachmentFields tests parsing attachment fields from issue descriptions.
 func TestParseAttachmentFields(t *testing.T) {
 	tests := []struct {

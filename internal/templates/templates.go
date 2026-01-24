@@ -31,6 +31,7 @@ type RoleData struct {
 	WorkDir        string   // current working directory
 	DefaultBranch  string   // default branch for merges (e.g., "main", "develop")
 	TargetBranch   string   // target branch for merge operations (defaults to DefaultBranch)
+	MergeStrategy  string   // merge queue strategy (direct_merge, pr_to_main, pr_to_branch, direct_to_branch)
 	Polecat        string   // polecat name (for polecat role)
 	Polecats       []string // list of polecats (for witness role)
 	BeadsDir       string   // BEADS_DIR path

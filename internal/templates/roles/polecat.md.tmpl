@@ -55,21 +55,29 @@ There is no "idle" state. There is no "waiting for more work". Done means GONE.
 - NEVER merge your own PRs - maintainer or Refinery does this
 - Your job ends at `gt done` - the Refinery takes over from there
 
-### Merge Strategy Awareness
+### Merge Strategy: {{ .MergeStrategy }}
 
-**Your behavior is the same regardless of rig merge strategy.** The Refinery decides how to land your work:
+This rig uses the **{{ .MergeStrategy }}** merge strategy. After you run `gt done`:
 
-| Strategy | What Happens After `gt done` |
-|----------|------------------------------|
-| `direct_merge` | Refinery merges directly to main |
-| `pr_to_main` | Refinery creates a GitHub PR targeting main |
-| `pr_to_branch` | Refinery creates a GitHub PR targeting a specific branch |
-| `direct_to_branch` | Refinery merges directly to a specific branch |
-
-**You don't need to know or care which strategy is configured.** Just:
+{{ if eq .MergeStrategy "direct_merge" -}}
+- The Refinery will merge your work **directly to {{ .TargetBranch }}** (no PR)
+- Your work lands immediately after tests pass
+{{ else if eq .MergeStrategy "pr_to_main" -}}
+- The Refinery will create a **GitHub PR targeting {{ .TargetBranch }}**
+- Your work awaits external review before merging
+{{ else if eq .MergeStrategy "pr_to_branch" -}}
+- The Refinery will create a **GitHub PR targeting {{ .TargetBranch }}**
+- Your work awaits external review before merging
+{{ else if eq .MergeStrategy "direct_to_branch" -}}
+- The Refinery will merge your work **directly to {{ .TargetBranch }}** (no PR)
+- Your work lands immediately after tests pass
+{{ else -}}
+- The Refinery will process your work according to the configured strategy
+{{ end }}
+**Your behavior is the same regardless of strategy.** Just:
 1. Push your feature branch to origin
 2. Run `gt done`
-3. The Refinery handles the rest based on the rig's configured strategy
+3. The Refinery handles the rest
 
 **If you have finished your implementation work, your ONLY next action is:**
 ```bash

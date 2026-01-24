@@ -133,6 +133,56 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 	}
 }
 
+// LoadMergeQueueConfigFromPath loads merge queue config from a rig path.
+// Returns the config if found and valid, or nil if not found/invalid.
+// This is used by gt prime to get merge strategy for template rendering.
+func LoadMergeQueueConfigFromPath(rigPath string) *MergeQueueConfig {
+	configPath := filepath.Join(rigPath, "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil
+	}
+
+	// Parse config file to extract merge_queue section
+	var rawConfig struct {
+		MergeQueue json.RawMessage `json:"merge_queue"`
+	}
+	if err := json.Unmarshal(data, &rawConfig); err != nil {
+		return nil
+	}
+
+	if rawConfig.MergeQueue == nil {
+		return nil
+	}
+
+	// Start with defaults
+	cfg := DefaultMergeQueueConfig()
+
+	// Parse merge_queue section
+	var mqRaw struct {
+		Enabled      *bool   `json:"enabled"`
+		Strategy     *string `json:"strategy"`
+		TargetBranch *string `json:"target_branch"`
+	}
+
+	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
+		return nil
+	}
+
+	// Apply non-nil values
+	if mqRaw.Enabled != nil {
+		cfg.Enabled = *mqRaw.Enabled
+	}
+	if mqRaw.Strategy != nil {
+		cfg.Strategy = *mqRaw.Strategy
+	}
+	if mqRaw.TargetBranch != nil {
+		cfg.TargetBranch = *mqRaw.TargetBranch
+	}
+
+	return cfg
+}
+
 // MRInfo holds merge request information for display and processing.
 // This replaces mrqueue.MR after the mrqueue package removal.
 type MRInfo struct {

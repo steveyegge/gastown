@@ -430,3 +430,110 @@ func TestEngineer_LoadConfig_InvalidStrategy(t *testing.T) {
 		t.Errorf("expected 'invalid merge strategy' error, got: %v", err)
 	}
 }
+
+func TestLoadMergeQueueConfigFromPath(t *testing.T) {
+	tests := []struct {
+		name           string
+		config         map[string]interface{}
+		wantNil        bool
+		wantStrategy   string
+		wantTarget     string
+	}{
+		{
+			name:    "no config file",
+			config:  nil,
+			wantNil: true,
+		},
+		{
+			name: "no merge_queue section",
+			config: map[string]interface{}{
+				"type": "rig",
+				"name": "test",
+			},
+			wantNil: true,
+		},
+		{
+			name: "with strategy",
+			config: map[string]interface{}{
+				"merge_queue": map[string]interface{}{
+					"strategy": "pr_to_main",
+				},
+			},
+			wantNil:      false,
+			wantStrategy: "pr_to_main",
+			wantTarget:   "main", // default
+		},
+		{
+			name: "with strategy and target",
+			config: map[string]interface{}{
+				"merge_queue": map[string]interface{}{
+					"strategy":      "pr_to_branch",
+					"target_branch": "develop",
+				},
+			},
+			wantNil:      false,
+			wantStrategy: "pr_to_branch",
+			wantTarget:   "develop",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir, err := os.MkdirTemp("", "loadconfig-test-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(tmpDir)
+
+			if tt.config != nil {
+				data, _ := json.MarshalIndent(tt.config, "", "  ")
+				if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			cfg := LoadMergeQueueConfigFromPath(tmpDir)
+
+			if tt.wantNil {
+				if cfg != nil {
+					t.Errorf("expected nil config, got %+v", cfg)
+				}
+				return
+			}
+
+			if cfg == nil {
+				t.Fatal("expected non-nil config")
+			}
+
+			if cfg.Strategy != tt.wantStrategy {
+				t.Errorf("Strategy = %q, want %q", cfg.Strategy, tt.wantStrategy)
+			}
+			if cfg.TargetBranch != tt.wantTarget {
+				t.Errorf("TargetBranch = %q, want %q", cfg.TargetBranch, tt.wantTarget)
+			}
+		})
+	}
+}
+
+func TestParsePRNumber(t *testing.T) {
+	tests := []struct {
+		url  string
+		want int
+	}{
+		{"https://github.com/owner/repo/pull/123", 123},
+		{"https://github.com/owner/repo/pull/1", 1},
+		{"https://github.com/owner/repo/pull/99999", 99999},
+		{"invalid", 0},
+		{"", 0},
+		{"https://github.com/owner/repo", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			got := parsePRNumber(tt.url)
+			if got != tt.want {
+				t.Errorf("parsePRNumber(%q) = %d, want %d", tt.url, got, tt.want)
+			}
+		})
+	}
+}

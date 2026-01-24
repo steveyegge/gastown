@@ -48,24 +48,51 @@ func IsDoltServerMode(beadsDir string) bool {
 	return config.Backend == BackendDolt && config.DoltServerEnabled
 }
 
-// DetectBackend reads metadata.json from the beads directory and returns the backend type.
-// Returns "sqlite" by default if no backend is specified or if metadata.json doesn't exist.
-func DetectBackend(beadsDir string) string {
+// GetStorageBackend detects the storage backend from metadata.json or config.yaml.
+// Priority order:
+// 1. metadata.json "backend" field (takes precedence)
+// 2. config.yaml "storage-backend" field
+// 3. Default to "sqlite"
+func GetStorageBackend(beadsDir string) string {
+	// First, check metadata.json (highest priority)
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
-	data, err := os.ReadFile(metadataPath) //nolint:gosec // G304: path is constructed internally
-	if err != nil {
-		return BackendSQLite // Default to SQLite if no metadata
+	if data, err := os.ReadFile(metadataPath); err == nil { //nolint:gosec // G304: path is constructed internally
+		var config MetadataConfig
+		if err := json.Unmarshal(data, &config); err == nil {
+			if config.Backend == BackendDolt {
+				return BackendDolt
+			}
+			if config.Backend == BackendSQLite {
+				return BackendSQLite
+			}
+		}
 	}
 
-	var config MetadataConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return BackendSQLite
+	// Second, check config.yaml
+	configPath := filepath.Join(beadsDir, "config.yaml")
+	if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: path is constructed internally
+		// Simple YAML parsing for storage-backend field
+		// Format: storage-backend: dolt
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "storage-backend:") {
+				value := strings.TrimSpace(strings.TrimPrefix(line, "storage-backend:"))
+				if value == BackendDolt {
+					return BackendDolt
+				}
+				if value == BackendSQLite {
+					return BackendSQLite
+				}
+			}
+		}
 	}
 
-	if config.Backend == BackendDolt {
-		return BackendDolt
-	}
 	return BackendSQLite
+}
+
+// DetectBackend is an alias for GetStorageBackend for backwards compatibility.
+func DetectBackend(beadsDir string) string {
+	return GetStorageBackend(beadsDir)
 }
 
 // GetDatabasePath returns the path to the database based on the backend type.
