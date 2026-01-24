@@ -17,7 +17,7 @@ func isClaudeCmd(cmd string) bool {
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentCopilot, AgentOpenCode}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -50,6 +50,7 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"cursor", AgentCursor, false},
 		{"auggie", AgentAuggie, false},
 		{"amp", AgentAmp, false},
+		{"copilot", AgentCopilot, false},
 		{"aider", "", true},               // Not built-in, can be added via config
 		{"opencode", AgentOpenCode, false}, // Built-in multi-model CLI agent
 		{"unknown", "", true},
@@ -83,6 +84,7 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentCursor, "cursor-agent"},
 		{AgentAuggie, "auggie"},
 		{AgentAmp, "amp"},
+		{AgentCopilot, "copilot"},
 	}
 
 	for _, tt := range tests {
@@ -129,6 +131,7 @@ func TestIsKnownPreset(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
+		{"copilot", true},
 		{"aider", false},    // Not built-in, can be added via config
 		{"opencode", true},  // Built-in multi-model CLI agent
 		{"unknown", false},
@@ -413,7 +416,7 @@ func TestGetProcessNames(t *testing.T) {
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentCopilot, AgentOpenCode}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -474,6 +477,11 @@ func TestAgentCommandGeneration(t *testing.T) {
 			preset:       AgentAmp,
 			wantCommand:  "amp",
 			wantContains: []string{"--dangerously-allow-all", "--no-ide"},
+		},
+		{
+			preset:       AgentCopilot,
+			wantCommand:  "copilot",
+			wantContains: []string{"--allow-all", "--no-ask-user"},
 		},
 	}
 
@@ -776,5 +784,49 @@ func TestOpenCodeRuntimeConfigFromPreset(t *testing.T) {
 	original := GetAgentPreset(AgentOpenCode)
 	if _, exists := original.Env["MUTATED"]; exists {
 		t.Error("Mutation of RuntimeConfig.Env affected original preset")
+	}
+}
+
+func TestCopilotAgentPreset(t *testing.T) {
+	t.Parallel()
+	info := GetAgentPreset(AgentCopilot)
+	if info == nil {
+		t.Fatal("copilot preset not found")
+	}
+
+	if info.Command != "copilot" {
+		t.Errorf("copilot command = %q, want copilot", info.Command)
+	}
+
+	if len(info.Args) != 2 {
+		t.Fatalf("copilot args = %v, want [--allow-all --no-ask-user]", info.Args)
+	}
+	if info.Args[0] != "--allow-all" || info.Args[1] != "--no-ask-user" {
+		t.Errorf("copilot args = %v, want [--allow-all --no-ask-user]", info.Args)
+	}
+
+	if info.InteractivePromptFlag != "-i" {
+		t.Errorf("copilot InteractivePromptFlag = %q, want -i", info.InteractivePromptFlag)
+	}
+
+	if len(info.ProcessNames) != 2 || info.ProcessNames[0] != "copilot" || info.ProcessNames[1] != "node" {
+		t.Errorf("copilot ProcessNames = %v, want [copilot node]", info.ProcessNames)
+	}
+
+	if info.SupportsHooks {
+		t.Error("copilot should not support hooks")
+	}
+	if info.SupportsForkSession {
+		t.Error("copilot should not support fork session")
+	}
+
+	if info.NonInteractive == nil {
+		t.Fatal("copilot NonInteractive is nil")
+	}
+	if info.NonInteractive.PromptFlag != "-p" {
+		t.Errorf("copilot NonInteractive.PromptFlag = %q, want -p", info.NonInteractive.PromptFlag)
+	}
+	if info.NonInteractive.OutputFlag != "--silent" {
+		t.Errorf("copilot NonInteractive.OutputFlag = %q, want --silent", info.NonInteractive.OutputFlag)
 	}
 }

@@ -455,7 +455,7 @@ gt config agent remove <name>     # Remove custom agent (built-ins protected)
 gt config default-agent [name]    # Get or set town default agent
 ```
 
-**Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
+**Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `copilot`, `opencode`
 
 **Custom agents**: Define per-town via CLI or JSON:
 ```bash
@@ -474,6 +474,7 @@ gt config default-agent claude-glm       # Set default
       "args": [],
       "resume_flag": "--session",
       "resume_style": "flag",
+      "interactive_prompt_flag": "-i",
       "non_interactive": {
         "subcommand": "run",
         "output_flag": "--format json"
