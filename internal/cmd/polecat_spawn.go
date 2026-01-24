@@ -136,7 +136,7 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 			RuntimeConfigDir: claudeConfigDir,
 		}
 		if opts.Agent != "" {
-			cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, r.Path, "", opts.Agent)
+			cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, r.Path, "", opts.Agent, polecatObj.ClonePath)
 			if err != nil {
 				return nil, err
 			}
