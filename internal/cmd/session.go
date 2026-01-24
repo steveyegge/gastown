@@ -236,6 +236,18 @@ func getSessionManager(rigName string) (*polecat.SessionManager, *rig.Rig, error
 	return polecatMgr, r, nil
 }
 
+// updatePolecatAgentState updates the agent bead's state after session start.
+// This is called after starting a polecat session to transition state from "spawning" to "working".
+func updatePolecatAgentState(r *rig.Rig, polecatName, state string) {
+	t := tmux.NewTmux()
+	polecatGit := git.NewGit(r.Path)
+	mgr := polecat.NewManager(r, polecatGit, t)
+	if err := mgr.SetAgentState(polecatName, state); err != nil {
+		// Non-fatal: log warning but continue
+		fmt.Printf("Warning: could not update agent state: %v\n", err)
+	}
+}
+
 func runSessionStart(cmd *cobra.Command, args []string) error {
 	rigName, polecatName, err := parseAddress(args[0])
 	if err != nil {
@@ -269,6 +281,9 @@ func runSessionStart(cmd *cobra.Command, args []string) error {
 	if err := polecatMgr.Start(polecatName, opts); err != nil {
 		return fmt.Errorf("starting session: %w", err)
 	}
+
+	// Update agent_state to "working" now that session is running
+	updatePolecatAgentState(r, polecatName, "working")
 
 	fmt.Printf("%s Session started. Attach with: %s\n",
 		style.Bold.Render("✓"),
@@ -495,7 +510,7 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	polecatMgr, _, err := getSessionManager(rigName)
+	polecatMgr, r, err := getSessionManager(rigName)
 	if err != nil {
 		return err
 	}
@@ -524,6 +539,9 @@ func runSessionRestart(cmd *cobra.Command, args []string) error {
 	if err := polecatMgr.Start(polecatName, opts); err != nil {
 		return fmt.Errorf("starting session: %w", err)
 	}
+
+	// Update agent_state to "working" now that session is running
+	updatePolecatAgentState(r, polecatName, "working")
 
 	fmt.Printf("%s Session restarted. Attach with: %s\n",
 		style.Bold.Render("✓"),

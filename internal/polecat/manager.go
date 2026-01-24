@@ -927,6 +927,15 @@ func (m *Manager) SetState(name string, state State) error {
 	return nil
 }
 
+// SetAgentState updates the agent bead's agent_state field.
+// This is called after a polecat session successfully starts to transition
+// from "spawning" to "working", making gt polecat identity show accurate status.
+// Valid states: "spawning", "working", "done", "stuck", "idle"
+func (m *Manager) SetAgentState(name string, state string) error {
+	agentID := m.agentBeadID(name)
+	return m.beads.UpdateAgentState(agentID, state, nil)
+}
+
 // AssignIssue assigns an issue to a polecat by setting the issue's assignee in beads.
 func (m *Manager) AssignIssue(name, issue string) error {
 	if !m.exists(name) {

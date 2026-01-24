@@ -1,0 +1,56 @@
+{{/* Partial template for expanded convoy details */}}
+<div class="convoy-detail">
+    <div class="detail-header">
+        <span class="detail-label">Created:</span> {{.CreatedAgo}}
+        {{if .CreatedAt}}
+        <span class="detail-timestamp">({{.CreatedAt}})</span>
+        {{end}}
+    </div>
+
+    {{if .TrackedDetails}}
+    <div class="tracked-issues">
+        <div class="tracked-header">Tracked Issues:</div>
+        {{range .TrackedDetails}}
+        <div class="tracked-issue {{if eq .Status "done"}}issue-done{{else if eq .Status "in_progress"}}issue-active{{else}}issue-pending{{end}}">
+            <div class="issue-main">
+                <span class="issue-status-dot">{{if eq .Status "done"}}●{{else if eq .Status "in_progress"}}◐{{else}}○{{end}}</span>
+                <span class="issue-id">{{.ID}}</span>
+                <span class="issue-title">{{.Title}}</span>
+            </div>
+            <div class="issue-meta">
+                <span class="meta-item">
+                    <span class="meta-label">Status:</span> {{.Status}}
+                </span>
+                {{if .AssigneeShort}}
+                <span class="meta-sep">|</span>
+                <span class="meta-item {{activityClass .AssigneeActivity}}">
+                    <span class="meta-label">Worker:</span> {{.AssigneeShort}}
+                    <span class="activity-dot-small"></span>
+                    {{.AssigneeActivity.FormattedAge}}
+                </span>
+                {{end}}
+            </div>
+            {{if .LastCommit}}
+            <div class="issue-commit">
+                <span class="commit-label">Last commit:</span> "{{.LastCommit}}"
+                {{if .LastCommitAgo}}
+                <span class="commit-ago">{{.LastCommitAgo}}</span>
+                {{end}}
+            </div>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+    {{else}}
+    <div class="tracked-issues tracked-empty">
+        No tracked issues found
+    </div>
+    {{end}}
+
+    {{if .Description}}
+    <div class="bead-description">
+        <div class="tracked-header">Notes:</div>
+        <div class="description-content">{{.Description}}</div>
+    </div>
+    {{end}}
+</div>

@@ -320,17 +320,718 @@
             opacity: 0;
             transition: opacity 200ms ease-in;
         }
+
+        /* Expandable rows */
+        .expandable-row {
+            cursor: pointer;
+        }
+
+        .expandable-row:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .expand-indicator {
+            display: inline-block;
+            width: 16px;
+            transition: transform 0.2s;
+        }
+
+        .expanded .expand-indicator {
+            transform: rotate(90deg);
+        }
+
+        .detail-row {
+            display: none;
+        }
+
+        .detail-row.open {
+            display: table-row;
+        }
+
+        .detail-row td {
+            padding: 0;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        /* Detail panel styles */
+        .polecat-detail,
+        .convoy-detail {
+            padding: 16px 24px;
+            border-left: 3px solid var(--border);
+            margin-left: 16px;
+        }
+
+        .detail-header {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .detail-label {
+            color: var(--text-secondary);
+        }
+
+        .detail-sep {
+            margin: 0 12px;
+            color: var(--border);
+        }
+
+        .detail-timestamp {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+        }
+
+        .detail-hook {
+            font-size: 0.875rem;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+        }
+
+        /* Terminal output */
+        .terminal-output {
+            margin: 12px 0;
+        }
+
+        .terminal-header {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .terminal-content {
+            background: #0d0d0d;
+            border-radius: 4px;
+            padding: 12px;
+            font-size: 0.8rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .terminal-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.4;
+        }
+
+        .terminal-empty {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        /* Tracked issues */
+        .tracked-issues {
+            margin: 12px 0;
+        }
+
+        .tracked-header {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .tracked-issue {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+
+        .tracked-issue:last-child {
+            margin-bottom: 0;
+        }
+
+        .issue-done {
+            border-left: 3px solid var(--green);
+        }
+
+        .issue-active {
+            border-left: 3px solid var(--yellow);
+        }
+
+        .issue-pending {
+            border-left: 3px solid var(--text-secondary);
+        }
+
+        .issue-main {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+
+        .issue-status-dot {
+            color: var(--text-secondary);
+        }
+
+        .issue-done .issue-status-dot {
+            color: var(--green);
+        }
+
+        .issue-active .issue-status-dot {
+            color: var(--yellow);
+        }
+
+        .issue-id {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .issue-title {
+            color: var(--text-secondary);
+        }
+
+        .issue-meta {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-left: 20px;
+        }
+
+        .meta-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .meta-label {
+            color: var(--text-secondary);
+        }
+
+        .meta-sep {
+            margin: 0 8px;
+            color: var(--border);
+        }
+
+        .activity-dot-small {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            margin-left: 4px;
+        }
+
+        .activity-green .activity-dot-small {
+            background: var(--green);
+        }
+
+        .activity-yellow .activity-dot-small {
+            background: var(--yellow);
+        }
+
+        .activity-red .activity-dot-small {
+            background: var(--red);
+        }
+
+        .issue-commit {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-left: 20px;
+            margin-top: 4px;
+        }
+
+        .commit-label {
+            color: var(--text-secondary);
+        }
+
+        .commit-ago {
+            color: var(--text-secondary);
+            margin-left: 8px;
+        }
+
+        .tracked-empty {
+            color: var(--text-secondary);
+            font-style: italic;
+            padding: 12px;
+        }
+
+        /* Bead description */
+        .bead-description {
+            margin-top: 12px;
+        }
+
+        .description-content {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            padding: 12px;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+
+        /* Action buttons */
+        .detail-actions {
+            margin-top: 16px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .action-btn {
+            background: var(--border);
+            color: var(--text-primary);
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .action-btn:hover {
+            background: var(--text-secondary);
+            color: var(--bg-dark);
+        }
+
+        /* Merge history */
+        .merge-history {
+            margin-top: 16px;
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .subsection-header {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .history-row {
+            cursor: pointer;
+        }
+
+        .history-row:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .history-row.expanded .expand-indicator {
+            transform: rotate(90deg);
+        }
+
+        .history-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875rem;
+            padding: 8px;
+            border-radius: 4px;
+            flex-wrap: wrap;
+        }
+
+        .history-success {
+            background: rgba(74, 222, 128, 0.05);
+        }
+
+        .history-fail {
+            background: rgba(248, 113, 113, 0.05);
+        }
+
+        /* Size-based colors for commits */
+        .history-small {
+            border-left: 3px solid var(--green);
+        }
+
+        .history-medium {
+            border-left: 3px solid var(--yellow);
+        }
+
+        .history-large {
+            border-left: 3px solid #f97316;
+        }
+
+        .history-huge {
+            border-left: 3px solid var(--red);
+        }
+
+        .history-icon {
+            width: 16px;
+            text-align: center;
+        }
+
+        .history-success .history-icon {
+            color: var(--green);
+        }
+
+        .history-fail .history-icon {
+            color: var(--red);
+        }
+
+        .history-repo {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            min-width: 80px;
+        }
+
+        .history-title {
+            color: var(--text-secondary);
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+        }
+
+        .history-stats {
+            display: flex;
+            gap: 8px;
+            font-size: 0.75rem;
+            font-family: monospace;
+        }
+
+        .history-additions {
+            color: var(--green);
+        }
+
+        .history-deletions {
+            color: var(--red);
+        }
+
+        .history-ago {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            min-width: 70px;
+            text-align: right;
+        }
+
+        .history-detail {
+            display: none;
+            padding: 8px 8px 8px 32px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 0 0 4px 4px;
+            margin-top: -4px;
+        }
+
+        .history-detail.open {
+            display: block;
+        }
+
+        .history-files {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-family: monospace;
+        }
+
+        .history-file {
+            padding: 2px 0;
+        }
+
+        .history-fail-reason {
+            width: 100%;
+            margin-left: 24px;
+            color: var(--red);
+            font-size: 0.75rem;
+        }
+
+        /* Activity feed */
+        .activity-feed {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .activity-item {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 8px;
+            border-left: 3px solid var(--border);
+            margin-bottom: 8px;
+        }
+
+        .activity-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .activity-commit {
+            border-left-color: var(--green);
+        }
+
+        .activity-pr_merge {
+            border-left-color: #9333ea;
+        }
+
+        .activity-main_commit {
+            border-left-color: #3b82f6;
+        }
+
+        .activity-spawn {
+            border-left-color: var(--yellow);
+        }
+
+        .activity-spawn .activity-actor {
+            color: var(--yellow);
+        }
+
+        .activity-stop, .activity-kill, .activity-halt {
+            border-left-color: var(--red);
+        }
+
+        .activity-stop .activity-actor, .activity-kill .activity-actor, .activity-halt .activity-actor {
+            color: var(--red);
+        }
+
+        .activity-nudge {
+            border-left-color: #f97316;
+        }
+
+        .activity-nudge .activity-actor {
+            color: #f97316;
+        }
+
+        .activity-handoff {
+            border-left-color: #06b6d4;
+        }
+
+        .activity-handoff .activity-actor {
+            color: #06b6d4;
+        }
+
+        .activity-done {
+            border-left-color: var(--green);
+        }
+
+        .activity-done .activity-actor {
+            color: var(--green);
+        }
+
+        .activity-escalation {
+            border-left-color: #ef4444;
+        }
+
+        .activity-escalation .activity-actor {
+            color: #ef4444;
+        }
+
+        .activity-boot {
+            border-left-color: #10b981;
+        }
+
+        .activity-boot .activity-actor {
+            color: #10b981;
+        }
+
+        .activity-sling, .activity-mail {
+            border-left-color: #8b5cf6;
+        }
+
+        .activity-sling .activity-actor, .activity-mail .activity-actor {
+            color: #8b5cf6;
+        }
+
+        .activity-patrol {
+            border-left-color: #64748b;
+        }
+
+        .activity-patrol .activity-actor {
+            color: #64748b;
+        }
+
+        .activity-time {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            min-width: 60px;
+        }
+
+        .activity-actor {
+            color: var(--green);
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+
+        .activity-commit .activity-actor {
+            color: var(--green);
+        }
+
+        .activity-pr_merge .activity-actor {
+            color: #9333ea;
+        }
+
+        .activity-main_commit .activity-actor {
+            color: #3b82f6;
+        }
+
+        .activity-summary {
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+
+        .activity-details {
+            width: 100%;
+            margin-left: 76px;
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+        }
+
+        /* HQ Agents status badges */
+        .hq-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .hq-status-running {
+            background: var(--green);
+            color: var(--bg-dark);
+        }
+
+        .hq-status-stopped {
+            background: var(--text-secondary);
+            color: var(--bg-dark);
+        }
+
+        /* Tab navigation */
+        .tab-nav {
+            display: flex;
+            gap: 0;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tab-btn {
+            padding: 12px 24px;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .tab-btn.active {
+            color: var(--text-primary);
+            border-bottom-color: var(--green);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .beads-iframe-container {
+            width: 100%;
+            height: calc(100vh - 150px);
+            min-height: 600px;
+            background: var(--bg-card);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .beads-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        .beads-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 400px;
+            color: var(--text-secondary);
+            gap: 16px;
+        }
+
+        .beads-loading-hint {
+            font-size: 0.875rem;
+            background: var(--bg-card);
+            padding: 16px 24px;
+            border-radius: 8px;
+            font-family: monospace;
+        }
+
+        .beads-loading-hint code {
+            color: var(--green);
+        }
     </style>
 </head>
 <body>
-    <div class="dashboard" hx-get="/" hx-trigger="every 10s" hx-swap="outerHTML">
+    <div class="dashboard">
         <header>
-            <h1>🚚 Gas Town Convoys</h1>
+            <h1>🚚 Gas Town</h1>
             <span class="refresh-info">
-                Auto-refresh: every 10s
                 <span class="htmx-indicator">⟳</span>
             </span>
         </header>
+
+        <nav class="tab-nav">
+            <button class="tab-btn active" onclick="switchTab('dashboard')">📊 Dashboard</button>
+            <button class="tab-btn" onclick="switchTab('beads')">🔮 Beads UI</button>
+        </nav>
+
+        <div id="tab-dashboard" class="tab-content active" hx-get="/" hx-trigger="every 10s" hx-swap="innerHTML" hx-select="#tab-dashboard-inner">
+            <div id="tab-dashboard-inner">
+
+        {{if .HQAgents}}
+        <h2 class="section-header">🏛️ Town Agents</h2>
+        <table class="convoy-table">
+            <thead>
+                <tr>
+                    <th>Agent</th>
+                    <th>Status</th>
+                    <th>Last Activity</th>
+                    <th>Current Task</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .HQAgents}}
+                <tr class="expandable-row"
+                    onclick="toggleDetail(this, 'hq-detail-{{.SessionID}}')"
+                    hx-get="/hq/{{.SessionID}}/details"
+                    hx-trigger="click once"
+                    hx-target="#hq-detail-{{.SessionID}} td"
+                    hx-swap="innerHTML">
+                    <td>
+                        <span class="expand-indicator">▸</span>
+                        <span class="convoy-id">{{if eq .Name "mayor"}}🎩{{else if eq .Name "deacon"}}📜{{end}} {{.Name}}</span>
+                    </td>
+                    <td>
+                        <span class="hq-status {{if eq .Status "running"}}hq-status-running{{else}}hq-status-stopped{{end}}">
+                            {{.Status}}
+                        </span>
+                    </td>
+                    <td class="{{activityClass .LastActivity}}">
+                        {{if eq .Status "running"}}
+                        <span class="activity-dot"></span>
+                        {{.LastActivity.FormattedAge}}
+                        {{else}}
+                        <span style="color: var(--text-secondary);">offline</span>
+                        {{end}}
+                    </td>
+                    <td class="status-hint">{{.StatusHint}}</td>
+                </tr>
+                <tr class="detail-row" id="hq-detail-{{.SessionID}}">
+                    <td colspan="4">
+                        <div class="htmx-indicator" style="padding: 16px;">Loading...</div>
+                    </td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+        {{end}}
 
         {{if .Convoys}}
         <table class="convoy-table">
@@ -344,8 +1045,14 @@
             </thead>
             <tbody>
                 {{range .Convoys}}
-                <tr class="{{workStatusClass .WorkStatus}}">
+                <tr class="{{workStatusClass .WorkStatus}} expandable-row"
+                    onclick="toggleDetail(this, 'convoy-detail-{{.ID}}')"
+                    hx-get="/convoy/{{.ID}}/details"
+                    hx-trigger="click once"
+                    hx-target="#convoy-detail-{{.ID}} td"
+                    hx-swap="innerHTML">
                     <td>
+                        <span class="expand-indicator">▸</span>
                         <span class="work-status">{{.WorkStatus}}</span>
                     </td>
                     <td>
@@ -365,6 +1072,11 @@
                         {{.LastActivity.FormattedAge}}
                     </td>
                 </tr>
+                <tr class="detail-row" id="convoy-detail-{{.ID}}">
+                    <td colspan="4">
+                        <div class="htmx-indicator" style="padding: 16px;">Loading...</div>
+                    </td>
+                </tr>
                 {{end}}
             </tbody>
         </table>
@@ -376,43 +1088,43 @@
         {{end}}
 
         <h2 class="section-header">🔀 Refinery Merge Queue</h2>
-        {{if .MergeQueue}}
+        {{if .InternalMRs}}
         <table class="convoy-table">
             <thead>
                 <tr>
-                    <th>PR #</th>
-                    <th>Repo</th>
-                    <th>Title</th>
-                    <th>CI Status</th>
-                    <th>Mergeable</th>
+                    <th>MR ID</th>
+                    <th>Rig</th>
+                    <th>Source Issue</th>
+                    <th>Branch</th>
+                    <th>Status</th>
                 </tr>
             </thead>
             <tbody>
-                {{range .MergeQueue}}
+                {{range .InternalMRs}}
                 <tr class="{{.ColorClass}}">
                     <td>
-                        <a href="{{.URL}}" target="_blank" class="pr-link">#{{.Number}}</a>
+                        <span class="mr-id">{{.ID}}</span>
                     </td>
-                    <td>{{.Repo}}</td>
+                    <td>{{.Rig}}</td>
                     <td>
-                        <span class="pr-title">{{.Title}}</span>
-                    </td>
-                    <td>
-                        {{if eq .CIStatus "pass"}}
-                        <span class="ci-status ci-pass">✓ Pass</span>
-                        {{else if eq .CIStatus "fail"}}
-                        <span class="ci-status ci-fail">✗ Fail</span>
+                        {{if .SourceIssue}}
+                        <span class="source-issue">{{.SourceIssue}}</span>
                         {{else}}
-                        <span class="ci-status ci-pending">⏳ Pending</span>
+                        <span class="pr-title">{{.Title}}</span>
                         {{end}}
                     </td>
                     <td>
-                        {{if eq .Mergeable "ready"}}
-                        <span class="merge-status merge-ready">Ready</span>
-                        {{else if eq .Mergeable "conflict"}}
-                        <span class="merge-status merge-conflict">Conflict</span>
+                        {{if .Branch}}
+                        <span class="branch-name">{{.Branch}}</span>
                         {{else}}
-                        <span class="merge-status merge-pending">Pending</span>
+                        <span class="dim">-</span>
+                        {{end}}
+                    </td>
+                    <td>
+                        {{if eq .Status "in_progress"}}
+                        <span class="ci-status ci-pending">⏳ Processing</span>
+                        {{else}}
+                        <span class="ci-status ci-pass">⏸ Queued</span>
                         {{end}}
                     </td>
                 </tr>
@@ -421,7 +1133,42 @@
         </table>
         {{else}}
         <div class="empty-state-inline">
-            <p>No PRs in queue</p>
+            <p>No MRs in queue</p>
+        </div>
+        {{end}}
+
+        {{if .MergeHistory}}
+        <div class="merge-history">
+            <h3 class="subsection-header">Recent Commits to Main</h3>
+            <div class="history-list">
+                {{range .MergeHistory}}
+                <div class="history-row" onclick="toggleHistoryDetail('history-{{.Hash}}')">
+                    <div class="history-item history-success {{if gt .Additions 500}}history-huge{{else if gt .Additions 200}}history-large{{else if gt .Additions 50}}history-medium{{else}}history-small{{end}}">
+                        <span class="expand-indicator">▸</span>
+                        <span class="history-repo">{{.Repo}}</span>
+                        {{if .URL}}
+                        <a href="{{.URL}}" target="_blank" class="pr-link history-title" onclick="event.stopPropagation()">{{.Title}}</a>
+                        {{else}}
+                        <span class="history-title">{{.Title}}</span>
+                        {{end}}
+                        <span class="history-stats">
+                            <span class="history-additions">+{{.Additions}}</span>
+                            <span class="history-deletions">-{{.Deletions}}</span>
+                        </span>
+                        <span class="history-ago">{{.MergedAgo}}</span>
+                    </div>
+                    {{if .FilesChanged}}
+                    <div class="history-detail" id="history-{{.Hash}}">
+                        <div class="history-files">
+                            {{range .FilesChanged}}
+                            <div class="history-file">{{.}}</div>
+                            {{end}}
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+            </div>
         </div>
         {{end}}
 
@@ -438,8 +1185,14 @@
             </thead>
             <tbody>
                 {{range .Polecats}}
-                <tr>
+                <tr class="expandable-row"
+                    onclick="toggleDetail(this, 'polecat-detail-{{.SessionID}}')"
+                    hx-get="/polecat/{{.SessionID}}/details"
+                    hx-trigger="click once"
+                    hx-target="#polecat-detail-{{.SessionID}} td"
+                    hx-swap="innerHTML">
                     <td>
+                        <span class="expand-indicator">▸</span>
                         <span class="convoy-id">{{.Name}}</span>
                     </td>
                     <td>{{.Rig}}</td>
@@ -449,10 +1202,143 @@
                     </td>
                     <td class="status-hint">{{.StatusHint}}</td>
                 </tr>
+                <tr class="detail-row" id="polecat-detail-{{.SessionID}}">
+                    <td colspan="4">
+                        <div class="htmx-indicator" style="padding: 16px;">Loading...</div>
+                    </td>
+                </tr>
                 {{end}}
             </tbody>
         </table>
         {{end}}
-    </div>
+
+        {{if .Activity}}
+        <h2 class="section-header">📋 Activity Feed</h2>
+        <div class="activity-feed">
+            {{range .Activity}}
+            <div class="activity-item activity-{{.Type}}">
+                <span class="activity-time">{{.TimestampAgo}}</span>
+                <span class="activity-actor">[{{.Actor}}]</span>
+                <span class="activity-summary">{{.Summary}}</span>
+                {{if .Details}}
+                <div class="activity-details">└─ {{.Details}}</div>
+                {{end}}
+            </div>
+            {{end}}
+        </div>
+        {{end}}
+            </div><!-- end tab-dashboard-inner -->
+        </div><!-- end tab-dashboard -->
+
+        <div id="tab-beads" class="tab-content">
+            <div class="beads-iframe-container">
+                <iframe
+                    id="beads-iframe"
+                    class="beads-iframe"
+                    src="/beads-ui/"
+                    onload="beadsLoaded()"
+                    onerror="beadsError()">
+                </iframe>
+            </div>
+            <noscript>
+                <div class="beads-loading">
+                    <p>Beads UI requires JavaScript to load.</p>
+                </div>
+            </noscript>
+        </div>
+    </div><!-- end dashboard -->
+
+    <script>
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById('tab-' + tabName).classList.add('active');
+
+            // Pause/resume auto-refresh based on active tab
+            const dashboardTab = document.getElementById('tab-dashboard');
+            if (tabName === 'dashboard') {
+                // Re-enable polling
+                dashboardTab.setAttribute('hx-trigger', 'every 10s');
+                htmx.process(dashboardTab);
+            } else {
+                // Disable polling when not viewing dashboard
+                dashboardTab.removeAttribute('hx-trigger');
+            }
+        }
+
+        function beadsLoaded() {
+            // Beads UI loaded successfully
+            console.log('Beads UI loaded');
+        }
+
+        function beadsError() {
+            const container = document.querySelector('.beads-iframe-container');
+            container.innerHTML = `
+                <div class="beads-loading">
+                    <p>Beads UI is not available</p>
+                    <div class="beads-loading-hint">
+                        Install it with: <code>npm install -g beads-ui</code>
+                    </div>
+                    <p style="margin-top: 12px; font-size: 0.8rem;">Then restart the dashboard</p>
+                    <button class="tab-btn" onclick="location.reload()" style="margin-top: 16px;">
+                        Retry
+                    </button>
+                </div>
+            `;
+        }
+
+        function toggleDetail(row, detailId) {
+            const detailRow = document.getElementById(detailId);
+            if (detailRow) {
+                const isOpen = detailRow.classList.toggle('open');
+                row.classList.toggle('expanded', isOpen);
+            }
+        }
+
+        function toggleHistoryDetail(detailId) {
+            const detail = document.getElementById(detailId);
+            if (detail) {
+                const isOpen = detail.classList.toggle('open');
+                // Find the parent .history-row and toggle expanded class
+                const row = detail.closest('.history-row');
+                if (row) {
+                    row.classList.toggle('expanded', isOpen);
+                }
+            }
+        }
+
+        function copyToClipboard(text, btn) {
+            navigator.clipboard.writeText(text).then(function() {
+                // Show feedback by changing button text temporarily
+                const originalText = btn.textContent;
+                btn.textContent = 'Copied!';
+                btn.style.background = 'var(--green)';
+                btn.style.color = 'var(--bg-dark)';
+                setTimeout(function() {
+                    btn.textContent = originalText;
+                    btn.style.background = '';
+                    btn.style.color = '';
+                }, 1500);
+            }).catch(function(err) {
+                alert('Command: ' + text);
+            });
+        }
+
+        // Auto-scroll terminal output to bottom after htmx loads content
+        document.body.addEventListener('htmx:afterSwap', function(event) {
+            const terminal = event.target.querySelector('.terminal-content');
+            if (terminal) {
+                terminal.scrollTop = terminal.scrollHeight;
+            }
+        });
+    </script>
 </body>
 </html>

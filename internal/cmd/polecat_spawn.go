@@ -145,6 +145,11 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		if err := polecatSessMgr.Start(polecatName, startOpts); err != nil {
 			return nil, fmt.Errorf("starting session: %w", err)
 		}
+		// Update agent_state from "spawning" to "working" now that session is running
+		if err := polecatMgr.SetAgentState(polecatName, "working"); err != nil {
+			// Non-fatal: log warning but continue
+			fmt.Printf("Warning: could not update agent state: %v\n", err)
+		}
 	}
 
 	// Get session name and pane

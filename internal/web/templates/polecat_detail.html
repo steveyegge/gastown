@@ -1,0 +1,35 @@
+{{/* Partial template for expanded polecat details */}}
+<div class="polecat-detail">
+    <div class="detail-header">
+        <span class="detail-label">Session:</span> {{.SessionID}}
+        <span class="detail-sep">|</span>
+        <span class="detail-label">Uptime:</span> {{.Uptime}}
+        {{if .HookBead}}
+        <span class="detail-sep">|</span>
+        <span class="detail-label">Hook:</span> {{.HookBead}}
+        {{end}}
+    </div>
+
+    {{if .HookTitle}}
+    <div class="detail-hook">
+        <span class="detail-label">Working on:</span> {{.HookTitle}}
+    </div>
+    {{end}}
+
+    {{if .TerminalLines}}
+    <div class="terminal-output">
+        <div class="terminal-header">Terminal Output (last {{len .TerminalLines}} lines):</div>
+        <div class="terminal-content">
+            {{range .TerminalLines}}<div class="terminal-line">{{.}}</div>{{end}}
+        </div>
+    </div>
+    {{else}}
+    <div class="terminal-output">
+        <div class="terminal-header">Terminal Output:</div>
+        <div class="terminal-content terminal-empty">
+            No output available
+        </div>
+    </div>
+    {{end}}
+
+</div>
