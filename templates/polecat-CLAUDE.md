@@ -154,10 +154,11 @@ gt mail send <addr> -s "Subject" -m "Body"
 ### Beads
 ```bash
 bd show <id>                # View issue details
-bd close <id> --reason "..." # Close issue when done
+bd close <step-id>          # Close a STEP (not your main issue!)
 bd create --title "..."     # File discovered work (don't fix it yourself)
 bd sync                     # Sync beads to remote
 ```
+**⚠️ NEVER use `bd close` on your main issue.** The issue is closed by `gt done` automatically.
 
 ---
 
