@@ -388,6 +388,25 @@ bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/refinery
 # Just exit - daemon will respawn if needed
 ```
 
+## Merge Queue Strategies
+
+The merge queue can be configured with different strategies for landing work.
+Check your rig's settings with `gt rig show {{ .RigName }}`.
+
+| Strategy | Description | Use Case |
+|----------|-------------|----------|
+| `direct_merge` | Merge directly to target branch (default) | Maintainer repos (steveyegge/*) |
+| `pr_to_main` | Create GitHub PR targeting main | External repos requiring review |
+| `pr_to_branch` | Create PR targeting a configured branch | Develop/staging workflows |
+| `direct_to_branch` | Merge to configured branch (not main) | Staging without PR requirement |
+
+**Your rig uses:** Check `{{ .RigName }}/settings/merge-queue.json` or `gt rig show`.
+
+**Strategy selection matters for:**
+- Whether you wait for PR approval before closing work beads
+- Whether PRs are automatically created or you merge directly
+- Which branch receives your merged commits
+
 ## CRITICAL: Sequential Rebase Protocol
 
 ```
