@@ -19,6 +19,29 @@ func TestAgentEnv_Mayor(t *testing.T) {
 	assertNotSet(t, env, "BEADS_NO_DAEMON")
 }
 
+// TestAgentEnv_CI verifies that CI=0 is set for all roles.
+// This prevents Ink (Claude Code's terminal UI) from detecting CI mode,
+// which can cause hangs in terminals like iTerm.
+// See: https://github.com/steveyegge/gastown/issues/322
+func TestAgentEnv_CI(t *testing.T) {
+	t.Parallel()
+	roles := []string{"mayor", "deacon", "witness", "refinery", "polecat", "crew", "boot"}
+
+	for _, role := range roles {
+		t.Run(role, func(t *testing.T) {
+			env := AgentEnv(AgentEnvConfig{
+				Role:      role,
+				Rig:       "testrig",
+				AgentName: "testagent",
+				TownRoot:  "/town",
+			})
+
+			// CI=0 must be set to prevent Ink from detecting CI mode
+			assertEnv(t, env, "CI", "0")
+		})
+	}
+}
+
 func TestAgentEnv_Witness(t *testing.T) {
 	t.Parallel()
 	env := AgentEnv(AgentEnvConfig{

@@ -44,6 +44,12 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 
 	env["GT_ROLE"] = cfg.Role
 
+	// CI=0 prevents Ink (Claude Code's terminal UI framework) from detecting CI mode.
+	// Some terminal emulators like iTerm may set or inherit CI=1, which causes Ink to
+	// fall into a non-interactive mode that can cause hangs and excessive resource usage.
+	// See: https://github.com/steveyegge/gastown/issues/322
+	env["CI"] = "0"
+
 	// Set role-specific variables
 	switch cfg.Role {
 	case "mayor":
