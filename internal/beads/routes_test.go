@@ -218,6 +218,90 @@ func TestResolveHookDir(t *testing.T) {
 	}
 }
 
+func TestGetRigPathForBeadID(t *testing.T) {
+	// Create a temporary directory with routes.jsonl
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Routes with multi-hyphen prefixes (the bug case)
+	routesContent := `{"prefix": "native-webview-", "path": "webview_native/mayor/rig"}
+{"prefix": "gt-", "path": "gastown/mayor/rig"}
+{"prefix": "hq-", "path": "."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		beadID   string
+		expected string
+	}{
+		{
+			name:     "multi-hyphen prefix matches correctly",
+			beadID:   "native-webview-kehs",
+			expected: filepath.Join(tmpDir, "webview_native/mayor/rig"),
+		},
+		{
+			name:     "single-hyphen prefix matches",
+			beadID:   "gt-abc123",
+			expected: filepath.Join(tmpDir, "gastown/mayor/rig"),
+		},
+		{
+			name:     "town-level bead returns townRoot",
+			beadID:   "hq-cv-abc",
+			expected: tmpDir,
+		},
+		{
+			name:     "unknown prefix returns empty",
+			beadID:   "unknown-bead",
+			expected: "",
+		},
+		{
+			name:     "empty beadID returns empty",
+			beadID:   "",
+			expected: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := GetRigPathForBeadID(tmpDir, tc.beadID)
+			if result != tc.expected {
+				t.Errorf("GetRigPathForBeadID(%q, %q) = %q, want %q",
+					tmpDir, tc.beadID, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestGetRigPathForBeadID_LongestPrefixWins(t *testing.T) {
+	// Test that when multiple prefixes could match, the longest one wins
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both "native-" and "native-webview-" could match "native-webview-kehs"
+	// The longer prefix should win
+	routesContent := `{"prefix": "native-", "path": "native_general/mayor/rig"}
+{"prefix": "native-webview-", "path": "webview_native/mayor/rig"}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := GetRigPathForBeadID(tmpDir, "native-webview-kehs")
+	expected := filepath.Join(tmpDir, "webview_native/mayor/rig")
+	if result != expected {
+		t.Errorf("GetRigPathForBeadID should match longest prefix: got %q, want %q", result, expected)
+	}
+}
+
 func TestAgentBeadIDsWithPrefix(t *testing.T) {
 	tests := []struct {
 		name     string

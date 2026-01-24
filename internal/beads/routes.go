@@ -198,6 +198,43 @@ func FindConflictingPrefixes(beadsDir string) (map[string][]string, error) {
 	return conflicts, nil
 }
 
+// GetRigPathForBeadID returns the rig path for a bead ID by matching against routes.jsonl.
+// Unlike GetRigPathForPrefix which requires an exact prefix match, this function uses
+// strings.HasPrefix to find the route whose prefix matches the beginning of the bead ID.
+// When multiple prefixes could match, the longest matching prefix wins.
+// Returns empty string if no matching route is found.
+func GetRigPathForBeadID(townRoot, beadID string) string {
+	if beadID == "" {
+		return ""
+	}
+
+	beadsDir := filepath.Join(townRoot, ".beads")
+	routes, err := LoadRoutes(beadsDir)
+	if err != nil || routes == nil {
+		return ""
+	}
+
+	// Find the longest matching prefix
+	var bestMatch *Route
+	for i := range routes {
+		r := &routes[i]
+		if strings.HasPrefix(beadID, r.Prefix) {
+			if bestMatch == nil || len(r.Prefix) > len(bestMatch.Prefix) {
+				bestMatch = r
+			}
+		}
+	}
+
+	if bestMatch == nil {
+		return ""
+	}
+
+	if bestMatch.Path == "." {
+		return townRoot // Town-level beads
+	}
+	return filepath.Join(townRoot, bestMatch.Path)
+}
+
 // ExtractPrefix extracts the prefix from a bead ID.
 // For example, "ap-qtsup.16" returns "ap-", "hq-cv-abc" returns "hq-".
 // Returns empty string if no valid prefix found (empty input, no hyphen,
