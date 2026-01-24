@@ -227,21 +227,15 @@ func (d *Daemon) heartbeat(state *State) {
 		d.logger.Printf("Deacon patrol disabled in config, skipping")
 	}
 
-	// 2. Poke Boot for intelligent triage (stuck/nudge/interrupt)
-	// Boot handles nuanced "is Deacon responsive" decisions
+	// 2. Run Boot triage (checks Deacon health: session exists + heartbeat fresh)
+	// Boot handles "is Deacon responsive" decisions using mechanical (non-Claude) triage.
+	// This replaces the previous belt-and-suspenders checkDeaconHeartbeat() call.
 	// Only run if Deacon patrol is enabled
 	if IsPatrolEnabled(d.patrolConfig, "deacon") {
 		d.ensureBootRunning()
 	}
 
-	// 3. Direct Deacon heartbeat check (belt-and-suspenders)
-	// Boot may not detect all stuck states; this provides a fallback
-	// Only run if Deacon patrol is enabled
-	if IsPatrolEnabled(d.patrolConfig, "deacon") {
-		d.checkDeaconHeartbeat()
-	}
-
-	// 4. Ensure Witnesses are running for all rigs (restart if dead)
+	// 3. Ensure Witnesses are running for all rigs (restart if dead)
 	// Check patrol config - can be disabled in mayor/daemon.json
 	if IsPatrolEnabled(d.patrolConfig, "witness") {
 		d.ensureWitnessesRunning()
@@ -249,7 +243,7 @@ func (d *Daemon) heartbeat(state *State) {
 		d.logger.Printf("Witness patrol disabled in config, skipping")
 	}
 
-	// 5. Ensure Refineries are running for all rigs (restart if dead)
+	// 4. Ensure Refineries are running for all rigs (restart if dead)
 	// Check patrol config - can be disabled in mayor/daemon.json
 	if IsPatrolEnabled(d.patrolConfig, "refinery") {
 		d.ensureRefineriesRunning()
@@ -257,27 +251,25 @@ func (d *Daemon) heartbeat(state *State) {
 		d.logger.Printf("Refinery patrol disabled in config, skipping")
 	}
 
-	// 6. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
+	// 5. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
 	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
 	// Uses regex-based WaitForRuntimeReady, which is acceptable for daemon bootstrap.
 	d.triggerPendingSpawns()
 
-	// 7. Process lifecycle requests
+	// 6. Process lifecycle requests
 	d.processLifecycleRequests()
 
-	// 8. (Removed) Stale agent check - violated "discover, don't track"
-
-	// 9. Check for GUPP violations (agents with work-on-hook not progressing)
+	// 7. Check for GUPP violations (agents with work-on-hook not progressing)
 	d.checkGUPPViolations()
 
-	// 10. Check for orphaned work (assigned to dead agents)
+	// 8. Check for orphaned work (assigned to dead agents)
 	d.checkOrphanedWork()
 
-	// 11. Check polecat session health (proactive crash detection)
+	// 9. Check polecat session health (proactive crash detection)
 	// This validates tmux sessions are still alive for polecats with work-on-hook
 	d.checkPolecatSessionHealth()
 
-	// 12. Clean up orphaned claude subagent processes (memory leak prevention)
+	// 10. Clean up orphaned claude subagent processes (memory leak prevention)
 	// These are Task tool subagents that didn't clean up after completion.
 	// This is a safety net - Deacon patrol also does this more frequently.
 	d.cleanupOrphanedProcesses()
@@ -300,42 +292,32 @@ func (d *Daemon) getDeaconSessionName() string {
 	return session.DeaconSessionName()
 }
 
-// ensureBootRunning spawns Boot to triage the Deacon.
+// ensureBootRunning runs Boot triage to check on the Deacon.
 // Boot is a fresh-each-tick watchdog that decides whether to start/wake/nudge
-// the Deacon, centralizing the "when to wake" decision in an agent.
-// In degraded mode (no tmux), falls back to mechanical checks.
+// the Deacon, centralizing the "when to wake" decision.
+//
+// IMPORTANT: We always use degraded (mechanical) mode to avoid Boot's Claude
+// session getting stuck waiting for user input. The mechanical triage is:
+// - Fast (milliseconds, not seconds waiting for Claude)
+// - Reliable (no interactive prompts that can block)
+// - Sufficient (checks heartbeat, restarts stuck Deacon)
 func (d *Daemon) ensureBootRunning() {
 	b := boot.New(d.config.TownRoot)
 
-	// Check if Boot is already running (recent marker)
+	// Check if Boot is already running
 	if b.IsRunning() {
-		d.logger.Println("Boot already running, skipping spawn")
+		d.logger.Println("Boot already running, skipping triage")
 		return
 	}
 
-	// Check for degraded mode
-	degraded := os.Getenv("GT_DEGRADED") == "true"
-	if degraded || !d.tmux.IsAvailable() {
-		// In degraded mode, run mechanical triage directly
-		d.logger.Println("Degraded mode: running mechanical Boot triage")
-		d.runDegradedBootTriage(b)
-		return
-	}
-
-	// Spawn Boot in a fresh tmux session
-	d.logger.Println("Spawning Boot for triage...")
-	if err := b.Spawn(""); err != nil {
-		d.logger.Printf("Error spawning Boot: %v, falling back to direct Deacon check", err)
-		// Fallback: ensure Deacon is running directly
-		d.ensureDeaconRunning()
-		return
-	}
-
-	d.logger.Println("Boot spawned successfully")
+	// Always use degraded (mechanical) triage - it's more reliable than spawning
+	// a Claude session that might ask questions and block.
+	d.logger.Println("Running Boot triage (mechanical mode)")
+	d.runDegradedBootTriage(b)
 }
 
-// runDegradedBootTriage performs mechanical Boot logic without AI reasoning.
-// This is for degraded mode when tmux is unavailable.
+// runDegradedBootTriage performs mechanical Boot triage without AI reasoning.
+// This checks both session existence AND heartbeat staleness.
 func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 	startTime := time.Now()
 	status := &boot.Status{
@@ -343,17 +325,56 @@ func (d *Daemon) runDegradedBootTriage(b *boot.Boot) {
 		StartedAt: startTime,
 	}
 
-	// Simple check: is Deacon session alive?
-	hasDeacon, err := d.tmux.HasSession(d.getDeaconSessionName())
+	deaconSession := d.getDeaconSessionName()
+
+	// Step 1: Check if Deacon session exists
+	hasDeacon, err := d.tmux.HasSession(deaconSession)
 	if err != nil {
 		d.logger.Printf("Error checking Deacon session: %v", err)
 		status.LastAction = "error"
 		status.Error = err.Error()
-	} else if !hasDeacon {
+		status.Running = false
+		status.CompletedAt = time.Now()
+		_ = b.SaveStatus(status)
+		return
+	}
+
+	if !hasDeacon {
+		// Deacon not running - start it
 		d.logger.Println("Deacon not running, starting...")
 		d.ensureDeaconRunning()
 		status.LastAction = "start"
 		status.Target = "deacon"
+		status.Running = false
+		status.CompletedAt = time.Now()
+		_ = b.SaveStatus(status)
+		return
+	}
+
+	// Step 2: Deacon exists - check heartbeat to detect stuck sessions
+	hb := deacon.ReadHeartbeat(d.config.TownRoot)
+	if hb != nil && hb.ShouldPoke() {
+		age := hb.Age()
+		if age > 30*time.Minute {
+			// Very stuck - restart the session
+			d.logger.Printf("Deacon heartbeat is %s old - restarting session", age.Round(time.Minute))
+			if err := d.tmux.KillSession(deaconSession); err == nil {
+				status.LastAction = "restart"
+				status.Target = "deacon-stuck"
+			} else {
+				d.logger.Printf("Error killing stuck Deacon: %v", err)
+				status.LastAction = "restart-failed"
+				status.Error = err.Error()
+			}
+		} else if age > 15*time.Minute {
+			// Stuck but not critically - nudge to wake up
+			d.logger.Printf("Deacon heartbeat is %s old - nudging session", age.Round(time.Minute))
+			_ = d.tmux.NudgeSession(deaconSession, "HEALTH_CHECK: heartbeat is stale, respond to confirm responsiveness")
+			status.LastAction = "nudge"
+			status.Target = "deacon-stale"
+		} else {
+			status.LastAction = "nothing"
+		}
 	} else {
 		status.LastAction = "nothing"
 	}

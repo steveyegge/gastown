@@ -23,7 +23,7 @@ Witnesses detect it and escalate to the Mayor.
 The Deacon's agent bead last_activity timestamp is updated during each patrol
 cycle. Witnesses check this timestamp to verify health."""
 formula = "mol-deacon-patrol"
-version = 8
+version = 10
 
 [[steps]]
 id = "inbox-check"
@@ -262,9 +262,59 @@ bd close <convoy-id> --reason "All tracked issues completed"
 **Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues). Use full IDs when checking."""
 
 [[steps]]
+id = "feed-stranded-convoys"
+title = "Feed stranded convoys"
+needs = ["check-convoy-completion"]
+description = """
+Find convoys with ready work but no workers and feed them.
+
+A convoy is "stranded" when it has open issues that are:
+- Status = open (not in_progress)
+- Not blocked (all dependencies met)
+- No assignee OR assignee session is dead
+
+This is the AUTONOMOUS WORK SPAWNING mechanism. Without this step, convoys
+with ready work will sit idle until someone manually slings the work.
+
+**Step 1: Check for stranded convoys**
+```bash
+gt convoy stranded --json
+```
+
+If no stranded convoys, skip to exit. Town is either at capacity or all work assigned.
+
+**Step 2: Check capacity**
+```bash
+# Count active polecats
+gt polecat list --json | jq 'length'
+```
+
+If at max capacity (default: 3 active polecats), skip feeding.
+Let current work complete before spawning more.
+
+**Step 3: Feed stranded convoys (one at a time)**
+For each stranded convoy (up to capacity):
+```bash
+# Dispatch convoy-feed to a dog
+gt sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
+```
+
+The mol-convoy-feed formula handles:
+- Picking the next ready issue from the convoy
+- Spawning a polecat to work on it
+- Updating issue assignment
+
+**Rate limiting:**
+- Feed at most 1 convoy per patrol cycle to avoid overwhelming the system
+- If multiple convoys are stranded, they'll be fed in subsequent cycles
+- This keeps the patrol loop responsive
+
+**Exit criteria:** One stranded convoy fed (if any), or skip if at capacity."""
+
+[[steps]]
 id = "resolve-external-deps"
 title = "Resolve external dependencies"
-needs = ["check-convoy-completion"]
+needs = ["feed-stranded-convoys"]
 description = """
 Resolve external dependencies across rigs.
 
@@ -474,9 +524,56 @@ No action needed - Witness is doing its job.
 investigate why the Witness isn't cleaning up properly."""
 
 [[steps]]
+id = "polecat-nudge"
+title = "Nudge idle polecats waiting at prompts"
+needs = ["zombie-scan"]
+description = """
+**WATCHDOG** - Detect and nudge polecats stuck waiting for user input.
+
+Claude Code sometimes pauses after completing actions, waiting for Enter to send
+the next command. This leaves polecats idle when they should be working.
+
+**Detection:**
+A polecat is "stuck waiting" if:
+- Session is running (tmux session alive)
+- Has hooked work (not idle)
+- No recent output (last activity > 2 minutes ago)
+- Prompt shows waiting input (the ❯ line has content but not sent)
+
+**Step 1: List active polecats**
+```bash
+gt polecat list cipherphall --json | jq '.[] | select(.state != "done")'
+```
+
+**Step 2: For each active polecat, check if stuck**
+```bash
+# Check last activity
+tmux capture-pane -t gt-cipherphall-<name> -p | tail -5
+# Look for: ❯ <some text>                                    ↵ send
+# This indicates Claude typed something but is waiting for Enter
+```
+
+**Step 3: Nudge stuck polecats**
+If you see a polecat waiting at a prompt with unsent text:
+```bash
+tmux send-keys -t gt-cipherphall-<name> Enter
+```
+
+**Step 4: Log nudges**
+```bash
+gt mail send overseer/ -s "Nudged polecat" -m "Sent Enter to <name> - was stuck waiting at prompt"
+```
+
+**Rate limiting:**
+- Only nudge each polecat once per patrol cycle
+- If same polecat is stuck multiple cycles, escalate to Mayor
+
+**Exit criteria:** All stuck polecats nudged (or none found)."""
+
+[[steps]]
 id = "plugin-run"
 title = "Execute registered plugins"
-needs = ["zombie-scan"]
+needs = ["polecat-nudge"]
 description = """
 Execute registered plugins.
 
@@ -632,9 +729,53 @@ Skip dispatch - nothing to do.
 **Exit criteria:** Orphan scan dispatched to dog (if needed)."""
 
 [[steps]]
+id = "stale-hooks-cleanup"
+title = "Clear stale hooked beads"
+needs = ["orphan-check"]
+description = """
+Clear beads stuck in 'hooked' status when their assignee is gone.
+
+Beads can get stuck in 'hooked' status when agents die, crash, or abandon work
+without properly releasing. This blocks the work from being picked up by other
+agents. The Deacon runs periodic cleanup to unhook these stale beads.
+
+**Step 1: Check for stale hooks**
+```bash
+gt deacon stale-hooks --dry-run
+```
+
+This finds hooked beads older than 1 hour where the assignee session is dead.
+
+**Step 2: If stale hooks found, clear them**
+```bash
+gt deacon stale-hooks
+```
+
+This automatically:
+- Finds hooked beads with dead assignees
+- Unhooks them (resets status to 'open')
+- Logs which beads were unhooked
+
+**Step 3: If stale hooks are cleared, notify**
+If any beads were unhooked, send a summary to the Mayor for visibility:
+```bash
+# Only if beads were actually unhooked
+gt mail send mayor/ -s "Stale hooks cleared" \
+  -m "Cleared N stale hooked beads. Work is now available for pickup."
+```
+
+**Why this matters:**
+Without this cleanup, stuck agents cause cascading stalls:
+- Mayor hooks a bead, then crashes → bead stays hooked forever
+- No other agent can pick up the work
+- Convoys stall waiting for the stuck work
+
+**Exit criteria:** All stale hooks cleared, work available for pickup."""
+
+[[steps]]
 id = "session-gc"
 title = "Detect cleanup needs"
-needs = ["orphan-check"]
+needs = ["stale-hooks-cleanup"]
 description = """
 **DETECT ONLY** - Check if cleanup is needed and dispatch to dog.
 
