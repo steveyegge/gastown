@@ -53,6 +53,12 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 		return result
 	}
 
+	if stale, reason := isStalePolecatDone(rigName, payload.PolecatName, msg); stale {
+		result.Handled = true
+		result.Action = fmt.Sprintf("ignored stale POLECAT_DONE for %s (%s)", payload.PolecatName, reason)
+		return result
+	}
+
 	// Handle PHASE_COMPLETE: recycle polecat (session ends but worktree stays)
 	// The polecat is registered as a waiter on the gate and will be re-dispatched
 	// when the gate closes via gt gate wake.
@@ -116,6 +122,47 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 	result.Action = fmt.Sprintf("created cleanup wisp %s for %s (needs manual cleanup: %s)", wispID, payload.PolecatName, nukeResult.Reason)
 
 	return result
+}
+
+func isStalePolecatDone(rigName, polecatName string, msg *mail.Message) (bool, string) {
+	if msg == nil {
+		return false, ""
+	}
+
+	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	t := tmux.NewTmux()
+	info, err := t.GetSessionInfo(sessionName)
+	if err != nil {
+		// Session not found or tmux not running - can't determine staleness, allow message
+		return false, ""
+	}
+	createdAt, err := parseTmuxSessionCreated(info.Created)
+	if err != nil {
+		return false, ""
+	}
+
+	return staleReasonForTimes(msg.Timestamp, createdAt)
+}
+
+func parseTmuxSessionCreated(created string) (time.Time, error) {
+	created = strings.TrimSpace(created)
+	if created == "" {
+		return time.Time{}, fmt.Errorf("empty session created time")
+	}
+	return time.ParseInLocation("2006-01-02 15:04:05", created, time.Local)
+}
+
+func staleReasonForTimes(messageTime, sessionCreated time.Time) (bool, string) {
+	if messageTime.IsZero() || sessionCreated.IsZero() {
+		return false, ""
+	}
+
+	if messageTime.Before(sessionCreated) {
+		reason := fmt.Sprintf("message=%s session_started=%s", messageTime.Format(time.RFC3339), sessionCreated.Format(time.RFC3339))
+		return true, reason
+	}
+
+	return false, ""
 }
 
 // HandleLifecycleShutdown processes a LIFECYCLE:Shutdown message.
