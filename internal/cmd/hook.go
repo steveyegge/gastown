@@ -96,6 +96,7 @@ var (
 	hookClear   bool
 	hookIfEmpty bool
 	hookUpsert  bool
+	hookAll     bool // --all: show all hooked beads (full queue)
 )
 
 func init() {
@@ -107,11 +108,13 @@ func init() {
 	hookCmd.Flags().BoolVar(&hookClear, "clear", false, "Clear your hook (alias for 'gt unhook')")
 	hookCmd.Flags().BoolVar(&hookIfEmpty, "if-empty", false, "Only hook if empty, exit 0 either way")
 	hookCmd.Flags().BoolVar(&hookUpsert, "upsert", false, "Replace existing hook, always succeed")
+	hookCmd.Flags().BoolVar(&hookAll, "all", false, "Show all hooked beads (full work queue)")
 
 	// --json flag for status output (used when no args, i.e., gt hook --json)
 	hookCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON (for status)")
 	hookStatusCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 	hookShowCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
+	hookShowCmd.Flags().BoolVar(&hookAll, "all", false, "Show all hooked beads (full work queue)")
 	hookCmd.AddCommand(hookStatusCmd)
 	hookCmd.AddCommand(hookShowCmd)
 
@@ -458,11 +461,17 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 
 	// JSON output
 	if moleculeJSON {
-		type compactInfo struct {
-			Agent  string `json:"agent"`
-			BeadID string `json:"bead_id,omitempty"`
-			Title  string `json:"title,omitempty"`
+		type beadInfo struct {
+			BeadID string `json:"bead_id"`
+			Title  string `json:"title"`
 			Status string `json:"status"`
+		}
+		type compactInfo struct {
+			Agent  string     `json:"agent"`
+			BeadID string     `json:"bead_id,omitempty"`
+			Title  string     `json:"title,omitempty"`
+			Status string     `json:"status"`
+			Queue  []beadInfo `json:"queue,omitempty"` // All hooked beads (with --all)
 		}
 		info := compactInfo{Agent: target}
 		if hookedBead != nil {
@@ -473,6 +482,13 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 			info.BeadID = hookedBeads[0].ID
 			info.Title = hookedBeads[0].Title
 			info.Status = hookedBeads[0].Status
+			// Include full queue when --all is set
+			if hookAll && len(hookedBeads) > 1 {
+				info.Queue = make([]beadInfo, len(hookedBeads))
+				for i, b := range hookedBeads {
+					info.Queue[i] = beadInfo{BeadID: b.ID, Title: b.Title, Status: b.Status}
+				}
+			}
 		} else {
 			info.Status = "empty"
 		}
@@ -483,6 +499,7 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 	// Compact one-line output
 	if hookedBead != nil {
 		fmt.Printf("%s: %s '%s' [%s]\n", target, hookedBead.ID, hookedBead.Title, hookedBead.Status)
+		// Note: when using agent bead's hook_bead, we only have one bead
 		return nil
 	}
 	if len(hookedBeads) == 0 {
@@ -490,8 +507,25 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Show all hooked beads when --all flag is set
+	if hookAll {
+		fmt.Printf("%s: %d hooked beads\n", target, len(hookedBeads))
+		for i, bead := range hookedBeads {
+			marker := " "
+			if i == 0 {
+				marker = "→" // Primary (first) bead
+			}
+			fmt.Printf("  %s %s '%s' [%s]\n", marker, bead.ID, bead.Title, bead.Status)
+		}
+		return nil
+	}
+
+	// Default: show only primary (first) bead
 	bead := hookedBeads[0]
 	fmt.Printf("%s: %s '%s' [%s]\n", target, bead.ID, bead.Title, bead.Status)
+	if len(hookedBeads) > 1 {
+		fmt.Printf("  (+%d more, use --all to see full queue)\n", len(hookedBeads)-1)
+	}
 	return nil
 }
 

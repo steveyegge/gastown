@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/base32"
@@ -1341,8 +1340,8 @@ type trackedIssueInfo struct {
 // properly handling external references.
 // Uses batched lookup to avoid N+1 subprocess calls.
 func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
-	// Read dependencies from JSONL (more reliable than sqlite3 CLI which may not be installed)
-	deps := getConvoyDependenciesFromJSONL(townBeads, convoyID)
+	// Read dependencies from SQLite (tracks dependencies are stored in dependencies table)
+	deps := getConvoyDependenciesFromSQLite(townBeads, convoyID)
 	if deps == nil {
 		return nil
 	}
@@ -1414,52 +1413,32 @@ type convoyDependency struct {
 	Type        string `json:"type"`
 }
 
-// getConvoyDependenciesFromJSONL reads the convoy's dependencies from the JSONL file.
-// JSONL files embed dependencies directly in issue records, making this more reliable
-// than sqlite3 CLI queries which may not be available on all systems.
-func getConvoyDependenciesFromJSONL(townBeads, convoyID string) []convoyDependency {
-	jsonlPath := filepath.Join(townBeads, "issues.jsonl")
-	file, err := os.Open(jsonlPath)
-	if err != nil {
+// getConvoyDependenciesFromSQLite reads the convoy's 'tracks' dependencies from SQLite.
+// Dependencies are stored in the dependencies table, not embedded in JSONL issue records.
+func getConvoyDependenciesFromSQLite(townBeads, convoyID string) []convoyDependency {
+	beadsDB := filepath.Join(townBeads, "beads.db")
+	if _, err := os.Stat(beadsDB); err != nil {
 		return nil
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	// Increase buffer size for large lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	// Query for 'tracks' type dependencies where the convoy is the issue_id
+	query := fmt.Sprintf(
+		`SELECT issue_id, depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`,
+		strings.ReplaceAll(convoyID, "'", "''"))
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		// Quick check: does this line contain our convoy ID?
-		if !bytes.Contains(line, []byte(convoyID)) {
-			continue
-		}
-
-		// Parse the issue record
-		var issue struct {
-			ID           string            `json:"id"`
-			Dependencies []convoyDependency `json:"dependencies"`
-		}
-		if err := json.Unmarshal(line, &issue); err != nil {
-			continue
-		}
-
-		// Found our convoy
-		if issue.ID == convoyID {
-			// Filter to only 'tracks' type dependencies
-			var tracksDeps []convoyDependency
-			for _, dep := range issue.Dependencies {
-				if dep.Type == "tracks" {
-					tracksDeps = append(tracksDeps, dep)
-				}
-			}
-			return tracksDeps
-		}
+	queryCmd := exec.Command("sqlite3", "-json", beadsDB, query)
+	var stdout bytes.Buffer
+	queryCmd.Stdout = &stdout
+	if err := queryCmd.Run(); err != nil {
+		return nil
 	}
 
-	return nil
+	var deps []convoyDependency
+	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
+		return nil
+	}
+
+	return deps
 }
 
 // issueDetails holds basic issue info.
