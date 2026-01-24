@@ -26,6 +26,11 @@ type MergeQueueConfig struct {
 	// Enabled controls whether the merge queue is active.
 	Enabled bool `json:"enabled"`
 
+	// Strategy determines how work is landed after merge queue processing.
+	// Valid values: "direct_merge", "pr_to_main", "pr_to_branch", "direct_to_branch"
+	// Default: "direct_merge" (current behavior - merge directly to target branch)
+	Strategy string `json:"strategy"`
+
 	// TargetBranch is the default branch to merge to (e.g., "main").
 	TargetBranch string `json:"target_branch"`
 
@@ -52,12 +57,69 @@ type MergeQueueConfig struct {
 
 	// MaxConcurrent is the maximum number of MRs to process concurrently.
 	MaxConcurrent int `json:"max_concurrent"`
+
+	// PROptions contains settings for PR-based merge strategies.
+	// Only used when Strategy is "pr_to_main" or "pr_to_branch".
+	PROptions *PROptions `json:"pr_options,omitempty"`
+}
+
+// PROptions contains settings for PR-based merge strategies.
+type PROptions struct {
+	// Template is the path to a PR template file (relative to repo root).
+	Template string `json:"template,omitempty"`
+
+	// AutoMerge enables GitHub auto-merge when creating PR.
+	AutoMerge bool `json:"auto_merge,omitempty"`
+
+	// Labels are GitHub labels to apply to created PRs.
+	Labels []string `json:"labels,omitempty"`
+
+	// Reviewers are GitHub usernames to request review from.
+	Reviewers []string `json:"reviewers,omitempty"`
+
+	// Draft creates the PR as a draft PR.
+	Draft bool `json:"draft,omitempty"`
+}
+
+// Merge strategy constants
+const (
+	StrategyDirectMerge    = "direct_merge"
+	StrategyPRToMain       = "pr_to_main"
+	StrategyPRToBranch     = "pr_to_branch"
+	StrategyDirectToBranch = "direct_to_branch"
+)
+
+// ValidMergeStrategies returns all valid merge strategy values.
+func ValidMergeStrategies() []string {
+	return []string{
+		StrategyDirectMerge,
+		StrategyPRToMain,
+		StrategyPRToBranch,
+		StrategyDirectToBranch,
+	}
+}
+
+// IsValidMergeStrategy returns true if the given strategy is a valid merge strategy.
+func IsValidMergeStrategy(s string) bool {
+	for _, valid := range ValidMergeStrategies() {
+		if s == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// IsPRStrategy returns true if the given strategy creates GitHub PRs.
+// PR strategies require different handling (gh CLI, async merge via GitHub).
+func IsPRStrategy(s string) bool {
+	return s == StrategyPRToMain || s == StrategyPRToBranch
 }
 
 // DefaultMergeQueueConfig returns sensible defaults for merge queue configuration.
 func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
 		Enabled:              true,
+		Strategy:             StrategyDirectMerge,
 		TargetBranch:         "main",
 		IntegrationBranches:  true,
 		OnConflict:           "assign_back",
@@ -164,16 +226,18 @@ func (e *Engineer) LoadConfig() error {
 	// Parse merge_queue section into our config struct
 	// We need special handling for poll_interval (string -> Duration)
 	var mqRaw struct {
-		Enabled              *bool   `json:"enabled"`
-		TargetBranch         *string `json:"target_branch"`
-		IntegrationBranches  *bool   `json:"integration_branches"`
-		OnConflict           *string `json:"on_conflict"`
-		RunTests             *bool   `json:"run_tests"`
-		TestCommand          *string `json:"test_command"`
-		DeleteMergedBranches *bool   `json:"delete_merged_branches"`
-		RetryFlakyTests      *int    `json:"retry_flaky_tests"`
-		PollInterval         *string `json:"poll_interval"`
-		MaxConcurrent        *int    `json:"max_concurrent"`
+		Enabled              *bool       `json:"enabled"`
+		Strategy             *string     `json:"strategy"`
+		TargetBranch         *string     `json:"target_branch"`
+		IntegrationBranches  *bool       `json:"integration_branches"`
+		OnConflict           *string     `json:"on_conflict"`
+		RunTests             *bool       `json:"run_tests"`
+		TestCommand          *string     `json:"test_command"`
+		DeleteMergedBranches *bool       `json:"delete_merged_branches"`
+		RetryFlakyTests      *int        `json:"retry_flaky_tests"`
+		PollInterval         *string     `json:"poll_interval"`
+		MaxConcurrent        *int        `json:"max_concurrent"`
+		PROptions            *PROptions  `json:"pr_options"`
 	}
 
 	if err := json.Unmarshal(rawConfig.MergeQueue, &mqRaw); err != nil {
@@ -183,6 +247,9 @@ func (e *Engineer) LoadConfig() error {
 	// Apply non-nil values to config (preserving defaults for missing fields)
 	if mqRaw.Enabled != nil {
 		e.config.Enabled = *mqRaw.Enabled
+	}
+	if mqRaw.Strategy != nil {
+		e.config.Strategy = *mqRaw.Strategy
 	}
 	if mqRaw.TargetBranch != nil {
 		e.config.TargetBranch = *mqRaw.TargetBranch
@@ -214,6 +281,20 @@ func (e *Engineer) LoadConfig() error {
 			return fmt.Errorf("invalid poll_interval %q: %w", *mqRaw.PollInterval, err)
 		}
 		e.config.PollInterval = dur
+	}
+	if mqRaw.PROptions != nil {
+		e.config.PROptions = mqRaw.PROptions
+	}
+
+	// Validate strategy
+	if e.config.Strategy != "" && !IsValidMergeStrategy(e.config.Strategy) {
+		return fmt.Errorf("invalid merge strategy %q, valid values: %v", e.config.Strategy, ValidMergeStrategies())
+	}
+
+	// Validate PROptions is only set with PR strategies
+	if e.config.PROptions != nil && !IsPRStrategy(e.config.Strategy) {
+		// Not an error, but log a warning - PROptions will be ignored
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: pr_options configured but strategy %q doesn't use PRs (pr_options ignored)\n", e.config.Strategy)
 	}
 
 	return nil
@@ -253,9 +334,32 @@ func (e *Engineer) ProcessMR(ctx context.Context, mr *beads.Issue) ProcessResult
 	return e.doMerge(ctx, mrFields.Branch, mrFields.Target, mrFields.SourceIssue)
 }
 
-// doMerge performs the actual git merge operation.
-// This is the core merge logic shared by ProcessMR and ProcessMRFromQueue.
+// doMerge performs the merge operation based on the configured strategy.
+// It dispatches to the appropriate merge handler (direct or PR-based).
 func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue string) ProcessResult {
+	// Strategy dispatch: PR-based strategies use a different flow
+	strategy := e.config.Strategy
+	if strategy == "" {
+		strategy = StrategyDirectMerge // Default for backward compatibility
+	}
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Using merge strategy: %s\n", strategy)
+
+	switch strategy {
+	case StrategyPRToMain, StrategyPRToBranch:
+		return e.doPRMerge(ctx, branch, target, sourceIssue)
+	case StrategyDirectMerge, StrategyDirectToBranch:
+		return e.doDirectMerge(ctx, branch, target, sourceIssue)
+	default:
+		// Unknown strategy - fall back to direct merge with warning
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: unknown strategy %q, falling back to direct_merge\n", strategy)
+		return e.doDirectMerge(ctx, branch, target, sourceIssue)
+	}
+}
+
+// doDirectMerge performs a direct git merge operation (no PR).
+// This is the original merge logic for direct_merge and direct_to_branch strategies.
+func (e *Engineer) doDirectMerge(ctx context.Context, branch, target, sourceIssue string) ProcessResult {
 	// Step 1: Verify source branch exists locally (shared .repo.git with polecats)
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking local branch %s...\n", branch)
 	exists, err := e.git.BranchExists(branch)
@@ -372,6 +476,169 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 	return ProcessResult{
 		Success:     true,
 		MergeCommit: mergeCommit,
+	}
+}
+
+// doPRMerge creates a GitHub PR instead of direct merge.
+// This is used for pr_to_main and pr_to_branch strategies.
+// The PR is created via the gh CLI and the work is considered complete
+// once the PR is created (actual merge happens externally via GitHub).
+func (e *Engineer) doPRMerge(ctx context.Context, branch, target, sourceIssue string) ProcessResult {
+	// Step 1: Verify source branch exists locally
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking local branch %s...\n", branch)
+	exists, err := e.git.BranchExists(branch)
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to check branch %s: %v", branch, err),
+		}
+	}
+	if !exists {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("branch %s not found locally", branch),
+		}
+	}
+
+	// Step 2: Checkout and rebase the source branch onto target
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Checking out branch %s...\n", branch)
+	if err := e.git.Checkout(branch); err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to checkout branch %s: %v", branch, err),
+		}
+	}
+
+	// Fetch latest from origin
+	if err := e.git.Fetch("origin"); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: fetch failed: %v (continuing)\n", err)
+	}
+
+	// Rebase onto target branch
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Rebasing %s onto origin/%s...\n", branch, target)
+	if err := e.git.Rebase("origin/" + target); err != nil {
+		// Abort rebase on failure
+		_ = e.git.AbortRebase()
+		return ProcessResult{
+			Success:  false,
+			Conflict: true,
+			Error:    fmt.Sprintf("rebase failed (conflicts): %v", err),
+		}
+	}
+
+	// Step 3: Run tests if configured
+	if e.config.RunTests && e.config.TestCommand != "" {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Running tests: %s\n", e.config.TestCommand)
+		result := e.runTests(ctx)
+		if !result.Success {
+			return ProcessResult{
+				Success:     false,
+				TestsFailed: true,
+				Error:       result.Error,
+			}
+		}
+		_, _ = fmt.Fprintln(e.output, "[Engineer] Tests passed")
+	}
+
+	// Step 4: Push rebased branch to origin
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing rebased branch to origin/%s...\n", branch)
+	if err := e.git.Push("origin", branch, true); err != nil { // force push after rebase
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to push branch: %v", err),
+		}
+	}
+
+	// Step 5: Create PR via gh CLI
+	prURL, err := e.createGitHubPR(ctx, branch, target, sourceIssue)
+	if err != nil {
+		return ProcessResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to create PR: %v", err),
+		}
+	}
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Created PR: %s\n", prURL)
+
+	// For PR strategies, we return success but no merge commit
+	// The actual merge will happen via GitHub when the PR is approved
+	return ProcessResult{
+		Success:     true,
+		MergeCommit: prURL, // Store PR URL in MergeCommit field for tracking
+	}
+}
+
+// createGitHubPR creates a GitHub pull request using the gh CLI.
+// Returns the PR URL on success.
+func (e *Engineer) createGitHubPR(ctx context.Context, branch, target, sourceIssue string) (string, error) {
+	// Build the gh pr create command
+	args := []string{"pr", "create", "--base", target, "--head", branch}
+
+	// Add title from source issue or branch name
+	title := fmt.Sprintf("Merge %s into %s", branch, target)
+	if sourceIssue != "" {
+		// Try to get the issue title
+		if issue, err := e.beads.Show(sourceIssue); err == nil && issue != nil {
+			title = issue.Title
+		}
+	}
+	args = append(args, "--title", title)
+
+	// Build PR body
+	body := fmt.Sprintf("Automated PR from Gas Town refinery.\n\nSource issue: %s", sourceIssue)
+	args = append(args, "--body", body)
+
+	// Apply PR options if configured
+	if opts := e.config.PROptions; opts != nil {
+		if opts.Draft {
+			args = append(args, "--draft")
+		}
+		for _, label := range opts.Labels {
+			args = append(args, "--label", label)
+		}
+		for _, reviewer := range opts.Reviewers {
+			args = append(args, "--reviewer", reviewer)
+		}
+	}
+
+	// Execute gh pr create
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Dir = e.workDir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Running: gh %s\n", strings.Join(args, " "))
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("gh pr create failed: %v\nstderr: %s", err, stderr.String())
+	}
+
+	// Extract PR URL from stdout (gh pr create outputs the URL)
+	prURL := strings.TrimSpace(stdout.String())
+	if prURL == "" {
+		return "", fmt.Errorf("gh pr create did not return a PR URL")
+	}
+
+	// Enable auto-merge if configured
+	if e.config.PROptions != nil && e.config.PROptions.AutoMerge {
+		e.enableAutoMerge(ctx, prURL)
+	}
+
+	return prURL, nil
+}
+
+// enableAutoMerge enables GitHub auto-merge on a PR.
+func (e *Engineer) enableAutoMerge(ctx context.Context, prURL string) {
+	cmd := exec.CommandContext(ctx, "gh", "pr", "merge", prURL, "--auto", "--squash")
+	cmd.Dir = e.workDir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to enable auto-merge: %v\n", err)
+	} else {
+		_, _ = fmt.Fprintln(e.output, "[Engineer] Enabled auto-merge on PR")
 	}
 }
 
