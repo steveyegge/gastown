@@ -187,10 +187,13 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 		if pgid != "" && pgid != "0" && pgid != "1" {
 			// Kill process group with negative PGID (POSIX convention)
 			// Use SIGTERM first for graceful shutdown
-			_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
+			// NOTE: The "--" is CRITICAL! Without it, procps-ng kill (v4.0.4+)
+			// misparses "-PGID" as an option and ends up calling kill(-1) which
+			// kills ALL processes! See https://github.com/groblegark/gastown/blob/main/MURDER_INVESTIGATION.md
+			_ = exec.Command("kill", "-TERM", "--", "-"+pgid).Run()
 			time.Sleep(100 * time.Millisecond)
 			// Force kill any remaining processes in the group
-			_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+			_ = exec.Command("kill", "-KILL", "--", "-"+pgid).Run()
 		}
 
 		// Also walk the process tree for any descendants that might have called setsid()
@@ -388,9 +391,10 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 	pgid := getProcessGroupID(pid)
 	if pgid != "" && pgid != "0" && pgid != "1" {
 		// Kill process group with negative PGID (POSIX convention)
-		_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
+		// NOTE: The "--" is CRITICAL! See comment in KillSessionWithProcesses.
+		_ = exec.Command("kill", "-TERM", "--", "-"+pgid).Run()
 		time.Sleep(100 * time.Millisecond)
-		_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+		_ = exec.Command("kill", "-KILL", "--", "-"+pgid).Run()
 	}
 
 	// Also walk the process tree for any descendants that might have called setsid()
