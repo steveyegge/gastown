@@ -610,12 +610,19 @@ func ValidateAccountCredentials(configDir, accountHandle string) error {
 	if configDir == "" {
 		return nil // No account configured, let Claude handle auth
 	}
-	// Check for credentials.json in the config directory
-	credPath := filepath.Join(configDir, "credentials.json")
-	if _, err := os.Stat(credPath); os.IsNotExist(err) {
-		return fmt.Errorf("account '%s' has no credentials - run 'claude login' first", accountHandle)
+	// Check for credentials in the config directory
+	// Claude Code stores credentials in .credentials.json (with dot prefix)
+	// but some versions may use credentials.json (without dot)
+	credPaths := []string{
+		filepath.Join(configDir, ".credentials.json"),
+		filepath.Join(configDir, "credentials.json"),
 	}
-	return nil
+	for _, credPath := range credPaths {
+		if _, err := os.Stat(credPath); err == nil {
+			return nil // Found credentials
+		}
+	}
+	return fmt.Errorf("account '%s' has no credentials - run 'claude login' first", accountHandle)
 }
 
 // LoadMessagingConfig loads and validates a messaging configuration file.
