@@ -221,7 +221,21 @@ The `tracks` relation is:
 Use convoys for "what's the status of this batch of work?"
 Use rig status for "what's everyone in this rig working on?"
 
+## Known Issues and Limitations
+
+Investigation hq-7b9b91 revealed several issues when slinging multiple tasks to a single agent:
+
+| Issue | Description | Workaround |
+|-------|-------------|------------|
+| No batching | Each sling creates separate convoy | Use `gt convoy create` with multiple issues first |
+| Assignee NULL | Auto-convoys have no assignee | Query by tracked bead assignee |
+| Progress 0/0 | `gt convoy status` may show 0/0 | Use `bd show` to check tracked issues |
+| Queue hidden | Hook shows one task, not full queue | Manual tracking of slung work |
+
+For details, see: [Convoy Investigation Report](../reports/hq-7b9b91-convoy-investigation.md)
+
 ## See Also
 
 - [Propulsion Principle](propulsion-principle.md) - Worker execution model
 - [Mail Protocol](../design/mail-protocol.md) - Notification delivery
+- [Investigation Report](../reports/hq-7b9b91-convoy-investigation.md) - Multi-sling behavior study
