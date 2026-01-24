@@ -86,7 +86,52 @@ func TestIsTownLevelAddress(t *testing.T) {
 	}
 }
 
+func TestAddressToSessionIDs(t *testing.T) {
+	tests := []struct {
+		address string
+		want    []string
+	}{
+		// Town-level addresses - single session
+		{"mayor", []string{"hq-mayor"}},
+		{"mayor/", []string{"hq-mayor"}},
+		{"deacon", []string{"hq-deacon"}},
+
+		// Rig singletons - single session (no crew/polecat ambiguity)
+		{"gastown/refinery", []string{"gt-gastown-refinery"}},
+		{"beads/witness", []string{"gt-beads-witness"}},
+
+		// Ambiguous addresses - try both crew and polecat variants
+		{"gastown/Toast", []string{"gt-gastown-crew-Toast", "gt-gastown-Toast"}},
+		{"beads/ruby", []string{"gt-beads-crew-ruby", "gt-beads-ruby"}},
+
+		// Explicit crew/polecat - single session
+		{"gastown/crew/max", []string{"gt-gastown-crew-max"}},
+		{"gastown/polecats/nux", []string{"gt-gastown-polecats-nux"}},
+
+		// Invalid addresses - empty result
+		{"gastown/", nil},  // Empty target
+		{"gastown", nil},   // No slash
+		{"", nil},          // Empty address
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			got := addressToSessionIDs(tt.address)
+			if len(got) != len(tt.want) {
+				t.Errorf("addressToSessionIDs(%q) = %v, want %v", tt.address, got, tt.want)
+				return
+			}
+			for i, v := range got {
+				if v != tt.want[i] {
+					t.Errorf("addressToSessionIDs(%q)[%d] = %q, want %q", tt.address, i, v, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestAddressToSessionID(t *testing.T) {
+	// Deprecated wrapper - returns first candidate from addressToSessionIDs
 	tests := []struct {
 		address string
 		want    string
@@ -95,7 +140,7 @@ func TestAddressToSessionID(t *testing.T) {
 		{"mayor/", "hq-mayor"},
 		{"deacon", "hq-deacon"},
 		{"gastown/refinery", "gt-gastown-refinery"},
-		{"gastown/Toast", "gt-gastown-Toast"},
+		{"gastown/Toast", "gt-gastown-crew-Toast"}, // First candidate is crew
 		{"beads/witness", "gt-beads-witness"},
 		{"gastown/", ""},   // Empty target
 		{"gastown", ""},    // No slash
