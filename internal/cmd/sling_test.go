@@ -853,6 +853,55 @@ exit /b 0
 	}
 }
 
+// TestEscapeSQLString tests the SQL injection prevention helper.
+func TestEscapeSQLString(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "no_special_chars",
+			input: "gt-abc123",
+			want:  "gt-abc123",
+		},
+		{
+			name:  "single_quote",
+			input: "O'Reilly",
+			want:  "O''Reilly",
+		},
+		{
+			name:  "multiple_single_quotes",
+			input: "it's a 'test'",
+			want:  "it''s a ''test''",
+		},
+		{
+			name:  "sql_injection_attempt",
+			input: "'; DROP TABLE issues; --",
+			want:  "''; DROP TABLE issues; --",
+		},
+		{
+			name:  "empty_string",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "only_quote",
+			input: "'",
+			want:  "''",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := escapeSQLString(tt.input)
+			if got != tt.want {
+				t.Errorf("escapeSQLString(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestLooksLikeBeadID tests the bead ID pattern recognition function.
 // This ensures gt sling accepts bead IDs even when routing-based verification fails.
 // Fixes: gt sling bd-ka761 failing with 'not a valid bead or formula'

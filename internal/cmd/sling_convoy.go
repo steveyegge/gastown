@@ -22,6 +22,12 @@ func slingGenerateShortID() string {
 	return strings.ToLower(base32.StdEncoding.EncodeToString(b)[:5])
 }
 
+// escapeSQLString escapes a string for safe use in SQL queries.
+// This prevents SQL injection by escaping single quotes.
+func escapeSQLString(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
 // isTrackedByConvoy checks if an issue is already being tracked by a convoy.
 // Returns the convoy ID if tracked, empty string otherwise.
 // Supports both SQLite and Dolt backends via beads.RunQuery.
@@ -37,6 +43,8 @@ func isTrackedByConvoy(beadID string) string {
 
 	// Query dependencies where this bead is being tracked
 	// Also check for external reference format: external:rig:issue-id
+	// Escape beadID to prevent SQL injection
+	escapedID := escapeSQLString(beadID)
 	query := fmt.Sprintf(`
 		SELECT d.issue_id
 		FROM dependencies d
@@ -46,7 +54,7 @@ func isTrackedByConvoy(beadID string) string {
 		AND i.status = 'open'
 		AND (d.depends_on_id = '%s' OR d.depends_on_id LIKE '%%:%s')
 		LIMIT 1
-	`, beadID, beadID)
+	`, escapedID, escapedID)
 
 	// Use backend-aware query (works with SQLite or Dolt)
 	results, err := beads.RunQuery(townBeads, query)
