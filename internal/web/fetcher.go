@@ -1276,20 +1276,21 @@ func (f *LiveConvoyFetcher) FetchQueues() ([]QueueRow, error) {
 		}
 
 		// Parse counts from description (key: value format)
+		// Best-effort parsing - ignore Sscanf errors as missing/malformed data is acceptable
 		for _, line := range strings.Split(q.Description, "\n") {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "available_count:") {
-				fmt.Sscanf(line, "available_count: %d", &row.Available)
+				_, _ = fmt.Sscanf(line, "available_count: %d", &row.Available)
 			} else if strings.HasPrefix(line, "processing_count:") {
-				fmt.Sscanf(line, "processing_count: %d", &row.Processing)
+				_, _ = fmt.Sscanf(line, "processing_count: %d", &row.Processing)
 			} else if strings.HasPrefix(line, "completed_count:") {
-				fmt.Sscanf(line, "completed_count: %d", &row.Completed)
+				_, _ = fmt.Sscanf(line, "completed_count: %d", &row.Completed)
 			} else if strings.HasPrefix(line, "failed_count:") {
-				fmt.Sscanf(line, "failed_count: %d", &row.Failed)
+				_, _ = fmt.Sscanf(line, "failed_count: %d", &row.Failed)
 			} else if strings.HasPrefix(line, "status:") {
 				// Override with parsed status if present
 				var s string
-				fmt.Sscanf(line, "status: %s", &s)
+				_, _ = fmt.Sscanf(line, "status: %s", &s)
 				if s != "" {
 					row.Status = s
 				}

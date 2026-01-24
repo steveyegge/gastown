@@ -54,13 +54,8 @@ func TestConvoyTemplate_RendersConvoyList(t *testing.T) {
 		t.Error("Template should contain convoy ID hq-cv-def")
 	}
 
-	// Check titles are rendered
-	if !strings.Contains(output, "Feature X") {
-		t.Error("Template should contain title 'Feature X'")
-	}
-	if !strings.Contains(output, "Bugfix Y") {
-		t.Error("Template should contain title 'Bugfix Y'")
-	}
+	// The simplified dashboard no longer shows convoy titles in the table,
+	// only the convoy IDs. Titles are shown in expanded view.
 }
 
 func TestConvoyTemplate_LastActivityColors(t *testing.T) {
@@ -184,14 +179,16 @@ func TestConvoyTemplate_StatusIndicators(t *testing.T) {
 	data := ConvoyData{
 		Convoys: []ConvoyRow{
 			{
-				ID:     "hq-cv-open",
-				Title:  "Open Convoy",
-				Status: "open",
+				ID:         "hq-cv-active",
+				Title:      "Active Convoy",
+				Status:     "open",
+				WorkStatus: "active",
 			},
 			{
-				ID:     "hq-cv-closed",
-				Title:  "Closed Convoy",
-				Status: "closed",
+				ID:         "hq-cv-stuck",
+				Title:      "Stuck Convoy",
+				Status:     "open",
+				WorkStatus: "stuck",
 			},
 		},
 	}
@@ -204,12 +201,12 @@ func TestConvoyTemplate_StatusIndicators(t *testing.T) {
 
 	output := buf.String()
 
-	// Check status indicators
-	if !strings.Contains(output, "status-open") {
-		t.Error("Template should contain status-open class")
+	// Check work status badges are rendered (replaced status-open/closed classes)
+	if !strings.Contains(output, "badge-green") {
+		t.Error("Template should contain badge-green class for active status")
 	}
-	if !strings.Contains(output, "status-closed") {
-		t.Error("Template should contain status-closed class")
+	if !strings.Contains(output, "badge-red") {
+		t.Error("Template should contain badge-red class for stuck status")
 	}
 }
 
@@ -232,7 +229,7 @@ func TestConvoyTemplate_EmptyState(t *testing.T) {
 	output := buf.String()
 
 	// Check for empty state message
-	if !strings.Contains(output, "No convoys") {
+	if !strings.Contains(output, "No active convoys") {
 		t.Error("Template should show empty state message when no convoys")
 	}
 }
