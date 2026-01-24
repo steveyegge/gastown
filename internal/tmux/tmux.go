@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -185,12 +187,16 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 		// Note: Processes that called setsid() will have a new PGID and won't be killed here
 		pgid := getProcessGroupID(pid)
 		if pgid != "" && pgid != "0" && pgid != "1" {
-			// Kill process group with negative PGID (POSIX convention)
-			// Use SIGTERM first for graceful shutdown
-			_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
+			// Kill process group using syscall.Kill() directly.
+			// CRITICAL: We cannot use exec.Command("kill", "-TERM", "-"+pgid) because
+			// /usr/bin/kill does NOT support the -<pgid> syntax - it interprets any
+			// negative number as -1 (broadcast to ALL processes), which kills systemd!
+			// The shell builtin 'kill' supports -<pgid>, but the binary does not.
+			pgidInt, _ := strconv.Atoi(pgid)
+			_ = syscall.Kill(-pgidInt, syscall.SIGTERM) // negative PID = process group
 			time.Sleep(100 * time.Millisecond)
 			// Force kill any remaining processes in the group
-			_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+			_ = syscall.Kill(-pgidInt, syscall.SIGKILL)
 		}
 
 		// Also walk the process tree for any descendants that might have called setsid()
@@ -387,10 +393,15 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 	// - Are not direct children but stayed in the same process group
 	pgid := getProcessGroupID(pid)
 	if pgid != "" && pgid != "0" && pgid != "1" {
-		// Kill process group with negative PGID (POSIX convention)
-		_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
+		// Kill process group using syscall.Kill() directly.
+		// CRITICAL: We cannot use exec.Command("kill", "-TERM", "-"+pgid) because
+		// /usr/bin/kill does NOT support the -<pgid> syntax - it interprets any
+		// negative number as -1 (broadcast to ALL processes), which kills systemd!
+		// The shell builtin 'kill' supports -<pgid>, but the binary does not.
+		pgidInt, _ := strconv.Atoi(pgid)
+		_ = syscall.Kill(-pgidInt, syscall.SIGTERM) // negative PID = process group
 		time.Sleep(100 * time.Millisecond)
-		_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+		_ = syscall.Kill(-pgidInt, syscall.SIGKILL)
 	}
 
 	// Also walk the process tree for any descendants that might have called setsid()
