@@ -1,4 +1,4 @@
-package witness
+package session
 
 import (
 	"strings"
@@ -13,9 +13,9 @@ func TestParseTmuxSessionCreated(t *testing.T) {
 		t.Fatalf("parse expected: %v", err)
 	}
 
-	parsed, err := parseTmuxSessionCreated(input)
+	parsed, err := ParseTmuxSessionCreated(input)
 	if err != nil {
-		t.Fatalf("parseTmuxSessionCreated: %v", err)
+		t.Fatalf("ParseTmuxSessionCreated: %v", err)
 	}
 	if !parsed.Equal(expected) {
 		t.Fatalf("parsed time mismatch: got %v want %v", parsed, expected)
@@ -28,7 +28,7 @@ func TestStaleReasonForTimes(t *testing.T) {
 	older := now.Add(-2 * time.Minute)
 
 	t.Run("message before session", func(t *testing.T) {
-		stale, reason := staleReasonForTimes(older, newer)
+		stale, reason := StaleReasonForTimes(older, newer)
 		if !stale {
 			t.Fatalf("expected stale")
 		}
@@ -38,21 +38,21 @@ func TestStaleReasonForTimes(t *testing.T) {
 	})
 
 	t.Run("message after session", func(t *testing.T) {
-		stale, reason := staleReasonForTimes(newer, older)
+		stale, reason := StaleReasonForTimes(newer, older)
 		if stale || reason != "" {
 			t.Fatalf("expected not stale, got %v %q", stale, reason)
 		}
 	})
 
 	t.Run("zero message time", func(t *testing.T) {
-		stale, reason := staleReasonForTimes(time.Time{}, now)
+		stale, reason := StaleReasonForTimes(time.Time{}, now)
 		if stale || reason != "" {
 			t.Fatalf("expected not stale for zero message time, got %v %q", stale, reason)
 		}
 	})
 
 	t.Run("zero session time", func(t *testing.T) {
-		stale, reason := staleReasonForTimes(now, time.Time{})
+		stale, reason := StaleReasonForTimes(now, time.Time{})
 		if stale || reason != "" {
 			t.Fatalf("expected not stale for zero session time, got %v %q", stale, reason)
 		}

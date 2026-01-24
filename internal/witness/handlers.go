@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -130,39 +131,13 @@ func isStalePolecatDone(rigName, polecatName string, msg *mail.Message) (bool, s
 	}
 
 	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
-	t := tmux.NewTmux()
-	info, err := t.GetSessionInfo(sessionName)
+	createdAt, err := session.SessionCreatedAt(sessionName)
 	if err != nil {
 		// Session not found or tmux not running - can't determine staleness, allow message
 		return false, ""
 	}
-	createdAt, err := parseTmuxSessionCreated(info.Created)
-	if err != nil {
-		return false, ""
-	}
 
-	return staleReasonForTimes(msg.Timestamp, createdAt)
-}
-
-func parseTmuxSessionCreated(created string) (time.Time, error) {
-	created = strings.TrimSpace(created)
-	if created == "" {
-		return time.Time{}, fmt.Errorf("empty session created time")
-	}
-	return time.ParseInLocation("2006-01-02 15:04:05", created, time.Local)
-}
-
-func staleReasonForTimes(messageTime, sessionCreated time.Time) (bool, string) {
-	if messageTime.IsZero() || sessionCreated.IsZero() {
-		return false, ""
-	}
-
-	if messageTime.Before(sessionCreated) {
-		reason := fmt.Sprintf("message=%s session_started=%s", messageTime.Format(time.RFC3339), sessionCreated.Format(time.RFC3339))
-		return true, reason
-	}
-
-	return false, ""
+	return session.StaleReasonForTimes(msg.Timestamp, createdAt)
 }
 
 // HandleLifecycleShutdown processes a LIFECYCLE:Shutdown message.

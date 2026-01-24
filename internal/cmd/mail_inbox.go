@@ -7,9 +7,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -289,6 +291,23 @@ func runMailArchive(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if mailArchiveStale {
+		if len(args) > 0 {
+			return errors.New("--stale cannot be combined with message IDs")
+		}
+		return runMailArchiveStale(mailbox, address)
+	}
+	if len(args) == 0 {
+		return errors.New("message ID required unless using --stale")
+	}
+	if mailArchiveDryRun {
+		fmt.Printf("%s Would archive %d message(s)\n", style.Dim.Render("(dry-run)"), len(args))
+		for _, msgID := range args {
+			fmt.Printf("  %s\n", style.Dim.Render(msgID))
+		}
+		return nil
+	}
+
 	// Archive all specified messages
 	archived := 0
 	var errors []string
@@ -316,6 +335,87 @@ func runMailArchive(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Archived %d messages\n", style.Bold.Render("✓"), archived)
 	}
 	return nil
+}
+
+type staleMessage struct {
+	Message *mail.Message
+	Reason  string
+}
+
+func runMailArchiveStale(mailbox *mail.Mailbox, address string) error {
+	identity, err := session.ParseAddress(address)
+	if err != nil {
+		return fmt.Errorf("determining session for %s: %w", address, err)
+	}
+
+	sessionName := identity.SessionName()
+	if sessionName == "" {
+		return fmt.Errorf("could not determine session name for %s", address)
+	}
+
+	sessionStart, err := session.SessionCreatedAt(sessionName)
+	if err != nil {
+		return fmt.Errorf("getting session start time for %s: %w", sessionName, err)
+	}
+
+	messages, err := mailbox.List()
+	if err != nil {
+		return fmt.Errorf("listing messages: %w", err)
+	}
+
+	staleMessages := staleMessagesForSession(messages, sessionStart)
+	if mailArchiveDryRun {
+		if len(staleMessages) == 0 {
+			fmt.Printf("%s No stale messages found\n", style.Success.Render("✓"))
+			return nil
+		}
+		fmt.Printf("%s Would archive %d stale message(s):\n", style.Dim.Render("(dry-run)"), len(staleMessages))
+		for _, stale := range staleMessages {
+			fmt.Printf("  %s %s\n", style.Dim.Render(stale.Message.ID), stale.Message.Subject)
+		}
+		return nil
+	}
+
+	if len(staleMessages) == 0 {
+		fmt.Printf("%s No stale messages to archive\n", style.Success.Render("✓"))
+		return nil
+	}
+
+	archived := 0
+	var errors []string
+	for _, stale := range staleMessages {
+		if err := mailbox.Delete(stale.Message.ID); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", stale.Message.ID, err))
+		} else {
+			archived++
+		}
+	}
+
+	if len(errors) > 0 {
+		fmt.Printf("%s Archived %d/%d stale messages\n", style.Bold.Render("⚠"), archived, len(staleMessages))
+		for _, e := range errors {
+			fmt.Printf("  Error: %s\n", e)
+		}
+		return fmt.Errorf("failed to archive %d stale messages", len(errors))
+	}
+
+	if archived == 1 {
+		fmt.Printf("%s Stale message archived\n", style.Bold.Render("✓"))
+	} else {
+		fmt.Printf("%s Archived %d stale messages\n", style.Bold.Render("✓"), archived)
+	}
+	return nil
+}
+
+func staleMessagesForSession(messages []*mail.Message, sessionStart time.Time) []staleMessage {
+	var staleMessages []staleMessage
+	for _, msg := range messages {
+		stale, reason := session.StaleReasonForTimes(msg.Timestamp, sessionStart)
+		if stale {
+			staleMessages = append(staleMessages, staleMessage{Message: msg, Reason: reason})
+		}
+	}
+	return staleMessages
 }
 
 func runMailMarkRead(cmd *cobra.Command, args []string) error {
