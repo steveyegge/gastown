@@ -21,6 +21,8 @@ Witness                    Refinery                      Git
    │                          │                           │
    │                    (run tests)                       │
    │                          │                           │
+   │                    (CODE REVIEW) ◄── NEW GATE        │
+   │                          │                           │
    │                    (if pass)                         │
    │                          │ merge & push              │
    │                          │──────────────────────────>│
@@ -33,7 +35,7 @@ Witness                    Refinery                      Git
 After successful merge, Refinery sends MERGED mail back to Witness so it can
 complete cleanup (nuke the polecat worktree)."""
 formula = "mol-refinery-patrol"
-version = 4
+version = 5
 
 [[steps]]
 id = "inbox-check"
@@ -218,7 +220,7 @@ needs = ["run-tests"]
 description = """
 **VERIFICATION GATE**: This step enforces the Beads Promise.
 
-If tests PASSED: This step auto-completes. Proceed to merge.
+If tests PASSED: This step auto-completes. Proceed to code-review.
 
 If tests FAILED:
 1. Diagnose: Is this a branch regression or pre-existing on main?
@@ -230,7 +232,7 @@ If tests FAILED:
    - Option A: Fix it yourself (you're the Engineer!)
    - Option B: File a bead: bd create --type=bug --priority=1 --title="..."
 
-**GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
+**GATE REQUIREMENT**: You CANNOT proceed to code-review without:
 - Tests passing, OR
 - Fix committed, OR
 - Bead filed for the failure
@@ -238,9 +240,76 @@ If tests FAILED:
 This is non-negotiable. Never disavow. Never "note and proceed." """
 
 [[steps]]
+id = "code-review"
+title = "Review code before merge"
+needs = ["handle-failures"]
+description = """
+**QUALITY GATE**: Review the code changes before merging to main.
+
+This step ensures code quality and security before changes land on main.
+You are the last line of defense before code enters production.
+
+**Step 1: View the changes**
+```bash
+git diff origin/main...HEAD --stat    # Overview of changed files
+git diff origin/main...HEAD           # Full diff
+```
+
+**Step 2: Review checklist**
+
+| Category | What to Check | Action if Found |
+|----------|---------------|-----------------|
+| **Security** | Hardcoded secrets, API keys, credentials | REJECT - notify polecat |
+| **Security** | SQL injection, XSS, command injection risks | REJECT - notify polecat |
+| **Security** | Insecure deserialization, path traversal | REJECT - notify polecat |
+| **Quality** | Obvious code duplication | COMMENT - note in summary |
+| **Quality** | Overly complex logic (can be simplified) | COMMENT - note in summary |
+| **Quality** | Poor naming (unclear variables/functions) | COMMENT - note in summary |
+| **Architecture** | Violates existing patterns in codebase | COMMENT or REJECT by severity |
+| **Architecture** | Introduces circular dependencies | REJECT - notify polecat |
+| **Tests** | New functionality lacks test coverage | COMMENT - note in summary |
+| **Tests** | Tests are flaky or non-deterministic | REJECT - notify polecat |
+| **Financial** | Calculation logic changes | Verify carefully, REJECT if uncertain |
+
+**Step 3: Make decision**
+
+**APPROVE** - Proceed to merge-push if:
+- No security issues found
+- No architectural violations
+- Code is reasonable quality (minor issues noted but not blocking)
+
+**REJECT** - Skip to loop-check if:
+- Security vulnerabilities found
+- Major architectural violations
+- Code quality too poor to merge
+
+**Step 4: If REJECT, notify polecat**
+```bash
+gt mail send <rig>/<polecat> -s "Code review: changes requested" -m "Branch: <branch>
+Issue: <issue-id>
+
+Review findings:
+<list issues found>
+
+Please address these issues and resubmit via gt done.
+The MR will be re-reviewed after fixes."
+```
+
+Do NOT close the MR bead on reject - polecat will fix and resubmit.
+
+**Step 5: Record review outcome**
+Track: review passed/rejected, issues found, polecat notified (if rejected)
+
+**GATE REQUIREMENT**: You CANNOT proceed to merge-push without:
+- Review PASSED (no blocking issues), OR
+- REJECT mail sent to polecat
+
+Add "Reviewed-by: refinery" to your merge summary."""
+
+[[steps]]
 id = "merge-push"
 title = "Merge and push to main"
-needs = ["handle-failures"]
+needs = ["code-review"]
 description = """
 Merge to main and push. CRITICAL: Notifications come IMMEDIATELY after push.
 
@@ -260,6 +329,7 @@ RIGHT NOW, before any cleanup, send MERGED mail to Witness:
 ```bash
 gt mail send <rig>/witness -s "MERGED <polecat-name>" -m "Branch: <branch>
 Issue: <issue-id>
+Reviewed-by: refinery
 Merged-At: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
@@ -321,6 +391,7 @@ More branches to process?
 **Entry paths:**
 - Normal: After successful merge-push
 - Conflict-skip: After process-branch created conflict-resolution task
+- Review-reject: After code-review sent rejection to polecat
 
 If yes: Return to process-branch with next branch.
 If no: Continue to generate-summary.
@@ -328,6 +399,7 @@ If no: Continue to generate-summary.
 **Track for this cycle:**
 - branches_merged: count and names of successfully merged branches
 - branches_conflict: count and names of branches skipped due to conflicts
+- branches_rejected: count and names of branches rejected in code review
 - conflict_tasks: IDs of conflict-resolution tasks created
 
 This tracking feeds into generate-summary for the patrol digest."""
@@ -343,22 +415,26 @@ Summarize this patrol cycle.
 - [ ] MERGED mail was sent to witness
 - [ ] MR bead was closed
 - [ ] MERGE_READY mail archived
+- [ ] Code review was performed
 
 If any notifications or archiving were missed, do them now!
 
 Include in summary:
 - Branches merged (count, names)
+- Code reviews performed (count - should match branches merged + rejected)
+- Review outcomes (approved, rejected with reasons)
 - MERGED mails sent (count - should match branches merged)
 - MR beads closed (count - should match branches merged)
 - MERGE_READY mails archived (count - should match branches merged)
 - Test results (pass/fail)
 - Branches with conflicts (count, names)
+- Branches rejected in review (count, names, reasons)
 - Conflict-resolution tasks created (IDs)
 - Issues filed (if any)
 - Any escalations sent
 
-**Conflict tracking is important** for monitoring MQ health. If many branches
-conflict, it may indicate main is moving too fast or branches are too stale.
+**Conflict and rejection tracking is important** for monitoring MQ health. If many branches
+conflict or get rejected, it may indicate training issues or main moving too fast.
 
 This becomes the digest when the patrol is squashed."""
 
@@ -455,7 +531,8 @@ If queue empty OR context HIGH OR good stopping point:
 - Use `gt handoff` for clean session transition:
 
 ```bash
-gt handoff -s "Patrol complete" -m "Merged X branches, Y tests passed.
+gt handoff -s "Patrol complete" -m "Merged X branches (Y reviewed), Z tests passed.
+Reviews: A approved, B rejected
 Queue: empty/N remaining
 Next: [any notes for successor]"
 ```
