@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +16,51 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// Command timeout constants
+const (
+	cmdTimeout      = 5 * time.Second // timeout for most commands
+	ghCmdTimeout    = 10 * time.Second // longer timeout for GitHub API calls
+	tmuxCmdTimeout  = 2 * time.Second  // short timeout for tmux queries
+)
+
+// runCmd executes a command with a timeout and returns stdout.
+// Returns empty buffer on timeout or error.
+func runCmd(timeout time.Duration, name string, args ...string) (*bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("%s timed out after %v", name, timeout)
+		}
+		return nil, err
+	}
+	return &stdout, nil
+}
+
+// runBdCmd executes a bd command with cmdTimeout in the specified beads directory.
+func runBdCmd(beadsDir string, args ...string) (*bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", args...)
+	cmd.Dir = beadsDir
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("bd timed out after %v", cmdTimeout)
+		}
+		return nil, err
+	}
+	return &stdout, nil
+}
 
 // LiveConvoyFetcher fetches convoy data from beads.
 type LiveConvoyFetcher struct {
@@ -39,14 +85,8 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 // FetchConvoys fetches all open convoys with their activity data.
 func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 	// List all open convoy-type issues
-	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = f.townBeads
-
-	var stdout bytes.Buffer
-	listCmd.Stdout = &stdout
-
-	if err := listCmd.Run(); err != nil {
+	stdout, err := runBdCmd(f.townBeads, "list", "--type=convoy", "--status=open", "--json")
+	if err != nil {
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}
 
@@ -161,13 +201,9 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 
 	// Query tracked dependencies from SQLite
 	safeConvoyID := strings.ReplaceAll(convoyID, "'", "''")
-	// #nosec G204 -- sqlite3 path is from trusted config, convoyID is escaped
-	queryCmd := exec.Command("sqlite3", "-json", dbPath,
-		fmt.Sprintf(`SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, safeConvoyID))
-
-	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
-	if err := queryCmd.Run(); err != nil {
+	query := fmt.Sprintf(`SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, safeConvoyID)
+	stdout, err := runCmd(cmdTimeout, "sqlite3", "-json", dbPath, query)
+	if err != nil {
 		return nil
 	}
 
@@ -242,12 +278,8 @@ func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*
 	args := append([]string{"show"}, issueIDs...)
 	args = append(args, "--json")
 
-	// #nosec G204 -- bd is a trusted internal tool, args are issue IDs
-	showCmd := exec.Command("bd", args...)
-	var stdout bytes.Buffer
-	showCmd.Stdout = &stdout
-
-	if err := showCmd.Run(); err != nil {
+	stdout, err := runCmd(cmdTimeout, "bd", args...)
+	if err != nil {
 		return result
 	}
 
@@ -340,11 +372,9 @@ func (f *LiveConvoyFetcher) getSessionActivityForAssignee(assignee string) *time
 
 	// Query tmux for session activity
 	// Format: session_activity returns unix timestamp
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}",
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}",
 		"-f", fmt.Sprintf("#{==:#{session_name},%s}", sessionName))
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	if err != nil {
 		return nil
 	}
 
@@ -374,10 +404,8 @@ func (f *LiveConvoyFetcher) getSessionActivityForAssignee(assignee string) *time
 func (f *LiveConvoyFetcher) getAllPolecatActivity() *time.Time {
 	// List all tmux sessions matching gt-*-* pattern (polecat sessions)
 	// Format: gt-{rig}-{polecat}
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}")
+	if err != nil {
 		return nil
 	}
 
@@ -510,16 +538,11 @@ type prResponse struct {
 
 // fetchPRsForRepo fetches open PRs for a single repo.
 func (f *LiveConvoyFetcher) fetchPRsForRepo(repoFull, repoShort string) ([]MergeQueueRow, error) {
-	// #nosec G204 -- gh is a trusted CLI, repo is from registered rigs config
-	cmd := exec.Command("gh", "pr", "list",
+	stdout, err := runCmd(ghCmdTimeout, "gh", "pr", "list",
 		"--repo", repoFull,
 		"--state", "open",
 		"--json", "number,title,url,mergeable,statusCheckRollup")
-
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
+	if err != nil {
 		return nil, fmt.Errorf("fetching PRs for %s: %w", repoFull, err)
 	}
 
@@ -642,10 +665,8 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 	assignedIssues := f.getAssignedIssuesMap()
 
 	// Query all tmux sessions with window_activity for more accurate timing
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}")
+	if err != nil {
 		// tmux not running or no sessions
 		return nil, nil
 	}
@@ -748,14 +769,8 @@ func (f *LiveConvoyFetcher) getAssignedIssuesMap() map[string]assignedIssue {
 	result := make(map[string]assignedIssue)
 
 	// Query all in_progress issues (these are the ones being worked on)
-	listArgs := []string{"list", "--status=in_progress", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = f.townBeads
-
-	var stdout bytes.Buffer
-	listCmd.Stdout = &stdout
-
-	if err := listCmd.Run(); err != nil {
+	stdout, err := runBdCmd(f.townBeads, "list", "--status=in_progress", "--json")
+	if err != nil {
 		return result // Return empty map on error
 	}
 
@@ -806,10 +821,8 @@ func calculatePolecatWorkStatus(activityAge time.Duration, issueID, polecatName 
 
 // getPolecatStatusHint captures the last non-empty line from a polecat's pane.
 func (f *LiveConvoyFetcher) getPolecatStatusHint(sessionName string) string {
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-J")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "capture-pane", "-t", sessionName, "-p", "-J")
+	if err != nil {
 		return ""
 	}
 
@@ -894,14 +907,8 @@ func parseActivityTimestamp(s string) (int64, bool) {
 // FetchMail fetches recent mail messages from the beads database.
 func (f *LiveConvoyFetcher) FetchMail() ([]MailRow, error) {
 	// List all message-type issues (mail)
-	listArgs := []string{"list", "--type=message", "--json", "--limit=50"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = f.townBeads
-
-	var stdout bytes.Buffer
-	listCmd.Stdout = &stdout
-
-	if err := listCmd.Run(); err != nil {
+	stdout, err := runBdCmd(f.townBeads, "list", "--type=message", "--json", "--limit=50")
+	if err != nil {
 		return nil, fmt.Errorf("listing mail: %w", err)
 	}
 
@@ -1141,14 +1148,8 @@ func (f *LiveConvoyFetcher) FetchDogs() ([]DogRow, error) {
 // FetchEscalations returns open escalations needing attention.
 func (f *LiveConvoyFetcher) FetchEscalations() ([]EscalationRow, error) {
 	// List open escalations
-	listArgs := []string{"list", "--label=gt:escalation", "--status=open", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = f.townBeads
-
-	var stdout bytes.Buffer
-	listCmd.Stdout = &stdout
-
-	if err := listCmd.Run(); err != nil {
+	stdout, err := runBdCmd(f.townBeads, "list", "--label=gt:escalation", "--status=open", "--json")
+	if err != nil {
 		return nil, nil // No escalations or bd not available
 	}
 
@@ -1247,14 +1248,8 @@ func (f *LiveConvoyFetcher) FetchHealth() (*HealthRow, error) {
 // FetchQueues returns work queues and their status.
 func (f *LiveConvoyFetcher) FetchQueues() ([]QueueRow, error) {
 	// List queue-type beads
-	listArgs := []string{"list", "--type=queue", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = f.townBeads
-
-	var stdout bytes.Buffer
-	listCmd.Stdout = &stdout
-
-	if err := listCmd.Run(); err != nil {
+	stdout, err := runBdCmd(f.townBeads, "list", "--type=queue", "--json")
+	if err != nil {
 		return nil, nil // No queues or bd not available
 	}
 
@@ -1306,11 +1301,8 @@ func (f *LiveConvoyFetcher) FetchQueues() ([]QueueRow, error) {
 // FetchSessions returns active tmux sessions with role detection.
 func (f *LiveConvoyFetcher) FetchSessions() ([]SessionRow, error) {
 	// List tmux sessions
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
+	if err != nil {
 		return nil, nil // tmux not running or no sessions
 	}
 
@@ -1390,14 +1382,8 @@ func (f *LiveConvoyFetcher) FetchSessions() ([]SessionRow, error) {
 // FetchHooks returns all hooked beads (work pinned to agents).
 func (f *LiveConvoyFetcher) FetchHooks() ([]HookRow, error) {
 	// Query all beads with status=hooked
-	listArgs := []string{"list", "--status=hooked", "--json", "--limit=0"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = f.townBeads
-
-	var stdout bytes.Buffer
-	listCmd.Stdout = &stdout
-
-	if err := listCmd.Run(); err != nil {
+	stdout, err := runBdCmd(f.townBeads, "list", "--status=hooked", "--json", "--limit=0")
+	if err != nil {
 		return nil, nil // No hooked beads or bd not available
 	}
 
@@ -1452,11 +1438,8 @@ func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
 	}
 
 	// Check if gt-mayor tmux session exists
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
+	if err != nil {
 		// tmux not running or no sessions
 		return status, nil
 	}
@@ -1491,14 +1474,8 @@ func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
 // FetchIssues returns open issues (the backlog).
 func (f *LiveConvoyFetcher) FetchIssues() ([]IssueRow, error) {
 	// Query open issues (excluding internal types like messages, convoys, queues)
-	listArgs := []string{"list", "--status=open", "--json", "--limit=50"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = f.townBeads
-
-	var stdout bytes.Buffer
-	listCmd.Stdout = &stdout
-
-	if err := listCmd.Run(); err != nil {
+	stdout, err := runBdCmd(f.townBeads, "list", "--status=open", "--json", "--limit=50")
+	if err != nil {
 		return nil, nil // No issues or bd not available
 	}
 

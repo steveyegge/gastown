@@ -1,10 +1,16 @@
 package web
 
 import (
+	"context"
 	"html/template"
+	"log"
 	"net/http"
 	"sync"
+	"time"
 )
+
+// fetchTimeout is the maximum time allowed for all data fetches to complete.
+const fetchTimeout = 8 * time.Second
 
 // ConvoyFetcher defines the interface for fetching convoy data.
 type ConvoyFetcher interface {
@@ -48,6 +54,10 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Check for expand parameter (fullscreen a specific panel)
 	expandPanel := r.URL.Query().Get("expand")
 
+	// Create a timeout context for all fetches
+	ctx, cancel := context.WithTimeout(r.Context(), fetchTimeout)
+	defer cancel()
+
 	var (
 		convoys     []ConvoyRow
 		mergeQueue  []MergeQueueRow
@@ -66,25 +76,135 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		wg          sync.WaitGroup
 	)
 
-	// Run all fetches in parallel
+	// Run all fetches in parallel with error logging
 	wg.Add(14)
 
-	go func() { defer wg.Done(); convoys, _ = h.fetcher.FetchConvoys() }()
-	go func() { defer wg.Done(); mergeQueue, _ = h.fetcher.FetchMergeQueue() }()
-	go func() { defer wg.Done(); polecats, _ = h.fetcher.FetchPolecats() }()
-	go func() { defer wg.Done(); mail, _ = h.fetcher.FetchMail() }()
-	go func() { defer wg.Done(); rigs, _ = h.fetcher.FetchRigs() }()
-	go func() { defer wg.Done(); dogs, _ = h.fetcher.FetchDogs() }()
-	go func() { defer wg.Done(); escalations, _ = h.fetcher.FetchEscalations() }()
-	go func() { defer wg.Done(); health, _ = h.fetcher.FetchHealth() }()
-	go func() { defer wg.Done(); queues, _ = h.fetcher.FetchQueues() }()
-	go func() { defer wg.Done(); sessions, _ = h.fetcher.FetchSessions() }()
-	go func() { defer wg.Done(); hooks, _ = h.fetcher.FetchHooks() }()
-	go func() { defer wg.Done(); mayor, _ = h.fetcher.FetchMayor() }()
-	go func() { defer wg.Done(); issues, _ = h.fetcher.FetchIssues() }()
-	go func() { defer wg.Done(); activity, _ = h.fetcher.FetchActivity() }()
+	go func() {
+		defer wg.Done()
+		var err error
+		convoys, err = h.fetcher.FetchConvoys()
+		if err != nil {
+			log.Printf("dashboard: FetchConvoys failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		mergeQueue, err = h.fetcher.FetchMergeQueue()
+		if err != nil {
+			log.Printf("dashboard: FetchMergeQueue failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		polecats, err = h.fetcher.FetchPolecats()
+		if err != nil {
+			log.Printf("dashboard: FetchPolecats failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		mail, err = h.fetcher.FetchMail()
+		if err != nil {
+			log.Printf("dashboard: FetchMail failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		rigs, err = h.fetcher.FetchRigs()
+		if err != nil {
+			log.Printf("dashboard: FetchRigs failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		dogs, err = h.fetcher.FetchDogs()
+		if err != nil {
+			log.Printf("dashboard: FetchDogs failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		escalations, err = h.fetcher.FetchEscalations()
+		if err != nil {
+			log.Printf("dashboard: FetchEscalations failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		health, err = h.fetcher.FetchHealth()
+		if err != nil {
+			log.Printf("dashboard: FetchHealth failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		queues, err = h.fetcher.FetchQueues()
+		if err != nil {
+			log.Printf("dashboard: FetchQueues failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		sessions, err = h.fetcher.FetchSessions()
+		if err != nil {
+			log.Printf("dashboard: FetchSessions failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		hooks, err = h.fetcher.FetchHooks()
+		if err != nil {
+			log.Printf("dashboard: FetchHooks failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		mayor, err = h.fetcher.FetchMayor()
+		if err != nil {
+			log.Printf("dashboard: FetchMayor failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		issues, err = h.fetcher.FetchIssues()
+		if err != nil {
+			log.Printf("dashboard: FetchIssues failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		activity, err = h.fetcher.FetchActivity()
+		if err != nil {
+			log.Printf("dashboard: FetchActivity failed: %v", err)
+		}
+	}()
 
-	wg.Wait()
+	// Wait for fetches or timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All fetches completed
+	case <-ctx.Done():
+		log.Printf("dashboard: fetch timeout after %v", fetchTimeout)
+	}
 
 	// Compute summary from already-fetched data
 	summary := computeSummary(polecats, hooks, issues, convoys, escalations, activity)
