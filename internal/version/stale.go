@@ -107,12 +107,13 @@ func CheckStaleBinary(repoDir string) *StaleBinaryInfo {
 }
 
 // GetRepoRoot returns the git repository root for the gt source code.
-// It looks for the gastown repo by checking known paths.
+// The gt source lives in the gastown rig at $GT_ROOT/gastown/mayor/rig.
 func GetRepoRoot() (string, error) {
-	// First, check if GT_ROOT environment variable is set
+	// Check if GT_ROOT environment variable is set (agents always have this)
 	if gtRoot := os.Getenv("GT_ROOT"); gtRoot != "" {
-		if isGitRepo(gtRoot) && hasGastownMarker(gtRoot) {
-			return gtRoot, nil
+		rigPath := gtRoot + "/gastown/mayor/rig"
+		if hasGtSource(rigPath) {
+			return rigPath, nil
 		}
 	}
 
@@ -120,23 +121,22 @@ func GetRepoRoot() (string, error) {
 	home := os.Getenv("HOME")
 	if home != "" {
 		candidates := []string{
-			home + "/gt/gastown",
-			home + "/gastown",
-			home + "/src/gastown",
-			home + "/dev/gastown",
+			home + "/gt/gastown/mayor/rig",
+			home + "/gastown/mayor/rig",
+			home + "/src/gastown/mayor/rig",
 		}
 		for _, candidate := range candidates {
-			if isGitRepo(candidate) && hasGastownMarker(candidate) {
+			if hasGtSource(candidate) {
 				return candidate, nil
 			}
 		}
 	}
 
-	// Check if current directory is in a gastown repo
+	// Check if current directory is in the gt source repo
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	if output, err := cmd.Output(); err == nil {
 		root := strings.TrimSpace(string(output))
-		if hasGastownMarker(root) {
+		if hasGtSource(root) {
 			return root, nil
 		}
 	}
@@ -151,11 +151,11 @@ func isGitRepo(dir string) bool {
 	return cmd.Run() == nil
 }
 
-// hasGastownMarker checks if a directory looks like the gastown repo.
-func hasGastownMarker(dir string) bool {
-	// Check for cmd/gt directory which is unique to gastown
-	cmd := exec.Command("test", "-d", dir+"/cmd/gt")
-	return cmd.Run() == nil
+// hasGtSource checks if a directory contains the gt source code.
+// We look for cmd/gt/main.go as the definitive marker.
+func hasGtSource(dir string) bool {
+	_, err := os.Stat(dir + "/cmd/gt/main.go")
+	return err == nil
 }
 
 // SetCommit allows the cmd package to pass in the build-time commit.

@@ -69,6 +69,11 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 	// Get the root command name being run
 	cmdName := cmd.Name()
 
+	// Check for stale binary (warning only, doesn't block)
+	if !beadsExemptCommands[cmdName] {
+		checkStaleBinaryWarning()
+	}
+
 	// Check town root branch (warning only, non-blocking)
 	if !branchCheckExemptCommands[cmdName] {
 		warnIfTownRootOffMain()
