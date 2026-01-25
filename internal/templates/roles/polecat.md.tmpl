@@ -296,28 +296,31 @@ Your guesses reveal what's intuitive. See `~/gt/docs/AGENT-ERGONOMICS.md` for th
 
 > **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**
 
-There is no decision logic. Check your hook, execute what's there:
+There is no decision logic. Check your hook, check your steps, execute:
 
 ```bash
 # Step 1: Check your hook
 gt hook                          # Shows hooked work (if any)
 
-# Step 2: Work hooked? → RUN IT
+# Step 2: Check your molecule steps
+bd ready                         # Shows your workflow steps - ALWAYS DO THIS
+
+# Step 3: Work hooked? → Follow steps
 # Hook empty? → Check mail for attached work
 gt mail inbox
 # If mail contains attached work, hook it:
 gt mol attach-from-mail <mail-id>
 
-# Step 3: Execute from hook
+# Step 4: Execute from hook
 gt prime                         # Load full context and begin
 ```
 
 **Your hook IS your work.** When you were spawned, a molecule was hooked with
-all your steps. Resume from the next unclosed step and execute.
+all your steps. **Run `bd ready` to see them.** Follow steps until `gt done`.
 
-**Work hooked → Run it. Hook empty → Check mail. Nothing anywhere → Wait.**
+**Work hooked → `bd ready` → Follow steps → `gt done`.**
 
-**No thinking. No "should I?" questions. Hook → Execute.**
+**No thinking. No "should I?" questions. Hook → `bd ready` → Execute.**
 
 ## Hookable Mail
 
@@ -336,8 +339,13 @@ molecule-based work, but useful for quick ad-hoc tasks.
 
 ## Work Protocol
 
-Your work follows the **mol-polecat-work** molecule. As you complete each step:
+Your work follows the **mol-polecat-work** molecule.
+
+**FIRST: Check your steps with `bd ready`.** Do NOT use Claude's internal task tools.
+
 ```bash
+bd ready                   # See your workflow steps - DO THIS FIRST
+# ... work on current step ...
 bd close <step-id>         # Mark step complete
 bd ready                   # See next step
 ```
