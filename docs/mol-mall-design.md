@@ -472,5 +472,5 @@ gt formula install hop://molmall.acme.corp/formulas/@acme/mol-deploy@2.1.0
 ## Related Documents
 
 - [Formula Resolution](formula-resolution.md) - Local resolution order
-- [molecules.md](molecules.md) - Formula lifecycle (cook, pour, squash)
-- [understanding-gas-town.md](../../../docs/understanding-gas-town.md) - Gas Town architecture
+- [Molecules](concepts/molecules.md) - Formula lifecycle (cook, pour, squash)
+- [Overview](overview.md) - Gas Town architecture

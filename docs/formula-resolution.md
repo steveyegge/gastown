@@ -244,5 +244,5 @@ gt formula uninstall mol-code-review-strict
 ## Related Documents
 
 - [Mol Mall Design](mol-mall-design.md) - Registry architecture
-- [molecules.md](molecules.md) - Formula → Proto → Mol lifecycle
-- [understanding-gas-town.md](../../../docs/understanding-gas-town.md) - Gas Town architecture
+- [Molecules](concepts/molecules.md) - Formula → Proto → Mol lifecycle
+- [Overview](overview.md) - Gas Town architecture

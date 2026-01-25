@@ -198,7 +198,7 @@ const (
 
 ### Why Not Mail?
 
-Considered but rejected for dog<->boot communication:
+Considered but rejected for dog↔boot communication:
 - Mail is async, poll-based - adds latency
 - State files are simpler for local coordination
 - Dogs don't need complex inter-agent communication
