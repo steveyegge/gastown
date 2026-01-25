@@ -62,7 +62,7 @@ case "$cmd" in
     shift || true
     case "$sub" in
       wisp)
-        echo '{"new_epic_id":"gt-wisp-288"}'
+        echo '{"new_epic_id":"gt-wisp-288","id_mapping":{"mol-polecat-work":"gt-wisp-288","mol-polecat-work.load-context":"gt-wisp-288-1","mol-polecat-work.branch-setup":"gt-wisp-288-2","mol-polecat-work.preflight-tests":"gt-wisp-288-3","mol-polecat-work.implement":"gt-wisp-288-4","mol-polecat-work.self-review":"gt-wisp-288-5","mol-polecat-work.run-tests":"gt-wisp-288-6","mol-polecat-work.cleanup-workspace":"gt-wisp-288-7","mol-polecat-work.prepare-for-review":"gt-wisp-288-8","mol-polecat-work.submit-and-exit":"gt-wisp-288-9"}}'
         ;;
       bond)
         echo '{"root_id":"gt-wisp-288"}'
@@ -94,7 +94,7 @@ if "%cmd%"=="formula" (
 if "%cmd%"=="cook" exit /b 0
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (
-    echo {^"new_epic_id^":^"gt-wisp-288^"}
+    echo {^"new_epic_id^":^"gt-wisp-288^",^"id_mapping^":{^"mol-polecat-work^":^"gt-wisp-288^",^"mol-polecat-work.load-context^":^"gt-wisp-288-1^",^"mol-polecat-work.branch-setup^":^"gt-wisp-288-2^",^"mol-polecat-work.implement^":^"gt-wisp-288-3^"}}
     exit /b 0
   )
   if "%sub%"=="bond" (
@@ -182,7 +182,7 @@ case "$cmd" in
   mol)
     sub="$1"; shift || true
     case "$sub" in
-      wisp) echo '{"new_epic_id":"gt-wisp-skip"}';;
+      wisp) echo '{"new_epic_id":"gt-wisp-skip","id_mapping":{"mol-polecat-work":"gt-wisp-skip","mol-polecat-work.load-context":"gt-wisp-skip-1","mol-polecat-work.branch-setup":"gt-wisp-skip-2","mol-polecat-work.preflight-tests":"gt-wisp-skip-3","mol-polecat-work.implement":"gt-wisp-skip-4","mol-polecat-work.self-review":"gt-wisp-skip-5","mol-polecat-work.run-tests":"gt-wisp-skip-6","mol-polecat-work.cleanup-workspace":"gt-wisp-skip-7","mol-polecat-work.prepare-for-review":"gt-wisp-skip-8","mol-polecat-work.submit-and-exit":"gt-wisp-skip-9"}}';;
       bond) echo '{"root_id":"gt-wisp-skip"}';;
     esac;;
 esac
@@ -199,7 +199,7 @@ if "%cmd%"=="--no-daemon" (
 )
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (
-    echo {^"new_epic_id^":^"gt-wisp-skip^"}
+    echo {^"new_epic_id^":^"gt-wisp-skip^",^"id_mapping^":{^"mol-polecat-work^":^"gt-wisp-skip^",^"mol-polecat-work.load-context^":^"gt-wisp-skip-1^",^"mol-polecat-work.branch-setup^":^"gt-wisp-skip-2^",^"mol-polecat-work.implement^":^"gt-wisp-skip-3^"}}
     exit /b 0
   )
   if "%sub%"=="bond" (
@@ -379,7 +379,7 @@ case "$cmd" in
   mol)
     sub="$1"; shift || true
     case "$sub" in
-      wisp) echo '{"new_epic_id":"gt-wisp-var"}';;
+      wisp) echo '{"new_epic_id":"gt-wisp-var","id_mapping":{"mol-polecat-work":"gt-wisp-var","mol-polecat-work.load-context":"gt-wisp-var-1","mol-polecat-work.branch-setup":"gt-wisp-var-2","mol-polecat-work.preflight-tests":"gt-wisp-var-3","mol-polecat-work.implement":"gt-wisp-var-4","mol-polecat-work.self-review":"gt-wisp-var-5","mol-polecat-work.run-tests":"gt-wisp-var-6","mol-polecat-work.cleanup-workspace":"gt-wisp-var-7","mol-polecat-work.prepare-for-review":"gt-wisp-var-8","mol-polecat-work.submit-and-exit":"gt-wisp-var-9"}}';;
       bond) echo '{"root_id":"gt-wisp-var"}';;
     esac;;
 esac
@@ -397,7 +397,7 @@ if "%cmd%"=="--no-daemon" (
 if "%cmd%"=="cook" exit /b 0
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (
-    echo {^"new_epic_id^":^"gt-wisp-var^"}
+    echo {^"new_epic_id^":^"gt-wisp-var^",^"id_mapping^":{^"mol-polecat-work^":^"gt-wisp-var^",^"mol-polecat-work.load-context^":^"gt-wisp-var-1^",^"mol-polecat-work.branch-setup^":^"gt-wisp-var-2^",^"mol-polecat-work.implement^":^"gt-wisp-var-3^"}}
     exit /b 0
   )
   if "%sub%"=="bond" (

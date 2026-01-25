@@ -897,7 +897,7 @@ case "$cmd" in
     shift || true
     case "$sub" in
       wisp)
-        echo '{"new_epic_id":"gt-wisp-xyz"}'
+        echo '{"new_epic_id":"gt-wisp-xyz","id_mapping":{"mol-polecat-work":"gt-wisp-xyz","mol-polecat-work.load-context":"gt-wisp-xyz-1","mol-polecat-work.branch-setup":"gt-wisp-xyz-2","mol-polecat-work.preflight-tests":"gt-wisp-xyz-3","mol-polecat-work.implement":"gt-wisp-xyz-4","mol-polecat-work.self-review":"gt-wisp-xyz-5","mol-polecat-work.run-tests":"gt-wisp-xyz-6","mol-polecat-work.cleanup-workspace":"gt-wisp-xyz-7","mol-polecat-work.prepare-for-review":"gt-wisp-xyz-8","mol-polecat-work.submit-and-exit":"gt-wisp-xyz-9"}}'
         ;;
       bond)
         echo '{"root_id":"gt-wisp-xyz"}'
@@ -931,7 +931,7 @@ if "%cmd%"=="formula" (
 if "%cmd%"=="cook" exit /b 0
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (
-    echo {^"new_epic_id^":^"gt-wisp-xyz^"}
+    echo {^"new_epic_id^":^"gt-wisp-xyz^",^"id_mapping^":{^"mol-polecat-work^":^"gt-wisp-xyz^",^"mol-polecat-work.load-context^":^"gt-wisp-xyz-1^",^"mol-polecat-work.branch-setup^":^"gt-wisp-xyz-2^",^"mol-polecat-work.preflight-tests^":^"gt-wisp-xyz-3^",^"mol-polecat-work.implement^":^"gt-wisp-xyz-4^",^"mol-polecat-work.self-review^":^"gt-wisp-xyz-5^",^"mol-polecat-work.run-tests^":^"gt-wisp-xyz-6^",^"mol-polecat-work.cleanup-workspace^":^"gt-wisp-xyz-7^",^"mol-polecat-work.prepare-for-review^":^"gt-wisp-xyz-8^",^"mol-polecat-work.submit-and-exit^":^"gt-wisp-xyz-9^"}}
     exit /b 0
   )
   if "%sub%"=="bond" (
