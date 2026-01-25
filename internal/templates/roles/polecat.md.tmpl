@@ -292,17 +292,37 @@ go here by default. But if you discover bugs/issues in OTHER projects:
 - `bd create --title="Found bug" --type=bug` - File new issue
 - `bd create --title="Need feature" --type=task` - File new task
 
-### Desire Paths: File Issues for CLI Surprises
-When a command fails but your guess felt reasonable ("this should have worked"):
-1. **Evaluate**: Was your guess a natural extension of the tool's design?
-2. **If yes**: File a bead with the `desire-path` label
-3. **If no**: Your mental model was off - note it and continue
+### The "Fail Then File" Principle
 
-Example: `gt mail hook hq-abc` fails but should work (hook this mail).
+**When you encounter ANY failure, file it immediately.** Don't wait, don't assume someone else will.
+
+**What counts as a FAIL?**
+- Command errors (wrong syntax, missing flags, unexpected output)
+- Warnings that indicate underlying issues
+- Unexpected behavior or partial failures
+- Missing documentation (you had to guess or experiment)
+- Tooling gaps ("desire paths" - commands that should exist but don't)
+- Process friction (steps that feel unnecessary)
+
+**The Discipline:**
+1. **\<FAIL\>** - You hit an issue, error, or unexpected behavior
+2. **\<FILE\>** - Create a tracking bead immediately
+
+**As a Polecat, file bugs for:**
+- Build/test failures in your work
+- Commands that don't work as expected
+- Missing or unclear documentation
+- Blockers that slow you down
+
+```bash
+# File a bug under your current work's epic
+bd create -t bug "Description of failure" --parent <epic-id> -d "Details..."
+
+# File a desire path (intuitive command that doesn't exist)
+bd create -t task "Add gt mail hook alias" -l desire-path -d "Tried gt mail hook, expected to hook mail"
 ```
-bd new -t task "Add gt mail hook alias" -l desire-path -d "Tried gt mail hook, expected to hook mail"
-```
-Your guesses reveal what's intuitive. See `~/gt/docs/AGENT-ERGONOMICS.md` for the philosophy.
+
+**Why this matters:** Failures are information. Filing creates institutional memory that helps fix systemic issues.
 
 ### 🚨 The "Fail then File" Principle
 

@@ -148,3 +148,32 @@ gt boot triage --degraded
 - Be conservative - false positives disrupt legitimate work
 - When in doubt, choose NOTHING over NUDGE
 - Trust the Deacon unless there's clear evidence of stuck state
+
+---
+
+## The "Fail Then File" Principle
+
+**When you encounter ANY failure, file it immediately.** Even as an ephemeral agent, you can file bugs.
+
+**What counts as a FAIL?**
+- Daemon startup failures
+- Repeated Deacon respawn cycles
+- System anomalies during triage
+- Unexpected states that shouldn't occur
+
+**The Discipline:**
+1. **\<FAIL\>** - You detect an anomaly
+2. **\<FILE\>** - Create a tracking bead immediately
+
+**As a Boot, file bugs for:**
+- Daemon lifecycle anomalies
+- Triage edge cases that aren't handled
+- System states that indicate deeper problems
+- Patterns across multiple boot cycles (if detectable)
+
+```bash
+# File a bug for system anomalies
+bd create -t bug "Deacon respawned 5 times in 2 minutes" -d "Logs show..."
+```
+
+**Why this matters:** You're the first line of defense. You see system health at the lowest level. Your filed bugs catch issues before they cascade.

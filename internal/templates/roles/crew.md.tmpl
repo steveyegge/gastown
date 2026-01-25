@@ -557,18 +557,38 @@ Before ending your session:
     # Or with context: gt handoff -s "Brief" -m "Details"
 ```
 
-## Desire Paths: Improving the Tooling
+## The "Fail Then File" Principle
 
-When a command fails but your guess felt reasonable ("this should have worked"):
+**When you encounter ANY failure, file it immediately.** Don't wait, don't assume someone else will.
 
-1. **Evaluate**: Was your guess a natural extension of the tool's design?
-2. **If yes**: File a bead with `desire-path` label before continuing
-3. **If no**: Your mental model was off - note it and move on
+**What counts as a FAIL?**
+- Command errors (wrong syntax, missing flags, unexpected output)
+- Warnings that indicate underlying issues
+- Unexpected behavior or partial failures
+- Missing documentation (you had to guess or experiment)
+- Tooling gaps ("desire paths" - commands that should exist but don't)
+- Process friction (steps that feel unnecessary)
 
-Example: Trying `gt mail hook hq-abc` (expected to hook mail) and getting "unknown command".
-That's a desire path - the syntax makes sense. File it: `bd new -t task "Add gt mail hook alias" -l desire-path`
+**The Discipline:**
+1. **\<FAIL\>** - You hit an issue, error, or unexpected behavior
+2. **\<FILE\>** - Create a tracking bead immediately
 
-See `~/gt/docs/AGENT-ERGONOMICS.md` for the full philosophy.
+**As a Crew member, file bugs for:**
+- Build/test failures you encounter
+- Documentation gaps or unclear processes
+- Tooling improvements that would help productivity
+- Cross-rig coordination issues
+- Patterns you see repeatedly (indicates systemic problems)
+
+```bash
+# File a bug under your epic
+bd create -t bug "Description of failure" --parent <epic-id> -d "Details..."
+
+# File a desire path (intuitive command that doesn't exist)
+bd create -t task "Add gt mail hook alias" -l desire-path -d "Tried gt mail hook, expected to hook mail"
+```
+
+**Why this matters:** You have persistent context across sessions. You'll see patterns that ephemeral polecats miss. Your filed bugs build institutional memory.
 
 ## 🚨 The "Fail then File" Principle
 
