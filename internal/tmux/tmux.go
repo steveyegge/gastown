@@ -1385,6 +1385,19 @@ func (t *Tmux) ClearHistory(pane string) error {
 	return err
 }
 
+// SetRemainOnExit controls whether a pane stays around after its process exits.
+// When on, the pane remains with "[Exited]" status, allowing respawn-pane to restart it.
+// When off (default), the pane is destroyed when its process exits.
+// This is essential for handoff: set on before killing processes, so respawn-pane works.
+func (t *Tmux) SetRemainOnExit(pane string, on bool) error {
+	value := "on"
+	if !on {
+		value = "off"
+	}
+	_, err := t.run("set-option", "-t", pane, "remain-on-exit", value)
+	return err
+}
+
 // SwitchClient switches the current tmux client to a different session.
 // Used after remote recycle to move the user's view to the recycled session.
 func (t *Tmux) SwitchClient(targetSession string) error {

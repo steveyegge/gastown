@@ -205,11 +205,11 @@ func findNextReadyStep(b *beads.Beads, moleculeID string) (*beads.Issue, bool, e
 		return nil, true, nil // No steps = complete
 	}
 
-	// Build set of closed step IDs and collect open steps
+	// Build set of closed step IDs and collect open step IDs
 	// Note: "open" means not started. "in_progress" means someone's working on it.
 	// We only consider "open" steps as candidates for the next step.
 	closedIDs := make(map[string]bool)
-	var openSteps []*beads.Issue
+	var openStepIDs []string
 	hasNonClosedSteps := false
 
 	for _, child := range children {
@@ -217,7 +217,7 @@ func findNextReadyStep(b *beads.Beads, moleculeID string) (*beads.Issue, bool, e
 		case "closed":
 			closedIDs[child.ID] = true
 		case "open":
-			openSteps = append(openSteps, child)
+			openStepIDs = append(openStepIDs, child.ID)
 			hasNonClosedSteps = true
 		default:
 			// in_progress or other status - not closed, not available
@@ -230,17 +230,42 @@ func findNextReadyStep(b *beads.Beads, moleculeID string) (*beads.Issue, bool, e
 		return nil, true, nil
 	}
 
+	// No open steps to check
+	if len(openStepIDs) == 0 {
+		return nil, false, nil
+	}
+
+	// Fetch full details for open steps to get dependency info.
+	// bd list doesn't return dependencies, but bd show does.
+	openStepsMap, err := b.ShowMultiple(openStepIDs)
+	if err != nil {
+		return nil, false, fmt.Errorf("fetching step details: %w", err)
+	}
+
 	// Find ready steps (open steps with all dependencies closed)
-	for _, step := range openSteps {
+	for _, stepID := range openStepIDs {
+		step, ok := openStepsMap[stepID]
+		if !ok {
+			continue
+		}
+
+		// Check dependencies using the Dependencies field (from bd show),
+		// not DependsOn (which is empty from bd list).
+		// Only "blocks" type dependencies block progress - ignore "parent-child".
 		allDepsClosed := true
-		for _, depID := range step.DependsOn {
-			if !closedIDs[depID] {
+		hasBlockingDeps := false
+		for _, dep := range step.Dependencies {
+			if dep.DependencyType != "blocks" {
+				continue // Skip parent-child and other non-blocking relationships
+			}
+			hasBlockingDeps = true
+			if !closedIDs[dep.ID] {
 				allDepsClosed = false
 				break
 			}
 		}
 
-		if len(step.DependsOn) == 0 || allDepsClosed {
+		if !hasBlockingDeps || allDepsClosed {
 			return step, false, nil
 		}
 	}

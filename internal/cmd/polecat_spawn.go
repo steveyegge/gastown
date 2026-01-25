@@ -23,12 +23,11 @@ type SpawnedPolecatInfo struct {
 	PolecatName string // Polecat name (e.g., "Toast")
 	ClonePath   string // Path to polecat's git worktree
 	SessionName string // Tmux session name (e.g., "gt-gastown-p-Toast")
-	Pane        string // Tmux pane ID (empty if session start was delayed)
+	Pane        string // Tmux pane ID (empty until StartSession is called)
 
-	// Internal fields for delayed session start
-	sessionDelayed bool
-	account        string
-	agent          string
+	// Internal fields for deferred session start
+	account string
+	agent   string
 }
 
 // AgentID returns the agent identifier (e.g., "gastown/polecats/Toast")
@@ -36,19 +35,25 @@ func (s *SpawnedPolecatInfo) AgentID() string {
 	return fmt.Sprintf("%s/polecats/%s", s.RigName, s.PolecatName)
 }
 
-// SlingSpawnOptions contains options for spawning a polecat via sling.
-type SlingSpawnOptions struct {
-	Force             bool   // Force spawn even if polecat has uncommitted work
-	Account           string // Claude Code account handle to use
-	Create            bool   // Create polecat if it doesn't exist (currently always true for sling)
-	HookBead          string // Bead ID to set as hook_bead at spawn time (atomic assignment)
-	Agent             string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
-	DelaySessionStart bool   // If true, create worktree but don't start session (caller will start later)
+// SessionStarted returns true if the tmux session has been started.
+func (s *SpawnedPolecatInfo) SessionStarted() bool {
+	return s.Pane != ""
 }
 
-// SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
+// SlingSpawnOptions contains options for spawning a polecat via sling.
+type SlingSpawnOptions struct {
+	Force    bool   // Force spawn even if polecat has uncommitted work
+	Account  string // Claude Code account handle to use
+	Create   bool   // Create polecat if it doesn't exist (currently always true for sling)
+	HookBead string // Bead ID to set as hook_bead at spawn time (atomic assignment)
+	Agent    string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
+}
+
+// SpawnPolecatForSling creates a fresh polecat but defers session start.
 // This is used by gt sling when the target is a rig name.
-// The caller (sling) handles hook attachment and nudging.
+// Session start is deferred so that attached_molecule can be set before
+// the polecat runs gt prime on startup (prevents race condition).
+// Caller must call StartDelayedSession() after setting up the bead.
 func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolecatInfo, error) {
 	// Find workspace
 	townRoot, err := workspace.FindFromCwdOrError()
@@ -121,55 +126,11 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		return nil, fmt.Errorf("getting polecat after creation: %w", err)
 	}
 
-	// Resolve account for runtime config
-	accountsPath := constants.MayorAccountsPath(townRoot)
-	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, opts.Account)
-	if err != nil {
-		return nil, fmt.Errorf("resolving account: %w", err)
-	}
-	if accountHandle != "" {
-		fmt.Printf("Using account: %s\n", accountHandle)
-	}
-
-	// Start session (reuse tmux from manager)
+	// Get session manager for session name (session start is deferred)
 	polecatSessMgr := polecat.NewSessionManager(t, r)
-
-	// Check if already running (skip session start if DelaySessionStart is set)
-	running, _ := polecatSessMgr.IsRunning(polecatName)
-	if !running && !opts.DelaySessionStart {
-		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
-		startOpts := polecat.SessionStartOptions{
-			RuntimeConfigDir: claudeConfigDir,
-		}
-		if opts.Agent != "" {
-			cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, r.Path, "", opts.Agent)
-			if err != nil {
-				return nil, err
-			}
-			startOpts.Command = cmd
-		}
-		if err := polecatSessMgr.Start(polecatName, startOpts); err != nil {
-			return nil, fmt.Errorf("starting session: %w", err)
-		}
-		// Update agent_state from "spawning" to "working" now that session is running
-		if err := polecatMgr.SetAgentState(polecatName, "working"); err != nil {
-			// Non-fatal: log warning but continue
-			fmt.Printf("Warning: could not update agent state: %v\n", err)
-		}
-	} else if opts.DelaySessionStart {
-		fmt.Printf("Polecat %s created (session start delayed)\n", polecatName)
-	}
-
-	// Get session name and pane (pane may be empty if session start was delayed)
 	sessionName := polecatSessMgr.SessionName(polecatName)
-	var pane string
-	if !opts.DelaySessionStart {
-		var err error
-		pane, err = getSessionPane(sessionName)
-		if err != nil {
-			return nil, fmt.Errorf("getting pane for %s: %w", sessionName, err)
-		}
-	}
+
+	fmt.Printf("Polecat %s created (session start deferred)\n", polecatName)
 
 	fmt.Printf("%s Polecat %s spawned\n", style.Bold.Render("✓"), polecatName)
 
@@ -177,22 +138,21 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
 
 	return &SpawnedPolecatInfo{
-		RigName:       rigName,
-		PolecatName:   polecatName,
-		ClonePath:     polecatObj.ClonePath,
-		SessionName:   sessionName,
-		Pane:          pane,
-		sessionDelayed: opts.DelaySessionStart,
-		account:       opts.Account,
-		agent:         opts.Agent,
+		RigName:     rigName,
+		PolecatName: polecatName,
+		ClonePath:   polecatObj.ClonePath,
+		SessionName: sessionName,
+		Pane:        "", // Empty until StartSession is called
+		account:     opts.Account,
+		agent:       opts.Agent,
 	}, nil
 }
 
-// StartDelayedSession starts the session for a polecat that was spawned with DelaySessionStart.
+// StartSession starts the tmux session for a spawned polecat.
 // Returns the pane ID after session start.
-func (s *SpawnedPolecatInfo) StartDelayedSession() (string, error) {
-	if !s.sessionDelayed {
-		return s.Pane, nil // Session already started
+func (s *SpawnedPolecatInfo) StartSession() (string, error) {
+	if s.SessionStarted() {
+		return s.Pane, nil
 	}
 
 	townRoot, err := workspace.FindFromCwdOrError()
@@ -254,7 +214,6 @@ func (s *SpawnedPolecatInfo) StartDelayedSession() (string, error) {
 	}
 
 	s.Pane = pane
-	s.sessionDelayed = false
 	return pane, nil
 }
 

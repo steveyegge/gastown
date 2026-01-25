@@ -19,27 +19,31 @@ import (
 // processes and avoids killing legitimate short-lived subagents.
 const minOrphanAge = 60
 
-// getGasTownSessionPIDs returns a set of PIDs belonging to valid Gas Town tmux sessions.
-// This prevents killing Claude processes that are part of witness/refinery/deacon sessions
+// getTmuxSessionPIDs returns a set of PIDs belonging to ANY tmux session.
+// This prevents killing Claude processes that are running in tmux sessions,
 // even if they temporarily show TTY "?" during startup or session transitions.
-func getGasTownSessionPIDs() map[int]bool {
+//
+// CRITICAL: We protect ALL tmux sessions, not just Gas Town ones (gt-*, hq-*).
+// User's personal Claude sessions (e.g., in sessions named "loomtown", "yaad")
+// must never be killed by orphan cleanup. The TTY="?" check is not reliable
+// during certain operations, so we must explicitly protect all tmux processes.
+func getTmuxSessionPIDs() map[int]bool {
 	pids := make(map[int]bool)
 
-	// Get list of Gas Town tmux sessions (gt-* and hq-*)
+	// Get list of ALL tmux sessions (not just gt-*/hq-*)
 	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
 	if err != nil {
 		return pids // tmux not available or no sessions
 	}
 
-	var gasTownSessions []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.HasPrefix(line, "gt-") || strings.HasPrefix(line, "hq-") {
-			gasTownSessions = append(gasTownSessions, line)
-		}
-	}
+	// Protect ALL sessions - user's personal sessions are just as important
+	sessions := strings.Split(strings.TrimSpace(string(out)), "\n")
 
-	// For each Gas Town session, get the PIDs of processes in its panes
-	for _, session := range gasTownSessions {
+	// For each session, get the PIDs of processes in its panes
+	for _, session := range sessions {
+		if session == "" {
+			continue
+		}
 		out, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_pid}").Output()
 		if err != nil {
 			continue
@@ -285,7 +289,7 @@ type OrphanedProcess struct {
 func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 	// Get PIDs belonging to valid Gas Town tmux sessions.
 	// These should not be killed even if they show TTY "?" during startup.
-	gasTownPIDs := getGasTownSessionPIDs()
+	protectedPIDs := getTmuxSessionPIDs()
 
 	// Use ps to get PID, TTY, command, and elapsed time for all processes
 	// TTY "?" indicates no controlling terminal
@@ -326,7 +330,7 @@ func FindOrphanedClaudeProcesses() ([]OrphanedProcess, error) {
 		// Skip processes that belong to valid Gas Town tmux sessions.
 		// This prevents killing witnesses/refineries/deacon during startup
 		// when they may temporarily show TTY "?".
-		if gasTownPIDs[pid] {
+		if protectedPIDs[pid] {
 			continue
 		}
 
@@ -375,7 +379,7 @@ type ZombieProcess struct {
 // This is the definitive zombie check because it verifies against tmux reality.
 func FindZombieClaudeProcesses() ([]ZombieProcess, error) {
 	// Get ALL valid PIDs (panes + their children) from active tmux sessions
-	validPIDs := getGasTownSessionPIDs()
+	validPIDs := getTmuxSessionPIDs()
 
 	// SAFETY CHECK: If no valid PIDs found, tmux might be down or no sessions exist.
 	// Returning empty is safer than marking all Claude processes as zombies.

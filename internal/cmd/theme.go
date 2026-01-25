@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
@@ -14,10 +15,13 @@ import (
 )
 
 var (
-	themeListFlag    bool
-	themeApplyFlag   bool
+	themeListFlag     bool
+	themeApplyFlag    bool
 	themeApplyAllFlag bool
 )
+
+// Valid CLI theme modes
+var validCLIThemes = []string{"auto", "dark", "light"}
 
 var themeCmd = &cobra.Command{
 	Use:     "theme [name]",
@@ -43,12 +47,37 @@ var themeApplyCmd = &cobra.Command{
 
 By default, only applies to sessions in the current rig.
 Use --all to apply to sessions across all rigs.`,
-	RunE:  runThemeApply,
+	RunE: runThemeApply,
+}
+
+var themeCLICmd = &cobra.Command{
+	Use:   "cli [mode]",
+	Short: "View or set CLI color scheme (dark/light/auto)",
+	Long: `Manage CLI output color scheme for Gas Town commands.
+
+Without arguments, shows the current CLI theme mode and detection.
+With a mode argument, sets the CLI theme preference.
+
+Modes:
+  auto   - Automatically detect terminal background (default)
+  dark   - Force dark mode colors (light text for dark backgrounds)
+  light  - Force light mode colors (dark text for light backgrounds)
+
+The setting is stored in town settings (settings/config.json) and can
+be overridden per-session via the GT_THEME environment variable.
+
+Examples:
+  gt theme cli              # Show current CLI theme
+  gt theme cli dark         # Set CLI theme to dark mode
+  gt theme cli auto         # Reset to auto-detection
+  GT_THEME=light gt status  # Override for a single command`,
+	RunE: runThemeCLI,
 }
 
 func init() {
 	rootCmd.AddCommand(themeCmd)
 	themeCmd.AddCommand(themeApplyCmd)
+	themeCmd.AddCommand(themeCLICmd)
 	themeCmd.Flags().BoolVarP(&themeListFlag, "list", "l", false, "List available themes")
 	themeApplyCmd.Flags().BoolVarP(&themeApplyAllFlag, "all", "a", false, "Apply to all rigs, not just current")
 }
@@ -361,4 +390,100 @@ func saveRigTheme(rigName, themeName string) error {
 	}
 
 	return nil
+}
+
+func runThemeCLI(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding workspace: %w", err)
+	}
+	if townRoot == "" {
+		return fmt.Errorf("not in a Gas Town workspace")
+	}
+
+	settingsPath := config.TownSettingsPath(townRoot)
+
+	// Show current theme
+	if len(args) == 0 {
+		settings, err := config.LoadOrCreateTownSettings(settingsPath)
+		if err != nil {
+			return fmt.Errorf("loading settings: %w", err)
+		}
+
+		// Determine effective mode
+		configValue := settings.CLITheme
+		if configValue == "" {
+			configValue = "auto"
+		}
+
+		// Check for env override
+		envValue := os.Getenv("GT_THEME")
+		effectiveMode := configValue
+		if envValue != "" {
+			effectiveMode = strings.ToLower(envValue)
+		}
+
+		fmt.Printf("CLI Theme:\n")
+		fmt.Printf("  Configured: %s\n", configValue)
+		if envValue != "" {
+			fmt.Printf("  Override:   %s (via GT_THEME)\n", envValue)
+		}
+		fmt.Printf("  Effective:  %s\n", effectiveMode)
+
+		// Show detection result for auto mode
+		if effectiveMode == "auto" {
+			detected := "light"
+			if detectTerminalBackground() {
+				detected = "dark"
+			}
+			fmt.Printf("  Detected:   %s background\n", detected)
+		}
+
+		return nil
+	}
+
+	// Set CLI theme
+	mode := strings.ToLower(args[0])
+	if !isValidCLITheme(mode) {
+		return fmt.Errorf("invalid CLI theme '%s' (valid: auto, dark, light)", mode)
+	}
+
+	// Load existing settings
+	settings, err := config.LoadOrCreateTownSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("loading settings: %w", err)
+	}
+
+	// Update CLITheme
+	settings.CLITheme = mode
+
+	// Save
+	if err := config.SaveTownSettings(settingsPath, settings); err != nil {
+		return fmt.Errorf("saving settings: %w", err)
+	}
+
+	fmt.Printf("CLI theme set to '%s'\n", mode)
+	if mode == "auto" {
+		fmt.Println("Colors will adapt to your terminal's background.")
+	} else {
+		fmt.Printf("Colors optimized for %s backgrounds.\n", mode)
+	}
+
+	return nil
+}
+
+// isValidCLITheme checks if a CLI theme mode is valid.
+func isValidCLITheme(mode string) bool {
+	for _, valid := range validCLIThemes {
+		if mode == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// detectTerminalBackground returns true if terminal has dark background.
+func detectTerminalBackground() bool {
+	// Use termenv for detection
+	return termenv.HasDarkBackground()
 }

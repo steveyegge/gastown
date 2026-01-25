@@ -433,6 +433,11 @@ func checkSlungWork(ctx RoleContext) bool {
 	// Build the role announcement string
 	roleAnnounce := buildRoleAnnouncement(ctx)
 
+	// Check for attached molecule FIRST - this determines the instruction flow
+	// With formula-on-bead, the base bead is hooked with attached_molecule pointing to wisp.
+	attachment := beads.ParseAttachmentFields(hookedBead)
+	hasMolecule := attachment != nil && attachment.AttachedMolecule != ""
+
 	// Found hooked work! Display AUTONOMOUS MODE prominently
 	fmt.Println()
 	fmt.Printf("%s\n\n", style.Bold.Render("## 🚨 AUTONOMOUS WORK MODE 🚨"))
@@ -447,14 +452,25 @@ func checkSlungWork(ctx RoleContext) bool {
 	fmt.Println("a track record that proves autonomous execution works at scale.")
 	fmt.Println()
 	fmt.Println("1. Announce: \"" + roleAnnounce + "\" (ONE line, no elaboration)")
-	fmt.Printf("2. Then IMMEDIATELY run: `bd show %s`\n", hookedBead.ID)
-	fmt.Println("3. Begin execution - no waiting for user input")
+
+	// Instructions differ based on whether molecule is attached
+	if hasMolecule {
+		fmt.Println("2. This bead has an ATTACHED MOLECULE (formula workflow)")
+		fmt.Println("3. Work through molecule steps in order - see CURRENT STEP below")
+		fmt.Println("4. Close each step with `bd close <step-id>`, then check `bd ready`")
+	} else {
+		fmt.Printf("2. Then IMMEDIATELY run: `bd show %s`\n", hookedBead.ID)
+		fmt.Println("3. Begin execution - no waiting for user input")
+	}
 	fmt.Println()
 	fmt.Println("**DO NOT:**")
 	fmt.Println("- Wait for user response after announcing")
 	fmt.Println("- Ask clarifying questions")
 	fmt.Println("- Describe what you're going to do")
 	fmt.Println("- Check mail first (hook takes priority)")
+	if hasMolecule {
+		fmt.Println("- Skip molecule steps or work on the base bead directly")
+	}
 	fmt.Println()
 
 	// Show the hooked work details
@@ -476,46 +492,47 @@ func checkSlungWork(ctx RoleContext) bool {
 	}
 	fmt.Println()
 
-	// Show bead preview using bd show
-	fmt.Println("**Bead details:**")
-	cmd := exec.Command("bd", "show", hookedBead.ID)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
-			fmt.Fprintf(os.Stderr, "  bd show %s: %s\n", hookedBead.ID, errMsg)
-		} else {
-			fmt.Fprintf(os.Stderr, "  bd show %s: %v\n", hookedBead.ID, err)
-		}
-	} else {
-		lines := strings.Split(stdout.String(), "\n")
-		maxLines := 15
-		if len(lines) > maxLines {
-			lines = lines[:maxLines]
-			lines = append(lines, "...")
-		}
-		for _, line := range lines {
-			fmt.Printf("  %s\n", line)
-		}
-	}
-	fmt.Println()
-
-	// Check for attached molecule and show execution prompt
-	// This was missing for hooked beads (only worked for pinned beads).
-	// With formula-on-bead, the base bead is hooked with attached_molecule pointing to wisp.
-	attachment := beads.ParseAttachmentFields(hookedBead)
-	if attachment != nil && attachment.AttachedMolecule != "" {
-		fmt.Printf("%s\n\n", style.Bold.Render("## 🎯 ATTACHED MOLECULE"))
-		fmt.Printf("Molecule: %s\n", attachment.AttachedMolecule)
+	// If molecule attached, show molecule context prominently INSTEAD of bd show
+	if hasMolecule {
+		fmt.Printf("%s\n\n", style.Bold.Render("## 🧬 ATTACHED MOLECULE (FORMULA WORKFLOW)"))
+		fmt.Printf("Molecule ID: %s\n", attachment.AttachedMolecule)
 		if attachment.AttachedArgs != "" {
 			fmt.Printf("\n%s\n", style.Bold.Render("📋 ARGS (use these to guide execution):"))
 			fmt.Printf("  %s\n", attachment.AttachedArgs)
 		}
 		fmt.Println()
 
-		// Show current step from molecule
+		// Show current step from molecule - THIS IS THE PRIMARY INSTRUCTION
 		showMoleculeExecutionPrompt(ctx.WorkDir, attachment.AttachedMolecule)
+
+		fmt.Println()
+		fmt.Printf("%s\n", style.Bold.Render("⚠️  IMPORTANT: Follow the molecule steps above, NOT the base bead."))
+		fmt.Println("The base bead is just a container. The molecule steps define your workflow.")
+	} else {
+		// No molecule - show bead preview using bd show
+		fmt.Println("**Bead details:**")
+		cmd := exec.Command("bd", "show", hookedBead.ID)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			if errMsg := strings.TrimSpace(stderr.String()); errMsg != "" {
+				fmt.Fprintf(os.Stderr, "  bd show %s: %s\n", hookedBead.ID, errMsg)
+			} else {
+				fmt.Fprintf(os.Stderr, "  bd show %s: %v\n", hookedBead.ID, err)
+			}
+		} else {
+			lines := strings.Split(stdout.String(), "\n")
+			maxLines := 15
+			if len(lines) > maxLines {
+				lines = lines[:maxLines]
+				lines = append(lines, "...")
+			}
+			for _, line := range lines {
+				fmt.Printf("  %s\n", line)
+			}
+		}
+		fmt.Println()
 	}
 
 	return true

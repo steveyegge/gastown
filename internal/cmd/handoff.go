@@ -204,6 +204,13 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
 	}
 
+	// Set remain-on-exit so the pane survives process death during handoff.
+	// Without this, killing processes causes tmux to destroy the pane before
+	// we can respawn it. This is essential for tmux session reuse.
+	if err := t.SetRemainOnExit(pane, true); err != nil {
+		style.PrintWarning("could not set remain-on-exit: %v", err)
+	}
+
 	// Kill all processes in the pane before respawning to prevent orphan leaks
 	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
 	if err := t.KillPaneProcesses(pane); err != nil {
@@ -212,6 +219,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	}
 
 	// Use exec to respawn the pane - this kills us and restarts
+	// Note: respawn-pane automatically resets remain-on-exit to off
 	return t.RespawnPane(pane, restartCmd)
 }
 
@@ -567,6 +575,13 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 		return nil
 	}
 
+	// Set remain-on-exit so the pane survives process death during handoff.
+	// Without this, killing processes causes tmux to destroy the pane before
+	// we can respawn it. This is essential for tmux session reuse.
+	if err := t.SetRemainOnExit(targetPane, true); err != nil {
+		style.PrintWarning("could not set remain-on-exit: %v", err)
+	}
+
 	// Kill all processes in the pane before respawning to prevent orphan leaks
 	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
 	if err := t.KillPaneProcesses(targetPane); err != nil {
@@ -581,6 +596,7 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 	}
 
 	// Respawn the remote session's pane
+	// Note: respawn-pane automatically resets remain-on-exit to off
 	if err := t.RespawnPane(targetPane, restartCmd); err != nil {
 		return fmt.Errorf("respawning pane: %w", err)
 	}

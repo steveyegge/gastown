@@ -42,6 +42,10 @@ var (
 
 	// Clear flags
 	mailClearAll bool
+
+	// Archive flags
+	mailArchiveStale  bool
+	mailArchiveDryRun bool
 )
 
 var mailCmd = &cobra.Command{
@@ -196,16 +200,22 @@ Examples:
 }
 
 var mailArchiveCmd = &cobra.Command{
-	Use:   "archive <message-id> [message-id...]",
+	Use:   "archive [message-id...]",
 	Short: "Archive messages",
 	Long: `Archive one or more messages.
 
 Removes the messages from your inbox by closing them in beads.
 
+Use --stale to archive messages sent before your current session started.
+
 Examples:
-  gt mail archive hq-abc123
-  gt mail archive hq-abc123 hq-def456 hq-ghi789`,
-	Args: cobra.MinimumNArgs(1),
+	gt mail archive hq-abc123
+	gt mail archive hq-abc123 hq-def456 hq-ghi789
+	gt mail archive --stale
+	gt mail archive --stale --dry-run`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		return nil
+	},
 	RunE: runMailArchive,
 }
 
@@ -486,6 +496,10 @@ func init() {
 
 	// Clear flags
 	mailClearCmd.Flags().BoolVar(&mailClearAll, "all", false, "Clear all messages (default behavior)")
+
+	// Archive flags
+	mailArchiveCmd.Flags().BoolVar(&mailArchiveStale, "stale", false, "Archive messages sent before session start")
+	mailArchiveCmd.Flags().BoolVarP(&mailArchiveDryRun, "dry-run", "n", false, "Show what would be archived without archiving")
 
 	// Add subcommands
 	mailCmd.AddCommand(mailSendCmd)

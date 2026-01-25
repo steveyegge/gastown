@@ -22,6 +22,16 @@ func init() {
 	}
 }
 
+// ApplyThemeMode applies the theme mode settings to lipgloss.
+// This should be called after InitTheme() has been called.
+func ApplyThemeMode() {
+	if !ShouldUseColor() {
+		return
+	}
+	// Set lipgloss dark background flag based on theme mode
+	lipgloss.SetHasDarkBackground(HasDarkBackground())
+}
+
 // Ayu theme color palette
 // Dark: https://terminalcolors.com/themes/ayu/dark/
 // Light: https://terminalcolors.com/themes/ayu/light/
