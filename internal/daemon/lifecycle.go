@@ -395,20 +395,6 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send startup nudge for predecessor discovery via /resume
-	recipient := identityToBDActor(identity)
-	_ = session.StartupNudge(d.tmux, sessionName, session.StartupNudgeConfig{
-		Recipient: recipient,
-		Sender:    "deacon",
-		Topic:     "lifecycle-restart",
-	}) // Non-fatal
-
-	// Send propulsion nudge to trigger autonomous execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = d.tmux.NudgeSession(sessionName, session.PropulsionNudgeForRole(parsed.RoleType, workDir)) // Non-fatal
-
 	return nil
 }
 
@@ -464,6 +450,7 @@ func (d *Daemon) getNeedsPreSync(config *beads.RoleConfig, parsed *ParsedIdentit
 
 // getStartCommand determines the startup command for an agent.
 // Uses role config if available, then role-based agent selection, then hardcoded defaults.
+// Includes beacon + role-specific instructions in the CLI prompt.
 func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIdentity) string {
 	// If role config is available, use it
 	if roleConfig != nil && roleConfig.StartCommand != "" {
@@ -479,8 +466,22 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 	// Use role-based agent resolution for per-role model selection
 	runtimeConfig := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
 
+	// Build recipient for beacon
+	recipient := identityToBDActor(parsed.RigName + "/" + parsed.RoleType)
+	if parsed.AgentName != "" {
+		recipient = identityToBDActor(parsed.RigName + "/" + parsed.RoleType + "/" + parsed.AgentName)
+	}
+	if parsed.RoleType == "deacon" || parsed.RoleType == "mayor" {
+		recipient = parsed.RoleType
+	}
+	prompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: recipient,
+		Sender:    "daemon",
+		Topic:     "lifecycle-restart",
+	}, "Check your hook and begin work.")
+
 	// Build default command using the role-resolved runtime config
-	defaultCmd := "exec " + runtimeConfig.BuildCommand()
+	defaultCmd := "exec " + runtimeConfig.BuildCommandWithPrompt(prompt)
 	if runtimeConfig.Session != nil && runtimeConfig.Session.SessionIDEnv != "" {
 		defaultCmd = config.PrependEnv(defaultCmd, map[string]string{"GT_SESSION_ID_ENV": runtimeConfig.Session.SessionIDEnv})
 	}
@@ -498,7 +499,7 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			TownRoot:     d.config.TownRoot,
 			SessionIDEnv: sessionIDEnv,
 		})
-		return config.PrependEnv("exec "+runtimeConfig.BuildCommand(), envVars)
+		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
 
 	if parsed.RoleType == "crew" {
@@ -513,7 +514,7 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			TownRoot:     d.config.TownRoot,
 			SessionIDEnv: sessionIDEnv,
 		})
-		return config.PrependEnv("exec "+runtimeConfig.BuildCommand(), envVars)
+		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
 
 	return defaultCmd

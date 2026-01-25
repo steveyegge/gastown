@@ -404,7 +404,7 @@ func startOrRestartCrewMember(t *tmux.Tmux, r *rig.Rig, crewName, townRoot strin
 			// Agent has exited, restart it
 			// Build startup beacon for predecessor discovery via /resume
 			address := fmt.Sprintf("%s/crew/%s", r.Name, crewName)
-			beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+			beacon := session.FormatStartupBeacon(session.BeaconConfig{
 				Recipient: address,
 				Sender:    "human",
 				Topic:     "restart",

@@ -180,10 +180,19 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
+	// Build startup command with beacon for predecessor discovery.
+	// Topic "assigned" already includes instructions in FormatStartupBeacon.
+	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
+		Recipient: address,
+		Sender:    "witness",
+		Topic:     "assigned",
+		MolID:     opts.Issue,
+	})
+
 	command := opts.Command
 	if command == "" {
-		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
+		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, beacon)
 	}
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
@@ -236,19 +245,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Wait for runtime to be fully ready at the prompt (not just started)
 	runtime.SleepForReadyDelay(runtimeConfig)
 	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
-	debugSession("StartupNudge", session.StartupNudge(m.tmux, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "witness",
-		Topic:     "assigned",
-		MolID:     opts.Issue,
-	}))
-
-	// GUPP: Send propulsion nudge to trigger autonomous work execution
-	time.Sleep(2 * time.Second)
-	debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
 
 	// Verify session survived startup - if the command crashed, the session may have died.
 	// Without this check, Start() would return success even if the pane died during initialization.
