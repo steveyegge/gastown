@@ -338,6 +338,10 @@ gt prime                    # Context recovery (run inside existing session)
 
 **Built-in agent presets**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `copilot`, `opencode`
 
+**Copilot trust**: Copilot CLI requires the town root in `~/.copilot/config.json`
+(`trusted_folders`). Use `gt install --trust-copilot` if the config file exists,
+or add the town root manually (or run `gt doctor --fix`).
+
 ### Convoy (Work Tracking)
 
 ```bash
