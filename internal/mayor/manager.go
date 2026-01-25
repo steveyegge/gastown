@@ -73,8 +73,11 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
-	// Ensure Claude settings exist
-	if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
+	// Ensure Claude settings exist at town root (not mayorDir)
+	// Mayor session runs from townRoot (line 99), so Claude looks for
+	// .claude/settings.json relative to townRoot, not mayorDir.
+	// See: https://github.com/steveyegge/gastown/issues/943
+	if err := claude.EnsureSettingsForRole(m.townRoot, "mayor"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
