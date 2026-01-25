@@ -153,9 +153,10 @@ func StopBdDaemonForWorkspace(beadsDir string) error {
 		return fmt.Errorf("checking beads directory: %w", err)
 	}
 
-	cmd := exec.Command("bd", "daemon", "stop")
-	cmd.Dir = filepath.Dir(resolvedBeadsDir)
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+resolvedBeadsDir)
+	// bd daemons stop requires workspace path (parent of .beads dir)
+	workspacePath := filepath.Dir(resolvedBeadsDir)
+	cmd := exec.Command("bd", "daemons", "stop", workspacePath)
+	cmd.Dir = workspacePath
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
