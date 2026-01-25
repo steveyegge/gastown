@@ -2403,7 +2403,44 @@ func TestBuildCommandWithPromptRespectsPromptModeNone(t *testing.T) {
 
 // TestRoleAgentConfigWithCustomAgent tests role-based agent resolution with
 // custom agents that have special settings like prompt_mode: "none".
-// This mirrors the manual test: setting mayor to opencode-mayor in config.json.
+//
+// This test mirrors manual verification using settings/config.json:
+//
+//	{
+//	  "type": "town-settings",
+//	  "version": 1,
+//	  "default_agent": "claude-opus",
+//	  "agents": {
+//	    "amp-yolo": {
+//	      "command": "amp",
+//	      "args": ["--dangerously-allow-all"]
+//	    },
+//	    "opencode-mayor": {
+//	      "command": "opencode",
+//	      "args": ["-m", "openai/gpt-5.2-codex"],
+//	      "prompt_mode": "none",
+//	      "process_names": ["opencode", "node"],
+//	      "env": {
+//	        "OPENCODE_PERMISSION": "{\"*\":\"allow\"}"
+//	      }
+//	    }
+//	  },
+//	  "role_agents": {
+//	    "crew": "claude-sonnet",
+//	    "deacon": "claude-haiku",
+//	    "mayor": "opencode-mayor",
+//	    "polecat": "claude-opus",
+//	    "refinery": "claude-opus",
+//	    "witness": "claude-sonnet"
+//	  }
+//	}
+//
+// Manual test procedure:
+//  1. Set role_agents.mayor to each agent (claude, gemini, codex, cursor, auggie, amp, opencode)
+//  2. Run: gt start
+//  3. Verify mayor starts with correct agent config
+//  4. Run: GT_NUKE_ACKNOWLEDGED=1 gt down --nuke
+//  5. Repeat for all 7 built-in agents
 func TestRoleAgentConfigWithCustomAgent(t *testing.T) {
 	t.Parallel()
 
