@@ -35,6 +35,10 @@ type AgentEnvConfig struct {
 	// BeadsNoDaemon sets BEADS_NO_DAEMON=1 if true
 	// Used for polecats that should bypass the beads daemon
 	BeadsNoDaemon bool
+
+	// Provider is the agent provider (e.g., "opencode", "claude").
+	// Provider-specific env vars like GT_AUTO_INIT are merged when set.
+	Provider string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -104,6 +108,13 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Add session ID env var name if provided
 	if cfg.SessionIDEnv != "" {
 		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
+	}
+
+	// Merge provider-specific env vars (e.g., GT_AUTO_INIT for OpenCode)
+	if cfg.Provider != "" {
+		for k, v := range providerEnv(cfg.Provider, cfg.Role) {
+			env[k] = v
+		}
 	}
 
 	return env

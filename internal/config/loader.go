@@ -1336,12 +1336,9 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 		cmd = "exec env " + strings.Join(exports, " ") + " "
 	}
 
-	// Add runtime command
-	if prompt != "" {
-		cmd += rc.BuildCommandWithPrompt(prompt)
-	} else {
-		cmd += rc.BuildCommand()
-	}
+	// Add runtime command with optional initial prompt.
+	// Always use BuildCommandWithPrompt to include InitialPrompt (e.g., [GT_AGENT_INIT] for OpenCode).
+	cmd += rc.BuildCommandWithPrompt(prompt)
 
 	return cmd
 }
@@ -1448,11 +1445,8 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 		cmd = "exec env " + strings.Join(exports, " ") + " "
 	}
 
-	if prompt != "" {
-		cmd += rc.BuildCommandWithPrompt(prompt)
-	} else {
-		cmd += rc.BuildCommand()
-	}
+	// Always use BuildCommandWithPrompt to include InitialPrompt (e.g., [GT_AGENT_INIT] for OpenCode).
+	cmd += rc.BuildCommandWithPrompt(prompt)
 
 	return cmd, nil
 }

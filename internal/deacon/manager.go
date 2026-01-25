@@ -102,6 +102,7 @@ func (m *Manager) Start(agentOverride string) error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "deacon",
 		TownRoot: m.townRoot,
+		Provider: runtimeConfig.Provider,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)

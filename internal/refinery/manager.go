@@ -164,6 +164,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Rig:           m.rig.Name,
 		TownRoot:      townRoot,
 		BeadsNoDaemon: true,
+		Provider:      runtimeConfig.Provider,
 	})
 
 	// Add refinery-specific flag

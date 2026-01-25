@@ -216,6 +216,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.RuntimeConfigDir,
 		BeadsNoDaemon:    true,
+		Provider:         runtimeConfig.Provider,
 	})
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
