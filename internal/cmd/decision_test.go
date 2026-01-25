@@ -243,7 +243,7 @@ func TestDecisionCommandFlags(t *testing.T) {
 
 	// Verify subcommands
 	subCommands := decisionCmd.Commands()
-	wantSubs := []string{"request", "list", "show", "resolve", "dashboard"}
+	wantSubs := []string{"request", "list", "show", "resolve", "dashboard", "await"}
 	for _, want := range wantSubs {
 		found := false
 		for _, cmd := range subCommands {
@@ -267,9 +267,31 @@ func TestDecisionRequestCmdFlags(t *testing.T) {
 	// Check required flags
 	flags := decisionRequestCmd.Flags()
 
+	// Primary flags (new API)
+	promptFlag := flags.Lookup("prompt")
+	if promptFlag == nil {
+		t.Error("missing --prompt flag")
+	}
+
+	blocksFlag := flags.Lookup("blocks")
+	if blocksFlag == nil {
+		t.Error("missing --blocks flag")
+	}
+
+	parentFlag := flags.Lookup("parent")
+	if parentFlag == nil {
+		t.Error("missing --parent flag")
+	}
+
+	// Backward compatibility aliases
 	questionFlag := flags.Lookup("question")
 	if questionFlag == nil {
-		t.Error("missing --question flag")
+		t.Error("missing --question alias flag")
+	}
+
+	blockerFlag := flags.Lookup("blocker")
+	if blockerFlag == nil {
+		t.Error("missing --blocker alias flag")
 	}
 
 	optionFlag := flags.Lookup("option")
@@ -282,11 +304,6 @@ func TestDecisionRequestCmdFlags(t *testing.T) {
 		t.Error("missing --urgency flag")
 	} else if urgencyFlag.DefValue != "medium" {
 		t.Errorf("urgency default = %q, want 'medium'", urgencyFlag.DefValue)
-	}
-
-	blockerFlag := flags.Lookup("blocker")
-	if blockerFlag == nil {
-		t.Error("missing --blocker flag")
 	}
 }
 
@@ -339,6 +356,44 @@ func TestDecisionDashboardCmdFlags(t *testing.T) {
 	jsonFlag := flags.Lookup("json")
 	if jsonFlag == nil {
 		t.Error("missing --json flag")
+	}
+}
+
+// TestDecisionAwaitCmdFlags tests await command flags.
+func TestDecisionAwaitCmdFlags(t *testing.T) {
+	if decisionAwaitCmd == nil {
+		t.Fatal("decisionAwaitCmd is nil")
+	}
+
+	flags := decisionAwaitCmd.Flags()
+
+	timeoutFlag := flags.Lookup("timeout")
+	if timeoutFlag == nil {
+		t.Error("missing --timeout flag")
+	}
+
+	jsonFlag := flags.Lookup("json")
+	if jsonFlag == nil {
+		t.Error("missing --json flag")
+	}
+}
+
+// TestDecisionCommandHasAwait tests that await is a subcommand.
+func TestDecisionCommandHasAwait(t *testing.T) {
+	if decisionCmd == nil {
+		t.Fatal("decisionCmd is nil")
+	}
+
+	subCommands := decisionCmd.Commands()
+	found := false
+	for _, cmd := range subCommands {
+		if cmd.Use == "await <decision-id>" || strings.HasPrefix(cmd.Use, "await ") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("missing await subcommand")
 	}
 }
 

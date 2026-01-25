@@ -15,9 +15,9 @@ import (
 )
 
 func runDecisionRequest(cmd *cobra.Command, args []string) error {
-	// Validate question
-	if decisionQuestion == "" {
-		return fmt.Errorf("--question is required")
+	// Validate prompt
+	if decisionPrompt == "" {
+		return fmt.Errorf("--prompt is required")
 	}
 
 	// Validate options (2-4 required)
@@ -74,7 +74,7 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 
 	// Build decision fields
 	fields := &beads.DecisionFields{
-		Question:    decisionQuestion,
+		Question:    decisionPrompt,
 		Context:     decisionContext,
 		Options:     options,
 		ChosenIndex: 0, // Pending
@@ -84,20 +84,20 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 	}
 
 	// Add blocker if specified
-	if decisionBlocker != "" {
-		fields.Blockers = []string{decisionBlocker}
+	if decisionBlocks != "" {
+		fields.Blockers = []string{decisionBlocks}
 	}
 
 	// Create decision bead
 	bd := beads.New(beads.ResolveBeadsDir(townRoot))
-	issue, err := bd.CreateDecisionBead(decisionQuestion, fields)
+	issue, err := bd.CreateDecisionBead(decisionPrompt, fields)
 	if err != nil {
 		return fmt.Errorf("creating decision bead: %w", err)
 	}
 
 	// Add blocker dependency if specified
-	if decisionBlocker != "" {
-		if err := bd.AddDecisionBlocker(issue.ID, decisionBlocker); err != nil {
+	if decisionBlocks != "" {
+		if err := bd.AddDecisionBlocker(issue.ID, decisionBlocks); err != nil {
 			style.PrintWarning("failed to add blocker dependency: %v", err)
 		}
 	}
@@ -107,7 +107,7 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 	msg := &mail.Message{
 		From:    agentID,
 		To:      "human",
-		Subject: fmt.Sprintf("[DECISION] %s", decisionQuestion),
+		Subject: fmt.Sprintf("[DECISION] %s", decisionPrompt),
 		Body:    formatDecisionMailBody(issue.ID, fields),
 		Type:    mail.TypeTask,
 	}
@@ -129,13 +129,13 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 	// Log to activity feed
 	payload := map[string]interface{}{
 		"decision_id":  issue.ID,
-		"question":     decisionQuestion,
+		"question":     decisionPrompt,
 		"urgency":      urgency,
 		"option_count": len(options),
 		"requested_by": agentID,
 	}
-	if decisionBlocker != "" {
-		payload["blocking"] = decisionBlocker
+	if decisionBlocks != "" {
+		payload["blocking"] = decisionBlocks
 	}
 	_ = events.LogFeed(events.TypeDecisionRequested, agentID, payload)
 
@@ -143,22 +143,22 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 	if decisionJSON {
 		result := map[string]interface{}{
 			"id":           issue.ID,
-			"question":     decisionQuestion,
+			"question":     decisionPrompt,
 			"urgency":      urgency,
 			"options":      options,
 			"requested_by": agentID,
 		}
-		if decisionBlocker != "" {
-			result["blocking"] = decisionBlocker
+		if decisionBlocks != "" {
+			result["blocking"] = decisionBlocks
 		}
 		out, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(out))
 	} else {
 		fmt.Printf("📋 Decision requested: %s\n", issue.ID)
-		fmt.Printf("   Question: %s\n", decisionQuestion)
+		fmt.Printf("   Question: %s\n", decisionPrompt)
 		fmt.Printf("   Options: %s\n", formatOptionsSummary(options))
-		if decisionBlocker != "" {
-			fmt.Printf("   Blocking: %s\n", decisionBlocker)
+		if decisionBlocks != "" {
+			fmt.Printf("   Blocking: %s\n", decisionBlocks)
 		}
 		fmt.Printf("\n→ Notified human (overseer)\n")
 		fmt.Printf("\nTo resolve: gt decision resolve %s --choice N --rationale \"...\"\n", issue.ID)
@@ -639,6 +639,90 @@ func urgencyEmoji(urgency string) string {
 		return "🟢"
 	default:
 		return "📋"
+	}
+}
+
+func runDecisionAwait(cmd *cobra.Command, args []string) error {
+	decisionID := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Parse timeout if specified
+	var timeout time.Duration
+	if decisionAwaitTimeout != "" {
+		timeout, err = time.ParseDuration(decisionAwaitTimeout)
+		if err != nil {
+			return fmt.Errorf("invalid timeout format: %w", err)
+		}
+	}
+
+	bd := beads.New(beads.ResolveBeadsDir(townRoot))
+
+	// Check if already resolved
+	issue, fields, err := bd.GetDecisionBead(decisionID)
+	if err != nil {
+		return fmt.Errorf("getting decision: %w", err)
+	}
+	if issue == nil {
+		return fmt.Errorf("decision not found: %s", decisionID)
+	}
+
+	startTime := time.Now()
+	pollInterval := 5 * time.Second
+
+	for {
+		// Check if resolved
+		if fields.ChosenIndex > 0 {
+			// Decision is resolved
+			if decisionJSON {
+				result := map[string]interface{}{
+					"id":           decisionID,
+					"resolved":     true,
+					"chosen_index": fields.ChosenIndex,
+					"chosen_label": fields.Options[fields.ChosenIndex-1].Label,
+					"rationale":    fields.Rationale,
+					"resolved_by":  fields.ResolvedBy,
+					"resolved_at":  fields.ResolvedAt,
+				}
+				out, _ := json.MarshalIndent(result, "", "  ")
+				fmt.Println(string(out))
+			} else {
+				fmt.Printf("✓ Decision %s resolved: %s\n", decisionID, fields.Options[fields.ChosenIndex-1].Label)
+				if fields.Rationale != "" {
+					fmt.Printf("  Rationale: %s\n", fields.Rationale)
+				}
+			}
+			return nil
+		}
+
+		// Check timeout
+		if timeout > 0 && time.Since(startTime) > timeout {
+			if decisionJSON {
+				result := map[string]interface{}{
+					"id":       decisionID,
+					"resolved": false,
+					"error":    "timeout waiting for decision",
+				}
+				out, _ := json.MarshalIndent(result, "", "  ")
+				fmt.Println(string(out))
+			}
+			return fmt.Errorf("timeout waiting for decision %s to be resolved", decisionID)
+		}
+
+		// Wait and poll again
+		time.Sleep(pollInterval)
+
+		// Refresh decision state
+		issue, fields, err = bd.GetDecisionBead(decisionID)
+		if err != nil {
+			return fmt.Errorf("getting decision: %w", err)
+		}
+		if issue == nil {
+			return fmt.Errorf("decision not found: %s", decisionID)
+		}
 	}
 }
 

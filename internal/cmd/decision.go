@@ -6,17 +6,19 @@ import (
 
 // Decision command flags
 var (
-	decisionQuestion    string
+	decisionPrompt      string   // Primary flag (--prompt)
 	decisionContext     string
 	decisionOptions     []string
 	decisionRecommend   int
-	decisionBlocker     string
+	decisionBlocks      string   // Primary flag (--blocks)
+	decisionParent      string   // Parent bead relationship
 	decisionUrgency     string
 	decisionJSON        bool
 	decisionListJSON    bool
 	decisionListAll     bool
 	decisionChoice      int
 	decisionRationale   string
+	decisionAwaitTimeout string  // For await command
 )
 
 var decisionCmd = &cobra.Command{
@@ -29,9 +31,12 @@ The decision system provides a lightweight way for agents to request
 structured decisions from humans. Unlike escalations (for problems),
 decisions are for choosing between valid options.
 
+This is the high-level agent workflow layer. For low-level primitives
+with full control, use 'bd decision' commands.
+
 DECISION WORKFLOW:
   1. Agent needs human input on approach
-  2. Runs: gt decision request --question "..." --option "A: desc" --option "B: desc"
+  2. Runs: gt decision request --prompt "..." --option "A: desc" --option "B: desc"
   3. Decision bead is created, human notified
   4. Human reviews and resolves: gt decision resolve <id> --choice 1
   5. Agent proceeds with chosen option
@@ -42,11 +47,12 @@ URGENCY LEVELS:
   low     Can wait, informational
 
 Examples:
-  gt decision request --question "Auth approach?" --option "JWT: Stateless" --option "Session: Traditional"
-  gt decision request --question "DB choice?" --option "Postgres" --option "MySQL" --blocker gt-work-xyz
+  gt decision request --prompt "Auth approach?" --option "JWT: Stateless" --option "Session: Traditional"
+  gt decision request --prompt "DB choice?" --option "Postgres" --option "MySQL" --blocks gt-work-xyz
   gt decision list                                # Show pending decisions
   gt decision show hq-dec-abc                     # Show decision details
-  gt decision resolve hq-dec-abc --choice 1 --rationale "JWT fits our architecture"`,
+  gt decision resolve hq-dec-abc --choice 1 --rationale "JWT fits our architecture"
+  gt decision await hq-dec-abc                    # Block until resolved`,
 }
 
 var decisionRequestCmd = &cobra.Command{
@@ -59,20 +65,21 @@ want human guidance. The decision is tracked as a bead and blocks
 dependent work until resolved.
 
 FLAGS:
-  --question    The decision to be made (required)
+  --prompt      The decision to be made (required)
   --option      An option in "Label: Description" format (repeatable, 2-4 required)
   --context     Background information or analysis
   --recommend   Mark option N as recommended (1-indexed)
-  --blocker     Bead ID that's blocked by this decision
+  --blocks      Bead ID that's blocked by this decision
+  --parent      Parent bead for hierarchy
   --urgency     Priority level: high, medium, low (default: medium)
 
 Examples:
   gt decision request \
-    --question "Which authentication method?" \
+    --prompt "Which authentication method?" \
     --option "JWT tokens: Stateless, scalable, good for SPAs" \
     --option "Session cookies: Simpler, traditional approach" \
     --recommend 1 \
-    --blocker gt-work-xyz`,
+    --blocks gt-work-xyz`,
 	RunE: runDecisionRequest,
 }
 
@@ -138,19 +145,45 @@ Examples:
 	RunE: runDecisionDashboard,
 }
 
+var decisionAwaitCmd = &cobra.Command{
+	Use:   "await <decision-id>",
+	Short: "Wait for a decision to be resolved",
+	Long: `Block until the specified decision is resolved.
+
+Useful for scripts and automation that need to wait for human input
+before proceeding. Returns the chosen option when resolved.
+
+FLAGS:
+  --timeout     Maximum time to wait (e.g., "5m", "1h", default: no timeout)
+
+Examples:
+  gt decision await hq-dec-abc123
+  gt decision await hq-dec-abc123 --timeout 5m
+  gt decision await hq-dec-abc123 --json`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDecisionAwait,
+}
+
 // Dashboard-specific flags
 var decisionDashboardJSON bool
 
 func init() {
 	// Request subcommand flags
-	decisionRequestCmd.Flags().StringVarP(&decisionQuestion, "question", "q", "", "The decision to be made (required)")
+	// Primary flags
+	decisionRequestCmd.Flags().StringVarP(&decisionPrompt, "prompt", "p", "", "The decision to be made (required)")
 	decisionRequestCmd.Flags().StringVarP(&decisionContext, "context", "c", "", "Background information or analysis")
 	decisionRequestCmd.Flags().StringArrayVarP(&decisionOptions, "option", "o", nil, "Option in 'Label: Description' format (repeatable)")
 	decisionRequestCmd.Flags().IntVarP(&decisionRecommend, "recommend", "r", 0, "Mark option N as recommended (1-indexed)")
-	decisionRequestCmd.Flags().StringVarP(&decisionBlocker, "blocker", "b", "", "Bead ID blocked by this decision")
+	decisionRequestCmd.Flags().StringVar(&decisionBlocks, "blocks", "", "Bead ID that this decision blocks")
+	decisionRequestCmd.Flags().StringVar(&decisionParent, "parent", "", "Parent bead for hierarchy")
 	decisionRequestCmd.Flags().StringVarP(&decisionUrgency, "urgency", "u", "medium", "Urgency level: high, medium, low")
 	decisionRequestCmd.Flags().BoolVar(&decisionJSON, "json", false, "Output as JSON")
-	_ = decisionRequestCmd.MarkFlagRequired("question")
+
+	// Aliases for backward compatibility
+	decisionRequestCmd.Flags().StringVarP(&decisionPrompt, "question", "q", "", "Alias for --prompt (deprecated)")
+	decisionRequestCmd.Flags().StringVarP(&decisionBlocks, "blocker", "b", "", "Alias for --blocks (deprecated)")
+	_ = decisionRequestCmd.Flags().MarkHidden("question")
+	_ = decisionRequestCmd.Flags().MarkHidden("blocker")
 
 	// List subcommand flags
 	decisionListCmd.Flags().BoolVar(&decisionListJSON, "json", false, "Output as JSON")
@@ -168,12 +201,17 @@ func init() {
 	// Dashboard subcommand flags
 	decisionDashboardCmd.Flags().BoolVar(&decisionDashboardJSON, "json", false, "Output as JSON")
 
+	// Await subcommand flags
+	decisionAwaitCmd.Flags().StringVar(&decisionAwaitTimeout, "timeout", "", "Maximum time to wait (e.g., '5m', '1h')")
+	decisionAwaitCmd.Flags().BoolVar(&decisionJSON, "json", false, "Output as JSON")
+
 	// Add subcommands
 	decisionCmd.AddCommand(decisionRequestCmd)
 	decisionCmd.AddCommand(decisionListCmd)
 	decisionCmd.AddCommand(decisionShowCmd)
 	decisionCmd.AddCommand(decisionResolveCmd)
 	decisionCmd.AddCommand(decisionDashboardCmd)
+	decisionCmd.AddCommand(decisionAwaitCmd)
 
 	rootCmd.AddCommand(decisionCmd)
 }
