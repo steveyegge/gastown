@@ -12,6 +12,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	gtconfig "github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -395,6 +396,34 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	_ = d.tmux.AcceptBypassPermissionsWarning(sessionName)
 	time.Sleep(constants.ShutdownNotifyDelay)
 
+	// GUPP: Gas Town Universal Propulsion Principle
+	// Send startup nudge for predecessor discovery via /resume
+	recipient := identityToBDActor(identity)
+	_ = session.StartupNudge(d.tmux, sessionName, session.StartupNudgeConfig{
+		Recipient: recipient,
+		Sender:    "deacon",
+		Topic:     "lifecycle-restart",
+	}) // Non-fatal
+
+	// Send propulsion nudge to trigger autonomous execution.
+	// Wait for beacon to be fully processed (needs to be separate prompt)
+	time.Sleep(2 * time.Second)
+
+	// For OpenCode: send [GT_AGENT_INIT] first for plugin to inject gt prime context.
+	// This ensures agents have full context BEFORE being told to run gt hook.
+	// Applies to ALL agents: mayor, deacon, witness, refinery, polecat, crew.
+	rigPath := ""
+	if parsed.RigName != "" {
+		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
+	}
+	runtimeCfg := gtconfig.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
+	if runtimeCfg.Provider == "opencode" {
+		_ = d.tmux.NudgeSession(sessionName, "[GT_AGENT_INIT]")
+		time.Sleep(3 * time.Second) // Wait for plugin to process and inject context
+	}
+
+	_ = d.tmux.NudgeSession(sessionName, session.PropulsionNudgeForRole(parsed.RoleType, workDir)) // Non-fatal
+
 	return nil
 }
 
@@ -534,7 +563,17 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 		_ = d.tmux.SetEnvironment(sessionName, k, v)
 	}
 
-	// Set any custom env vars from role config
+	// Set provider-specific env vars (e.g., GT_AUTO_INIT for OpenCode plugin)
+	rigPath := ""
+	if parsed.RigName != "" {
+		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
+	}
+	runtimeCfg := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
+	if runtimeCfg.Provider == "opencode" {
+		_ = d.tmux.SetEnvironment(sessionName, "GT_AUTO_INIT", "1")
+	}
+
+	// Set any custom env vars from role config (bead-defined overrides)
 	if roleConfig != nil {
 		for k, v := range roleConfig.EnvVars {
 			expanded := beads.ExpandRolePattern(v, d.config.TownRoot, parsed.RigName, parsed.AgentName, parsed.RoleType)
