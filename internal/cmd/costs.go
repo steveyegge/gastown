@@ -709,8 +709,8 @@ func getClaudeProjectDir(workDir string) (string, error) {
 	}
 
 	// Convert path to Claude's directory naming: replace / with -
-	// Remove leading slash first to avoid leading dash
-	projectName := strings.ReplaceAll(strings.TrimPrefix(workDir, "/"), "/", "-")
+	// Keep leading slash - it becomes a leading dash in Claude's encoding
+	projectName := strings.ReplaceAll(workDir, "/", "-")
 	return filepath.Join(home, ".claude", "projects", projectName), nil
 }
 
