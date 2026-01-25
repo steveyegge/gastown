@@ -963,3 +963,146 @@ func TestValidateRecipient(t *testing.T) {
 		})
 	}
 }
+
+// ============ Notification Skip Tests ============
+
+func TestShouldSkipNotification(t *testing.T) {
+	tests := []struct {
+		name    string
+		subject string
+		want    bool
+	}{
+		// Messages that SHOULD be skipped (high-frequency operational)
+		{"lifecycle shutdown", "LIFECYCLE:Shutdown quartz", true},
+		{"lifecycle lowercase", "lifecycle:shutdown obsidian", true},
+		{"polecat started", "POLECAT_STARTED quartz", true},
+		{"polecat done", "POLECAT_DONE obsidian", true},
+		{"polecat lowercase", "polecat_done furiosa", true},
+		{"witness ping", "WITNESS_PING gastown", true},
+		{"witness ping lowercase", "witness_ping provinces", true},
+		{"merged notification", "MERGED polecat/branch", true},
+		{"merged lowercase", "merged feature-123", true},
+
+		// Messages that should NOT be skipped (need immediate attention)
+		{"help request", "HELP: stuck on merge conflict", false},
+		{"blocked", "Blocked: waiting for API key", false},
+		{"handoff", "HANDOFF: patrol context", false},
+		{"start work", "START_WORK gt-abc123", false},
+		{"escalation", "Escalation: polecat stuck", false},
+		{"generic message", "Weekly status update", false},
+		{"empty subject", "", false},
+
+		// Edge cases - partial matches should NOT skip
+		{"lifecycle in middle", "Re: LIFECYCLE:Shutdown", false},
+		{"polecat in middle", "About POLECAT_DONE", false},
+		{"merged in middle", "Re: MERGED branch", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &Message{Subject: tt.subject}
+			got := shouldSkipNotification(msg)
+			if got != tt.want {
+				t.Errorf("shouldSkipNotification(subject=%q) = %v, want %v", tt.subject, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestShouldSkipNotification_DesignIntent documents WHY certain messages skip notification.
+// This test serves as documentation for future developers adding new message types.
+//
+// The fundamental principle: Patrol agents (witness, refinery, deacon) poll their
+// inbox on a regular cycle. Tmux nudges are an optimization for latency, but they
+// cause "API Error: 400 due to tool use concurrency issues" when multiple arrive
+// faster than Claude can process them.
+//
+// Additionally, beads activity (from bd commands) wakes agents subscribed to the
+// activity feed. Sling operations create beads activity, making nudges redundant.
+//
+// Rule of thumb for new message types:
+// - Skip notification if: message is operational/status update that agents will
+//   process on their next patrol cycle anyway
+// - Send notification if: message requires immediate human/agent attention
+//   (HELP, HANDOFF, explicit nudge requests)
+func TestShouldSkipNotification_DesignIntent(t *testing.T) {
+	// These are the categories we explicitly handle:
+	operationalMessages := []string{
+		"LIFECYCLE:Shutdown x",  // State transition - patrol handles
+		"POLECAT_STARTED x",     // Lifecycle event - patrol handles
+		"POLECAT_DONE x",        // Lifecycle event - patrol handles
+		"WITNESS_PING rig",      // Health check - patrol handles
+		"MERGED branch",         // Informational - patrol handles
+	}
+
+	urgentMessages := []string{
+		"HELP: stuck",           // Needs immediate attention
+		"Blocked: waiting",      // Needs immediate attention
+		"HANDOFF: context",      // Successor needs to pick up
+		"START_WORK gt-abc",     // New work assignment
+		"Escalation: polecat",   // Urgent escalation
+	}
+
+	for _, subject := range operationalMessages {
+		msg := &Message{Subject: subject}
+		if !shouldSkipNotification(msg) {
+			t.Errorf("operational message %q should skip notification", subject)
+		}
+	}
+
+	for _, subject := range urgentMessages {
+		msg := &Message{Subject: subject}
+		if shouldSkipNotification(msg) {
+			t.Errorf("urgent message %q should NOT skip notification", subject)
+		}
+	}
+}
+
+func TestShouldSkipNotification_WithShouldBeWisp_Relationship(t *testing.T) {
+	// Verify that wisp messages and skip-notification messages overlap correctly.
+	// Some messages are both wisps (ephemeral storage) AND skip notification.
+	// Others are wisps but should still notify (e.g., START_WORK).
+
+	r := &Router{} // Only need for shouldBeWisp method
+
+	tests := []struct {
+		name       string
+		subject    string
+		wantWisp   bool
+		wantSkip   bool
+		comment    string
+	}{
+		// Both wisp AND skip notification
+		{"polecat_started", "POLECAT_STARTED foo", true, true, "lifecycle event - ephemeral, no nudge needed"},
+		{"polecat_done", "POLECAT_DONE bar", true, true, "lifecycle event - ephemeral, no nudge needed"},
+
+		// Wisp but should NOT skip notification (needs immediate attention)
+		{"start_work", "START_WORK gt-abc", true, false, "new work assignment - ephemeral but needs nudge"},
+		{"nudge", "NUDGE check status", true, false, "explicit nudge request - ephemeral but is itself a nudge"},
+
+		// Skip notification but NOT wisp (persists but doesn't need nudge)
+		{"lifecycle", "LIFECYCLE:Shutdown x", false, true, "operational signal - persists for audit, no nudge"},
+		{"merged", "MERGED branch-x", false, true, "informational - persists, no nudge"},
+		{"witness_ping", "WITNESS_PING rig", false, true, "health check - persists, no nudge"},
+
+		// Neither wisp nor skip (normal message)
+		{"help", "HELP: need assistance", false, false, "help request - persists and needs immediate attention"},
+		{"generic", "Weekly report", false, false, "normal message - persists and notifies"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &Message{Subject: tt.subject}
+
+			gotWisp := r.shouldBeWisp(msg)
+			gotSkip := shouldSkipNotification(msg)
+
+			if gotWisp != tt.wantWisp {
+				t.Errorf("shouldBeWisp(subject=%q) = %v, want %v (%s)", tt.subject, gotWisp, tt.wantWisp, tt.comment)
+			}
+			if gotSkip != tt.wantSkip {
+				t.Errorf("shouldSkipNotification(subject=%q) = %v, want %v (%s)", tt.subject, gotSkip, tt.wantSkip, tt.comment)
+			}
+		})
+	}
+}

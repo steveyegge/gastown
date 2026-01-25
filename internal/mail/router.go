@@ -493,6 +493,42 @@ func (r *Router) shouldBeWisp(msg *Message) bool {
 	return false
 }
 
+// shouldSkipNotification returns true for transient/operational messages that
+// should not trigger a tmux nudge. Patrol agents (witness, refinery, deacon)
+// poll their inbox regularly via `gt mail inbox`. Nudging for every operational
+// message causes "API Error: 400 due to tool use concurrency issues" when
+// multiple messages arrive faster than Claude can process them.
+//
+// Messages that SHOULD still trigger nudges (need immediate attention):
+// - HELP / Blocked - someone needs assistance
+// - HANDOFF - successor needs to pick up work
+// - START_WORK - new work assignment (not a status update)
+//
+// Messages that should NOT trigger nudges (processed on patrol cycle):
+// - LIFECYCLE:* - operational state changes
+// - POLECAT_* - lifecycle events (started, done, etc.)
+// - *_PING - health check signals
+// - MERGED - informational merge completion
+func shouldSkipNotification(msg *Message) bool {
+	subjectLower := strings.ToLower(msg.Subject)
+
+	// High-frequency prefixes that don't need immediate attention
+	skipPrefixes := []string{
+		"lifecycle:",   // Operational state changes (shutdown, etc.)
+		"polecat_",     // Polecat lifecycle events
+		"witness_ping", // Health check from witnesses
+		"merged",       // Informational merge completion
+	}
+
+	for _, prefix := range skipPrefixes {
+		if strings.HasPrefix(subjectLower, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Send delivers a message via beads message.
 // Routes the message to the correct beads database based on recipient address.
 // Supports fan-out for:
@@ -645,8 +681,10 @@ func (r *Router) sendToSingle(msg *Message) error {
 	}
 
 	// Notify recipient if they have an active session (best-effort notification)
-	// Skip notification for self-mail (handoffs to future-self don't need present-self notified)
-	if !isSelfMail(msg.From, msg.To) {
+	// Skip notification for:
+	// - Self-mail (handoffs to future-self don't need present-self notified)
+	// - Transient lifecycle messages (high-frequency, agents poll for these)
+	if !isSelfMail(msg.From, msg.To) && !shouldSkipNotification(msg) {
 		_ = r.notifyRecipient(msg)
 	}
 
