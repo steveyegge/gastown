@@ -919,6 +919,10 @@ func runRigStart(cmd *cobra.Command, args []string) error {
 }
 
 func runRigShutdown(cmd *cobra.Command, args []string) error {
+	return runRigShutdownWithOptions(cmd, args, true)
+}
+
+func runRigShutdownWithOptions(cmd *cobra.Command, args []string, stopBdDaemon bool) error {
 	rigName := args[0]
 
 	// Find workspace
@@ -978,33 +982,32 @@ func runRigShutdown(cmd *cobra.Command, args []string) error {
 
 	var errors []string
 
-	// 1. Stop all polecat sessions
 	t := tmux.NewTmux()
 	polecatMgr := polecat.NewSessionManager(t, r)
 	infos, err := polecatMgr.List()
 	if err == nil && len(infos) > 0 {
 		fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
-		if err := polecatMgr.StopAll(rigShutdownForce); err != nil {
-			errors = append(errors, fmt.Sprintf("polecat sessions: %v", err))
-		}
 	}
 
-	// 2. Stop the refinery
 	refMgr := refinery.NewManager(r)
 	if running, _ := refMgr.IsRunning(); running {
 		fmt.Printf("  Stopping refinery...\n")
-		if err := refMgr.Stop(); err != nil {
-			errors = append(errors, fmt.Sprintf("refinery: %v", err))
-		}
 	}
 
-	// 3. Stop the witness
 	witMgr := witness.NewManager(r)
 	if running, _ := witMgr.IsRunning(); running {
 		fmt.Printf("  Stopping witness...\n")
-		if err := witMgr.Stop(); err != nil {
-			errors = append(errors, fmt.Sprintf("witness: %v", err))
-		}
+	}
+
+	stopErrs := StopRigAgents(r, StopRigOptions{
+		StopPolecats: true,
+		StopRefinery: true,
+		StopWitness:  true,
+		StopBdDaemon: stopBdDaemon,
+		Force:        rigShutdownForce,
+	})
+	for _, err := range stopErrs {
+		errors = append(errors, err.Error())
 	}
 
 	if len(errors) > 0 {
@@ -1025,7 +1028,7 @@ func runRigReboot(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Rebooting rig %s...\n\n", style.Bold.Render(rigName))
 
 	// Shutdown first
-	if err := runRigShutdown(cmd, args); err != nil {
+	if err := runRigShutdownWithOptions(cmd, args, false); err != nil {
 		// If shutdown fails due to uncommitted work, propagate the error
 		return err
 	}
@@ -1241,33 +1244,32 @@ func runRigStop(cmd *cobra.Command, args []string) error {
 
 		var errors []string
 
-		// 1. Stop all polecat sessions
 		t := tmux.NewTmux()
 		polecatMgr := polecat.NewSessionManager(t, r)
 		infos, err := polecatMgr.List()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("  Stopping %d polecat session(s)...\n", len(infos))
-			if err := polecatMgr.StopAll(rigStopForce); err != nil {
-				errors = append(errors, fmt.Sprintf("polecat sessions: %v", err))
-			}
 		}
 
-		// 2. Stop the refinery
 		refMgr := refinery.NewManager(r)
 		if running, _ := refMgr.IsRunning(); running {
 			fmt.Printf("  Stopping refinery...\n")
-			if err := refMgr.Stop(); err != nil {
-				errors = append(errors, fmt.Sprintf("refinery: %v", err))
-			}
 		}
 
-		// 3. Stop the witness
 		witMgr := witness.NewManager(r)
 		if running, _ := witMgr.IsRunning(); running {
 			fmt.Printf("  Stopping witness...\n")
-			if err := witMgr.Stop(); err != nil {
-				errors = append(errors, fmt.Sprintf("witness: %v", err))
-			}
+		}
+
+		stopErrs := StopRigAgents(r, StopRigOptions{
+			StopPolecats: true,
+			StopRefinery: true,
+			StopWitness:  true,
+			StopBdDaemon: true,
+			Force:        rigStopForce,
+		})
+		for _, err := range stopErrs {
+			errors = append(errors, err.Error())
 		}
 
 		if len(errors) > 0 {
@@ -1373,32 +1375,31 @@ func runRigRestart(cmd *cobra.Command, args []string) error {
 		// === STOP PHASE ===
 		fmt.Printf("  Stopping...\n")
 
-		// 1. Stop all polecat sessions
+		refMgr := refinery.NewManager(r)
+		witMgr := witness.NewManager(r)
+
 		polecatMgr := polecat.NewSessionManager(t, r)
 		infos, err := polecatMgr.List()
 		if err == nil && len(infos) > 0 {
 			fmt.Printf("    Stopping %d polecat session(s)...\n", len(infos))
-			if err := polecatMgr.StopAll(rigRestartForce); err != nil {
-				stopErrors = append(stopErrors, fmt.Sprintf("polecat sessions: %v", err))
-			}
 		}
 
-		// 2. Stop the refinery
-		refMgr := refinery.NewManager(r)
 		if running, _ := refMgr.IsRunning(); running {
 			fmt.Printf("    Stopping refinery...\n")
-			if err := refMgr.Stop(); err != nil {
-				stopErrors = append(stopErrors, fmt.Sprintf("refinery: %v", err))
-			}
 		}
 
-		// 3. Stop the witness
-		witMgr := witness.NewManager(r)
 		if running, _ := witMgr.IsRunning(); running {
 			fmt.Printf("    Stopping witness...\n")
-			if err := witMgr.Stop(); err != nil {
-				stopErrors = append(stopErrors, fmt.Sprintf("witness: %v", err))
-			}
+		}
+
+		stopErrs := StopRigAgents(r, StopRigOptions{
+			StopPolecats: true,
+			StopRefinery: true,
+			StopWitness:  true,
+			Force:        rigRestartForce,
+		})
+		for _, err := range stopErrs {
+			stopErrors = append(stopErrors, err.Error())
 		}
 
 		if len(stopErrors) > 0 {

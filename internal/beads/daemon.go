@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -129,6 +131,43 @@ func StartBdDaemonIfNeeded(workDir string) error {
 	return cmd.Run()
 }
 
+// StopBdDaemonForWorkspace stops the bd daemon for a specific workspace.
+func StopBdDaemonForWorkspace(beadsDir string) error {
+	if beadsDir == "" {
+		return nil
+	}
+
+	if _, err := exec.LookPath("bd"); err != nil {
+		return nil
+	}
+
+	resolvedBeadsDir := ResolveBeadsDir(beadsDir)
+	if resolvedBeadsDir == "" {
+		resolvedBeadsDir = beadsDir
+	}
+
+	if _, err := os.Stat(resolvedBeadsDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("checking beads directory: %w", err)
+	}
+
+	cmd := exec.Command("bd", "daemon", "stop")
+	cmd.Dir = filepath.Dir(resolvedBeadsDir)
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+resolvedBeadsDir)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if stderr.Len() > 0 {
+			return fmt.Errorf("stopping bd daemon: %v: %s", err, strings.TrimSpace(stderr.String()))
+		}
+		return fmt.Errorf("stopping bd daemon: %w", err)
+	}
+
+	return nil
+}
+
 // StopAllBdProcesses stops all bd daemon and activity processes.
 // Returns (daemonsKilled, activityKilled, error).
 // If dryRun is true, returns counts without stopping anything.
@@ -171,7 +210,6 @@ func CountBdDaemons() int {
 	count, _ := strconv.Atoi(strings.TrimSpace(string(output)))
 	return count
 }
-
 
 func stopBdDaemons(force bool) (int, int) {
 	before := CountBdDaemons()

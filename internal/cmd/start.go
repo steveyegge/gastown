@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
@@ -600,8 +601,12 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 		cleanupPolecats(townRoot)
 	}
 
-	// Phase 7: Stop the daemon
-	fmt.Printf("\nPhase 7: Stopping daemon...\n")
+	// Phase 7: Stop bd daemons
+	fmt.Printf("\nPhase 7: Stopping bd daemons...\n")
+	stopBdDaemons()
+
+	// Phase 8: Stop the daemon
+	fmt.Printf("\nPhase 8: Stopping daemon...\n")
 	if townRoot != "" {
 		stopDaemonIfRunning(townRoot)
 	}
@@ -631,6 +636,11 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 		fmt.Println("Cleaning up polecats...")
 		cleanupPolecats(townRoot)
 	}
+
+	// Stop bd daemons
+	fmt.Println()
+	fmt.Println("Stopping bd daemons...")
+	stopBdDaemons()
 
 	// Stop the daemon
 	if townRoot != "" {
@@ -854,6 +864,26 @@ func stopDaemonIfRunning(townRoot string) {
 			fmt.Printf("  %s Killed %d orphaned daemon(s)\n",
 				style.Bold.Render("✓"), killed)
 		}
+	}
+}
+
+func stopBdDaemons() {
+	daemonsKilled, activityKilled, err := beads.StopAllBdProcesses(false, false)
+	if err != nil {
+		fmt.Printf("  %s Failed to stop bd processes: %v\n", style.Bold.Render("✗"), err)
+		return
+	}
+
+	if daemonsKilled == 0 && activityKilled == 0 {
+		fmt.Printf("  %s No bd processes running\n", style.Dim.Render("○"))
+		return
+	}
+
+	if daemonsKilled > 0 {
+		fmt.Printf("  %s Stopped %d bd daemon(s)\n", style.Bold.Render("✓"), daemonsKilled)
+	}
+	if activityKilled > 0 {
+		fmt.Printf("  %s Stopped %d bd activity process(es)\n", style.Bold.Render("✓"), activityKilled)
 	}
 }
 
