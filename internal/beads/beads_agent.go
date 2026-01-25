@@ -246,8 +246,11 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		return issue, nil
 	}
 
-	// Check if it's a UNIQUE constraint error
-	if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+	// Check if it's a UNIQUE constraint error (SQLite or Dolt/MySQL)
+	errStr := err.Error()
+	isDuplicateKey := strings.Contains(errStr, "UNIQUE constraint failed") || // SQLite
+		strings.Contains(errStr, "duplicate primary key") // Dolt/MySQL Error 1062
+	if !isDuplicateKey {
 		return nil, err
 	}
 
