@@ -662,19 +662,24 @@ to proceed. Use them for:
 - Business decisions (feature prioritization, scope tradeoffs)
 - Ambiguous requirements needing clarification
 
+### Two-Layer Architecture
+
+- **`gt decision`** = High-level agent workflow (use this)
+- **`bd decision`** = Low-level primitives (for hooks/scripts)
+
 ### Creating a Decision
 
 When you encounter a fork in the road requiring human judgment:
 
 ```bash
-bd decision create \
+gt decision request \
   --prompt "Which caching strategy for the API layer?" \
-  --options '[
-    {"id":"redis","label":"Redis (distributed, persistent)"},
-    {"id":"memory","label":"In-memory (simple, fast)"},
-    {"id":"sqlite","label":"SQLite (hybrid approach)"}
-  ]' \
-  --parent <your-current-work-bead>
+  --option "Redis: Distributed, persistent caching" \
+  --option "In-memory: Simple and fast" \
+  --option "SQLite: Hybrid approach" \
+  --blocks <work-bead-blocked-by-this> \
+  --parent <parent-bead> \
+  --urgency high
 ```
 
 This creates a gate that blocks dependent work until resolved.
@@ -682,23 +687,24 @@ This creates a gate that blocks dependent work until resolved.
 ### Checking Decision Status
 
 ```bash
-bd decision list              # List pending decisions
-bd decision show <id>         # View decision details
-bd decision check <id>        # Check if resolved
-bd decision await <id>        # Block until resolved (for scripts)
+gt decision list              # List pending decisions
+gt decision list --all        # Include resolved
+gt decision show <id>         # View decision details
+gt decision dashboard         # Summary by urgency
+gt decision await <id>        # Block until resolved (for scripts)
 ```
 
-### Iterative Refinement
+### Resolving Decisions
 
-Decisions support up to 3 refinement iterations. If the overseer responds with
-text guidance instead of selecting an option, a new iteration is created with
-your refined options based on their feedback.
+```bash
+gt decision resolve <id> --choice 1 --rationale "Redis fits our scaling needs"
+```
 
 ### When to Use Decisions vs Escalation
 
 | Situation | Tool |
 |-----------|------|
-| Multiple valid options, need human choice | `bd decision create` |
+| Multiple valid options, need human choice | `gt decision request` |
 | Blocked, need help, something is broken | `gt escalate` |
 | Quick question, informal | `gt mail send --human` |
 

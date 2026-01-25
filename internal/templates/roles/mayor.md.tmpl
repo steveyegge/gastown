@@ -278,13 +278,16 @@ escalate to the overseer: `gt mail send --human -s "Decision needed" -m "..."`
 When YOU need a decision from the overseer:
 
 ```bash
-bd decision create \
+gt decision request \
   --prompt "Which authentication approach for admin panel?" \
-  --options '[{"id":"jwt","label":"JWT tokens"},{"id":"session","label":"Session cookies"}]' \
-  --parent <your-work-bead>
+  --option "JWT tokens: Stateless, scalable" \
+  --option "Session cookies: Traditional approach" \
+  --blocks <work-bead-blocked-by-this> \
+  --urgency high
 ```
 
-The decision blocks dependent work until resolved.
+The decision blocks dependent work until resolved. Check status with
+`gt decision list` or `gt decision dashboard`.
 
 ## Key Commands
 
