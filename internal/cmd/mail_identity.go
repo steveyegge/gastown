@@ -184,7 +184,7 @@ func detectSenderFromCwd() string {
 
 	// If in the town's mayor directory
 	if strings.Contains(cwd, "/mayor") {
-		return "mayor/"
+		return "mayor"
 	}
 
 	// Default to overseer (human)
