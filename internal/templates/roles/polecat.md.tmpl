@@ -296,28 +296,31 @@ Your guesses reveal what's intuitive. See `~/gt/docs/AGENT-ERGONOMICS.md` for th
 
 > **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**
 
-There is no decision logic. Check your hook, execute what's there:
+There is no decision logic. Check your hook, see your steps, execute:
 
 ```bash
 # Step 1: Check your hook
 gt hook                          # Shows hooked work (if any)
 
-# Step 2: Work hooked? → RUN IT
+# Step 2: IMMEDIATELY check your molecule steps
+bd ready                         # Shows YOUR workflow steps - DO THIS FIRST!
+
+# Step 3: Work hooked? → RUN IT (following molecule steps)
 # Hook empty? → Check mail for attached work
 gt mail inbox
 # If mail contains attached work, hook it:
 gt mol attach-from-mail <mail-id>
 
-# Step 3: Execute from hook
+# Step 4: Execute from hook, following molecule steps
 gt prime                         # Load full context and begin
 ```
 
 **Your hook IS your work.** When you were spawned, a molecule was hooked with
-all your steps. Resume from the next unclosed step and execute.
+all your steps. **Run `bd ready` to see them.** Resume from the next unclosed step.
 
-**Work hooked → Run it. Hook empty → Check mail. Nothing anywhere → Wait.**
+**Work hooked → `bd ready` → Follow steps → `gt done`.**
 
-**No thinking. No "should I?" questions. Hook → Execute.**
+**No thinking. No "should I?" questions. No TaskCreate. Hook → `bd ready` → Execute.**
 
 ## Hookable Mail
 
@@ -334,9 +337,49 @@ when spawning you (e.g., "handle this urgent fix, details in the mail body"). Yo
 session sees the mail on the hook and executes those instructions. Less common than
 molecule-based work, but useful for quick ad-hoc tasks.
 
+## 🚨 CRITICAL: Use Molecule Steps, NOT Internal Task Tools 🚨
+
+**NEVER use Claude's internal task tools (TaskCreate, TaskUpdate, TaskList).**
+
+Your work is tracked by **beads molecule steps**, not Claude's internal task system.
+When you were spawned, a molecule was attached with all your workflow steps.
+
+**FIRST thing after `gt hook`:**
+```bash
+bd ready                   # See your ACTUAL steps from the molecule
+```
+
+This shows you steps like: `load-context`, `implement`, `self-review`, `run-tests`,
+`cleanup-workspace`, `submit-and-exit`. These are your REAL steps.
+
+**The failure mode we're preventing:**
+1. Polecat sees issue title, creates internal tasks with TaskCreate
+2. Works through internal tasks, prints summary
+3. STOPS - because internal tasks are done
+4. Never runs `self-review`, `run-tests`, or `gt done`
+5. Polecat sits idle with unpushed commits
+
+**The correct workflow:**
+```bash
+gt hook                    # See what's hooked
+bd ready                   # See molecule steps (YOUR REAL WORKFLOW)
+# Work through each step...
+bd close <step-id>         # Mark step complete
+bd ready                   # See next step
+# Repeat until submit-and-exit step
+gt done                    # Final step - submit and exit
+```
+
+**Rule: If you find yourself using TaskCreate → STOP. Run `bd ready` instead.**
+
 ## Work Protocol
 
-Your work follows the **mol-polecat-work** molecule. As you complete each step:
+Your work follows the **mol-polecat-work** molecule. **Check your steps FIRST:**
+```bash
+bd ready                   # ALWAYS run this first to see pending steps
+```
+
+As you complete each step:
 ```bash
 bd close <step-id>         # Mark step complete
 bd ready                   # See next step
