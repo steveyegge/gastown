@@ -58,3 +58,6 @@ CLAUDE.md
 logs/
 settings/
 .events.jsonl
+
+# Junie
+.junie
