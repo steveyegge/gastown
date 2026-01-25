@@ -503,7 +503,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	if topic == "" {
 		topic = "start"
 	}
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
 		Recipient: address,
 		Sender:    "human",
 		Topic:     topic,

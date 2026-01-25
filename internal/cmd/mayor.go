@@ -188,7 +188,7 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 			}
 
 			// Build startup beacon for context (like gt handoff does)
-			beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+			beacon := session.FormatStartupBeacon(session.BeaconConfig{
 				Recipient: "mayor",
 				Sender:    "human",
 				Topic:     "attach",

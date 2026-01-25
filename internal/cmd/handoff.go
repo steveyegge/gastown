@@ -386,9 +386,9 @@ func buildRestartCommand(sessionName string) (string, error) {
 	gtRole := identity.GTRole()
 
 	// Build startup beacon for predecessor discovery via /resume
-	// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+	// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
 	// The SessionStart hook handles context injection (gt prime --hook)
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
 		Recipient: identity.Address(),
 		Sender:    "self",
 		Topic:     "handoff",
