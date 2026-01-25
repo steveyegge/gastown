@@ -335,9 +335,10 @@ bd show gt-w98d  # witness Handoff bead
 
 **Use `gt nudge`, never raw `tmux send-keys`** - it drops the Enter key.
 
-**Do NOT mail on HEALTH_CHECK nudges.** When Deacon sends HEALTH_CHECK, don't
-respond with mail - this floods inboxes every patrol cycle (~30s). The Deacon
-tracks your health via session status, not mail responses.
+**Do NOT respond to HEALTH_CHECK nudges.** When Deacon sends HEALTH_CHECK, don't
+respond at all - no mail, no nudge back, nothing. HEALTH_CHECK is a liveness probe;
+simply receiving it and continuing your work proves you're alive. The Deacon tracks
+your health via session activity, not your response. Responding creates message floods.
 
 **Village mindset**: You're part of a self-healing network. If you see Refinery
 struggling, ping it. If Deacon seems stuck, notify Mayor.
