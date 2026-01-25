@@ -410,10 +410,12 @@ gt nudge <rig>/refinery 'HEALTH_CHECK from deacon'
 ```
 
 **Health Ping Benefit**: The nudge commands serve dual purposes:
-1. **Liveness verification** - Agent responds to prove it's alive
+1. **Liveness verification** - Agent receives the nudge (no response expected!)
 2. **Backoff reset** - Any nudge resets agent's backoff to base interval
 
-This ensures patrol agents remain responsive during active work periods.
+**IMPORTANT**: Agents should NOT respond to HEALTH_CHECK - no mail, no nudge back.
+The act of receiving the nudge and continuing work proves liveness. Verify health
+via `gt witness status` and `gt refinery status`, not by waiting for responses.
 
 **Signals to assess:**
 

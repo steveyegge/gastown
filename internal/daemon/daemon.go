@@ -462,7 +462,7 @@ func (d *Daemon) checkDeaconHeartbeat() {
 	} else {
 		// Stuck but not critically - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
-		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
+		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale (continue working, no response needed)"); err != nil {
 			d.logger.Printf("Error nudging stuck Deacon: %v", err)
 		}
 	}
@@ -628,7 +628,7 @@ func (d *Daemon) checkRefineryHeartbeat(rigName string) {
 	} else {
 		// Stuck but not critically - nudge to wake up
 		d.logger.Printf("Refinery for %s stuck for %s - nudging session", rigName, age.Round(time.Minute))
-		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
+		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale (continue working, no response needed)"); err != nil {
 			d.logger.Printf("Error nudging stuck Refinery for %s: %v", rigName, err)
 		}
 	}
