@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt costs record && gt decision remind --nudge"
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt costs record"
           }
         ]
       }
