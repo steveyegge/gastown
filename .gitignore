@@ -60,3 +60,6 @@ CLAUDE.md
 logs/
 settings/
 .events.jsonl
+
+# Generated skill symlinks (populated by bd skill sync)
+.claude/skills/
