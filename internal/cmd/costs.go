@@ -338,8 +338,15 @@ func runCostsFromLedger() error {
 		// Also include today's wisps (not yet digested)
 		todayEntries, _ := querySessionCostEntries(now)
 		entries = append(entries, todayEntries...)
+	} else if costsByRole || costsByRig {
+		// When using --by-role or --by-rig without time filter, default to today
+		// (querying all historical events would be expensive and likely empty)
+		entries, err = querySessionCostEntries(now)
+		if err != nil {
+			return fmt.Errorf("querying session cost entries: %w", err)
+		}
 	} else {
-		// No time filter: query both digests and legacy session.ended events
+		// No time filter and no breakdown flags: query both digests and legacy session.ended events
 		// (for backwards compatibility during migration)
 		entries = querySessionEvents()
 	}
