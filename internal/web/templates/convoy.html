@@ -1151,8 +1151,8 @@
         {{end}}
 
         {{if .MergeHistory}}
+        <h2 class="section-header">📝 Recent Commits to Main</h2>
         <div class="merge-history">
-            <h3 class="subsection-header">Recent Commits to Main</h3>
             <div class="history-list">
                 {{range .MergeHistory}}
                 <div class="history-row" onclick="toggleHistoryDetail('history-{{.Hash}}')">

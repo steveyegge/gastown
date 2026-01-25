@@ -958,7 +958,7 @@ func (f *LiveConvoyFetcher) FetchPolecatDetail(sessionID string) (*PolecatDetail
 	uptime := formatDuration(time.Since(createdTime))
 
 	// Get terminal lines
-	terminalLines := f.getPolecatTerminalLines(sessionID, 15)
+	terminalLines := f.getPolecatTerminalLines(sessionID, 50)
 
 	// Get hook bead from agent bead
 	hookBead, hookTitle := f.getPolecatHook(rig, polecatName)
@@ -1785,7 +1785,7 @@ func (f *LiveConvoyFetcher) FetchHQAgentDetail(sessionID string) (*HQAgentDetail
 	uptime := formatDuration(time.Since(createdTime))
 
 	// Get terminal lines
-	terminalLines := f.getPolecatTerminalLines(sessionID, 15)
+	terminalLines := f.getPolecatTerminalLines(sessionID, 50)
 
 	// Get status hint
 	statusHint := f.getStatusHintWithDefault(sessionID)
