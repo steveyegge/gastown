@@ -177,6 +177,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewRuntimeGitignoreCheck())
 	d.Register(doctor.NewLegacyGastownCheck())
 	d.Register(doctor.NewClaudeSettingsCheck())
+	d.Register(doctor.NewCopilotTrustCheck())
 
 	// Priming subsystem check
 	d.Register(doctor.NewPrimingCheck())
