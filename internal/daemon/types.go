@@ -106,6 +106,12 @@ type PatrolConfig struct {
 
 	// Agent is the agent type for this patrol (not used yet).
 	Agent string `json:"agent,omitempty"`
+
+	// AutoConfirmSuggestions enables auto-confirmation of Claude suggestions.
+	// When true, the witness patrol will automatically confirm (press Enter)
+	// when a polecat is idle at the prompt with a suggested action.
+	// Default: false (suggestions wait for human confirmation).
+	AutoConfirmSuggestions bool `json:"auto_confirm_suggestions,omitempty"`
 }
 
 // PatrolsConfig holds configuration for all patrols.
@@ -166,6 +172,22 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 		}
 	}
 	return true // Default: enabled
+}
+
+// IsAutoConfirmEnabled checks if auto-confirm suggestions is enabled for a patrol.
+// Returns false if the config doesn't exist (default disabled for safety).
+func IsAutoConfirmEnabled(config *DaemonPatrolConfig, patrol string) bool {
+	if config == nil || config.Patrols == nil {
+		return false // Default: disabled (opt-in feature)
+	}
+
+	switch patrol {
+	case "witness":
+		if config.Patrols.Witness != nil {
+			return config.Patrols.Witness.AutoConfirmSuggestions
+		}
+	}
+	return false // Default: disabled
 }
 
 // LifecycleAction represents a lifecycle request action.
