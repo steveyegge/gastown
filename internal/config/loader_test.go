@@ -26,8 +26,11 @@ func skipIfAgentBinaryMissing(t *testing.T, agents ...string) {
 
 // isClaudeCommand checks if a command is claude (either "claude" or a path ending in "/claude").
 // This handles the case where resolveClaudePath returns the full path to the claude binary.
+// Also handles Windows paths with .exe extension.
 func isClaudeCommand(cmd string) bool {
-	return cmd == "claude" || strings.HasSuffix(cmd, "/claude")
+	base := filepath.Base(cmd)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	return base == "claude"
 }
 
 func TestTownConfigRoundTrip(t *testing.T) {
@@ -2099,8 +2102,9 @@ func TestFillRuntimeDefaults(t *testing.T) {
 
 		result := fillRuntimeDefaults(input)
 
-		if result.Command != "claude" {
-			t.Errorf("Command: got %q, want %q", result.Command, "claude")
+		// Use isClaudeCommand to handle resolved paths (e.g., /opt/homebrew/bin/claude)
+		if !isClaudeCommand(result.Command) {
+			t.Errorf("Command: got %q, want claude or path ending in claude", result.Command)
 		}
 		// Args should be preserved, not overwritten
 		if len(result.Args) != 1 || result.Args[0] != "--custom-flag" {
@@ -2578,6 +2582,9 @@ func TestMultipleAgentTypes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
+			// Skip if agent binary not installed (prevents flaky CI failures)
+			skipIfAgentBinaryMissing(t, tc.agentName)
+
 			// Verify it's actually a built-in preset
 			if tc.isBuiltIn {
 				preset := GetAgentPresetByName(tc.agentName)
@@ -2699,6 +2706,7 @@ func TestCustomClaudeVariants(t *testing.T) {
 // TestCustomAgentWithAmp tests custom agent configuration for amp.
 // This mirrors the manual test: amp-yolo started successfully with custom args.
 func TestCustomAgentWithAmp(t *testing.T) {
+	skipIfAgentBinaryMissing(t, "amp")
 	t.Parallel()
 
 	townRoot := t.TempDir()
