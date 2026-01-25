@@ -287,6 +287,66 @@ func TestInstallNoBeadsFlag(t *testing.T) {
 	}
 }
 
+func TestInstallTrustCopilotFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+	copilotDir := filepath.Join(tmpDir, ".copilot")
+	if err := os.MkdirAll(copilotDir, 0755); err != nil {
+		t.Fatalf("failed to create copilot dir: %v", err)
+	}
+	configPath := filepath.Join(copilotDir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"trusted_folders": []}`), 0644); err != nil {
+		t.Fatalf("failed to write copilot config: %v", err)
+	}
+
+	gtBinary := buildGT(t)
+	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads", "--trust-copilot")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("gt install --trust-copilot failed: %v\nOutput: %s", err, output)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read copilot config: %v", err)
+	}
+
+	var got struct {
+		TrustedFolders []string `json:"trusted_folders"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("invalid copilot config JSON: %v", err)
+	}
+	found := false
+	for _, folder := range got.TrustedFolders {
+		if folder == hqPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected trusted_folders to include %s, got %v", hqPath, got.TrustedFolders)
+	}
+}
+
+func TestInstallTrustCopilotSkipsMissingConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	hqPath := filepath.Join(tmpDir, "test-hq")
+
+	gtBinary := buildGT(t)
+	cmd := exec.Command(gtBinary, "install", hqPath, "--no-beads", "--trust-copilot")
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gt install --trust-copilot failed: %v\nOutput: %s", err, output)
+	}
+
+	configPath := filepath.Join(tmpDir, ".copilot", "config.json")
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Fatalf("expected copilot config not to be created, stat err: %v", err)
+	}
+}
+
 // assertDirExists checks that the given path exists and is a directory.
 func assertDirExists(t *testing.T, path, name string) {
 	t.Helper()
