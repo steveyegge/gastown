@@ -67,13 +67,13 @@ func (m *Manager) Start(agentOverride string) error {
 		}
 	}
 
-	// Ensure mayor directory exists (for Claude settings)
+	// Ensure mayor directory exists
 	mayorDir := m.mayorDir()
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
-	// Ensure Claude settings exist
+	// Ensure Claude settings exist in mayorDir (where session runs from).
 	if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
@@ -93,10 +93,10 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
-	// Create session in townRoot (not mayorDir) to match gt handoff behavior
-	// This ensures Mayor works from the town root where all tools work correctly
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, m.townRoot, startupCmd); err != nil {
+	// Create session in mayorDir - Mayor's home directory within the town.
+	// Tools like gt prime use workspace.FindFromCwd() which walks UP to find
+	// town root, so running from ~/gt/mayor/ still finds ~/gt/ correctly.
+	if err := t.NewSessionWithCommand(sessionID, mayorDir, startupCmd); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
