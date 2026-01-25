@@ -1079,11 +1079,17 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 	if rc == nil {
 		return DefaultRuntimeConfig()
 	}
-	// Create a copy to avoid modifying the original
+	// Create a copy to avoid modifying the original, preserving all fields
 	result := &RuntimeConfig{
+		Provider:      rc.Provider,
 		Command:       rc.Command,
 		Args:          rc.Args,
 		InitialPrompt: rc.InitialPrompt,
+		PromptMode:    rc.PromptMode,
+		Session:       rc.Session,
+		Hooks:         rc.Hooks,
+		Tmux:          rc.Tmux,
+		Instructions:  rc.Instructions,
 	}
 	// Copy Env map to avoid mutation and preserve agent-specific env vars
 	if len(rc.Env) > 0 {
