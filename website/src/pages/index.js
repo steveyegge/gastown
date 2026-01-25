@@ -37,7 +37,7 @@ export default function Home() {
   return (
     <Layout
       title={`${siteConfig.title} documentation`}
-      description="Gas Town is a multi-agent orchestration system for Claude Code and Codex with persistent work tracking.">
+      description="Gas Town is a multi-agent orchestration system for coding agents with persistent work tracking.">
       <HomepageHeader />
       <main>
         <HomepageFeatures />

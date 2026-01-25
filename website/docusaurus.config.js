@@ -12,7 +12,7 @@ import { themes as prismThemes } from "prism-react-renderer";
 const config = {
   title: "Gas Town",
   tagline:
-    "Multi-agent orchestration for Claude Code and Codex with persistent work tracking.",
+    "Multi-agent orchestration system for coding agents with persistent work tracking.",
   favicon: "img/favicon.ico",
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
@@ -139,6 +139,22 @@ const config = {
               {
                 label: "Codex",
                 href: "https://chatgpt.com/codex",
+              },
+              {
+                label: "Gemini CLI",
+                href: "https://github.com/google-gemini/gemini-cli",
+              },
+              {
+                label: "Cursor Agent",
+                href: "https://www.cursor.com/",
+              },
+              {
+                label: "Auggie",
+                href: "https://www.augmentcode.com/",
+              },
+              {
+                label: "Amp",
+                href: "https://ampcode.com/",
               },
             ],
           },
