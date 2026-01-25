@@ -381,6 +381,17 @@ func runDecisionResolve(cmd *cobra.Command, args []string) error {
 		if err := router.Send(msg); err != nil {
 			style.PrintWarning("failed to notify requestor: %v", err)
 		}
+
+		// Nudge the requesting agent so they see the resolution immediately
+		nudgeMsg := fmt.Sprintf("[DECISION RESOLVED] %s: Chose \"%s\"", decisionID, chosenOption.Label)
+		if decisionRationale != "" {
+			nudgeMsg += fmt.Sprintf(" - %s", decisionRationale)
+		}
+		nudgeCmd := execCommand("gt", "nudge", fields.RequestedBy, nudgeMsg)
+		if err := nudgeCmd.Run(); err != nil {
+			// Don't fail resolve, just warn
+			style.PrintWarning("failed to nudge requestor: %v", err)
+		}
 	}
 
 	// Log to activity feed
