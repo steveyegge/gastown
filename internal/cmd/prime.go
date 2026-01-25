@@ -209,6 +209,12 @@ func runPrime(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Output skill context for polecats and crew
+	// Skill context is best-effort - don't fail prime on skill discovery errors
+	if ctx.Role == RolePolecat || ctx.Role == RoleCrew {
+		_ = OutputSkillContext(os.Stdout, ctx.Role) //nolint:errcheck // best effort
+	}
+
 	// Output handoff content if present
 	outputHandoffContent(ctx)
 
