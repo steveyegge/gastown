@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -60,6 +64,18 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating convoy handler: %w", err)
 	}
 
+	// Set up signal handling for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		fmt.Println("\n   Shutting down...")
+		cancel()
+	}()
+
 	// Build the URL
 	url := fmt.Sprintf("http://localhost:%d", dashboardPort)
 
@@ -80,7 +96,20 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	return server.ListenAndServe()
+
+	// Use context for graceful shutdown
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+
+	err = server.ListenAndServe()
+	if err == http.ErrServerClosed {
+		return nil // Graceful shutdown
+	}
+	return err
 }
 
 // openBrowser opens the specified URL in the default browser.
