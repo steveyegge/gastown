@@ -514,7 +514,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 	// Start polecat session now that attached_molecule is set
 	// This ensures polecat sees the molecule when gt prime runs on session start
-	if newPolecatInfo != nil {
+	freshlySpawned := newPolecatInfo != nil
+	if freshlySpawned {
 		pane, err := newPolecatInfo.StartSession()
 		if err != nil {
 			return fmt.Errorf("starting polecat session: %w", err)
@@ -523,7 +524,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try to inject the "start now" prompt (graceful if no tmux)
-	if targetPane == "" {
+	// Skip for freshly spawned polecats - SessionManager.Start() already sent StartupNudge
+	// with instructions. Sending another nudge causes Claude to interpret it as interruption.
+	if freshlySpawned {
+		// Fresh polecat already got StartupNudge from SessionManager.Start()
+	} else if targetPane == "" {
 		fmt.Printf("%s No pane to nudge (agent will discover work via gt prime)\n", style.Dim.Render("○"))
 	} else {
 		// Ensure agent is ready before nudging (prevents race condition where
