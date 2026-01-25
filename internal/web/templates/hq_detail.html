@@ -1,0 +1,25 @@
+{{/* Partial template for expanded HQ agent details */}}
+<div class="polecat-detail">
+    <div class="detail-header">
+        <span class="detail-label">Session:</span> {{.SessionID}}
+        <span class="detail-sep">|</span>
+        <span class="detail-label">Uptime:</span> {{.Uptime}}
+    </div>
+
+    {{if .TerminalLines}}
+    <div class="terminal-output">
+        <div class="terminal-header">Terminal Output (last {{len .TerminalLines}} lines):</div>
+        <div class="terminal-content">
+            {{range .TerminalLines}}<div class="terminal-line">{{.}}</div>{{end}}
+        </div>
+    </div>
+    {{else}}
+    <div class="terminal-output">
+        <div class="terminal-header">Terminal Output:</div>
+        <div class="terminal-content terminal-empty">
+            No output available
+        </div>
+    </div>
+    {{end}}
+
+</div>

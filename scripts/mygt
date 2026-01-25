@@ -1,0 +1,33 @@
+#!/bin/bash
+# mygt - Run locally built Gas Town binary
+# Usage: mygt [args...]
+#
+# This script builds and runs the local gt binary instead of the installed one.
+# Useful for testing changes before releasing.
+
+set -e
+
+# Resolve symlinks to get actual script location, then find repo root
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+BINARY="$REPO_ROOT/bin/gt"
+
+# Ensure bin directory exists
+mkdir -p "$REPO_ROOT/bin"
+
+# Build if binary doesn't exist or source is newer
+# Check .go, .html (templates), and .toml (formulas) files
+if [[ ! -f "$BINARY" ]] || [[ $(find "$REPO_ROOT" \( -name "*.go" -o -name "*.html" -o -name "*.toml" \) -newer "$BINARY" 2>/dev/null | head -1) ]]; then
+    echo "Building gt from $REPO_ROOT..." >&2
+    (cd "$REPO_ROOT" && go build -o "$BINARY" ./cmd/gt)
+fi
+
+# Run with all arguments
+exec "$BINARY" "$@"

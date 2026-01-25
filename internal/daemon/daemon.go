@@ -56,6 +56,11 @@ type Daemon struct {
 	// See: https://github.com/steveyegge/gastown/issues/567
 	// Note: Only accessed from heartbeat loop goroutine - no sync needed.
 	deaconLastStarted time.Time
+
+	// Refinery startup tracking: per-rig tracking of when refineries were last started.
+	// Prevents race condition where newly started sessions are immediately killed.
+	// Note: Only accessed from heartbeat loop goroutine - no sync needed.
+	refineryLastStarted map[string]time.Time
 }
 
 // sessionDeath records a detected session death for mass death analysis.
@@ -94,12 +99,13 @@ func New(config *Config) (*Daemon, error) {
 	}
 
 	return &Daemon{
-		config:       config,
-		patrolConfig: patrolConfig,
-		tmux:         tmux.NewTmux(),
-		logger:       logger,
-		ctx:          ctx,
-		cancel:       cancel,
+		config:              config,
+		patrolConfig:        patrolConfig,
+		tmux:                tmux.NewTmux(),
+		logger:              logger,
+		ctx:                 ctx,
+		cancel:              cancel,
+		refineryLastStarted: make(map[string]time.Time),
 	}, nil
 }
 
@@ -255,6 +261,12 @@ func (d *Daemon) heartbeat(state *State) {
 		d.ensureRefineriesRunning()
 	} else {
 		d.logger.Printf("Refinery patrol disabled in config, skipping")
+	}
+
+	// 5b. Check Refinery heartbeats (belt-and-suspenders for stuck refineries)
+	// This detects refineries that are running but not making progress.
+	if IsPatrolEnabled(d.patrolConfig, "refinery") {
+		d.checkRefineryHeartbeats()
 	}
 
 	// 6. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
@@ -534,6 +546,92 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	}
 
 	d.logger.Printf("Refinery session for %s started successfully", rigName)
+
+	// Track when we started this refinery to prevent race condition in checkRefineryHeartbeat.
+	d.refineryLastStarted[rigName] = time.Now()
+}
+
+// refineryGracePeriod is the time to wait after starting a Refinery before checking heartbeat.
+// The Refinery needs time to initialize Claude, run SessionStart hooks, execute gt prime,
+// run a patrol cycle, and write a fresh heartbeat. 5 minutes is conservative.
+const refineryGracePeriod = 5 * time.Minute
+
+// checkRefineryHeartbeats checks if refineries are making progress for all rigs.
+// This is a belt-and-suspenders fallback to detect stuck refineries.
+func (d *Daemon) checkRefineryHeartbeats() {
+	rigs := d.getKnownRigs()
+	for _, rigName := range rigs {
+		d.checkRefineryHeartbeat(rigName)
+	}
+}
+
+// checkRefineryHeartbeat checks if a specific rig's refinery is making progress.
+// Uses the heartbeat file that the Refinery updates on each patrol cycle.
+func (d *Daemon) checkRefineryHeartbeat(rigName string) {
+	// Check if rig is operational first
+	if operational, _ := d.isRigOperational(rigName); !operational {
+		return
+	}
+
+	// Grace period: don't check heartbeat for newly started sessions.
+	// This prevents the race condition where we start a Refinery, then immediately
+	// see a stale heartbeat (from before the crash) and kill the session we just started.
+	if lastStarted, ok := d.refineryLastStarted[rigName]; ok {
+		if time.Since(lastStarted) < refineryGracePeriod {
+			d.logger.Printf("Refinery for %s started recently (%s ago), skipping heartbeat check",
+				rigName, time.Since(lastStarted).Round(time.Second))
+			return
+		}
+	}
+
+	hb := refinery.ReadHeartbeat(d.config.TownRoot, rigName)
+	if hb == nil {
+		// No heartbeat file - Refinery hasn't started a cycle yet
+		// This is normal for newly spawned refineries
+		return
+	}
+
+	age := hb.Age()
+
+	// If heartbeat is fresh enough, nothing to do
+	if !hb.ShouldPoke() {
+		return
+	}
+
+	d.logger.Printf("Refinery heartbeat for %s is stale (%s old), checking session...", rigName, age.Round(time.Minute))
+
+	sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+
+	// Check if session exists
+	hasSession, err := d.tmux.HasSession(sessionName)
+	if err != nil {
+		d.logger.Printf("Error checking Refinery session for %s: %v", rigName, err)
+		return
+	}
+
+	if !hasSession {
+		// Session doesn't exist - ensureRefineryRunning already ran earlier
+		// in heartbeat, so Refinery should be starting
+		return
+	}
+
+	// Session exists but heartbeat is stale - Refinery is stuck
+	if age > 30*time.Minute {
+		// Very stuck - restart the session.
+		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+		d.logger.Printf("Refinery for %s stuck for %s - restarting session", rigName, age.Round(time.Minute))
+		if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
+			d.logger.Printf("Error killing stuck Refinery for %s: %v", rigName, err)
+		}
+		// Spawn new Refinery immediately instead of waiting for next heartbeat
+		d.ensureRefineryRunning(rigName)
+	} else {
+		// Stuck but not critically - nudge to wake up
+		d.logger.Printf("Refinery for %s stuck for %s - nudging session", rigName, age.Round(time.Minute))
+		if err := d.tmux.NudgeSession(sessionName, "HEALTH_CHECK: heartbeat stale, respond to confirm responsiveness"); err != nil {
+			d.logger.Printf("Error nudging stuck Refinery for %s: %v", rigName, err)
+		}
+	}
 }
 
 // getKnownRigs returns list of registered rig names.
