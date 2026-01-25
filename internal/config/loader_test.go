@@ -2176,6 +2176,166 @@ func TestFillRuntimeDefaults(t *testing.T) {
 			t.Errorf("PromptMode: got %q, want %q - custom prompt_mode was not preserved", result.PromptMode, "none")
 		}
 	})
+
+	t.Run("args slice is deep copied not shared", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "opencode",
+			Args:    []string{"original-arg"},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's args
+		result.Args[0] = "modified-arg"
+
+		// Original should be unchanged
+		if input.Args[0] != "original-arg" {
+			t.Errorf("Args slice was not deep copied - modifications affect original: got %q, want %q",
+				input.Args[0], "original-arg")
+		}
+	})
+
+	t.Run("session struct is deep copied", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			Session: &RuntimeSessionConfig{
+				SessionIDEnv: "ORIGINAL_SESSION_ID",
+				ConfigDirEnv: "ORIGINAL_CONFIG_DIR",
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's session
+		result.Session.SessionIDEnv = "MODIFIED_SESSION_ID"
+
+		// Original should be unchanged
+		if input.Session.SessionIDEnv != "ORIGINAL_SESSION_ID" {
+			t.Errorf("Session struct was not deep copied - modifications affect original: got %q, want %q",
+				input.Session.SessionIDEnv, "ORIGINAL_SESSION_ID")
+		}
+	})
+
+	t.Run("hooks struct is deep copied", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			Hooks: &RuntimeHooksConfig{
+				Provider:     "original-provider",
+				Dir:          "original-dir",
+				SettingsFile: "original-file",
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's hooks
+		result.Hooks.Provider = "modified-provider"
+
+		// Original should be unchanged
+		if input.Hooks.Provider != "original-provider" {
+			t.Errorf("Hooks struct was not deep copied - modifications affect original: got %q, want %q",
+				input.Hooks.Provider, "original-provider")
+		}
+	})
+
+	t.Run("tmux struct and process_names are deep copied", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "opencode",
+			Tmux: &RuntimeTmuxConfig{
+				ProcessNames:      []string{"original-process"},
+				ReadyPromptPrefix: "original-prefix",
+				ReadyDelayMs:      5000,
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's tmux
+		result.Tmux.ProcessNames[0] = "modified-process"
+		result.Tmux.ReadyPromptPrefix = "modified-prefix"
+
+		// Original should be unchanged
+		if input.Tmux.ProcessNames[0] != "original-process" {
+			t.Errorf("Tmux.ProcessNames was not deep copied - modifications affect original: got %q, want %q",
+				input.Tmux.ProcessNames[0], "original-process")
+		}
+		if input.Tmux.ReadyPromptPrefix != "original-prefix" {
+			t.Errorf("Tmux struct was not deep copied - modifications affect original: got %q, want %q",
+				input.Tmux.ReadyPromptPrefix, "original-prefix")
+		}
+	})
+
+	t.Run("instructions struct is deep copied", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "opencode",
+			Instructions: &RuntimeInstructionsConfig{
+				File: "ORIGINAL.md",
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Modify result's instructions
+		result.Instructions.File = "MODIFIED.md"
+
+		// Original should be unchanged
+		if input.Instructions.File != "ORIGINAL.md" {
+			t.Errorf("Instructions struct was not deep copied - modifications affect original: got %q, want %q",
+				input.Instructions.File, "ORIGINAL.md")
+		}
+	})
+
+	t.Run("nil nested structs remain nil", func(t *testing.T) {
+		t.Parallel()
+		input := &RuntimeConfig{
+			Command: "claude",
+			// All nested structs left nil
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// Nil nested structs should remain nil (not get zero-value structs)
+		if result.Session != nil {
+			t.Error("Session should remain nil when input has nil Session")
+		}
+		if result.Hooks != nil {
+			t.Error("Hooks should remain nil when input has nil Hooks")
+		}
+		if result.Tmux != nil {
+			t.Error("Tmux should remain nil when input has nil Tmux")
+		}
+		if result.Instructions != nil {
+			t.Error("Instructions should remain nil when input has nil Instructions")
+		}
+	})
+
+	t.Run("partial nested struct is copied without defaults", func(t *testing.T) {
+		t.Parallel()
+		// User defines partial Tmux config - only ProcessNames, no other fields
+		input := &RuntimeConfig{
+			Command: "opencode",
+			Tmux: &RuntimeTmuxConfig{
+				ProcessNames: []string{"opencode"},
+				// ReadyPromptPrefix and ReadyDelayMs left at zero values
+			},
+		}
+
+		result := fillRuntimeDefaults(input)
+
+		// ProcessNames should be copied
+		if len(result.Tmux.ProcessNames) != 1 || result.Tmux.ProcessNames[0] != "opencode" {
+			t.Errorf("Tmux.ProcessNames not copied correctly: got %v", result.Tmux.ProcessNames)
+		}
+		// Zero values should remain zero (fillRuntimeDefaults doesn't fill nested defaults)
+		if result.Tmux.ReadyDelayMs != 0 {
+			t.Errorf("Tmux.ReadyDelayMs should be 0 (unfilled), got %d", result.Tmux.ReadyDelayMs)
+		}
+	})
 }
 
 // TestLookupAgentConfigPreservesCustomFields verifies that custom agents
@@ -2333,7 +2493,9 @@ func TestRoleAgentConfigWithCustomAgent(t *testing.T) {
 }
 
 // TestMultipleAgentTypes tests that various built-in agent presets work correctly.
-// This mirrors the manual tests: claude-opus, codex, gemini all started successfully.
+// NOTE: Only these are actual built-in presets: claude, gemini, codex, cursor, auggie, amp, opencode.
+// Variants like "claude-opus", "claude-haiku", "claude-sonnet" are NOT built-in - they need
+// to be defined as custom agents in TownSettings.Agents if specific model selection is needed.
 func TestMultipleAgentTypes(t *testing.T) {
 	t.Parallel()
 
@@ -2341,27 +2503,52 @@ func TestMultipleAgentTypes(t *testing.T) {
 		name          string
 		agentName     string
 		expectCommand string
+		isBuiltIn     bool // true if this is an actual built-in preset
 	}{
 		{
-			name:          "claude-opus built-in",
-			agentName:     "claude-opus",
+			name:          "claude built-in preset",
+			agentName:     "claude",
 			expectCommand: "claude",
+			isBuiltIn:     true,
 		},
 		{
-			name:          "codex built-in",
+			name:          "codex built-in preset",
 			agentName:     "codex",
 			expectCommand: "codex",
+			isBuiltIn:     true,
 		},
 		{
-			name:          "gemini built-in",
+			name:          "gemini built-in preset",
 			agentName:     "gemini",
 			expectCommand: "gemini",
+			isBuiltIn:     true,
+		},
+		{
+			name:          "amp built-in preset",
+			agentName:     "amp",
+			expectCommand: "amp",
+			isBuiltIn:     true,
+		},
+		{
+			name:          "opencode built-in preset",
+			agentName:     "opencode",
+			expectCommand: "opencode",
+			isBuiltIn:     true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+
+			// Verify it's actually a built-in preset
+			if tc.isBuiltIn {
+				preset := GetAgentPresetByName(tc.agentName)
+				if preset == nil {
+					t.Errorf("%s should be a built-in preset but GetAgentPresetByName returned nil", tc.agentName)
+					return
+				}
+			}
 
 			townRoot := t.TempDir()
 			rigPath := filepath.Join(townRoot, "testrig")
@@ -2390,6 +2577,85 @@ func TestMultipleAgentTypes(t *testing.T) {
 				t.Errorf("Command: got %q, want command containing %q", rc.Command, tc.expectCommand)
 			}
 		})
+	}
+}
+
+// TestCustomClaudeVariants tests that Claude model variants (opus, sonnet, haiku) need
+// to be explicitly defined as custom agents since they are NOT built-in presets.
+func TestCustomClaudeVariants(t *testing.T) {
+	t.Parallel()
+
+	// Verify that claude-opus/sonnet/haiku are NOT built-in presets
+	variants := []string{"claude-opus", "claude-sonnet", "claude-haiku"}
+	for _, variant := range variants {
+		if preset := GetAgentPresetByName(variant); preset != nil {
+			t.Errorf("%s should NOT be a built-in preset (only 'claude' is), but GetAgentPresetByName returned non-nil", variant)
+		}
+	}
+
+	// Test that custom claude variants work when explicitly defined
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleMayor:  "claude-opus",
+		constants.RoleDeacon: "claude-haiku",
+	}
+	// Define the custom variants
+	townSettings.Agents = map[string]*RuntimeConfig{
+		"claude-opus": {
+			Command: "claude",
+			Args:    []string{"--model", "claude-opus-4", "--dangerously-skip-permissions"},
+		},
+		"claude-haiku": {
+			Command: "claude",
+			Args:    []string{"--model", "claude-haiku-3", "--dangerously-skip-permissions"},
+		},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	// Test claude-opus custom agent
+	rc := ResolveRoleAgentConfig(constants.RoleMayor, townRoot, rigPath)
+	if rc == nil {
+		t.Fatal("ResolveRoleAgentConfig returned nil for claude-opus")
+	}
+	if !strings.Contains(rc.Command, "claude") {
+		t.Errorf("claude-opus Command: got %q, want claude", rc.Command)
+	}
+	foundModel := false
+	for _, arg := range rc.Args {
+		if arg == "claude-opus-4" {
+			foundModel = true
+			break
+		}
+	}
+	if !foundModel {
+		t.Errorf("claude-opus Args should contain model flag: got %v", rc.Args)
+	}
+
+	// Test claude-haiku custom agent
+	rc = ResolveRoleAgentConfig(constants.RoleDeacon, townRoot, rigPath)
+	if rc == nil {
+		t.Fatal("ResolveRoleAgentConfig returned nil for claude-haiku")
+	}
+	foundModel = false
+	for _, arg := range rc.Args {
+		if arg == "claude-haiku-3" {
+			foundModel = true
+			break
+		}
+	}
+	if !foundModel {
+		t.Errorf("claude-haiku Args should contain model flag: got %v", rc.Args)
 	}
 }
 
