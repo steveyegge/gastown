@@ -191,8 +191,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine target agent (self or specified)
 	var targetAgent string
 	var targetPane string
-	var hookWorkDir string        // Working directory for running bd hook commands
-	var hookSetAtomically bool    // True if hook was set during polecat spawn (skip redundant update)
+	var hookWorkDir string                   // Working directory for running bd hook commands
+	var hookSetAtomically bool               // True if hook was set during polecat spawn (skip redundant update)
+	var newPolecatInfo *SpawnedPolecatInfo // Spawned polecat info (session started after bead setup)
 
 	if len(args) > 1 {
 		target := args[1]
@@ -247,7 +248,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 					return fmt.Errorf("spawning polecat: %w", spawnErr)
 				}
 				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
+				newPolecatInfo = spawnInfo      // Store for later session start
 				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
 				hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
 
@@ -279,7 +280,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 							return fmt.Errorf("spawning polecat to replace dead polecat: %w", spawnErr)
 						}
 						targetAgent = spawnInfo.AgentID()
-						targetPane = spawnInfo.Pane
+						newPolecatInfo = spawnInfo // Store for later session start
 						hookWorkDir = spawnInfo.ClonePath
 						hookSetAtomically = true // Hook was set during spawn (GH #gt-mzyk5)
 
@@ -509,6 +510,16 @@ func runSling(cmd *cobra.Command, args []string) error {
 			// Warn but don't fail - polecat can still work through steps
 			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
 		}
+	}
+
+	// Start polecat session now that attached_molecule is set
+	// This ensures polecat sees the molecule when gt prime runs on session start
+	if newPolecatInfo != nil {
+		pane, err := newPolecatInfo.StartSession()
+		if err != nil {
+			return fmt.Errorf("starting polecat session: %w", err)
+		}
+		targetPane = pane
 	}
 
 	// Try to inject the "start now" prompt (graceful if no tmux)
