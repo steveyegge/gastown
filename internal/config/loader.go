@@ -1456,20 +1456,37 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 // For rig-level roles (witness, refinery), pass the rig name and rigPath.
 // For town-level roles (mayor, deacon, boot), pass empty rig and rigPath, but provide townRoot.
 func BuildAgentStartupCommand(role, rig, townRoot, rigPath, prompt string) string {
+	// Resolve RuntimeConfig first to get the Provider for env vars (e.g., GT_AUTO_INIT for OpenCode).
+	// This ensures provider-specific env vars are included in the startup command.
+	rc := ResolveRoleAgentConfig(role, townRoot, rigPath)
 	envVars := AgentEnv(AgentEnvConfig{
 		Role:     role,
 		Rig:      rig,
 		TownRoot: townRoot,
+		Provider: rc.Provider,
 	})
 	return BuildStartupCommand(envVars, rigPath, prompt)
 }
 
 // BuildAgentStartupCommandWithAgentOverride is like BuildAgentStartupCommand, but uses agentOverride if non-empty.
 func BuildAgentStartupCommandWithAgentOverride(role, rig, townRoot, rigPath, prompt, agentOverride string) (string, error) {
+	// Resolve RuntimeConfig first to get the Provider for env vars (e.g., GT_AUTO_INIT for OpenCode).
+	// Use override if provided, otherwise use role-based resolution.
+	var rc *RuntimeConfig
+	if agentOverride != "" {
+		var err error
+		rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		rc = ResolveRoleAgentConfig(role, townRoot, rigPath)
+	}
 	envVars := AgentEnv(AgentEnvConfig{
 		Role:     role,
 		Rig:      rig,
 		TownRoot: townRoot,
+		Provider: rc.Provider,
 	})
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }
@@ -1481,11 +1498,14 @@ func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) st
 	if rigPath != "" {
 		townRoot = filepath.Dir(rigPath)
 	}
+	// Resolve RuntimeConfig first to get the Provider for env vars (e.g., GT_AUTO_INIT for OpenCode).
+	rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
 	envVars := AgentEnv(AgentEnvConfig{
 		Role:      "polecat",
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  townRoot,
+		Provider:  rc.Provider,
 	})
 	return BuildStartupCommand(envVars, rigPath, prompt)
 }
@@ -1496,11 +1516,23 @@ func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, 
 	if rigPath != "" {
 		townRoot = filepath.Dir(rigPath)
 	}
+	// Resolve RuntimeConfig first to get the Provider for env vars (e.g., GT_AUTO_INIT for OpenCode).
+	var rc *RuntimeConfig
+	if agentOverride != "" {
+		var err error
+		rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		rc = ResolveRoleAgentConfig("polecat", townRoot, rigPath)
+	}
 	envVars := AgentEnv(AgentEnvConfig{
 		Role:      "polecat",
 		Rig:       rigName,
 		AgentName: polecatName,
 		TownRoot:  townRoot,
+		Provider:  rc.Provider,
 	})
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }
@@ -1512,11 +1544,14 @@ func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
 	if rigPath != "" {
 		townRoot = filepath.Dir(rigPath)
 	}
+	// Resolve RuntimeConfig first to get the Provider for env vars (e.g., GT_AUTO_INIT for OpenCode).
+	rc := ResolveRoleAgentConfig("crew", townRoot, rigPath)
 	envVars := AgentEnv(AgentEnvConfig{
 		Role:      "crew",
 		Rig:       rigName,
 		AgentName: crewName,
 		TownRoot:  townRoot,
+		Provider:  rc.Provider,
 	})
 	return BuildStartupCommand(envVars, rigPath, prompt)
 }
@@ -1527,11 +1562,23 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 	if rigPath != "" {
 		townRoot = filepath.Dir(rigPath)
 	}
+	// Resolve RuntimeConfig first to get the Provider for env vars (e.g., GT_AUTO_INIT for OpenCode).
+	var rc *RuntimeConfig
+	if agentOverride != "" {
+		var err error
+		rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		rc = ResolveRoleAgentConfig("crew", townRoot, rigPath)
+	}
 	envVars := AgentEnv(AgentEnvConfig{
 		Role:      "crew",
 		Rig:       rigName,
 		AgentName: crewName,
 		TownRoot:  townRoot,
+		Provider:  rc.Provider,
 	})
 	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
 }
