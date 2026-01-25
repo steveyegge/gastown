@@ -16,9 +16,10 @@ import (
 )
 
 type wispCreateJSON struct {
-	NewEpicID string `json:"new_epic_id"`
-	RootID    string `json:"root_id"`
-	ResultID  string `json:"result_id"`
+	NewEpicID string            `json:"new_epic_id"`
+	RootID    string            `json:"root_id"`
+	ResultID  string            `json:"result_id"`
+	IDMapping map[string]string `json:"id_mapping"`
 }
 
 func parseWispIDFromJSON(jsonOutput []byte) (string, error) {

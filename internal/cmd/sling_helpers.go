@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -510,6 +512,12 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		return nil, fmt.Errorf("parsing wisp output: %w", err)
 	}
 
+	// Parse wisp output to get step ID mapping
+	idMapping, err := parseWispIDMappingFromJSON(wispOut)
+	if err != nil {
+		return nil, fmt.Errorf("parsing wisp id mapping: %w", err)
+	}
+
 	// Step 3: Bond wisp to original bead (creates compound)
 	bondArgs := []string{"--no-daemon", "mol", "bond", wispRootID, beadID, "--json"}
 	bondCmd := exec.Command("bd", bondArgs...)
@@ -528,10 +536,112 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 		wispRootID = bondResult.RootID
 	}
 
+	if err := addFormulaStepDependencies(formulaName, formulaWorkDir, townRoot, idMapping); err != nil {
+		return nil, fmt.Errorf("adding formula dependencies: %w", err)
+	}
+
 	return &FormulaOnBeadResult{
 		WispRootID: wispRootID,
 		BeadToHook: beadID, // Hook the BASE bead (lifecycle fix: wisp is attached_molecule)
 	}, nil
+}
+
+func parseWispIDMappingFromJSON(jsonOutput []byte) (map[string]string, error) {
+	var result wispCreateJSON
+	if err := json.Unmarshal(jsonOutput, &result); err != nil {
+		return nil, fmt.Errorf("parsing wisp JSON: %w (output: %s)", err, trimJSONForError(jsonOutput))
+	}
+	if len(result.IDMapping) == 0 {
+		return nil, fmt.Errorf("wisp JSON missing id_mapping (output: %s)", trimJSONForError(jsonOutput))
+	}
+	return result.IDMapping, nil
+}
+
+func addFormulaStepDependencies(formulaName, formulaWorkDir, townRoot string, idMapping map[string]string) error {
+	if len(idMapping) == 0 {
+		return fmt.Errorf("wisp id mapping is empty")
+	}
+
+	f, err := loadFormulaForDependencies(formulaName, formulaWorkDir, townRoot)
+	if err != nil {
+		return err
+	}
+
+	for _, stepID := range f.GetAllIDs() {
+		needs := f.GetDependencies(stepID)
+		if len(needs) == 0 {
+			continue
+		}
+		stepBeadID, ok := idMapping[stepID]
+		if !ok {
+			return fmt.Errorf("missing id_mapping for step %s", stepID)
+		}
+		for _, neededID := range needs {
+			neededBeadID, ok := idMapping[neededID]
+			if !ok {
+				return fmt.Errorf("missing id_mapping for dependency %s", neededID)
+			}
+			depArgs := []string{"--no-daemon", "dep", "add", stepBeadID, neededBeadID, "--type=blocks"}
+			depCmd := exec.Command("bd", depArgs...)
+			depCmd.Dir = formulaWorkDir
+			depCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
+			depCmd.Stderr = os.Stderr
+			if err := depCmd.Run(); err != nil {
+				return fmt.Errorf("adding dependency %s -> %s: %w", stepID, neededID, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func loadFormulaForDependencies(formulaName, formulaWorkDir, townRoot string) (*formula.Formula, error) {
+	path, err := findFormulaForDependencies(formulaName, formulaWorkDir, townRoot)
+	if err != nil && !strings.HasPrefix(formulaName, "mol-") {
+		path, err = findFormulaForDependencies("mol-"+formulaName, formulaWorkDir, townRoot)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	f, err := formula.ParseFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("parsing formula %s: %w", formulaName, err)
+	}
+
+	return f, nil
+}
+
+func findFormulaForDependencies(name, formulaWorkDir, townRoot string) (string, error) {
+	searchPaths := []string{
+		filepath.Join(formulaWorkDir, ".beads", "formulas"),
+	}
+
+	if gtRoot := os.Getenv("GT_ROOT"); gtRoot != "" {
+		searchPaths = append(searchPaths, filepath.Join(gtRoot, ".beads", "formulas"))
+	}
+
+	if townRoot != "" {
+		searchPaths = append(searchPaths, filepath.Join(townRoot, ".beads", "formulas"))
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		searchPaths = append(searchPaths, filepath.Join(home, ".beads", "formulas"))
+	}
+
+	for _, searchPath := range searchPaths {
+		path := filepath.Join(searchPath, name+".formula.toml")
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+
+		path = filepath.Join(searchPath, name+".formula.json")
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("formula '%s' not found", name)
 }
 
 // CookFormula cooks a formula to ensure its proto exists.
