@@ -147,9 +147,9 @@ func runReady(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func(r *rig.Rig) {
 			defer wg.Done()
-			// Use mayor/rig path where rig-level beads are stored
-			rigBeadsPath := constants.RigMayorPath(r.Path)
-			rigBeads := beads.New(rigBeadsPath)
+			// Use rig root path where rig-level beads are stored
+			// BeadsPath returns rig root; redirect system handles mayor/rig routing
+			rigBeads := beads.New(r.BeadsPath())
 			issues, err := rigBeads.Ready()
 
 			mu.Lock()
@@ -159,10 +159,10 @@ func runReady(cmd *cobra.Command, args []string) error {
 				src.Error = err.Error()
 			} else {
 				// Filter out formula scaffolds (gt-579)
-				formulaNames := getFormulaNames(rigBeadsPath)
+				formulaNames := getFormulaNames(r.BeadsPath())
 				filtered := filterFormulaScaffolds(issues, formulaNames)
 				// Defense-in-depth: also filter wisps that shouldn't appear in ready work
-				wispIDs := getWispIDs(rigBeadsPath)
+				wispIDs := getWispIDs(r.BeadsPath())
 				src.Issues = filterWisps(filtered, wispIDs)
 			}
 			sources = append(sources, src)
