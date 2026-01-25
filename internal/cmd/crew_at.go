@@ -217,8 +217,25 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// a fresh shell. Killing it would destroy the pane before we can respawn.
 		// KillPaneProcesses is only needed when restarting in an EXISTING session
 		// where Claude/Node processes might be running and ignoring SIGHUP.
-		if err := t.RespawnPane(paneID, startupCmd); err != nil {
-			return fmt.Errorf("starting runtime: %w", err)
+
+		// Check if pane's working directory exists (may have been deleted)
+		paneWorkDir, _ := t.GetPaneWorkDir(sessionID)
+		var respawnWorkDir string
+		if paneWorkDir != "" {
+			if _, err := os.Stat(paneWorkDir); err != nil {
+				style.PrintWarning("pane working directory deleted, using rig root")
+				respawnWorkDir = r.Path
+			}
+		}
+
+		if respawnWorkDir != "" {
+			if err := t.RespawnPaneWithWorkDir(paneID, respawnWorkDir, startupCmd); err != nil {
+				return fmt.Errorf("starting runtime: %w", err)
+			}
+		} else {
+			if err := t.RespawnPane(paneID, startupCmd); err != nil {
+				return fmt.Errorf("starting runtime: %w", err)
+			}
 		}
 
 		fmt.Printf("%s Created session for %s/%s\n",
@@ -266,11 +283,28 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 				// Non-fatal but log the warning
 				style.PrintWarning("could not kill pane processes: %v", err)
 			}
-			if err := t.RespawnPane(paneID, startupCmd); err != nil {
+
+			// Check if pane's working directory exists (may have been deleted)
+			paneWorkDir, _ := t.GetPaneWorkDir(sessionID)
+			var respawnWorkDir string
+			if paneWorkDir != "" {
+				if _, err := os.Stat(paneWorkDir); err != nil {
+					style.PrintWarning("pane working directory deleted, using rig root")
+					respawnWorkDir = r.Path
+				}
+			}
+
+			respawnErr := func() error {
+				if respawnWorkDir != "" {
+					return t.RespawnPaneWithWorkDir(paneID, respawnWorkDir, startupCmd)
+				}
+				return t.RespawnPane(paneID, startupCmd)
+			}()
+			if respawnErr != nil {
 				// If pane is stale (session exists but pane doesn't), recreate the session
-				if strings.Contains(err.Error(), "can't find pane") {
+				if strings.Contains(respawnErr.Error(), "can't find pane") {
 					if crewAtRetried {
-						return fmt.Errorf("stale session persists after cleanup: %w", err)
+						return fmt.Errorf("stale session persists after cleanup: %w", respawnErr)
 					}
 					fmt.Printf("Stale session detected, recreating...\n")
 					if killErr := t.KillSession(sessionID); killErr != nil {
@@ -280,7 +314,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 					defer func() { crewAtRetried = false }()
 					return runCrewAt(cmd, args) // Retry with fresh session
 				}
-				return fmt.Errorf("restarting runtime: %w", err)
+				return fmt.Errorf("restarting runtime: %w", respawnErr)
 			}
 		}
 	}
