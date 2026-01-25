@@ -655,9 +655,9 @@ func (b *Beads) ReleaseWithReason(id, reason string) error {
 	return err
 }
 
-// AddDependency adds a dependency: issue depends on dependsOn.
+// AddDependency adds a blocking dependency: issue depends on dependsOn.
 func (b *Beads) AddDependency(issue, dependsOn string) error {
-	_, err := b.run("dep", "add", issue, dependsOn)
+	_, err := b.run("dep", "add", issue, dependsOn, "--type=blocks")
 	return err
 }
 
