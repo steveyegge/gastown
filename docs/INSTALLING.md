@@ -109,6 +109,17 @@ gt install ~/gt --shell
 #   └── .beads/            # Town-level issue tracking
 ```
 
+**Copilot trust (optional)**: Copilot CLI requires the town root to be listed in
+`~/.copilot/config.json` under `trusted_folders`. If that file already exists,
+you can have `gt install` add the HQ automatically:
+
+```bash
+gt install ~/gt --trust-copilot
+```
+
+If Copilot is installed after `gt install` or the config file did not exist,
+manually add the town root to `trusted_folders` (or run `gt doctor --fix`).
+
 ### Step 3: Add a Project (Rig)
 
 ```bash
