@@ -66,6 +66,7 @@ func EnsureGitignorePatterns(worktreePath string) error {
 		".runtime/",
 		".claude/",
 		".logs/",
+		".beads/",
 	}
 
 	// Read existing gitignore content

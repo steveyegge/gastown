@@ -475,9 +475,10 @@ type FormulaOnBeadResult struct {
 //   - hookWorkDir: working directory for bd commands (polecat's worktree)
 //   - townRoot: the town root directory
 //   - skipCook: if true, skip cooking (for batch mode optimization where cook happens once)
+//   - extraVars: additional --var values supplied by the user
 //
 // Returns the wisp root ID which should be hooked.
-func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot string, skipCook bool) (*FormulaOnBeadResult, error) {
+func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot string, skipCook bool, extraVars []string) (*FormulaOnBeadResult, error) {
 	// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
 	formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 
@@ -494,7 +495,11 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	// Step 2: Create wisp with feature and issue variables from bead
 	featureVar := fmt.Sprintf("feature=%s", title)
 	issueVar := fmt.Sprintf("issue=%s", beadID)
-	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar, "--json"}
+	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar}
+	for _, variable := range extraVars {
+		wispArgs = append(wispArgs, "--var", variable)
+	}
+	wispArgs = append(wispArgs, "--json")
 	wispCmd := exec.Command("bd", wispArgs...)
 	wispCmd.Dir = formulaWorkDir
 	wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)

@@ -131,11 +131,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 	townBeadsDir := filepath.Join(townRoot, ".beads")
 
-	// --var is only for standalone formula mode, not formula-on-bead mode
-	if slingOnTarget != "" && len(slingVars) > 0 {
-		return fmt.Errorf("--var cannot be used with --on (formula-on-bead mode doesn't support variables)")
-	}
-
 	// Batch mode detection: multiple beads with rig target
 	// Pattern: gt sling gt-abc gt-def gt-ghi gastown
 	// When len(args) > 2 and last arg is a rig, sling each bead to its own polecat
@@ -191,8 +186,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine target agent (self or specified)
 	var targetAgent string
 	var targetPane string
-	var hookWorkDir string        // Working directory for running bd hook commands
-	var hookSetAtomically bool    // True if hook was set during polecat spawn (skip redundant update)
+	var hookWorkDir string     // Working directory for running bd hook commands
+	var hookSetAtomically bool // True if hook was set during polecat spawn (skip redundant update)
 
 	if len(args) > 1 {
 		target := args[1]
@@ -434,7 +429,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if formulaName != "" {
 		fmt.Printf("  Instantiating formula %s...\n", formulaName)
 
-		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false)
+		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false, slingVars)
 		if err != nil {
 			return fmt.Errorf("instantiating formula %s: %w", formulaName, err)
 		}
