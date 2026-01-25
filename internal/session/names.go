@@ -73,7 +73,7 @@ func PropulsionNudgeForRole(role, workDir string) string {
 	case "refinery":
 		msg = "Run `gt prime` to check MQ status and begin patrol."
 	case "deacon":
-		msg = "Run `gt prime` to check patrol status and begin heartbeat cycle."
+		msg = "Check `gt hook` - if empty, run `gt sling mol-deacon-patrol hq-deacon` and execute the patrol."
 	case "mayor":
 		msg = "Run `gt prime` to check mail and begin coordination."
 	default:
