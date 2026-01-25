@@ -23,7 +23,12 @@ type SpawnedPolecatInfo struct {
 	PolecatName string // Polecat name (e.g., "Toast")
 	ClonePath   string // Path to polecat's git worktree
 	SessionName string // Tmux session name (e.g., "gt-gastown-p-Toast")
-	Pane        string // Tmux pane ID
+	Pane        string // Tmux pane ID (empty if session start was delayed)
+
+	// Internal fields for delayed session start
+	sessionDelayed bool
+	account        string
+	agent          string
 }
 
 // AgentID returns the agent identifier (e.g., "gastown/polecats/Toast")
@@ -33,11 +38,12 @@ func (s *SpawnedPolecatInfo) AgentID() string {
 
 // SlingSpawnOptions contains options for spawning a polecat via sling.
 type SlingSpawnOptions struct {
-	Force    bool   // Force spawn even if polecat has uncommitted work
-	Account  string // Claude Code account handle to use
-	Create   bool   // Create polecat if it doesn't exist (currently always true for sling)
-	HookBead string // Bead ID to set as hook_bead at spawn time (atomic assignment)
-	Agent    string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
+	Force             bool   // Force spawn even if polecat has uncommitted work
+	Account           string // Claude Code account handle to use
+	Create            bool   // Create polecat if it doesn't exist (currently always true for sling)
+	HookBead          string // Bead ID to set as hook_bead at spawn time (atomic assignment)
+	Agent             string // Agent override for this spawn (e.g., "gemini", "codex", "claude-haiku")
+	DelaySessionStart bool   // If true, create worktree but don't start session (caller will start later)
 }
 
 // SpawnPolecatForSling creates a fresh polecat and optionally starts its session.
@@ -128,9 +134,9 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	// Start session (reuse tmux from manager)
 	polecatSessMgr := polecat.NewSessionManager(t, r)
 
-	// Check if already running
+	// Check if already running (skip session start if DelaySessionStart is set)
 	running, _ := polecatSessMgr.IsRunning(polecatName)
-	if !running {
+	if !running && !opts.DelaySessionStart {
 		fmt.Printf("Starting session for %s/%s...\n", rigName, polecatName)
 		startOpts := polecat.SessionStartOptions{
 			RuntimeConfigDir: claudeConfigDir,
@@ -150,13 +156,19 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 			// Non-fatal: log warning but continue
 			fmt.Printf("Warning: could not update agent state: %v\n", err)
 		}
+	} else if opts.DelaySessionStart {
+		fmt.Printf("Polecat %s created (session start delayed)\n", polecatName)
 	}
 
-	// Get session name and pane
+	// Get session name and pane (pane may be empty if session start was delayed)
 	sessionName := polecatSessMgr.SessionName(polecatName)
-	pane, err := getSessionPane(sessionName)
-	if err != nil {
-		return nil, fmt.Errorf("getting pane for %s: %w", sessionName, err)
+	var pane string
+	if !opts.DelaySessionStart {
+		var err error
+		pane, err = getSessionPane(sessionName)
+		if err != nil {
+			return nil, fmt.Errorf("getting pane for %s: %w", sessionName, err)
+		}
 	}
 
 	fmt.Printf("%s Polecat %s spawned\n", style.Bold.Render("✓"), polecatName)
@@ -165,12 +177,85 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	_ = events.LogFeed(events.TypeSpawn, "gt", events.SpawnPayload(rigName, polecatName))
 
 	return &SpawnedPolecatInfo{
-		RigName:     rigName,
-		PolecatName: polecatName,
-		ClonePath:   polecatObj.ClonePath,
-		SessionName: sessionName,
-		Pane:        pane,
+		RigName:       rigName,
+		PolecatName:   polecatName,
+		ClonePath:     polecatObj.ClonePath,
+		SessionName:   sessionName,
+		Pane:          pane,
+		sessionDelayed: opts.DelaySessionStart,
+		account:       opts.Account,
+		agent:         opts.Agent,
 	}, nil
+}
+
+// StartDelayedSession starts the session for a polecat that was spawned with DelaySessionStart.
+// Returns the pane ID after session start.
+func (s *SpawnedPolecatInfo) StartDelayedSession() (string, error) {
+	if !s.sessionDelayed {
+		return s.Pane, nil // Session already started
+	}
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return "", fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Load rig config
+	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		rigsConfig = &config.RigsConfig{Rigs: make(map[string]config.RigEntry)}
+	}
+
+	g := git.NewGit(townRoot)
+	rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+	r, err := rigMgr.GetRig(s.RigName)
+	if err != nil {
+		return "", fmt.Errorf("rig '%s' not found", s.RigName)
+	}
+
+	// Resolve account
+	accountsPath := constants.MayorAccountsPath(townRoot)
+	claudeConfigDir, _, err := config.ResolveAccountConfigDir(accountsPath, s.account)
+	if err != nil {
+		return "", fmt.Errorf("resolving account: %w", err)
+	}
+
+	// Start session
+	t := tmux.NewTmux()
+	polecatSessMgr := polecat.NewSessionManager(t, r)
+
+	fmt.Printf("Starting session for %s/%s...\n", s.RigName, s.PolecatName)
+	startOpts := polecat.SessionStartOptions{
+		RuntimeConfigDir: claudeConfigDir,
+	}
+	if s.agent != "" {
+		cmd, err := config.BuildPolecatStartupCommandWithAgentOverride(s.RigName, s.PolecatName, r.Path, "", s.agent)
+		if err != nil {
+			return "", err
+		}
+		startOpts.Command = cmd
+	}
+	if err := polecatSessMgr.Start(s.PolecatName, startOpts); err != nil {
+		return "", fmt.Errorf("starting session: %w", err)
+	}
+
+	// Update agent state
+	polecatGit := git.NewGit(r.Path)
+	polecatMgr := polecat.NewManager(r, polecatGit, t)
+	if err := polecatMgr.SetAgentState(s.PolecatName, "working"); err != nil {
+		fmt.Printf("Warning: could not update agent state: %v\n", err)
+	}
+
+	// Get pane
+	pane, err := getSessionPane(s.SessionName)
+	if err != nil {
+		return "", fmt.Errorf("getting pane for %s: %w", s.SessionName, err)
+	}
+
+	s.Pane = pane
+	s.sessionDelayed = false
+	return pane, nil
 }
 
 // IsRigName checks if a target string is a rig name (not a role or path).

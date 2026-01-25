@@ -191,8 +191,9 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine target agent (self or specified)
 	var targetAgent string
 	var targetPane string
-	var hookWorkDir string        // Working directory for running bd hook commands
-	var hookSetAtomically bool    // True if hook was set during polecat spawn (skip redundant update)
+	var hookWorkDir string                      // Working directory for running bd hook commands
+	var hookSetAtomically bool                  // True if hook was set during polecat spawn (skip redundant update)
+	var delayedSpawnInfo *SpawnedPolecatInfo    // For delayed session start after attached_molecule is set
 
 	if len(args) > 1 {
 		target := args[1]
@@ -234,20 +235,22 @@ func runSling(cmd *cobra.Command, args []string) error {
 				targetPane = "<new-pane>"
 			} else {
 				// Spawn a fresh polecat in the rig
+				// Delay session start so we can set attached_molecule before polecat runs gt prime
 				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
 				spawnOpts := SlingSpawnOptions{
-					Force:    slingForce,
-					Account:  slingAccount,
-					Create:   slingCreate,
-					HookBead: beadID, // Set atomically at spawn time
-					Agent:    slingAgent,
+					Force:             slingForce,
+					Account:           slingAccount,
+					Create:            slingCreate,
+					HookBead:          beadID, // Set atomically at spawn time
+					Agent:             slingAgent,
+					DelaySessionStart: true, // Start session after attached_molecule is set
 				}
 				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
 				if spawnErr != nil {
 					return fmt.Errorf("spawning polecat: %w", spawnErr)
 				}
 				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
+				delayedSpawnInfo = spawnInfo // Store for later session start
 				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
 				hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
 
@@ -509,6 +512,16 @@ func runSling(cmd *cobra.Command, args []string) error {
 			// Warn but don't fail - polecat can still work through steps
 			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
 		}
+	}
+
+	// Start delayed polecat session now that attached_molecule is set
+	// This ensures polecat sees the molecule when gt prime runs on session start
+	if delayedSpawnInfo != nil {
+		pane, err := delayedSpawnInfo.StartDelayedSession()
+		if err != nil {
+			return fmt.Errorf("starting delayed polecat session: %w", err)
+		}
+		targetPane = pane
 	}
 
 	// Try to inject the "start now" prompt (graceful if no tmux)
