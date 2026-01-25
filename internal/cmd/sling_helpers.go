@@ -435,19 +435,19 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 
 // wakeRigAgents wakes the witness and refinery for a rig after polecat dispatch.
 // This ensures the patrol agents are ready to monitor and merge.
+//
+// NOTE: We no longer nudge agents here. Nudging on every dispatch causes
+// "API Error: 400 due to tool use concurrency issues" when multiple polecats
+// are dispatched in quick succession. The patrol agents poll mail on their
+// normal cycle and will pick up lifecycle events without explicit nudges.
+// See: shouldSkipNotification() in mail/router.go
 func wakeRigAgents(rigName string) {
 	// Boot the rig (idempotent - no-op if already running)
 	bootCmd := exec.Command("gt", "rig", "boot", rigName)
 	_ = bootCmd.Run() // Ignore errors - rig might already be running
 
-	// Nudge witness and refinery to clear any backoff
-	t := tmux.NewTmux()
-	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
-
-	// Silent nudges - sessions might not exist yet
-	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
-	_ = t.NudgeSession(refinerySession, "Polecat dispatched - check for merge requests")
+	// Patrol agents (witness, refinery) check mail on their patrol cycle.
+	// No explicit nudge needed - it causes concurrency errors with Claude API.
 }
 
 // isPolecatTarget checks if the target string refers to a polecat.
