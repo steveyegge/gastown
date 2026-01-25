@@ -415,7 +415,9 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	// Build startup command first
 	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", "", agentOverride)
+	// Include initial prompt for autonomous patrol startup (like witnesses do)
+	initialPrompt := "I am Deacon. Start patrol: check gt hook, if empty run `gt sling mol-deacon-patrol hq-deacon` and execute the patrol."
+	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
 	}

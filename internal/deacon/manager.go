@@ -83,7 +83,7 @@ func (m *Manager) Start(agentOverride string) error {
 	// Build startup command with initial prompt for autonomous patrol.
 	// The prompt triggers GUPP: deacon starts patrol immediately without waiting for input.
 	// This prevents the agent from sitting idle at the prompt after SessionStart hooks run.
-	initialPrompt := "I am Deacon. Start patrol: check gt hook, if empty create mol-deacon-patrol wisp and execute it."
+	initialPrompt := "I am Deacon. Start patrol: check gt hook, if empty run `gt sling mol-deacon-patrol hq-deacon` and execute the patrol."
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
