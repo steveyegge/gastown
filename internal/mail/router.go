@@ -189,6 +189,13 @@ func (r *Router) resolveBeadsDir(_ string) string { // address unused: all mail 
 	return filepath.Join(r.townRoot, ".beads")
 }
 
+func (r *Router) ensureCustomTypes(beadsDir string) error {
+	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
+		return fmt.Errorf("ensuring custom types: %w", err)
+	}
+	return nil
+}
+
 // isTownLevelAddress returns true if the address is for a town-level agent or the overseer.
 func isTownLevelAddress(address string) bool {
 	addr := strings.TrimSuffix(address, "/")
@@ -214,10 +221,10 @@ const (
 
 // ParsedGroup represents a parsed @group address.
 type ParsedGroup struct {
-	Type      GroupType
-	RoleType  string // witness, crew, polecat, dog, etc.
-	Rig       string // rig name for rig-scoped groups
-	Original  string // original @group string
+	Type     GroupType
+	RoleType string // witness, crew, polecat, dog, etc.
+	Rig      string // rig name for rig-scoped groups
+	Original string // original @group string
 }
 
 // parseGroupAddress parses a @group address into its components.
@@ -639,6 +646,9 @@ func (r *Router) sendToSingle(msg *Message) error {
 	}
 
 	beadsDir := r.resolveBeadsDir(msg.To)
+	if err := r.ensureCustomTypes(beadsDir); err != nil {
+		return err
+	}
 	_, err := runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending message: %w", err)
@@ -749,6 +759,9 @@ func (r *Router) sendToQueue(msg *Message) error {
 
 	// Queue messages go to town-level beads (shared location)
 	beadsDir := r.resolveBeadsDir("")
+	if err := r.ensureCustomTypes(beadsDir); err != nil {
+		return err
+	}
 	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending to queue %s: %w", queueName, err)
@@ -820,6 +833,9 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 
 	// Announce messages go to town-level beads (shared location)
 	beadsDir := r.resolveBeadsDir("")
+	if err := r.ensureCustomTypes(beadsDir); err != nil {
+		return err
+	}
 	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending to announce %s: %w", announceName, err)
@@ -893,6 +909,9 @@ func (r *Router) sendToChannel(msg *Message) error {
 
 	// Channel messages go to town-level beads (shared location)
 	beadsDir := r.resolveBeadsDir("")
+	if err := r.ensureCustomTypes(beadsDir); err != nil {
+		return err
+	}
 	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending to channel %s: %w", channelName, err)
@@ -930,6 +949,9 @@ func (r *Router) pruneAnnounce(announceName string, retainCount int) error {
 	}
 
 	beadsDir := r.resolveBeadsDir("")
+	if err := r.ensureCustomTypes(beadsDir); err != nil {
+		return err
+	}
 
 	// Query existing messages in this announce channel
 	// Use bd list with labels filter to find messages with announce:<name> label
