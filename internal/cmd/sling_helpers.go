@@ -572,14 +572,17 @@ func addFormulaStepDependencies(formulaName, formulaWorkDir, townRoot string, id
 		if len(needs) == 0 {
 			continue
 		}
-		stepBeadID, ok := idMapping[stepID]
+		// id_mapping keys are prefixed with formula name (e.g., "shiny-explicit.design")
+		prefixedStepID := formulaName + "." + stepID
+		stepBeadID, ok := idMapping[prefixedStepID]
 		if !ok {
-			return fmt.Errorf("missing id_mapping for step %s", stepID)
+			return fmt.Errorf("missing id_mapping for step %s (key: %s)", stepID, prefixedStepID)
 		}
 		for _, neededID := range needs {
-			neededBeadID, ok := idMapping[neededID]
+			prefixedNeededID := formulaName + "." + neededID
+			neededBeadID, ok := idMapping[prefixedNeededID]
 			if !ok {
-				return fmt.Errorf("missing id_mapping for dependency %s", neededID)
+				return fmt.Errorf("missing id_mapping for dependency %s (key: %s)", neededID, prefixedNeededID)
 			}
 			depArgs := []string{"--no-daemon", "dep", "add", stepBeadID, neededBeadID, "--type=blocks"}
 			depCmd := exec.Command("bd", depArgs...)
