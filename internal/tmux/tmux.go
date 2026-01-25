@@ -179,18 +179,26 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	if pid != "" {
+		// SAFETY: Get the tmux server's PGID to avoid accidentally killing it
+		tmuxServerPGID := getTmuxServerPGID()
+
 		// First, kill the entire process group. This catches processes that:
 		// - Reparented to init (PID 1) when their parent died
 		// - Are not direct children but stayed in the same process group
 		// Note: Processes that called setsid() will have a new PGID and won't be killed here
 		pgid := getProcessGroupID(pid)
 		if pgid != "" && pgid != "0" && pgid != "1" {
-			// Kill process group with negative PGID (POSIX convention)
-			// Use SIGTERM first for graceful shutdown
-			_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
-			time.Sleep(100 * time.Millisecond)
-			// Force kill any remaining processes in the group
-			_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+			// CRITICAL SAFETY CHECK: Never kill the tmux server's process group
+			if tmuxServerPGID != "" && pgid == tmuxServerPGID {
+				fmt.Fprintf(os.Stderr, "[KillSessionWithProcesses] BLOCKED: Refusing to kill PGID %s (matches tmux server)\n", pgid)
+			} else {
+				// Kill process group with negative PGID (POSIX convention)
+				// Use SIGTERM first for graceful shutdown
+				_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
+				time.Sleep(100 * time.Millisecond)
+				// Force kill any remaining processes in the group
+				_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+			}
 		}
 
 		// Also walk the process tree for any descendants that might have called setsid()
@@ -338,6 +346,33 @@ func getProcessGroupID(pid string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// getTmuxServerPGID returns the process group ID of the tmux server.
+// This is used as a safety check to avoid accidentally killing the tmux server.
+// Returns empty string if the server can't be found or PGID can't be determined.
+func getTmuxServerPGID() string {
+	// Find the tmux server process
+	out, err := exec.Command("pgrep", "-f", "tmux: server").Output()
+	if err != nil {
+		return ""
+	}
+	// pgrep may return multiple PIDs; take the first
+	pids := strings.Fields(strings.TrimSpace(string(out)))
+	if len(pids) == 0 {
+		return ""
+	}
+	return getProcessGroupID(pids[0])
+}
+
+// getParentPID returns the parent PID (PPID) for a given PID.
+// Returns empty string if the process doesn't exist or PPID can't be determined.
+func getParentPID(pid string) string {
+	out, err := exec.Command("ps", "-o", "ppid=", "-p", pid).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // getProcessGroupMembers returns all PIDs in a process group.
 // This finds processes that share the same PGID, including those that reparented to init.
 func getProcessGroupMembers(pgid string) []string {
@@ -364,13 +399,14 @@ func getProcessGroupMembers(pgid string) []string {
 //
 // Process:
 // 1. Get the pane's main process PID and its process group ID (PGID)
-// 2. Kill the entire process group (catches reparented processes)
-// 3. Find all descendant processes recursively (catches any stragglers)
-// 4. Send SIGTERM/SIGKILL to descendants
-// 5. Kill the pane process itself
+// 2. Build exclusion set (current process and ancestors to avoid self-kill)
+// 3. Kill the entire process group (catches reparented processes)
+// 4. Find all descendant processes recursively (catches any stragglers)
+// 5. Send SIGTERM/SIGKILL to descendants (excluding self and ancestors)
+// 6. Kill the pane process itself
 //
 // This ensures Claude processes and all their children are properly terminated
-// before respawning the pane.
+// before respawning the pane, while preserving the calling process chain.
 func (t *Tmux) KillPaneProcesses(pane string) error {
 	// Get the pane PID
 	pid, err := t.GetPanePID(pane)
@@ -382,38 +418,75 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 		return fmt.Errorf("pane PID is empty")
 	}
 
-	// First, kill the entire process group. This catches processes that:
-	// - Reparented to init (PID 1) when their parent died
-	// - Are not direct children but stayed in the same process group
-	pgid := getProcessGroupID(pid)
-	if pgid != "" && pgid != "0" && pgid != "1" {
-		// Kill process group with negative PGID (POSIX convention)
-		_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
-		time.Sleep(100 * time.Millisecond)
-		_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+	// Build exclusion set: current process and all ancestors up to and including
+	// the pane process. This prevents self-kill during handoff where gt handoff
+	// is running as a descendant of the pane's main process (Claude).
+	exclude := make(map[string]bool)
+	currentPID := fmt.Sprintf("%d", os.Getpid())
+	exclude[currentPID] = true
+	// Walk up the process tree to find ancestors
+	for p := currentPID; p != "" && p != "1" && p != pid; {
+		parent := getParentPID(p)
+		if parent != "" && parent != "1" {
+			exclude[parent] = true
+		}
+		p = parent
 	}
 
-	// Also walk the process tree for any descendants that might have called setsid()
+	// SAFETY: Get the tmux server's PGID to avoid accidentally killing it
+	tmuxServerPGID := getTmuxServerPGID()
+
+	// Get the pane process's PGID for the group kill
+	pgid := getProcessGroupID(pid)
+
+	// Note: We skip the PGID-based kill entirely when running from within the pane.
+	// The caller (gt handoff) is in the same process tree as Claude, and killing
+	// the PGID would kill the caller before RespawnPane can be called.
+	// Instead, we rely on the individual descendant kills (with exclusions) and
+	// let RespawnPane's -k flag clean up the pane process.
+	callerInPaneTree := false
+	for p := currentPID; p != "" && p != "1"; p = getParentPID(p) {
+		if p == pid {
+			callerInPaneTree = true
+			break
+		}
+	}
+
+	if !callerInPaneTree && pgid != "" && pgid != "0" && pgid != "1" {
+		// CRITICAL SAFETY CHECK: Never kill the tmux server's process group
+		if tmuxServerPGID != "" && pgid == tmuxServerPGID {
+			fmt.Fprintf(os.Stderr, "[KillPaneProcesses] BLOCKED: Refusing to kill PGID %s (matches tmux server)\n", pgid)
+		} else {
+			// Kill process group with negative PGID (POSIX convention)
+			_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
+			time.Sleep(100 * time.Millisecond)
+			_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+		}
+	}
+
+	// Walk the process tree for descendants
 	descendants := getAllDescendants(pid)
 
-	// Send SIGTERM to all descendants (deepest first to avoid orphaning)
+	// Send SIGTERM to descendants (excluding self and ancestors)
 	for _, dpid := range descendants {
-		_ = exec.Command("kill", "-TERM", dpid).Run()
+		if !exclude[dpid] {
+			_ = exec.Command("kill", "-TERM", dpid).Run()
+		}
 	}
 
-	// Wait for graceful shutdown (2s gives processes time to clean up)
+	// Wait for graceful shutdown
 	time.Sleep(processKillGracePeriod)
 
-	// Send SIGKILL to any remaining descendants
+	// Send SIGKILL to remaining descendants (excluding self and ancestors)
 	for _, dpid := range descendants {
-		_ = exec.Command("kill", "-KILL", dpid).Run()
+		if !exclude[dpid] {
+			_ = exec.Command("kill", "-KILL", dpid).Run()
+		}
 	}
 
-	// Kill the pane process itself (may have called setsid() and detached,
-	// or may have no children like Claude Code)
-	_ = exec.Command("kill", "-TERM", pid).Run()
-	time.Sleep(processKillGracePeriod)
-	_ = exec.Command("kill", "-KILL", pid).Run()
+	// Don't kill the pane process directly - RespawnPane's -k flag will handle it.
+	// If we kill it here and the caller is in the pane tree, we'd kill our parent
+	// chain and never reach RespawnPane.
 
 	return nil
 }
