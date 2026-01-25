@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestDiscoverSkills(t *testing.T) {
-	// Create temp skills directory
+	// Create temp directory structure
 	tmpDir := t.TempDir()
-	skillsDir := filepath.Join(tmpDir, ".claude", "cowork-skills", "test-skill")
+	skillsDir := filepath.Join(tmpDir, ".claude", "skills", "test-skill")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -56,6 +57,53 @@ triggers:
 	}
 }
 
+func TestDiscoverAgents(t *testing.T) {
+	// Create temp directory structure
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, ".claude", "agents")
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create test agent .md file
+	agentContent := `---
+name: test-agent
+description: A test agent for testing
+model: opus
+---
+# Test Agent
+`
+	if err := os.WriteFile(filepath.Join(agentsDir, "test-agent.md"), []byte(agentContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Override HOME for test
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	agents, err := DiscoverAgents()
+	if err != nil {
+		t.Fatalf("DiscoverAgents() error: %v", err)
+	}
+
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+
+	if agents[0].Name != "test-agent" {
+		t.Errorf("expected name 'test-agent', got '%s'", agents[0].Name)
+	}
+
+	if agents[0].Description != "A test agent for testing" {
+		t.Errorf("expected description 'A test agent for testing', got '%s'", agents[0].Description)
+	}
+
+	if agents[0].Model != "opus" {
+		t.Errorf("expected model 'opus', got '%s'", agents[0].Model)
+	}
+}
+
 func TestParseSkillFileMultilineDescription(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -94,22 +142,102 @@ triggers:
 	}
 }
 
-func TestOutputSkillContext(t *testing.T) {
-	var buf bytes.Buffer
+func TestOutputClaudeContext(t *testing.T) {
+	// Create temp directory with skills and agents
+	tmpDir := t.TempDir()
 
-	// With no skills (empty HOME), should output nothing
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", "/nonexistent-dir-for-test")
-	defer os.Setenv("HOME", origHome)
-
-	err := OutputSkillContext(&buf, RolePolecat)
-	if err != nil {
-		t.Fatalf("OutputSkillContext() error: %v", err)
+	// Create skills dir
+	skillsDir := filepath.Join(tmpDir, ".claude", "skills", "test-skill")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	skillContent := `---
+name: test-skill
+description: Test skill description
+---
+`
+	if err := os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	// Should be empty since no skills found
+	// Create agents dir
+	agentsDir := filepath.Join(tmpDir, ".claude", "agents")
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	agentContent := `---
+name: test-agent
+description: Test agent description
+model: sonnet
+---
+`
+	if err := os.WriteFile(filepath.Join(agentsDir, "test-agent.md"), []byte(agentContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Override HOME for test
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	var buf bytes.Buffer
+	err := OutputClaudeContext(&buf, RolePolecat)
+	if err != nil {
+		t.Fatalf("OutputClaudeContext() error: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should contain skills section
+	if !strings.Contains(output, "### Skills") {
+		t.Error("expected output to contain '### Skills'")
+	}
+
+	// Should contain agents section
+	if !strings.Contains(output, "### Agents") {
+		t.Error("expected output to contain '### Agents'")
+	}
+
+	// Should contain our test skill
+	if !strings.Contains(output, "test-skill") {
+		t.Error("expected output to contain 'test-skill'")
+	}
+
+	// Should contain our test agent
+	if !strings.Contains(output, "test-agent") {
+		t.Error("expected output to contain 'test-agent'")
+	}
+}
+
+func TestOutputClaudeContextMayorRole(t *testing.T) {
+	// Create temp directory with skills
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, ".claude", "skills", "test-skill")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	skillContent := `---
+name: test-skill
+description: Test skill
+---
+`
+	if err := os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	var buf bytes.Buffer
+	err := OutputClaudeContext(&buf, RoleMayor)
+	if err != nil {
+		t.Fatalf("OutputClaudeContext() error: %v", err)
+	}
+
+	// Mayor role should produce no output
 	if buf.Len() != 0 {
-		t.Errorf("expected empty output, got %d bytes", buf.Len())
+		t.Errorf("expected empty output for Mayor role, got %d bytes", buf.Len())
 	}
 }
 
@@ -126,49 +254,13 @@ func TestGracefulDegradation(t *testing.T) {
 	if skills != nil && len(skills) > 0 {
 		t.Errorf("expected no skills, got %d", len(skills))
 	}
-}
 
-func TestIsRelevantForRole(t *testing.T) {
-	tests := []struct {
-		name     string
-		skill    SkillInfo
-		role     Role
-		expected bool
-	}{
-		{
-			name:     "implement skill for polecat",
-			skill:    SkillInfo{Name: "implement"},
-			role:     RolePolecat,
-			expected: true,
-		},
-		{
-			name:     "dispatch skill for crew",
-			skill:    SkillInfo{Name: "dispatch"},
-			role:     RoleCrew,
-			expected: true,
-		},
-		{
-			name:     "implement skill for mayor",
-			skill:    SkillInfo{Name: "implement"},
-			role:     RoleMayor,
-			expected: false,
-		},
-		{
-			name:     "unknown skill for polecat",
-			skill:    SkillInfo{Name: "unknown-skill"},
-			role:     RolePolecat,
-			expected: false,
-		},
+	agents, err := DiscoverAgents()
+	if err != nil {
+		t.Fatalf("DiscoverAgents() should not error on missing dir: %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isRelevantForRole(tt.skill, tt.role)
-			if result != tt.expected {
-				t.Errorf("isRelevantForRole(%s, %s) = %v, want %v",
-					tt.skill.Name, tt.role, result, tt.expected)
-			}
-		})
+	if agents != nil && len(agents) > 0 {
+		t.Errorf("expected no agents, got %d", len(agents))
 	}
 }
 
@@ -192,5 +284,28 @@ No YAML frontmatter here.
 
 	if skill != nil {
 		t.Error("expected nil skill for file without frontmatter")
+	}
+}
+
+func TestParseAgentFileNoFrontmatter(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create agent without frontmatter
+	agentContent := `# Just a Markdown File
+
+No YAML frontmatter here.
+`
+	agentPath := filepath.Join(tmpDir, "agent.md")
+	if err := os.WriteFile(agentPath, []byte(agentContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := parseAgentFile(agentPath)
+	if err != nil {
+		t.Fatalf("parseAgentFile() error: %v", err)
+	}
+
+	if agent != nil {
+		t.Error("expected nil agent for file without frontmatter")
 	}
 }

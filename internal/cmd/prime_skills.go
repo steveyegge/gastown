@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -17,68 +16,41 @@ type SkillInfo struct {
 	Triggers    []string
 }
 
-// relevantSkills defines skills relevant for autonomous workers (polecats/crew).
-// Package-level to avoid repeated allocation.
-var relevantSkills = map[string]bool{
-	// Core workflow
-	"implement": true,
-	"beads":     true,
-	"status":    true,
-	"molecules": true,
-	// Communication
-	"dispatch": true,
-	"mail":     true,
-	"handoff":  true,
-	// Infrastructure
-	"polecat-lifecycle": true,
-	"crew":              true,
-	"roles":             true,
-	"bd-routing":        true,
-	// Work patterns
-	"crank":          true,
-	"implement-wave": true,
-	"retro":          true,
-	// Validation
-	"vibe":             true,
-	"validation-chain": true,
+// AgentInfo holds parsed agent metadata from agent .md frontmatter
+type AgentInfo struct {
+	Name        string
+	Description string
+	Model       string
 }
 
-// DiscoverSkills scans skill directories for SKILL.md files
+// DiscoverSkills scans ~/.claude/skills/ for SKILL.md files
 func DiscoverSkills() ([]SkillInfo, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
 
-	var skills []SkillInfo
-
-	// Scan primary skill directories
-	skillDirs := []string{
-		filepath.Join(homeDir, ".claude", "cowork-skills"),
-		filepath.Join(homeDir, ".claude", "skills"),
+	skillsDir := filepath.Join(homeDir, ".claude", "skills")
+	if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
+		return nil, nil // Graceful degradation
 	}
 
-	for _, dir := range skillDirs {
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			continue
-		}
-		dirSkills, err := scanSkillDirectory(dir)
-		if err != nil {
-			continue
-		}
-		skills = append(skills, dirSkills...)
+	return scanSkillDirectory(skillsDir)
+}
+
+// DiscoverAgents scans ~/.claude/agents/ for agent .md files
+func DiscoverAgents() ([]AgentInfo, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
 	}
 
-	// Scan plugin cache for marketplace skills
-	pluginCacheDir := filepath.Join(homeDir, ".claude", "plugins", "cache", "agentops-marketplace")
-	if _, err := os.Stat(pluginCacheDir); err == nil {
-		pluginSkills, err := scanPluginSkills(pluginCacheDir)
-		if err == nil {
-			skills = append(skills, pluginSkills...)
-		}
+	agentsDir := filepath.Join(homeDir, ".claude", "agents")
+	if _, err := os.Stat(agentsDir); os.IsNotExist(err) {
+		return nil, nil // Graceful degradation
 	}
 
-	return skills, nil
+	return scanAgentDirectory(agentsDir)
 }
 
 // scanSkillDirectory scans a directory for SKILL.md files (one level deep)
@@ -108,54 +80,34 @@ func scanSkillDirectory(dir string) ([]SkillInfo, error) {
 	return skills, nil
 }
 
-// scanPluginSkills scans plugin cache for skills
-// Structure: <cache>/<plugin>/<version>/skills/<skill>/SKILL.md
-func scanPluginSkills(cacheDir string) ([]SkillInfo, error) {
-	var skills []SkillInfo
+// scanAgentDirectory scans a directory for agent .md files
+func scanAgentDirectory(dir string) ([]AgentInfo, error) {
+	var agents []AgentInfo
 
-	plugins, err := os.ReadDir(cacheDir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, plugin := range plugins {
-		if !plugin.IsDir() {
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
 
-		pluginPath := filepath.Join(cacheDir, plugin.Name())
-		versions, err := os.ReadDir(pluginPath)
-		if err != nil || len(versions) == 0 {
-			continue
-		}
-
-		// Sort versions descending to get latest first
-		// Semantic versions sort correctly as strings (1.0.0 < 1.1.0 < 2.0.0)
-		versionNames := make([]string, 0, len(versions))
-		for _, v := range versions {
-			if v.IsDir() {
-				versionNames = append(versionNames, v.Name())
-			}
-		}
-		sort.Sort(sort.Reverse(sort.StringSlice(versionNames)))
-
-		if len(versionNames) == 0 {
-			continue
-		}
-
-		versionPath := filepath.Join(pluginPath, versionNames[0], "skills")
-		if _, err := os.Stat(versionPath); os.IsNotExist(err) {
-			continue
-		}
-
-		dirSkills, err := scanSkillDirectory(versionPath)
+		agentPath := filepath.Join(dir, entry.Name())
+		agent, err := parseAgentFile(agentPath)
 		if err != nil {
 			continue
 		}
-		skills = append(skills, dirSkills...)
+		if agent != nil {
+			agents = append(agents, *agent)
+		}
 	}
 
-	return skills, nil
+	return agents, nil
 }
 
 // parseSkillFile reads YAML frontmatter from a SKILL.md file
@@ -167,29 +119,79 @@ func parseSkillFile(path string) (*SkillInfo, error) {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	return parseFrontmatter(scanner), nil
+	return parseSkillFrontmatter(scanner), nil
 }
 
-// parseFrontmatter parses YAML frontmatter from a scanner
-func parseFrontmatter(scanner *bufio.Scanner) *SkillInfo {
+// parseAgentFile reads YAML frontmatter from an agent .md file
+func parseAgentFile(path string) (*AgentInfo, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	return parseAgentFrontmatter(scanner), nil
+}
+
+// parseSkillFrontmatter parses YAML frontmatter from a scanner for skills
+func parseSkillFrontmatter(scanner *bufio.Scanner) *SkillInfo {
 	// Check for YAML frontmatter delimiter
 	if !scanner.Scan() || scanner.Text() != "---" {
 		return nil
 	}
 
 	skill := &SkillInfo{}
-	state := &parserState{}
+	inTriggers := false
+	inDescription := false
+	var descLines []string
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "---" {
 			break
 		}
-		state.parseLine(line, skill)
+
+		// Handle multi-line description continuation
+		if inDescription {
+			if strings.HasPrefix(line, "  ") {
+				descLines = append(descLines, strings.TrimSpace(line))
+				continue
+			}
+			skill.Description = strings.Join(descLines, " ")
+			inDescription = false
+		}
+
+		switch {
+		case strings.HasPrefix(line, "name:"):
+			skill.Name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+
+		case strings.HasPrefix(line, "description:"):
+			desc := strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+			if desc == ">" || desc == "|" {
+				inDescription = true
+				descLines = nil
+			} else {
+				skill.Description = desc
+			}
+
+		case strings.HasPrefix(line, "triggers:"):
+			inTriggers = true
+
+		case inTriggers && strings.HasPrefix(line, "  - "):
+			trigger := strings.TrimPrefix(line, "  - ")
+			trigger = strings.Trim(trigger, "\"'")
+			skill.Triggers = append(skill.Triggers, trigger)
+
+		case !strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "-"):
+			inTriggers = false
+		}
 	}
 
-	// Finalize any pending multi-line description
-	state.finalize(skill)
+	// Finalize pending multi-line description
+	if inDescription && len(descLines) > 0 {
+		skill.Description = strings.Join(descLines, " ")
+	}
 
 	if skill.Name == "" {
 		return nil
@@ -198,111 +200,100 @@ func parseFrontmatter(scanner *bufio.Scanner) *SkillInfo {
 	return skill
 }
 
-// parserState tracks YAML parsing state
-type parserState struct {
-	inTriggers       bool
-	inDescription    bool
-	descriptionLines []string
-}
-
-// parseLine processes a single line of YAML frontmatter
-func (s *parserState) parseLine(line string, skill *SkillInfo) {
-	// Handle continuation of multi-line description
-	if s.inDescription {
-		if strings.HasPrefix(line, "  ") {
-			s.descriptionLines = append(s.descriptionLines, strings.TrimSpace(line))
-			return
-		}
-		// End of description block
-		skill.Description = strings.Join(s.descriptionLines, " ")
-		s.inDescription = false
-	}
-
-	// Parse key-value pairs
-	switch {
-	case strings.HasPrefix(line, "name:"):
-		skill.Name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
-
-	case strings.HasPrefix(line, "description:"):
-		desc := strings.TrimSpace(strings.TrimPrefix(line, "description:"))
-		if desc == ">" || desc == "|" {
-			s.inDescription = true
-			s.descriptionLines = nil
-		} else {
-			skill.Description = desc
-		}
-
-	case strings.HasPrefix(line, "triggers:"):
-		s.inTriggers = true
-
-	case s.inTriggers && strings.HasPrefix(line, "  - "):
-		trigger := strings.TrimPrefix(line, "  - ")
-		trigger = strings.Trim(trigger, "\"'")
-		skill.Triggers = append(skill.Triggers, trigger)
-
-	case !strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "-"):
-		s.inTriggers = false
-	}
-}
-
-// finalize completes any pending multi-line values
-func (s *parserState) finalize(skill *SkillInfo) {
-	if s.inDescription && len(s.descriptionLines) > 0 {
-		skill.Description = strings.Join(s.descriptionLines, " ")
-	}
-}
-
-// OutputSkillContext writes available skills section to stdout
-func OutputSkillContext(w io.Writer, role Role) error {
-	skills, err := DiscoverSkills()
-	if err != nil || len(skills) == 0 {
-		return nil // Graceful degradation
-	}
-
-	// Filter and deduplicate skills
-	unique := filterAndDedupe(skills, role)
-	if len(unique) == 0 {
+// parseAgentFrontmatter parses YAML frontmatter from a scanner for agents
+func parseAgentFrontmatter(scanner *bufio.Scanner) *AgentInfo {
+	// Check for YAML frontmatter delimiter
+	if !scanner.Scan() || scanner.Text() != "---" {
 		return nil
 	}
 
-	// Use buffered writer for batched error handling
+	agent := &AgentInfo{}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "---" {
+			break
+		}
+
+		switch {
+		case strings.HasPrefix(line, "name:"):
+			agent.Name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+
+		case strings.HasPrefix(line, "description:"):
+			agent.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+
+		case strings.HasPrefix(line, "model:"):
+			agent.Model = strings.TrimSpace(strings.TrimPrefix(line, "model:"))
+		}
+	}
+
+	if agent.Name == "" {
+		return nil
+	}
+
+	return agent
+}
+
+// OutputClaudeContext writes available skills and agents to stdout for polecats/crew
+func OutputClaudeContext(w io.Writer, role Role) error {
+	// Only output for polecat and crew roles
+	if role != RolePolecat && role != RoleCrew {
+		return nil
+	}
+
+	skills, _ := DiscoverSkills()
+	agents, _ := DiscoverAgents()
+
+	// Nothing to output
+	if len(skills) == 0 && len(agents) == 0 {
+		return nil
+	}
+
 	bw := bufio.NewWriter(w)
 
 	fmt.Fprintln(bw)
-	fmt.Fprintln(bw, "## Available Skills")
+	fmt.Fprintln(bw, "## Claude Code Assets")
 	fmt.Fprintln(bw)
-	fmt.Fprintln(bw, "Load skills with `/skill-name` for documented workflows:")
+	fmt.Fprintln(bw, "Available skills and agents from `~/.claude/`:")
 	fmt.Fprintln(bw)
-	fmt.Fprintln(bw, "| Skill | Description |")
-	fmt.Fprintln(bw, "|-------|-------------|")
 
-	for _, s := range unique {
-		desc := truncateDescription(s.Description, 60)
-		fmt.Fprintf(bw, "| `/%s` | %s |\n", s.Name, desc)
+	// Output skills table
+	if len(skills) > 0 {
+		fmt.Fprintln(bw, "### Skills")
+		fmt.Fprintln(bw)
+		fmt.Fprintln(bw, "Invoke with `/skill-name`:")
+		fmt.Fprintln(bw)
+		fmt.Fprintln(bw, "| Skill | Description |")
+		fmt.Fprintln(bw, "|-------|-------------|")
+
+		for _, s := range skills {
+			desc := truncateDescription(s.Description, 60)
+			fmt.Fprintf(bw, "| `/%s` | %s |\n", s.Name, desc)
+		}
+		fmt.Fprintln(bw)
 	}
 
-	fmt.Fprintln(bw)
+	// Output agents table
+	if len(agents) > 0 {
+		fmt.Fprintln(bw, "### Agents")
+		fmt.Fprintln(bw)
+		fmt.Fprintln(bw, "Invoke via Task() or explicit request:")
+		fmt.Fprintln(bw)
+		fmt.Fprintln(bw, "| Agent | Model | Description |")
+		fmt.Fprintln(bw, "|-------|-------|-------------|")
+
+		for _, a := range agents {
+			desc := truncateDescription(a.Description, 50)
+			model := a.Model
+			if model == "" {
+				model = "default"
+			}
+			fmt.Fprintf(bw, "| `%s` | %s | %s |\n", a.Name, model, desc)
+		}
+		fmt.Fprintln(bw)
+	}
 
 	return bw.Flush()
-}
-
-// filterAndDedupe filters skills by role and removes duplicates
-func filterAndDedupe(skills []SkillInfo, role Role) []SkillInfo {
-	seen := make(map[string]bool)
-	var unique []SkillInfo
-
-	for _, s := range skills {
-		if !isRelevantForRole(s, role) {
-			continue
-		}
-		if seen[s.Name] {
-			continue
-		}
-		seen[s.Name] = true
-		unique = append(unique, s)
-	}
-
-	return unique
 }
 
 // truncateDescription shortens and cleans description for table display
@@ -317,11 +308,7 @@ func truncateDescription(desc string, maxLen int) string {
 	return desc
 }
 
-// isRelevantForRole determines if a skill is relevant for polecats/crew
-func isRelevantForRole(skill SkillInfo, role Role) bool {
-	// Only show for polecat and crew roles
-	if role != RolePolecat && role != RoleCrew {
-		return false
-	}
-	return relevantSkills[skill.Name]
+// OutputSkillContext is kept for backward compatibility, calls OutputClaudeContext
+func OutputSkillContext(w io.Writer, role Role) error {
+	return OutputClaudeContext(w, role)
 }
