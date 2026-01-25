@@ -235,6 +235,53 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	return nil
 }
 
+// storeNoMergeInBead sets the no_merge field in a bead's description.
+// When set, gt done will skip the merge queue and keep work on the feature branch.
+// This is useful for upstream contributions or when human review is needed before merge.
+func storeNoMergeInBead(beadID string, noMerge bool) error {
+	if !noMerge {
+		return nil
+	}
+
+	// Get the bead to preserve existing description content
+	showCmd := exec.Command("bd", "show", beadID, "--json")
+	out, err := showCmd.Output()
+	if err != nil {
+		return fmt.Errorf("fetching bead: %w", err)
+	}
+
+	// Parse the bead
+	var issues []beads.Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return fmt.Errorf("parsing bead: %w", err)
+	}
+	if len(issues) == 0 {
+		return fmt.Errorf("bead not found")
+	}
+	issue := &issues[0]
+
+	// Get or create attachment fields
+	fields := beads.ParseAttachmentFields(issue)
+	if fields == nil {
+		fields = &beads.AttachmentFields{}
+	}
+
+	// Set the no_merge flag
+	fields.NoMerge = true
+
+	// Update the description
+	newDesc := beads.SetAttachmentFields(issue, fields)
+
+	// Update the bead
+	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd.Stderr = os.Stderr
+	if err := updateCmd.Run(); err != nil {
+		return fmt.Errorf("updating bead description: %w", err)
+	}
+
+	return nil
+}
+
 // injectStartPrompt sends a prompt to the target pane to start working.
 // Uses the reliable nudge pattern: literal mode + 500ms debounce + separate Enter.
 func injectStartPrompt(pane, beadID, subject, args string) error {

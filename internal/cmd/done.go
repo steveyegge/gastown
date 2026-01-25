@@ -310,6 +310,38 @@ func runDone(cmd *cobra.Command, args []string) error {
 		// Initialize beads
 		bd := beads.New(beads.ResolveBeadsDir(cwd))
 
+		// Check for no_merge flag - if set, skip merge queue and notify for review
+		sourceIssueForNoMerge, err := bd.Show(issueID)
+		if err == nil {
+			attachmentFields := beads.ParseAttachmentFields(sourceIssueForNoMerge)
+			if attachmentFields != nil && attachmentFields.NoMerge {
+				fmt.Printf("%s No-merge mode: skipping merge queue\n", style.Bold.Render("→"))
+				fmt.Printf("  Branch: %s\n", branch)
+				fmt.Printf("  Issue: %s\n", issueID)
+				fmt.Println()
+				fmt.Printf("%s\n", style.Dim.Render("Work stays on feature branch for human review."))
+
+				// Mail dispatcher with READY_FOR_REVIEW
+				if dispatcher := attachmentFields.DispatchedBy; dispatcher != "" {
+					townRouter := mail.NewRouter(townRoot)
+					reviewMsg := &mail.Message{
+						To:      dispatcher,
+						From:    detectSender(),
+						Subject: fmt.Sprintf("READY_FOR_REVIEW: %s", issueID),
+						Body:    fmt.Sprintf("Branch: %s\nIssue: %s\nReady for review.", branch, issueID),
+					}
+					if err := townRouter.Send(reviewMsg); err != nil {
+						style.PrintWarning("could not notify dispatcher: %v", err)
+					} else {
+						fmt.Printf("%s Dispatcher notified: READY_FOR_REVIEW\n", style.Bold.Render("✓"))
+					}
+				}
+
+				// Skip MR creation, go to witness notification
+				goto notifyWitness
+			}
+		}
+
 		// Determine target branch (auto-detect integration branch if applicable)
 		target := defaultBranch
 		autoTarget, err := detectIntegrationBranch(bd, g, issueID)

@@ -96,6 +96,7 @@ var (
 	slingAccount  string // --account: Claude Code account handle to use
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
+	slingNoMerge  bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
 )
 
 func init() {
@@ -113,6 +114,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
+	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -496,6 +498,15 @@ func runSling(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
 		} else {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Store no_merge flag in bead (skips merge queue on completion)
+	if slingNoMerge {
+		if err := storeNoMergeInBead(beadID, true); err != nil {
+			fmt.Printf("%s Could not store no_merge in bead: %v\n", style.Dim.Render("Warning:"), err)
+		} else {
+			fmt.Printf("%s No-merge mode enabled (work stays on feature branch)\n", style.Bold.Render("✓"))
 		}
 	}
 
