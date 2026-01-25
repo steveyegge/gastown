@@ -172,16 +172,14 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// If subject/message provided, send handoff mail to self first
-	// The mail is auto-hooked so the next session picks it up
-	if handoffSubject != "" || handoffMessage != "" {
-		beadID, err := sendHandoffMail(handoffSubject, handoffMessage)
-		if err != nil {
-			style.PrintWarning("could not send handoff mail: %v", err)
-			// Continue anyway - the respawn is more important
-		} else {
-			fmt.Printf("%s Sent handoff mail %s (auto-hooked)\n", style.Bold.Render("📬"), beadID)
-		}
+	// Send handoff mail to self (defaults applied inside sendHandoffMail).
+	// The mail is auto-hooked so the next session picks it up.
+	beadID, err := sendHandoffMail(handoffSubject, handoffMessage)
+	if err != nil {
+		style.PrintWarning("could not send handoff mail: %v", err)
+		// Continue anyway - the respawn is more important
+	} else {
+		fmt.Printf("%s Sent handoff mail %s (auto-hooked)\n", style.Bold.Render("📬"), beadID)
 	}
 
 	// NOTE: reportAgentState("stopped") removed (gt-zecmc)
