@@ -632,9 +632,43 @@ func getSessionNudgeLock(session string) *sync.Mutex {
 	return actual.(*sync.Mutex)
 }
 
+// IsSessionAttached returns true if the session has any clients attached.
+func (t *Tmux) IsSessionAttached(target string) bool {
+	attached, err := t.run("display-message", "-t", target, "-p", "#{session_attached}")
+	return err == nil && attached == "1"
+}
+
+// WakePane triggers a SIGWINCH in a pane by resizing it slightly then restoring.
+// This wakes up Claude Code's event loop by simulating a terminal resize.
+//
+// When Claude runs in a detached tmux session, its TUI library may not process
+// stdin until a terminal event occurs. Attaching triggers SIGWINCH which wakes
+// the event loop. This function simulates that by doing a resize dance.
+//
+// Note: This always performs the resize. Use WakePaneIfDetached to skip
+// attached sessions where the wake is unnecessary.
+func (t *Tmux) WakePane(target string) {
+	// Resize pane down by 1 row, then up by 1 row
+	// This triggers SIGWINCH without changing the final pane size
+	_, _ = t.run("resize-pane", "-t", target, "-y", "-1")
+	time.Sleep(50 * time.Millisecond)
+	_, _ = t.run("resize-pane", "-t", target, "-y", "+1")
+}
+
+// WakePaneIfDetached triggers a SIGWINCH only if the session is detached.
+// This avoids unnecessary latency on attached sessions where Claude is
+// already processing terminal events.
+func (t *Tmux) WakePaneIfDetached(target string) {
+	if t.IsSessionAttached(target) {
+		return
+	}
+	t.WakePane(target)
+}
+
 // NudgeSession sends a message to a Claude Code session reliably.
 // This is the canonical way to send messages to Claude sessions.
 // Uses: literal mode + 500ms debounce + ESC (for vim mode) + separate Enter.
+// After sending, triggers SIGWINCH to wake Claude in detached sessions.
 // Verification is the Witness's job (AI), not this function.
 //
 // IMPORTANT: Nudges to the same session are serialized to prevent interleaving.
@@ -670,6 +704,8 @@ func (t *Tmux) NudgeSession(session, message string) error {
 			lastErr = err
 			continue
 		}
+		// 5. Wake the pane to trigger SIGWINCH for detached sessions
+		t.WakePaneIfDetached(session)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
@@ -677,6 +713,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 // NudgePane sends a message to a specific pane reliably.
 // Same pattern as NudgeSession but targets a pane ID (e.g., "%9") instead of session name.
+// After sending, triggers SIGWINCH to wake Claude in detached sessions.
 // Nudges to the same pane are serialized to prevent interleaving.
 func (t *Tmux) NudgePane(pane, message string) error {
 	// Serialize nudges to this pane to prevent interleaving
@@ -707,6 +744,8 @@ func (t *Tmux) NudgePane(pane, message string) error {
 			lastErr = err
 			continue
 		}
+		// 5. Wake the pane to trigger SIGWINCH for detached sessions
+		t.WakePaneIfDetached(pane)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
