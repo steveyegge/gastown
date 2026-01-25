@@ -175,17 +175,20 @@ about next steps before the session ends.
 
 FLAGS:
   --inject     Output as <system-reminder> for Claude Code hooks
+  --nudge      Send reminder as nudge to current agent's session
 
 Exit codes (normal mode):
   0 - Work detected, reminder printed
   1 - No work detected
 
-Exit codes (--inject mode):
+Exit codes (--inject/--nudge mode):
   0 - Always (hooks should never block)
-  Output: <system-reminder> if work exists, silent otherwise
 
 Examples:
-  # For Claude Code Stop hook
+  # For Claude Code Stop hook (nudges self if work detected)
+  gt decision remind --nudge
+
+  # For UserPromptSubmit hook (injects context)
   gt decision remind --inject
 
   # Human-readable check
@@ -198,6 +201,7 @@ var decisionDashboardJSON bool
 
 // Remind-specific flags
 var decisionRemindInject bool
+var decisionRemindNudge bool
 
 func init() {
 	// Request subcommand flags
@@ -239,6 +243,7 @@ func init() {
 
 	// Remind subcommand flags
 	decisionRemindCmd.Flags().BoolVar(&decisionRemindInject, "inject", false, "Output as <system-reminder> for Claude Code hooks")
+	decisionRemindCmd.Flags().BoolVar(&decisionRemindNudge, "nudge", false, "Send reminder as nudge to current agent's session")
 
 	// Add subcommands
 	decisionCmd.AddCommand(decisionRequestCmd)

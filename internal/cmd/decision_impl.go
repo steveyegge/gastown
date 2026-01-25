@@ -754,7 +754,7 @@ func runDecisionRemind(cmd *cobra.Command, args []string) error {
 	}
 
 	if !hasWork {
-		if decisionRemindInject {
+		if decisionRemindInject || decisionRemindNudge {
 			// Silent exit - no reminder needed
 			return nil
 		}
@@ -764,6 +764,21 @@ func runDecisionRemind(cmd *cobra.Command, args []string) error {
 
 	// Format the reminder
 	reminderText := formatDecisionReminder(workIndicators)
+
+	if decisionRemindNudge {
+		// Send reminder as nudge to current agent's session
+		agent := detectSender()
+		if agent == "" {
+			agent = "gastown/crew/decision_point" // fallback
+		}
+		nudgeMsg := "DECISION REMINDER: Session work detected. Consider offering the user a decision point about next steps before ending this session."
+		nudgeCmd := execCommand("gt", "nudge", agent, nudgeMsg)
+		if err := nudgeCmd.Run(); err != nil {
+			// Don't fail the hook, just log
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to send decision nudge: %v\n", err)
+		}
+		return nil
+	}
 
 	if decisionRemindInject {
 		// Output as system-reminder for Claude Code hooks
