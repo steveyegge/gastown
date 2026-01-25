@@ -245,6 +245,16 @@ a structured decision is made. Agents escalate decisions when they encounter:
 - Business decisions (feature prioritization, scope tradeoffs)
 - Ambiguous requirements needing clarification
 
+### Evaluating Decision Quality
+
+When reviewing agent decisions, check that options are:
+- **Well-researched** - Not guesses, actual alternatives with context
+- **Mutually exclusive** - Distinct paths, not variations of the same thing
+- **Actionable** - Each option leads to clear next steps
+
+If options are weak (e.g., "Yes/No", vague labels), respond with text guidance
+to request better options: `--text="Expand on implementation approach for each"`
+
 ### Responding to Decisions
 
 When an agent creates a decision point, you'll receive mail or see it in the queue:
@@ -275,13 +285,22 @@ escalate to the overseer: `gt mail send --human -s "Decision needed" -m "..."`
 
 ### Creating Decisions (for your own workflows)
 
-When YOU need a decision from the overseer:
+When YOU need a decision from the overseer, you SHOULD offer one at these points:
+1. **Strategic forks** - Multiple valid high-level approaches
+2. **End of planning session** - "Here's what I'm planning, approve?"
+3. **Risk points** - Before actions that are hard to reverse
+
+Before creating, **research each option thoroughly**. Include:
+- Brief label (5-10 words)
+- Implementation approach
+- Key tradeoffs
 
 ```bash
 gt decision request \
   --prompt "Which authentication approach for admin panel?" \
-  --option "JWT tokens: Stateless, scalable" \
-  --option "Session cookies: Traditional approach" \
+  --option "JWT tokens: Stateless, scalable, requires careful token management" \
+  --option "Session cookies: Traditional, simpler but adds server state" \
+  --option "Defer: Use basic auth for now, revisit after MVP" \
   --blocks <work-bead-blocked-by-this> \
   --urgency high
 ```

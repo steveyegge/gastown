@@ -662,6 +662,35 @@ to proceed. Use them for:
 - Business decisions (feature prioritization, scope tradeoffs)
 - Ambiguous requirements needing clarification
 
+### When to Offer Decisions (MANDATORY)
+
+You MUST offer a decision point at these junctures:
+1. **Completing a research/design phase** - Before starting implementation
+2. **Multiple valid approaches exist** - Architectural forks
+3. **End of work session** - "Here's what I accomplished, here are next steps"
+4. **Scope ambiguity** - Requirements could be interpreted multiple ways
+5. **Risk points** - Actions that are hard to reverse (schema changes, deletions)
+
+**NOT required for:** Trivial fixes (typos, obvious bugs), clear single-path work where
+the user gave explicit instructions, or intermediate research steps.
+
+### Crafting Quality Options
+
+Before offering a decision, **research each option**. Don't guess. Each option should have:
+- Brief label (5-10 words)
+- Implementation approach overview
+- Key tradeoffs or considerations
+
+Bad options: "Yes / No" or "Option A / Option B / Other"
+Good options: Real alternatives with context that enables informed choice.
+
+Example of quality options:
+```
+--option "Redis: Distributed caching, handles scaling, adds operational complexity"
+--option "In-memory: Simple and fast, limited to single process"
+--option "Defer: No caching until bottleneck proven, avoid premature optimization"
+```
+
 ### Two-Layer Architecture
 
 - **`gt decision`** = High-level agent workflow (use this)
