@@ -180,10 +180,19 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
+	// Build startup command with beacon for predecessor discovery.
+	// Topic "assigned" already includes instructions in FormatStartupBeacon.
+	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
+		Recipient: address,
+		Sender:    "witness",
+		Topic:     "assigned",
+		MolID:     opts.Issue,
+	})
+
 	command := opts.Command
 	if command == "" {
-		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
+		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, beacon)
 	}
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
@@ -237,19 +246,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	runtime.SleepForReadyDelay(runtimeConfig)
 	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)
 
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
-	debugSession("StartupNudge", session.StartupNudge(m.tmux, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "witness",
-		Topic:     "assigned",
-		MolID:     opts.Issue,
-	}))
-
-	// GUPP: Send propulsion nudge to trigger autonomous work execution
-	time.Sleep(2 * time.Second)
-	debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
-
 	// Verify session survived startup - if the command crashed, the session may have died.
 	// Without this check, Start() would return success even if the pane died during initialization.
 	running, err = m.tmux.HasSession(sessionID)
@@ -275,14 +271,6 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 		return ErrSessionNotFound
 	}
 
-	// Sync beads before shutdown (non-fatal)
-	if !force {
-		polecatDir := m.polecatDir(polecat)
-		if err := m.syncBeads(polecatDir); err != nil {
-			fmt.Printf("Warning: beads sync failed: %v\n", err)
-		}
-	}
-
 	// Try graceful shutdown first
 	if !force {
 		_ = m.tmux.SendKeysRaw(sessionID, "C-c")
@@ -296,13 +284,6 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 	}
 
 	return nil
-}
-
-// syncBeads runs bd sync in the given directory.
-func (m *SessionManager) syncBeads(workDir string) error {
-	cmd := exec.Command("bd", "sync")
-	cmd.Dir = workDir
-	return cmd.Run()
 }
 
 // IsRunning checks if a polecat session is active.

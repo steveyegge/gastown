@@ -193,10 +193,10 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		}
 
 		// Build startup beacon for predecessor discovery via /resume
-		// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+		// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
 		// The SessionStart hook handles context injection (gt prime --hook)
 		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
-		beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		beacon := session.FormatStartupBeacon(session.BeaconConfig{
 			Recipient: address,
 			Sender:    "human",
 			Topic:     "start",
@@ -242,9 +242,9 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			}
 
 			// Build startup beacon for predecessor discovery via /resume
-			// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+			// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
 			address := fmt.Sprintf("%s/crew/%s", r.Name, name)
-			beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+			beacon := session.FormatStartupBeacon(session.BeaconConfig{
 				Recipient: address,
 				Sender:    "human",
 				Topic:     "restart",
@@ -301,7 +301,7 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// We're in the session at a shell prompt - start the agent
 		// Build startup beacon for predecessor discovery via /resume
 		address := fmt.Sprintf("%s/crew/%s", r.Name, name)
-		beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+		beacon := session.FormatStartupBeacon(session.BeaconConfig{
 			Recipient: address,
 			Sender:    "human",
 			Topic:     "start",

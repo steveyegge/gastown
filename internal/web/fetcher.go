@@ -2,10 +2,13 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +16,51 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// Command timeout constants
+const (
+	cmdTimeout      = 5 * time.Second // timeout for most commands
+	ghCmdTimeout    = 10 * time.Second // longer timeout for GitHub API calls
+	tmuxCmdTimeout  = 2 * time.Second  // short timeout for tmux queries
+)
+
+// runCmd executes a command with a timeout and returns stdout.
+// Returns empty buffer on timeout or error.
+func runCmd(timeout time.Duration, name string, args ...string) (*bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("%s timed out after %v", name, timeout)
+		}
+		return nil, err
+	}
+	return &stdout, nil
+}
+
+// runBdCmd executes a bd command with cmdTimeout in the specified beads directory.
+func runBdCmd(beadsDir string, args ...string) (*bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", args...)
+	cmd.Dir = beadsDir
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("bd timed out after %v", cmdTimeout)
+		}
+		return nil, err
+	}
+	return &stdout, nil
+}
 
 // LiveConvoyFetcher fetches convoy data from beads.
 type LiveConvoyFetcher struct {
@@ -37,14 +85,8 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 // FetchConvoys fetches all open convoys with their activity data.
 func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 	// List all open convoy-type issues
-	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = f.townBeads
-
-	var stdout bytes.Buffer
-	listCmd.Stdout = &stdout
-
-	if err := listCmd.Run(); err != nil {
+	stdout, err := runBdCmd(f.townBeads, "list", "--type=convoy", "--status=open", "--json")
+	if err != nil {
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}
 
@@ -159,13 +201,9 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 
 	// Query tracked dependencies from SQLite
 	safeConvoyID := strings.ReplaceAll(convoyID, "'", "''")
-	// #nosec G204 -- sqlite3 path is from trusted config, convoyID is escaped
-	queryCmd := exec.Command("sqlite3", "-json", dbPath,
-		fmt.Sprintf(`SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, safeConvoyID))
-
-	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
-	if err := queryCmd.Run(); err != nil {
+	query := fmt.Sprintf(`SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, safeConvoyID)
+	stdout, err := runCmd(cmdTimeout, "sqlite3", "-json", dbPath, query)
+	if err != nil {
 		return nil
 	}
 
@@ -240,12 +278,8 @@ func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*
 	args := append([]string{"show"}, issueIDs...)
 	args = append(args, "--json")
 
-	// #nosec G204 -- bd is a trusted internal tool, args are issue IDs
-	showCmd := exec.Command("bd", args...)
-	var stdout bytes.Buffer
-	showCmd.Stdout = &stdout
-
-	if err := showCmd.Run(); err != nil {
+	stdout, err := runCmd(cmdTimeout, "bd", args...)
+	if err != nil {
 		return result
 	}
 
@@ -338,11 +372,9 @@ func (f *LiveConvoyFetcher) getSessionActivityForAssignee(assignee string) *time
 
 	// Query tmux for session activity
 	// Format: session_activity returns unix timestamp
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}",
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}",
 		"-f", fmt.Sprintf("#{==:#{session_name},%s}", sessionName))
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	if err != nil {
 		return nil
 	}
 
@@ -372,10 +404,8 @@ func (f *LiveConvoyFetcher) getSessionActivityForAssignee(assignee string) *time
 func (f *LiveConvoyFetcher) getAllPolecatActivity() *time.Time {
 	// List all tmux sessions matching gt-*-* pattern (polecat sessions)
 	// Format: gt-{rig}-{polecat}
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}")
+	if err != nil {
 		return nil
 	}
 
@@ -508,16 +538,11 @@ type prResponse struct {
 
 // fetchPRsForRepo fetches open PRs for a single repo.
 func (f *LiveConvoyFetcher) fetchPRsForRepo(repoFull, repoShort string) ([]MergeQueueRow, error) {
-	// #nosec G204 -- gh is a trusted CLI, repo is from registered rigs config
-	cmd := exec.Command("gh", "pr", "list",
+	stdout, err := runCmd(ghCmdTimeout, "gh", "pr", "list",
 		"--repo", repoFull,
 		"--state", "open",
 		"--json", "number,title,url,mergeable,statusCheckRollup")
-
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
+	if err != nil {
 		return nil, fmt.Errorf("fetching PRs for %s: %w", repoFull, err)
 	}
 
@@ -636,11 +661,12 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		registeredRigs[rigName] = true
 	}
 
+	// Pre-fetch assigned issues map: assignee -> (issueID, title)
+	assignedIssues := f.getAssignedIssuesMap()
+
 	// Query all tmux sessions with window_activity for more accurate timing
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}")
+	if err != nil {
 		// tmux not running or no sessions
 		return nil, nil
 	}
@@ -693,6 +719,7 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 			continue
 		}
 		activityTime := time.Unix(activityUnix, 0)
+		activityAge := time.Since(activityTime)
 
 		// Get status hint - special handling for refinery
 		var statusHint string
@@ -702,24 +729,100 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 			statusHint = f.getPolecatStatusHint(sessionName)
 		}
 
+		// Look up assigned issue for this polecat
+		// Assignee format: "rigname/polecats/polecatname"
+		assignee := fmt.Sprintf("%s/polecats/%s", rig, polecat)
+		var issueID, issueTitle string
+		if issue, ok := assignedIssues[assignee]; ok {
+			issueID = issue.ID
+			issueTitle = issue.Title
+		// Keep full title - CSS handles overflow
+		}
+
+		// Calculate work status based on activity age and issue assignment
+		workStatus := calculatePolecatWorkStatus(activityAge, issueID, polecat)
+
 		polecats = append(polecats, PolecatRow{
 			Name:         polecat,
 			Rig:          rig,
 			SessionID:    sessionName,
 			LastActivity: activity.Calculate(activityTime),
 			StatusHint:   statusHint,
+			IssueID:      issueID,
+			IssueTitle:   issueTitle,
+			WorkStatus:   workStatus,
 		})
 	}
 
 	return polecats, nil
 }
 
+// assignedIssue holds issue info for the assigned issues map.
+type assignedIssue struct {
+	ID    string
+	Title string
+}
+
+// getAssignedIssuesMap returns a map of assignee -> assigned issue.
+// Queries beads for all in_progress issues with assignees.
+func (f *LiveConvoyFetcher) getAssignedIssuesMap() map[string]assignedIssue {
+	result := make(map[string]assignedIssue)
+
+	// Query all in_progress issues (these are the ones being worked on)
+	stdout, err := runBdCmd(f.townBeads, "list", "--status=in_progress", "--json")
+	if err != nil {
+		return result // Return empty map on error
+	}
+
+	var issues []struct {
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+		Assignee string `json:"assignee"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return result
+	}
+
+	for _, issue := range issues {
+		if issue.Assignee != "" {
+			result[issue.Assignee] = assignedIssue{
+				ID:    issue.ID,
+				Title: issue.Title,
+			}
+		}
+	}
+
+	return result
+}
+
+// calculatePolecatWorkStatus determines the polecat's work status based on activity and assignment.
+// Returns: "working", "stale", "stuck", or "idle"
+func calculatePolecatWorkStatus(activityAge time.Duration, issueID, polecatName string) string {
+	// Refinery has special handling - it's always "working" if it has PRs
+	if polecatName == "refinery" {
+		return "working"
+	}
+
+	// No issue assigned = idle
+	if issueID == "" {
+		return "idle"
+	}
+
+	// Has issue - determine status based on activity
+	switch {
+	case activityAge < 5*time.Minute:
+		return "working" // Active recently
+	case activityAge < 30*time.Minute:
+		return "stale" // Might be thinking or stuck
+	default:
+		return "stuck" // Likely stuck - no activity for 30+ minutes
+	}
+}
+
 // getPolecatStatusHint captures the last non-empty line from a polecat's pane.
 func (f *LiveConvoyFetcher) getPolecatStatusHint(sessionName string) string {
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-J")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "capture-pane", "-t", sessionName, "-p", "-J")
+	if err != nil {
 		return ""
 	}
 
@@ -799,4 +902,798 @@ func parseActivityTimestamp(s string) (int64, bool) {
 		return 0, false
 	}
 	return unix, true
+}
+
+// FetchMail fetches recent mail messages from the beads database.
+func (f *LiveConvoyFetcher) FetchMail() ([]MailRow, error) {
+	// List all message-type issues (mail)
+	stdout, err := runBdCmd(f.townBeads, "list", "--type=message", "--json", "--limit=50")
+	if err != nil {
+		return nil, fmt.Errorf("listing mail: %w", err)
+	}
+
+	var messages []struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Status    string `json:"status"`
+		CreatedAt string `json:"created_at"`
+		Priority  int    `json:"priority"`
+		Assignee  string `json:"assignee"`  // "to" address stored here
+		CreatedBy string `json:"created_by"` // "from" address
+		Labels    []string `json:"labels"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &messages); err != nil {
+		return nil, fmt.Errorf("parsing mail list: %w", err)
+	}
+
+	rows := make([]MailRow, 0, len(messages))
+	for _, m := range messages {
+		// Parse timestamp
+		var timestamp time.Time
+		var age string
+		var sortKey int64
+		if m.CreatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, m.CreatedAt); err == nil {
+				timestamp = t
+				age = formatMailAge(time.Since(t))
+				sortKey = t.Unix()
+			}
+		}
+
+		// Determine priority string
+		priorityStr := "normal"
+		switch m.Priority {
+		case 0:
+			priorityStr = "urgent"
+		case 1:
+			priorityStr = "high"
+		case 2:
+			priorityStr = "normal"
+		case 3, 4:
+			priorityStr = "low"
+		}
+
+		// Determine message type from labels
+		msgType := "notification"
+		for _, label := range m.Labels {
+			if label == "task" || label == "reply" || label == "scavenge" {
+				msgType = label
+				break
+			}
+		}
+
+		// Format from/to addresses for display
+		from := formatAgentAddress(m.CreatedBy)
+		to := formatAgentAddress(m.Assignee)
+
+		rows = append(rows, MailRow{
+			ID:        m.ID,
+			From:      from,
+			FromRaw:   m.CreatedBy,
+			To:        to,
+			Subject:   m.Title,
+			Timestamp: timestamp.Format("15:04"),
+			Age:       age,
+			Priority:  priorityStr,
+			Type:      msgType,
+			Read:      m.Status == "closed",
+			SortKey:   sortKey,
+		})
+	}
+
+	// Sort by timestamp, newest first
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].SortKey > rows[j].SortKey
+	})
+
+	return rows, nil
+}
+
+// formatMailAge returns a human-readable age string.
+func formatMailAge(d time.Duration) string {
+	if d < time.Minute {
+		return "just now"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
+
+// formatAgentAddress shortens agent addresses for display.
+// "gastown/polecats/Toast" -> "Toast (gastown)"
+// "mayor/" -> "Mayor"
+func formatAgentAddress(addr string) string {
+	if addr == "" {
+		return "—"
+	}
+	if addr == "mayor/" || addr == "mayor" {
+		return "Mayor"
+	}
+	
+	parts := strings.Split(addr, "/")
+	if len(parts) >= 3 && parts[1] == "polecats" {
+		return fmt.Sprintf("%s (%s)", parts[2], parts[0])
+	}
+	if len(parts) >= 3 && parts[1] == "crew" {
+		return fmt.Sprintf("%s (%s/crew)", parts[2], parts[0])
+	}
+	if len(parts) >= 2 {
+		return fmt.Sprintf("%s/%s", parts[0], parts[len(parts)-1])
+	}
+	return addr
+}
+
+// FetchRigs returns all registered rigs with their agent counts.
+func (f *LiveConvoyFetcher) FetchRigs() ([]RigRow, error) {
+	// Load rigs config from mayor/rigs.json
+	rigsConfigPath := filepath.Join(f.townRoot, "mayor", "rigs.json")
+	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading rigs config: %w", err)
+	}
+
+	var rows []RigRow
+	for name, entry := range rigsConfig.Rigs {
+		row := RigRow{
+			Name:   name,
+			GitURL: entry.GitURL,
+		}
+
+		rigPath := filepath.Join(f.townRoot, name)
+
+		// Count polecats
+		polecatsDir := filepath.Join(rigPath, "polecats")
+		if entries, err := os.ReadDir(polecatsDir); err == nil {
+			for _, e := range entries {
+				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+					row.PolecatCount++
+				}
+			}
+		}
+
+		// Count crew
+		crewDir := filepath.Join(rigPath, "crew")
+		if entries, err := os.ReadDir(crewDir); err == nil {
+			for _, e := range entries {
+				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+					row.CrewCount++
+				}
+			}
+		}
+
+		// Check for witness
+		witnessPath := filepath.Join(rigPath, "witness")
+		if _, err := os.Stat(witnessPath); err == nil {
+			row.HasWitness = true
+		}
+
+		// Check for refinery
+		refineryPath := filepath.Join(rigPath, "refinery", "rig")
+		if _, err := os.Stat(refineryPath); err == nil {
+			row.HasRefinery = true
+		}
+
+		rows = append(rows, row)
+	}
+
+	// Sort by name
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Name < rows[j].Name
+	})
+
+	return rows, nil
+}
+
+// FetchDogs returns all dogs in the kennel with their state.
+func (f *LiveConvoyFetcher) FetchDogs() ([]DogRow, error) {
+	kennelPath := filepath.Join(f.townRoot, "deacon", "dogs")
+
+	entries, err := os.ReadDir(kennelPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // No kennel yet
+		}
+		return nil, fmt.Errorf("reading kennel: %w", err)
+	}
+
+	var rows []DogRow
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+
+		// Read dog state file
+		stateFile := filepath.Join(kennelPath, name, ".dog.json")
+		data, err := os.ReadFile(stateFile)
+		if err != nil {
+			continue // Not a valid dog
+		}
+
+		var state struct {
+			Name       string            `json:"name"`
+			State      string            `json:"state"`
+			LastActive time.Time         `json:"last_active"`
+			Work       string            `json:"work,omitempty"`
+			Worktrees  map[string]string `json:"worktrees,omitempty"`
+		}
+		if err := json.Unmarshal(data, &state); err != nil {
+			continue
+		}
+
+		rows = append(rows, DogRow{
+			Name:       state.Name,
+			State:      state.State,
+			Work:       state.Work,
+			LastActive: formatMailAge(time.Since(state.LastActive)),
+			RigCount:   len(state.Worktrees),
+		})
+	}
+
+	// Sort by name
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Name < rows[j].Name
+	})
+
+	return rows, nil
+}
+
+// FetchEscalations returns open escalations needing attention.
+func (f *LiveConvoyFetcher) FetchEscalations() ([]EscalationRow, error) {
+	// List open escalations
+	stdout, err := runBdCmd(f.townBeads, "list", "--label=gt:escalation", "--status=open", "--json")
+	if err != nil {
+		return nil, nil // No escalations or bd not available
+	}
+
+	var issues []struct {
+		ID          string   `json:"id"`
+		Title       string   `json:"title"`
+		CreatedAt   string   `json:"created_at"`
+		CreatedBy   string   `json:"created_by"`
+		Labels      []string `json:"labels"`
+		Description string   `json:"description"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return nil, fmt.Errorf("parsing escalations: %w", err)
+	}
+
+	var rows []EscalationRow
+	for _, issue := range issues {
+		row := EscalationRow{
+			ID:          issue.ID,
+			Title:       issue.Title,
+			EscalatedBy: formatAgentAddress(issue.CreatedBy),
+			Severity:    "medium", // default
+		}
+
+		// Parse severity from labels
+		for _, label := range issue.Labels {
+			if strings.HasPrefix(label, "severity:") {
+				row.Severity = strings.TrimPrefix(label, "severity:")
+			}
+			if label == "acked" {
+				row.Acked = true
+			}
+		}
+
+		// Calculate age
+		if issue.CreatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
+				row.Age = formatMailAge(time.Since(t))
+			}
+		}
+
+		rows = append(rows, row)
+	}
+
+	// Sort by severity (critical first), then by age
+	severityOrder := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
+	sort.Slice(rows, func(i, j int) bool {
+		si, sj := severityOrder[rows[i].Severity], severityOrder[rows[j].Severity]
+		return si < sj
+	})
+
+	return rows, nil
+}
+
+// FetchHealth returns system health status.
+func (f *LiveConvoyFetcher) FetchHealth() (*HealthRow, error) {
+	row := &HealthRow{}
+
+	// Read deacon heartbeat
+	heartbeatFile := filepath.Join(f.townRoot, "deacon", "heartbeat.json")
+	if data, err := os.ReadFile(heartbeatFile); err == nil {
+		var hb struct {
+			Timestamp       time.Time `json:"timestamp"`
+			Cycle           int64     `json:"cycle"`
+			HealthyAgents   int       `json:"healthy_agents"`
+			UnhealthyAgents int       `json:"unhealthy_agents"`
+		}
+		if err := json.Unmarshal(data, &hb); err == nil {
+			row.DeaconCycle = hb.Cycle
+			row.HealthyAgents = hb.HealthyAgents
+			row.UnhealthyAgents = hb.UnhealthyAgents
+			age := time.Since(hb.Timestamp)
+			row.DeaconHeartbeat = formatMailAge(age)
+			row.HeartbeatFresh = age < 5*time.Minute
+		}
+	} else {
+		row.DeaconHeartbeat = "no heartbeat"
+	}
+
+	// Check pause state
+	pauseFile := filepath.Join(f.townRoot, ".runtime", "deacon", "paused.json")
+	if data, err := os.ReadFile(pauseFile); err == nil {
+		var pause struct {
+			Paused bool   `json:"paused"`
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal(data, &pause); err == nil {
+			row.IsPaused = pause.Paused
+			row.PauseReason = pause.Reason
+		}
+	}
+
+	return row, nil
+}
+
+// FetchQueues returns work queues and their status.
+func (f *LiveConvoyFetcher) FetchQueues() ([]QueueRow, error) {
+	// List queue-type beads
+	stdout, err := runBdCmd(f.townBeads, "list", "--type=queue", "--json")
+	if err != nil {
+		return nil, nil // No queues or bd not available
+	}
+
+	var queues []struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Status      string `json:"status"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &queues); err != nil {
+		return nil, fmt.Errorf("parsing queues: %w", err)
+	}
+
+	var rows []QueueRow
+	for _, q := range queues {
+		row := QueueRow{
+			Name:   q.Title,
+			Status: q.Status,
+		}
+
+		// Parse counts from description (key: value format)
+		// Best-effort parsing - ignore Sscanf errors as missing/malformed data is acceptable
+		for _, line := range strings.Split(q.Description, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "available_count:") {
+				_, _ = fmt.Sscanf(line, "available_count: %d", &row.Available)
+			} else if strings.HasPrefix(line, "processing_count:") {
+				_, _ = fmt.Sscanf(line, "processing_count: %d", &row.Processing)
+			} else if strings.HasPrefix(line, "completed_count:") {
+				_, _ = fmt.Sscanf(line, "completed_count: %d", &row.Completed)
+			} else if strings.HasPrefix(line, "failed_count:") {
+				_, _ = fmt.Sscanf(line, "failed_count: %d", &row.Failed)
+			} else if strings.HasPrefix(line, "status:") {
+				// Override with parsed status if present
+				var s string
+				_, _ = fmt.Sscanf(line, "status: %s", &s)
+				if s != "" {
+					row.Status = s
+				}
+			}
+		}
+
+		rows = append(rows, row)
+	}
+
+	return rows, nil
+}
+
+// FetchSessions returns active tmux sessions with role detection.
+func (f *LiveConvoyFetcher) FetchSessions() ([]SessionRow, error) {
+	// List tmux sessions
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
+	if err != nil {
+		return nil, nil // tmux not running or no sessions
+	}
+
+	var rows []SessionRow
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		if line == "" {
+			continue
+		}
+
+		parts := strings.SplitN(line, ":", 2)
+		name := parts[0]
+
+		// Only include gt-* sessions
+		if !strings.HasPrefix(name, "gt-") {
+			continue
+		}
+
+		row := SessionRow{
+			Name:    name,
+			IsAlive: true, // Session exists
+		}
+
+		// Parse activity timestamp
+		if len(parts) > 1 {
+			if ts, ok := parseActivityTimestamp(parts[1]); ok && ts > 0 {
+				age := time.Since(time.Unix(ts, 0))
+				row.Activity = formatMailAge(age)
+			}
+		}
+
+		// Detect role from session name pattern: gt-<rig>-<role>[-<name>]
+		// Examples: gt-gastown-witness, gt-gastown-nux, gt-deacon
+		nameParts := strings.Split(strings.TrimPrefix(name, "gt-"), "-")
+		if len(nameParts) >= 1 {
+			// Check for special roles
+			if nameParts[0] == "deacon" {
+				row.Role = "deacon"
+			} else if len(nameParts) >= 2 {
+				row.Rig = nameParts[0]
+				role := nameParts[1]
+
+				switch role {
+				case "witness":
+					row.Role = "witness"
+				case "refinery":
+					row.Role = "refinery"
+				default:
+					// Assume it's a polecat name
+					row.Role = "polecat"
+					row.Worker = role
+				}
+
+				// Check if there's a worker name after the role (for crew)
+				if len(nameParts) >= 3 && (role == "crew") {
+					row.Worker = nameParts[2]
+				}
+			}
+		}
+
+		rows = append(rows, row)
+	}
+
+	// Sort by rig, then role, then worker
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Rig != rows[j].Rig {
+			return rows[i].Rig < rows[j].Rig
+		}
+		if rows[i].Role != rows[j].Role {
+			return rows[i].Role < rows[j].Role
+		}
+		return rows[i].Worker < rows[j].Worker
+	})
+
+	return rows, nil
+}
+
+// FetchHooks returns all hooked beads (work pinned to agents).
+func (f *LiveConvoyFetcher) FetchHooks() ([]HookRow, error) {
+	// Query all beads with status=hooked
+	stdout, err := runBdCmd(f.townBeads, "list", "--status=hooked", "--json", "--limit=0")
+	if err != nil {
+		return nil, nil // No hooked beads or bd not available
+	}
+
+	var beads []struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Assignee  string `json:"assignee"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &beads); err != nil {
+		return nil, fmt.Errorf("parsing hooked beads: %w", err)
+	}
+
+	var rows []HookRow
+	for _, bead := range beads {
+		row := HookRow{
+			ID:       bead.ID,
+			Title:    bead.Title,
+			Assignee: bead.Assignee,
+			Agent:    formatAgentAddress(bead.Assignee),
+		}
+
+		// Keep full title - CSS handles overflow
+
+		// Calculate age and stale status
+		if bead.UpdatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, bead.UpdatedAt); err == nil {
+				age := time.Since(t)
+				row.Age = formatMailAge(age)
+				row.IsStale = age > time.Hour // Stale if hooked > 1 hour
+			}
+		}
+
+		rows = append(rows, row)
+	}
+
+	// Sort by stale first (stuck work), then by age
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].IsStale != rows[j].IsStale {
+			return rows[i].IsStale // Stale items first
+		}
+		return rows[i].Age > rows[j].Age
+	})
+
+	return rows, nil
+}
+
+// FetchMayor returns the Mayor's current status.
+func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
+	status := &MayorStatus{
+		IsAttached: false,
+	}
+
+	// Check if gt-mayor tmux session exists
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
+	if err != nil {
+		// tmux not running or no sessions
+		return status, nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "gt-mayor:") {
+			status.IsAttached = true
+			status.SessionName = "gt-mayor"
+
+			// Parse activity timestamp
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				if activityTs, ok := parseActivityTimestamp(parts[1]); ok {
+					age := time.Since(time.Unix(activityTs, 0))
+					status.LastActivity = formatMailAge(age)
+					status.IsActive = age < 5*time.Minute
+				}
+			}
+			break
+		}
+	}
+
+	// Try to detect runtime from mayor config or session
+	if status.IsAttached {
+		status.Runtime = "claude" // Default; could enhance to detect actual runtime
+	}
+
+	return status, nil
+}
+
+// FetchIssues returns open issues (the backlog).
+func (f *LiveConvoyFetcher) FetchIssues() ([]IssueRow, error) {
+	// Query open issues (excluding internal types like messages, convoys, queues)
+	stdout, err := runBdCmd(f.townBeads, "list", "--status=open", "--json", "--limit=50")
+	if err != nil {
+		return nil, nil // No issues or bd not available
+	}
+
+	var beads []struct {
+		ID        string   `json:"id"`
+		Title     string   `json:"title"`
+		Type      string   `json:"type"`
+		Priority  int      `json:"priority"`
+		Labels    []string `json:"labels"`
+		CreatedAt string   `json:"created_at"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &beads); err != nil {
+		return nil, fmt.Errorf("parsing issues: %w", err)
+	}
+
+	var rows []IssueRow
+	for _, bead := range beads {
+		// Skip internal types (messages, convoys, queues, merge-requests, wisps)
+		switch bead.Type {
+		case "message", "convoy", "queue", "merge-request", "wisp", "agent":
+			continue
+		}
+
+		row := IssueRow{
+			ID:       bead.ID,
+			Title:    bead.Title,
+			Type:     bead.Type,
+			Priority: bead.Priority,
+		}
+
+		// Keep full title - CSS handles overflow
+
+		// Format labels (skip internal labels)
+		var displayLabels []string
+		for _, label := range bead.Labels {
+			if !strings.HasPrefix(label, "gt:") && !strings.HasPrefix(label, "internal:") {
+				displayLabels = append(displayLabels, label)
+			}
+		}
+		if len(displayLabels) > 0 {
+			row.Labels = strings.Join(displayLabels, ", ")
+			if len(row.Labels) > 25 {
+				row.Labels = row.Labels[:22] + "..."
+			}
+		}
+
+		// Calculate age
+		if bead.CreatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, bead.CreatedAt); err == nil {
+				row.Age = formatMailAge(time.Since(t))
+			}
+		}
+
+		rows = append(rows, row)
+	}
+
+	// Sort by priority (1=critical first), then by age
+	sort.Slice(rows, func(i, j int) bool {
+		pi, pj := rows[i].Priority, rows[j].Priority
+		if pi == 0 {
+			pi = 5 // Treat unset priority as low
+		}
+		if pj == 0 {
+			pj = 5
+		}
+		if pi != pj {
+			return pi < pj
+		}
+		return rows[i].Age > rows[j].Age // Older first for same priority
+	})
+
+	return rows, nil
+}
+
+// FetchActivity returns recent activity from the event log.
+func (f *LiveConvoyFetcher) FetchActivity() ([]ActivityRow, error) {
+	eventsPath := filepath.Join(f.townRoot, ".events.jsonl")
+
+	// Read events file
+	data, err := os.ReadFile(eventsPath)
+	if err != nil {
+		return nil, nil // No events file
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 0 {
+		return nil, nil
+	}
+
+	// Take last 20 events (most recent)
+	start := 0
+	if len(lines) > 20 {
+		start = len(lines) - 20
+	}
+
+	var rows []ActivityRow
+	for i := len(lines) - 1; i >= start; i-- {
+		line := lines[i]
+		if line == "" {
+			continue
+		}
+
+		var event struct {
+			Timestamp  string                 `json:"ts"`
+			Type       string                 `json:"type"`
+			Actor      string                 `json:"actor"`
+			Payload    map[string]interface{} `json:"payload"`
+			Visibility string                 `json:"visibility"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+
+		// Skip audit-only events
+		if event.Visibility == "audit" {
+			continue
+		}
+
+		row := ActivityRow{
+			Type:  event.Type,
+			Actor: formatAgentAddress(event.Actor),
+			Icon:  eventIcon(event.Type),
+		}
+
+		// Calculate time ago
+		if t, err := time.Parse(time.RFC3339, event.Timestamp); err == nil {
+			row.Time = formatMailAge(time.Since(t))
+		}
+
+		// Generate human-readable summary
+		row.Summary = eventSummary(event.Type, event.Actor, event.Payload)
+
+		rows = append(rows, row)
+	}
+
+	return rows, nil
+}
+
+// eventIcon returns an emoji for an event type.
+func eventIcon(eventType string) string {
+	icons := map[string]string{
+		"sling":             "🎯",
+		"hook":              "🪝",
+		"unhook":            "🔓",
+		"done":              "✅",
+		"mail":              "📬",
+		"spawn":             "🦨",
+		"kill":              "💀",
+		"nudge":             "👉",
+		"handoff":           "🤝",
+		"session_start":     "▶️",
+		"session_end":       "⏹️",
+		"session_death":     "☠️",
+		"mass_death":        "💥",
+		"patrol_started":    "🔍",
+		"patrol_complete":   "✔️",
+		"escalation_sent":   "⚠️",
+		"escalation_acked":  "👍",
+		"escalation_closed": "🔕",
+		"merge_started":     "🔀",
+		"merged":            "✨",
+		"merge_failed":      "❌",
+		"boot":              "🚀",
+		"halt":              "🛑",
+	}
+	if icon, ok := icons[eventType]; ok {
+		return icon
+	}
+	return "📋"
+}
+
+// eventSummary generates a human-readable summary for an event.
+func eventSummary(eventType, actor string, payload map[string]interface{}) string {
+	shortActor := formatAgentAddress(actor)
+
+	switch eventType {
+	case "sling":
+		bead, _ := payload["bead"].(string)
+		target, _ := payload["target"].(string)
+		return fmt.Sprintf("%s slung to %s", bead, formatAgentAddress(target))
+	case "done":
+		bead, _ := payload["bead"].(string)
+		return fmt.Sprintf("%s completed %s", shortActor, bead)
+	case "mail":
+		to, _ := payload["to"].(string)
+		subject, _ := payload["subject"].(string)
+		if len(subject) > 25 {
+			subject = subject[:22] + "..."
+		}
+		return fmt.Sprintf("→ %s: %s", formatAgentAddress(to), subject)
+	case "spawn":
+		return fmt.Sprintf("%s spawned", shortActor)
+	case "kill":
+		return fmt.Sprintf("%s killed", shortActor)
+	case "hook":
+		bead, _ := payload["bead"].(string)
+		return fmt.Sprintf("%s hooked %s", shortActor, bead)
+	case "unhook":
+		bead, _ := payload["bead"].(string)
+		return fmt.Sprintf("%s unhooked %s", shortActor, bead)
+	case "merged":
+		branch, _ := payload["branch"].(string)
+		return fmt.Sprintf("merged %s", branch)
+	case "merge_failed":
+		reason, _ := payload["reason"].(string)
+		if len(reason) > 30 {
+			reason = reason[:27] + "..."
+		}
+		return fmt.Sprintf("merge failed: %s", reason)
+	case "escalation_sent":
+		return "escalation created"
+	case "session_death":
+		role, _ := payload["role"].(string)
+		return fmt.Sprintf("%s session died", formatAgentAddress(role))
+	case "mass_death":
+		count, _ := payload["count"].(float64)
+		return fmt.Sprintf("%.0f sessions died", count)
+	default:
+		return eventType
+	}
 }

@@ -135,7 +135,7 @@ func TestAssigneeID(t *testing.T) {
 	m := NewManager(r, git.NewGit(r.Path), nil)
 
 	id := m.assigneeID("Toast")
-	expected := "test-rig/Toast"
+	expected := "test-rig/polecats/Toast"
 	if id != expected {
 		t.Errorf("assigneeID = %q, want %q", id, expected)
 	}
@@ -446,81 +446,83 @@ func TestAddWithOptions_AgentsMDFallback(t *testing.T) {
 		t.Errorf("AGENTS.md content = %q, want %q", gotContent, wantContent)
 	}
 }
+
 // TestReconcilePoolWith tests all permutations of directory and session existence.
 // This is the core allocation policy logic.
 //
 // Truth table:
-//   HasDir | HasSession | Result
-//   -------|------------|------------------
-//   false  | false      | available (not in-use)
-//   true   | false      | in-use (normal finished polecat)
-//   false  | true       | orphan → kill session, available
-//   true   | true       | in-use (normal working polecat)
+//
+//	HasDir | HasSession | Result
+//	-------|------------|------------------
+//	false  | false      | available (not in-use)
+//	true   | false      | in-use (normal finished polecat)
+//	false  | true       | orphan → kill session, available
+//	true   | true       | in-use (normal working polecat)
 func TestReconcilePoolWith(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name             string
-		namesWithDirs    []string
+		name              string
+		namesWithDirs     []string
 		namesWithSessions []string
-		wantInUse        []string // names that should be marked in-use
-		wantOrphans      []string // sessions that should be killed
+		wantInUse         []string // names that should be marked in-use
+		wantOrphans       []string // sessions that should be killed
 	}{
 		{
-			name:             "no dirs, no sessions - all available",
-			namesWithDirs:    []string{},
+			name:              "no dirs, no sessions - all available",
+			namesWithDirs:     []string{},
 			namesWithSessions: []string{},
-			wantInUse:        []string{},
-			wantOrphans:      []string{},
+			wantInUse:         []string{},
+			wantOrphans:       []string{},
 		},
 		{
-			name:             "has dir, no session - in use",
-			namesWithDirs:    []string{"toast"},
+			name:              "has dir, no session - in use",
+			namesWithDirs:     []string{"toast"},
 			namesWithSessions: []string{},
-			wantInUse:        []string{"toast"},
-			wantOrphans:      []string{},
+			wantInUse:         []string{"toast"},
+			wantOrphans:       []string{},
 		},
 		{
-			name:             "no dir, has session - orphan killed",
-			namesWithDirs:    []string{},
+			name:              "no dir, has session - orphan killed",
+			namesWithDirs:     []string{},
 			namesWithSessions: []string{"nux"},
-			wantInUse:        []string{},
-			wantOrphans:      []string{"nux"},
+			wantInUse:         []string{},
+			wantOrphans:       []string{"nux"},
 		},
 		{
-			name:             "has dir, has session - in use",
-			namesWithDirs:    []string{"capable"},
+			name:              "has dir, has session - in use",
+			namesWithDirs:     []string{"capable"},
 			namesWithSessions: []string{"capable"},
-			wantInUse:        []string{"capable"},
-			wantOrphans:      []string{},
+			wantInUse:         []string{"capable"},
+			wantOrphans:       []string{},
 		},
 		{
-			name:             "mixed: one with dir, one orphan session",
-			namesWithDirs:    []string{"toast"},
+			name:              "mixed: one with dir, one orphan session",
+			namesWithDirs:     []string{"toast"},
 			namesWithSessions: []string{"toast", "nux"},
-			wantInUse:        []string{"toast"},
-			wantOrphans:      []string{"nux"},
+			wantInUse:         []string{"toast"},
+			wantOrphans:       []string{"nux"},
 		},
 		{
-			name:             "multiple dirs, no sessions",
-			namesWithDirs:    []string{"toast", "nux", "capable"},
+			name:              "multiple dirs, no sessions",
+			namesWithDirs:     []string{"toast", "nux", "capable"},
 			namesWithSessions: []string{},
-			wantInUse:        []string{"capable", "nux", "toast"},
-			wantOrphans:      []string{},
+			wantInUse:         []string{"capable", "nux", "toast"},
+			wantOrphans:       []string{},
 		},
 		{
-			name:             "multiple orphan sessions",
-			namesWithDirs:    []string{},
+			name:              "multiple orphan sessions",
+			namesWithDirs:     []string{},
 			namesWithSessions: []string{"slit", "rictus"},
-			wantInUse:        []string{},
-			wantOrphans:      []string{"rictus", "slit"},
+			wantInUse:         []string{},
+			wantOrphans:       []string{"rictus", "slit"},
 		},
 		{
-			name:             "complex: dirs, valid sessions, orphan sessions",
-			namesWithDirs:    []string{"toast", "capable"},
+			name:              "complex: dirs, valid sessions, orphan sessions",
+			namesWithDirs:     []string{"toast", "capable"},
 			namesWithSessions: []string{"toast", "nux", "slit"},
-			wantInUse:        []string{"capable", "toast"},
-			wantOrphans:      []string{"nux", "slit"},
+			wantInUse:         []string{"capable", "toast"},
+			wantOrphans:       []string{"nux", "slit"},
 		},
 	}
 

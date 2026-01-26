@@ -67,3 +67,6 @@ sync-branch: beads-sync
 # Format: external:<project>:<capability> in bd dep commands
 external_projects:
   beads: ../../../beads/mayor/rig
+
+# Custom issue types for Gas Town (fallback when database is unavailable)
+types.custom: "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"

@@ -4,12 +4,11 @@ package session
 import (
 	"fmt"
 	"time"
-
-	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// StartupNudgeConfig configures a startup nudge message.
-type StartupNudgeConfig struct {
+// BeaconConfig configures a startup beacon message.
+// The beacon is injected into the CLI prompt to identify sessions in /resume picker.
+type BeaconConfig struct {
 	// Recipient is the address of the agent being nudged.
 	// Examples: "gastown/crew/gus", "deacon", "gastown/witness"
 	Recipient string
@@ -27,27 +26,17 @@ type StartupNudgeConfig struct {
 	MolID string
 }
 
-// StartupNudge sends a formatted startup message to a Claude Code session.
-// The message becomes the session title in Claude Code's /resume picker,
-// enabling workers to find predecessor sessions.
+// FormatStartupBeacon builds the formatted startup beacon message.
+// The beacon is injected into the CLI prompt, making sessions identifiable
+// in Claude Code's /resume picker for predecessor discovery.
 //
 // Format: [GAS TOWN] <recipient> <- <sender> • <timestamp> • <topic[:mol-id]>
 //
 // Examples:
 //   - [GAS TOWN] gastown/crew/gus <- deacon • 2025-12-30T15:42 • assigned:gt-abc12
-//   - [GAS TOWN] deacon <- mayor • 2025-12-30T08:00 • cold-start
-//   - [GAS TOWN] gastown/witness <- self • 2025-12-30T14:00 • handoff
-//
-// The message content doesn't trigger GUPP - CLAUDE.md and hooks handle that.
-// The metadata makes sessions identifiable in /resume.
-func StartupNudge(t *tmux.Tmux, session string, cfg StartupNudgeConfig) error {
-	message := FormatStartupNudge(cfg)
-	return t.NudgeSession(session, message)
-}
-
-// FormatStartupNudge builds the formatted startup nudge message.
-// Separated from StartupNudge for testing and reuse.
-func FormatStartupNudge(cfg StartupNudgeConfig) string {
+//   - [GAS TOWN] deacon <- daemon • 2025-12-30T08:00 • patrol
+//   - [GAS TOWN] gastown/witness <- deacon • 2025-12-30T14:00 • patrol
+func FormatStartupBeacon(cfg BeaconConfig) string {
 	// Use local time in compact format
 	timestamp := time.Now().Format("2006-01-02T15:04")
 
@@ -90,4 +79,19 @@ func FormatStartupNudge(cfg StartupNudgeConfig) string {
 	}
 
 	return beacon
+}
+
+// BuildStartupPrompt creates the CLI prompt for agent startup.
+//
+// GUPP (Gas Town Universal Propulsion Principle) implementation:
+//   - Beacon identifies session for /resume predecessor discovery
+//   - Instructions tell agent to start working immediately
+//   - SessionStart hook runs `gt prime` which injects full context including
+//     "AUTONOMOUS WORK MODE" instructions when work is hooked
+//
+// This replaces the old two-step StartupNudge + PropulsionNudge pattern.
+// The beacon is processed in Claude's first turn along with gt prime context,
+// so no separate propulsion nudge is needed.
+func BuildStartupPrompt(cfg BeaconConfig, instructions string) string {
+	return FormatStartupBeacon(cfg) + "\n\n" + instructions
 }

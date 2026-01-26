@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/formula"
 	"github.com/steveyegge/gastown/internal/shell"
@@ -258,12 +258,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Town beads (hq- prefix) stores mayor mail, cross-rig coordination, and handoffs.
 	// Rig beads are separate and have their own prefixes.
 	if !installNoBeads {
-		// Kill any orphaned bd daemons before initializing beads.
-		// Stale daemons can interfere with fresh database creation.
-		if killed, _, _ := beads.StopAllBdProcesses(false, true); killed > 0 {
-			fmt.Printf("   ✓ Stopped %d orphaned bd daemon(s)\n", killed)
-		}
-
 		if err := initTownBeads(absPath); err != nil {
 			fmt.Printf("   %s Could not initialize town beads: %v\n", style.Dim.Render("⚠"), err)
 		} else {
@@ -414,11 +408,8 @@ func initTownBeads(townPath string) error {
 
 	// Configure custom types for Gas Town (agent, role, rig, convoy, slot).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
-	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
-	configCmd.Dir = townPath
-	if configOutput, configErr := configCmd.CombinedOutput(); configErr != nil {
-		// Non-fatal: older beads versions don't need this, newer ones do
-		fmt.Printf("   %s Could not set custom types: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(configOutput)))
+	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
+		return fmt.Errorf("ensuring custom types: %w", err)
 	}
 
 	// Configure allowed_prefixes for convoy beads (hq-cv-* IDs).

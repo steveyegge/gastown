@@ -295,12 +295,12 @@ cross-session continuity when work doesn't fit neatly into a bead.
 ```
 [ ] git status              (check what changed)
 [ ] git add <files>         (stage code changes)
-[ ] bd sync                 (commit beads changes)
 [ ] git commit -m "..."     (commit code)
-[ ] bd sync                 (commit any new beads changes)
 [ ] git push                (push to remote)
 [ ] HANDOFF (if incomplete work):
     gt mail send mayor/ -s "🤝 HANDOFF: <brief>" -m "<context>"
 ```
+
+Note: Beads changes are persisted immediately to Dolt - no sync step needed.
 
 Town root: {{ .TownRoot }}

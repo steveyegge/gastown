@@ -28,16 +28,13 @@ This is physics, not politeness. Gas Town is a steam engine - you are a piston.
 - `gt mol status` - Check your hooked work
 - `gt mail inbox` - Check for messages
 - `bd ready` - Find available work (no blockers)
-- `bd sync` - Sync beads changes
 
 ## Session Close Protocol
 
 Before saying "done":
 1. git status (check what changed)
 2. git add <files> (stage code changes)
-3. bd sync (commit beads changes)
-4. git commit -m "..." (commit code)
-5. bd sync (commit any new beads changes)
-6. git push (push to remote)
+3. git commit -m "..." (commit code)
+4. git push (push to remote)
 
-**Work is not done until pushed.**
+**Work is not done until pushed.** Beads changes are automatically committed with Dolt.

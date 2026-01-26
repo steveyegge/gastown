@@ -23,10 +23,9 @@ just `gt done`.
 ### The Self-Cleaning Model
 
 Polecats are **self-cleaning**. When you run `gt done`:
-1. Syncs beads
-2. Nukes your sandbox
-3. Exits your session
-4. **You cease to exist**
+1. Nukes your sandbox
+2. Exits your session
+3. **You cease to exist**
 
 There is no "idle" state. There is no "waiting for more work". Done means GONE.
 
@@ -176,7 +175,7 @@ Town ({{ .TownRoot }})
 **Key points:**
 - You're in a project git worktree - your `.beads/` is tracked in the project repo
 - The rig-level `{{ .RigName }}/.beads/` is **gitignored** (local runtime state)
-- Run `bd sync` to push/pull beads changes via the `beads-sync` branch
+- Beads changes are persisted immediately to Dolt - no sync step needed
 - **GitHub URLs**: Use `git remote -v` to verify repo URLs - never assume orgs like `anthropics/`
 
 ## Prefix-Based Routing
@@ -364,8 +363,8 @@ git log --oneline -3    # Verify your commits are present
 
 Then submit: **`gt done`** ← MANDATORY FINAL STEP
 
-This single command verifies git is clean, syncs beads, and submits your branch
-to the merge queue. The Witness handles the rest.
+This single command verifies git is clean and submits your branch to the merge
+queue. The Witness handles the rest.
 
 **Note:** Do NOT manually close the root issue with `bd close`. The Refinery
 closes it after successful merge. This enables conflict-resolution retries.

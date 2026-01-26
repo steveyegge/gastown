@@ -189,10 +189,6 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
-	// Check bd daemon health and attempt restart if needed
-	// This is non-blocking - if daemons can't be started, we show a warning but continue
-	bdWarning := beads.EnsureBdDaemonHealth(townRoot)
-
 	// Load town config
 	townConfigPath := constants.MayorTownPath(townRoot)
 	townConfig, err := config.LoadTownConfig(townConfigPath)
@@ -402,12 +398,6 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 	}
 	if err := outputStatusText(status); err != nil {
 		return err
-	}
-
-	// Show bd daemon warning at the end if there were issues
-	if bdWarning != "" {
-		fmt.Printf("%s %s\n", style.Warning.Render("⚠"), bdWarning)
-		fmt.Printf("  Run 'bd daemon killall && bd daemon start' to restart daemons\n")
 	}
 
 	return nil

@@ -156,21 +156,12 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("setting docked label: %w", err)
 	}
 
-	// Sync beads to propagate to other clones
-	fmt.Printf("  Syncing beads...\n")
-	syncCmd := exec.Command("bd", "sync")
-	syncCmd.Dir = r.BeadsPath()
-	if output, err := syncCmd.CombinedOutput(); err != nil {
-		fmt.Printf("  %s bd sync warning: %v\n%s", style.Warning.Render("!"), err, string(output))
-	}
-
 	// Output
 	fmt.Printf("%s Rig %s docked (global)\n", style.Success.Render("✓"), rigName)
 	fmt.Printf("  Label added: %s\n", RigDockedLabel)
 	for _, msg := range stoppedAgents {
 		fmt.Printf("  %s\n", msg)
 	}
-	fmt.Printf("  Run '%s' to propagate to other clones\n", style.Dim.Render("bd sync"))
 
 	return nil
 }
@@ -232,14 +223,6 @@ func runRigUndock(cmd *cobra.Command, args []string) error {
 		RemoveLabels: []string{RigDockedLabel},
 	}); err != nil {
 		return fmt.Errorf("removing docked label: %w", err)
-	}
-
-	// Sync beads to propagate to other clones
-	fmt.Printf("  Syncing beads...\n")
-	syncCmd := exec.Command("bd", "sync")
-	syncCmd.Dir = r.BeadsPath()
-	if output, err := syncCmd.CombinedOutput(); err != nil {
-		fmt.Printf("  %s bd sync warning: %v\n%s", style.Warning.Render("!"), err, string(output))
 	}
 
 	fmt.Printf("%s Rig %s undocked\n", style.Success.Render("✓"), rigName)
