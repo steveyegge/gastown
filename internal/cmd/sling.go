@@ -214,6 +214,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 	var hookWorkDir string     // Working directory for running bd hook commands
 	var hookSetAtomically bool // True if hook was set during polecat spawn (skip redundant update)
 
+	// Deferred spawn: don't spawn polecat until AFTER formula instantiation succeeds.
+	// This prevents orphan polecats when formula fails (GH #gt-e9o).
+	var deferredRigName string
+	var deferredSpawnOpts SlingSpawnOptions
+
 	if len(args) > 1 {
 		target := args[1]
 
@@ -253,26 +258,23 @@ func runSling(cmd *cobra.Command, args []string) error {
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
 				targetPane = "<new-pane>"
 			} else {
-				// Spawn a fresh polecat in the rig
-				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
-				spawnOpts := SlingSpawnOptions{
-					Force:    slingForce,
-					Account:  slingAccount,
-					Create:   slingCreate,
-					HookBead: beadID, // Set atomically at spawn time
-					Agent:    slingAgent,
+				// DEFERRED SPAWN: Don't spawn polecat yet - we need to validate bead
+				// and instantiate formula first. This prevents orphan polecats when
+				// formula instantiation fails (GH #gt-e9o).
+				fmt.Printf("Target is rig '%s', will spawn polecat after validation...\n", rigName)
+				deferredRigName = rigName
+				deferredSpawnOpts = SlingSpawnOptions{
+					Force:   slingForce,
+					Account: slingAccount,
+					Create:  slingCreate,
+					// HookBead: NOT set - we'll hook via bd update after spawn
+					Agent: slingAgent,
 				}
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-				if spawnErr != nil {
-					return fmt.Errorf("spawning polecat: %w", spawnErr)
-				}
-				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
-				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
-				hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
-
-				// Wake witness and refinery to monitor the new polecat
-				wakeRigAgents(rigName)
+				// Use placeholder values until spawn
+				targetAgent = fmt.Sprintf("%s/polecats/<pending>", rigName)
+				targetPane = ""
+				// hookWorkDir stays empty - formula instantiation will use townRoot
+				// hookSetAtomically = false - hook will be set via bd update
 			}
 		} else {
 			// Slinging to an existing agent
@@ -286,25 +288,22 @@ func runSling(cmd *cobra.Command, args []string) error {
 					parts := strings.Split(target, "/")
 					if len(parts) >= 3 && parts[1] == "polecats" {
 						rigName := parts[0]
-						fmt.Printf("Target polecat has no active session, spawning fresh polecat in rig '%s'...\n", rigName)
-						spawnOpts := SlingSpawnOptions{
-							Force:    slingForce,
-							Account:  slingAccount,
-							Create:   slingCreate,
-							HookBead: beadID,
-							Agent:    slingAgent,
+						// DEFERRED SPAWN: Don't spawn yet - validate bead and instantiate
+						// formula first. This prevents orphan polecats (GH #gt-e9o).
+						fmt.Printf("Target polecat has no active session, will spawn fresh polecat after validation...\n")
+						deferredRigName = rigName
+						deferredSpawnOpts = SlingSpawnOptions{
+							Force:   slingForce,
+							Account: slingAccount,
+							Create:  slingCreate,
+							// HookBead: NOT set - we'll hook via bd update after spawn
+							Agent: slingAgent,
 						}
-						spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-						if spawnErr != nil {
-							return fmt.Errorf("spawning polecat to replace dead polecat: %w", spawnErr)
-						}
-						targetAgent = spawnInfo.AgentID()
-						targetPane = spawnInfo.Pane
-						hookWorkDir = spawnInfo.ClonePath
-						hookSetAtomically = true // Hook was set during spawn (GH #gt-mzyk5)
-
-						// Wake witness and refinery to monitor the new polecat
-						wakeRigAgents(rigName)
+						// Use placeholder values until spawn
+						targetAgent = fmt.Sprintf("%s/polecats/<pending>", rigName)
+						targetPane = ""
+						// hookWorkDir stays empty - formula instantiation will use townRoot
+						// hookSetAtomically = false - hook will be set via bd update
 					} else {
 						return fmt.Errorf("resolving target: %w", err)
 					}
@@ -549,6 +548,23 @@ func runSling(cmd *cobra.Command, args []string) error {
 		// - Wisp hooked instead of base bead
 		// - attached_molecule stored as self-reference in wisp (meaningless)
 		// - Base bead left orphaned after gt done
+	}
+
+	// Execute deferred polecat spawn if needed (for rig targets).
+	// This happens AFTER formula instantiation to prevent orphan polecats on failure (GH #gt-e9o).
+	if deferredRigName != "" {
+		fmt.Printf("  Spawning polecat in %s...\n", deferredRigName)
+		spawnInfo, spawnErr := SpawnPolecatForSling(deferredRigName, deferredSpawnOpts)
+		if spawnErr != nil {
+			return fmt.Errorf("spawning polecat: %w", spawnErr)
+		}
+		targetAgent = spawnInfo.AgentID()
+		targetPane = spawnInfo.Pane
+		hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
+		// Note: hookSetAtomically stays false - we hook via bd update below
+
+		// Wake witness and refinery to monitor the new polecat
+		wakeRigAgents(deferredRigName)
 	}
 
 	// Hook the bead using bd update.
