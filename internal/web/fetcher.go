@@ -14,6 +14,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/activity"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -1441,7 +1442,10 @@ func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
 		IsAttached: false,
 	}
 
-	// Check if gt-mayor tmux session exists
+	// Get the actual mayor session name (e.g., "hq-mayor")
+	mayorSessionName := session.MayorSessionName()
+
+	// Check if mayor tmux session exists
 	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
 	if err != nil {
 		// tmux not running or no sessions
@@ -1450,9 +1454,9 @@ func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
 
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	for _, line := range lines {
-		if strings.HasPrefix(line, "gt-mayor:") {
+		if strings.HasPrefix(line, mayorSessionName+":") {
 			status.IsAttached = true
-			status.SessionName = "gt-mayor"
+			status.SessionName = mayorSessionName
 
 			// Parse activity timestamp
 			parts := strings.SplitN(line, ":", 2)
