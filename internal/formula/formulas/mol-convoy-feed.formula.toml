@@ -21,6 +21,9 @@ This is infrastructure work. You:
 |----------|--------|-------------|
 | convoy | --var | The stranded convoy ID to feed |
 
+**Syntax note:** double-brace syntax (e.g., convoy) = template variable (substituted at runtime).
+`<var>` in examples = pseudocode placeholder (agent computes the value).
+
 ## Single Pass Design
 
 Dog doesn't babysit or wait for completion. The workflow is:
@@ -182,32 +185,32 @@ Create summary report of convoy feeding actions.
 ```markdown
 ## Convoy Feed Report: {{convoy}}
 
-**Ready issues found**: {{ready_count}}
-**Polecats available**: {{available_count}}
-**Issues dispatched**: {{dispatch_count}}
+**Ready issues found**: <ready_count>
+**Polecats available**: <available_count>
+**Issues dispatched**: <dispatch_count>
 
 ### Dispatched Work
-{{#each dispatched}}
-- {{issue_id}}: {{title}} → {{rig}}/{{polecat}}
-{{/each}}
+<for each dispatched>
+- <issue_id>: <title> → <rig>/<polecat>
+</for>
 
 ### Skipped (no capacity)
-{{#if skipped}}
-{{#each skipped}}
-- {{issue_id}}: {{title}} (will retry next cycle)
-{{/each}}
-{{else}}
+<if skipped>
+<for each skipped>
+- <issue_id>: <title> (will retry next cycle)
+</for>
+<else>
 (none)
-{{/if}}
+</if>
 
 ### Errors
-{{#if errors}}
-{{#each errors}}
-- {{issue_id}}: {{error}}
-{{/each}}
-{{else}}
+<if errors>
+<for each errors>
+- <issue_id>: <error>
+</for>
+<else>
 (none)
-{{/if}}
+</if>
 ```
 
 **2. Send to Deacon:**
@@ -215,10 +218,10 @@ Create summary report of convoy feeding actions.
 gt mail send deacon/ -s "Convoy fed: {{convoy}}" -m "$(cat <<EOF
 Convoy {{convoy}} feeding complete.
 
-Dispatched: {{dispatch_count}}/{{ready_count}} issues
-{{#if errors}}Errors: {{error_count}}{{/if}}
+Dispatched: <dispatch_count>/<ready_count> issues
+<if errors>Errors: <error_count></if>
 
-{{report_summary}}
+<report_summary>
 EOF
 )"
 ```
@@ -240,8 +243,8 @@ Signal work complete and return to available pool.
 ```bash
 gt mail send deacon/ -s "DOG_DONE $(hostname)" -m "Task: convoy-feed
 Convoy: {{convoy}}
-Ready: {{ready_count}}
-Dispatched: {{dispatch_count}}
+Ready: <ready_count>
+Dispatched: <dispatch_count>
 Status: COMPLETE
 
 Ready for next assignment."

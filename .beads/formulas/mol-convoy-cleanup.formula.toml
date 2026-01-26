@@ -90,7 +90,7 @@ bd show <tracked-id>
 
 **3. Create summary text:**
 ```markdown
-## Convoy Summary: {{convoy.title}}
+## Convoy Summary: <convoy-title>
 
 **Duration**: X days/hours
 **Issues completed**: N
@@ -151,16 +151,16 @@ Notify the Mayor (overseer) of convoy completion.
 
 **1. Send completion mail:**
 ```bash
-gt mail send mayor/ -s "Convoy complete: {{convoy.title}}" -m "$(cat <<EOF
+gt mail send mayor/ -s "Convoy complete: <convoy-title>" -m "$(cat <<EOF
 Convoy {{convoy}} has completed and been archived.
 
 ## Summary
-{{generated_summary}}
+<generated-summary>
 
 ## Metrics
-- Duration: {{duration}}
-- Issues: {{issue_count}}
-- Contributors: {{contributor_list}}
+- Duration: <duration>
+- Issues: <issue-count>
+- Contributors: <contributor-list>
 
 This convoy has been archived. View details: bd show {{convoy}}
 EOF
@@ -188,7 +188,7 @@ Signal work complete and return to available pool.
 gt mail send deacon/ -s "DOG_DONE $(hostname)" -m "Task: convoy-cleanup
 Convoy: {{convoy}}
 Status: COMPLETE
-Duration: {{work_duration}}
+Duration: <work-duration>
 
 Ready for next assignment."
 ```
