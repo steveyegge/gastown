@@ -22,9 +22,9 @@ func NewSetupHandler() *SetupHandler {
 }
 
 // ServeHTTP renders the setup page.
-func (h *SetupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *SetupHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(setupHTML))
+	_, _ = w.Write([]byte(setupHTML))
 }
 
 // SetupAPIHandler handles API requests for setup operations.
@@ -229,7 +229,7 @@ func (h *SetupAPIHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	for i := 0; i < 30; i++ { // Try for 3 seconds
 		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/commands", newPort))
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			ready = true
 			break
 		}

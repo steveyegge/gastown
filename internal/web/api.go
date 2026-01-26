@@ -157,16 +157,16 @@ func (h *APIHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // handleCommands returns the list of available commands for the palette.
-func (h *APIHandler) handleCommands(w http.ResponseWriter, r *http.Request) {
+func (h *APIHandler) handleCommands(w http.ResponseWriter, _ *http.Request) {
 	resp := CommandListResponse{
 		Commands: GetCommandList(),
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // runGtCommand executes a gt command with the given args.
@@ -211,7 +211,7 @@ func (h *APIHandler) runGtCommand(ctx context.Context, timeout time.Duration, ar
 func (h *APIHandler) sendError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(CommandResponse{
+	_ = json.NewEncoder(w).Encode(CommandResponse{
 		Success: false,
 		Error:   message,
 	})

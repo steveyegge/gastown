@@ -69,7 +69,7 @@ git branch --show-current
 
 **2. Check beads state:**
 ```bash
-bd doctor            # Verify beads database health
+bd sync --status
 ```
 
 **3. Document starting state:**
@@ -77,7 +77,7 @@ bd doctor            # Verify beads database health
 - Uncommitted changes (staged/unstaged)
 - Untracked files (list them)
 - Stash entries
-- Beads database health
+- Beads sync status
 
 This information guides decisions in subsequent steps.
 
@@ -240,31 +240,42 @@ risk merging incorrectly. A resubmitted branch is better than a broken main.
 **Exit criteria:** Local branch matches or is cleanly ahead of origin/main."""
 
 [[steps]]
-id = "verify-beads"
-title = "Verify beads database health"
+id = "sync-beads"
+title = "Sync beads state"
 needs = ["sync-git"]
 description = """
-Verify the Dolt-backed beads database is healthy.
-
-**Note:** Gas Town uses Dolt as the beads backend. There is no `bd sync` command -
-changes are written directly to the Dolt sql-server and synced via Dolt's
-git-like PUSH/PULL operations.
+Sync the beads database with remote.
 
 ```bash
-bd doctor            # Check database health
-bd list --limit 5    # Verify we can read beads
+bd sync
 ```
 
-**If errors:**
-- Connection errors: Check if `dolt sql-server` is running
-- Data errors: Escalate to mayor
+**If conflicts:**
+Beads uses JSONL append-only format, so true conflicts are rare.
+If they occur:
+```bash
+bd sync --status  # Diagnose
+```
 
-**Exit criteria:** Beads database accessible and healthy."""
+Likely causes:
+- Two agents edited same bead simultaneously
+- Corrupted beads-sync branch
+
+Resolution:
+```bash
+# Try pulling fresh
+git fetch origin beads-sync
+bd sync
+```
+
+If still failing, escalate to mayor.
+
+**Exit criteria:** Beads synced successfully."""
 
 [[steps]]
 id = "run-doctor"
 title = "Run beads health check"
-needs = ["verify-beads"]
+needs = ["sync-beads"]
 description = """
 Check for beads system issues.
 
