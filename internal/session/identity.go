@@ -25,6 +25,59 @@ type AgentIdentity struct {
 	Name string // crew/polecat name (empty for mayor/deacon/witness/refinery)
 }
 
+// ParseAddress parses a mail-style address into an AgentIdentity.
+func ParseAddress(address string) (*AgentIdentity, error) {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return nil, fmt.Errorf("empty address")
+	}
+
+	if address == "mayor" || address == "mayor/" {
+		return &AgentIdentity{Role: RoleMayor}, nil
+	}
+	if address == "deacon" || address == "deacon/" {
+		return &AgentIdentity{Role: RoleDeacon}, nil
+	}
+	if address == "overseer" {
+		return nil, fmt.Errorf("overseer has no session")
+	}
+
+	address = strings.TrimSuffix(address, "/")
+	parts := strings.Split(address, "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid address %q", address)
+	}
+
+	rig := parts[0]
+	switch len(parts) {
+	case 2:
+		name := parts[1]
+		switch name {
+		case "witness":
+			return &AgentIdentity{Role: RoleWitness, Rig: rig}, nil
+		case "refinery":
+			return &AgentIdentity{Role: RoleRefinery, Rig: rig}, nil
+		case "crew", "polecats":
+			return nil, fmt.Errorf("invalid address %q", address)
+		default:
+			return &AgentIdentity{Role: RolePolecat, Rig: rig, Name: name}, nil
+		}
+	case 3:
+		role := parts[1]
+		name := parts[2]
+		switch role {
+		case "crew":
+			return &AgentIdentity{Role: RoleCrew, Rig: rig, Name: name}, nil
+		case "polecats":
+			return &AgentIdentity{Role: RolePolecat, Rig: rig, Name: name}, nil
+		default:
+			return nil, fmt.Errorf("invalid address %q", address)
+		}
+	default:
+		return nil, fmt.Errorf("invalid address %q", address)
+	}
+}
+
 // ParseSessionName parses a tmux session name into an AgentIdentity.
 //
 // Session name formats:

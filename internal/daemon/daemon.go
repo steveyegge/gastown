@@ -46,6 +46,7 @@ type Daemon struct {
 	cancel       context.CancelFunc
 	curator      *feed.Curator
 	convoyWatcher *ConvoyWatcher
+	doltServer   *DoltServerManager
 
 	// Mass death detection: track recent session deaths
 	deathsMu     sync.Mutex
@@ -93,6 +94,15 @@ func New(config *Config) (*Daemon, error) {
 		logger.Printf("Loaded patrol config from %s", PatrolConfigFile(config.TownRoot))
 	}
 
+	// Initialize Dolt server manager if configured
+	var doltServer *DoltServerManager
+	if patrolConfig != nil && patrolConfig.Patrols != nil && patrolConfig.Patrols.DoltServer != nil {
+		doltServer = NewDoltServerManager(config.TownRoot, patrolConfig.Patrols.DoltServer, logger.Printf)
+		if doltServer.IsEnabled() {
+			logger.Printf("Dolt server management enabled (port %d)", patrolConfig.Patrols.DoltServer.Port)
+		}
+	}
+
 	return &Daemon{
 		config:       config,
 		patrolConfig: patrolConfig,
@@ -100,6 +110,7 @@ func New(config *Config) (*Daemon, error) {
 		logger:       logger,
 		ctx:          ctx,
 		cancel:       cancel,
+		doltServer:   doltServer,
 	}, nil
 }
 
@@ -219,6 +230,10 @@ func (d *Daemon) heartbeat(state *State) {
 
 	d.logger.Println("Heartbeat starting (recovery-focused)")
 
+	// 0. Ensure Dolt server is running (if configured)
+	// This must happen before beads operations that depend on Dolt.
+	d.ensureDoltServerRunning()
+
 	// 1. Ensure Deacon is running (restart if dead)
 	// Check patrol config - can be disabled in mayor/daemon.json
 	if IsPatrolEnabled(d.patrolConfig, "deacon") {
@@ -282,6 +297,18 @@ func (d *Daemon) heartbeat(state *State) {
 	}
 
 	d.logger.Printf("Heartbeat complete (#%d)", state.HeartbeatCount)
+}
+
+// ensureDoltServerRunning ensures the Dolt SQL server is running if configured.
+// This provides the backend for beads database access in server mode.
+func (d *Daemon) ensureDoltServerRunning() {
+	if d.doltServer == nil || !d.doltServer.IsEnabled() {
+		return
+	}
+
+	if err := d.doltServer.EnsureRunning(); err != nil {
+		d.logger.Printf("Error ensuring Dolt server is running: %v", err)
+	}
 }
 
 // DeaconRole is the role name for the Deacon's handoff bead.
@@ -590,13 +617,32 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 		d.logger.Printf("Warning: no wisp config for %s - parked state may have been lost", rigName)
 	}
 
-	// Check rig status - parked and docked rigs should not have agents auto-started
+	// Check wisp layer first (local/ephemeral overrides)
 	status := cfg.GetString("status")
 	switch status {
 	case "parked":
 		return false, "rig is parked"
 	case "docked":
 		return false, "rig is docked"
+	}
+
+	// Check rig bead labels (global/synced docked status)
+	// This is the persistent docked state set by 'gt rig dock'
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
+	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.Beads != nil {
+		rigBeadID := fmt.Sprintf("%s-rig-%s", rigCfg.Beads.Prefix, rigName)
+		rigBeadsDir := beads.ResolveBeadsDir(rigPath)
+		bd := beads.NewWithBeadsDir(rigPath, rigBeadsDir)
+		if issue, err := bd.Show(rigBeadID); err == nil {
+			for _, label := range issue.Labels {
+				if label == "status:docked" {
+					return false, "rig is docked (global)"
+				}
+				if label == "status:parked" {
+					return false, "rig is parked (global)"
+				}
+			}
+		}
 	}
 
 	// Check auto_restart config
@@ -685,6 +731,15 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 	if d.convoyWatcher != nil {
 		d.convoyWatcher.Stop()
 		d.logger.Println("Convoy watcher stopped")
+	}
+
+	// Stop Dolt server if we're managing it
+	if d.doltServer != nil && d.doltServer.IsEnabled() && !d.doltServer.IsExternal() {
+		if err := d.doltServer.Stop(); err != nil {
+			d.logger.Printf("Warning: failed to stop Dolt server: %v", err)
+		} else {
+			d.logger.Println("Dolt server stopped")
+		}
 	}
 
 	state.Running = false

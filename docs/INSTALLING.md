@@ -268,13 +268,13 @@ ssh -T git@github.com
 git config --global credential.helper cache
 ```
 
-### Beads sync issues
+### Beads issues
 
-If beads aren't syncing across clones:
+If experiencing beads problems:
 
 ```bash
 cd ~/gt/myproject/mayor/rig
-bd sync --status           # Check sync status
+bd status                  # Check database health
 bd doctor                  # Run beads health check
 ```
 

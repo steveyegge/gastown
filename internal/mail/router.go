@@ -189,6 +189,13 @@ func (r *Router) resolveBeadsDir(_ string) string { // address unused: all mail 
 	return filepath.Join(r.townRoot, ".beads")
 }
 
+func (r *Router) ensureCustomTypes(beadsDir string) error {
+	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
+		return fmt.Errorf("ensuring custom types: %w", err)
+	}
+	return nil
+}
+
 // isTownLevelAddress returns true if the address is for a town-level agent or the overseer.
 func isTownLevelAddress(address string) bool {
 	addr := strings.TrimSuffix(address, "/")
@@ -214,10 +221,10 @@ const (
 
 // ParsedGroup represents a parsed @group address.
 type ParsedGroup struct {
-	Type      GroupType
-	RoleType  string // witness, crew, polecat, dog, etc.
-	Rig       string // rig name for rig-scoped groups
-	Original  string // original @group string
+	Type     GroupType
+	RoleType string // witness, crew, polecat, dog, etc.
+	Rig      string // rig name for rig-scoped groups
+	Original string // original @group string
 }
 
 // parseGroupAddress parses a @group address into its components.
@@ -281,21 +288,48 @@ type agentBead struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Status      string `json:"status"`
+	CreatedBy   string `json:"created_by"`
 }
 
 // agentBeadToAddress converts an agent bead to a mail address.
-// Uses the agent bead ID to derive the address:
-//   - gt-mayor → mayor/
-//   - gt-deacon → deacon/
-//   - gt-gastown-witness → gastown/witness
-//   - gt-gastown-crew-max → gastown/max
-//   - gt-gastown-polecat-Toast → gastown/Toast
+// Handles both legacy gt- prefixed IDs and current hq- prefixed IDs:
+//   - hq-mayor → mayor/
+//   - hq-deacon → deacon/
+//   - hq-{hash} → uses created_by field or parses title/description
+//   - gt-mayor → mayor/ (legacy)
+//   - gt-gastown-crew-max → gastown/max (legacy)
 func agentBeadToAddress(bead *agentBead) string {
 	if bead == nil {
 		return ""
 	}
 
 	id := bead.ID
+
+	// Handle hq- prefixed IDs (current format)
+	if strings.HasPrefix(id, "hq-") {
+		// Well-known town-level agents
+		if id == "hq-mayor" {
+			return "mayor/"
+		}
+		if id == "hq-deacon" {
+			return "deacon/"
+		}
+
+		// For rig-level agents, created_by often contains the agent address
+		// e.g., "beads/crew/emma" for an agent that self-registered
+		if bead.CreatedBy != "" && strings.Contains(bead.CreatedBy, "/") {
+			// Validate it looks like an agent address (rig/role/name or rig/name)
+			parts := strings.Split(bead.CreatedBy, "/")
+			if len(parts) >= 2 {
+				return bead.CreatedBy
+			}
+		}
+
+		// Fall back to parsing description for role_type and rig
+		return parseAgentAddressFromDescription(bead.Description)
+	}
+
+	// Handle gt- prefixed IDs (legacy format)
 	if !strings.HasPrefix(id, "gt-") {
 		return "" // Not a valid agent bead ID
 	}
@@ -321,6 +355,37 @@ func agentBeadToAddress(bead *agentBead) string {
 		}
 		return ""
 	}
+}
+
+// parseAgentAddressFromDescription extracts agent address from description metadata.
+// Looks for "role_type: X" and "rig: Y" patterns in the description.
+func parseAgentAddressFromDescription(desc string) string {
+	var roleType, rig string
+
+	for _, line := range strings.Split(desc, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "role_type:") {
+			roleType = strings.TrimSpace(strings.TrimPrefix(line, "role_type:"))
+		} else if strings.HasPrefix(line, "rig:") {
+			rig = strings.TrimSpace(strings.TrimPrefix(line, "rig:"))
+		}
+	}
+
+	// Handle null values from description
+	if rig == "null" || rig == "" {
+		rig = ""
+	}
+	if roleType == "null" || roleType == "" {
+		return ""
+	}
+
+	// Town-level agents (no rig)
+	if rig == "" {
+		return roleType + "/"
+	}
+
+	// Rig-level agents: rig/name (role_type is the agent name for crew/polecat)
+	return rig + "/" + roleType
 }
 
 // ResolveGroupAddress resolves a @group address to individual recipient addresses.
@@ -566,10 +631,38 @@ func (r *Router) sendToGroup(msg *Message) error {
 	return nil
 }
 
+// validateRecipient checks that the recipient identity corresponds to an existing agent.
+// Returns an error if the recipient is invalid or doesn't exist.
+func (r *Router) validateRecipient(identity string) error {
+	// Overseer is the human operator, not an agent bead
+	if identity == "overseer" {
+		return nil
+	}
+
+	// Query all agents and check if any match this identity
+	agents, err := r.queryAgents("")
+	if err != nil {
+		return fmt.Errorf("failed to query agents: %w", err)
+	}
+
+	for _, agent := range agents {
+		if agentBeadToAddress(agent) == identity {
+			return nil // Found matching agent
+		}
+	}
+
+	return fmt.Errorf("no agent found")
+}
+
 // sendToSingle sends a message to a single recipient.
 func (r *Router) sendToSingle(msg *Message) error {
 	// Convert addresses to beads identities
 	toIdentity := AddressToIdentity(msg.To)
+
+	// Validate recipient exists
+	if err := r.validateRecipient(toIdentity); err != nil {
+		return fmt.Errorf("invalid recipient %q: %w", msg.To, err)
+	}
 
 	// Build labels for from/thread/reply-to/cc
 	var labels []string
@@ -611,6 +704,9 @@ func (r *Router) sendToSingle(msg *Message) error {
 	}
 
 	beadsDir := r.resolveBeadsDir(msg.To)
+	if err := r.ensureCustomTypes(beadsDir); err != nil {
+		return err
+	}
 	_, err := runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending message: %w", err)
@@ -721,6 +817,9 @@ func (r *Router) sendToQueue(msg *Message) error {
 
 	// Queue messages go to town-level beads (shared location)
 	beadsDir := r.resolveBeadsDir("")
+	if err := r.ensureCustomTypes(beadsDir); err != nil {
+		return err
+	}
 	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending to queue %s: %w", queueName, err)
@@ -792,6 +891,9 @@ func (r *Router) sendToAnnounce(msg *Message) error {
 
 	// Announce messages go to town-level beads (shared location)
 	beadsDir := r.resolveBeadsDir("")
+	if err := r.ensureCustomTypes(beadsDir); err != nil {
+		return err
+	}
 	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending to announce %s: %w", announceName, err)
@@ -865,6 +967,9 @@ func (r *Router) sendToChannel(msg *Message) error {
 
 	// Channel messages go to town-level beads (shared location)
 	beadsDir := r.resolveBeadsDir("")
+	if err := r.ensureCustomTypes(beadsDir); err != nil {
+		return err
+	}
 	_, err = runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
 	if err != nil {
 		return fmt.Errorf("sending to channel %s: %w", channelName, err)
@@ -902,6 +1007,9 @@ func (r *Router) pruneAnnounce(announceName string, retainCount int) error {
 	}
 
 	beadsDir := r.resolveBeadsDir("")
+	if err := r.ensureCustomTypes(beadsDir); err != nil {
+		return err
+	}
 
 	// Query existing messages in this announce channel
 	// Use bd list with labels filter to find messages with announce:<name> label
@@ -963,47 +1071,85 @@ func (r *Router) GetMailbox(address string) (*Mailbox, error) {
 
 // notifyRecipient sends a notification to a recipient's tmux session.
 // Uses NudgeSession to add the notification to the agent's conversation history.
-// Supports mayor/, rig/polecat, and rig/refinery addresses.
+// Supports mayor/, deacon/, rig/crew/name, rig/polecats/name, and rig/name addresses.
 func (r *Router) notifyRecipient(msg *Message) error {
-	sessionID := addressToSessionID(msg.To)
-	if sessionID == "" {
+	sessionIDs := addressToSessionIDs(msg.To)
+	if len(sessionIDs) == 0 {
 		return nil // Unable to determine session ID
 	}
 
-	// Check if session exists
-	hasSession, err := r.tmux.HasSession(sessionID)
-	if err != nil || !hasSession {
-		return nil // No active session, skip notification
+	// Try each possible session ID until we find one that exists.
+	// This handles the ambiguity where canonical addresses (rig/name) don't
+	// distinguish between crew workers (gt-rig-crew-name) and polecats (gt-rig-name).
+	for _, sessionID := range sessionIDs {
+		hasSession, err := r.tmux.HasSession(sessionID)
+		if err != nil || !hasSession {
+			continue
+		}
+
+		// Send notification to the agent's conversation history
+		notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
+		return r.tmux.NudgeSession(sessionID, notification)
 	}
 
-	// Send notification to the agent's conversation history
-	notification := fmt.Sprintf("📬 You have new mail from %s. Subject: %s. Run 'gt mail inbox' to read.", msg.From, msg.Subject)
-	return r.tmux.NudgeSession(sessionID, notification)
+	return nil // No active session found
 }
 
-// addressToSessionID converts a mail address to a tmux session ID.
-// Returns empty string if address format is not recognized.
-func addressToSessionID(address string) string {
+// addressToSessionIDs converts a mail address to possible tmux session IDs.
+// Returns multiple candidates since the canonical address format (rig/name)
+// doesn't distinguish between crew workers (gt-rig-crew-name) and polecats
+// (gt-rig-name). The caller should try each and use the one that exists.
+//
+// This supersedes the approach in PR #896 which only handled slash-to-dash
+// conversion but didn't address the crew/polecat ambiguity.
+func addressToSessionIDs(address string) []string {
 	// Mayor address: "mayor/" or "mayor"
 	if strings.HasPrefix(address, "mayor") {
-		return session.MayorSessionName()
+		return []string{session.MayorSessionName()}
 	}
 
 	// Deacon address: "deacon/" or "deacon"
 	if strings.HasPrefix(address, "deacon") {
-		return session.DeaconSessionName()
+		return []string{session.DeaconSessionName()}
 	}
 
-	// Rig-based address: "rig/target"
+	// Rig-based address: "rig/target" or "rig/crew/name" or "rig/polecats/name"
 	parts := strings.SplitN(address, "/", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return ""
+		return nil
 	}
 
 	rig := parts[0]
 	target := parts[1]
 
-	// Polecat: gt-rig-polecat
-	// Refinery: gt-rig-refinery (if refinery has its own session)
-	return fmt.Sprintf("gt-%s-%s", rig, target)
+	// If target already has crew/ or polecats/ prefix, use it directly
+	// e.g., "gastown/crew/holden" → "gt-gastown-crew-holden"
+	if strings.HasPrefix(target, "crew/") || strings.HasPrefix(target, "polecats/") {
+		return []string{fmt.Sprintf("gt-%s-%s", rig, strings.ReplaceAll(target, "/", "-"))}
+	}
+
+	// Special cases that don't need crew variant
+	if target == "witness" || target == "refinery" {
+		return []string{fmt.Sprintf("gt-%s-%s", rig, target)}
+	}
+
+	// For normalized addresses like "gastown/holden", try both:
+	// 1. Crew format: gt-gastown-crew-holden
+	// 2. Polecat format: gt-gastown-holden
+	// Return crew first since crew workers are more commonly missed.
+	return []string{
+		session.CrewSessionName(rig, target),    // gt-rig-crew-name
+		session.PolecatSessionName(rig, target), // gt-rig-name
+	}
+}
+
+// addressToSessionID converts a mail address to a tmux session ID.
+// Returns empty string if address format is not recognized.
+// Deprecated: Use addressToSessionIDs for proper crew/polecat handling.
+func addressToSessionID(address string) string {
+	ids := addressToSessionIDs(address)
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[0]
 }

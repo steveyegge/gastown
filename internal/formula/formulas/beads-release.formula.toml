@@ -305,28 +305,25 @@ Should show {{version}}.
 """
 
 [[steps]]
-id = "restart-daemons"
-title = "Restart daemons"
+id = "verify-install"
+title = "Verify installation"
 needs = ["local-install"]
 description = """
-Restart bd daemons to pick up new version.
+Verify the new bd version is working.
 
 ```bash
-bd daemons killall
+bd --version         # Should show {{version}}
+bd doctor            # Verify database connectivity
 ```
 
-Daemons will auto-restart with new version on next bd command.
-
-Verify:
-```bash
-bd daemons list
-```
+**Note:** Gas Town uses Dolt backend - there are no bd daemons to restart.
+The Dolt sql-server runs independently.
 """
 
 [[steps]]
 id = "release-complete"
 title = "Release complete"
-needs = ["restart-daemons"]
+needs = ["verify-install"]
 description = """
 Release v{{version}} is complete!
 
@@ -335,8 +332,7 @@ Summary:
 - Git tag pushed
 - CI artifacts built
 - npm and PyPI packages published
-- Local installation updated
-- Daemons restarted
+- Local installation updated and verified
 
 Optional next steps:
 - Announce on social media

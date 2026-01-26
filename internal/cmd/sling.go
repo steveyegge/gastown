@@ -113,6 +113,7 @@ var (
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
 	slingConvoy   string // --convoy: add to existing convoy instead of creating new one
+	slingNoMerge  bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
 )
 
 func init() {
@@ -131,6 +132,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
 	slingCmd.Flags().StringVar(&slingConvoy, "convoy", "", "Add to existing convoy instead of creating new one")
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
+	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -148,13 +150,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("finding town root: %w", err)
 	}
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-
-	// Daemon-first approach: ensure bd daemon is running for write operations.
-	// If daemon can't be started, slingDaemonAvailable=false and commands use --no-daemon.
-	if !ensureSlingDaemon(townRoot) {
-		// Non-fatal: proceed with --no-daemon fallback, but warn user
-		fmt.Printf("%s bd daemon not available, using direct mode\n", style.Dim.Render("○"))
-	}
 
 	// --var is only for standalone formula mode, not formula-on-bead mode
 	if slingOnTarget != "" && len(slingVars) > 0 {
@@ -216,8 +211,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine target agent (self or specified)
 	var targetAgent string
 	var targetPane string
-	var hookWorkDir string        // Working directory for running bd hook commands
-	var hookSetAtomically bool    // True if hook was set during polecat spawn (skip redundant update)
+	var hookWorkDir string     // Working directory for running bd hook commands
+	var hookSetAtomically bool // True if hook was set during polecat spawn (skip redundant update)
 
 	if len(args) > 1 {
 		target := args[1]
@@ -530,7 +525,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if formulaName != "" {
 		fmt.Printf("  Instantiating formula %s...\n", formulaName)
 
-		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false)
+		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false, slingVars)
 		if err != nil {
 			return fmt.Errorf("instantiating formula %s: %w", formulaName, err)
 		}
@@ -592,6 +587,15 @@ func runSling(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
 		} else {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Store no_merge flag in bead (skips merge queue on completion)
+	if slingNoMerge {
+		if err := storeNoMergeInBead(beadID, true); err != nil {
+			fmt.Printf("%s Could not store no_merge in bead: %v\n", style.Dim.Render("Warning:"), err)
+		} else {
+			fmt.Printf("%s No-merge mode enabled (work stays on feature branch)\n", style.Bold.Render("✓"))
 		}
 	}
 

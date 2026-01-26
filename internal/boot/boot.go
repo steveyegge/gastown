@@ -13,6 +13,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
@@ -85,7 +86,7 @@ func (b *Boot) IsRunning() bool {
 
 // IsSessionAlive checks if the Boot tmux session exists.
 func (b *Boot) IsSessionAlive() bool {
-	has, err := b.tmux.HasSession(SessionName)
+	has, err := b.tmux.HasSession(session.BootSessionName())
 	return err == nil && has
 }
 
@@ -167,7 +168,7 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	// Kill any stale session first.
 	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 	if b.IsSessionAlive() {
-		_ = b.tmux.KillSessionWithProcesses(SessionName)
+		_ = b.tmux.KillSessionWithProcesses(session.BootSessionName())
 	}
 
 	// Ensure boot directory exists
@@ -175,17 +176,21 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
 
-	// Build startup command with optional agent override
-	// The "gt boot triage" prompt tells Boot to immediately start triage (GUPP principle)
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: "boot",
+		Sender:    "daemon",
+		Topic:     "triage",
+	}, "Run `gt boot triage` now.")
+
 	var startCmd string
 	if agentOverride != "" {
 		var err error
-		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", "gt boot triage", agentOverride)
+		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", initialPrompt, agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", "gt boot triage")
+		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", initialPrompt)
 	}
 
 	// Ensure Claude settings exist for boot (autonomous role)
@@ -195,7 +200,7 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
-	if err := b.tmux.NewSessionWithCommand(SessionName, b.bootDir, startCmd); err != nil {
+	if err := b.tmux.NewSessionWithCommand(session.BootSessionName(), b.bootDir, startCmd); err != nil {
 		return fmt.Errorf("creating boot session: %w", err)
 	}
 
@@ -205,7 +210,7 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		TownRoot: b.townRoot,
 	})
 	for k, v := range envVars {
-		_ = b.tmux.SetEnvironment(SessionName, k, v)
+		_ = b.tmux.SetEnvironment(session.BootSessionName(), k, v)
 	}
 
 	return nil

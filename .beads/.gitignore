@@ -10,6 +10,7 @@ daemon.lock
 daemon.log
 daemon.pid
 bd.sock
+bd.sock.startlock
 sync-state.json
 last-touched
 

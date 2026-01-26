@@ -110,9 +110,10 @@ type PatrolConfig struct {
 
 // PatrolsConfig holds configuration for all patrols.
 type PatrolsConfig struct {
-	Refinery *PatrolConfig `json:"refinery,omitempty"`
-	Witness  *PatrolConfig `json:"witness,omitempty"`
-	Deacon   *PatrolConfig `json:"deacon,omitempty"`
+	Refinery   *PatrolConfig     `json:"refinery,omitempty"`
+	Witness    *PatrolConfig     `json:"witness,omitempty"`
+	Deacon     *PatrolConfig     `json:"deacon,omitempty"`
+	DoltServer *DoltServerConfig `json:"dolt_server,omitempty"`
 }
 
 // DaemonPatrolConfig is the structure of mayor/daemon.json.

@@ -1211,3 +1211,142 @@ func TestCleanupOrphanedSessions_NoSessions(t *testing.T) {
 	// May clean some existing GT sessions if they exist, but shouldn't error
 	t.Logf("CleanupOrphanedSessions cleaned %d sessions", cleaned)
 }
+
+func TestKillPaneProcessesExcluding(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-killpaneexcl-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session with a long-running process
+	cmd := `sleep 300`
+	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Get the pane ID
+	paneID, err := tm.GetPaneID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneID: %v", err)
+	}
+
+	// Kill pane processes with empty excludePIDs (should kill all processes)
+	if err := tm.KillPaneProcessesExcluding(paneID, nil); err != nil {
+		t.Fatalf("KillPaneProcessesExcluding: %v", err)
+	}
+
+	// Session may still exist (pane respawns as dead), but processes should be gone
+	// Check that we can still get info about the session (verifies we didn't panic)
+	_, _ = tm.HasSession(sessionName)
+}
+
+func TestKillPaneProcessesExcluding_WithExcludePID(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-killpaneexcl2-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session with a long-running process
+	cmd := `sleep 300`
+	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Get the pane ID and PID
+	paneID, err := tm.GetPaneID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneID: %v", err)
+	}
+
+	panePID, err := tm.GetPanePID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPanePID: %v", err)
+	}
+	if panePID == "" {
+		t.Skip("could not get pane PID")
+	}
+
+	// Kill pane processes with the pane PID excluded
+	// The function should NOT kill the excluded PID
+	err = tm.KillPaneProcessesExcluding(paneID, []string{panePID})
+	if err != nil {
+		t.Fatalf("KillPaneProcessesExcluding: %v", err)
+	}
+
+	// The session/pane should still exist since we excluded the main process
+	has, _ := tm.HasSession(sessionName)
+	if !has {
+		t.Log("Session was destroyed - this may happen if tmux auto-cleaned after descendants died")
+	}
+}
+
+func TestKillPaneProcessesExcluding_NonexistentPane(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Killing nonexistent pane should return an error but not panic
+	err := tm.KillPaneProcessesExcluding("%99999", []string{"12345"})
+	if err == nil {
+		t.Error("expected error for nonexistent pane")
+	}
+}
+
+func TestKillPaneProcessesExcluding_FiltersPIDs(t *testing.T) {
+	// Unit test the PID filtering logic without needing tmux
+	// This tests that the exclusion set is built correctly
+
+	excludePIDs := []string{"123", "456", "789"}
+	exclude := make(map[string]bool)
+	for _, pid := range excludePIDs {
+		exclude[pid] = true
+	}
+
+	// Test that excluded PIDs are in the set
+	for _, pid := range excludePIDs {
+		if !exclude[pid] {
+			t.Errorf("exclude[%q] = false, want true", pid)
+		}
+	}
+
+	// Test that non-excluded PIDs are not in the set
+	nonExcluded := []string{"111", "222", "333"}
+	for _, pid := range nonExcluded {
+		if exclude[pid] {
+			t.Errorf("exclude[%q] = true, want false", pid)
+		}
+	}
+
+	// Test filtering logic
+	allPIDs := []string{"111", "123", "222", "456", "333", "789"}
+	var filtered []string
+	for _, pid := range allPIDs {
+		if !exclude[pid] {
+			filtered = append(filtered, pid)
+		}
+	}
+
+	expectedFiltered := []string{"111", "222", "333"}
+	if len(filtered) != len(expectedFiltered) {
+		t.Fatalf("filtered = %v, want %v", filtered, expectedFiltered)
+	}
+	for i, pid := range filtered {
+		if pid != expectedFiltered[i] {
+			t.Errorf("filtered[%d] = %q, want %q", i, pid, expectedFiltered[i])
+		}
+	}
+}

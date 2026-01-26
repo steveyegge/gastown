@@ -1334,68 +1334,58 @@ type trackedIssueInfo struct {
 	WorkerAge string `json:"worker_age,omitempty"` // How long worker has been on this issue
 }
 
-// getTrackedIssues retrieves issues tracked by a convoy.
-// It reads from the JSONL file which embeds dependencies in issue records,
-// avoiding the need for sqlite3 CLI and working around bd dep list not
-// properly handling external references.
-// Uses batched lookup to avoid N+1 subprocess calls.
+// getTrackedIssues uses bd dep list to get issues tracked by a convoy.
+// Returns issue details including status, type, and worker info.
 func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
-	// Read dependencies from SQLite (tracks dependencies are stored in dependencies table)
-	deps := getConvoyDependenciesFromSQLite(townBeads, convoyID)
-	if deps == nil {
+	// Use bd dep list to get tracked dependencies
+	// Run from town root (parent of .beads) so bd routes correctly
+	townRoot := filepath.Dir(townBeads)
+	depCmd := exec.Command("bd", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	depCmd.Dir = townRoot
+
+	var stdout bytes.Buffer
+	depCmd.Stdout = &stdout
+	if err := depCmd.Run(); err != nil {
 		return nil
 	}
 
-	// First pass: collect all issue IDs (normalized from external refs)
-	issueIDs := make([]string, 0, len(deps))
-	idToDepType := make(map[string]string)
-	for _, dep := range deps {
-		issueID := dep.DependsOnID
-
-		// Handle external reference format: external:rig:issue-id
-		if strings.HasPrefix(issueID, "external:") {
-			parts := strings.SplitN(issueID, ":", 3)
-			if len(parts) == 3 {
-				issueID = parts[2] // Extract the actual issue ID
-			}
-		}
-
-		issueIDs = append(issueIDs, issueID)
-		idToDepType[issueID] = dep.Type
+	// Parse the JSON output - bd dep list returns full issue details
+	var deps []struct {
+		ID             string   `json:"id"`
+		Title          string   `json:"title"`
+		Status         string   `json:"status"`
+		IssueType      string   `json:"issue_type"`
+		Assignee       string   `json:"assignee"`
+		DependencyType string   `json:"dependency_type"`
+		Labels         []string `json:"labels"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
+		return nil
 	}
 
-	// Single batch call to get all issue details
-	detailsMap := getIssueDetailsBatch(issueIDs)
-
-	// Get workers for these issues (only for non-closed issues)
-	openIssueIDs := make([]string, 0, len(issueIDs))
-	for _, id := range issueIDs {
-		if details, ok := detailsMap[id]; ok && details.Status != "closed" {
-			openIssueIDs = append(openIssueIDs, id)
+	// Collect non-closed issue IDs for worker lookup
+	openIssueIDs := make([]string, 0, len(deps))
+	for _, dep := range deps {
+		if dep.Status != "closed" {
+			openIssueIDs = append(openIssueIDs, dep.ID)
 		}
 	}
 	workersMap := getWorkersForIssues(openIssueIDs)
 
-	// Second pass: build result using the batch lookup
+	// Build result
 	var tracked []trackedIssueInfo
-	for _, issueID := range issueIDs {
+	for _, dep := range deps {
 		info := trackedIssueInfo{
-			ID:   issueID,
-			Type: idToDepType[issueID],
-		}
-
-		if details, ok := detailsMap[issueID]; ok {
-			info.Title = details.Title
-			info.Status = details.Status
-			info.IssueType = details.IssueType
-			info.Assignee = details.Assignee
-		} else {
-			info.Title = "(external)"
-			info.Status = "unknown"
+			ID:        dep.ID,
+			Title:     dep.Title,
+			Status:    dep.Status,
+			Type:      dep.DependencyType,
+			IssueType: dep.IssueType,
+			Assignee:  dep.Assignee,
 		}
 
 		// Add worker info if available
-		if worker, ok := workersMap[issueID]; ok {
+		if worker, ok := workersMap[dep.ID]; ok {
 			info.Worker = worker.Worker
 			info.WorkerAge = worker.Age
 		}
@@ -1406,46 +1396,56 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 	return tracked
 }
 
-// convoyDependency represents a dependency record from JSONL.
-type convoyDependency struct {
-	IssueID     string `json:"issue_id"`
-	DependsOnID string `json:"depends_on_id"`
-	Type        string `json:"type"`
-}
+// getExternalIssueDetails fetches issue details from an external rig database.
+// townBeads: path to town .beads directory
+// rigName: name of the rig (e.g., "claycantrell")
+// issueID: the issue ID to look up
+func getExternalIssueDetails(townBeads, rigName, issueID string) *issueDetails {
+	// Resolve rig directory path: town parent + rig name
+	townParent := filepath.Dir(townBeads)
+	rigDir := filepath.Join(townParent, rigName)
 
-// getConvoyDependenciesFromDB reads the convoy's 'tracks' dependencies from the beads backend.
-// Uses beads.RunQuery which supports both SQLite and Dolt backends.
-func getConvoyDependenciesFromSQLite(townBeads, convoyID string) []convoyDependency {
-	// Query for 'tracks' type dependencies where the convoy is the issue_id
-	// Escape convoyID to prevent SQL injection
-	escapedID := strings.ReplaceAll(convoyID, "'", "''")
-	query := fmt.Sprintf(
-		`SELECT issue_id, depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`,
-		escapedID)
-
-	// Use backend-aware query (works with SQLite or Dolt)
-	results, err := beads.RunQuery(townBeads, query)
-	if err != nil || len(results) == 0 {
+	// Check if rig directory exists
+	if _, err := os.Stat(rigDir); os.IsNotExist(err) {
 		return nil
 	}
 
-	// Convert results to convoyDependency slice
-	var deps []convoyDependency
-	for _, row := range results {
-		dep := convoyDependency{}
-		if id, ok := row["issue_id"].(string); ok {
-			dep.IssueID = id
-		}
-		if depOn, ok := row["depends_on_id"].(string); ok {
-			dep.DependsOnID = depOn
-		}
-		if t, ok := row["type"].(string); ok {
-			dep.Type = t
-		}
-		deps = append(deps, dep)
+	// Query the rig database by running bd show from the rig directory
+	// Use --allow-stale to handle cases where JSONL and DB are out of sync
+	showCmd := exec.Command("bd", "show", issueID, "--json", "--allow-stale")
+	showCmd.Dir = rigDir // Set working directory to rig directory
+	var stdout bytes.Buffer
+	showCmd.Stdout = &stdout
+
+	if err := showCmd.Run(); err != nil {
+		return nil
+	}
+	if stdout.Len() == 0 {
+		return nil
 	}
 
-	return deps
+	var issues []struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Status    string `json:"status"`
+		IssueType string `json:"issue_type"`
+		Assignee  string `json:"assignee"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return nil
+	}
+	if len(issues) == 0 {
+		return nil
+	}
+
+	issue := issues[0]
+	return &issueDetails{
+		ID:        issue.ID,
+		Title:     issue.Title,
+		Status:    issue.Status,
+		IssueType: issue.IssueType,
+		Assignee:  issue.Assignee,
+	}
 }
 
 // issueDetails holds basic issue info.

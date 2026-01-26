@@ -327,7 +327,7 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 }
 
 // ListByAssignee returns all issues assigned to a specific assignee.
-// The assignee is typically in the format "rig/polecatName" (e.g., "gastown/Toast").
+// The assignee is typically in the format "rig/polecats/polecatName" (e.g., "gastown/polecats/Toast").
 func (b *Beads) ListByAssignee(assignee string) ([]*Issue, error) {
 	return b.List(ListOptions{
 		Status:   "all", // Include both open and closed for state derivation
@@ -749,18 +749,15 @@ This is physics, not politeness. Gas Town is a steam engine - you are a piston.
 - ` + "`gt mol status`" + ` - Check your hooked work
 - ` + "`gt mail inbox`" + ` - Check for messages
 - ` + "`bd ready`" + ` - Find available work (no blockers)
-- ` + "`bd sync`" + ` - Sync beads changes
 
 ## Session Close Protocol
 
 Before signaling completion:
 1. git status (check what changed)
 2. git add <files> (stage code changes)
-3. bd sync (commit beads changes)
-4. git commit -m "..." (commit code)
-5. bd sync (commit any new beads changes)
-6. git push (push to remote)
-7. ` + "`gt done`" + ` (submit to merge queue and exit)
+3. git commit -m "..." (commit code)
+4. git push (push to remote)
+5. ` + "`gt done`" + ` (submit to merge queue and exit)
 
 **Polecats MUST call ` + "`gt done`" + ` - this submits work and exits the session.**
 `

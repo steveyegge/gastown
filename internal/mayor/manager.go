@@ -80,7 +80,7 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Build startup beacon with explicit instructions (matches gt handoff behavior)
 	// This ensures the agent has clear context immediately, not after nudges arrive
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
 		Recipient: "mayor",
 		Sender:    "human",
 		Topic:     "cold-start",

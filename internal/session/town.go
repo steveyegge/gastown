@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -22,7 +21,7 @@ type TownSession struct {
 func TownSessions() []TownSession {
 	return []TownSession{
 		{"Mayor", MayorSessionName()},
-		{"Boot", boot.SessionName},
+		{"Boot", BootSessionName()},
 		{"Deacon", DeaconSessionName()},
 	}
 }

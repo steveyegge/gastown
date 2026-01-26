@@ -14,40 +14,14 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-// slingDaemonAvailable tracks whether the bd daemon is available for sling operations.
-// Set at sling start via ensureSlingDaemon(). If false, bd commands use --no-daemon.
-var slingDaemonAvailable bool
-
-// ensureSlingDaemon ensures the bd daemon is running for sling operations.
-// Sets slingDaemonAvailable and returns whether daemon is available.
-// This implements the daemon-first approach: try daemon, fall back to direct mode.
-func ensureSlingDaemon(townRoot string) bool {
-	slingDaemonAvailable = beads.EnsureDaemonForSling(townRoot)
-	return slingDaemonAvailable
-}
-
-// bdCmd creates an exec.Command for bd with appropriate daemon mode.
-// If daemon is available (slingDaemonAvailable=true), uses daemon mode.
-// Otherwise, uses --no-daemon for direct mode fallback.
+// bdCmd creates an exec.Command for bd.
 func bdCmd(args ...string) *exec.Cmd {
-	if slingDaemonAvailable {
-		return exec.Command("bd", args...)
-	}
-	// Prepend --no-daemon for direct mode
-	fullArgs := append([]string{"--no-daemon"}, args...)
-	return exec.Command("bd", fullArgs...)
+	return exec.Command("bd", args...)
 }
 
 // bdCmdWithStale creates a bd command with --allow-stale for read operations.
-// Uses daemon mode if available, otherwise --no-daemon.
 func bdCmdWithStale(args ...string) *exec.Cmd {
-	if slingDaemonAvailable {
-		fullArgs := append(args, "--allow-stale")
-		return exec.Command("bd", fullArgs...)
-	}
-	// Prepend --no-daemon and append --allow-stale for direct mode
-	fullArgs := append([]string{"--no-daemon"}, args...)
-	fullArgs = append(fullArgs, "--allow-stale")
+	fullArgs := append(args, "--allow-stale")
 	return exec.Command("bd", fullArgs...)
 }
 
@@ -62,11 +36,10 @@ type beadInfo struct {
 // Uses bd's native prefix-based routing via routes.jsonl - do NOT set BEADS_DIR
 // as that overrides routing and breaks resolution of rig-level beads.
 //
-// Uses --no-daemon with --allow-stale to avoid daemon socket timing issues
-// while still finding beads when database is out of sync with JSONL.
+// Uses --allow-stale to find beads when database might be out of sync with JSONL.
 // For existence checks, stale data is acceptable - we just need to know it exists.
 func verifyBeadExists(beadID string) error {
-	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
+	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
 	// Run from town root so bd can find routes.jsonl for prefix-based routing.
 	// Do NOT set BEADS_DIR - that overrides routing and breaks rig bead resolution.
 	if townRoot, err := workspace.FindFromCwd(); err == nil {
@@ -274,6 +247,53 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 
 	// Update the bead
 	updateCmd := bdCmd("update", beadID, "--description="+newDesc)
+	updateCmd.Stderr = os.Stderr
+	if err := updateCmd.Run(); err != nil {
+		return fmt.Errorf("updating bead description: %w", err)
+	}
+
+	return nil
+}
+
+// storeNoMergeInBead sets the no_merge field in a bead's description.
+// When set, gt done will skip the merge queue and keep work on the feature branch.
+// This is useful for upstream contributions or when human review is needed before merge.
+func storeNoMergeInBead(beadID string, noMerge bool) error {
+	if !noMerge {
+		return nil
+	}
+
+	// Get the bead to preserve existing description content
+	showCmd := exec.Command("bd", "show", beadID, "--json")
+	out, err := showCmd.Output()
+	if err != nil {
+		return fmt.Errorf("fetching bead: %w", err)
+	}
+
+	// Parse the bead
+	var issues []beads.Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return fmt.Errorf("parsing bead: %w", err)
+	}
+	if len(issues) == 0 {
+		return fmt.Errorf("bead not found")
+	}
+	issue := &issues[0]
+
+	// Get or create attachment fields
+	fields := beads.ParseAttachmentFields(issue)
+	if fields == nil {
+		fields = &beads.AttachmentFields{}
+	}
+
+	// Set the no_merge flag
+	fields.NoMerge = true
+
+	// Update the description
+	newDesc := beads.SetAttachmentFields(issue, fields)
+
+	// Update the bead
+	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -534,9 +554,10 @@ type FormulaOnBeadResult struct {
 //   - hookWorkDir: working directory for bd commands (polecat's worktree)
 //   - townRoot: the town root directory
 //   - skipCook: if true, skip cooking (for batch mode optimization where cook happens once)
+//   - extraVars: additional --var values supplied by the user
 //
 // Returns the wisp root ID which should be hooked.
-func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot string, skipCook bool) (*FormulaOnBeadResult, error) {
+func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot string, skipCook bool, extraVars []string) (*FormulaOnBeadResult, error) {
 	// Route bd mutations (wisp/bond) to the correct beads context for the target bead.
 	formulaWorkDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 
@@ -553,7 +574,11 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	// Step 2: Create wisp with feature and issue variables from bead
 	featureVar := fmt.Sprintf("feature=%s", title)
 	issueVar := fmt.Sprintf("issue=%s", beadID)
-	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar, "--json"}
+	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar}
+	for _, variable := range extraVars {
+		wispArgs = append(wispArgs, "--var", variable)
+	}
+	wispArgs = append(wispArgs, "--json")
 	wispCmd := exec.Command("bd", wispArgs...)
 	wispCmd.Dir = formulaWorkDir
 	wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)

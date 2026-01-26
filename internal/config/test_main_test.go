@@ -22,6 +22,7 @@ func TestMain(m *testing.M) {
 		"cursor-agent",
 		"auggie",
 		"amp",
+		"opencode",
 	}
 	for _, name := range binaries {
 		path := filepath.Join(stubDir, name)

@@ -212,6 +212,10 @@ func (m *Mailbox) identityVariants() []string {
 
 // queryMessages runs a bd list query with the given filter flag and value.
 func (m *Mailbox) queryMessages(beadsDir, filterFlag, filterValue, status string) ([]*Message, error) {
+	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
+		return nil, fmt.Errorf("ensuring custom types: %w", err)
+	}
+
 	args := []string{"list",
 		"--type", "message",
 		filterFlag, filterValue,
@@ -281,22 +285,19 @@ func (m *Mailbox) listLegacy() ([]*Message, error) {
 }
 
 // ListUnread returns unread (open) messages.
+// Filters out messages marked as read (via "read" label in beads mode).
 func (m *Mailbox) ListUnread() ([]*Message, error) {
-	if m.legacy {
-		all, err := m.List()
-		if err != nil {
-			return nil, err
-		}
-		var unread []*Message
-		for _, msg := range all {
-			if !msg.Read {
-				unread = append(unread, msg)
-			}
-		}
-		return unread, nil
+	all, err := m.List()
+	if err != nil {
+		return nil, err
 	}
-	// For beads, inbox only returns open (unread) messages
-	return m.List()
+	var unread []*Message
+	for _, msg := range all {
+		if !msg.Read {
+			unread = append(unread, msg)
+		}
+	}
+	return unread, nil
 }
 
 // Get returns a message by ID.
@@ -832,8 +833,8 @@ func (m *Mailbox) rewriteLegacy(messages []*Message) error {
 	for _, msg := range messages {
 		data, err := json.Marshal(msg)
 		if err != nil {
-			_ = file.Close()         // best-effort cleanup
-			_ = os.Remove(tmpPath)   // best-effort cleanup
+			_ = file.Close()       // best-effort cleanup
+			_ = os.Remove(tmpPath) // best-effort cleanup
 			return err
 		}
 		_, _ = file.WriteString(string(data) + "\n") // non-fatal: partial write is acceptable

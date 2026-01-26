@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -174,16 +175,14 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// If subject/message provided, send handoff mail to self first
-	// The mail is auto-hooked so the next session picks it up
-	if handoffSubject != "" || handoffMessage != "" {
-		beadID, err := sendHandoffMail(handoffSubject, handoffMessage)
-		if err != nil {
-			style.PrintWarning("could not send handoff mail: %v", err)
-			// Continue anyway - the respawn is more important
-		} else {
-			fmt.Printf("%s Sent handoff mail %s (auto-hooked)\n", style.Bold.Render("📬"), beadID)
-		}
+	// Send handoff mail to self (defaults applied inside sendHandoffMail).
+	// The mail is auto-hooked so the next session picks it up.
+	beadID, err := sendHandoffMail(handoffSubject, handoffMessage)
+	if err != nil {
+		style.PrintWarning("could not send handoff mail: %v", err)
+		// Continue anyway - the respawn is more important
+	} else {
+		fmt.Printf("%s Sent handoff mail %s (auto-hooked)\n", style.Bold.Render("📬"), beadID)
 	}
 
 	// NOTE: reportAgentState("stopped") removed (gt-zecmc)
@@ -206,14 +205,29 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		_ = os.WriteFile(markerPath, []byte(currentSession), 0644)
 	}
 
-	// Kill all processes in the pane before respawning to prevent orphan leaks
-	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
-	if err := t.KillPaneProcesses(pane); err != nil {
+	// Set remain-on-exit so the pane survives process death during handoff.
+	// Without this, killing processes causes tmux to destroy the pane before
+	// we can respawn it. This is essential for tmux session reuse.
+	if err := t.SetRemainOnExit(pane, true); err != nil {
+		style.PrintWarning("could not set remain-on-exit: %v", err)
+	}
+
+	// Kill all processes in the pane before respawning to prevent orphan leaks.
+	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore.
+	//
+	// IMPORTANT: For self-handoff, we must exclude our own process and parent (Claude Code)
+	// from being killed. Otherwise gt handoff dies before reaching RespawnPane.
+	excludePIDs := []string{
+		strconv.Itoa(os.Getpid()),  // gt handoff process
+		strconv.Itoa(os.Getppid()), // Claude Code (parent)
+	}
+	if err := t.KillPaneProcessesExcluding(pane, excludePIDs); err != nil {
 		// Non-fatal but log the warning
 		style.PrintWarning("could not kill pane processes: %v", err)
 	}
 
-	// Use exec to respawn the pane - this kills us and restarts
+	// Use respawn-pane -k to atomically kill current process and start new one
+	// Note: respawn-pane automatically resets remain-on-exit to off
 	return t.RespawnPane(pane, restartCmd)
 }
 
@@ -397,9 +411,9 @@ func buildRestartCommand(sessionName string) (string, error) {
 	gtRole := identity.GTRole()
 
 	// Build startup beacon for predecessor discovery via /resume
-	// Use FormatStartupNudge instead of bare "gt prime" which confuses agents
+	// Use FormatStartupBeacon instead of bare "gt prime" which confuses agents
 	// The SessionStart hook handles context injection (gt prime --hook)
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
 		Recipient: identity.Address(),
 		Sender:    "self",
 		Topic:     "handoff",
@@ -587,6 +601,13 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 		return nil
 	}
 
+	// Set remain-on-exit so the pane survives process death during handoff.
+	// Without this, killing processes causes tmux to destroy the pane before
+	// we can respawn it. This is essential for tmux session reuse.
+	if err := t.SetRemainOnExit(targetPane, true); err != nil {
+		style.PrintWarning("could not set remain-on-exit: %v", err)
+	}
+
 	// Kill all processes in the pane before respawning to prevent orphan leaks
 	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
 	if err := t.KillPaneProcesses(targetPane); err != nil {
@@ -601,6 +622,7 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 	}
 
 	// Respawn the remote session's pane
+	// Note: respawn-pane automatically resets remain-on-exit to off
 	if err := t.RespawnPane(targetPane, restartCmd); err != nil {
 		return fmt.Errorf("respawning pane: %w", err)
 	}
