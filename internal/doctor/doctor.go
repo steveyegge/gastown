@@ -3,6 +3,7 @@ package doctor
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/ui"
 )
@@ -41,12 +42,13 @@ type categoryGetter interface {
 
 // Run executes all registered checks and returns a report.
 func (d *Doctor) Run(ctx *CheckContext) *Report {
-	return d.RunStreaming(ctx, nil)
+	return d.RunStreaming(ctx, nil, 0)
 }
 
 // RunStreaming executes all registered checks with optional real-time output.
 // If w is non-nil, prints each check name as it starts and result when done.
-func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer) *Report {
+// If slowThreshold > 0, shows hourglass icon for slow checks.
+func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer, slowThreshold time.Duration) *Report {
 	report := NewReport()
 
 	for _, check := range d.checks {
@@ -55,7 +57,9 @@ func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer) *Report {
 			fmt.Fprintf(w, "  %s  %s...", ui.RenderMuted("○"), check.Name())
 		}
 
+		start := time.Now()
 		result := check.Run(ctx)
+		result.Elapsed = time.Since(start)
 
 		// Ensure check name is populated
 		if result.Name == "" {
@@ -77,10 +81,19 @@ func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer) *Report {
 			case StatusError:
 				statusIcon = ui.RenderFailIcon()
 			}
-			// Use carriage return to overwrite the "running" line
-			fmt.Fprintf(w, "\r  %s  %s", statusIcon, result.Name)
+			// Check if slow (hourglass replaces spaces to maintain alignment)
+			isSlow := slowThreshold > 0 && result.Elapsed >= slowThreshold
+			slowIndicator := "  "
+			if isSlow {
+				report.Summary.Slow++
+				slowIndicator = "⏳"
+			}
+			fmt.Fprintf(w, "\r  %s%s%s", statusIcon, slowIndicator, result.Name)
 			if result.Message != "" {
 				fmt.Fprintf(w, "%s", ui.RenderMuted(" "+result.Message))
+			}
+			if isSlow {
+				fmt.Fprintf(w, "%s", ui.RenderMuted(" ("+formatDuration(result.Elapsed)+")"))
 			}
 			fmt.Fprintln(w)
 		}
@@ -94,12 +107,13 @@ func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer) *Report {
 // Fix runs all checks with auto-fix enabled where possible.
 // It first runs the check, then if it fails and can be fixed, attempts the fix.
 func (d *Doctor) Fix(ctx *CheckContext) *Report {
-	return d.FixStreaming(ctx, nil)
+	return d.FixStreaming(ctx, nil, 0)
 }
 
 // FixStreaming runs all checks with auto-fix and optional real-time output.
 // If w is non-nil, prints each check name as it starts and result when done.
-func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer) *Report {
+// If slowThreshold > 0, shows hourglass icon for slow checks.
+func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time.Duration) *Report {
 	report := NewReport()
 
 	for _, check := range d.checks {
@@ -108,6 +122,7 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer) *Report {
 			fmt.Fprintf(w, "  %s  %s...", ui.RenderMuted("○"), check.Name())
 		}
 
+		start := time.Now()
 		result := check.Run(ctx)
 		if result.Name == "" {
 			result.Name = check.Name()
@@ -156,6 +171,9 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer) *Report {
 			}
 		}
 
+		// Record total elapsed time including any fix attempts
+		result.Elapsed = time.Since(start)
+
 		// Stream: overwrite line with final result
 		if w != nil {
 			var statusIcon string
@@ -167,9 +185,19 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer) *Report {
 			case StatusError:
 				statusIcon = ui.RenderFailIcon()
 			}
-			fmt.Fprintf(w, "\r  %s  %s", statusIcon, result.Name)
+			// Check if slow (hourglass replaces spaces to maintain alignment)
+			isSlow := slowThreshold > 0 && result.Elapsed >= slowThreshold
+			slowIndicator := "  "
+			if isSlow {
+				report.Summary.Slow++
+				slowIndicator = "⏳"
+			}
+			fmt.Fprintf(w, "\r  %s%s%s", statusIcon, slowIndicator, result.Name)
 			if result.Message != "" {
 				fmt.Fprintf(w, "%s", ui.RenderMuted(" "+result.Message))
+			}
+			if isSlow {
+				fmt.Fprintf(w, "%s", ui.RenderMuted(" ("+formatDuration(result.Elapsed)+")"))
 			}
 			fmt.Fprintln(w)
 		}
