@@ -6,10 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/witness"
 )
 
 // RigDockedLabel is the label set on rig identity beads when docked.
@@ -119,34 +116,14 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Docking rig %s...\n", style.Bold.Render(rigName))
 
-	var stoppedAgents []string
-
-	t := tmux.NewTmux()
-
-	// Stop witness if running
-	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
-	witnessRunning, _ := t.HasSession(witnessSession)
-	if witnessRunning {
-		fmt.Printf("  Stopping witness...\n")
-		witMgr := witness.NewManager(r)
-		if err := witMgr.Stop(); err != nil {
-			fmt.Printf("  %s Failed to stop witness: %v\n", style.Warning.Render("!"), err)
-		} else {
-			stoppedAgents = append(stoppedAgents, "Witness stopped")
-		}
-	}
-
-	// Stop refinery if running
-	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
-	refineryRunning, _ := t.HasSession(refinerySession)
-	if refineryRunning {
-		fmt.Printf("  Stopping refinery...\n")
-		refMgr := refinery.NewManager(r)
-		if err := refMgr.Stop(); err != nil {
-			fmt.Printf("  %s Failed to stop refinery: %v\n", style.Warning.Render("!"), err)
-		} else {
-			stoppedAgents = append(stoppedAgents, "Refinery stopped")
-		}
+	// Stop rig agents
+	fmt.Printf("  Stopping agents...\n")
+	errs := StopRigAgents(r, StopRigOptions{
+		StopWitness:  true,
+		StopRefinery: true,
+	})
+	for _, err := range errs {
+		fmt.Printf("  %s %v\n", style.Warning.Render("!"), err)
 	}
 
 	// Set docked label on rig identity bead
@@ -159,9 +136,6 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	// Output
 	fmt.Printf("%s Rig %s docked (global)\n", style.Success.Render("✓"), rigName)
 	fmt.Printf("  Label added: %s\n", RigDockedLabel)
-	for _, msg := range stoppedAgents {
-		fmt.Printf("  %s\n", msg)
-	}
 
 	return nil
 }
