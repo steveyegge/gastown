@@ -194,10 +194,13 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 			} else {
 				// Kill process group with negative PGID (POSIX convention)
 				// Use SIGTERM first for graceful shutdown
-				_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
+				// NOTE: The "--" is CRITICAL! Without it, procps-ng kill (v4.0.4+)
+				// misparses "-PGID" as an option and ends up calling kill(-1) which
+				// kills ALL processes! See https://github.com/groblegark/gastown/blob/main/MURDER_INVESTIGATION.md
+				_ = exec.Command("kill", "-TERM", "--", "-"+pgid).Run()
 				time.Sleep(100 * time.Millisecond)
 				// Force kill any remaining processes in the group
-				_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+				_ = exec.Command("kill", "-KILL", "--", "-"+pgid).Run()
 			}
 		}
 
@@ -458,9 +461,10 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 			fmt.Fprintf(os.Stderr, "[KillPaneProcesses] BLOCKED: Refusing to kill PGID %s (matches tmux server)\n", pgid)
 		} else {
 			// Kill process group with negative PGID (POSIX convention)
-			_ = exec.Command("kill", "-TERM", "-"+pgid).Run()
+			// NOTE: The "--" is CRITICAL! See comment in KillSessionWithProcesses.
+			_ = exec.Command("kill", "-TERM", "--", "-"+pgid).Run()
 			time.Sleep(100 * time.Millisecond)
-			_ = exec.Command("kill", "-KILL", "-"+pgid).Run()
+			_ = exec.Command("kill", "-KILL", "--", "-"+pgid).Run()
 		}
 	}
 
@@ -487,6 +491,65 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 	// Don't kill the pane process directly - RespawnPane's -k flag will handle it.
 	// If we kill it here and the caller is in the pane tree, we'd kill our parent
 	// chain and never reach RespawnPane.
+
+	return nil
+}
+
+// KillPaneProcessesExcluding is like KillPaneProcesses but excludes specified PIDs
+// from being killed. This is essential for self-handoff scenarios where the calling
+// process (e.g., gt handoff running inside Claude Code) needs to survive long enough
+// to call RespawnPane. Without exclusion, the caller would be killed before completing.
+//
+// The excluded PIDs should include the calling process and any ancestors that must
+// survive. After this function returns, RespawnPane's -k flag will send SIGHUP to
+// clean up the remaining processes.
+func (t *Tmux) KillPaneProcessesExcluding(pane string, excludePIDs []string) error {
+	// Build exclusion set for O(1) lookup
+	exclude := make(map[string]bool)
+	for _, pid := range excludePIDs {
+		exclude[pid] = true
+	}
+
+	// Get the pane PID
+	pid, err := t.GetPanePID(pane)
+	if err != nil {
+		return fmt.Errorf("getting pane PID: %w", err)
+	}
+
+	if pid == "" {
+		return fmt.Errorf("pane PID is empty")
+	}
+
+	// Get all descendant PIDs recursively (returns deepest-first order)
+	descendants := getAllDescendants(pid)
+
+	// Filter out excluded PIDs
+	var filtered []string
+	for _, dpid := range descendants {
+		if !exclude[dpid] {
+			filtered = append(filtered, dpid)
+		}
+	}
+
+	// Send SIGTERM to all non-excluded descendants (deepest first to avoid orphaning)
+	for _, dpid := range filtered {
+		_ = exec.Command("kill", "-TERM", dpid).Run()
+	}
+
+	// Wait for graceful shutdown
+	time.Sleep(100 * time.Millisecond)
+
+	// Send SIGKILL to any remaining non-excluded descendants
+	for _, dpid := range filtered {
+		_ = exec.Command("kill", "-KILL", dpid).Run()
+	}
+
+	// Kill the pane process itself only if not excluded
+	if !exclude[pid] {
+		_ = exec.Command("kill", "-TERM", pid).Run()
+		time.Sleep(100 * time.Millisecond)
+		_ = exec.Command("kill", "-KILL", pid).Run()
+	}
 
 	return nil
 }
@@ -731,9 +794,43 @@ func getSessionNudgeLock(session string) *sync.Mutex {
 	return actual.(*sync.Mutex)
 }
 
+// IsSessionAttached returns true if the session has any clients attached.
+func (t *Tmux) IsSessionAttached(target string) bool {
+	attached, err := t.run("display-message", "-t", target, "-p", "#{session_attached}")
+	return err == nil && attached == "1"
+}
+
+// WakePane triggers a SIGWINCH in a pane by resizing it slightly then restoring.
+// This wakes up Claude Code's event loop by simulating a terminal resize.
+//
+// When Claude runs in a detached tmux session, its TUI library may not process
+// stdin until a terminal event occurs. Attaching triggers SIGWINCH which wakes
+// the event loop. This function simulates that by doing a resize dance.
+//
+// Note: This always performs the resize. Use WakePaneIfDetached to skip
+// attached sessions where the wake is unnecessary.
+func (t *Tmux) WakePane(target string) {
+	// Resize pane down by 1 row, then up by 1 row
+	// This triggers SIGWINCH without changing the final pane size
+	_, _ = t.run("resize-pane", "-t", target, "-y", "-1")
+	time.Sleep(50 * time.Millisecond)
+	_, _ = t.run("resize-pane", "-t", target, "-y", "+1")
+}
+
+// WakePaneIfDetached triggers a SIGWINCH only if the session is detached.
+// This avoids unnecessary latency on attached sessions where Claude is
+// already processing terminal events.
+func (t *Tmux) WakePaneIfDetached(target string) {
+	if t.IsSessionAttached(target) {
+		return
+	}
+	t.WakePane(target)
+}
+
 // NudgeSession sends a message to a Claude Code session reliably.
 // This is the canonical way to send messages to Claude sessions.
 // Uses: literal mode + 500ms debounce + ESC (for vim mode) + separate Enter.
+// After sending, triggers SIGWINCH to wake Claude in detached sessions.
 // Verification is the Witness's job (AI), not this function.
 //
 // IMPORTANT: Nudges to the same session are serialized to prevent interleaving.
@@ -769,6 +866,8 @@ func (t *Tmux) NudgeSession(session, message string) error {
 			lastErr = err
 			continue
 		}
+		// 5. Wake the pane to trigger SIGWINCH for detached sessions
+		t.WakePaneIfDetached(session)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
@@ -776,6 +875,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 // NudgePane sends a message to a specific pane reliably.
 // Same pattern as NudgeSession but targets a pane ID (e.g., "%9") instead of session name.
+// After sending, triggers SIGWINCH to wake Claude in detached sessions.
 // Nudges to the same pane are serialized to prevent interleaving.
 func (t *Tmux) NudgePane(pane, message string) error {
 	// Serialize nudges to this pane to prevent interleaving
@@ -806,6 +906,8 @@ func (t *Tmux) NudgePane(pane, message string) error {
 			lastErr = err
 			continue
 		}
+		// 5. Wake the pane to trigger SIGWINCH for detached sessions
+		t.WakePaneIfDetached(pane)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)

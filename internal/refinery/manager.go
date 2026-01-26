@@ -134,16 +134,21 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: fmt.Sprintf("%s/refinery", m.rig.Name),
+		Sender:    "deacon",
+		Topic:     "patrol",
+	}, "Check your hook and begin patrol.")
+
 	var command string
 	if agentOverride != "" {
 		var err error
-		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, "", agentOverride)
+		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt, agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, "")
+		command = config.BuildAgentStartupCommand("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt)
 	}
 
 	// Create session with command directly to avoid send-keys race condition.
@@ -188,20 +193,6 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Wait for runtime to be fully ready
 	runtime.SleepForReadyDelay(runtimeConfig)
 	_ = runtime.RunStartupFallback(t, sessionID, "refinery", runtimeConfig)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/refinery", m.rig.Name)
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "deacon",
-		Topic:     "patrol",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("refinery", refineryRigDir)) // Non-fatal
 
 	return nil
 }

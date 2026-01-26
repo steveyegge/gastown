@@ -62,6 +62,7 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// If database file is empty but JSONL has content, this is the bug
+	// Note: This check is for SQLite backend; Dolt backend doesn't use these files
 	if dbErr == nil && dbInfo.Size() == 0 {
 		if jsonlErr == nil && jsonlInfo.Size() > 0 {
 			return &CheckResult{
@@ -72,7 +73,7 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 					"This can cause 'table issues has no column named pinned' errors",
 					"The database needs to be rebuilt from the JSONL file",
 				},
-				FixHint: "Run 'gt doctor --fix' or delete issues.db and run 'bd sync --from-main'",
+				FixHint: "Run 'gt doctor --fix' or delete issues.db and run 'bd import'",
 			}
 		}
 	}
@@ -113,6 +114,7 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix attempts to rebuild the database from JSONL.
+// Note: This fix is for SQLite backend. With Dolt backend, this is a no-op.
 func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
 	issuesDB := filepath.Join(beadsDir, "issues.db")
@@ -128,8 +130,8 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 			return err
 		}
 
-		// Run bd sync to rebuild from JSONL
-		cmd := exec.Command("bd", "sync", "--from-main")
+		// Run bd import to rebuild from JSONL
+		cmd := exec.Command("bd", "import")
 		cmd.Dir = ctx.TownRoot
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
@@ -152,7 +154,7 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 				return err
 			}
 
-			cmd := exec.Command("bd", "sync", "--from-main")
+			cmd := exec.Command("bd", "import")
 			cmd.Dir = ctx.RigPath()
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr

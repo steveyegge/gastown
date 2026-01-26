@@ -903,6 +903,80 @@ func TestAttachmentFieldsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestNoMergeField tests the no_merge field in AttachmentFields.
+// The no_merge flag tells gt done to skip the merge queue and keep work on a feature branch.
+func TestNoMergeField(t *testing.T) {
+	t.Run("parse no_merge true", func(t *testing.T) {
+		issue := &Issue{Description: "no_merge: true\ndispatched_by: mayor"}
+		fields := ParseAttachmentFields(issue)
+		if fields == nil {
+			t.Fatal("ParseAttachmentFields() = nil")
+		}
+		if !fields.NoMerge {
+			t.Error("NoMerge should be true")
+		}
+		if fields.DispatchedBy != "mayor" {
+			t.Errorf("DispatchedBy = %q, want 'mayor'", fields.DispatchedBy)
+		}
+	})
+
+	t.Run("parse no_merge false", func(t *testing.T) {
+		issue := &Issue{Description: "no_merge: false\ndispatched_by: crew"}
+		fields := ParseAttachmentFields(issue)
+		if fields == nil {
+			t.Fatal("ParseAttachmentFields() = nil")
+		}
+		if fields.NoMerge {
+			t.Error("NoMerge should be false")
+		}
+	})
+
+	t.Run("parse no-merge alternate format", func(t *testing.T) {
+		issue := &Issue{Description: "no-merge: true"}
+		fields := ParseAttachmentFields(issue)
+		if fields == nil {
+			t.Fatal("ParseAttachmentFields() = nil")
+		}
+		if !fields.NoMerge {
+			t.Error("NoMerge should be true with hyphen format")
+		}
+	})
+
+	t.Run("format no_merge", func(t *testing.T) {
+		fields := &AttachmentFields{
+			NoMerge:      true,
+			DispatchedBy: "mayor",
+		}
+		got := FormatAttachmentFields(fields)
+		if !strings.Contains(got, "no_merge: true") {
+			t.Errorf("FormatAttachmentFields() missing no_merge, got:\n%s", got)
+		}
+		if !strings.Contains(got, "dispatched_by: mayor") {
+			t.Errorf("FormatAttachmentFields() missing dispatched_by, got:\n%s", got)
+		}
+	})
+
+	t.Run("round-trip with no_merge", func(t *testing.T) {
+		original := &AttachmentFields{
+			AttachedMolecule: "mol-test",
+			AttachedAt:       "2026-01-24T12:00:00Z",
+			DispatchedBy:     "gastown/crew/max",
+			NoMerge:          true,
+		}
+
+		formatted := FormatAttachmentFields(original)
+		issue := &Issue{Description: formatted}
+		parsed := ParseAttachmentFields(issue)
+
+		if parsed == nil {
+			t.Fatal("round-trip parse returned nil")
+		}
+		if *parsed != *original {
+			t.Errorf("round-trip mismatch:\ngot  %+v\nwant %+v", parsed, original)
+		}
+	})
+}
+
 // TestResolveBeadsDir tests the redirect following logic.
 func TestResolveBeadsDir(t *testing.T) {
 	// Create temp directory structure

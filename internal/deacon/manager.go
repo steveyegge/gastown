@@ -80,10 +80,11 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
-	// Build startup command with initial prompt for autonomous patrol.
-	// The prompt triggers GUPP: deacon starts patrol immediately without waiting for input.
-	// This prevents the agent from sitting idle at the prompt after SessionStart hooks run.
-	initialPrompt := "I am Deacon. Start patrol: check gt hook, if empty create mol-deacon-patrol wisp and execute it."
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}, "I am Deacon. Start patrol: check gt hook, if empty create mol-deacon-patrol wisp and execute it.")
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", m.townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
@@ -120,19 +121,6 @@ func (m *Manager) Start(agentOverride string) error {
 	_ = t.AcceptBypassPermissionsWarning(sessionID)
 
 	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: "deacon",
-		Sender:    "daemon",
-		Topic:     "patrol",
-	}) // Non-fatal
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	_ = t.NudgeSession(sessionID, session.PropulsionNudgeForRole("deacon", deaconDir)) // Non-fatal
 
 	return nil
 }

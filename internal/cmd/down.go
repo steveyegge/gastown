@@ -11,7 +11,6 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/events"
@@ -136,35 +135,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	// Phase 1: Stop bd resurrection layer (--all only)
-	if downAll {
-		daemonsKilled, activityKilled, err := beads.StopAllBdProcesses(downDryRun, downForce)
-		if err != nil {
-			printDownStatus("bd processes", false, err.Error())
-			allOK = false
-		} else {
-			if downDryRun {
-				if daemonsKilled > 0 || activityKilled > 0 {
-					printDownStatus("bd daemon", true, fmt.Sprintf("%d would stop", daemonsKilled))
-					printDownStatus("bd activity", true, fmt.Sprintf("%d would stop", activityKilled))
-				} else {
-					printDownStatus("bd processes", true, "none running")
-				}
-			} else {
-				if daemonsKilled > 0 {
-					printDownStatus("bd daemon", true, fmt.Sprintf("%d stopped", daemonsKilled))
-				}
-				if activityKilled > 0 {
-					printDownStatus("bd activity", true, fmt.Sprintf("%d stopped", activityKilled))
-				}
-				if daemonsKilled == 0 && activityKilled == 0 {
-					printDownStatus("bd processes", true, "none running")
-				}
-			}
-		}
-	}
-
-	// Phase 2a: Stop refineries
+	// Phase 1: Stop refineries
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
 		if downDryRun {
@@ -184,7 +155,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 2b: Stop witnesses
+	// Phase 2: Stop witnesses
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-witness", rigName)
 		if downDryRun {
@@ -427,14 +398,6 @@ func acquireShutdownLock(townRoot string) (*flock.Flock, error) {
 // Returns list of things that are still running or respawned.
 func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 	var respawned []string
-
-	if count := beads.CountBdDaemons(); count > 0 {
-		respawned = append(respawned, fmt.Sprintf("bd daemon (%d running)", count))
-	}
-
-	if count := beads.CountBdActivityProcesses(); count > 0 {
-		respawned = append(respawned, fmt.Sprintf("bd activity (%d running)", count))
-	}
 
 	sessions, err := t.ListSessions()
 	if err == nil {

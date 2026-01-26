@@ -1075,29 +1075,84 @@ func lookupAgentConfig(name string, townSettings *TownSettings, rigSettings *Rig
 }
 
 // fillRuntimeDefaults fills in default values for empty RuntimeConfig fields.
+// It creates a deep copy to prevent mutation of the original config.
+//
+// Default behavior:
+//   - Command defaults to "claude" if empty
+//   - Args defaults to ["--dangerously-skip-permissions"] if nil
+//   - Empty Args slice ([]string{}) means "no args" and is preserved as-is
+//
+// All fields are deep-copied: modifying the returned config will not affect
+// the input config, including nested structs and slices.
 func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 	if rc == nil {
 		return DefaultRuntimeConfig()
 	}
-	// Create a copy to avoid modifying the original
+
+	// Create result with scalar fields (strings are immutable in Go)
 	result := &RuntimeConfig{
+		Provider:      rc.Provider,
 		Command:       rc.Command,
-		Args:          rc.Args,
 		InitialPrompt: rc.InitialPrompt,
+		PromptMode:    rc.PromptMode,
 	}
-	// Copy Env map to avoid mutation and preserve agent-specific env vars
+
+	// Deep copy Args slice to avoid sharing backing array
+	if rc.Args != nil {
+		result.Args = make([]string, len(rc.Args))
+		copy(result.Args, rc.Args)
+	}
+
+	// Deep copy Env map
 	if len(rc.Env) > 0 {
 		result.Env = make(map[string]string, len(rc.Env))
 		for k, v := range rc.Env {
 			result.Env[k] = v
 		}
 	}
+
+	// Deep copy nested structs (nil checks prevent panic on access)
+	if rc.Session != nil {
+		result.Session = &RuntimeSessionConfig{
+			SessionIDEnv: rc.Session.SessionIDEnv,
+			ConfigDirEnv: rc.Session.ConfigDirEnv,
+		}
+	}
+
+	if rc.Hooks != nil {
+		result.Hooks = &RuntimeHooksConfig{
+			Provider:     rc.Hooks.Provider,
+			Dir:          rc.Hooks.Dir,
+			SettingsFile: rc.Hooks.SettingsFile,
+		}
+	}
+
+	if rc.Tmux != nil {
+		result.Tmux = &RuntimeTmuxConfig{
+			ReadyPromptPrefix: rc.Tmux.ReadyPromptPrefix,
+			ReadyDelayMs:      rc.Tmux.ReadyDelayMs,
+		}
+		// Deep copy ProcessNames slice
+		if rc.Tmux.ProcessNames != nil {
+			result.Tmux.ProcessNames = make([]string, len(rc.Tmux.ProcessNames))
+			copy(result.Tmux.ProcessNames, rc.Tmux.ProcessNames)
+		}
+	}
+
+	if rc.Instructions != nil {
+		result.Instructions = &RuntimeInstructionsConfig{
+			File: rc.Instructions.File,
+		}
+	}
+
+	// Apply defaults for required fields
 	if result.Command == "" {
 		result.Command = "claude"
 	}
 	if result.Args == nil {
 		result.Args = []string{"--dangerously-skip-permissions"}
 	}
+
 	return result
 }
 

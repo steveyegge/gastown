@@ -113,7 +113,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		beadToHook := beadID
 		attachedMoleculeID := ""
 		if formulaCooked {
-			result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, true)
+			result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, true, slingVars)
 			if err != nil {
 				fmt.Printf("  %s Could not apply formula: %v (hooking raw bead)\n", style.Dim.Render("Warning:"), err)
 			} else {

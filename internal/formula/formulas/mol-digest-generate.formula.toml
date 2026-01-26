@@ -190,11 +190,6 @@ bd create --title="Digest: {{date}}" --type=digest \
   --label=digest,{{period}}
 ```
 
-**3. Sync:**
-```bash
-bd sync
-```
-
 **Exit criteria:** Digest sent to Mayor and archived as bead."""
 
 [[steps]]

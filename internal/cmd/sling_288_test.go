@@ -120,7 +120,8 @@ exit /b 0
 	}
 
 	// Test the helper function directly
-	result, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "Test Bug Fix", "", townRoot, false)
+	extraVars := []string{"branch=polecat/furiosa/gt-abc123"}
+	result, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "Test Bug Fix", "", townRoot, false, extraVars)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead failed: %v", err)
 	}
@@ -144,6 +145,9 @@ exit /b 0
 	}
 	if !strings.Contains(logContent, "mol wisp mol-polecat-work") {
 		t.Errorf("mol wisp command not found in log:\n%s", logContent)
+	}
+	if !strings.Contains(logContent, "--var branch=polecat/furiosa/gt-abc123") {
+		t.Errorf("extra vars not passed to wisp command:\n%s", logContent)
 	}
 	if !strings.Contains(logContent, "mol bond") {
 		t.Errorf("mol bond command not found in log:\n%s", logContent)
@@ -219,7 +223,7 @@ exit /b 0
 	_ = os.Chdir(townRoot)
 
 	// Test with skipCook=true
-	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-test", "Test", "", townRoot, true)
+	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-test", "Test", "", townRoot, true, nil)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead failed: %v", err)
 	}
@@ -295,11 +299,11 @@ func TestSlingHookRawBeadFlag(t *testing.T) {
 // When formulaName is empty and target contains "/polecats/", mol-polecat-work should be applied.
 func TestAutoApplyLogic(t *testing.T) {
 	tests := []struct {
-		name           string
-		formulaName    string
-		hookRawBead    bool
-		targetAgent    string
-		wantAutoApply  bool
+		name          string
+		formulaName   string
+		hookRawBead   bool
+		targetAgent   string
+		wantAutoApply bool
 	}{
 		{
 			name:          "bare bead to polecat - should auto-apply",
@@ -416,7 +420,7 @@ exit /b 0
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 	_ = os.Chdir(townRoot)
 
-	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "My Cool Feature", "", townRoot, false)
+	_, err := InstantiateFormulaOnBead("mol-polecat-work", "gt-abc123", "My Cool Feature", "", townRoot, false, nil)
 	if err != nil {
 		t.Fatalf("InstantiateFormulaOnBead: %v", err)
 	}
