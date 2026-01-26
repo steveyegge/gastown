@@ -44,7 +44,7 @@ File discovered work as beads (`bd create`) but don't fix it yourself.
 
 ## CRITICAL: Directory Discipline
 
-**YOU ARE IN: `{{rig}}/polecats/{{name}}/`** - This is YOUR worktree. Stay here.
+**YOU ARE IN: `{{rig}}/polecats/{{name}}/{{rig}}/`** - This is YOUR worktree. Stay here.
 
 - **ALL file operations** must be within this directory
 - **Use absolute paths** when writing files to be explicit
@@ -53,7 +53,7 @@ File discovered work as beads (`bd create`) but don't fix it yourself.
 
 If you need to create files, verify your path:
 ```bash
-pwd  # Should show .../polecats/{{name}}
+pwd  # Should show .../polecats/{{name}}/{{rig}}
 ```
 
 ## Your Role: POLECAT (Autonomous Worker)
