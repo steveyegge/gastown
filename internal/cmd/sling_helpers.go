@@ -137,7 +137,9 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 	}
 
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	// Uses --no-daemon with --allow-stale to avoid database sync race conditions
+	// when called immediately after bead creation (GH #30).
+	showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
@@ -190,7 +192,9 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	issue := &beads.Issue{}
 	if logPath == "" {
 		// Get the bead to preserve existing description content
-		showCmd := exec.Command("bd", "show", beadID, "--json")
+		// Uses --no-daemon with --allow-stale to avoid database sync race conditions
+		// when called immediately after bead creation (GH #30).
+		showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
 		out, err := showCmd.Output()
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
@@ -244,7 +248,9 @@ func storeNoMergeInBead(beadID string, noMerge bool) error {
 	}
 
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	// Uses --no-daemon with --allow-stale to avoid database sync race conditions
+	// when called immediately after bead creation (GH #30).
+	showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
