@@ -24,6 +24,27 @@ func skipIfAgentBinaryMissing(t *testing.T, agents ...string) {
 	}
 }
 
+func stubAgentBinaries(t *testing.T, agents ...string) {
+	t.Helper()
+
+	binDir := t.TempDir()
+	for _, name := range agents {
+		if runtime.GOOS == "windows" {
+			path := filepath.Join(binDir, name+".cmd")
+			if err := os.WriteFile(path, []byte("@echo off\r\nexit /b 0\r\n"), 0644); err != nil {
+				t.Fatalf("write %s stub: %v", name, err)
+			}
+			continue
+		}
+		path := filepath.Join(binDir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatalf("write %s stub: %v", name, err)
+		}
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // isClaudeCommand checks if a command is claude (either "claude" or a path ending in "/claude").
 // This handles the case where resolveClaudePath returns the full path to the claude binary.
 // Also handles Windows paths with .exe extension.
@@ -2446,7 +2467,7 @@ func TestBuildCommandWithPromptRespectsPromptModeNone(t *testing.T) {
 //  4. Run: GT_NUKE_ACKNOWLEDGED=1 gt down --nuke
 //  5. Repeat for all 7 built-in agents
 func TestRoleAgentConfigWithCustomAgent(t *testing.T) {
-	t.Parallel()
+	stubAgentBinaries(t, "claude", "opencode")
 
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
@@ -2627,7 +2648,7 @@ func TestMultipleAgentTypes(t *testing.T) {
 // TestCustomClaudeVariants tests that Claude model variants (opus, sonnet, haiku) need
 // to be explicitly defined as custom agents since they are NOT built-in presets.
 func TestCustomClaudeVariants(t *testing.T) {
-	t.Parallel()
+	stubAgentBinaries(t, "claude")
 
 	// Verify that claude-opus/sonnet/haiku are NOT built-in presets
 	variants := []string{"claude-opus", "claude-sonnet", "claude-haiku"}

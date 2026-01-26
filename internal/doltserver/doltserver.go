@@ -298,12 +298,16 @@ func Start(townRoot string) error {
 	cmd.Stdin = nil
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		if closeErr := logFile.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close log file: %v\n", closeErr)
+		}
 		return fmt.Errorf("starting Dolt server: %w", err)
 	}
 
 	// Close log file in parent (child has its own handle)
-	logFile.Close()
+	if err := logFile.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to close log file: %v\n", err)
+	}
 
 	// Write PID file
 	if err := os.WriteFile(config.PidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0644); err != nil {
