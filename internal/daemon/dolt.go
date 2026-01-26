@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -143,7 +142,7 @@ func (m *DoltServerManager) Status() *DoltServerStatus {
 func (m *DoltServerManager) isRunning() (int, bool) {
 	// First check our tracked process
 	if m.process != nil {
-		if err := m.process.Signal(syscall.Signal(0)); err == nil {
+		if isProcessAlive(m.process) {
 			return m.process.Pid, true
 		}
 		// Process died, clear it
@@ -167,7 +166,7 @@ func (m *DoltServerManager) isRunning() (int, bool) {
 		return 0, false
 	}
 
-	if err := process.Signal(syscall.Signal(0)); err != nil {
+	if !isProcessAlive(process) {
 		// Process not running, clean up stale PID file
 		_ = os.Remove(m.pidFile())
 		return 0, false
@@ -271,7 +270,7 @@ func (m *DoltServerManager) startLocked() error {
 	cmd.Stderr = logFile
 
 	// Detach from this process group so it survives daemon restart
-	cmd.SysProcAttr = doltSysProcAttr()
+	setSysProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
@@ -326,16 +325,16 @@ func (m *DoltServerManager) stopLocked() error {
 		return nil // Already gone
 	}
 
-	// Send SIGTERM for graceful shutdown
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		m.logger("Warning: failed to send SIGTERM: %v", err)
+	// Send termination signal for graceful shutdown
+	if err := sendTermSignal(process); err != nil {
+		m.logger("Warning: failed to send termination signal: %v", err)
 	}
 
 	// Wait for graceful shutdown (up to 5 seconds)
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 50; i++ {
-			if err := process.Signal(syscall.Signal(0)); err != nil {
+			if !isProcessAlive(process) {
 				close(done)
 				return
 			}
@@ -348,8 +347,8 @@ func (m *DoltServerManager) stopLocked() error {
 		m.logger("Dolt SQL server stopped gracefully")
 	case <-time.After(5 * time.Second):
 		// Force kill
-		m.logger("Dolt SQL server did not stop gracefully, sending SIGKILL")
-		_ = process.Signal(syscall.SIGKILL)
+		m.logger("Dolt SQL server did not stop gracefully, forcing termination")
+		_ = sendKillSignal(process)
 	}
 
 	// Clean up
