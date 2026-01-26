@@ -46,7 +46,8 @@ type DogDispatchInfo struct {
 // DispatchToDog finds or spawns a dog for work dispatch.
 // If dogName is empty, finds an idle dog from the pool.
 // If create is true and no dogs exist, creates one.
-func DispatchToDog(dogName string, create bool) (*DogDispatchInfo, error) {
+// workDesc is recorded in the dog's state so we know what it's working on.
+func DispatchToDog(dogName string, create bool, workDesc string) (*DogDispatchInfo, error) {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return nil, fmt.Errorf("finding town root: %w", err)
@@ -102,9 +103,9 @@ func DispatchToDog(dogName string, create bool) (*DogDispatchInfo, error) {
 		}
 	}
 
-	// Mark dog as working
-	if err := mgr.SetState(targetDog.Name, dog.StateWorking); err != nil {
-		return nil, fmt.Errorf("setting dog state: %w", err)
+	// Mark dog as working with the assigned work
+	if err := mgr.AssignWork(targetDog.Name, workDesc); err != nil {
+		return nil, fmt.Errorf("assigning work to dog: %w", err)
 	}
 
 	// Build agent ID
