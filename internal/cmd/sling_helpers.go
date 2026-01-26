@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -494,7 +496,26 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	// Step 2: Create wisp with feature and issue variables from bead
 	featureVar := fmt.Sprintf("feature=%s", title)
 	issueVar := fmt.Sprintf("issue=%s", beadID)
-	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar, "--json"}
+	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar}
+
+	// Load rig settings for stack-specific commands
+	// formulaWorkDir is the rig directory, so settings are at settings/config.json relative to it
+	settingsPath := filepath.Join(formulaWorkDir, "settings", "config.json")
+	if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.MergeQueue != nil {
+		mq := settings.MergeQueue
+		if mq.TestCommand != "" {
+			wispArgs = append(wispArgs, "--var", fmt.Sprintf("test_command=%s", mq.TestCommand))
+		}
+		if mq.LintCommand != "" {
+			wispArgs = append(wispArgs, "--var", fmt.Sprintf("lint_command=%s", mq.LintCommand))
+		}
+		if mq.BuildCommand != "" {
+			wispArgs = append(wispArgs, "--var", fmt.Sprintf("build_command=%s", mq.BuildCommand))
+		}
+	}
+	// Note: if settings don't exist, formulas use their default values
+
+	wispArgs = append(wispArgs, "--json")
 	wispCmd := exec.Command("bd", wispArgs...)
 	wispCmd.Dir = formulaWorkDir
 	wispCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)

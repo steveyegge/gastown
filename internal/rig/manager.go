@@ -13,8 +13,8 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
-	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
 )
 
@@ -387,6 +387,18 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		return nil, fmt.Errorf("checking out default branch for mayor: %w", err)
 	}
 	fmt.Printf("   ✓ Created mayor clone\n")
+
+	// Auto-detect tech stack and generate settings/config.json
+	stack := detectTechStack(mayorRigPath)
+	if stack != TechStackUnknown {
+		fmt.Printf("  Detected tech stack: %s\n", stack)
+		if err := m.generateRigSettings(rigPath, mayorRigPath); err != nil {
+			// Non-fatal: log warning but continue
+			fmt.Fprintf(os.Stderr, "  Warning: Could not generate settings: %v\n", err)
+		} else {
+			fmt.Printf("   ✓ Generated settings/config.json with %s commands\n", stack)
+		}
+	}
 
 	// Check if source repo has tracked .beads/ directory.
 	// If so, we need to initialize the database (beads.db is gitignored so it doesn't exist after clone).
@@ -1195,4 +1207,128 @@ See docs/deacon-plugins.md for full documentation.
 		return err
 	}
 	return m.ensureGitignoreEntry(gitignorePath, ".repo.git/")
+}
+
+// TechStack represents a detected technology stack.
+type TechStack string
+
+const (
+	TechStackGo      TechStack = "go"
+	TechStackNode    TechStack = "node"
+	TechStackRust    TechStack = "rust"
+	TechStackPython  TechStack = "python"
+	TechStackRuby    TechStack = "ruby"
+	TechStackUnknown TechStack = "unknown"
+)
+
+// stackCommands maps tech stacks to their standard commands.
+var stackCommands = map[TechStack]struct {
+	Test  string
+	Lint  string
+	Build string
+}{
+	TechStackGo: {
+		Test:  "go test ./...",
+		Lint:  "golangci-lint run ./...",
+		Build: "go build ./...",
+	},
+	TechStackNode: {
+		Test:  "npm test",
+		Lint:  "npm run lint",
+		Build: "npm run build",
+	},
+	TechStackRust: {
+		Test:  "cargo test",
+		Lint:  "cargo clippy",
+		Build: "cargo build",
+	},
+	TechStackPython: {
+		Test:  "pytest",
+		Lint:  "ruff check .",
+		Build: "python -m build",
+	},
+	TechStackRuby: {
+		Test:  "bundle exec rspec",
+		Lint:  "bundle exec rubocop",
+		Build: "bundle exec rake build",
+	},
+}
+
+// detectTechStack detects the technology stack from project files.
+func detectTechStack(repoPath string) TechStack {
+	// Check for Go
+	if fileExists(filepath.Join(repoPath, "go.mod")) {
+		return TechStackGo
+	}
+	// Check for Node/npm
+	if fileExists(filepath.Join(repoPath, "package.json")) {
+		return TechStackNode
+	}
+	// Check for Rust
+	if fileExists(filepath.Join(repoPath, "Cargo.toml")) {
+		return TechStackRust
+	}
+	// Check for Python
+	if fileExists(filepath.Join(repoPath, "pyproject.toml")) ||
+		fileExists(filepath.Join(repoPath, "setup.py")) ||
+		fileExists(filepath.Join(repoPath, "requirements.txt")) {
+		return TechStackPython
+	}
+	// Check for Ruby
+	if fileExists(filepath.Join(repoPath, "Gemfile")) {
+		return TechStackRuby
+	}
+	return TechStackUnknown
+}
+
+// fileExists checks if a file exists.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// generateRigSettings creates a settings/config.json with auto-detected stack commands.
+func (m *Manager) generateRigSettings(rigPath, repoPath string) error {
+	stack := detectTechStack(repoPath)
+	if stack == TechStackUnknown {
+		// Don't generate settings for unknown stacks - let defaults apply
+		return nil
+	}
+
+	cmds, ok := stackCommands[stack]
+	if !ok {
+		return nil
+	}
+
+	// Create settings directory
+	settingsDir := filepath.Join(rigPath, "settings")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		return fmt.Errorf("creating settings directory: %w", err)
+	}
+
+	// Create settings config
+	settings := &config.RigSettings{
+		Type:    "rig-settings",
+		Version: 1,
+		MergeQueue: &config.MergeQueueConfig{
+			Enabled:      true,
+			TargetBranch: "main",
+			RunTests:     true,
+			TestCommand:  cmds.Test,
+			LintCommand:  cmds.Lint,
+			BuildCommand: cmds.Build,
+		},
+	}
+
+	settingsPath := filepath.Join(settingsDir, "config.json")
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling settings: %w", err)
+	}
+
+	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
+		return fmt.Errorf("writing settings: %w", err)
+	}
+
+	return nil
 }

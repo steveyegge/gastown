@@ -705,6 +705,12 @@ type MergeQueueConfig struct {
 	// TestCommand is the command to run for tests.
 	TestCommand string `json:"test_command,omitempty"`
 
+	// LintCommand is the command to run for linting (used by formulas).
+	LintCommand string `json:"lint_command,omitempty"`
+
+	// BuildCommand is the command to run for building (used by formulas).
+	BuildCommand string `json:"build_command,omitempty"`
+
 	// DeleteMergedBranches controls whether to delete branches after merging.
 	DeleteMergedBranches bool `json:"delete_merged_branches"`
 
