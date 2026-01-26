@@ -292,12 +292,11 @@ type agentBead struct {
 }
 
 // agentBeadToAddress converts an agent bead to a mail address.
-// Handles both legacy gt- prefixed IDs and current hq- prefixed IDs:
+// Handles multiple ID formats:
 //   - hq-mayor → mayor/
 //   - hq-deacon → deacon/
-//   - hq-{hash} → uses created_by field or parses title/description
-//   - gt-mayor → mayor/ (legacy)
 //   - gt-gastown-crew-max → gastown/max (legacy)
+//   - ppf-pyspark_pipeline_framework-polecat-Toast → pyspark_pipeline_framework/Toast (rig prefix)
 func agentBeadToAddress(bead *agentBead) string {
 	if bead == nil {
 		return ""
@@ -305,7 +304,7 @@ func agentBeadToAddress(bead *agentBead) string {
 
 	id := bead.ID
 
-	// Handle hq- prefixed IDs (current format)
+	// Handle hq- prefixed IDs (town-level format)
 	if strings.HasPrefix(id, "hq-") {
 		// Well-known town-level agents
 		if id == "hq-mayor" {
@@ -315,27 +314,20 @@ func agentBeadToAddress(bead *agentBead) string {
 			return "deacon/"
 		}
 
-		// For rig-level agents, created_by often contains the agent address
-		// e.g., "beads/crew/emma" for an agent that self-registered
-		if bead.CreatedBy != "" && strings.Contains(bead.CreatedBy, "/") {
-			// Validate it looks like an agent address (rig/role/name or rig/name)
-			parts := strings.Split(bead.CreatedBy, "/")
-			if len(parts) >= 2 {
-				return bead.CreatedBy
-			}
-		}
-
-		// Fall back to parsing description for role_type and rig
+		// For other hq- agents, fall back to description parsing
 		return parseAgentAddressFromDescription(bead.Description)
 	}
 
 	// Handle gt- prefixed IDs (legacy format)
-	if !strings.HasPrefix(id, "gt-") {
-		return "" // Not a valid agent bead ID
+	// Also handle rig-prefixed IDs (e.g., ppf-) by extracting rig from description
+	var rest string
+	if strings.HasPrefix(id, "gt-") {
+		rest = strings.TrimPrefix(id, "gt-")
+	} else {
+		// For rig-prefixed IDs, extract rig and role from description
+		return parseRigAgentAddress(bead)
 	}
 
-	// Strip prefix
-	rest := strings.TrimPrefix(id, "gt-")
 	parts := strings.Split(rest, "-")
 
 	switch len(parts) {
@@ -355,6 +347,48 @@ func agentBeadToAddress(bead *agentBead) string {
 		}
 		return ""
 	}
+}
+
+// parseRigAgentAddress extracts address from a rig-prefixed agent bead.
+// ID format: <prefix>-<rig>-<role>[-<name>]
+// Examples:
+//   - ppf-pyspark_pipeline_framework-witness → pyspark_pipeline_framework/witness
+//   - ppf-pyspark_pipeline_framework-polecat-Toast → pyspark_pipeline_framework/Toast
+func parseRigAgentAddress(bead *agentBead) string {
+	// Parse rig and role_type from description
+	var roleType, rig string
+	for _, line := range strings.Split(bead.Description, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "role_type:") {
+			roleType = strings.TrimSpace(strings.TrimPrefix(line, "role_type:"))
+		} else if strings.HasPrefix(line, "rig:") {
+			rig = strings.TrimSpace(strings.TrimPrefix(line, "rig:"))
+		}
+	}
+
+	if rig == "" || rig == "null" || roleType == "" || roleType == "null" {
+		return ""
+	}
+
+	// For singleton roles (witness, refinery), address is rig/role
+	if roleType == "witness" || roleType == "refinery" {
+		return rig + "/" + roleType
+	}
+
+	// For named roles (crew, polecat), extract name from ID
+	// ID pattern: <prefix>-<rig>-<role>-<name>
+	// Find the role in the ID and take everything after it as the name
+	id := bead.ID
+	roleMarker := "-" + roleType + "-"
+	if idx := strings.Index(id, roleMarker); idx >= 0 {
+		name := id[idx+len(roleMarker):]
+		if name != "" {
+			return rig + "/" + name
+		}
+	}
+
+	// Fallback: return rig/roleType (may not be correct for all cases)
+	return rig + "/" + roleType
 }
 
 // parseAgentAddressFromDescription extracts agent address from description metadata.
@@ -534,6 +568,31 @@ func (r *Router) queryAgents(descContains string) ([]*agentBead, error) {
 	return active, nil
 }
 
+// queryAgentsFromDir queries agent beads from a specific beads directory.
+func (r *Router) queryAgentsFromDir(beadsDir string) ([]*agentBead, error) {
+	args := []string{"list", "--type=agent", "--json", "--limit=0"}
+
+	stdout, err := runBdCommand(args, filepath.Dir(beadsDir), beadsDir)
+	if err != nil {
+		return nil, fmt.Errorf("querying agents from %s: %w", beadsDir, err)
+	}
+
+	var agents []*agentBead
+	if err := json.Unmarshal(stdout, &agents); err != nil {
+		return nil, fmt.Errorf("parsing agent query result: %w", err)
+	}
+
+	// Filter for open agents only (closed agents are inactive)
+	var active []*agentBead
+	for _, agent := range agents {
+		if agent.Status == "open" || agent.Status == "in_progress" {
+			active = append(active, agent)
+		}
+	}
+
+	return active, nil
+}
+
 // shouldBeWisp determines if a message should be stored as a wisp.
 // Returns true if:
 // - Message.Wisp is explicitly set
@@ -633,21 +692,46 @@ func (r *Router) sendToGroup(msg *Message) error {
 
 // validateRecipient checks that the recipient identity corresponds to an existing agent.
 // Returns an error if the recipient is invalid or doesn't exist.
+// Queries agents from town-level beads AND all rig-level beads via routes.jsonl.
 func (r *Router) validateRecipient(identity string) error {
 	// Overseer is the human operator, not an agent bead
 	if identity == "overseer" {
 		return nil
 	}
 
-	// Query all agents and check if any match this identity
+	// Query agents from town-level beads
 	agents, err := r.queryAgents("")
 	if err != nil {
-		return fmt.Errorf("failed to query agents: %w", err)
+		return fmt.Errorf("failed to query town agents: %w", err)
 	}
 
 	for _, agent := range agents {
 		if agentBeadToAddress(agent) == identity {
 			return nil // Found matching agent
+		}
+	}
+
+	// Query agents from rig-level beads via routes.jsonl
+	if r.townRoot != "" {
+		townBeadsDir := filepath.Join(r.townRoot, ".beads")
+		routes, err := beads.LoadRoutes(townBeadsDir)
+		if err == nil {
+			for _, route := range routes {
+				// Skip hq- routes (town-level, already queried)
+				if strings.HasPrefix(route.Prefix, "hq-") {
+					continue
+				}
+				rigBeadsDir := filepath.Join(r.townRoot, route.Path, ".beads")
+				rigAgents, err := r.queryAgentsFromDir(rigBeadsDir)
+				if err != nil {
+					continue // Skip rigs with errors
+				}
+				for _, agent := range rigAgents {
+					if agentBeadToAddress(agent) == identity {
+						return nil // Found matching agent
+					}
+				}
+			}
 		}
 	}
 
