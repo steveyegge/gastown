@@ -22,10 +22,11 @@ import (
 
 // Common errors
 var (
-	ErrPolecatExists     = errors.New("polecat already exists")
-	ErrPolecatNotFound   = errors.New("polecat not found")
-	ErrHasChanges        = errors.New("polecat has uncommitted changes")
+	ErrPolecatExists      = errors.New("polecat already exists")
+	ErrPolecatNotFound    = errors.New("polecat not found")
+	ErrHasChanges         = errors.New("polecat has uncommitted changes")
 	ErrHasUncommittedWork = errors.New("polecat has uncommitted work")
+	ErrShellInWorktree    = errors.New("shell working directory is inside polecat worktree")
 )
 
 // UncommittedWorkError provides details about uncommitted work.
@@ -525,6 +526,23 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 					return &UncommittedWorkError{PolecatName: name, Status: status}
 				}
 			}
+		}
+	}
+
+	// Check if user's shell is cd'd into the worktree (prevents broken shell)
+	// This check ALWAYS runs, even with --force/nuclear, because deleting your
+	// shell's cwd breaks the shell completely (all commands fail with exit 1).
+	// See: https://github.com/steveyegge/gastown/issues/942
+	cwd, cwdErr := os.Getwd()
+	if cwdErr == nil {
+		// Normalize paths for comparison
+		cwdAbs, _ := filepath.Abs(cwd)
+		cloneAbs, _ := filepath.Abs(clonePath)
+		polecatAbs, _ := filepath.Abs(polecatDir)
+
+		if strings.HasPrefix(cwdAbs, cloneAbs) || strings.HasPrefix(cwdAbs, polecatAbs) {
+			return fmt.Errorf("%w: your shell is in %s\n\nPlease cd elsewhere first, then retry:\n  cd ~/gt\n  gt polecat nuke %s/%s --force",
+				ErrShellInWorktree, cwd, m.rig.Name, name)
 		}
 	}
 

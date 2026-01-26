@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -211,15 +212,19 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		style.PrintWarning("could not set remain-on-exit: %v", err)
 	}
 
-	// NOTE: For self-handoff, we do NOT call KillPaneProcesses here.
-	// That would kill the gt handoff process itself before it can call RespawnPane,
-	// leaving the pane dead with no respawn. RespawnPane's -k flag handles killing
-	// atomically - tmux kills the old process and spawns the new one together.
-	// See: https://github.com/steveyegge/gastown/issues/859 (pane is dead bug)
+	// Kill all processes in the pane before respawning to prevent orphan leaks.
+	// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore.
 	//
-	// For orphan prevention, we rely on respawn-pane -k which sends SIGHUP/SIGTERM.
-	// If orphans still occur, the solution is to adjust the restart command to
-	// kill orphans at startup, not to kill ourselves before respawning.
+	// IMPORTANT: For self-handoff, we must exclude our own process and parent (Claude Code)
+	// from being killed. Otherwise gt handoff dies before reaching RespawnPane.
+	excludePIDs := []string{
+		strconv.Itoa(os.Getpid()),  // gt handoff process
+		strconv.Itoa(os.Getppid()), // Claude Code (parent)
+	}
+	if err := t.KillPaneProcessesExcluding(pane, excludePIDs); err != nil {
+		// Non-fatal but log the warning
+		style.PrintWarning("could not kill pane processes: %v", err)
+	}
 
 	// Use respawn-pane -k to atomically kill current process and start new one
 	// Note: respawn-pane automatically resets remain-on-exit to off
