@@ -243,7 +243,7 @@ func (h *SetupAPIHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 
 	// Send success response with the new port to redirect to
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":  true,
 		"message":  fmt.Sprintf("Dashboard launching from %s", path),
 		"redirect": fmt.Sprintf("http://localhost:%d", newPort),
@@ -259,7 +259,7 @@ func (h *SetupAPIHandler) handleCheckWorkspace(w http.ResponseWriter, r *http.Re
 
 	if req.Path == "" {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(CheckWorkspaceResponse{Valid: false, Message: "Path is required"})
+		_ = json.NewEncoder(w).Encode(CheckWorkspaceResponse{Valid: false, Message: "Path is required"})
 		return
 	}
 
@@ -274,7 +274,7 @@ func (h *SetupAPIHandler) handleCheckWorkspace(w http.ResponseWriter, r *http.Re
 	mayorDir := filepath.Join(path, "mayor")
 	if _, err := os.Stat(mayorDir); os.IsNotExist(err) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(CheckWorkspaceResponse{
+		_ = json.NewEncoder(w).Encode(CheckWorkspaceResponse{
 			Valid:   false,
 			Path:    path,
 			Message: "Not a Gas Town workspace (no mayor/ directory)",
@@ -302,7 +302,7 @@ func (h *SetupAPIHandler) handleCheckWorkspace(w http.ResponseWriter, r *http.Re
 	name := filepath.Base(path)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(CheckWorkspaceResponse{
+	_ = json.NewEncoder(w).Encode(CheckWorkspaceResponse{
 		Valid:   true,
 		Path:    path,
 		Name:    name,
@@ -353,12 +353,12 @@ func (h *SetupAPIHandler) runGtCommand(ctx context.Context, timeout time.Duratio
 func (h *SetupAPIHandler) sendError(w http.ResponseWriter, msg string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(SetupResponse{Success: false, Error: msg})
+	_ = json.NewEncoder(w).Encode(SetupResponse{Success: false, Error: msg})
 }
 
 func (h *SetupAPIHandler) sendJSON(w http.ResponseWriter, resp SetupResponse) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // NewSetupMux creates the HTTP handler for setup mode.
