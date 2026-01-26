@@ -47,7 +47,7 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 	// Find workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a workspace: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	// Detect agent identity
@@ -77,34 +77,15 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		options = append(options, opt)
 	}
 
-	// Parse pros/cons for options (format: "N:text" where N is 1-indexed option number)
-	for _, proStr := range decisionOptionPros {
-		optIdx, text, err := parseOptionProCon(proStr, len(options))
-		if err != nil {
-			return fmt.Errorf("invalid --pro format: %w", err)
-		}
-		options[optIdx].Pros = append(options[optIdx].Pros, text)
-	}
-	for _, conStr := range decisionOptionCons {
-		optIdx, text, err := parseOptionProCon(conStr, len(options))
-		if err != nil {
-			return fmt.Errorf("invalid --con format: %w", err)
-		}
-		options[optIdx].Cons = append(options[optIdx].Cons, text)
-	}
-
 	// Build decision fields
 	fields := &beads.DecisionFields{
-		Question:                decisionPrompt,
-		Context:                 decisionContext,
-		Analysis:                decisionAnalysis,
-		Tradeoffs:               decisionTradeoffs,
-		RecommendationRationale: decisionRecommendRationale,
-		Options:                 options,
-		ChosenIndex:             0, // Pending
-		RequestedBy:             agentID,
-		RequestedAt:             time.Now().Format(time.RFC3339),
-		Urgency:                 urgency,
+		Question:    decisionPrompt,
+		Context:     decisionContext,
+		Options:     options,
+		ChosenIndex: 0, // Pending
+		RequestedBy: agentID,
+		RequestedAt: time.Now().Format(time.RFC3339),
+		Urgency:     urgency,
 	}
 
 	// Add blocker if specified
@@ -194,7 +175,7 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 func runDecisionList(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a workspace: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	bd := beads.New(beads.ResolveBeadsDir(townRoot))
@@ -256,7 +237,7 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a workspace: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	bd := beads.New(beads.ResolveBeadsDir(townRoot))
@@ -270,22 +251,19 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 
 	if decisionJSON {
 		data := map[string]interface{}{
-			"id":                       issue.ID,
-			"question":                 fields.Question,
-			"context":                  fields.Context,
-			"analysis":                 fields.Analysis,
-			"tradeoffs":                fields.Tradeoffs,
-			"recommendation_rationale": fields.RecommendationRationale,
-			"options":                  fields.Options,
-			"chosen_index":             fields.ChosenIndex,
-			"rationale":                fields.Rationale,
-			"urgency":                  fields.Urgency,
-			"requested_by":             fields.RequestedBy,
-			"requested_at":             fields.RequestedAt,
-			"resolved_by":              fields.ResolvedBy,
-			"resolved_at":              fields.ResolvedAt,
-			"blockers":                 fields.Blockers,
-			"status":                   issue.Status,
+			"id":           issue.ID,
+			"question":     fields.Question,
+			"context":      fields.Context,
+			"options":      fields.Options,
+			"chosen_index": fields.ChosenIndex,
+			"rationale":    fields.Rationale,
+			"urgency":      fields.Urgency,
+			"requested_by": fields.RequestedBy,
+			"requested_at": fields.RequestedAt,
+			"resolved_by":  fields.ResolvedBy,
+			"resolved_at":  fields.ResolvedAt,
+			"blockers":     fields.Blockers,
+			"status":       issue.Status,
 		}
 		out, _ := json.MarshalIndent(data, "", "  ")
 		fmt.Println(string(out))
@@ -305,14 +283,6 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Context:\n  %s\n\n", strings.ReplaceAll(fields.Context, "\n", "\n  "))
 	}
 
-	if fields.Analysis != "" {
-		fmt.Printf("Analysis:\n  %s\n\n", strings.ReplaceAll(fields.Analysis, "\n", "\n  "))
-	}
-
-	if fields.Tradeoffs != "" {
-		fmt.Printf("Tradeoffs:\n  %s\n\n", strings.ReplaceAll(fields.Tradeoffs, "\n", "\n  "))
-	}
-
 	fmt.Printf("Options:\n")
 	for i, opt := range fields.Options {
 		num := i + 1
@@ -327,24 +297,8 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 		if opt.Description != "" {
 			fmt.Printf("     %s\n", opt.Description)
 		}
-		if len(opt.Pros) > 0 {
-			fmt.Printf("     Pros:\n")
-			for _, pro := range opt.Pros {
-				fmt.Printf("       + %s\n", pro)
-			}
-		}
-		if len(opt.Cons) > 0 {
-			fmt.Printf("     Cons:\n")
-			for _, con := range opt.Cons {
-				fmt.Printf("       - %s\n", con)
-			}
-		}
 	}
 	fmt.Println()
-
-	if fields.RecommendationRationale != "" {
-		fmt.Printf("Recommendation Rationale:\n  %s\n\n", strings.ReplaceAll(fields.RecommendationRationale, "\n", "\n  "))
-	}
 
 	fmt.Printf("Requested by: %s\n", fields.RequestedBy)
 	fmt.Printf("Requested at: %s\n", formatRelativeTimeSimple(fields.RequestedAt))
@@ -378,7 +332,7 @@ func runDecisionResolve(cmd *cobra.Command, args []string) error {
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a workspace: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	// Detect who is resolving
@@ -489,7 +443,7 @@ func runDecisionResolve(cmd *cobra.Command, args []string) error {
 func runDecisionDashboard(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a workspace: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	bd := beads.New(beads.ResolveBeadsDir(townRoot))
@@ -640,18 +594,6 @@ func formatDecisionMailBody(beadID string, fields *beads.DecisionFields) string 
 		lines = append(lines, fields.Context)
 	}
 
-	if fields.Analysis != "" {
-		lines = append(lines, "")
-		lines = append(lines, "Analysis:")
-		lines = append(lines, fields.Analysis)
-	}
-
-	if fields.Tradeoffs != "" {
-		lines = append(lines, "")
-		lines = append(lines, "Tradeoffs:")
-		lines = append(lines, fields.Tradeoffs)
-	}
-
 	lines = append(lines, "")
 	lines = append(lines, "Options:")
 	for i, opt := range fields.Options {
@@ -663,24 +605,6 @@ func formatDecisionMailBody(beadID string, fields *beads.DecisionFields) string 
 		if opt.Description != "" {
 			lines = append(lines, fmt.Sprintf("     %s", opt.Description))
 		}
-		if len(opt.Pros) > 0 {
-			lines = append(lines, "     Pros:")
-			for _, pro := range opt.Pros {
-				lines = append(lines, fmt.Sprintf("       + %s", pro))
-			}
-		}
-		if len(opt.Cons) > 0 {
-			lines = append(lines, "     Cons:")
-			for _, con := range opt.Cons {
-				lines = append(lines, fmt.Sprintf("       - %s", con))
-			}
-		}
-	}
-
-	if fields.RecommendationRationale != "" {
-		lines = append(lines, "")
-		lines = append(lines, "Recommendation Rationale:")
-		lines = append(lines, fields.RecommendationRationale)
 	}
 
 	if len(fields.Blockers) > 0 {
@@ -722,33 +646,6 @@ func formatOptionsSummary(options []beads.DecisionOption) string {
 	return strings.Join(labels, ", ")
 }
 
-// parseOptionProCon parses "N:text" format for option pros/cons.
-// Returns the 0-indexed option index and the text.
-func parseOptionProCon(s string, numOptions int) (int, string, error) {
-	colonIdx := strings.Index(s, ":")
-	if colonIdx == -1 {
-		return 0, "", fmt.Errorf("expected 'N:text' format, got '%s'", s)
-	}
-
-	numStr := strings.TrimSpace(s[:colonIdx])
-	text := strings.TrimSpace(s[colonIdx+1:])
-
-	if text == "" {
-		return 0, "", fmt.Errorf("text cannot be empty")
-	}
-
-	var num int
-	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
-		return 0, "", fmt.Errorf("invalid option number '%s'", numStr)
-	}
-
-	if num < 1 || num > numOptions {
-		return 0, "", fmt.Errorf("option number %d out of range (1-%d)", num, numOptions)
-	}
-
-	return num - 1, text, nil // Return 0-indexed
-}
-
 func urgencyEmoji(urgency string) string {
 	switch urgency {
 	case beads.UrgencyHigh:
@@ -767,7 +664,7 @@ func runDecisionAwait(cmd *cobra.Command, args []string) error {
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a workspace: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	// Parse timeout if specified
@@ -888,7 +785,7 @@ func runDecisionRemind(cmd *cobra.Command, args []string) error {
 		// Send reminder as nudge to current agent's session
 		agent := detectSender()
 		if agent == "" {
-			agent = detectSenderFromCwd() // dynamic fallback based on cwd
+			agent = "gastown/crew/decision_point" // fallback
 		}
 		nudgeMsg := "DECISION REMINDER: Session work detected. Consider offering the user a decision point about next steps before ending this session."
 		nudgeCmd := execCommand("gt", "nudge", agent, nudgeMsg)
@@ -996,7 +893,7 @@ func runDecisionWatch(cmd *cobra.Command, args []string) error {
 	// Verify we're in a Gas Town workspace
 	_, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a workspace: %w", err)
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
 	// Create the TUI model

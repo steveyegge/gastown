@@ -11,30 +11,25 @@ import (
 
 // DecisionOption represents a single option in a decision request.
 type DecisionOption struct {
-	Label       string   `json:"label"`                 // Short label (e.g., "JWT tokens")
-	Description string   `json:"description,omitempty"` // Explanation of this choice
-	Pros        []string `json:"pros,omitempty"`        // Advantages of this option
-	Cons        []string `json:"cons,omitempty"`        // Disadvantages of this option
-	Recommended bool     `json:"recommended,omitempty"` // Mark as recommended option
+	Label       string `json:"label"`                 // Short label (e.g., "JWT tokens")
+	Description string `json:"description,omitempty"` // Explanation of this choice
+	Recommended bool   `json:"recommended,omitempty"` // Mark as recommended option
 }
 
 // DecisionFields holds structured fields for decision beads.
 // These are stored as structured data in the description.
 type DecisionFields struct {
-	Question                string           `json:"question"`                          // The decision to be made
-	Context                 string           `json:"context,omitempty"`                 // Brief background context
-	Analysis                string           `json:"analysis,omitempty"`                // Detailed analysis of the situation
-	Tradeoffs               string           `json:"tradeoffs,omitempty"`               // General tradeoffs discussion
-	RecommendationRationale string           `json:"recommendation_rationale,omitempty"` // Why the recommended option is suggested
-	Options                 []DecisionOption `json:"options"`                           // Available choices
-	ChosenIndex             int              `json:"chosen_index"`                      // Index of selected option (0 = pending, 1-indexed when resolved)
-	Rationale               string           `json:"rationale,omitempty"`               // Why this choice was made
-	RequestedBy             string           `json:"requested_by"`                      // Agent that requested decision
-	RequestedAt             string           `json:"requested_at"`                      // When requested
-	ResolvedBy              string           `json:"resolved_by,omitempty"`             // Who made the decision
-	ResolvedAt              string           `json:"resolved_at,omitempty"`             // When resolved
-	Urgency                 string           `json:"urgency"`                           // high, medium, low
-	Blockers                []string         `json:"blockers,omitempty"`                // Work IDs blocked by this decision
+	Question    string           `json:"question"`              // The decision to be made
+	Context     string           `json:"context,omitempty"`     // Background/analysis
+	Options     []DecisionOption `json:"options"`               // Available choices
+	ChosenIndex int              `json:"chosen_index"`          // Index of selected option (0 = pending, 1-indexed when resolved)
+	Rationale   string           `json:"rationale,omitempty"`   // Why this choice was made
+	RequestedBy string           `json:"requested_by"`          // Agent that requested decision
+	RequestedAt string           `json:"requested_at"`          // When requested
+	ResolvedBy  string           `json:"resolved_by,omitempty"` // Who made the decision
+	ResolvedAt  string           `json:"resolved_at,omitempty"` // When resolved
+	Urgency     string           `json:"urgency"`               // high, medium, low
+	Blockers    []string         `json:"blockers,omitempty"`    // Work IDs blocked by this decision
 }
 
 // DecisionState constants for decision status tracking.
@@ -80,20 +75,6 @@ func FormatDecisionDescription(fields *DecisionFields) string {
 		lines = append(lines, "")
 	}
 
-	// Analysis section (if provided)
-	if fields.Analysis != "" {
-		lines = append(lines, "## Analysis")
-		lines = append(lines, fields.Analysis)
-		lines = append(lines, "")
-	}
-
-	// Tradeoffs section (if provided)
-	if fields.Tradeoffs != "" {
-		lines = append(lines, "## Tradeoffs")
-		lines = append(lines, fields.Tradeoffs)
-		lines = append(lines, "")
-	}
-
 	// Options section
 	lines = append(lines, "## Options")
 	lines = append(lines, "")
@@ -111,29 +92,6 @@ func FormatDecisionDescription(fields *DecisionFields) string {
 		if opt.Description != "" {
 			lines = append(lines, opt.Description)
 		}
-		// Add pros if present
-		if len(opt.Pros) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, "**Pros:**")
-			for _, pro := range opt.Pros {
-				lines = append(lines, fmt.Sprintf("- %s", pro))
-			}
-		}
-		// Add cons if present
-		if len(opt.Cons) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, "**Cons:**")
-			for _, con := range opt.Cons {
-				lines = append(lines, fmt.Sprintf("- %s", con))
-			}
-		}
-		lines = append(lines, "")
-	}
-
-	// Recommendation rationale (if provided)
-	if fields.RecommendationRationale != "" {
-		lines = append(lines, "## Recommendation")
-		lines = append(lines, fields.RecommendationRationale)
 		lines = append(lines, "")
 	}
 
@@ -173,7 +131,6 @@ func ParseDecisionFields(description string) *DecisionFields {
 	var currentSection string
 	var optionIndex int
 	var currentOption *DecisionOption
-	var currentSubsection string // Track Pros/Cons within options
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -181,7 +138,6 @@ func ParseDecisionFields(description string) *DecisionFields {
 		// Detect section headers
 		if strings.HasPrefix(line, "## ") {
 			currentSection = strings.TrimPrefix(line, "## ")
-			currentSubsection = ""
 			continue
 		}
 
@@ -192,7 +148,6 @@ func ParseDecisionFields(description string) *DecisionFields {
 			}
 			optionIndex++
 			currentOption = &DecisionOption{}
-			currentSubsection = ""
 
 			// Parse option label (remove number prefix and markers)
 			optLine := strings.TrimPrefix(line, "### ")
@@ -213,17 +168,6 @@ func ParseDecisionFields(description string) *DecisionFields {
 			continue
 		}
 
-		// Detect subsections within options (Pros/Cons)
-		if currentSection == "Options" && currentOption != nil {
-			if line == "**Pros:**" {
-				currentSubsection = "Pros"
-				continue
-			} else if line == "**Cons:**" {
-				currentSubsection = "Cons"
-				continue
-			}
-		}
-
 		// Parse section content
 		switch currentSection {
 		case "Question":
@@ -242,54 +186,12 @@ func ParseDecisionFields(description string) *DecisionFields {
 				fields.Context += line
 			}
 
-		case "Analysis":
-			if line != "" && !strings.HasPrefix(line, "#") && line != "---" {
-				if fields.Analysis != "" {
-					fields.Analysis += "\n"
-				}
-				fields.Analysis += line
-			}
-
-		case "Tradeoffs":
-			if line != "" && !strings.HasPrefix(line, "#") && line != "---" {
-				if fields.Tradeoffs != "" {
-					fields.Tradeoffs += "\n"
-				}
-				fields.Tradeoffs += line
-			}
-
-		case "Recommendation":
-			if line != "" && !strings.HasPrefix(line, "#") && line != "---" {
-				if fields.RecommendationRationale != "" {
-					fields.RecommendationRationale += "\n"
-				}
-				fields.RecommendationRationale += line
-			}
-
 		case "Options":
 			if currentOption != nil && line != "" && !strings.HasPrefix(line, "#") && line != "---" {
-				// Check if it's a list item for pros/cons
-				if strings.HasPrefix(line, "- ") {
-					item := strings.TrimPrefix(line, "- ")
-					switch currentSubsection {
-					case "Pros":
-						currentOption.Pros = append(currentOption.Pros, item)
-					case "Cons":
-						currentOption.Cons = append(currentOption.Cons, item)
-					default:
-						// Regular description line that happens to start with -
-						if currentOption.Description != "" {
-							currentOption.Description += " "
-						}
-						currentOption.Description += line
-					}
-				} else if currentSubsection == "" {
-					// Regular description content
-					if currentOption.Description != "" {
-						currentOption.Description += " "
-					}
-					currentOption.Description += line
+				if currentOption.Description != "" {
+					currentOption.Description += " "
 				}
+				currentOption.Description += line
 			}
 
 		case "Resolution":
@@ -505,9 +407,8 @@ func (b *Beads) GetBdDecision(id string) (*BdDecisionPoint, error) {
 }
 
 // ListDecisions returns all pending decision beads.
-// Note: --include-gates is required because decisions are gate-type issues (hq-3q571.1)
 func (b *Beads) ListDecisions() ([]*Issue, error) {
-	out, err := b.run("list", "--label=gt:decision", "--label=decision:pending", "--status=open", "--include-gates", "--json")
+	out, err := b.run("list", "--label=gt:decision", "--label=decision:pending", "--status=open", "--json")
 	if err != nil {
 		return nil, err
 	}

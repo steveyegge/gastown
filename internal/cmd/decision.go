@@ -6,24 +6,19 @@ import (
 
 // Decision command flags
 var (
-	decisionPrompt               string   // Primary flag (--prompt)
-	decisionContext              string
-	decisionAnalysis             string   // Detailed analysis of the situation
-	decisionTradeoffs            string   // General tradeoffs discussion
-	decisionRecommendRationale   string   // Why the recommended option is suggested
-	decisionOptions              []string
-	decisionOptionPros           []string // Pros for options (repeatable: "1:Pro text" format)
-	decisionOptionCons           []string // Cons for options (repeatable: "1:Con text" format)
-	decisionRecommend            int
-	decisionBlocks               string   // Primary flag (--blocks)
-	decisionParent               string   // Parent bead relationship
-	decisionUrgency              string
-	decisionJSON                 bool
-	decisionListJSON             bool
-	decisionListAll              bool
-	decisionChoice               int
-	decisionRationale            string
-	decisionAwaitTimeout         string   // For await command
+	decisionPrompt      string   // Primary flag (--prompt)
+	decisionContext     string
+	decisionOptions     []string
+	decisionRecommend   int
+	decisionBlocks      string   // Primary flag (--blocks)
+	decisionParent      string   // Parent bead relationship
+	decisionUrgency     string
+	decisionJSON        bool
+	decisionListJSON    bool
+	decisionListAll     bool
+	decisionChoice      int
+	decisionRationale   string
+	decisionAwaitTimeout string  // For await command
 )
 
 var decisionCmd = &cobra.Command{
@@ -70,43 +65,21 @@ want human guidance. The decision is tracked as a bead and blocks
 dependent work until resolved.
 
 FLAGS:
-  --prompt                The decision to be made (required)
-  --option                An option in "Label: Description" format (repeatable, 2-4 required)
-  --context               Brief background information
-  --analysis              Detailed analysis of the situation (paragraph-length encouraged)
-  --tradeoffs             General tradeoffs discussion
-  --recommend             Mark option N as recommended (1-indexed)
-  --recommend-rationale   Why the recommended option is suggested
-  --pro                   Pro for an option in "N:Pro text" format (repeatable)
-  --con                   Con for an option in "N:Con text" format (repeatable)
-  --blocks                Bead ID that's blocked by this decision
-  --parent                Parent bead for hierarchy
-  --urgency               Priority level: high, medium, low (default: medium)
+  --prompt      The decision to be made (required)
+  --option      An option in "Label: Description" format (repeatable, 2-4 required)
+  --context     Background information or analysis
+  --recommend   Mark option N as recommended (1-indexed)
+  --blocks      Bead ID that's blocked by this decision
+  --parent      Parent bead for hierarchy
+  --urgency     Priority level: high, medium, low (default: medium)
 
 Examples:
-  # Simple decision
   gt decision request \
     --prompt "Which authentication method?" \
     --option "JWT tokens: Stateless, scalable, good for SPAs" \
     --option "Session cookies: Simpler, traditional approach" \
     --recommend 1 \
-    --blocks gt-work-xyz
-
-  # Rich decision with analysis and tradeoffs
-  gt decision request \
-    --prompt "Which database for the new service?" \
-    --context "Building a new microservice that needs persistent storage" \
-    --analysis "The service handles ~1000 requests/day with complex queries..." \
-    --tradeoffs "Speed vs flexibility is the key consideration here" \
-    --option "PostgreSQL: Full-featured relational database" \
-    --option "SQLite: Lightweight, embedded, zero-config" \
-    --pro "1:Excellent for complex queries and joins" \
-    --pro "1:Strong ecosystem and tooling" \
-    --con "1:Requires separate server process" \
-    --pro "2:No external dependencies" \
-    --con "2:Limited concurrent write performance" \
-    --recommend 1 \
-    --recommend-rationale "PostgreSQL better fits our scaling needs"`,
+    --blocks gt-work-xyz`,
 	RunE: runDecisionRequest,
 }
 
@@ -311,14 +284,9 @@ func init() {
 	// Request subcommand flags
 	// Primary flags
 	decisionRequestCmd.Flags().StringVarP(&decisionPrompt, "prompt", "p", "", "The decision to be made (required)")
-	decisionRequestCmd.Flags().StringVarP(&decisionContext, "context", "c", "", "Brief background information")
-	decisionRequestCmd.Flags().StringVarP(&decisionAnalysis, "analysis", "a", "", "Detailed analysis of the situation")
-	decisionRequestCmd.Flags().StringVar(&decisionTradeoffs, "tradeoffs", "", "General tradeoffs discussion")
+	decisionRequestCmd.Flags().StringVarP(&decisionContext, "context", "c", "", "Background information or analysis")
 	decisionRequestCmd.Flags().StringArrayVarP(&decisionOptions, "option", "o", nil, "Option in 'Label: Description' format (repeatable)")
-	decisionRequestCmd.Flags().StringArrayVar(&decisionOptionPros, "pro", nil, "Pro for option in 'N:Pro text' format (repeatable)")
-	decisionRequestCmd.Flags().StringArrayVar(&decisionOptionCons, "con", nil, "Con for option in 'N:Con text' format (repeatable)")
 	decisionRequestCmd.Flags().IntVarP(&decisionRecommend, "recommend", "r", 0, "Mark option N as recommended (1-indexed)")
-	decisionRequestCmd.Flags().StringVar(&decisionRecommendRationale, "recommend-rationale", "", "Why the recommended option is suggested")
 	decisionRequestCmd.Flags().StringVar(&decisionBlocks, "blocks", "", "Bead ID that this decision blocks")
 	decisionRequestCmd.Flags().StringVar(&decisionParent, "parent", "", "Parent bead for hierarchy")
 	decisionRequestCmd.Flags().StringVarP(&decisionUrgency, "urgency", "u", "medium", "Urgency level: high, medium, low")

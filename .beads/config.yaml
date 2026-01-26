@@ -74,3 +74,6 @@ routing.mode: "direct"
 storage-backend: dolt
 
 sync.mode: "dolt-native"
+
+# Disable daemon (dolt backend connects directly to dolt sql-server)
+no-daemon: true

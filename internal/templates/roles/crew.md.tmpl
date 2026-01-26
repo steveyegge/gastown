@@ -671,64 +671,21 @@ You MUST offer a decision point at these junctures:
 **NOT required for:** Trivial fixes (typos, obvious bugs), clear single-path work where
 the user gave explicit instructions, or intermediate research steps.
 
-### Crafting Rich Decisions
+### Crafting Quality Options
 
-**Invest in rich context.** Humans make better decisions when they understand the full picture.
-Use ALL available fields to provide comprehensive decision context:
+Before offering a decision, **research each option**. Don't guess. Each option should have:
+- Brief label (5-10 words)
+- Implementation approach overview
+- Key tradeoffs or considerations
 
-| Field | Purpose | Quality Bar |
-|-------|---------|-------------|
-| `--prompt` | The decision question | Clear, specific, actionable |
-| `--context` | Brief background | 1-2 sentences of setup |
-| `--analysis` | Detailed analysis | **Paragraph-length encouraged** - explain what you found, constraints, requirements |
-| `--tradeoffs` | General tensions | Speed vs. flexibility? Simplicity vs. scalability? |
-| `--option` | Each option | "Label: Brief description" format |
-| `--pro` | Advantages per option | "N:Concrete benefit" - be specific |
-| `--con` | Disadvantages per option | "N:Concrete drawback" - be honest |
-| `--recommend` | Your recommendation | Which option (1-indexed) |
-| `--recommend-rationale` | Why you recommend it | Show your reasoning |
+Bad options: "Yes / No" or "Option A / Option B / Other"
+Good options: Real alternatives with context that enables informed choice.
 
-**Bad decisions:**
-```bash
-# Minimal context - forces human to guess
-gt decision request \
-  --prompt "Which database?" \
-  --option "PostgreSQL" \
-  --option "MySQL"
+Example of quality options:
 ```
-
-**Good decisions:**
-```bash
-# Rich context - enables informed choice
-gt decision request \
-  --prompt "Which database for the user profile service?" \
-  --context "Building a read-heavy service expected to handle 10K req/day" \
-  --analysis "Query patterns are primarily key-value lookups by user ID with \
-    occasional admin dashboard queries requiring joins across 3-4 tables. \
-    Data volume is ~100K users initially, growing 50% yearly. Need strong \
-    consistency for profile updates." \
-  --tradeoffs "The core tension is between query flexibility and operational \
-    simplicity. Managed services reduce ops burden but limit customization." \
-  --option "PostgreSQL: Full-featured relational database" \
-  --option "MySQL: Simpler, widely deployed" \
-  --option "DynamoDB: Managed NoSQL with auto-scaling" \
-  --pro "1:Excellent query flexibility for admin dashboards" \
-  --pro "1:Strong ecosystem and tooling" \
-  --pro "1:Native JSON support for flexible schemas" \
-  --con "1:Requires connection pooling at scale" \
-  --pro "2:Simpler to operate" \
-  --pro "2:Lower memory footprint" \
-  --con "2:Less sophisticated query planner" \
-  --pro "3:Zero-ops auto-scaling" \
-  --pro "3:Pay-per-request pricing" \
-  --con "3:No joins - would need denormalization" \
-  --con "3:Vendor lock-in" \
-  --recommend 1 \
-  --recommend-rationale "PostgreSQL balances flexibility with maturity. The \
-    admin dashboard queries require joins that DynamoDB can't handle without \
-    significant denormalization. MySQL would work but PostgreSQL's JSON \
-    support gives us schema flexibility as requirements evolve." \
-  --urgency medium
+--option "Redis: Distributed caching, handles scaling, adds operational complexity"
+--option "In-memory: Simple and fast, limited to single process"
+--option "Defer: No caching until bottleneck proven, avoid premature optimization"
 ```
 
 ### Two-Layer Architecture
@@ -743,16 +700,9 @@ When you encounter a fork in the road requiring human judgment:
 ```bash
 gt decision request \
   --prompt "Which caching strategy for the API layer?" \
-  --context "API latency P95 is 400ms, target is <100ms" \
-  --analysis "Profiling shows 60% of time spent in database queries..." \
   --option "Redis: Distributed, persistent caching" \
   --option "In-memory: Simple and fast" \
-  --pro "1:Scales horizontally" \
-  --con "1:Additional infrastructure" \
-  --pro "2:Zero external dependencies" \
-  --con "2:Lost on restart" \
-  --recommend 2 \
-  --recommend-rationale "Single-process deployment for now..." \
+  --option "SQLite: Hybrid approach" \
   --blocks <work-bead-blocked-by-this> \
   --parent <parent-bead> \
   --urgency high

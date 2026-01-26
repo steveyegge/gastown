@@ -137,7 +137,7 @@ title: "Auth approach: JWT vs Sessions?"
 labels:
   - gt:decision
   - decision:pending        # or decision:resolved
-  - requested_by:myrig/crew/agent
+  - requested_by:gastown/crew/decision_point
   - urgency:medium          # low, medium, high
 description: |
   ## Question
@@ -159,10 +159,10 @@ description: |
   Best for service-to-service. Not ideal for user auth.
 
   ---
-  _Decision requested by: myrig/crew/agent_
+  _Decision requested by: gastown/crew/decision_point_
   _Blocking: gt-work-xyz_
 created_at: 2026-01-24T18:00:00Z
-created_by: myrig/crew/agent
+created_by: gastown/crew/decision_point
 ```
 
 ### Resolved Bead Format
@@ -205,7 +205,7 @@ description: |
   **Resolved at:** 2026-01-24T19:30:00Z
 
   ---
-  _Decision requested by: myrig/crew/agent_
+  _Decision requested by: gastown/crew/decision_point_
 created_at: 2026-01-24T18:00:00Z
 closed_at: 2026-01-24T19:30:00Z
 ```
@@ -254,7 +254,7 @@ gt decision request \
 List pending decisions.
 
 ```bash
-gt decision list [--all] [--urgency=high] [--requestor=myrig/crew/x]
+gt decision list [--all] [--urgency=high] [--requestor=gastown/crew/x]
 ```
 
 **Output:**
@@ -262,12 +262,12 @@ gt decision list [--all] [--urgency=high] [--requestor=myrig/crew/x]
 📋 Pending Decisions (2)
 
   ● hq-dec-abc123 [MEDIUM] Which auth approach?
-    Requested by: myrig/crew/agent · Age: 2h
+    Requested by: gastown/crew/decision_point · Age: 2h
     Options: JWT tokens*, Sessions, API keys
     Blocking: gt-work-xyz
 
   ● hq-dec-def456 [HIGH] Database migration strategy?
-    Requested by: myrig/crew/db_lead · Age: 30m
+    Requested by: gastown/crew/db_lead · Age: 30m
     Options: Blue-green*, Rolling, Big-bang
     Blocking: gt-work-abc, gt-work-def
 
@@ -302,7 +302,7 @@ Options:
   3. API keys
      Best for service-to-service. Not ideal for user auth.
 
-Requested by: myrig/crew/agent
+Requested by: gastown/crew/decision_point
 Requested at: 2026-01-24T18:00:00Z
 Urgency: medium
 Blocking: gt-work-xyz
@@ -337,7 +337,7 @@ gt decision resolve hq-dec-abc123 \
   Rationale: JWT aligns with our scaling goals and SPA architecture
 
 → Unblocked: gt-work-xyz
-→ Mailed myrig/crew/agent
+→ Mailed gastown/crew/decision_point
 ```
 
 ### gt decision dashboard
