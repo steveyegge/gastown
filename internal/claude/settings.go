@@ -34,11 +34,12 @@ func RoleTypeFor(role string) RoleType {
 	}
 }
 
-// EnsureSettings ensures .claude/settings.json exists in the given directory.
-// For worktrees, we use sparse checkout to exclude source repo's .claude/ directory,
-// so our settings.json is the only one Claude Code sees.
+// EnsureSettings ensures .claude/settings.local.json exists in the given directory.
+// We use settings.local.json because Claude Code gitignores *.local.json by default,
+// preventing pollution of user repos. Settings must be in the working directory -
+// Claude Code does NOT traverse parent directories for settings files.
 func EnsureSettings(workDir string, roleType RoleType) error {
-	return EnsureSettingsAt(workDir, roleType, ".claude", "settings.json")
+	return EnsureSettingsAt(workDir, roleType, ".claude", "settings.local.json")
 }
 
 // EnsureSettingsAt ensures a settings file exists at a custom directory/file.

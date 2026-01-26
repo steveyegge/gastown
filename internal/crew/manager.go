@@ -488,11 +488,10 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		}
 	}
 
-	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	// All crew members share the same settings file.
-	crewBaseDir := filepath.Join(m.rig.Path, "crew")
-	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
+	// Ensure Claude settings exist in the working directory (worker.ClonePath).
+	// Claude Code does NOT traverse parent directories for settings files.
+	// The .claude/ directory is gitignored via EnsureGitignorePatterns().
+	if err := claude.EnsureSettingsForRole(worker.ClonePath, "crew"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
