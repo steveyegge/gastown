@@ -19,7 +19,7 @@ import (
 
 // Command timeout constants
 const (
-	cmdTimeout      = 5 * time.Second // timeout for most commands
+	cmdTimeout      = 15 * time.Second // timeout for most commands (bd can be slow with large datasets)
 	ghCmdTimeout    = 10 * time.Second // longer timeout for GitHub API calls
 	tmuxCmdTimeout  = 2 * time.Second  // short timeout for tmux queries
 )
@@ -53,9 +53,14 @@ func runBdCmd(beadsDir string, args ...string) (*bytes.Buffer, error) {
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("bd timed out after %v", cmdTimeout)
+		}
+		// If we got some output, return it anyway (bd may exit non-zero with warnings)
+		if stdout.Len() > 0 {
+			return &stdout, nil
 		}
 		return nil, err
 	}
