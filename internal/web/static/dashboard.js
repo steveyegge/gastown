@@ -833,6 +833,9 @@
                     if (!running) opt.disabled = true;
                     select.appendChild(opt);
                 });
+            })
+            .catch(function(err) {
+                console.error('Failed to load agents for To dropdown:', err);
             });
     }
 
