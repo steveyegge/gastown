@@ -241,5 +241,12 @@ func SetupRedirect(townRoot, worktreePath string) error {
 		return fmt.Errorf("creating redirect file: %w", err)
 	}
 
+	// Copy routes.jsonl from town root to enable cross-prefix bead resolution
+	townRoutesPath := filepath.Join(townRoot, ".beads", "routes.jsonl")
+	if routesData, err := os.ReadFile(townRoutesPath); err == nil {
+		worktreeRoutesPath := filepath.Join(worktreeBeadsDir, "routes.jsonl")
+		os.WriteFile(worktreeRoutesPath, routesData, 0644)
+	}
+
 	return nil
 }
