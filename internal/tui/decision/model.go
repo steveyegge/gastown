@@ -22,21 +22,27 @@ const pollInterval = 5 * time.Second
 
 // Option represents a decision option
 type Option struct {
-	ID          string `json:"id"`
-	Short       string `json:"short"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
+	ID          string   `json:"id"`
+	Short       string   `json:"short"`
+	Label       string   `json:"label"`
+	Description string   `json:"description"`
+	Pros        []string `json:"pros,omitempty"`
+	Cons        []string `json:"cons,omitempty"`
+	Recommended bool     `json:"recommended,omitempty"`
 }
 
 // DecisionItem represents a pending decision
 type DecisionItem struct {
-	ID          string    `json:"id"`
-	Prompt      string    `json:"prompt"`
-	Options     []Option  `json:"options"`
-	Urgency     string    `json:"urgency"`
-	RequestedBy string    `json:"requested_by"`
-	RequestedAt time.Time `json:"requested_at"`
-	Context     string    `json:"context"`
+	ID                      string    `json:"id"`
+	Prompt                  string    `json:"prompt"`
+	Options                 []Option  `json:"options"`
+	Urgency                 string    `json:"urgency"`
+	RequestedBy             string    `json:"requested_by"`
+	RequestedAt             time.Time `json:"requested_at"`
+	Context                 string    `json:"context"`
+	Analysis                string    `json:"analysis"`
+	Tradeoffs               string    `json:"tradeoffs"`
+	RecommendationRationale string    `json:"recommendation_rationale"`
 }
 
 // rawDecisionItem is the actual JSON format from gt decision list --json
@@ -61,7 +67,10 @@ func (d *DecisionItem) UnmarshalJSON(data []byte) error {
 	d.Prompt = raw.Title
 	d.Urgency = extractUrgencyFromLabels(raw.Labels)
 	d.Options = parseOptionsFromDescription(raw.Description)
-	d.Context = extractContextFromDescription(raw.Description)
+	d.Context = extractSectionFromDescription(raw.Description, "Context")
+	d.Analysis = extractSectionFromDescription(raw.Description, "Analysis")
+	d.Tradeoffs = extractSectionFromDescription(raw.Description, "Tradeoffs")
+	d.RecommendationRationale = extractSectionFromDescription(raw.Description, "Recommendation")
 
 	// Parse timestamp
 	if raw.CreatedAt != "" {
@@ -97,16 +106,20 @@ func parseOptionsFromDescription(desc string) []Option {
 	lines := strings.Split(desc, "\n")
 	var currentOption *Option
 	var descLines []string
+	var currentSubsection string // "pros", "cons", or ""
 
 	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
 		// Look for option headers: "### 1. Label" or "### N. Label"
 		if strings.HasPrefix(line, "### ") {
 			// Save previous option if exists
 			if currentOption != nil {
-				currentOption.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
+				currentOption.Description = strings.TrimSpace(strings.Join(descLines, " "))
 				options = append(options, *currentOption)
 				descLines = nil
 			}
+			currentSubsection = ""
 
 			// Parse new option header
 			header := strings.TrimPrefix(line, "### ")
@@ -115,56 +128,84 @@ func parseOptionsFromDescription(desc string) []Option {
 				header = strings.TrimSpace(header[dotIdx+2:])
 			}
 
+			// Check for recommended marker
+			recommended := false
+			if strings.Contains(header, "*(Recommended)*") {
+				recommended = true
+				header = strings.Replace(header, " *(Recommended)*", "", 1)
+			}
+			// Remove [CHOSEN] marker if present
+			header = strings.Replace(header, " **[CHOSEN]**", "", 1)
+
 			currentOption = &Option{
-				ID:    fmt.Sprintf("%d", len(options)+1),
-				Label: header,
+				ID:          fmt.Sprintf("%d", len(options)+1),
+				Label:       strings.TrimSpace(header),
+				Recommended: recommended,
 			}
 		} else if currentOption != nil {
 			// Check for end markers
 			if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "## ") {
 				// Save current option and stop
-				currentOption.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
+				currentOption.Description = strings.TrimSpace(strings.Join(descLines, " "))
 				options = append(options, *currentOption)
 				currentOption = nil
 				descLines = nil
-			} else if strings.TrimSpace(line) != "" {
-				descLines = append(descLines, strings.TrimSpace(line))
+				currentSubsection = ""
+			} else if trimmedLine == "**Pros:**" {
+				currentSubsection = "pros"
+			} else if trimmedLine == "**Cons:**" {
+				currentSubsection = "cons"
+			} else if strings.HasPrefix(trimmedLine, "- ") {
+				// List item
+				item := strings.TrimPrefix(trimmedLine, "- ")
+				if currentSubsection == "pros" {
+					currentOption.Pros = append(currentOption.Pros, item)
+				} else if currentSubsection == "cons" {
+					currentOption.Cons = append(currentOption.Cons, item)
+				} else {
+					// Regular description list item
+					descLines = append(descLines, trimmedLine)
+				}
+			} else if trimmedLine != "" {
+				if currentSubsection == "" {
+					descLines = append(descLines, trimmedLine)
+				}
 			}
 		}
 	}
 
 	// Don't forget the last option
 	if currentOption != nil {
-		currentOption.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
+		currentOption.Description = strings.TrimSpace(strings.Join(descLines, " "))
 		options = append(options, *currentOption)
 	}
 
 	return options
 }
 
-// extractContextFromDescription extracts context section from description
-func extractContextFromDescription(desc string) string {
-	// Look for context between "## Context" and the next section
+// extractSectionFromDescription extracts a named section from markdown description
+func extractSectionFromDescription(desc, sectionName string) string {
 	lines := strings.Split(desc, "\n")
-	var contextLines []string
-	inContext := false
+	var sectionLines []string
+	inSection := false
+	sectionHeader := "## " + sectionName
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "## Context") {
-			inContext = true
+		if strings.HasPrefix(line, sectionHeader) {
+			inSection = true
 			continue
 		}
-		if inContext {
-			if strings.HasPrefix(line, "## ") {
+		if inSection {
+			if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "---") {
 				break
 			}
 			if strings.TrimSpace(line) != "" {
-				contextLines = append(contextLines, strings.TrimSpace(line))
+				sectionLines = append(sectionLines, strings.TrimSpace(line))
 			}
 		}
 	}
 
-	return strings.Join(contextLines, "\n")
+	return strings.Join(sectionLines, "\n")
 }
 
 // extractRequestedByFromDescription extracts requester from markdown footer

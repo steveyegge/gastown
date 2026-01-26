@@ -19,8 +19,21 @@ Decision Points formalize these moments, ensuring agents pause and gather human 
 A Decision Point is a **gate** that blocks workflow until a human responds. The agent presents:
 - A clear question or prompt
 - 2-4 structured options with descriptions
-- Optional context or analysis
+- Rich context including analysis and tradeoffs
 - Urgency level (high/medium/low)
+
+**Rich Decision Fields:**
+| Field | Purpose |
+|-------|---------|
+| `--prompt` | The decision question (required) |
+| `--context` | Brief background information |
+| `--analysis` | Detailed analysis of the situation (paragraph-length encouraged) |
+| `--tradeoffs` | General discussion of tradeoffs between approaches |
+| `--option` | An option with "Label: Description" format (2-4 required) |
+| `--pro` | Pros for an option in "N:text" format (e.g., "1:Fast implementation") |
+| `--con` | Cons for an option in "N:text" format (e.g., "1:Higher maintenance") |
+| `--recommend` | Mark option N as recommended |
+| `--recommend-rationale` | Why the recommended option is suggested |
 
 The human can:
 1. **Select an option** - Choose one of the presented options
@@ -51,6 +64,33 @@ gt decision request \
   --prompt "Which caching strategy should we use?" \
   --option "Redis: Distributed, handles scaling" \
   --option "In-memory: Simple and fast"
+
+# Rich decision with analysis and tradeoffs
+gt decision request \
+  --prompt "Which database for the new microservice?" \
+  --context "Building a read-heavy service for user profiles" \
+  --analysis "Current traffic is ~1000 req/day but expected to grow 10x. \
+    Query patterns are mostly key-value lookups with occasional \
+    joins for admin dashboards." \
+  --tradeoffs "Speed vs flexibility is the key consideration. \
+    Managed services reduce ops burden but increase costs." \
+  --option "PostgreSQL: Full-featured relational database" \
+  --option "Redis: In-memory key-value store" \
+  --option "DynamoDB: Managed NoSQL with auto-scaling" \
+  --pro "1:Excellent query flexibility" \
+  --pro "1:Strong ecosystem" \
+  --con "1:Requires dedicated server" \
+  --pro "2:Sub-millisecond reads" \
+  --pro "2:Great for caching layer" \
+  --con "2:No complex queries" \
+  --con "2:Data persistence concerns" \
+  --pro "3:Zero-ops auto-scaling" \
+  --con "3:Vendor lock-in" \
+  --con "3:Higher per-request cost" \
+  --recommend 1 \
+  --recommend-rationale "PostgreSQL balances flexibility with performance. \
+    The query patterns suggest we'll eventually need joins, and the \
+    read-heavy workload can be optimized with read replicas."
 
 # Decision with urgency and context
 gt decision request \
@@ -308,7 +348,19 @@ Decisions are first-class beads with type `gate` and `await_type = "decision"`. 
 4. **Scope ambiguity** - Requirements need clarification
 5. **Risk points** - Hard-to-reverse actions
 
-### Crafting Quality Options
+### Crafting Rich Decisions (LLM Guidance)
+
+When creating decision points, **invest in rich context**. Humans make better decisions when they understand the full picture. Use all available fields:
+
+**Analysis**: Provide detailed background. Don't just say "we need a database" - explain the query patterns, expected load, data relationships, and constraints you've discovered. Paragraph-length analysis is encouraged.
+
+**Tradeoffs**: Discuss the general tensions at play. Speed vs. flexibility? Simplicity vs. scalability? Short-term vs. long-term? Help the human understand the shape of the decision space.
+
+**Per-Option Pros/Cons**: Don't just describe options - evaluate them. Each option should have concrete pros and cons based on your analysis. This shows you've thought through the implications.
+
+**Recommendation Rationale**: If you recommend an option, explain why. What factors drove your recommendation? This helps humans either agree with your reasoning or identify where their priorities differ.
+
+### Option Quality
 
 **Don't:**
 ```
@@ -317,15 +369,36 @@ Decisions are first-class beads with type `gate` and `await_type = "decision"`. 
 ```
 
 **Do:**
-```
---option "Redis: Distributed caching, handles scaling, adds ops complexity"
---option "In-memory: Simple, fast, single-process only"
---option "Defer: No caching until bottleneck proven"
+```bash
+gt decision request \
+  --prompt "Add caching layer to API?" \
+  --analysis "Profiling shows 60% of API time is database queries. \
+    Most queries are repeatable user lookups. P95 latency is 400ms, \
+    target is <100ms." \
+  --tradeoffs "Caching reduces latency but adds complexity. Must handle \
+    cache invalidation on user updates." \
+  --option "Redis: Distributed caching" \
+  --option "In-memory: Process-local cache" \
+  --option "Defer: Optimize queries first" \
+  --pro "1:Handles horizontal scaling" \
+  --pro "1:Persistent across restarts" \
+  --con "1:Additional infrastructure" \
+  --pro "2:Zero external dependencies" \
+  --pro "2:Fastest possible reads" \
+  --con "2:Lost on process restart" \
+  --con "2:Memory pressure under load" \
+  --pro "3:Simpler architecture" \
+  --pro "3:May be sufficient" \
+  --con "3:Delays latency improvement" \
+  --recommend 2 \
+  --recommend-rationale "For current scale, in-memory is sufficient. \
+    Single-process deployment means no cache coherence issues. \
+    Can migrate to Redis when we scale horizontally."
 ```
 
 Each option should:
 - Have a clear label
-- Explain the tradeoff
+- Include specific pros and cons
 - Enable informed choice
 
 ### Urgency Levels

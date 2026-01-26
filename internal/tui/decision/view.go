@@ -150,7 +150,23 @@ func (m *Model) renderDetailPane() string {
 	if d.Context != "" {
 		b.WriteString(detailLabelStyle.Render("Context:"))
 		b.WriteString("\n")
-		b.WriteString(detailValueStyle.Render(d.Context))
+		b.WriteString(wrapText(detailValueStyle.Render(d.Context), m.width-4))
+		b.WriteString("\n\n")
+	}
+
+	// Analysis if available
+	if d.Analysis != "" {
+		b.WriteString(detailLabelStyle.Render("Analysis:"))
+		b.WriteString("\n")
+		b.WriteString(wrapText(detailValueStyle.Render(d.Analysis), m.width-4))
+		b.WriteString("\n\n")
+	}
+
+	// Tradeoffs if available
+	if d.Tradeoffs != "" {
+		b.WriteString(detailLabelStyle.Render("Tradeoffs:"))
+		b.WriteString("\n")
+		b.WriteString(wrapText(detailValueStyle.Render(d.Tradeoffs), m.width-4))
 		b.WriteString("\n\n")
 	}
 
@@ -165,10 +181,13 @@ func (m *Model) renderDetailPane() string {
 		// Option number
 		numStr := optionNumberStyle.Render(fmt.Sprintf("[%d]", optNum))
 
-		// Option label
+		// Option label with recommended marker
 		label := opt.Label
 		if opt.Short != "" && opt.Short != opt.ID {
 			label = opt.Short + ": " + label
+		}
+		if opt.Recommended {
+			label += " ★"
 		}
 
 		// Option description
@@ -185,6 +204,31 @@ func (m *Model) renderDetailPane() string {
 		} else {
 			b.WriteString(optionLabelStyle.Render(line))
 		}
+		b.WriteString("\n")
+
+		// Pros if available
+		if len(opt.Pros) > 0 {
+			for _, pro := range opt.Pros {
+				b.WriteString(successStyle.Render(fmt.Sprintf("      + %s", pro)))
+				b.WriteString("\n")
+			}
+		}
+
+		// Cons if available
+		if len(opt.Cons) > 0 {
+			for _, con := range opt.Cons {
+				b.WriteString(errorStyle.Render(fmt.Sprintf("      - %s", con)))
+				b.WriteString("\n")
+			}
+		}
+	}
+
+	// Recommendation rationale if available
+	if d.RecommendationRationale != "" {
+		b.WriteString("\n")
+		b.WriteString(detailLabelStyle.Render("Recommendation:"))
+		b.WriteString("\n")
+		b.WriteString(wrapText(detailValueStyle.Render(d.RecommendationRationale), m.width-4))
 		b.WriteString("\n")
 	}
 
@@ -203,6 +247,42 @@ func (m *Model) renderDetailPane() string {
 	}
 
 	return b.String()
+}
+
+// wrapText wraps text to a given width, preserving newlines
+func wrapText(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+
+	var result strings.Builder
+	lines := strings.Split(text, "\n")
+
+	for i, line := range lines {
+		if i > 0 {
+			result.WriteString("\n")
+		}
+
+		// Simple word wrapping
+		words := strings.Fields(line)
+		if len(words) == 0 {
+			continue
+		}
+
+		currentLine := words[0]
+		for _, word := range words[1:] {
+			if len(currentLine)+1+len(word) <= width {
+				currentLine += " " + word
+			} else {
+				result.WriteString(currentLine)
+				result.WriteString("\n")
+				currentLine = word
+			}
+		}
+		result.WriteString(currentLine)
+	}
+
+	return result.String()
 }
 
 // renderInputMode renders the input mode view
