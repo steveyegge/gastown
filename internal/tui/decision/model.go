@@ -452,6 +452,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.detailViewport.Width = msg.Width - 4
 		m.detailViewport.Height = msg.Height/2 - 4
+		m.peekViewport.Width = msg.Width - 4
+		m.peekViewport.Height = msg.Height - 6
 		m.textInput.SetWidth(msg.Width - 10)
 
 	case tea.KeyMsg:

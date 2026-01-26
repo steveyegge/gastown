@@ -349,6 +349,11 @@ func formatTimeAgo(t time.Time) string {
 func (m *Model) renderPeekMode() string {
 	var b strings.Builder
 
+	// Safety check for uninitialized dimensions
+	if m.width == 0 || m.height == 0 {
+		return "Initializing..."
+	}
+
 	// Header
 	header := fmt.Sprintf("─── Terminal Peek: %s ", m.peekSessionName)
 	header += strings.Repeat("─", max(0, m.width-len(header)-2))
@@ -356,7 +361,12 @@ func (m *Model) renderPeekMode() string {
 	b.WriteString("\n\n")
 
 	// Content - use viewport for scrolling
-	b.WriteString(m.peekViewport.View())
+	// Handle empty content gracefully
+	if m.peekContent == "" {
+		b.WriteString(helpStyle.Render("(No terminal content captured)"))
+	} else {
+		b.WriteString(m.peekViewport.View())
+	}
 	b.WriteString("\n")
 
 	// Footer with scroll position
