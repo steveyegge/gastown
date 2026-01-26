@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,6 +37,150 @@ type DecisionItem struct {
 	RequestedBy string    `json:"requested_by"`
 	RequestedAt time.Time `json:"requested_at"`
 	Context     string    `json:"context"`
+}
+
+// rawDecisionItem is the actual JSON format from gt decision list --json
+type rawDecisionItem struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Status      string   `json:"status"`
+	CreatedAt   string   `json:"created_at"`
+	CreatedBy   string   `json:"created_by"`
+	Labels      []string `json:"labels"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling to handle the actual format
+func (d *DecisionItem) UnmarshalJSON(data []byte) error {
+	var raw rawDecisionItem
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	d.ID = raw.ID
+	d.Prompt = raw.Title
+	d.Urgency = extractUrgencyFromLabels(raw.Labels)
+	d.Options = parseOptionsFromDescription(raw.Description)
+	d.Context = extractContextFromDescription(raw.Description)
+
+	// Parse timestamp
+	if raw.CreatedAt != "" {
+		t, err := time.Parse(time.RFC3339, raw.CreatedAt)
+		if err == nil {
+			d.RequestedAt = t
+		}
+	}
+
+	// Extract requested_by from description or use created_by
+	d.RequestedBy = extractRequestedByFromDescription(raw.Description)
+	if d.RequestedBy == "" {
+		d.RequestedBy = raw.CreatedBy
+	}
+
+	return nil
+}
+
+// extractUrgencyFromLabels extracts urgency level from labels array
+func extractUrgencyFromLabels(labels []string) string {
+	for _, label := range labels {
+		if strings.HasPrefix(label, "urgency:") {
+			return strings.TrimPrefix(label, "urgency:")
+		}
+	}
+	return "medium" // default
+}
+
+// parseOptionsFromDescription parses options from markdown description
+func parseOptionsFromDescription(desc string) []Option {
+	var options []Option
+
+	lines := strings.Split(desc, "\n")
+	var currentOption *Option
+	var descLines []string
+
+	for _, line := range lines {
+		// Look for option headers: "### 1. Label" or "### N. Label"
+		if strings.HasPrefix(line, "### ") {
+			// Save previous option if exists
+			if currentOption != nil {
+				currentOption.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
+				options = append(options, *currentOption)
+				descLines = nil
+			}
+
+			// Parse new option header
+			header := strings.TrimPrefix(line, "### ")
+			// Remove leading number and dot: "1. Label" -> "Label"
+			if dotIdx := strings.Index(header, ". "); dotIdx != -1 {
+				header = strings.TrimSpace(header[dotIdx+2:])
+			}
+
+			currentOption = &Option{
+				ID:    fmt.Sprintf("%d", len(options)+1),
+				Label: header,
+			}
+		} else if currentOption != nil {
+			// Check for end markers
+			if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "## ") {
+				// Save current option and stop
+				currentOption.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
+				options = append(options, *currentOption)
+				currentOption = nil
+				descLines = nil
+			} else if strings.TrimSpace(line) != "" {
+				descLines = append(descLines, strings.TrimSpace(line))
+			}
+		}
+	}
+
+	// Don't forget the last option
+	if currentOption != nil {
+		currentOption.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
+		options = append(options, *currentOption)
+	}
+
+	return options
+}
+
+// extractContextFromDescription extracts context section from description
+func extractContextFromDescription(desc string) string {
+	// Look for context between "## Context" and the next section
+	lines := strings.Split(desc, "\n")
+	var contextLines []string
+	inContext := false
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## Context") {
+			inContext = true
+			continue
+		}
+		if inContext {
+			if strings.HasPrefix(line, "## ") {
+				break
+			}
+			if strings.TrimSpace(line) != "" {
+				contextLines = append(contextLines, strings.TrimSpace(line))
+			}
+		}
+	}
+
+	return strings.Join(contextLines, "\n")
+}
+
+// extractRequestedByFromDescription extracts requester from markdown footer
+func extractRequestedByFromDescription(desc string) string {
+	// Look for "_Requested by: xxx_" pattern
+	lines := strings.Split(desc, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "_Requested by:") && strings.HasSuffix(line, "_") {
+			// Extract between ":" and trailing "_"
+			inner := strings.TrimPrefix(line, "_Requested by:")
+			inner = strings.TrimSuffix(inner, "_")
+			return strings.TrimSpace(inner)
+		}
+	}
+	return ""
 }
 
 // InputMode represents the current input mode
@@ -346,19 +491,33 @@ func (m *Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// filterDecisions filters decisions based on current filter
+// filterDecisions filters and sorts decisions based on current filter
 func (m *Model) filterDecisions(decisions []DecisionItem) []DecisionItem {
-	if m.filter == "all" {
-		return decisions
-	}
+	var result []DecisionItem
 
-	var filtered []DecisionItem
-	for _, d := range decisions {
-		if d.Urgency == m.filter {
-			filtered = append(filtered, d)
+	if m.filter == "all" {
+		result = decisions
+	} else {
+		for _, d := range decisions {
+			if d.Urgency == m.filter {
+				result = append(result, d)
+			}
 		}
 	}
-	return filtered
+
+	// Sort by urgency (high first) then by time (newest first)
+	sort.Slice(result, func(i, j int) bool {
+		urgencyOrder := map[string]int{"high": 0, "medium": 1, "low": 2}
+		ui := urgencyOrder[result[i].Urgency]
+		uj := urgencyOrder[result[j].Urgency]
+		if ui != uj {
+			return ui < uj
+		}
+		// Same urgency, sort by time (newest first)
+		return result[i].RequestedAt.After(result[j].RequestedAt)
+	})
+
+	return result
 }
 
 // View renders the TUI
