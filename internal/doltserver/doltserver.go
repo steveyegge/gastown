@@ -298,12 +298,12 @@ func Start(townRoot string) error {
 	cmd.Stdin = nil
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		_ = logFile.Close()
 		return fmt.Errorf("starting Dolt server: %w", err)
 	}
 
 	// Close log file in parent (child has its own handle)
-	logFile.Close()
+	_ = logFile.Close()
 
 	// Write PID file
 	if err := os.WriteFile(config.PidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0644); err != nil {

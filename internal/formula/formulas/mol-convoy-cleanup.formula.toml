@@ -135,7 +135,12 @@ bd show {{convoy}}
 # Status should reflect archived state
 ```
 
-**Exit criteria:** Convoy archived."""
+**4. Sync to persist:**
+```bash
+bd sync
+```
+
+**Exit criteria:** Convoy archived, changes synced."""
 
 [[steps]]
 id = "notify-overseer"
