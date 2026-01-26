@@ -377,9 +377,10 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	}
 
 	// Fetch latest from origin to ensure worktree starts from up-to-date code
-	if err := repoGit.Fetch("origin"); err != nil {
+	fetchErr := repoGit.Fetch("origin")
+	if fetchErr != nil {
 		// Non-fatal - proceed with potentially stale code
-		fmt.Printf("Warning: could not fetch origin: %v\n", err)
+		fmt.Printf("Warning: could not fetch origin: %v\n", fetchErr)
 	}
 
 	// Determine the start point for the new worktree
@@ -389,6 +390,16 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		defaultBranch = rigCfg.DefaultBranch
 	}
 	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
+
+	// Validate that the start point exists locally before creating worktree.
+	// Issue hq-a21833: polecat created branch with no merge base because origin/main
+	// didn't exist locally (fetch failed or ref not updated).
+	if !repoGit.RefExists(startPoint) {
+		// Start point doesn't exist - this would cause the new branch to have no
+		// proper merge base with origin/main, resulting in massive diffs.
+		_ = os.RemoveAll(polecatDir) // Clean up directory we created
+		return nil, fmt.Errorf("start point %s does not exist locally (fetch may have failed); cannot create worktree with proper merge base", startPoint)
+	}
 
 	// Always create fresh branch - unique name guarantees no collision
 	// git worktree add -b polecat/<name>-<timestamp> <path> <startpoint>
@@ -403,6 +414,19 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		// Clean up the parent directory we created
 		_ = os.RemoveAll(polecatDir)
 		return nil, fmt.Errorf("verifying worktree at %s: %w", clonePath, err)
+	}
+
+	// Verify the new branch has proper merge-base with origin/main (defense in depth).
+	// Issue hq-a21833: polecat branch had no common ancestor, causing 8179 files changed.
+	worktreeGit := git.NewGit(clonePath)
+	isAncestor, err := worktreeGit.IsAncestor(startPoint, "HEAD")
+	if err != nil {
+		_ = os.RemoveAll(polecatDir)
+		return nil, fmt.Errorf("checking merge-base for new worktree: %w", err)
+	}
+	if !isAncestor {
+		_ = os.RemoveAll(polecatDir)
+		return nil, fmt.Errorf("new branch is not based on %s; refusing to create polecat with invalid merge-base", startPoint)
 	}
 
 	// Ensure AGENTS.md exists - critical for polecats to "land the plane"

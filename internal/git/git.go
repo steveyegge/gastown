@@ -792,6 +792,13 @@ func (g *Git) Rev(ref string) (string, error) {
 	return g.run("rev-parse", ref)
 }
 
+// RefExists checks if a ref (branch, tag, remote tracking ref) exists locally.
+// This is useful for checking if refs like "origin/main" exist before using them.
+func (g *Git) RefExists(ref string) bool {
+	_, err := g.run("rev-parse", "--verify", ref)
+	return err == nil
+}
+
 // IsAncestor checks if ancestor is an ancestor of descendant.
 func (g *Git) IsAncestor(ancestor, descendant string) (bool, error) {
 	_, err := g.run("merge-base", "--is-ancestor", ancestor, descendant)

@@ -488,3 +488,29 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
+
+func TestRefExists(t *testing.T) {
+	dir := initTestRepo(t)
+	g := NewGit(dir)
+
+	// HEAD should exist
+	if !g.RefExists("HEAD") {
+		t.Error("expected HEAD to exist")
+	}
+
+	// main/master should exist (depending on git default)
+	mainExists := g.RefExists("main") || g.RefExists("master")
+	if !mainExists {
+		t.Error("expected main or master branch to exist")
+	}
+
+	// Non-existent ref should not exist
+	if g.RefExists("nonexistent-branch") {
+		t.Error("expected nonexistent-branch to not exist")
+	}
+
+	// origin/main should not exist (no remote)
+	if g.RefExists("origin/main") {
+		t.Error("expected origin/main to not exist (no remote)")
+	}
+}
