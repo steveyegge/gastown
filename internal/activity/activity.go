@@ -7,16 +7,16 @@ import (
 
 // Color class constants for activity status.
 const (
-	ColorGreen   = "green"   // Active: <2 minutes
-	ColorYellow  = "yellow"  // Stale: 2-5 minutes
-	ColorRed     = "red"     // Stuck: >5 minutes
+	ColorGreen   = "green"   // Active: <5 minutes
+	ColorYellow  = "yellow"  // Stale: 5-10 minutes
+	ColorRed     = "red"     // Stuck: >10 minutes
 	ColorUnknown = "unknown" // No activity data
 )
 
 // Thresholds for activity color coding.
 const (
-	ThresholdActive = 2 * time.Minute  // Green threshold
-	ThresholdStale  = 5 * time.Minute  // Yellow threshold (beyond this is red)
+	ThresholdActive = 5 * time.Minute   // Green threshold
+	ThresholdStale  = 10 * time.Minute  // Yellow threshold (beyond this is red)
 )
 
 // Info holds activity information for display.
@@ -29,9 +29,9 @@ type Info struct {
 
 // Calculate computes activity info from a last-activity timestamp.
 // Returns color-coded info based on thresholds:
-//   - Green:   <2 minutes (active)
-//   - Yellow:  2-5 minutes (stale)
-//   - Red:     >5 minutes (stuck)
+//   - Green:   <5 minutes (active)
+//   - Yellow:  5-10 minutes (stale)
+//   - Red:     >10 minutes (stuck)
 //   - Unknown: zero time value
 func Calculate(lastActivity time.Time) Info {
 	info := Info{
