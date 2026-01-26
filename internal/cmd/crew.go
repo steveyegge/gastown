@@ -22,6 +22,8 @@ var (
 	crewListAll       bool
 	crewDryRun        bool
 	crewDebug         bool
+	crewSync          bool // Sync from origin before starting (default: true)
+	crewNoSync        bool // Disable sync before starting
 )
 
 var crewCmd = &cobra.Command{
@@ -270,13 +272,18 @@ var crewStartCmd = &cobra.Command{
 The rig name can be provided as the first argument, or inferred from the
 current directory. If no crew names are specified, starts all crew in the rig.
 
+By default, workspaces are synced from origin before starting to ensure they
+have the latest code (equivalent to running 'gt crew pristine' first). Use
+--no-sync to skip this step.
+
 The crew session starts in the background with Claude running and ready.
 
 Examples:
   gt crew start beads             # Start all crew in beads rig
   gt crew start                   # Start all crew (rig inferred from cwd)
   gt crew start beads grip fang   # Start specific crew in beads rig
-  gt crew start gastown joe       # Start joe in gastown rig`,
+  gt crew start gastown joe       # Start joe in gastown rig
+  gt crew start --no-sync         # Start without syncing from origin`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		// With --all, we can have 0 args (infer rig) or 1+ args (rig specified)
 		if crewAll {
@@ -364,6 +371,8 @@ func init() {
 	crewStartCmd.Flags().BoolVar(&crewAll, "all", false, "Start all crew members in the rig")
 	crewStartCmd.Flags().StringVar(&crewAccount, "account", "", "Claude Code account handle to use")
 	crewStartCmd.Flags().StringVar(&crewAgentOverride, "agent", "", "Agent alias to run crew worker with (overrides rig/town default)")
+	crewStartCmd.Flags().BoolVar(&crewSync, "sync", true, "Sync workspace from origin before starting (default: true)")
+	crewStartCmd.Flags().BoolVar(&crewNoSync, "no-sync", false, "Skip syncing from origin before starting")
 
 	crewStopCmd.Flags().StringVar(&crewRig, "rig", "", "Rig to use (filter when using --all)")
 	crewStopCmd.Flags().BoolVar(&crewAll, "all", false, "Stop all running crew sessions")

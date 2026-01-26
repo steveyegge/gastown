@@ -327,6 +327,28 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		AgentOverride:   crewAgentOverride,
 	}
 
+	// Sync workspaces from origin if enabled (default: true, unless --no-sync)
+	shouldSync := crewSync && !crewNoSync
+	if shouldSync {
+		fmt.Printf("Syncing %d workspace(s) from origin...\n", len(crewNames))
+		for _, name := range crewNames {
+			// Skip sync for workspaces that don't exist yet (will be created fresh)
+			if _, err := crewMgr.Get(name); err == nil {
+				result, err := crewMgr.Pristine(name)
+				if err != nil {
+					fmt.Printf("  %s %s/%s: sync failed: %v\n", style.WarningPrefix, rigName, name, err)
+				} else if result.PullError != "" {
+					fmt.Printf("  %s %s/%s: pull warning: %s\n", style.WarningPrefix, rigName, name, result.PullError)
+				} else if result.Pulled {
+					fmt.Printf("  %s %s/%s: synced\n", style.Dim.Render("↓"), rigName, name)
+				} else {
+					fmt.Printf("  %s %s/%s: up to date\n", style.Dim.Render("○"), rigName, name)
+				}
+			}
+		}
+		fmt.Println()
+	}
+
 	// Start each crew member in parallel
 	type result struct {
 		name    string
