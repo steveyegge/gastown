@@ -17,7 +17,7 @@ func isClaudeCmd(cmd string) bool {
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode, AgentKiro}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -52,6 +52,7 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"amp", AgentAmp, false},
 		{"aider", "", true},               // Not built-in, can be added via config
 		{"opencode", AgentOpenCode, false}, // Built-in multi-model CLI agent
+		{"kiro", AgentKiro, false},          // Built-in Kiro CLI agent
 		{"unknown", "", true},
 	}
 
@@ -83,6 +84,8 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 		{AgentCursor, "cursor-agent"},
 		{AgentAuggie, "auggie"},
 		{AgentAmp, "amp"},
+		{AgentOpenCode, "opencode"},
+		{AgentKiro, "kiro"},
 	}
 
 	for _, tt := range tests {
@@ -131,6 +134,7 @@ func TestIsKnownPreset(t *testing.T) {
 		{"amp", true},
 		{"aider", false},    // Not built-in, can be added via config
 		{"opencode", true},  // Built-in multi-model CLI agent
+		{"kiro", true},      // Built-in Kiro CLI agent
 		{"unknown", false},
 		{"chatgpt", false},
 	}
@@ -297,6 +301,13 @@ func TestBuildResumeCommand(t *testing.T) {
 			contains:  []string{"codex", "resume", "codex-sess-789", "--yolo"},
 		},
 		{
+			name:      "kiro flag style",
+			agentName: "kiro",
+			sessionID: "kiro-sess-101",
+			wantEmpty: false,
+			contains:  []string{"kiro", "--trust-all-tools", "--resume", "kiro-sess-101"},
+		},
+		{
 			name:      "empty session ID",
 			agentName: "claude",
 			sessionID: "",
@@ -342,6 +353,7 @@ func TestSupportsSessionResume(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
+		{"kiro", true},
 		{"unknown", false},
 	}
 
@@ -366,6 +378,7 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 		{"cursor", ""},   // Cursor uses --resume with chatId directly
 		{"auggie", ""},   // Auggie uses --resume directly
 		{"amp", ""},      // AMP uses 'threads continue' subcommand
+		{"kiro", ""},     // Kiro uses --resume directly
 		{"unknown", ""},
 	}
 
@@ -391,6 +404,7 @@ func TestGetProcessNames(t *testing.T) {
 		{"auggie", []string{"auggie"}},
 		{"amp", []string{"amp"}},
 		{"opencode", []string{"opencode", "node", "bun"}},
+		{"kiro", []string{"kiro", "node"}},
 		{"unknown", []string{"node", "claude"}}, // Falls back to Claude's process
 	}
 
@@ -413,7 +427,7 @@ func TestGetProcessNames(t *testing.T) {
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentOpenCode, AgentKiro}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -474,6 +488,11 @@ func TestAgentCommandGeneration(t *testing.T) {
 			preset:       AgentAmp,
 			wantCommand:  "amp",
 			wantContains: []string{"--dangerously-allow-all", "--no-ide"},
+		},
+		{
+			preset:       AgentKiro,
+			wantCommand:  "kiro",
+			wantContains: []string{"--trust-all-tools"},
 		},
 	}
 
@@ -776,5 +795,183 @@ func TestOpenCodeRuntimeConfigFromPreset(t *testing.T) {
 	original := GetAgentPreset(AgentOpenCode)
 	if _, exists := original.Env["MUTATED"]; exists {
 		t.Error("Mutation of RuntimeConfig.Env affected original preset")
+	}
+}
+
+func TestKiroAgentPreset(t *testing.T) {
+	t.Parallel()
+	info := GetAgentPreset(AgentKiro)
+	if info == nil {
+		t.Fatal("kiro preset not found")
+	}
+
+	// Check command
+	if info.Command != "kiro" {
+		t.Errorf("kiro command = %q, want kiro", info.Command)
+	}
+
+	// Check YOLO-equivalent flag (--trust-all-tools)
+	hasTrust := false
+	for _, arg := range info.Args {
+		if arg == "--trust-all-tools" {
+			hasTrust = true
+		}
+	}
+	if !hasTrust {
+		t.Error("kiro args missing --trust-all-tools")
+	}
+
+	// Check ProcessNames for detection
+	if len(info.ProcessNames) != 2 {
+		t.Errorf("kiro ProcessNames length = %d, want 2", len(info.ProcessNames))
+	}
+	if info.ProcessNames[0] != "kiro" {
+		t.Errorf("kiro ProcessNames[0] = %q, want kiro", info.ProcessNames[0])
+	}
+	if info.ProcessNames[1] != "node" {
+		t.Errorf("kiro ProcessNames[1] = %q, want node", info.ProcessNames[1])
+	}
+
+	// Check resume support
+	if info.ResumeFlag != "--resume" {
+		t.Errorf("kiro ResumeFlag = %q, want --resume", info.ResumeFlag)
+	}
+	if info.ResumeStyle != "flag" {
+		t.Errorf("kiro ResumeStyle = %q, want flag", info.ResumeStyle)
+	}
+
+	// Check hooks support
+	if !info.SupportsHooks {
+		t.Error("kiro should support hooks")
+	}
+
+	// Check fork session (not supported)
+	if info.SupportsForkSession {
+		t.Error("kiro should not support fork session")
+	}
+
+	// Check NonInteractive config
+	if info.NonInteractive == nil {
+		t.Fatal("kiro NonInteractive is nil")
+	}
+	if info.NonInteractive.PromptFlag != "-p" {
+		t.Errorf("kiro NonInteractive.PromptFlag = %q, want -p", info.NonInteractive.PromptFlag)
+	}
+	if info.NonInteractive.OutputFlag != "--output json" {
+		t.Errorf("kiro NonInteractive.OutputFlag = %q, want --output json", info.NonInteractive.OutputFlag)
+	}
+}
+
+func TestKiroProviderDefaults(t *testing.T) {
+	t.Parallel()
+
+	// Test defaultRuntimeCommand
+	cmd := defaultRuntimeCommand("kiro")
+	if cmd != "kiro" {
+		t.Errorf("defaultRuntimeCommand(kiro) = %q, want kiro", cmd)
+	}
+
+	// Test defaultRuntimeArgs
+	args := defaultRuntimeArgs("kiro")
+	if len(args) != 1 || args[0] != "--trust-all-tools" {
+		t.Errorf("defaultRuntimeArgs(kiro) = %v, want [--trust-all-tools]", args)
+	}
+
+	// Test defaultPromptMode
+	mode := defaultPromptMode("kiro")
+	if mode != "none" {
+		t.Errorf("defaultPromptMode(kiro) = %q, want none", mode)
+	}
+
+	// Test defaultHooksProvider
+	hp := defaultHooksProvider("kiro")
+	if hp != "kiro" {
+		t.Errorf("defaultHooksProvider(kiro) = %q, want kiro", hp)
+	}
+
+	// Test defaultHooksDir
+	hd := defaultHooksDir("kiro")
+	if hd != ".kiro" {
+		t.Errorf("defaultHooksDir(kiro) = %q, want .kiro", hd)
+	}
+
+	// Test defaultHooksFile
+	hf := defaultHooksFile("kiro")
+	if hf != "settings.json" {
+		t.Errorf("defaultHooksFile(kiro) = %q, want settings.json", hf)
+	}
+
+	// Test defaultProcessNames
+	names := defaultProcessNames("kiro", "kiro")
+	if len(names) != 2 {
+		t.Errorf("defaultProcessNames(kiro) length = %d, want 2", len(names))
+	}
+	if names[0] != "kiro" || names[1] != "node" {
+		t.Errorf("defaultProcessNames(kiro) = %v, want [kiro, node]", names)
+	}
+
+	// Test defaultReadyDelayMs
+	delay := defaultReadyDelayMs("kiro")
+	if delay != 8000 {
+		t.Errorf("defaultReadyDelayMs(kiro) = %d, want 8000", delay)
+	}
+
+	// Test defaultInstructionsFile
+	instFile := defaultInstructionsFile("kiro")
+	if instFile != "AGENTS.md" {
+		t.Errorf("defaultInstructionsFile(kiro) = %q, want AGENTS.md", instFile)
+	}
+}
+
+func TestKiroRuntimeConfigFromPreset(t *testing.T) {
+	t.Parallel()
+	rc := RuntimeConfigFromPreset(AgentKiro)
+	if rc == nil {
+		t.Fatal("RuntimeConfigFromPreset(kiro) returned nil")
+	}
+
+	// Check command
+	if rc.Command != "kiro" {
+		t.Errorf("RuntimeConfig.Command = %q, want kiro", rc.Command)
+	}
+
+	// Check args
+	if len(rc.Args) != 1 || rc.Args[0] != "--trust-all-tools" {
+		t.Errorf("RuntimeConfig.Args = %v, want [--trust-all-tools]", rc.Args)
+	}
+
+	// Kiro has no Env (unlike OpenCode which uses OPENCODE_PERMISSION)
+	if rc.Env != nil && len(rc.Env) > 0 {
+		t.Errorf("Expected nil/empty Env for Kiro preset, got %v", rc.Env)
+	}
+
+	// Hooks are populated by FillRuntimeDefaults, not RuntimeConfigFromPreset.
+	// Verify hooks via FillRuntimeDefaults with kiro provider.
+	filled := normalizeRuntimeConfig(&RuntimeConfig{Provider: "kiro"})
+	if filled.Hooks == nil {
+		t.Fatal("FillRuntimeDefaults for kiro: Hooks is nil")
+	}
+	if filled.Hooks.Provider != "kiro" {
+		t.Errorf("FillRuntimeDefaults Hooks.Provider = %q, want kiro", filled.Hooks.Provider)
+	}
+	if filled.Hooks.Dir != ".kiro" {
+		t.Errorf("FillRuntimeDefaults Hooks.Dir = %q, want .kiro", filled.Hooks.Dir)
+	}
+	if filled.Hooks.SettingsFile != "settings.json" {
+		t.Errorf("FillRuntimeDefaults Hooks.SettingsFile = %q, want settings.json", filled.Hooks.SettingsFile)
+	}
+}
+
+func TestKiroResumeCommand(t *testing.T) {
+	t.Parallel()
+	result := BuildResumeCommand("kiro", "kiro-session-42")
+	if result == "" {
+		t.Fatal("BuildResumeCommand(kiro, kiro-session-42) returned empty")
+	}
+
+	for _, want := range []string{"kiro", "--trust-all-tools", "--resume", "kiro-session-42"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("BuildResumeCommand result %q missing %q", result, want)
+		}
 	}
 }
