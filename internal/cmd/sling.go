@@ -191,6 +191,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	var hookWorkDir string                 // Working directory for running bd hook commands
 	var hookSetAtomically bool             // True if hook was set during polecat spawn (skip redundant update)
 	var newPolecatInfo *SpawnedPolecatInfo // Spawned polecat info (session started after bead setup)
+	var delayedDogInfo *DogDispatchInfo    // For delayed dog session start after hook is set
 
 	if len(args) > 1 {
 		target := args[1]
@@ -214,14 +215,20 @@ func runSling(cmd *cobra.Command, args []string) error {
 				}
 				targetPane = "<dog-pane>"
 			} else {
-				// Dispatch to dog
-				dispatchInfo, dispatchErr := DispatchToDog(dogName, slingCreate, beadID)
+				// Dispatch to dog with delayed session start
+				// Session starts after hook is set to avoid race condition
+				dispatchOpts := DogDispatchOptions{
+					Create:            slingCreate,
+					WorkDesc:          beadID,
+					DelaySessionStart: true,
+				}
+				dispatchInfo, dispatchErr := DispatchToDog(dogName, dispatchOpts)
 				if dispatchErr != nil {
 					return fmt.Errorf("dispatching to dog: %w", dispatchErr)
 				}
 				targetAgent = dispatchInfo.AgentID
-				targetPane = dispatchInfo.Pane
-				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
+				delayedDogInfo = dispatchInfo // Store for later session start
+				fmt.Printf("Dispatched to dog %s (session start delayed)\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
 			// Check if target is a rig name (auto-spawn polecat)
@@ -525,6 +532,16 @@ func runSling(cmd *cobra.Command, args []string) error {
 		pane, err := newPolecatInfo.StartSession()
 		if err != nil {
 			return fmt.Errorf("starting polecat session: %w", err)
+		}
+		targetPane = pane
+	}
+
+	// Start delayed dog session now that hook is set
+	// This ensures dog sees the hook when gt prime runs on session start
+	if delayedDogInfo != nil {
+		pane, err := delayedDogInfo.StartDelayedSession()
+		if err != nil {
+			return fmt.Errorf("starting delayed dog session: %w", err)
 		}
 		targetPane = pane
 	}
