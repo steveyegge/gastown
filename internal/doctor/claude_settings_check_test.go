@@ -441,11 +441,11 @@ func TestClaudeSettingsCheck_MultipleStaleFiles(t *testing.T) {
 	if result.Status != StatusError {
 		t.Errorf("expected StatusError for multiple stale files, got %v", result.Status)
 	}
-	// 3 stale files + 1 missing settings.local.json = 4 issues
-	// We report both stale settings.json AND missing settings.local.json because
-	// the stale file might have local modifications needing manual review
-	if !strings.Contains(result.Message, "4") {
-		t.Errorf("expected message about 4 issues (3 stale + 1 missing), got %q", result.Message)
+	// 3 stale files + 3 missing settings.local.json = 6 issues
+	// Each directory with stale settings.json also reports missing settings.local.json
+	// because the stale file might have local modifications needing manual review
+	if !strings.Contains(result.Message, "6") {
+		t.Errorf("expected message about 6 issues (3 stale + 3 missing), got %q", result.Message)
 	}
 }
 
@@ -530,8 +530,10 @@ func TestClaudeSettingsCheck_FixDeletesStaleFile(t *testing.T) {
 func TestClaudeSettingsCheck_SkipsNonRigDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create directories that should be skipped
-	for _, skipDir := range []string{"mayor", "deacon", "daemon", ".git", "docs", ".hidden"} {
+	// Create directories that should be skipped as rigs
+	// Note: don't use mayor/deacon here because those are legitimate town-level agent
+	// directories - creating subdirs there triggers missing settings detection
+	for _, skipDir := range []string{"daemon", ".git", "docs", ".hidden"} {
 		dir := filepath.Join(tmpDir, skipDir, "witness", "rig", ".claude")
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
@@ -546,13 +548,8 @@ func TestClaudeSettingsCheck_SkipsNonRigDirectories(t *testing.T) {
 
 	_ = check.Run(ctx)
 
-	// Should only find mayor and deacon settings in their specific locations
-	// The witness settings in these dirs should be ignored
-	// Since we didn't create valid mayor/deacon settings, those will be stale
-	// But the ones in "mayor/witness/rig/.claude" should be ignored
-
 	// Count how many stale files were found - should be 0 since none of the
-	// skipped directories have their settings detected
+	// skipped directories (daemon, .git, docs, .hidden) are detected as rigs
 	if len(check.staleSettings) != 0 {
 		t.Errorf("expected 0 stale files (skipped dirs), got %d", len(check.staleSettings))
 	}
@@ -1249,9 +1246,12 @@ func TestClaudeSettingsCheck_MixedMissingAndStale(t *testing.T) {
 		t.Errorf("expected StatusError for mixed issues, got %v", result.Status)
 	}
 
-	// Should have 2 issues: 1 missing (refinery) + 1 stale (mayor settings.json)
-	if len(check.staleSettings) != 2 {
-		t.Errorf("expected 2 stale settings, got %d: %+v", len(check.staleSettings), check.staleSettings)
+	// Should have 3 issues:
+	// 1. mayor stale settings.json
+	// 2. mayor missing settings.local.json (reported separately from stale)
+	// 3. refinery missing settings.local.json
+	if len(check.staleSettings) != 3 {
+		t.Errorf("expected 3 stale settings, got %d: %+v", len(check.staleSettings), check.staleSettings)
 	}
 
 	// Verify we have both types
