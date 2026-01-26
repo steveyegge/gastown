@@ -2,30 +2,45 @@
 
 ## Summary
 
-When the tmux server crashes or agents die unexpectedly, we lose running Claude processes but retain valuable context in tmux scrollback buffers. This design proposes a `gt recover` command that captures scrollback history and injects it into newly spawned agents, enabling them to resume work with full conversational context.
+When the tmux server crashes or polecats die unexpectedly, we lose running Claude processes but retain valuable context in tmux scrollback buffers. This design proposes a `gt recover` command that captures scrollback history and injects it into newly spawned polecats, enabling them to resume their latest task with conversational context.
+
+## Scope
+
+**In scope:** Polecat recovery only. Polecats are the workhorses that hold task-specific context worth preserving.
+
+**Out of scope:** Infrastructure agents (Mayor, Deacon, Witness, Refinery). These can be recovered through existing mechanisms (restart + bead state) since their context is more procedural than task-specific.
 
 ## Problem Statement
 
 Currently, when a crash occurs:
 
 1. **Tmux server exits** - All sessions and processes are lost
-2. **Agent restarts** - New Claude instance starts fresh
+2. **Polecat restarts** - New Claude instance starts fresh
 3. **Handoff bead read** - Agent gets structured state (task, files, status)
 4. **Context gap** - Agent lacks the conversation history, reasoning, and partial work
 
-The handoff bead system captures *what* the agent was doing, but not *how* they were thinking about it or *where* they were in the conversation.
+The handoff bead system captures *what* the polecat was doing, but not *how* they were thinking about it or *where* they were in the conversation.
 
 ## Proposed Solution
 
 ### New Command: `gt recover`
 
 ```bash
-gt recover                    # Interactive: list crashed sessions, pick one
-gt recover <session>          # Recover specific session
-gt recover --all              # Recover all crashed/restorable sessions
+gt recover                    # Interactive: list crashed polecat sessions
+gt recover <session>          # Recover specific polecat
+gt recover --all              # Recover all crashed polecats
 gt recover --dry-run          # Show what would be recovered
-gt recover --context-lines N  # Limit scrollback to last N lines (default: 5000)
 ```
+
+### Context Limits
+
+We want to capture the **latest task context**, not the entire session history. The limit is based on Claude's context window:
+
+- **Target:** ~60% of 200k token context = ~120k tokens for recovery context
+- **Rough conversion:** ~4 chars per token = ~480k characters = ~12k lines (at 40 chars/line avg)
+- **Default limit:** 10,000 lines of scrollback (conservative estimate)
+
+This leaves room for the new task prompt, tool outputs, and agent reasoning while capturing the most recent work.
 
 ### Recovery Flow
 
@@ -189,18 +204,19 @@ New config options in `gt.toml`:
 ```toml
 [recovery]
 enabled = true
-auto_recover = false          # Auto-recover on gt start?
-max_context_lines = 5000      # Scrollback limit
+auto_recover = false          # Auto-recover polecats on gt start?
+max_context_lines = 10000     # ~120k tokens worth of scrollback
 snapshot_interval = "5m"      # How often to snapshot (if enabled)
 snapshot_dir = ".gt/snapshots"
 
 [recovery.prompts]
 # Customizable recovery prompt template
 template = """
-You crashed mid-task. Previous context:
+You crashed mid-task. Here's your recent conversation context:
+
 {{.Scrollback}}
 
-Resume your work.
+Resume from where you left off.
 """
 ```
 
@@ -236,9 +252,9 @@ Attach with: tmux attach -t gt-pixelsrc-witness
 ### Edge Cases
 
 1. **No scrollback available** - Fall back to bead-only recovery
-2. **Scrollback too large** - Truncate to last N lines, summarize older content
+2. **Scrollback exceeds limit** - Truncate to last 10k lines (most recent context)
 3. **Corrupted scrollback** - Skip parsing, inject raw text
-4. **Multiple crashes** - Recover in dependency order (deacon first, then witnesses)
+4. **Multiple polecats crashed** - Recover each independently (no ordering required)
 5. **Mid-tool-execution** - Detect and warn about partial file writes, incomplete commands
 
 ### Security Considerations
@@ -278,10 +294,9 @@ Attach with: tmux attach -t gt-pixelsrc-witness
 
 ## Open Questions
 
-1. Should we summarize long scrollbacks using Claude before injection?
-2. How do we handle recovery of polecats vs infrastructure agents differently?
-3. Should recovery be opt-in or opt-out per agent type?
-4. How do we prevent recovery loops (crash -> recover -> crash)?
+1. Should we attempt to parse and extract just the "current task" portion of scrollback, or is a simple line limit sufficient?
+2. Should recovery be opt-in or opt-out per polecat?
+3. How do we detect that a polecat is in a bad state that will just crash again? (Defer for now - observe in practice first)
 
 ## Related
 
