@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt mail check --inject && bd decision check --inject && gt decision turn-clear"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && (gt mail check --inject || true) && (bd decision check --inject || true) && (gt decision turn-clear || true)"
           }
         ]
       }
@@ -92,7 +92,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && _stdin=$(cat) && gt decision turn-check --soft; echo \"$_stdin\" | gt costs record"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && _stdin=$(cat) && (gt decision turn-check --soft || true); echo \"$_stdin\" | gt costs record"
           }
         ]
       }
