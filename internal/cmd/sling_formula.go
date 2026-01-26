@@ -112,7 +112,7 @@ func runSlingFormula(args []string) error {
 				targetPane = "<dog-pane>"
 			} else {
 				// Dispatch to dog
-				dispatchInfo, dispatchErr := DispatchToDog(dogName, slingCreate)
+				dispatchInfo, dispatchErr := DispatchToDog(dogName, slingCreate, formulaName)
 				if dispatchErr != nil {
 					return fmt.Errorf("dispatching to dog: %w", dispatchErr)
 				}
