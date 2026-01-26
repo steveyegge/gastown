@@ -215,7 +215,7 @@ func (m *DoltServerManager) EnsureRunning() error {
 		m.lastCheck = time.Now()
 		if err := m.checkHealthLocked(); err != nil {
 			m.logger("Dolt server unhealthy: %v, restarting...", err)
-			m.stopLocked()
+			_ = m.stopLocked()
 			time.Sleep(m.config.RestartDelay)
 			return m.startLocked()
 		}
@@ -273,14 +273,14 @@ func (m *DoltServerManager) startLocked() error {
 	setSysProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		_ = logFile.Close()
 		return fmt.Errorf("starting dolt sql-server: %w", err)
 	}
 
 	// Don't wait for it - it's a long-running server
 	go func() {
 		_ = cmd.Wait()
-		logFile.Close()
+		_ = logFile.Close()
 	}()
 
 	m.process = cmd.Process
@@ -312,6 +312,8 @@ func (m *DoltServerManager) Stop() error {
 }
 
 // stopLocked stops the Dolt server. Must be called with m.mu held.
+//
+//nolint:unparam // error return kept for future extensibility and API consistency
 func (m *DoltServerManager) stopLocked() error {
 	pid, running := m.isRunning()
 	if !running {
