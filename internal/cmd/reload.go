@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -51,6 +53,14 @@ var (
 	reloadForce    bool
 )
 
+// pidChange tracks before/after PIDs for a service
+type pidChange struct {
+	name     string
+	oldPID   int
+	newPID   int
+	reloaded bool // true if PID actually changed
+}
+
 func init() {
 	reloadCmd.Flags().BoolVarP(&reloadQuiet, "quiet", "q", false, "Only show errors")
 	reloadCmd.Flags().BoolVar(&reloadMayor, "mayor", false, "Also reload Mayor session (kills current session if attached)")
@@ -73,6 +83,21 @@ func runReload(cmd *cobra.Command, args []string) error {
 	rigs := discoverRigs(townRoot)
 	allOK := true
 
+	// Track PID changes for summary
+	var pidChanges []pidChange
+
+	// Capture gt daemon PID before
+	_, gtOldPID, _ := daemon.IsRunning(townRoot)
+
+	// Capture bd daemon PIDs before
+	bdWorkspaces := findBdWorkspaces(townRoot)
+	bdOldPIDs := make(map[string]int)
+	for _, ws := range bdWorkspaces {
+		if pid := getBdDaemonPID(ws); pid > 0 {
+			bdOldPIDs[ws] = pid
+		}
+	}
+
 	fmt.Println("═══ Stopping services ═══")
 	fmt.Println()
 
@@ -86,42 +111,104 @@ func runReload(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 2: Stop rig agents (refineries, witnesses)
-	for _, rigName := range rigs {
-		// Stop refinery
-		sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
-		wasRunning, err := reloadStopSession(t, sessionName)
-		if err != nil {
-			printReloadStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
-			allOK = false
-		} else if wasRunning {
-			printReloadStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "stopped")
-		}
+	// Phase 2 & 3: Stop all sessions in parallel (rig agents + town sessions)
+	// This dramatically reduces reload time since each stop has a 2s grace period
+	type stopResult struct {
+		name    string
+		ok      bool
+		detail  string
+		running bool
+	}
+	var stopResults []stopResult
+	var stopMu sync.Mutex
+	var stopWg sync.WaitGroup
 
-		// Stop witness
-		sessionName = fmt.Sprintf("gt-%s-witness", rigName)
-		wasRunning, err = reloadStopSession(t, sessionName)
-		if err != nil {
-			printReloadStatus(fmt.Sprintf("Witness (%s)", rigName), false, err.Error())
-			allOK = false
-		} else if wasRunning {
-			printReloadStatus(fmt.Sprintf("Witness (%s)", rigName), true, "stopped")
-		}
+	// Collect all sessions to stop
+	var sessionsToStop []struct {
+		name        string
+		sessionName string
+		isTown      bool
+		townSession session.TownSession
 	}
 
-	// Phase 3: Stop town-level sessions (Deacon, Boot, optionally Mayor)
+	// Rig agents
+	for _, rigName := range rigs {
+		sessionsToStop = append(sessionsToStop,
+			struct {
+				name        string
+				sessionName string
+				isTown      bool
+				townSession session.TownSession
+			}{fmt.Sprintf("Refinery (%s)", rigName), fmt.Sprintf("gt-%s-refinery", rigName), false, session.TownSession{}},
+			struct {
+				name        string
+				sessionName string
+				isTown      bool
+				townSession session.TownSession
+			}{fmt.Sprintf("Witness (%s)", rigName), fmt.Sprintf("gt-%s-witness", rigName), false, session.TownSession{}},
+		)
+	}
+
+	// Town sessions (except Deacon - handled separately via KillSessionWithProcesses)
 	for _, ts := range session.TownSessions() {
-		// Skip Mayor unless --mayor flag
 		if ts.Name == "Mayor" && !reloadMayor {
 			continue
 		}
-		stopped, err := session.StopTownSession(t, ts, reloadForce)
-		if err != nil {
-			printReloadStatus(ts.Name, false, err.Error())
-			allOK = false
-		} else if stopped {
-			printReloadStatus(ts.Name, true, "stopped")
+		if ts.Name == "Deacon" {
+			continue // Handled below via KillSessionWithProcesses
 		}
+		sessionsToStop = append(sessionsToStop, struct {
+			name        string
+			sessionName string
+			isTown      bool
+			townSession session.TownSession
+		}{ts.Name, ts.SessionID, true, ts})
+	}
+
+	// Stop all in parallel
+	for _, s := range sessionsToStop {
+		stopWg.Add(1)
+		go func(name, sessionName string, isTown bool, ts session.TownSession) {
+			defer stopWg.Done()
+			var wasRunning bool
+			var err error
+
+			if isTown {
+				wasRunning, err = session.StopTownSession(t, ts, reloadForce)
+			} else {
+				wasRunning, err = reloadStopSession(t, sessionName)
+			}
+
+			stopMu.Lock()
+			if err != nil {
+				// "session not found" is not an error - session already stopped
+				if strings.Contains(err.Error(), "session not found") {
+					// Don't report, already stopped
+				} else {
+					stopResults = append(stopResults, stopResult{name, false, err.Error(), true})
+				}
+			} else if wasRunning {
+				stopResults = append(stopResults, stopResult{name, true, "stopped", true})
+			}
+			stopMu.Unlock()
+		}(s.name, s.sessionName, s.isTown, s.townSession)
+	}
+	stopWg.Wait()
+
+	// Stop Deacon - use KillSessionWithProcesses to properly kill process tree
+	// (avoids pkill -f pattern matching which can kill unrelated processes)
+	deaconSession := session.DeaconSessionName()
+	if running, _ := t.HasSession(deaconSession); running {
+		_ = t.KillSessionWithProcesses(deaconSession)
+		printReloadStatus("Deacon", true, "stopped")
+	}
+
+	// Print results
+	for _, r := range stopResults {
+		if !r.ok {
+			allOK = false
+		}
+		printReloadStatus(r.name, r.ok, r.detail)
 	}
 
 	// Phase 4: Stop gt daemon
@@ -135,26 +222,44 @@ func runReload(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 5: Stop all bd daemons (errors are non-fatal - daemon may already be stopped)
-	bdWorkspaces := findBdWorkspaces(townRoot)
+	// Phase 5: Kill bd daemons by PID (avoids pkill pattern matching)
 	for _, ws := range bdWorkspaces {
-		if err := stopBdDaemon(ws); err != nil {
-			// Non-fatal - daemon may already be stopped
-			printReloadStatus(fmt.Sprintf("bd daemon (%s)", shortPath(ws)), true, "stopped (was not running)")
-		} else {
-			printReloadStatus(fmt.Sprintf("bd daemon (%s)", shortPath(ws)), true, "stopped")
+		pidFile := filepath.Join(ws, ".beads", "daemon.pid")
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			printReloadStatus(fmt.Sprintf("bd daemon (%s)", shortPath(ws)), true, "not running")
+			continue
 		}
+		pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+		if pid == 0 {
+			printReloadStatus(fmt.Sprintf("bd daemon (%s)", shortPath(ws)), true, "not running")
+			continue
+		}
+		// Check if process is actually running
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err != nil {
+			printReloadStatus(fmt.Sprintf("bd daemon (%s)", shortPath(ws)), true, "not running")
+			continue
+		}
+		// Kill by specific PID - SIGTERM then SIGKILL
+		_ = exec.Command("kill", "-TERM", strconv.Itoa(pid)).Run()
+		time.Sleep(500 * time.Millisecond)
+		// Check if still alive, force kill if needed
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err == nil {
+			_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
+		}
+		printReloadStatus(fmt.Sprintf("bd daemon (%s)", shortPath(ws)), true, "stopped")
 	}
 
 	fmt.Println()
 	fmt.Println("═══ Starting services ═══")
 	fmt.Println()
 
-	// Phase 6: Start bd daemons
+	// Phase 6: Start bd daemons sequentially (parallel causes database contention)
 	for _, ws := range bdWorkspaces {
-		if err := startBdDaemon(ws); err != nil {
-			printReloadStatus(fmt.Sprintf("bd daemon (%s)", shortPath(ws)), false, err.Error())
+		err := startBdDaemon(ws)
+		if err != nil {
 			allOK = false
+			printReloadStatus(fmt.Sprintf("bd daemon (%s)", shortPath(ws)), false, err.Error())
 		} else {
 			printReloadStatus(fmt.Sprintf("bd daemon (%s)", shortPath(ws)), true, "started")
 		}
@@ -225,6 +330,30 @@ func runReload(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Capture new PIDs and build summary
+	_, gtNewPID, _ := daemon.IsRunning(townRoot)
+	if gtOldPID > 0 || gtNewPID > 0 {
+		pidChanges = append(pidChanges, pidChange{
+			name:     "gt daemon",
+			oldPID:   gtOldPID,
+			newPID:   gtNewPID,
+			reloaded: gtOldPID != gtNewPID && gtNewPID > 0,
+		})
+	}
+
+	for _, ws := range bdWorkspaces {
+		newPID := getBdDaemonPID(ws)
+		oldPID := bdOldPIDs[ws]
+		if oldPID > 0 || newPID > 0 {
+			pidChanges = append(pidChanges, pidChange{
+				name:     fmt.Sprintf("bd daemon (%s)", shortPath(ws)),
+				oldPID:   oldPID,
+				newPID:   newPID,
+				reloaded: oldPID != newPID && newPID > 0,
+			})
+		}
+	}
+
 	// Summary
 	fmt.Println()
 	if allOK {
@@ -232,6 +361,37 @@ func runReload(cmd *cobra.Command, args []string) error {
 		_ = events.LogFeed(events.TypeBoot, "gt", events.BootPayload("reload", []string{"all"}))
 	} else {
 		fmt.Printf("%s Some services failed to reload\n", style.Bold.Render("✗"))
+	}
+
+	// PID change summary
+	if len(pidChanges) > 0 {
+		fmt.Println()
+		fmt.Println("═══ PID Changes ═══")
+		fmt.Println()
+		allReloaded := true
+		for _, pc := range pidChanges {
+			if pc.reloaded {
+				fmt.Printf("%s %s: %d → %d\n", style.SuccessPrefix, pc.name,
+					pc.oldPID, pc.newPID)
+			} else if pc.newPID == 0 {
+				fmt.Printf("%s %s: %d → %s\n", style.ErrorPrefix, pc.name,
+					pc.oldPID, style.Dim.Render("not running"))
+				allReloaded = false
+			} else if pc.oldPID == pc.newPID {
+				fmt.Printf("%s %s: %d %s\n", style.WarningPrefix, pc.name,
+					pc.oldPID, style.Dim.Render("(unchanged - not restarted!)"))
+				allReloaded = false
+			} else if pc.oldPID == 0 {
+				fmt.Printf("%s %s: %s → %d\n", style.SuccessPrefix, pc.name,
+					style.Dim.Render("not running"), pc.newPID)
+			}
+		}
+		if !allReloaded {
+			allOK = false
+		}
+	}
+
+	if !allOK {
 		return fmt.Errorf("not all services reloaded")
 	}
 
@@ -367,24 +527,69 @@ func findBdWorkspaces(townRoot string) []string {
 	return unique
 }
 
-// stopBdDaemon stops the bd daemon in a workspace.
+// stopBdDaemon stops the bd daemon in a workspace and waits for it to die.
 func stopBdDaemon(workspace string) error {
-	// bd daemons stop requires workspace path as argument
+	// Get current PID before stopping
+	pidFile := filepath.Join(workspace, ".beads", "daemon.pid")
+	oldPIDData, _ := os.ReadFile(pidFile)
+	oldPID, _ := strconv.Atoi(strings.TrimSpace(string(oldPIDData)))
+
+	if oldPID == 0 {
+		return fmt.Errorf("not running")
+	}
+
+	// Check if process is actually running
+	if _, err := os.Stat(fmt.Sprintf("/proc/%d", oldPID)); err != nil {
+		return fmt.Errorf("not running")
+	}
+
+	// Use RPC shutdown for graceful cleanup (flushes DB, closes connections)
 	cmd := exec.Command("bd", "daemons", "stop", workspace)
-	return cmd.Run()
+	_ = cmd.Run() // Ignore error - we'll verify via /proc
+
+	// Wait for process to actually die (up to 3 seconds)
+	for i := 0; i < 30; i++ {
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", oldPID)); err != nil {
+			return nil // Process is dead
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// RPC didn't kill it in time - escalate to SIGTERM
+	proc, _ := os.FindProcess(oldPID)
+	if proc != nil {
+		_ = proc.Signal(os.Interrupt)
+	}
+
+	// Wait another 2 seconds
+	for i := 0; i < 20; i++ {
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", oldPID)); err != nil {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Still alive - SIGKILL
+	if proc != nil {
+		_ = proc.Kill()
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	if _, err := os.Stat(fmt.Sprintf("/proc/%d", oldPID)); err != nil {
+		return nil
+	}
+
+	return fmt.Errorf("process %d did not die after kill", oldPID)
 }
 
 // startBdDaemon starts the bd daemon in a workspace.
+// During reload, "already running" is an error since we expect fresh starts.
 func startBdDaemon(workspace string) error {
 	cmd := exec.Command("bd", "daemon", "start")
 	cmd.Dir = workspace
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Check if it's already running (not an error)
-		if strings.Contains(string(output), "already running") {
-			return nil
-		}
-		return fmt.Errorf("%s: %s", err, string(output))
+		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(output)))
 	}
 	// Give daemon time to initialize
 	time.Sleep(200 * time.Millisecond)
@@ -398,4 +603,22 @@ func shortPath(path string) string {
 		return "~" + path[len(home):]
 	}
 	return path
+}
+
+// getBdDaemonPID returns the PID of the bd daemon for a workspace, or 0 if not running.
+func getBdDaemonPID(workspace string) int {
+	pidFile := filepath.Join(workspace, ".beads", "daemon.pid")
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0
+	}
+	// Verify process is actually running by checking /proc
+	if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err != nil {
+		return 0
+	}
+	return pid
 }
