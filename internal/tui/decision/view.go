@@ -15,6 +15,11 @@ func (m *Model) renderView() string {
 		return "Terminal too small. Please resize."
 	}
 
+	// Peek mode - show terminal content instead of normal view
+	if m.peeking {
+		return m.renderPeekMode()
+	}
+
 	// Title
 	b.WriteString(titleStyle.Render("🎯 Decision Watch"))
 	b.WriteString("\n")
@@ -67,7 +72,7 @@ func (m *Model) renderView() string {
 		b.WriteString(m.help.View(m.keys))
 	} else {
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("j/k: navigate  1-4: select option  r: rationale  enter: confirm  ?: help  q: quit"))
+		b.WriteString(helpStyle.Render("j/k: navigate  1-4: select  r: rationale  p: peek terminal  enter: confirm  ?: help  q: quit"))
 	}
 
 	return b.String()
@@ -338,4 +343,46 @@ func formatTimeAgo(t time.Time) string {
 		}
 		return fmt.Sprintf("%d days ago", days)
 	}
+}
+
+// renderPeekMode renders the terminal peek overlay
+func (m *Model) renderPeekMode() string {
+	var b strings.Builder
+
+	// Header
+	header := fmt.Sprintf("─── Terminal Peek: %s ", m.peekSessionName)
+	header += strings.Repeat("─", max(0, m.width-len(header)-2))
+	b.WriteString(titleStyle.Render(header))
+	b.WriteString("\n\n")
+
+	// Content - show last lines that fit in the viewport
+	lines := strings.Split(m.peekContent, "\n")
+	maxLines := m.height - 6 // Leave room for header and footer
+	if maxLines < 5 {
+		maxLines = 5
+	}
+
+	startLine := 0
+	if len(lines) > maxLines {
+		startLine = len(lines) - maxLines
+	}
+
+	for i := startLine; i < len(lines); i++ {
+		line := lines[i]
+		// Truncate long lines
+		if len(line) > m.width-2 {
+			line = line[:m.width-5] + "..."
+		}
+		b.WriteString(detailValueStyle.Render(line))
+		b.WriteString("\n")
+	}
+
+	// Footer
+	b.WriteString("\n")
+	footer := strings.Repeat("─", m.width-2)
+	b.WriteString(helpStyle.Render(footer))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("Press any key to close"))
+
+	return b.String()
 }

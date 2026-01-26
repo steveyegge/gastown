@@ -20,6 +20,7 @@ type KeyMap struct {
 	Confirm   key.Binding
 	Rationale key.Binding
 	Text      key.Binding
+	Peek      key.Binding // Peek at agent's terminal
 	Cancel    key.Binding
 	Refresh   key.Binding
 
@@ -79,6 +80,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("t"),
 			key.WithHelp("t", "text input"),
 		),
+		Peek: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "peek terminal"),
+		),
 		Cancel: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "cancel"),
@@ -108,7 +113,7 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns key bindings for the short help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Select1, k.Confirm, k.Rationale, k.Quit, k.Help}
+	return []key.Binding{k.Up, k.Down, k.Select1, k.Confirm, k.Rationale, k.Peek, k.Quit, k.Help}
 }
 
 // FullHelp returns key bindings for the full help view.
@@ -116,7 +121,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.PageUp, k.PageDown},
 		{k.Select1, k.Select2, k.Select3, k.Select4},
-		{k.Confirm, k.Rationale, k.Text, k.Cancel},
+		{k.Confirm, k.Rationale, k.Text, k.Peek, k.Cancel},
 		{k.Refresh, k.FilterHigh, k.FilterAll},
 		{k.Help, k.Quit},
 	}

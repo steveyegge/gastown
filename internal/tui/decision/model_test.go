@@ -507,6 +507,39 @@ func TestSelectingOptionLocksDecision(t *testing.T) {
 	}
 }
 
+// TestGetSessionName tests converting RequestedBy to tmux session name
+func TestGetSessionName(t *testing.T) {
+	tests := []struct {
+		requestedBy string
+		expected    string
+		shouldErr   bool
+	}{
+		{"gastown/crew/decision_point", "gt-gastown-decision_point", false},
+		{"beads/crew/wolf", "gt-beads-wolf", false},
+		{"myrig/polecats/alpha", "gt-myrig-alpha", false},
+		{"overseer", "", true},   // Cannot peek human
+		{"human", "", true},      // Cannot peek human
+		{"", "", true},           // Empty
+		{"singlepart", "", true}, // Invalid format
+	}
+
+	for _, tt := range tests {
+		result, err := getSessionName(tt.requestedBy)
+		if tt.shouldErr {
+			if err == nil {
+				t.Errorf("getSessionName(%q) expected error, got nil", tt.requestedBy)
+			}
+		} else {
+			if err != nil {
+				t.Errorf("getSessionName(%q) unexpected error: %v", tt.requestedBy, err)
+			}
+			if result != tt.expected {
+				t.Errorf("getSessionName(%q) = %q, want %q", tt.requestedBy, result, tt.expected)
+			}
+		}
+	}
+}
+
 // TestParseOptionsWithProsAndCons tests parsing options that include pros/cons sections
 func TestParseOptionsWithProsAndCons(t *testing.T) {
 	desc := `## Question

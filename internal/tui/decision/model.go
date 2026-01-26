@@ -260,6 +260,12 @@ type Model struct {
 	err            error
 	status         string
 
+	// Peek state - for viewing agent terminal
+	peeking         bool
+	peekContent     string
+	peekSessionName string
+	peekViewport    viewport.Model
+
 	// Polling
 	pollTicker *time.Ticker
 	done       chan struct{}
@@ -317,6 +323,13 @@ type tickMsg time.Time
 type resolvedMsg struct {
 	id  string
 	err error
+}
+
+// peekMsg is sent when terminal content is captured
+type peekMsg struct {
+	sessionName string
+	content     string
+	err         error
 }
 
 // fetchDecisions fetches pending decisions from bd
@@ -379,6 +392,57 @@ func (m *Model) resolveDecision(decisionID string, choice int, rationale string)
 	}
 }
 
+// getSessionName converts a RequestedBy path to a tmux session name
+// e.g., "gastown/crew/decision_point" -> "gt-gastown-decision_point"
+func getSessionName(requestedBy string) (string, error) {
+	if requestedBy == "" {
+		return "", fmt.Errorf("no requestor specified")
+	}
+
+	// Handle special cases
+	if requestedBy == "overseer" || requestedBy == "human" {
+		return "", fmt.Errorf("cannot peek human session")
+	}
+
+	// Parse rig/type/name format
+	parts := strings.Split(requestedBy, "/")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("invalid requestor format: %s", requestedBy)
+	}
+
+	rig := parts[0]
+	agentName := parts[len(parts)-1]
+
+	// Construct session name: gt-<rig>-<agent>
+	return fmt.Sprintf("gt-%s-%s", rig, agentName), nil
+}
+
+// captureTerminal captures the content of an agent's terminal
+func (m *Model) captureTerminal(sessionName string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// First check if session exists
+		checkCmd := exec.CommandContext(ctx, "tmux", "has-session", "-t", sessionName)
+		if err := checkCmd.Run(); err != nil {
+			return peekMsg{sessionName: sessionName, err: fmt.Errorf("session '%s' not found", sessionName)}
+		}
+
+		// Capture pane content with scrollback
+		cmd := exec.CommandContext(ctx, "tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-100")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			return peekMsg{sessionName: sessionName, err: fmt.Errorf("capture failed: %s", stderr.String())}
+		}
+
+		return peekMsg{sessionName: sessionName, content: stdout.String()}
+	}
+}
+
 // Update handles messages
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -392,6 +456,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textInput.SetWidth(msg.Width - 10)
 
 	case tea.KeyMsg:
+		// Handle peek mode - any key dismisses
+		if m.peeking {
+			m.peeking = false
+			m.peekContent = ""
+			m.peekSessionName = ""
+			return m, nil
+		}
+
 		// Handle input mode first
 		if m.inputMode != ModeNormal {
 			return m.handleInputMode(msg)
@@ -447,6 +519,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textInput.Focus()
 			m.textInput.SetValue("")
 			m.textInput.Placeholder = "Enter custom response..."
+
+		case key.Matches(msg, m.keys.Peek):
+			if len(m.decisions) > 0 && m.selected < len(m.decisions) {
+				d := m.decisions[m.selected]
+				sessionName, err := getSessionName(d.RequestedBy)
+				if err != nil {
+					m.status = fmt.Sprintf("Cannot peek: %v", err)
+				} else {
+					m.status = fmt.Sprintf("Peeking at %s...", sessionName)
+					cmds = append(cmds, m.captureTerminal(sessionName))
+				}
+			}
 
 		case key.Matches(msg, m.keys.Confirm):
 			if m.selectedOption > 0 && len(m.decisions) > 0 && m.selected < len(m.decisions) {
@@ -518,6 +602,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Resolved: %s", msg.id)
 			m.clearActiveDecision() // Clear all input state after resolution
 			cmds = append(cmds, m.fetchDecisions())
+		}
+
+	case peekMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Peek failed: %v", msg.err)
+		} else {
+			m.peeking = true
+			m.peekSessionName = msg.sessionName
+			m.peekContent = msg.content
+			m.peekViewport.SetContent(msg.content)
+			m.peekViewport.GotoBottom()
+			m.status = fmt.Sprintf("Peeking: %s (press any key to close)", msg.sessionName)
 		}
 	}
 
