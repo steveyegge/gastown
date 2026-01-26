@@ -273,9 +273,12 @@ func TestConvoyHandler_FetchConvoysError(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	// Should show the empty state for convoys section
-	if !strings.Contains(body, "No active convoys") {
-		t.Error("Response should show empty state when fetch fails")
+	// Should show the error in the panel
+	if !strings.Contains(body, "panel-error") {
+		t.Error("Response should show error panel when fetch fails")
+	}
+	if !strings.Contains(body, "fetch failed") {
+		t.Error("Response should show error message in panel")
 	}
 }
 
@@ -1088,4 +1091,146 @@ func TestConvoyHandler_NonFatalErrors(t *testing.T) {
 	if !strings.Contains(body, "hq-cv-test") {
 		t.Error("Response should contain convoy data even when other fetches fail")
 	}
+
+	// Errors should be displayed in panels
+	if !strings.Contains(body, "panel-error") {
+		t.Error("Response should display errors in panel-error divs")
+	}
+	if !strings.Contains(body, "fetch failed") {
+		t.Error("Response should display error message text")
+	}
+}
+
+// TestConvoyHandler_ErrorsDisplayedInPanels verifies that fetch errors are displayed
+// in their respective panels with the panel-error class.
+func TestConvoyHandler_ErrorsDisplayedInPanels(t *testing.T) {
+	tests := []struct {
+		name      string
+		mockSetup func() *MockConvoyFetcherWithAllErrors
+		wantError string
+	}{
+		{
+			name: "mail fetch error displayed",
+			mockSetup: func() *MockConvoyFetcherWithAllErrors {
+				return &MockConvoyFetcherWithAllErrors{
+					MailError: errors.New("bd timed out after 5s"),
+				}
+			},
+			wantError: "bd timed out after 5s",
+		},
+		{
+			name: "convoys fetch error displayed",
+			mockSetup: func() *MockConvoyFetcherWithAllErrors {
+				return &MockConvoyFetcherWithAllErrors{
+					ConvoysError: errors.New("listing convoys: connection refused"),
+				}
+			},
+			wantError: "listing convoys: connection refused",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := tt.mockSetup()
+			handler, err := NewConvoyHandler(mock)
+			if err != nil {
+				t.Fatalf("NewConvoyHandler() error = %v", err)
+			}
+
+			req := httptest.NewRequest("GET", "/", nil)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+			}
+
+			body := w.Body.String()
+
+			// Should contain panel-error class
+			if !strings.Contains(body, "panel-error") {
+				t.Error("Response should contain panel-error class")
+			}
+
+			// Should contain the specific error message
+			if !strings.Contains(body, tt.wantError) {
+				t.Errorf("Response should contain error message %q", tt.wantError)
+			}
+		})
+	}
+}
+
+// MockConvoyFetcherWithAllErrors supports configurable errors for all fetch methods.
+type MockConvoyFetcherWithAllErrors struct {
+	ConvoysError     error
+	MergeQueueError  error
+	PolecatsError    error
+	MailError        error
+	RigsError        error
+	DogsError        error
+	EscalationsError error
+	HealthError      error
+	QueuesError      error
+	SessionsError    error
+	HooksError       error
+	MayorError       error
+	IssuesError      error
+	ActivityError    error
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchConvoys() ([]ConvoyRow, error) {
+	return nil, m.ConvoysError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchMergeQueue() ([]MergeQueueRow, error) {
+	return nil, m.MergeQueueError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchPolecats() ([]PolecatRow, error) {
+	return nil, m.PolecatsError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchMail() ([]MailRow, error) {
+	return nil, m.MailError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchRigs() ([]RigRow, error) {
+	return nil, m.RigsError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchDogs() ([]DogRow, error) {
+	return nil, m.DogsError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchEscalations() ([]EscalationRow, error) {
+	return nil, m.EscalationsError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchHealth() (*HealthRow, error) {
+	return nil, m.HealthError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchQueues() ([]QueueRow, error) {
+	return nil, m.QueuesError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchSessions() ([]SessionRow, error) {
+	return nil, m.SessionsError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchHooks() ([]HookRow, error) {
+	return nil, m.HooksError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchMayor() (*MayorStatus, error) {
+	return nil, m.MayorError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchIssues() ([]IssueRow, error) {
+	return nil, m.IssuesError
+}
+
+func (m *MockConvoyFetcherWithAllErrors) FetchActivity() ([]ActivityRow, error) {
+	return nil, m.ActivityError
 }
