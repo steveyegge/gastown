@@ -494,6 +494,12 @@ func runShutdown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Prevent tmux server from exiting when all sessions are killed.
+	// By default, tmux exits when there are no sessions (exit-empty on).
+	// This ensures the server stays running for subsequent `gt up`.
+	// Ignore errors - if there's no server, nothing to configure.
+	_ = t.SetExitEmpty(false)
+
 	if shutdownGraceful {
 		return runGracefulShutdown(t, toStop, townRoot)
 	}
