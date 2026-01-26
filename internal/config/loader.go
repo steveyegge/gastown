@@ -251,6 +251,9 @@ func NewRigConfig(name, gitURL string) *RigConfig {
 		Version: CurrentRigConfigVersion,
 		Name:    name,
 		GitURL:  gitURL,
+		Git: &RigGitConfig{
+			Origin: gitURL,
+		},
 	}
 }
 
