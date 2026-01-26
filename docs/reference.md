@@ -626,7 +626,6 @@ bd create --title="..." --type=task
 bd update <id> --status=in_progress
 bd close <id>
 bd dep add <child> <parent>  # child depends on parent
-bd sync                      # Push/pull changes
 ```
 
 ## Patrol Agents

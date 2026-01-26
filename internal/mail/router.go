@@ -281,21 +281,48 @@ type agentBead struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Status      string `json:"status"`
+	CreatedBy   string `json:"created_by"`
 }
 
 // agentBeadToAddress converts an agent bead to a mail address.
-// Uses the agent bead ID to derive the address:
-//   - gt-mayor → mayor/
-//   - gt-deacon → deacon/
-//   - gt-gastown-witness → gastown/witness
-//   - gt-gastown-crew-max → gastown/max
-//   - gt-gastown-polecat-Toast → gastown/Toast
+// Handles both legacy gt- prefixed IDs and current hq- prefixed IDs:
+//   - hq-mayor → mayor/
+//   - hq-deacon → deacon/
+//   - hq-{hash} → uses created_by field or parses title/description
+//   - gt-mayor → mayor/ (legacy)
+//   - gt-gastown-crew-max → gastown/max (legacy)
 func agentBeadToAddress(bead *agentBead) string {
 	if bead == nil {
 		return ""
 	}
 
 	id := bead.ID
+
+	// Handle hq- prefixed IDs (current format)
+	if strings.HasPrefix(id, "hq-") {
+		// Well-known town-level agents
+		if id == "hq-mayor" {
+			return "mayor/"
+		}
+		if id == "hq-deacon" {
+			return "deacon/"
+		}
+
+		// For rig-level agents, created_by often contains the agent address
+		// e.g., "beads/crew/emma" for an agent that self-registered
+		if bead.CreatedBy != "" && strings.Contains(bead.CreatedBy, "/") {
+			// Validate it looks like an agent address (rig/role/name or rig/name)
+			parts := strings.Split(bead.CreatedBy, "/")
+			if len(parts) >= 2 {
+				return bead.CreatedBy
+			}
+		}
+
+		// Fall back to parsing description for role_type and rig
+		return parseAgentAddressFromDescription(bead.Description)
+	}
+
+	// Handle gt- prefixed IDs (legacy format)
 	if !strings.HasPrefix(id, "gt-") {
 		return "" // Not a valid agent bead ID
 	}
@@ -321,6 +348,37 @@ func agentBeadToAddress(bead *agentBead) string {
 		}
 		return ""
 	}
+}
+
+// parseAgentAddressFromDescription extracts agent address from description metadata.
+// Looks for "role_type: X" and "rig: Y" patterns in the description.
+func parseAgentAddressFromDescription(desc string) string {
+	var roleType, rig string
+
+	for _, line := range strings.Split(desc, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "role_type:") {
+			roleType = strings.TrimSpace(strings.TrimPrefix(line, "role_type:"))
+		} else if strings.HasPrefix(line, "rig:") {
+			rig = strings.TrimSpace(strings.TrimPrefix(line, "rig:"))
+		}
+	}
+
+	// Handle null values from description
+	if rig == "null" || rig == "" {
+		rig = ""
+	}
+	if roleType == "null" || roleType == "" {
+		return ""
+	}
+
+	// Town-level agents (no rig)
+	if rig == "" {
+		return roleType + "/"
+	}
+
+	// Rig-level agents: rig/name (role_type is the agent name for crew/polecat)
+	return rig + "/" + roleType
 }
 
 // ResolveGroupAddress resolves a @group address to individual recipient addresses.

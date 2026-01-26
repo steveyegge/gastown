@@ -275,14 +275,6 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 		return ErrSessionNotFound
 	}
 
-	// Sync beads before shutdown (non-fatal)
-	if !force {
-		polecatDir := m.polecatDir(polecat)
-		if err := m.syncBeads(polecatDir); err != nil {
-			fmt.Printf("Warning: beads sync failed: %v\n", err)
-		}
-	}
-
 	// Try graceful shutdown first
 	if !force {
 		_ = m.tmux.SendKeysRaw(sessionID, "C-c")
@@ -296,13 +288,6 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 	}
 
 	return nil
-}
-
-// syncBeads runs bd sync in the given directory.
-func (m *SessionManager) syncBeads(workDir string) error {
-	cmd := exec.Command("bd", "sync")
-	cmd.Dir = workDir
-	return cmd.Run()
 }
 
 // IsRunning checks if a polecat session is active.

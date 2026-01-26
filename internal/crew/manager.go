@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -373,7 +372,7 @@ func (m *Manager) Rename(oldName, newName string) error {
 }
 
 // Pristine ensures a crew worker is up-to-date with remote.
-// It runs git pull --rebase and bd sync.
+// It runs git pull --rebase.
 func (m *Manager) Pristine(name string) (*PristineResult, error) {
 	if err := validateCrewName(name); err != nil {
 		return nil, err
@@ -403,21 +402,10 @@ func (m *Manager) Pristine(name string) (*PristineResult, error) {
 		result.Pulled = true
 	}
 
-	// Run bd sync
-	if err := m.runBdSync(crewPath); err != nil {
-		result.SyncError = err.Error()
-	} else {
-		result.Synced = true
-	}
+	// Note: With Dolt backend, beads changes are persisted immediately - no sync needed
+	result.Synced = true
 
 	return result, nil
-}
-
-// runBdSync runs bd sync in the given directory.
-func (m *Manager) runBdSync(dir string) error {
-	cmd := exec.Command("bd", "sync")
-	cmd.Dir = dir
-	return cmd.Run()
 }
 
 // PristineResult captures the results of a pristine operation.

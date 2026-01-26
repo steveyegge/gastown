@@ -156,7 +156,6 @@ gt mail send <addr> -s "Subject" -m "Body"
 bd show <id>                # View issue details
 bd close <id> --reason "..." # Close issue when done
 bd create --title "..."     # File discovered work (don't fix it yourself)
-bd sync                     # Sync beads to remote
 ```
 
 ---
@@ -191,8 +190,7 @@ When your work is done, follow this EXACT checklist - **step 5 is REQUIRED**:
        - For Go projects:    go test ./... && go vet ./...
 [ ] 2. Stage changes:     git add <files>
 [ ] 3. Commit changes:    git commit -m "msg (issue-id)"
-[ ] 4. Sync beads:        bd sync
-[ ] 5. Self-clean:        gt done   ← MANDATORY FINAL STEP
+[ ] 4. Self-clean:        gt done   ← MANDATORY FINAL STEP
 ```
 
 **Quality gates are not optional.** Git worktrees may not trigger pre-commit hooks

@@ -1310,104 +1310,58 @@ type trackedIssueInfo struct {
 	WorkerAge string `json:"worker_age,omitempty"` // How long worker has been on this issue
 }
 
-// getTrackedIssues queries SQLite directly to get issues tracked by a convoy.
-// This is needed because bd dep list doesn't properly show cross-rig external dependencies.
-// Uses batched lookup to avoid N+1 subprocess calls.
+// getTrackedIssues uses bd dep list to get issues tracked by a convoy.
+// Returns issue details including status, type, and worker info.
 func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
-	dbPath := filepath.Join(townBeads, "beads.db")
-
-	// Query tracked dependencies from SQLite
-	// Escape single quotes to prevent SQL injection
-	safeConvoyID := strings.ReplaceAll(convoyID, "'", "''")
-	queryCmd := exec.Command("sqlite3", "-json", dbPath,
-		fmt.Sprintf(`SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, safeConvoyID))
+	// Use bd dep list to get tracked dependencies
+	// Run from town root (parent of .beads) so bd routes correctly
+	townRoot := filepath.Dir(townBeads)
+	depCmd := exec.Command("bd", "--no-daemon", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	depCmd.Dir = townRoot
 
 	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
-	if err := queryCmd.Run(); err != nil {
+	depCmd.Stdout = &stdout
+	if err := depCmd.Run(); err != nil {
 		return nil
 	}
 
+	// Parse the JSON output - bd dep list returns full issue details
 	var deps []struct {
-		DependsOnID string `json:"depends_on_id"`
-		Type        string `json:"type"`
+		ID             string   `json:"id"`
+		Title          string   `json:"title"`
+		Status         string   `json:"status"`
+		IssueType      string   `json:"issue_type"`
+		Assignee       string   `json:"assignee"`
+		DependencyType string   `json:"dependency_type"`
+		Labels         []string `json:"labels"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
 		return nil
 	}
 
-	// First pass: collect all issue IDs and track which rig they belong to
-	type issueRef struct {
-		ID      string
-		RigName string // empty for local issues, rig name for external
-	}
-	issueRefs := make([]issueRef, 0, len(deps))
-	idToDepType := make(map[string]string)
-
+	// Collect non-closed issue IDs for worker lookup
+	openIssueIDs := make([]string, 0, len(deps))
 	for _, dep := range deps {
-		issueID := dep.DependsOnID
-		rigName := "" // Local issue by default
-
-		// Handle external reference format: external:rig:issue-id
-		if strings.HasPrefix(issueID, "external:") {
-			parts := strings.SplitN(issueID, ":", 3)
-			if len(parts) == 3 {
-				rigName = parts[1]   // Extract rig name
-				issueID = parts[2] // Extract the actual issue ID
-			}
-		}
-
-		issueRefs = append(issueRefs, issueRef{ID: issueID, RigName: rigName})
-		idToDepType[issueID] = dep.Type
-	}
-
-	// Query issues, grouped by rig
-	detailsMap := make(map[string]*issueDetails)
-	for _, ref := range issueRefs {
-		var details *issueDetails
-		if ref.RigName != "" {
-			// External reference: query the rig database
-			details = getExternalIssueDetails(townBeads, ref.RigName, ref.ID)
-		} else {
-			// Local reference: query town database
-			details = getIssueDetails(ref.ID)
-		}
-		if details != nil {
-			detailsMap[ref.ID] = details
-		}
-	}
-
-	// Get workers for these issues (only for non-closed issues)
-	openIssueIDs := make([]string, 0)
-	for _, ref := range issueRefs {
-		id := ref.ID
-		if details, ok := detailsMap[id]; ok && details.Status != "closed" {
-			openIssueIDs = append(openIssueIDs, id)
+		if dep.Status != "closed" {
+			openIssueIDs = append(openIssueIDs, dep.ID)
 		}
 	}
 	workersMap := getWorkersForIssues(openIssueIDs)
 
-	// Second pass: build result using the batch lookup
+	// Build result
 	var tracked []trackedIssueInfo
-	for _, ref := range issueRefs {
-		issueID := ref.ID
+	for _, dep := range deps {
 		info := trackedIssueInfo{
-			ID:   issueID,
-			Type: idToDepType[issueID],
-		}
-
-		if details, ok := detailsMap[issueID]; ok {
-			info.Title = details.Title
-			info.Status = details.Status
-			info.IssueType = details.IssueType
-			info.Assignee = details.Assignee
-		} else {
-			info.Title = "(external)"
-			info.Status = "unknown"
+			ID:        dep.ID,
+			Title:     dep.Title,
+			Status:    dep.Status,
+			Type:      dep.DependencyType,
+			IssueType: dep.IssueType,
+			Assignee:  dep.Assignee,
 		}
 
 		// Add worker info if available
-		if worker, ok := workersMap[issueID]; ok {
+		if worker, ok := workersMap[dep.ID]; ok {
 			info.Worker = worker.Worker
 			info.WorkerAge = worker.Age
 		}

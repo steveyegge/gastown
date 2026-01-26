@@ -604,22 +604,7 @@ func (d *Daemon) syncWorkspace(workDir string) {
 		// Don't fail - agent can handle conflicts
 	}
 
-	// Reset stderr buffer
-	stderr.Reset()
-
-	// Sync beads
-	bdCmd := exec.Command("bd", "sync")
-	bdCmd.Dir = workDir
-	bdCmd.Stderr = &stderr
-	bdCmd.Env = os.Environ() // Inherit PATH to find bd executable
-	if err := bdCmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg == "" {
-			errMsg = err.Error()
-		}
-		d.logger.Printf("Warning: bd sync failed in %s: %s", workDir, errMsg)
-		// Don't fail - sync issues may be recoverable
-	}
+	// Note: With Dolt backend, beads changes are persisted immediately - no sync needed
 }
 
 // closeMessage removes a lifecycle mail message after processing.

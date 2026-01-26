@@ -264,7 +264,7 @@ func TestEnsureGitignorePatterns_CreatesNewFile(t *testing.T) {
 	}
 
 	// Check all required patterns are present
-	patterns := []string{".runtime/", ".claude/", ".beads/", ".logs/"}
+	patterns := []string{".runtime/", ".claude/", ".logs/"}
 	for _, pattern := range patterns {
 		if !containsLine(string(content), pattern) {
 			t.Errorf(".gitignore missing pattern %q", pattern)
@@ -302,7 +302,7 @@ func TestEnsureGitignorePatterns_AppendsToExisting(t *testing.T) {
 	}
 
 	// Should add required patterns
-	patterns := []string{".runtime/", ".claude/", ".beads/", ".logs/"}
+	patterns := []string{".runtime/", ".claude/", ".logs/"}
 	for _, pattern := range patterns {
 		if !containsLine(string(content), pattern) {
 			t.Errorf(".gitignore missing pattern %q", pattern)
@@ -336,9 +336,6 @@ func TestEnsureGitignorePatterns_SkipsExistingPatterns(t *testing.T) {
 	}
 
 	// Should add missing patterns
-	if !containsLine(string(content), ".beads/") {
-		t.Error(".gitignore missing pattern .beads/")
-	}
 	if !containsLine(string(content), ".logs/") {
 		t.Error(".gitignore missing pattern .logs/")
 	}
@@ -378,7 +375,7 @@ func TestEnsureGitignorePatterns_AllPatternsPresent(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create existing .gitignore with all required patterns
-	existing := ".runtime/\n.claude/\n.beads/\n.logs/\n"
+	existing := ".runtime/\n.claude/\n.logs/\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(existing), 0644); err != nil {
 		t.Fatalf("Failed to create .gitignore: %v", err)
 	}
