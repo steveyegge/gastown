@@ -40,6 +40,12 @@ func DeaconTheme() Theme {
 	return Theme{Name: "deacon", BG: "#2d1f3d", FG: "#c0b0d0"}
 }
 
+// DogTheme returns the theme for Dog helper sessions.
+// Warm brown/tan - working dogs, complementary to Deacon's purple.
+func DogTheme() Theme {
+	return Theme{Name: "dog", BG: "#3d2f1f", FG: "#d0c0a0"}
+}
+
 // GetThemeByName finds a theme by name from the default palette.
 // Returns nil if not found.
 func GetThemeByName(name string) *Theme {

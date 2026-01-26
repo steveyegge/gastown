@@ -46,7 +46,8 @@ type DogDispatchInfo struct {
 // DispatchToDog finds or spawns a dog for work dispatch.
 // If dogName is empty, finds an idle dog from the pool.
 // If create is true and no dogs exist, creates one.
-func DispatchToDog(dogName string, create bool) (*DogDispatchInfo, error) {
+// workDesc is recorded in the dog's state so we know what it's working on.
+func DispatchToDog(dogName string, create bool, workDesc string) (*DogDispatchInfo, error) {
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return nil, fmt.Errorf("finding town root: %w", err)
@@ -102,23 +103,26 @@ func DispatchToDog(dogName string, create bool) (*DogDispatchInfo, error) {
 		}
 	}
 
-	// Mark dog as working
-	if err := mgr.SetState(targetDog.Name, dog.StateWorking); err != nil {
-		return nil, fmt.Errorf("setting dog state: %w", err)
+	// Mark dog as working with the assigned work
+	if err := mgr.AssignWork(targetDog.Name, workDesc); err != nil {
+		return nil, fmt.Errorf("assigning work to dog: %w", err)
 	}
 
 	// Build agent ID
 	agentID := fmt.Sprintf("deacon/dogs/%s", targetDog.Name)
 
-	// Try to find tmux session for the dog (dogs may run in tmux like polecats)
-	// Dogs use the pattern gt-{town}-deacon-{name}
-	townName, _ := workspace.GetTownName(townRoot)
-	sessionName := fmt.Sprintf("gt-%s-deacon-%s", townName, targetDog.Name)
+	// Ensure dog session is running (start if needed)
 	t := tmux.NewTmux()
-	var pane string
-	if has, _ := t.HasSession(sessionName); has {
-		// Get the pane from the session
-		pane, _ = getSessionPane(sessionName)
+	sessMgr := dog.NewSessionManager(t, townRoot)
+
+	opts := dog.SessionStartOptions{
+		WorkDesc: workDesc,
+	}
+	pane, err := sessMgr.EnsureRunning(targetDog.Name, opts)
+	if err != nil {
+		// Log but don't fail - dog state is set, session may start later
+		fmt.Printf("Warning: could not start dog session: %v\n", err)
+		pane = ""
 	}
 
 	return &DogDispatchInfo{
