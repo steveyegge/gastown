@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/session"
@@ -109,7 +110,7 @@ func (c *ClaudeSettingsCheck) Run(ctx *CheckContext) *CheckResult {
 
 	fixHint := "Run 'gt doctor --fix' to update settings and restart affected agents"
 	if hasModifiedFiles {
-		fixHint = "Run 'gt doctor --fix' to fix safe issues. Files with local modifications require manual review."
+		fixHint = "Run 'gt doctor --fix' to fix issues. Files with local modifications will be renamed to .bak files."
 	}
 
 	return &CheckResult{
@@ -458,23 +459,32 @@ func (c *ClaudeSettingsCheck) hookHasPattern(hooks map[string]any, hookName, pat
 }
 
 // Fix deletes stale settings files and restarts affected agents.
-// Files with local modifications are skipped to avoid losing user changes.
+// Files with local modifications are renamed to .bak.<timestamp> instead of being skipped.
 func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 	var errors []string
-	var skipped []string
+	var renamed []string
 	t := tmux.NewTmux()
 
 	for _, sf := range c.staleSettings {
-		// Skip files with local modifications - require manual review
+		wasRenamed := false
+
+		// Files with local modifications get renamed to preserve changes
 		if sf.wrongLocation && sf.gitStatus == gitStatusTrackedModified {
-			skipped = append(skipped, fmt.Sprintf("%s: has local modifications, skipping", sf.path))
-			continue
+			backupPath := fmt.Sprintf("%s.bak.%d", sf.path, time.Now().Unix())
+			if err := os.Rename(sf.path, backupPath); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to rename %s to backup: %v", sf.path, err))
+				continue
+			}
+			renamed = append(renamed, fmt.Sprintf("%s → %s", sf.path, backupPath))
+			wasRenamed = true
 		}
 
-		// Delete the stale settings file
-		if err := os.Remove(sf.path); err != nil {
-			errors = append(errors, fmt.Sprintf("failed to delete %s: %v", sf.path, err))
-			continue
+		// Delete the stale settings file (skip if already renamed)
+		if !wasRenamed {
+			if err := os.Remove(sf.path); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to delete %s: %v", sf.path, err))
+				continue
+			}
 		}
 
 		// Also delete parent .claude directory if empty
@@ -538,10 +548,11 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	// Report skipped files as warnings, not errors
-	if len(skipped) > 0 {
-		for _, s := range skipped {
-			fmt.Printf("  Warning: %s\n", s)
+	// Report renamed files as info
+	if len(renamed) > 0 {
+		fmt.Printf("  Renamed files with local modifications (backups preserved):\n")
+		for _, r := range renamed {
+			fmt.Printf("    %s\n", r)
 		}
 	}
 

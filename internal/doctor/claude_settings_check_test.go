@@ -849,13 +849,13 @@ func TestClaudeSettingsCheck_GitStatusTrackedModified(t *testing.T) {
 	if !found {
 		t.Errorf("expected details to mention local modifications, got %v", result.Details)
 	}
-	// Should also mention manual review
-	if !strings.Contains(result.FixHint, "manual review") {
-		t.Errorf("expected fix hint to mention manual review, got %q", result.FixHint)
+	// Should mention .bak files for backup
+	if !strings.Contains(result.FixHint, ".bak files") {
+		t.Errorf("expected fix hint to mention .bak files, got %q", result.FixHint)
 	}
 }
 
-func TestClaudeSettingsCheck_FixSkipsModifiedFiles(t *testing.T) {
+func TestClaudeSettingsCheck_FixRenamesModifiedFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
@@ -885,14 +885,32 @@ func TestClaudeSettingsCheck_FixSkipsModifiedFiles(t *testing.T) {
 		t.Fatalf("expected StatusError before fix, got %v", result.Status)
 	}
 
-	// Apply fix - should NOT delete the modified file
+	// Apply fix - should rename the modified file to a backup
 	if err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
-	// Verify file still exists (was skipped)
-	if _, err := os.Stat(wrongSettings); os.IsNotExist(err) {
-		t.Error("expected modified file to be preserved, but it was deleted")
+	// Verify original file was renamed (no longer exists)
+	if _, err := os.Stat(wrongSettings); !os.IsNotExist(err) {
+		t.Error("expected modified file to be renamed, but it still exists")
+	}
+
+	// Verify backup file exists (with .bak. prefix in name)
+	claudeDir := filepath.Dir(wrongSettings)
+	entries, err := os.ReadDir(claudeDir)
+	if err != nil {
+		t.Fatalf("failed to read .claude dir: %v", err)
+	}
+
+	foundBackup := false
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "settings.json.bak.") {
+			foundBackup = true
+			break
+		}
+	}
+	if !foundBackup {
+		t.Error("expected backup file to exist with .bak. extension")
 	}
 }
 
