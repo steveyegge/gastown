@@ -18,6 +18,31 @@ We use a direct-to-main workflow for trusted contributors. For external contribu
 3. Ensure tests pass: `go test ./...`
 4. Submit a pull request
 
+### PR Branch Naming
+
+**Never create PRs from your fork's `main` branch.** Always create a dedicated branch for each PR:
+
+```bash
+# Good - dedicated branch per PR
+git checkout -b fix/deacon-startup upstream/main
+git checkout -b feat/auto-seance upstream/main
+
+# Bad - PR from main accumulates unrelated commits
+git checkout main  # Don't PR from here!
+```
+
+Why this matters:
+- PRs from `main` accumulate ALL commits pushed to your fork
+- Multiple contributors pushing to the same fork's `main` creates chaos
+- Reviewers can't tell which commits belong to which PR
+- You can't have multiple PRs open simultaneously
+
+Branch naming conventions:
+- `fix/*` - Bug fixes
+- `feat/*` - New features
+- `refactor/*` - Code restructuring
+- `docs/*` - Documentation only
+
 ## Code Style
 
 - Follow standard Go conventions (`gofmt`, `go vet`)
