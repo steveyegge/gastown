@@ -283,7 +283,9 @@ Examples:
   gt decision check                           # Simple check
   gt decision check --inject                  # For hooks
   gt decision check --identity gastown/crew/joe  # Explicit identity`,
-	RunE: runDecisionCheck,
+	RunE:          runDecisionCheck,
+	SilenceUsage:  true, // Exit codes signal status, not errors
+	SilenceErrors: true, // Suppress "Error: exit 1" message
 }
 
 // Watch-specific flags
