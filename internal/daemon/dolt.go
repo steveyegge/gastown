@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -215,7 +216,9 @@ func (m *DoltServerManager) EnsureRunning() error {
 		m.lastCheck = time.Now()
 		if err := m.checkHealthLocked(); err != nil {
 			m.logger("Dolt server unhealthy: %v, restarting...", err)
-			m.stopLocked()
+			if stopErr := m.stopLocked(); stopErr != nil {
+				m.logger("Warning: failed to stop Dolt server: %v", stopErr)
+			}
 			time.Sleep(m.config.RestartDelay)
 			return m.startLocked()
 		}
@@ -273,14 +276,20 @@ func (m *DoltServerManager) startLocked() error {
 	setSysProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		if closeErr := logFile.Close(); closeErr != nil {
+			m.logger("Warning: failed to close log file: %v", closeErr)
+		}
 		return fmt.Errorf("starting dolt sql-server: %w", err)
 	}
 
 	// Don't wait for it - it's a long-running server
 	go func() {
-		_ = cmd.Wait()
-		logFile.Close()
+		if err := cmd.Wait(); err != nil {
+			m.logger("Warning: dolt sql-server exited: %v", err)
+		}
+		if err := logFile.Close(); err != nil {
+			m.logger("Warning: failed to close log file: %v", err)
+		}
 	}()
 
 	m.process = cmd.Process
@@ -322,12 +331,15 @@ func (m *DoltServerManager) stopLocked() error {
 
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return nil // Already gone
+		return fmt.Errorf("finding process %d: %w", pid, err)
 	}
+
+	var stopErr error
 
 	// Send termination signal for graceful shutdown
 	if err := sendTermSignal(process); err != nil {
 		m.logger("Warning: failed to send termination signal: %v", err)
+		stopErr = errors.Join(stopErr, fmt.Errorf("send termination signal: %w", err))
 	}
 
 	// Wait for graceful shutdown (up to 5 seconds)
@@ -348,14 +360,16 @@ func (m *DoltServerManager) stopLocked() error {
 	case <-time.After(5 * time.Second):
 		// Force kill
 		m.logger("Dolt SQL server did not stop gracefully, forcing termination")
-		_ = sendKillSignal(process)
+		if err := sendKillSignal(process); err != nil {
+			stopErr = errors.Join(stopErr, fmt.Errorf("force kill process %d: %w", pid, err))
+		}
 	}
 
 	// Clean up
 	_ = os.Remove(m.pidFile())
 	m.process = nil
 
-	return nil
+	return stopErr
 }
 
 // checkHealth checks if the Dolt server is healthy (can accept connections).
