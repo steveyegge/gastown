@@ -1217,7 +1217,7 @@ func (f *LiveConvoyFetcher) FetchHealth() (*HealthRow, error) {
 	heartbeatFile := filepath.Join(f.townRoot, "deacon", "heartbeat.json")
 	if data, err := os.ReadFile(heartbeatFile); err == nil {
 		var hb struct {
-			Timestamp       time.Time `json:"timestamp"`
+			LastHeartbeat   time.Time `json:"last_heartbeat"`
 			Cycle           int64     `json:"cycle"`
 			HealthyAgents   int       `json:"healthy_agents"`
 			UnhealthyAgents int       `json:"unhealthy_agents"`
@@ -1226,9 +1226,13 @@ func (f *LiveConvoyFetcher) FetchHealth() (*HealthRow, error) {
 			row.DeaconCycle = hb.Cycle
 			row.HealthyAgents = hb.HealthyAgents
 			row.UnhealthyAgents = hb.UnhealthyAgents
-			age := time.Since(hb.Timestamp)
-			row.DeaconHeartbeat = formatMailAge(age)
-			row.HeartbeatFresh = age < 5*time.Minute
+			if !hb.LastHeartbeat.IsZero() {
+				age := time.Since(hb.LastHeartbeat)
+				row.DeaconHeartbeat = formatMailAge(age)
+				row.HeartbeatFresh = age < 5*time.Minute
+			} else {
+				row.DeaconHeartbeat = "no timestamp"
+			}
 		}
 	} else {
 		row.DeaconHeartbeat = "no heartbeat"
