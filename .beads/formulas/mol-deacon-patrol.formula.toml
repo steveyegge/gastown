@@ -382,6 +382,19 @@ needs = ["trigger-pending-spawns", "dispatch-gated-molecules", "fire-notificatio
 description = """
 Check Witness and Refinery health for each rig.
 
+**IMPORTANT: Skip DOCKED/PARKED rigs**
+Before checking any rig, verify its operational state:
+```bash
+gt rig status <rig>
+# Check the Status: line - if DOCKED or PARKED, skip entirely
+```
+
+DOCKED rigs are globally shut down - do NOT:
+- Check their witness/refinery status
+- Send health pings
+- Attempt restarts
+Simply skip them and move to the next rig.
+
 **IMPORTANT: Idle Town Protocol**
 Before sending health check nudges, check if the town is idle:
 ```bash

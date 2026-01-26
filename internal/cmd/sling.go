@@ -96,6 +96,7 @@ var (
 	slingAccount  string // --account: Claude Code account handle to use
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
+	slingNoMerge  bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
 )
 
 func init() {
@@ -113,6 +114,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
+	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
 
 	rootCmd.AddCommand(slingCmd)
 }
@@ -130,11 +132,6 @@ func runSling(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("finding town root: %w", err)
 	}
 	townBeadsDir := filepath.Join(townRoot, ".beads")
-
-	// --var is only for standalone formula mode, not formula-on-bead mode
-	if slingOnTarget != "" && len(slingVars) > 0 {
-		return fmt.Errorf("--var cannot be used with --on (formula-on-bead mode doesn't support variables)")
-	}
 
 	// Batch mode detection: multiple beads with rig target
 	// Pattern: gt sling gt-abc gt-def gt-ghi gastown
@@ -191,8 +188,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine target agent (self or specified)
 	var targetAgent string
 	var targetPane string
-	var hookWorkDir string                   // Working directory for running bd hook commands
-	var hookSetAtomically bool               // True if hook was set during polecat spawn (skip redundant update)
+	var hookWorkDir string                 // Working directory for running bd hook commands
+	var hookSetAtomically bool             // True if hook was set during polecat spawn (skip redundant update)
 	var newPolecatInfo *SpawnedPolecatInfo // Spawned polecat info (session started after bead setup)
 
 	if len(args) > 1 {
@@ -435,7 +432,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if formulaName != "" {
 		fmt.Printf("  Instantiating formula %s...\n", formulaName)
 
-		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false)
+		result, err := InstantiateFormulaOnBead(formulaName, beadID, info.Title, hookWorkDir, townRoot, false, slingVars)
 		if err != nil {
 			return fmt.Errorf("instantiating formula %s: %w", formulaName, err)
 		}
@@ -497,6 +494,15 @@ func runSling(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%s Could not store args in bead: %v\n", style.Dim.Render("Warning:"), err)
 		} else {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
+		}
+	}
+
+	// Store no_merge flag in bead (skips merge queue on completion)
+	if slingNoMerge {
+		if err := storeNoMergeInBead(beadID, true); err != nil {
+			fmt.Printf("%s Could not store no_merge in bead: %v\n", style.Dim.Render("Warning:"), err)
+		} else {
+			fmt.Printf("%s No-merge mode enabled (work stays on feature branch)\n", style.Bold.Render("✓"))
 		}
 	}
 

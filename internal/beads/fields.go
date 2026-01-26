@@ -21,6 +21,7 @@ type AttachmentFields struct {
 	AttachedAt       string // ISO 8601 timestamp when attached
 	AttachedArgs     string // Natural language args passed via gt sling --args (no-tmux mode)
 	DispatchedBy     string // Agent ID that dispatched this work (for completion notification)
+	NoMerge          bool   // If true, gt done skips merge queue (for upstream PRs/human review)
 }
 
 // ParseAttachmentFields extracts attachment fields from an issue's description.
@@ -65,6 +66,9 @@ func ParseAttachmentFields(issue *Issue) *AttachmentFields {
 		case "dispatched_by", "dispatched-by", "dispatchedby":
 			fields.DispatchedBy = value
 			hasFields = true
+		case "no_merge", "no-merge", "nomerge":
+			fields.NoMerge = strings.ToLower(value) == "true"
+			hasFields = true
 		}
 	}
 
@@ -95,6 +99,9 @@ func FormatAttachmentFields(fields *AttachmentFields) string {
 	if fields.DispatchedBy != "" {
 		lines = append(lines, "dispatched_by: "+fields.DispatchedBy)
 	}
+	if fields.NoMerge {
+		lines = append(lines, "no_merge: true")
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -117,6 +124,9 @@ func SetAttachmentFields(issue *Issue, fields *AttachmentFields) string {
 		"dispatched_by":     true,
 		"dispatched-by":     true,
 		"dispatchedby":      true,
+		"no_merge":          true,
+		"no-merge":          true,
+		"nomerge":           true,
 	}
 
 	// Collect non-attachment lines from existing description

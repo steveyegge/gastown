@@ -5,16 +5,16 @@ import (
 	"testing"
 )
 
-func TestFormatStartupNudge(t *testing.T) {
+func TestFormatStartupBeacon(t *testing.T) {
 	tests := []struct {
 		name     string
-		cfg      StartupNudgeConfig
+		cfg      BeaconConfig
 		wantSub  []string // substrings that must appear
 		wantNot  []string // substrings that must NOT appear
 	}{
 		{
 			name: "assigned with mol-id",
-			cfg: StartupNudgeConfig{
+			cfg: BeaconConfig{
 				Recipient: "gastown/crew/gus",
 				Sender:    "deacon",
 				Topic:     "assigned",
@@ -31,7 +31,7 @@ func TestFormatStartupNudge(t *testing.T) {
 		},
 		{
 			name: "cold-start no mol-id",
-			cfg: StartupNudgeConfig{
+			cfg: BeaconConfig{
 				Recipient: "deacon",
 				Sender:    "mayor",
 				Topic:     "cold-start",
@@ -49,7 +49,7 @@ func TestFormatStartupNudge(t *testing.T) {
 		},
 		{
 			name: "handoff self",
-			cfg: StartupNudgeConfig{
+			cfg: BeaconConfig{
 				Recipient: "gastown/witness",
 				Sender:    "self",
 				Topic:     "handoff",
@@ -66,7 +66,7 @@ func TestFormatStartupNudge(t *testing.T) {
 		},
 		{
 			name: "mol-id only",
-			cfg: StartupNudgeConfig{
+			cfg: BeaconConfig{
 				Recipient: "gastown/polecats/Toast",
 				Sender:    "witness",
 				MolID:     "gt-xyz99",
@@ -80,7 +80,7 @@ func TestFormatStartupNudge(t *testing.T) {
 		},
 		{
 			name: "empty topic defaults to ready",
-			cfg: StartupNudgeConfig{
+			cfg: BeaconConfig{
 				Recipient: "deacon",
 				Sender:    "mayor",
 			},
@@ -91,7 +91,7 @@ func TestFormatStartupNudge(t *testing.T) {
 		},
 		{
 			name: "start includes fallback instructions",
-			cfg: StartupNudgeConfig{
+			cfg: BeaconConfig{
 				Recipient: "beads/crew/fang",
 				Sender:    "human",
 				Topic:     "start",
@@ -106,7 +106,7 @@ func TestFormatStartupNudge(t *testing.T) {
 		},
 		{
 			name: "restart includes fallback instructions",
-			cfg: StartupNudgeConfig{
+			cfg: BeaconConfig{
 				Recipient: "gastown/crew/george",
 				Sender:    "human",
 				Topic:     "restart",
@@ -122,19 +122,55 @@ func TestFormatStartupNudge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FormatStartupNudge(tt.cfg)
+			got := FormatStartupBeacon(tt.cfg)
 
 			for _, sub := range tt.wantSub {
 				if !strings.Contains(got, sub) {
-					t.Errorf("FormatStartupNudge() = %q, want to contain %q", got, sub)
+					t.Errorf("FormatStartupBeacon() = %q, want to contain %q", got, sub)
 				}
 			}
 
 			for _, sub := range tt.wantNot {
 				if strings.Contains(got, sub) {
-					t.Errorf("FormatStartupNudge() = %q, should NOT contain %q", got, sub)
+					t.Errorf("FormatStartupBeacon() = %q, should NOT contain %q", got, sub)
 				}
 			}
 		})
+	}
+}
+
+func TestBuildStartupPrompt(t *testing.T) {
+	// BuildStartupPrompt combines beacon + instructions
+	cfg := BeaconConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}
+	instructions := "Start patrol immediately."
+
+	got := BuildStartupPrompt(cfg, instructions)
+
+	// Should contain beacon parts
+	if !strings.Contains(got, "[GAS TOWN]") {
+		t.Errorf("BuildStartupPrompt() missing beacon header")
+	}
+	if !strings.Contains(got, "deacon") {
+		t.Errorf("BuildStartupPrompt() missing recipient")
+	}
+	if !strings.Contains(got, "<- daemon") {
+		t.Errorf("BuildStartupPrompt() missing sender")
+	}
+	if !strings.Contains(got, "patrol") {
+		t.Errorf("BuildStartupPrompt() missing topic")
+	}
+
+	// Should contain instructions after beacon
+	if !strings.Contains(got, instructions) {
+		t.Errorf("BuildStartupPrompt() missing instructions")
+	}
+
+	// Should have blank line between beacon and instructions
+	if !strings.Contains(got, "\n\n"+instructions) {
+		t.Errorf("BuildStartupPrompt() missing blank line before instructions")
 	}
 }

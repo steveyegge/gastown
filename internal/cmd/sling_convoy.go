@@ -3,6 +3,7 @@ package cmd
 import (
 	"crypto/rand"
 	"encoding/base32"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,32 +30,34 @@ func isTrackedByConvoy(beadID string) string {
 		return ""
 	}
 
-	// Query town beads for any convoy that tracks this issue
-	// Convoys use "tracks" dependency type: convoy -> tracked issue
-	townBeads := filepath.Join(townRoot, ".beads")
-	dbPath := filepath.Join(townBeads, "beads.db")
+	// Use bd dep list to find what tracks this issue (direction=up)
+	// Filter for open convoys in the results
+	depCmd := exec.Command("bd", "--no-daemon", "dep", "list", beadID, "--direction=up", "--type=tracks", "--json")
+	depCmd.Dir = townRoot
 
-	// Query dependencies where this bead is being tracked
-	// Also check for external reference format: external:rig:issue-id
-	query := fmt.Sprintf(`
-		SELECT d.issue_id
-		FROM dependencies d
-		JOIN issues i ON d.issue_id = i.id
-		WHERE d.type = 'tracks'
-		AND i.issue_type = 'convoy'
-		AND i.status = 'open'
-		AND (d.depends_on_id = '%s' OR d.depends_on_id LIKE '%%:%s')
-		LIMIT 1
-	`, beadID, beadID)
-
-	queryCmd := exec.Command("sqlite3", dbPath, query)
-	out, err := queryCmd.Output()
+	out, err := depCmd.Output()
 	if err != nil {
 		return ""
 	}
 
-	convoyID := strings.TrimSpace(string(out))
-	return convoyID
+	// Parse results and find an open convoy
+	var trackers []struct {
+		ID        string `json:"id"`
+		IssueType string `json:"issue_type"`
+		Status    string `json:"status"`
+	}
+	if err := json.Unmarshal(out, &trackers); err != nil {
+		return ""
+	}
+
+	// Return the first open convoy that tracks this issue
+	for _, tracker := range trackers {
+		if tracker.IssueType == "convoy" && tracker.Status == "open" {
+			return tracker.ID
+		}
+	}
+
+	return ""
 }
 
 // createAutoConvoy creates an auto-convoy for a single issue and tracks it.

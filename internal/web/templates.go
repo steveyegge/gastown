@@ -14,31 +14,155 @@ var templateFS embed.FS
 
 // ConvoyData represents data passed to the convoy template.
 type ConvoyData struct {
-	Convoys      []ConvoyRow
-	MergeQueue   []MergeQueueRow   // GitHub PRs
-	InternalMRs  []InternalMRRow   // Internal beads MRs
-	MergeHistory []MergeHistoryRow
-	Polecats     []PolecatRow
-	HQAgents     []HQAgentRow
-	Activity     []ActivityEvent
-	BeadsUIPort  int               // Port for beads-ui iframe (0 if not available)
-	Errors       []string          // Non-fatal errors to display in UI
+	Convoys     []ConvoyRow
+	MergeQueue  []MergeQueueRow
+	Polecats    []PolecatRow
+	Mail        []MailRow
+	Rigs        []RigRow
+	Dogs        []DogRow
+	Escalations []EscalationRow
+	Health      *HealthRow
+	Queues      []QueueRow
+	Sessions    []SessionRow
+	Hooks       []HookRow
+	Mayor       *MayorStatus
+	Issues      []IssueRow
+	Activity    []ActivityRow
+	Summary     *DashboardSummary
+	Expand      string // Panel to show fullscreen (from ?expand=name)
 }
 
-// HQAgentRow represents a town-level agent (Mayor, Deacon) in the dashboard.
-type HQAgentRow struct {
-	Name         string        // "mayor" or "deacon"
-	SessionID    string        // e.g., "hq-mayor"
-	Status       string        // "running", "stopped"
-	LastActivity activity.Info // Activity indicator
-	StatusHint   string        // Last line from pane
+// RigRow represents a registered rig in the dashboard.
+type RigRow struct {
+	Name         string
+	GitURL       string
+	PolecatCount int
+	CrewCount    int
+	HasWitness   bool
+	HasRefinery  bool
 }
 
-// HQAgentDetail contains expanded information for an HQ agent.
-type HQAgentDetail struct {
-	HQAgentRow
-	Uptime        string   // Session duration (e.g., "45m", "2h 15m")
-	TerminalLines []string // Last N lines from tmux pane
+// DogRow represents a Deacon helper worker.
+type DogRow struct {
+	Name       string // Dog name (e.g., "alpha")
+	State      string // idle, working
+	Work       string // Current work assignment
+	LastActive string // Formatted age (e.g., "5m ago")
+	RigCount   int    // Number of worktrees
+}
+
+// EscalationRow represents an escalation needing attention.
+type EscalationRow struct {
+	ID          string
+	Title       string
+	Severity    string // critical, high, medium, low
+	EscalatedBy string
+	Age         string
+	Acked       bool
+}
+
+// HealthRow represents system health status.
+type HealthRow struct {
+	DeaconHeartbeat string // Age of heartbeat (e.g., "2m ago")
+	DeaconCycle     int64
+	HealthyAgents   int
+	UnhealthyAgents int
+	IsPaused        bool
+	PauseReason     string
+	HeartbeatFresh  bool // true if < 5min old
+}
+
+// QueueRow represents a work queue.
+type QueueRow struct {
+	Name       string
+	Status     string // active, paused, closed
+	Available  int
+	Processing int
+	Completed  int
+	Failed     int
+}
+
+// SessionRow represents a tmux session.
+type SessionRow struct {
+	Name     string // Session name (e.g., "gt-gastown-witness")
+	Role     string // witness, refinery, polecat, crew, deacon
+	Rig      string // Rig name if applicable
+	Worker   string // Worker name for polecats/crew
+	Activity string // Age since last activity
+	IsAlive  bool   // Whether Claude is running in session
+}
+
+// HookRow represents a hooked bead (work pinned to an agent).
+type HookRow struct {
+	ID       string // Bead ID (e.g., "gt-abc12")
+	Title    string // Work item title
+	Assignee string // Agent address (e.g., "gastown/polecats/nux")
+	Agent    string // Formatted agent name
+	Age      string // Time since hooked
+	IsStale  bool   // True if hooked > 1 hour (potentially stuck)
+}
+
+// MayorStatus represents the Mayor's current state.
+type MayorStatus struct {
+	IsAttached   bool   // True if gt-mayor tmux session exists
+	SessionName  string // Tmux session name
+	LastActivity string // Age since last activity
+	IsActive     bool   // True if activity < 5 min (likely working)
+	Runtime      string // Which runtime (claude, codex, etc.)
+}
+
+// IssueRow represents an open issue in the backlog.
+type IssueRow struct {
+	ID       string // Bead ID (e.g., "gt-abc12")
+	Title    string // Issue title
+	Type     string // issue, bug, feature, task
+	Priority int    // 1=critical, 2=high, 3=medium, 4=low
+	Age      string // Time since created
+	Labels   string // Comma-separated labels
+}
+
+// ActivityRow represents an event in the activity feed.
+type ActivityRow struct {
+	Time    string // Formatted time (e.g., "2m ago")
+	Icon    string // Emoji for event type
+	Type    string // Event type (sling, done, mail, etc.)
+	Actor   string // Who did it
+	Summary string // Human-readable description
+}
+
+// DashboardSummary provides at-a-glance stats and alerts.
+type DashboardSummary struct {
+	// Stats
+	PolecatCount    int
+	HookCount       int
+	IssueCount      int
+	ConvoyCount     int
+	EscalationCount int
+
+	// Alerts (things needing attention)
+	StuckPolecats     int // No activity > 5 min
+	StaleHooks        int // Hooked > 1 hour
+	UnackedEscalations int
+	DeadSessions      int // Sessions that died recently
+	HighPriorityIssues int // P1/P2 issues
+
+	// Computed
+	HasAlerts bool
+}
+
+// MailRow represents a mail message in the dashboard.
+type MailRow struct {
+	ID          string // Message ID (e.g., "hq-msg-abc123")
+	From        string // Sender (e.g., "gastown/polecats/Toast")
+	FromRaw     string // Raw sender address for color hashing
+	To          string // Recipient (e.g., "mayor/")
+	Subject     string // Message subject
+	Timestamp   string // Formatted timestamp
+	Age         string // Human-readable age (e.g., "5m ago")
+	Priority    string // low, normal, high, urgent
+	Type        string // task, notification, reply
+	Read        bool   // Whether message has been read
+	SortKey     int64  // Unix timestamp for sorting
 }
 
 // PolecatRow represents a polecat worker in the dashboard.
@@ -48,15 +172,9 @@ type PolecatRow struct {
 	SessionID    string        // e.g., "gt-roxas-dag"
 	LastActivity activity.Info // Colored activity display
 	StatusHint   string        // Last line from pane (optional)
-}
-
-// PolecatDetail contains expanded information for a polecat.
-type PolecatDetail struct {
-	PolecatRow
-	HookBead      string   // Current work assignment bead ID
-	HookTitle     string   // Title of hooked issue
-	Uptime        string   // Session duration (e.g., "45m", "2h 15m")
-	TerminalLines []string // Last N lines from tmux pane
+	IssueID      string        // Currently assigned issue ID (e.g., "hq-1234")
+	IssueTitle   string        // Issue title (truncated)
+	WorkStatus   string        // working, stale, stuck, idle
 }
 
 // MergeQueueRow represents a PR in the merge queue.
@@ -68,19 +186,6 @@ type MergeQueueRow struct {
 	CIStatus   string // "pass", "fail", "pending"
 	Mergeable  string // "ready", "conflict", "pending"
 	ColorClass string // "mq-green", "mq-yellow", "mq-red"
-}
-
-// InternalMRRow represents an MR bead in the internal merge queue.
-type InternalMRRow struct {
-	ID          string // Bead ID (e.g., "mr-abc123")
-	Rig         string // Rig name (e.g., "roxas")
-	Title       string // MR title
-	Branch      string // Source branch
-	Target      string // Target branch (e.g., "main")
-	Worker      string // Who did the work
-	SourceIssue string // Source issue being merged (e.g., "gt-abc")
-	Status      string // "open", "in_progress"
-	ColorClass  string // "mq-green", "mq-yellow"
 }
 
 // ConvoyRow represents a single convoy in the dashboard.
@@ -104,81 +209,19 @@ type TrackedIssue struct {
 	Assignee string
 }
 
-// TrackedIssueDetail contains expanded information for a tracked issue.
-type TrackedIssueDetail struct {
-	TrackedIssue
-	AssigneeShort    string        // Just the polecat name (e.g., "chrome")
-	AssigneeActivity activity.Info // Live tmux activity for assignee
-	LastCommit       string        // Most recent commit message
-	LastCommitAgo    string        // "2m ago"
-}
-
-// ConvoyDetail contains expanded information for a convoy.
-type ConvoyDetail struct {
-	ConvoyRow
-	TrackedDetails []TrackedIssueDetail
-	CreatedAt      string
-	CreatedAgo     string
-	Description    string // Bead description/notes
-}
-
-// MergeHistoryRow represents a recently merged or failed PR.
-type MergeHistoryRow struct {
-	Number     int
-	Repo       string
-	Title      string
-	URL        string
-	MergedAt   string // Timestamp
-	MergedAgo  string // "3m ago"
-	Success    bool
-	FailReason string // Only if failed
-	Hash       string // Short commit hash for ID
-	Additions  int    // Lines added
-	Deletions  int    // Lines removed
-	FilesChanged []string // Top files changed (for expandable detail)
-}
-
-// MergeQueueStats contains 24h merge statistics.
-type MergeQueueStats struct {
-	MergedCount24h  int
-	FailedCount24h  int
-	AvgQueueMinutes int
-}
-
-// MergeQueueData contains all merge queue information.
-type MergeQueueData struct {
-	Stats        *MergeQueueStats
-	PendingPRs   []MergeQueueRow
-	RecentMerges []MergeHistoryRow
-}
-
-// ActivityEvent represents a single event in the activity feed.
-type ActivityEvent struct {
-	ID           string // Unique event ID
-	Timestamp    string // RFC3339 timestamp
-	TimestampAgo string // "2m ago"
-	Type         string // Event type: commit, spawn, stop, dispatch, pr_merge, etc.
-	Actor        string // Who caused it (polecat name, "refinery", etc.)
-	ActorType    string // "polecat", "refinery", "witness", "mayor", "user"
-	Summary      string // One-line description
-	Details      string // Optional second line
-	RelatedID    string // Convoy ID, Issue ID, PR number, etc.
-	Rig          string // Which rig (for filtering)
-}
-
-// ActivityFeed contains activity events for the dashboard.
-type ActivityFeed struct {
-	Events []ActivityEvent
-}
-
 // LoadTemplates loads and parses all HTML templates.
 func LoadTemplates() (*template.Template, error) {
 	// Define template functions
 	funcMap := template.FuncMap{
-		"activityClass":   activityClass,
-		"statusClass":     statusClass,
-		"workStatusClass": workStatusClass,
-		"progressPercent": progressPercent,
+		"activityClass":       activityClass,
+		"statusClass":         statusClass,
+		"workStatusClass":     workStatusClass,
+		"progressPercent":     progressPercent,
+		"senderColorClass":    senderColorClass,
+		"severityClass":       severityClass,
+		"dogStateClass":       dogStateClass,
+		"queueStatusClass":    queueStatusClass,
+		"polecatStatusClass":  polecatStatusClass,
 	}
 
 	// Get the templates subdirectory
@@ -246,4 +289,86 @@ func progressPercent(completed, total int) int {
 		return 0
 	}
 	return (completed * 100) / total
+}
+
+// senderColorClass returns a CSS class for sender-based color coding.
+// Uses a simple hash to assign consistent colors to each sender.
+func senderColorClass(fromRaw string) string {
+	if fromRaw == "" {
+		return "sender-default"
+	}
+	// Simple hash: sum of bytes mod number of colors
+	var sum int
+	for _, b := range []byte(fromRaw) {
+		sum += int(b)
+	}
+	colors := []string{
+		"sender-cyan",
+		"sender-purple",
+		"sender-green",
+		"sender-yellow",
+		"sender-orange",
+		"sender-blue",
+		"sender-red",
+		"sender-pink",
+	}
+	return colors[sum%len(colors)]
+}
+
+// severityClass returns CSS class for escalation severity.
+func severityClass(severity string) string {
+	switch severity {
+	case "critical":
+		return "severity-critical"
+	case "high":
+		return "severity-high"
+	case "medium":
+		return "severity-medium"
+	case "low":
+		return "severity-low"
+	default:
+		return "severity-unknown"
+	}
+}
+
+// dogStateClass returns CSS class for dog state.
+func dogStateClass(state string) string {
+	switch state {
+	case "idle":
+		return "dog-idle"
+	case "working":
+		return "dog-working"
+	default:
+		return "dog-unknown"
+	}
+}
+
+// queueStatusClass returns CSS class for queue status.
+func queueStatusClass(status string) string {
+	switch status {
+	case "active":
+		return "queue-active"
+	case "paused":
+		return "queue-paused"
+	case "closed":
+		return "queue-closed"
+	default:
+		return "queue-unknown"
+	}
+}
+
+// polecatStatusClass returns CSS class for polecat work status.
+func polecatStatusClass(status string) string {
+	switch status {
+	case "working":
+		return "polecat-working"
+	case "stale":
+		return "polecat-stale"
+	case "stuck":
+		return "polecat-stuck"
+	case "idle":
+		return "polecat-idle"
+	default:
+		return "polecat-unknown"
+	}
 }

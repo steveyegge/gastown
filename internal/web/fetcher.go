@@ -1,8 +1,8 @@
 package web
 
 import (
-	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +16,51 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// Command timeout constants
+const (
+	cmdTimeout      = 5 * time.Second // timeout for most commands
+	ghCmdTimeout    = 10 * time.Second // longer timeout for GitHub API calls
+	tmuxCmdTimeout  = 2 * time.Second  // short timeout for tmux queries
+)
+
+// runCmd executes a command with a timeout and returns stdout.
+// Returns empty buffer on timeout or error.
+func runCmd(timeout time.Duration, name string, args ...string) (*bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("%s timed out after %v", name, timeout)
+		}
+		return nil, err
+	}
+	return &stdout, nil
+}
+
+// runBdCmd executes a bd command with cmdTimeout in the specified beads directory.
+func runBdCmd(beadsDir string, args ...string) (*bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", args...)
+	cmd.Dir = beadsDir
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("bd timed out after %v", cmdTimeout)
+		}
+		return nil, err
+	}
+	return &stdout, nil
+}
 
 // LiveConvoyFetcher fetches convoy data from beads.
 type LiveConvoyFetcher struct {
@@ -40,14 +85,8 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 // FetchConvoys fetches all open convoys with their activity data.
 func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 	// List all open convoy-type issues
-	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = f.townBeads
-
-	var stdout bytes.Buffer
-	listCmd.Stdout = &stdout
-
-	if err := listCmd.Run(); err != nil {
+	stdout, err := runBdCmd(f.townBeads, "list", "--type=convoy", "--status=open", "--json")
+	if err != nil {
 		return nil, fmt.Errorf("listing convoys: %w", err)
 	}
 
@@ -101,23 +140,28 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 			// Have active tmux session activity from assigned workers
 			row.LastActivity = activity.Calculate(mostRecentActivity)
 		} else if !hasAssignee {
-			// No workers assigned to any tracked issues
-			if !mostRecentUpdated.IsZero() {
-				// Show when issue was last updated
+			// No assignees found in beads - try fallback to any running polecat activity
+			// This handles cases where bd update --assignee didn't persist or wasn't returned
+			if polecatActivity := f.getAllPolecatActivity(); polecatActivity != nil {
+				info := activity.Calculate(*polecatActivity)
+				info.FormattedAge = info.FormattedAge + " (polecat active)"
+				row.LastActivity = info
+			} else if !mostRecentUpdated.IsZero() {
+				// Fall back to issue updated_at if no polecats running
 				info := activity.Calculate(mostRecentUpdated)
-				info.FormattedAge = info.FormattedAge + " (no worker)"
+				info.FormattedAge = info.FormattedAge + " (unassigned)"
 				row.LastActivity = info
 			} else {
 				row.LastActivity = activity.Info{
-					FormattedAge: "no worker",
+					FormattedAge: "unassigned",
 					ColorClass:   activity.ColorUnknown,
 				}
 			}
 		} else {
-			// Has assignee but no active tmux session (worker crashed or stopped)
+			// Has assignee but no active session
 			row.LastActivity = activity.Info{
-				FormattedAge: "worker offline",
-				ColorClass:   activity.ColorRed,
+				FormattedAge: "idle",
+				ColorClass:   activity.ColorUnknown,
 			}
 		}
 
@@ -138,17 +182,6 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 		rows = append(rows, row)
 	}
 
-	// Sort convoys: stuck first, then stale, then active, then waiting, then complete
-	// Within same status, sort by ID for consistency
-	statusOrder := map[string]int{"stuck": 0, "stale": 1, "active": 2, "waiting": 3, "complete": 4}
-	sort.Slice(rows, func(i, j int) bool {
-		oi, oj := statusOrder[rows[i].WorkStatus], statusOrder[rows[j].WorkStatus]
-		if oi != oj {
-			return oi < oj
-		}
-		return rows[i].ID < rows[j].ID
-	})
-
 	return rows, nil
 }
 
@@ -168,13 +201,9 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 
 	// Query tracked dependencies from SQLite
 	safeConvoyID := strings.ReplaceAll(convoyID, "'", "''")
-	// #nosec G204 -- sqlite3 path is from trusted config, convoyID is escaped
-	queryCmd := exec.Command("sqlite3", "-json", dbPath,
-		fmt.Sprintf(`SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, safeConvoyID))
-
-	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
-	if err := queryCmd.Run(); err != nil {
+	query := fmt.Sprintf(`SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, safeConvoyID)
+	stdout, err := runCmd(cmdTimeout, "sqlite3", "-json", dbPath, query)
+	if err != nil {
 		return nil
 	}
 
@@ -249,12 +278,8 @@ func (f *LiveConvoyFetcher) getIssueDetailsBatch(issueIDs []string) map[string]*
 	args := append([]string{"show"}, issueIDs...)
 	args = append(args, "--json")
 
-	// #nosec G204 -- bd is a trusted internal tool, args are issue IDs
-	showCmd := exec.Command("bd", args...)
-	var stdout bytes.Buffer
-	showCmd.Stdout = &stdout
-
-	if err := showCmd.Run(); err != nil {
+	stdout, err := runCmd(cmdTimeout, "bd", args...)
+	if err != nil {
 		return result
 	}
 
@@ -345,14 +370,11 @@ func (f *LiveConvoyFetcher) getSessionActivityForAssignee(assignee string) *time
 	// Construct session name
 	sessionName := fmt.Sprintf("gt-%s-%s", rig, polecat)
 
-	// Query tmux for window activity (more accurate than session_activity).
-	// session_activity only updates on I/O, but window_activity tracks cursor
-	// movement and other changes - important when Claude is "thinking" for long periods.
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}",
+	// Query tmux for session activity
+	// Format: session_activity returns unix timestamp
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}",
 		"-f", fmt.Sprintf("#{==:#{session_name},%s}", sessionName))
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	if err != nil {
 		return nil
 	}
 
@@ -382,11 +404,8 @@ func (f *LiveConvoyFetcher) getSessionActivityForAssignee(assignee string) *time
 func (f *LiveConvoyFetcher) getAllPolecatActivity() *time.Time {
 	// List all tmux sessions matching gt-*-* pattern (polecat sessions)
 	// Format: gt-{rig}-{polecat}
-	// Use window_activity instead of session_activity for better accuracy during long "thinking" periods.
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}|#{session_activity}")
+	if err != nil {
 		return nil
 	}
 
@@ -479,19 +498,6 @@ func (f *LiveConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
 		result = append(result, prs...)
 	}
 
-	// Sort merge queue: ready PRs first, then by repo and PR number
-	colorOrder := map[string]int{"mq-green": 0, "mq-yellow": 1, "mq-red": 2}
-	sort.Slice(result, func(i, j int) bool {
-		oi, oj := colorOrder[result[i].ColorClass], colorOrder[result[j].ColorClass]
-		if oi != oj {
-			return oi < oj
-		}
-		if result[i].Repo != result[j].Repo {
-			return result[i].Repo < result[j].Repo
-		}
-		return result[i].Number < result[j].Number
-	})
-
 	return result, nil
 }
 
@@ -532,16 +538,11 @@ type prResponse struct {
 
 // fetchPRsForRepo fetches open PRs for a single repo.
 func (f *LiveConvoyFetcher) fetchPRsForRepo(repoFull, repoShort string) ([]MergeQueueRow, error) {
-	// #nosec G204 -- gh is a trusted CLI, repo is from registered rigs config
-	cmd := exec.Command("gh", "pr", "list",
+	stdout, err := runCmd(ghCmdTimeout, "gh", "pr", "list",
 		"--repo", repoFull,
 		"--state", "open",
 		"--json", "number,title,url,mergeable,statusCheckRollup")
-
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
+	if err != nil {
 		return nil, fmt.Errorf("fetching PRs for %s: %w", repoFull, err)
 	}
 
@@ -654,21 +655,18 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		return nil, fmt.Errorf("loading rigs config: %w", err)
 	}
 
-	// Build list of registered rig names (sorted by length descending for longest-match-first)
-	rigNames := make([]string, 0, len(rigsConfig.Rigs))
+	// Build set of registered rig names
+	registeredRigs := make(map[string]bool)
 	for rigName := range rigsConfig.Rigs {
-		rigNames = append(rigNames, rigName)
+		registeredRigs[rigName] = true
 	}
-	// Sort by length descending so "my-rig" matches before "my"
-	sort.Slice(rigNames, func(i, j int) bool {
-		return len(rigNames[i]) > len(rigNames[j])
-	})
+
+	// Pre-fetch assigned issues map: assignee -> (issueID, title)
+	assignedIssues := f.getAssignedIssuesMap()
 
 	// Query all tmux sessions with window_activity for more accurate timing
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}")
+	if err != nil {
 		// tmux not running or no sessions
 		return nil, nil
 	}
@@ -696,19 +694,16 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 			continue
 		}
 
-		// Parse session name by matching against registered rig names.
-		// This handles rig names with hyphens (e.g., "gt-my-rig-chrome" where rig is "my-rig").
-		suffix := strings.TrimPrefix(sessionName, "gt-")
-		var rig, polecat string
-		for _, rigName := range rigNames {
-			prefix := rigName + "-"
-			if strings.HasPrefix(suffix, prefix) {
-				rig = rigName
-				polecat = strings.TrimPrefix(suffix, prefix)
-				break
-			}
+		// Parse session name: gt-roxas-dag -> rig=roxas, polecat=dag
+		nameParts := strings.SplitN(sessionName, "-", 3)
+		if len(nameParts) != 3 {
+			continue
 		}
-		if rig == "" || polecat == "" {
+		rig := nameParts[1]
+		polecat := nameParts[2]
+
+		// Skip rigs not registered in this workspace
+		if !registeredRigs[rig] {
 			continue
 		}
 
@@ -724,14 +719,28 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 			continue
 		}
 		activityTime := time.Unix(activityUnix, 0)
+		activityAge := time.Since(activityTime)
 
 		// Get status hint - special handling for refinery
 		var statusHint string
 		if polecat == "refinery" {
 			statusHint = f.getRefineryStatusHint(mergeQueueCount)
 		} else {
-			statusHint = f.getStatusHintWithDefault(sessionName)
+			statusHint = f.getPolecatStatusHint(sessionName)
 		}
+
+		// Look up assigned issue for this polecat
+		// Assignee format: "rigname/polecats/polecatname"
+		assignee := fmt.Sprintf("%s/polecats/%s", rig, polecat)
+		var issueID, issueTitle string
+		if issue, ok := assignedIssues[assignee]; ok {
+			issueID = issue.ID
+			issueTitle = issue.Title
+		// Keep full title - CSS handles overflow
+		}
+
+		// Calculate work status based on activity age and issue assignment
+		workStatus := calculatePolecatWorkStatus(activityAge, issueID, polecat)
 
 		polecats = append(polecats, PolecatRow{
 			Name:         polecat,
@@ -739,34 +748,89 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 			SessionID:    sessionName,
 			LastActivity: activity.Calculate(activityTime),
 			StatusHint:   statusHint,
+			IssueID:      issueID,
+			IssueTitle:   issueTitle,
+			WorkStatus:   workStatus,
 		})
 	}
-
-	// Sort polecats by rig, then by name
-	sort.Slice(polecats, func(i, j int) bool {
-		if polecats[i].Rig != polecats[j].Rig {
-			return polecats[i].Rig < polecats[j].Rig
-		}
-		return polecats[i].Name < polecats[j].Name
-	})
 
 	return polecats, nil
 }
 
+// assignedIssue holds issue info for the assigned issues map.
+type assignedIssue struct {
+	ID    string
+	Title string
+}
+
+// getAssignedIssuesMap returns a map of assignee -> assigned issue.
+// Queries beads for all in_progress issues with assignees.
+func (f *LiveConvoyFetcher) getAssignedIssuesMap() map[string]assignedIssue {
+	result := make(map[string]assignedIssue)
+
+	// Query all in_progress issues (these are the ones being worked on)
+	stdout, err := runBdCmd(f.townBeads, "list", "--status=in_progress", "--json")
+	if err != nil {
+		return result // Return empty map on error
+	}
+
+	var issues []struct {
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+		Assignee string `json:"assignee"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return result
+	}
+
+	for _, issue := range issues {
+		if issue.Assignee != "" {
+			result[issue.Assignee] = assignedIssue{
+				ID:    issue.ID,
+				Title: issue.Title,
+			}
+		}
+	}
+
+	return result
+}
+
+// calculatePolecatWorkStatus determines the polecat's work status based on activity and assignment.
+// Returns: "working", "stale", "stuck", or "idle"
+func calculatePolecatWorkStatus(activityAge time.Duration, issueID, polecatName string) string {
+	// Refinery has special handling - it's always "working" if it has PRs
+	if polecatName == "refinery" {
+		return "working"
+	}
+
+	// No issue assigned = idle
+	if issueID == "" {
+		return "idle"
+	}
+
+	// Has issue - determine status based on activity
+	switch {
+	case activityAge < 5*time.Minute:
+		return "working" // Active recently
+	case activityAge < 30*time.Minute:
+		return "stale" // Might be thinking or stuck
+	default:
+		return "stuck" // Likely stuck - no activity for 30+ minutes
+	}
+}
+
 // getPolecatStatusHint captures the last non-empty line from a polecat's pane.
 func (f *LiveConvoyFetcher) getPolecatStatusHint(sessionName string) string {
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-J")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "capture-pane", "-t", sessionName, "-p", "-J")
+	if err != nil {
 		return ""
 	}
 
-	// Get last non-empty line, skipping Claude UI elements
+	// Get last non-empty line
 	lines := strings.Split(stdout.String(), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
-		if line != "" && !isClaudeUILine(line) {
+		if line != "" {
 			// Truncate long lines
 			if len(line) > 60 {
 				line = line[:57] + "..."
@@ -775,99 +839,6 @@ func (f *LiveConvoyFetcher) getPolecatStatusHint(sessionName string) string {
 		}
 	}
 	return ""
-}
-
-// isClaudeUILine returns true if the line is a Claude Code UI element (not actual output).
-func isClaudeUILine(line string) bool {
-	// Skip Claude status/permission lines (start with play symbols)
-	if strings.HasPrefix(line, "⏵") {
-		return true
-	}
-	// Skip lines that are just the prompt indicator
-	if strings.HasPrefix(line, ">") && len(line) < 5 {
-		return true
-	}
-	// Skip the send button indicator
-	if strings.Contains(line, "↵") && strings.Contains(line, "send") {
-		return true
-	}
-	// Skip lines that are mostly box-drawing characters (UI separators)
-	if isBoxDrawingLine(line) {
-		return true
-	}
-	// Skip common Claude UI patterns
-	uiPatterns := []string{
-		"bypass permissions",
-		"shift+tab to cycle",
-		"to cycle)",
-		"Esc to interrupt",
-		"to interrupt",
-		"? for shortcuts",
-		"for shortcuts",
-		"claude-code",
-		"Claude Code",
-	}
-	for _, pattern := range uiPatterns {
-		if strings.Contains(line, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-// isBoxDrawingLine returns true if a line is mostly box-drawing characters (UI separators).
-func isBoxDrawingLine(line string) bool {
-	if len(line) < 5 {
-		return false
-	}
-	boxChars := 0
-	totalChars := 0
-	for _, r := range line {
-		totalChars++
-		// Box drawing characters: ─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼ ═ ║ etc.
-		if r >= 0x2500 && r <= 0x257F {
-			boxChars++
-		}
-	}
-	// If more than 50% are box drawing chars, it's a UI line
-	return totalChars > 0 && float64(boxChars)/float64(totalChars) > 0.5
-}
-
-// isIdleLine returns true if the line indicates Claude is idle/waiting for input.
-func isIdleLine(line string) bool {
-	idlePatterns := []string{
-		"Waiting for",
-		"waiting for",
-		"Press Enter",
-		"Type a message",
-		"What would you like",
-		"How can I help",
-		"Ready to help",
-		"What can I",
-		"I can help",
-	}
-	for _, pattern := range idlePatterns {
-		if strings.Contains(line, pattern) {
-			return true
-		}
-	}
-	// Check if it's just a prompt character
-	if line == ">" || line == "$" || line == "%" {
-		return true
-	}
-	return false
-}
-
-// getStatusHintWithDefault returns a status hint, or a default if none found.
-func (f *LiveConvoyFetcher) getStatusHintWithDefault(sessionName string) string {
-	hint := f.getPolecatStatusHint(sessionName)
-	if hint == "" {
-		return "<idle>"
-	}
-	if isIdleLine(hint) {
-		return "<idle>"
-	}
-	return hint
 }
 
 // getMergeQueueCount returns the total number of open PRs across all repos.
@@ -890,1168 +861,839 @@ func (f *LiveConvoyFetcher) getRefineryStatusHint(mergeQueueCount int) string {
 	return fmt.Sprintf("Processing %d PRs", mergeQueueCount)
 }
 
-// FetchPolecatDetail returns expanded information for a polecat session.
-func (f *LiveConvoyFetcher) FetchPolecatDetail(sessionID string) (*PolecatDetail, error) {
-	// Parse session ID to get rig and polecat name
-	// Format: gt-<rig>-<polecat>
-	if !strings.HasPrefix(sessionID, "gt-") {
-		return nil, fmt.Errorf("invalid session ID format: %s", sessionID)
+// truncateStatusHint truncates a status hint to 60 characters with ellipsis.
+func truncateStatusHint(line string) string {
+	if len(line) > 60 {
+		return line[:57] + "..."
 	}
+	return line
+}
 
-	// Load rigs to properly parse session name
-	rigsConfigPath := filepath.Join(f.townRoot, "mayor", "rigs.json")
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+// parsePolecatSessionName parses a tmux session name into rig and polecat components.
+// Format: gt-<rig>-<polecat> -> (rig, polecat, true)
+// Returns ("", "", false) if the format is invalid.
+func parsePolecatSessionName(sessionName string) (rig, polecat string, ok bool) {
+	if !strings.HasPrefix(sessionName, "gt-") {
+		return "", "", false
+	}
+	parts := strings.SplitN(sessionName, "-", 3)
+	if len(parts) != 3 {
+		return "", "", false
+	}
+	return parts[1], parts[2], true
+}
+
+// isWorkerSession returns true if the polecat name represents a worker session.
+// Non-worker sessions: witness, mayor, deacon, boot
+func isWorkerSession(polecat string) bool {
+	switch polecat {
+	case "witness", "mayor", "deacon", "boot":
+		return false
+	default:
+		return true
+	}
+}
+
+// parseActivityTimestamp parses a Unix timestamp string from tmux.
+// Returns (0, false) for invalid or zero timestamps.
+func parseActivityTimestamp(s string) (int64, bool) {
+	var unix int64
+	if _, err := fmt.Sscanf(s, "%d", &unix); err != nil || unix <= 0 {
+		return 0, false
+	}
+	return unix, true
+}
+
+// FetchMail fetches recent mail messages from the beads database.
+func (f *LiveConvoyFetcher) FetchMail() ([]MailRow, error) {
+	// List all message-type issues (mail)
+	stdout, err := runBdCmd(f.townBeads, "list", "--type=message", "--json", "--limit=50")
 	if err != nil {
-		return nil, fmt.Errorf("loading rigs config: %w", err)
+		return nil, fmt.Errorf("listing mail: %w", err)
 	}
 
-	// Build rig names sorted by length for matching
-	rigNames := make([]string, 0, len(rigsConfig.Rigs))
-	for rigName := range rigsConfig.Rigs {
-		rigNames = append(rigNames, rigName)
+	var messages []struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Status    string `json:"status"`
+		CreatedAt string `json:"created_at"`
+		Priority  int    `json:"priority"`
+		Assignee  string `json:"assignee"`  // "to" address stored here
+		CreatedBy string `json:"created_by"` // "from" address
+		Labels    []string `json:"labels"`
 	}
-	sort.Slice(rigNames, func(i, j int) bool {
-		return len(rigNames[i]) > len(rigNames[j])
-	})
-
-	// Parse rig and polecat from session name
-	suffix := strings.TrimPrefix(sessionID, "gt-")
-	var rig, polecatName string
-	for _, rigName := range rigNames {
-		prefix := rigName + "-"
-		if strings.HasPrefix(suffix, prefix) {
-			rig = rigName
-			polecatName = strings.TrimPrefix(suffix, prefix)
-			break
-		}
-	}
-	if rig == "" || polecatName == "" {
-		return nil, fmt.Errorf("could not parse session ID: %s", sessionID)
+	if err := json.Unmarshal(stdout.Bytes(), &messages); err != nil {
+		return nil, fmt.Errorf("parsing mail list: %w", err)
 	}
 
-	// Get session activity
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}|#{session_created}",
-		"-f", fmt.Sprintf("#{==:#{session_name},%s}", sessionID))
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
-	}
-
-	output := strings.TrimSpace(stdout.String())
-	if output == "" {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
-	}
-
-	parts := strings.Split(output, "|")
-	if len(parts) < 3 {
-		return nil, fmt.Errorf("unexpected tmux output format")
-	}
-
-	// Parse activity and created timestamps
-	var activityUnix, createdUnix int64
-	fmt.Sscanf(parts[1], "%d", &activityUnix)
-	fmt.Sscanf(parts[2], "%d", &createdUnix)
-
-	activityTime := time.Unix(activityUnix, 0)
-	createdTime := time.Unix(createdUnix, 0)
-	uptime := formatDuration(time.Since(createdTime))
-
-	// Get terminal lines
-	terminalLines := f.getPolecatTerminalLines(sessionID, 50)
-
-	// Get hook bead from agent bead
-	hookBead, hookTitle := f.getPolecatHook(rig, polecatName)
-
-	// Get status hint
-	statusHint := f.getStatusHintWithDefault(sessionID)
-
-	return &PolecatDetail{
-		PolecatRow: PolecatRow{
-			Name:         polecatName,
-			Rig:          rig,
-			SessionID:    sessionID,
-			LastActivity: activity.Calculate(activityTime),
-			StatusHint:   statusHint,
-		},
-		HookBead:      hookBead,
-		HookTitle:     hookTitle,
-		Uptime:        uptime,
-		TerminalLines: terminalLines,
-	}, nil
-}
-
-// getPolecatTerminalLines returns the last N lines from a polecat's tmux pane.
-func (f *LiveConvoyFetcher) getPolecatTerminalLines(sessionID string, n int) []string {
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionID, "-p", "-J", "-S", fmt.Sprintf("-%d", n))
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
-		return nil
-	}
-
-	allLines := strings.Split(stdout.String(), "\n")
-	// Filter empty lines and trim
-	var result []string
-	for _, line := range allLines {
-		trimmed := strings.TrimRight(line, " \t")
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-
-	// Return last N non-empty lines
-	if len(result) > n {
-		result = result[len(result)-n:]
-	}
-	return result
-}
-
-// getPolecatHook returns the hook bead and title for a polecat.
-func (f *LiveConvoyFetcher) getPolecatHook(rig, polecatName string) (string, string) {
-	// Query agent bead for hook
-	agentBeadID := fmt.Sprintf("gt-%s-polecat-%s", rig, polecatName)
-	cmd := exec.Command("bd", "show", agentBeadID, "--json")
-	cmd.Dir = f.townBeads
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
-		return "", ""
-	}
-
-	var beads []struct {
-		HookBead string `json:"hook_bead"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &beads); err != nil || len(beads) == 0 {
-		return "", ""
-	}
-
-	hookBead := beads[0].HookBead
-	if hookBead == "" {
-		return "", ""
-	}
-
-	// Get hook title
-	hookCmd := exec.Command("bd", "show", hookBead, "--json")
-	hookCmd.Dir = f.townBeads
-	var hookStdout bytes.Buffer
-	hookCmd.Stdout = &hookStdout
-	if err := hookCmd.Run(); err != nil {
-		return hookBead, ""
-	}
-
-	var hookBeads []struct {
-		Title string `json:"title"`
-	}
-	if err := json.Unmarshal(hookStdout.Bytes(), &hookBeads); err != nil || len(hookBeads) == 0 {
-		return hookBead, ""
-	}
-
-	return hookBead, hookBeads[0].Title
-}
-
-// formatDuration formats a duration as a human-readable string.
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	hours := int(d.Hours())
-	mins := int(d.Minutes()) % 60
-	if mins == 0 {
-		return fmt.Sprintf("%dh", hours)
-	}
-	return fmt.Sprintf("%dh %dm", hours, mins)
-}
-
-// FetchConvoyDetail returns expanded information for a convoy.
-func (f *LiveConvoyFetcher) FetchConvoyDetail(convoyID string) (*ConvoyDetail, error) {
-	// Get convoy basic info
-	cmd := exec.Command("bd", "show", convoyID, "--json")
-	cmd.Dir = f.townBeads
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("convoy not found: %s", convoyID)
-	}
-
-	var convoys []struct {
-		ID          string `json:"id"`
-		Title       string `json:"title"`
-		Status      string `json:"status"`
-		CreatedAt   string `json:"created_at"`
-		Description string `json:"description"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil || len(convoys) == 0 {
-		return nil, fmt.Errorf("could not parse convoy: %s", convoyID)
-	}
-
-	convoy := convoys[0]
-
-	// Get tracked issues with details
-	tracked := f.getTrackedIssues(convoyID)
-	details := f.getIssueDetailsBatch(collectIssueIDs(tracked))
-	workers := f.getWorkersFromAssignees(details)
-
-	var trackedDetails []TrackedIssueDetail
-	completed := 0
-	for _, t := range tracked {
-		detail := TrackedIssueDetail{
-			TrackedIssue: TrackedIssue{
-				ID:       t.ID,
-				Title:    t.Title,
-				Status:   t.Status,
-				Assignee: t.Assignee,
-			},
-		}
-
-		if t.Status == "closed" {
-			completed++
-		}
-
-		// Parse assignee to get short name
-		if t.Assignee != "" {
-			parts := strings.Split(t.Assignee, "/")
-			if len(parts) > 0 {
-				detail.AssigneeShort = parts[len(parts)-1]
+	rows := make([]MailRow, 0, len(messages))
+	for _, m := range messages {
+		// Parse timestamp
+		var timestamp time.Time
+		var age string
+		var sortKey int64
+		if m.CreatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, m.CreatedAt); err == nil {
+				timestamp = t
+				age = formatMailAge(time.Since(t))
+				sortKey = t.Unix()
 			}
 		}
 
-		// Get worker activity
-		if w, ok := workers[t.ID]; ok && w.LastActivity != nil {
-			detail.AssigneeActivity = activity.Calculate(*w.LastActivity)
+		// Determine priority string
+		priorityStr := "normal"
+		switch m.Priority {
+		case 0:
+			priorityStr = "urgent"
+		case 1:
+			priorityStr = "high"
+		case 2:
+			priorityStr = "normal"
+		case 3, 4:
+			priorityStr = "low"
 		}
 
-		// Get last commit (from git log in polecat worktree)
-		if t.Assignee != "" {
-			commit, ago := f.getLastCommitForIssue(t.Assignee, t.ID)
-			detail.LastCommit = commit
-			detail.LastCommitAgo = ago
+		// Determine message type from labels
+		msgType := "notification"
+		for _, label := range m.Labels {
+			if label == "task" || label == "reply" || label == "scavenge" {
+				msgType = label
+				break
+			}
 		}
 
-		trackedDetails = append(trackedDetails, detail)
+		// Format from/to addresses for display
+		from := formatAgentAddress(m.CreatedBy)
+		to := formatAgentAddress(m.Assignee)
+
+		rows = append(rows, MailRow{
+			ID:        m.ID,
+			From:      from,
+			FromRaw:   m.CreatedBy,
+			To:        to,
+			Subject:   m.Title,
+			Timestamp: timestamp.Format("15:04"),
+			Age:       age,
+			Priority:  priorityStr,
+			Type:      msgType,
+			Read:      m.Status == "closed",
+			SortKey:   sortKey,
+		})
 	}
 
-	// Calculate work status
-	var mostRecentActivity time.Time
-	for _, t := range tracked {
-		if t.LastActivity.After(mostRecentActivity) {
-			mostRecentActivity = t.LastActivity
-		}
-	}
+	// Sort by timestamp, newest first
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].SortKey > rows[j].SortKey
+	})
 
-	var lastActivity activity.Info
-	if !mostRecentActivity.IsZero() {
-		lastActivity = activity.Calculate(mostRecentActivity)
-	} else {
-		lastActivity = activity.Info{FormattedAge: "unknown", ColorClass: activity.ColorUnknown}
-	}
-
-	workStatus := calculateWorkStatus(completed, len(tracked), lastActivity.ColorClass)
-
-	// Parse created time
-	createdAgo := ""
-	if convoy.CreatedAt != "" {
-		if t, err := time.Parse(time.RFC3339, convoy.CreatedAt); err == nil {
-			createdAgo = formatDuration(time.Since(t)) + " ago"
-		}
-	}
-
-	return &ConvoyDetail{
-		ConvoyRow: ConvoyRow{
-			ID:           convoy.ID,
-			Title:        convoy.Title,
-			Status:       convoy.Status,
-			WorkStatus:   workStatus,
-			Progress:     fmt.Sprintf("%d/%d", completed, len(tracked)),
-			Completed:    completed,
-			Total:        len(tracked),
-			LastActivity: lastActivity,
-		},
-		TrackedDetails: trackedDetails,
-		CreatedAt:      convoy.CreatedAt,
-		CreatedAgo:     createdAgo,
-		Description:    convoy.Description,
-	}, nil
+	return rows, nil
 }
 
-// collectIssueIDs extracts issue IDs from tracked issues.
-func collectIssueIDs(tracked []trackedIssueInfo) []string {
-	ids := make([]string, len(tracked))
-	for i, t := range tracked {
-		ids[i] = t.ID
+// formatMailAge returns a human-readable age string.
+func formatMailAge(d time.Duration) string {
+	if d < time.Minute {
+		return "just now"
 	}
-	return ids
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
-// getLastCommitForIssue gets the last commit message for an issue from the assignee's worktree.
-func (f *LiveConvoyFetcher) getLastCommitForIssue(assignee, issueID string) (string, string) {
-	// Parse assignee: "rigname/polecats/polecatname"
-	parts := strings.Split(assignee, "/")
-	if len(parts) != 3 || parts[1] != "polecats" {
-		return "", ""
+// formatAgentAddress shortens agent addresses for display.
+// "gastown/polecats/Toast" -> "Toast (gastown)"
+// "mayor/" -> "Mayor"
+func formatAgentAddress(addr string) string {
+	if addr == "" {
+		return "—"
 	}
-	rigName := parts[0]
-	polecatName := parts[2]
-
-	// Construct polecat worktree path: townRoot/rigName/polecats/polecatName/rigName
-	worktreePath := filepath.Join(f.townRoot, rigName, "polecats", polecatName, rigName)
-
-	// Get last commit
-	cmd := exec.Command("git", "log", "-1", "--format=%s|%ar")
-	cmd.Dir = worktreePath
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
-		return "", ""
+	if addr == "mayor/" || addr == "mayor" {
+		return "Mayor"
 	}
-
-	output := strings.TrimSpace(stdout.String())
-	commitParts := strings.SplitN(output, "|", 2)
-	if len(commitParts) < 2 {
-		return output, ""
+	
+	parts := strings.Split(addr, "/")
+	if len(parts) >= 3 && parts[1] == "polecats" {
+		return fmt.Sprintf("%s (%s)", parts[2], parts[0])
 	}
-
-	// Truncate long commit messages
-	msg := commitParts[0]
-	if len(msg) > 50 {
-		msg = msg[:47] + "..."
+	if len(parts) >= 3 && parts[1] == "crew" {
+		return fmt.Sprintf("%s (%s/crew)", parts[2], parts[0])
 	}
-
-	return msg, commitParts[1]
+	if len(parts) >= 2 {
+		return fmt.Sprintf("%s/%s", parts[0], parts[len(parts)-1])
+	}
+	return addr
 }
 
-// FetchMergeHistory returns recent commits pushed to main branch via refinery.
-func (f *LiveConvoyFetcher) FetchMergeHistory(limit int) ([]MergeHistoryRow, error) {
+// FetchRigs returns all registered rigs with their agent counts.
+func (f *LiveConvoyFetcher) FetchRigs() ([]RigRow, error) {
+	// Load rigs config from mayor/rigs.json
 	rigsConfigPath := filepath.Join(f.townRoot, "mayor", "rigs.json")
 	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading rigs config: %w", err)
 	}
 
-	var result []MergeHistoryRow
+	var rows []RigRow
+	for name, entry := range rigsConfig.Rigs {
+		row := RigRow{
+			Name:   name,
+			GitURL: entry.GitURL,
+		}
 
-	for rigName, entry := range rigsConfig.Rigs {
-		// Check refinery clone path: townRoot/rigName/refinery/rig
-		refineryPath := filepath.Join(f.townRoot, rigName, "refinery", "rig")
+		rigPath := filepath.Join(f.townRoot, name)
 
-		// Fetch latest from origin
-		fetchCmd := exec.Command("git", "fetch", "origin")
-		fetchCmd.Dir = refineryPath
-		_ = fetchCmd.Run() // Ignore errors, proceed with potentially stale data
+		// Count polecats
+		polecatsDir := filepath.Join(rigPath, "polecats")
+		if entries, err := os.ReadDir(polecatsDir); err == nil {
+			for _, e := range entries {
+				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+					row.PolecatCount++
+				}
+			}
+		}
 
-		// Get recent commits on origin/main with stats
-		cmd := exec.Command("git", "log", "origin/main", "--format=%H|%s|%ar|%aI", "--numstat", "-n", fmt.Sprintf("%d", limit))
-		cmd.Dir = refineryPath
-		var stdout bytes.Buffer
-		cmd.Stdout = &stdout
-		if err := cmd.Run(); err != nil {
+		// Count crew
+		crewDir := filepath.Join(rigPath, "crew")
+		if entries, err := os.ReadDir(crewDir); err == nil {
+			for _, e := range entries {
+				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+					row.CrewCount++
+				}
+			}
+		}
+
+		// Check for witness
+		witnessPath := filepath.Join(rigPath, "witness")
+		if _, err := os.Stat(witnessPath); err == nil {
+			row.HasWitness = true
+		}
+
+		// Check for refinery
+		refineryPath := filepath.Join(rigPath, "refinery", "rig")
+		if _, err := os.Stat(refineryPath); err == nil {
+			row.HasRefinery = true
+		}
+
+		rows = append(rows, row)
+	}
+
+	// Sort by name
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Name < rows[j].Name
+	})
+
+	return rows, nil
+}
+
+// FetchDogs returns all dogs in the kennel with their state.
+func (f *LiveConvoyFetcher) FetchDogs() ([]DogRow, error) {
+	kennelPath := filepath.Join(f.townRoot, "deacon", "dogs")
+
+	entries, err := os.ReadDir(kennelPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // No kennel yet
+		}
+		return nil, fmt.Errorf("reading kennel: %w", err)
+	}
+
+	var rows []DogRow
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
 			continue
 		}
 
-		// Build GitHub commit URL base if possible
-		commitURLBase := ""
-		repoPath := gitURLToRepoPath(entry.GitURL)
-		if repoPath != "" {
-			commitURLBase = fmt.Sprintf("https://github.com/%s/commit/", repoPath)
+		// Read dog state file
+		stateFile := filepath.Join(kennelPath, name, ".dog.json")
+		data, err := os.ReadFile(stateFile)
+		if err != nil {
+			continue // Not a valid dog
 		}
 
-		// Parse output - format is header line, blank line, then numstat lines
-		// Git outputs: header\n\nnumstat1\nnumstat2\n\nheader2\n\nnumstat3...
-		lines := strings.Split(stdout.String(), "\n")
-		var currentRow *MergeHistoryRow
-		for _, line := range lines {
-			if line == "" {
-				// Skip blank lines - they appear between header and numstat
-				continue
-			}
-
-			// Check if this is a commit header line (contains |)
-			if strings.Contains(line, "|") && !strings.HasPrefix(line, "-") {
-				parts := strings.SplitN(line, "|", 4)
-				if len(parts) >= 4 {
-					// Save previous commit if exists
-					if currentRow != nil {
-						result = append(result, *currentRow)
-					}
-
-					hash := parts[0]
-					shortHash := hash[:8]
-					msg := parts[1]
-
-					// Skip uninteresting merge commits
-					if strings.HasPrefix(msg, "Merge remote-tracking branch") ||
-						strings.HasPrefix(msg, "Merge branch") {
-						continue
-					}
-
-					if len(msg) > 50 {
-						msg = msg[:47] + "..."
-					}
-
-					commitURL := ""
-					if commitURLBase != "" {
-						commitURL = commitURLBase + hash
-					}
-
-					currentRow = &MergeHistoryRow{
-						Number:    0,
-						Repo:      rigName,
-						Title:     fmt.Sprintf("[%s] %s", shortHash, msg),
-						URL:       commitURL,
-						MergedAt:  parts[3],
-						MergedAgo: parts[2],
-						Success:   true,
-						Hash:      shortHash,
-					}
-				}
-			} else if currentRow != nil {
-				// This is a numstat line: additions\tdeletions\tfilename
-				statParts := strings.Split(line, "\t")
-				if len(statParts) >= 3 {
-					var add, del int
-					fmt.Sscanf(statParts[0], "%d", &add)
-					fmt.Sscanf(statParts[1], "%d", &del)
-					currentRow.Additions += add
-					currentRow.Deletions += del
-
-					// Track top files (limit to 5)
-					if len(currentRow.FilesChanged) < 5 {
-						filename := statParts[2]
-						// Shorten long paths
-						if len(filename) > 40 {
-							filename = "..." + filename[len(filename)-37:]
-						}
-						currentRow.FilesChanged = append(currentRow.FilesChanged, fmt.Sprintf("%s (+%d/-%d)", filename, add, del))
-					}
-				}
-			}
+		var state struct {
+			Name       string            `json:"name"`
+			State      string            `json:"state"`
+			LastActive time.Time         `json:"last_active"`
+			Work       string            `json:"work,omitempty"`
+			Worktrees  map[string]string `json:"worktrees,omitempty"`
 		}
-		// Don't forget the last commit
-		if currentRow != nil {
-			result = append(result, *currentRow)
+		if err := json.Unmarshal(data, &state); err != nil {
+			continue
 		}
+
+		rows = append(rows, DogRow{
+			Name:       state.Name,
+			State:      state.State,
+			Work:       state.Work,
+			LastActive: formatMailAge(time.Since(state.LastActive)),
+			RigCount:   len(state.Worktrees),
+		})
 	}
 
-	// Sort by commit time (most recent first)
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].MergedAt > result[j].MergedAt
+	// Sort by name
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Name < rows[j].Name
 	})
 
-	// Limit results
-	if len(result) > limit {
-		result = result[:limit]
-	}
-
-	return result, nil
+	return rows, nil
 }
 
-// FetchActivity returns recent activity events from various sources.
-func (f *LiveConvoyFetcher) FetchActivity(limit int) ([]ActivityEvent, error) {
-	var events []ActivityEvent
-
-	// Add lifecycle events from .events.jsonl (spawn, nudge, handoff, etc.)
-	lifecycleEvents := f.fetchLifecycleEvents(limit * 2) // Get more to filter
-	events = append(events, lifecycleEvents...)
-
-	// Add git commits from polecats
-	commitEvents := f.fetchCommitEvents(limit)
-	events = append(events, commitEvents...)
-
-	// Add main branch commits (direct pushes) from refinery clones
-	mainCommits := f.fetchMainBranchCommits(limit)
-	events = append(events, mainCommits...)
-
-	// Sort by timestamp descending (parse to handle format variations)
-	sort.Slice(events, func(i, j int) bool {
-		ti, _ := time.Parse(time.RFC3339, events[i].Timestamp)
-		tj, _ := time.Parse(time.RFC3339, events[j].Timestamp)
-		return ti.After(tj)
-	})
-
-	// Limit results
-	if len(events) > limit {
-		events = events[:limit]
-	}
-
-	return events, nil
-}
-
-// eventLogEntry matches the structure in .events.jsonl
-type eventLogEntry struct {
-	Timestamp  string                 `json:"ts"`
-	Source     string                 `json:"source"`
-	Type       string                 `json:"type"`
-	Actor      string                 `json:"actor"`
-	Payload    map[string]interface{} `json:"payload,omitempty"`
-	Visibility string                 `json:"visibility"`
-}
-
-// fetchLifecycleEvents reads events from .events.jsonl file.
-func (f *LiveConvoyFetcher) fetchLifecycleEvents(limit int) []ActivityEvent {
-	var events []ActivityEvent
-
-	eventsPath := filepath.Join(f.townRoot, ".events.jsonl")
-	file, err := os.Open(eventsPath) //nolint:gosec // G304: path is constructed from trusted townRoot
+// FetchEscalations returns open escalations needing attention.
+func (f *LiveConvoyFetcher) FetchEscalations() ([]EscalationRow, error) {
+	// List open escalations
+	stdout, err := runBdCmd(f.townBeads, "list", "--label=gt:escalation", "--status=open", "--json")
 	if err != nil {
-		return events
+		return nil, nil // No escalations or bd not available
 	}
-	defer file.Close()
 
-	// Read all lines to get the most recent ones
-	var allEntries []eventLogEntry
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
+	var issues []struct {
+		ID          string   `json:"id"`
+		Title       string   `json:"title"`
+		CreatedAt   string   `json:"created_at"`
+		CreatedBy   string   `json:"created_by"`
+		Labels      []string `json:"labels"`
+		Description string   `json:"description"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
+		return nil, fmt.Errorf("parsing escalations: %w", err)
+	}
+
+	var rows []EscalationRow
+	for _, issue := range issues {
+		row := EscalationRow{
+			ID:          issue.ID,
+			Title:       issue.Title,
+			EscalatedBy: formatAgentAddress(issue.CreatedBy),
+			Severity:    "medium", // default
+		}
+
+		// Parse severity from labels
+		for _, label := range issue.Labels {
+			if strings.HasPrefix(label, "severity:") {
+				row.Severity = strings.TrimPrefix(label, "severity:")
+			}
+			if label == "acked" {
+				row.Acked = true
+			}
+		}
+
+		// Calculate age
+		if issue.CreatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, issue.CreatedAt); err == nil {
+				row.Age = formatMailAge(time.Since(t))
+			}
+		}
+
+		rows = append(rows, row)
+	}
+
+	// Sort by severity (critical first), then by age
+	severityOrder := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
+	sort.Slice(rows, func(i, j int) bool {
+		si, sj := severityOrder[rows[i].Severity], severityOrder[rows[j].Severity]
+		return si < sj
+	})
+
+	return rows, nil
+}
+
+// FetchHealth returns system health status.
+func (f *LiveConvoyFetcher) FetchHealth() (*HealthRow, error) {
+	row := &HealthRow{}
+
+	// Read deacon heartbeat
+	heartbeatFile := filepath.Join(f.townRoot, "deacon", "heartbeat.json")
+	if data, err := os.ReadFile(heartbeatFile); err == nil {
+		var hb struct {
+			Timestamp       time.Time `json:"timestamp"`
+			Cycle           int64     `json:"cycle"`
+			HealthyAgents   int       `json:"healthy_agents"`
+			UnhealthyAgents int       `json:"unhealthy_agents"`
+		}
+		if err := json.Unmarshal(data, &hb); err == nil {
+			row.DeaconCycle = hb.Cycle
+			row.HealthyAgents = hb.HealthyAgents
+			row.UnhealthyAgents = hb.UnhealthyAgents
+			age := time.Since(hb.Timestamp)
+			row.DeaconHeartbeat = formatMailAge(age)
+			row.HeartbeatFresh = age < 5*time.Minute
+		}
+	} else {
+		row.DeaconHeartbeat = "no heartbeat"
+	}
+
+	// Check pause state
+	pauseFile := filepath.Join(f.townRoot, ".runtime", "deacon", "paused.json")
+	if data, err := os.ReadFile(pauseFile); err == nil {
+		var pause struct {
+			Paused bool   `json:"paused"`
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal(data, &pause); err == nil {
+			row.IsPaused = pause.Paused
+			row.PauseReason = pause.Reason
+		}
+	}
+
+	return row, nil
+}
+
+// FetchQueues returns work queues and their status.
+func (f *LiveConvoyFetcher) FetchQueues() ([]QueueRow, error) {
+	// List queue-type beads
+	stdout, err := runBdCmd(f.townBeads, "list", "--type=queue", "--json")
+	if err != nil {
+		return nil, nil // No queues or bd not available
+	}
+
+	var queues []struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Status      string `json:"status"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &queues); err != nil {
+		return nil, fmt.Errorf("parsing queues: %w", err)
+	}
+
+	var rows []QueueRow
+	for _, q := range queues {
+		row := QueueRow{
+			Name:   q.Title,
+			Status: q.Status,
+		}
+
+		// Parse counts from description (key: value format)
+		// Best-effort parsing - ignore Sscanf errors as missing/malformed data is acceptable
+		for _, line := range strings.Split(q.Description, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "available_count:") {
+				_, _ = fmt.Sscanf(line, "available_count: %d", &row.Available)
+			} else if strings.HasPrefix(line, "processing_count:") {
+				_, _ = fmt.Sscanf(line, "processing_count: %d", &row.Processing)
+			} else if strings.HasPrefix(line, "completed_count:") {
+				_, _ = fmt.Sscanf(line, "completed_count: %d", &row.Completed)
+			} else if strings.HasPrefix(line, "failed_count:") {
+				_, _ = fmt.Sscanf(line, "failed_count: %d", &row.Failed)
+			} else if strings.HasPrefix(line, "status:") {
+				// Override with parsed status if present
+				var s string
+				_, _ = fmt.Sscanf(line, "status: %s", &s)
+				if s != "" {
+					row.Status = s
+				}
+			}
+		}
+
+		rows = append(rows, row)
+	}
+
+	return rows, nil
+}
+
+// FetchSessions returns active tmux sessions with role detection.
+func (f *LiveConvoyFetcher) FetchSessions() ([]SessionRow, error) {
+	// List tmux sessions
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
+	if err != nil {
+		return nil, nil // tmux not running or no sessions
+	}
+
+	var rows []SessionRow
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
 		if line == "" {
 			continue
 		}
 
-		var entry eventLogEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		parts := strings.SplitN(line, ":", 2)
+		name := parts[0]
+
+		// Only include gt-* sessions
+		if !strings.HasPrefix(name, "gt-") {
 			continue
 		}
-		allEntries = append(allEntries, entry)
-	}
 
-	// Get last N entries (most recent)
-	startIdx := 0
-	if len(allEntries) > limit {
-		startIdx = len(allEntries) - limit
-	}
-	recentEntries := allEntries[startIdx:]
-
-	// Convert to ActivityEvents, filtering for interesting types
-	for _, entry := range recentEntries {
-		event := f.convertEventLogEntry(entry)
-		if event != nil {
-			events = append(events, *event)
+		row := SessionRow{
+			Name:    name,
+			IsAlive: true, // Session exists
 		}
+
+		// Parse activity timestamp
+		if len(parts) > 1 {
+			if ts, ok := parseActivityTimestamp(parts[1]); ok && ts > 0 {
+				age := time.Since(time.Unix(ts, 0))
+				row.Activity = formatMailAge(age)
+			}
+		}
+
+		// Detect role from session name pattern: gt-<rig>-<role>[-<name>]
+		// Examples: gt-gastown-witness, gt-gastown-nux, gt-deacon
+		nameParts := strings.Split(strings.TrimPrefix(name, "gt-"), "-")
+		if len(nameParts) >= 1 {
+			// Check for special roles
+			if nameParts[0] == "deacon" {
+				row.Role = "deacon"
+			} else if len(nameParts) >= 2 {
+				row.Rig = nameParts[0]
+				role := nameParts[1]
+
+				switch role {
+				case "witness":
+					row.Role = "witness"
+				case "refinery":
+					row.Role = "refinery"
+				default:
+					// Assume it's a polecat name
+					row.Role = "polecat"
+					row.Worker = role
+				}
+
+				// Check if there's a worker name after the role (for crew)
+				if len(nameParts) >= 3 && (role == "crew") {
+					row.Worker = nameParts[2]
+				}
+			}
+		}
+
+		rows = append(rows, row)
 	}
 
-	return events
+	// Sort by rig, then role, then worker
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Rig != rows[j].Rig {
+			return rows[i].Rig < rows[j].Rig
+		}
+		if rows[i].Role != rows[j].Role {
+			return rows[i].Role < rows[j].Role
+		}
+		return rows[i].Worker < rows[j].Worker
+	})
+
+	return rows, nil
 }
 
-// convertEventLogEntry converts a raw event log entry to an ActivityEvent.
-// Returns nil for events we don't want to display in the feed.
-func (f *LiveConvoyFetcher) convertEventLogEntry(entry eventLogEntry) *ActivityEvent {
-	// Parse timestamp
-	ts, err := time.Parse(time.RFC3339, entry.Timestamp)
+// FetchHooks returns all hooked beads (work pinned to agents).
+func (f *LiveConvoyFetcher) FetchHooks() ([]HookRow, error) {
+	// Query all beads with status=hooked
+	stdout, err := runBdCmd(f.townBeads, "list", "--status=hooked", "--json", "--limit=0")
 	if err != nil {
-		return nil
-	}
-	timestampAgo := formatTimeAgo(ts)
-
-	// Extract common payload fields
-	rig, _ := entry.Payload["rig"].(string)
-	polecat, _ := entry.Payload["polecat"].(string)
-	target, _ := entry.Payload["target"].(string)
-	reason, _ := entry.Payload["reason"].(string)
-
-	// Determine actor type
-	actorType := "system"
-	if strings.Contains(entry.Actor, "/polecat") || polecat != "" {
-		actorType = "polecat"
-	} else if strings.Contains(entry.Actor, "witness") {
-		actorType = "witness"
-	} else if strings.Contains(entry.Actor, "mayor") {
-		actorType = "mayor"
-	} else if strings.Contains(entry.Actor, "deacon") {
-		actorType = "deacon"
-	} else if strings.Contains(entry.Actor, "refinery") {
-		actorType = "refinery"
+		return nil, nil // No hooked beads or bd not available
 	}
 
-	// Short actor name for display
-	actorName := entry.Actor
-	if parts := strings.Split(entry.Actor, "/"); len(parts) > 0 {
-		actorName = parts[len(parts)-1]
+	var beads []struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Assignee  string `json:"assignee"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &beads); err != nil {
+		return nil, fmt.Errorf("parsing hooked beads: %w", err)
 	}
 
-	switch entry.Type {
-	case "spawn":
-		name := polecat
-		if name == "" {
-			name = actorName
-		}
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("spawn-%s-%s", entry.Timestamp, name),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "spawn",
-			Actor:        name,
-			ActorType:    actorType,
-			Summary:      fmt.Sprintf("🐾 Spawned on %s", rig),
-			Rig:          rig,
+	var rows []HookRow
+	for _, bead := range beads {
+		row := HookRow{
+			ID:       bead.ID,
+			Title:    bead.Title,
+			Assignee: bead.Assignee,
+			Agent:    formatAgentAddress(bead.Assignee),
 		}
 
-	case "nudge":
-		targetName := target
-		if targetName == "" {
-			targetName = polecat
-		}
-		reasonText := reason
-		if reasonText == "" {
-			reasonText = "keepalive"
-		}
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("nudge-%s-%s", entry.Timestamp, targetName),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "nudge",
-			Actor:        actorName,
-			ActorType:    actorType,
-			Summary:      fmt.Sprintf("👉 Nudged %s", targetName),
-			Details:      reasonText,
-			Rig:          rig,
+		// Keep full title - CSS handles overflow
+
+		// Calculate age and stale status
+		if bead.UpdatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, bead.UpdatedAt); err == nil {
+				age := time.Since(t)
+				row.Age = formatMailAge(age)
+				row.IsStale = age > time.Hour // Stale if hooked > 1 hour
+			}
 		}
 
-	case "handoff":
-		subject, _ := entry.Payload["subject"].(string)
-		if subject == "" {
-			subject = "work"
+		rows = append(rows, row)
+	}
+
+	// Sort by stale first (stuck work), then by age
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].IsStale != rows[j].IsStale {
+			return rows[i].IsStale // Stale items first
 		}
-		if len(subject) > 40 {
-			subject = subject[:37] + "..."
+		return rows[i].Age > rows[j].Age
+	})
+
+	return rows, nil
+}
+
+// FetchMayor returns the Mayor's current status.
+func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
+	status := &MayorStatus{
+		IsAttached: false,
+	}
+
+	// Check if gt-mayor tmux session exists
+	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
+	if err != nil {
+		// tmux not running or no sessions
+		return status, nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "gt-mayor:") {
+			status.IsAttached = true
+			status.SessionName = "gt-mayor"
+
+			// Parse activity timestamp
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				if activityTs, ok := parseActivityTimestamp(parts[1]); ok {
+					age := time.Since(time.Unix(activityTs, 0))
+					status.LastActivity = formatMailAge(age)
+					status.IsActive = age < 5*time.Minute
+				}
+			}
+			break
 		}
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("handoff-%s-%s", entry.Timestamp, actorName),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "handoff",
-			Actor:        actorName,
-			ActorType:    actorType,
-			Summary:      fmt.Sprintf("🔄 Handed off: %s", subject),
-			Rig:          rig,
+	}
+
+	// Try to detect runtime from mayor config or session
+	if status.IsAttached {
+		status.Runtime = "claude" // Default; could enhance to detect actual runtime
+	}
+
+	return status, nil
+}
+
+// FetchIssues returns open issues (the backlog).
+func (f *LiveConvoyFetcher) FetchIssues() ([]IssueRow, error) {
+	// Query open issues (excluding internal types like messages, convoys, queues)
+	stdout, err := runBdCmd(f.townBeads, "list", "--status=open", "--json", "--limit=50")
+	if err != nil {
+		return nil, nil // No issues or bd not available
+	}
+
+	var beads []struct {
+		ID        string   `json:"id"`
+		Title     string   `json:"title"`
+		Type      string   `json:"type"`
+		Priority  int      `json:"priority"`
+		Labels    []string `json:"labels"`
+		CreatedAt string   `json:"created_at"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &beads); err != nil {
+		return nil, fmt.Errorf("parsing issues: %w", err)
+	}
+
+	var rows []IssueRow
+	for _, bead := range beads {
+		// Skip internal types (messages, convoys, queues, merge-requests, wisps)
+		switch bead.Type {
+		case "message", "convoy", "queue", "merge-request", "wisp", "agent":
+			continue
 		}
 
-	case "done":
-		branch, _ := entry.Payload["branch"].(string)
-		beadID, _ := entry.Payload["bead"].(string)
-		summary := "✅ Completed work"
-		if branch != "" {
-			summary = fmt.Sprintf("✅ Completed %s", branch)
-		} else if beadID != "" {
-			summary = fmt.Sprintf("✅ Completed %s", beadID)
-		}
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("done-%s-%s", entry.Timestamp, actorName),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "done",
-			Actor:        actorName,
-			ActorType:    actorType,
-			Summary:      summary,
-			Rig:          rig,
+		row := IssueRow{
+			ID:       bead.ID,
+			Title:    bead.Title,
+			Type:     bead.Type,
+			Priority: bead.Priority,
 		}
 
-	case "kill":
-		targetName := target
-		if targetName == "" {
-			targetName = polecat
+		// Keep full title - CSS handles overflow
+
+		// Format labels (skip internal labels)
+		var displayLabels []string
+		for _, label := range bead.Labels {
+			if !strings.HasPrefix(label, "gt:") && !strings.HasPrefix(label, "internal:") {
+				displayLabels = append(displayLabels, label)
+			}
 		}
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("kill-%s-%s", entry.Timestamp, targetName),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "kill",
-			Actor:        actorName,
-			ActorType:    actorType,
-			Summary:      fmt.Sprintf("💀 Killed %s", targetName),
-			Details:      reason,
-			Rig:          rig,
+		if len(displayLabels) > 0 {
+			row.Labels = strings.Join(displayLabels, ", ")
+			if len(row.Labels) > 25 {
+				row.Labels = row.Labels[:22] + "..."
+			}
 		}
 
-	case "escalation_sent":
-		to, _ := entry.Payload["to"].(string)
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("escalation-%s-%s", entry.Timestamp, actorName),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "escalation",
-			Actor:        actorName,
-			ActorType:    actorType,
-			Summary:      fmt.Sprintf("⚠️ Escalated %s to %s", target, to),
-			Details:      reason,
-			Rig:          rig,
+		// Calculate age
+		if bead.CreatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, bead.CreatedAt); err == nil {
+				row.Age = formatMailAge(time.Since(t))
+			}
 		}
 
-	case "boot":
-		agents, _ := entry.Payload["agents"].([]interface{})
-		agentCount := len(agents)
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("boot-%s-%s", entry.Timestamp, rig),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "boot",
-			Actor:        "system",
-			ActorType:    "system",
-			Summary:      fmt.Sprintf("🚀 Booted rig %s with %d agents", rig, agentCount),
-			Rig:          rig,
+		rows = append(rows, row)
+	}
+
+	// Sort by priority (1=critical first), then by age
+	sort.Slice(rows, func(i, j int) bool {
+		pi, pj := rows[i].Priority, rows[j].Priority
+		if pi == 0 {
+			pi = 5 // Treat unset priority as low
+		}
+		if pj == 0 {
+			pj = 5
+		}
+		if pi != pj {
+			return pi < pj
+		}
+		return rows[i].Age > rows[j].Age // Older first for same priority
+	})
+
+	return rows, nil
+}
+
+// FetchActivity returns recent activity from the event log.
+func (f *LiveConvoyFetcher) FetchActivity() ([]ActivityRow, error) {
+	eventsPath := filepath.Join(f.townRoot, ".events.jsonl")
+
+	// Read events file
+	data, err := os.ReadFile(eventsPath)
+	if err != nil {
+		return nil, nil // No events file
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 0 {
+		return nil, nil
+	}
+
+	// Take last 20 events (most recent)
+	start := 0
+	if len(lines) > 20 {
+		start = len(lines) - 20
+	}
+
+	var rows []ActivityRow
+	for i := len(lines) - 1; i >= start; i-- {
+		line := lines[i]
+		if line == "" {
+			continue
 		}
 
-	case "halt":
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("halt-%s", entry.Timestamp),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "halt",
-			Actor:        actorName,
-			ActorType:    actorType,
-			Summary:      "🛑 Halted town services",
+		var event struct {
+			Timestamp  string                 `json:"ts"`
+			Type       string                 `json:"type"`
+			Actor      string                 `json:"actor"`
+			Payload    map[string]interface{} `json:"payload"`
+			Visibility string                 `json:"visibility"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
 		}
 
+		// Skip audit-only events
+		if event.Visibility == "audit" {
+			continue
+		}
+
+		row := ActivityRow{
+			Type:  event.Type,
+			Actor: formatAgentAddress(event.Actor),
+			Icon:  eventIcon(event.Type),
+		}
+
+		// Calculate time ago
+		if t, err := time.Parse(time.RFC3339, event.Timestamp); err == nil {
+			row.Time = formatMailAge(time.Since(t))
+		}
+
+		// Generate human-readable summary
+		row.Summary = eventSummary(event.Type, event.Actor, event.Payload)
+
+		rows = append(rows, row)
+	}
+
+	return rows, nil
+}
+
+// eventIcon returns an emoji for an event type.
+func eventIcon(eventType string) string {
+	icons := map[string]string{
+		"sling":             "🎯",
+		"hook":              "🪝",
+		"unhook":            "🔓",
+		"done":              "✅",
+		"mail":              "📬",
+		"spawn":             "🦨",
+		"kill":              "💀",
+		"nudge":             "👉",
+		"handoff":           "🤝",
+		"session_start":     "▶️",
+		"session_end":       "⏹️",
+		"session_death":     "☠️",
+		"mass_death":        "💥",
+		"patrol_started":    "🔍",
+		"patrol_complete":   "✔️",
+		"escalation_sent":   "⚠️",
+		"escalation_acked":  "👍",
+		"escalation_closed": "🔕",
+		"merge_started":     "🔀",
+		"merged":            "✨",
+		"merge_failed":      "❌",
+		"boot":              "🚀",
+		"halt":              "🛑",
+	}
+	if icon, ok := icons[eventType]; ok {
+		return icon
+	}
+	return "📋"
+}
+
+// eventSummary generates a human-readable summary for an event.
+func eventSummary(eventType, actor string, payload map[string]interface{}) string {
+	shortActor := formatAgentAddress(actor)
+
+	switch eventType {
 	case "sling":
-		beadID, _ := entry.Payload["bead"].(string)
-		target, _ := entry.Payload["target"].(string)
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("sling-%s-%s", entry.Timestamp, beadID),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "sling",
-			Actor:        actorName,
-			ActorType:    actorType,
-			Summary:      fmt.Sprintf("📦 Slung work to %s", target),
-			Details:      beadID,
-		}
-
+		bead, _ := payload["bead"].(string)
+		target, _ := payload["target"].(string)
+		return fmt.Sprintf("%s slung to %s", bead, formatAgentAddress(target))
+	case "done":
+		bead, _ := payload["bead"].(string)
+		return fmt.Sprintf("%s completed %s", shortActor, bead)
 	case "mail":
-		to, _ := entry.Payload["to"].(string)
-		subject, _ := entry.Payload["subject"].(string)
-		if len(subject) > 40 {
-			subject = subject[:37] + "..."
+		to, _ := payload["to"].(string)
+		subject, _ := payload["subject"].(string)
+		if len(subject) > 25 {
+			subject = subject[:22] + "..."
 		}
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("mail-%s-%s", entry.Timestamp, to),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "mail",
-			Actor:        actorName,
-			ActorType:    actorType,
-			Summary:      fmt.Sprintf("📬 Sent mail to %s", to),
-			Details:      subject,
+		return fmt.Sprintf("→ %s: %s", formatAgentAddress(to), subject)
+	case "spawn":
+		return fmt.Sprintf("%s spawned", shortActor)
+	case "kill":
+		return fmt.Sprintf("%s killed", shortActor)
+	case "hook":
+		bead, _ := payload["bead"].(string)
+		return fmt.Sprintf("%s hooked %s", shortActor, bead)
+	case "unhook":
+		bead, _ := payload["bead"].(string)
+		return fmt.Sprintf("%s unhooked %s", shortActor, bead)
+	case "merged":
+		branch, _ := payload["branch"].(string)
+		return fmt.Sprintf("merged %s", branch)
+	case "merge_failed":
+		reason, _ := payload["reason"].(string)
+		if len(reason) > 30 {
+			reason = reason[:27] + "..."
 		}
-
-	case "patrol_complete":
-		polecatCount, _ := entry.Payload["polecat_count"].(float64)
-		message, _ := entry.Payload["message"].(string)
-		summary := fmt.Sprintf("🔍 Patrol complete (%d polecats)", int(polecatCount))
-		return &ActivityEvent{
-			ID:           fmt.Sprintf("patrol-%s-%s", entry.Timestamp, actorName),
-			Timestamp:    entry.Timestamp,
-			TimestampAgo: timestampAgo,
-			Type:         "patrol",
-			Actor:        actorName,
-			ActorType:    actorType,
-			Summary:      summary,
-			Details:      message,
-			Rig:          rig,
-		}
-
+		return fmt.Sprintf("merge failed: %s", reason)
+	case "escalation_sent":
+		return "escalation created"
+	case "session_death":
+		role, _ := payload["role"].(string)
+		return fmt.Sprintf("%s session died", formatAgentAddress(role))
+	case "mass_death":
+		count, _ := payload["count"].(float64)
+		return fmt.Sprintf("%.0f sessions died", count)
 	default:
-		// Skip uninteresting event types
-		return nil
+		return eventType
 	}
-}
-
-// formatTimeAgo formats a time as a human-readable "X ago" string.
-func formatTimeAgo(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		m := int(d.Minutes())
-		if m == 1 {
-			return "1 minute ago"
-		}
-		return fmt.Sprintf("%d minutes ago", m)
-	case d < 24*time.Hour:
-		h := int(d.Hours())
-		if h == 1 {
-			return "1 hour ago"
-		}
-		return fmt.Sprintf("%d hours ago", h)
-	default:
-		days := int(d.Hours() / 24)
-		if days == 1 {
-			return "1 day ago"
-		}
-		return fmt.Sprintf("%d days ago", days)
-	}
-}
-
-// fetchMainBranchCommits gets recent commits from each rig's main branch (via refinery clone).
-// This catches direct pushes that don't go through GitHub PRs.
-func (f *LiveConvoyFetcher) fetchMainBranchCommits(limit int) []ActivityEvent {
-	var events []ActivityEvent
-
-	rigsConfigPath := filepath.Join(f.townRoot, "mayor", "rigs.json")
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
-	if err != nil {
-		return events
-	}
-
-	for rigName := range rigsConfig.Rigs {
-		// Check refinery clone path: townRoot/rigName/refinery/rig
-		refineryPath := filepath.Join(f.townRoot, rigName, "refinery", "rig")
-
-		// Fetch latest from origin first
-		fetchCmd := exec.Command("git", "fetch", "origin")
-		fetchCmd.Dir = refineryPath
-		_ = fetchCmd.Run() // Ignore errors, proceed with potentially stale data
-
-		// Get recent commits on origin/main (last hour)
-		cmd := exec.Command("git", "log", "origin/main", "--since=1 hour ago", "--format=%H|%s|%ar|%aI|%an", "-n", fmt.Sprintf("%d", limit))
-		cmd.Dir = refineryPath
-		var stdout bytes.Buffer
-		cmd.Stdout = &stdout
-		if err := cmd.Run(); err != nil {
-			continue
-		}
-
-		lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-		for _, line := range lines {
-			if line == "" {
-				continue
-			}
-			parts := strings.SplitN(line, "|", 5)
-			if len(parts) < 5 {
-				continue
-			}
-
-			hash := parts[0][:8]
-			msg := parts[1]
-			if len(msg) > 50 {
-				msg = msg[:47] + "..."
-			}
-			author := parts[4]
-
-			events = append(events, ActivityEvent{
-				ID:           fmt.Sprintf("main-%s-%s", rigName, hash),
-				Timestamp:    parts[3],
-				TimestampAgo: parts[2],
-				Type:         "main_commit",
-				Actor:        author,
-				ActorType:    "refinery",
-				Summary:      fmt.Sprintf("Pushed to main: \"%s\"", msg),
-				Details:      rigName,
-				Rig:          rigName,
-			})
-		}
-	}
-
-	return events
-}
-
-// FetchHQAgentDetail returns expanded information for an HQ agent session.
-func (f *LiveConvoyFetcher) FetchHQAgentDetail(sessionID string) (*HQAgentDetail, error) {
-	// Validate session ID format
-	if !strings.HasPrefix(sessionID, "hq-") {
-		return nil, fmt.Errorf("invalid HQ session ID format: %s", sessionID)
-	}
-
-	// Extract agent name from session ID (hq-mayor -> mayor)
-	agentName := strings.TrimPrefix(sessionID, "hq-")
-
-	// Get session activity and creation time
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}|#{session_created}",
-		"-f", fmt.Sprintf("#{==:#{session_name},%s}", sessionID))
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
-	}
-
-	output := strings.TrimSpace(stdout.String())
-	if output == "" {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
-	}
-
-	parts := strings.Split(output, "|")
-	if len(parts) < 3 {
-		return nil, fmt.Errorf("unexpected tmux output format")
-	}
-
-	// Parse activity and created timestamps
-	var activityUnix, createdUnix int64
-	fmt.Sscanf(parts[1], "%d", &activityUnix)
-	fmt.Sscanf(parts[2], "%d", &createdUnix)
-
-	activityTime := time.Unix(activityUnix, 0)
-	createdTime := time.Unix(createdUnix, 0)
-	uptime := formatDuration(time.Since(createdTime))
-
-	// Get terminal lines
-	terminalLines := f.getPolecatTerminalLines(sessionID, 50)
-
-	// Get status hint
-	statusHint := f.getStatusHintWithDefault(sessionID)
-
-	return &HQAgentDetail{
-		HQAgentRow: HQAgentRow{
-			Name:         agentName,
-			SessionID:    sessionID,
-			Status:       "running",
-			LastActivity: activity.Calculate(activityTime),
-			StatusHint:   statusHint,
-		},
-		Uptime:        uptime,
-		TerminalLines: terminalLines,
-	}, nil
-}
-
-// FetchHQAgents returns status of town-level agents (Mayor, Deacon).
-func (f *LiveConvoyFetcher) FetchHQAgents() ([]HQAgentRow, error) {
-	var agents []HQAgentRow
-
-	// Define the HQ agent sessions to look for
-	hqAgents := []struct {
-		name      string
-		sessionID string
-	}{
-		{"mayor", "hq-mayor"},
-		{"deacon", "hq-deacon"},
-	}
-
-	for _, agent := range hqAgents {
-		row := HQAgentRow{
-			Name:      agent.name,
-			SessionID: agent.sessionID,
-			Status:    "stopped",
-		}
-
-		// Query tmux for this session
-		cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{window_activity}",
-			"-f", fmt.Sprintf("#{==:#{session_name},%s}", agent.sessionID))
-		var stdout bytes.Buffer
-		cmd.Stdout = &stdout
-		if err := cmd.Run(); err == nil {
-			output := strings.TrimSpace(stdout.String())
-			if output != "" {
-				row.Status = "running"
-
-				// Parse activity timestamp
-				parts := strings.Split(output, "|")
-				if len(parts) >= 2 {
-					var activityUnix int64
-					if _, err := fmt.Sscanf(parts[1], "%d", &activityUnix); err == nil && activityUnix > 0 {
-						activityTime := time.Unix(activityUnix, 0)
-						row.LastActivity = activity.Calculate(activityTime)
-					}
-				}
-
-				// Get status hint from pane
-				row.StatusHint = f.getStatusHintWithDefault(agent.sessionID)
-			}
-		}
-
-		// If stopped, set default activity
-		if row.Status == "stopped" {
-			row.LastActivity = activity.Info{
-				FormattedAge: "offline",
-				ColorClass:   activity.ColorUnknown,
-			}
-		}
-
-		agents = append(agents, row)
-	}
-
-	return agents, nil
-}
-
-// fetchCommitEvents gets recent commits from polecat worktrees.
-func (f *LiveConvoyFetcher) fetchCommitEvents(limit int) []ActivityEvent {
-	var events []ActivityEvent
-
-	// Get all polecats
-	polecats, err := f.FetchPolecats()
-	if err != nil {
-		return events
-	}
-
-	for _, polecat := range polecats {
-		// Get rig path: townRoot/rigName/polecats/polecatName/rigName
-		worktreePath := filepath.Join(f.townRoot, polecat.Rig, "polecats", polecat.Name, polecat.Rig)
-
-		// Get recent commits (last hour)
-		cmd := exec.Command("git", "log", "--since=1 hour ago", "--format=%H|%s|%ar|%aI", "-n", "5")
-		cmd.Dir = worktreePath
-		var stdout bytes.Buffer
-		cmd.Stdout = &stdout
-		if err := cmd.Run(); err != nil {
-			continue
-		}
-
-		lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-		for _, line := range lines {
-			if line == "" {
-				continue
-			}
-			parts := strings.SplitN(line, "|", 4)
-			if len(parts) < 4 {
-				continue
-			}
-
-			hash := parts[0][:8]
-			msg := parts[1]
-			if len(msg) > 50 {
-				msg = msg[:47] + "..."
-			}
-
-			events = append(events, ActivityEvent{
-				ID:           fmt.Sprintf("commit-%s", hash),
-				Timestamp:    parts[3],
-				TimestampAgo: parts[2],
-				Type:         "commit",
-				Actor:        polecat.Name,
-				ActorType:    "polecat",
-				Summary:      fmt.Sprintf("Committed: \"%s\"", msg),
-				Rig:          polecat.Rig,
-			})
-		}
-	}
-
-	return events
-}
-
-// FetchInternalMRs fetches open MR beads from all registered rigs.
-// These are the internal merge requests tracked by beads (what mayor reports on),
-// as opposed to GitHub PRs which are fetched by FetchMergeQueue.
-// MRs are identified by the gt:merge-request label, not by type.
-func (f *LiveConvoyFetcher) FetchInternalMRs() ([]InternalMRRow, error) {
-	// Load registered rigs from config
-	rigsConfigPath := filepath.Join(f.townRoot, "mayor", "rigs.json")
-	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("loading rigs config: %w", err)
-	}
-
-	var result []InternalMRRow
-
-	for rigName := range rigsConfig.Rigs {
-		// Query beads for this rig's open merge-request issues
-		// bd must be run from the rig directory (it finds .beads automatically)
-		rigPath := filepath.Join(f.townRoot, rigName)
-		beadsPath := filepath.Join(rigPath, ".beads")
-
-		// Check if beads database exists for this rig
-		if _, err := os.Stat(beadsPath); os.IsNotExist(err) {
-			continue
-		}
-
-		// Query for open merge requests using label (not type - see #816)
-		// MRs created by `gt done` have type=task but gt:merge-request label
-		cmd := exec.Command("bd", "list", "--label", "gt:merge-request", "--status=open", "--json")
-		cmd.Dir = rigPath
-		var stdout bytes.Buffer
-		cmd.Stdout = &stdout
-		if err := cmd.Run(); err != nil {
-			continue // Non-fatal: skip this rig
-		}
-
-		var mrs []struct {
-			ID          string `json:"id"`
-			Title       string `json:"title"`
-			Status      string `json:"status"`
-			Description string `json:"description"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &mrs); err != nil {
-			continue
-		}
-
-		for _, mr := range mrs {
-			// Parse MR fields from description
-			fields := parseMRDescription(mr.Description)
-
-			row := InternalMRRow{
-				ID:          mr.ID,
-				Rig:         rigName,
-				Title:       mr.Title,
-				Status:      mr.Status,
-				Branch:      fields.Branch,
-				Target:      fields.Target,
-				Worker:      fields.Worker,
-				SourceIssue: fields.SourceIssue,
-			}
-
-			// Determine color class based on status
-			if mr.Status == "in_progress" {
-				row.ColorClass = "mq-yellow"
-			} else {
-				row.ColorClass = "mq-green"
-			}
-
-			result = append(result, row)
-		}
-
-		// Also check for in_progress MRs
-		cmd = exec.Command("bd", "list", "--label", "gt:merge-request", "--status=in_progress", "--json")
-		cmd.Dir = rigPath
-		stdout.Reset()
-		cmd.Stdout = &stdout
-		if err := cmd.Run(); err == nil {
-			var inProgressMRs []struct {
-				ID          string `json:"id"`
-				Title       string `json:"title"`
-				Status      string `json:"status"`
-				Description string `json:"description"`
-			}
-			if err := json.Unmarshal(stdout.Bytes(), &inProgressMRs); err == nil {
-				for _, mr := range inProgressMRs {
-					fields := parseMRDescription(mr.Description)
-					row := InternalMRRow{
-						ID:          mr.ID,
-						Rig:         rigName,
-						Title:       mr.Title,
-						Status:      mr.Status,
-						Branch:      fields.Branch,
-						Target:      fields.Target,
-						Worker:      fields.Worker,
-						SourceIssue: fields.SourceIssue,
-						ColorClass:  "mq-yellow",
-					}
-					result = append(result, row)
-				}
-			}
-		}
-	}
-
-	return result, nil
-}
-
-// mrDescFields holds parsed MR description fields.
-type mrDescFields struct {
-	Branch      string
-	Target      string
-	Worker      string
-	SourceIssue string
-}
-
-// parseMRDescription extracts fields from MR description.
-// Format: key: value lines (e.g., "branch: polecat/Nux/gt-xyz")
-func parseMRDescription(desc string) mrDescFields {
-	var fields mrDescFields
-	for _, line := range strings.Split(desc, "\n") {
-		line = strings.TrimSpace(line)
-		colonIdx := strings.Index(line, ":")
-		if colonIdx == -1 {
-			continue
-		}
-		key := strings.TrimSpace(strings.ToLower(line[:colonIdx]))
-		value := strings.TrimSpace(line[colonIdx+1:])
-		switch key {
-		case "branch":
-			fields.Branch = value
-		case "target":
-			fields.Target = value
-		case "worker":
-			fields.Worker = value
-		case "source_issue", "source-issue", "sourceissue":
-			fields.SourceIssue = value
-		}
-	}
-	return fields
 }

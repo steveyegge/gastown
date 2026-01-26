@@ -413,10 +413,11 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		return fmt.Errorf("creating deacon settings: %w", err)
 	}
 
-	// Build startup command first
-	// Export GT_ROLE and BD_ACTOR in the command since tmux SetEnvironment only affects new panes
-	// Include initial prompt for autonomous patrol startup (like witnesses do)
-	initialPrompt := "I am Deacon. Start patrol: check gt hook, if empty run `gt sling mol-deacon-patrol hq-deacon` and execute the patrol."
+	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
+		Recipient: "deacon",
+		Sender:    "daemon",
+		Topic:     "patrol",
+	}, "I am Deacon. Start patrol: check gt hook, if empty create mol-deacon-patrol wisp and execute it.")
 	startupCmd, err := config.BuildAgentStartupCommandWithAgentOverride("deacon", "", townRoot, "", initialPrompt, agentOverride)
 	if err != nil {
 		return fmt.Errorf("building startup command: %w", err)
@@ -452,23 +453,6 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	runtimeConfig := config.LoadRuntimeConfig("")
 	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	if err := session.StartupNudge(t, sessionName, session.StartupNudgeConfig{
-		Recipient: "deacon",
-		Sender:    "daemon",
-		Topic:     "patrol",
-	}); err != nil {
-		style.PrintWarning("failed to send startup nudge: %v", err)
-	}
-
-	// GUPP: Gas Town Universal Propulsion Principle
-	// Send the propulsion nudge to trigger autonomous patrol execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
-	if err := t.NudgeSession(sessionName, session.PropulsionNudgeForRole("deacon", deaconDir)); err != nil {
-		return fmt.Errorf("sending propulsion nudge: %w", err)
-	}
 
 	return nil
 }

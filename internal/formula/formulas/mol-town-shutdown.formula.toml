@@ -136,15 +136,19 @@ Old logs are moved to `$GT_ROOT/logs/archive/` with timestamps.
 """
 
 [[steps]]
-id = "sync-state"
-title = "Sync beads and push"
+id = "verify-state"
+title = "Verify beads state"
 needs = ["rotate-logs"]
 description = """
-Ensure all beads state is persisted.
+Verify beads database is accessible.
 
 ```bash
-bd sync
+bd doctor
+bd list --limit 5    # Quick connectivity check
 ```
+
+Note: With Dolt backend, changes are persisted immediately to the sql-server.
+There is no separate sync step needed.
 
 Note: We do NOT force-commit polecat work here. Their sandboxes
 are preserved with whatever state they had. They'll commit their
@@ -154,7 +158,7 @@ own work when they resume.
 [[steps]]
 id = "handoff-mayor"
 title = "Send Mayor handoff"
-needs = ["sync-state"]
+needs = ["verify-state"]
 description = """
 Record shutdown context for the fresh Mayor session.
 

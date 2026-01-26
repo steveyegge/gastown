@@ -11,7 +11,6 @@ to commit." This breaks the Gas Town model. The system is designed for autonomou
 
 **When implementation is complete:**
 - Push your commits: `git push`
-- Sync beads: `bd sync`
 - Either continue with next task OR cycle: `gt handoff`
 
 **Do NOT:**
@@ -132,7 +131,7 @@ Town ({{ .TownRoot }})
 **Key points:**
 - Mail ALWAYS uses town beads - `gt mail` routes there automatically
 - Project issues use your clone's beads - `bd` commands use local `.beads/`
-- Run `bd sync` to push/pull beads changes via the `beads-sync` branch
+- Beads changes are persisted immediately to Dolt - no sync step needed
 - **GitHub URLs**: Use `git remote -v` to verify repo URLs - never assume orgs like `anthropics/`
 
 ## Prefix-Based Routing
@@ -321,7 +320,6 @@ ONE exception where branches are created. But the rule still applies:
 - `bd update <id> --status=in_progress` - Claim an issue
 - `bd show <id>` - View issue details
 - `bd close <id>` - Mark issue complete
-- `bd sync` - Sync beads changes
 
 ### Communication
 - `gt mail send <addr> -s "Subject" -m "Message"` - Send mail (async, queued)
@@ -381,7 +379,6 @@ Raw `tmux send-keys` is unreliable. Always use `gt nudge` for agent-to-agent com
 - Managing your own progress
 - Asking for help when stuck
 - Keeping your git state clean
-- Syncing beads before long breaks
 
 ## Context Cycling (Handoff)
 
@@ -420,7 +417,6 @@ Before ending your session:
 ```
 [ ] git status              (check for uncommitted changes)
 [ ] git push                (push any commits)
-[ ] bd sync                 (sync beads if configured)
 [ ] Check inbox             (any messages needing response?)
 [ ] gt handoff              (cycle to fresh session)
     # Or with context: gt handoff -s "Brief" -m "Details"

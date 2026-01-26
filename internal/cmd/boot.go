@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -141,7 +142,7 @@ func runBootStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	if sessionAlive {
-		fmt.Printf("  Session: %s (alive)\n", boot.SessionName)
+		fmt.Printf("  Session: %s (alive)\n", session.BootSessionName())
 	} else {
 		fmt.Printf("  Session: %s\n", style.Dim.Render("not running"))
 	}
@@ -219,7 +220,7 @@ func runBootSpawn(cmd *cobra.Command, args []string) error {
 	if b.IsDegraded() {
 		fmt.Println("Boot spawned in degraded mode (subprocess)")
 	} else {
-		fmt.Printf("Boot spawned in session: %s\n", boot.SessionName)
+		fmt.Printf("Boot spawned in session: %s\n", session.BootSessionName())
 	}
 
 	return nil

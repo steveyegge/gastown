@@ -1034,3 +1034,107 @@ exit /b 0
 			"Log output:\n%s\nAttached log:\n%s", string(logBytes), attachedLog)
 	}
 }
+
+// TestSlingNoMergeFlag verifies that gt sling --no-merge stores the no_merge flag
+// in the bead's description. This flag tells gt done to skip the merge queue
+// and keep work on the feature branch for human review.
+func TestSlingNoMergeFlag(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker so workspace.FindFromCwd() succeeds.
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create stub bd that logs update commands
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	bdScript := `#!/bin/sh
+set -e
+echo "ARGS:$*" >> "${BD_LOG}"
+if [ "$1" = "--no-daemon" ]; then
+  shift
+fi
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+    ;;
+  update)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo ARGS:%*>>"%BD_LOG%"
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" set "cmd=%2"
+if "%cmd%"=="show" (
+  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+  exit /b 0
+)
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flags
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	prevNoMerge := slingNoMerge
+	t.Cleanup(func() {
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+		slingNoMerge = prevNoMerge
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true
+	slingNoMerge = true // This is what we're testing
+
+	if err := runSling(nil, []string{"gt-test123"}); err != nil {
+		t.Fatalf("runSling: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read bd log: %v", err)
+	}
+
+	// Look for update command that includes no_merge in description
+	logLines := strings.Split(string(logBytes), "\n")
+	foundNoMerge := false
+	for _, line := range logLines {
+		if strings.Contains(line, "update") && strings.Contains(line, "no_merge") {
+			foundNoMerge = true
+			break
+		}
+	}
+
+	if !foundNoMerge {
+		t.Errorf("--no-merge flag not stored in bead description\nLog:\n%s", string(logBytes))
+	}
+}
