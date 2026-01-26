@@ -2,6 +2,7 @@
 package beads
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -253,6 +254,94 @@ func SetupRedirect(townRoot, worktreePath string) error {
 	if configData, err := os.ReadFile(townConfigPath); err == nil {
 		worktreeConfigPath := filepath.Join(worktreeBeadsDir, "config.yaml")
 		os.WriteFile(worktreeConfigPath, configData, 0644)
+	}
+
+	return nil
+}
+
+// CopyBeadEntryToWorktree copies a bead entry from the town's issues.jsonl to the worktree's issues.jsonl.
+// This allows polecats in worktrees to resolve target beads that exist in the parent town.
+//
+// Parameters:
+//   - townRoot: the town root directory
+//   - beadID: the bead ID to copy (e.g., "hq-abc")
+//   - worktreePath: the worktree directory
+//
+// This is safe to call even if the bead doesn't exist in the town beads.
+func CopyBeadEntryToWorktree(townRoot, beadID, worktreePath string) error {
+	if beadID == "" {
+		return nil // Nothing to copy
+	}
+
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	townIssuesPath := filepath.Join(townBeadsDir, "issues.jsonl")
+
+	// Try to read the town's issues.jsonl
+	townData, err := os.ReadFile(townIssuesPath)
+	if err != nil {
+		// Town issues.jsonl doesn't exist or is not readable - not fatal
+		return nil
+	}
+
+	// Find the line matching the beadID
+	lines := strings.Split(strings.TrimSpace(string(townData)), "\n")
+	var beadLine string
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		// Try to parse the line to check if it contains our bead ID
+		var issueData map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &issueData); err != nil {
+			continue
+		}
+		if id, ok := issueData["id"].(string); ok && id == beadID {
+			beadLine = line
+			break
+		}
+	}
+
+	if beadLine == "" {
+		// Bead not found in town issues.jsonl - not fatal
+		return nil
+	}
+
+	// Ensure worktree .beads directory exists
+	worktreeBeadsDir := filepath.Join(worktreePath, ".beads")
+	if err := os.MkdirAll(worktreeBeadsDir, 0755); err != nil {
+		return fmt.Errorf("creating worktree .beads dir: %w", err)
+	}
+
+	// Read existing worktree issues.jsonl if it exists
+	worktreeIssuesPath := filepath.Join(worktreeBeadsDir, "issues.jsonl")
+	var worktreeLines []string
+	if existingData, err := os.ReadFile(worktreeIssuesPath); err == nil {
+		existingLines := strings.Split(strings.TrimSpace(string(existingData)), "\n")
+		for _, line := range existingLines {
+			if line == "" {
+				continue
+			}
+			// Check if this line already contains our bead ID
+			var issueData map[string]interface{}
+			if err := json.Unmarshal([]byte(line), &issueData); err != nil {
+				worktreeLines = append(worktreeLines, line)
+				continue
+			}
+			if id, ok := issueData["id"].(string); ok && id == beadID {
+				// Already exists - skip (we'll add the new one)
+				continue
+			}
+			worktreeLines = append(worktreeLines, line)
+		}
+	}
+
+	// Append the bead entry
+	worktreeLines = append(worktreeLines, beadLine)
+
+	// Write back to worktree issues.jsonl
+	content := strings.Join(worktreeLines, "\n") + "\n"
+	if err := os.WriteFile(worktreeIssuesPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("writing worktree issues.jsonl: %w", err)
 	}
 
 	return nil

@@ -415,6 +415,18 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
+	// Copy target bead entry to worktree if one is being hooked.
+	// This allows polecats to resolve beads from parent town even when slinging cross-context work.
+	if opts.HookBead != "" {
+		townRoot, err := workspace.Find(m.rig.Path)
+		if err == nil {
+			if err := beads.CopyBeadEntryToWorktree(townRoot, opts.HookBead, clonePath); err != nil {
+				// Non-fatal - polecat can resolve via routing if local copy fails
+				fmt.Printf("Warning: could not copy bead entry to worktree: %v\n", err)
+			}
+		}
+	}
+
 	// Provision PRIME.md with Gas Town context for this worker.
 	// This is the fallback if SessionStart hook fails - ensures polecats
 	// always have GUPP and essential Gas Town context.
@@ -742,6 +754,18 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Set up shared beads
 	if err := m.setupSharedBeads(newClonePath); err != nil {
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Copy target bead entry to worktree if one is being hooked.
+	// This allows polecats to resolve beads from parent town even when slinging cross-context work.
+	if opts.HookBead != "" {
+		townRoot, err := workspace.Find(m.rig.Path)
+		if err == nil {
+			if err := beads.CopyBeadEntryToWorktree(townRoot, opts.HookBead, newClonePath); err != nil {
+				// Non-fatal - polecat can resolve via routing if local copy fails
+				fmt.Printf("Warning: could not copy bead entry to worktree: %v\n", err)
+			}
+		}
 	}
 
 	// Copy overlay files from .runtime/overlay/ to polecat root.
