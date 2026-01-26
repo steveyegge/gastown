@@ -170,7 +170,7 @@ Gas Town can enforce that agents offer a decision point before ending each turn.
 Three Claude Code hooks work together:
 
 1. **UserPromptSubmit**: Clears the "decision offered" marker when a new turn starts
-2. **PostToolUse**: Detects when `gt decision request` or `bd decision create` is called, sets marker
+2. **PostToolUse**: Detects when `gt decision request` is called, sets marker
 3. **Stop**: Checks for marker; blocks if missing
 
 ### Enforcement Modes
@@ -227,7 +227,7 @@ When an agent tries to end a turn without offering a decision:
 
 ● Ran 1 stop hook
   ⎿  Stop hook error: You must offer a formal decision point using
-     bd decision create or gt decision request before ending this turn.
+     'gt decision request' before ending this turn.
 
 ● [Agent learns the API and creates a decision]
 
@@ -347,7 +347,7 @@ Each option should:
 | `gt decision watch` | Interactive TUI for monitoring/responding |
 | `gt decision dashboard` | Summary view by urgency |
 | `gt decision await <id>` | Block until resolved (scripting) |
-| `bd decision create` | Low-level decision creation |
+| `bd decision create` | Low-level primitive (for hooks/scripts only, not agent use) |
 | `bd decision respond` | Low-level response recording |
 
 ## See Also
