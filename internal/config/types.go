@@ -597,6 +597,8 @@ func defaultRuntimeCommand(provider string) string {
 		return "codex"
 	case "opencode":
 		return "opencode"
+	case "kiro":
+		return "kiro"
 	case "generic":
 		return ""
 	default:
@@ -633,6 +635,8 @@ func defaultRuntimeArgs(provider string) []string {
 	switch provider {
 	case "claude":
 		return []string{"--dangerously-skip-permissions"}
+	case "kiro":
+		return []string{"--trust-all-tools"}
 	default:
 		return nil
 	}
@@ -643,6 +647,8 @@ func defaultPromptMode(provider string) string {
 	case "codex":
 		return "none"
 	case "opencode":
+		return "none"
+	case "kiro":
 		return "none"
 	default:
 		return "arg"
@@ -669,6 +675,8 @@ func defaultHooksProvider(provider string) string {
 		return "claude"
 	case "opencode":
 		return "opencode"
+	case "kiro":
+		return "kiro"
 	default:
 		return "none"
 	}
@@ -680,6 +688,8 @@ func defaultHooksDir(provider string) string {
 		return ".claude"
 	case "opencode":
 		return ".opencode/plugin"
+	case "kiro":
+		return ".kiro"
 	default:
 		return ""
 	}
@@ -691,6 +701,8 @@ func defaultHooksFile(provider string) string {
 		return "settings.json"
 	case "opencode":
 		return "gastown.js"
+	case "kiro":
+		return "settings.json"
 	default:
 		return ""
 	}
@@ -704,6 +716,10 @@ func defaultProcessNames(provider, command string) []string {
 		// OpenCode runs as Node.js process, need both for IsAgentRunning detection.
 		// tmux pane_current_command may show "node" or "opencode" depending on how invoked.
 		return []string{"opencode", "node"}
+	}
+	if provider == "kiro" {
+		// Kiro likely runs as Node.js process, need both for IsAgentRunning detection.
+		return []string{"kiro", "node"}
 	}
 	if command != "" {
 		return []string{filepath.Base(command)}
@@ -732,6 +748,11 @@ func defaultReadyDelayMs(provider string) int {
 		// 8000ms provides reliable startup detection across models.
 		return 8000
 	}
+	if provider == "kiro" {
+		// Kiro uses a TUI with box-drawing characters like OpenCode,
+		// requiring delay-based detection instead of prompt prefix matching.
+		return 8000
+	}
 	return 0
 }
 
@@ -740,6 +761,9 @@ func defaultInstructionsFile(provider string) string {
 		return "AGENTS.md"
 	}
 	if provider == "opencode" {
+		return "AGENTS.md"
+	}
+	if provider == "kiro" {
 		return "AGENTS.md"
 	}
 	return "CLAUDE.md"
