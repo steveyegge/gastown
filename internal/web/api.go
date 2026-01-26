@@ -92,6 +92,10 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleMailRead(w, r)
 	case path == "/mail/send" && r.Method == http.MethodPost:
 		h.handleMailSend(w, r)
+	case path == "/issues/show" && r.Method == http.MethodGet:
+		h.handleIssueShow(w, r)
+	case path == "/pr/show" && r.Method == http.MethodGet:
+		h.handlePRShow(w, r)
 	default:
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
@@ -721,6 +725,339 @@ func parseJSONPaths(jsonStr string) []string {
 		}
 	}
 	return paths
+}
+
+// IssueShowResponse is the response for /api/issues/show.
+type IssueShowResponse struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	Priority    string   `json:"priority,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Created     string   `json:"created,omitempty"`
+	Updated     string   `json:"updated,omitempty"`
+	DependsOn   []string `json:"depends_on,omitempty"`
+	Blocks      []string `json:"blocks,omitempty"`
+	RawOutput   string   `json:"raw_output"`
+}
+
+// handleIssueShow returns details for a specific issue/bead.
+func (h *APIHandler) handleIssueShow(w http.ResponseWriter, r *http.Request) {
+	issueID := r.URL.Query().Get("id")
+	if issueID == "" {
+		h.sendError(w, "Missing issue ID", http.StatusBadRequest)
+		return
+	}
+
+	// Run bd show to get issue details
+	output, err := h.runBdCommand(r.Context(), 10*time.Second, []string{"show", issueID})
+	if err != nil {
+		h.sendError(w, "Failed to fetch issue: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the output
+	resp := parseIssueShowOutput(output, issueID)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// runBdCommand executes a bd command with the given args.
+func (h *APIHandler) runBdCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", args...)
+	if h.workDir != "" {
+		cmd.Dir = h.workDir
+	}
+	cmd.Stdin = nil
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return output, fmt.Errorf("command timed out after %v", timeout)
+	}
+
+	if err != nil {
+		return output, fmt.Errorf("command failed: %v", err)
+	}
+
+	return output, nil
+}
+
+// parseIssueShowOutput parses the output from "bd show <id>".
+func parseIssueShowOutput(output string, issueID string) IssueShowResponse {
+	resp := IssueShowResponse{
+		ID:        issueID,
+		RawOutput: output,
+	}
+
+	lines := strings.Split(output, "\n")
+	inDescription := false
+	parsedFirstLine := false
+	var descLines []string
+	var dependsOn []string
+	var blocks []string
+
+	for _, line := range lines {
+		// First non-empty line usually has the format: "○ id · title   [● P2 · OPEN]"
+		if !parsedFirstLine && (strings.HasPrefix(line, "○") || strings.HasPrefix(line, "●")) {
+			parsedFirstLine = true
+			// Parse the first line for title and status
+			// Format: "○ id · title   [● P2 · OPEN]"
+			// Find the bracket first to isolate the status
+			if bracketIdx := strings.Index(line, "["); bracketIdx > 0 {
+				beforeBracket := line[:bracketIdx]
+				statusPart := line[bracketIdx:]
+
+				// Extract priority and status from [● P2 · OPEN]
+				statusPart = strings.Trim(statusPart, "[]●○ ")
+				statusParts := strings.Split(statusPart, "·")
+				if len(statusParts) >= 1 {
+					resp.Priority = strings.TrimSpace(statusParts[0])
+				}
+				if len(statusParts) >= 2 {
+					resp.Status = strings.TrimSpace(statusParts[1])
+				}
+
+				// Now parse the title from before the bracket
+				// Format: "○ id · title"
+				// Find the second · which separates id from title
+				if firstDot := strings.Index(beforeBracket, "·"); firstDot > 0 {
+					afterFirstDot := beforeBracket[firstDot+len("·"):]
+					if secondDot := strings.Index(afterFirstDot, "·"); secondDot > 0 {
+						resp.Title = strings.TrimSpace(afterFirstDot[secondDot+len("·"):])
+					} else {
+						// Only one dot - id is embedded in icon part
+						resp.Title = strings.TrimSpace(afterFirstDot)
+					}
+				}
+			}
+			continue
+		}
+
+		if strings.HasPrefix(line, "Type:") {
+			resp.Type = strings.TrimSpace(strings.TrimPrefix(line, "Type:"))
+		} else if strings.HasPrefix(line, "Created:") {
+			parts := strings.Split(line, "·")
+			resp.Created = strings.TrimSpace(strings.TrimPrefix(parts[0], "Created:"))
+			if len(parts) > 1 {
+				resp.Updated = strings.TrimSpace(strings.TrimPrefix(parts[1], "Updated:"))
+			}
+		} else if line == "DESCRIPTION" {
+			inDescription = true
+		} else if line == "DEPENDS ON" || line == "BLOCKS" {
+			inDescription = false
+		} else if inDescription && strings.TrimSpace(line) != "" {
+			descLines = append(descLines, line)
+		} else if strings.HasPrefix(strings.TrimSpace(line), "→") {
+			// Dependency line
+			depLine := strings.TrimSpace(line)
+			depLine = strings.TrimPrefix(depLine, "→")
+			depLine = strings.TrimSpace(depLine)
+			// Extract just the bead ID
+			if colonIdx := strings.Index(depLine, ":"); colonIdx > 0 {
+				parts := strings.Fields(depLine[:colonIdx])
+				if len(parts) >= 2 {
+					dependsOn = append(dependsOn, parts[1])
+				}
+			}
+		} else if strings.HasPrefix(strings.TrimSpace(line), "←") {
+			// Blocks line
+			blockLine := strings.TrimSpace(line)
+			blockLine = strings.TrimPrefix(blockLine, "←")
+			blockLine = strings.TrimSpace(blockLine)
+			// Extract just the bead ID
+			if colonIdx := strings.Index(blockLine, ":"); colonIdx > 0 {
+				parts := strings.Fields(blockLine[:colonIdx])
+				if len(parts) >= 2 {
+					blocks = append(blocks, parts[1])
+				}
+			}
+		}
+	}
+
+	resp.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
+	resp.DependsOn = dependsOn
+	resp.Blocks = blocks
+
+	return resp
+}
+
+// PRShowResponse is the response for /api/pr/show.
+type PRShowResponse struct {
+	Number       int      `json:"number"`
+	Title        string   `json:"title"`
+	State        string   `json:"state"`
+	Author       string   `json:"author"`
+	URL          string   `json:"url"`
+	Body         string   `json:"body"`
+	CreatedAt    string   `json:"created_at"`
+	UpdatedAt    string   `json:"updated_at"`
+	Additions    int      `json:"additions"`
+	Deletions    int      `json:"deletions"`
+	ChangedFiles int      `json:"changed_files"`
+	Mergeable    string   `json:"mergeable"`
+	BaseRef      string   `json:"base_ref"`
+	HeadRef      string   `json:"head_ref"`
+	Labels       []string `json:"labels,omitempty"`
+	Checks       []string `json:"checks,omitempty"`
+	RawOutput    string   `json:"raw_output,omitempty"`
+}
+
+// handlePRShow returns details for a specific PR.
+func (h *APIHandler) handlePRShow(w http.ResponseWriter, r *http.Request) {
+	// Accept either repo/number or full URL
+	repo := r.URL.Query().Get("repo")
+	number := r.URL.Query().Get("number")
+	prURL := r.URL.Query().Get("url")
+
+	if prURL == "" && (repo == "" || number == "") {
+		h.sendError(w, "Missing repo/number or url parameter", http.StatusBadRequest)
+		return
+	}
+
+	var args []string
+	if prURL != "" {
+		args = []string{"pr", "view", prURL, "--json", "number,title,state,author,url,body,createdAt,updatedAt,additions,deletions,changedFiles,mergeable,baseRefName,headRefName,labels,statusCheckRollup"}
+	} else {
+		args = []string{"pr", "view", number, "--repo", repo, "--json", "number,title,state,author,url,body,createdAt,updatedAt,additions,deletions,changedFiles,mergeable,baseRefName,headRefName,labels,statusCheckRollup"}
+	}
+
+	output, err := h.runGhCommand(r.Context(), 15*time.Second, args)
+	if err != nil {
+		h.sendError(w, "Failed to fetch PR: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the JSON output
+	resp := parsePRShowOutput(output)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// runGhCommand executes a gh command with the given args.
+func (h *APIHandler) runGhCommand(ctx context.Context, timeout time.Duration, args []string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	if h.workDir != "" {
+		cmd.Dir = h.workDir
+	}
+	cmd.Stdin = nil
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return output, fmt.Errorf("command timed out after %v", timeout)
+	}
+
+	if err != nil {
+		return output, fmt.Errorf("command failed: %v", err)
+	}
+
+	return output, nil
+}
+
+// parsePRShowOutput parses the JSON output from "gh pr view --json".
+func parsePRShowOutput(jsonStr string) PRShowResponse {
+	resp := PRShowResponse{
+		RawOutput: jsonStr,
+	}
+
+	var data struct {
+		Number       int    `json:"number"`
+		Title        string `json:"title"`
+		State        string `json:"state"`
+		Author       struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		URL          string `json:"url"`
+		Body         string `json:"body"`
+		CreatedAt    string `json:"createdAt"`
+		UpdatedAt    string `json:"updatedAt"`
+		Additions    int    `json:"additions"`
+		Deletions    int    `json:"deletions"`
+		ChangedFiles int    `json:"changedFiles"`
+		Mergeable    string `json:"mergeable"`
+		BaseRefName  string `json:"baseRefName"`
+		HeadRefName  string `json:"headRefName"`
+		Labels       []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+		StatusCheckRollup []struct {
+			Name       string `json:"name"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+		} `json:"statusCheckRollup"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+		return resp
+	}
+
+	resp.Number = data.Number
+	resp.Title = data.Title
+	resp.State = data.State
+	resp.Author = data.Author.Login
+	resp.URL = data.URL
+	resp.Body = data.Body
+	resp.CreatedAt = data.CreatedAt
+	resp.UpdatedAt = data.UpdatedAt
+	resp.Additions = data.Additions
+	resp.Deletions = data.Deletions
+	resp.ChangedFiles = data.ChangedFiles
+	resp.Mergeable = data.Mergeable
+	resp.BaseRef = data.BaseRefName
+	resp.HeadRef = data.HeadRefName
+
+	for _, label := range data.Labels {
+		resp.Labels = append(resp.Labels, label.Name)
+	}
+
+	for _, check := range data.StatusCheckRollup {
+		status := check.Name + ": "
+		if check.Conclusion != "" {
+			status += check.Conclusion
+		} else {
+			status += check.Status
+		}
+		resp.Checks = append(resp.Checks, status)
+	}
+
+	// Clear raw output if parsing succeeded
+	resp.RawOutput = ""
+
+	return resp
 }
 
 // parseCommandArgs splits a command string into args, respecting quotes.

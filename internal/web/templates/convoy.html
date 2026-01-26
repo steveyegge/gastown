@@ -403,49 +403,88 @@
             </div>
 
             <!-- Merge Queue Panel -->
-            <div class="panel">
+            <div class="panel" id="merge-queue-panel">
                 <div class="panel-header">
                     <h2>🔀 Merge Queue</h2>
                     <span class="count">{{len .MergeQueue}}</span>
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .MergeQueue}}
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>PR</th>
-                                <th>Repo</th>
-                                <th>Title</th>
-                                <th>CI</th>
-                                <th>Merge</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .MergeQueue}}
-                            <tr class="{{.ColorClass}}">
-                                <td><a href="{{.URL}}" target="_blank" class="pr-link">#{{.Number}}</a></td>
-                                <td>{{.Repo}}</td>
-                                <td class="pr-title">{{.Title}}</td>
-                                <td>
-                                    {{if eq .CIStatus "pass"}}<span class="badge badge-green">CI Pass</span>
-                                    {{else if eq .CIStatus "fail"}}<span class="badge badge-red">CI Fail</span>
-                                    {{else}}<span class="badge badge-yellow">CI Running</span>{{end}}
-                                </td>
-                                <td>
-                                    {{if eq .Mergeable "ready"}}<span class="badge badge-green">Ready</span>
-                                    {{else if eq .Mergeable "conflict"}}<span class="badge badge-red">Conflict</span>
-                                    {{else}}<span class="badge badge-muted">Pending</span>{{end}}
-                                </td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                    {{else}}
-                    <div class="empty-state">
-                        <p>No PRs in queue</p>
+                    <!-- PR List View -->
+                    <div id="pr-list">
+                        {{if .MergeQueue}}
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>PR</th>
+                                    <th>Repo</th>
+                                    <th>Title</th>
+                                    <th>CI</th>
+                                    <th>Merge</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .MergeQueue}}
+                                <tr class="pr-row {{.ColorClass}}" data-pr-url="{{.URL}}" data-pr-repo="{{.Repo}}" data-pr-number="{{.Number}}">
+                                    <td><span class="pr-link">#{{.Number}}</span></td>
+                                    <td>{{.Repo}}</td>
+                                    <td class="pr-title">{{.Title}}</td>
+                                    <td>
+                                        {{if eq .CIStatus "pass"}}<span class="badge badge-green">CI Pass</span>
+                                        {{else if eq .CIStatus "fail"}}<span class="badge badge-red">CI Fail</span>
+                                        {{else}}<span class="badge badge-yellow">CI Running</span>{{end}}
+                                    </td>
+                                    <td>
+                                        {{if eq .Mergeable "ready"}}<span class="badge badge-green">Ready</span>
+                                        {{else if eq .Mergeable "conflict"}}<span class="badge badge-red">Conflict</span>
+                                        {{else}}<span class="badge badge-muted">Pending</span>{{end}}
+                                    </td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                        {{else}}
+                        <div class="empty-state">
+                            <p>No PRs in queue</p>
+                        </div>
+                        {{end}}
                     </div>
-                    {{end}}
+                    <!-- PR Detail View (hidden by default) -->
+                    <div id="pr-detail" style="display: none;">
+                        <div class="detail-header">
+                            <button id="pr-back-btn" class="btn-back">← Back</button>
+                            <a id="pr-detail-link" href="#" target="_blank" class="btn-link">Open in GitHub ↗</a>
+                        </div>
+                        <div class="pr-detail-content">
+                            <div class="pr-detail-title">
+                                <span id="pr-detail-state" class="pr-state"></span>
+                                <span id="pr-detail-number" class="pr-number"></span>
+                            </div>
+                            <h3 id="pr-detail-title-text"></h3>
+                            <div class="pr-detail-meta">
+                                <span id="pr-detail-author"></span>
+                                <span id="pr-detail-branches"></span>
+                                <span id="pr-detail-created"></span>
+                            </div>
+                            <div class="pr-detail-stats">
+                                <span id="pr-detail-additions" class="stat-additions"></span>
+                                <span id="pr-detail-deletions" class="stat-deletions"></span>
+                                <span id="pr-detail-files"></span>
+                            </div>
+                            <div class="pr-detail-section">
+                                <h4>Description</h4>
+                                <pre id="pr-detail-body"></pre>
+                            </div>
+                            <div id="pr-detail-labels-section" class="pr-detail-section" style="display: none;">
+                                <h4>Labels</h4>
+                                <div id="pr-detail-labels"></div>
+                            </div>
+                            <div id="pr-detail-checks-section" class="pr-detail-section" style="display: none;">
+                                <h4>Checks</h4>
+                                <div id="pr-detail-checks"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -662,46 +701,79 @@
             {{end}}
 
             <!-- Open Issues Panel -->
-            <div class="panel">
+            <div class="panel" id="issues-panel">
                 <div class="panel-header">
                     <h2>📿 Open Issues</h2>
                     <span class="count">{{len .Issues}}</span>
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Issues}}
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Pri</th>
-                                <th>ID</th>
-                                <th>Title</th>
-                                <th>Type</th>
-                                <th>Age</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .Issues}}
-                            <tr class="issue-row priority-{{.Priority}}">
-                                <td>
-                                    {{if eq .Priority 1}}<span class="badge badge-red">P1</span>
-                                    {{else if eq .Priority 2}}<span class="badge badge-orange">P2</span>
-                                    {{else if eq .Priority 3}}<span class="badge badge-yellow">P3</span>
-                                    {{else}}<span class="badge badge-muted">P4</span>{{end}}
-                                </td>
-                                <td><span class="issue-id">{{.ID}}</span></td>
-                                <td class="issue-title">{{.Title}}</td>
-                                <td class="issue-type">{{.Type}}</td>
-                                <td>{{.Age}}</td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                    {{else}}
-                    <div class="empty-state">
-                        <p>No open issues</p>
+                    <!-- Issues List View -->
+                    <div id="issues-list">
+                        {{if .Issues}}
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Pri</th>
+                                    <th>ID</th>
+                                    <th>Title</th>
+                                    <th>Type</th>
+                                    <th>Age</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .Issues}}
+                                <tr class="issue-row priority-{{.Priority}}" data-issue-id="{{.ID}}">
+                                    <td>
+                                        {{if eq .Priority 1}}<span class="badge badge-red">P1</span>
+                                        {{else if eq .Priority 2}}<span class="badge badge-orange">P2</span>
+                                        {{else if eq .Priority 3}}<span class="badge badge-yellow">P3</span>
+                                        {{else}}<span class="badge badge-muted">P4</span>{{end}}
+                                    </td>
+                                    <td><span class="issue-id">{{.ID}}</span></td>
+                                    <td class="issue-title">{{.Title}}</td>
+                                    <td class="issue-type">{{.Type}}</td>
+                                    <td>{{.Age}}</td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                        {{else}}
+                        <div class="empty-state">
+                            <p>No open issues</p>
+                        </div>
+                        {{end}}
                     </div>
-                    {{end}}
+                    <!-- Issue Detail View (hidden by default) -->
+                    <div id="issue-detail" style="display: none;">
+                        <div class="detail-header">
+                            <button id="issue-back-btn" class="btn-back">← Back</button>
+                        </div>
+                        <div class="issue-detail-content">
+                            <div class="issue-detail-title">
+                                <span id="issue-detail-priority" class="badge"></span>
+                                <span id="issue-detail-id" class="issue-id"></span>
+                                <span id="issue-detail-status" class="issue-status"></span>
+                            </div>
+                            <h3 id="issue-detail-title-text"></h3>
+                            <div class="issue-detail-meta">
+                                <span id="issue-detail-type"></span>
+                                <span id="issue-detail-created"></span>
+                            </div>
+                            <div class="issue-detail-section">
+                                <h4>Description</h4>
+                                <pre id="issue-detail-description"></pre>
+                            </div>
+                            <div id="issue-detail-deps" class="issue-detail-section" style="display: none;">
+                                <h4>Dependencies</h4>
+                                <div id="issue-detail-depends-on"></div>
+                            </div>
+                            <div id="issue-detail-blocks-section" class="issue-detail-section" style="display: none;">
+                                <h4>Blocks</h4>
+                                <div id="issue-detail-blocks"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 

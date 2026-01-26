@@ -511,6 +511,273 @@
             background: rgba(255, 180, 84, 0.05);
         }
 
+        /* Clickable issue rows */
+        .issue-row {
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .issue-row:hover {
+            background: rgba(138, 180, 248, 0.12);
+        }
+
+        /* Issue detail view */
+        #issue-detail {
+            padding: 8px;
+        }
+
+        .issue-detail-content {
+            margin-top: 12px;
+        }
+
+        .issue-detail-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .issue-detail-title .issue-id {
+            font-size: 0.9rem;
+        }
+
+        .issue-status {
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: var(--bg-elevated);
+            color: var(--text-muted);
+        }
+
+        .issue-status.open {
+            background: rgba(138, 180, 248, 0.2);
+            color: var(--blue);
+        }
+
+        .issue-status.in_progress {
+            background: rgba(255, 209, 102, 0.2);
+            color: var(--yellow);
+        }
+
+        .issue-status.closed {
+            background: rgba(166, 218, 149, 0.2);
+            color: var(--green);
+        }
+
+        #issue-detail h3 {
+            margin: 0 0 12px 0;
+            font-size: 1.1rem;
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .issue-detail-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+
+        .issue-detail-section {
+            margin-top: 16px;
+        }
+
+        .issue-detail-section h4 {
+            margin: 0 0 8px 0;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        #issue-detail-description {
+            margin: 0;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .issue-dep-item {
+            display: inline-block;
+            padding: 2px 8px;
+            margin: 2px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: var(--blue);
+            cursor: pointer;
+        }
+
+        .issue-dep-item:hover {
+            background: rgba(138, 180, 248, 0.2);
+        }
+
+        /* Clickable PR rows */
+        .pr-row {
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .pr-row:hover {
+            background: rgba(138, 180, 248, 0.12) !important;
+        }
+
+        /* PR detail view */
+        #pr-detail {
+            padding: 8px;
+        }
+
+        .pr-detail-content {
+            margin-top: 12px;
+        }
+
+        .pr-detail-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .pr-number {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--blue);
+        }
+
+        .pr-state {
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .pr-state.open {
+            background: rgba(166, 218, 149, 0.2);
+            color: var(--green);
+        }
+
+        .pr-state.closed {
+            background: rgba(240, 113, 120, 0.2);
+            color: var(--red);
+        }
+
+        .pr-state.merged {
+            background: rgba(198, 160, 246, 0.2);
+            color: var(--purple);
+        }
+
+        #pr-detail h3 {
+            margin: 0 0 12px 0;
+            font-size: 1.1rem;
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .pr-detail-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .pr-detail-stats {
+            display: flex;
+            gap: 12px;
+            font-size: 0.8rem;
+            margin-bottom: 16px;
+        }
+
+        .stat-additions {
+            color: var(--green);
+        }
+
+        .stat-deletions {
+            color: var(--red);
+        }
+
+        .pr-detail-section {
+            margin-top: 16px;
+        }
+
+        .pr-detail-section h4 {
+            margin: 0 0 8px 0;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        #pr-detail-body {
+            margin: 0;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .pr-label {
+            display: inline-block;
+            padding: 2px 8px;
+            margin: 2px;
+            background: rgba(138, 180, 248, 0.2);
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: var(--blue);
+        }
+
+        .pr-check {
+            display: block;
+            padding: 4px 0;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .pr-check.success {
+            color: var(--green);
+        }
+
+        .pr-check.failure {
+            color: var(--red);
+        }
+
+        .pr-check.pending {
+            color: var(--yellow);
+        }
+
+        .btn-link {
+            font-size: 0.8rem;
+            color: var(--blue);
+            text-decoration: none;
+            margin-left: auto;
+        }
+
+        .btn-link:hover {
+            text-decoration: underline;
+        }
+
+        .detail-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
         /* Activity feed styles */
         .activity-feed {
             padding: 8px !important;
