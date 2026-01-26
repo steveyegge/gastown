@@ -93,6 +93,7 @@ type Step struct {
 	Title       string   `toml:"title"`
 	Description string   `toml:"description"`
 	Needs       []string `toml:"needs"`
+	Parallel    bool     `toml:"parallel"` // If true, this step can run concurrently with other parallel steps that share the same needs
 }
 
 // Template represents a template step in an expansion formula.
