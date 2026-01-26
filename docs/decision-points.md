@@ -115,6 +115,52 @@ gt decision resolve hq-abc123 --choice 1
 gt decision resolve hq-abc123 --choice 2 --rationale "Simpler for MVP"
 ```
 
+### Interactive Watch TUI
+
+The `gt decision watch` command provides an interactive terminal UI for monitoring and responding to decisions in real-time.
+
+```bash
+# Launch the watch TUI
+gt decision watch
+
+# Show only high urgency decisions
+gt decision watch --urgent-only
+
+# Enable desktop notifications for new decisions
+gt decision watch --notify
+```
+
+**Features:**
+- Real-time view of pending decisions with auto-refresh (every 5 seconds)
+- Two-pane layout: decision list (top) and detail view (bottom)
+- Color-coded urgency indicators (red/orange/green)
+- Keyboard-driven navigation and selection
+
+**Keyboard Shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` or `↑` / `↓` | Navigate between decisions |
+| `1` - `4` | Select option by number |
+| `Enter` | Confirm selection |
+| `r` | Add rationale before confirming |
+| `t` | Enter custom text response |
+| `R` | Refresh immediately |
+| `!` | Filter to high urgency only |
+| `a` | Show all urgencies |
+| `?` | Toggle help |
+| `q` | Quit |
+
+**Workflow:**
+1. Launch `gt decision watch`
+2. Navigate to a decision with `j`/`k`
+3. Review the question and options in the detail pane
+4. Press `1`-`4` to select an option
+5. Optionally press `r` to add a rationale
+6. Press `Enter` to confirm
+
+The TUI provides immediate visual feedback and handles the resolution automatically, making it ideal for humans monitoring multiple agent sessions.
+
 ## Per-Turn Decision Enforcement
 
 Gas Town can enforce that agents offer a decision point before ending each turn. This ensures agents regularly check in with humans rather than running autonomously for extended periods.
@@ -298,6 +344,7 @@ Each option should:
 | `gt decision list` | List pending decisions |
 | `gt decision show <id>` | View decision details |
 | `gt decision resolve <id>` | Respond to a decision |
+| `gt decision watch` | Interactive TUI for monitoring/responding |
 | `gt decision dashboard` | Summary view by urgency |
 | `gt decision await <id>` | Block until resolved (scripting) |
 | `bd decision create` | Low-level decision creation |

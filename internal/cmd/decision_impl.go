@@ -7,11 +7,13 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
+	decisionTUI "github.com/steveyegge/gastown/internal/tui/decision"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -882,5 +884,32 @@ func formatDecisionReminder(workIndicators []string) string {
 	sb.WriteString("Use 'gt decision request' to create a decision, or proceed with handoff if\n")
 	sb.WriteString("the work is self-contained and no human input is needed.\n")
 	return sb.String()
+}
+
+func runDecisionWatch(cmd *cobra.Command, args []string) error {
+	// Verify we're in a Gas Town workspace
+	_, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Create the TUI model
+	m := decisionTUI.New()
+
+	// Apply flags
+	if decisionWatchUrgentOnly {
+		m.SetFilter("high")
+	}
+	if decisionWatchNotify {
+		m.SetNotify(true)
+	}
+
+	// Run the TUI
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("error running decision watch: %w", err)
+	}
+
+	return nil
 }
 

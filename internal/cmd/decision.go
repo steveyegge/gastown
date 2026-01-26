@@ -196,6 +196,41 @@ Examples:
 	RunE: runDecisionRemind,
 }
 
+var decisionWatchCmd = &cobra.Command{
+	Use:   "watch",
+	Short: "Interactive TUI for monitoring and responding to decisions",
+	Long: `Launch an interactive terminal UI for decision management.
+
+The watch TUI provides:
+  - Real-time view of all pending decisions
+  - Keyboard navigation and quick selection
+  - Option selection with number keys (1-4)
+  - Rationale input before confirming
+  - Automatic refresh every 5 seconds
+
+KEYBOARD SHORTCUTS:
+  j/k or ↑/↓    Navigate between decisions
+  1-4           Select option by number
+  r             Add rationale before confirming
+  Enter         Confirm selection
+  t             Enter custom text response
+  R             Refresh immediately
+  !             Filter to high urgency only
+  a             Show all urgencies
+  ?             Toggle help
+  q             Quit
+
+Examples:
+  gt decision watch                    # Launch interactive TUI
+  gt decision watch --urgent-only      # Show only high urgency
+  gt decision watch --notify           # Enable desktop notifications`,
+	RunE: runDecisionWatch,
+}
+
+// Watch-specific flags
+var decisionWatchUrgentOnly bool
+var decisionWatchNotify bool
+
 // Dashboard-specific flags
 var decisionDashboardJSON bool
 
@@ -245,6 +280,10 @@ func init() {
 	decisionRemindCmd.Flags().BoolVar(&decisionRemindInject, "inject", false, "Output as <system-reminder> for Claude Code hooks")
 	decisionRemindCmd.Flags().BoolVar(&decisionRemindNudge, "nudge", false, "Send reminder as nudge to current agent's session")
 
+	// Watch subcommand flags
+	decisionWatchCmd.Flags().BoolVar(&decisionWatchUrgentOnly, "urgent-only", false, "Show only high urgency decisions")
+	decisionWatchCmd.Flags().BoolVar(&decisionWatchNotify, "notify", false, "Enable desktop notifications for new decisions")
+
 	// Add subcommands
 	decisionCmd.AddCommand(decisionRequestCmd)
 	decisionCmd.AddCommand(decisionListCmd)
@@ -253,6 +292,7 @@ func init() {
 	decisionCmd.AddCommand(decisionDashboardCmd)
 	decisionCmd.AddCommand(decisionAwaitCmd)
 	decisionCmd.AddCommand(decisionRemindCmd)
+	decisionCmd.AddCommand(decisionWatchCmd)
 
 	rootCmd.AddCommand(decisionCmd)
 }
