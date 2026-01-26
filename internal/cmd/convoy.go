@@ -309,6 +309,17 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Get town name for prefix
+	townName, err := workspace.GetTownName(townRoot)
+	if err != nil {
+		return fmt.Errorf("getting town name: %w", err)
+	}
+
 	// Ensure custom types (including 'convoy') are registered in town beads.
 	// This handles cases where install didn't complete or beads was initialized manually.
 	if err := beads.EnsureCustomTypes(townBeads); err != nil {
@@ -333,8 +344,8 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		description += fmt.Sprintf("\nMolecule: %s", convoyMolecule)
 	}
 
-	// Generate convoy ID with cv- prefix
-	convoyID := fmt.Sprintf("hq-cv-%s", generateShortID())
+	// Generate convoy ID with cv- prefix using town name
+	convoyID := fmt.Sprintf("%s-cv-%s", townName, generateShortID())
 
 	createArgs := []string{
 		"create",
@@ -349,7 +360,7 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	createCmd := exec.Command("bd", createArgs...)
-	createCmd.Dir = townBeads
+	createCmd.Dir = townRoot // Run from town root so bd can find config
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	createCmd.Stdout = &stdout
@@ -367,7 +378,7 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		// Use --type=tracks for non-blocking tracking relation
 		depArgs := []string{"dep", "add", convoyID, issueID, "--type=tracks"}
 		depCmd := exec.Command("bd", depArgs...)
-		depCmd.Dir = townBeads
+		depCmd.Dir = townRoot
 		var depStderr bytes.Buffer
 		depCmd.Stderr = &depStderr
 
