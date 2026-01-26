@@ -201,6 +201,59 @@ func TestIsPaneDead(t *testing.T) {
 	}
 }
 
+// TestNewSessionWithCommand_InstantExit verifies that remain-on-exit is set before
+// the command runs, even if the command exits instantly. This tests the fix for
+// the race condition in gt-958e7d where fast-exiting commands could cause the
+// session to be destroyed before diagnostic output could be captured.
+func TestNewSessionWithCommand_InstantExit(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-instant-exit-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSessionWithProcesses(sessionName)
+
+	// Create session with a command that exits IMMEDIATELY with a diagnostic message.
+	// This simulates the race condition where the command exits before remain-on-exit
+	// could be set externally. With the fix, remain-on-exit is set internally before
+	// the actual command runs.
+	if err := tm.NewSessionWithCommand(sessionName, "", "sh -c 'echo INSTANT_EXIT_DIAGNOSTIC; exit 42'"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
+
+	// Give tmux time to process the command exit
+	time.Sleep(500 * time.Millisecond)
+
+	// With the fix, the session should still exist because remain-on-exit was set
+	// BEFORE the command ran (not after, as in the race-prone original implementation)
+	hasSession, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !hasSession {
+		t.Fatal("session was destroyed despite instant exit - remain-on-exit race condition not fixed")
+	}
+
+	// The pane should be dead (command exited)
+	dead, err := tm.IsPaneDead(sessionName)
+	if err != nil {
+		t.Fatalf("IsPaneDead: %v", err)
+	}
+	if !dead {
+		t.Error("expected pane to be dead after instant exit")
+	}
+
+	// Verify we can capture the diagnostic output
+	output := tm.CaptureDeadPaneOutput(sessionName, 10)
+	if !strings.Contains(output, "INSTANT_EXIT_DIAGNOSTIC") {
+		t.Errorf("diagnostic output not captured, got: %q", output)
+	}
+}
+
 func TestDuplicateSession(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")

@@ -96,25 +96,42 @@ func (t *Tmux) NewSession(name, workDir string) error {
 // or the command arrives before the shell prompt. The command runs directly as the
 // initial process of the pane.
 // See: https://github.com/anthropics/gastown/issues/280
+//
+// This function ensures remain-on-exit is set BEFORE the actual command runs.
+// This prevents a race condition where fast-exiting commands (auth failures, missing
+// binaries) could cause the session to be destroyed before remain-on-exit is set,
+// losing diagnostic output. See: gt-958e7d
 func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
+	// Strategy: Create session with a brief sleep, set remain-on-exit, then respawn
+	// with the actual command. This avoids quoting issues that arise from trying to
+	// wrap arbitrary commands in shell strings.
+	//
+	// 1. Create session with a dummy command (sleep) to hold the session open
+	// 2. Set remain-on-exit on the window
+	// 3. Respawn the pane with the actual command
+	//
+	// The sleep ensures the session exists long enough for us to set remain-on-exit.
+	// The respawn-pane then runs the actual command with remain-on-exit already set.
 	args := []string{"new-session", "-d", "-s", name}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
 	}
-	// Add the command as the last argument - tmux runs it as the pane's initial process
-	args = append(args, command)
+	// Start with a sleep command to hold the session open briefly
+	args = append(args, "sleep 60")
 	_, err := t.run(args...)
 	if err != nil {
 		return err
 	}
 
-	// Enable remain-on-exit to preserve pane after command exits.
-	// This allows capturing diagnostic output if the agent command crashes during startup.
-	// The zombie pane is cleaned up when we detect it in startup verification.
-	// Use set-window-option for the window-level option.
+	// Set remain-on-exit BEFORE running the actual command
+	// This ensures the pane is preserved even if the command exits immediately
 	_, _ = t.run("set-window-option", "-t", name, "remain-on-exit", "on")
 
-	return nil
+	// Now respawn the pane with the actual command
+	// respawn-pane -k kills the current process (sleep) and starts the new command
+	// The -t flag targets the session's default pane
+	_, err = t.run("respawn-pane", "-k", "-t", name, command)
+	return err
 }
 
 // IsPaneDead checks if the pane's command has exited (pane_dead=1).
