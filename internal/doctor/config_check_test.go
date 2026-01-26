@@ -238,14 +238,15 @@ func TestSessionHookCheck_Run(t *testing.T) {
 func TestSessionHookCheck_Fix(t *testing.T) {
 	t.Run("fixes bare gt prime to gt prime --hook", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		claudeDir := filepath.Join(tmpDir, ".claude")
+		// Create mayor/.claude/ directory (SessionHookCheck looks for settings.local.json in agent dirs)
+		claudeDir := filepath.Join(tmpDir, "mayor", ".claude")
 		if err := os.MkdirAll(claudeDir, 0755); err != nil {
 			t.Fatal(err)
 		}
 
-		// Create settings with bare gt prime
+		// Create settings.local.json with bare gt prime (should be gt prime --hook)
 		settings := `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "gt prime"}]}]}}`
-		settingsPath := filepath.Join(claudeDir, "settings.json")
+		settingsPath := filepath.Join(claudeDir, "settings.local.json")
 		if err := os.WriteFile(settingsPath, []byte(settings), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -283,13 +284,14 @@ func TestSessionHookCheck_Fix(t *testing.T) {
 
 	t.Run("fixes multiple hooks in same file", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		claudeDir := filepath.Join(tmpDir, ".claude")
+		// Create mayor/.claude/ directory (SessionHookCheck looks for settings.local.json in agent dirs)
+		claudeDir := filepath.Join(tmpDir, "mayor", ".claude")
 		if err := os.MkdirAll(claudeDir, 0755); err != nil {
 			t.Fatal(err)
 		}
 
 		settings := `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "gt prime && echo done"}]}], "PreCompact": [{"hooks": [{"type": "command", "command": "gt prime"}]}]}}`
-		settingsPath := filepath.Join(claudeDir, "settings.json")
+		settingsPath := filepath.Join(claudeDir, "settings.local.json")
 		if err := os.WriteFile(settingsPath, []byte(settings), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -324,13 +326,14 @@ func TestSessionHookCheck_Fix(t *testing.T) {
 
 	t.Run("does not double-add --hook", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		claudeDir := filepath.Join(tmpDir, ".claude")
+		// Create mayor/.claude/ directory (SessionHookCheck looks for settings.local.json in agent dirs)
+		claudeDir := filepath.Join(tmpDir, "mayor", ".claude")
 		if err := os.MkdirAll(claudeDir, 0755); err != nil {
 			t.Fatal(err)
 		}
 
 		settings := `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "gt prime --hook"}]}]}}`
-		settingsPath := filepath.Join(claudeDir, "settings.json")
+		settingsPath := filepath.Join(claudeDir, "settings.local.json")
 		if err := os.WriteFile(settingsPath, []byte(settings), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -338,7 +341,7 @@ func TestSessionHookCheck_Fix(t *testing.T) {
 		check := NewSessionHookCheck()
 		ctx := &CheckContext{TownRoot: tmpDir}
 
-		// Should already be OK
+		// Should already be OK (already has --hook)
 		result := check.Run(ctx)
 		if result.Status != StatusOK {
 			t.Errorf("expected StatusOK for already-fixed file, got %v", result.Status)
