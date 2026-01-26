@@ -86,6 +86,7 @@ func init() {
 	mayorCmd.AddCommand(mayorAttachCmd)
 	mayorCmd.AddCommand(mayorStatusCmd)
 	mayorCmd.AddCommand(mayorRestartCmd)
+	mayorCmd.AddCommand(mayorChatCmd)
 
 	mayorStartCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
 	mayorAttachCmd.Flags().StringVar(&mayorAgentOverride, "agent", "", "Agent alias to run the Mayor with (overrides town default)")
