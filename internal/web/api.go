@@ -255,7 +255,7 @@ func (h *APIHandler) handleMailInbox(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(MailInboxResponse{
+		_ = json.NewEncoder(w).Encode(MailInboxResponse{
 			Messages:    messages,
 			UnreadCount: unread,
 			Total:       len(messages),
@@ -278,7 +278,7 @@ func (h *APIHandler) handleMailInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(MailInboxResponse{
+	_ = json.NewEncoder(w).Encode(MailInboxResponse{
 		Messages:    messages,
 		UnreadCount: unread,
 		Total:       len(messages),
@@ -303,7 +303,7 @@ func (h *APIHandler) handleMailRead(w http.ResponseWriter, r *http.Request) {
 	msg := parseMailReadOutput(output, msgID)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(msg)
+	_ = json.NewEncoder(w).Encode(msg)
 }
 
 // MailSendRequest is the request body for /api/mail/send.
@@ -342,7 +342,7 @@ func (h *APIHandler) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Message sent",
 		"output":  output,
@@ -531,7 +531,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // parseRigListOutput extracts rig names from the text output of "gt rig list".
