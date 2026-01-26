@@ -153,20 +153,61 @@ func StopBdDaemonForWorkspace(beadsDir string) error {
 		return fmt.Errorf("checking beads directory: %w", err)
 	}
 
+	// Get PID before stopping so we can verify the process dies
+	pidFile := filepath.Join(resolvedBeadsDir, "daemon.pid")
+	pidData, _ := os.ReadFile(pidFile)
+	oldPID, _ := strconv.Atoi(strings.TrimSpace(string(pidData)))
+
+	if oldPID == 0 {
+		return nil // Not running
+	}
+
+	// Check if process is actually running
+	if _, err := os.Stat(fmt.Sprintf("/proc/%d", oldPID)); err != nil {
+		return nil // Not running
+	}
+
 	// bd daemons stop requires workspace path (parent of .beads dir)
 	workspacePath := filepath.Dir(resolvedBeadsDir)
 	cmd := exec.Command("bd", "daemons", "stop", workspacePath)
 	cmd.Dir = workspacePath
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if stderr.Len() > 0 {
-			return fmt.Errorf("stopping bd daemon: %v: %s", err, strings.TrimSpace(stderr.String()))
+	_ = cmd.Run() // Ignore error - we'll verify via /proc
+
+	// Wait for process to actually die (up to 3 seconds)
+	for i := 0; i < 30; i++ {
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", oldPID)); err != nil {
+			return nil // Process is dead
 		}
-		return fmt.Errorf("stopping bd daemon: %w", err)
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	return nil
+	// RPC didn't kill it in time - escalate to SIGTERM
+	proc, _ := os.FindProcess(oldPID)
+	if proc != nil {
+		_ = proc.Signal(os.Interrupt)
+	}
+
+	// Wait another 2 seconds
+	for i := 0; i < 20; i++ {
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", oldPID)); err != nil {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Still alive - SIGKILL
+	if proc != nil {
+		_ = proc.Kill()
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	if _, err := os.Stat(fmt.Sprintf("/proc/%d", oldPID)); err != nil {
+		return nil
+	}
+
+	return fmt.Errorf("process %d did not die after kill", oldPID)
 }
 
 // StopAllBdProcesses stops all bd daemon and activity processes.

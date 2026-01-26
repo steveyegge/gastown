@@ -237,7 +237,15 @@ func runReload(cmd *cobra.Command, args []string) error {
 	fmt.Println("═══ Starting services ═══")
 	fmt.Println()
 
-	// Phase 6: Start bd daemons sequentially (parallel causes database contention)
+	// Phase 6: Kill any bd daemons that may have restarted between stop and start phases
+	// (bd auto-starts daemons when running commands, so hooks/background tasks can restart them)
+	if len(bdWorkspaces) > 0 {
+		cmd := exec.Command("bd", "daemon", "killall", "--force")
+		_ = cmd.Run() // Ignore errors - we just want to ensure they're dead
+		time.Sleep(500 * time.Millisecond) // Give processes time to die
+	}
+
+	// Phase 7: Start bd daemons sequentially (parallel causes database contention)
 	for _, ws := range bdWorkspaces {
 		err := startBdDaemon(ws)
 		if err != nil {
