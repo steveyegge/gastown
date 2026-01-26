@@ -541,6 +541,17 @@ func categorizeSessions(sessions []string, mayorSession, deaconSession string) (
 func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) error {
 	fmt.Printf("Graceful shutdown of Gas Town (waiting up to %ds)...\n\n", shutdownWait)
 
+	// Detect if we're running inside one of the sessions we're about to kill.
+	// If so, defer killing that session until after all cleanup completes.
+	currentSession, _ := getCurrentTmuxSession()
+	skipSession := ""
+	for _, sess := range gtSessions {
+		if sess == currentSession {
+			skipSession = currentSession
+			break
+		}
+	}
+
 	// Phase 1: Send ESC to all agents to interrupt them
 	fmt.Printf("Phase 1: Sending ESC to %d agent(s)...\n", len(gtSessions))
 	for _, sess := range gtSessions {
@@ -577,7 +588,7 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 	fmt.Printf("\nPhase 4: Terminating sessions...\n")
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
-	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
+	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession, skipSession)
 
 	// Phase 5: Cleanup orphaned Claude processes if requested
 	if shutdownCleanupOrphans {
@@ -599,15 +610,34 @@ func runGracefulShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) err
 
 	fmt.Println()
 	fmt.Printf("%s Graceful shutdown complete (%d sessions stopped)\n", style.Bold.Render("✓"), stopped)
+
+	// Phase 8: Kill our own session last - this terminates the gt process but cleanup is done.
+	if skipSession != "" {
+		fmt.Printf("\nPhase 8: Stopping own session %s...\n", skipSession)
+		_ = t.KillSessionWithProcesses(skipSession)
+		// If we get here, the kill failed (shouldn't happen)
+	}
+
 	return nil
 }
 
 func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) error {
 	fmt.Println("Shutting down Gas Town...")
 
+	// Detect if we're running inside one of the sessions we're about to kill.
+	// If so, defer killing that session until after all cleanup completes.
+	currentSession, _ := getCurrentTmuxSession()
+	skipSession := ""
+	for _, sess := range gtSessions {
+		if sess == currentSession {
+			skipSession = currentSession
+			break
+		}
+	}
+
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
-	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession)
+	stopped := killSessionsInOrder(t, gtSessions, mayorSession, deaconSession, skipSession)
 
 	// Cleanup orphaned Claude processes if requested
 	if shutdownCleanupOrphans {
@@ -633,18 +663,27 @@ func runImmediateShutdown(t *tmux.Tmux, gtSessions []string, townRoot string) er
 	fmt.Println()
 	fmt.Printf("%s Gas Town shutdown complete (%d sessions stopped)\n", style.Bold.Render("✓"), stopped)
 
+	// Kill our own session last - this terminates the gt process but cleanup is done.
+	// The user will see "Terminated" but all cleanup has completed.
+	if skipSession != "" {
+		fmt.Printf("  %s Stopping own session %s...\n", style.Bold.Render("→"), skipSession)
+		_ = t.KillSessionWithProcesses(skipSession)
+		// If we get here, the kill failed (shouldn't happen)
+	}
+
 	return nil
 }
 
 // killSessionsInOrder stops sessions in the correct order:
 // 1. Deacon first (so it doesn't restart others)
-// 2. Everything except Mayor
+// 2. Everything except Mayor and skipSession
 // 3. Mayor last
 // mayorSession and deaconSession are the dynamic session names for the current town.
+// skipSession (if non-empty) is deferred - caller should kill it after cleanup completes.
 //
 // Returns the count of sessions that were successfully stopped (verified by checking
 // if the session no longer exists after the kill attempt).
-func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSession string) int {
+func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSession, skipSession string) int {
 	stopped := 0
 
 	// Helper to check if session is in our list
@@ -659,6 +698,11 @@ func killSessionsInOrder(t *tmux.Tmux, sessions []string, mayorSession, deaconSe
 
 	// Helper to kill a session and verify it was stopped
 	killAndVerify := func(sess string) bool {
+		// Skip the session we're running in - caller handles it after cleanup
+		if sess == skipSession {
+			return false
+		}
+
 		// Check if session exists before attempting to kill
 		exists, _ := t.HasSession(sess)
 		if !exists {
