@@ -111,15 +111,18 @@ func DispatchToDog(dogName string, create bool, workDesc string) (*DogDispatchIn
 	// Build agent ID
 	agentID := fmt.Sprintf("deacon/dogs/%s", targetDog.Name)
 
-	// Try to find tmux session for the dog (dogs may run in tmux like polecats)
-	// Dogs use the pattern gt-{town}-deacon-{name}
-	townName, _ := workspace.GetTownName(townRoot)
-	sessionName := fmt.Sprintf("gt-%s-deacon-%s", townName, targetDog.Name)
+	// Ensure dog session is running (start if needed)
 	t := tmux.NewTmux()
-	var pane string
-	if has, _ := t.HasSession(sessionName); has {
-		// Get the pane from the session
-		pane, _ = getSessionPane(sessionName)
+	sessMgr := dog.NewSessionManager(t, townRoot)
+
+	opts := dog.SessionStartOptions{
+		WorkDesc: workDesc,
+	}
+	pane, err := sessMgr.EnsureRunning(targetDog.Name, opts)
+	if err != nil {
+		// Log but don't fail - dog state is set, session may start later
+		fmt.Printf("Warning: could not start dog session: %v\n", err)
+		pane = ""
 	}
 
 	return &DogDispatchInfo{
