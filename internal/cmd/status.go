@@ -263,41 +263,58 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Fetch rig-level agent beads
-	for _, r := range rigs {
-		rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
-		rigBeads := beads.New(rigBeadsPath)
-		rigAgentBeads, _ := rigBeads.ListAgentBeads()
-		if rigAgentBeads == nil {
-			continue
-		}
-		for id, issue := range rigAgentBeads {
-			allAgentBeads[id] = issue
-		}
+	// Fetch rig-level agent beads IN PARALLEL
+	// Each rig has its own beads DB, so we can fetch concurrently.
+	var beadsMu sync.Mutex
+	var beadsWg sync.WaitGroup
 
-		var hookIDs []string
-		for _, issue := range rigAgentBeads {
-			// Use the HookBead field from the database column; fall back for legacy beads.
-			hookID := issue.HookBead
-			if hookID == "" {
-				fields := beads.ParseAgentFields(issue.Description)
-				if fields != nil {
-					hookID = fields.HookBead
+	for _, r := range rigs {
+		beadsWg.Add(1)
+		go func(r *rig.Rig) {
+			defer beadsWg.Done()
+
+			rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
+			rigBeads := beads.New(rigBeadsPath)
+			rigAgentBeads, _ := rigBeads.ListAgentBeads()
+			if rigAgentBeads == nil {
+				return
+			}
+
+			// Collect hook IDs from agent beads
+			var hookIDs []string
+			for _, issue := range rigAgentBeads {
+				// Use the HookBead field from the database column; fall back for legacy beads.
+				hookID := issue.HookBead
+				if hookID == "" {
+					fields := beads.ParseAgentFields(issue.Description)
+					if fields != nil {
+						hookID = fields.HookBead
+					}
+				}
+				if hookID != "" {
+					hookIDs = append(hookIDs, hookID)
 				}
 			}
-			if hookID != "" {
-				hookIDs = append(hookIDs, hookID)
-			}
-		}
 
-		if len(hookIDs) == 0 {
-			continue
-		}
-		hookBeads, _ := rigBeads.ShowMultiple(hookIDs)
-		for id, issue := range hookBeads {
-			allHookBeads[id] = issue
-		}
+			// Fetch hook beads if any
+			var hookBeads map[string]*beads.Issue
+			if len(hookIDs) > 0 {
+				hookBeads, _ = rigBeads.ShowMultiple(hookIDs)
+			}
+
+			// Store results with mutex protection
+			beadsMu.Lock()
+			for id, issue := range rigAgentBeads {
+				allAgentBeads[id] = issue
+			}
+			for id, issue := range hookBeads {
+				allHookBeads[id] = issue
+			}
+			beadsMu.Unlock()
+		}(r)
 	}
+
+	beadsWg.Wait()
 
 	// Create mail router for inbox lookups
 	mailRouter := mail.NewRouter(townRoot)
@@ -360,8 +377,8 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 				rs.CrewCount = len(workers)
 			}
 
-			// Discover hooks for all agents in this rig
-			rs.Hooks = discoverRigHooks(r, rs.Crews)
+			// Discover hooks for all agents in this rig (uses pre-fetched data)
+			rs.Hooks = discoverRigHooks(r, rs.Crews, allAgentBeads, allHookBeads)
 			activeHooks := 0
 			for _, hook := range rs.Hooks {
 				if hook.HasWork {
@@ -874,35 +891,59 @@ func capitalizeFirst(s string) string {
 }
 
 // discoverRigHooks finds all hook attachments for agents in a rig.
-// It scans polecats, crew workers, witness, and refinery for handoff beads.
-func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
+// Uses pre-fetched agent beads and hook beads for O(1) lookups (no beads calls).
+func discoverRigHooks(r *rig.Rig, crews []string, allAgentBeads map[string]*beads.Issue, allHookBeads map[string]*beads.Issue) []AgentHookInfo {
 	var hooks []AgentHookInfo
+	townRoot := filepath.Dir(r.Path)
+	prefix := beads.GetPrefixForRig(townRoot, r.Name)
 
-	// Create beads instance for the rig
-	b := beads.New(r.Path)
+	// Helper to build hook info from pre-fetched data
+	buildHook := func(beadID, agentAddress, roleType string) AgentHookInfo {
+		hook := AgentHookInfo{
+			Agent: agentAddress,
+			Role:  roleType,
+		}
+		if issue, ok := allAgentBeads[beadID]; ok {
+			hookBeadID := issue.HookBead
+			if hookBeadID == "" {
+				fields := beads.ParseAgentFields(issue.Description)
+				if fields != nil {
+					hookBeadID = fields.HookBead
+				}
+			}
+			if hookBeadID != "" {
+				hook.HasWork = true
+				hook.Molecule = hookBeadID
+				if hookBead, ok := allHookBeads[hookBeadID]; ok {
+					hook.Title = hookBead.Title
+				}
+			}
+		}
+		return hook
+	}
 
 	// Check polecats
 	for _, name := range r.Polecats {
-		hook := getAgentHook(b, name, r.Name+"/"+name, "polecat")
-		hooks = append(hooks, hook)
+		beadID := beads.PolecatBeadIDWithPrefix(prefix, r.Name, name)
+		hooks = append(hooks, buildHook(beadID, r.Name+"/"+name, "polecat"))
 	}
 
 	// Check crew workers
 	for _, name := range crews {
-		hook := getAgentHook(b, name, r.Name+"/crew/"+name, "crew")
-		hooks = append(hooks, hook)
+		beadID := beads.CrewBeadIDWithPrefix(prefix, r.Name, name)
+		hooks = append(hooks, buildHook(beadID, r.Name+"/crew/"+name, "crew"))
 	}
 
 	// Check witness
 	if r.HasWitness {
-		hook := getAgentHook(b, "witness", r.Name+"/witness", "witness")
-		hooks = append(hooks, hook)
+		beadID := beads.WitnessBeadIDWithPrefix(prefix, r.Name)
+		hooks = append(hooks, buildHook(beadID, r.Name+"/witness", "witness"))
 	}
 
 	// Check refinery
 	if r.HasRefinery {
-		hook := getAgentHook(b, "refinery", r.Name+"/refinery", "refinery")
-		hooks = append(hooks, hook)
+		beadID := beads.RefineryBeadIDWithPrefix(prefix, r.Name)
+		hooks = append(hooks, buildHook(beadID, r.Name+"/refinery", "refinery"))
 	}
 
 	return hooks
@@ -1205,30 +1246,3 @@ func getMQSummary(r *rig.Rig) *MQSummary {
 	}
 }
 
-// getAgentHook retrieves hook status for a specific agent.
-func getAgentHook(b *beads.Beads, role, agentAddress, roleType string) AgentHookInfo {
-	hook := AgentHookInfo{
-		Agent: agentAddress,
-		Role:  roleType,
-	}
-
-	// Find handoff bead for this role
-	handoff, err := b.FindHandoffBead(role)
-	if err != nil || handoff == nil {
-		return hook
-	}
-
-	// Check for attachment
-	attachment := beads.ParseAttachmentFields(handoff)
-	if attachment != nil && attachment.AttachedMolecule != "" {
-		hook.HasWork = true
-		hook.Molecule = attachment.AttachedMolecule
-		hook.Title = handoff.Title
-	} else if handoff.Description != "" {
-		// Has content but no molecule - still has work
-		hook.HasWork = true
-		hook.Title = handoff.Title
-	}
-
-	return hook
-}
