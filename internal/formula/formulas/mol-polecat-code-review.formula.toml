@@ -270,6 +270,11 @@ Overall assessment:
 <brief summary - healthy, needs attention, significant issues, etc.>"
 ```
 
+**2. Sync beads:**
+```bash
+bd sync
+```
+
 **Exit criteria:** Tracking issue updated with summary."""
 
 [[steps]]
@@ -281,8 +286,9 @@ Signal completion and clean up. You cease to exist after this step.
 
 **Self-Cleaning Model:**
 Once you run `gt done`, you're gone. The command:
-1. Nukes your sandbox
-2. Exits your session immediately
+1. Syncs beads (final sync)
+2. Nukes your sandbox
+3. Exits your session immediately
 
 **Run gt done:**
 ```bash
@@ -296,7 +302,7 @@ gt done
 
 You are NOT involved in any of that. You're gone. Done means gone.
 
-**Exit criteria:** Sandbox nuked, session exited."""
+**Exit criteria:** Beads synced, sandbox nuked, session exited."""
 
 [vars]
 [vars.scope]

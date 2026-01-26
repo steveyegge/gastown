@@ -306,6 +306,11 @@ bd close <source-issue> --reason="merged via conflict resolution"
 The Refinery normally closes issues after merge, but since we pushed
 directly to main, we handle it here.
 
+**3. Sync beads:**
+```bash
+bd sync
+```
+
 **Exit criteria:** Original MR and source issue are closed."""
 
 [[steps]]
