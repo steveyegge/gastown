@@ -85,6 +85,81 @@ Callbacks may spawn new polecats, update issue state, or trigger other actions.
 Keep inbox near-empty - only unprocessed items should remain."""
 
 [[steps]]
+id = "check-convoy-completion"
+title = "Check convoy completion"
+needs = ["inbox-check"]
+description = """
+Check convoy completion status.
+
+Convoys are coordination beads that track multiple issues across rigs. When all tracked issues close, the convoy auto-closes.
+
+**Step 1: Find open convoys**
+```bash
+bd list --type=convoy --status=open
+```
+
+**Step 2: For each open convoy, check tracked issues**
+```bash
+bd show <convoy-id>
+# Look for 'tracks' or 'dependencies' field listing tracked issues
+```
+
+**Step 3: If all tracked issues are closed, close the convoy**
+```bash
+# Check each tracked issue
+for issue in tracked_issues:
+    bd show <issue-id>
+    # If status is open/in_progress, convoy stays open
+    # If all are closed (completed, wontfix, etc.), convoy is complete
+
+# Close convoy when all tracked issues are done
+bd close <convoy-id> --reason "All tracked issues completed"
+```
+
+**Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues). Use full IDs when checking."""
+
+[[steps]]
+id = "feed-stranded-convoys"
+title = "Feed stranded convoys"
+needs = ["check-convoy-completion"]
+description = """
+Detect stranded convoys and dispatch dogs to feed them.
+
+A convoy is "stranded" when it has ready issues (open, unblocked, no assignee)
+but no workers are processing them. This step ensures work doesn't stall.
+
+**Step 1: Check for stranded convoys**
+```bash
+gt convoy stranded --json
+```
+
+If no stranded convoys, skip to exit criteria.
+
+**Step 2: For each stranded convoy, dispatch a dog**
+```bash
+# For each convoy in the stranded list:
+gt sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
+```
+
+The dog will:
+1. Load the convoy and find ready issues
+2. Check polecat capacity across rigs
+3. Dispatch ready issues using `gt sling`
+4. Return to kennel
+
+**Step 3: Log dispatches**
+Note which convoys were fed for observability:
+```bash
+# Convoy <convoy-id> dispatched to dog for feeding (<N> ready issues)
+```
+
+**If no idle dogs available:**
+Log warning and continue - the convoy will be detected again next cycle.
+Dog pool maintenance step ensures dogs are available.
+
+**Exit criteria:** All stranded convoys have feeding dogs dispatched (or logged if no dogs available)."""
+
+[[steps]]
 id = "orphan-process-cleanup"
 title = "Clean up orphaned claude subagent processes"
 needs = ["inbox-check"]
@@ -228,84 +303,9 @@ already have active polecats working on them.
 **Exit criteria:** All gate-ready molecules dispatched to polecats."""
 
 [[steps]]
-id = "check-convoy-completion"
-title = "Check convoy completion"
-needs = ["inbox-check"]
-description = """
-Check convoy completion status.
-
-Convoys are coordination beads that track multiple issues across rigs. When all tracked issues close, the convoy auto-closes.
-
-**Step 1: Find open convoys**
-```bash
-bd list --type=convoy --status=open
-```
-
-**Step 2: For each open convoy, check tracked issues**
-```bash
-bd show <convoy-id>
-# Look for 'tracks' or 'dependencies' field listing tracked issues
-```
-
-**Step 3: If all tracked issues are closed, close the convoy**
-```bash
-# Check each tracked issue
-for issue in tracked_issues:
-    bd show <issue-id>
-    # If status is open/in_progress, convoy stays open
-    # If all are closed (completed, wontfix, etc.), convoy is complete
-
-# Close convoy when all tracked issues are done
-bd close <convoy-id> --reason "All tracked issues completed"
-```
-
-**Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues). Use full IDs when checking."""
-
-[[steps]]
-id = "feed-stranded-convoys"
-title = "Feed stranded convoys"
-needs = ["check-convoy-completion"]
-description = """
-Detect stranded convoys and dispatch dogs to feed them.
-
-A convoy is "stranded" when it has ready issues (open, unblocked, no assignee)
-but no workers are processing them. This step ensures work doesn't stall.
-
-**Step 1: Check for stranded convoys**
-```bash
-gt convoy stranded --json
-```
-
-If no stranded convoys, skip to exit criteria.
-
-**Step 2: For each stranded convoy, dispatch a dog**
-```bash
-# For each convoy in the stranded list:
-gt sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
-```
-
-The dog will:
-1. Load the convoy and find ready issues
-2. Check polecat capacity across rigs
-3. Dispatch ready issues using `gt sling`
-4. Return to kennel
-
-**Step 3: Log dispatches**
-Note which convoys were fed for observability:
-```bash
-# Convoy <convoy-id> dispatched to dog for feeding (<N> ready issues)
-```
-
-**If no idle dogs available:**
-Log warning and continue - the convoy will be detected again next cycle.
-Dog pool maintenance step ensures dogs are available.
-
-**Exit criteria:** All stranded convoys have feeding dogs dispatched (or logged if no dogs available)."""
-
-[[steps]]
 id = "resolve-external-deps"
 title = "Resolve external dependencies"
-needs = ["feed-stranded-convoys"]
+needs = ["dispatch-gated-molecules"]
 description = """
 Resolve external dependencies across rigs.
 
