@@ -29,6 +29,13 @@ install: build
 	@rm -f $(INSTALL_DIR)/$(BINARY)
 	@cp $(BUILD_DIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY)
 	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
+	@# Sync mol-*.toml formulas to town if both dirs exist
+	@if [ -d ".beads/formulas" ] && [ -d "$(HOME)/gt/.beads/formulas" ]; then \
+		for f in .beads/formulas/mol-*.toml; do \
+			[ -f "$$f" ] && cp "$$f" "$(HOME)/gt/.beads/formulas/" && echo "  Synced $$(basename $$f)"; \
+		done; \
+		echo "Synced formulas to $(HOME)/gt/.beads/formulas"; \
+	fi
 
 clean:
 	rm -f $(BUILD_DIR)/$(BINARY)
