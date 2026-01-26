@@ -38,13 +38,13 @@ import (
 // This is recovery-focused: normal wake is handled by feed subscription (bd activity --follow).
 // The daemon is the safety net for dead sessions, GUPP violations, and orphaned work.
 type Daemon struct {
-	config       *Config
-	patrolConfig *DaemonPatrolConfig
-	tmux         *tmux.Tmux
-	logger       *log.Logger
-	ctx          context.Context
-	cancel       context.CancelFunc
-	curator      *feed.Curator
+	config        *Config
+	patrolConfig  *DaemonPatrolConfig
+	tmux          *tmux.Tmux
+	logger        *log.Logger
+	ctx           context.Context
+	cancel        context.CancelFunc
+	curator       *feed.Curator
 	convoyWatcher *ConvoyWatcher
 	doltServer   *DoltServerManager
 
@@ -796,16 +796,26 @@ func IsRunning(townRoot string) (bool, int, error) {
 
 // isGasTownDaemon checks if a PID is actually a gt daemon run process.
 // This prevents false positives from PID reuse.
-// Uses ps command for cross-platform compatibility (Linux, macOS).
+// Uses /proc on Linux (works on Alpine/BusyBox), falls back to ps on macOS.
 func isGasTownDaemon(pid int) bool {
-	// Use ps to get command for the PID (works on Linux and macOS)
-	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=")
-	output, err := cmd.Output()
-	if err != nil {
-		return false
+	var cmdline string
+
+	// Try /proc first (Linux, including Alpine/BusyBox)
+	procPath := fmt.Sprintf("/proc/%d/cmdline", pid)
+	if data, err := os.ReadFile(procPath); err == nil {
+		// cmdline has null-separated args, replace with spaces
+		cmdline = strings.ReplaceAll(string(data), "\x00", " ")
+	} else {
+		// Fall back to ps (macOS, other Unix)
+		cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=")
+		output, err := cmd.Output()
+		if err != nil {
+			return false
+		}
+		cmdline = string(output)
 	}
 
-	cmdline := strings.TrimSpace(string(output))
+	cmdline = strings.TrimSpace(cmdline)
 
 	// Check if it's "gt daemon run" or "/path/to/gt daemon run"
 	return strings.Contains(cmdline, "gt") && strings.Contains(cmdline, "daemon") && strings.Contains(cmdline, "run")
