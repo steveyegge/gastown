@@ -19,9 +19,9 @@ import (
 
 // Command timeout constants
 const (
-	cmdTimeout      = 15 * time.Second // timeout for most commands (bd can be slow with large datasets)
-	ghCmdTimeout    = 10 * time.Second // longer timeout for GitHub API calls
-	tmuxCmdTimeout  = 2 * time.Second  // short timeout for tmux queries
+	cmdTimeout     = 15 * time.Second // timeout for most commands (bd can be slow with large datasets)
+	ghCmdTimeout   = 10 * time.Second // longer timeout for GitHub API calls
+	tmuxCmdTimeout = 2 * time.Second  // short timeout for tmux queries
 )
 
 // runCmd executes a command with a timeout and returns stdout.
@@ -85,7 +85,6 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 		townBeads: filepath.Join(townRoot, ".beads"),
 	}, nil
 }
-
 
 // FetchConvoys fetches all open convoys with their activity data.
 func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
@@ -741,7 +740,7 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		if issue, ok := assignedIssues[assignee]; ok {
 			issueID = issue.ID
 			issueTitle = issue.Title
-		// Keep full title - CSS handles overflow
+			// Keep full title - CSS handles overflow
 		}
 
 		// Calculate work status based on activity age and issue assignment
@@ -918,13 +917,13 @@ func (f *LiveConvoyFetcher) FetchMail() ([]MailRow, error) {
 	}
 
 	var messages []struct {
-		ID        string `json:"id"`
-		Title     string `json:"title"`
-		Status    string `json:"status"`
-		CreatedAt string `json:"created_at"`
-		Priority  int    `json:"priority"`
-		Assignee  string `json:"assignee"`  // "to" address stored here
-		CreatedBy string `json:"created_by"` // "from" address
+		ID        string   `json:"id"`
+		Title     string   `json:"title"`
+		Status    string   `json:"status"`
+		CreatedAt string   `json:"created_at"`
+		Priority  int      `json:"priority"`
+		Assignee  string   `json:"assignee"`   // "to" address stored here
+		CreatedBy string   `json:"created_by"` // "from" address
 		Labels    []string `json:"labels"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &messages); err != nil {
@@ -1018,7 +1017,7 @@ func formatAgentAddress(addr string) string {
 	if addr == "mayor/" || addr == "mayor" {
 		return "Mayor"
 	}
-	
+
 	parts := strings.Split(addr, "/")
 	if len(parts) >= 3 && parts[1] == "polecats" {
 		return fmt.Sprintf("%s (%s)", parts[2], parts[0])

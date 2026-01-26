@@ -738,7 +738,7 @@ func TestE2E_Server_FullDashboard(t *testing.T) {
 		{"PR repo", "roxas"},
 		{"Polecat section", "Polecats"},
 		{"Polecat name", "furiosa"},
-		{"HTMX auto-refresh", `hx-trigger="every 10s"`},
+		{"HTMX auto-refresh", `hx-trigger="every 10s`}, // trigger has conditional suffix
 	}
 
 	for _, check := range checks {
@@ -935,12 +935,9 @@ func TestE2E_Server_HTMLStructure(t *testing.T) {
 		}
 	}
 
-	// Validate CSS variables for theming
-	cssVars := []string{"--bg-dark", "--green", "--yellow", "--red"}
-	for _, v := range cssVars {
-		if !strings.Contains(body, v) {
-			t.Errorf("Should contain CSS variable %q", v)
-		}
+	// Validate CSS file is linked (CSS variables are now in external file)
+	if !strings.Contains(body, `href="/static/dashboard.css"`) {
+		t.Error("Should link to external CSS file dashboard.css")
 	}
 }
 
