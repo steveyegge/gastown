@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
@@ -95,6 +96,19 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 					polecatName, workStatus.String())
 			}
 		}
+
+		// Check for unmerged MRs - destroying a polecat with pending MR loses work (ne-rn24b)
+		if existingPolecat.Branch != "" {
+			bd := beads.New(r.Path)
+			mr, mrErr := bd.FindMRForBranch(existingPolecat.Branch)
+			if mrErr == nil && mr != nil {
+				return nil, fmt.Errorf("polecat '%s' has unmerged MR: %s\n"+
+					"Wait for MR to merge before respawning, or use:\n"+
+					"  gt polecat nuke --force %s/%s  # to abandon the MR",
+					polecatName, mr.ID, rigName, polecatName)
+			}
+		}
+
 		fmt.Printf("Repairing stale polecat %s with fresh worktree...\n", polecatName)
 		if _, err = polecatMgr.RepairWorktreeWithOptions(polecatName, opts.Force, addOpts); err != nil {
 			return nil, fmt.Errorf("repairing stale polecat: %w", err)
