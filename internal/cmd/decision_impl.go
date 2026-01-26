@@ -47,7 +47,7 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 	// Find workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		return fmt.Errorf("not in a workspace: %w", err)
 	}
 
 	// Detect agent identity
@@ -194,7 +194,7 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 func runDecisionList(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		return fmt.Errorf("not in a workspace: %w", err)
 	}
 
 	bd := beads.New(beads.ResolveBeadsDir(townRoot))
@@ -255,7 +255,7 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		return fmt.Errorf("not in a workspace: %w", err)
 	}
 
 	bd := beads.New(beads.ResolveBeadsDir(townRoot))
@@ -377,7 +377,7 @@ func runDecisionResolve(cmd *cobra.Command, args []string) error {
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		return fmt.Errorf("not in a workspace: %w", err)
 	}
 
 	// Detect who is resolving
@@ -488,7 +488,7 @@ func runDecisionResolve(cmd *cobra.Command, args []string) error {
 func runDecisionDashboard(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		return fmt.Errorf("not in a workspace: %w", err)
 	}
 
 	bd := beads.New(beads.ResolveBeadsDir(townRoot))
@@ -766,7 +766,7 @@ func runDecisionAwait(cmd *cobra.Command, args []string) error {
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		return fmt.Errorf("not in a workspace: %w", err)
 	}
 
 	// Parse timeout if specified
@@ -887,7 +887,7 @@ func runDecisionRemind(cmd *cobra.Command, args []string) error {
 		// Send reminder as nudge to current agent's session
 		agent := detectSender()
 		if agent == "" {
-			agent = "gastown/crew/decision_point" // fallback
+			agent = detectSenderFromCwd() // dynamic fallback based on cwd
 		}
 		nudgeMsg := "DECISION REMINDER: Session work detected. Consider offering the user a decision point about next steps before ending this session."
 		nudgeCmd := execCommand("gt", "nudge", agent, nudgeMsg)
@@ -995,7 +995,7 @@ func runDecisionWatch(cmd *cobra.Command, args []string) error {
 	// Verify we're in a Gas Town workspace
 	_, err := workspace.FindFromCwdOrError()
 	if err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		return fmt.Errorf("not in a workspace: %w", err)
 	}
 
 	// Create the TUI model
