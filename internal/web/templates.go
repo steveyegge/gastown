@@ -30,6 +30,9 @@ type ConvoyData struct {
 	Activity    []ActivityRow
 	Summary     *DashboardSummary
 	Expand      string // Panel to show fullscreen (from ?expand=name)
+
+	// Errors maps panel names to fetch error messages (displayed in respective panels)
+	Errors map[string]string
 }
 
 // RigRow represents a registered rig in the dashboard.

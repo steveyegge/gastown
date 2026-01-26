@@ -74,122 +74,106 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		issues      []IssueRow
 		activity    []ActivityRow
 		wg          sync.WaitGroup
+		errMu       sync.Mutex
+		errors      = make(map[string]string)
 	)
 
 	// Run all fetches in parallel with error logging
 	wg.Add(14)
 
+	// Helper to record fetch errors
+	recordErr := func(panel string, err error) {
+		if err != nil {
+			log.Printf("dashboard: Fetch%s failed: %v", panel, err)
+			errMu.Lock()
+			errors[panel] = err.Error()
+			errMu.Unlock()
+		}
+	}
+
 	go func() {
 		defer wg.Done()
 		var err error
 		convoys, err = h.fetcher.FetchConvoys()
-		if err != nil {
-			log.Printf("dashboard: FetchConvoys failed: %v", err)
-		}
+		recordErr("Convoys", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		mergeQueue, err = h.fetcher.FetchMergeQueue()
-		if err != nil {
-			log.Printf("dashboard: FetchMergeQueue failed: %v", err)
-		}
+		recordErr("MergeQueue", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		polecats, err = h.fetcher.FetchPolecats()
-		if err != nil {
-			log.Printf("dashboard: FetchPolecats failed: %v", err)
-		}
+		recordErr("Polecats", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		mail, err = h.fetcher.FetchMail()
-		if err != nil {
-			log.Printf("dashboard: FetchMail failed: %v", err)
-		}
+		recordErr("Mail", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		rigs, err = h.fetcher.FetchRigs()
-		if err != nil {
-			log.Printf("dashboard: FetchRigs failed: %v", err)
-		}
+		recordErr("Rigs", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		dogs, err = h.fetcher.FetchDogs()
-		if err != nil {
-			log.Printf("dashboard: FetchDogs failed: %v", err)
-		}
+		recordErr("Dogs", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		escalations, err = h.fetcher.FetchEscalations()
-		if err != nil {
-			log.Printf("dashboard: FetchEscalations failed: %v", err)
-		}
+		recordErr("Escalations", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		health, err = h.fetcher.FetchHealth()
-		if err != nil {
-			log.Printf("dashboard: FetchHealth failed: %v", err)
-		}
+		recordErr("Health", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		queues, err = h.fetcher.FetchQueues()
-		if err != nil {
-			log.Printf("dashboard: FetchQueues failed: %v", err)
-		}
+		recordErr("Queues", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		sessions, err = h.fetcher.FetchSessions()
-		if err != nil {
-			log.Printf("dashboard: FetchSessions failed: %v", err)
-		}
+		recordErr("Sessions", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		hooks, err = h.fetcher.FetchHooks()
-		if err != nil {
-			log.Printf("dashboard: FetchHooks failed: %v", err)
-		}
+		recordErr("Hooks", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		mayor, err = h.fetcher.FetchMayor()
-		if err != nil {
-			log.Printf("dashboard: FetchMayor failed: %v", err)
-		}
+		recordErr("Mayor", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		issues, err = h.fetcher.FetchIssues()
-		if err != nil {
-			log.Printf("dashboard: FetchIssues failed: %v", err)
-		}
+		recordErr("Issues", err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
 		activity, err = h.fetcher.FetchActivity()
-		if err != nil {
-			log.Printf("dashboard: FetchActivity failed: %v", err)
-		}
+		recordErr("Activity", err)
 	}()
 
 	// Wait for fetches or timeout
@@ -226,6 +210,7 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Activity:    activity,
 		Summary:     summary,
 		Expand:      expandPanel,
+		Errors:      errors,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
