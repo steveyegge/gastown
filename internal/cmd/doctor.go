@@ -141,6 +141,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewCheckMisclassifiedWisps())
 	d.Register(doctor.NewBranchCheck())
 	d.Register(doctor.NewBeadsSyncOrphanCheck())
+	d.Register(doctor.NewBeadsSyncWorktreeCheck())
 	d.Register(doctor.NewCloneDivergenceCheck())
 	d.Register(doctor.NewIdentityCollisionCheck())
 	d.Register(doctor.NewLinkedPaneCheck())
