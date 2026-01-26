@@ -188,16 +188,17 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		d.RegisterAll(doctor.RigChecks()...)
 	}
 
-	// Run checks
+	// Run checks with streaming output
+	fmt.Println() // Initial blank line
 	var report *doctor.Report
 	if doctorFix {
-		report = d.Fix(ctx)
+		report = d.FixStreaming(ctx, os.Stdout)
 	} else {
-		report = d.Run(ctx)
+		report = d.RunStreaming(ctx, os.Stdout)
 	}
 
-	// Print report
-	report.Print(os.Stdout, doctorVerbose)
+	// Print summary (checks were already printed during streaming)
+	report.PrintSummaryOnly(os.Stdout, doctorVerbose)
 
 	// Exit with error code if there are errors
 	if report.HasErrors() {
