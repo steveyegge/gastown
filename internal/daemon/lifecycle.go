@@ -399,19 +399,14 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 	// GUPP: Gas Town Universal Propulsion Principle
 	// Send startup nudge for predecessor discovery via /resume
 	recipient := identityToBDActor(identity)
-	_ = session.StartupNudge(d.tmux, sessionName, session.StartupNudgeConfig{
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
 		Recipient: recipient,
-		Sender:    "deacon",
+		Sender:    "daemon",
 		Topic:     "lifecycle-restart",
-	}) // Non-fatal
-
-	// Send propulsion nudge to trigger autonomous execution.
-	// Wait for beacon to be fully processed (needs to be separate prompt)
-	time.Sleep(2 * time.Second)
+	})
 
 	// For OpenCode: send [GT_AGENT_INIT] first for plugin to inject gt prime context.
 	// This ensures agents have full context BEFORE being told to run gt hook.
-	// Applies to ALL agents: mayor, deacon, witness, refinery, polecat, crew.
 	rigPath := ""
 	if parsed.RigName != "" {
 		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
@@ -422,9 +417,33 @@ func (d *Daemon) restartSession(sessionName, identity string) error {
 		time.Sleep(3 * time.Second) // Wait for plugin to process and inject context
 	}
 
-	_ = d.tmux.NudgeSession(sessionName, session.PropulsionNudgeForRole(parsed.RoleType, workDir)) // Non-fatal
+	// Send beacon + propulsion instructions
+	instructions := propulsionInstructions(parsed.RoleType)
+	_ = d.tmux.NudgeSession(sessionName, beacon+"\n\n"+instructions) // Non-fatal
 
 	return nil
+}
+
+// propulsionInstructions returns role-specific startup instructions.
+func propulsionInstructions(role string) string {
+	switch role {
+	case "polecat", "crew":
+		return "Check your hook and mail, then act on the hook if present:\n" +
+			"1. `gt hook` - shows hooked work (if any)\n" +
+			"2. `gt mail inbox` - check for messages\n" +
+			"3. If work is hooked → execute it immediately\n" +
+			"4. If nothing hooked → wait for instructions"
+	case "witness":
+		return "Run `gt prime` to check patrol status and begin work."
+	case "refinery":
+		return "Run `gt prime` to check MQ status and begin patrol."
+	case "deacon":
+		return "Run `gt prime` to check patrol status and begin heartbeat cycle."
+	case "mayor":
+		return "Run `gt prime` to check mail and begin coordination."
+	default:
+		return "Run `gt prime` to get context and check your hook."
+	}
 }
 
 // getWorkDir determines the working directory for an agent.
@@ -568,7 +587,7 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 	if parsed.RigName != "" {
 		rigPath = filepath.Join(d.config.TownRoot, parsed.RigName)
 	}
-	runtimeCfg := config.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
+	runtimeCfg := gtconfig.ResolveRoleAgentConfig(parsed.RoleType, d.config.TownRoot, rigPath)
 	if runtimeCfg.Provider == "opencode" {
 		_ = d.tmux.SetEnvironment(sessionName, "GT_AUTO_INIT", "1")
 	}
