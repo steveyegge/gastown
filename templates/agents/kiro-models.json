@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "description": "Kiro model presets (stub - kiro model selection mechanism TBD)",
+  "models": {},
+  "notes": {
+    "why_delay_based": "Kiro TUI uses box-drawing characters that break prompt prefix matching. Delay-based detection is required.",
+    "default_delay": 8000
+  }
+}
