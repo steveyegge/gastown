@@ -765,7 +765,8 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 
 	// Use nuclear=true since we know we just pushed our work
 	// The branch is pushed, MR is created, we're clean
-	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, true); err != nil {
+	// selfNuke=true because polecat is deleting its own worktree from inside it
+	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, true, true); err != nil {
 		return fmt.Errorf("removing worktree: %w", err)
 	}
 

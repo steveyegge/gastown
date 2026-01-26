@@ -481,16 +481,17 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 // If force is true, removes even with uncommitted changes (but not stashes/unpushed).
 // Use nuclear=true to bypass ALL safety checks.
 func (m *Manager) Remove(name string, force bool) error {
-	return m.RemoveWithOptions(name, force, false)
+	return m.RemoveWithOptions(name, force, false, false)
 }
 
 // RemoveWithOptions deletes a polecat worktree with explicit control over safety checks.
 // force=true: bypass uncommitted changes check (legacy behavior)
 // nuclear=true: bypass ALL safety checks including stashes and unpushed commits
+// selfNuke=true: bypass cwd-in-worktree check (for polecat deleting its own worktree)
 //
 // ZFC #10: Uses cleanup_status from agent bead if available (polecat self-report),
 // falls back to git check for backward compatibility.
-func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
+func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) error {
 	if !m.exists(name) {
 		return ErrPolecatNotFound
 	}
@@ -530,19 +531,22 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 	}
 
 	// Check if user's shell is cd'd into the worktree (prevents broken shell)
-	// This check ALWAYS runs, even with --force/nuclear, because deleting your
-	// shell's cwd breaks the shell completely (all commands fail with exit 1).
+	// This check runs unless selfNuke=true (polecat deleting its own worktree).
+	// When a polecat calls `gt done`, it's inside its worktree by design - the session
+	// will be killed immediately after, so breaking the shell is expected and harmless.
 	// See: https://github.com/steveyegge/gastown/issues/942
-	cwd, cwdErr := os.Getwd()
-	if cwdErr == nil {
-		// Normalize paths for comparison
-		cwdAbs, _ := filepath.Abs(cwd)
-		cloneAbs, _ := filepath.Abs(clonePath)
-		polecatAbs, _ := filepath.Abs(polecatDir)
+	if !selfNuke {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr == nil {
+			// Normalize paths for comparison
+			cwdAbs, _ := filepath.Abs(cwd)
+			cloneAbs, _ := filepath.Abs(clonePath)
+			polecatAbs, _ := filepath.Abs(polecatDir)
 
-		if strings.HasPrefix(cwdAbs, cloneAbs) || strings.HasPrefix(cwdAbs, polecatAbs) {
-			return fmt.Errorf("%w: your shell is in %s\n\nPlease cd elsewhere first, then retry:\n  cd ~/gt\n  gt polecat nuke %s/%s --force",
-				ErrShellInWorktree, cwd, m.rig.Name, name)
+			if strings.HasPrefix(cwdAbs, cloneAbs) || strings.HasPrefix(cwdAbs, polecatAbs) {
+				return fmt.Errorf("%w: your shell is in %s\n\nPlease cd elsewhere first, then retry:\n  cd ~/gt\n  gt polecat nuke %s/%s --force",
+					ErrShellInWorktree, cwd, m.rig.Name, name)
+			}
 		}
 	}
 
