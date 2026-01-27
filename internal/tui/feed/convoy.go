@@ -16,7 +16,8 @@ import (
 )
 
 // convoyIDPattern validates convoy IDs to prevent SQL injection
-var convoyIDPattern = regexp.MustCompile(`^hq-[a-zA-Z0-9-]+$`)
+// Convoy IDs follow the format: {townName}-cv-{shortID}
+var convoyIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*-cv-[a-zA-Z0-9]+$`)
 
 // convoySubprocessTimeout is the timeout for bd and sqlite3 calls in the convoy panel.
 // Prevents TUI freezing if these commands hang.
@@ -168,7 +169,7 @@ func getTrackedIssueStatus(beadsDir, convoyID string) []trackedStatus {
 	defer cancel()
 
 	// Query tracked dependencies from SQLite
-	// convoyID is validated above to match ^hq-[a-zA-Z0-9-]+$
+	// convoyID is validated above to match {townName}-cv-{shortID} pattern
 	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, //nolint:gosec // G204: convoyID is validated against strict pattern
 		fmt.Sprintf(`SELECT depends_on_id FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, convoyID))
 

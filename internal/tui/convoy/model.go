@@ -18,7 +18,8 @@ import (
 )
 
 // convoyIDPattern validates convoy IDs to prevent SQL injection.
-var convoyIDPattern = regexp.MustCompile(`^hq-[a-zA-Z0-9-]+$`)
+// Convoy IDs follow the format: {townName}-cv-{shortID}
+var convoyIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*-cv-[a-zA-Z0-9]+$`)
 
 // subprocessTimeout is the timeout for bd and sqlite3 calls.
 const subprocessTimeout = 5 * time.Second
