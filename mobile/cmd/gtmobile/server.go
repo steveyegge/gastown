@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/crew"
+	"github.com/steveyegge/gastown/internal/eventbus"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -240,12 +241,13 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 // DecisionServer implements the DecisionService.
 type DecisionServer struct {
 	townRoot string
+	bus      *eventbus.Bus
 }
 
 var _ gastownv1connect.DecisionServiceHandler = (*DecisionServer)(nil)
 
-func NewDecisionServer(townRoot string) *DecisionServer {
-	return &DecisionServer{townRoot: townRoot}
+func NewDecisionServer(townRoot string, bus *eventbus.Bus) *DecisionServer {
+	return &DecisionServer{townRoot: townRoot, bus: bus}
 }
 
 func (s *DecisionServer) ListPending(
@@ -300,7 +302,104 @@ func (s *DecisionServer) GetDecision(
 	ctx context.Context,
 	req *connect.Request[gastownv1.GetDecisionRequest],
 ) (*connect.Response[gastownv1.GetDecisionResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("GetDecision not yet implemented"))
+	townBeadsPath := beads.GetTownBeadsPath(s.townRoot)
+	client := beads.New(townBeadsPath)
+
+	issue, fields, err := client.GetDecisionBead(req.Msg.DecisionId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	if issue == nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("decision not found: %s", req.Msg.DecisionId))
+	}
+
+	var options []*gastownv1.DecisionOption
+	for _, opt := range fields.Options {
+		options = append(options, &gastownv1.DecisionOption{
+			Label:       opt.Label,
+			Description: opt.Description,
+			Recommended: opt.Recommended,
+		})
+	}
+
+	decision := &gastownv1.Decision{
+		Id:          issue.ID,
+		Question:    fields.Question,
+		Context:     fields.Context,
+		Options:     options,
+		ChosenIndex: int32(fields.ChosenIndex),
+		Rationale:   fields.Rationale,
+		ResolvedBy:  fields.ResolvedBy,
+		RequestedBy: &gastownv1.AgentAddress{Name: fields.RequestedBy},
+		Urgency:     toUrgency(fields.Urgency),
+		Blockers:    fields.Blockers,
+		Resolved:    fields.ChosenIndex > 0,
+	}
+
+	return connect.NewResponse(&gastownv1.GetDecisionResponse{Decision: decision}), nil
+}
+
+func (s *DecisionServer) CreateDecision(
+	ctx context.Context,
+	req *connect.Request[gastownv1.CreateDecisionRequest],
+) (*connect.Response[gastownv1.CreateDecisionResponse], error) {
+	townBeadsPath := beads.GetTownBeadsPath(s.townRoot)
+	client := beads.New(townBeadsPath)
+
+	// Convert proto options to beads options
+	var options []beads.DecisionOption
+	for _, opt := range req.Msg.Options {
+		options = append(options, beads.DecisionOption{
+			Label:       opt.Label,
+			Description: opt.Description,
+			Recommended: opt.Recommended,
+		})
+	}
+
+	// Build decision fields
+	fields := &beads.DecisionFields{
+		Question:    req.Msg.Question,
+		Context:     req.Msg.Context,
+		Options:     options,
+		RequestedBy: formatAgentAddress(req.Msg.RequestedBy),
+		RequestedAt: time.Now().Format(time.RFC3339),
+		Urgency:     fromUrgency(req.Msg.Urgency),
+		Blockers:    req.Msg.Blockers,
+	}
+
+	// Create the decision bead
+	issue, err := client.CreateDecisionBead(req.Msg.Question, fields)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("creating decision: %w", err))
+	}
+
+	// Build response decision
+	var protoOptions []*gastownv1.DecisionOption
+	for _, opt := range options {
+		protoOptions = append(protoOptions, &gastownv1.DecisionOption{
+			Label:       opt.Label,
+			Description: opt.Description,
+			Recommended: opt.Recommended,
+		})
+	}
+
+	decision := &gastownv1.Decision{
+		Id:          issue.ID,
+		Question:    fields.Question,
+		Context:     fields.Context,
+		Options:     protoOptions,
+		RequestedBy: req.Msg.RequestedBy,
+		Urgency:     req.Msg.Urgency,
+		Blockers:    fields.Blockers,
+		Resolved:    false,
+	}
+
+	// Publish event to bus for real-time notification
+	if s.bus != nil {
+		s.bus.PublishDecisionCreated(issue.ID, decision)
+	}
+
+	return connect.NewResponse(&gastownv1.CreateDecisionResponse{Decision: decision}), nil
 }
 
 func (s *DecisionServer) Resolve(
@@ -322,18 +421,127 @@ func (s *DecisionServer) WatchDecisions(
 	req *connect.Request[gastownv1.WatchDecisionsRequest],
 	stream *connect.ServerStream[gastownv1.Decision],
 ) error {
+	seen := make(map[string]bool)
+
+	// First, send all existing pending decisions
+	townBeadsPath := beads.GetTownBeadsPath(s.townRoot)
+	client := beads.New(townBeadsPath)
+	issues, err := client.ListDecisions()
+	if err == nil {
+		for _, issue := range issues {
+			seen[issue.ID] = true
+			fields := beads.ParseDecisionFields(issue.Description)
+			if fields == nil {
+				continue
+			}
+
+			var options []*gastownv1.DecisionOption
+			for _, opt := range fields.Options {
+				options = append(options, &gastownv1.DecisionOption{
+					Label:       opt.Label,
+					Description: opt.Description,
+					Recommended: opt.Recommended,
+				})
+			}
+
+			if err := stream.Send(&gastownv1.Decision{
+				Id:          issue.ID,
+				Question:    fields.Question,
+				Context:     fields.Context,
+				Options:     options,
+				Urgency:     toUrgency(fields.Urgency),
+				RequestedBy: &gastownv1.AgentAddress{Name: fields.RequestedBy},
+			}); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Subscribe to event bus for real-time updates
+	if s.bus != nil {
+		events, unsubscribe := s.bus.Subscribe()
+		defer unsubscribe()
+
+		// Backup polling (30 seconds) to catch decisions created via CLI
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+
+			case event, ok := <-events:
+				if !ok {
+					return nil // Bus closed
+				}
+				// Only process decision created events
+				if event.Type != eventbus.EventDecisionCreated {
+					continue
+				}
+				if seen[event.DecisionID] {
+					continue
+				}
+				seen[event.DecisionID] = true
+
+				// Extract decision from event data
+				if decision, ok := event.Data.(*gastownv1.Decision); ok {
+					if err := stream.Send(decision); err != nil {
+						return err
+					}
+				}
+
+			case <-ticker.C:
+				// Backup poll for decisions created via CLI (not through RPC)
+				issues, err := client.ListDecisions()
+				if err != nil {
+					continue
+				}
+
+				for _, issue := range issues {
+					if seen[issue.ID] {
+						continue
+					}
+					seen[issue.ID] = true
+
+					fields := beads.ParseDecisionFields(issue.Description)
+					if fields == nil {
+						continue
+					}
+
+					var options []*gastownv1.DecisionOption
+					for _, opt := range fields.Options {
+						options = append(options, &gastownv1.DecisionOption{
+							Label:       opt.Label,
+							Description: opt.Description,
+							Recommended: opt.Recommended,
+						})
+					}
+
+					if err := stream.Send(&gastownv1.Decision{
+						Id:          issue.ID,
+						Question:    fields.Question,
+						Context:     fields.Context,
+						Options:     options,
+						Urgency:     toUrgency(fields.Urgency),
+						RequestedBy: &gastownv1.AgentAddress{Name: fields.RequestedBy},
+					}); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: no event bus, use polling only
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-
-	seen := make(map[string]bool)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			townBeadsPath := beads.GetTownBeadsPath(s.townRoot)
-			client := beads.New(townBeadsPath)
 			issues, err := client.ListDecisions()
 			if err != nil {
 				continue
@@ -362,6 +570,7 @@ func (s *DecisionServer) WatchDecisions(
 				if err := stream.Send(&gastownv1.Decision{
 					Id:          issue.ID,
 					Question:    fields.Question,
+					Context:     fields.Context,
 					Options:     options,
 					Urgency:     toUrgency(fields.Urgency),
 					RequestedBy: &gastownv1.AgentAddress{Name: fields.RequestedBy},
@@ -384,6 +593,32 @@ func toUrgency(s string) gastownv1.Urgency {
 	default:
 		return gastownv1.Urgency_URGENCY_UNSPECIFIED
 	}
+}
+
+func fromUrgency(u gastownv1.Urgency) string {
+	switch u {
+	case gastownv1.Urgency_URGENCY_HIGH:
+		return "high"
+	case gastownv1.Urgency_URGENCY_MEDIUM:
+		return "medium"
+	case gastownv1.Urgency_URGENCY_LOW:
+		return "low"
+	default:
+		return "medium"
+	}
+}
+
+func formatAgentAddress(addr *gastownv1.AgentAddress) string {
+	if addr == nil {
+		return ""
+	}
+	if addr.Rig != "" && addr.Role != "" && addr.Name != "" {
+		return fmt.Sprintf("%s/%s/%s", addr.Rig, addr.Role, addr.Name)
+	}
+	if addr.Rig != "" && addr.Role != "" {
+		return fmt.Sprintf("%s/%s", addr.Rig, addr.Role)
+	}
+	return addr.Name
 }
 
 // MailServer implements the MailService.

@@ -267,6 +267,142 @@ func (x *GetDecisionResponse) GetDecision() *Decision {
 	return nil
 }
 
+type CreateDecisionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Question      string                 `protobuf:"bytes,1,opt,name=question,proto3" json:"question,omitempty"`                          // The prompt/question for the human
+	Context       string                 `protobuf:"bytes,2,opt,name=context,proto3" json:"context,omitempty"`                            // Additional context for the decision
+	Options       []*DecisionOption      `protobuf:"bytes,3,rep,name=options,proto3" json:"options,omitempty"`                            // Available options to choose from
+	RequestedBy   *AgentAddress          `protobuf:"bytes,4,opt,name=requested_by,json=requestedBy,proto3" json:"requested_by,omitempty"` // Agent requesting the decision
+	Urgency       Urgency                `protobuf:"varint,5,opt,name=urgency,proto3,enum=gastown.v1.Urgency" json:"urgency,omitempty"`   // How urgent is this decision
+	Blockers      []string               `protobuf:"bytes,6,rep,name=blockers,proto3" json:"blockers,omitempty"`                          // Work IDs blocked by this decision
+	ParentBead    string                 `protobuf:"bytes,7,opt,name=parent_bead,json=parentBead,proto3" json:"parent_bead,omitempty"`    // Optional parent bead ID for hierarchy
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateDecisionRequest) Reset() {
+	*x = CreateDecisionRequest{}
+	mi := &file_gastown_v1_decision_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateDecisionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateDecisionRequest) ProtoMessage() {}
+
+func (x *CreateDecisionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastown_v1_decision_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateDecisionRequest.ProtoReflect.Descriptor instead.
+func (*CreateDecisionRequest) Descriptor() ([]byte, []int) {
+	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CreateDecisionRequest) GetQuestion() string {
+	if x != nil {
+		return x.Question
+	}
+	return ""
+}
+
+func (x *CreateDecisionRequest) GetContext() string {
+	if x != nil {
+		return x.Context
+	}
+	return ""
+}
+
+func (x *CreateDecisionRequest) GetOptions() []*DecisionOption {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+func (x *CreateDecisionRequest) GetRequestedBy() *AgentAddress {
+	if x != nil {
+		return x.RequestedBy
+	}
+	return nil
+}
+
+func (x *CreateDecisionRequest) GetUrgency() Urgency {
+	if x != nil {
+		return x.Urgency
+	}
+	return Urgency_URGENCY_UNSPECIFIED
+}
+
+func (x *CreateDecisionRequest) GetBlockers() []string {
+	if x != nil {
+		return x.Blockers
+	}
+	return nil
+}
+
+func (x *CreateDecisionRequest) GetParentBead() string {
+	if x != nil {
+		return x.ParentBead
+	}
+	return ""
+}
+
+type CreateDecisionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Decision      *Decision              `protobuf:"bytes,1,opt,name=decision,proto3" json:"decision,omitempty"` // The created decision with assigned ID
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateDecisionResponse) Reset() {
+	*x = CreateDecisionResponse{}
+	mi := &file_gastown_v1_decision_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateDecisionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateDecisionResponse) ProtoMessage() {}
+
+func (x *CreateDecisionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastown_v1_decision_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateDecisionResponse.ProtoReflect.Descriptor instead.
+func (*CreateDecisionResponse) Descriptor() ([]byte, []int) {
+	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CreateDecisionResponse) GetDecision() *Decision {
+	if x != nil {
+		return x.Decision
+	}
+	return nil
+}
+
 type ResolveRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DecisionId    string                 `protobuf:"bytes,1,opt,name=decision_id,json=decisionId,proto3" json:"decision_id,omitempty"`
@@ -278,7 +414,7 @@ type ResolveRequest struct {
 
 func (x *ResolveRequest) Reset() {
 	*x = ResolveRequest{}
-	mi := &file_gastown_v1_decision_proto_msgTypes[4]
+	mi := &file_gastown_v1_decision_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -290,7 +426,7 @@ func (x *ResolveRequest) String() string {
 func (*ResolveRequest) ProtoMessage() {}
 
 func (x *ResolveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastown_v1_decision_proto_msgTypes[4]
+	mi := &file_gastown_v1_decision_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -303,7 +439,7 @@ func (x *ResolveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveRequest.ProtoReflect.Descriptor instead.
 func (*ResolveRequest) Descriptor() ([]byte, []int) {
-	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{4}
+	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ResolveRequest) GetDecisionId() string {
@@ -336,7 +472,7 @@ type ResolveResponse struct {
 
 func (x *ResolveResponse) Reset() {
 	*x = ResolveResponse{}
-	mi := &file_gastown_v1_decision_proto_msgTypes[5]
+	mi := &file_gastown_v1_decision_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -348,7 +484,7 @@ func (x *ResolveResponse) String() string {
 func (*ResolveResponse) ProtoMessage() {}
 
 func (x *ResolveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastown_v1_decision_proto_msgTypes[5]
+	mi := &file_gastown_v1_decision_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -361,7 +497,7 @@ func (x *ResolveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveResponse.ProtoReflect.Descriptor instead.
 func (*ResolveResponse) Descriptor() ([]byte, []int) {
-	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{5}
+	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ResolveResponse) GetDecision() *Decision {
@@ -381,7 +517,7 @@ type CancelRequest struct {
 
 func (x *CancelRequest) Reset() {
 	*x = CancelRequest{}
-	mi := &file_gastown_v1_decision_proto_msgTypes[6]
+	mi := &file_gastown_v1_decision_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -393,7 +529,7 @@ func (x *CancelRequest) String() string {
 func (*CancelRequest) ProtoMessage() {}
 
 func (x *CancelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastown_v1_decision_proto_msgTypes[6]
+	mi := &file_gastown_v1_decision_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,7 +542,7 @@ func (x *CancelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelRequest.ProtoReflect.Descriptor instead.
 func (*CancelRequest) Descriptor() ([]byte, []int) {
-	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{6}
+	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CancelRequest) GetDecisionId() string {
@@ -431,7 +567,7 @@ type CancelResponse struct {
 
 func (x *CancelResponse) Reset() {
 	*x = CancelResponse{}
-	mi := &file_gastown_v1_decision_proto_msgTypes[7]
+	mi := &file_gastown_v1_decision_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -443,7 +579,7 @@ func (x *CancelResponse) String() string {
 func (*CancelResponse) ProtoMessage() {}
 
 func (x *CancelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastown_v1_decision_proto_msgTypes[7]
+	mi := &file_gastown_v1_decision_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -456,7 +592,7 @@ func (x *CancelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelResponse.ProtoReflect.Descriptor instead.
 func (*CancelResponse) Descriptor() ([]byte, []int) {
-	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{7}
+	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{9}
 }
 
 type WatchDecisionsRequest struct {
@@ -468,7 +604,7 @@ type WatchDecisionsRequest struct {
 
 func (x *WatchDecisionsRequest) Reset() {
 	*x = WatchDecisionsRequest{}
-	mi := &file_gastown_v1_decision_proto_msgTypes[8]
+	mi := &file_gastown_v1_decision_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -480,7 +616,7 @@ func (x *WatchDecisionsRequest) String() string {
 func (*WatchDecisionsRequest) ProtoMessage() {}
 
 func (x *WatchDecisionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastown_v1_decision_proto_msgTypes[8]
+	mi := &file_gastown_v1_decision_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -493,7 +629,7 @@ func (x *WatchDecisionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchDecisionsRequest.ProtoReflect.Descriptor instead.
 func (*WatchDecisionsRequest) Descriptor() ([]byte, []int) {
-	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{8}
+	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *WatchDecisionsRequest) GetMinUrgency() Urgency {
@@ -526,7 +662,7 @@ type Decision struct {
 
 func (x *Decision) Reset() {
 	*x = Decision{}
-	mi := &file_gastown_v1_decision_proto_msgTypes[9]
+	mi := &file_gastown_v1_decision_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -538,7 +674,7 @@ func (x *Decision) String() string {
 func (*Decision) ProtoMessage() {}
 
 func (x *Decision) ProtoReflect() protoreflect.Message {
-	mi := &file_gastown_v1_decision_proto_msgTypes[9]
+	mi := &file_gastown_v1_decision_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -551,7 +687,7 @@ func (x *Decision) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Decision.ProtoReflect.Descriptor instead.
 func (*Decision) Descriptor() ([]byte, []int) {
-	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{9}
+	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Decision) GetId() string {
@@ -664,7 +800,7 @@ type DecisionOption struct {
 
 func (x *DecisionOption) Reset() {
 	*x = DecisionOption{}
-	mi := &file_gastown_v1_decision_proto_msgTypes[10]
+	mi := &file_gastown_v1_decision_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -676,7 +812,7 @@ func (x *DecisionOption) String() string {
 func (*DecisionOption) ProtoMessage() {}
 
 func (x *DecisionOption) ProtoReflect() protoreflect.Message {
-	mi := &file_gastown_v1_decision_proto_msgTypes[10]
+	mi := &file_gastown_v1_decision_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -689,7 +825,7 @@ func (x *DecisionOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecisionOption.ProtoReflect.Descriptor instead.
 func (*DecisionOption) Descriptor() ([]byte, []int) {
-	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{10}
+	return file_gastown_v1_decision_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DecisionOption) GetLabel() string {
@@ -730,6 +866,17 @@ const file_gastown_v1_decision_proto_rawDesc = "" +
 	"\vdecision_id\x18\x01 \x01(\tR\n" +
 	"decisionId\"G\n" +
 	"\x13GetDecisionResponse\x120\n" +
+	"\bdecision\x18\x01 \x01(\v2\x14.gastown.v1.DecisionR\bdecision\"\xac\x02\n" +
+	"\x15CreateDecisionRequest\x12\x1a\n" +
+	"\bquestion\x18\x01 \x01(\tR\bquestion\x12\x18\n" +
+	"\acontext\x18\x02 \x01(\tR\acontext\x124\n" +
+	"\aoptions\x18\x03 \x03(\v2\x1a.gastown.v1.DecisionOptionR\aoptions\x12;\n" +
+	"\frequested_by\x18\x04 \x01(\v2\x18.gastown.v1.AgentAddressR\vrequestedBy\x12-\n" +
+	"\aurgency\x18\x05 \x01(\x0e2\x13.gastown.v1.UrgencyR\aurgency\x12\x1a\n" +
+	"\bblockers\x18\x06 \x03(\tR\bblockers\x12\x1f\n" +
+	"\vparent_bead\x18\a \x01(\tR\n" +
+	"parentBead\"J\n" +
+	"\x16CreateDecisionResponse\x120\n" +
 	"\bdecision\x18\x01 \x01(\v2\x14.gastown.v1.DecisionR\bdecision\"r\n" +
 	"\x0eResolveRequest\x12\x1f\n" +
 	"\vdecision_id\x18\x01 \x01(\tR\n" +
@@ -772,10 +919,11 @@ const file_gastown_v1_decision_proto_rawDesc = "" +
 	"\x13URGENCY_UNSPECIFIED\x10\x00\x12\x0f\n" +
 	"\vURGENCY_LOW\x10\x01\x12\x12\n" +
 	"\x0eURGENCY_MEDIUM\x10\x02\x12\x10\n" +
-	"\fURGENCY_HIGH\x10\x032\x83\x03\n" +
+	"\fURGENCY_HIGH\x10\x032\xdc\x03\n" +
 	"\x0fDecisionService\x12N\n" +
 	"\vListPending\x12\x1e.gastown.v1.ListPendingRequest\x1a\x1f.gastown.v1.ListPendingResponse\x12N\n" +
-	"\vGetDecision\x12\x1e.gastown.v1.GetDecisionRequest\x1a\x1f.gastown.v1.GetDecisionResponse\x12B\n" +
+	"\vGetDecision\x12\x1e.gastown.v1.GetDecisionRequest\x1a\x1f.gastown.v1.GetDecisionResponse\x12W\n" +
+	"\x0eCreateDecision\x12!.gastown.v1.CreateDecisionRequest\x1a\".gastown.v1.CreateDecisionResponse\x12B\n" +
 	"\aResolve\x12\x1a.gastown.v1.ResolveRequest\x1a\x1b.gastown.v1.ResolveResponse\x12?\n" +
 	"\x06Cancel\x12\x19.gastown.v1.CancelRequest\x1a\x1a.gastown.v1.CancelResponse\x12K\n" +
 	"\x0eWatchDecisions\x12!.gastown.v1.WatchDecisionsRequest\x1a\x14.gastown.v1.Decision0\x01B\xa7\x01\n" +
@@ -796,49 +944,57 @@ func file_gastown_v1_decision_proto_rawDescGZIP() []byte {
 }
 
 var file_gastown_v1_decision_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_gastown_v1_decision_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_gastown_v1_decision_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_gastown_v1_decision_proto_goTypes = []any{
-	(Urgency)(0),                  // 0: gastown.v1.Urgency
-	(*ListPendingRequest)(nil),    // 1: gastown.v1.ListPendingRequest
-	(*ListPendingResponse)(nil),   // 2: gastown.v1.ListPendingResponse
-	(*GetDecisionRequest)(nil),    // 3: gastown.v1.GetDecisionRequest
-	(*GetDecisionResponse)(nil),   // 4: gastown.v1.GetDecisionResponse
-	(*ResolveRequest)(nil),        // 5: gastown.v1.ResolveRequest
-	(*ResolveResponse)(nil),       // 6: gastown.v1.ResolveResponse
-	(*CancelRequest)(nil),         // 7: gastown.v1.CancelRequest
-	(*CancelResponse)(nil),        // 8: gastown.v1.CancelResponse
-	(*WatchDecisionsRequest)(nil), // 9: gastown.v1.WatchDecisionsRequest
-	(*Decision)(nil),              // 10: gastown.v1.Decision
-	(*DecisionOption)(nil),        // 11: gastown.v1.DecisionOption
-	(*AgentAddress)(nil),          // 12: gastown.v1.AgentAddress
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(Urgency)(0),                   // 0: gastown.v1.Urgency
+	(*ListPendingRequest)(nil),     // 1: gastown.v1.ListPendingRequest
+	(*ListPendingResponse)(nil),    // 2: gastown.v1.ListPendingResponse
+	(*GetDecisionRequest)(nil),     // 3: gastown.v1.GetDecisionRequest
+	(*GetDecisionResponse)(nil),    // 4: gastown.v1.GetDecisionResponse
+	(*CreateDecisionRequest)(nil),  // 5: gastown.v1.CreateDecisionRequest
+	(*CreateDecisionResponse)(nil), // 6: gastown.v1.CreateDecisionResponse
+	(*ResolveRequest)(nil),         // 7: gastown.v1.ResolveRequest
+	(*ResolveResponse)(nil),        // 8: gastown.v1.ResolveResponse
+	(*CancelRequest)(nil),          // 9: gastown.v1.CancelRequest
+	(*CancelResponse)(nil),         // 10: gastown.v1.CancelResponse
+	(*WatchDecisionsRequest)(nil),  // 11: gastown.v1.WatchDecisionsRequest
+	(*Decision)(nil),               // 12: gastown.v1.Decision
+	(*DecisionOption)(nil),         // 13: gastown.v1.DecisionOption
+	(*AgentAddress)(nil),           // 14: gastown.v1.AgentAddress
+	(*timestamppb.Timestamp)(nil),  // 15: google.protobuf.Timestamp
 }
 var file_gastown_v1_decision_proto_depIdxs = []int32{
 	0,  // 0: gastown.v1.ListPendingRequest.min_urgency:type_name -> gastown.v1.Urgency
-	10, // 1: gastown.v1.ListPendingResponse.decisions:type_name -> gastown.v1.Decision
-	10, // 2: gastown.v1.GetDecisionResponse.decision:type_name -> gastown.v1.Decision
-	10, // 3: gastown.v1.ResolveResponse.decision:type_name -> gastown.v1.Decision
-	0,  // 4: gastown.v1.WatchDecisionsRequest.min_urgency:type_name -> gastown.v1.Urgency
-	11, // 5: gastown.v1.Decision.options:type_name -> gastown.v1.DecisionOption
-	12, // 6: gastown.v1.Decision.requested_by:type_name -> gastown.v1.AgentAddress
-	13, // 7: gastown.v1.Decision.requested_at:type_name -> google.protobuf.Timestamp
-	13, // 8: gastown.v1.Decision.resolved_at:type_name -> google.protobuf.Timestamp
-	0,  // 9: gastown.v1.Decision.urgency:type_name -> gastown.v1.Urgency
-	1,  // 10: gastown.v1.DecisionService.ListPending:input_type -> gastown.v1.ListPendingRequest
-	3,  // 11: gastown.v1.DecisionService.GetDecision:input_type -> gastown.v1.GetDecisionRequest
-	5,  // 12: gastown.v1.DecisionService.Resolve:input_type -> gastown.v1.ResolveRequest
-	7,  // 13: gastown.v1.DecisionService.Cancel:input_type -> gastown.v1.CancelRequest
-	9,  // 14: gastown.v1.DecisionService.WatchDecisions:input_type -> gastown.v1.WatchDecisionsRequest
-	2,  // 15: gastown.v1.DecisionService.ListPending:output_type -> gastown.v1.ListPendingResponse
-	4,  // 16: gastown.v1.DecisionService.GetDecision:output_type -> gastown.v1.GetDecisionResponse
-	6,  // 17: gastown.v1.DecisionService.Resolve:output_type -> gastown.v1.ResolveResponse
-	8,  // 18: gastown.v1.DecisionService.Cancel:output_type -> gastown.v1.CancelResponse
-	10, // 19: gastown.v1.DecisionService.WatchDecisions:output_type -> gastown.v1.Decision
-	15, // [15:20] is the sub-list for method output_type
-	10, // [10:15] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	12, // 1: gastown.v1.ListPendingResponse.decisions:type_name -> gastown.v1.Decision
+	12, // 2: gastown.v1.GetDecisionResponse.decision:type_name -> gastown.v1.Decision
+	13, // 3: gastown.v1.CreateDecisionRequest.options:type_name -> gastown.v1.DecisionOption
+	14, // 4: gastown.v1.CreateDecisionRequest.requested_by:type_name -> gastown.v1.AgentAddress
+	0,  // 5: gastown.v1.CreateDecisionRequest.urgency:type_name -> gastown.v1.Urgency
+	12, // 6: gastown.v1.CreateDecisionResponse.decision:type_name -> gastown.v1.Decision
+	12, // 7: gastown.v1.ResolveResponse.decision:type_name -> gastown.v1.Decision
+	0,  // 8: gastown.v1.WatchDecisionsRequest.min_urgency:type_name -> gastown.v1.Urgency
+	13, // 9: gastown.v1.Decision.options:type_name -> gastown.v1.DecisionOption
+	14, // 10: gastown.v1.Decision.requested_by:type_name -> gastown.v1.AgentAddress
+	15, // 11: gastown.v1.Decision.requested_at:type_name -> google.protobuf.Timestamp
+	15, // 12: gastown.v1.Decision.resolved_at:type_name -> google.protobuf.Timestamp
+	0,  // 13: gastown.v1.Decision.urgency:type_name -> gastown.v1.Urgency
+	1,  // 14: gastown.v1.DecisionService.ListPending:input_type -> gastown.v1.ListPendingRequest
+	3,  // 15: gastown.v1.DecisionService.GetDecision:input_type -> gastown.v1.GetDecisionRequest
+	5,  // 16: gastown.v1.DecisionService.CreateDecision:input_type -> gastown.v1.CreateDecisionRequest
+	7,  // 17: gastown.v1.DecisionService.Resolve:input_type -> gastown.v1.ResolveRequest
+	9,  // 18: gastown.v1.DecisionService.Cancel:input_type -> gastown.v1.CancelRequest
+	11, // 19: gastown.v1.DecisionService.WatchDecisions:input_type -> gastown.v1.WatchDecisionsRequest
+	2,  // 20: gastown.v1.DecisionService.ListPending:output_type -> gastown.v1.ListPendingResponse
+	4,  // 21: gastown.v1.DecisionService.GetDecision:output_type -> gastown.v1.GetDecisionResponse
+	6,  // 22: gastown.v1.DecisionService.CreateDecision:output_type -> gastown.v1.CreateDecisionResponse
+	8,  // 23: gastown.v1.DecisionService.Resolve:output_type -> gastown.v1.ResolveResponse
+	10, // 24: gastown.v1.DecisionService.Cancel:output_type -> gastown.v1.CancelResponse
+	12, // 25: gastown.v1.DecisionService.WatchDecisions:output_type -> gastown.v1.Decision
+	20, // [20:26] is the sub-list for method output_type
+	14, // [14:20] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_gastown_v1_decision_proto_init() }
@@ -853,7 +1009,7 @@ func file_gastown_v1_decision_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastown_v1_decision_proto_rawDesc), len(file_gastown_v1_decision_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

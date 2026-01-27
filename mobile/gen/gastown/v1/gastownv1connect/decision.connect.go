@@ -39,6 +39,9 @@ const (
 	// DecisionServiceGetDecisionProcedure is the fully-qualified name of the DecisionService's
 	// GetDecision RPC.
 	DecisionServiceGetDecisionProcedure = "/gastown.v1.DecisionService/GetDecision"
+	// DecisionServiceCreateDecisionProcedure is the fully-qualified name of the DecisionService's
+	// CreateDecision RPC.
+	DecisionServiceCreateDecisionProcedure = "/gastown.v1.DecisionService/CreateDecision"
 	// DecisionServiceResolveProcedure is the fully-qualified name of the DecisionService's Resolve RPC.
 	DecisionServiceResolveProcedure = "/gastown.v1.DecisionService/Resolve"
 	// DecisionServiceCancelProcedure is the fully-qualified name of the DecisionService's Cancel RPC.
@@ -54,6 +57,10 @@ type DecisionServiceClient interface {
 	ListPending(context.Context, *connect.Request[v1.ListPendingRequest]) (*connect.Response[v1.ListPendingResponse], error)
 	// GetDecision returns a specific decision
 	GetDecision(context.Context, *connect.Request[v1.GetDecisionRequest]) (*connect.Response[v1.GetDecisionResponse], error)
+	// CreateDecision creates a new decision request
+	// This is the primary way to create decisions when gtmobile is running,
+	// enabling real-time notification via the event bus.
+	CreateDecision(context.Context, *connect.Request[v1.CreateDecisionRequest]) (*connect.Response[v1.CreateDecisionResponse], error)
 	// Resolve resolves a decision with the chosen option
 	Resolve(context.Context, *connect.Request[v1.ResolveRequest]) (*connect.Response[v1.ResolveResponse], error)
 	// Cancel cancels a pending decision
@@ -85,6 +92,12 @@ func NewDecisionServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(decisionServiceMethods.ByName("GetDecision")),
 			connect.WithClientOptions(opts...),
 		),
+		createDecision: connect.NewClient[v1.CreateDecisionRequest, v1.CreateDecisionResponse](
+			httpClient,
+			baseURL+DecisionServiceCreateDecisionProcedure,
+			connect.WithSchema(decisionServiceMethods.ByName("CreateDecision")),
+			connect.WithClientOptions(opts...),
+		),
 		resolve: connect.NewClient[v1.ResolveRequest, v1.ResolveResponse](
 			httpClient,
 			baseURL+DecisionServiceResolveProcedure,
@@ -110,6 +123,7 @@ func NewDecisionServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 type decisionServiceClient struct {
 	listPending    *connect.Client[v1.ListPendingRequest, v1.ListPendingResponse]
 	getDecision    *connect.Client[v1.GetDecisionRequest, v1.GetDecisionResponse]
+	createDecision *connect.Client[v1.CreateDecisionRequest, v1.CreateDecisionResponse]
 	resolve        *connect.Client[v1.ResolveRequest, v1.ResolveResponse]
 	cancel         *connect.Client[v1.CancelRequest, v1.CancelResponse]
 	watchDecisions *connect.Client[v1.WatchDecisionsRequest, v1.Decision]
@@ -123,6 +137,11 @@ func (c *decisionServiceClient) ListPending(ctx context.Context, req *connect.Re
 // GetDecision calls gastown.v1.DecisionService.GetDecision.
 func (c *decisionServiceClient) GetDecision(ctx context.Context, req *connect.Request[v1.GetDecisionRequest]) (*connect.Response[v1.GetDecisionResponse], error) {
 	return c.getDecision.CallUnary(ctx, req)
+}
+
+// CreateDecision calls gastown.v1.DecisionService.CreateDecision.
+func (c *decisionServiceClient) CreateDecision(ctx context.Context, req *connect.Request[v1.CreateDecisionRequest]) (*connect.Response[v1.CreateDecisionResponse], error) {
+	return c.createDecision.CallUnary(ctx, req)
 }
 
 // Resolve calls gastown.v1.DecisionService.Resolve.
@@ -146,6 +165,10 @@ type DecisionServiceHandler interface {
 	ListPending(context.Context, *connect.Request[v1.ListPendingRequest]) (*connect.Response[v1.ListPendingResponse], error)
 	// GetDecision returns a specific decision
 	GetDecision(context.Context, *connect.Request[v1.GetDecisionRequest]) (*connect.Response[v1.GetDecisionResponse], error)
+	// CreateDecision creates a new decision request
+	// This is the primary way to create decisions when gtmobile is running,
+	// enabling real-time notification via the event bus.
+	CreateDecision(context.Context, *connect.Request[v1.CreateDecisionRequest]) (*connect.Response[v1.CreateDecisionResponse], error)
 	// Resolve resolves a decision with the chosen option
 	Resolve(context.Context, *connect.Request[v1.ResolveRequest]) (*connect.Response[v1.ResolveResponse], error)
 	// Cancel cancels a pending decision
@@ -173,6 +196,12 @@ func NewDecisionServiceHandler(svc DecisionServiceHandler, opts ...connect.Handl
 		connect.WithSchema(decisionServiceMethods.ByName("GetDecision")),
 		connect.WithHandlerOptions(opts...),
 	)
+	decisionServiceCreateDecisionHandler := connect.NewUnaryHandler(
+		DecisionServiceCreateDecisionProcedure,
+		svc.CreateDecision,
+		connect.WithSchema(decisionServiceMethods.ByName("CreateDecision")),
+		connect.WithHandlerOptions(opts...),
+	)
 	decisionServiceResolveHandler := connect.NewUnaryHandler(
 		DecisionServiceResolveProcedure,
 		svc.Resolve,
@@ -197,6 +226,8 @@ func NewDecisionServiceHandler(svc DecisionServiceHandler, opts ...connect.Handl
 			decisionServiceListPendingHandler.ServeHTTP(w, r)
 		case DecisionServiceGetDecisionProcedure:
 			decisionServiceGetDecisionHandler.ServeHTTP(w, r)
+		case DecisionServiceCreateDecisionProcedure:
+			decisionServiceCreateDecisionHandler.ServeHTTP(w, r)
 		case DecisionServiceResolveProcedure:
 			decisionServiceResolveHandler.ServeHTTP(w, r)
 		case DecisionServiceCancelProcedure:
@@ -218,6 +249,10 @@ func (UnimplementedDecisionServiceHandler) ListPending(context.Context, *connect
 
 func (UnimplementedDecisionServiceHandler) GetDecision(context.Context, *connect.Request[v1.GetDecisionRequest]) (*connect.Response[v1.GetDecisionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastown.v1.DecisionService.GetDecision is not implemented"))
+}
+
+func (UnimplementedDecisionServiceHandler) CreateDecision(context.Context, *connect.Request[v1.CreateDecisionRequest]) (*connect.Response[v1.CreateDecisionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastown.v1.DecisionService.CreateDecision is not implemented"))
 }
 
 func (UnimplementedDecisionServiceHandler) Resolve(context.Context, *connect.Request[v1.ResolveRequest]) (*connect.Response[v1.ResolveResponse], error) {

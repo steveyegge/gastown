@@ -15,6 +15,11 @@ service DecisionService {
   // GetDecision returns a specific decision
   rpc GetDecision(GetDecisionRequest) returns (GetDecisionResponse);
 
+  // CreateDecision creates a new decision request
+  // This is the primary way to create decisions when gtmobile is running,
+  // enabling real-time notification via the event bus.
+  rpc CreateDecision(CreateDecisionRequest) returns (CreateDecisionResponse);
+
   // Resolve resolves a decision with the chosen option
   rpc Resolve(ResolveRequest) returns (ResolveResponse);
 
@@ -41,6 +46,20 @@ message GetDecisionRequest {
 
 message GetDecisionResponse {
   Decision decision = 1;
+}
+
+message CreateDecisionRequest {
+  string question = 1;                    // The prompt/question for the human
+  string context = 2;                     // Additional context for the decision
+  repeated DecisionOption options = 3;    // Available options to choose from
+  AgentAddress requested_by = 4;          // Agent requesting the decision
+  Urgency urgency = 5;                    // How urgent is this decision
+  repeated string blockers = 6;           // Work IDs blocked by this decision
+  string parent_bead = 7;                 // Optional parent bead ID for hierarchy
+}
+
+message CreateDecisionResponse {
+  Decision decision = 1;                  // The created decision with assigned ID
 }
 
 message ResolveRequest {

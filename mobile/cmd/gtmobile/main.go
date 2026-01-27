@@ -12,6 +12,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/steveyegge/gastown/internal/eventbus"
 	"github.com/steveyegge/gastown/mobile/gen/gastown/v1/gastownv1connect"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -37,10 +38,14 @@ func main() {
 		}
 	}
 
+	// Create event bus for real-time decision notifications
+	decisionBus := eventbus.New()
+	defer decisionBus.Close()
+
 	// Create service handlers
 	statusServer := NewStatusServer(root)
 	mailServer := NewMailServer(root)
-	decisionServer := NewDecisionServer(root)
+	decisionServer := NewDecisionServer(root, decisionBus)
 
 	// Set up interceptors
 	var opts []connect.HandlerOption
