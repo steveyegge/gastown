@@ -553,11 +553,22 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	}
 
 	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	// All crew members share the same settings file.
+	// write into the source repo. All crew members share the same settings file
+	// via a .claude symlink in each worker directory (Claude Code does NOT walk
+	// up the directory tree to find settings).
 	crewBaseDir := filepath.Join(m.rig.Path, "crew")
 	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
+	}
+
+	// Ensure the .claude symlink exists in the worker directory.
+	// This is critical: Claude Code only reads .claude/settings.json from the CWD,
+	// so each worker needs a symlink to the shared crew/.claude directory.
+	// The symlink is created during Add() but may be missing for older workspaces
+	// or if it was accidentally removed. This call is idempotent.
+	if err := m.setupClaudeSymlink(worker.ClonePath); err != nil {
+		// Non-fatal but important - log it so we notice if it fails
+		fmt.Printf("Warning: could not ensure .claude symlink for %s: %v\n", name, err)
 	}
 
 	// Build the startup beacon for predecessor discovery via /resume
