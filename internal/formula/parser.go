@@ -389,6 +389,47 @@ func (f *Formula) GetStep(id string) *Step {
 	return nil
 }
 
+// ParallelReadySteps returns ready steps grouped by whether they can run in parallel.
+// Returns (parallelSteps, sequentialStep) where:
+// - parallelSteps: steps marked with parallel=true that share the same needs
+// - sequentialStep: the first non-parallel ready step, or nil if all are parallel
+// If multiple parallel steps are ready, they should all be executed concurrently.
+func (f *Formula) ParallelReadySteps(completed map[string]bool) (parallel []string, sequential string) {
+	ready := f.ReadySteps(completed)
+	if len(ready) == 0 {
+		return nil, ""
+	}
+
+	// For non-workflow formulas, return all as parallel (convoy/aspect are inherently parallel)
+	if f.Type != TypeWorkflow {
+		return ready, ""
+	}
+
+	// Group by parallel flag
+	var parallelIDs []string
+	var sequentialIDs []string
+	for _, id := range ready {
+		step := f.GetStep(id)
+		if step != nil && step.Parallel {
+			parallelIDs = append(parallelIDs, id)
+		} else {
+			sequentialIDs = append(sequentialIDs, id)
+		}
+	}
+
+	// If we have parallel steps, return them all for concurrent execution
+	if len(parallelIDs) > 0 {
+		return parallelIDs, ""
+	}
+
+	// Otherwise return the first sequential step
+	if len(sequentialIDs) > 0 {
+		return nil, sequentialIDs[0]
+	}
+
+	return nil, ""
+}
+
 // GetLeg returns a leg by ID, or nil if not found.
 func (f *Formula) GetLeg(id string) *Leg {
 	for i := range f.Legs {
