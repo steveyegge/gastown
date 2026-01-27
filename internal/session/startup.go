@@ -70,14 +70,6 @@ func FormatStartupBeacon(cfg BeaconConfig) string {
 		beacon += "\n\nWork is on your hook. Run `gt hook` now and begin immediately."
 	}
 
-	// For start/restart, add fallback instructions in case SessionStart hook fails
-	// to inject context via gt prime. This prevents the "No recent activity" state
-	// where agents sit idle because they received only metadata, no instructions.
-	// See: gt-uoc64 (crew workers starting without proper context injection)
-	if cfg.Topic == "start" || cfg.Topic == "restart" {
-		beacon += "\n\nRun `gt prime` now for full context, then check your hook and mail."
-	}
-
 	return beacon
 }
 
