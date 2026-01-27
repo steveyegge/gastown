@@ -54,6 +54,7 @@ var beadsExemptCommands = map[string]bool{
 	"tap":        true,
 	"dnd":        true,
 	"reload":     true,
+	"nuke":       true,
 }
 
 // Commands exempt from the town root branch warning.

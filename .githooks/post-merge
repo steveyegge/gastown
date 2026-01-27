@@ -1,0 +1,64 @@
+#!/bin/sh
+#
+# bd (beads) post-merge hook (chained)
+#
+# This hook chains bd functionality with your existing post-merge hook.
+
+# Run existing hook first
+if [ -x "" ]; then
+    "" "$@"
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+        exit $EXIT_CODE
+    fi
+fi
+
+# Check if bd is available
+if ! command -v bd >/dev/null 2>&1; then
+    echo "Warning: bd command not found, skipping post-merge import" >&2
+    exit 0
+fi
+
+# Check if we're in a bd workspace
+# For worktrees, .beads is in the main repository root, not the worktree
+BEADS_DIR=""
+if git rev-parse --git-dir >/dev/null 2>&1; then
+    # Check if we're in a worktree
+    if [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]; then
+        # Worktree: .beads is in main repo root
+        MAIN_REPO_ROOT="$(git rev-parse --git-common-dir)"
+        MAIN_REPO_ROOT="$(dirname "$MAIN_REPO_ROOT")"
+        if [ -d "$MAIN_REPO_ROOT/.beads" ]; then
+            BEADS_DIR="$MAIN_REPO_ROOT/.beads"
+        fi
+    else
+        # Regular repo: check current directory
+        if [ -d .beads ]; then
+            BEADS_DIR=".beads"
+        fi
+    fi
+fi
+
+if [ -z "$BEADS_DIR" ]; then
+    exit 0
+fi
+
+# Skip for Dolt backend (uses its own sync mechanism, not JSONL import)
+if [ -f "$BEADS_DIR/metadata.json" ]; then
+    if grep -q '"backend"[[:space:]]*:[[:space:]]*"dolt"' "$BEADS_DIR/metadata.json" 2>/dev/null; then
+        exit 0
+    fi
+fi
+
+# Check if issues.jsonl exists and was updated
+if [ ! -f "$BEADS_DIR/issues.jsonl" ]; then
+    exit 0
+fi
+
+# Import the updated JSONL
+if ! bd import -i "$BEADS_DIR/issues.jsonl" >/dev/null 2>&1; then
+    echo "Warning: Failed to import bd changes after merge" >&2
+    echo "Run 'bd import -i $BEADS_DIR/issues.jsonl' manually to see the error" >&2
+fi
+
+exit 0
