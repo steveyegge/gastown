@@ -455,6 +455,9 @@ func agentIDToBeadID(agentID, townRoot string) string {
 // For cross-database scenarios (agent in rig db, hook bead in town db),
 // the slot set may fail - this is handled gracefully with a warning.
 // The work is still correctly attached via `bd update <bead> --assignee=<agent>`.
+//
+// Fix for hq-cc7214.26: If agent bead doesn't exist or is closed, this function
+// now creates/reopens it before setting the hook.
 func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	_ = townBeadsDir // Not used - BEADS_DIR breaks redirect mechanism
 
@@ -495,10 +498,75 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	// For cross-database scenarios, slot set may fail gracefully (warning only).
 	bd := beads.New(agentWorkDir)
 	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
+		// Fix for hq-cc7214.26: If agent bead doesn't exist or is closed,
+		// try to create/reopen it and retry setting the hook.
+		if strings.Contains(err.Error(), "not found") {
+			if ensureErr := ensureAgentBeadExists(bd, agentID, agentBeadID, townRoot); ensureErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: couldn't create agent bead %s: %v\n", agentBeadID, ensureErr)
+				return
+			}
+			// Retry setting the hook after creating/reopening the bead
+			if retryErr := bd.SetHookBead(agentBeadID, beadID); retryErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook after create: %v\n", agentBeadID, retryErr)
+			}
+			return
+		}
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
 		return
 	}
+}
+
+// ensureAgentBeadExists creates or reopens an agent bead if it doesn't exist or is closed.
+// This fixes hq-cc7214.26 where slinging fails because the agent bead isn't found.
+func ensureAgentBeadExists(bd *beads.Beads, agentID, agentBeadID, townRoot string) error {
+	// Parse agent ID to determine role type and rig
+	// Format: rig/role/name (e.g., gastown/crew/dolt_doctor, gastown/polecats/Toast)
+	// Or: rig/role (e.g., gastown/witness, gastown/refinery)
+	agentID = strings.TrimSuffix(agentID, "/")
+	parts := strings.Split(agentID, "/")
+
+	var roleType, rigName, agentName string
+	switch {
+	case len(parts) == 3 && parts[1] == "crew":
+		roleType = "crew"
+		rigName = parts[0]
+		agentName = parts[2]
+	case len(parts) == 3 && parts[1] == "polecats":
+		roleType = "polecat"
+		rigName = parts[0]
+		agentName = parts[2]
+	case len(parts) == 2 && parts[1] == "witness":
+		roleType = "witness"
+		rigName = parts[0]
+	case len(parts) == 2 && parts[1] == "refinery":
+		roleType = "refinery"
+		rigName = parts[0]
+	default:
+		return fmt.Errorf("unsupported agent ID format: %s", agentID)
+	}
+
+	// Build description based on role type
+	var desc string
+	switch roleType {
+	case "crew":
+		desc = fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", agentName, rigName)
+	case "polecat":
+		desc = fmt.Sprintf("Polecat %s in %s - ephemeral worker.", agentName, rigName)
+	case "witness":
+		desc = fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName)
+	case "refinery":
+		desc = fmt.Sprintf("Refinery for %s - processes merge queue.", rigName)
+	}
+
+	fields := &beads.AgentFields{
+		RoleType:   roleType,
+		Rig:        rigName,
+		AgentState: "working", // Set to working since we're about to hook work
+	}
+
+	_, err := bd.CreateOrReopenAgentBead(agentBeadID, desc, fields)
+	return err
 }
 
 // wakeRigAgents wakes the witness and refinery for a rig after polecat dispatch.

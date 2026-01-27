@@ -329,8 +329,18 @@ func runHook(_ *cobra.Command, args []string) error {
 		if agentBeadID != "" {
 			bd := beads.New(workDir)
 			if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
-				// Log warning but don't fail - the bead is already hooked
-				fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
+				// Fix for hq-cc7214.26: If agent bead doesn't exist or is closed,
+				// try to create/reopen it and retry setting the hook.
+				if strings.Contains(err.Error(), "not found") {
+					if ensureErr := ensureAgentBeadExists(bd, agentID, agentBeadID, townRoot); ensureErr != nil {
+						fmt.Fprintf(os.Stderr, "Warning: couldn't create agent bead %s: %v\n", agentBeadID, ensureErr)
+					} else if retryErr := bd.SetHookBead(agentBeadID, beadID); retryErr != nil {
+						fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook after create: %v\n", agentBeadID, retryErr)
+					}
+				} else {
+					// Log warning but don't fail - the bead is already hooked
+					fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
+				}
 			}
 		}
 	}
