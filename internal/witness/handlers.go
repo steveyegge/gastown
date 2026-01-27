@@ -855,6 +855,10 @@ type PolecatsWithHookedWork struct {
 //
 // FIX (hq-50u3h): This function addresses the bug where done polecats don't process hooked work.
 // The fix checks each polecat's agent bead for hook_bead and verifies no active tmux session.
+//
+// FIX (hq-dtwfqa): Validate hook_bead exists before including in respawn list.
+// If hook_bead points to a deleted/non-existent bead, clear it and skip this polecat.
+// This prevents respawn failures when orphaned polecats have stale hook_bead references.
 func FindPolecatsWithHookedWork(workDir, rigName string) ([]*PolecatsWithHookedWork, error) {
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
@@ -902,6 +906,21 @@ func FindPolecatsWithHookedWork(workDir, rigName string) ([]*PolecatsWithHookedW
 			continue
 		}
 
+		// FIX (hq-dtwfqa): Validate that hook_bead actually exists before adding to respawn list.
+		// If the bead was deleted or doesn't exist, clear the stale reference.
+		_, err = bd.Show(fields.HookBead)
+		if err != nil {
+			// Hook bead doesn't exist - clear the stale reference
+			// This is non-fatal; we log and continue
+			if clearErr := bd.ClearHookBead(agentID); clearErr != nil {
+				// Couldn't clear - log but continue
+				fmt.Printf("Warning: could not clear stale hook_bead %s from %s: %v\n", fields.HookBead, agentID, clearErr)
+			} else {
+				fmt.Printf("Cleared stale hook_bead %s from %s (bead no longer exists)\n", fields.HookBead, agentID)
+			}
+			continue
+		}
+
 		// Check if polecat has an active tmux session
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 		hasSession, _ := t.HasSession(sessionName)
@@ -927,6 +946,7 @@ func FindPolecatsWithHookedWork(workDir, rigName string) ([]*PolecatsWithHookedW
 // The polecat's session is restarted to process the hooked work.
 //
 // FIX (hq-50u3h): This function respawns polecats with hooked work but no active session.
+// FIX (hq-dtwfqa): Validate hook_bead exists before attempting respawn.
 func RespawnPolecatWithHookedWork(workDir, rigName, polecatName string) error {
 	townRoot, err := workspace.Find(workDir)
 	if err != nil || townRoot == "" {
@@ -956,6 +976,17 @@ func RespawnPolecatWithHookedWork(workDir, rigName, polecatName string) error {
 
 	if fields.HookBead == "" {
 		return fmt.Errorf("no hooked work found for polecat %s", polecatName)
+	}
+
+	// FIX (hq-dtwfqa): Validate hook_bead exists before attempting respawn.
+	// If the bead was deleted between finding and respawning, clear it and return error.
+	_, err = bd.Show(fields.HookBead)
+	if err != nil {
+		// Hook bead doesn't exist - clear the stale reference
+		if clearErr := bd.ClearHookBead(agentBeadID); clearErr != nil {
+			return fmt.Errorf("hook_bead %s no longer exists and failed to clear: %w", fields.HookBead, clearErr)
+		}
+		return fmt.Errorf("hook_bead %s no longer exists (cleared stale reference)", fields.HookBead)
 	}
 
 	// Check if polecat directory exists (using Get to check if polecat exists)
