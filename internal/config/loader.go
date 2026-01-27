@@ -1262,6 +1262,37 @@ func findTownRootFromCwd() (string, error) {
 	}
 }
 
+// extractSimpleRole extracts the simple role name from a GT_ROLE value.
+// GT_ROLE can be:
+//   - Simple: "mayor", "deacon"
+//   - Compound: "rig/witness", "rig/refinery", "rig/crew/name", "rig/polecats/name"
+//
+// For compound format, returns the role segment (second part).
+// For simple format, returns the role as-is.
+func extractSimpleRole(gtRole string) string {
+	if gtRole == "" {
+		return ""
+	}
+	parts := strings.Split(gtRole, "/")
+	switch len(parts) {
+	case 1:
+		// Simple format: "mayor", "deacon"
+		return parts[0]
+	case 2:
+		// "rig/witness", "rig/refinery"
+		return parts[1]
+	case 3:
+		// "rig/crew/name" → "crew", "rig/polecats/name" → "polecat"
+		role := parts[1]
+		if role == "polecats" {
+			return "polecat"
+		}
+		return role
+	default:
+		return gtRole
+	}
+}
+
 // BuildStartupCommand builds a full startup command with environment exports.
 // envVars is a map of environment variable names to values.
 // rigPath is optional - if empty, tries to detect town root from cwd.
@@ -1274,8 +1305,10 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	var rc *RuntimeConfig
 	var townRoot string
 
-	// Extract role from envVars for role-based agent resolution
-	role := envVars["GT_ROLE"]
+	// Extract role from envVars for role-based agent resolution.
+	// GT_ROLE may be compound format (e.g., "rig/refinery") so we extract
+	// the simple role name for role_agents lookup.
+	role := extractSimpleRole(envVars["GT_ROLE"])
 
 	if rigPath != "" {
 		// Derive town root from rig path

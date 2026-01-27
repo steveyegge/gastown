@@ -988,8 +988,8 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 	if !strings.Contains(cmd, "exec env") {
 		t.Error("expected 'exec env' in command")
 	}
-	if !strings.Contains(cmd, "GT_ROLE=witness") {
-		t.Error("expected GT_ROLE=witness in command")
+	if !strings.Contains(cmd, "GT_ROLE=gastown/witness") {
+		t.Error("expected GT_ROLE=gastown/witness in command")
 	}
 	if !strings.Contains(cmd, "BD_ACTOR=gastown/witness") {
 		t.Error("expected BD_ACTOR in command")
@@ -1003,8 +1003,8 @@ func TestBuildPolecatStartupCommand(t *testing.T) {
 	t.Parallel()
 	cmd := BuildPolecatStartupCommand("gastown", "toast", "", "")
 
-	if !strings.Contains(cmd, "GT_ROLE=polecat") {
-		t.Error("expected GT_ROLE=polecat in command")
+	if !strings.Contains(cmd, "GT_ROLE=gastown/polecats/toast") {
+		t.Error("expected GT_ROLE=gastown/polecats/toast in command")
 	}
 	if !strings.Contains(cmd, "GT_RIG=gastown") {
 		t.Error("expected GT_RIG=gastown in command")
@@ -1021,8 +1021,8 @@ func TestBuildCrewStartupCommand(t *testing.T) {
 	t.Parallel()
 	cmd := BuildCrewStartupCommand("gastown", "max", "", "")
 
-	if !strings.Contains(cmd, "GT_ROLE=crew") {
-		t.Error("expected GT_ROLE=crew in command")
+	if !strings.Contains(cmd, "GT_ROLE=gastown/crew/max") {
+		t.Error("expected GT_ROLE=gastown/crew/max in command")
 	}
 	if !strings.Contains(cmd, "GT_RIG=gastown") {
 		t.Error("expected GT_RIG=gastown in command")
@@ -1129,7 +1129,7 @@ func TestBuildPolecatStartupCommandWithAgentOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
 	}
-	if !strings.Contains(cmd, "GT_ROLE=polecat") {
+	if !strings.Contains(cmd, "GT_ROLE=testrig/polecats/toast") {
 		t.Fatalf("expected GT_ROLE export in command: %q", cmd)
 	}
 	if !strings.Contains(cmd, "GT_RIG=testrig") {
@@ -1212,7 +1212,7 @@ func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCrewStartupCommandWithAgentOverride: %v", err)
 	}
-	if !strings.Contains(cmd, "GT_ROLE=crew") {
+	if !strings.Contains(cmd, "GT_ROLE=testrig/crew/max") {
 		t.Fatalf("expected GT_ROLE export in command: %q", cmd)
 	}
 	if !strings.Contains(cmd, "GT_RIG=testrig") {
@@ -1377,13 +1377,13 @@ func TestBuildAgentStartupCommand_UsesRoleAgents(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	// BuildAgentStartupCommand passes role via GT_ROLE env var
+	// BuildAgentStartupCommand passes role via GT_ROLE env var (compound format)
 	cmd := BuildAgentStartupCommand(constants.RoleRefinery, "testrig", townRoot, rigPath, "")
 	if !strings.Contains(cmd, "codex") {
 		t.Fatalf("expected codex for refinery role, got: %q", cmd)
 	}
-	if !strings.Contains(cmd, "GT_ROLE="+constants.RoleRefinery) {
-		t.Fatalf("expected GT_ROLE=%s in command: %q", constants.RoleRefinery, cmd)
+	if !strings.Contains(cmd, "GT_ROLE=testrig/refinery") {
+		t.Fatalf("expected GT_ROLE=testrig/refinery in command: %q", cmd)
 	}
 }
 
