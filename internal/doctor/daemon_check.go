@@ -67,11 +67,11 @@ func (c *DaemonCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix starts the daemon.
-func (c *DaemonCheck) Fix(ctx *CheckContext) error {
+func (c *DaemonCheck) Fix(ctx *CheckContext) (string, error) {
 	// Find gt executable
 	gtPath, err := os.Executable()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Start daemon in background (detach from parent I/O - daemon uses its own logging)
@@ -82,13 +82,13 @@ func (c *DaemonCheck) Fix(ctx *CheckContext) error {
 	cmd.Stderr = nil
 
 	if err := cmd.Start(); err != nil {
-		return err
+		return "", err
 	}
 
 	// Wait a moment for daemon to initialize
 	time.Sleep(300 * time.Millisecond)
 
-	return nil
+	return "", nil
 }
 
 // itoa is a simple int to string helper

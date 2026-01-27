@@ -142,9 +142,9 @@ func (c *CrewStateCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix regenerates invalid state.json files with correct values.
-func (c *CrewStateCheck) Fix(ctx *CheckContext) error {
+func (c *CrewStateCheck) Fix(ctx *CheckContext) (string, error) {
 	if len(c.invalidCrews) == 0 {
-		return nil
+		return "", nil
 	}
 
 	var lastErr error
@@ -170,7 +170,7 @@ func (c *CrewStateCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	return lastErr
+	return "", lastErr
 }
 
 type crewDir struct {
@@ -276,9 +276,9 @@ func (c *CrewWorktreeCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix removes stale cross-rig worktrees.
-func (c *CrewWorktreeCheck) Fix(ctx *CheckContext) error {
+func (c *CrewWorktreeCheck) Fix(ctx *CheckContext) (string, error) {
 	if len(c.staleWorktrees) == 0 {
-		return nil
+		return "", nil
 	}
 
 	var lastErr error
@@ -292,7 +292,7 @@ func (c *CrewWorktreeCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	return lastErr
+	return "", lastErr
 }
 
 // findCrewWorktrees finds cross-rig worktrees in crew directories.

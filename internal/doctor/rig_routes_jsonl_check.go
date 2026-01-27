@@ -102,22 +102,22 @@ func (c *RigRoutesJSONLCheck) Run(ctx *CheckContext) *CheckResult {
 // Fix deletes routes.jsonl files in rig .beads directories.
 // The SQLite database (beads.db) is the source of truth - bd will auto-export
 // to issues.jsonl on next run.
-func (c *RigRoutesJSONLCheck) Fix(ctx *CheckContext) error {
+func (c *RigRoutesJSONLCheck) Fix(ctx *CheckContext) (string, error) {
 	// Re-run check to populate affectedRigs if needed
 	if len(c.affectedRigs) == 0 {
 		result := c.Run(ctx)
 		if result.Status == StatusOK {
-			return nil // Nothing to fix
+			return "", nil // Nothing to fix
 		}
 	}
 
 	for _, info := range c.affectedRigs {
 		if err := os.Remove(info.routesPath); err != nil {
-			return fmt.Errorf("deleting %s: %w", info.routesPath, err)
+			return "", fmt.Errorf("deleting %s: %w", info.routesPath, err)
 		}
 	}
 
-	return nil
+	return "", nil
 }
 
 // findRigDirectories finds all rig directories in the town.

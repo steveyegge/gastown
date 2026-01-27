@@ -107,12 +107,12 @@ func (c *RigBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix creates missing rig identity beads.
-func (c *RigBeadsCheck) Fix(ctx *CheckContext) error {
+func (c *RigBeadsCheck) Fix(ctx *CheckContext) (string, error) {
 	// Load routes to get rig info
 	townBeadsDir := filepath.Join(ctx.TownRoot, ".beads")
 	routes, err := beads.LoadRoutes(townBeadsDir)
 	if err != nil {
-		return fmt.Errorf("loading routes.jsonl: %w", err)
+		return "", fmt.Errorf("loading routes.jsonl: %w", err)
 	}
 
 	// Build unique rig list from routes
@@ -138,7 +138,7 @@ func (c *RigBeadsCheck) Fix(ctx *CheckContext) error {
 	}
 
 	if len(rigSet) == 0 {
-		return nil // No rigs to process
+		return "", nil // No rigs to process
 	}
 
 	// Create missing rig identity beads
@@ -163,10 +163,10 @@ func (c *RigBeadsCheck) Fix(ctx *CheckContext) error {
 			}
 
 			if _, err := bd.CreateRigBead(rigBeadID, rigName, fields); err != nil {
-				return fmt.Errorf("creating %s: %w", rigBeadID, err)
+				return "", fmt.Errorf("creating %s: %w", rigBeadID, err)
 			}
 		}
 	}
 
-	return nil
+	return "", nil
 }

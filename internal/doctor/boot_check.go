@@ -35,12 +35,12 @@ func (c *BootHealthCheck) CanFix() bool {
 }
 
 // Fix creates the missing boot directory.
-func (c *BootHealthCheck) Fix(ctx *CheckContext) error {
+func (c *BootHealthCheck) Fix(ctx *CheckContext) (string, error) {
 	if !c.missingDir {
-		return nil
+		return "", nil
 	}
 	b := boot.New(ctx.TownRoot)
-	return b.EnsureDir()
+	return "", b.EnsureDir()
 }
 
 // Run checks Boot health: directory, session, status, and marker freshness.

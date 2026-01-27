@@ -75,14 +75,20 @@ func (ctx *CheckContext) RigPath() string {
 	return ctx.TownRoot + "/" + ctx.RigName
 }
 
+// DefaultSlowThreshold is the default duration above which a check is considered slow.
+const DefaultSlowThreshold = 1 * time.Second
+
 // CheckResult represents the outcome of a health check.
 type CheckResult struct {
-	Name     string      // Check name
-	Status   CheckStatus // Result status
-	Message  string      // Primary result message
-	Details  []string    // Additional information
-	FixHint  string      // Suggestion if not auto-fixable
-	Category string      // Category for grouping (e.g., CategoryCore)
+	Name     string        // Check name
+	Status   CheckStatus   // Result status
+	Message  string        // Primary result message
+	Details  []string      // Additional information
+	FixHint  string        // Suggestion if not auto-fixable
+	Category string        // Category for grouping (e.g., CategoryCore)
+	Elapsed  time.Duration // How long the check took to run
+	Fixed      bool          // True if this check was auto-fixed during --fix
+	FixMessage string        // Message returned by Fix() describing what was done
 }
 
 // Check defines the interface for a health check.
@@ -97,8 +103,9 @@ type Check interface {
 	Run(ctx *CheckContext) *CheckResult
 
 	// Fix attempts to automatically fix the issue.
+	// Returns a message describing what was fixed and an error if the fix failed.
 	// Should only be called if CanFix() returns true.
-	Fix(ctx *CheckContext) error
+	Fix(ctx *CheckContext) (string, error)
 
 	// CanFix returns true if this check can automatically fix issues.
 	CanFix() bool
@@ -106,10 +113,14 @@ type Check interface {
 
 // ReportSummary summarizes the results of all checks.
 type ReportSummary struct {
-	Total    int
-	OK       int
-	Warnings int
-	Errors   int
+	Total       int
+	OK          int
+	Warnings    int
+	Errors      int
+	Fixed       int
+	Slow        int           // Checks that took longer than threshold (counted during Print)
+	SlowestName string        // Name of the slowest check
+	SlowestTime time.Duration // Duration of the slowest check
 }
 
 // Report contains all check results and a summary.
@@ -140,6 +151,15 @@ func (r *Report) Add(result *CheckResult) {
 	case StatusError:
 		r.Summary.Errors++
 	}
+	if result.Fixed {
+		r.Summary.Fixed++
+	}
+
+	// Track the slowest check
+	if result.Elapsed > r.Summary.SlowestTime {
+		r.Summary.SlowestName = result.Name
+		r.Summary.SlowestTime = result.Elapsed
+	}
 }
 
 // HasErrors returns true if any check reported an error.
@@ -157,9 +177,42 @@ func (r *Report) IsHealthy() bool {
 	return r.Summary.Errors == 0 && r.Summary.Warnings == 0
 }
 
+// PrintSummaryOnly outputs just the summary and warnings section.
+// Used after streaming output where checks were already printed as they ran.
+// Slow checks are already counted during streaming, so slowThreshold is only
+// used for the summary display.
+func (r *Report) PrintSummaryOnly(w io.Writer, verbose bool, slowThreshold time.Duration) {
+	// Collect warnings/errors for summary section
+	var warnings []*CheckResult
+	for _, check := range r.Checks {
+		if check.Status != StatusOK {
+			warnings = append(warnings, check)
+		}
+	}
+
+	// Print separator and summary
+	_, _ = fmt.Fprintln(w, ui.RenderSeparator())
+	r.printSummary(w, slowThreshold)
+
+	// Print warnings/errors section with fixes
+	r.printWarningsSection(w, warnings)
+
+	// Print details for non-OK checks in verbose mode
+	if verbose && len(warnings) > 0 {
+		for _, check := range warnings {
+			if len(check.Details) > 0 {
+				for _, detail := range check.Details {
+					_, _ = fmt.Fprintf(w, "     %s%s\n", ui.MutedStyle.Render(ui.TreeLast), ui.RenderMuted(detail))
+				}
+			}
+		}
+	}
+}
+
 // Print outputs the report to the given writer.
 // Matches bd doctor UX: grouped by category, semantic icons, warnings section.
-func (r *Report) Print(w io.Writer, verbose bool) {
+// If slowThreshold > 0, displays elapsed time for checks exceeding the threshold.
+func (r *Report) Print(w io.Writer, verbose bool, slowThreshold time.Duration) {
 	// Print header with version placeholder (caller should set via PrintWithVersion)
 	_, _ = fmt.Fprintln(w)
 
@@ -188,7 +241,7 @@ func (r *Report) Print(w io.Writer, verbose bool) {
 
 		// Print each check in this category
 		for _, check := range checks {
-			r.printCheck(w, check, verbose)
+			r.printCheck(w, check, verbose, slowThreshold)
 			if check.Status != StatusOK {
 				warnings = append(warnings, check)
 			}
@@ -200,7 +253,7 @@ func (r *Report) Print(w io.Writer, verbose bool) {
 	if otherChecks, exists := checksByCategory["Other"]; exists && len(otherChecks) > 0 {
 		_, _ = fmt.Fprintln(w, ui.RenderCategory("Other"))
 		for _, check := range otherChecks {
-			r.printCheck(w, check, verbose)
+			r.printCheck(w, check, verbose, slowThreshold)
 			if check.Status != StatusOK {
 				warnings = append(warnings, check)
 			}
@@ -210,14 +263,14 @@ func (r *Report) Print(w io.Writer, verbose bool) {
 
 	// Print separator and summary
 	_, _ = fmt.Fprintln(w, ui.RenderSeparator())
-	r.printSummary(w)
+	r.printSummary(w, slowThreshold)
 
 	// Print warnings/errors section with fixes
 	r.printWarningsSection(w, warnings)
 }
 
 // printCheck outputs a single check result with semantic styling.
-func (r *Report) printCheck(w io.Writer, check *CheckResult, verbose bool) {
+func (r *Report) printCheck(w io.Writer, check *CheckResult, verbose bool, slowThreshold time.Duration) {
 	var statusIcon string
 	switch check.Status {
 	case StatusOK:
@@ -228,10 +281,24 @@ func (r *Report) printCheck(w io.Writer, check *CheckResult, verbose bool) {
 		statusIcon = ui.RenderFailIcon()
 	}
 
-	// Print check line: icon + name + muted message
-	_, _ = fmt.Fprintf(w, "  %s  %s", statusIcon, check.Name)
+	// Add hourglass for slow checks (only when --slow is enabled)
+	isSlow := slowThreshold > 0 && check.Elapsed >= slowThreshold
+	if isSlow {
+		r.Summary.Slow++ // Count slow checks during print
+	}
+
+	// Print check line: icon + name + muted message + optional timing
+	// For slow checks, hourglass replaces spaces to maintain alignment
+	slowIndicator := "  "
+	if isSlow {
+		slowIndicator = "⏳"
+	}
+	_, _ = fmt.Fprintf(w, "  %s%s%s", statusIcon, slowIndicator, check.Name)
 	if check.Message != "" {
 		_, _ = fmt.Fprintf(w, "%s", ui.RenderMuted(" "+check.Message))
+	}
+	if isSlow {
+		_, _ = fmt.Fprintf(w, "%s", ui.RenderMuted(" ("+formatDuration(check.Elapsed)+")"))
 	}
 	_, _ = fmt.Fprintln(w)
 
@@ -243,47 +310,109 @@ func (r *Report) printCheck(w io.Writer, check *CheckResult, verbose bool) {
 	}
 }
 
+// formatDuration formats a duration in a human-readable way.
+// Examples: "1.2s", "45s", "1m 30s", "2h 5m"
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	if d < time.Hour {
+		m := int(d.Minutes())
+		s := int(d.Seconds()) % 60
+		if s == 0 {
+			return fmt.Sprintf("%dm", m)
+		}
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if m == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
 // printSummary outputs the summary line with semantic icons.
-func (r *Report) printSummary(w io.Writer) {
+func (r *Report) printSummary(w io.Writer, slowThreshold time.Duration) {
 	summary := fmt.Sprintf("%s %d passed  %s %d warnings  %s %d failed",
 		ui.RenderPassIcon(), r.Summary.OK,
 		ui.RenderWarnIcon(), r.Summary.Warnings,
 		ui.RenderFailIcon(), r.Summary.Errors,
 	)
+	if r.Summary.Fixed > 0 {
+		summary += fmt.Sprintf("  %s %d fixed", ui.RenderFixIcon(), r.Summary.Fixed)
+	}
+	if slowThreshold > 0 && r.Summary.Slow > 0 {
+		summary += fmt.Sprintf("  ⏳ %d slow (slowest: %s %s)",
+			r.Summary.Slow,
+			r.Summary.SlowestName,
+			formatDuration(r.Summary.SlowestTime),
+		)
+	}
 	_, _ = fmt.Fprintln(w, summary)
 }
 
-// printWarningsSection outputs numbered warnings/errors sorted by severity.
+// printWarningsSection outputs numbered warnings/errors sorted by severity,
+// and a separate section for issues that were auto-fixed.
 func (r *Report) printWarningsSection(w io.Writer, warnings []*CheckResult) {
-	if len(warnings) == 0 {
+	// Collect fixed checks from the full report
+	var fixed []*CheckResult
+	for _, check := range r.Checks {
+		if check.Fixed {
+			fixed = append(fixed, check)
+		}
+	}
+
+	if len(warnings) == 0 && len(fixed) == 0 {
 		_, _ = fmt.Fprintln(w)
 		_, _ = fmt.Fprintln(w, ui.RenderPass(ui.IconPass+" All checks passed"))
 		return
 	}
 
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, ui.RenderWarn(ui.IconWarn+"  WARNINGS"))
+	// Print unfixed warnings/errors
+	if len(warnings) > 0 {
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, ui.RenderWarn(ui.IconWarn+"  WARNINGS"))
 
-	// Sort by severity: errors first, then warnings
-	slices.SortStableFunc(warnings, func(a, b *CheckResult) int {
-		if a.Status == StatusError && b.Status != StatusError {
-			return -1
-		}
-		if a.Status != StatusError && b.Status == StatusError {
-			return 1
-		}
-		return 0
-	})
+		// Sort by severity: errors first, then warnings
+		slices.SortStableFunc(warnings, func(a, b *CheckResult) int {
+			if a.Status == StatusError && b.Status != StatusError {
+				return -1
+			}
+			if a.Status != StatusError && b.Status == StatusError {
+				return 1
+			}
+			return 0
+		})
 
-	for i, check := range warnings {
-		line := fmt.Sprintf("%s: %s", check.Name, check.Message)
-		if check.Status == StatusError {
-			_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderFailIcon(), ui.RenderFail(fmt.Sprintf("%d.", i+1)), ui.RenderFail(line))
-		} else {
-			_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderWarnIcon(), ui.RenderWarn(fmt.Sprintf("%d.", i+1)), line)
+		for i, check := range warnings {
+			line := fmt.Sprintf("%s: %s", check.Name, check.Message)
+			if check.Status == StatusError {
+				_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderFailIcon(), ui.RenderFail(fmt.Sprintf("%d.", i+1)), ui.RenderFail(line))
+			} else {
+				_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderWarnIcon(), ui.RenderWarn(fmt.Sprintf("%d.", i+1)), line)
+			}
+			if check.FixHint != "" {
+				_, _ = fmt.Fprintf(w, "        %s%s\n", ui.MutedStyle.Render(ui.TreeLast), check.FixHint)
+			}
 		}
-		if check.FixHint != "" {
-			_, _ = fmt.Fprintf(w, "        %s%s\n", ui.MutedStyle.Render(ui.TreeLast), check.FixHint)
+	}
+
+	// Print fixed items
+	if len(fixed) > 0 {
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, ui.RenderPass(ui.IconFix+"  FIXED"))
+		for i, check := range fixed {
+			line := fmt.Sprintf("%s: %s", check.Name, check.Message)
+			if check.FixMessage != "" {
+				line += " — " + check.FixMessage
+			}
+			_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderPassIcon(), ui.RenderPass(fmt.Sprintf("%d.", i+1)), line)
 		}
+	}
+
+	if len(warnings) == 0 {
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, ui.RenderPass(ui.IconPass+" All remaining checks passed"))
 	}
 }

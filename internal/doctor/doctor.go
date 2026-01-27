@@ -1,5 +1,13 @@
 package doctor
 
+import (
+	"fmt"
+	"io"
+	"time"
+
+	"github.com/steveyegge/gastown/internal/ui"
+)
+
 // Doctor manages and executes health checks.
 type Doctor struct {
 	checks []Check
@@ -34,10 +42,25 @@ type categoryGetter interface {
 
 // Run executes all registered checks and returns a report.
 func (d *Doctor) Run(ctx *CheckContext) *Report {
+	return d.RunStreaming(ctx, nil, 0)
+}
+
+// RunStreaming executes all registered checks with optional real-time output.
+// If w is non-nil, prints each check name as it starts and result when done.
+// If slowThreshold > 0, shows hourglass icon for slow checks.
+func (d *Doctor) RunStreaming(ctx *CheckContext, w io.Writer, slowThreshold time.Duration) *Report {
 	report := NewReport()
 
 	for _, check := range d.checks {
+		// Stream: print check name before running
+		if w != nil {
+			fmt.Fprintf(w, "  %s  %s...", ui.RenderMuted("○"), check.Name())
+		}
+
+		start := time.Now()
 		result := check.Run(ctx)
+		result.Elapsed = time.Since(start)
+
 		// Ensure check name is populated
 		if result.Name == "" {
 			result.Name = check.Name()
@@ -46,6 +69,35 @@ func (d *Doctor) Run(ctx *CheckContext) *Report {
 		if cg, ok := check.(categoryGetter); ok && result.Category == "" {
 			result.Category = cg.Category()
 		}
+
+		// Stream: overwrite line with result
+		if w != nil {
+			var statusIcon string
+			switch result.Status {
+			case StatusOK:
+				statusIcon = ui.RenderPassIcon()
+			case StatusWarning:
+				statusIcon = ui.RenderWarnIcon()
+			case StatusError:
+				statusIcon = ui.RenderFailIcon()
+			}
+			// Check if slow (hourglass replaces spaces to maintain alignment)
+			isSlow := slowThreshold > 0 && result.Elapsed >= slowThreshold
+			slowIndicator := "  "
+			if isSlow {
+				report.Summary.Slow++
+				slowIndicator = "⏳"
+			}
+			fmt.Fprintf(w, "\r  %s%s%s", statusIcon, slowIndicator, result.Name)
+			if result.Message != "" {
+				fmt.Fprintf(w, "%s", ui.RenderMuted(" "+result.Message))
+			}
+			if isSlow {
+				fmt.Fprintf(w, "%s", ui.RenderMuted(" ("+formatDuration(result.Elapsed)+")"))
+			}
+			fmt.Fprintln(w)
+		}
+
 		report.Add(result)
 	}
 
@@ -55,9 +107,22 @@ func (d *Doctor) Run(ctx *CheckContext) *Report {
 // Fix runs all checks with auto-fix enabled where possible.
 // It first runs the check, then if it fails and can be fixed, attempts the fix.
 func (d *Doctor) Fix(ctx *CheckContext) *Report {
+	return d.FixStreaming(ctx, nil, 0)
+}
+
+// FixStreaming runs all checks with auto-fix and optional real-time output.
+// If w is non-nil, prints each check name as it starts and result when done.
+// If slowThreshold > 0, shows hourglass icon for slow checks.
+func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time.Duration) *Report {
 	report := NewReport()
 
 	for _, check := range d.checks {
+		// Stream: print check name before running
+		if w != nil {
+			fmt.Fprintf(w, "  %s  %s...", ui.RenderMuted("○"), check.Name())
+		}
+
+		start := time.Now()
 		result := check.Run(ctx)
 		if result.Name == "" {
 			result.Name = check.Name()
@@ -69,7 +134,25 @@ func (d *Doctor) Fix(ctx *CheckContext) *Report {
 
 		// Attempt fix if check failed and is fixable
 		if result.Status != StatusOK && check.CanFix() {
-			err := check.Fix(ctx)
+			originalMessage := result.Message
+
+			// Stream: show the problem with fixing indicator (all on same line)
+			if w != nil {
+				var problemIcon string
+				if result.Status == StatusError {
+					problemIcon = ui.RenderFailIcon()
+				} else {
+					problemIcon = ui.RenderWarnIcon()
+				}
+				// Overwrite the "checking" line with problem status + fixing indicator
+				fmt.Fprintf(w, "\r  %s  %s", problemIcon, check.Name())
+				if result.Message != "" {
+					fmt.Fprintf(w, "%s", ui.RenderMuted(" "+result.Message))
+				}
+				fmt.Fprintf(w, "%s", ui.RenderMuted(" (fixing)..."))
+			}
+
+			fixMsg, err := check.Fix(ctx)
 			if err == nil {
 				// Re-run check to verify fix worked
 				result = check.Run(ctx)
@@ -80,14 +163,58 @@ func (d *Doctor) Fix(ctx *CheckContext) *Report {
 				if cg, ok := check.(categoryGetter); ok && result.Category == "" {
 					result.Category = cg.Category()
 				}
-				// Update message to indicate fix was applied
+				// Mark as fixed if the re-run now passes
 				if result.Status == StatusOK {
-					result.Message = result.Message + " (fixed)"
+					result.Fixed = true
+					result.FixMessage = fixMsg
+					result.Message = originalMessage + " (fixed)"
 				}
 			} else {
 				// Fix failed, add error to details
 				result.Details = append(result.Details, "Fix failed: "+err.Error())
 			}
+		}
+
+		// Record total elapsed time including any fix attempts
+		result.Elapsed = time.Since(start)
+
+		// Stream: overwrite line with final result
+		if w != nil {
+			var statusIcon string
+			if result.Fixed {
+				statusIcon = ui.RenderFixIcon()
+			} else {
+				switch result.Status {
+				case StatusOK:
+					statusIcon = ui.RenderPassIcon()
+				case StatusWarning:
+					statusIcon = ui.RenderWarnIcon()
+				case StatusError:
+					statusIcon = ui.RenderFailIcon()
+				}
+			}
+			// Check if slow (hourglass replaces spaces to maintain alignment)
+			// Fix icon (🔧) is double-width, so use one less padding space
+			isSlow := slowThreshold > 0 && result.Elapsed >= slowThreshold
+			slowIndicator := "  "
+			if result.Fixed {
+				slowIndicator = " "
+			}
+			if isSlow {
+				report.Summary.Slow++
+				slowIndicator = "⏳"
+			}
+			fmt.Fprintf(w, "\r  %s%s%s", statusIcon, slowIndicator, result.Name)
+			if result.Message != "" {
+				fmt.Fprintf(w, "%s", ui.RenderMuted(" "+result.Message))
+			}
+			if result.FixMessage != "" {
+				fmt.Fprintf(w, "%s", ui.RenderMuted(" — "+result.FixMessage))
+			}
+			if isSlow {
+				fmt.Fprintf(w, "%s", ui.RenderMuted(" ("+formatDuration(result.Elapsed)+")"))
+			}
+			fmt.Fprintln(w)
 		}
 
 		report.Add(result)
@@ -125,8 +252,8 @@ func (b *BaseCheck) CanFix() bool {
 }
 
 // Fix returns an error indicating this check cannot be auto-fixed.
-func (b *BaseCheck) Fix(ctx *CheckContext) error {
-	return ErrCannotFix
+func (b *BaseCheck) Fix(ctx *CheckContext) (string, error) {
+	return "", ErrCannotFix
 }
 
 // FixableCheck provides a base implementation for checks that support auto-fix.

@@ -200,6 +200,7 @@ const (
 	IconPass = "✓"
 	IconWarn = "⚠"
 	IconFail = "✖"
+	IconFix  = "🔧"
 	IconSkip = "-"
 	IconInfo = "ℹ"
 )
@@ -293,6 +294,11 @@ func RenderWarnIcon() string {
 // RenderFailIcon renders the fail icon with styling
 func RenderFailIcon() string {
 	return FailStyle.Render(IconFail)
+}
+
+// RenderFixIcon renders the fix icon (wrench emoji, double-width)
+func RenderFixIcon() string {
+	return IconFix
 }
 
 // RenderSkipIcon renders the skip icon with styling

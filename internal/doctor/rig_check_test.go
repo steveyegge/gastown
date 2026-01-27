@@ -200,7 +200,7 @@ func TestBeadsRedirectCheck_FixWrongRedirect(t *testing.T) {
 	}
 
 	// Apply fix
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -241,7 +241,7 @@ func TestBeadsRedirectCheck_Fix(t *testing.T) {
 	}
 
 	// Apply fix
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -279,7 +279,7 @@ func TestBeadsRedirectCheck_FixNoOp_LocalBeads(t *testing.T) {
 	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
 
 	// Fix should be a no-op
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -330,7 +330,7 @@ func TestBeadsRedirectCheck_FixInitBeads(t *testing.T) {
 	}
 
 	// Apply fix - this will run 'bd init' if available, otherwise create config.yaml
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -428,7 +428,7 @@ func TestBeadsRedirectCheck_FixConflictingLocalBeads(t *testing.T) {
 	}
 
 	// Apply fix - should remove conflicting local beads and create redirect
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 

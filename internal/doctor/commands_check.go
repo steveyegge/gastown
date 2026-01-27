@@ -67,10 +67,10 @@ func (c *CommandsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix provisions missing slash commands at town level.
-func (c *CommandsCheck) Fix(ctx *CheckContext) error {
+func (c *CommandsCheck) Fix(ctx *CheckContext) (string, error) {
 	if len(c.missingCommands) == 0 {
-		return nil
+		return "", nil
 	}
 
-	return templates.ProvisionCommands(c.townRoot)
+	return "", templates.ProvisionCommands(c.townRoot)
 }

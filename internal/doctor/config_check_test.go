@@ -253,7 +253,7 @@ func TestSessionHookCheck_Fix(t *testing.T) {
 		}
 
 		// Apply fix
-		if err := check.Fix(ctx); err != nil {
+		if _, err := check.Fix(ctx); err != nil {
 			t.Fatalf("Fix failed: %v", err)
 		}
 
@@ -295,7 +295,7 @@ func TestSessionHookCheck_Fix(t *testing.T) {
 			t.Errorf("expected StatusWarning before fix, got %v", result.Status)
 		}
 
-		if err := check.Fix(ctx); err != nil {
+		if _, err := check.Fix(ctx); err != nil {
 			t.Fatalf("Fix failed: %v", err)
 		}
 
@@ -338,7 +338,7 @@ func TestSessionHookCheck_Fix(t *testing.T) {
 		}
 
 		// Fix should be no-op (no files cached)
-		if err := check.Fix(ctx); err != nil {
+		if _, err := check.Fix(ctx); err != nil {
 			t.Fatalf("Fix failed: %v", err)
 		}
 
