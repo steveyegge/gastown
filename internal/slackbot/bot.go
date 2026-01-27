@@ -132,16 +132,61 @@ func (b *Bot) handleDecisionsCommand(cmd slack.SlashCommand) {
 	}
 
 	if len(decisions) == 0 {
-		b.postEphemeral(cmd.ChannelID, cmd.UserID,
-			"No pending decisions.")
+		blocks := []slack.Block{
+			slack.NewSectionBlock(
+				slack.NewTextBlockObject("mrkdwn",
+					"✨ *No pending decisions!*\n\nAll decisions have been resolved. Check back later or wait for notifications.",
+					false, false,
+				),
+				nil, nil,
+			),
+		}
+		_, _, _ = b.client.PostMessage(cmd.ChannelID,
+			slack.MsgOptionBlocks(blocks...),
+			slack.MsgOptionResponseURL(cmd.ResponseURL, slack.ResponseTypeEphemeral),
+		)
 		return
 	}
 
+	// Count by urgency
+	highCount, medCount, lowCount := 0, 0, 0
+	for _, d := range decisions {
+		switch d.Urgency {
+		case "high":
+			highCount++
+		case "medium":
+			medCount++
+		default:
+			lowCount++
+		}
+	}
+
 	// Build message with decision list
+	summaryText := fmt.Sprintf("📋 *%d Pending Decision", len(decisions))
+	if len(decisions) > 1 {
+		summaryText += "s"
+	}
+	summaryText += "*"
+	if highCount > 0 {
+		summaryText += fmt.Sprintf(" (:red_circle: %d high", highCount)
+		if medCount > 0 || lowCount > 0 {
+			summaryText += ","
+		}
+		if medCount > 0 {
+			summaryText += fmt.Sprintf(" :large_yellow_circle: %d med", medCount)
+		}
+		if lowCount > 0 {
+			summaryText += fmt.Sprintf(" :large_green_circle: %d low", lowCount)
+		}
+		summaryText += ")"
+	}
+
 	blocks := []slack.Block{
-		slack.NewHeaderBlock(
-			slack.NewTextBlockObject("plain_text", "Pending Decisions", false, false),
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn", summaryText, false, false),
+			nil, nil,
 		),
+		slack.NewDividerBlock(),
 	}
 
 	for _, d := range decisions {
@@ -359,8 +404,15 @@ func (b *Bot) buildResolveModal(decisionID string, chosenIndex int, question, op
 		displayQuestion = displayQuestion[:197] + "..."
 	}
 
-	// Private metadata to pass through to submission
-	metadata := fmt.Sprintf("%s:%d:%s", decisionID, chosenIndex, channelID)
+	// Truncate option label for metadata (max ~100 chars to stay within Slack limits)
+	metadataLabel := optionLabel
+	if len(metadataLabel) > 100 {
+		metadataLabel = metadataLabel[:97] + "..."
+	}
+
+	// Private metadata to pass through to submission (format: id:index:channel:label)
+	// Using | as separator for label since it might contain colons
+	metadata := fmt.Sprintf("%s:%d:%s|%s", decisionID, chosenIndex, channelID, metadataLabel)
 
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,
@@ -405,8 +457,16 @@ func (b *Bot) handleViewSubmission(callback slack.InteractionCallback) {
 		return
 	}
 
-	// Parse private metadata (format: "decisionID:chosenIndex:channelID")
-	parts := strings.Split(callback.View.PrivateMetadata, ":")
+	// Parse private metadata (format: "decisionID:chosenIndex:channelID|optionLabel")
+	metadata := callback.View.PrivateMetadata
+	labelSep := strings.LastIndex(metadata, "|")
+	optionLabel := ""
+	if labelSep > 0 {
+		optionLabel = metadata[labelSep+1:]
+		metadata = metadata[:labelSep]
+	}
+
+	parts := strings.Split(metadata, ":")
 	if len(parts) < 3 {
 		log.Printf("Slack: Invalid modal metadata: %s", callback.View.PrivateMetadata)
 		return
@@ -437,25 +497,17 @@ func (b *Bot) handleViewSubmission(callback slack.InteractionCallback) {
 	ctx := context.Background()
 	resolved, err := b.rpcClient.ResolveDecision(ctx, decisionID, chosenIndex, rationale)
 	if err != nil {
-		// Post error to channel since we can't return error to modal
-		b.postEphemeral(channelID, callback.User.ID,
-			fmt.Sprintf("Error resolving decision: %v", err))
+		// Post detailed error to channel
+		b.postErrorMessage(channelID, callback.User.ID, decisionID, err)
 		return
 	}
 
-	// Confirm resolution
-	b.postEphemeral(channelID, callback.User.ID,
-		fmt.Sprintf("✅ Decision %s resolved!\n*Choice:* Option %d\n*Rationale:* %s",
-			resolved.ID, resolved.ChosenIndex, rationale))
+	// Post rich confirmation
+	b.postResolutionConfirmation(channelID, callback.User.ID, resolved.ID, optionLabel, rationale)
 
 	// Post to notification channel if configured and different
 	if b.channelID != "" && b.channelID != channelID {
-		_, _, _ = b.client.PostMessage(b.channelID,
-			slack.MsgOptionText(
-				fmt.Sprintf("Decision `%s` resolved by <@%s>", decisionID, callback.User.ID),
-				false,
-			),
-		)
+		b.postResolutionNotification(decisionID, optionLabel, callback.User.ID)
 	}
 }
 
@@ -465,6 +517,96 @@ func (b *Bot) postEphemeral(channelID, userID, text string) {
 	)
 	if err != nil {
 		log.Printf("Slack: Error posting ephemeral: %v", err)
+	}
+}
+
+func (b *Bot) postErrorMessage(channelID, userID, decisionID string, err error) {
+	errMsg := err.Error()
+
+	// Provide specific guidance based on error type
+	hint := ""
+	if strings.Contains(errMsg, "not found") {
+		hint = "\n\n💡 *Tip:* This decision may have already been resolved by someone else. Run `/decisions` to see current pending decisions."
+	} else if strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "connection") {
+		hint = "\n\n💡 *Tip:* The Gas Town server may be temporarily unavailable. Please try again in a moment."
+	} else if strings.Contains(errMsg, "RPC error") {
+		hint = "\n\n💡 *Tip:* There was a server error. If this persists, check that gtmobile is running."
+	}
+
+	blocks := []slack.Block{
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn",
+				fmt.Sprintf("❌ *Failed to resolve decision*\n\n*Decision ID:* `%s`\n*Error:* %s%s",
+					decisionID, errMsg, hint),
+				false, false,
+			),
+			nil, nil,
+		),
+	}
+
+	_, err2 := b.client.PostEphemeral(channelID, userID,
+		slack.MsgOptionBlocks(blocks...),
+	)
+	if err2 != nil {
+		log.Printf("Slack: Error posting error message: %v", err2)
+	}
+}
+
+func (b *Bot) postResolutionConfirmation(channelID, userID, decisionID, optionLabel, rationale string) {
+	// Truncate rationale for display
+	displayRationale := rationale
+	if len(displayRationale) > 200 {
+		displayRationale = displayRationale[:197] + "..."
+	}
+
+	blocks := []slack.Block{
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn",
+				fmt.Sprintf("✅ *Decision Resolved Successfully!*\n\n"+
+					"*Decision ID:* `%s`\n"+
+					"*Your Choice:* %s\n"+
+					"*Rationale:* %s",
+					decisionID, optionLabel, displayRationale),
+				false, false,
+			),
+			nil, nil,
+		),
+		slack.NewContextBlock("",
+			slack.NewTextBlockObject("mrkdwn",
+				"_The decision owner and any blocked tasks have been notified._",
+				false, false,
+			),
+		),
+	}
+
+	_, err := b.client.PostEphemeral(channelID, userID,
+		slack.MsgOptionBlocks(blocks...),
+	)
+	if err != nil {
+		log.Printf("Slack: Error posting confirmation: %v", err)
+	}
+}
+
+func (b *Bot) postResolutionNotification(decisionID, optionLabel, userID string) {
+	blocks := []slack.Block{
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn",
+				fmt.Sprintf("📋 *Decision Resolved*\n\n"+
+					"*ID:* `%s`\n"+
+					"*Choice:* %s\n"+
+					"*Resolved by:* <@%s>",
+					decisionID, optionLabel, userID),
+				false, false,
+			),
+			nil, nil,
+		),
+	}
+
+	_, _, err := b.client.PostMessage(b.channelID,
+		slack.MsgOptionBlocks(blocks...),
+	)
+	if err != nil {
+		log.Printf("Slack: Error posting resolution notification: %v", err)
 	}
 }
 
