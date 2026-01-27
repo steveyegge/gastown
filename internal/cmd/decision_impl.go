@@ -111,15 +111,51 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		fields.Blockers = []string{decisionBlocks}
 	}
 
-	// Create decision bead
-	bd := beads.New(beads.ResolveBeadsDir(townRoot))
-	issue, err := bd.CreateDecisionBead(decisionPrompt, fields)
-	if err != nil {
-		return fmt.Errorf("creating decision bead: %w", err)
+	// Try RPC first if gtmobile is available (enables real-time event bus notifications)
+	var issue *beads.Issue
+	rpcUsed := false
+
+	rpcClient := rpcclient.NewClient("http://localhost:8443")
+	if rpcClient.IsAvailable(context.Background()) {
+		// Convert options for RPC
+		var rpcOptions []rpcclient.DecisionOption
+		for _, opt := range options {
+			rpcOptions = append(rpcOptions, rpcclient.DecisionOption{
+				Label:       opt.Label,
+				Description: opt.Description,
+				Recommended: opt.Recommended,
+			})
+		}
+
+		decision, rpcErr := rpcClient.CreateDecision(context.Background(), rpcclient.CreateDecisionRequest{
+			Question:    decisionPrompt,
+			Context:     decisionContext,
+			Options:     rpcOptions,
+			RequestedBy: agentID,
+			Urgency:     urgency,
+			Blockers:    fields.Blockers,
+		})
+		if rpcErr == nil {
+			// RPC succeeded - use the returned decision
+			issue = &beads.Issue{ID: decision.ID}
+			rpcUsed = true
+		}
+		// If RPC fails, fall back to direct beads
 	}
 
-	// Add blocker dependency if specified
-	if decisionBlocks != "" {
+	// Fall back to direct beads if RPC not available or failed
+	if !rpcUsed {
+		bd := beads.New(beads.ResolveBeadsDir(townRoot))
+		var err error
+		issue, err = bd.CreateDecisionBead(decisionPrompt, fields)
+		if err != nil {
+			return fmt.Errorf("creating decision bead: %w", err)
+		}
+	}
+
+	// Add blocker dependency if specified (only if we used direct beads, RPC handles this)
+	if decisionBlocks != "" && !rpcUsed {
+		bd := beads.New(beads.ResolveBeadsDir(townRoot))
 		if err := bd.AddDecisionBlocker(issue.ID, decisionBlocks); err != nil {
 			style.PrintWarning("failed to add blocker dependency: %v", err)
 		}

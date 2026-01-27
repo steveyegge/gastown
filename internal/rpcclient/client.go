@@ -204,3 +204,204 @@ func urgencyToString(u string) string {
 		return "medium"
 	}
 }
+
+func urgencyToProto(u string) string {
+	switch u {
+	case "high":
+		return "URGENCY_HIGH"
+	case "medium":
+		return "URGENCY_MEDIUM"
+	case "low":
+		return "URGENCY_LOW"
+	default:
+		return "URGENCY_MEDIUM"
+	}
+}
+
+// IsAvailable checks if the RPC server is available by probing the health endpoint.
+// Returns true if the server responds with HTTP 200 within timeout.
+func (c *Client) IsAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/health", nil)
+	if err != nil {
+		return false
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
+}
+
+// CreateDecisionRequest contains the parameters for creating a decision via RPC.
+type CreateDecisionRequest struct {
+	Question    string
+	Context     string
+	Options     []DecisionOption
+	RequestedBy string
+	Urgency     string
+	Blockers    []string
+	ParentBead  string
+}
+
+// CreateDecision creates a new decision via the RPC server.
+// Returns the created decision with its assigned ID.
+func (c *Client) CreateDecision(ctx context.Context, req CreateDecisionRequest) (*Decision, error) {
+	// Build request body
+	var options []map[string]interface{}
+	for _, opt := range req.Options {
+		options = append(options, map[string]interface{}{
+			"label":       opt.Label,
+			"description": opt.Description,
+			"recommended": opt.Recommended,
+		})
+	}
+
+	body := map[string]interface{}{
+		"question": req.Question,
+		"options":  options,
+		"urgency":  urgencyToProto(req.Urgency),
+	}
+	if req.Context != "" {
+		body["context"] = req.Context
+	}
+	if req.RequestedBy != "" {
+		body["requestedBy"] = map[string]string{"name": req.RequestedBy}
+	}
+	if len(req.Blockers) > 0 {
+		body["blockers"] = req.Blockers
+	}
+	if req.ParentBead != "" {
+		body["parentBead"] = req.ParentBead
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encoding request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		c.baseURL+"/gastown.v1.DecisionService/CreateDecision",
+		strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-GT-API-Key", c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("RPC error: %s", resp.Status)
+	}
+
+	// Parse response
+	var result struct {
+		Decision struct {
+			ID          string `json:"id"`
+			Question    string `json:"question"`
+			Context     string `json:"context"`
+			Options     []struct {
+				Label       string `json:"label"`
+				Description string `json:"description"`
+				Recommended bool   `json:"recommended"`
+			} `json:"options"`
+			RequestedBy struct {
+				Name string `json:"name"`
+			} `json:"requestedBy"`
+			Urgency string `json:"urgency"`
+		} `json:"decision"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+
+	var opts []DecisionOption
+	for _, o := range result.Decision.Options {
+		opts = append(opts, DecisionOption{
+			Label:       o.Label,
+			Description: o.Description,
+			Recommended: o.Recommended,
+		})
+	}
+
+	return &Decision{
+		ID:          result.Decision.ID,
+		Question:    result.Decision.Question,
+		Context:     result.Decision.Context,
+		Options:     opts,
+		RequestedBy: result.Decision.RequestedBy.Name,
+		Urgency:     urgencyToString(result.Decision.Urgency),
+	}, nil
+}
+
+// ResolveDecision resolves a decision via the RPC server.
+func (c *Client) ResolveDecision(ctx context.Context, decisionID string, chosenIndex int, rationale string) (*Decision, error) {
+	body := map[string]interface{}{
+		"decisionId":  decisionID,
+		"chosenIndex": chosenIndex,
+		"rationale":   rationale,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encoding request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		c.baseURL+"/gastown.v1.DecisionService/Resolve",
+		strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-GT-API-Key", c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("RPC error: %s", resp.Status)
+	}
+
+	// Parse response
+	var result struct {
+		Decision struct {
+			ID          string `json:"id"`
+			Question    string `json:"question"`
+			ChosenIndex int    `json:"chosenIndex"`
+			Rationale   string `json:"rationale"`
+			ResolvedBy  string `json:"resolvedBy"`
+			Resolved    bool   `json:"resolved"`
+		} `json:"decision"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+
+	return &Decision{
+		ID:          result.Decision.ID,
+		Question:    result.Decision.Question,
+		ChosenIndex: result.Decision.ChosenIndex,
+		Rationale:   result.Decision.Rationale,
+		Resolved:    result.Decision.Resolved,
+	}, nil
+}
