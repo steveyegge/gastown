@@ -63,7 +63,7 @@ func TestGastown_CreateFile(t *testing.T) {
 }
 
 func TestGastown_FixBug(t *testing.T) {
-	t.Skip("Skipping: known beads slot race condition - see internal/beads/beads_agent.go")
+	// t.Skip("Skipping: known beads slot race condition - see internal/beads/beads_agent.go")
 
 	for _, rt := range []string{"claude", "opencode"} {
 		t.Run(rt, func(t *testing.T) {

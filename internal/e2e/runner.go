@@ -223,6 +223,7 @@ echo "TMUX_TMPDIR: $TMUX_TMPDIR" >> "%[1]s"
 export TERM=dumb
 export CI=true
 export GT_ISOLATED_BEADS=1
+export GT_TOWN_ROOT="${GT_TOWN_ROOT}"
 export GASTOWN_TEST_HASH="%[5]s"
 export OPENCODE_LOG_LEVEL=debug
 export OPENCODE_LOG_FILE="%[3]s"
@@ -689,7 +690,7 @@ func (r *E2ERunner) runCmd(dir, name string, args ...string) {
 	}
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), "GT_TOWN_ROOT="+r.fixture.Root)
 	out, err := cmd.CombinedOutput()
 
 	displayDir := dir
@@ -711,7 +712,7 @@ func (r *E2ERunner) runCmdOutput(dir, name string, args ...string) (string, erro
 	}
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), "GT_TOWN_ROOT="+r.fixture.Root)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

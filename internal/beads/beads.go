@@ -131,7 +131,8 @@ func NewIsolated(workDir string) *Beads {
 // NewWithBeadsDir creates a Beads wrapper with an explicit BEADS_DIR.
 // This is needed when running from a polecat worktree but accessing town-level beads.
 func NewWithBeadsDir(workDir, beadsDir string) *Beads {
-	return &Beads{workDir: workDir, beadsDir: beadsDir}
+	isolated := os.Getenv("GT_ISOLATED_BEADS") != ""
+	return &Beads{workDir: workDir, beadsDir: beadsDir, isolated: isolated}
 }
 
 // getActor returns the BD_ACTOR value for this context.
