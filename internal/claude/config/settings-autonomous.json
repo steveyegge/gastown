@@ -72,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt inject drain --quiet"
+            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt inject drain --quiet && gt nudge drain --quiet"
           }
         ]
       },
