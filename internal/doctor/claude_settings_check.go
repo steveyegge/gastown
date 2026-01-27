@@ -368,9 +368,8 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 	// Check for required elements based on template
 	// All templates should have:
 	// 1. enabledPlugins
-	// 2. PATH export in hooks
-	// 3. Stop hook with gt costs record (for autonomous)
-	// 4. gt nudge deacon session-started in SessionStart
+	// 2. Stop hook with gt costs record (for autonomous)
+	// 3. gt nudge deacon session-started in SessionStart
 
 	// Check enabledPlugins
 	if _, ok := actual["enabledPlugins"]; !ok {
@@ -381,11 +380,6 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 	hooks, ok := actual["hooks"].(map[string]any)
 	if !ok {
 		return append(missing, "hooks")
-	}
-
-	// Check SessionStart hook has PATH export
-	if !c.hookHasPattern(hooks, "SessionStart", "PATH=") {
-		missing = append(missing, "PATH export")
 	}
 
 	// Check SessionStart hook has deacon nudge
