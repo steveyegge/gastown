@@ -92,7 +92,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && _stdin=$(cat) && echo \"$_stdin\" | gt costs record && gt decision turn-check"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && _stdin=$(cat) && echo \"$_stdin\" | gt costs record && echo \"$_stdin\" | gt decision turn-check"
           }
         ]
       }
