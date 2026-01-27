@@ -401,7 +401,12 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	// Set hook_bead to the slung work (gt-zecmc: removed agent_state update).
 	// Agent liveness is observable from tmux - no need to record it in bead.
 	// For cross-database scenarios, slot set may fail gracefully (warning only).
-	bd := beads.New(bdWorkDir)
+	var bd *beads.Beads
+	if os.Getenv("GT_ISOLATED_BEADS") != "" {
+		bd = beads.NewIsolated(bdWorkDir)
+	} else {
+		bd = beads.New(bdWorkDir)
+	}
 	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
@@ -460,7 +465,12 @@ func attachPolecatWorkMolecule(targetAgent, hookWorkDir, townRoot string) error 
 	// This fixes issue #197: polecat fails to hook when slinging with molecule.
 	rigDir := beads.ResolveHookDir(townRoot, prefix+"-"+polecatName, hookWorkDir)
 
-	b := beads.New(rigDir)
+	var b *beads.Beads
+	if os.Getenv("GT_ISOLATED_BEADS") != "" {
+		b = beads.NewIsolated(rigDir)
+	} else {
+		b = beads.New(rigDir)
+	}
 
 	// Check if molecule is already attached (avoid duplicate attach)
 	attachment, err := b.GetAttachment(agentBeadID)

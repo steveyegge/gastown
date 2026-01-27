@@ -222,6 +222,7 @@ export TMUX_TMPDIR="%[4]s"
 echo "TMUX_TMPDIR: $TMUX_TMPDIR" >> "%[1]s"
 export TERM=dumb
 export CI=true
+export GT_ISOLATED_BEADS=1
 export GASTOWN_TEST_HASH="%[5]s"
 export OPENCODE_LOG_LEVEL=debug
 export OPENCODE_LOG_FILE="%[3]s"
@@ -366,6 +367,7 @@ func (r *E2ERunner) SlingWork() {
 
 	env := os.Environ()
 	env = append(env, "TMUX_TMPDIR="+r.tmuxDir)
+	env = append(env, "GT_ISOLATED_BEADS=1")
 	cmd.Env = env
 
 	stdout, _ := cmd.StdoutPipe()
@@ -458,6 +460,7 @@ func (r *E2ERunner) WaitForCompletion() bool {
 
 	startTime := time.Now()
 	seenBusy := false
+	seenDone := false
 
 	for {
 		select {
@@ -525,17 +528,18 @@ func (r *E2ERunner) WaitForCompletion() bool {
 				lines := strings.Split(cleanOutput, "\n")
 				for _, line := range lines {
 					line = strings.TrimSpace(line)
-					if line == "" || strings.HasPrefix(line, "Active") || (strings.HasPrefix(line, "●") && len(strings.Fields(line)) < 2) {
+					isBulletLine := strings.HasPrefix(line, "●") || strings.HasPrefix(line, "○")
+					if line == "" || strings.HasPrefix(line, "Active") || (isBulletLine && len(strings.Fields(line)) < 2) {
 						continue
 					}
 					parts := strings.Fields(line)
 					name := ""
 					status := ""
-					if parts[0] == "●" && len(parts) >= 3 {
+					if (parts[0] == "●" || parts[0] == "○") && len(parts) >= 3 {
 						name = parts[1]
 						status = parts[len(parts)-1]
 					} else if len(parts) >= 2 {
-						name = strings.TrimPrefix(parts[0], "●")
+						name = strings.TrimPrefix(strings.TrimPrefix(parts[0], "●"), "○")
 						status = parts[len(parts)-1]
 					}
 
@@ -578,8 +582,11 @@ func (r *E2ERunner) WaitForCompletion() bool {
 			if polecatStatus == "busy" || polecatStatus == "active" {
 				seenBusy = true
 			}
+			if polecatStatus == "done" {
+				seenDone = true
+			}
 
-			if polecatStatus == "done" && time.Since(startTime) > 10*time.Second {
+			if seenDone && time.Since(startTime) > 10*time.Second {
 				r.t.Logf("\n  [COMPLETION] Success: cluster reports task 'done'")
 				r.exitTmuxSession()
 				return true

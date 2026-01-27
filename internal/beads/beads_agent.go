@@ -176,12 +176,13 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// Set the role slot if specified (this is the authoritative storage)
 	if fields != nil && fields.RoleBead != "" {
 		var slotErr error
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 15; i++ {
+			_, _ = b.run("sync", "--import")
 			_, slotErr = b.run("slot", "set", id, "role", fields.RoleBead)
 			if slotErr == nil {
 				break
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 		}
 		if slotErr != nil {
 			fmt.Printf("Warning: could not set role slot for ID '%s': %v\n", id, slotErr)
@@ -193,12 +194,13 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// agent's hook slot is empty. See mi-619.
 	if fields != nil && fields.HookBead != "" {
 		var slotErr error
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 15; i++ {
+			_, _ = b.run("sync", "--import")
 			_, slotErr = b.run("slot", "set", id, "hook", fields.HookBead)
 			if slotErr == nil {
 				break
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 		}
 		if slotErr != nil {
 			fmt.Printf("Warning: could not set hook slot for ID '%s': %v\n", id, slotErr)
