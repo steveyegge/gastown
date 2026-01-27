@@ -849,6 +849,8 @@ type Account struct {
 	Email       string `json:"email"`                 // account email
 	Description string `json:"description,omitempty"` // human description
 	ConfigDir   string `json:"config_dir"`            // path to CLAUDE_CONFIG_DIR
+	AuthToken   string `json:"auth_token,omitempty"`  // optional ANTHROPIC_AUTH_TOKEN for API auth
+	BaseURL     string `json:"base_url,omitempty"`    // optional ANTHROPIC_BASE_URL for custom endpoints
 }
 
 // CurrentAccountsVersion is the current schema version for AccountsConfig.

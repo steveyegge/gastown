@@ -329,9 +329,17 @@ func runSling(cmd *cobra.Command, args []string) error {
 
 					// Resolve account config
 					accountsPath := constants.MayorAccountsPath(townRoot)
-					claudeConfigDir, _, accountErr := config.ResolveAccountConfigDir(accountsPath, slingAccount)
+					resolvedAcct, accountErr := config.ResolveAccount(accountsPath, slingAccount)
 					if accountErr != nil {
 						return fmt.Errorf("resolving account: %w", accountErr)
+					}
+
+					// Extract account fields (handle nil account)
+					var claudeConfigDir, authToken, baseURL string
+					if resolvedAcct != nil {
+						claudeConfigDir = resolvedAcct.ConfigDir
+						authToken = resolvedAcct.AuthToken
+						baseURL = resolvedAcct.BaseURL
 					}
 
 					// Start the crew session
@@ -339,6 +347,8 @@ func runSling(cmd *cobra.Command, args []string) error {
 						Account:         slingAccount,
 						ClaudeConfigDir: claudeConfigDir,
 						AgentOverride:   slingAgent,
+						AuthToken:       authToken,
+						BaseURL:         baseURL,
 					}
 					if startErr := crewMgr.Start(crewName, startOpts); startErr != nil {
 						return fmt.Errorf("starting crew session %s/%s: %w", rigName, crewName, startErr)

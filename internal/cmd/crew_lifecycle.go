@@ -309,15 +309,23 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		townRoot = filepath.Dir(r.Path)
 	}
 	accountsPath := constants.MayorAccountsPath(townRoot)
-	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, crewAccount)
+	resolvedAccount, err := config.ResolveAccount(accountsPath, crewAccount)
 	if err != nil {
 		return fmt.Errorf("resolving account: %w", err)
 	}
 
 	// Validate that the account has credentials before starting
 	// This prevents OAuth prompts from appearing in crew sessions
-	if err := config.ValidateAccountCredentials(claudeConfigDir, accountHandle); err != nil {
+	if err := config.ValidateAccountAuth(resolvedAccount); err != nil {
 		return err
+	}
+
+	// Extract account fields (handle nil account)
+	var claudeConfigDir, authToken, baseURL string
+	if resolvedAccount != nil {
+		claudeConfigDir = resolvedAccount.ConfigDir
+		authToken = resolvedAccount.AuthToken
+		baseURL = resolvedAccount.BaseURL
 	}
 
 	// Build start options (shared across all crew members)
@@ -325,6 +333,8 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		Account:         crewAccount,
 		ClaudeConfigDir: claudeConfigDir,
 		AgentOverride:   crewAgentOverride,
+		AuthToken:       authToken,
+		BaseURL:         baseURL,
 	}
 
 	// Sync workspaces from origin if enabled (default: true, unless --no-sync)

@@ -547,6 +547,73 @@ func (c *AccountsConfig) GetDefaultAccount() *Account {
 	return c.GetAccount(c.Default)
 }
 
+// ResolvedAccount contains all account resolution results needed for agent startup.
+type ResolvedAccount struct {
+	ConfigDir string // Expanded CLAUDE_CONFIG_DIR path
+	Handle    string // Account handle that was resolved
+	AuthToken string // Optional ANTHROPIC_AUTH_TOKEN
+	BaseURL   string // Optional ANTHROPIC_BASE_URL
+}
+
+// ResolveAccount resolves an account and returns all its configuration.
+// Priority order:
+//  1. GT_ACCOUNT environment variable
+//  2. accountFlag (from --account command flag)
+//  3. Default account from config
+//
+// Returns nil if no account configured or resolved.
+func ResolveAccount(accountsPath, accountFlag string) (*ResolvedAccount, error) {
+	// Load accounts config
+	cfg, loadErr := LoadAccountsConfig(accountsPath)
+	if loadErr != nil {
+		// No accounts configured - that's OK, return nil
+		return nil, nil
+	}
+
+	// Priority 1: GT_ACCOUNT env var
+	if envAccount := os.Getenv("GT_ACCOUNT"); envAccount != "" {
+		acct := cfg.GetAccount(envAccount)
+		if acct == nil {
+			return nil, fmt.Errorf("GT_ACCOUNT '%s' not found in accounts config", envAccount)
+		}
+		return &ResolvedAccount{
+			ConfigDir: expandPath(acct.ConfigDir),
+			Handle:    envAccount,
+			AuthToken: acct.AuthToken,
+			BaseURL:   acct.BaseURL,
+		}, nil
+	}
+
+	// Priority 2: --account flag
+	if accountFlag != "" {
+		acct := cfg.GetAccount(accountFlag)
+		if acct == nil {
+			return nil, fmt.Errorf("account '%s' not found in accounts config", accountFlag)
+		}
+		return &ResolvedAccount{
+			ConfigDir: expandPath(acct.ConfigDir),
+			Handle:    accountFlag,
+			AuthToken: acct.AuthToken,
+			BaseURL:   acct.BaseURL,
+		}, nil
+	}
+
+	// Priority 3: Default account
+	if cfg.Default != "" {
+		acct := cfg.GetDefaultAccount()
+		if acct != nil {
+			return &ResolvedAccount{
+				ConfigDir: expandPath(acct.ConfigDir),
+				Handle:    cfg.Default,
+				AuthToken: acct.AuthToken,
+				BaseURL:   acct.BaseURL,
+			}, nil
+		}
+	}
+
+	return nil, nil
+}
+
 // ResolveAccountConfigDir resolves the CLAUDE_CONFIG_DIR for account selection.
 // Priority order:
 //  1. GT_ACCOUNT environment variable
@@ -555,41 +622,17 @@ func (c *AccountsConfig) GetDefaultAccount() *Account {
 //
 // Returns empty string if no account configured or resolved.
 // Returns the handle that was resolved as second value.
+//
+// Deprecated: Use ResolveAccount for access to auth_token and base_url fields.
 func ResolveAccountConfigDir(accountsPath, accountFlag string) (configDir, handle string, err error) {
-	// Load accounts config
-	cfg, loadErr := LoadAccountsConfig(accountsPath)
-	if loadErr != nil {
-		// No accounts configured - that's OK, return empty
+	resolved, err := ResolveAccount(accountsPath, accountFlag)
+	if err != nil {
+		return "", "", err
+	}
+	if resolved == nil {
 		return "", "", nil
 	}
-
-	// Priority 1: GT_ACCOUNT env var
-	if envAccount := os.Getenv("GT_ACCOUNT"); envAccount != "" {
-		acct := cfg.GetAccount(envAccount)
-		if acct == nil {
-			return "", "", fmt.Errorf("GT_ACCOUNT '%s' not found in accounts config", envAccount)
-		}
-		return expandPath(acct.ConfigDir), envAccount, nil
-	}
-
-	// Priority 2: --account flag
-	if accountFlag != "" {
-		acct := cfg.GetAccount(accountFlag)
-		if acct == nil {
-			return "", "", fmt.Errorf("account '%s' not found in accounts config", accountFlag)
-		}
-		return expandPath(acct.ConfigDir), accountFlag, nil
-	}
-
-	// Priority 3: Default account
-	if cfg.Default != "" {
-		acct := cfg.GetDefaultAccount()
-		if acct != nil {
-			return expandPath(acct.ConfigDir), cfg.Default, nil
-		}
-	}
-
-	return "", "", nil
+	return resolved.ConfigDir, resolved.Handle, nil
 }
 
 // expandPath expands ~ to home directory.
@@ -606,23 +649,49 @@ func expandPath(path string) string {
 // ValidateAccountCredentials checks if an account has valid credentials.
 // Returns nil if credentials are valid or if no account is specified.
 // This prevents OAuth prompts from appearing in automated agent sessions.
+//
+// Deprecated: Use ValidateAccountAuth for accounts with auth_token support.
 func ValidateAccountCredentials(configDir, accountHandle string) error {
-	if configDir == "" {
+	return ValidateAccountAuth(&ResolvedAccount{
+		ConfigDir: configDir,
+		Handle:    accountHandle,
+	})
+}
+
+// ValidateAccountAuth checks if a resolved account has valid credentials.
+// Returns nil if credentials are valid or if no account is specified.
+// This prevents OAuth prompts from appearing in automated agent sessions.
+//
+// Valid credentials include:
+//   - OAuth credentials in .credentials.json (Claude Code standard)
+//   - An auth_token configured in the account (API key authentication)
+func ValidateAccountAuth(account *ResolvedAccount) error {
+	if account == nil {
 		return nil // No account configured, let Claude handle auth
 	}
-	// Check for credentials in the config directory
+
+	// If auth_token is configured, that's valid credentials
+	if account.AuthToken != "" {
+		return nil
+	}
+
+	if account.ConfigDir == "" {
+		return nil // No config dir and no auth token, let Claude handle auth
+	}
+
+	// Check for OAuth credentials in the config directory
 	// Claude Code stores credentials in .credentials.json (with dot prefix)
 	// but some versions may use credentials.json (without dot)
 	credPaths := []string{
-		filepath.Join(configDir, ".credentials.json"),
-		filepath.Join(configDir, "credentials.json"),
+		filepath.Join(account.ConfigDir, ".credentials.json"),
+		filepath.Join(account.ConfigDir, "credentials.json"),
 	}
 	for _, credPath := range credPaths {
 		if _, err := os.Stat(credPath); err == nil {
 			return nil // Found credentials
 		}
 	}
-	return fmt.Errorf("account '%s' has no credentials - run 'claude login' first", accountHandle)
+	return fmt.Errorf("account '%s' has no credentials - run 'claude login' or configure auth_token", account.Handle)
 }
 
 // LoadMessagingConfig loads and validates a messaging configuration file.

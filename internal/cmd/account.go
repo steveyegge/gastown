@@ -18,6 +18,8 @@ var (
 	accountJSON        bool
 	accountEmail       string
 	accountDescription string
+	accountAuthToken   string
+	accountBaseURL     string
 )
 
 var accountCmd = &cobra.Command{
@@ -59,10 +61,14 @@ Creates a config directory at ~/.claude-accounts/<handle> and registers
 the account. You'll need to run 'claude' with CLAUDE_CONFIG_DIR set to
 that directory to complete the login.
 
+For API key authentication (e.g., with LiteLLM proxy), use --auth-token
+and --base-url instead of OAuth login.
+
 Examples:
   gt account add work
   gt account add work --email steve@company.com
-  gt account add work --email steve@company.com --desc "Work account"`,
+  gt account add work --email steve@company.com --desc "Work account"
+  gt account add litellm --auth-token sk-xxx --base-url http://localhost:4000`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAccountAdd,
 }
@@ -89,6 +95,8 @@ type AccountListItem struct {
 	Description string `json:"description,omitempty"`
 	ConfigDir   string `json:"config_dir"`
 	IsDefault   bool   `json:"is_default"`
+	HasToken    bool   `json:"has_token,omitempty"`  // true if auth_token is configured
+	BaseURL     string `json:"base_url,omitempty"`   // custom API base URL
 }
 
 func runAccountList(cmd *cobra.Command, args []string) error {
@@ -123,6 +131,8 @@ func runAccountList(cmd *cobra.Command, args []string) error {
 			Description: acct.Description,
 			ConfigDir:   acct.ConfigDir,
 			IsDefault:   handle == cfg.Default,
+			HasToken:    acct.AuthToken != "",
+			BaseURL:     acct.BaseURL,
 		})
 	}
 
@@ -152,10 +162,16 @@ func runAccountList(cmd *cobra.Command, args []string) error {
 		if item.IsDefault {
 			fmt.Printf("  %s", style.Dim.Render("(default)"))
 		}
+		if item.HasToken {
+			fmt.Printf("  %s", style.Dim.Render("[token]"))
+		}
 		fmt.Println()
 
 		if item.Description != "" {
 			fmt.Printf("    %s\n", style.Dim.Render(item.Description))
+		}
+		if item.BaseURL != "" {
+			fmt.Printf("    %s\n", style.Dim.Render("Base URL: "+item.BaseURL))
 		}
 	}
 
@@ -196,6 +212,8 @@ func runAccountAdd(cmd *cobra.Command, args []string) error {
 		Email:       accountEmail,
 		Description: accountDescription,
 		ConfigDir:   configDir,
+		AuthToken:   accountAuthToken,
+		BaseURL:     accountBaseURL,
 	}
 
 	// If this is the first account, make it default
@@ -210,10 +228,19 @@ func runAccountAdd(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Added account '%s'\n", handle)
 	fmt.Printf("Config directory: %s\n", configDir)
-	fmt.Println()
-	fmt.Println("To complete login, run:")
-	fmt.Printf("  CLAUDE_CONFIG_DIR=%s claude\n", configDir)
-	fmt.Println("Then use /login to authenticate.")
+
+	if accountAuthToken != "" {
+		fmt.Println()
+		fmt.Println("Auth token configured - no OAuth login needed.")
+		if accountBaseURL != "" {
+			fmt.Printf("Base URL: %s\n", accountBaseURL)
+		}
+	} else {
+		fmt.Println()
+		fmt.Println("To complete login, run:")
+		fmt.Printf("  CLAUDE_CONFIG_DIR=%s claude\n", configDir)
+		fmt.Println("Then use /login to authenticate.")
+	}
 
 	return nil
 }
@@ -327,6 +354,19 @@ func runAccountStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Description: %s\n", acct.Description)
 	}
 	fmt.Printf("Config Dir: %s\n", configDir)
+	if acct.AuthToken != "" {
+		// Mask the auth token for security
+		masked := acct.AuthToken
+		if len(masked) > 8 {
+			masked = masked[:4] + "..." + masked[len(masked)-4:]
+		} else {
+			masked = "***"
+		}
+		fmt.Printf("Auth Token: %s\n", masked)
+	}
+	if acct.BaseURL != "" {
+		fmt.Printf("Base URL:   %s\n", acct.BaseURL)
+	}
 
 	if envAccount != "" {
 		fmt.Printf("\n%s\n", style.Dim.Render("(set via GT_ACCOUNT environment variable)"))
@@ -459,6 +499,8 @@ func init() {
 
 	accountAddCmd.Flags().StringVar(&accountEmail, "email", "", "Account email address")
 	accountAddCmd.Flags().StringVar(&accountDescription, "desc", "", "Account description")
+	accountAddCmd.Flags().StringVar(&accountAuthToken, "auth-token", "", "ANTHROPIC_AUTH_TOKEN for API authentication")
+	accountAddCmd.Flags().StringVar(&accountBaseURL, "base-url", "", "ANTHROPIC_BASE_URL for custom API endpoints")
 
 	// Add subcommands
 	accountCmd.AddCommand(accountListCmd)

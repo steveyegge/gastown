@@ -51,6 +51,14 @@ type StartOptions struct {
 
 	// AgentOverride specifies an alternate agent alias (e.g., for testing).
 	AgentOverride string
+
+	// AuthToken is an optional ANTHROPIC_AUTH_TOKEN for API authentication.
+	// If set, this takes precedence over OAuth credentials.
+	AuthToken string
+
+	// BaseURL is an optional ANTHROPIC_BASE_URL for custom API endpoints.
+	// Used with AuthToken for alternative API providers (e.g., LiteLLM).
+	BaseURL string
 }
 
 // validateCrewName checks that a crew name is safe and valid.
@@ -577,6 +585,21 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
 	}
 
+	// Prepend account-related env vars if needed (auth_token, base_url, config_dir)
+	prependEnvVars := make(map[string]string)
+	if opts.ClaudeConfigDir != "" {
+		prependEnvVars["CLAUDE_CONFIG_DIR"] = opts.ClaudeConfigDir
+	}
+	if opts.AuthToken != "" {
+		prependEnvVars["ANTHROPIC_AUTH_TOKEN"] = opts.AuthToken
+	}
+	if opts.BaseURL != "" {
+		prependEnvVars["ANTHROPIC_BASE_URL"] = opts.BaseURL
+	}
+	if len(prependEnvVars) > 0 {
+		claudeCmd = config.PrependEnv(claudeCmd, prependEnvVars)
+	}
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := t.NewSessionWithCommand(sessionID, worker.ClonePath, claudeCmd); err != nil {
@@ -593,6 +616,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.ClaudeConfigDir,
 		BeadsNoDaemon:    true,
+		AuthToken:        opts.AuthToken,
+		BaseURL:          opts.BaseURL,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)
