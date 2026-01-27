@@ -3,7 +3,7 @@ modules:
   - path: proto
     name: buf.build/gastown/mobile
 deps:
-  - buf.build/googleapis/googleapis
+  - buf.build/protocolbuffers/wellknowntypes
 lint:
   use:
     - DEFAULT
