@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -334,9 +335,13 @@ func TestUnit_OpencodeConfigCreation(t *testing.T) {
 
 // TestUnit_TmuxIsolation tests tmux session isolation
 func TestUnit_TmuxIsolation(t *testing.T) {
-	// Create isolated tmux dir
-	tmuxDir := filepath.Join(t.TempDir(), "tmux")
+	// Use /tmp with short name to avoid Unix socket path length limits (~104 chars)
+	// t.TempDir() paths are too long for tmux sockets
+	tmuxDir := filepath.Join("/tmp", fmt.Sprintf("gt-tmux-%d", os.Getpid()))
 	os.MkdirAll(tmuxDir, 0700)
+	t.Cleanup(func() {
+		os.RemoveAll(tmuxDir)
+	})
 
 	originalTmuxDir := os.Getenv("TMUX_TMPDIR")
 	os.Setenv("TMUX_TMPDIR", tmuxDir)
