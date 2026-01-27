@@ -167,43 +167,35 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 	// Force JSONL→SQLite sync and verify the bead is visible
 	for i := 0; i < 30; i++ {
 		_, _ = b.run("sync", "--import")
-		if showOut, err := b.run("show", id, "--json"); err == nil && len(showOut) > 0 {
+		if showOut, err := b.run("show", issue.ID, "--json"); err == nil && len(showOut) > 0 {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Set the role slot if specified (this is the authoritative storage)
-	if fields != nil && fields.RoleBead != "" {
-		var slotErr error
-		for i := 0; i < 15; i++ {
-			_, _ = b.run("sync", "--import")
-			_, slotErr = b.run("slot", "set", id, "role", fields.RoleBead)
-			if slotErr == nil {
-				break
-			}
-			time.Sleep(200 * time.Millisecond)
+	// Use direct JSONL append to set slots (bypassing bd slot set bugs in isolated mode)
+	if fields != nil && (fields.RoleBead != "" || fields.HookBead != "") {
+		update := map[string]interface{}{
+			"id":         issue.ID,
+			"updated_at": time.Now().Format(time.RFC3339Nano),
 		}
-		if slotErr != nil {
-			fmt.Printf("Warning: could not set role slot for ID '%s': %v\n", id, slotErr)
+		if fields.RoleBead != "" {
+			update["role"] = fields.RoleBead
 		}
-	}
+		if fields.HookBead != "" {
+			update["hook"] = fields.HookBead
+		}
 
-	// Set the hook slot if specified (this is the authoritative storage)
-	// This fixes the slot inconsistency bug where bead status is 'hooked' but
-	// agent's hook slot is empty. See mi-619.
-	if fields != nil && fields.HookBead != "" {
-		var slotErr error
-		for i := 0; i < 15; i++ {
-			_, _ = b.run("sync", "--import")
-			_, slotErr = b.run("slot", "set", id, "hook", fields.HookBead)
-			if slotErr == nil {
-				break
+		if err := b.AppendJSONL(update); err != nil {
+			fmt.Printf("Warning: failed to append to beads.jsonl: %v\n", err)
+		} else {
+			// Sync again to make sure DB is updated
+			for i := 0; i < 5; i++ {
+				if _, err := b.run("sync", "--import"); err == nil {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
 			}
-			time.Sleep(200 * time.Millisecond)
-		}
-		if slotErr != nil {
-			fmt.Printf("Warning: could not set hook slot for ID '%s': %v\n", id, slotErr)
 		}
 	}
 

@@ -209,6 +209,27 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
+// AppendJSONL appends a map as a JSON line to the beads.jsonl file.
+// This is used to bypass CLI bugs/limitations by writing directly to the log.
+func (b *Beads) AppendJSONL(data map[string]interface{}) error {
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshal json: %w", err)
+	}
+
+	jsonlPath := filepath.Join(b.beadsDir, "beads.jsonl")
+	f, err := os.OpenFile(jsonlPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open beads.jsonl: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write(append(jsonBytes, '\n')); err != nil {
+		return fmt.Errorf("write jsonl: %w", err)
+	}
+	return nil
+}
+
 // Run executes a bd command and returns stdout.
 // This is a public wrapper around the internal run method for cases where
 // callers need to run arbitrary bd commands.
