@@ -217,6 +217,10 @@ func runSlingFormula(args []string) error {
 	// Step 2.5: Spawn polecat if deferred (rig target case)
 	// We spawn AFTER wisp exists so polecat doesn't race to check hook before work is ready.
 	if deferredRigName != "" {
+		// Set HookBead atomically at spawn time to prevent race condition (GH #hq-3d01de).
+		// Without this, the polecat might start before bd update sets the hook.
+		deferredSpawnOpts.HookBead = wispRootID
+
 		fmt.Printf("  Allocated polecat: ")
 		spawnInfo, spawnErr := SpawnPolecatForSling(deferredRigName, deferredSpawnOpts)
 		if spawnErr != nil {

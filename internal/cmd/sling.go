@@ -563,6 +563,10 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Execute deferred polecat spawn if needed (for rig targets).
 	// This happens AFTER formula instantiation to prevent orphan polecats on failure (GH #gt-e9o).
 	if deferredRigName != "" {
+		// Set HookBead atomically at spawn time to prevent race condition (GH #hq-3d01de).
+		// Without this, the polecat might start before bd update sets the hook.
+		deferredSpawnOpts.HookBead = beadID
+
 		fmt.Printf("  Spawning polecat in %s...\n", deferredRigName)
 		spawnInfo, spawnErr := SpawnPolecatForSling(deferredRigName, deferredSpawnOpts)
 		if spawnErr != nil {
@@ -571,7 +575,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 		targetAgent = spawnInfo.AgentID()
 		targetPane = spawnInfo.Pane
 		hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
-		// Note: hookSetAtomically stays false - we hook via bd update below
+		hookSetAtomically = true          // Hook was set during spawn - skip redundant updateAgentHookBead
 
 		// Wake witness and refinery to monitor the new polecat
 		wakeRigAgents(deferredRigName)
