@@ -20,6 +20,15 @@ func TestDeaconBeadIDTown(t *testing.T) {
 	}
 }
 
+// TestBootBeadIDTown tests the town-level Boot bead ID.
+func TestBootBeadIDTown(t *testing.T) {
+	got := BootBeadIDTown()
+	want := "hq-boot"
+	if got != want {
+		t.Errorf("BootBeadIDTown() = %q, want %q", got, want)
+	}
+}
+
 // TestDogBeadIDTown tests town-level Dog bead IDs.
 func TestDogBeadIDTown(t *testing.T) {
 	tests := []struct {
@@ -87,5 +96,191 @@ func TestDogRoleBeadIDTown(t *testing.T) {
 	want := "hq-dog-role"
 	if got != want {
 		t.Errorf("DogRoleBeadIDTown() = %q, want %q", got, want)
+	}
+}
+
+// TestPolecatBeadIDWithPrefixDeduplication tests that prefix==rig doesn't duplicate.
+// Fixes issue gt-u6qwz: fhc-fhc-polecat-stoat should be fhc-polecat-stoat
+func TestPolecatBeadIDWithPrefixDeduplication(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		rig    string
+		pname  string
+		want   string
+	}{
+		// prefix != rig: include rig in ID
+		{"prefix_ne_rig", "gt", "gastown", "toast", "gt-gastown-polecat-toast"},
+		// prefix == rig: omit rig to avoid duplication
+		{"prefix_eq_rig", "fhc", "fhc", "stoat", "fhc-polecat-stoat"},
+		// another prefix == rig case
+		{"helm_rig", "helm", "helm", "worker", "helm-polecat-worker"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PolecatBeadIDWithPrefix(tt.prefix, tt.rig, tt.pname)
+			if got != tt.want {
+				t.Errorf("PolecatBeadIDWithPrefix(%q, %q, %q) = %q, want %q",
+					tt.prefix, tt.rig, tt.pname, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWitnessBeadIDWithPrefixDeduplication tests that prefix==rig doesn't duplicate.
+func TestWitnessBeadIDWithPrefixDeduplication(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		rig    string
+		want   string
+	}{
+		{"prefix_ne_rig", "gt", "gastown", "gt-gastown-witness"},
+		{"prefix_eq_rig", "fhc", "fhc", "fhc-witness"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := WitnessBeadIDWithPrefix(tt.prefix, tt.rig)
+			if got != tt.want {
+				t.Errorf("WitnessBeadIDWithPrefix(%q, %q) = %q, want %q",
+					tt.prefix, tt.rig, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRefineryBeadIDWithPrefixDeduplication tests that prefix==rig doesn't duplicate.
+func TestRefineryBeadIDWithPrefixDeduplication(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		rig    string
+		want   string
+	}{
+		{"prefix_ne_rig", "gt", "gastown", "gt-gastown-refinery"},
+		{"prefix_eq_rig", "fhc", "fhc", "fhc-refinery"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RefineryBeadIDWithPrefix(tt.prefix, tt.rig)
+			if got != tt.want {
+				t.Errorf("RefineryBeadIDWithPrefix(%q, %q) = %q, want %q",
+					tt.prefix, tt.rig, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCrewBeadIDWithPrefixDeduplication tests that prefix==rig doesn't duplicate.
+func TestCrewBeadIDWithPrefixDeduplication(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		rig    string
+		cname  string
+		want   string
+	}{
+		{"prefix_ne_rig", "gt", "gastown", "max", "gt-gastown-crew-max"},
+		{"prefix_eq_rig", "fhc", "fhc", "max", "fhc-crew-max"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CrewBeadIDWithPrefix(tt.prefix, tt.rig, tt.cname)
+			if got != tt.want {
+				t.Errorf("CrewBeadIDWithPrefix(%q, %q, %q) = %q, want %q",
+					tt.prefix, tt.rig, tt.cname, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPolecatBeadIDTown tests the town-level Polecat bead ID (fix for loc-1augh).
+func TestPolecatBeadIDTown(t *testing.T) {
+	tests := []struct {
+		rig   string
+		pname string
+		want  string
+	}{
+		{"gastown", "toast", "hq-gastown-polecat-toast"},
+		{"local", "marten", "hq-local-polecat-marten"},
+		{"fhc", "stoat", "hq-fhc-polecat-stoat"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.rig+"/"+tt.pname, func(t *testing.T) {
+			got := PolecatBeadIDTown(tt.rig, tt.pname)
+			if got != tt.want {
+				t.Errorf("PolecatBeadIDTown(%q, %q) = %q, want %q",
+					tt.rig, tt.pname, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWitnessBeadIDTown tests the town-level Witness bead ID.
+func TestWitnessBeadIDTown(t *testing.T) {
+	tests := []struct {
+		rig  string
+		want string
+	}{
+		{"gastown", "hq-gastown-witness"},
+		{"local", "hq-local-witness"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.rig, func(t *testing.T) {
+			got := WitnessBeadIDTown(tt.rig)
+			if got != tt.want {
+				t.Errorf("WitnessBeadIDTown(%q) = %q, want %q",
+					tt.rig, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRefineryBeadIDTown tests the town-level Refinery bead ID.
+func TestRefineryBeadIDTown(t *testing.T) {
+	tests := []struct {
+		rig  string
+		want string
+	}{
+		{"gastown", "hq-gastown-refinery"},
+		{"local", "hq-local-refinery"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.rig, func(t *testing.T) {
+			got := RefineryBeadIDTown(tt.rig)
+			if got != tt.want {
+				t.Errorf("RefineryBeadIDTown(%q) = %q, want %q",
+					tt.rig, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCrewBeadIDTown tests the town-level Crew bead ID.
+func TestCrewBeadIDTown(t *testing.T) {
+	tests := []struct {
+		rig   string
+		cname string
+		want  string
+	}{
+		{"gastown", "max", "hq-gastown-crew-max"},
+		{"local", "dave", "hq-local-crew-dave"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.rig+"/"+tt.cname, func(t *testing.T) {
+			got := CrewBeadIDTown(tt.rig, tt.cname)
+			if got != tt.want {
+				t.Errorf("CrewBeadIDTown(%q, %q) = %q, want %q",
+					tt.rig, tt.cname, got, tt.want)
+			}
+		})
 	}
 }

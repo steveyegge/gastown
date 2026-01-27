@@ -218,6 +218,85 @@ func TestResolveHookDir(t *testing.T) {
 	}
 }
 
+func TestResolveToExternalRef(t *testing.T) {
+	// Create a temporary directory with routes.jsonl
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix": "gt-", "path": "gastown/mayor/rig"}
+{"prefix": "bd-", "path": "beads/mayor/rig"}
+{"prefix": "hq-", "path": "."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		beadID   string
+		expected string
+	}{
+		{
+			name:     "gastown bead gets external ref with project name",
+			beadID:   "gt-mol-abc123",
+			expected: "external:gastown:gt-mol-abc123",
+		},
+		{
+			name:     "beads bead gets external ref with project name",
+			beadID:   "bd-task-xyz",
+			expected: "external:beads:bd-task-xyz",
+		},
+		{
+			name:     "hq bead returns empty (local, no external ref)",
+			beadID:   "hq-abc123",
+			expected: "",
+		},
+		{
+			name:     "hq convoy returns empty",
+			beadID:   "hq-cv-xyz",
+			expected: "",
+		},
+		{
+			name:     "unknown prefix returns empty (no route)",
+			beadID:   "unk-mol-abc",
+			expected: "",
+		},
+		{
+			name:     "empty bead ID returns empty",
+			beadID:   "",
+			expected: "",
+		},
+		{
+			name:     "bead ID without hyphen returns empty",
+			beadID:   "nohyphen",
+			expected: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ResolveToExternalRef(tmpDir, tc.beadID)
+			if result != tc.expected {
+				t.Errorf("ResolveToExternalRef(%q, %q) = %q, want %q",
+					tmpDir, tc.beadID, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestResolveToExternalRef_NoRoutesFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	// No routes.jsonl file
+
+	result := ResolveToExternalRef(tmpDir, "gt-abc")
+	if result != "" {
+		t.Errorf("Expected empty string when no routes file, got %q", result)
+	}
+}
+
 func TestAgentBeadIDsWithPrefix(t *testing.T) {
 	tests := []struct {
 		name     string

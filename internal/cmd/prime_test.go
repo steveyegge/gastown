@@ -80,7 +80,8 @@ func TestGetAgentBeadID_UsesRigPrefix(t *testing.T) {
 				Polecat:  "lex",
 				TownRoot: townRoot,
 			},
-			want: "bd-beads-polecat-lex",
+			// Polecats use town-level beads with hq- prefix (fix for gt-myc)
+			want: "hq-beads-polecat-lex",
 		},
 		{
 			name: "crew",

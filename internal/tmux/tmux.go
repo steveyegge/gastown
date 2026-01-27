@@ -3,6 +3,7 @@ package tmux
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,10 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 )
+
+// DefaultTimeout is the default timeout for tmux commands.
+// Most tmux operations should complete quickly; hangs indicate issues.
+const DefaultTimeout = 10 * time.Second
 
 // sessionNudgeLocks serializes nudges to the same session.
 // This prevents interleaving when multiple nudges arrive concurrently,
@@ -43,14 +48,27 @@ func NewTmux() *Tmux {
 }
 
 // run executes a tmux command and returns stdout.
+// Uses a default timeout to prevent hangs from blocking operations.
 func (t *Tmux) run(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
+	return t.runWithTimeout(DefaultTimeout, args...)
+}
+
+// runWithTimeout executes a tmux command with a custom timeout.
+func (t *Tmux) runWithTimeout(timeout time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "tmux", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	if err != nil {
+		// Check if the error was due to context timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("tmux command timed out after %v: %v", timeout, args)
+		}
 		return "", t.wrapError(err, stderr.String(), args)
 	}
 
@@ -96,15 +114,66 @@ func (t *Tmux) NewSession(name, workDir string) error {
 // or the command arrives before the shell prompt. The command runs directly as the
 // initial process of the pane.
 // See: https://github.com/anthropics/gastown/issues/280
+//
+// This function ensures remain-on-exit is set BEFORE the actual command runs.
+// This prevents a race condition where fast-exiting commands (auth failures, missing
+// binaries) could cause the session to be destroyed before remain-on-exit is set,
+// losing diagnostic output. See: gt-958e7d
 func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
+	// Strategy: Create session with a brief sleep, set remain-on-exit, then respawn
+	// with the actual command. This avoids quoting issues that arise from trying to
+	// wrap arbitrary commands in shell strings.
+	//
+	// 1. Create session with a dummy command (sleep) to hold the session open
+	// 2. Set remain-on-exit on the window
+	// 3. Respawn the pane with the actual command
+	//
+	// The sleep ensures the session exists long enough for us to set remain-on-exit.
+	// The respawn-pane then runs the actual command with remain-on-exit already set.
 	args := []string{"new-session", "-d", "-s", name}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
 	}
-	// Add the command as the last argument - tmux runs it as the pane's initial process
-	args = append(args, command)
+	// Start with a sleep command to hold the session open briefly
+	args = append(args, "sleep 60")
 	_, err := t.run(args...)
+	if err != nil {
+		return err
+	}
+
+	// Set remain-on-exit BEFORE running the actual command
+	// This ensures the pane is preserved even if the command exits immediately
+	_, _ = t.run("set-window-option", "-t", name, "remain-on-exit", "on")
+
+	// Now respawn the pane with the actual command
+	// respawn-pane -k kills the current process (sleep) and starts the new command
+	// The -t flag targets the session's default pane
+	_, err = t.run("respawn-pane", "-k", "-t", name, command)
 	return err
+}
+
+// IsPaneDead checks if the pane's command has exited (pane_dead=1).
+// With remain-on-exit enabled, the pane stays around after command exit,
+// allowing us to capture diagnostic output before cleanup.
+func (t *Tmux) IsPaneDead(session string) (bool, error) {
+	out, err := t.run("display-message", "-t", session, "-p", "#{pane_dead}")
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrNoServer) {
+			return false, err
+		}
+		return false, err
+	}
+	return strings.TrimSpace(out) == "1", nil
+}
+
+// CaptureDeadPaneOutput captures output from a dead pane for diagnostics.
+// Returns empty string if capture fails (non-fatal since this is for debugging).
+func (t *Tmux) CaptureDeadPaneOutput(session string, lines int) string {
+	output, err := t.CapturePane(session, lines)
+	if err != nil {
+		return ""
+	}
+	return output
 }
 
 // EnsureSessionFresh ensures a session is available and healthy.
@@ -220,10 +289,11 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	// Kill the tmux session
-	// Ignore "session not found" - killing the pane process may have already
-	// caused tmux to destroy the session automatically
+	// Ignore "session not found" or "no server" - killing the pane process may have already
+	// caused tmux to destroy the session automatically. If it was the last session,
+	// the tmux server itself shuts down, resulting in "no server" instead of "session not found".
 	err = t.KillSession(name)
-	if err == ErrSessionNotFound {
+	if err == ErrSessionNotFound || err == ErrNoServer {
 		return nil
 	}
 	return err
@@ -300,10 +370,11 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 	}
 
 	// Kill the tmux session - this will terminate the excluded process too
-	// Ignore "session not found" - if we killed all non-excluded processes,
-	// tmux may have already destroyed the session automatically
+	// Ignore "session not found" or "no server" - if we killed all non-excluded processes,
+	// tmux may have already destroyed the session automatically. If it was the last session,
+	// the tmux server itself shuts down, resulting in "no server" instead of "session not found".
 	err = t.KillSession(name)
-	if err == ErrSessionNotFound {
+	if err == ErrSessionNotFound || err == ErrNoServer {
 		return nil
 	}
 	return err
@@ -525,6 +596,16 @@ func (t *Tmux) HasSession(name string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// GetCurrentSessionName returns the name of the current tmux session.
+// This only works when called from within a tmux session.
+func (t *Tmux) GetCurrentSessionName() (string, error) {
+	out, err := t.run("display-message", "-p", "#{session_name}")
+	if err != nil {
+		return "", fmt.Errorf("getting current session name: %w", err)
+	}
+	return out, nil
 }
 
 // ListSessions returns all session names.
@@ -922,29 +1003,36 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// hasClaudeChild checks if a process has a child running claude/node.
+// hasClaudeChild checks if a process has a descendant running claude/node.
 // Used when the pane command is a shell (bash, zsh) that launched claude.
+//
+// IMPORTANT: This checks ALL descendants, not just direct children.
+// Claude is often started via wrapper scripts like:
+//   bash (pane) -> bash -c 'export ... && claude' -> claude
+// In this case, Claude is a grandchild, not a direct child.
+// Using only pgrep -P (direct children) would miss this case and cause
+// CleanupOrphanedSessions to kill sessions with running Claude agents.
 func hasClaudeChild(pid string) bool {
-	// Use pgrep to find child processes
-	cmd := exec.Command("pgrep", "-P", pid, "-l")
-	out, err := cmd.Output()
-	if err != nil {
+	// Get all descendant PIDs recursively
+	descendants := getAllDescendants(pid)
+	if len(descendants) == 0 {
 		return false
 	}
-	// Check if any child is node or claude
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+
+	// Check each descendant's command name
+	for _, dpid := range descendants {
+		// Get the command name for this PID
+		out, err := exec.Command("ps", "-o", "comm=", "-p", dpid).Output()
+		if err != nil {
 			continue
 		}
-		// Format: "PID name" e.g., "29677 node"
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			name := parts[1]
-			if name == "node" || name == "claude" {
-				return true
-			}
+		name := strings.TrimSpace(string(out))
+		if name == "node" || name == "claude" {
+			return true
+		}
+		// Also check for version pattern (Claude Code shows version as process name)
+		if versionPattern.MatchString(name) {
+			return true
 		}
 	}
 	return false

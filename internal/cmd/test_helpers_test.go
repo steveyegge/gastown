@@ -44,13 +44,15 @@ func buildGT(t *testing.T) string {
 	}
 
 	// Build gt binary to a persistent temp location (not per-test)
+	// Include ldflags to set BuiltProperly=1 (required for gt install to work)
 	tmpDir := os.TempDir()
 	binaryName := "gt-integration-test"
 	if runtime.GOOS == "windows" {
 		binaryName += ".exe"
 	}
 	tmpBinary := filepath.Join(tmpDir, binaryName)
-	cmd := exec.Command("go", "build", "-o", tmpBinary, "./cmd/gt")
+	ldflags := "-X github.com/steveyegge/gastown/internal/cmd.BuiltProperly=1"
+	cmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", tmpBinary, "./cmd/gt")
 	cmd.Dir = projectRoot
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to build gt: %v\nOutput: %s", err, output)

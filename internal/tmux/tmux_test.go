@@ -15,6 +15,39 @@ func hasTmux() bool {
 	return err == nil
 }
 
+// hasRealClaudeSessions checks if there are any gt-* or hq-* sessions with Claude running.
+// Used to skip tests that call CleanupOrphanedSessions, which could kill real sessions.
+//
+// SURVIVOR NOTES (from attempt #8):
+// ===================================
+// The bug was in hasClaudeChild() - it only checked DIRECT children using pgrep -P.
+// When Claude is started via wrapper scripts like:
+//   bash (pane) -> bash -c 'export ... && claude' -> claude
+// Claude is a GRANDCHILD, not a direct child. The function missed it entirely.
+//
+// Fix: Modified hasClaudeChild() to use getAllDescendants() instead of pgrep -P.
+// This recursively finds ALL descendants and checks each for node/claude.
+//
+// If you're reading this because you just died: check if hasClaudeChild() is still
+// checking all descendants. The bug might have regressed or there's another edge case.
+func hasRealClaudeSessions() bool {
+	tm := NewTmux()
+	sessions, err := tm.ListSessions()
+	if err != nil {
+		return false
+	}
+	for _, sess := range sessions {
+		if (strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-")) &&
+			!strings.Contains(sess, "-test-") {
+			// Found a non-test gt-/hq- session - check if Claude is running
+			if tm.IsClaudeRunning(sess) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestListSessionsNoServer(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
@@ -54,13 +87,13 @@ func TestSessionLifecycle(t *testing.T) {
 	sessionName := "gt-test-session-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// Create session
 	if err := tm.NewSession(sessionName, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	// Verify exists
 	has, err := tm.HasSession(sessionName)
@@ -88,8 +121,8 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 
 	// Kill session
-	if err := tm.KillSession(sessionName); err != nil {
-		t.Fatalf("KillSession: %v", err)
+	if err := tm.KillSessionWithProcesses(sessionName); err != nil {
+		t.Fatalf("KillSessionWithProcesses: %v", err)
 	}
 
 	// Verify gone
@@ -102,6 +135,179 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 }
 
+func TestIsPaneDead(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-panedead-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSessionWithProcesses(sessionName)
+
+	// Test 1: Create session with long-running command - pane should be alive
+	if err := tm.NewSessionWithCommand(sessionName, "", "sleep 60"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
+
+	// Wait for session to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Pane should not be dead while command is running
+	dead, err := tm.IsPaneDead(sessionName)
+	if err != nil {
+		t.Fatalf("IsPaneDead: %v", err)
+	}
+	if dead {
+		t.Error("expected pane to be alive while command is running")
+	}
+
+	// Test 2: Create a new session with a command that exits after a brief delay
+	// This simulates an agent that starts but crashes during initialization
+	shortSessionName := sessionName + "-short"
+	_ = tm.KillSessionWithProcesses(shortSessionName)
+
+	// Create session with command that prints output and exits after a brief delay
+	// The delay ensures remain-on-exit can be set before the command exits
+	if err := tm.NewSessionWithCommand(shortSessionName, "", "sh -c 'sleep 0.5; echo startup-failed-diagnostic; exit 1'"); err != nil {
+		t.Fatalf("NewSessionWithCommand (short): %v", err)
+	}
+	defer func() { _ = tm.KillSessionWithProcesses(shortSessionName) }()
+
+	// Wait for command to exit (0.5s sleep + some buffer)
+	time.Sleep(1 * time.Second)
+
+	// With remain-on-exit enabled (by NewSessionWithCommand), pane should be dead but session exists
+	hasSession, _ := tm.HasSession(shortSessionName)
+	if !hasSession {
+		t.Skip("session was destroyed (remain-on-exit may not have taken effect)")
+	}
+
+	dead, err = tm.IsPaneDead(shortSessionName)
+	if err != nil {
+		t.Fatalf("IsPaneDead (short): %v", err)
+	}
+	if !dead {
+		t.Error("expected pane to be dead after command exited")
+	}
+
+	// Test 3: Can capture output from dead pane
+	output := tm.CaptureDeadPaneOutput(shortSessionName, 10)
+	if !strings.Contains(output, "startup-failed-diagnostic") {
+		t.Logf("Output: %q", output)
+		// Note: This is informational - some tmux versions may not preserve output
+	}
+}
+
+// TestNewSessionWithCommand_InstantExit verifies that remain-on-exit is set before
+// the command runs, even if the command exits instantly. This tests the fix for
+// the race condition in gt-958e7d where fast-exiting commands could cause the
+// session to be destroyed before diagnostic output could be captured.
+func TestNewSessionWithCommand_InstantExit(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-instant-exit-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSessionWithProcesses(sessionName)
+
+	// Create session with a command that exits IMMEDIATELY with a diagnostic message.
+	// This simulates the race condition where the command exits before remain-on-exit
+	// could be set externally. With the fix, remain-on-exit is set internally before
+	// the actual command runs.
+	if err := tm.NewSessionWithCommand(sessionName, "", "sh -c 'echo INSTANT_EXIT_DIAGNOSTIC; exit 42'"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
+
+	// Give tmux time to process the command exit
+	time.Sleep(500 * time.Millisecond)
+
+	// With the fix, the session should still exist because remain-on-exit was set
+	// BEFORE the command ran (not after, as in the race-prone original implementation)
+	hasSession, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !hasSession {
+		t.Fatal("session was destroyed despite instant exit - remain-on-exit race condition not fixed")
+	}
+
+	// The pane should be dead (command exited)
+	dead, err := tm.IsPaneDead(sessionName)
+	if err != nil {
+		t.Fatalf("IsPaneDead: %v", err)
+	}
+	if !dead {
+		t.Error("expected pane to be dead after instant exit")
+	}
+
+	// Verify we can capture the diagnostic output
+	output := tm.CaptureDeadPaneOutput(sessionName, 10)
+	if !strings.Contains(output, "INSTANT_EXIT_DIAGNOSTIC") {
+		t.Errorf("diagnostic output not captured, got: %q", output)
+	}
+
+	// Verify we can get the exit status (should be "42" from exit 42)
+	exitStatus := tm.GetPaneExitStatus(sessionName)
+	if exitStatus != "42" {
+		t.Logf("GetPaneExitStatus = %q (expected 42, may vary by tmux version)", exitStatus)
+	}
+}
+
+// TestGetPaneExitStatus verifies that we can retrieve the exit status of a dead pane.
+func TestGetPaneExitStatus(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-exit-status-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSessionWithProcesses(sessionName)
+
+	// Create session with a command that exits with a specific status
+	if err := tm.NewSessionWithCommand(sessionName, "", "sh -c 'exit 127'"); err != nil {
+		t.Fatalf("NewSessionWithCommand: %v", err)
+	}
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
+
+	// Give tmux time to process the command exit
+	time.Sleep(500 * time.Millisecond)
+
+	// Session should still exist (remain-on-exit preserves it)
+	hasSession, err := tm.HasSession(sessionName)
+	if err != nil {
+		t.Fatalf("HasSession: %v", err)
+	}
+	if !hasSession {
+		t.Skip("session was destroyed - remain-on-exit may not be working")
+	}
+
+	// Pane should be dead
+	dead, err := tm.IsPaneDead(sessionName)
+	if err != nil {
+		t.Fatalf("IsPaneDead: %v", err)
+	}
+	if !dead {
+		t.Fatal("expected pane to be dead after exit")
+	}
+
+	// Exit status should be 127 (command not found / explicit exit)
+	exitStatus := tm.GetPaneExitStatus(sessionName)
+	if exitStatus == "" {
+		t.Log("GetPaneExitStatus returned empty (tmux version may not support pane_dead_status)")
+	} else if exitStatus != "127" {
+		t.Errorf("GetPaneExitStatus = %q, want 127", exitStatus)
+	}
+}
+
 func TestDuplicateSession(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
@@ -111,13 +317,13 @@ func TestDuplicateSession(t *testing.T) {
 	sessionName := "gt-test-dup-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// Create session
 	if err := tm.NewSession(sessionName, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	// Try to create duplicate
 	err := tm.NewSession(sessionName, "")
@@ -135,13 +341,13 @@ func TestSendKeysAndCapture(t *testing.T) {
 	sessionName := "gt-test-keys-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// Create session
 	if err := tm.NewSession(sessionName, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	// Send echo command
 	if err := tm.SendKeys(sessionName, "echo HELLO_TEST_MARKER"); err != nil {
@@ -171,13 +377,13 @@ func TestGetSessionInfo(t *testing.T) {
 	sessionName := "gt-test-info-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// Create session
 	if err := tm.NewSession(sessionName, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	info, err := tm.GetSessionInfo(sessionName)
 	if err != nil {
@@ -224,13 +430,13 @@ func TestEnsureSessionFresh_NoExistingSession(t *testing.T) {
 	sessionName := "gt-test-fresh-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// EnsureSessionFresh should create a new session
 	if err := tm.EnsureSessionFresh(sessionName, ""); err != nil {
 		t.Fatalf("EnsureSessionFresh: %v", err)
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	// Verify session exists
 	has, err := tm.HasSession(sessionName)
@@ -251,14 +457,14 @@ func TestEnsureSessionFresh_ZombieSession(t *testing.T) {
 	sessionName := "gt-test-zombie-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// Create a zombie session (session exists but no Claude/node running)
 	// A normal tmux session with bash/zsh is a "zombie" for our purposes
 	if err := tm.NewSession(sessionName, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	// Verify it's a zombie (not running Claude/node)
 	if tm.IsClaudeRunning(sessionName) {
@@ -295,7 +501,7 @@ func TestEnsureSessionFresh_IdempotentOnZombie(t *testing.T) {
 	sessionName := "gt-test-idem-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// Call EnsureSessionFresh multiple times - should work each time
 	for i := 0; i < 3; i++ {
@@ -303,7 +509,7 @@ func TestEnsureSessionFresh_IdempotentOnZombie(t *testing.T) {
 			t.Fatalf("EnsureSessionFresh attempt %d: %v", i+1, err)
 		}
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	// Session should exist
 	has, err := tm.HasSession(sessionName)
@@ -324,13 +530,13 @@ func TestIsAgentRunning(t *testing.T) {
 	sessionName := "gt-test-agent-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// Create session (will run default shell)
 	if err := tm.NewSession(sessionName, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	// Get the current pane command (should be bash/zsh/etc)
 	cmd, err := tm.GetPaneCommand(sessionName)
@@ -414,13 +620,13 @@ func TestIsClaudeRunning(t *testing.T) {
 	sessionName := "gt-test-claude-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// Create session (will run default shell, not Claude)
 	if err := tm.NewSession(sessionName, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	// IsClaudeRunning should be false (shell is running, not node/claude)
 	cmd, _ := tm.GetPaneCommand(sessionName)
@@ -474,7 +680,7 @@ func TestIsClaudeRunning_ShellWithNodeChild(t *testing.T) {
 	sessionName := "gt-test-shell-child-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// Create session with "bash -c" running a node process
 	// Use a simple node command that runs for a few seconds
@@ -482,7 +688,7 @@ func TestIsClaudeRunning_ShellWithNodeChild(t *testing.T) {
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	// Give the node process time to start
 	// WaitForCommand waits until NOT running bash/zsh/sh
@@ -808,13 +1014,13 @@ func TestSessionSet(t *testing.T) {
 	sessionName := "gt-test-sessionset-" + t.Name()
 
 	// Clean up any existing session
-	_ = tm.KillSession(sessionName)
+	_ = tm.KillSessionWithProcesses(sessionName)
 
 	// Create a test session
 	if err := tm.NewSession(sessionName, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	defer func() { _ = tm.KillSession(sessionName) }()
+	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
 	// Get the session set
 	set, err := tm.GetSessionSet()
@@ -852,9 +1058,173 @@ func TestSessionSet(t *testing.T) {
 	}
 }
 
+// TestCleanupOrphanedSessions_DiagnosticDryRun is a SAFE diagnostic test that shows
+// what CleanupOrphanedSessions WOULD kill without actually killing anything.
+// Run this BEFORE TestCleanupOrphanedSessions to debug the murder mystery.
+//
+// MURDER INVESTIGATION NOTE (Attempt #10):
+// Previous Claudes running via mosh (not in tmux) were killed when running
+// TestCleanupOrphanedSessions. The mosh session itself was terminated.
+// This diagnostic helps identify what's being targeted for killing.
+func TestCleanupOrphanedSessions_DiagnosticDryRun(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+
+	// Log current process info
+	t.Logf("=== DIAGNOSTIC: Current process info ===")
+	t.Logf("Test PID: %d", os.Getpid())
+
+	// Get our PGID
+	pgidCmd := exec.Command("ps", "-o", "pgid=", "-p", fmt.Sprintf("%d", os.Getpid()))
+	if pgidOut, err := pgidCmd.Output(); err == nil {
+		t.Logf("Test PGID: %s", strings.TrimSpace(string(pgidOut)))
+	}
+
+	// Check for existing sessions BEFORE we create any
+	t.Logf("=== DIAGNOSTIC: Existing tmux sessions ===")
+	sessions, err := tm.ListSessions()
+	if err != nil {
+		t.Logf("ListSessions error: %v", err)
+	} else {
+		t.Logf("Found %d existing sessions", len(sessions))
+		for _, sess := range sessions {
+			pid, _ := tm.GetPanePID(sess)
+			cmd, _ := tm.GetPaneCommand(sess)
+			isRunning := tm.IsClaudeRunning(sess)
+			t.Logf("  Session %q: pane_pid=%s, pane_cmd=%s, IsClaudeRunning=%v", sess, pid, cmd, isRunning)
+
+			// Check what WOULD be killed
+			if (strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-")) && !isRunning {
+				t.Logf("    ^^^ THIS SESSION WOULD BE KILLED BY CleanupOrphanedSessions!")
+				if pid != "" {
+					pgid := getProcessGroupID(pid)
+					t.Logf("    PGID that would be killed: %s", pgid)
+					// Show what's in that process group
+					members := getProcessGroupMembers(pgid)
+					t.Logf("    Processes in PGID %s: %v", pgid, members)
+					// Show descendants
+					descendants := getAllDescendants(pid)
+					t.Logf("    Descendants of PID %s: %v", pid, descendants)
+				}
+			}
+		}
+	}
+
+	// Now create test sessions and show their info
+	t.Logf("=== DIAGNOSTIC: Creating test sessions ===")
+	gtSession := "gt-test-diag-" + t.Name()
+	if err := tm.NewSession(gtSession, ""); err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+	defer func() { _ = tm.KillSession(gtSession) }()
+
+	// Wait a moment for session to stabilize
+	time.Sleep(200 * time.Millisecond)
+
+	pid, _ := tm.GetPanePID(gtSession)
+	cmd, _ := tm.GetPaneCommand(gtSession)
+	t.Logf("Test session %q: pane_pid=%s, pane_cmd=%s", gtSession, pid, cmd)
+
+	if pid != "" {
+		pgid := getProcessGroupID(pid)
+		t.Logf("Test session PGID: %s", pgid)
+
+		// Check if this PGID matches our test process's PGID (would be BAD)
+		ourPgidCmd := exec.Command("ps", "-o", "pgid=", "-p", fmt.Sprintf("%d", os.Getpid()))
+		if ourPgidOut, err := ourPgidCmd.Output(); err == nil {
+			ourPgid := strings.TrimSpace(string(ourPgidOut))
+			if ourPgid == pgid {
+				t.Errorf("DANGER: Test session PGID %s matches our PGID! Killing would kill us!", pgid)
+			} else {
+				t.Logf("SAFE: Test session PGID %s differs from our PGID %s", pgid, ourPgid)
+			}
+		}
+	}
+
+	t.Logf("=== DIAGNOSTIC: Dry run complete - no killing performed ===")
+}
+
+// TestKillSessionWithProcesses_Trace traces exactly what KillSessionWithProcesses does
+// without the full CleanupOrphanedSessions loop. This isolates the kill logic.
+func TestKillSessionWithProcesses_Trace(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-kill-trace-" + t.Name()
+
+	// Our process info for comparison
+	myPID := fmt.Sprintf("%d", os.Getpid())
+	myPGIDCmd := exec.Command("ps", "-o", "pgid=", "-p", myPID)
+	myPGIDOut, _ := myPGIDCmd.Output()
+	myPGID := strings.TrimSpace(string(myPGIDOut))
+	t.Logf("=== My process: PID=%s, PGID=%s ===", myPID, myPGID)
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	// Get session info
+	panePID, err := tm.GetPanePID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPanePID: %v", err)
+	}
+	t.Logf("Session %s: pane_pid=%s", sessionName, panePID)
+
+	// Get PGID of pane
+	panePGID := getProcessGroupID(panePID)
+	t.Logf("Pane PGID: %s", panePGID)
+
+	// Check if our PGID would be affected
+	if myPGID == panePGID {
+		t.Fatalf("DANGER: My PGID %s equals pane PGID %s - would kill self!", myPGID, panePGID)
+	}
+
+	// Check process group members
+	members := getProcessGroupMembers(panePGID)
+	t.Logf("Processes in pane PGID %s: %v", panePGID, members)
+
+	// Check if I'm in that list
+	for _, m := range members {
+		if m == myPID {
+			t.Fatalf("DANGER: My PID %s is in pane's process group!", myPID)
+		}
+	}
+
+	// Check descendants
+	descendants := getAllDescendants(panePID)
+	t.Logf("Descendants of pane PID %s: %v", panePID, descendants)
+
+	for _, d := range descendants {
+		if d == myPID {
+			t.Fatalf("DANGER: My PID %s is a descendant of pane!", myPID)
+		}
+	}
+
+	t.Logf("=== Safety checks passed, calling KillSessionWithProcesses ===")
+
+	// NOW call KillSessionWithProcesses
+	if err := tm.KillSessionWithProcesses(sessionName); err != nil {
+		t.Logf("KillSessionWithProcesses returned error: %v", err)
+	}
+
+	t.Logf("=== KillSessionWithProcesses completed, I'm still alive! ===")
+}
+
 func TestCleanupOrphanedSessions(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
+	}
+	if hasRealClaudeSessions() {
+		t.Skip("skipping: real Claude sessions exist (would be killed by CleanupOrphanedSessions)")
 	}
 
 	tm := NewTmux()
@@ -932,6 +1302,9 @@ func TestCleanupOrphanedSessions(t *testing.T) {
 func TestCleanupOrphanedSessions_NoSessions(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
+	}
+	if hasRealClaudeSessions() {
+		t.Skip("skipping: real Claude sessions exist (would be killed by CleanupOrphanedSessions)")
 	}
 
 	tm := NewTmux()

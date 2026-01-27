@@ -85,7 +85,7 @@ func runGateWake(cmd *cobra.Command, args []string) error {
 	gateID := args[0]
 
 	// Get gate info
-	gateCheck := exec.Command("bd", "gate", "show", gateID, "--json")
+	gateCheck := exec.Command("bd", "--no-daemon", "gate", "show", gateID, "--json")
 	gateOutput, err := gateCheck.Output()
 	if err != nil {
 		return fmt.Errorf("gate '%s' not found or not accessible", gateID)

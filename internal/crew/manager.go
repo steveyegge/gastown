@@ -51,6 +51,14 @@ type StartOptions struct {
 
 	// AgentOverride specifies an alternate agent alias (e.g., for testing).
 	AgentOverride string
+
+	// AuthToken is an optional ANTHROPIC_AUTH_TOKEN for API authentication.
+	// If set, this takes precedence over OAuth credentials.
+	AuthToken string
+
+	// BaseURL is an optional ANTHROPIC_BASE_URL for custom API endpoints.
+	// Used with AuthToken for alternative API providers (e.g., LiteLLM).
+	BaseURL string
 }
 
 // validateCrewName checks that a crew name is safe and valid.
@@ -172,12 +180,27 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
 	}
 
+	// Set up .claude symlink so crew worker inherits shared hook configuration.
+	// Claude Code doesn't traverse parent directories for settings.json, so the symlink
+	// makes crew/.claude/settings.json visible in the worker's CWD.
+	if err := m.setupClaudeSymlink(crewPath); err != nil {
+		// Non-fatal - crew can still work without hooks (uses PRIME.md fallback)
+		fmt.Printf("Warning: could not set up .claude symlink: %v\n", err)
+	}
+
 	// Provision PRIME.md with Gas Town context for this worker.
 	// This is the fallback if SessionStart hook fails - ensures crew workers
 	// always have GUPP and essential Gas Town context.
 	if err := beads.ProvisionPrimeMDForWorktree(crewPath); err != nil {
 		// Non-fatal - crew can still work via hook, warn but don't fail
 		fmt.Printf("Warning: could not provision PRIME.md: %v\n", err)
+	}
+
+	// Provision FILE_AFTER_FAIL.md with the "Fail then File" principle documentation.
+	// This ensures crew workers have consistent guidance on bug filing.
+	if err := claude.ProvisionFileAfterFail(crewPath); err != nil {
+		// Non-fatal - crew can still work, warn but don't fail
+		fmt.Printf("Warning: could not provision FILE_AFTER_FAIL.md: %v\n", err)
 	}
 
 	// Copy overlay files from .runtime/overlay/ to crew root.
@@ -418,6 +441,59 @@ type PristineResult struct {
 	SyncError  string `json:"sync_error,omitempty"`
 }
 
+// setupClaudeSymlink creates a symlink from the crew worker's .claude directory to the shared
+// crew/.claude directory. Claude Code only looks in the current working directory for
+// .claude/settings.json (no parent directory traversal), so this symlink is required for
+// crew workers to inherit the shared hook configuration.
+//
+// The symlink is relative to work across different mount points and locations.
+// Fix for: hq-cc7214.22 (crew not loading Claude hooks)
+func (m *Manager) setupClaudeSymlink(crewPath string) error {
+	symlinkPath := filepath.Join(crewPath, ".claude")
+
+	// Check if something already exists at .claude
+	if info, err := os.Lstat(symlinkPath); err == nil {
+		// If it's already a symlink, check if it points to the right place
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(symlinkPath)
+			if err == nil {
+				// Calculate expected relative path to crew/.claude
+				// From: crew/<name>/.claude
+				// To: crew/.claude
+				// Relative: ../.claude
+				expectedTarget := filepath.Join("..", ".claude")
+				if target == expectedTarget {
+					return nil // Already correctly set up
+				}
+			}
+			// Wrong target - remove and recreate
+			if err := os.Remove(symlinkPath); err != nil {
+				return fmt.Errorf("removing stale .claude symlink: %w", err)
+			}
+		} else {
+			// It's a regular file or directory - don't touch it
+			// This could be a legitimate .claude directory from the source repo
+			return nil
+		}
+	}
+
+	// Check if the target .claude directory exists
+	targetDir := filepath.Join(m.rig.Path, "crew", ".claude")
+	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
+		// Target doesn't exist - nothing to symlink to
+		return nil
+	}
+
+	// Create relative symlink: ../.claude
+	// From: crew/<name>/.claude -> crew/.claude
+	relTarget := filepath.Join("..", ".claude")
+	if err := os.Symlink(relTarget, symlinkPath); err != nil {
+		return fmt.Errorf("creating .claude symlink: %w", err)
+	}
+
+	return nil
+}
+
 // setupSharedBeads creates a redirect file so the crew worker uses the rig's shared .beads database.
 // This eliminates the need for git sync between crew clones - all crew members share one database.
 func (m *Manager) setupSharedBeads(crewPath string) error {
@@ -477,11 +553,22 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	}
 
 	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	// All crew members share the same settings file.
+	// write into the source repo. All crew members share the same settings file
+	// via a .claude symlink in each worker directory (Claude Code does NOT walk
+	// up the directory tree to find settings).
 	crewBaseDir := filepath.Join(m.rig.Path, "crew")
 	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
+	}
+
+	// Ensure the .claude symlink exists in the worker directory.
+	// This is critical: Claude Code only reads .claude/settings.json from the CWD,
+	// so each worker needs a symlink to the shared crew/.claude directory.
+	// The symlink is created during Add() but may be missing for older workspaces
+	// or if it was accidentally removed. This call is idempotent.
+	if err := m.setupClaudeSymlink(worker.ClonePath); err != nil {
+		// Non-fatal but important - log it so we notice if it fails
+		fmt.Printf("Warning: could not ensure .claude symlink for %s: %v\n", name, err)
 	}
 
 	// Build the startup beacon for predecessor discovery via /resume
@@ -509,6 +596,21 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		claudeCmd = strings.Replace(claudeCmd, " --dangerously-skip-permissions", "", 1)
 	}
 
+	// Prepend account-related env vars if needed (auth_token, base_url, config_dir)
+	prependEnvVars := make(map[string]string)
+	if opts.ClaudeConfigDir != "" {
+		prependEnvVars["CLAUDE_CONFIG_DIR"] = opts.ClaudeConfigDir
+	}
+	if opts.AuthToken != "" {
+		prependEnvVars["ANTHROPIC_AUTH_TOKEN"] = opts.AuthToken
+	}
+	if opts.BaseURL != "" {
+		prependEnvVars["ANTHROPIC_BASE_URL"] = opts.BaseURL
+	}
+	if len(prependEnvVars) > 0 {
+		claudeCmd = config.PrependEnv(claudeCmd, prependEnvVars)
+	}
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := t.NewSessionWithCommand(sessionID, worker.ClonePath, claudeCmd); err != nil {
@@ -525,6 +627,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		TownRoot:         townRoot,
 		RuntimeConfigDir: opts.ClaudeConfigDir,
 		BeadsNoDaemon:    true,
+		AuthToken:        opts.AuthToken,
+		BaseURL:          opts.BaseURL,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)

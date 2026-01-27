@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/hooks"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -40,10 +42,77 @@ Examples:
 	RunE: runHooks,
 }
 
+var hooksReportErrorCmd = &cobra.Command{
+	Use:   "report-error",
+	Short: "Report a hook error (for use in hook commands)",
+	Long: `Report a hook error with deduplication.
+
+This command is designed to be used in hook commands instead of "|| true"
+to capture errors while still allowing the hook to succeed.
+
+Errors are deduplicated within a 60-second window to prevent spam.
+Use "gt hooks errors" to view recent errors.
+
+Examples:
+  # In a hook command (replaces || true)
+  some-command || gt hooks report-error --type SessionStart --command "some-command" --exit-code $?
+
+  # Report with stderr capture
+  output=$(some-command 2>&1) || gt hooks report-error --type SessionStart --command "some-command" --exit-code $? --stderr "$output"`,
+	RunE: runHooksReportError,
+}
+
+var hooksErrorsCmd = &cobra.Command{
+	Use:   "errors",
+	Short: "List recent hook errors",
+	Long: `List recent hook errors logged by hooks.
+
+Shows errors that were reported via "gt hooks report-error".
+Errors are deduplicated, so the count shows how many times
+the same error occurred within the deduplication window.
+
+Examples:
+  gt hooks errors           # Show last 20 errors
+  gt hooks errors --limit 50 # Show last 50 errors
+  gt hooks errors --json    # JSON output
+  gt hooks errors --clear   # Clear all errors`,
+	RunE: runHooksErrors,
+}
+
+var (
+	// report-error flags
+	reportHookType  string
+	reportCommand   string
+	reportExitCode  int
+	reportStderr    string
+	reportRole      string
+
+	// errors flags
+	errorsLimit int
+	errorsJSON  bool
+	errorsClear bool
+)
+
 func init() {
 	rootCmd.AddCommand(hooksCmd)
 	hooksCmd.Flags().BoolVar(&hooksJSON, "json", false, "Output as JSON")
 	hooksCmd.Flags().BoolVarP(&hooksVerbose, "verbose", "v", false, "Show hook commands")
+
+	// report-error subcommand
+	hooksReportErrorCmd.Flags().StringVar(&reportHookType, "type", "", "Hook type (SessionStart, UserPromptSubmit, etc.)")
+	hooksReportErrorCmd.Flags().StringVar(&reportCommand, "command", "", "The command that failed")
+	hooksReportErrorCmd.Flags().IntVar(&reportExitCode, "exit-code", 1, "Exit code of the failed command")
+	hooksReportErrorCmd.Flags().StringVar(&reportStderr, "stderr", "", "Standard error output")
+	hooksReportErrorCmd.Flags().StringVar(&reportRole, "role", "", "Gas Town role (auto-detected if not specified)")
+	_ = hooksReportErrorCmd.MarkFlagRequired("type")
+	_ = hooksReportErrorCmd.MarkFlagRequired("command")
+	hooksCmd.AddCommand(hooksReportErrorCmd)
+
+	// errors subcommand
+	hooksErrorsCmd.Flags().IntVar(&errorsLimit, "limit", 20, "Maximum number of errors to show")
+	hooksErrorsCmd.Flags().BoolVar(&errorsJSON, "json", false, "Output as JSON")
+	hooksErrorsCmd.Flags().BoolVar(&errorsClear, "clear", false, "Clear all logged errors")
+	hooksCmd.AddCommand(hooksErrorsCmd)
 }
 
 // ClaudeSettings represents the Claude Code settings.json structure.
@@ -324,4 +393,110 @@ func outputHooksHuman(townRoot string, hooks []HookInfo) error {
 	fmt.Printf("%s %d hooks found\n", style.Dim.Render("Total:"), len(hooks))
 
 	return nil
+}
+
+func runHooksReportError(cmd *cobra.Command, args []string) error {
+	// Auto-detect role if not specified
+	role := reportRole
+	if role == "" {
+		role = detectSender()
+	}
+	if role == "" {
+		role = "unknown"
+	}
+
+	logged, err := hooks.ReportHookError(reportHookType, reportCommand, reportExitCode, reportStderr, role)
+	if err != nil {
+		// Don't fail the hook, just log to stderr
+		fmt.Fprintf(os.Stderr, "Warning: failed to log hook error: %v\n", err)
+		return nil
+	}
+
+	if logged {
+		fmt.Fprintf(os.Stderr, "Hook error logged: %s [%s] exit %d\n", reportHookType, reportCommand, reportExitCode)
+	}
+	// Else: deduplicated, no output
+
+	return nil
+}
+
+func runHooksErrors(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	log := hooks.NewErrorLog(townRoot)
+
+	if errorsClear {
+		if err := log.ClearErrors(); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("clearing errors: %w", err)
+		}
+		fmt.Println("Hook errors cleared")
+		return nil
+	}
+
+	errors, err := log.GetRecentErrors(errorsLimit)
+	if err != nil {
+		return fmt.Errorf("getting errors: %w", err)
+	}
+
+	if errorsJSON {
+		data, _ := json.MarshalIndent(errors, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+
+	if len(errors) == 0 {
+		fmt.Println(style.Dim.Render("No hook errors logged"))
+		return nil
+	}
+
+	fmt.Printf("\n%s Recent Hook Errors\n\n", style.Bold.Render("⚠️"))
+
+	for _, e := range errors {
+		ts, _ := time.Parse(time.RFC3339, e.Timestamp)
+		age := formatHookErrorAge(ts)
+
+		countStr := ""
+		if e.Count > 1 {
+			countStr = fmt.Sprintf(" (x%d)", e.Count)
+		}
+
+		fmt.Printf("  %s %s [exit %d]%s\n", style.Bold.Render(e.HookType), age, e.ExitCode, countStr)
+		fmt.Printf("    %s %s\n", style.Dim.Render("Command:"), truncateCommand(e.Command, 60))
+		fmt.Printf("    %s %s\n", style.Dim.Render("Role:"), e.Role)
+		if e.Stderr != "" {
+			fmt.Printf("    %s %s\n", style.Dim.Render("Stderr:"), truncateCommand(e.Stderr, 60))
+		}
+		fmt.Println()
+	}
+
+	fmt.Printf("%s %d error(s) shown\n", style.Dim.Render("Total:"), len(errors))
+	fmt.Printf("%s gt hooks errors --clear\n", style.Dim.Render("Clear with:"))
+
+	return nil
+}
+
+func formatHookErrorAge(t time.Time) string {
+	d := time.Since(t)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
+
+func truncateCommand(s string, maxLen int) string {
+	// Remove newlines
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > maxLen {
+		return s[:maxLen-3] + "..."
+	}
+	return s
 }

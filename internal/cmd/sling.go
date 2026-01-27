@@ -9,8 +9,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -35,6 +40,17 @@ Auto-Convoy:
 
   gt sling gt-abc gastown              # Creates "Work: <issue-title>" convoy
   gt sling gt-abc gastown --no-convoy  # Skip auto-convoy creation
+
+Convoy Batching:
+  Use --convoy to add multiple issues to a single convoy instead of creating
+  separate convoys for each. This is recommended when slinging related work.
+
+  # Create convoy first, then add issues to it
+  gt convoy create "Release v2.0" gt-abc
+  gt sling gt-def gastown --convoy hq-cv-xyz
+  gt sling gt-ghi gastown --convoy hq-cv-xyz
+
+  Use 'gt workload <agent>' to see all hooked issues for an agent.
 
 Target Resolution:
   gt sling gt-abc                       # Self (current agent)
@@ -96,6 +112,7 @@ var (
 	slingAccount  string // --account: Claude Code account handle to use
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
+	slingConvoy   string // --convoy: add to existing convoy instead of creating new one
 	slingNoMerge  bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
 )
 
@@ -113,6 +130,7 @@ func init() {
 	slingCmd.Flags().StringVar(&slingAccount, "account", "", "Claude Code account handle to use")
 	slingCmd.Flags().StringVar(&slingAgent, "agent", "", "Override agent/runtime for this sling (e.g., claude, gemini, codex, or custom alias)")
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
+	slingCmd.Flags().StringVar(&slingConvoy, "convoy", "", "Add to existing convoy instead of creating new one")
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
 	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
 
@@ -132,6 +150,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("finding town root: %w", err)
 	}
 	townBeadsDir := filepath.Join(townRoot, ".beads")
+
+	// --var is only for standalone formula mode, not formula-on-bead mode
+	if slingOnTarget != "" && len(slingVars) > 0 {
+		return fmt.Errorf("--var cannot be used with --on (formula-on-bead mode doesn't support variables)")
+	}
 
 	// Batch mode detection: multiple beads with rig target
 	// Pattern: gt sling gt-abc gt-def gt-ghi gastown
@@ -191,6 +214,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 	var hookWorkDir string     // Working directory for running bd hook commands
 	var hookSetAtomically bool // True if hook was set during polecat spawn (skip redundant update)
 
+	// Deferred spawn: don't spawn polecat until AFTER formula instantiation succeeds.
+	// This prevents orphan polecats when formula fails (GH #gt-e9o).
+	var deferredRigName string
+	var deferredSpawnOpts SlingSpawnOptions
+
 	if len(args) > 1 {
 		target := args[1]
 
@@ -230,26 +258,23 @@ func runSling(cmd *cobra.Command, args []string) error {
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
 				targetPane = "<new-pane>"
 			} else {
-				// Spawn a fresh polecat in the rig
-				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
-				spawnOpts := SlingSpawnOptions{
-					Force:    slingForce,
-					Account:  slingAccount,
-					Create:   slingCreate,
-					HookBead: beadID, // Set atomically at spawn time
-					Agent:    slingAgent,
+				// DEFERRED SPAWN: Don't spawn polecat yet - we need to validate bead
+				// and instantiate formula first. This prevents orphan polecats when
+				// formula instantiation fails (GH #gt-e9o).
+				fmt.Printf("Target is rig '%s', will spawn polecat after validation...\n", rigName)
+				deferredRigName = rigName
+				deferredSpawnOpts = SlingSpawnOptions{
+					Force:   slingForce,
+					Account: slingAccount,
+					Create:  slingCreate,
+					// HookBead: NOT set - we'll hook via bd update after spawn
+					Agent: slingAgent,
 				}
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-				if spawnErr != nil {
-					return fmt.Errorf("spawning polecat: %w", spawnErr)
-				}
-				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
-				hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
-				hookSetAtomically = true          // Hook was set during spawn (GH #gt-mzyk5)
-
-				// Wake witness and refinery to monitor the new polecat
-				wakeRigAgents(rigName)
+				// Use placeholder values until spawn
+				targetAgent = fmt.Sprintf("%s/polecats/<pending>", rigName)
+				targetPane = ""
+				// hookWorkDir stays empty - formula instantiation will use townRoot
+				// hookSetAtomically = false - hook will be set via bd update
 			}
 		} else {
 			// Slinging to an existing agent
@@ -263,27 +288,79 @@ func runSling(cmd *cobra.Command, args []string) error {
 					parts := strings.Split(target, "/")
 					if len(parts) >= 3 && parts[1] == "polecats" {
 						rigName := parts[0]
-						fmt.Printf("Target polecat has no active session, spawning fresh polecat in rig '%s'...\n", rigName)
-						spawnOpts := SlingSpawnOptions{
-							Force:    slingForce,
-							Account:  slingAccount,
-							Create:   slingCreate,
-							HookBead: beadID,
-							Agent:    slingAgent,
+						// DEFERRED SPAWN: Don't spawn yet - validate bead and instantiate
+						// formula first. This prevents orphan polecats (GH #gt-e9o).
+						fmt.Printf("Target polecat has no active session, will spawn fresh polecat after validation...\n")
+						deferredRigName = rigName
+						deferredSpawnOpts = SlingSpawnOptions{
+							Force:   slingForce,
+							Account: slingAccount,
+							Create:  slingCreate,
+							// HookBead: NOT set - we'll hook via bd update after spawn
+							Agent: slingAgent,
 						}
-						spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-						if spawnErr != nil {
-							return fmt.Errorf("spawning polecat to replace dead polecat: %w", spawnErr)
-						}
-						targetAgent = spawnInfo.AgentID()
-						targetPane = spawnInfo.Pane
-						hookWorkDir = spawnInfo.ClonePath
-						hookSetAtomically = true // Hook was set during spawn (GH #gt-mzyk5)
-
-						// Wake witness and refinery to monitor the new polecat
-						wakeRigAgents(rigName)
+						// Use placeholder values until spawn
+						targetAgent = fmt.Sprintf("%s/polecats/<pending>", rigName)
+						targetPane = ""
+						// hookWorkDir stays empty - formula instantiation will use townRoot
+						// hookSetAtomically = false - hook will be set via bd update
 					} else {
 						return fmt.Errorf("resolving target: %w", err)
+					}
+				} else if rigName, crewName, ok := parseCrewTarget(target); ok {
+					// FIX (hq-cc7214.25): Auto-start crew session if not running
+					fmt.Printf("Target crew %s/%s has no active session, starting...\n", rigName, crewName)
+
+					// Get rig and crew manager
+					rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
+					rigsConfig, configErr := config.LoadRigsConfig(rigsConfigPath)
+					if configErr != nil {
+						return fmt.Errorf("loading rigs config: %w", configErr)
+					}
+					g := git.NewGit(townRoot)
+					rigMgr := rig.NewManager(townRoot, rigsConfig, g)
+					r, rigErr := rigMgr.GetRig(rigName)
+					if rigErr != nil {
+						return fmt.Errorf("getting rig %s: %w", rigName, rigErr)
+					}
+
+					crewGit := git.NewGit(r.Path)
+					crewMgr := crew.NewManager(r, crewGit)
+
+					// Resolve account config
+					accountsPath := constants.MayorAccountsPath(townRoot)
+					resolvedAcct, accountErr := config.ResolveAccount(accountsPath, slingAccount)
+					if accountErr != nil {
+						return fmt.Errorf("resolving account: %w", accountErr)
+					}
+
+					// Extract account fields (handle nil account)
+					var claudeConfigDir, authToken, baseURL string
+					if resolvedAcct != nil {
+						claudeConfigDir = resolvedAcct.ConfigDir
+						authToken = resolvedAcct.AuthToken
+						baseURL = resolvedAcct.BaseURL
+					}
+
+					// Start the crew session
+					startOpts := crew.StartOptions{
+						Account:         slingAccount,
+						ClaudeConfigDir: claudeConfigDir,
+						AgentOverride:   slingAgent,
+						AuthToken:       authToken,
+						BaseURL:         baseURL,
+					}
+					if startErr := crewMgr.Start(crewName, startOpts); startErr != nil {
+						return fmt.Errorf("starting crew session %s/%s: %w", rigName, crewName, startErr)
+					}
+
+					// Retry resolving the target now that session is running
+					targetAgent, targetPane, targetWorkDir, err = resolveTargetAgent(target)
+					if err != nil {
+						return fmt.Errorf("resolving target after starting crew: %w", err)
+					}
+					if targetWorkDir != "" {
+						hookWorkDir = targetWorkDir
 					}
 				} else {
 					return fmt.Errorf("resolving target: %w", err)
@@ -373,26 +450,52 @@ func runSling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Auto-convoy: check if issue is already tracked by a convoy
-	// If not, create one for dashboard visibility (unless --no-convoy is set)
+	// Workload warning: check if target already has many hooked issues
+	// Threshold of 3 hooked issues triggers a warning to suggest batching
+	const workloadThreshold = 3
+	existingWorkload := countHookedBeadsForAgent(townRoot, targetAgent)
+	if existingWorkload >= workloadThreshold && slingConvoy == "" {
+		fmt.Printf("%s %s already has %d hooked issues\n", style.Warning.Render("⚠"), targetAgent, existingWorkload)
+		fmt.Printf("  Consider using --convoy to batch related work:\n")
+		fmt.Printf("    gt convoy create \"Batch name\" %s\n", beadID)
+		fmt.Printf("    gt sling <next-bead> %s --convoy <convoy-id>\n", targetAgent)
+		fmt.Printf("  Or use 'gt workload %s' to see full queue\n\n", targetAgent)
+	}
+
+	// Convoy handling: add to existing convoy, create auto-convoy, or skip
+	// Priority: --convoy flag > existing convoy > auto-create
 	if !slingNoConvoy && formulaName == "" {
-		existingConvoy := isTrackedByConvoy(beadID)
-		if existingConvoy == "" {
+		if slingConvoy != "" {
+			// User specified convoy to add to
 			if slingDryRun {
-				fmt.Printf("Would create convoy 'Work: %s'\n", info.Title)
-				fmt.Printf("Would add tracking relation to %s\n", beadID)
+				fmt.Printf("Would add %s to convoy %s\n", beadID, slingConvoy)
 			} else {
-				convoyID, err := createAutoConvoy(beadID, info.Title)
-				if err != nil {
-					// Log warning but don't fail - convoy is optional
-					fmt.Printf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
+				if err := addToConvoy(slingConvoy, beadID); err != nil {
+					fmt.Printf("%s Could not add to convoy %s: %v\n", style.Dim.Render("Warning:"), slingConvoy, err)
 				} else {
-					fmt.Printf("%s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
-					fmt.Printf("  Tracking: %s\n", beadID)
+					fmt.Printf("%s Added to convoy 🚚 %s\n", style.Bold.Render("→"), slingConvoy)
 				}
 			}
 		} else {
-			fmt.Printf("%s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
+			// Check if already tracked by a convoy
+			existingConvoy := isTrackedByConvoy(beadID)
+			if existingConvoy == "" {
+				if slingDryRun {
+					fmt.Printf("Would create convoy 'Work: %s'\n", info.Title)
+					fmt.Printf("Would add tracking relation to %s\n", beadID)
+				} else {
+					convoyID, err := createAutoConvoy(beadID, info.Title, targetAgent)
+					if err != nil {
+						// Log warning but don't fail - convoy is optional
+						fmt.Printf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
+					} else {
+						fmt.Printf("%s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
+						fmt.Printf("  Tracking: %s\n", beadID)
+					}
+				}
+			} else {
+				fmt.Printf("%s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
+			}
 		}
 	}
 
@@ -455,6 +558,27 @@ func runSling(cmd *cobra.Command, args []string) error {
 		// - Wisp hooked instead of base bead
 		// - attached_molecule stored as self-reference in wisp (meaningless)
 		// - Base bead left orphaned after gt done
+	}
+
+	// Execute deferred polecat spawn if needed (for rig targets).
+	// This happens AFTER formula instantiation to prevent orphan polecats on failure (GH #gt-e9o).
+	if deferredRigName != "" {
+		// Set HookBead atomically at spawn time to prevent race condition (GH #hq-3d01de).
+		// Without this, the polecat might start before bd update sets the hook.
+		deferredSpawnOpts.HookBead = beadID
+
+		fmt.Printf("  Spawning polecat in %s...\n", deferredRigName)
+		spawnInfo, spawnErr := SpawnPolecatForSling(deferredRigName, deferredSpawnOpts)
+		if spawnErr != nil {
+			return fmt.Errorf("spawning polecat: %w", spawnErr)
+		}
+		targetAgent = spawnInfo.AgentID()
+		targetPane = spawnInfo.Pane
+		hookWorkDir = spawnInfo.ClonePath // Run bd commands from polecat's worktree
+		hookSetAtomically = true          // Hook was set during spawn - skip redundant updateAgentHookBead
+
+		// Wake witness and refinery to monitor the new polecat
+		wakeRigAgents(deferredRigName)
 	}
 
 	// Hook the bead using bd update.

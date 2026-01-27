@@ -906,10 +906,20 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 
 	// Resolve account for Claude config
 	accountsPath := constants.MayorAccountsPath(townRoot)
-	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, startCrewAccount)
+	resolvedAccount, err := config.ResolveAccount(accountsPath, startCrewAccount)
 	if err != nil {
 		return fmt.Errorf("resolving account: %w", err)
 	}
+
+	// Extract account fields (handle nil account)
+	var claudeConfigDir, accountHandle, authToken, baseURL string
+	if resolvedAccount != nil {
+		claudeConfigDir = resolvedAccount.ConfigDir
+		accountHandle = resolvedAccount.Handle
+		authToken = resolvedAccount.AuthToken
+		baseURL = resolvedAccount.BaseURL
+	}
+
 	if accountHandle != "" {
 		fmt.Printf("Using account: %s\n", accountHandle)
 	}
@@ -919,6 +929,8 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		Account:         startCrewAccount,
 		ClaudeConfigDir: claudeConfigDir,
 		AgentOverride:   startCrewAgentOverride,
+		AuthToken:       authToken,
+		BaseURL:         baseURL,
 	})
 	if err != nil {
 		if errors.Is(err, crew.ErrSessionRunning) {

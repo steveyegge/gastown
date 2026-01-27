@@ -1,0 +1,364 @@
+description = """
+Upstream patch → build → install workflow for gastown.
+
+This formula automates the cycle of keeping the local gastown binary updated
+with upstream (steveyegge/gastown) changes:
+
+1. Fetch and apply patches from upstream
+2. Build the project via make
+3. Install the gt binary to the deployment location
+4. Verify the installation
+
+## Usage
+
+```bash
+# Run as a crew wisp (one-shot)
+gt mol wisp create mol-patch-build-install
+
+# Sling to a crew member for execution
+gt sling gastown/crew/upstream_syncer --formula mol-patch-build-install
+
+# With explicit install target
+gt sling gastown/crew/upstream_syncer --formula mol-patch-build-install --var install_target=deploy
+```
+
+## Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| install_target | deploy | Make target: "install" (~/.local/bin) or "deploy" (~/local/bin) |
+| skip_tests | false | Skip test suite (use for quick iterations) |
+| force_sync | false | Force sync even if no upstream changes |
+
+## Prerequisites
+
+- Git remotes configured: `origin` (fork) and `upstream` (steveyegge/gastown)
+- Go toolchain installed
+- Write access to install location
+"""
+formula = "mol-patch-build-install"
+type = "workflow"
+version = 1
+
+[vars.install_target]
+description = "Make target for installation: 'install' or 'deploy'"
+default = "deploy"
+
+[vars.skip_tests]
+description = "Skip running tests (for quick iterations)"
+default = "false"
+
+[vars.force_sync]
+description = "Force sync even if already up to date with upstream"
+default = "false"
+
+[[steps]]
+id = "verify-remotes"
+title = "Verify git remotes are configured"
+description = """
+Ensure both origin (fork) and upstream (steveyegge) remotes exist.
+
+```bash
+git remote -v
+```
+
+**Expected configuration:**
+- `origin` → groblegark/gastown (your fork)
+- `upstream` → steveyegge/gastown (upstream source)
+
+**If upstream is missing:**
+```bash
+git remote add upstream https://github.com/steveyegge/gastown.git
+```
+
+**Exit criteria:** Both remotes configured correctly.
+"""
+
+[[steps]]
+id = "check-clean-state"
+title = "Ensure working directory is clean"
+needs = ["verify-remotes"]
+description = """
+The sync requires a clean working directory to avoid conflicts.
+
+```bash
+git status --porcelain
+```
+
+**If uncommitted changes exist:**
+
+Option A - Commit if ready:
+```bash
+git add -A && git commit -m "WIP: <description>"
+```
+
+Option B - Stash if not ready:
+```bash
+git stash push -m "pre-sync $(date +%Y%m%d-%H%M%S)"
+```
+
+**Exit criteria:** Working tree is clean (no uncommitted changes).
+"""
+
+[[steps]]
+id = "fetch-upstream"
+title = "Fetch latest from upstream"
+needs = ["check-clean-state"]
+description = """
+Fetch the latest commits from upstream without merging.
+
+```bash
+git fetch upstream
+git fetch origin
+```
+
+**Check what's new:**
+```bash
+# Commits on upstream not in local
+git log --oneline HEAD..upstream/main | head -20
+
+# Count of new commits
+git rev-list HEAD..upstream/main --count
+```
+
+**If no new commits and force_sync is false:**
+Report "Already up to date" and optionally skip remaining steps.
+
+**Exit criteria:** Upstream fetched, new commit count documented.
+"""
+
+[[steps]]
+id = "merge-upstream"
+title = "Apply upstream patches via merge"
+needs = ["fetch-upstream"]
+description = """
+Merge upstream changes into the current branch.
+
+**Strategy: Prefer merge over rebase for patch visibility.**
+
+```bash
+# Ensure we're on main
+git checkout main
+
+# Merge upstream/main
+git merge upstream/main --no-edit
+```
+
+**If merge succeeds:** Continue to build step.
+
+**If merge conflicts:**
+
+1. **Assess each conflict:**
+   ```bash
+   git status  # See conflicted files
+   git diff    # Examine conflict markers
+   ```
+
+2. **For simple conflicts (imports, formatting):**
+   ```bash
+   # Edit and resolve
+   git add <resolved-file>
+   git commit --no-edit
+   ```
+
+3. **For complex conflicts:**
+   ```bash
+   git merge --abort
+   bd create -t bug "Upstream merge conflict in <files>" \
+     -d "Manual resolution needed for: ..."
+   gt mail send --human -s "Upstream merge needs attention" \
+     -m "Conflicting files: ..."
+   ```
+   Exit workflow - human intervention needed.
+
+**Exit criteria:** Upstream changes merged successfully.
+"""
+
+[[steps]]
+id = "run-build"
+title = "Build the project"
+needs = ["merge-upstream"]
+description = """
+Build gastown using the Makefile.
+
+```bash
+make build
+```
+
+This runs:
+1. `go generate ./...` - Generate any needed code
+2. `go build` with version ldflags
+
+**If build fails:**
+
+1. Check for missing dependencies:
+   ```bash
+   go mod tidy
+   make build
+   ```
+
+2. If still failing:
+   ```bash
+   bd create -t bug "Build failure after upstream sync" \
+     -d "Error output: ..."
+   ```
+   Do NOT proceed to installation with broken build.
+
+**Exit criteria:** Binary successfully built at ./gt
+"""
+
+[[steps]]
+id = "run-tests"
+title = "Run test suite"
+needs = ["run-build"]
+description = """
+Verify tests pass with the new code.
+
+**If skip_tests is true:** Skip this step.
+
+```bash
+make test
+```
+
+For resource-constrained environments:
+```bash
+make test-safe
+```
+
+**If tests fail:**
+
+1. Check if failures are pre-existing:
+   ```bash
+   bd list --type=bug | grep -i test
+   ```
+
+2. If new failures, file a bug:
+   ```bash
+   bd create -t bug "Test failure after upstream sync" \
+     -d "Failing tests: ..."
+   ```
+
+3. **Decision point:** Continue with installation anyway?
+   - For critical path work: Proceed but track the issue
+   - For production deployment: STOP and fix first
+
+**Exit criteria:** Tests documented (pass or tracked failures).
+"""
+
+[[steps]]
+id = "install-binary"
+title = "Install the gt binary"
+needs = ["run-tests"]
+description = """
+Install the built binary using the Makefile target.
+
+**Install target: {{install_target}}**
+
+```bash
+make {{install_target}}
+```
+
+**Target behaviors:**
+- `install`: Copies to ~/.local/bin/gt
+- `deploy`: Builds fresh to temp, then moves to ~/local/bin/gt with hash verification
+
+**If installation fails:**
+
+1. Check permissions:
+   ```bash
+   ls -la ~/.local/bin/ 2>/dev/null || ls -la ~/local/bin/
+   ```
+
+2. Check if binary is in use:
+   ```bash
+   pgrep -f 'gt ' && echo "gt processes running"
+   ```
+   May need to stop processes or use `deploy` target which uses mv.
+
+**Exit criteria:** Binary installed to target location.
+"""
+
+[[steps]]
+id = "verify-install"
+title = "Verify installation"
+needs = ["install-binary"]
+description = """
+Confirm the installed binary is working correctly.
+
+```bash
+# Check version
+gt version
+
+# Verify it's the newly built binary
+which gt
+ls -la $(which gt)
+
+# Quick smoke test
+gt doctor
+```
+
+**Version should show:**
+- Recent commit hash
+- Build time from this session
+- BuiltProperly=1 (if using ldflags)
+
+**Exit criteria:** Installed binary responds correctly.
+"""
+
+[[steps]]
+id = "push-merged"
+title = "Push merged changes to origin"
+needs = ["verify-install"]
+description = """
+Push the merged upstream changes to the fork.
+
+```bash
+git push origin main
+```
+
+This ensures:
+- Fork is updated with upstream changes
+- Other crew members get the patches on next pull
+- Build artifacts are based on committed state
+
+**If push fails (someone else pushed):**
+```bash
+git pull --rebase origin main
+git push origin main
+```
+
+**Exit criteria:** Fork updated with merged upstream changes.
+"""
+
+[[steps]]
+id = "sync-complete"
+title = "Report sync completion"
+needs = ["push-merged"]
+description = """
+Document what was synchronized.
+
+```bash
+# Get summary
+NEW_COMMITS=$(git log --oneline @{1}..HEAD | wc -l | tr -d ' ')
+GT_VERSION=$(gt version 2>/dev/null | head -1)
+INSTALL_PATH=$(which gt)
+
+echo "=== UPSTREAM SYNC COMPLETE ==="
+echo "New commits merged: $NEW_COMMITS"
+echo "gt version: $GT_VERSION"
+echo "Installed at: $INSTALL_PATH"
+```
+
+**Optional: Notify overseer:**
+```bash
+gt mail send --human -s "Upstream sync complete" -m "
+Synced $NEW_COMMITS commits from upstream.
+gt version: $GT_VERSION
+
+Notable changes:
+$(git log --oneline @{1}..HEAD | head -10)
+"
+```
+
+**Exit criteria:** Sync documented and complete.
+"""

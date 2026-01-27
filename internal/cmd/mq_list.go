@@ -113,6 +113,13 @@ func runMQList(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		// Filter by rig - only show MRs for this rig
+		// MRs have a rig field indicating which rig they belong to.
+		// Skip MRs that have a rig field that doesn't match the requested rig.
+		if fields != nil && fields.Rig != "" && !strings.EqualFold(fields.Rig, rigName) {
+			continue
+		}
+
 		// Calculate priority score
 		score := calculateMRScore(issue, fields, now)
 		scored = append(scored, scoredIssue{issue: issue, fields: fields, score: score})

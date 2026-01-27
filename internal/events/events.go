@@ -68,6 +68,13 @@ const (
 	TypeMerged       = "merged"
 	TypeMergeFailed  = "merge_failed"
 	TypeMergeSkipped = "merge_skipped"
+
+	// Decision events
+	TypeDecisionRequested = "decision_requested"
+	TypeDecisionResolved  = "decision_resolved"
+
+	// Hook error events
+	TypeHookError = "hook_error"
 )
 
 // EventsFile is the name of the raw events log.
@@ -327,6 +334,29 @@ func SessionPayload(sessionID, role, topic, cwd string) map[string]interface{} {
 	}
 	if cwd != "" {
 		p["cwd"] = cwd
+	}
+	return p
+}
+
+// HookErrorPayload creates a payload for hook error events.
+// hookType: The Claude Code hook type (SessionStart, UserPromptSubmit, etc.)
+// command: The command that failed
+// exitCode: Exit code of the command
+// stderr: Standard error output (truncated)
+// role: Gas Town role running the hook
+func HookErrorPayload(hookType, command string, exitCode int, stderr, role string) map[string]interface{} {
+	p := map[string]interface{}{
+		"hook_type": hookType,
+		"command":   command,
+		"exit_code": exitCode,
+		"role":      role,
+	}
+	if stderr != "" {
+		// Truncate stderr to avoid huge payloads
+		if len(stderr) > 500 {
+			stderr = stderr[:500] + "..."
+		}
+		p["stderr"] = stderr
 	}
 	return p
 }

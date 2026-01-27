@@ -471,8 +471,9 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
 	}
-	// Type is deprecated: convert to gt:<type> label
+	// Set issue type AND add gt:<type> label for backwards compatibility
 	if opts.Type != "" {
+		args = append(args, "--type="+opts.Type)
 		args = append(args, "--labels=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {
@@ -522,8 +523,9 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
 	}
-	// Type is deprecated: convert to gt:<type> label
+	// Set issue type AND add gt:<type> label for backwards compatibility
 	if opts.Type != "" {
+		args = append(args, "--type="+opts.Type)
 		args = append(args, "--labels=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {
@@ -592,6 +594,12 @@ func (b *Beads) Update(id string, opts UpdateOptions) error {
 	}
 
 	_, err := b.run(args...)
+	return err
+}
+
+// AddLabel adds a label to an issue.
+func (b *Beads) AddLabel(id, label string) error {
+	_, err := b.run("label", "add", id, label)
 	return err
 }
 

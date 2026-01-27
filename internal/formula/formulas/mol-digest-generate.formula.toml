@@ -94,7 +94,7 @@ bd list --status=closed --updated-after={{since}}
 b) **Agent activity:**
 ```bash
 gt polecats <rig>           # Polecat activity
-gt feed --since={{since}}   # Activity feed entries
+gt feed --since={{since}} --no-follow   # Activity feed entries
 ```
 
 c) **Merges:**

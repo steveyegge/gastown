@@ -682,6 +682,11 @@ type MergeQueueConfig struct {
 	// Enabled controls whether the merge queue is active.
 	Enabled bool `json:"enabled"`
 
+	// Strategy determines how work is landed after merge queue processing.
+	// Valid values: "direct_merge", "pr_to_main", "pr_to_branch", "direct_to_branch"
+	// Default: "direct_merge" (current behavior - merge directly to target branch)
+	Strategy string `json:"strategy,omitempty"`
+
 	// TargetBranch is the default branch to merge into (usually "main").
 	TargetBranch string `json:"target_branch"`
 
@@ -716,6 +721,29 @@ type MergeQueueConfig struct {
 
 	// MaxConcurrent is the maximum number of concurrent merges.
 	MaxConcurrent int `json:"max_concurrent"`
+
+	// PROptions contains settings for PR-based merge strategies.
+	// Only used when Strategy is "pr_to_main" or "pr_to_branch".
+	PROptions *PROptions `json:"pr_options,omitempty"`
+}
+
+// PROptions contains settings for PR-based merge strategies.
+type PROptions struct {
+	// Template is the path to a PR template file (relative to repo root).
+	Template string `json:"template,omitempty"`
+
+	// AutoMerge enables GitHub auto-merge when creating PR.
+	// The PR will automatically merge when all requirements are met.
+	AutoMerge bool `json:"auto_merge,omitempty"`
+
+	// Labels are GitHub labels to apply to created PRs.
+	Labels []string `json:"labels,omitempty"`
+
+	// Reviewers are GitHub usernames to request review from.
+	Reviewers []string `json:"reviewers,omitempty"`
+
+	// Draft creates the PR as a draft PR.
+	Draft bool `json:"draft,omitempty"`
 }
 
 // OnConflict strategy constants.
@@ -724,10 +752,55 @@ const (
 	OnConflictAutoRebase = "auto_rebase"
 )
 
+// MergeStrategy constants define how work is landed after merge queue processing.
+const (
+	// StrategyDirectMerge merges directly to target branch (no PR).
+	// This is the default and current behavior.
+	StrategyDirectMerge = "direct_merge"
+
+	// StrategyPRToMain creates a GitHub PR targeting main branch.
+	// Used for external repos or repos requiring review.
+	StrategyPRToMain = "pr_to_main"
+
+	// StrategyPRToBranch creates a GitHub PR targeting a configured branch.
+	// Used for develop/staging workflows.
+	StrategyPRToBranch = "pr_to_branch"
+
+	// StrategyDirectToBranch merges directly to a configured branch (not main).
+	// Used for staging branches without PR requirement.
+	StrategyDirectToBranch = "direct_to_branch"
+)
+
+// ValidMergeStrategies returns all valid merge strategy values.
+func ValidMergeStrategies() []string {
+	return []string{
+		StrategyDirectMerge,
+		StrategyPRToMain,
+		StrategyPRToBranch,
+		StrategyDirectToBranch,
+	}
+}
+
+// IsValidMergeStrategy checks if a strategy value is valid.
+func IsValidMergeStrategy(strategy string) bool {
+	for _, valid := range ValidMergeStrategies() {
+		if strategy == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// IsPRStrategy returns true if the strategy creates a PR instead of direct merge.
+func IsPRStrategy(strategy string) bool {
+	return strategy == StrategyPRToMain || strategy == StrategyPRToBranch
+}
+
 // DefaultMergeQueueConfig returns a MergeQueueConfig with sensible defaults.
 func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
 		Enabled:              true,
+		Strategy:             StrategyDirectMerge,
 		TargetBranch:         "main",
 		IntegrationBranches:  true,
 		OnConflict:           OnConflictAssignBack,
@@ -776,6 +849,8 @@ type Account struct {
 	Email       string `json:"email"`                 // account email
 	Description string `json:"description,omitempty"` // human description
 	ConfigDir   string `json:"config_dir"`            // path to CLAUDE_CONFIG_DIR
+	AuthToken   string `json:"auth_token,omitempty"`  // optional ANTHROPIC_AUTH_TOKEN for API auth
+	BaseURL     string `json:"base_url,omitempty"`    // optional ANTHROPIC_BASE_URL for custom endpoints
 }
 
 // CurrentAccountsVersion is the current schema version for AccountsConfig.

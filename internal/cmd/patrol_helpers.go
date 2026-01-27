@@ -2,15 +2,23 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/style"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
+
+// wispCreateResult matches the JSON output from bd mol wisp create --json
+type wispCreateResult struct {
+	NewEpicID string `json:"new_epic_id"`
+	Created   int    `json:"created"`
+}
 
 // PatrolConfig holds role-specific patrol configuration.
 type PatrolConfig struct {
@@ -135,8 +143,8 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 		return "", fmt.Errorf("proto %s not found in catalog", cfg.PatrolMolName)
 	}
 
-	// Create the patrol wisp
-	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
+	// Create the patrol wisp with JSON output for reliable parsing
+	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName, "--json")
 	cmdSpawn.Dir = cfg.BeadsDir
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
@@ -146,23 +154,15 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 		return "", fmt.Errorf("failed to create patrol wisp: %s", stderrSpawn.String())
 	}
 
-	// Parse the created molecule ID from output
-	var patrolID string
-	spawnOutput := stdoutSpawn.String()
-	for _, line := range strings.Split(spawnOutput, "\n") {
-		if strings.Contains(line, "Root issue:") || strings.Contains(line, "Created") {
-			parts := strings.Fields(line)
-			for _, p := range parts {
-				if strings.HasPrefix(p, "wisp-") || strings.HasPrefix(p, "gt-") {
-					patrolID = p
-					break
-				}
-			}
-		}
+	// Parse JSON output to get the wisp ID
+	var result wispCreateResult
+	if err := json.Unmarshal(stdoutSpawn.Bytes(), &result); err != nil {
+		return "", fmt.Errorf("created wisp but could not parse JSON output: %v (output: %s)", err, stdoutSpawn.String())
 	}
 
+	patrolID := result.NewEpicID
 	if patrolID == "" {
-		return "", fmt.Errorf("created wisp but could not parse ID from output")
+		return "", fmt.Errorf("created wisp but new_epic_id was empty in JSON output")
 	}
 
 	// Hook the wisp to the agent so gt mol status sees it
@@ -171,6 +171,12 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	if err := cmdPin.Run(); err != nil {
 		return patrolID, fmt.Errorf("created wisp %s but failed to hook", patrolID)
 	}
+
+	// Also set the hook slot on the agent bead (fixes mi-619: hook slot consistency bug)
+	// This is critical - the agent bead's hook slot is what gt hook queries.
+	// Without this, the patrol wisp status is "hooked" but the agent's hook slot is empty,
+	// making the work invisible to gt hook and breaking autonomous execution.
+	setPatrolAgentHookSlot(patrolID, cfg)
 
 	return patrolID, nil
 }
@@ -217,5 +223,46 @@ func outputPatrolContext(cfg PatrolConfig) {
 	if patrolID != "" {
 		fmt.Println()
 		fmt.Printf("Current patrol ID: %s\n", patrolID)
+	}
+}
+
+// setPatrolAgentHookSlot sets the hook slot on the agent bead for a patrol.
+// This fixes the mi-619 bug where the patrol wisp is marked hooked but the agent
+// bead's hook slot is empty, making work invisible to gt hook.
+func setPatrolAgentHookSlot(patrolID string, cfg PatrolConfig) {
+	var agentBeadID string
+
+	switch cfg.RoleName {
+	case "deacon":
+		agentBeadID = beads.DeaconBeadIDTown()
+	case "witness":
+		// Extract rig from assignee (format: "rig/witness")
+		parts := strings.Split(cfg.Assignee, "/")
+		if len(parts) >= 2 && parts[1] == "witness" {
+			rig := parts[0]
+			prefix := beads.GetPrefixForRig("", rig) // "" since we can infer from beads dir
+			agentBeadID = beads.WitnessBeadIDWithPrefix(prefix, rig)
+		}
+	case "refinery":
+		// Extract rig from assignee (format: "rig/refinery")
+		parts := strings.Split(cfg.Assignee, "/")
+		if len(parts) >= 2 && parts[1] == "refinery" {
+			rig := parts[0]
+			prefix := beads.GetPrefixForRig("", rig)
+			agentBeadID = beads.RefineryBeadIDWithPrefix(prefix, rig)
+		}
+	}
+
+	if agentBeadID == "" {
+		// Silent skip - some configurations may not support hook slot setting
+		return
+	}
+
+	cmdHookSlot := exec.Command("bd", "--no-daemon", "slot", "set", agentBeadID, "hook", patrolID)
+	cmdHookSlot.Dir = cfg.BeadsDir
+	if err := cmdHookSlot.Run(); err != nil {
+		// Non-fatal: the work is still hooked (status=hooked), but the agent bead's hook slot
+		// might not be updated. Log but continue - bd slot set can fail for cross-database scenarios.
+		fmt.Fprintf(os.Stderr, "Warning: could not set agent hook slot for %s: %v\n", cfg.Assignee, err)
 	}
 }

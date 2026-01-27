@@ -14,6 +14,17 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+// bdCmd creates an exec.Command for bd.
+func bdCmd(args ...string) *exec.Cmd {
+	return exec.Command("bd", args...)
+}
+
+// bdCmdWithStale creates a bd command with --allow-stale for read operations.
+func bdCmdWithStale(args ...string) *exec.Cmd {
+	fullArgs := append(args, "--allow-stale")
+	return exec.Command("bd", fullArgs...)
+}
+
 // beadInfo holds status and assignee for a bead.
 type beadInfo struct {
 	Title    string `json:"title"`
@@ -25,11 +36,10 @@ type beadInfo struct {
 // Uses bd's native prefix-based routing via routes.jsonl - do NOT set BEADS_DIR
 // as that overrides routing and breaks resolution of rig-level beads.
 //
-// Uses --no-daemon with --allow-stale to avoid daemon socket timing issues
-// while still finding beads when database is out of sync with JSONL.
+// Uses --allow-stale to find beads when database might be out of sync with JSONL.
 // For existence checks, stale data is acceptable - we just need to know it exists.
 func verifyBeadExists(beadID string) error {
-	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
+	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
 	// Run from town root so bd can find routes.jsonl for prefix-based routing.
 	// Do NOT set BEADS_DIR - that overrides routing and breaks rig bead resolution.
 	if townRoot, err := workspace.FindFromCwd(); err == nil {
@@ -131,16 +141,21 @@ func storeArgsInBead(beadID, args string) error {
 
 // storeDispatcherInBead stores the dispatcher agent ID in the bead's description.
 // This enables polecats to notify the dispatcher when work is complete.
+// Uses daemon-first approach: daemon mode if available, --no-daemon fallback.
 func storeDispatcherInBead(beadID, dispatcher string) error {
 	if dispatcher == "" {
 		return nil
 	}
 
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "show", beadID, "--json")
+	showCmd := bdCmdWithStale("show", beadID, "--json")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
+	}
+	// Handle bd --no-daemon exit 0 bug: empty stdout means not found
+	if len(out) == 0 {
+		return fmt.Errorf("bead not found")
 	}
 
 	// Parse the bead
@@ -166,7 +181,7 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 	newDesc := beads.SetAttachmentFields(issue, fields)
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := bdCmd("update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -178,6 +193,7 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 // storeAttachedMoleculeInBead sets the attached_molecule field in a bead's description.
 // This is required for gt hook to recognize that a molecule is attached to the bead.
 // Called after bonding a formula wisp to a bead via "gt sling <formula> --on <bead>".
+// Uses daemon-first approach: daemon mode if available, --no-daemon fallback.
 func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	if moleculeID == "" {
 		return nil
@@ -190,10 +206,14 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	issue := &beads.Issue{}
 	if logPath == "" {
 		// Get the bead to preserve existing description content
-		showCmd := exec.Command("bd", "show", beadID, "--json")
+		showCmd := bdCmdWithStale("show", beadID, "--json")
 		out, err := showCmd.Output()
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
+		}
+		// Handle bd --no-daemon exit 0 bug: empty stdout means not found
+		if len(out) == 0 {
+			return fmt.Errorf("bead not found")
 		}
 
 		// Parse the bead
@@ -226,7 +246,7 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	}
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
+	updateCmd := bdCmd("update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -418,7 +438,8 @@ func agentIDToBeadID(agentID, townRoot string) string {
 	case len(parts) == 3 && parts[1] == "crew":
 		return beads.CrewBeadIDWithPrefix(prefix, rig, parts[2])
 	case len(parts) == 3 && parts[1] == "polecats":
-		return beads.PolecatBeadIDWithPrefix(prefix, rig, parts[2])
+		// Polecat agent beads use town beads (hq- prefix) - fix for hq-uumjfv
+		return beads.PolecatBeadIDTown(rig, parts[2])
 	default:
 		return ""
 	}
@@ -434,6 +455,9 @@ func agentIDToBeadID(agentID, townRoot string) string {
 // For cross-database scenarios (agent in rig db, hook bead in town db),
 // the slot set may fail - this is handled gracefully with a warning.
 // The work is still correctly attached via `bd update <bead> --assignee=<agent>`.
+//
+// Fix for hq-cc7214.26: If agent bead doesn't exist or is closed, this function
+// now creates/reopens it before setting the hook.
 func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	_ = townBeadsDir // Not used - BEADS_DIR breaks redirect mechanism
 
@@ -474,10 +498,75 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	// For cross-database scenarios, slot set may fail gracefully (warning only).
 	bd := beads.New(agentWorkDir)
 	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
+		// Fix for hq-cc7214.26: If agent bead doesn't exist or is closed,
+		// try to create/reopen it and retry setting the hook.
+		if strings.Contains(err.Error(), "not found") {
+			if ensureErr := ensureAgentBeadExists(bd, agentID, agentBeadID, townRoot); ensureErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: couldn't create agent bead %s: %v\n", agentBeadID, ensureErr)
+				return
+			}
+			// Retry setting the hook after creating/reopening the bead
+			if retryErr := bd.SetHookBead(agentBeadID, beadID); retryErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook after create: %v\n", agentBeadID, retryErr)
+			}
+			return
+		}
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
 		return
 	}
+}
+
+// ensureAgentBeadExists creates or reopens an agent bead if it doesn't exist or is closed.
+// This fixes hq-cc7214.26 where slinging fails because the agent bead isn't found.
+func ensureAgentBeadExists(bd *beads.Beads, agentID, agentBeadID, townRoot string) error {
+	// Parse agent ID to determine role type and rig
+	// Format: rig/role/name (e.g., gastown/crew/dolt_doctor, gastown/polecats/Toast)
+	// Or: rig/role (e.g., gastown/witness, gastown/refinery)
+	agentID = strings.TrimSuffix(agentID, "/")
+	parts := strings.Split(agentID, "/")
+
+	var roleType, rigName, agentName string
+	switch {
+	case len(parts) == 3 && parts[1] == "crew":
+		roleType = "crew"
+		rigName = parts[0]
+		agentName = parts[2]
+	case len(parts) == 3 && parts[1] == "polecats":
+		roleType = "polecat"
+		rigName = parts[0]
+		agentName = parts[2]
+	case len(parts) == 2 && parts[1] == "witness":
+		roleType = "witness"
+		rigName = parts[0]
+	case len(parts) == 2 && parts[1] == "refinery":
+		roleType = "refinery"
+		rigName = parts[0]
+	default:
+		return fmt.Errorf("unsupported agent ID format: %s", agentID)
+	}
+
+	// Build description based on role type
+	var desc string
+	switch roleType {
+	case "crew":
+		desc = fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", agentName, rigName)
+	case "polecat":
+		desc = fmt.Sprintf("Polecat %s in %s - ephemeral worker.", agentName, rigName)
+	case "witness":
+		desc = fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName)
+	case "refinery":
+		desc = fmt.Sprintf("Refinery for %s - processes merge queue.", rigName)
+	}
+
+	fields := &beads.AgentFields{
+		RoleType:   roleType,
+		Rig:        rigName,
+		AgentState: "working", // Set to working since we're about to hook work
+	}
+
+	_, err := bd.CreateOrReopenAgentBead(agentBeadID, desc, fields)
+	return err
 }
 
 // wakeRigAgents wakes the witness and refinery for a rig after polecat dispatch.
@@ -504,6 +593,18 @@ func wakeRigAgents(rigName string) {
 func isPolecatTarget(target string) bool {
 	parts := strings.Split(target, "/")
 	return len(parts) >= 3 && parts[1] == "polecats"
+}
+
+// parseCrewTarget parses a crew target string and returns the rig name and crew name.
+// Returns (rigName, crewName, true) if the target is a valid crew target format "rig/crew/name".
+// Returns ("", "", false) otherwise.
+// This is used to detect and auto-start stopped crew sessions when slinging work.
+func parseCrewTarget(target string) (rigName, crewName string, ok bool) {
+	parts := strings.Split(target, "/")
+	if len(parts) == 3 && parts[1] == "crew" {
+		return parts[0], parts[2], true
+	}
+	return "", "", false
 }
 
 // FormulaOnBeadResult contains the result of instantiating a formula on a bead.

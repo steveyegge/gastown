@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package gastown.v1;
+
+option go_package = "github.com/steveyegge/gastown/mobile/gen/gastown/v1;gastownv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Priority levels for messages and issues
+enum Priority {
+  PRIORITY_UNSPECIFIED = 0;
+  PRIORITY_LOW = 1;
+  PRIORITY_NORMAL = 2;
+  PRIORITY_HIGH = 3;
+  PRIORITY_URGENT = 4;
+}
+
+// Agent address in the form "rig/role/name" or "mayor/"
+message AgentAddress {
+  string rig = 1;      // e.g., "gastown", empty for town-level
+  string role = 2;     // e.g., "crew", "polecats", "witness"
+  string name = 3;     // e.g., "mobile_gastown", "alpha"
+}
+
+// Overseer (human operator) information
+message OverseerInfo {
+  string name = 1;
+  string email = 2;
+  string username = 3;
+  int32 unread_mail = 4;
+}
+
+// Summary of a rig
+message RigSummary {
+  string name = 1;
+  int32 polecat_count = 2;
+  int32 crew_count = 3;
+  bool has_witness = 4;
+  bool has_refinery = 5;
+}
+
+// Bead/issue reference
+message BeadRef {
+  string id = 1;       // e.g., "gt-abc123", "hq-xyz789"
+  string title = 2;
+  string status = 3;   // open, closed, in_progress
+  string type = 4;     // task, bug, feature, epic, decision
+}

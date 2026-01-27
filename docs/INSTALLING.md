@@ -10,7 +10,7 @@ Complete setup guide for Gas Town multi-agent orchestrator.
 |------|---------|-------|---------|
 | **Go** | 1.24+ | `go version` | See [golang.org](https://go.dev/doc/install) |
 | **Git** | 2.20+ | `git --version` | See below |
-| **Beads** | latest | `bd version` | `go install github.com/steveyegge/beads/cmd/bd@latest` |
+| **Beads** | latest | `bd version` | `go install github.com/groblegark/beads/cmd/bd@latest` |
 
 ### Optional (for Full Stack Mode)
 
@@ -81,7 +81,7 @@ tmux -V           # (Optional) Should show 3.0 or higher
 go install github.com/steveyegge/gastown/cmd/gt@latest
 
 # Install Beads (issue tracker)
-go install github.com/steveyegge/beads/cmd/bd@latest
+go install github.com/groblegark/beads/cmd/bd@latest
 
 # Verify installation
 gt version
@@ -230,7 +230,7 @@ source ~/.bashrc  # or restart terminal
 Beads CLI not installed:
 
 ```bash
-go install github.com/steveyegge/beads/cmd/bd@latest
+go install github.com/groblegark/beads/cmd/bd@latest
 ```
 
 ### `gt doctor` shows errors
@@ -284,7 +284,7 @@ To update Gas Town and Beads:
 
 ```bash
 go install github.com/steveyegge/gastown/cmd/gt@latest
-go install github.com/steveyegge/beads/cmd/bd@latest
+go install github.com/groblegark/beads/cmd/bd@latest
 gt doctor --fix            # Fix any post-update issues
 ```
 

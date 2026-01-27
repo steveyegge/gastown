@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -86,23 +84,16 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Find town root and rig path for agent beads
+	// Find town root for beads resolution
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return fmt.Errorf("finding town root: %w", err)
 	}
 
-	// Extract rig name from agent ID (e.g., "gastown/crew/joe" -> "gastown")
-	// For town-level agents like "mayor/", use town root
-	rigName := strings.Split(agentID, "/")[0]
-	var beadsPath string
-	if rigName == "mayor" || rigName == "deacon" {
-		beadsPath = townRoot
-	} else {
-		beadsPath = filepath.Join(townRoot, rigName)
-	}
-
-	b := beads.New(beadsPath)
+	// Use town root for beads client - routing handles prefix-based resolution.
+	// FIX (hq-8af330.6): Previously used rig path for non-town agents, but
+	// crew beads use gt- prefix which routes via town-level routes.jsonl.
+	b := beads.New(townRoot)
 
 	// Convert agent ID to agent bead ID and look up the agent bead
 	agentBeadID := agentIDToBeadID(agentID, townRoot)

@@ -310,7 +310,7 @@ func handleStepContinue(cwd, townRoot, _ string, nextStep *beads.Issue, dryRun b
 	}
 
 	// Pin the next step bead
-	pinCmd := exec.Command("bd", "update", nextStep.ID, "--status=pinned", "--assignee="+agentID)
+	pinCmd := exec.Command("bd", "--no-daemon", "update", nextStep.ID, "--status=pinned", "--assignee="+agentID)
 	pinCmd.Dir = gitRoot
 	pinCmd.Stderr = os.Stderr
 	if err := pinCmd.Run(); err != nil {
@@ -404,7 +404,7 @@ func handleMoleculeComplete(cwd, townRoot, moleculeID string, dryRun bool) error
 		})
 		if err == nil && len(pinnedBeads) > 0 {
 			// Unpin by setting status to open
-			unpinCmd := exec.Command("bd", "update", pinnedBeads[0].ID, "--status=open")
+			unpinCmd := exec.Command("bd", "--no-daemon", "update", pinnedBeads[0].ID, "--status=open")
 			unpinCmd.Dir = gitRoot
 			unpinCmd.Stderr = os.Stderr
 			if err := unpinCmd.Run(); err != nil {

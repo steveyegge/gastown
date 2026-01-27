@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
@@ -17,7 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
-	"github.com/steveyegge/gastown/internal/workspace"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Common errors
@@ -47,9 +48,14 @@ func (e *UncommittedWorkError) Unwrap() error {
 type Manager struct {
 	rig      *rig.Rig
 	git      *git.Git
-	beads    *beads.Beads
+	beads    *beads.Beads // Rig-level beads for issue and agent bead operations
+	prefix   string       // Rig's configured prefix (e.g., "gt", "fhc") without hyphen
 	namePool *NamePool
 	tmux     *tmux.Tmux
+
+	// allocMu protects name allocation within a single process.
+	// File locking (in AllocateName) handles cross-process synchronization.
+	allocMu sync.Mutex
 }
 
 // NewManager creates a new polecat manager.
@@ -59,6 +65,12 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	// For local beads: rig/.beads is the database, so use rig root
 	resolvedBeads := beads.ResolveBeadsDir(r.Path)
 	beadsPath := filepath.Dir(resolvedBeads) // Get the directory containing .beads
+
+	// Get rig's configured prefix for agent bead IDs (e.g., "gt", "fhc").
+	// Agent beads are stored in the rig's beads database with the rig's prefix,
+	// aligning with existing beads infrastructure (fix for gt-qub).
+	townRoot := filepath.Dir(r.Path)
+	prefix := beads.GetPrefixForRig(townRoot, r.Name)
 
 	// Try to load rig settings for namepool config
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
@@ -84,6 +96,7 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 		rig:      r,
 		git:      g,
 		beads:    beads.NewWithBeadsDir(beadsPath, resolvedBeads),
+		prefix:   prefix,
 		namePool: pool,
 		tmux:     t,
 	}
@@ -96,17 +109,12 @@ func (m *Manager) assigneeID(name string) string {
 }
 
 // agentBeadID returns the agent bead ID for a polecat.
-// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast", "bd-beads-polecat-obsidian")
-// The prefix is looked up from routes.jsonl to support rigs with custom prefixes.
+// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast")
+// When prefix equals rig name, the rig is deduplicated (e.g., "fhc-polecat-Toast").
+// Polecat agent beads are stored in the rig's beads database with the rig's
+// configured prefix, aligning with existing beads infrastructure (fix for gt-qub).
 func (m *Manager) agentBeadID(name string) string {
-	// Find town root to lookup prefix from routes.jsonl
-	townRoot, err := workspace.Find(m.rig.Path)
-	if err != nil || townRoot == "" {
-		// Fall back to default prefix
-		return beads.PolecatBeadID(m.rig.Name, name)
-	}
-	prefix := beads.GetPrefixForRig(townRoot, m.rig.Name)
-	return beads.PolecatBeadIDWithPrefix(prefix, m.rig.Name, name)
+	return beads.PolecatBeadIDWithPrefix(m.prefix, m.rig.Name, name)
 }
 
 // getCleanupStatusFromBead reads the cleanup_status from the polecat's agent bead.
@@ -370,9 +378,10 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	}
 
 	// Fetch latest from origin to ensure worktree starts from up-to-date code
-	if err := repoGit.Fetch("origin"); err != nil {
+	fetchErr := repoGit.Fetch("origin")
+	if fetchErr != nil {
 		// Non-fatal - proceed with potentially stale code
-		fmt.Printf("Warning: could not fetch origin: %v\n", err)
+		fmt.Printf("Warning: could not fetch origin: %v\n", fetchErr)
 	}
 
 	// Determine the start point for the new worktree
@@ -383,11 +392,42 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	}
 	startPoint := fmt.Sprintf("origin/%s", defaultBranch)
 
+	// Validate that the start point exists locally before creating worktree.
+	// Issue hq-a21833: polecat created branch with no merge base because origin/main
+	// didn't exist locally (fetch failed or ref not updated).
+	if !repoGit.RefExists(startPoint) {
+		// Start point doesn't exist - this would cause the new branch to have no
+		// proper merge base with origin/main, resulting in massive diffs.
+		_ = os.RemoveAll(polecatDir) // Clean up directory we created
+		return nil, fmt.Errorf("start point %s does not exist locally (fetch may have failed); cannot create worktree with proper merge base", startPoint)
+	}
+
 	// Always create fresh branch - unique name guarantees no collision
 	// git worktree add -b polecat/<name>-<timestamp> <path> <startpoint>
 	// Worktree goes in polecats/<name>/<rigname>/ for LLM ergonomics
 	if err := repoGit.WorktreeAddFromRef(clonePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
+	}
+
+	// Verify worktree was actually created (guards against silent failures).
+	// Issue: gt sling reports success but worktree never created.
+	if err := verifyWorktree(clonePath); err != nil {
+		// Clean up the parent directory we created
+		_ = os.RemoveAll(polecatDir)
+		return nil, fmt.Errorf("verifying worktree at %s: %w", clonePath, err)
+	}
+
+	// Verify the new branch has proper merge-base with origin/main (defense in depth).
+	// Issue hq-a21833: polecat branch had no common ancestor, causing 8179 files changed.
+	worktreeGit := git.NewGit(clonePath)
+	isAncestor, err := worktreeGit.IsAncestor(startPoint, "HEAD")
+	if err != nil {
+		_ = os.RemoveAll(polecatDir)
+		return nil, fmt.Errorf("checking merge-base for new worktree: %w", err)
+	}
+	if !isAncestor {
+		_ = os.RemoveAll(polecatDir)
+		return nil, fmt.Errorf("new branch is not based on %s; refusing to create polecat with invalid merge-base", startPoint)
 	}
 
 	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
@@ -413,6 +453,14 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		// Non-fatal - polecat can still work with local beads
 		// Log warning but don't fail the spawn
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Set up .claude symlink so polecat inherits shared hook configuration.
+	// Claude Code doesn't traverse parent directories for settings.json, so the symlink
+	// makes polecats/.claude/settings.json visible in the worktree's CWD.
+	if err := m.setupClaudeSymlink(clonePath); err != nil {
+		// Non-fatal - polecat can still work without hooks (uses PRIME.md fallback)
+		fmt.Printf("Warning: could not set up .claude symlink: %v\n", err)
 	}
 
 	// Provision PRIME.md with Gas Town context for this worker.
@@ -611,17 +659,41 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 // AllocateName allocates a name from the name pool.
 // Returns a pooled name (polecat-01 through polecat-50) if available,
 // otherwise returns an overflow name (rigname-N).
+//
+// This function uses two levels of locking to ensure safe allocation:
+// 1. Process-level mutex for concurrent goroutines within the same process
+// 2. File-based locking for concurrent processes (e.g., parallel gt sling commands)
 func (m *Manager) AllocateName() (string, error) {
-	// First reconcile pool with existing polecats to handle stale state
-	m.ReconcilePool()
+	// First acquire process-level lock for goroutine safety
+	m.allocMu.Lock()
+	defer m.allocMu.Unlock()
 
-	name, err := m.namePool.Allocate()
+	// Use file lock to synchronize across processes
+	// This prevents race conditions when multiple gt sling commands run in parallel
+	lockPath := filepath.Join(m.rig.Path, ".runtime", "namepool.lock")
+	flock := util.NewFileLock(lockPath)
+
+	var name string
+	err := flock.WithLock(func() error {
+		// First reconcile pool with existing polecats to handle stale state
+		// This must happen inside the lock to get accurate filesystem state
+		m.ReconcilePool()
+
+		var allocErr error
+		name, allocErr = m.namePool.Allocate()
+		if allocErr != nil {
+			return allocErr
+		}
+
+		if saveErr := m.namePool.Save(); saveErr != nil {
+			return fmt.Errorf("saving pool state: %w", saveErr)
+		}
+
+		return nil
+	})
+
 	if err != nil {
 		return "", err
-	}
-
-	if err := m.namePool.Save(); err != nil {
-		return "", fmt.Errorf("saving pool state: %w", err)
 	}
 
 	return name, nil
@@ -724,6 +796,12 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
 
+	// Verify worktree was actually created (guards against silent failures).
+	// Issue: gt sling reports success but worktree never created.
+	if err := verifyWorktree(newClonePath); err != nil {
+		return nil, fmt.Errorf("verifying worktree at %s: %w", newClonePath, err)
+	}
+
 	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
 	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
 	agentsMDPath := filepath.Join(newClonePath, "AGENTS.md")
@@ -742,6 +820,11 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Set up shared beads
 	if err := m.setupSharedBeads(newClonePath); err != nil {
 		fmt.Printf("Warning: could not set up shared beads: %v\n", err)
+	}
+
+	// Set up .claude symlink for shared hook configuration
+	if err := m.setupClaudeSymlink(newClonePath); err != nil {
+		fmt.Printf("Warning: could not set up .claude symlink: %v\n", err)
 	}
 
 	// Copy overlay files from .runtime/overlay/ to polecat root.
@@ -997,8 +1080,10 @@ func (m *Manager) ClearIssue(name string) error {
 	return nil
 }
 
-// loadFromBeads gets polecat info from beads assignee field.
-// State is simple: issue assigned → working, no issue → done (ready for cleanup).
+// loadFromBeads gets polecat info from beads assignee field and agent bead hook_bead.
+// State is determined by: has assigned issue OR has hook_bead → working, neither → done.
+// This fixes the bug where polecats with newly hooked work show as "done" because
+// the issue assignee hasn't been updated yet.
 // Transient polecats should always have work; no work means ready for Witness cleanup.
 // We don't interpret issue status (ZFC: Go is transport, not decision-maker).
 func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
@@ -1038,6 +1123,23 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 		state = StateWorking
 	}
 
+	// FIX (hq-50u3h, bd-3q6.7-1): Check agent bead's hook_bead field.
+	// hook_bead is the AUTHORITATIVE source for what the polecat is working on.
+	// It's set atomically during gt sling, while assignee fields may be stale
+	// (e.g., from previous polecat lifecycle before nuke).
+	// ALWAYS use hook_bead when set, overriding any stale assignee.
+	agentBeadID := m.agentBeadID(name)
+	if _, fields, err := m.beads.GetAgentBead(agentBeadID); err == nil && fields != nil {
+		if fields.HookBead != "" {
+			// Polecat has hooked work - should be working, not done
+			state = StateWorking
+			// FIX (bd-3q6.7-1): ALWAYS use hook_bead as the issue reference.
+			// Stale assignee fields from previous lifecycle must not override
+			// the newly hooked work. hook_bead is the authoritative source.
+			issueID = fields.HookBead
+		}
+	}
+
 	return &Polecat{
 		Name:      name,
 		Rig:       m.rig.Name,
@@ -1048,11 +1150,119 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	}, nil
 }
 
+// setupClaudeSymlink creates a symlink from the worktree's .claude directory to the shared
+// polecats/.claude directory. Claude Code only looks in the current working directory for
+// .claude/settings.json (no parent directory traversal), so this symlink is required for
+// polecats to inherit the shared hook configuration.
+//
+// The symlink is relative to work across different mount points and locations.
+// Fix for: hq-cc7214.22 (polecats not loading Claude hooks)
+func (m *Manager) setupClaudeSymlink(clonePath string) error {
+	symlinkPath := filepath.Join(clonePath, ".claude")
+
+	// Check if something already exists at .claude
+	if info, err := os.Lstat(symlinkPath); err == nil {
+		// If it's already a symlink, check if it points to the right place
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(symlinkPath)
+			if err == nil {
+				// Calculate expected relative path to polecats/.claude
+				// From: polecats/<name>/<rigname>/.claude
+				// To: polecats/.claude
+				// Relative: ../../.claude
+				expectedTarget := filepath.Join("..", "..", ".claude")
+				if target == expectedTarget {
+					return nil // Already correctly set up
+				}
+			}
+			// Wrong target - remove and recreate
+			if err := os.Remove(symlinkPath); err != nil {
+				return fmt.Errorf("removing stale .claude symlink: %w", err)
+			}
+		} else {
+			// It's a regular file or directory - don't touch it
+			// This could be a legitimate .claude directory from the source repo
+			return nil
+		}
+	}
+
+	// Check if the target .claude directory exists
+	targetDir := filepath.Join(m.rig.Path, "polecats", ".claude")
+	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
+		// Target doesn't exist - nothing to symlink to
+		return nil
+	}
+
+	// Create relative symlink: ../../.claude
+	// From: polecats/<name>/<rigname>/.claude -> polecats/.claude
+	relTarget := filepath.Join("..", "..", ".claude")
+	if err := os.Symlink(relTarget, symlinkPath); err != nil {
+		return fmt.Errorf("creating .claude symlink: %w", err)
+	}
+
+	return nil
+}
+
 // setupSharedBeads creates a redirect file so the polecat uses the rig's shared .beads database.
 // This eliminates the need for git sync between polecat clones - all polecats share one database.
+// Also sets beads.role=maintainer in git config to ensure beads are written to the rig's database
+// instead of ~/.beads-planning (which is the default for HTTPS-cloned repos without credentials).
 func (m *Manager) setupSharedBeads(clonePath string) error {
 	townRoot := filepath.Dir(m.rig.Path)
-	return beads.SetupRedirect(townRoot, clonePath)
+	if err := beads.SetupRedirect(townRoot, clonePath); err != nil {
+		return err
+	}
+
+	// Set beads.role=maintainer to prevent beads from routing writes to ~/.beads-planning.
+	// Without this, HTTPS-cloned repos are treated as "contributor" and writes go to the
+	// wrong database, causing MR beads to be lost. See: gt-3ml66
+	polecatGit := git.NewGit(clonePath)
+	if err := polecatGit.SetConfig("beads.role", "maintainer"); err != nil {
+		return fmt.Errorf("setting beads.role config: %w", err)
+	}
+
+	return nil
+}
+
+// verifyWorktree checks that a worktree was actually created and is valid.
+// This guards against silent failures in git worktree add where git returns
+// success but the worktree is incomplete or missing.
+//
+// Checks:
+// 1. Directory exists
+// 2. Has a .git file (worktree marker) or .git directory
+// 3. Can run git commands in it
+//
+// Issue: gt sling reports success but worktree never created (hq-yh8icr).
+func verifyWorktree(path string) error {
+	// Check 1: Directory exists
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("worktree directory does not exist")
+		}
+		return fmt.Errorf("checking worktree directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("worktree path is not a directory")
+	}
+
+	// Check 2: Has .git file or directory (indicates git worktree or repo)
+	gitPath := filepath.Join(path, ".git")
+	if _, err := os.Stat(gitPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("worktree missing .git (not a valid worktree)")
+		}
+		return fmt.Errorf("checking .git: %w", err)
+	}
+
+	// Check 3: Can run git rev-parse to verify it's a working git directory
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--git-dir")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git rev-parse failed (invalid git worktree): %w", err)
+	}
+
+	return nil
 }
 
 // CleanupStaleBranches removes orphaned polecat branches that are no longer in use.

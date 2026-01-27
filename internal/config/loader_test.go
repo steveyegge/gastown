@@ -344,6 +344,63 @@ func TestRigSettingsValidation(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "valid merge strategy direct_merge",
+			settings: &RigSettings{
+				Type:    "rig-settings",
+				Version: 1,
+				MergeQueue: &MergeQueueConfig{
+					Strategy: StrategyDirectMerge,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid merge strategy pr_to_main",
+			settings: &RigSettings{
+				Type:    "rig-settings",
+				Version: 1,
+				MergeQueue: &MergeQueueConfig{
+					Strategy: StrategyPRToMain,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid merge strategy",
+			settings: &RigSettings{
+				Type:    "rig-settings",
+				Version: 1,
+				MergeQueue: &MergeQueueConfig{
+					Strategy: "invalid_strategy",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "pr_options with non-PR strategy",
+			settings: &RigSettings{
+				Type:    "rig-settings",
+				Version: 1,
+				MergeQueue: &MergeQueueConfig{
+					Strategy:  StrategyDirectMerge,
+					PROptions: &PROptions{AutoMerge: true},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "pr_options with PR strategy is valid",
+			settings: &RigSettings{
+				Type:    "rig-settings",
+				Version: 1,
+				MergeQueue: &MergeQueueConfig{
+					Strategy:  StrategyPRToMain,
+					PROptions: &PROptions{AutoMerge: true, Labels: []string{"automated"}},
+				},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -362,6 +419,9 @@ func TestDefaultMergeQueueConfig(t *testing.T) {
 
 	if !cfg.Enabled {
 		t.Error("Enabled should be true by default")
+	}
+	if cfg.Strategy != StrategyDirectMerge {
+		t.Errorf("Strategy = %q, want %q", cfg.Strategy, StrategyDirectMerge)
 	}
 	if cfg.TargetBranch != "main" {
 		t.Errorf("TargetBranch = %q, want 'main'", cfg.TargetBranch)
@@ -502,6 +562,41 @@ func TestAccountsConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAccountsConfigWithAuthToken(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mayor", "accounts.json")
+
+	original := NewAccountsConfig()
+	original.Accounts["litellm"] = Account{
+		Description: "LiteLLM proxy account",
+		ConfigDir:   "~/.claude-accounts/litellm",
+		AuthToken:   "sk-test-12345",
+		BaseURL:     "http://localhost:4000",
+	}
+	original.Default = "litellm"
+
+	if err := SaveAccountsConfig(path, original); err != nil {
+		t.Fatalf("SaveAccountsConfig: %v", err)
+	}
+
+	loaded, err := LoadAccountsConfig(path)
+	if err != nil {
+		t.Fatalf("LoadAccountsConfig: %v", err)
+	}
+
+	litellm := loaded.GetAccount("litellm")
+	if litellm == nil {
+		t.Fatal("GetAccount('litellm') returned nil")
+	}
+	if litellm.AuthToken != "sk-test-12345" {
+		t.Errorf("litellm.AuthToken = %q, want 'sk-test-12345'", litellm.AuthToken)
+	}
+	if litellm.BaseURL != "http://localhost:4000" {
+		t.Errorf("litellm.BaseURL = %q, want 'http://localhost:4000'", litellm.BaseURL)
+	}
+}
+
 func TestAccountsConfigValidation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -563,6 +658,115 @@ func TestLoadAccountsConfigNotFound(t *testing.T) {
 	_, err := LoadAccountsConfig("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestValidateAccountAuth(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		account *ResolvedAccount
+		wantErr bool
+	}{
+		{
+			name:    "nil account is valid",
+			account: nil,
+			wantErr: false,
+		},
+		{
+			name: "auth token is valid credentials",
+			account: &ResolvedAccount{
+				Handle:    "litellm",
+				AuthToken: "sk-test-12345",
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty config dir with auth token is valid",
+			account: &ResolvedAccount{
+				Handle:    "litellm",
+				AuthToken: "sk-test-12345",
+				BaseURL:   "http://localhost:4000",
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty config dir without auth token is valid (let Claude handle)",
+			account: &ResolvedAccount{
+				Handle: "test",
+			},
+			wantErr: false,
+		},
+		{
+			name: "config dir without credentials file fails",
+			account: &ResolvedAccount{
+				Handle:    "test",
+				ConfigDir: "/nonexistent/path",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateAccountAuth(tt.account)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateAccountAuth() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestResolveAccount(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mayor", "accounts.json")
+
+	cfg := NewAccountsConfig()
+	cfg.Accounts["work"] = Account{
+		Email:     "work@example.com",
+		ConfigDir: "~/.claude-accounts/work",
+	}
+	cfg.Accounts["litellm"] = Account{
+		Description: "LiteLLM proxy",
+		ConfigDir:   "~/.claude-accounts/litellm",
+		AuthToken:   "sk-test-12345",
+		BaseURL:     "http://localhost:4000",
+	}
+	cfg.Default = "work"
+
+	if err := SaveAccountsConfig(path, cfg); err != nil {
+		t.Fatalf("SaveAccountsConfig: %v", err)
+	}
+
+	// Test resolving default account
+	resolved, err := ResolveAccount(path, "")
+	if err != nil {
+		t.Fatalf("ResolveAccount: %v", err)
+	}
+	if resolved == nil {
+		t.Fatal("ResolveAccount returned nil")
+	}
+	if resolved.Handle != "work" {
+		t.Errorf("Handle = %q, want 'work'", resolved.Handle)
+	}
+	if resolved.AuthToken != "" {
+		t.Errorf("AuthToken should be empty for work account")
+	}
+
+	// Test resolving specific account with auth token
+	resolved, err = ResolveAccount(path, "litellm")
+	if err != nil {
+		t.Fatalf("ResolveAccount: %v", err)
+	}
+	if resolved.Handle != "litellm" {
+		t.Errorf("Handle = %q, want 'litellm'", resolved.Handle)
+	}
+	if resolved.AuthToken != "sk-test-12345" {
+		t.Errorf("AuthToken = %q, want 'sk-test-12345'", resolved.AuthToken)
+	}
+	if resolved.BaseURL != "http://localhost:4000" {
+		t.Errorf("BaseURL = %q, want 'http://localhost:4000'", resolved.BaseURL)
 	}
 }
 
@@ -3390,10 +3594,13 @@ func TestBuildStartupCommandWithAgentOverride_IncludesGTRoot(t *testing.T) {
 		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
 	}
 
-	// Should include GT_ROOT in export
-	expected := "GT_ROOT=" + ShellQuote(townRoot)
-	if !strings.Contains(cmd, expected) {
-		t.Errorf("expected %s in command, got: %q", expected, cmd)
+	// Should include GT_ROOT in export.
+	// Accept both quoted and unquoted forms since path quoting varies by platform.
+	// Windows paths contain backslashes which trigger ShellQuote's quoting logic.
+	unquotedForm := "GT_ROOT=" + townRoot
+	quotedForm := "GT_ROOT=" + ShellQuote(townRoot)
+	if !strings.Contains(cmd, unquotedForm) && !strings.Contains(cmd, quotedForm) {
+		t.Errorf("expected GT_ROOT=%s (quoted or unquoted) in command, got: %q", townRoot, cmd)
 	}
 }
 

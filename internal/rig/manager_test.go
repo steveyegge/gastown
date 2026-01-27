@@ -624,6 +624,101 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 	}
 }
 
+func TestInitBeads_InheritsDoltBackendFromTown(t *testing.T) {
+	// Cannot use t.Parallel() due to t.Setenv
+	// When town uses Dolt backend, new rigs should inherit it.
+	// This test verifies that initBeads passes --backend dolt when town uses Dolt.
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "newrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir rig: %v", err)
+	}
+
+	// Create town-level .beads with Dolt backend (non-server mode)
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+		t.Fatalf("mkdir town beads: %v", err)
+	}
+	// Set storage-backend: dolt in config.yaml (non-server mode)
+	configYAML := "prefix: hq\nstorage-backend: dolt\n"
+	if err := os.WriteFile(filepath.Join(townBeadsDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatalf("write town config.yaml: %v", err)
+	}
+
+	// Use fake bd that captures the init arguments
+	argsLog := filepath.Join(t.TempDir(), "bd-args.log")
+	script := `#!/usr/bin/env bash
+set -e
+echo "$@" >> "` + argsLog + `"
+exit 0
+`
+	windowsScript := "@echo off\r\necho %* >> \"" + argsLog + "\"\r\nexit /b 0\r\n"
+	binDir := writeFakeBD(t, script, windowsScript)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	manager := &Manager{townRoot: townRoot}
+	if err := manager.initBeads(rigPath, "nr"); err != nil {
+		t.Fatalf("initBeads: %v", err)
+	}
+
+	// Verify --backend dolt was passed to bd init
+	argsData, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatalf("reading args log: %v", err)
+	}
+	argsContent := string(argsData)
+	if !strings.Contains(argsContent, "--backend dolt") {
+		t.Errorf("bd init should include --backend dolt when town uses Dolt; got: %s", argsContent)
+	}
+}
+
+func TestInitBeads_DoltServerMode_CreatesRedirect(t *testing.T) {
+	t.Parallel()
+	// When town uses Dolt server mode, new rigs should create a redirect
+	// to the town-level .beads instead of a local database.
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "newrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir rig: %v", err)
+	}
+
+	// Create town-level .beads with Dolt server mode enabled
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+		t.Fatalf("mkdir town beads: %v", err)
+	}
+	// Set up metadata.json with Dolt server mode
+	metadata := `{
+  "backend": "dolt",
+  "dolt_server_enabled": true,
+  "dolt_server_host": "127.0.0.1",
+  "dolt_server_port": 3306
+}`
+	if err := os.WriteFile(filepath.Join(townBeadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write town metadata.json: %v", err)
+	}
+
+	manager := &Manager{townRoot: townRoot}
+	if err := manager.initBeads(rigPath, "nr"); err != nil {
+		t.Fatalf("initBeads: %v", err)
+	}
+
+	// Verify redirect file was created pointing to town-level .beads
+	redirectPath := filepath.Join(rigPath, ".beads", "redirect")
+	content, err := os.ReadFile(redirectPath)
+	if err != nil {
+		t.Fatalf("reading redirect file: %v", err)
+	}
+
+	// Should contain a relative path to town .beads (../.beads)
+	got := strings.TrimSpace(string(content))
+	if !strings.HasSuffix(got, ".beads") {
+		t.Errorf("redirect should point to .beads; got: %s", got)
+	}
+}
+
 func TestDeriveBeadsPrefix(t *testing.T) {
 	tests := []struct {
 		name string

@@ -178,10 +178,11 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Lifecycle hygiene checks
 	d.Register(doctor.NewLifecycleHygieneCheck())
 
-	// Hook attachment checks
+	// Hook checks
 	d.Register(doctor.NewHookAttachmentValidCheck())
 	d.Register(doctor.NewHookSingletonCheck())
 	d.Register(doctor.NewOrphanedAttachmentsCheck())
+	d.Register(doctor.NewHookErrorsCheck())
 
 	// Rig-specific checks (only when --rig is specified)
 	if doctorRig != "" {
