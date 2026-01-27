@@ -21,7 +21,8 @@ type KeyMap struct {
 	Rationale key.Binding
 	Text      key.Binding
 	Peek      key.Binding // Peek at agent's terminal
-	Cancel    key.Binding
+	Cancel    key.Binding // Exit TUI without making selection
+	Dismiss   key.Binding // Dismiss/defer decision
 	Refresh   key.Binding
 
 	// Filtering
@@ -86,7 +87,11 @@ func DefaultKeyMap() KeyMap {
 		),
 		Cancel: key.NewBinding(
 			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
+			key.WithHelp("esc", "exit"),
+		),
+		Dismiss: key.NewBinding(
+			key.WithKeys("d", "D"),
+			key.WithHelp("d", "dismiss"),
 		),
 		Refresh: key.NewBinding(
 			key.WithKeys("R"),
@@ -113,7 +118,7 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns key bindings for the short help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Select1, k.Confirm, k.Rationale, k.Peek, k.Quit, k.Help}
+	return []key.Binding{k.Up, k.Down, k.Select1, k.Confirm, k.Rationale, k.Dismiss, k.Peek, k.Quit, k.Help}
 }
 
 // FullHelp returns key bindings for the full help view.

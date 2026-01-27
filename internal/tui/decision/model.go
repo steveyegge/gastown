@@ -284,6 +284,12 @@ type resolvedMsg struct {
 	err error
 }
 
+// dismissedMsg is sent when a decision is dismissed/canceled
+type dismissedMsg struct {
+	id  string
+	err error
+}
+
 // peekMsg is sent when terminal content is captured
 type peekMsg struct {
 	sessionName string
@@ -348,6 +354,29 @@ func (m *Model) resolveDecision(decisionID string, choice int, rationale string)
 		}
 
 		return resolvedMsg{id: decisionID}
+	}
+}
+
+// dismissDecision cancels/dismisses a decision
+func (m *Model) dismissDecision(decisionID string, reason string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		args := []string{"decision", "cancel", decisionID}
+		if reason != "" {
+			args = append(args, "--reason", reason)
+		}
+
+		cmd := exec.CommandContext(ctx, "gt", args...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			return dismissedMsg{id: decisionID, err: fmt.Errorf("%s", stderr.String())}
+		}
+
+		return dismissedMsg{id: decisionID}
 	}
 }
 
@@ -445,7 +474,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch {
-		case key.Matches(msg, m.keys.Quit):
+		case key.Matches(msg, m.keys.Quit), key.Matches(msg, m.keys.Cancel):
 			close(m.done)
 			return m, tea.Quit
 
@@ -515,6 +544,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.fetchDecisions())
 			m.status = "Refreshing..."
 
+		case key.Matches(msg, m.keys.Dismiss):
+			if len(m.decisions) > 0 && m.selected < len(m.decisions) {
+				d := m.decisions[m.selected]
+				cmds = append(cmds, m.dismissDecision(d.ID, "Dismissed via TUI"))
+				m.status = fmt.Sprintf("Dismissing %s...", d.ID)
+			}
+
 		case key.Matches(msg, m.keys.FilterHigh):
 			m.filter = "high"
 
@@ -546,6 +582,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Resolved: %s", msg.id)
 			m.selectedOption = 0
 			m.rationale = ""
+			cmds = append(cmds, m.fetchDecisions())
+		}
+
+	case dismissedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = fmt.Sprintf("Dismiss error: %v", msg.err)
+		} else {
+			m.status = fmt.Sprintf("Dismissed: %s", msg.id)
+			m.selectedOption = 0
 			cmds = append(cmds, m.fetchDecisions())
 		}
 
