@@ -3594,10 +3594,13 @@ func TestBuildStartupCommandWithAgentOverride_IncludesGTRoot(t *testing.T) {
 		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
 	}
 
-	// Should include GT_ROOT in export
-	expected := "GT_ROOT=" + ShellQuote(townRoot)
-	if !strings.Contains(cmd, expected) {
-		t.Errorf("expected %s in command, got: %q", expected, cmd)
+	// Should include GT_ROOT in export.
+	// Accept both quoted and unquoted forms since path quoting varies by platform.
+	// Windows paths contain backslashes which trigger ShellQuote's quoting logic.
+	unquotedForm := "GT_ROOT=" + townRoot
+	quotedForm := "GT_ROOT=" + ShellQuote(townRoot)
+	if !strings.Contains(cmd, unquotedForm) && !strings.Contains(cmd, quotedForm) {
+		t.Errorf("expected GT_ROOT=%s (quoted or unquoted) in command, got: %q", townRoot, cmd)
 	}
 }
 
