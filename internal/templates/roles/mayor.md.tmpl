@@ -305,7 +305,7 @@ Note: Beads changes are persisted immediately to Dolt - no sync step needed.
 
 ## Pull Requests
 
-When creating PRs, always use `--repo` with the origin remote (gh CLI defaults to upstream for forks):
+When creating PRs, default to `--repo` with the origin remote (gh CLI defaults to upstream for forks):
 
 ```bash
 gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\.git/\1/')
