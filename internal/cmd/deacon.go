@@ -400,6 +400,14 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	// Clean up any stale hooked beads from previous deacon sessions.
+	// When the deacon restarts, old patrol wisps can remain "hooked" in the database.
+	// Close them before starting fresh to prevent orphaned hooks.
+	if err := closeStaleDeaconHooks(townRoot); err != nil {
+		// Non-fatal: log warning but continue startup
+		style.PrintWarning("failed to clean stale deacon hooks: %v", err)
+	}
+
 	// Deacon runs from its own directory (for correct role detection by gt prime)
 	deaconDir := filepath.Join(townRoot, "deacon")
 
@@ -1024,6 +1032,42 @@ func updateAgentBeadState(townRoot, agent, state, _ string) { // reason unused b
 	cmd := exec.Command("bd", "agent", "state", beadID, state)
 	cmd.Dir = townRoot
 	_ = cmd.Run() // Best effort
+}
+
+// closeStaleDeaconHooks closes any hooked beads assigned to deacon.
+// This prevents orphaned patrol wisps from accumulating when the deacon restarts.
+func closeStaleDeaconHooks(townRoot string) error {
+	// Get all hooked beads
+	cmd := exec.Command("bd", "list", "--status=hooked", "--json", "--limit=0")
+	cmd.Dir = townRoot
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil // No hooked beads is fine
+	}
+
+	if len(output) == 0 || string(output) == "[]" || string(output) == "null\n" {
+		return nil
+	}
+
+	var beads []struct {
+		ID       string `json:"id"`
+		Assignee string `json:"assignee"`
+	}
+	if err := json.Unmarshal(output, &beads); err != nil {
+		return fmt.Errorf("parsing hooked beads: %w", err)
+	}
+
+	// Close any beads assigned to deacon
+	for _, bead := range beads {
+		if bead.Assignee == "deacon" || bead.Assignee == "deacon/" {
+			closeCmd := exec.Command("gt", "close", bead.ID)
+			closeCmd.Dir = townRoot
+			_ = closeCmd.Run() // Best effort
+		}
+	}
+
+	return nil
 }
 
 // runDeaconStaleHooks finds and unhooks stale hooked beads.
