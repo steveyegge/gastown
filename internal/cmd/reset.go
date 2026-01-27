@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
@@ -83,38 +86,95 @@ func runReset(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 2: Delete beads database
-	fmt.Println("Clearing database...")
-	beadsDir := filepath.Join(townRoot, ".beads")
+	// Step 2: Stop beads daemon (it caches data in memory)
+	fmt.Println("Stopping beads daemon...")
+	stopDaemonCmd := exec.Command("bd", "daemon", "stop", townRoot)
+	if err := stopDaemonCmd.Run(); err == nil {
+		fmt.Printf("  %s Stopped beads daemon\n", style.Bold.Render("✓"))
+	}
+
+	// Step 3: Delete all beads with configured prefix (clears both local and global db)
+	fmt.Println("Deleting all beads...")
+	if err := deleteAllBeads(townRoot); err != nil {
+		fmt.Printf("  %s Could not delete beads: %v\n", style.Dim.Render("Warning:"), err)
+	}
+
+	// Step 4: Delete beads databases (town + all agents)
+	fmt.Println("Clearing databases...")
+	beadsDirs := []string{
+		filepath.Join(townRoot, ".beads"),
+		filepath.Join(townRoot, "deacon", ".beads"),
+		filepath.Join(townRoot, "mayor", ".beads"),
+	}
 	dbFiles := []string{
 		"beads.db",
 		"beads.db-shm",
 		"beads.db-wal",
 	}
-	for _, f := range dbFiles {
-		path := filepath.Join(beadsDir, f)
-		if err := os.Remove(path); err == nil {
-			fmt.Printf("  %s Deleted %s\n", style.Bold.Render("✓"), f)
+	for _, beadsDir := range beadsDirs {
+		for _, f := range dbFiles {
+			path := filepath.Join(beadsDir, f)
+			if err := os.Remove(path); err == nil {
+				relPath := path[len(townRoot)+1:]
+				fmt.Printf("  %s Deleted %s\n", style.Bold.Render("✓"), relPath)
+			}
 		}
 	}
 
-	// Step 3: Clear jsonl files (but don't delete - they'll be recreated)
-	fmt.Println("Clearing logs...")
-	jsonlFiles := []string{
-		filepath.Join(beadsDir, "issues.jsonl"),
-		filepath.Join(beadsDir, "interactions.jsonl"),
-		filepath.Join(townRoot, ".events.jsonl"),
+	// Step 5: Clear jsonl files and routes (these contain persisted beads data)
+	fmt.Println("Clearing logs and beads data...")
+	var jsonlFiles []string
+	for _, beadsDir := range beadsDirs {
+		jsonlFiles = append(jsonlFiles,
+			filepath.Join(beadsDir, "issues.jsonl"),
+			filepath.Join(beadsDir, "interactions.jsonl"),
+			filepath.Join(beadsDir, "routes.jsonl"),
+			filepath.Join(beadsDir, "molecules.jsonl"),
+		)
 	}
+	jsonlFiles = append(jsonlFiles, filepath.Join(townRoot, ".events.jsonl"))
 	for _, path := range jsonlFiles {
 		if err := os.Remove(path); err == nil {
-			fmt.Printf("  %s Cleared %s\n", style.Bold.Render("✓"), filepath.Base(path))
+			relPath := path[len(townRoot)+1:]
+			fmt.Printf("  %s Cleared %s\n", style.Bold.Render("✓"), relPath)
 		}
 	}
 
-	// Step 4: Clear daemon activity
+	// Step 6: Clear daemon activity
 	activityPath := filepath.Join(townRoot, "daemon", "activity.json")
 	if err := os.Remove(activityPath); err == nil {
 		fmt.Printf("  %s Cleared daemon activity\n", style.Bold.Render("✓"))
+	}
+
+	// Step 7: Clear runtime state (session IDs, handoff state)
+	fmt.Println("Clearing runtime state...")
+	runtimeDirs := []string{
+		filepath.Join(townRoot, ".runtime"),
+		filepath.Join(townRoot, "mayor", ".runtime"),
+		filepath.Join(townRoot, "deacon", ".runtime"),
+	}
+	for _, dir := range runtimeDirs {
+		if entries, err := os.ReadDir(dir); err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					path := filepath.Join(dir, entry.Name())
+					if err := os.Remove(path); err == nil {
+						fmt.Printf("  %s Cleared %s\n", style.Bold.Render("✓"), filepath.Join(filepath.Base(dir), entry.Name()))
+					}
+				}
+			}
+		}
+	}
+
+	// Step 8: Clear agent state files (deacon state, heartbeat)
+	agentStateFiles := []string{
+		filepath.Join(townRoot, "deacon", "state.json"),
+		filepath.Join(townRoot, "deacon", "heartbeat.json"),
+	}
+	for _, path := range agentStateFiles {
+		if err := os.Remove(path); err == nil {
+			fmt.Printf("  %s Cleared %s\n", style.Bold.Render("✓"), filepath.Base(path))
+		}
 	}
 
 	fmt.Println()
@@ -122,5 +182,63 @@ func runReset(cmd *cobra.Command, args []string) error {
 	fmt.Println("  Configuration preserved (config.yaml, formulas)")
 	fmt.Println("  Run 'gt status' to verify")
 
+	return nil
+}
+
+// deleteAllBeads deletes all beads with the configured issue prefix.
+// This ensures both local and global beads databases are cleaned up.
+func deleteAllBeads(townRoot string) error {
+	// Get the issue prefix
+	prefixCmd := exec.Command("bd", "config", "get", "issue_prefix")
+	prefixCmd.Dir = townRoot
+	prefixOut, err := prefixCmd.Output()
+	if err != nil {
+		return fmt.Errorf("getting issue prefix: %w", err)
+	}
+	prefix := strings.TrimSpace(string(prefixOut))
+	if prefix == "" {
+		return fmt.Errorf("no issue prefix configured")
+	}
+
+	// List all issues with this prefix (using --no-daemon to get direct access)
+	listCmd := exec.Command("bd", "--no-daemon", "list", "--json")
+	listCmd.Dir = townRoot
+	listOut, err := listCmd.Output()
+	if err != nil {
+		// No issues to delete
+		return nil
+	}
+
+	// Parse the JSON output to get issue IDs
+	var issues []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(listOut, &issues); err != nil {
+		return fmt.Errorf("parsing issue list: %w", err)
+	}
+
+	// Filter to issues with our prefix
+	var idsToDelete []string
+	for _, issue := range issues {
+		if strings.HasPrefix(issue.ID, prefix+"-") {
+			idsToDelete = append(idsToDelete, issue.ID)
+		}
+	}
+
+	if len(idsToDelete) == 0 {
+		fmt.Printf("  %s No beads to delete\n", style.Dim.Render("·"))
+		return nil
+	}
+
+	// Delete all issues with cascade (to get children) and hard (permanent)
+	deleteArgs := []string{"--no-daemon", "delete", "--cascade", "--hard", "--force"}
+	deleteArgs = append(deleteArgs, idsToDelete...)
+	deleteCmd := exec.Command("bd", deleteArgs...)
+	deleteCmd.Dir = townRoot
+	if err := deleteCmd.Run(); err != nil {
+		return fmt.Errorf("deleting beads: %w", err)
+	}
+
+	fmt.Printf("  %s Deleted %d beads\n", style.Bold.Render("✓"), len(idsToDelete))
 	return nil
 }
