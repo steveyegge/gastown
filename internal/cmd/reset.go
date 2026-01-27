@@ -17,10 +17,12 @@ var resetCmd = &cobra.Command{
 	Long: `Reset Gas Town to a clean state, as if freshly installed.
 
 This command:
-1. Stops all running agents (deacon, mayor, polecats, etc.)
+1. Stops running agents (deacon, polecats, etc. - mayor preserved by default)
 2. Deletes the beads database (all issues, wisps, molecules)
 3. Clears activity logs and event files
 4. Preserves configuration (config.yaml, formulas, etc.)
+
+Use --all to also stop the mayor.
 
 Use this when you want a clean slate without reinstalling.
 
@@ -30,10 +32,12 @@ WARNING: This permanently deletes all work history. Use with caution.`,
 
 var (
 	resetForce bool
+	resetAll   bool
 )
 
 func init() {
 	resetCmd.Flags().BoolVarP(&resetForce, "force", "f", false, "Skip confirmation prompt")
+	resetCmd.Flags().BoolVarP(&resetAll, "all", "a", false, "Also stop mayor (by default, mayor is preserved)")
 	rootCmd.AddCommand(resetCmd)
 }
 
@@ -71,10 +75,12 @@ func runReset(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s Stopped deacon\n", style.Bold.Render("✓"))
 	}
 
-	// Stop mayor
-	if running, _ := t.HasSession("hq-mayor"); running {
-		_ = t.KillSessionWithProcesses("hq-mayor")
-		fmt.Printf("  %s Stopped mayor\n", style.Bold.Render("✓"))
+	// Stop mayor (only with --all flag)
+	if resetAll {
+		if running, _ := t.HasSession("hq-mayor"); running {
+			_ = t.KillSessionWithProcesses("hq-mayor")
+			fmt.Printf("  %s Stopped mayor\n", style.Bold.Render("✓"))
+		}
 	}
 
 	// Step 2: Delete beads database
