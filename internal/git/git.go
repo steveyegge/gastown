@@ -54,6 +54,7 @@ func moveDir(src, dest string) error {
 }
 
 // copyDir recursively copies a directory from src to dest.
+// Symlinks are preserved (recreated with the same target) rather than followed.
 func copyDir(src, dest string) error {
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -72,6 +73,18 @@ func copyDir(src, dest string) error {
 	for _, entry := range entries {
 		srcPath := filepath.Join(src, entry.Name())
 		destPath := filepath.Join(dest, entry.Name())
+
+		// Handle symlinks: recreate them rather than following
+		if entry.Type()&os.ModeSymlink != 0 {
+			linkTarget, err := os.Readlink(srcPath)
+			if err != nil {
+				return fmt.Errorf("reading symlink %s: %w", srcPath, err)
+			}
+			if err := os.Symlink(linkTarget, destPath); err != nil {
+				return fmt.Errorf("creating symlink %s: %w", destPath, err)
+			}
+			continue
+		}
 
 		if entry.IsDir() {
 			if err := copyDir(srcPath, destPath); err != nil {
@@ -442,10 +455,10 @@ func (g *Git) CommitAll(message string) error {
 
 // GitStatus represents the status of the working directory.
 type GitStatus struct {
-	Clean    bool
-	Modified []string
-	Added    []string
-	Deleted  []string
+	Clean     bool
+	Modified  []string
+	Added     []string
+	Deleted   []string
 	Untracked []string
 }
 
@@ -1167,8 +1180,8 @@ type UncommittedWorkStatus struct {
 	StashCount            int
 	UnpushedCommits       int
 	// Details for error messages
-	ModifiedFiles   []string
-	UntrackedFiles  []string
+	ModifiedFiles  []string
+	UntrackedFiles []string
 }
 
 // Clean returns true if there is no uncommitted work.

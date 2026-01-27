@@ -488,3 +488,124 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
+
+// TestCopyDirWithSymlinks verifies that copyDir correctly handles symlinks.
+// This was broken: symlinks pointing to directories caused "copy_file_range:
+// is a directory" errors because entry.IsDir() returns false for symlinks,
+// so they were passed to copyFile which followed the symlink and tried to
+// copy the target directory as a file.
+//
+// Reproduces the bug seen when cloning repos with symlinks (e.g., monorepo
+// with rust_crates/proto/proto_arrow_types/proto -> ../proto_definitions/proto).
+func TestCopyDirWithSymlinks(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src")
+	dst := filepath.Join(tmp, "dst")
+
+	// Create source directory structure:
+	// src/
+	//   target_dir/
+	//     file.txt
+	//   link -> target_dir  (symlink to directory)
+	//   regular.txt
+	targetDir := filepath.Join(src, "target_dir")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatalf("mkdir target_dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "file.txt"), []byte("content"), 0644); err != nil {
+		t.Fatalf("write file.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "regular.txt"), []byte("regular"), 0644); err != nil {
+		t.Fatalf("write regular.txt: %v", err)
+	}
+
+	// Create symlink to directory (this is what triggers the bug)
+	linkPath := filepath.Join(src, "link")
+	if err := os.Symlink("target_dir", linkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// Verify setup
+	linkInfo, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected symlink, got mode %v", linkInfo.Mode())
+	}
+
+	// Copy the directory - this is what failed before the fix
+	if err := copyDir(src, dst); err != nil {
+		t.Fatalf("copyDir failed: %v", err)
+	}
+
+	// Verify the symlink was preserved (not followed and copied as directory)
+	dstLinkPath := filepath.Join(dst, "link")
+	dstLinkInfo, err := os.Lstat(dstLinkPath)
+	if err != nil {
+		t.Fatalf("lstat dst link: %v", err)
+	}
+	if dstLinkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected symlink at dst, got mode %v", dstLinkInfo.Mode())
+	}
+
+	// Verify symlink target is preserved
+	target, err := os.Readlink(dstLinkPath)
+	if err != nil {
+		t.Fatalf("readlink dst: %v", err)
+	}
+	if target != "target_dir" {
+		t.Errorf("symlink target = %q, want %q", target, "target_dir")
+	}
+
+	// Verify the actual target directory was also copied
+	dstTargetFile := filepath.Join(dst, "target_dir", "file.txt")
+	if _, err := os.Stat(dstTargetFile); err != nil {
+		t.Errorf("expected target_dir/file.txt to exist: %v", err)
+	}
+
+	// Verify regular file was copied
+	dstRegular := filepath.Join(dst, "regular.txt")
+	if _, err := os.Stat(dstRegular); err != nil {
+		t.Errorf("expected regular.txt to exist: %v", err)
+	}
+}
+
+// TestCopyDirWithSymlinkToFile verifies symlinks to files are also preserved.
+func TestCopyDirWithSymlinkToFile(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src")
+	dst := filepath.Join(tmp, "dst")
+
+	// Create source with symlink to file
+	if err := os.MkdirAll(src, 0755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "target.txt"), []byte("target"), 0644); err != nil {
+		t.Fatalf("write target.txt: %v", err)
+	}
+	if err := os.Symlink("target.txt", filepath.Join(src, "link.txt")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	if err := copyDir(src, dst); err != nil {
+		t.Fatalf("copyDir failed: %v", err)
+	}
+
+	// Verify symlink preserved
+	dstLinkInfo, err := os.Lstat(filepath.Join(dst, "link.txt"))
+	if err != nil {
+		t.Fatalf("lstat dst link: %v", err)
+	}
+	if dstLinkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected symlink, got mode %v", dstLinkInfo.Mode())
+	}
+
+	target, err := os.Readlink(filepath.Join(dst, "link.txt"))
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if target != "target.txt" {
+		t.Errorf("target = %q, want %q", target, "target.txt")
+	}
+}
