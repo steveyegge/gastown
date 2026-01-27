@@ -17,6 +17,11 @@ func (m *Model) renderView() string {
 		return "Terminal too small. Please resize."
 	}
 
+	// Crew wizard mode - show wizard instead of normal view
+	if m.creatingCrew && m.crewWizard != nil {
+		return m.crewWizard.View()
+	}
+
 	// Peek mode - show terminal content instead of normal view
 	if m.peeking {
 		return m.renderPeekMode()
@@ -74,7 +79,7 @@ func (m *Model) renderView() string {
 		b.WriteString(m.help.View(m.keys))
 	} else {
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("j/k: navigate  1-4: select  r: rationale  p: peek terminal  enter: confirm  ?: help  q: quit"))
+		b.WriteString(helpStyle.Render("j/k: navigate  1-4: select  r: rationale  p: peek  c: crew  enter: confirm  ?: help  q: quit"))
 	}
 
 	return b.String()

@@ -32,6 +32,7 @@ const (
 type AddModel struct {
 	// Wizard state
 	step WizardStep
+	done bool // Set when wizard should close (user acknowledged success/error)
 
 	// Input fields
 	nameInput    textinput.Model
@@ -229,9 +230,10 @@ func (m *AddModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case StepOptions:
 			return m.handleOptionsStep(msg)
 		case StepSuccess, StepError:
-			// Any key exits
+			// Any key signals done - parent should check IsDone()
 			if msg.Type == tea.KeyEnter || msg.Type == tea.KeyEsc || msg.String() == "q" {
-				return m, tea.Quit
+				m.done = true
+				return m, nil
 			}
 		}
 
@@ -269,7 +271,8 @@ func (m *AddModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *AddModel) handleNameStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		return m, tea.Quit
+		m.done = true // Signal wizard cancelled
+		return m, nil
 	case tea.KeyEnter:
 		// Validate name
 		name := m.nameInput.Value()
@@ -577,4 +580,9 @@ func (m *AddModel) renderHelp() string {
 		return helpStyle.Render("Press any key to exit")
 	}
 	return ""
+}
+
+// IsDone returns true if the wizard has completed (user acknowledged success/error)
+func (m *AddModel) IsDone() bool {
+	return m.done
 }

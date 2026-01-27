@@ -920,13 +920,22 @@ func formatDecisionReminder(workIndicators []string) string {
 
 func runDecisionWatch(cmd *cobra.Command, args []string) error {
 	// Verify we're in a Gas Town workspace
-	_, err := workspace.FindFromCwdOrError()
+	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	// Try to infer current rig
+	currentRig, _ := inferRigFromCwd(townRoot)
+	if currentRig == "" {
+		currentRig = "gastown" // fallback
+	}
+
 	// Create the TUI model
 	m := decisionTUI.New()
+
+	// Set workspace info for crew creation
+	m.SetWorkspace(townRoot, currentRig)
 
 	// Apply flags
 	if decisionWatchUrgentOnly {

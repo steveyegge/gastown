@@ -29,6 +29,9 @@ type KeyMap struct {
 	FilterHigh key.Binding
 	FilterAll  key.Binding
 
+	// Crew management
+	CreateCrew key.Binding
+
 	// General
 	Help key.Binding
 	Quit key.Binding
@@ -105,6 +108,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("a"),
 			key.WithHelp("a", "show all"),
 		),
+		CreateCrew: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "create crew"),
+		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
 			key.WithHelp("?", "help"),
@@ -118,7 +125,7 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns key bindings for the short help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Select1, k.Confirm, k.Rationale, k.Dismiss, k.Peek, k.Quit, k.Help}
+	return []key.Binding{k.Up, k.Down, k.Select1, k.Confirm, k.Rationale, k.Dismiss, k.Peek, k.CreateCrew, k.Quit, k.Help}
 }
 
 // FullHelp returns key bindings for the full help view.
@@ -127,7 +134,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.PageUp, k.PageDown},
 		{k.Select1, k.Select2, k.Select3, k.Select4},
 		{k.Confirm, k.Rationale, k.Text, k.Peek, k.Cancel},
-		{k.Refresh, k.FilterHigh, k.FilterAll},
+		{k.Refresh, k.FilterHigh, k.FilterAll, k.CreateCrew},
 		{k.Help, k.Quit},
 	}
 }

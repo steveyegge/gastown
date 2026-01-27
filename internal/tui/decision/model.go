@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	crewTUI "github.com/steveyegge/gastown/internal/tui/crew"
 )
 
 // pollInterval is how often we check for new decisions
@@ -224,6 +225,12 @@ type Model struct {
 	peekSessionName string
 	peekViewport    viewport.Model
 
+	// Crew wizard state
+	creatingCrew bool
+	crewWizard   *crewTUI.AddModel
+	townRoot     string
+	currentRig   string
+
 	// Polling
 	pollTicker *time.Ticker
 	done       chan struct{}
@@ -253,6 +260,12 @@ func New() *Model {
 // SetFilter sets the urgency filter
 func (m *Model) SetFilter(filter string) {
 	m.filter = filter
+}
+
+// SetWorkspace sets the workspace info for crew creation
+func (m *Model) SetWorkspace(townRoot, currentRig string) {
+	m.townRoot = townRoot
+	m.currentRig = currentRig
 }
 
 // SetNotify enables desktop notifications
@@ -444,6 +457,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textInput.SetWidth(msg.Width - 10)
 
 	case tea.KeyMsg:
+		// Handle crew wizard mode - delegate all input
+		if m.creatingCrew && m.crewWizard != nil {
+			updated, cmd := m.crewWizard.Update(msg)
+			if wizard, ok := updated.(*crewTUI.AddModel); ok {
+				m.crewWizard = wizard
+				// Check if wizard completed or was cancelled
+				if wizard.IsDone() {
+					m.creatingCrew = false
+					m.crewWizard = nil
+					// Refresh decisions after crew creation
+					return m, m.fetchDecisions()
+				}
+			}
+			return m, cmd
+		}
+
 		// Handle peek mode - arrow keys scroll, other keys dismiss
 		if m.peeking {
 			switch {
@@ -556,6 +585,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.FilterAll):
 			m.filter = "all"
+
+		case key.Matches(msg, m.keys.CreateCrew):
+			if m.townRoot != "" {
+				m.crewWizard = crewTUI.NewAddModel(m.townRoot, m.currentRig)
+				m.creatingCrew = true
+				return m, m.crewWizard.Init()
+			} else {
+				m.status = "Cannot create crew: workspace not configured"
+			}
 		}
 
 	case fetchDecisionsMsg:
