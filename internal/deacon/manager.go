@@ -23,24 +23,26 @@ var (
 // Manager handles deacon lifecycle operations.
 type Manager struct {
 	townRoot string
+	town     string // basename of townRoot, for town-namespaced session names
 }
 
 // NewManager creates a new deacon manager for a town.
 func NewManager(townRoot string) *Manager {
 	return &Manager{
 		townRoot: townRoot,
+		town:     filepath.Base(townRoot),
 	}
 }
 
 // SessionName returns the tmux session name for the deacon.
-// This is a package-level function for convenience.
+// This is a package-level function for convenience (legacy, no town context).
 func SessionName() string {
 	return session.DeaconSessionName()
 }
 
 // SessionName returns the tmux session name for the deacon.
 func (m *Manager) SessionName() string {
-	return SessionName()
+	return session.DeaconSessionName(m.town)
 }
 
 // deaconDir returns the working directory for the deacon.

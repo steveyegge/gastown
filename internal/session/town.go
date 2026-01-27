@@ -18,11 +18,16 @@ type TownSession struct {
 // TownSessions returns the list of town-level sessions in shutdown order.
 // Order matters: Boot (Deacon's watchdog) must be stopped before Deacon,
 // otherwise Boot will try to restart Deacon.
-func TownSessions() []TownSession {
+// When town is provided, session names use the town-namespaced format.
+func TownSessions(town ...string) []TownSession {
+	t := ""
+	if len(town) > 0 {
+		t = town[0]
+	}
 	return []TownSession{
-		{"Mayor", MayorSessionName()},
-		{"Boot", BootSessionName()},
-		{"Deacon", DeaconSessionName()},
+		{"Mayor", MayorSessionName(t)},
+		{"Boot", BootSessionName(t)},
+		{"Deacon", DeaconSessionName(t)},
 	}
 }
 

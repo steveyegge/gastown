@@ -81,9 +81,11 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 	// Get list of valid rigs
 	validRigs := c.getValidRigs(ctx.TownRoot)
 
-	// Get session names for mayor/deacon
-	mayorSession := session.MayorSessionName()
-	deaconSession := session.DeaconSessionName()
+	// Get session names for mayor/deacon/boot
+	town := filepath.Base(ctx.TownRoot)
+	mayorSession := session.MayorSessionName(town)
+	deaconSession := session.DeaconSessionName(town)
+	bootSession := session.BootSessionName(town)
 
 	// Check each session
 	var orphans []string
@@ -99,7 +101,7 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		if c.isValidSession(sess, validRigs, mayorSession, deaconSession) {
+		if c.isValidSession(sess, validRigs, mayorSession, deaconSession, bootSession) {
 			validCount++
 		} else {
 			orphans = append(orphans, sess)
@@ -207,7 +209,7 @@ func (c *OrphanSessionCheck) getValidRigs(townRoot string) []string {
 //   - gt-<rig>-<polecat> (where polecat is any name)
 //
 // Note: We can't verify polecat names without reading state, so we're permissive.
-func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, mayorSession, deaconSession string) bool {
+func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, mayorSession, deaconSession, bootSession string) bool {
 	// Mayor session is always valid (dynamic name based on town)
 	if mayorSession != "" && sess == mayorSession {
 		return true
@@ -215,6 +217,16 @@ func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, may
 
 	// Deacon session is always valid (dynamic name based on town)
 	if deaconSession != "" && sess == deaconSession {
+		return true
+	}
+
+	// Boot session is always valid (dynamic name based on town)
+	if bootSession != "" && sess == bootSession {
+		return true
+	}
+
+	// Legacy boot session (gt-boot)
+	if sess == "gt-boot" {
 		return true
 	}
 

@@ -176,7 +176,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 3: Stop town-level sessions (Mayor, Boot, Deacon)
-	for _, ts := range session.TownSessions() {
+	for _, ts := range session.TownSessions(workspace.TownName()) {
 		if downDryRun {
 			if running, _ := t.HasSession(ts.SessionID); running {
 				printDownStatus(ts.Name, true, "would stop")

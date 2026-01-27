@@ -17,15 +17,14 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// deaconSession is the deacon session name, duplicated here to avoid import cycle with session package.
-const deaconSession = "hq-deacon"
+// SessionName is the default tmux session name for Boot (legacy format).
+// Callers that know the town name should use SessionNameForTown instead.
+var SessionName = session.BootSessionName()
 
-// SessionName is the tmux session name for Boot.
-// Note: We use "gt-boot" instead of "hq-deacon-boot" to avoid tmux prefix
-// matching collisions. Tmux matches session names by prefix, so "hq-deacon-boot"
-// would match when checking for "hq-deacon", causing HasSession("hq-deacon")
-// to return true when only Boot is running.
-const SessionName = "gt-boot"
+// SessionNameForTown returns the Boot session name for a specific town.
+func SessionNameForTown(town string) string {
+	return session.BootSessionName(town)
+}
 
 // MarkerFileName is the lock file for Boot startup coordination.
 const MarkerFileName = ".boot-running"

@@ -91,8 +91,8 @@ func outputPrimeContext(ctx RoleContext) error {
 		TargetBranch:  targetBranch,
 		MergeStrategy: mergeStrategy,
 		Polecat:       ctx.Polecat,
-		MayorSession:  session.MayorSessionName(),
-		DeaconSession: session.DeaconSessionName(),
+		MayorSession:  session.MayorSessionName(workspace.TownName()),
+		DeaconSession: session.DeaconSessionName(workspace.TownName()),
 	}
 
 	// Render and output

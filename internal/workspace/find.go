@@ -159,6 +159,27 @@ func IsWorkspace(dir string) (bool, error) {
 	return false, nil
 }
 
+// TownName returns the basename of the town root directory.
+// This is used for generating unique tmux session names (e.g., "hq-gt11-mayor")
+// without requiring config file access. Returns empty string if town root
+// cannot be determined.
+func TownName() string {
+	townRoot, err := FindFromCwdOrError()
+	if err != nil {
+		return ""
+	}
+	return filepath.Base(townRoot)
+}
+
+// TownNameFromRoot returns the basename of the given town root directory.
+// Returns empty string if townRoot is empty.
+func TownNameFromRoot(townRoot string) string {
+	if townRoot == "" {
+		return ""
+	}
+	return filepath.Base(townRoot)
+}
+
 // GetTownName loads the town name from the workspace's town.json config.
 // This is used for generating unique tmux session names that avoid collisions
 // when running multiple Gas Town instances.

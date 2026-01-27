@@ -105,8 +105,10 @@ func getBootManager() (*boot.Boot, error) {
 }
 
 // getBootSessionName returns the Boot session name.
+// Uses town-namespaced format when workspace is available.
 func getBootSessionName() string {
-	return boot.SessionName
+	town := workspace.TownName()
+	return session.BootSessionName(town)
 }
 
 func runBootStatus(cmd *cobra.Command, args []string) error {
@@ -147,7 +149,7 @@ func runBootStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	if sessionAlive {
-		fmt.Printf("  Session: %s (alive)\n", session.BootSessionName())
+		fmt.Printf("  Session: %s (alive)\n", session.BootSessionName(workspace.TownName()))
 	} else {
 		fmt.Printf("  Session: %s\n", style.Dim.Render("not running"))
 	}
@@ -225,7 +227,7 @@ func runBootSpawn(cmd *cobra.Command, args []string) error {
 	if b.IsDegraded() {
 		fmt.Println("Boot spawned in degraded mode (subprocess)")
 	} else {
-		fmt.Printf("Boot spawned in session: %s\n", session.BootSessionName())
+		fmt.Printf("Boot spawned in session: %s\n", session.BootSessionName(workspace.TownName()))
 	}
 
 	return nil

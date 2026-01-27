@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"runtime"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/session"
 )
 
 // mockSessionLister allows deterministic testing of orphan session detection.
@@ -115,6 +117,7 @@ func TestOrphanSessionCheck_IsValidSession(t *testing.T) {
 	validRigs := []string{"gastown", "beads"}
 	mayorSession := "hq-mayor"
 	deaconSession := "hq-deacon"
+	bootSession := "gt-boot"
 
 	tests := []struct {
 		session string
@@ -123,6 +126,7 @@ func TestOrphanSessionCheck_IsValidSession(t *testing.T) {
 		// Town-level sessions
 		{"hq-mayor", true},
 		{"hq-deacon", true},
+		{"gt-boot", true},
 
 		// Valid rig sessions
 		{"gt-gastown-witness", true},
@@ -143,7 +147,7 @@ func TestOrphanSessionCheck_IsValidSession(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.session, func(t *testing.T) {
-			got := check.isValidSession(tt.session, validRigs, mayorSession, deaconSession)
+			got := check.isValidSession(tt.session, validRigs, mayorSession, deaconSession, bootSession)
 			if got != tt.want {
 				t.Errorf("isValidSession(%q) = %v, want %v", tt.session, got, tt.want)
 			}
@@ -158,6 +162,7 @@ func TestOrphanSessionCheck_IsValidSession_EdgeCases(t *testing.T) {
 	validRigs := []string{"gastown", "niflheim", "grctool", "7thsense", "pulseflow"}
 	mayorSession := "hq-mayor"
 	deaconSession := "hq-deacon"
+	bootSession := "gt-boot"
 
 	tests := []struct {
 		name    string
@@ -233,7 +238,7 @@ func TestOrphanSessionCheck_IsValidSession_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := check.isValidSession(tt.session, validRigs, mayorSession, deaconSession)
+			got := check.isValidSession(tt.session, validRigs, mayorSession, deaconSession, bootSession)
 			if got != tt.want {
 				t.Errorf("isValidSession(%q) = %v, want %v: %s", tt.session, got, tt.want, tt.reason)
 			}
@@ -369,10 +374,12 @@ func TestOrphanSessionCheck_HQSessions(t *testing.T) {
 		t.Fatalf("create rigs.json: %v", err)
 	}
 
+	town := filepath.Base(townRoot)
 	lister := &mockSessionLister{
 		sessions: []string{
-			"hq-mayor",   // valid: headquarters mayor session
-			"hq-deacon",  // valid: headquarters deacon session
+			session.MayorSessionName(town),  // valid: headquarters mayor session
+			session.DeaconSessionName(town),  // valid: headquarters deacon session
+			session.BootSessionName(town),   // valid: headquarters boot session
 		},
 	}
 	check := NewOrphanSessionCheckWithSessionLister(lister)
@@ -381,7 +388,7 @@ func TestOrphanSessionCheck_HQSessions(t *testing.T) {
 	if result.Status != StatusOK {
 		t.Fatalf("expected StatusOK for valid hq sessions, got %v: %s", result.Status, result.Message)
 	}
-	if result.Message != "All 2 Gas Town sessions are valid" {
+	if result.Message != "All 3 Gas Town sessions are valid" {
 		t.Fatalf("unexpected message: %q", result.Message)
 	}
 	if len(check.orphanSessions) != 0 {
@@ -409,16 +416,18 @@ func TestOrphanSessionCheck_Run_Deterministic(t *testing.T) {
 		t.Fatalf("create beads rig: %v", err)
 	}
 
+	town := filepath.Base(townRoot)
 	lister := &mockSessionLister{
 		sessions: []string{
-			"gt-gastown-witness",      // valid: gastown rig exists
-			"gt-gastown-polecat1",     // valid: gastown rig exists
-			"gt-beads-refinery",       // valid: beads rig exists
-			"hq-mayor",                // valid: hq-mayor is recognized
-			"hq-deacon",               // valid: hq-deacon is recognized
-			"gt-unknown-witness",      // orphan: unknown rig doesn't exist
-			"gt-missing-crew-joe",     // orphan: missing rig doesn't exist
-			"random-session",          // ignored: doesn't match gt-*/hq-* pattern
+			"gt-gastown-witness",              // valid: gastown rig exists
+			"gt-gastown-polecat1",             // valid: gastown rig exists
+			"gt-beads-refinery",               // valid: beads rig exists
+			session.MayorSessionName(town),    // valid: hq-mayor is recognized
+			session.DeaconSessionName(town),   // valid: hq-deacon is recognized
+			session.BootSessionName(town),     // valid: boot session is recognized
+			"gt-unknown-witness",              // orphan: unknown rig doesn't exist
+			"gt-missing-crew-joe",             // orphan: missing rig doesn't exist
+			"random-session",                  // ignored: doesn't match gt-*/hq-* pattern
 		},
 	}
 	check := NewOrphanSessionCheckWithSessionLister(lister)

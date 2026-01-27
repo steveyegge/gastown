@@ -2,13 +2,17 @@ package cmd
 
 import (
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/session"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 func TestResolveNudgePattern(t *testing.T) {
+	town := workspace.TownName()
 	// Create test agent sessions (mayor/deacon use hq- prefix)
 	agents := []*AgentSession{
-		{Name: "hq-mayor", Type: AgentMayor},
-		{Name: "hq-deacon", Type: AgentDeacon},
+		{Name: session.MayorSessionName(town), Type: AgentMayor},
+		{Name: session.DeaconSessionName(town), Type: AgentDeacon},
 		{Name: "gt-gastown-witness", Type: AgentWitness, Rig: "gastown"},
 		{Name: "gt-gastown-refinery", Type: AgentRefinery, Rig: "gastown"},
 		{Name: "gt-gastown-crew-max", Type: AgentCrew, Rig: "gastown", AgentName: "max"},
@@ -27,12 +31,12 @@ func TestResolveNudgePattern(t *testing.T) {
 		{
 			name:     "mayor special case",
 			pattern:  "mayor",
-			expected: []string{"hq-mayor"},
+			expected: []string{session.MayorSessionName(town)},
 		},
 		{
 			name:     "deacon special case",
 			pattern:  "deacon",
-			expected: []string{"hq-deacon"},
+			expected: []string{session.DeaconSessionName(town)},
 		},
 		{
 			name:     "specific witness",

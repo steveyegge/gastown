@@ -322,9 +322,9 @@ func (d *Daemon) identityToSession(identity string) string {
 	// Fallback: use default patterns based on role type
 	switch parsed.RoleType {
 	case "mayor":
-		return session.MayorSessionName()
+		return session.MayorSessionName(d.townName())
 	case "deacon":
-		return session.DeaconSessionName()
+		return session.DeaconSessionName(d.townName())
 	case "witness", "refinery":
 		return fmt.Sprintf("gt-%s-%s", parsed.RigName, parsed.RoleType)
 	case "crew":

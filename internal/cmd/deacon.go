@@ -27,8 +27,10 @@ import (
 )
 
 // getDeaconSessionName returns the Deacon session name.
+// Uses town-namespaced format when workspace is available.
 func getDeaconSessionName() string {
-	return session.DeaconSessionName()
+	town := workspace.TownName()
+	return session.DeaconSessionName(town)
 }
 
 var deaconCmd = &cobra.Command{
@@ -948,9 +950,9 @@ func runDeaconHealthState(cmd *cobra.Command, args []string) error {
 func agentAddressToIDs(address string) (beadID, sessionName string, err error) {
 	switch address {
 	case "deacon":
-		return beads.DeaconBeadIDTown(), session.DeaconSessionName(), nil
+		return beads.DeaconBeadIDTown(), session.DeaconSessionName(workspace.TownName()), nil
 	case "mayor":
-		return beads.MayorBeadIDTown(), session.MayorSessionName(), nil
+		return beads.MayorBeadIDTown(), session.MayorSessionName(workspace.TownName()), nil
 	}
 
 	parts := strings.Split(address, "/")

@@ -91,3 +91,48 @@ func TestTownSession_ShutdownOrder(t *testing.T) {
 		t.Errorf("Third session should be Deacon, got %q", sessions[2].Name)
 	}
 }
+
+func TestTownSessions_WithTown(t *testing.T) {
+	sessions := TownSessions("gt11")
+
+	if len(sessions) != 3 {
+		t.Fatalf("TownSessions(\"gt11\") returned %d sessions, want 3", len(sessions))
+	}
+
+	// Verify town-namespaced session IDs
+	expected := map[string]string{
+		"Mayor":  "hq-gt11-mayor",
+		"Boot":   "hq-gt11-boot",
+		"Deacon": "hq-gt11-deacon",
+	}
+	for _, s := range sessions {
+		want, ok := expected[s.Name]
+		if !ok {
+			t.Errorf("Unexpected session name %q", s.Name)
+			continue
+		}
+		if s.SessionID != want {
+			t.Errorf("TownSessions(\"gt11\") %s.SessionID = %q, want %q", s.Name, s.SessionID, want)
+		}
+	}
+}
+
+func TestTownSessions_EmptyTown(t *testing.T) {
+	// Empty town produces legacy format
+	sessions := TownSessions("")
+
+	expected := map[string]string{
+		"Mayor":  "hq-mayor",
+		"Boot":   "gt-boot",
+		"Deacon": "hq-deacon",
+	}
+	for _, s := range sessions {
+		want, ok := expected[s.Name]
+		if !ok {
+			continue
+		}
+		if s.SessionID != want {
+			t.Errorf("TownSessions(\"\") %s.SessionID = %q, want %q", s.Name, s.SessionID, want)
+		}
+	}
+}

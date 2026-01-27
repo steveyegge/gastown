@@ -12,6 +12,7 @@ type Role string
 const (
 	RoleMayor    Role = "mayor"
 	RoleDeacon   Role = "deacon"
+	RoleBoot     Role = "boot"
 	RoleWitness  Role = "witness"
 	RoleRefinery Role = "refinery"
 	RoleCrew     Role = "crew"
@@ -20,9 +21,10 @@ const (
 
 // AgentIdentity represents a parsed Gas Town agent identity.
 type AgentIdentity struct {
-	Role Role   // mayor, deacon, witness, refinery, crew, polecat
-	Rig  string // rig name (empty for mayor/deacon)
-	Name string // crew/polecat name (empty for mayor/deacon/witness/refinery)
+	Role Role   // mayor, deacon, boot, witness, refinery, crew, polecat
+	Rig  string // rig name (empty for mayor/deacon/boot)
+	Name string // crew/polecat name (empty for mayor/deacon/boot/witness/refinery)
+	Town string // town name (empty for legacy format or rig-level roles)
 }
 
 // ParseAddress parses a mail-style address into an AgentIdentity.
@@ -93,13 +95,30 @@ func ParseAddress(address string) (*AgentIdentity, error) {
 // be ambiguous for rig names containing hyphens.
 func ParseSessionName(session string) (*AgentIdentity, error) {
 	// Check for town-level roles (hq- prefix)
+	// Formats:
+	//   Legacy:  hq-mayor, hq-deacon
+	//   New:     hq-{town}-mayor, hq-{town}-deacon, hq-{town}-boot
 	if strings.HasPrefix(session, HQPrefix) {
 		suffix := strings.TrimPrefix(session, HQPrefix)
+		// Legacy format: single segment (e.g., "mayor", "deacon")
 		if suffix == "mayor" {
 			return &AgentIdentity{Role: RoleMayor}, nil
 		}
 		if suffix == "deacon" {
 			return &AgentIdentity{Role: RoleDeacon}, nil
+		}
+		// New format: {town}-{role} (e.g., "gt11-mayor", "gt11-deacon", "gt11-boot")
+		if idx := strings.LastIndex(suffix, "-"); idx > 0 {
+			town := suffix[:idx]
+			role := suffix[idx+1:]
+			switch role {
+			case "mayor":
+				return &AgentIdentity{Role: RoleMayor, Town: town}, nil
+			case "deacon":
+				return &AgentIdentity{Role: RoleDeacon, Town: town}, nil
+			case "boot":
+				return &AgentIdentity{Role: RoleBoot, Town: town}, nil
+			}
 		}
 		return nil, fmt.Errorf("invalid session name %q: unknown hq- role", session)
 	}
@@ -112,6 +131,11 @@ func ParseSessionName(session string) (*AgentIdentity, error) {
 	suffix := strings.TrimPrefix(session, Prefix)
 	if suffix == "" {
 		return nil, fmt.Errorf("invalid session name %q: empty after prefix", session)
+	}
+
+	// Legacy boot format: gt-boot
+	if suffix == "boot" {
+		return &AgentIdentity{Role: RoleBoot}, nil
 	}
 
 	// Parse into parts for rig-level roles
@@ -152,9 +176,11 @@ func ParseSessionName(session string) (*AgentIdentity, error) {
 func (a *AgentIdentity) SessionName() string {
 	switch a.Role {
 	case RoleMayor:
-		return MayorSessionName()
+		return MayorSessionName(a.Town)
 	case RoleDeacon:
-		return DeaconSessionName()
+		return DeaconSessionName(a.Town)
+	case RoleBoot:
+		return BootSessionName(a.Town)
 	case RoleWitness:
 		return WitnessSessionName(a.Rig)
 	case RoleRefinery:
@@ -182,6 +208,8 @@ func (a *AgentIdentity) Address() string {
 		return "mayor"
 	case RoleDeacon:
 		return "deacon"
+	case RoleBoot:
+		return "boot"
 	case RoleWitness:
 		return fmt.Sprintf("%s/witness", a.Rig)
 	case RoleRefinery:

@@ -307,11 +307,11 @@ func agentBeadToAddress(bead *agentBead) string {
 
 	// Handle hq- prefixed IDs (current format)
 	if strings.HasPrefix(id, "hq-") {
-		// Well-known town-level agents
-		if id == "hq-mayor" {
+		// Well-known town-level agents (both legacy and town-namespaced formats)
+		if id == "hq-mayor" || strings.HasSuffix(id, "-mayor") {
 			return "mayor/"
 		}
-		if id == "hq-deacon" {
+		if id == "hq-deacon" || strings.HasSuffix(id, "-deacon") {
 			return "deacon/"
 		}
 
@@ -1073,7 +1073,7 @@ func (r *Router) GetMailbox(address string) (*Mailbox, error) {
 // Uses NudgeSession to add the notification to the agent's conversation history.
 // Supports mayor/, deacon/, rig/crew/name, rig/polecats/name, and rig/name addresses.
 func (r *Router) notifyRecipient(msg *Message) error {
-	sessionIDs := addressToSessionIDs(msg.To)
+	sessionIDs := addressToSessionIDs(msg.To, filepath.Base(r.townRoot))
 	if len(sessionIDs) == 0 {
 		return nil // Unable to determine session ID
 	}
@@ -1102,15 +1102,15 @@ func (r *Router) notifyRecipient(msg *Message) error {
 //
 // This supersedes the approach in PR #896 which only handled slash-to-dash
 // conversion but didn't address the crew/polecat ambiguity.
-func addressToSessionIDs(address string) []string {
+func addressToSessionIDs(address, town string) []string {
 	// Mayor address: "mayor/" or "mayor"
 	if strings.HasPrefix(address, "mayor") {
-		return []string{session.MayorSessionName()}
+		return []string{session.MayorSessionName(town)}
 	}
 
 	// Deacon address: "deacon/" or "deacon"
 	if strings.HasPrefix(address, "deacon") {
-		return []string{session.DeaconSessionName()}
+		return []string{session.DeaconSessionName(town)}
 	}
 
 	// Rig-based address: "rig/target" or "rig/crew/name" or "rig/polecats/name"
@@ -1146,8 +1146,8 @@ func addressToSessionIDs(address string) []string {
 // addressToSessionID converts a mail address to a tmux session ID.
 // Returns empty string if address format is not recognized.
 // Deprecated: Use addressToSessionIDs for proper crew/polecat handling.
-func addressToSessionID(address string) string {
-	ids := addressToSessionIDs(address)
+func addressToSessionID(address, town string) string {
+	ids := addressToSessionIDs(address, town)
 	if len(ids) == 0 {
 		return ""
 	}

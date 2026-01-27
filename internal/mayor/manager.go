@@ -23,24 +23,26 @@ var (
 // Manager handles mayor lifecycle operations.
 type Manager struct {
 	townRoot string
+	town     string // basename of townRoot, for town-namespaced session names
 }
 
 // NewManager creates a new mayor manager for a town.
 func NewManager(townRoot string) *Manager {
 	return &Manager{
 		townRoot: townRoot,
+		town:     filepath.Base(townRoot),
 	}
 }
 
 // SessionName returns the tmux session name for the mayor.
-// This is a package-level function for convenience.
+// This is a package-level function for convenience (legacy, no town context).
 func SessionName() string {
 	return session.MayorSessionName()
 }
 
 // SessionName returns the tmux session name for the mayor.
 func (m *Manager) SessionName() string {
-	return SessionName()
+	return session.MayorSessionName(m.town)
 }
 
 // mayorDir returns the working directory for the mayor.

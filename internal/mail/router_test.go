@@ -117,7 +117,7 @@ func TestAddressToSessionIDs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.address, func(t *testing.T) {
-			got := addressToSessionIDs(tt.address)
+			got := addressToSessionIDs(tt.address, "")
 			if len(got) != len(tt.want) {
 				t.Errorf("addressToSessionIDs(%q) = %v, want %v", tt.address, got, tt.want)
 				return
@@ -150,7 +150,7 @@ func TestAddressToSessionID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.address, func(t *testing.T) {
-			got := addressToSessionID(tt.address)
+			got := addressToSessionID(tt.address, "")
 			if got != tt.want {
 				t.Errorf("addressToSessionID(%q) = %q, want %q", tt.address, got, tt.want)
 			}
