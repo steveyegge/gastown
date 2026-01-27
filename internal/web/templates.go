@@ -16,7 +16,7 @@ var templateFS embed.FS
 type ConvoyData struct {
 	Convoys     []ConvoyRow
 	MergeQueue  []MergeQueueRow
-	Polecats    []PolecatRow
+	Workers     []WorkerRow
 	Mail        []MailRow
 	Rigs        []RigRow
 	Dogs        []DogRow
@@ -165,8 +165,8 @@ type MailRow struct {
 	SortKey     int64  // Unix timestamp for sorting
 }
 
-// PolecatRow represents a worker (polecat or crew) in the dashboard.
-type PolecatRow struct {
+// WorkerRow represents a worker (polecat or refinery) in the dashboard.
+type WorkerRow struct {
 	Name         string        // e.g., "dag", "nux", "refinery"
 	Rig          string        // e.g., "roxas", "gastown"
 	SessionID    string        // e.g., "gt-roxas-dag"
@@ -175,7 +175,7 @@ type PolecatRow struct {
 	IssueID      string        // Currently assigned issue ID (e.g., "hq-1234")
 	IssueTitle   string        // Issue title (truncated)
 	WorkStatus   string        // working, stale, stuck, idle
-	AgentType    string        // "polecat" (ephemeral) or "crew" (permanent)
+	AgentType    string        // "polecat" (ephemeral) or "refinery" (permanent)
 }
 
 // MergeQueueRow represents a PR in the merge queue.

@@ -646,8 +646,8 @@ func determineColorClass(ciStatus, mergeable string) string {
 	return "mq-yellow"
 }
 
-// FetchPolecats fetches all running polecat and refinery sessions with activity data.
-func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
+// FetchWorkers fetches all running worker sessions (polecats and refinery) with activity data.
+func (f *LiveConvoyFetcher) FetchWorkers() ([]WorkerRow, error) {
 	// Load registered rigs to filter sessions
 	rigsConfigPath := filepath.Join(f.townRoot, "mayor", "rigs.json")
 	rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
@@ -674,7 +674,7 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 	// Pre-fetch merge queue count to determine refinery idle status
 	mergeQueueCount := f.getMergeQueueCount()
 
-	var polecats []PolecatRow
+	var workers []WorkerRow
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 
 	for _, line := range lines {
@@ -694,13 +694,13 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 			continue
 		}
 
-		// Parse session name: gt-roxas-dag -> rig=roxas, polecat=dag
+		// Parse session name: gt-roxas-dag -> rig=roxas, worker=dag
 		nameParts := strings.SplitN(sessionName, "-", 3)
 		if len(nameParts) != 3 {
 			continue
 		}
 		rig := nameParts[1]
-		polecat := nameParts[2]
+		workerName := nameParts[2]
 
 		// Skip rigs not registered in this workspace
 		if !registeredRigs[rig] {
@@ -708,13 +708,13 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		}
 
 		// Skip non-worker sessions (witness, mayor, deacon, boot)
-		if polecat == "witness" || polecat == "mayor" || polecat == "deacon" || polecat == "boot" {
+		if workerName == "witness" || workerName == "mayor" || workerName == "deacon" || workerName == "boot" {
 			continue
 		}
 
 		// Determine agent type: refinery is its own permanent role, others are polecats (ephemeral)
 		agentType := "polecat"
-		if polecat == "refinery" {
+		if workerName == "refinery" {
 			agentType = "refinery"
 		}
 
@@ -728,15 +728,15 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 
 		// Get status hint - special handling for refinery
 		var statusHint string
-		if polecat == "refinery" {
+		if workerName == "refinery" {
 			statusHint = f.getRefineryStatusHint(mergeQueueCount)
 		} else {
-			statusHint = f.getPolecatStatusHint(sessionName)
+			statusHint = f.getWorkerStatusHint(sessionName)
 		}
 
-		// Look up assigned issue for this polecat
-		// Assignee format: "rigname/polecats/polecatname"
-		assignee := fmt.Sprintf("%s/polecats/%s", rig, polecat)
+		// Look up assigned issue for this worker
+		// Assignee format: "rigname/polecats/workername"
+		assignee := fmt.Sprintf("%s/polecats/%s", rig, workerName)
 		var issueID, issueTitle string
 		if issue, ok := assignedIssues[assignee]; ok {
 			issueID = issue.ID
@@ -745,10 +745,10 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		}
 
 		// Calculate work status based on activity age and issue assignment
-		workStatus := calculatePolecatWorkStatus(activityAge, issueID, polecat)
+		workStatus := calculateWorkerWorkStatus(activityAge, issueID, workerName)
 
-		polecats = append(polecats, PolecatRow{
-			Name:         polecat,
+		workers = append(workers, WorkerRow{
+			Name:         workerName,
 			Rig:          rig,
 			SessionID:    sessionName,
 			LastActivity: activity.Calculate(activityTime),
@@ -760,7 +760,7 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		})
 	}
 
-	return polecats, nil
+	return workers, nil
 }
 
 // assignedIssue holds issue info for the assigned issues map.
@@ -801,11 +801,11 @@ func (f *LiveConvoyFetcher) getAssignedIssuesMap() map[string]assignedIssue {
 	return result
 }
 
-// calculatePolecatWorkStatus determines the polecat's work status based on activity and assignment.
+// calculateWorkerWorkStatus determines the worker's work status based on activity and assignment.
 // Returns: "working", "stale", "stuck", or "idle"
-func calculatePolecatWorkStatus(activityAge time.Duration, issueID, polecatName string) string {
+func calculateWorkerWorkStatus(activityAge time.Duration, issueID, workerName string) string {
 	// Refinery has special handling - it's always "working" if it has PRs
-	if polecatName == "refinery" {
+	if workerName == "refinery" {
 		return "working"
 	}
 
@@ -825,8 +825,8 @@ func calculatePolecatWorkStatus(activityAge time.Duration, issueID, polecatName 
 	}
 }
 
-// getPolecatStatusHint captures the last non-empty line from a polecat's pane.
-func (f *LiveConvoyFetcher) getPolecatStatusHint(sessionName string) string {
+// getWorkerStatusHint captures the last non-empty line from a worker's pane.
+func (f *LiveConvoyFetcher) getWorkerStatusHint(sessionName string) string {
 	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "capture-pane", "-t", sessionName, "-p", "-J")
 	if err != nil {
 		return ""

@@ -16,7 +16,7 @@ const fetchTimeout = 8 * time.Second
 type ConvoyFetcher interface {
 	FetchConvoys() ([]ConvoyRow, error)
 	FetchMergeQueue() ([]MergeQueueRow, error)
-	FetchPolecats() ([]PolecatRow, error)
+	FetchWorkers() ([]WorkerRow, error)
 	FetchMail() ([]MailRow, error)
 	FetchRigs() ([]RigRow, error)
 	FetchDogs() ([]DogRow, error)
@@ -61,7 +61,7 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var (
 		convoys     []ConvoyRow
 		mergeQueue  []MergeQueueRow
-		polecats    []PolecatRow
+		workers     []WorkerRow
 		mail        []MailRow
 		rigs        []RigRow
 		dogs        []DogRow
@@ -98,9 +98,9 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer wg.Done()
 		var err error
-		polecats, err = h.fetcher.FetchPolecats()
+		workers, err = h.fetcher.FetchWorkers()
 		if err != nil {
-			log.Printf("dashboard: FetchPolecats failed: %v", err)
+			log.Printf("dashboard: FetchWorkers failed: %v", err)
 		}
 	}()
 	go func() {
@@ -207,12 +207,12 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Compute summary from already-fetched data
-	summary := computeSummary(polecats, hooks, issues, convoys, escalations, activity)
+	summary := computeSummary(workers, hooks, issues, convoys, escalations, activity)
 
 	data := ConvoyData{
 		Convoys:     convoys,
 		MergeQueue:  mergeQueue,
-		Polecats:    polecats,
+		Workers:     workers,
 		Mail:        mail,
 		Rigs:        rigs,
 		Dogs:        dogs,
@@ -237,20 +237,20 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // computeSummary calculates dashboard stats and alerts from fetched data.
-func computeSummary(polecats []PolecatRow, hooks []HookRow, issues []IssueRow,
+func computeSummary(workers []WorkerRow, hooks []HookRow, issues []IssueRow,
 	convoys []ConvoyRow, escalations []EscalationRow, activity []ActivityRow) *DashboardSummary {
 
 	summary := &DashboardSummary{
-		PolecatCount:    len(polecats),
+		PolecatCount:    len(workers),
 		HookCount:       len(hooks),
 		IssueCount:      len(issues),
 		ConvoyCount:     len(convoys),
 		EscalationCount: len(escalations),
 	}
 
-	// Count stuck polecats (status = "stuck")
-	for _, p := range polecats {
-		if p.WorkStatus == "stuck" {
+	// Count stuck workers (status = "stuck")
+	for _, w := range workers {
+		if w.WorkStatus == "stuck" {
 			summary.StuckPolecats++
 		}
 	}

@@ -1045,15 +1045,15 @@
                 </div>
             </div>
 
-            <!-- Workers Panel (Polecats + Crew) -->
+            <!-- Workers Panel (Polecats + Refinery) -->
             <div class="panel">
                 <div class="panel-header">
                     <h2>👷 Workers</h2>
-                    <span class="count">{{len .Polecats}}</span>
+                    <span class="count">{{len .Workers}}</span>
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Polecats}}
+                    {{if .Workers}}
                     <table>
                         <thead>
                             <tr>
@@ -1066,7 +1066,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {{range .Polecats}}
+                            {{range .Workers}}
                             <tr class="{{polecatStatusClass .WorkStatus}}">
                                 <td><span class="polecat-name">{{.Name}}</span></td>
                                 <td>

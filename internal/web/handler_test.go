@@ -19,7 +19,7 @@ var errFetchFailed = errors.New("fetch failed")
 type MockConvoyFetcher struct {
 	Convoys     []ConvoyRow
 	MergeQueue  []MergeQueueRow
-	Polecats    []PolecatRow
+	Workers     []WorkerRow
 	Mail        []MailRow
 	Rigs        []RigRow
 	Dogs        []DogRow
@@ -42,8 +42,8 @@ func (m *MockConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
 	return m.MergeQueue, nil
 }
 
-func (m *MockConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
-	return m.Polecats, nil
+func (m *MockConvoyFetcher) FetchWorkers() ([]WorkerRow, error) {
+	return m.Workers, nil
 }
 
 func (m *MockConvoyFetcher) FetchMail() ([]MailRow, error) {
@@ -378,7 +378,7 @@ func TestConvoyHandler_EmptyMergeQueue(t *testing.T) {
 func TestConvoyHandler_PolecatWorkersRendering(t *testing.T) {
 	mock := &MockConvoyFetcher{
 		Convoys: []ConvoyRow{},
-		Polecats: []PolecatRow{
+		Workers: []WorkerRow{
 			{
 				Name:         "dag",
 				Rig:          "roxas",
@@ -602,7 +602,7 @@ func TestConvoyHandler_FullDashboard(t *testing.T) {
 				ColorClass: "mq-green",
 			},
 		},
-		Polecats: []PolecatRow{
+		Workers: []WorkerRow{
 			{
 				Name:         "worker1",
 				Rig:          "testrig",
@@ -680,7 +680,7 @@ func TestE2E_Server_FullDashboard(t *testing.T) {
 				ColorClass: "mq-green",
 			},
 		},
-		Polecats: []PolecatRow{
+		Workers: []WorkerRow{
 			{
 				Name:         "furiosa",
 				Rig:          "roxas",
@@ -763,7 +763,7 @@ func TestE2E_Server_ActivityColors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &MockConvoyFetcher{
-				Polecats: []PolecatRow{
+				Workers: []WorkerRow{
 					{
 						Name:         "test-worker",
 						Rig:          "test-rig",
@@ -803,7 +803,7 @@ func TestE2E_Server_MergeQueueEmpty(t *testing.T) {
 	mock := &MockConvoyFetcher{
 		Convoys:    []ConvoyRow{},
 		MergeQueue: []MergeQueueRow{},
-		Polecats:   []PolecatRow{},
+		Workers:   []WorkerRow{},
 	}
 
 	handler, err := NewConvoyHandler(mock)
@@ -947,7 +947,7 @@ func TestE2E_Server_HTMLStructure(t *testing.T) {
 // TestE2E_Server_RefineryInPolecats tests that refinery appears in polecat workers.
 func TestE2E_Server_RefineryInPolecats(t *testing.T) {
 	mock := &MockConvoyFetcher{
-		Polecats: []PolecatRow{
+		Workers: []WorkerRow{
 			{
 				Name:         "refinery",
 				Rig:          "roxas",
@@ -999,7 +999,7 @@ func TestE2E_Server_RefineryInPolecats(t *testing.T) {
 type MockConvoyFetcherWithErrors struct {
 	Convoys         []ConvoyRow
 	MergeQueueError error
-	PolecatsError   error
+	WorkersError    error
 }
 
 func (m *MockConvoyFetcherWithErrors) FetchConvoys() ([]ConvoyRow, error) {
@@ -1010,8 +1010,8 @@ func (m *MockConvoyFetcherWithErrors) FetchMergeQueue() ([]MergeQueueRow, error)
 	return nil, m.MergeQueueError
 }
 
-func (m *MockConvoyFetcherWithErrors) FetchPolecats() ([]PolecatRow, error) {
-	return nil, m.PolecatsError
+func (m *MockConvoyFetcherWithErrors) FetchWorkers() ([]WorkerRow, error) {
+	return nil, m.WorkersError
 }
 
 func (m *MockConvoyFetcherWithErrors) FetchMail() ([]MailRow, error) {
@@ -1064,7 +1064,7 @@ func TestConvoyHandler_NonFatalErrors(t *testing.T) {
 			{ID: "hq-cv-test", Title: "Test", Status: "open", WorkStatus: "active"},
 		},
 		MergeQueueError: errFetchFailed,
-		PolecatsError:   errFetchFailed,
+		WorkersError:    errFetchFailed,
 	}
 
 	handler, err := NewConvoyHandler(mock)
