@@ -52,8 +52,8 @@ var (
 	orphansProcsForce      bool
 	orphansProcsAggressive bool
 
-	// Worktree orphan flags
-	orphansWorktreesVerbose bool
+	// Stranded work flags
+	orphansStrandedVerbose bool
 )
 
 // Commit orphan kill command
@@ -145,9 +145,9 @@ Examples:
 	RunE: runOrphansKillProcesses,
 }
 
-// Worktree orphan command
-var orphansWorktreesCmd = &cobra.Command{
-	Use:   "worktrees",
+// Stranded work command
+var orphansStrandedCmd = &cobra.Command{
+	Use:   "stranded",
 	Short: "Find stranded work in polecat worktrees",
 	Long: `Scan polecat worktrees for branches with unmerged commits.
 
@@ -160,9 +160,9 @@ A worktree is considered to have stranded work if:
 - AND there's no active tmux session (polecat is dead)
 
 Examples:
-  gt orphans worktrees           # List worktrees with stranded commits
-  gt orphans worktrees -v        # Include branch names and commit details`,
-	RunE: runOrphansWorktrees,
+  gt orphans stranded           # List worktrees with stranded commits
+  gt orphans stranded -v        # Include branch names and commit details`,
+	RunE: runOrphansStranded,
 }
 
 func init() {
@@ -181,8 +181,8 @@ func init() {
 	// Aggressive flag for all procs commands (persistent so it applies to subcommands)
 	orphansProcsCmd.PersistentFlags().BoolVar(&orphansProcsAggressive, "aggressive", false, "Use tmux session verification to find ALL orphans (not just PPID=1)")
 
-	// Worktree orphan flags
-	orphansWorktreesCmd.Flags().BoolVarP(&orphansWorktreesVerbose, "verbose", "v", false, "Show detailed commit information")
+	// Stranded work flags
+	orphansStrandedCmd.Flags().BoolVarP(&orphansStrandedVerbose, "verbose", "v", false, "Show detailed commit information")
 
 	// Wire up subcommands
 	orphansProcsCmd.AddCommand(orphansProcsListCmd)
@@ -190,7 +190,7 @@ func init() {
 
 	orphansCmd.AddCommand(orphansKillCmd)
 	orphansCmd.AddCommand(orphansProcsCmd)
-	orphansCmd.AddCommand(orphansWorktreesCmd)
+	orphansCmd.AddCommand(orphansStrandedCmd)
 
 	rootCmd.AddCommand(orphansCmd)
 }
@@ -871,8 +871,8 @@ type StrandedWorktree struct {
 	CommitInfo []string // Commit subjects (for verbose mode)
 }
 
-// runOrphansWorktrees scans polecat worktrees for stranded work
-func runOrphansWorktrees(cmd *cobra.Command, args []string) error {
+// runOrphansStranded scans polecat worktrees for stranded (unmerged) work
+func runOrphansStranded(cmd *cobra.Command, args []string) error {
 	// Find workspace to determine rig root
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -908,7 +908,7 @@ func runOrphansWorktrees(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  %s %s%s\n", style.Bold.Render(s.Name), style.Dim.Render(fmt.Sprintf("(%d commits)", s.Commits)), sessionStatus)
 		fmt.Printf("    Path: %s\n", s.Path)
-		if orphansWorktreesVerbose {
+		if orphansStrandedVerbose {
 			fmt.Printf("    Branch: %s\n", s.Branch)
 			if len(s.CommitInfo) > 0 {
 				fmt.Printf("    Commits:\n")
@@ -1003,7 +1003,7 @@ func findStrandedWorktrees(rigPath string) ([]StrandedWorktree, error) {
 
 		// Get commit info for verbose mode
 		var commitInfo []string
-		if orphansWorktreesVerbose {
+		if orphansStrandedVerbose {
 			logCmd := exec.Command("git", "log", "--oneline", "origin/main..HEAD", "--format=%h %s")
 			logCmd.Dir = clonePath
 			logOut, err := logCmd.Output()
