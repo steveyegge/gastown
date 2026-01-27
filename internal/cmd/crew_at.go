@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/crew"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -164,13 +165,19 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 
 		// Set environment (non-fatal: session works without these)
 		// Use centralized AgentEnv for consistency across all role startup paths
+		doltServer, err := doltserver.EnsureRunningIfMigrated(townRoot)
+		if err != nil {
+			return fmt.Errorf("dolt server check: %w", err)
+		}
 		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:             "crew",
-			Rig:              r.Name,
-			AgentName:        name,
-			TownRoot:         townRoot,
-			RuntimeConfigDir: claudeConfigDir,
-			BeadsNoDaemon:    true,
+			Role:               "crew",
+			Rig:                r.Name,
+			AgentName:          name,
+			TownRoot:           townRoot,
+			RuntimeConfigDir:   claudeConfigDir,
+			BeadsNoDaemon:      true,
+			DoltServerMode:     doltServer,
+			DoltServerDatabase: r.Name,
 		})
 		for k, v := range envVars {
 			_ = t.SetEnvironment(sessionID, k, v)

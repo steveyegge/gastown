@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -189,9 +190,15 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	}
 
 	// Set environment using centralized AgentEnv for consistency
+	doltServer, err := doltserver.EnsureRunningIfMigrated(b.townRoot)
+	if err != nil {
+		return fmt.Errorf("dolt server check: %w", err)
+	}
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "boot",
-		TownRoot: b.townRoot,
+		Role:               "boot",
+		TownRoot:           b.townRoot,
+		DoltServerMode:     doltServer,
+		DoltServerDatabase: "hq",
 	})
 	for k, v := range envVars {
 		_ = b.tmux.SetEnvironment(session.BootSessionName(), k, v)
@@ -209,9 +216,15 @@ func (b *Boot) spawnDegraded() error {
 	cmd.Dir = b.deaconDir
 
 	// Use centralized AgentEnv for consistency with tmux mode
+	doltServerDegraded, err := doltserver.EnsureRunningIfMigrated(b.townRoot)
+	if err != nil {
+		return fmt.Errorf("dolt server check: %w", err)
+	}
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "boot",
-		TownRoot: b.townRoot,
+		Role:               "boot",
+		TownRoot:           b.townRoot,
+		DoltServerMode:     doltServerDegraded,
+		DoltServerDatabase: "hq",
 	})
 	cmd.Env = config.EnvForExecCommand(envVars)
 	cmd.Env = append(cmd.Env, "GT_DEGRADED=true")
