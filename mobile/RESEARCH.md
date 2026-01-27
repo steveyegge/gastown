@@ -184,9 +184,53 @@ Recommended: **Sidecar daemon on town host**
 5. **TLS**: Required for production (self-signed OK with pinning)
 6. **Decision restrictions**: Optionally limit which decisions mobile can resolve
 
+## Upstream Gastown Compatibility
+
+Analysis of existing gastown architecture confirms Connect-RPC is compatible:
+
+### Existing Infrastructure
+
+| Component | Technology | Port | Notes |
+|-----------|------------|------|-------|
+| Dashboard | `net/http` | 8080 | HTMX-based convoy tracking |
+| Dolt SQL | MySQL protocol | 3307 | Multi-rig database access |
+| Daemon | Local state | - | PID files, heartbeat |
+| Connection layer | Interface abstraction | - | Local + SSH (planned) |
+
+### Why Connect-RPC Fits
+
+1. **Uses `net/http`** - Same foundation as existing dashboard server
+2. **No port conflicts** - Can use 8443 alongside dashboard (8080) and Dolt (3307)
+3. **Coexists with Connection abstraction** - Doesn't interfere with planned SSH support
+4. **Complementary to federation** - Mobile access is orthogonal to HOP protocol
+5. **Reuses internal packages** - No code duplication, direct integration
+
+### Federation Alignment
+
+The planned HOP protocol (`hop://entity/chain/rig/issue-id`) is for cross-workspace
+federation. Mobile access via Connect-RPC serves a different purpose:
+- **Federation**: Workspace-to-workspace communication
+- **Mobile**: Human-to-workspace interaction from phones
+
+These can coexist - a federated workspace could also expose mobile endpoints.
+
+### Future Considerations
+
+If upstream gastown adopts gRPC for internal communication:
+- Connect-RPC is gRPC wire-compatible
+- Same .proto definitions work for both
+- Migration path is smooth
+
+## Completed Deliverables
+
+1. **Proto files** - `proto/gastown/v1/` (status, mail, decision services)
+2. **PoC server** - `cmd/gtmobile/main.go` (tested, working)
+3. **Build config** - `buf.yaml`, `buf.gen.yaml` for code generation
+
 ## Next Steps
 
-1. Draft .proto files for core services
-2. Build proof-of-concept server exposing `gt status`
-3. Test with curl and grpcurl
-4. Evaluate connect-swift/connect-kotlin client generation
+1. Install buf CLI and generate Connect-RPC code
+2. Add TLS/authentication layer
+3. Implement streaming endpoints for real-time updates
+4. Build connect-swift/connect-kotlin mobile clients
+5. Integrate with `gt daemon` for unified lifecycle management
