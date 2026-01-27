@@ -247,48 +247,50 @@ func TestDecisionServiceIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("Resolve_Unimplemented", func(t *testing.T) {
+	t.Run("Resolve_NonExistent", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		req := connect.NewRequest(&gastownv1.ResolveRequest{
-			DecisionId:  "test-id",
+			DecisionId:  "nonexistent-decision",
 			ChosenIndex: 1,
 			Rationale:   "test rationale",
 		})
 		_, err := decisionClient.Resolve(ctx, req)
 		if err == nil {
-			t.Fatal("expected error for unimplemented method")
+			t.Fatal("expected error for non-existent decision")
 		}
 
 		connectErr, ok := err.(*connect.Error)
 		if !ok {
 			t.Fatalf("expected connect.Error, got %T", err)
 		}
-		if connectErr.Code() != connect.CodeUnimplemented {
-			t.Errorf("error code = %v, want Unimplemented", connectErr.Code())
+		// Resolving non-existent decision returns Internal error
+		if connectErr.Code() != connect.CodeInternal {
+			t.Errorf("error code = %v, want Internal", connectErr.Code())
 		}
 	})
 
-	t.Run("Cancel_Unimplemented", func(t *testing.T) {
+	t.Run("Cancel_NonExistent", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		req := connect.NewRequest(&gastownv1.CancelRequest{
-			DecisionId: "test-id",
+			DecisionId: "nonexistent-decision",
 			Reason:     "test reason",
 		})
 		_, err := decisionClient.Cancel(ctx, req)
 		if err == nil {
-			t.Fatal("expected error for unimplemented method")
+			t.Fatal("expected error for non-existent decision")
 		}
 
 		connectErr, ok := err.(*connect.Error)
 		if !ok {
 			t.Fatalf("expected connect.Error, got %T", err)
 		}
-		if connectErr.Code() != connect.CodeUnimplemented {
-			t.Errorf("error code = %v, want Unimplemented", connectErr.Code())
+		// Canceling non-existent decision returns Internal error
+		if connectErr.Code() != connect.CodeInternal {
+			t.Errorf("error code = %v, want Internal", connectErr.Code())
 		}
 	})
 }

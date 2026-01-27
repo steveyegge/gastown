@@ -258,45 +258,47 @@ func TestDecisionServerGetDecision(t *testing.T) {
 	}
 }
 
-// TestDecisionServerResolve tests unimplemented method returns correct error.
+// TestDecisionServerResolve tests that resolving a non-existent decision returns error.
 func TestDecisionServerResolve(t *testing.T) {
 	bus := eventbus.New()
 	defer bus.Close()
-	server := NewDecisionServer("/tmp/test", bus)
-	req := connect.NewRequest(&gastownv1.ResolveRequest{DecisionId: "test-id", ChosenIndex: 1})
+	server := NewDecisionServer("/tmp/test-resolve", bus)
+	req := connect.NewRequest(&gastownv1.ResolveRequest{DecisionId: "nonexistent-id", ChosenIndex: 1})
 
 	_, err := server.Resolve(context.Background(), req)
 	if err == nil {
-		t.Fatal("expected error for unimplemented method")
+		t.Fatal("expected error for non-existent decision")
 	}
 
 	connectErr, ok := err.(*connect.Error)
 	if !ok {
 		t.Fatalf("expected connect.Error, got %T", err)
 	}
-	if connectErr.Code() != connect.CodeUnimplemented {
-		t.Errorf("error code = %v, want Unimplemented", connectErr.Code())
+	// Resolving non-existent decision returns Internal error
+	if connectErr.Code() != connect.CodeInternal {
+		t.Errorf("error code = %v, want Internal", connectErr.Code())
 	}
 }
 
-// TestDecisionServerCancel tests unimplemented method returns correct error.
+// TestDecisionServerCancel tests that canceling a non-existent decision returns error.
 func TestDecisionServerCancel(t *testing.T) {
 	bus := eventbus.New()
 	defer bus.Close()
-	server := NewDecisionServer("/tmp/test", bus)
-	req := connect.NewRequest(&gastownv1.CancelRequest{DecisionId: "test-id"})
+	server := NewDecisionServer("/tmp/test-cancel", bus)
+	req := connect.NewRequest(&gastownv1.CancelRequest{DecisionId: "nonexistent-id"})
 
 	_, err := server.Cancel(context.Background(), req)
 	if err == nil {
-		t.Fatal("expected error for unimplemented method")
+		t.Fatal("expected error for non-existent decision")
 	}
 
 	connectErr, ok := err.(*connect.Error)
 	if !ok {
 		t.Fatalf("expected connect.Error, got %T", err)
 	}
-	if connectErr.Code() != connect.CodeUnimplemented {
-		t.Errorf("error code = %v, want Unimplemented", connectErr.Code())
+	// Canceling non-existent decision returns Internal error
+	if connectErr.Code() != connect.CodeInternal {
+		t.Errorf("error code = %v, want Internal", connectErr.Code())
 	}
 }
 
