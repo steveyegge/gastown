@@ -86,6 +86,18 @@ func main() {
 		log.Printf("Notifications channel: %s", *channelID)
 	}
 
+	// Start SSE listener for real-time decision notifications
+	if *channelID != "" {
+		sseURL := *rpcURL + "/events/decisions"
+		sseListener := slackbot.NewSSEListener(sseURL, bot, bot.RPCClient())
+		go func() {
+			log.Printf("Starting SSE listener: %s", sseURL)
+			if err := sseListener.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("SSE listener error: %v", err)
+			}
+		}()
+	}
+
 	if err := bot.Run(ctx); err != nil {
 		log.Fatalf("Bot error: %v", err)
 	}

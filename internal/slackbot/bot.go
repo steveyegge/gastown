@@ -340,6 +340,11 @@ func (b *Bot) postEphemeral(channelID, userID, text string) {
 	}
 }
 
+// RPCClient returns the bot's RPC client for use by the SSE listener.
+func (b *Bot) RPCClient() *rpcclient.Client {
+	return b.rpcClient
+}
+
 // NotifyNewDecision posts a new decision notification to the configured channel.
 func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 	if b.channelID == "" {
