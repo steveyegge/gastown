@@ -20,7 +20,6 @@ var (
 	mailCC            []string // CC recipients
 	mailInboxJSON     bool
 	mailReadJSON      bool
-	mailReadFull      bool
 	mailInboxUnread   bool
 	mailInboxAll      bool
 	mailInboxIdentity string
@@ -474,7 +473,6 @@ func init() {
 
 	// Read flags
 	mailReadCmd.Flags().BoolVar(&mailReadJSON, "json", false, "Output as JSON")
-	mailReadCmd.Flags().BoolVarP(&mailReadFull, "full", "f", false, "Show complete message without truncation")
 
 	// Check flags
 	mailCheckCmd.Flags().BoolVar(&mailCheckInject, "inject", false, "Output format for Claude Code hooks")

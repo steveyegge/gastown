@@ -13,7 +13,6 @@ import (
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
-	"github.com/steveyegge/gastown/internal/ui"
 )
 
 // getMailbox returns the mailbox for the given address.
@@ -188,12 +187,7 @@ func runMailRead(cmd *cobra.Command, args []string) error {
 	}
 
 	if msg.Body != "" {
-		body := msg.Body
-		// Truncate long bodies unless --full is specified
-		if !mailReadFull && ui.ShouldTruncate(body, ui.DefaultMaxLines, 0) {
-			body = ui.TruncateLines(body, ui.DefaultMaxLines, ui.DefaultContextLines)
-		}
-		fmt.Printf("\n%s\n", body)
+		fmt.Printf("\n%s\n", msg.Body)
 	}
 
 	return nil
@@ -229,12 +223,12 @@ func runMailPeek(cmd *cobra.Command, args []string) error {
 	fmt.Printf("From: %s\n", msg.From)
 	fmt.Printf("ID: %s\n\n", msg.ID)
 
-	// Body preview (smart truncation for popup display)
+	// Body preview (truncate long bodies)
 	if msg.Body != "" {
 		body := msg.Body
-		// Smart truncation for popup display - show beginning and end
-		if ui.ShouldTruncate(body, 10, 500) {
-			body = ui.TruncateChars(body, 500, 150)
+		// Truncate to ~500 chars for popup display
+		if len(body) > 500 {
+			body = body[:500] + "\n..."
 		}
 		fmt.Print(body)
 		if !strings.HasSuffix(body, "\n") {

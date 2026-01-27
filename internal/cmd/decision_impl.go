@@ -19,7 +19,6 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	decisionTUI "github.com/steveyegge/gastown/internal/tui/decision"
-	"github.com/steveyegge/gastown/internal/ui"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -297,12 +296,7 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Question: %s\n\n", fields.Question)
 
 	if fields.Context != "" {
-		context := fields.Context
-		// Truncate long context unless --full is specified
-		if !decisionShowFull && ui.ShouldTruncate(context, ui.DefaultMaxLines, 0) {
-			context = ui.TruncateLines(context, ui.DefaultMaxLines, ui.DefaultContextLines)
-		}
-		fmt.Printf("Context:\n  %s\n\n", strings.ReplaceAll(context, "\n", "\n  "))
+		fmt.Printf("Context:\n  %s\n\n", strings.ReplaceAll(fields.Context, "\n", "\n  "))
 	}
 
 	fmt.Printf("Options:\n")
