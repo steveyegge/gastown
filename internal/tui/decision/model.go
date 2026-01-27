@@ -455,6 +455,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.peekViewport.Width = msg.Width - 4
 		m.peekViewport.Height = msg.Height - 6
 		m.textInput.SetWidth(msg.Width - 10)
+		// Forward to crew wizard if active
+		if m.crewWizard != nil {
+			m.crewWizard.SetSize(msg.Width, msg.Height)
+		}
 
 	case tea.KeyMsg:
 		// Handle crew wizard mode - delegate all input
@@ -589,6 +593,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.CreateCrew):
 			if m.townRoot != "" {
 				m.crewWizard = crewTUI.NewAddModel(m.townRoot, m.currentRig)
+				m.crewWizard.SetSize(m.width, m.height) // Pass dimensions to wizard
 				m.creatingCrew = true
 				return m, m.crewWizard.Init()
 			} else {

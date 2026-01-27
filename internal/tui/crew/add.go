@@ -95,6 +95,13 @@ func NewAddModel(townRoot, currentRig string) *AddModel {
 	}
 }
 
+// SetSize sets the terminal dimensions for the wizard
+func (m *AddModel) SetSize(width, height int) {
+	m.width = width
+	m.height = height
+	m.nameInput.Width = min(40, width-10)
+}
+
 // Init initializes the model
 func (m *AddModel) Init() tea.Cmd {
 	return tea.Batch(
