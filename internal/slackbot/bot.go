@@ -189,6 +189,13 @@ func (b *Bot) handleDecisionsCommand(cmd slack.SlashCommand) {
 }
 
 func (b *Bot) handleInteraction(callback slack.InteractionCallback) {
+	// Handle view submissions (modal form submissions)
+	if callback.Type == slack.InteractionTypeViewSubmission {
+		b.handleViewSubmission(callback)
+		return
+	}
+
+	// Handle block actions (button clicks, etc.)
 	for _, action := range callback.ActionCallback.BlockActions {
 		switch action.ActionID {
 		case "view_decision":
@@ -305,23 +312,144 @@ func (b *Bot) handleResolveDecision(callback slack.InteractionCallback, action *
 	var chosenIndex int
 	fmt.Sscanf(parts[1], "%d", &chosenIndex)
 
-	// Resolve via RPC
+	// Fetch decision details for the modal
 	ctx := context.Background()
-	rationale := fmt.Sprintf("Resolved via Slack by <@%s>", callback.User.ID)
-
-	resolved, err := b.rpcClient.ResolveDecision(ctx, decisionID, chosenIndex, rationale)
+	decisions, err := b.rpcClient.ListPendingDecisions(ctx)
 	if err != nil {
 		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Error fetching decision: %v", err))
+		return
+	}
+
+	var decision *rpcclient.Decision
+	for _, d := range decisions {
+		if d.ID == decisionID {
+			decision = &d
+			break
+		}
+	}
+
+	if decision == nil {
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Decision %s not found or already resolved.", decisionID))
+		return
+	}
+
+	// Get the selected option label
+	optionLabel := fmt.Sprintf("Option %d", chosenIndex)
+	if chosenIndex > 0 && chosenIndex <= len(decision.Options) {
+		optionLabel = decision.Options[chosenIndex-1].Label
+	}
+
+	// Open modal for rationale input
+	modalRequest := b.buildResolveModal(decisionID, chosenIndex, decision.Question, optionLabel, callback.Channel.ID)
+
+	_, err = b.client.OpenView(callback.TriggerID, modalRequest)
+	if err != nil {
+		log.Printf("Slack: Error opening modal: %v", err)
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Error opening dialog: %v", err))
+	}
+}
+
+func (b *Bot) buildResolveModal(decisionID string, chosenIndex int, question, optionLabel, channelID string) slack.ModalViewRequest {
+	// Truncate question if too long for display
+	displayQuestion := question
+	if len(displayQuestion) > 200 {
+		displayQuestion = displayQuestion[:197] + "..."
+	}
+
+	// Private metadata to pass through to submission
+	metadata := fmt.Sprintf("%s:%d:%s", decisionID, chosenIndex, channelID)
+
+	return slack.ModalViewRequest{
+		Type:            slack.VTModal,
+		CallbackID:      "resolve_decision_modal",
+		Title:           slack.NewTextBlockObject("plain_text", "Resolve Decision", false, false),
+		Submit:          slack.NewTextBlockObject("plain_text", "Resolve", false, false),
+		Close:           slack.NewTextBlockObject("plain_text", "Cancel", false, false),
+		PrivateMetadata: metadata,
+		Blocks: slack.Blocks{
+			BlockSet: []slack.Block{
+				slack.NewSectionBlock(
+					slack.NewTextBlockObject("mrkdwn",
+						fmt.Sprintf("*Decision:* %s\n\n%s", decisionID, displayQuestion),
+						false, false,
+					),
+					nil, nil,
+				),
+				slack.NewSectionBlock(
+					slack.NewTextBlockObject("mrkdwn",
+						fmt.Sprintf("*Selected Option:* %s", optionLabel),
+						false, false,
+					),
+					nil, nil,
+				),
+				slack.NewDividerBlock(),
+				slack.NewInputBlock(
+					"rationale_block",
+					slack.NewTextBlockObject("plain_text", "Rationale (optional)", false, false),
+					slack.NewTextBlockObject("plain_text", "Explain why you chose this option", false, false),
+					slack.NewPlainTextInputBlockElement(
+						slack.NewTextBlockObject("plain_text", "Enter your reasoning...", false, false),
+						"rationale_input",
+					),
+				),
+			},
+		},
+	}
+}
+
+func (b *Bot) handleViewSubmission(callback slack.InteractionCallback) {
+	if callback.View.CallbackID != "resolve_decision_modal" {
+		return
+	}
+
+	// Parse private metadata (format: "decisionID:chosenIndex:channelID")
+	parts := strings.Split(callback.View.PrivateMetadata, ":")
+	if len(parts) < 3 {
+		log.Printf("Slack: Invalid modal metadata: %s", callback.View.PrivateMetadata)
+		return
+	}
+
+	decisionID := parts[0]
+	var chosenIndex int
+	fmt.Sscanf(parts[1], "%d", &chosenIndex)
+	channelID := parts[2]
+
+	// Get rationale from form
+	rationale := ""
+	if rationaleBlock, ok := callback.View.State.Values["rationale_block"]; ok {
+		if rationaleInput, ok := rationaleBlock["rationale_input"]; ok {
+			rationale = rationaleInput.Value
+		}
+	}
+
+	// Add user attribution if rationale is empty or append to existing
+	userAttribution := fmt.Sprintf("Resolved via Slack by <@%s>", callback.User.ID)
+	if rationale == "" {
+		rationale = userAttribution
+	} else {
+		rationale = rationale + "\n\n— " + userAttribution
+	}
+
+	// Resolve via RPC
+	ctx := context.Background()
+	resolved, err := b.rpcClient.ResolveDecision(ctx, decisionID, chosenIndex, rationale)
+	if err != nil {
+		// Post error to channel since we can't return error to modal
+		b.postEphemeral(channelID, callback.User.ID,
 			fmt.Sprintf("Error resolving decision: %v", err))
 		return
 	}
 
 	// Confirm resolution
-	b.postEphemeral(callback.Channel.ID, callback.User.ID,
-		fmt.Sprintf("✅ Decision %s resolved! Choice: %d", resolved.ID, resolved.ChosenIndex))
+	b.postEphemeral(channelID, callback.User.ID,
+		fmt.Sprintf("✅ Decision %s resolved!\n*Choice:* Option %d\n*Rationale:* %s",
+			resolved.ID, resolved.ChosenIndex, rationale))
 
-	// Optionally post to channel if configured
-	if b.channelID != "" && b.channelID != callback.Channel.ID {
+	// Post to notification channel if configured and different
+	if b.channelID != "" && b.channelID != channelID {
 		_, _, _ = b.client.PostMessage(b.channelID,
 			slack.MsgOptionText(
 				fmt.Sprintf("Decision `%s` resolved by <@%s>", decisionID, callback.User.ID),
