@@ -165,9 +165,9 @@ type MailRow struct {
 	SortKey   int64  // Unix timestamp for sorting
 }
 
-// PolecatRow represents a polecat worker in the dashboard.
+// PolecatRow represents a worker (polecat or crew) in the dashboard.
 type PolecatRow struct {
-	Name         string        // e.g., "dag", "nux"
+	Name         string        // e.g., "dag", "nux", "refinery"
 	Rig          string        // e.g., "roxas", "gastown"
 	SessionID    string        // e.g., "gt-roxas-dag"
 	LastActivity activity.Info // Colored activity display
@@ -175,6 +175,7 @@ type PolecatRow struct {
 	IssueID      string        // Currently assigned issue ID (e.g., "hq-1234")
 	IssueTitle   string        // Issue title (truncated)
 	WorkStatus   string        // working, stale, stuck, idle
+	AgentType    string        // "polecat" (ephemeral) or "crew" (permanent)
 }
 
 // MergeQueueRow represents a PR in the merge queue.
