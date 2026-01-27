@@ -60,6 +60,7 @@ func (c *LifecycleHygieneCheck) checkDeaconInbox(ctx *CheckContext) int {
 	// Get deacon inbox via gt mail
 	cmd := exec.Command("gt", "mail", "inbox", "--identity", "deacon/", "--json")
 	cmd.Dir = ctx.TownRoot
+	cmd.Env = append(cmd.Environ(), "BEADS_NO_DAEMON=1")
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -101,6 +102,7 @@ func (c *LifecycleHygieneCheck) Fix(ctx *CheckContext) error {
 	for _, msg := range c.staleMessages {
 		cmd := exec.Command("gt", "mail", "delete", msg.ID) //nolint:gosec // G204: msg.ID is from internal state, not user input
 		cmd.Dir = ctx.TownRoot
+		cmd.Env = append(cmd.Environ(), "BEADS_NO_DAEMON=1")
 		if err := cmd.Run(); err != nil {
 			errors = append(errors, fmt.Sprintf("failed to delete message %s: %v", msg.ID, err))
 		}
