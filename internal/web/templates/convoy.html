@@ -572,6 +572,20 @@
             font-size: 0.8rem;
         }
 
+        /* Panel error state */
+        .panel-error {
+            text-align: center;
+            padding: 16px;
+            background: rgba(240, 113, 120, 0.1);
+            border-left: 3px solid var(--red);
+            color: var(--red);
+        }
+
+        .panel-error p {
+            font-size: 0.8rem;
+            margin: 0;
+        }
+
         /* htmx loading indicator */
         .htmx-request .htmx-indicator {
             opacity: 1;
@@ -992,7 +1006,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Convoys}}
+                    {{if index .Errors "Convoys"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Convoys"}}</p>
+                    </div>
+                    {{else if .Convoys}}
                     <table>
                         <thead>
                             <tr>
@@ -1053,7 +1071,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Polecats}}
+                    {{if index .Errors "Polecats"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Polecats"}}</p>
+                    </div>
+                    {{else if .Polecats}}
                     <table>
                         <thead>
                             <tr>
@@ -1112,7 +1134,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Sessions}}
+                    {{if index .Errors "Sessions"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Sessions"}}</p>
+                    </div>
+                    {{else if .Sessions}}
                     <table>
                         <thead>
                             <tr>
@@ -1151,7 +1177,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body activity-feed">
-                    {{if .Activity}}
+                    {{if index .Errors "Activity"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Activity"}}</p>
+                    </div>
+                    {{else if .Activity}}
                     <div class="feed-list">
                         {{range .Activity}}
                         <div class="feed-item">
@@ -1179,7 +1209,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Mail}}
+                    {{if index .Errors "Mail"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Mail"}}</p>
+                    </div>
+                    {{else if .Mail}}
                     <table>
                         <thead>
                             <tr>
@@ -1220,7 +1254,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .MergeQueue}}
+                    {{if index .Errors "MergeQueue"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "MergeQueue"}}</p>
+                    </div>
+                    {{else if .MergeQueue}}
                     <table>
                         <thead>
                             <tr>
@@ -1267,7 +1305,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Escalations}}
+                    {{if index .Errors "Escalations"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Escalations"}}</p>
+                    </div>
+                    {{else if .Escalations}}
                     <table>
                         <thead>
                             <tr>
@@ -1314,7 +1356,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Rigs}}
+                    {{if index .Errors "Rigs"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Rigs"}}</p>
+                    </div>
+                    {{else if .Rigs}}
                     <table>
                         <thead>
                             <tr>
@@ -1354,7 +1400,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Dogs}}
+                    {{if index .Errors "Dogs"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Dogs"}}</p>
+                    </div>
+                    {{else if .Dogs}}
                     <table>
                         <thead>
                             <tr>
@@ -1393,7 +1443,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Health}}
+                    {{if index .Errors "Health"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Health"}}</p>
+                    </div>
+                    {{else if .Health}}
                     <div class="health-grid">
                         <div class="health-item">
                             <div class="health-label">Deacon Heartbeat</div>
@@ -1430,8 +1484,8 @@
                 </div>
             </div>
 
-            <!-- Queues Panel (optional, only show if there are queues) -->
-            {{if .Queues}}
+            <!-- Queues Panel (optional, only show if there are queues or error) -->
+            {{if or .Queues (index .Errors "Queues")}}
             <div class="panel">
                 <div class="panel-header">
                     <h2>📋 Queues</h2>
@@ -1439,6 +1493,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
+                    {{if index .Errors "Queues"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Queues"}}</p>
+                    </div>
+                    {{else}}
                     <table>
                         <thead>
                             <tr>
@@ -1467,6 +1526,7 @@
                             {{end}}
                         </tbody>
                     </table>
+                    {{end}}
                 </div>
             </div>
             {{end}}
@@ -1479,7 +1539,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Issues}}
+                    {{if index .Errors "Issues"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Issues"}}</p>
+                    </div>
+                    {{else if .Issues}}
                     <table>
                         <thead>
                             <tr>
@@ -1523,7 +1587,11 @@
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Hooks}}
+                    {{if index .Errors "Hooks"}}
+                    <div class="panel-error">
+                        <p>⚠️ {{index .Errors "Hooks"}}</p>
+                    </div>
+                    {{else if .Hooks}}
                     <table>
                         <thead>
                             <tr>
