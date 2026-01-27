@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,12 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
+
+// wispCreateResult matches the JSON output from bd mol wisp create --json
+type wispCreateResult struct {
+	NewEpicID string `json:"new_epic_id"`
+	Created   int    `json:"created"`
+}
 
 // PatrolConfig holds role-specific patrol configuration.
 type PatrolConfig struct {
@@ -136,8 +143,8 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 		return "", fmt.Errorf("proto %s not found in catalog", cfg.PatrolMolName)
 	}
 
-	// Create the patrol wisp
-	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
+	// Create the patrol wisp with JSON output for reliable parsing
+	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName, "--json")
 	cmdSpawn.Dir = cfg.BeadsDir
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
@@ -147,23 +154,15 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 		return "", fmt.Errorf("failed to create patrol wisp: %s", stderrSpawn.String())
 	}
 
-	// Parse the created molecule ID from output
-	var patrolID string
-	spawnOutput := stdoutSpawn.String()
-	for _, line := range strings.Split(spawnOutput, "\n") {
-		if strings.Contains(line, "Root issue:") || strings.Contains(line, "Created") {
-			parts := strings.Fields(line)
-			for _, p := range parts {
-				if strings.HasPrefix(p, "wisp-") || strings.HasPrefix(p, "gt-") {
-					patrolID = p
-					break
-				}
-			}
-		}
+	// Parse JSON output to get the wisp ID
+	var result wispCreateResult
+	if err := json.Unmarshal(stdoutSpawn.Bytes(), &result); err != nil {
+		return "", fmt.Errorf("created wisp but could not parse JSON output: %v (output: %s)", err, stdoutSpawn.String())
 	}
 
+	patrolID := result.NewEpicID
 	if patrolID == "" {
-		return "", fmt.Errorf("created wisp but could not parse ID from output")
+		return "", fmt.Errorf("created wisp but new_epic_id was empty in JSON output")
 	}
 
 	// Hook the wisp to the agent so gt mol status sees it
