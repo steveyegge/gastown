@@ -10,6 +10,15 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 )
 
+// skipIfNoSymlinkSupport skips the test if symlinks are not supported.
+// On Windows, symlinks require elevated privileges or Developer Mode.
+func skipIfNoSymlinkSupport(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require elevated privileges on Windows")
+	}
+}
+
 // setupSeanceTestEnv creates a test environment with multiple accounts and sessions.
 func setupSeanceTestEnv(t *testing.T) (townRoot, fakeHome string, cleanup func()) {
 	t.Helper()
@@ -107,6 +116,8 @@ func createTestSession(t *testing.T, configDir, projectName, sessionID string) {
 }
 
 func TestFindSessionLocation(t *testing.T) {
+	skipIfNoSymlinkSupport(t)
+
 	t.Run("finds session in account1", func(t *testing.T) {
 		townRoot, fakeHome, cleanup := setupSeanceTestEnv(t)
 		defer cleanup()
@@ -164,9 +175,7 @@ func TestFindSessionLocation(t *testing.T) {
 }
 
 func TestSymlinkSessionToCurrentAccount(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink tests require elevated privileges on Windows")
-	}
+	skipIfNoSymlinkSupport(t)
 
 	t.Run("creates symlink for session in other account", func(t *testing.T) {
 		townRoot, fakeHome, cleanup := setupSeanceTestEnv(t)
@@ -269,9 +278,7 @@ func TestSymlinkSessionToCurrentAccount(t *testing.T) {
 }
 
 func TestCleanupOrphanedSessionSymlinks(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink tests require elevated privileges on Windows")
-	}
+	skipIfNoSymlinkSupport(t)
 
 	t.Run("removes orphaned symlinks", func(t *testing.T) {
 		_, fakeHome, cleanup := setupSeanceTestEnv(t)
