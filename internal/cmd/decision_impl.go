@@ -2,12 +2,15 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,6 +19,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/inject"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/rpcclient"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	decisionTUI "github.com/steveyegge/gastown/internal/tui/decision"
@@ -919,6 +923,11 @@ func formatDecisionReminder(workIndicators []string) string {
 }
 
 func runDecisionWatch(cmd *cobra.Command, args []string) error {
+	// Handle RPC mode - simple streaming watcher for testing the RPC layer
+	if decisionWatchRPC {
+		return runDecisionWatchRPC()
+	}
+
 	// Verify we're in a Gas Town workspace
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -951,6 +960,65 @@ func runDecisionWatch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error running decision watch: %w", err)
 	}
 
+	return nil
+}
+
+// runDecisionWatchRPC runs a simple RPC-based decision watcher.
+// This serves as a test harness for the mobile RPC server.
+func runDecisionWatchRPC() error {
+	fmt.Printf("Connecting to RPC server at %s...\n", decisionWatchRPCAddr)
+
+	client := rpcclient.NewClient(decisionWatchRPCAddr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle Ctrl+C
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Println("\nStopping...")
+		cancel()
+	}()
+
+	fmt.Println("Watching for decisions (Ctrl+C to stop)...")
+	fmt.Println()
+
+	seen := make(map[string]bool)
+	err := client.WatchDecisions(ctx, func(d rpcclient.Decision) error {
+		if seen[d.ID] {
+			return nil
+		}
+		seen[d.ID] = true
+
+		// Print decision info
+		urgencyIcon := "●"
+		switch d.Urgency {
+		case "high":
+			urgencyIcon = "🔴"
+		case "medium":
+			urgencyIcon = "🟡"
+		case "low":
+			urgencyIcon = "🟢"
+		}
+
+		fmt.Printf("%s [%s] %s\n", urgencyIcon, d.ID, d.Question)
+		fmt.Printf("   Requested by: %s\n", d.RequestedBy)
+		for i, opt := range d.Options {
+			rec := ""
+			if opt.Recommended {
+				rec = " (recommended)"
+			}
+			fmt.Printf("   %d. %s%s\n", i+1, opt.Label, rec)
+		}
+		fmt.Println()
+		return nil
+	})
+
+	if err != nil && err != context.Canceled {
+		return fmt.Errorf("watch error: %w", err)
+	}
 	return nil
 }
 
