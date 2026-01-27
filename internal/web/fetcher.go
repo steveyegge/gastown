@@ -712,10 +712,10 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 			continue
 		}
 
-		// Determine agent type: refinery is crew (permanent), others are polecats (ephemeral)
+		// Determine agent type: refinery is its own permanent role, others are polecats (ephemeral)
 		agentType := "polecat"
 		if polecat == "refinery" {
-			agentType = "crew"
+			agentType = "refinery"
 		}
 
 		// Parse activity timestamp
