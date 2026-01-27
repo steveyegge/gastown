@@ -652,6 +652,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.peekViewport.GotoBottom()
 			m.status = fmt.Sprintf("Peeking: %s (↑/↓ scroll, any other key to close)", msg.sessionName)
 		}
+
+	default:
+		// Forward unknown messages to crew wizard if active
+		// This handles the wizard's internal messages (rigsLoadedMsg, crewCreatedMsg, etc.)
+		if m.creatingCrew && m.crewWizard != nil {
+			updated, cmd := m.crewWizard.Update(msg)
+			if wizard, ok := updated.(*crewTUI.AddModel); ok {
+				m.crewWizard = wizard
+				if wizard.IsDone() {
+					m.creatingCrew = false
+					m.crewWizard = nil
+					return m, m.fetchDecisions()
+				}
+			}
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	// Update viewport
