@@ -156,16 +156,16 @@ func TestFormatTrackBeadID(t *testing.T) {
 			expected: "external:gastown:gt-abc",
 		},
 
-		// Beads without routes fall back to legacy prefix-based format
+		// Beads without routes return unchanged - let bd handle routing
 		{
-			name:     "unknown prefix fallback two segments",
+			name:     "unknown prefix two segments returns unchanged",
 			beadID:   "foo-bar",
-			expected: "external:foo-bar:foo-bar",
+			expected: "foo-bar",
 		},
 		{
-			name:     "unknown prefix fallback three segments",
+			name:     "unknown prefix three segments returns unchanged",
 			beadID:   "unk-mol-abc123",
-			expected: "external:unk-mol:unk-mol-abc123",
+			expected: "unk-mol-abc123",
 		},
 
 		// Edge cases

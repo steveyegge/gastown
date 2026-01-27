@@ -198,7 +198,8 @@ func parseJSON(data []byte, target interface{}) error {
 //   - "gt-mol-abc123" -> "external:gastown:gt-mol-abc123"
 //   - "bd-xyz" -> "external:beads:bd-xyz"
 //
-// Falls back to legacy prefix-based format if routes lookup fails.
+// Returns the bead ID unchanged if routes lookup fails - bd can handle
+// routing on its own via its internal routing.ResolveToExternalRef().
 func formatTrackBeadID(beadID string) string {
 	if strings.HasPrefix(beadID, "hq-") {
 		return beadID
@@ -212,19 +213,9 @@ func formatTrackBeadID(beadID string) string {
 		}
 	}
 
-	// Fallback: if no route found, use legacy prefix-based format
-	// This maintains backwards compatibility for repos without routes.jsonl
-	parts := strings.SplitN(beadID, "-", 3)
-	switch len(parts) {
-	case 0, 1:
-		// Single segment or empty - return as-is (fallback)
-		return beadID
-	case 2:
-		// Two segments - use the whole ID as the prefix
-		return fmt.Sprintf("external:%s:%s", beadID, beadID)
-	default:
-		// Three+ segments - use first two as the prefix
-		rigPrefix := parts[0] + "-" + parts[1]
-		return fmt.Sprintf("external:%s:%s", rigPrefix, beadID)
-	}
+	// No route found - return bead ID unchanged and let bd handle routing.
+	// This avoids producing incorrect external ref formats like
+	// "external:gt-mol:gt-mol-abc123" when the correct format should be
+	// "external:gastown:gt-mol-abc123" (with project name, not prefix).
+	return beadID
 }
