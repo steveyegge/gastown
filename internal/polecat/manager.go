@@ -46,12 +46,12 @@ func (e *UncommittedWorkError) Unwrap() error {
 
 // Manager handles polecat lifecycle.
 type Manager struct {
-	rig       *rig.Rig
-	git       *git.Git
-	beads     *beads.Beads // Rig-level beads for issue operations
-	townBeads *beads.Beads // Town-level beads for agent bead operations (hq- prefix)
-	namePool  *NamePool
-	tmux      *tmux.Tmux
+	rig      *rig.Rig
+	git      *git.Git
+	beads    *beads.Beads // Rig-level beads for issue and agent bead operations
+	prefix   string       // Rig's configured prefix (e.g., "gt", "fhc") without hyphen
+	namePool *NamePool
+	tmux     *tmux.Tmux
 
 	// allocMu protects name allocation within a single process.
 	// File locking (in AllocateName) handles cross-process synchronization.
@@ -66,11 +66,11 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	resolvedBeads := beads.ResolveBeadsDir(r.Path)
 	beadsPath := filepath.Dir(resolvedBeads) // Get the directory containing .beads
 
-	// Town beads for agent bead operations (hq- prefix).
-	// Agent beads are coordination artifacts stored at town level to avoid
-	// prefix/database mismatch issues (fix for loc-1augh).
+	// Get rig's configured prefix for agent bead IDs (e.g., "gt", "fhc").
+	// Agent beads are stored in the rig's beads database with the rig's prefix,
+	// aligning with existing beads infrastructure (fix for gt-qub).
 	townRoot := filepath.Dir(r.Path)
-	townBeadsDir := filepath.Join(townRoot, ".beads")
+	prefix := beads.GetPrefixForRig(townRoot, r.Name)
 
 	// Try to load rig settings for namepool config
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
@@ -93,12 +93,12 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	_ = pool.Load() // non-fatal: state file may not exist for new rigs
 
 	return &Manager{
-		rig:       r,
-		git:       g,
-		beads:     beads.NewWithBeadsDir(beadsPath, resolvedBeads),
-		townBeads: beads.NewWithBeadsDir(townRoot, townBeadsDir),
-		namePool:  pool,
-		tmux:      t,
+		rig:      r,
+		git:      g,
+		beads:    beads.NewWithBeadsDir(beadsPath, resolvedBeads),
+		prefix:   prefix,
+		namePool: pool,
+		tmux:     t,
 	}
 }
 
@@ -109,11 +109,12 @@ func (m *Manager) assigneeID(name string) string {
 }
 
 // agentBeadID returns the agent bead ID for a polecat.
-// Format: "hq-<rig>-polecat-<name>" (e.g., "hq-gastown-polecat-Toast")
-// Polecat agent beads are stored at town-level with hq- prefix to avoid
-// prefix/database mismatch issues (fix for loc-1augh).
+// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast")
+// When prefix equals rig name, the rig is deduplicated (e.g., "fhc-polecat-Toast").
+// Polecat agent beads are stored in the rig's beads database with the rig's
+// configured prefix, aligning with existing beads infrastructure (fix for gt-qub).
 func (m *Manager) agentBeadID(name string) string {
-	return beads.PolecatBeadIDTown(m.rig.Name, name)
+	return beads.PolecatBeadIDWithPrefix(m.prefix, m.rig.Name, name)
 }
 
 // getCleanupStatusFromBead reads the cleanup_status from the polecat's agent bead.
@@ -121,7 +122,7 @@ func (m *Manager) agentBeadID(name string) string {
 // ZFC #10: This is the ZFC-compliant way to check if removal is safe.
 func (m *Manager) getCleanupStatusFromBead(name string) CleanupStatus {
 	agentID := m.agentBeadID(name)
-	_, fields, err := m.townBeads.GetAgentBead(agentID)
+	_, fields, err := m.beads.GetAgentBead(agentID)
 	if err != nil || fields == nil {
 		return CleanupUnknown
 	}
@@ -497,7 +498,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// HookBead is set atomically at creation time if provided (avoids cross-beads routing issues).
 	// Uses CreateOrReopenAgentBead to handle re-spawning with same name (GH #332).
 	agentID := m.agentBeadID(name)
-	_, err = m.townBeads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
+	_, err = m.beads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
@@ -645,7 +646,7 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 	// NOTE: We use CloseAndClearAgentBead instead of DeleteAgentBead because bd delete --hard
 	// creates tombstones that cannot be reopened.
 	agentID := m.agentBeadID(name)
-	if err := m.townBeads.CloseAndClearAgentBead(agentID, "polecat removed"); err != nil {
+	if err := m.beads.CloseAndClearAgentBead(agentID, "polecat removed"); err != nil {
 		// Only log if not "not found" - it's ok if it doesn't exist
 		if !errors.Is(err, beads.ErrNotFound) {
 			fmt.Printf("Warning: could not close agent bead %s: %v\n", agentID, err)
@@ -754,7 +755,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// NOTE: We use CloseAndClearAgentBead instead of DeleteAgentBead because bd delete --hard
 	// creates tombstones that cannot be reopened.
 	agentID := m.agentBeadID(name)
-	if err := m.townBeads.CloseAndClearAgentBead(agentID, "polecat repair"); err != nil {
+	if err := m.beads.CloseAndClearAgentBead(agentID, "polecat repair"); err != nil {
 		if !errors.Is(err, beads.ErrNotFound) {
 			fmt.Printf("Warning: could not close old agent bead %s: %v\n", agentID, err)
 		}
@@ -841,7 +842,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 	// Create or reopen agent bead for ZFC compliance
 	// HookBead is set atomically at recreation time if provided.
 	// Uses CreateOrReopenAgentBead to handle re-spawning with same name (GH #332).
-	_, err = m.townBeads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
+	_, err = m.beads.CreateOrReopenAgentBead(agentID, agentID, &beads.AgentFields{
 		RoleType:   "polecat",
 		Rig:        m.rig.Name,
 		AgentState: "spawning",
@@ -1128,7 +1129,7 @@ func (m *Manager) loadFromBeads(name string) (*Polecat, error) {
 	// (e.g., from previous polecat lifecycle before nuke).
 	// ALWAYS use hook_bead when set, overriding any stale assignee.
 	agentBeadID := m.agentBeadID(name)
-	if _, fields, err := m.townBeads.GetAgentBead(agentBeadID); err == nil && fields != nil {
+	if _, fields, err := m.beads.GetAgentBead(agentBeadID); err == nil && fields != nil {
 		if fields.HookBead != "" {
 			// Polecat has hooked work - should be working, not done
 			state = StateWorking
@@ -1372,7 +1373,7 @@ func (m *Manager) DetectStalePolecats(threshold int) ([]*StalenessInfo, error) {
 
 		// Check agent bead state
 		agentID := m.agentBeadID(p.Name)
-		_, fields, err := m.townBeads.GetAgentBead(agentID)
+		_, fields, err := m.beads.GetAgentBead(agentID)
 		if err == nil && fields != nil {
 			info.AgentState = fields.AgentState
 		}
