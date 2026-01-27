@@ -253,6 +253,7 @@ func init() {
 	moleculeCmd.AddCommand(moleculeBurnCmd)
 	moleculeCmd.AddCommand(moleculeSquashCmd)
 	moleculeCmd.AddCommand(moleculeProgressCmd)
+	moleculeCmd.AddCommand(moleculeDagCmd)
 	moleculeCmd.AddCommand(moleculeAttachCmd)
 	moleculeCmd.AddCommand(moleculeDetachCmd)
 	moleculeCmd.AddCommand(moleculeAttachmentCmd)
