@@ -139,24 +139,24 @@ func (c *PreCheckoutHookCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix installs the pre-checkout hook.
-func (c *PreCheckoutHookCheck) Fix(ctx *CheckContext) error {
+func (c *PreCheckoutHookCheck) Fix(ctx *CheckContext) (string, error) {
 	if !c.hookMissing {
-		return nil
+		return "", nil
 	}
 
 	hooksDir := filepath.Join(ctx.TownRoot, ".git", "hooks")
 
 	// Ensure hooks directory exists
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
-		return fmt.Errorf("creating hooks directory: %w", err)
+		return "", fmt.Errorf("creating hooks directory: %w", err)
 	}
 
 	hookPath := filepath.Join(hooksDir, "pre-checkout")
 
 	// Install the hook
 	if err := os.WriteFile(hookPath, []byte(preCheckoutHookScript), 0755); err != nil {
-		return fmt.Errorf("writing hook: %w", err)
+		return "", fmt.Errorf("writing hook: %w", err)
 	}
 
-	return nil
+	return "", nil
 }

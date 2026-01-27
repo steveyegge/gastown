@@ -110,9 +110,9 @@ func (c *ZombieSessionCheck) Run(ctx *CheckContext) *CheckResult {
 
 // Fix kills all zombie sessions (tmux sessions with no Claude running).
 // Crew sessions are never auto-killed as they are human-managed.
-func (c *ZombieSessionCheck) Fix(ctx *CheckContext) error {
+func (c *ZombieSessionCheck) Fix(ctx *CheckContext) (string, error) {
 	if len(c.zombieSessions) == 0 {
-		return nil
+		return "", nil
 	}
 
 	t := tmux.NewTmux()
@@ -134,5 +134,5 @@ func (c *ZombieSessionCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	return lastErr
+	return "", lastErr
 }

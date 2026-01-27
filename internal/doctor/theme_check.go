@@ -92,10 +92,10 @@ func (c *ThemeCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix applies themes to all sessions.
-func (c *ThemeCheck) Fix(ctx *CheckContext) error {
+func (c *ThemeCheck) Fix(ctx *CheckContext) (string, error) {
 	cmd := exec.Command("gt", "theme", "apply", "--all")
 	cmd.Dir = ctx.TownRoot
-	return cmd.Run()
+	return "", cmd.Run()
 }
 
 // getSessionStatusLeft retrieves the status-left setting for a tmux session.

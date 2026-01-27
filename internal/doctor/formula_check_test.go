@@ -86,7 +86,7 @@ func TestFormulaCheck_Fix(t *testing.T) {
 	ctx := &CheckContext{TownRoot: tmpDir}
 
 	// Run fix
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix() error: %v", err)
 	}
 

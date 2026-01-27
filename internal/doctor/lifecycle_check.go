@@ -94,7 +94,7 @@ func (c *LifecycleHygieneCheck) checkDeaconInbox(ctx *CheckContext) int {
 }
 
 // Fix cleans up stale lifecycle messages.
-func (c *LifecycleHygieneCheck) Fix(ctx *CheckContext) error {
+func (c *LifecycleHygieneCheck) Fix(ctx *CheckContext) (string, error) {
 	var errors []string
 
 	// Delete stale lifecycle messages
@@ -107,7 +107,7 @@ func (c *LifecycleHygieneCheck) Fix(ctx *CheckContext) error {
 	}
 
 	if len(errors) > 0 {
-		return fmt.Errorf("%s", strings.Join(errors, "; "))
+		return "", fmt.Errorf("%s", strings.Join(errors, "; "))
 	}
-	return nil
+	return "", nil
 }

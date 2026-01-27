@@ -70,12 +70,12 @@ func (c *StaleBinaryCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix rebuilds and installs gt.
-func (c *StaleBinaryCheck) Fix(ctx *CheckContext) error {
+func (c *StaleBinaryCheck) Fix(ctx *CheckContext) (string, error) {
 	// Note: We don't auto-fix this because:
 	// 1. It requires building and installing, which takes time
 	// 2. It modifies system files outside the workspace
 	// 3. User should explicitly run 'gt install'
-	return fmt.Errorf("run 'gt install' manually to rebuild")
+	return "", fmt.Errorf("run 'gt install' manually to rebuild")
 }
 
 // CanFix returns false - stale binary should be fixed manually.

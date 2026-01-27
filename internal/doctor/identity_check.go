@@ -153,15 +153,15 @@ func (c *IdentityCollisionCheck) Run(ctx *CheckContext) *CheckResult {
 	return result
 }
 
-func (c *IdentityCollisionCheck) Fix(ctx *CheckContext) error {
+func (c *IdentityCollisionCheck) Fix(ctx *CheckContext) (string, error) {
 	cleaned, err := lock.CleanStaleLocks(ctx.TownRoot)
 	if err != nil {
-		return fmt.Errorf("cleaning stale locks: %w", err)
+		return "", fmt.Errorf("cleaning stale locks: %w", err)
 	}
 
 	if cleaned > 0 {
-		fmt.Printf("  Cleaned %d stale lock(s)\n", cleaned)
+		return fmt.Sprintf("Cleaned %d stale lock(s)", cleaned), nil
 	}
 
-	return nil
+	return "", nil
 }

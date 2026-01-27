@@ -169,7 +169,7 @@ func (c *HookAttachmentValidCheck) formatInvalid(inv invalidAttachment) string {
 }
 
 // Fix detaches all invalid molecule attachments.
-func (c *HookAttachmentValidCheck) Fix(ctx *CheckContext) error {
+func (c *HookAttachmentValidCheck) Fix(ctx *CheckContext) (string, error) {
 	var errors []string
 
 	for _, inv := range c.invalidAttachments {
@@ -182,9 +182,9 @@ func (c *HookAttachmentValidCheck) Fix(ctx *CheckContext) error {
 	}
 
 	if len(errors) > 0 {
-		return fmt.Errorf("%s", strings.Join(errors, "; "))
+		return "", fmt.Errorf("%s", strings.Join(errors, "; "))
 	}
-	return nil
+	return "", nil
 }
 
 // HookSingletonCheck ensures each agent has at most one handoff bead.
@@ -305,7 +305,7 @@ func (c *HookSingletonCheck) formatDuplicate(dup duplicateHandoff) string {
 }
 
 // Fix closes duplicate handoff beads, keeping the first one.
-func (c *HookSingletonCheck) Fix(ctx *CheckContext) error {
+func (c *HookSingletonCheck) Fix(ctx *CheckContext) (string, error) {
 	var errors []string
 
 	for _, dup := range c.duplicates {
@@ -322,9 +322,9 @@ func (c *HookSingletonCheck) Fix(ctx *CheckContext) error {
 	}
 
 	if len(errors) > 0 {
-		return fmt.Errorf("%s", strings.Join(errors, "; "))
+		return "", fmt.Errorf("%s", strings.Join(errors, "; "))
 	}
-	return nil
+	return "", nil
 }
 
 // OrphanedAttachmentsCheck detects handoff beads for agents that no longer exist.

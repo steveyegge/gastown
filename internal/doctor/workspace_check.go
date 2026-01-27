@@ -159,7 +159,7 @@ func (c *RigsRegistryExistsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix creates an empty rigs.json file.
-func (c *RigsRegistryExistsCheck) Fix(ctx *CheckContext) error {
+func (c *RigsRegistryExistsCheck) Fix(ctx *CheckContext) (string, error) {
 	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
 
 	emptyRigs := struct {
@@ -172,10 +172,10 @@ func (c *RigsRegistryExistsCheck) Fix(ctx *CheckContext) error {
 
 	data, err := json.MarshalIndent(emptyRigs, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling empty rigs.json: %w", err)
+		return "", fmt.Errorf("marshaling empty rigs.json: %w", err)
 	}
 
-	return os.WriteFile(rigsPath, data, 0644)
+	return "", os.WriteFile(rigsPath, data, 0644)
 }
 
 // RigsRegistryValidCheck verifies mayor/rigs.json is valid and rigs exist.
@@ -282,21 +282,21 @@ func (c *RigsRegistryValidCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix removes missing rigs from the registry.
-func (c *RigsRegistryValidCheck) Fix(ctx *CheckContext) error {
+func (c *RigsRegistryValidCheck) Fix(ctx *CheckContext) (string, error) {
 	if len(c.missingRigs) == 0 {
-		return nil
+		return "", nil
 	}
 
 	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
 
 	data, err := os.ReadFile(rigsPath)
 	if err != nil {
-		return fmt.Errorf("reading rigs.json: %w", err)
+		return "", fmt.Errorf("reading rigs.json: %w", err)
 	}
 
 	var config rigsConfig
 	if err := json.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("parsing rigs.json: %w", err)
+		return "", fmt.Errorf("parsing rigs.json: %w", err)
 	}
 
 	// Remove missing rigs
@@ -307,10 +307,10 @@ func (c *RigsRegistryValidCheck) Fix(ctx *CheckContext) error {
 	// Write back
 	newData, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling rigs.json: %w", err)
+		return "", fmt.Errorf("marshaling rigs.json: %w", err)
 	}
 
-	return os.WriteFile(rigsPath, newData, 0644)
+	return "", os.WriteFile(rigsPath, newData, 0644)
 }
 
 // MayorExistsCheck verifies the mayor/ directory structure.

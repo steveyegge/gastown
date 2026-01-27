@@ -88,9 +88,9 @@ func (c *BranchCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix switches all off-main directories to main branch.
-func (c *BranchCheck) Fix(ctx *CheckContext) error {
+func (c *BranchCheck) Fix(ctx *CheckContext) (string, error) {
 	if len(c.offMainDirs) == 0 {
-		return nil
+		return "", nil
 	}
 
 	var lastErr error
@@ -112,7 +112,7 @@ func (c *BranchCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	return lastErr
+	return "", lastErr
 }
 
 // findPersistentRoleDirs finds all directories that should be on main:

@@ -115,7 +115,7 @@ func TestRigRoutesJSONLCheck_Fix(t *testing.T) {
 		}
 
 		// Fix
-		if err := check.Fix(ctx); err != nil {
+		if _, err := check.Fix(ctx); err != nil {
 			t.Fatalf("Fix() error: %v", err)
 		}
 
@@ -142,7 +142,7 @@ func TestRigRoutesJSONLCheck_Fix(t *testing.T) {
 		}
 
 		// Fix should be no-op
-		if err := check.Fix(ctx); err != nil {
+		if _, err := check.Fix(ctx); err != nil {
 			t.Fatalf("Fix() error on clean state: %v", err)
 		}
 	})

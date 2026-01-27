@@ -100,7 +100,7 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 		ctx := &CheckContext{TownRoot: tmpDir}
 
 		// Run fix
-		if err := check.Fix(ctx); err != nil {
+		if _, err := check.Fix(ctx); err != nil {
 			t.Fatalf("Fix failed: %v", err)
 		}
 
@@ -160,7 +160,7 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 		ctx := &CheckContext{TownRoot: tmpDir}
 
 		// Run fix
-		if err := check.Fix(ctx); err != nil {
+		if _, err := check.Fix(ctx); err != nil {
 			t.Fatalf("Fix failed: %v", err)
 		}
 
@@ -207,7 +207,7 @@ func TestRoutesCheck_FixRestoresTownRoute(t *testing.T) {
 		ctx := &CheckContext{TownRoot: tmpDir}
 
 		// Run fix (should be a no-op)
-		if err := check.Fix(ctx); err != nil {
+		if _, err := check.Fix(ctx); err != nil {
 			t.Fatalf("Fix failed: %v", err)
 		}
 
@@ -283,7 +283,7 @@ func TestRoutesCheck_CorruptedRoutesJsonl(t *testing.T) {
 		ctx := &CheckContext{TownRoot: tmpDir}
 
 		// Run fix
-		if err := check.Fix(ctx); err != nil {
+		if _, err := check.Fix(ctx); err != nil {
 			t.Fatalf("Fix failed: %v", err)
 		}
 

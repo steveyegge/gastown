@@ -157,9 +157,9 @@ func (c *RepoFingerprintCheck) checkBeadsDir(workDir, location string) *CheckRes
 }
 
 // Fix runs bd migrate --update-repo-id and restarts the daemon.
-func (c *RepoFingerprintCheck) Fix(ctx *CheckContext) error {
+func (c *RepoFingerprintCheck) Fix(ctx *CheckContext) (string, error) {
 	if !c.needsMigration || c.beadsDir == "" {
-		return nil
+		return "", nil
 	}
 
 	// Run bd migrate --update-repo-id
@@ -168,7 +168,7 @@ func (c *RepoFingerprintCheck) Fix(ctx *CheckContext) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("bd migrate --update-repo-id failed: %v: %s", err, stderr.String())
+		return "", fmt.Errorf("bd migrate --update-repo-id failed: %v: %s", err, stderr.String())
 	}
 
 	// Restart daemon if running
@@ -189,12 +189,12 @@ func (c *RepoFingerprintCheck) Fix(ctx *CheckContext) error {
 		startCmd.Stdout = nil
 		startCmd.Stderr = nil
 		if err := startCmd.Start(); err != nil {
-			return fmt.Errorf("failed to restart daemon: %w", err)
+			return "", fmt.Errorf("failed to restart daemon: %w", err)
 		}
 
 		// Wait for daemon to initialize
 		time.Sleep(300 * time.Millisecond)
 	}
 
-	return nil
+	return "", nil
 }

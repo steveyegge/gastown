@@ -87,6 +87,8 @@ type CheckResult struct {
 	FixHint  string        // Suggestion if not auto-fixable
 	Category string        // Category for grouping (e.g., CategoryCore)
 	Elapsed  time.Duration // How long the check took to run
+	Fixed      bool          // True if this check was auto-fixed during --fix
+	FixMessage string        // Message returned by Fix() describing what was done
 }
 
 // Check defines the interface for a health check.
@@ -101,8 +103,9 @@ type Check interface {
 	Run(ctx *CheckContext) *CheckResult
 
 	// Fix attempts to automatically fix the issue.
+	// Returns a message describing what was fixed and an error if the fix failed.
 	// Should only be called if CanFix() returns true.
-	Fix(ctx *CheckContext) error
+	Fix(ctx *CheckContext) (string, error)
 
 	// CanFix returns true if this check can automatically fix issues.
 	CanFix() bool
@@ -114,6 +117,7 @@ type ReportSummary struct {
 	OK          int
 	Warnings    int
 	Errors      int
+	Fixed       int
 	Slow        int           // Checks that took longer than threshold (counted during Print)
 	SlowestName string        // Name of the slowest check
 	SlowestTime time.Duration // Duration of the slowest check
@@ -146,6 +150,9 @@ func (r *Report) Add(result *CheckResult) {
 		r.Summary.Warnings++
 	case StatusError:
 		r.Summary.Errors++
+	}
+	if result.Fixed {
+		r.Summary.Fixed++
 	}
 
 	// Track the slowest check
@@ -332,6 +339,9 @@ func (r *Report) printSummary(w io.Writer, slowThreshold time.Duration) {
 		ui.RenderWarnIcon(), r.Summary.Warnings,
 		ui.RenderFailIcon(), r.Summary.Errors,
 	)
+	if r.Summary.Fixed > 0 {
+		summary += fmt.Sprintf("  %s %d fixed", ui.RenderFixIcon(), r.Summary.Fixed)
+	}
 	if slowThreshold > 0 && r.Summary.Slow > 0 {
 		summary += fmt.Sprintf("  ⏳ %d slow (slowest: %s %s)",
 			r.Summary.Slow,
@@ -342,37 +352,67 @@ func (r *Report) printSummary(w io.Writer, slowThreshold time.Duration) {
 	_, _ = fmt.Fprintln(w, summary)
 }
 
-// printWarningsSection outputs numbered warnings/errors sorted by severity.
+// printWarningsSection outputs numbered warnings/errors sorted by severity,
+// and a separate section for issues that were auto-fixed.
 func (r *Report) printWarningsSection(w io.Writer, warnings []*CheckResult) {
-	if len(warnings) == 0 {
+	// Collect fixed checks from the full report
+	var fixed []*CheckResult
+	for _, check := range r.Checks {
+		if check.Fixed {
+			fixed = append(fixed, check)
+		}
+	}
+
+	if len(warnings) == 0 && len(fixed) == 0 {
 		_, _ = fmt.Fprintln(w)
 		_, _ = fmt.Fprintln(w, ui.RenderPass(ui.IconPass+" All checks passed"))
 		return
 	}
 
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, ui.RenderWarn(ui.IconWarn+"  WARNINGS"))
+	// Print unfixed warnings/errors
+	if len(warnings) > 0 {
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, ui.RenderWarn(ui.IconWarn+"  WARNINGS"))
 
-	// Sort by severity: errors first, then warnings
-	slices.SortStableFunc(warnings, func(a, b *CheckResult) int {
-		if a.Status == StatusError && b.Status != StatusError {
-			return -1
-		}
-		if a.Status != StatusError && b.Status == StatusError {
-			return 1
-		}
-		return 0
-	})
+		// Sort by severity: errors first, then warnings
+		slices.SortStableFunc(warnings, func(a, b *CheckResult) int {
+			if a.Status == StatusError && b.Status != StatusError {
+				return -1
+			}
+			if a.Status != StatusError && b.Status == StatusError {
+				return 1
+			}
+			return 0
+		})
 
-	for i, check := range warnings {
-		line := fmt.Sprintf("%s: %s", check.Name, check.Message)
-		if check.Status == StatusError {
-			_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderFailIcon(), ui.RenderFail(fmt.Sprintf("%d.", i+1)), ui.RenderFail(line))
-		} else {
-			_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderWarnIcon(), ui.RenderWarn(fmt.Sprintf("%d.", i+1)), line)
+		for i, check := range warnings {
+			line := fmt.Sprintf("%s: %s", check.Name, check.Message)
+			if check.Status == StatusError {
+				_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderFailIcon(), ui.RenderFail(fmt.Sprintf("%d.", i+1)), ui.RenderFail(line))
+			} else {
+				_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderWarnIcon(), ui.RenderWarn(fmt.Sprintf("%d.", i+1)), line)
+			}
+			if check.FixHint != "" {
+				_, _ = fmt.Fprintf(w, "        %s%s\n", ui.MutedStyle.Render(ui.TreeLast), check.FixHint)
+			}
 		}
-		if check.FixHint != "" {
-			_, _ = fmt.Fprintf(w, "        %s%s\n", ui.MutedStyle.Render(ui.TreeLast), check.FixHint)
+	}
+
+	// Print fixed items
+	if len(fixed) > 0 {
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, ui.RenderPass(ui.IconFix+"  FIXED"))
+		for i, check := range fixed {
+			line := fmt.Sprintf("%s: %s", check.Name, check.Message)
+			if check.FixMessage != "" {
+				line += " — " + check.FixMessage
+			}
+			_, _ = fmt.Fprintf(w, "  %s  %s %s\n", ui.RenderPassIcon(), ui.RenderPass(fmt.Sprintf("%d.", i+1)), line)
 		}
+	}
+
+	if len(warnings) == 0 {
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, ui.RenderPass(ui.IconPass+" All remaining checks passed"))
 	}
 }
