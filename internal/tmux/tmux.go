@@ -599,7 +599,7 @@ func (t *Tmux) HasSession(name string) (bool, error) {
 }
 
 // GetCurrentSessionName returns the name of the current tmux session.
-// This works when called from within a tmux pane.
+// This only works when called from within a tmux session.
 func (t *Tmux) GetCurrentSessionName() (string, error) {
 	out, err := t.run("display-message", "-p", "#{session_name}")
 	if err != nil {
@@ -1001,30 +1001,6 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
-}
-
-// GetPaneExitStatus returns the exit status of a dead pane's last command.
-// Returns empty string if the pane is not dead or if the status cannot be retrieved.
-// This helps diagnose why a session died during startup.
-func (t *Tmux) GetPaneExitStatus(session string) string {
-	// pane_dead_status returns the exit status of the pane's last command
-	// Only available when the pane is dead (remain-on-exit is set)
-	out, err := t.run("display-message", "-t", session, "-p", "#{pane_dead_status}")
-	if err != nil {
-		return ""
-	}
-	status := strings.TrimSpace(out)
-	// Return empty if not available (pane not dead or tmux version too old)
-	if status == "" || status == "0" {
-		// Exit 0 is success, but if pane is dead it means the command completed
-		// Check if it's actually a successful exit vs no data
-		dead, _ := t.IsPaneDead(session)
-		if dead && status == "0" {
-			return "0" // Command exited successfully (unusual for startup failure)
-		}
-		return ""
-	}
-	return status
 }
 
 // hasClaudeChild checks if a process has a descendant running claude/node.
