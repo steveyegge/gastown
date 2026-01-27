@@ -464,8 +464,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
 		} else {
-			// Normal start - session exists, check if Claude is actually running
-			if t.IsClaudeRunning(sessionID) {
+			// Normal start - session exists, check if agent is actually running
+			if t.IsAgentAlive(sessionID) {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
 			// Zombie session - kill and recreate.
@@ -537,10 +537,10 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
 	_ = t.SetCrewCycleBindings(sessionID)
 
-	// Note: We intentionally don't wait for Claude to start here.
+	// Note: We intentionally don't wait for the agent to start here.
 	// The session is created in detached mode, and blocking for 60 seconds
-	// serves no purpose. If the caller needs to know when Claude is ready,
-	// they can check with IsClaudeRunning().
+	// serves no purpose. If the caller needs to know when the agent is ready,
+	// they can check with IsAgentAlive().
 
 	return nil
 }

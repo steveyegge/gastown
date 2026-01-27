@@ -101,7 +101,7 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	running, _ := t.HasSession(sessionID)
 	if running {
 		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		if t.IsAgentAlive(sessionID) {
 			// Healthy - Claude is running
 			return ErrAlreadyRunning
 		}

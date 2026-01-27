@@ -352,7 +352,8 @@ func ensureAgentReady(sessionName string) error {
 	}
 
 	// Claude-only: accept bypass permissions warning if present
-	if t.IsClaudeRunning(sessionName) {
+	agentName, _ := t.GetEnvironment(sessionName, "GT_AGENT")
+	if agentName == "" || agentName == "claude" {
 		_ = t.AcceptBypassPermissionsWarning(sessionName)
 
 		// PRAGMATIC APPROACH: fixed delay rather than prompt detection.

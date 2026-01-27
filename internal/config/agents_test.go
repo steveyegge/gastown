@@ -384,13 +384,14 @@ func TestGetProcessNames(t *testing.T) {
 		agentName string
 		want      []string
 	}{
-		{"claude", []string{"node"}},
+		{"claude", []string{"node", "claude"}},
 		{"gemini", []string{"gemini"}},
 		{"codex", []string{"codex"}},
 		{"cursor", []string{"cursor-agent"}},
 		{"auggie", []string{"auggie"}},
 		{"amp", []string{"amp"}},
-		{"unknown", []string{"node"}}, // Falls back to Claude's process
+		{"opencode", []string{"opencode", "node", "bun"}},
+		{"unknown", []string{"node", "claude"}}, // Falls back to Claude's process
 	}
 
 	for _, tt := range tests {
@@ -692,15 +693,15 @@ func TestOpenCodeAgentPreset(t *testing.T) {
 		t.Errorf("OPENCODE_PERMISSION = %q, want {\"*\":\"allow\"}", permission)
 	}
 
-	// Check ProcessNames for detection
-	if len(info.ProcessNames) != 2 {
-		t.Errorf("opencode ProcessNames length = %d, want 2", len(info.ProcessNames))
+	// Check ProcessNames for detection (opencode, node, bun)
+	if len(info.ProcessNames) != 3 {
+		t.Errorf("opencode ProcessNames length = %d, want 3", len(info.ProcessNames))
 	}
-	if info.ProcessNames[0] != "opencode" {
-		t.Errorf("opencode ProcessNames[0] = %q, want opencode", info.ProcessNames[0])
-	}
-	if info.ProcessNames[1] != "node" {
-		t.Errorf("opencode ProcessNames[1] = %q, want node", info.ProcessNames[1])
+	expectedNames := []string{"opencode", "node", "bun"}
+	for i, want := range expectedNames {
+		if i < len(info.ProcessNames) && info.ProcessNames[i] != want {
+			t.Errorf("opencode ProcessNames[%d] = %q, want %q", i, info.ProcessNames[i], want)
+		}
 	}
 
 	// Check hooks support
