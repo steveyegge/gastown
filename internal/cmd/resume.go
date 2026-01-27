@@ -93,7 +93,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check gate status
-	gateCheck := exec.Command("bd", "gate", "show", parked.GateID, "--json")
+	gateCheck := exec.Command("bd", "--no-daemon", "gate", "show", parked.GateID, "--json")
 	gateOutput, err := gateCheck.Output()
 	gateNotFound := false
 	if err != nil {
@@ -155,7 +155,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 
 	// Pin the bead to restore work
 	if parked.BeadID != "" {
-		pinCmd := exec.Command("bd", "update", parked.BeadID, "--status=pinned", "--assignee="+agentID)
+		pinCmd := exec.Command("bd", "--no-daemon", "update", parked.BeadID, "--status=pinned", "--assignee="+agentID)
 		pinCmd.Dir = cloneRoot
 		pinCmd.Stderr = os.Stderr
 		if err := pinCmd.Run(); err != nil {

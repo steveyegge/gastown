@@ -264,7 +264,7 @@ func runHook(_ *cobra.Command, args []string) error {
 			if !hookDryRun {
 				if hasAttachment {
 					// Close completed molecule bead (use bd close --force for pinned)
-					closeArgs := []string{"close", existing.ID, "--force",
+					closeArgs := []string{"--no-daemon", "close", existing.ID, "--force",
 						"--reason=Auto-replaced by gt hook (molecule complete)"}
 					if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
 						closeArgs = append(closeArgs, "--session="+sessionID)
@@ -345,7 +345,7 @@ func runHook(_ *cobra.Command, args []string) error {
 // doHook performs the actual hook operation and logs the event.
 // It uses the bd CLI for discovery-based bead routing.
 func doHook(beadID, agentID string) error {
-	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
+	hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+agentID)
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking bead: %w", err)
