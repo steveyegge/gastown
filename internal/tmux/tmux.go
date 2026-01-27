@@ -778,12 +778,9 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	// 2. Wait 500ms for paste to complete (tested, required)
 	time.Sleep(500 * time.Millisecond)
 
-	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
-	// See: https://github.com/anthropics/gastown/issues/307
-	_, _ = t.run("send-keys", "-t", session, "Escape")
-	time.Sleep(100 * time.Millisecond)
-
-	// 4. Send Enter with retry (critical for message submission)
+	// 3. Send Enter with retry (critical for message submission)
+	// NOTE: Previously sent Escape here for vim users, but it triggers
+	// Claude Code's interrupt handler. Removed per gastown issue #307 follow-up.
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -818,12 +815,9 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	// 2. Wait 500ms for paste to complete (tested, required)
 	time.Sleep(500 * time.Millisecond)
 
-	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
-	// See: https://github.com/anthropics/gastown/issues/307
-	_, _ = t.run("send-keys", "-t", pane, "Escape")
-	time.Sleep(100 * time.Millisecond)
-
-	// 4. Send Enter with retry (critical for message submission)
+	// 3. Send Enter with retry (critical for message submission)
+	// NOTE: Previously sent Escape here for vim users, but it triggers
+	// Claude Code's interrupt handler. Removed per gastown issue #307 follow-up.
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
