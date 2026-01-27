@@ -127,18 +127,31 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 	var files []staleSettingsInfo
 
 	// Check for STALE settings at town root (~/gt/.claude/settings.json)
-	// This is WRONG - settings here pollute ALL child workspaces via directory traversal.
+	// A regular file here is WRONG - it pollutes ALL child workspaces via directory traversal.
 	// Mayor settings should be at ~/gt/mayor/.claude/ instead.
+	// However, a symlink pointing to mayor/.claude/settings.json is CORRECT -
+	// the mayor session runs from town root and needs this symlink to find its hooks.
 	staleTownRootSettings := filepath.Join(townRoot, ".claude", "settings.json")
 	if fileExists(staleTownRootSettings) {
-		files = append(files, staleSettingsInfo{
-			path:          staleTownRootSettings,
-			agentType:     "mayor",
-			sessionName:   "hq-mayor",
-			wrongLocation: true,
-			gitStatus:     c.getGitFileStatus(staleTownRootSettings),
-			missing:       []string{"should be at mayor/.claude/settings.json, not town root"},
-		})
+		isValidSymlink := false
+		if info, err := os.Lstat(staleTownRootSettings); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if target, err := os.Readlink(staleTownRootSettings); err == nil {
+				expectedTarget := filepath.Join("..", "mayor", ".claude", "settings.json")
+				if target == expectedTarget {
+					isValidSymlink = true
+				}
+			}
+		}
+		if !isValidSymlink {
+			files = append(files, staleSettingsInfo{
+				path:          staleTownRootSettings,
+				agentType:     "mayor",
+				sessionName:   "hq-mayor",
+				wrongLocation: true,
+				gitStatus:     c.getGitFileStatus(staleTownRootSettings),
+				missing:       []string{"should be a symlink to mayor/.claude/settings.json, not a regular file"},
+			})
+		}
 	}
 
 	// Check for STALE CLAUDE.md at town root (~/gt/CLAUDE.md)
@@ -516,9 +529,18 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 			mayorDir := filepath.Join(ctx.TownRoot, "mayor")
 
 			// For mayor settings.json at town root, create at mayor/.claude/
+			// and symlink from town root so the mayor session (which runs from
+			// town root) can find its hooks.
 			if sf.agentType == "mayor" && strings.HasSuffix(claudeDir, ".claude") && !strings.Contains(sf.path, "/mayor/") {
 				if err := os.MkdirAll(mayorDir, 0755); err == nil {
 					_ = claude.EnsureSettingsForRole(mayorDir, "mayor")
+				}
+				// Create symlink from town root to mayor settings
+				townClaudeDir := filepath.Join(ctx.TownRoot, ".claude")
+				symlinkPath := filepath.Join(townClaudeDir, "settings.json")
+				if err := os.MkdirAll(townClaudeDir, 0755); err == nil {
+					relTarget := filepath.Join("..", "mayor", ".claude", "settings.json")
+					_ = os.Symlink(relTarget, symlinkPath)
 				}
 			}
 
