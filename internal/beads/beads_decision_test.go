@@ -356,6 +356,72 @@ func TestDecisionConstants(t *testing.T) {
 	}
 }
 
+// TestTruncateTitle tests title truncation for database constraints.
+func TestTruncateTitle(t *testing.T) {
+	tests := []struct {
+		name   string
+		title  string
+		maxLen int
+		want   string
+	}{
+		{
+			name:   "short title unchanged",
+			title:  "Simple question",
+			maxLen: 500,
+			want:   "Simple question",
+		},
+		{
+			name:   "exact length unchanged",
+			title:  strings.Repeat("a", 500),
+			maxLen: 500,
+			want:   strings.Repeat("a", 500),
+		},
+		{
+			name:   "long title truncated with ellipsis",
+			title:  strings.Repeat("a", 600),
+			maxLen: 500,
+			want:   strings.Repeat("a", 497) + "...",
+		},
+		{
+			name:   "unicode preserved in truncation",
+			title:  "Question about " + strings.Repeat("x", 500),
+			maxLen: 100,
+			want:   "Question about " + strings.Repeat("x", 82) + "...",
+		},
+		{
+			name:   "maxTitleLength constant",
+			title:  strings.Repeat("x", 500),
+			maxLen: maxTitleLength,
+			want:   strings.Repeat("x", maxTitleLength-3) + "...",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateTitle(tt.title, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("truncateTitle() = %q (len=%d), want %q (len=%d)",
+					got, len(got), tt.want, len(tt.want))
+			}
+			if len(got) > tt.maxLen {
+				t.Errorf("truncateTitle() result len=%d exceeds maxLen=%d", len(got), tt.maxLen)
+			}
+		})
+	}
+}
+
+// TestMaxTitleLengthConstant verifies the constant is set correctly.
+func TestMaxTitleLengthConstant(t *testing.T) {
+	// maxTitleLength should be less than 500 (Dolt VARCHAR limit)
+	// to leave room for resolution markers like [RESOLVED: ...]
+	if maxTitleLength >= 500 {
+		t.Errorf("maxTitleLength = %d, should be < 500 to leave room for resolution markers", maxTitleLength)
+	}
+	if maxTitleLength < 400 {
+		t.Errorf("maxTitleLength = %d, should be >= 400 to allow reasonable title length", maxTitleLength)
+	}
+}
+
 // Integration tests - require a real beads repo
 
 // setupTestBeadsRepo creates a temporary beads repo for testing.
@@ -422,6 +488,48 @@ func TestCreateDecisionBeadIntegration(t *testing.T) {
 	}
 	if !HasLabel(issue, "urgency:medium") {
 		t.Errorf("missing urgency:medium label, got labels: %v", issue.Labels)
+	}
+}
+
+// TestCreateDecisionBeadLongTitleIntegration tests that long titles are truncated.
+func TestCreateDecisionBeadLongTitleIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	_, b, cleanup := setupTestBeadsRepo(t)
+	defer cleanup()
+
+	// Create a title that exceeds the database limit (500 chars)
+	longTitle := "Very long decision prompt that exceeds the database limit: " + strings.Repeat("x", 500)
+
+	fields := &DecisionFields{
+		Question:    longTitle,
+		Options:     []DecisionOption{{Label: "Option A"}, {Label: "Option B"}},
+		Urgency:     UrgencyMedium,
+		RequestedBy: "test-agent",
+		RequestedAt: time.Now().Format(time.RFC3339),
+	}
+
+	// This should NOT fail - the title should be truncated
+	created, err := b.CreateDecisionBead(longTitle, fields)
+	if err != nil {
+		t.Fatalf("CreateDecisionBead failed with long title: %v", err)
+	}
+
+	// Verify the title was truncated
+	issue, err := b.Show(created.ID)
+	if err != nil {
+		t.Fatalf("Show failed: %v", err)
+	}
+
+	if len(issue.Title) > 500 {
+		t.Errorf("Title length %d exceeds database limit 500", len(issue.Title))
+	}
+
+	// Verify truncation indicator
+	if len(longTitle) > maxTitleLength && !strings.HasSuffix(issue.Title, "...") {
+		t.Errorf("Truncated title should end with '...', got: %q", issue.Title)
 	}
 }
 

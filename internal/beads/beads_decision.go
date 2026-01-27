@@ -9,6 +9,20 @@ import (
 	"time"
 )
 
+// maxTitleLength is the maximum length for issue titles in the database.
+// Dolt schema uses VARCHAR(500), so we use 450 to leave room for resolution markers.
+const maxTitleLength = 450
+
+// truncateTitle truncates a title to fit within database constraints.
+// If truncation is needed, it appends "..." to indicate the title was shortened.
+func truncateTitle(title string, maxLen int) string {
+	if len(title) <= maxLen {
+		return title
+	}
+	// Leave room for "..."
+	return title[:maxLen-3] + "..."
+}
+
 // DecisionOption represents a single option in a decision request.
 type DecisionOption struct {
 	Label       string `json:"label"`                 // Short label (e.g., "JWT tokens")
@@ -231,8 +245,12 @@ func ParseDecisionFields(description string) *DecisionFields {
 func (b *Beads) CreateDecisionBead(title string, fields *DecisionFields) (*Issue, error) {
 	description := FormatDecisionDescription(fields)
 
+	// Truncate title to fit database constraints (VARCHAR(500) in Dolt)
+	// Use maxTitleLength (450) to leave room for resolution markers like [RESOLVED: ...]
+	safeTitle := truncateTitle(title, maxTitleLength)
+
 	args := []string{"create", "--json",
-		"--title=" + title,
+		"--title=" + safeTitle,
 		"--description=" + description,
 		"--type=task",
 		"--labels=gt:decision",
@@ -307,7 +325,11 @@ func (b *Beads) resolveGtDecision(issue *Issue, id string, chosenIndex int, rati
 	// Update title to show resolution
 	newTitle := issue.Title
 	if !strings.Contains(newTitle, "[RESOLVED:") {
-		newTitle = fmt.Sprintf("%s [RESOLVED: %s]", issue.Title, fields.Options[chosenIndex-1].Label)
+		chosenLabel := fields.Options[chosenIndex-1].Label
+		newTitle = fmt.Sprintf("%s [RESOLVED: %s]", issue.Title, chosenLabel)
+		// Truncate to fit database constraints (VARCHAR(500) in Dolt)
+		// Use 500 here since we're at the final title, not creating new
+		newTitle = truncateTitle(newTitle, 500)
 	}
 
 	// Update the bead
