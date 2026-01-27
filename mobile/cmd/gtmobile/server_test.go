@@ -16,6 +16,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/steveyegge/gastown/internal/eventbus"
 	gastownv1 "github.com/steveyegge/gastown/mobile/gen/gastown/v1"
 )
 
@@ -81,7 +82,9 @@ func TestNewStatusServer(t *testing.T) {
 
 // TestNewDecisionServer tests DecisionServer constructor.
 func TestNewDecisionServer(t *testing.T) {
-	server := NewDecisionServer("/tmp/test-town")
+	bus := eventbus.New()
+	defer bus.Close()
+	server := NewDecisionServer("/tmp/test-town", bus)
 	if server == nil {
 		t.Fatal("NewDecisionServer returned nil")
 	}
@@ -234,28 +237,32 @@ func generateTestCert(certFile, keyFile string) error {
 	return nil
 }
 
-// TestDecisionServerGetDecision tests unimplemented method returns correct error.
+// TestDecisionServerGetDecision tests that GetDecision returns NotFound for nonexistent decisions.
 func TestDecisionServerGetDecision(t *testing.T) {
-	server := NewDecisionServer("/tmp/test")
-	req := connect.NewRequest(&gastownv1.GetDecisionRequest{DecisionId: "test-id"})
+	bus := eventbus.New()
+	defer bus.Close()
+	server := NewDecisionServer("/tmp/test", bus)
+	req := connect.NewRequest(&gastownv1.GetDecisionRequest{DecisionId: "nonexistent-id"})
 
 	_, err := server.GetDecision(context.Background(), req)
 	if err == nil {
-		t.Fatal("expected error for unimplemented method")
+		t.Fatal("expected error for nonexistent decision")
 	}
 
 	connectErr, ok := err.(*connect.Error)
 	if !ok {
 		t.Fatalf("expected connect.Error, got %T", err)
 	}
-	if connectErr.Code() != connect.CodeUnimplemented {
-		t.Errorf("error code = %v, want Unimplemented", connectErr.Code())
+	if connectErr.Code() != connect.CodeNotFound {
+		t.Errorf("error code = %v, want NotFound", connectErr.Code())
 	}
 }
 
 // TestDecisionServerResolve tests unimplemented method returns correct error.
 func TestDecisionServerResolve(t *testing.T) {
-	server := NewDecisionServer("/tmp/test")
+	bus := eventbus.New()
+	defer bus.Close()
+	server := NewDecisionServer("/tmp/test", bus)
 	req := connect.NewRequest(&gastownv1.ResolveRequest{DecisionId: "test-id", ChosenIndex: 1})
 
 	_, err := server.Resolve(context.Background(), req)
@@ -274,7 +281,9 @@ func TestDecisionServerResolve(t *testing.T) {
 
 // TestDecisionServerCancel tests unimplemented method returns correct error.
 func TestDecisionServerCancel(t *testing.T) {
-	server := NewDecisionServer("/tmp/test")
+	bus := eventbus.New()
+	defer bus.Close()
+	server := NewDecisionServer("/tmp/test", bus)
 	req := connect.NewRequest(&gastownv1.CancelRequest{DecisionId: "test-id"})
 
 	_, err := server.Cancel(context.Background(), req)
