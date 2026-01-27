@@ -20,8 +20,8 @@ import (
 type WizardStep int
 
 const (
-	StepName WizardStep = iota
-	StepRig
+	StepRig WizardStep = iota
+	StepName
 	StepOptions
 	StepCreating
 	StepSuccess
@@ -71,7 +71,7 @@ type creationStep struct {
 func NewAddModel(townRoot, currentRig string) *AddModel {
 	ti := textinput.New()
 	ti.Placeholder = "crew_name"
-	ti.Focus()
+	// Don't focus yet - we start on rig selection
 	ti.CharLimit = 64
 	ti.Width = 40
 
@@ -79,7 +79,7 @@ func NewAddModel(townRoot, currentRig string) *AddModel {
 	s.Spinner = spinner.Dot
 
 	return &AddModel{
-		step:       StepName,
+		step:       StepRig, // Start with rig selection
 		nameInput:  ti,
 		spinner:    s,
 		townRoot:   townRoot,
@@ -104,10 +104,8 @@ func (m *AddModel) SetSize(width, height int) {
 
 // Init initializes the model
 func (m *AddModel) Init() tea.Cmd {
-	return tea.Batch(
-		textinput.Blink,
-		m.loadRigs(),
-	)
+	// Only load rigs at start - we'll focus the text input when we get to the name step
+	return m.loadRigs()
 }
 
 // rigsLoadedMsg is sent when rigs are loaded
@@ -278,7 +276,8 @@ func (m *AddModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *AddModel) handleNameStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.done = true // Signal wizard cancelled
+		m.step = StepRig // Go back to rig selection
+		m.nameInput.Blur()
 		return m, nil
 	case tea.KeyEnter:
 		// Validate name
@@ -287,7 +286,8 @@ func (m *AddModel) handleNameStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Don't advance, error is shown in view
 			return m, nil
 		}
-		m.step = StepRig
+		m.step = StepOptions
+		m.nameInput.Blur()
 		return m, nil
 	}
 
@@ -300,8 +300,7 @@ func (m *AddModel) handleNameStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *AddModel) handleRigStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.step = StepName
-		m.nameInput.Focus()
+		m.done = true // Cancel wizard - this is the first step
 		return m, nil
 	case tea.KeyUp, tea.KeyShiftTab:
 		if m.selectedRig > 0 {
@@ -312,9 +311,23 @@ func (m *AddModel) handleRigStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedRig++
 		}
 	case tea.KeyEnter:
-		m.step = StepOptions
-		return m, nil
+		m.step = StepName
+		m.nameInput.Focus()
+		return m, textinput.Blink
 	}
+
+	// Handle j/k for vim-style navigation
+	switch msg.String() {
+	case "j":
+		if m.selectedRig < len(m.rigs)-1 {
+			m.selectedRig++
+		}
+	case "k":
+		if m.selectedRig > 0 {
+			m.selectedRig--
+		}
+	}
+
 	return m, nil
 }
 
@@ -322,8 +335,9 @@ func (m *AddModel) handleRigStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *AddModel) handleOptionsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.step = StepRig
-		return m, nil
+		m.step = StepName
+		m.nameInput.Focus()
+		return m, textinput.Blink
 	case tea.KeySpace:
 		m.createBranch = !m.createBranch
 	case tea.KeyEnter:
@@ -405,7 +419,7 @@ func (m *AddModel) View() string {
 
 // renderStepIndicator renders the step progress indicator
 func (m *AddModel) renderStepIndicator() string {
-	steps := []string{"Name", "Rig", "Options", "Create"}
+	steps := []string{"Rig", "Name", "Options", "Create"}
 	var parts []string
 
 	for i, name := range steps {
@@ -575,10 +589,10 @@ func (m *AddModel) renderErrorStep() string {
 // renderHelp renders contextual help
 func (m *AddModel) renderHelp() string {
 	switch m.step {
-	case StepName:
-		return helpStyle.Render("Enter: continue  Esc: cancel")
 	case StepRig:
-		return helpStyle.Render("j/k or arrows: select  Enter: continue  Esc: back")
+		return helpStyle.Render("j/k or arrows: select  Enter: continue  Esc: cancel")
+	case StepName:
+		return helpStyle.Render("Enter: continue  Esc: back")
 	case StepOptions:
 		return helpStyle.Render("Space: toggle  Enter: create  Esc: back")
 	case StepCreating:
