@@ -67,9 +67,9 @@ func TestRigLevelCustomAgentIntegration(t *testing.T) {
 			t.Errorf("Expected command to contain --test-mode, got: %s", cmd)
 		}
 
-		// Verify environment variables are set
-		if !strings.Contains(cmd, "GT_ROLE=polecat") {
-			t.Errorf("Expected GT_ROLE=polecat in command, got: %s", cmd)
+		// Verify environment variables are set (GT_ROLE is compound format)
+		if !strings.Contains(cmd, "GT_ROLE=testrig/polecats/test-polecat") {
+			t.Errorf("Expected GT_ROLE=testrig/polecats/test-polecat in command, got: %s", cmd)
 		}
 
 		if !strings.Contains(cmd, "GT_POLECAT=test-polecat") {
