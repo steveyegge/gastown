@@ -708,9 +708,14 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 		}
 
 		// Skip non-worker sessions (witness, mayor, deacon, boot)
-		// Note: refinery is included to show idle/processing status
 		if polecat == "witness" || polecat == "mayor" || polecat == "deacon" || polecat == "boot" {
 			continue
+		}
+
+		// Determine agent type: refinery is crew (permanent), others are polecats (ephemeral)
+		agentType := "polecat"
+		if polecat == "refinery" {
+			agentType = "crew"
 		}
 
 		// Parse activity timestamp
@@ -751,6 +756,7 @@ func (f *LiveConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
 			IssueID:      issueID,
 			IssueTitle:   issueTitle,
 			WorkStatus:   workStatus,
+			AgentType:    agentType,
 		})
 	}
 

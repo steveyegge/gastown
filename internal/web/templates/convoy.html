@@ -1045,10 +1045,10 @@
                 </div>
             </div>
 
-            <!-- Polecats Panel -->
+            <!-- Workers Panel (Polecats + Crew) -->
             <div class="panel">
                 <div class="panel-header">
-                    <h2>🐾 Polecats</h2>
+                    <h2>👷 Workers</h2>
                     <span class="count">{{len .Polecats}}</span>
                     <button class="expand-btn">Expand</button>
                 </div>
@@ -1058,6 +1058,7 @@
                         <thead>
                             <tr>
                                 <th>Worker</th>
+                                <th>Type</th>
                                 <th>Rig</th>
                                 <th>Working On</th>
                                 <th>Status</th>
@@ -1068,6 +1069,13 @@
                             {{range .Polecats}}
                             <tr class="{{polecatStatusClass .WorkStatus}}">
                                 <td><span class="polecat-name">{{.Name}}</span></td>
+                                <td>
+                                    {{if eq .AgentType "crew"}}
+                                    <span class="badge badge-blue">crew</span>
+                                    {{else}}
+                                    <span class="badge badge-muted">polecat</span>
+                                    {{end}}
+                                </td>
                                 <td><span class="polecat-rig">{{.Rig}}</span></td>
                                 <td class="polecat-issue">
                                     {{if .IssueID}}
