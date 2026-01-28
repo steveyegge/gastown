@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/rpcclient"
@@ -18,6 +19,8 @@ type SSEListener struct {
 	sseURL    string
 	bot       *Bot
 	rpcClient *rpcclient.Client
+	seen      map[string]bool // Track notified decision IDs to avoid duplicates
+	seenMu    sync.Mutex
 }
 
 // NewSSEListener creates a new SSE listener.
@@ -26,6 +29,7 @@ func NewSSEListener(sseURL string, bot *Bot, rpcClient *rpcclient.Client) *SSELi
 		sseURL:    sseURL,
 		bot:       bot,
 		rpcClient: rpcClient,
+		seen:      make(map[string]bool),
 	}
 }
 
@@ -146,47 +150,64 @@ func (l *SSEListener) handleEvent(evt sseEvent) {
 			return
 		}
 
+		log.Printf("SSE: Received decision event: id=%s type=%s question=%q", de.ID, de.Type, de.Question)
+
 		switch de.Type {
-		case "created":
+		case "created", "pending":
 			l.notifyNewDecision(de)
 		case "resolved":
 			l.notifyResolvedDecision(de)
+		default:
+			log.Printf("SSE: Ignoring event type: %s", de.Type)
 		}
 	}
 }
 
 func (l *SSEListener) notifyNewDecision(de decisionEvent) {
-	// Fetch full decision details from RPC
+	// Check if we've already notified for this decision
+	l.seenMu.Lock()
+	if l.seen[de.ID] {
+		l.seenMu.Unlock()
+		return
+	}
+	l.seen[de.ID] = true
+	l.seenMu.Unlock()
+
+	// Fetch full decision details from RPC using GetDecision (works even if resolved)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	decisions, err := l.rpcClient.ListPendingDecisions(ctx)
+	decision, err := l.rpcClient.GetDecision(ctx, de.ID)
 	if err != nil {
 		log.Printf("SSE: Error fetching decision %s: %v", de.ID, err)
-		// Fall back to basic notification with what we have
-		decision := rpcclient.Decision{
+		// Fall back to basic notification with what we have from the event
+		if de.Question == "" {
+			log.Printf("SSE: No question in event data, skipping notification for %s", de.ID)
+			return
+		}
+		fallback := rpcclient.Decision{
 			ID:       de.ID,
 			Question: de.Question,
 			Urgency:  de.Urgency,
 		}
-		if err := l.bot.NotifyNewDecision(decision); err != nil {
+		if err := l.bot.NotifyNewDecision(fallback); err != nil {
 			log.Printf("SSE: Error notifying Slack: %v", err)
 		}
 		return
 	}
 
-	// Find the specific decision
-	for _, d := range decisions {
-		if d.ID == de.ID {
-			if err := l.bot.NotifyNewDecision(d); err != nil {
-				log.Printf("SSE: Error notifying Slack: %v", err)
-			}
-			return
-		}
+	// Skip if already resolved (we only notify for new pending decisions)
+	if decision.Resolved {
+		log.Printf("SSE: Decision %s already resolved, skipping notification", de.ID)
+		return
 	}
 
-	// Decision not found in pending list - might be resolved already
-	log.Printf("SSE: Decision %s not found in pending list", de.ID)
+	log.Printf("SSE: Sending notification for decision %s to Slack", de.ID)
+	if err := l.bot.NotifyNewDecision(*decision); err != nil {
+		log.Printf("SSE: Error notifying Slack: %v", err)
+	} else {
+		log.Printf("SSE: Successfully notified Slack for decision %s", de.ID)
+	}
 }
 
 func (l *SSEListener) notifyResolvedDecision(de decisionEvent) {

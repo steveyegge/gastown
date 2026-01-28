@@ -935,9 +935,15 @@ func NewSSEHandler(bus *eventbus.Bus, townRoot string) http.HandlerFunc {
 		fmt.Fprintf(w, "data: {\"status\":\"connected\",\"subscribers\":%d}\n\n", bus.SubscriberCount())
 		flusher.Flush()
 
+		// Track seen decisions to avoid duplicates
+		seen := make(map[string]bool)
+		for _, issue := range issues {
+			seen[issue.ID] = true
+		}
+
 		// Stream events
 		ctx := r.Context()
-		ticker := time.NewTicker(30 * time.Second) // Keepalive
+		ticker := time.NewTicker(30 * time.Second) // Backup poll for CLI-created decisions
 		defer ticker.Stop()
 
 		for {
@@ -960,11 +966,44 @@ func NewSSEHandler(bus *eventbus.Bus, townRoot string) http.HandlerFunc {
 					eventType = "canceled"
 				}
 				fmt.Fprintf(w, "event: decision\n")
+				// Include question and urgency for created events (helps slackbot)
+				if event.Type == eventbus.EventDecisionCreated {
+					if decision, ok := event.Data.(*gastownv1.Decision); ok && decision != nil {
+						seen[decision.Id] = true
+						fmt.Fprintf(w, "data: {\"id\":\"%s\",\"question\":\"%s\",\"urgency\":\"%s\",\"type\":\"%s\"}\n\n",
+							decision.Id, escapeJSON(decision.Question), fromUrgency(decision.Urgency), eventType)
+						flusher.Flush()
+						continue
+					}
+				}
+				seen[event.DecisionID] = true
 				fmt.Fprintf(w, "data: {\"id\":\"%s\",\"type\":\"%s\"}\n\n", event.DecisionID, eventType)
 				flusher.Flush()
 
 			case <-ticker.C:
-				// Keepalive comment
+				// Backup poll for decisions created via CLI (not through RPC)
+				newIssues, err := client.ListDecisions()
+				if err != nil {
+					// Just send keepalive on error
+					fmt.Fprintf(w, ": keepalive\n\n")
+					flusher.Flush()
+					continue
+				}
+				for _, issue := range newIssues {
+					if seen[issue.ID] {
+						continue
+					}
+					seen[issue.ID] = true
+					fields := beads.ParseDecisionFields(issue.Description)
+					if fields == nil {
+						continue
+					}
+					fmt.Fprintf(w, "event: decision\n")
+					fmt.Fprintf(w, "data: {\"id\":\"%s\",\"question\":\"%s\",\"urgency\":\"%s\",\"type\":\"pending\"}\n\n",
+						issue.ID, escapeJSON(fields.Question), fields.Urgency)
+					flusher.Flush()
+				}
+				// Send keepalive even if no new decisions
 				fmt.Fprintf(w, ": keepalive\n\n")
 				flusher.Flush()
 			}
