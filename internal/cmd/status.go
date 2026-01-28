@@ -227,53 +227,41 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 	}
 
 	// Pre-fetch agent beads across all rig-specific beads DBs.
+	// In --fast mode, parallelize these fetches for better performance.
 	allAgentBeads := make(map[string]*beads.Issue)
 	allHookBeads := make(map[string]*beads.Issue)
+	var beadsMu sync.Mutex // Protects allAgentBeads and allHookBeads
+
+	// Helper to safely merge beads into the shared maps
+	mergeAgentBeads := func(beadsMap map[string]*beads.Issue) {
+		beadsMu.Lock()
+		for id, issue := range beadsMap {
+			allAgentBeads[id] = issue
+		}
+		beadsMu.Unlock()
+	}
+	mergeHookBeads := func(beadsMap map[string]*beads.Issue) {
+		beadsMu.Lock()
+		for id, issue := range beadsMap {
+			allHookBeads[id] = issue
+		}
+		beadsMu.Unlock()
+	}
+
+	var beadsWg sync.WaitGroup
 
 	// Fetch town-level agent beads (Mayor, Deacon) from town beads
 	townBeadsPath := beads.GetTownBeadsPath(townRoot)
-	townBeadsClient := beads.New(townBeadsPath)
-	townAgentBeads, _ := townBeadsClient.ListAgentBeads()
-	for id, issue := range townAgentBeads {
-		allAgentBeads[id] = issue
-	}
+	beadsWg.Add(1)
+	go func() {
+		defer beadsWg.Done()
+		townBeadsClient := beads.New(townBeadsPath)
+		townAgentBeads, _ := townBeadsClient.ListAgentBeads()
+		mergeAgentBeads(townAgentBeads)
 
-	// Fetch hook beads from town beads
-	var townHookIDs []string
-	for _, issue := range townAgentBeads {
-		hookID := issue.HookBead
-		if hookID == "" {
-			fields := beads.ParseAgentFields(issue.Description)
-			if fields != nil {
-				hookID = fields.HookBead
-			}
-		}
-		if hookID != "" {
-			townHookIDs = append(townHookIDs, hookID)
-		}
-	}
-	if len(townHookIDs) > 0 {
-		townHookBeads, _ := townBeadsClient.ShowMultiple(townHookIDs)
-		for id, issue := range townHookBeads {
-			allHookBeads[id] = issue
-		}
-	}
-
-	// Fetch rig-level agent beads
-	for _, r := range rigs {
-		rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
-		rigBeads := beads.New(rigBeadsPath)
-		rigAgentBeads, _ := rigBeads.ListAgentBeads()
-		if rigAgentBeads == nil {
-			continue
-		}
-		for id, issue := range rigAgentBeads {
-			allAgentBeads[id] = issue
-		}
-
-		var hookIDs []string
-		for _, issue := range rigAgentBeads {
-			// Use the HookBead field from the database column; fall back for legacy beads.
+		// Fetch hook beads from town beads
+		var townHookIDs []string
+		for _, issue := range townAgentBeads {
 			hookID := issue.HookBead
 			if hookID == "" {
 				fields := beads.ParseAgentFields(issue.Description)
@@ -282,18 +270,52 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 				}
 			}
 			if hookID != "" {
-				hookIDs = append(hookIDs, hookID)
+				townHookIDs = append(townHookIDs, hookID)
 			}
 		}
+		if len(townHookIDs) > 0 {
+			townHookBeads, _ := townBeadsClient.ShowMultiple(townHookIDs)
+			mergeHookBeads(townHookBeads)
+		}
+	}()
 
-		if len(hookIDs) == 0 {
-			continue
-		}
-		hookBeads, _ := rigBeads.ShowMultiple(hookIDs)
-		for id, issue := range hookBeads {
-			allHookBeads[id] = issue
-		}
+	// Fetch rig-level agent beads in parallel
+	for _, r := range rigs {
+		beadsWg.Add(1)
+		go func(r *rig.Rig) {
+			defer beadsWg.Done()
+			rigBeadsPath := filepath.Join(r.Path, "mayor", "rig")
+			rigBeads := beads.New(rigBeadsPath)
+			rigAgentBeads, _ := rigBeads.ListAgentBeads()
+			if rigAgentBeads == nil {
+				return
+			}
+			mergeAgentBeads(rigAgentBeads)
+
+			var hookIDs []string
+			for _, issue := range rigAgentBeads {
+				// Use the HookBead field from the database column; fall back for legacy beads.
+				hookID := issue.HookBead
+				if hookID == "" {
+					fields := beads.ParseAgentFields(issue.Description)
+					if fields != nil {
+						hookID = fields.HookBead
+					}
+				}
+				if hookID != "" {
+					hookIDs = append(hookIDs, hookID)
+				}
+			}
+
+			if len(hookIDs) == 0 {
+				return
+			}
+			hookBeads, _ := rigBeads.ShowMultiple(hookIDs)
+			mergeHookBeads(hookBeads)
+		}(r)
 	}
+
+	beadsWg.Wait()
 
 	// Create mail router for inbox lookups
 	mailRouter := mail.NewRouter(townRoot)
@@ -307,10 +329,12 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 			Username: overseerConfig.Username,
 			Source:   overseerConfig.Source,
 		}
-		// Get overseer mail count
-		if mailbox, err := mailRouter.GetMailbox("overseer"); err == nil {
-			_, unread, _ := mailbox.Count()
-			overseerInfo.UnreadMail = unread
+		// Get overseer mail count (skip in --fast mode)
+		if !statusFast {
+			if mailbox, err := mailRouter.GetMailbox("overseer"); err == nil {
+				_, unread, _ := mailbox.Count()
+				overseerInfo.UnreadMail = unread
+			}
 		}
 	}
 
@@ -357,7 +381,11 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 			}
 
 			// Discover hooks for all agents in this rig
-			rs.Hooks = discoverRigHooks(r, rs.Crews)
+			// In --fast mode, skip expensive handoff bead lookups. Hook info comes from
+			// preloaded agent beads via discoverRigAgents instead.
+			if !statusFast {
+				rs.Hooks = discoverRigHooks(r, rs.Crews)
+			}
 			activeHooks := 0
 			for _, hook := range rs.Hooks {
 				if hook.HasWork {
@@ -370,7 +398,10 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 			rs.Agents = discoverRigAgents(allSessions, r, rs.Crews, allAgentBeads, allHookBeads, mailRouter, statusFast)
 
 			// Get MQ summary if rig has a refinery
-			rs.MQ = getMQSummary(r)
+			// Skip in --fast mode to avoid expensive bd queries
+			if !statusFast {
+				rs.MQ = getMQSummary(r)
+			}
 
 			status.Rigs[idx] = rs
 		}(i, r)
@@ -396,11 +427,7 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 	if statusJSON {
 		return outputStatusJSON(status)
 	}
-	if err := outputStatusText(status); err != nil {
-		return err
-	}
-
-	return nil
+	return outputStatusText(status)
 }
 
 func outputStatusJSON(status TownStatus) error {
