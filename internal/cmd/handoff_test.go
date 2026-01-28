@@ -8,6 +8,61 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
+func TestSessionWorkDir(t *testing.T) {
+	townRoot := "/home/test/gt"
+
+	tests := []struct {
+		name        string
+		sessionName string
+		wantDir     string
+		wantErr     bool
+	}{
+		{
+			name:        "mayor runs from mayor subdirectory",
+			sessionName: "hq-mayor",
+			wantDir:     townRoot + "/mayor",
+			wantErr:     false,
+		},
+		{
+			name:        "deacon runs from deacon subdirectory",
+			sessionName: "hq-deacon",
+			wantDir:     townRoot + "/deacon",
+			wantErr:     false,
+		},
+		{
+			name:        "crew runs from crew subdirectory",
+			sessionName: "gt-gastown-crew-holden",
+			wantDir:     townRoot + "/gastown/crew/holden",
+			wantErr:     false,
+		},
+		{
+			name:        "witness runs from witness directory",
+			sessionName: "gt-gastown-witness",
+			wantDir:     townRoot + "/gastown/witness",
+			wantErr:     false,
+		},
+		{
+			name:        "refinery runs from refinery/rig directory",
+			sessionName: "gt-gastown-refinery",
+			wantDir:     townRoot + "/gastown/refinery/rig",
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotDir, err := sessionWorkDir(tt.sessionName, townRoot)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("sessionWorkDir() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotDir != tt.wantDir {
+				t.Errorf("sessionWorkDir() = %q, want %q", gotDir, tt.wantDir)
+			}
+		})
+	}
+}
+
 func TestDetectTownRootFromCwd_EnvFallback(t *testing.T) {
 	// Save original env vars and restore after test
 	origTownRoot := os.Getenv("GT_TOWN_ROOT")

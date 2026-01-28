@@ -251,6 +251,29 @@ func TestFindSkipsNestedWorkspaceInWorktree(t *testing.T) {
 	}
 }
 
+func TestFindFromMayorDir(t *testing.T) {
+	// This test verifies that Mayor running from ~/gt/mayor/ can find ~/gt/ as town root.
+	// This is critical for the Mayor working directory change (issue #943).
+	root := realPath(t, t.TempDir())
+	mayorDir := filepath.Join(root, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	townFile := filepath.Join(mayorDir, "town.json")
+	if err := os.WriteFile(townFile, []byte(`{"type":"town"}`), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Find from mayorDir should return root (the parent)
+	found, err := Find(mayorDir)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if found != root {
+		t.Errorf("Find(%q) = %q, want %q", mayorDir, found, root)
+	}
+}
+
 func TestFindSkipsNestedWorkspaceInCrew(t *testing.T) {
 	root := realPath(t, t.TempDir())
 

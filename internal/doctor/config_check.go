@@ -517,6 +517,14 @@ func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 		files = append(files, townSettings)
 	}
 
+	// Town-level agents (mayor, deacon) - these are not rigs but have their own settings
+	for _, agent := range []string{"mayor", "deacon"} {
+		agentSettings := filepath.Join(townRoot, agent, ".claude", "settings.json")
+		if _, err := os.Stat(agentSettings); err == nil {
+			files = append(files, agentSettings)
+		}
+	}
+
 	// Find all rigs
 	rigs := findAllRigs(townRoot)
 	for _, rig := range rigs {
