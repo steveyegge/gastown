@@ -529,6 +529,12 @@ func (b *Beads) CloseAndClearAgentBead(id, reason string) error {
 
 // GetAgentBead retrieves an agent bead by ID.
 // Returns nil if not found.
+//
+// FIX (hq-21gprr): This function now uses JSON fields from the Issue struct
+// when available, rather than relying solely on parsed description text.
+// SetHookBead() updates the database column directly (via bd slot set), but
+// doesn't update the description text. So we must read hook_bead from the
+// Issue.HookBead JSON field to get the current value.
 func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	issue, err := b.Show(id)
 	if err != nil {
@@ -543,6 +549,17 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	}
 
 	fields := ParseAgentFields(issue.Description)
+
+	// FIX (hq-21gprr): Override with JSON fields which are the source of truth.
+	// SetHookBead uses "bd slot set" which updates the database column directly,
+	// but doesn't update the description text. The JSON field is authoritative.
+	if issue.HookBead != "" {
+		fields.HookBead = issue.HookBead
+	}
+	if issue.AgentState != "" {
+		fields.AgentState = issue.AgentState
+	}
+
 	return issue, fields, nil
 }
 
