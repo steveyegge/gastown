@@ -1129,20 +1129,20 @@ func isCrewPath(path, rigName string) bool {
 // crewSessionName returns the tmux session name for a crew member.
 func crewSessionName(requestedBy, rigName string) string {
 	// Handle formats:
-	// - "gastown/crew/decision" -> "gt-gastown-decision"
-	// - "gastown/decision" (old format) -> "gt-gastown-decision"
+	// - "gastown/crew/worker" -> "gt-gastown-crew-worker"
+	// - "gastown/worker" (old format) -> try crew first, then polecat
 	parts := strings.Split(requestedBy, "/")
 
 	if len(parts) == 3 && parts[1] == "crew" {
-		// New format: rig/crew/name
-		return fmt.Sprintf("gt-%s-%s", parts[0], parts[2])
+		// New format: rig/crew/name -> gt-rig-crew-name
+		return session.CrewSessionName(parts[0], parts[2])
 	}
 
 	if len(parts) == 2 {
-		// Old format: rig/name
+		// Old format: rig/name - assume crew for non-system roles
 		role := parts[1]
 		if role != "witness" && role != "refinery" && role != "polecats" {
-			return fmt.Sprintf("gt-%s-%s", parts[0], role)
+			return session.CrewSessionName(parts[0], role)
 		}
 	}
 

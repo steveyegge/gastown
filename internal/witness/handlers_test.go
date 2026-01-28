@@ -70,13 +70,13 @@ func TestCrewSessionName(t *testing.T) {
 			name:        "new format crew",
 			requestedBy: "gastown/crew/decision",
 			rigName:     "gastown",
-			want:        "gt-gastown-decision",
+			want:        "gt-gastown-crew-decision",
 		},
 		{
 			name:        "old format crew",
 			requestedBy: "gastown/decision",
 			rigName:     "gastown",
-			want:        "gt-gastown-decision",
+			want:        "gt-gastown-crew-decision",
 		},
 		{
 			name:        "witness returns empty",

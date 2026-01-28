@@ -129,6 +129,35 @@ func TestAddressToSessionIDs(t *testing.T) {
 			}
 		})
 	}
+
+	// Town-namespaced tests: when town is non-empty, mayor/deacon get namespaced session names
+	townTests := []struct {
+		address string
+		town    string
+		want    []string
+	}{
+		{"mayor", "gt11", []string{"hq-gt11-mayor"}},
+		{"mayor/", "gt11", []string{"hq-gt11-mayor"}},
+		{"deacon", "gt11", []string{"hq-gt11-deacon"}},
+		// Rig-level addresses are unaffected by town
+		{"gastown/crew/max", "gt11", []string{"gt-gastown-crew-max"}},
+		{"gastown/Toast", "gt11", []string{"gt-gastown-crew-Toast", "gt-gastown-Toast"}},
+	}
+
+	for _, tt := range townTests {
+		t.Run(tt.address+"_town_"+tt.town, func(t *testing.T) {
+			got := addressToSessionIDs(tt.address, tt.town)
+			if len(got) != len(tt.want) {
+				t.Errorf("addressToSessionIDs(%q, %q) = %v, want %v", tt.address, tt.town, got, tt.want)
+				return
+			}
+			for i, v := range got {
+				if v != tt.want[i] {
+					t.Errorf("addressToSessionIDs(%q, %q)[%d] = %q, want %q", tt.address, tt.town, i, v, tt.want[i])
+				}
+			}
+		})
+	}
 }
 
 func TestAddressToSessionID(t *testing.T) {
