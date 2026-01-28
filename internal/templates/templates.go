@@ -13,7 +13,7 @@ import (
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
 
-//go:embed commands/*.md
+//go:embed commands/*.md commands-opencode/*.md
 var commandsFS embed.FS
 
 // Templates manages role and message templates.
@@ -24,18 +24,18 @@ type Templates struct {
 
 // RoleData contains information for rendering role contexts.
 type RoleData struct {
-	Role           string   // mayor, witness, refinery, polecat, crew, deacon
-	RigName        string   // e.g., "greenplace"
-	TownRoot       string   // e.g., "/Users/steve/ai"
-	TownName       string   // e.g., "ai" - the town identifier for session names
-	WorkDir        string   // current working directory
-	DefaultBranch  string   // default branch for merges (e.g., "main", "develop")
-	Polecat        string   // polecat name (for polecat role)
-	Polecats       []string // list of polecats (for witness role)
-	BeadsDir       string   // BEADS_DIR path
-	IssuePrefix    string   // beads issue prefix
-	MayorSession   string   // e.g., "gt-ai-mayor" - dynamic mayor session name
-	DeaconSession  string   // e.g., "gt-ai-deacon" - dynamic deacon session name
+	Role          string   // mayor, witness, refinery, polecat, crew, deacon
+	RigName       string   // e.g., "greenplace"
+	TownRoot      string   // e.g., "/Users/steve/ai"
+	TownName      string   // e.g., "ai" - the town identifier for session names
+	WorkDir       string   // current working directory
+	DefaultBranch string   // default branch for merges (e.g., "main", "develop")
+	Polecat       string   // polecat name (for polecat role)
+	Polecats      []string // list of polecats (for witness role)
+	BeadsDir      string   // BEADS_DIR path
+	IssuePrefix   string   // beads issue prefix
+	MayorSession  string   // e.g., "gt-ai-mayor" - dynamic mayor session name
+	DeaconSession string   // e.g., "gt-ai-deacon" - dynamic deacon session name
 }
 
 // SpawnData contains information for spawn assignment messages.
@@ -137,6 +137,7 @@ func (t *Templates) MessageNames() []string {
 }
 
 // CreateMayorCLAUDEmd creates the Mayor's CLAUDE.md file at the specified directory.
+// Also creates AGENTS.md as a pointer to CLAUDE.md for compatibility with other agents.
 // This is used by both gt install and gt doctor --fix.
 func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSession string) error {
 	tmpl, err := New()
@@ -159,7 +160,23 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 	}
 
 	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
-	return os.WriteFile(claudePath, []byte(content), 0644)
+	if err := os.WriteFile(claudePath, []byte(content), 0644); err != nil {
+		return err
+	}
+
+	// Create AGENTS.md as pointer to CLAUDE.md for compatibility with OpenCode/Codex
+	agentsContent := `# Agent Instructions
+
+See **CLAUDE.md** for complete agent context and instructions.
+
+This file exists for compatibility with tools that look for AGENTS.md.
+
+> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+
+Full context is injected by ` + "`gt prime`" + ` at session start.
+`
+	agentsPath := filepath.Join(mayorDir, "AGENTS.md")
+	return os.WriteFile(agentsPath, []byte(agentsContent), 0644)
 }
 
 // GetAllRoleTemplates returns all role templates as a map of filename to content.
@@ -189,15 +206,26 @@ func GetAllRoleTemplates() (map[string][]byte, error) {
 // even if the source repo doesn't have them tracked.
 // If a command already exists, it is skipped (no overwrite).
 func ProvisionCommands(workspacePath string) error {
-	entries, err := commandsFS.ReadDir("commands")
-	if err != nil {
-		return fmt.Errorf("reading commands directory: %w", err)
-	}
+	return provisionCommandsTo(workspacePath, ".claude", "commands")
+}
 
-	// Create .claude/commands/ directory
-	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
+// ProvisionCommandsOpenCode creates the .opencode/commands/ directory with OpenCode-compatible
+// slash commands. Uses templates from commands-opencode/ which have proper YAML frontmatter.
+// If a command already exists, it is skipped (no overwrite).
+func ProvisionCommandsOpenCode(workspacePath string) error {
+	return provisionCommandsTo(workspacePath, ".opencode", "commands-opencode")
+}
+
+// provisionCommandsTo provisions commands from a source directory to a target directory.
+func provisionCommandsTo(workspacePath, targetDir, sourceDir string) error {
+	commandsDir := filepath.Join(workspacePath, targetDir, "commands")
 	if err := os.MkdirAll(commandsDir, 0755); err != nil {
 		return fmt.Errorf("creating commands directory: %w", err)
+	}
+
+	entries, err := commandsFS.ReadDir(sourceDir)
+	if err != nil {
+		return fmt.Errorf("reading commands directory %s: %w", sourceDir, err)
 	}
 
 	for _, entry := range entries {
@@ -212,9 +240,9 @@ func ProvisionCommands(workspacePath string) error {
 			continue
 		}
 
-		content, err := commandsFS.ReadFile("commands/" + entry.Name())
+		content, err := commandsFS.ReadFile(sourceDir + "/" + entry.Name())
 		if err != nil {
-			return fmt.Errorf("reading %s: %w", entry.Name(), err)
+			return fmt.Errorf("reading %s/%s: %w", sourceDir, entry.Name(), err)
 		}
 
 		if err := os.WriteFile(destPath, content, 0644); err != nil { //nolint:gosec // G306: template files are non-sensitive
@@ -227,7 +255,40 @@ func ProvisionCommands(workspacePath string) error {
 
 // CommandNames returns the list of embedded slash commands.
 func CommandNames() ([]string, error) {
-	entries, err := commandsFS.ReadDir("commands")
+	return commandNamesFor("commands")
+}
+
+// CommandNamesOpenCode returns the list of embedded OpenCode slash commands.
+func CommandNamesOpenCode() ([]string, error) {
+	return commandNamesFor("commands-opencode")
+}
+
+// HasCommands checks if a workspace has the .claude/commands/ directory provisioned.
+func HasCommands(workspacePath string) bool {
+	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
+	info, err := os.Stat(commandsDir)
+	return err == nil && info.IsDir()
+}
+
+// HasCommandsOpenCode checks if a workspace has the .opencode/commands/ directory provisioned.
+func HasCommandsOpenCode(workspacePath string) bool {
+	commandsDir := filepath.Join(workspacePath, ".opencode", "commands")
+	info, err := os.Stat(commandsDir)
+	return err == nil && info.IsDir()
+}
+
+// MissingCommands returns the list of embedded commands missing from the workspace.
+func MissingCommands(workspacePath string) ([]string, error) {
+	return missingCommandsFor(workspacePath, "commands", ".claude")
+}
+
+// MissingCommandsOpenCode returns the list of embedded OpenCode commands missing from the workspace.
+func MissingCommandsOpenCode(workspacePath string) ([]string, error) {
+	return missingCommandsFor(workspacePath, "commands-opencode", ".opencode")
+}
+
+func commandNamesFor(sourceDir string) ([]string, error) {
+	entries, err := commandsFS.ReadDir(sourceDir)
 	if err != nil {
 		return nil, fmt.Errorf("reading commands directory: %w", err)
 	}
@@ -241,21 +302,13 @@ func CommandNames() ([]string, error) {
 	return names, nil
 }
 
-// HasCommands checks if a workspace has the .claude/commands/ directory provisioned.
-func HasCommands(workspacePath string) bool {
-	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
-	info, err := os.Stat(commandsDir)
-	return err == nil && info.IsDir()
-}
-
-// MissingCommands returns the list of embedded commands missing from the workspace.
-func MissingCommands(workspacePath string) ([]string, error) {
-	entries, err := commandsFS.ReadDir("commands")
+func missingCommandsFor(workspacePath, sourceDir, targetDir string) ([]string, error) {
+	entries, err := commandsFS.ReadDir(sourceDir)
 	if err != nil {
 		return nil, fmt.Errorf("reading commands directory: %w", err)
 	}
 
-	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
+	commandsDir := filepath.Join(workspacePath, targetDir, "commands")
 	var missing []string
 
 	for _, entry := range entries {

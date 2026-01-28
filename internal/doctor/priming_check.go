@@ -115,7 +115,8 @@ func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, _ string) []priming
 	var issues []primingIssue
 
 	agentPath := filepath.Join(townRoot, agentDir)
-	settingsPath := filepath.Join(agentPath, ".claude", "settings.json")
+	hooksDir := DetectHooksDir(agentPath)
+	settingsPath := filepath.Join(agentPath, hooksDir, "settings.json")
 
 	// Check for SessionStart hook with gt prime
 	if fileExists(settingsPath) {
@@ -149,8 +150,18 @@ func (c *PrimingCheck) checkAgentPriming(townRoot, agentDir, _ string) []priming
 		}
 	}
 
-	// Check AGENTS.md is minimal (bootstrap pointer, not full context)
+	// Check AGENTS.md exists alongside CLAUDE.md (for OpenCode/Codex compatibility)
 	agentsMdPath := filepath.Join(agentPath, "AGENTS.md")
+	if fileExists(claudeMdPath) && !fileExists(agentsMdPath) {
+		issues = append(issues, primingIssue{
+			location:    agentDir,
+			issueType:   "missing_agents_md",
+			description: "Missing AGENTS.md (needed for OpenCode/Codex compatibility)",
+			fixable:     true,
+		})
+	}
+
+	// Check AGENTS.md is minimal (bootstrap pointer, not full context)
 	if fileExists(agentsMdPath) {
 		lines := c.countLines(agentsMdPath)
 		if lines > 20 {
@@ -238,7 +249,8 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 		if dirExists(crewDir) {
 			crewEntries, _ := os.ReadDir(crewDir)
 			for _, crewEntry := range crewEntries {
-				if !crewEntry.IsDir() || crewEntry.Name() == ".claude" {
+				name := crewEntry.Name()
+				if !crewEntry.IsDir() || name == ".claude" || name == ".opencode" {
 					continue
 				}
 				crewPath := filepath.Join(crewDir, crewEntry.Name())
@@ -261,16 +273,17 @@ func (c *PrimingCheck) checkRigPriming(townRoot string) []primingIssue {
 		if dirExists(polecatsDir) {
 			pcEntries, _ := os.ReadDir(polecatsDir)
 			for _, pcEntry := range pcEntries {
-				if !pcEntry.IsDir() || pcEntry.Name() == ".claude" {
+				pcName := pcEntry.Name()
+				if !pcEntry.IsDir() || pcName == ".claude" || pcName == ".opencode" {
 					continue
 				}
-				polecatPath := filepath.Join(polecatsDir, pcEntry.Name())
+				polecatPath := filepath.Join(polecatsDir, pcName)
 				// Check if beads redirect is set up
 				beadsDir := beads.ResolveBeadsDir(polecatPath)
 				primeMdPath := filepath.Join(beadsDir, "PRIME.md")
 				if !fileExists(primeMdPath) {
 					issues = append(issues, primingIssue{
-						location:    fmt.Sprintf("%s/polecats/%s", rigName, pcEntry.Name()),
+						location:    fmt.Sprintf("%s/polecats/%s", rigName, pcName),
 						issueType:   "missing_prime_md",
 						description: "Missing PRIME.md (Gas Town context fallback)",
 						fixable:     true,
@@ -361,6 +374,24 @@ func (c *PrimingCheck) Fix(ctx *CheckContext) error {
 				if err := beads.ProvisionPrimeMD(targetPath); err != nil {
 					errors = append(errors, fmt.Sprintf("%s: %v", issue.location, err))
 				}
+			}
+
+		case "missing_agents_md":
+			// Create AGENTS.md pointer file for OpenCode/Codex compatibility
+			agentPath := filepath.Join(ctx.TownRoot, issue.location)
+			agentsMdPath := filepath.Join(agentPath, "AGENTS.md")
+			agentsContent := `# Agent Instructions
+
+See **CLAUDE.md** for complete agent context and instructions.
+
+This file exists for compatibility with tools that look for AGENTS.md.
+
+> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+
+Full context is injected by ` + "`gt prime`" + ` at session start.
+`
+			if err := os.WriteFile(agentsMdPath, []byte(agentsContent), 0644); err != nil {
+				errors = append(errors, fmt.Sprintf("%s: %v", issue.location, err))
 			}
 		}
 	}

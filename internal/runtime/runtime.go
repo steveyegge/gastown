@@ -13,13 +13,51 @@ import (
 )
 
 // EnsureSettingsForRole installs runtime hook settings when supported.
+//
+// IMPORTANT: Settings must be installed in workDir (the session's working directory),
+// NOT in a parent directory. Neither Claude Code nor OpenCode traverse parent
+// directories to find settings:
+//
+//   - Claude Code: Does NOT walk up parent directories for .claude/settings.json.
+//     This is an open feature request: https://github.com/anthropics/claude-code/issues/12962
+//     Only CLAUDE.md files support parent directory traversal.
+//
+//   - OpenCode: Documentation does not specify directory traversal for .opencode/plugins/.
+//     Plugins are loaded from project-level (.opencode/plugins/) or global (~/.config/opencode/plugins/).
+//
+// Therefore, when a session runs in a subdirectory (e.g., polecats/Toast/ or crew/emma/),
+// settings must be placed directly in that directory, not in a shared parent.
 func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error {
 	if rc == nil {
 		rc = config.DefaultRuntimeConfig()
 	}
 
+	// If Hooks not set, fill defaults based on Provider
 	if rc.Hooks == nil {
-		return nil
+		rc.Hooks = &config.RuntimeHooksConfig{}
+		if rc.Hooks.Provider == "" {
+			rc.Hooks.Provider = rc.Provider
+		}
+		if rc.Hooks.Dir == "" {
+			switch rc.Provider {
+			case "claude":
+				rc.Hooks.Dir = ".claude"
+			case "opencode":
+				rc.Hooks.Dir = ".opencode/plugins"
+			default:
+				rc.Hooks.Dir = ""
+			}
+		}
+		if rc.Hooks.SettingsFile == "" {
+			switch rc.Provider {
+			case "claude":
+				rc.Hooks.SettingsFile = "settings.json"
+			case "opencode":
+				rc.Hooks.SettingsFile = "gastown.js"
+			default:
+				rc.Hooks.SettingsFile = ""
+			}
+		}
 	}
 
 	switch rc.Hooks.Provider {

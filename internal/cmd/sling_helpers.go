@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -284,7 +287,7 @@ func storeNoMergeInBead(beadID string, noMerge bool) error {
 
 // injectStartPrompt sends a prompt to the target pane to start working.
 // Uses the reliable nudge pattern: literal mode + 500ms debounce + separate Enter.
-func injectStartPrompt(pane, beadID, subject, args string) error {
+func injectStartPrompt(pane, beadID, subject, args, provider string) error {
 	if pane == "" {
 		return fmt.Errorf("no target pane")
 	}
@@ -292,6 +295,11 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 	// Skip nudge during tests to prevent agent self-interruption
 	if os.Getenv("GT_TEST_NO_NUDGE") != "" {
 		return nil
+	}
+
+	t := tmux.NewTmux()
+	if strings.EqualFold(provider, "opencode") {
+		return t.NudgePane(pane, "[GT_AGENT_INIT]")
 	}
 
 	// Build the prompt to inject
@@ -310,8 +318,29 @@ func injectStartPrompt(pane, beadID, subject, args string) error {
 	}
 
 	// Use the reliable nudge pattern (same as gt nudge / tmux.NudgeSession)
-	t := tmux.NewTmux()
 	return t.NudgePane(pane, prompt)
+}
+
+func resolveProviderForSession(townRoot, sessionName string) string {
+	if townRoot == "" || sessionName == "" {
+		return ""
+	}
+
+	identity, err := session.ParseSessionName(sessionName)
+	if err != nil {
+		return ""
+	}
+
+	rigPath := ""
+	if identity.Rig != "" {
+		rigPath = filepath.Join(townRoot, identity.Rig)
+	}
+
+	runtimeConfig := config.ResolveRoleAgentConfig(string(identity.Role), townRoot, rigPath)
+	if runtimeConfig == nil {
+		return ""
+	}
+	return runtimeConfig.Provider
 }
 
 // getSessionFromPane extracts session name from a pane target.

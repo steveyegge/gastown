@@ -11,7 +11,6 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
-	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -394,28 +393,31 @@ func buildRestartCommand(sessionName string) (string, error) {
 		Topic:     "handoff",
 	})
 
-	// For respawn-pane, we:
-	// 1. cd to the right directory (role's canonical home)
-	// 2. export GT_ROLE and BD_ACTOR so role detection works correctly
-	// 3. export Claude-related env vars (not inherited by fresh shell)
-	// 4. run claude with the startup beacon (triggers immediate context loading)
-	// Use exec to ensure clean process replacement.
-	//
-	// Check if current session is using a non-default agent (GT_AGENT env var).
-	// If so, preserve it across handoff by using the override variant.
+	// Determine rigPath for BuildAgentStartupCommand
+	var rigPath string
+	if identity.Rig != "" {
+		rigPath = filepath.Join(townRoot, identity.Rig)
+	}
+
+	// Build role-aware runtime command using BuildAgentStartupCommand
+	// This respects role_agents configuration for per-role model selection
+	// If GT_AGENT override is set, use that agent instead of default
 	currentAgent := os.Getenv("GT_AGENT")
 	var runtimeCmd string
 	if currentAgent != "" {
 		var err error
-		runtimeCmd, err = config.GetRuntimeCommandWithPromptAndAgentOverride("", beacon, currentAgent)
+		runtimeCmd, err = config.BuildAgentStartupCommandWithAgentOverride(gtRole, identity.Rig, townRoot, rigPath, beacon, currentAgent)
 		if err != nil {
-			return "", fmt.Errorf("resolving agent config: %w", err)
+			return "", fmt.Errorf("building startup command with agent override: %w", err)
 		}
 	} else {
-		runtimeCmd = config.GetRuntimeCommandWithPrompt("", beacon)
+		runtimeCmd = config.BuildAgentStartupCommand(gtRole, identity.Rig, townRoot, rigPath, beacon)
 	}
 
-	// Build environment exports - role vars first, then Claude vars
+	// For respawn-pane, we need to:
+	// 1. cd to the right directory (role's canonical home)
+	// 2. export Claude-related env vars (not inherited by fresh shell)
+	// 3. exec role-aware runtime command (includes GT_ROLE, BD_ACTOR, etc.)
 	var exports []string
 	if gtRole != "" {
 		runtimeConfig := config.LoadRuntimeConfig("")
@@ -439,7 +441,6 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// Add Claude-related env vars from current environment
 	for _, name := range claudeEnvVars {
 		if val := os.Getenv(name); val != "" {
-			// Shell-escape the value in case it contains special chars
 			exports = append(exports, fmt.Sprintf("%s=%q", name, val))
 		}
 	}
@@ -596,6 +597,12 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 		style.PrintWarning("could not clear history: %v", err)
 	}
 
+	// Kill all processes in the pane before respawning to prevent process leaks
+	if err := t.KillPaneProcesses(targetPane); err != nil {
+		// Non-fatal - continue with respawn
+		style.PrintWarning("could not kill pane processes: %v", err)
+	}
+
 	// Respawn the remote session's pane
 	// Note: respawn-pane automatically resets remain-on-exit to off
 	if err := t.RespawnPane(targetPane, restartCmd); err != nil {
@@ -649,9 +656,6 @@ func sendHandoffMail(subject, message string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("detecting agent identity: %w", err)
 	}
-
-	// Normalize identity to match mailbox query format
-	agentID = mail.AddressToIdentity(agentID)
 
 	// Detect town root for beads location
 	townRoot := detectTownRootFromCwd()

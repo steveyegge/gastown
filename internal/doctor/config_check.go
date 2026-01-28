@@ -508,84 +508,104 @@ func (c *SessionHookCheck) usesSessionStartScript(content, hookType string) bool
 }
 
 // findSettingsFiles finds all settings.json files in the town.
+// Checks for both .claude and .opencode directories to support multiple providers.
 func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 	var files []string
 
-	// Town root
-	townSettings := filepath.Join(townRoot, ".claude", "settings.json")
-	if _, err := os.Stat(townSettings); err == nil {
-		files = append(files, townSettings)
+	// Town root (check both providers)
+	for _, hooksDir := range knownHooksDirs {
+		townSettings := filepath.Join(townRoot, hooksDir, "settings.json")
+		if _, err := os.Stat(townSettings); err == nil {
+			files = append(files, townSettings)
+		}
 	}
 
 	// Find all rigs
 	rigs := findAllRigs(townRoot)
 	for _, rig := range rigs {
-		// Rig root
-		rigSettings := filepath.Join(rig, ".claude", "settings.json")
-		if _, err := os.Stat(rigSettings); err == nil {
-			files = append(files, rigSettings)
+		// Rig root (check both providers)
+		for _, hooksDir := range knownHooksDirs {
+			rigSettings := filepath.Join(rig, hooksDir, "settings.json")
+			if _, err := os.Stat(rigSettings); err == nil {
+				files = append(files, rigSettings)
+			}
 		}
 
-		// Mayor/rig
-		mayorRigSettings := filepath.Join(rig, "mayor", "rig", ".claude", "settings.json")
-		if _, err := os.Stat(mayorRigSettings); err == nil {
-			files = append(files, mayorRigSettings)
+		// Mayor/rig (check both providers)
+		mayorRigDir := filepath.Join(rig, "mayor", "rig")
+		for _, hooksDir := range knownHooksDirs {
+			mayorRigSettings := filepath.Join(mayorRigDir, hooksDir, "settings.json")
+			if _, err := os.Stat(mayorRigSettings); err == nil {
+				files = append(files, mayorRigSettings)
+			}
 		}
 
-		// Witness
-		witnessSettings := filepath.Join(rig, "witness", ".claude", "settings.json")
+		// Witness - use DetectHooksDir for correct location
+		witnessDir := filepath.Join(rig, "witness")
+		witnessHooksDir := DetectHooksDir(witnessDir)
+		witnessSettings := filepath.Join(witnessDir, witnessHooksDir, "settings.json")
 		if _, err := os.Stat(witnessSettings); err == nil {
 			files = append(files, witnessSettings)
 		}
 
-		// Witness/rig
-		witnessRigSettings := filepath.Join(rig, "witness", "rig", ".claude", "settings.json")
-		if _, err := os.Stat(witnessRigSettings); err == nil {
-			files = append(files, witnessRigSettings)
+		// Witness/rig (check both providers - these are wrong locations)
+		for _, hooksDir := range knownHooksDirs {
+			witnessRigSettings := filepath.Join(witnessDir, "rig", hooksDir, "settings.json")
+			if _, err := os.Stat(witnessRigSettings); err == nil {
+				files = append(files, witnessRigSettings)
+			}
 		}
 
-		// Refinery
-		refinerySettings := filepath.Join(rig, "refinery", ".claude", "settings.json")
+		// Refinery - use DetectHooksDir for correct location
+		refineryDir := filepath.Join(rig, "refinery")
+		refineryHooksDir := DetectHooksDir(refineryDir)
+		refinerySettings := filepath.Join(refineryDir, refineryHooksDir, "settings.json")
 		if _, err := os.Stat(refinerySettings); err == nil {
 			files = append(files, refinerySettings)
 		}
 
-		// Refinery/rig
-		refineryRigSettings := filepath.Join(rig, "refinery", "rig", ".claude", "settings.json")
-		if _, err := os.Stat(refineryRigSettings); err == nil {
-			files = append(files, refineryRigSettings)
+		// Refinery/rig (check both providers - these are wrong locations)
+		for _, hooksDir := range knownHooksDirs {
+			refineryRigSettings := filepath.Join(refineryDir, "rig", hooksDir, "settings.json")
+			if _, err := os.Stat(refineryRigSettings); err == nil {
+				files = append(files, refineryRigSettings)
+			}
 		}
 
-		// Crew members
+		// Crew members (check both providers)
 		crewPath := filepath.Join(rig, "crew")
 		if crewEntries, err := os.ReadDir(crewPath); err == nil {
 			for _, crew := range crewEntries {
 				if crew.IsDir() && !strings.HasPrefix(crew.Name(), ".") {
-					crewSettings := filepath.Join(crewPath, crew.Name(), ".claude", "settings.json")
-					if _, err := os.Stat(crewSettings); err == nil {
-						files = append(files, crewSettings)
+					for _, hooksDir := range knownHooksDirs {
+						crewSettings := filepath.Join(crewPath, crew.Name(), hooksDir, "settings.json")
+						if _, err := os.Stat(crewSettings); err == nil {
+							files = append(files, crewSettings)
+						}
 					}
 				}
 			}
 		}
 
-		// Polecats (handle both new and old structures)
-		// New structure: polecats/<name>/<rigname>/.claude/settings.json
-		// Old structure: polecats/<name>/.claude/settings.json
+		// Polecats (handle both new and old structures, both providers)
+		// New structure: polecats/<name>/<rigname>/<hooksDir>/settings.json
+		// Old structure: polecats/<name>/<hooksDir>/settings.json
 		rigName := filepath.Base(rig)
 		polecatsPath := filepath.Join(rig, "polecats")
 		if polecatEntries, err := os.ReadDir(polecatsPath); err == nil {
 			for _, polecat := range polecatEntries {
 				if polecat.IsDir() && !strings.HasPrefix(polecat.Name(), ".") {
-					// Try new structure first
-					polecatSettings := filepath.Join(polecatsPath, polecat.Name(), rigName, ".claude", "settings.json")
-					if _, err := os.Stat(polecatSettings); err == nil {
-						files = append(files, polecatSettings)
-					} else {
-						// Fall back to old structure
-						polecatSettings = filepath.Join(polecatsPath, polecat.Name(), ".claude", "settings.json")
+					for _, hooksDir := range knownHooksDirs {
+						// Try new structure first
+						polecatSettings := filepath.Join(polecatsPath, polecat.Name(), rigName, hooksDir, "settings.json")
 						if _, err := os.Stat(polecatSettings); err == nil {
 							files = append(files, polecatSettings)
+						} else {
+							// Fall back to old structure
+							polecatSettings = filepath.Join(polecatsPath, polecat.Name(), hooksDir, "settings.json")
+							if _, err := os.Stat(polecatSettings); err == nil {
+								files = append(files, polecatSettings)
+							}
 						}
 					}
 				}
