@@ -132,6 +132,25 @@ Examples:
 	RunE: runDogCall,
 }
 
+var dogDoneCmd = &cobra.Command{
+	Use:   "done [name]",
+	Short: "Mark dog as done and return to idle",
+	Long: `Mark a dog as done with its current work and return to idle state.
+
+Dogs should call this when they complete their work assignment.
+This clears the work field and sets state to idle, making the dog
+available for new work.
+
+Without a name argument, auto-detects the current dog from the working
+directory (must be run from within a dog's worktree).
+
+Examples:
+  gt dog done         # Auto-detect from cwd
+  gt dog done alpha   # Explicit name`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runDogDone,
+}
+
 var dogStatusCmd = &cobra.Command{
 	Use:   "status [name]",
 	Short: "Show detailed dog status",
@@ -210,6 +229,7 @@ func init() {
 	dogCmd.AddCommand(dogRemoveCmd)
 	dogCmd.AddCommand(dogListCmd)
 	dogCmd.AddCommand(dogCallCmd)
+	dogCmd.AddCommand(dogDoneCmd)
 	dogCmd.AddCommand(dogStatusCmd)
 	dogCmd.AddCommand(dogDispatchCmd)
 
@@ -453,7 +473,7 @@ func runDogCall(cmd *cobra.Command, args []string) error {
 		}
 
 		if d.State == dog.StateWorking {
-			fmt.Printf("Dog %s is already working\n", name)
+			fmt.Printf("Dog %s is already working (use 'gt dog done %s' when complete)\n", name, name)
 			return nil
 		}
 
@@ -481,6 +501,55 @@ func runDogCall(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("✓ Called %s - ready for work\n", d.Name)
+	return nil
+}
+
+func runDogDone(cmd *cobra.Command, args []string) error {
+	mgr, err := getDogManager()
+	if err != nil {
+		return err
+	}
+
+	var name string
+	if len(args) > 0 {
+		name = args[0]
+	} else {
+		// Auto-detect dog from cwd
+		// Dog worktrees are at ~/gt/deacon/dogs/<name>/<rig>/
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting cwd: %w", err)
+		}
+
+		// Look for /deacon/dogs/<name>/ in path
+		parts := strings.Split(cwd, string(filepath.Separator))
+		for i := 0; i < len(parts)-1; i++ {
+			if parts[i] == "dogs" && i > 0 && parts[i-1] == "deacon" {
+				name = parts[i+1]
+				break
+			}
+		}
+
+		if name == "" {
+			return fmt.Errorf("could not detect dog name from cwd: %s\nRun from a dog worktree or specify name: gt dog done <name>", cwd)
+		}
+	}
+
+	d, err := mgr.Get(name)
+	if err != nil {
+		return fmt.Errorf("getting dog %s: %w", name, err)
+	}
+
+	if d.State == dog.StateIdle && d.Work == "" {
+		fmt.Printf("Dog %s is already idle with no work\n", name)
+		return nil
+	}
+
+	if err := mgr.ClearWork(name); err != nil {
+		return fmt.Errorf("clearing work for dog %s: %w", name, err)
+	}
+
+	fmt.Printf("✓ Dog %s returned to kennel (idle)\n", name)
 	return nil
 }
 

@@ -236,22 +236,33 @@ needs = ["report-results"]
 description = """
 Signal work complete and return to available pool.
 
-**1. Signal completion to Deacon:**
+**1. Return to idle state:**
 ```bash
-gt mail send deacon/ -s "DOG_DONE $(hostname)" -m "Task: convoy-feed
+gt dog done
+```
+
+This command:
+- Auto-detects your dog name from the working directory
+- Clears your work assignment
+- Sets state back to "idle"
+- Makes you available for the next dispatch
+
+**CRITICAL**: Without `gt dog done`, you stay stuck in "working" state and the
+Deacon cannot assign you new work.
+
+**2. (Optional) Send completion mail to Deacon:**
+```bash
+gt mail send deacon/ -s "Convoy fed: {{convoy}}" -m "Task: convoy-feed
 Convoy: {{convoy}}
 Ready: {{ready_count}}
 Dispatched: {{dispatch_count}}
-Status: COMPLETE
-
-Ready for next assignment."
+Status: COMPLETE"
 ```
 
-**2. Return to kennel:**
-Dog returns to available state in the pool. Deacon will assign next work
-or retire the dog if pool is oversized.
+Note: The report-results step already notifies the Deacon. This additional
+mail is optional but useful for visibility.
 
-**Exit criteria:** Deacon notified, dog ready for next work or retirement."""
+**Exit criteria:** Dog returned to idle, ready for next assignment."""
 
 [vars]
 [vars.convoy]
