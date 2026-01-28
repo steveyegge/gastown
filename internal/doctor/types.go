@@ -157,6 +157,36 @@ func (r *Report) IsHealthy() bool {
 	return r.Summary.Errors == 0 && r.Summary.Warnings == 0
 }
 
+// PrintSummaryOnly outputs just the summary and warnings section.
+// Used after streaming output where checks were already printed as they ran.
+func (r *Report) PrintSummaryOnly(w io.Writer, verbose bool) {
+	// Collect warnings/errors for summary section
+	var warnings []*CheckResult
+	for _, check := range r.Checks {
+		if check.Status != StatusOK {
+			warnings = append(warnings, check)
+		}
+	}
+
+	// Print separator and summary
+	_, _ = fmt.Fprintln(w, ui.RenderSeparator())
+	r.printSummary(w)
+
+	// Print warnings/errors section with fixes
+	r.printWarningsSection(w, warnings)
+
+	// Print details for non-OK checks in verbose mode
+	if verbose && len(warnings) > 0 {
+		for _, check := range warnings {
+			if len(check.Details) > 0 {
+				for _, detail := range check.Details {
+					_, _ = fmt.Fprintf(w, "     %s%s\n", ui.MutedStyle.Render(ui.TreeLast), ui.RenderMuted(detail))
+				}
+			}
+		}
+	}
+}
+
 // Print outputs the report to the given writer.
 // Matches bd doctor UX: grouped by category, semantic icons, warnings section.
 func (r *Report) Print(w io.Writer, verbose bool) {
