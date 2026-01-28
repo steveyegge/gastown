@@ -182,6 +182,35 @@ func IsRunning(townRoot string) (bool, int, error) {
 	return false, 0, nil
 }
 
+// EnsureRunningIfMigrated checks if rig databases have been migrated to the
+// centralized .dolt-data/ directory. If they have, verifies the dolt server is
+// running. Returns (true, nil) if the server is running with migrated databases,
+// (false, nil) if no databases have been migrated, or an error if databases are
+// migrated but the server is not running.
+func EnsureRunningIfMigrated(townRoot string) (bool, error) {
+	config := DefaultConfig(townRoot)
+
+	// Check if .dolt-data/ exists and has entries
+	entries, err := os.ReadDir(config.DataDir)
+	if err != nil || len(entries) == 0 {
+		return false, nil // No migrated databases, embedded mode OK
+	}
+
+	running, _, err := IsRunning(townRoot)
+	if err != nil {
+		return false, fmt.Errorf("failed to check dolt server status: %w", err)
+	}
+	if !running {
+		return false, fmt.Errorf(
+			"dolt databases have been migrated to %s but the dolt server is not running; "+
+				"run 'gt dolt start' or enable daemon-managed dolt in mayor/daemon.json",
+			config.DataDir,
+		)
+	}
+
+	return true, nil
+}
+
 // findDoltServerOnPort finds a dolt sql-server process listening on the given port.
 // Returns the PID or 0 if not found.
 func findDoltServerOnPort(port int) int {

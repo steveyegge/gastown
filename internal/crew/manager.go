@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -518,13 +519,19 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	townRoot := filepath.Dir(m.rig.Path)
+	doltServer, err := doltserver.EnsureRunningIfMigrated(townRoot)
+	if err != nil {
+		return fmt.Errorf("dolt server check: %w", err)
+	}
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:             "crew",
-		Rig:              m.rig.Name,
-		AgentName:        name,
-		TownRoot:         townRoot,
-		RuntimeConfigDir: opts.ClaudeConfigDir,
-		BeadsNoDaemon:    true,
+		Role:               "crew",
+		Rig:                m.rig.Name,
+		AgentName:          name,
+		TownRoot:           townRoot,
+		RuntimeConfigDir:   opts.ClaudeConfigDir,
+		BeadsNoDaemon:      true,
+		DoltServerMode:     doltServer,
+		DoltServerDatabase: m.rig.Name,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)

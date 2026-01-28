@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -147,10 +148,16 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
+	doltServer, err := doltserver.EnsureRunningIfMigrated(townRoot)
+	if err != nil {
+		return fmt.Errorf("dolt server check: %w", err)
+	}
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "witness",
-		Rig:      m.rig.Name,
-		TownRoot: townRoot,
+		Role:               "witness",
+		Rig:                m.rig.Name,
+		TownRoot:           townRoot,
+		DoltServerMode:     doltServer,
+		DoltServerDatabase: m.rig.Name,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionID, k, v)

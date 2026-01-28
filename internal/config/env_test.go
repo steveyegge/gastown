@@ -175,6 +175,93 @@ func TestAgentEnv_EmptyTownRootOmitted(t *testing.T) {
 	assertEnv(t, env, "GT_RIG", "myrig")
 }
 
+func TestAgentEnv_DoltServerModeDisabled(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:     "polecat",
+		Rig:      "myrig",
+		AgentName: "Toast",
+		TownRoot: "/town",
+	})
+
+	assertNotSet(t, env, "BEADS_DOLT_SERVER_MODE")
+	assertNotSet(t, env, "BEADS_DOLT_SERVER_HOST")
+	assertNotSet(t, env, "BEADS_DOLT_SERVER_PORT")
+}
+
+func TestAgentEnv_DoltServerModeEnabled(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:           "polecat",
+		Rig:            "myrig",
+		AgentName:      "Toast",
+		TownRoot:       "/town",
+		DoltServerMode: true,
+	})
+
+	assertEnv(t, env, "BEADS_DOLT_SERVER_MODE", "1")
+	assertEnv(t, env, "BEADS_DOLT_SERVER_HOST", "127.0.0.1")
+	assertEnv(t, env, "BEADS_DOLT_SERVER_PORT", "3307")
+}
+
+func TestAgentEnv_DoltServerModeWithDatabase(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:               "polecat",
+		Rig:                "gastown",
+		AgentName:          "Toast",
+		TownRoot:           "/town",
+		DoltServerMode:     true,
+		DoltServerDatabase: "gastown",
+	})
+
+	assertEnv(t, env, "BEADS_DOLT_SERVER_MODE", "1")
+	assertEnv(t, env, "BEADS_DOLT_SERVER_DATABASE", "gastown")
+}
+
+func TestAgentEnv_DoltServerModeHqDatabase(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:               "mayor",
+		TownRoot:           "/town",
+		DoltServerMode:     true,
+		DoltServerDatabase: "hq",
+	})
+
+	assertEnv(t, env, "BEADS_DOLT_SERVER_MODE", "1")
+	assertEnv(t, env, "BEADS_DOLT_SERVER_DATABASE", "hq")
+}
+
+func TestAgentEnv_DoltServerModeNoDatabaseOmitted(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:           "polecat",
+		Rig:            "myrig",
+		AgentName:      "Toast",
+		TownRoot:       "/town",
+		DoltServerMode: true,
+	})
+
+	assertEnv(t, env, "BEADS_DOLT_SERVER_MODE", "1")
+	assertNotSet(t, env, "BEADS_DOLT_SERVER_DATABASE")
+}
+
+func TestAgentEnv_DoltServerModeCustomHostPort(t *testing.T) {
+	t.Parallel()
+	env := AgentEnv(AgentEnvConfig{
+		Role:           "witness",
+		Rig:            "myrig",
+		TownRoot:       "/town",
+		DoltServerMode: true,
+		DoltServerHost: "192.168.1.10",
+		DoltServerPort: 3308,
+	})
+
+	assertEnv(t, env, "BEADS_DOLT_SERVER_MODE", "1")
+	assertEnv(t, env, "BEADS_DOLT_SERVER_HOST", "192.168.1.10")
+	assertEnv(t, env, "BEADS_DOLT_SERVER_PORT", "3308")
+}
+
 func TestShellQuote(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

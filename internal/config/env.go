@@ -5,8 +5,13 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+// DefaultDoltServerPort is the default port for the Dolt SQL server.
+// Matches doltserver.DefaultPort but defined here to avoid circular imports.
+const DefaultDoltServerPort = 3307
 
 // AgentEnvConfig specifies the configuration for generating agent environment variables.
 // This is the single source of truth for all agent environment configuration.
@@ -35,6 +40,23 @@ type AgentEnvConfig struct {
 	// BeadsNoDaemon sets BEADS_NO_DAEMON=1 if true
 	// Used for polecats that should bypass the beads daemon
 	BeadsNoDaemon bool
+
+	// DoltServerMode enables dolt server mode env vars for agent sessions.
+	// When true, BEADS_DOLT_SERVER_MODE=1 and connection vars are set.
+	// Callers must verify the server is running before setting this.
+	DoltServerMode bool
+
+	// DoltServerHost is the dolt server host (default 127.0.0.1).
+	DoltServerHost string
+
+	// DoltServerPort is the dolt server port (default 3307).
+	DoltServerPort int
+
+	// DoltServerDatabase is the dolt server database name.
+	// This is the rig name (e.g., "gastown", "beads") for rig-level agents,
+	// or "hq" for town-level agents (mayor, deacon, boot).
+	// Maps to the directory name under .dolt-data/.
+	DoltServerDatabase string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -111,6 +133,24 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Add session ID env var name if provided
 	if cfg.SessionIDEnv != "" {
 		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
+	}
+
+	// Set dolt server mode env vars for beads CLI
+	if cfg.DoltServerMode {
+		env["BEADS_DOLT_SERVER_MODE"] = "1"
+		host := cfg.DoltServerHost
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		env["BEADS_DOLT_SERVER_HOST"] = host
+		port := cfg.DoltServerPort
+		if port == 0 {
+			port = DefaultDoltServerPort
+		}
+		env["BEADS_DOLT_SERVER_PORT"] = strconv.Itoa(port)
+		if cfg.DoltServerDatabase != "" {
+			env["BEADS_DOLT_SERVER_DATABASE"] = cfg.DoltServerDatabase
+		}
 	}
 
 	return env

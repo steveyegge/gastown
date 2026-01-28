@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -486,6 +487,12 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		defaultCmd = config.PrependEnv(defaultCmd, map[string]string{"GT_SESSION_ID_ENV": runtimeConfig.Session.SessionIDEnv})
 	}
 
+	// Check dolt server status for env passthrough (non-fatal in daemon context)
+	doltServer, doltErr := doltserver.EnsureRunningIfMigrated(d.config.TownRoot)
+	if doltErr != nil {
+		d.logger.Printf("WARNING: dolt server check failed: %v", doltErr)
+	}
+
 	// Polecats and crew need environment variables set in the command
 	if parsed.RoleType == "polecat" {
 		var sessionIDEnv string
@@ -493,11 +500,13 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
 		}
 		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:         "polecat",
-			Rig:          parsed.RigName,
-			AgentName:    parsed.AgentName,
-			TownRoot:     d.config.TownRoot,
-			SessionIDEnv: sessionIDEnv,
+			Role:               "polecat",
+			Rig:                parsed.RigName,
+			AgentName:          parsed.AgentName,
+			TownRoot:           d.config.TownRoot,
+			SessionIDEnv:       sessionIDEnv,
+			DoltServerMode:     doltServer,
+			DoltServerDatabase: parsed.RigName,
 		})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
@@ -508,11 +517,13 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
 		}
 		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:         "crew",
-			Rig:          parsed.RigName,
-			AgentName:    parsed.AgentName,
-			TownRoot:     d.config.TownRoot,
-			SessionIDEnv: sessionIDEnv,
+			Role:               "crew",
+			Rig:                parsed.RigName,
+			AgentName:          parsed.AgentName,
+			TownRoot:           d.config.TownRoot,
+			SessionIDEnv:       sessionIDEnv,
+			DoltServerMode:     doltServer,
+			DoltServerDatabase: parsed.RigName,
 		})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
@@ -523,12 +534,24 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 // setSessionEnvironment sets environment variables for the tmux session.
 // Uses centralized AgentEnv for consistency, plus custom env vars from role config if available.
 func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
+	// Check dolt server status for env passthrough (non-fatal)
+	doltServer, doltErr := doltserver.EnsureRunningIfMigrated(d.config.TownRoot)
+	if doltErr != nil {
+		d.logger.Printf("WARNING: dolt server check failed: %v", doltErr)
+	}
+
 	// Use centralized AgentEnv for base environment variables
+	doltDB := parsed.RigName
+	if doltDB == "" {
+		doltDB = "hq"
+	}
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:      parsed.RoleType,
-		Rig:       parsed.RigName,
-		AgentName: parsed.AgentName,
-		TownRoot:  d.config.TownRoot,
+		Role:               parsed.RoleType,
+		Rig:                parsed.RigName,
+		AgentName:          parsed.AgentName,
+		TownRoot:           d.config.TownRoot,
+		DoltServerMode:     doltServer,
+		DoltServerDatabase: doltDB,
 	})
 	for k, v := range envVars {
 		_ = d.tmux.SetEnvironment(sessionName, k, v)

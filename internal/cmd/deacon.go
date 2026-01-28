@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
@@ -432,9 +433,15 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 
 	// Set environment (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
+	doltServer, err := doltserver.EnsureRunningIfMigrated(townRoot)
+	if err != nil {
+		return fmt.Errorf("dolt server check: %w", err)
+	}
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:     "deacon",
-		TownRoot: townRoot,
+		Role:               "deacon",
+		TownRoot:           townRoot,
+		DoltServerMode:     doltServer,
+		DoltServerDatabase: "hq",
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionName, k, v)
