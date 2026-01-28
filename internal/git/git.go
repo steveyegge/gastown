@@ -4,7 +4,6 @@ package git
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,70 +42,14 @@ func moveDir(src, dest string) error {
 		return nil
 	}
 
-	// Rename failed, try copy+delete as fallback for cross-filesystem moves
-	if err := copyDir(src, dest); err != nil {
+	// Rename failed, use platform-specific copy for cross-filesystem moves
+	if err := copyDirPreserving(src, dest); err != nil {
 		return fmt.Errorf("copying directory: %w", err)
 	}
 	if err := os.RemoveAll(src); err != nil {
 		return fmt.Errorf("removing source after copy: %w", err)
 	}
 	return nil
-}
-
-// copyDir recursively copies a directory from src to dest.
-func copyDir(src, dest string) error {
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll(dest, srcInfo.Mode()); err != nil {
-		return err
-	}
-
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		destPath := filepath.Join(dest, entry.Name())
-
-		if entry.IsDir() {
-			if err := copyDir(srcPath, destPath); err != nil {
-				return err
-			}
-		} else {
-			if err := copyFile(srcPath, destPath); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// copyFile copies a single file from src to dest, preserving permissions.
-func copyFile(src, dest string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	srcInfo, err := srcFile.Stat()
-	if err != nil {
-		return err
-	}
-
-	destFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, srcFile)
-	return err
 }
 
 // Git wraps git operations for a working directory.
