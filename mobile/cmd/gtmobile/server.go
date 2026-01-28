@@ -462,9 +462,21 @@ func (s *DecisionServer) Resolve(
 	}
 
 	// Notify the requesting agent (mail + nudge + unblock)
+	// Get chosen label from fields, with fallback to request index and proto options
 	chosenLabel := ""
-	if fields.ChosenIndex > 0 && fields.ChosenIndex <= len(fields.Options) {
-		chosenLabel = fields.Options[fields.ChosenIndex-1].Label
+	chosenIndex := int(req.Msg.ChosenIndex) // Use request index as ground truth
+	if chosenIndex > 0 && chosenIndex <= len(fields.Options) {
+		chosenLabel = fields.Options[chosenIndex-1].Label
+	}
+	// Fallback: if fields.Options is empty but proto options exist, use those
+	if chosenLabel == "" && chosenIndex > 0 && chosenIndex <= len(options) {
+		chosenLabel = options[chosenIndex-1].Label
+		log.Printf("WARN: Used proto options fallback for decision %s chosenLabel", issue.ID)
+	}
+	// Final fallback: log warning if still empty
+	if chosenLabel == "" && chosenIndex > 0 {
+		log.Printf("WARN: Empty chosenLabel for decision %s: ChosenIndex=%d, fields.Options=%d, proto.Options=%d",
+			issue.ID, chosenIndex, len(fields.Options), len(options))
 	}
 	go notify.DecisionResolved(s.townRoot, issue.ID, *fields, chosenLabel, fields.Rationale, resolvedBy)
 
