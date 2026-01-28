@@ -51,7 +51,7 @@ const config = {
           // Reference the project's docs folder dynamically
           path: "../docs",
           sidebarPath: "./sidebars.js",
-          editUrl: "https://github.com/steveyegge/gastown/tree/main/",
+          editUrl: "https://github.com/steveyegge/gastown/tree/main/website/",
         },
         blog: false,
         theme: {
