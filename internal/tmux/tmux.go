@@ -176,6 +176,17 @@ func (t *Tmux) CaptureDeadPaneOutput(session string, lines int) string {
 	return output
 }
 
+// GetPaneExitStatus returns the exit status of a dead pane.
+// Returns empty string if the pane is not dead or if the status cannot be retrieved.
+// Note: Requires tmux 2.0+ for pane_dead_status support.
+func (t *Tmux) GetPaneExitStatus(session string) string {
+	out, err := t.run("display-message", "-t", session, "-p", "#{pane_dead_status}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // EnsureSessionFresh ensures a session is available and healthy.
 // If the session exists but is a zombie (Claude not running), it kills the session first.
 // This prevents "session already exists" errors when trying to restart dead agents.
