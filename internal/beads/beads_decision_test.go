@@ -1,6 +1,7 @@
 package beads
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,6 +43,58 @@ func TestDecisionFieldsStruct(t *testing.T) {
 	}
 	if fields.ChosenIndex != 0 {
 		t.Errorf("ChosenIndex = %d, want 0 (pending)", fields.ChosenIndex)
+	}
+}
+
+// TestBdDecisionPointDataStruct verifies BdDecisionPointData fields including RequestedBy.
+// This test ensures the struct can properly unmarshal the requested_by field from bd decision show.
+func TestBdDecisionPointDataStruct(t *testing.T) {
+	data := BdDecisionPointData{
+		IssueID:     "hq-test123",
+		Prompt:      "Which option?",
+		Options:     `[{"id":"1","label":"A"},{"id":"2","label":"B"}]`,
+		CreatedAt:   "2026-01-28T12:00:00Z",
+		RequestedBy: "gastown/crew/decision",
+	}
+
+	if data.IssueID != "hq-test123" {
+		t.Errorf("IssueID = %q, want 'hq-test123'", data.IssueID)
+	}
+	if data.Prompt != "Which option?" {
+		t.Errorf("Prompt = %q, want 'Which option?'", data.Prompt)
+	}
+	if data.RequestedBy != "gastown/crew/decision" {
+		t.Errorf("RequestedBy = %q, want 'gastown/crew/decision'", data.RequestedBy)
+	}
+}
+
+// TestBdDecisionPointDataJSONUnmarshal verifies BdDecisionPointData JSON unmarshaling.
+// This tests that the requested_by field is properly extracted from bd decision show JSON.
+func TestBdDecisionPointDataJSONUnmarshal(t *testing.T) {
+	jsonData := `{
+		"issue_id": "hq-abc123",
+		"prompt": "Test decision?",
+		"options": "[{\"id\":\"1\",\"label\":\"Yes\"},{\"id\":\"2\",\"label\":\"No\"}]",
+		"created_at": "2026-01-28T10:00:00Z",
+		"requested_by": "gastown/crew/test_agent"
+	}`
+
+	var data BdDecisionPointData
+	if err := json.Unmarshal([]byte(jsonData), &data); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	if data.IssueID != "hq-abc123" {
+		t.Errorf("IssueID = %q, want 'hq-abc123'", data.IssueID)
+	}
+	if data.Prompt != "Test decision?" {
+		t.Errorf("Prompt = %q, want 'Test decision?'", data.Prompt)
+	}
+	if data.RequestedBy != "gastown/crew/test_agent" {
+		t.Errorf("RequestedBy = %q, want 'gastown/crew/test_agent'", data.RequestedBy)
+	}
+	if data.CreatedAt != "2026-01-28T10:00:00Z" {
+		t.Errorf("CreatedAt = %q, want '2026-01-28T10:00:00Z'", data.CreatedAt)
 	}
 }
 
