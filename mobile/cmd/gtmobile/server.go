@@ -244,12 +244,20 @@ func (s *StatusServer) collectTownStatus(fast bool) (*gastownv1.TownStatus, erro
 type DecisionServer struct {
 	townRoot string
 	bus      *eventbus.Bus
+	poller   *eventbus.DecisionPoller // Optional: marks RPC-created decisions as seen
 }
 
 var _ gastownv1connect.DecisionServiceHandler = (*DecisionServer)(nil)
 
 func NewDecisionServer(townRoot string, bus *eventbus.Bus) *DecisionServer {
 	return &DecisionServer{townRoot: townRoot, bus: bus}
+}
+
+// SetPoller sets the decision poller for marking RPC-created decisions as seen.
+// This prevents duplicate notifications when the poller finds decisions that were
+// already published to the event bus via RPC.
+func (s *DecisionServer) SetPoller(poller *eventbus.DecisionPoller) {
+	s.poller = poller
 }
 
 func (s *DecisionServer) ListPending(
@@ -399,6 +407,11 @@ func (s *DecisionServer) CreateDecision(
 	// Publish event to bus for real-time notification
 	if s.bus != nil {
 		s.bus.PublishDecisionCreated(issue.ID, decision)
+	}
+
+	// Mark as seen by poller to prevent duplicate notification when poller discovers it
+	if s.poller != nil {
+		s.poller.MarkSeen(issue.ID)
 	}
 
 	return connect.NewResponse(&gastownv1.CreateDecisionResponse{Decision: decision}), nil
@@ -967,28 +980,30 @@ func NewSSEHandler(bus *eventbus.Bus, townRoot string) http.HandlerFunc {
 				if !ok {
 					return
 				}
-				// Send event based on type
+				// Skip if already sent to this client (avoids duplicates from poller + backup poll)
+				if event.Type == eventbus.EventDecisionCreated {
+					if decision, ok := event.Data.(*gastownv1.Decision); ok && decision != nil {
+						if seen[decision.Id] {
+							continue // Already sent via backup poll
+						}
+						seen[decision.Id] = true
+						fmt.Fprintf(w, "event: decision\n")
+						fmt.Fprintf(w, "data: {\"id\":\"%s\",\"question\":\"%s\",\"urgency\":\"%s\",\"type\":\"created\"}\n\n",
+							decision.Id, escapeJSON(decision.Question), fromUrgency(decision.Urgency))
+						flusher.Flush()
+						continue
+					}
+				}
+				// For other event types (resolved, canceled), always send
 				eventType := "unknown"
 				switch event.Type {
-				case eventbus.EventDecisionCreated:
-					eventType = "created"
 				case eventbus.EventDecisionResolved:
 					eventType = "resolved"
 				case eventbus.EventDecisionCanceled:
 					eventType = "canceled"
 				}
-				fmt.Fprintf(w, "event: decision\n")
-				// Include question and urgency for created events (helps slackbot)
-				if event.Type == eventbus.EventDecisionCreated {
-					if decision, ok := event.Data.(*gastownv1.Decision); ok && decision != nil {
-						seen[decision.Id] = true
-						fmt.Fprintf(w, "data: {\"id\":\"%s\",\"question\":\"%s\",\"urgency\":\"%s\",\"type\":\"%s\"}\n\n",
-							decision.Id, escapeJSON(decision.Question), fromUrgency(decision.Urgency), eventType)
-						flusher.Flush()
-						continue
-					}
-				}
 				seen[event.DecisionID] = true
+				fmt.Fprintf(w, "event: decision\n")
 				fmt.Fprintf(w, "data: {\"id\":\"%s\",\"type\":\"%s\"}\n\n", event.DecisionID, eventType)
 				flusher.Flush()
 

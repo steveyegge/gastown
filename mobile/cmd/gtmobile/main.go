@@ -5,17 +5,33 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"connectrpc.com/connect"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/eventbus"
+	gastownv1 "github.com/steveyegge/gastown/mobile/gen/gastown/v1"
 	"github.com/steveyegge/gastown/mobile/gen/gastown/v1/gastownv1connect"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+// toUrgencyProto converts a string urgency to the proto enum.
+func toUrgencyProto(urgency string) gastownv1.Urgency {
+	switch urgency {
+	case "high":
+		return gastownv1.Urgency_URGENCY_HIGH
+	case "low":
+		return gastownv1.Urgency_URGENCY_LOW
+	default:
+		return gastownv1.Urgency_URGENCY_MEDIUM
+	}
+}
 
 var (
 	port     = flag.Int("port", 8443, "Server port")
@@ -42,10 +58,41 @@ func main() {
 	decisionBus := eventbus.New()
 	defer decisionBus.Close()
 
+	// Create decision poller to catch CLI-created decisions that bypass RPC
+	// Polls every 10 seconds (faster than the 30s SSE backup poll for better UX)
+	townBeadsPath := beads.GetTownBeadsPath(root)
+
+	// Publisher callback converts DecisionData to proto and publishes to event bus
+	publisher := func(data eventbus.DecisionData) {
+		var options []*gastownv1.DecisionOption
+		for _, opt := range data.Options {
+			options = append(options, &gastownv1.DecisionOption{
+				Label:       opt.Label,
+				Description: opt.Description,
+				Recommended: opt.Recommended,
+			})
+		}
+		decision := &gastownv1.Decision{
+			Id:          data.ID,
+			Question:    data.Question,
+			Context:     data.Context,
+			Options:     options,
+			RequestedBy: &gastownv1.AgentAddress{Name: data.RequestedBy},
+			Urgency:     toUrgencyProto(data.Urgency),
+			Blockers:    data.Blockers,
+		}
+		decisionBus.PublishDecisionCreated(data.ID, decision)
+	}
+
+	decisionPoller := eventbus.NewDecisionPoller(publisher, townBeadsPath, 10*time.Second)
+	decisionPoller.Start(context.Background())
+	defer decisionPoller.Stop()
+
 	// Create service handlers
 	statusServer := NewStatusServer(root)
 	mailServer := NewMailServer(root)
 	decisionServer := NewDecisionServer(root, decisionBus)
+	decisionServer.SetPoller(decisionPoller) // Wire up poller to prevent duplicates
 
 	// Set up interceptors
 	var opts []connect.HandlerOption
