@@ -12,6 +12,7 @@ import (
 // Returns the created issue or an error.
 func (b *Beads) CreateDogAgentBead(name, location string) (*Issue, error) {
 	title := fmt.Sprintf("Dog: %s", name)
+	beadID := DogBeadIDTown(name) // Use canonical ID: hq-dog-<name>
 	labels := []string{
 		"gt:agent",
 		"role_type:dog",
@@ -21,6 +22,8 @@ func (b *Beads) CreateDogAgentBead(name, location string) (*Issue, error) {
 
 	args := []string{
 		"create", "--json",
+		"--id=" + beadID,
+		"--type=agent",
 		"--role-type=dog",
 		"--title=" + title,
 		"--labels=" + strings.Join(labels, ","),
