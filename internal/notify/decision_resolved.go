@@ -56,6 +56,8 @@ func DecisionResolved(townRoot, decisionID string, fields beads.DecisionFields, 
 		if rationale != "" {
 			nudgeMsg += fmt.Sprintf(" - %s", rationale)
 		}
+		// Add actionable instructions so the agent knows to continue working
+		nudgeMsg += " → Continue working - check inbox"
 		nudgeCmd := exec.Command("gt", "nudge", "--direct", fields.RequestedBy, nudgeMsg) //nolint:gosec // trusted internal command
 		if err := nudgeCmd.Run(); err != nil {
 			log.Printf("notify: failed to nudge requestor %q: %v", fields.RequestedBy, err)
