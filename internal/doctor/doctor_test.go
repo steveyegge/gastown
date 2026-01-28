@@ -209,7 +209,7 @@ func TestReport_Print(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	r.Print(&buf, false)
+	r.Print(&buf, false, 0)
 
 	output := buf.String()
 	if output == "" {
