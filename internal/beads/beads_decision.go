@@ -501,18 +501,37 @@ func (b *Beads) GetBdDecision(id string) (*BdDecisionPoint, error) {
 }
 
 // ListDecisions returns all pending decision beads.
+// This queries both gt-style decisions (using labels) and bd-style decisions
+// (from the decision_points table), merging and deduplicating the results.
 func (b *Beads) ListDecisions() ([]*Issue, error) {
+	// Track seen IDs to deduplicate
+	seen := make(map[string]bool)
+	var allIssues []*Issue
+
+	// First, query gt-style decisions using labels
 	out, err := b.run("list", "--label=gt:decision", "--label=decision:pending", "--status=open", "--json")
-	if err != nil {
-		return nil, err
+	if err == nil {
+		var gtIssues []*Issue
+		if err := json.Unmarshal(out, &gtIssues); err == nil {
+			for _, issue := range gtIssues {
+				if !seen[issue.ID] {
+					seen[issue.ID] = true
+					allIssues = append(allIssues, issue)
+				}
+			}
+		}
 	}
 
-	var issues []*Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
+	// Also query bd-style decisions from decision_points table
+	bdIssues, _ := b.ListBdDecisions()
+	for _, issue := range bdIssues {
+		if !seen[issue.ID] {
+			seen[issue.ID] = true
+			allIssues = append(allIssues, issue)
+		}
 	}
 
-	return issues, nil
+	return allIssues, nil
 }
 
 // ListAllDecisions returns all decision beads (pending and resolved).
