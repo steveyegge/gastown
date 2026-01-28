@@ -1127,7 +1127,8 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 		}
 
 		// Step 3: Delete worktree (nuclear mode - bypass all safety checks)
-		if err := p.mgr.RemoveWithOptions(p.polecatName, true, true); err != nil {
+		// selfNuke=false because this is an external nuke command, not polecat self-deleting
+		if err := p.mgr.RemoveWithOptions(p.polecatName, true, true, false); err != nil {
 			if errors.Is(err, polecat.ErrPolecatNotFound) {
 				fmt.Printf("  %s worktree already gone\n", style.Dim.Render("○"))
 			} else {
@@ -1336,7 +1337,7 @@ func runPolecatStale(cmd *cobra.Command, args []string) error {
 					continue
 				}
 				fmt.Printf("  Nuking %s...", info.Name)
-				if err := mgr.RemoveWithOptions(info.Name, true, false); err != nil {
+				if err := mgr.RemoveWithOptions(info.Name, true, false, false); err != nil {
 					fmt.Printf(" %s (%v)\n", style.Error.Render("failed"), err)
 				} else {
 					fmt.Printf(" %s\n", style.Success.Render("done"))
