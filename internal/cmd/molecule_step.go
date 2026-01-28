@@ -359,6 +359,22 @@ func handleStepContinue(cwd, townRoot, _ string, nextStep *beads.Issue, dryRun b
 		style.PrintWarning("could not clear history: %v", err)
 	}
 
+	// Check if pane's working directory exists (may have been deleted)
+	paneWorkDir, _ := t.GetPaneWorkDir(currentSession)
+	var respawnWorkDir string
+	if paneWorkDir != "" {
+		if _, err := os.Stat(paneWorkDir); err != nil {
+			// Use town root as fallback
+			if townRoot != "" {
+				style.PrintWarning("pane working directory deleted, using town root")
+				respawnWorkDir = townRoot
+			}
+		}
+	}
+
+	if respawnWorkDir != "" {
+		return t.RespawnPaneWithWorkDir(pane, respawnWorkDir, restartCmd)
+	}
 	return t.RespawnPane(pane, restartCmd)
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -13,6 +14,11 @@ import (
 func hasTmux() bool {
 	_, err := exec.LookPath("tmux")
 	return err == nil
+}
+
+// resolveSymlinks resolves symbolic links in a path (for comparing paths on macOS where /var -> /private/var)
+func resolveSymlinks(path string) (string, error) {
+	return filepath.EvalSymlinks(path)
 }
 
 func TestListSessionsNoServer(t *testing.T) {
@@ -1082,5 +1088,94 @@ func TestKillPaneProcessesExcluding_FiltersPIDs(t *testing.T) {
 		if pid != expectedFiltered[i] {
 			t.Errorf("filtered[%d] = %q, want %q", i, pid, expectedFiltered[i])
 		}
+	}
+}
+
+func TestRespawnPaneWithWorkDir(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-respawn-workdir-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session in temp directory
+	tempDir := t.TempDir()
+	if err := tm.NewSession(sessionName, tempDir); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Get pane ID
+	paneID, err := tm.GetPaneID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneID: %v", err)
+	}
+
+	// Set remain-on-exit so we can respawn
+	if err := tm.SetRemainOnExit(paneID, true); err != nil {
+		t.Fatalf("SetRemainOnExit: %v", err)
+	}
+
+	// Create another temp directory for the new workdir
+	newWorkDir := t.TempDir()
+
+	// Respawn with the new working directory, using sleep to keep process alive
+	if err := tm.RespawnPaneWithWorkDir(paneID, newWorkDir, "sleep 30"); err != nil {
+		t.Fatalf("RespawnPaneWithWorkDir: %v", err)
+	}
+
+	// Wait a bit for the command to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify the working directory changed
+	actualWorkDir, err := tm.GetPaneWorkDir(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneWorkDir: %v", err)
+	}
+
+	// Resolve symlinks for comparison (macOS /var -> /private/var)
+	resolvedActual, _ := resolveSymlinks(actualWorkDir)
+	resolvedExpected, _ := resolveSymlinks(newWorkDir)
+	if resolvedActual != resolvedExpected {
+		t.Errorf("GetPaneWorkDir = %q, want %q", actualWorkDir, newWorkDir)
+	}
+}
+
+func TestRespawnPaneWithWorkDir_EmptyWorkDir(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-respawn-empty-" + t.Name()
+
+	// Clean up any existing session
+	_ = tm.KillSession(sessionName)
+
+	// Create session
+	tempDir := t.TempDir()
+	if err := tm.NewSession(sessionName, tempDir); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Get pane ID
+	paneID, err := tm.GetPaneID(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneID: %v", err)
+	}
+
+	// Set remain-on-exit so we can respawn
+	if err := tm.SetRemainOnExit(paneID, true); err != nil {
+		t.Fatalf("SetRemainOnExit: %v", err)
+	}
+
+	// Respawn with empty workdir (should behave like regular RespawnPane)
+	if err := tm.RespawnPaneWithWorkDir(paneID, "", "true"); err != nil {
+		t.Fatalf("RespawnPaneWithWorkDir with empty workdir: %v", err)
 	}
 }

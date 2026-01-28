@@ -219,8 +219,24 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	// If orphans still occur, the solution is to adjust the restart command to
 	// kill orphans at startup, not to kill ourselves before respawning.
 
+	// Check if pane's working directory exists (may have been deleted)
+	paneWorkDir, _ := t.GetPaneWorkDir(currentSession)
+	var respawnWorkDir string
+	if paneWorkDir != "" {
+		if _, err := os.Stat(paneWorkDir); err != nil {
+			// Use town root as fallback
+			if townRoot := detectTownRootFromCwd(); townRoot != "" {
+				style.PrintWarning("pane working directory deleted, using town root")
+				respawnWorkDir = townRoot
+			}
+		}
+	}
+
 	// Use respawn-pane -k to atomically kill current process and start new one
 	// Note: respawn-pane automatically resets remain-on-exit to off
+	if respawnWorkDir != "" {
+		return t.RespawnPaneWithWorkDir(pane, respawnWorkDir, restartCmd)
+	}
 	return t.RespawnPane(pane, restartCmd)
 }
 
@@ -596,10 +612,29 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 		style.PrintWarning("could not clear history: %v", err)
 	}
 
+	// Check if pane's working directory exists (may have been deleted)
+	paneWorkDir, _ := t.GetPaneWorkDir(targetSession)
+	var respawnWorkDir string
+	if paneWorkDir != "" {
+		if _, err := os.Stat(paneWorkDir); err != nil {
+			// Use town root as fallback
+			if townRoot := detectTownRootFromCwd(); townRoot != "" {
+				style.PrintWarning("pane working directory deleted, using town root")
+				respawnWorkDir = townRoot
+			}
+		}
+	}
+
 	// Respawn the remote session's pane
 	// Note: respawn-pane automatically resets remain-on-exit to off
-	if err := t.RespawnPane(targetPane, restartCmd); err != nil {
-		return fmt.Errorf("respawning pane: %w", err)
+	if respawnWorkDir != "" {
+		if err := t.RespawnPaneWithWorkDir(targetPane, respawnWorkDir, restartCmd); err != nil {
+			return fmt.Errorf("respawning pane: %w", err)
+		}
+	} else {
+		if err := t.RespawnPane(targetPane, restartCmd); err != nil {
+			return fmt.Errorf("respawning pane: %w", err)
+		}
 	}
 
 	// If --watch, switch to that session

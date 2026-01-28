@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -213,9 +214,25 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 				style.PrintWarning("could not kill pane processes: %v", err)
 			}
 
+			// Check if pane's current working directory exists (may have been deleted)
+			paneWorkDir, _ := t.GetPaneWorkDir(sessionID)
+			var respawnWorkDir string
+			if paneWorkDir != "" {
+				if _, err := os.Stat(paneWorkDir); err != nil {
+					style.PrintWarning("pane working directory deleted, using town root")
+					respawnWorkDir = townRoot
+				}
+			}
+
 			// Note: respawn-pane automatically resets remain-on-exit to off
-			if err := t.RespawnPane(paneID, startupCmd); err != nil {
-				return fmt.Errorf("restarting runtime: %w", err)
+			if respawnWorkDir != "" {
+				if err := t.RespawnPaneWithWorkDir(paneID, respawnWorkDir, startupCmd); err != nil {
+					return fmt.Errorf("restarting runtime: %w", err)
+				}
+			} else {
+				if err := t.RespawnPane(paneID, startupCmd); err != nil {
+					return fmt.Errorf("restarting runtime: %w", err)
+				}
 			}
 
 			fmt.Printf("%s Mayor restarted with context\n", style.Bold.Render("✓"))
