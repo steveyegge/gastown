@@ -623,6 +623,8 @@ type BdDecisionListItem struct {
 	Options       string             `json:"options"` // JSON string of options (raw)
 	OptionsParsed []BdDecisionOption `json:"options_parsed"`
 	CreatedAt     string             `json:"created_at"`
+	RequestedBy   string             `json:"requested_by,omitempty"` // Who requested the decision (hq-orlqi0)
+	Urgency       string             `json:"urgency,omitempty"`      // Urgency level (hq-orlqi0)
 	Issue         *Issue             `json:"issue"`
 }
 
@@ -667,6 +669,15 @@ func (b *Beads) ListBdDecisions() ([]*Issue, error) {
 				desc.WriteString("\n")
 			}
 			desc.WriteString("\n")
+		}
+
+		// Add metadata footer for ParseDecisionFields to extract (hq-orlqi0)
+		desc.WriteString("---\n")
+		if dp.RequestedBy != "" {
+			desc.WriteString(fmt.Sprintf("_Requested by: %s_\n", dp.RequestedBy))
+		}
+		if dp.Urgency != "" {
+			desc.WriteString(fmt.Sprintf("_Urgency: %s_\n", dp.Urgency))
 		}
 
 		issue := dp.Issue
