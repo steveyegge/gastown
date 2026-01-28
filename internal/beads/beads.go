@@ -31,6 +31,17 @@ func init() {
 	resolvedBdPath = resolveBdPath()
 }
 
+// SetBdPathForTest overrides the cached bd path for testing purposes.
+// Returns a cleanup function that restores the original path.
+// This allows tests to inject a stub bd script.
+func SetBdPathForTest(path string) func() {
+	original := resolvedBdPath
+	resolvedBdPath = path
+	return func() {
+		resolvedBdPath = original
+	}
+}
+
 // resolveBdPath finds the bd binary, preferring ~/.local/bin/bd over system PATH.
 // The system PATH may contain an older bd that doesn't support Dolt backend.
 func resolveBdPath() string {

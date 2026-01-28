@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // TestSlingFormulaOnBeadHooksBaseBead verifies that when using
@@ -539,6 +541,14 @@ exit /b 0
 			t.Fatalf("write bd stub: %v", err)
 		}
 	}
+
+	// Override the cached bd path to use our stub
+	bdStubPath := filepath.Join(binDir, "bd")
+	if runtime.GOOS == "windows" {
+		bdStubPath = filepath.Join(binDir, "bd.cmd")
+	}
+	cleanup := beads.SetBdPathForTest(bdStubPath)
+	t.Cleanup(cleanup)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GT_ROLE", "polecat")
