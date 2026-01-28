@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/steveyegge/gastown/internal/rpcclient"
 	crewTUI "github.com/steveyegge/gastown/internal/tui/crew"
 )
 
@@ -231,6 +232,9 @@ type Model struct {
 	townRoot     string
 	currentRig   string
 
+	// RPC mode - when set, uses RPC client instead of gt CLI commands
+	rpcClient *rpcclient.Client
+
 	// Polling
 	pollTicker *time.Ticker
 	done       chan struct{}
@@ -273,6 +277,12 @@ func (m *Model) SetNotify(notify bool) {
 	m.notify = notify
 }
 
+// SetRPCClient configures the model to use RPC calls instead of CLI commands.
+// When set, the model will use the RPC client for fetching and resolving decisions.
+func (m *Model) SetRPCClient(client *rpcclient.Client) {
+	m.rpcClient = client
+}
+
 // Init initializes the model
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -310,12 +320,48 @@ type peekMsg struct {
 	err         error
 }
 
-// fetchDecisions fetches pending decisions from bd
+// fetchDecisions fetches pending decisions from bd or RPC server
 func (m *Model) fetchDecisions() tea.Cmd {
+	// Capture rpcClient for closure
+	rpcClient := m.rpcClient
+
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		// Use RPC if client is configured
+		if rpcClient != nil {
+			rpcDecisions, err := rpcClient.ListPendingDecisions(ctx)
+			if err != nil {
+				return fetchDecisionsMsg{err: fmt.Errorf("RPC fetch failed: %w", err)}
+			}
+
+			// Convert rpcclient.Decision to DecisionItem
+			var decisions []DecisionItem
+			for _, d := range rpcDecisions {
+				var opts []Option
+				for i, o := range d.Options {
+					opts = append(opts, Option{
+						ID:          fmt.Sprintf("%d", i+1),
+						Label:       o.Label,
+						Description: o.Description,
+					})
+				}
+				requestedAt, _ := time.Parse(time.RFC3339, d.RequestedAt)
+				decisions = append(decisions, DecisionItem{
+					ID:          d.ID,
+					Prompt:      d.Question,
+					Options:     opts,
+					Urgency:     d.Urgency,
+					RequestedBy: d.RequestedBy,
+					RequestedAt: requestedAt,
+					Context:     d.Context,
+				})
+			}
+			return fetchDecisionsMsg{decisions: decisions}
+		}
+
+		// Fall back to CLI command
 		cmd := exec.CommandContext(ctx, "gt", "decision", "list", "--json")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -349,10 +395,23 @@ func (m *Model) startPolling() tea.Cmd {
 
 // resolveDecision resolves a decision with the given option
 func (m *Model) resolveDecision(decisionID string, choice int, rationale string) tea.Cmd {
+	// Capture rpcClient for closure
+	rpcClient := m.rpcClient
+
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
+		// Use RPC if client is configured
+		if rpcClient != nil {
+			_, err := rpcClient.ResolveDecision(ctx, decisionID, choice, rationale)
+			if err != nil {
+				return resolvedMsg{id: decisionID, err: fmt.Errorf("RPC resolve failed: %w", err)}
+			}
+			return resolvedMsg{id: decisionID}
+		}
+
+		// Fall back to CLI command
 		args := []string{"decision", "resolve", decisionID, "--choice", fmt.Sprintf("%d", choice)}
 		if rationale != "" {
 			args = append(args, "--rationale", rationale)
@@ -372,10 +431,19 @@ func (m *Model) resolveDecision(decisionID string, choice int, rationale string)
 
 // dismissDecision cancels/dismisses a decision
 func (m *Model) dismissDecision(decisionID string, reason string) tea.Cmd {
+	// Capture rpcClient for closure
+	rpcClient := m.rpcClient
+
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
+		// RPC mode doesn't support cancel yet - return error
+		if rpcClient != nil {
+			return dismissedMsg{id: decisionID, err: fmt.Errorf("dismiss not supported in RPC mode")}
+		}
+
+		// Fall back to CLI command
 		args := []string{"decision", "cancel", decisionID}
 		if reason != "" {
 			args = append(args, "--reason", reason)

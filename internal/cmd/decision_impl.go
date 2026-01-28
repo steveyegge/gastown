@@ -8,9 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -948,62 +946,41 @@ func runDecisionWatch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runDecisionWatchRPC runs a simple RPC-based decision watcher.
-// This serves as a test harness for the mobile RPC server.
+// runDecisionWatchRPC runs the decision TUI backed by RPC calls.
+// This provides the same interactive experience as the TUI mode but
+// communicates with a remote RPC server instead of using local beads.
 func runDecisionWatchRPC() error {
-	fmt.Printf("Connecting to RPC server at %s...\n", decisionWatchRPCAddr)
-
+	// Check RPC server availability first
 	client := rpcclient.NewClient(decisionWatchRPCAddr)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle Ctrl+C
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		fmt.Println("\nStopping...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if !client.IsAvailable(ctx) {
 		cancel()
-	}()
-
-	fmt.Println("Watching for decisions (Ctrl+C to stop)...")
-	fmt.Println()
-
-	seen := make(map[string]bool)
-	err := client.WatchDecisions(ctx, func(d rpcclient.Decision) error {
-		if seen[d.ID] {
-			return nil
-		}
-		seen[d.ID] = true
-
-		// Print decision info
-		urgencyIcon := "●"
-		switch d.Urgency {
-		case "high":
-			urgencyIcon = "🔴"
-		case "medium":
-			urgencyIcon = "🟡"
-		case "low":
-			urgencyIcon = "🟢"
-		}
-
-		fmt.Printf("%s [%s] %s\n", urgencyIcon, d.ID, d.Question)
-		fmt.Printf("   Requested by: %s\n", d.RequestedBy)
-		for i, opt := range d.Options {
-			rec := ""
-			if opt.Recommended {
-				rec = " (recommended)"
-			}
-			fmt.Printf("   %d. %s%s\n", i+1, opt.Label, rec)
-		}
-		fmt.Println()
-		return nil
-	})
-
-	if err != nil && err != context.Canceled {
-		return fmt.Errorf("watch error: %w", err)
+		return fmt.Errorf("RPC server not available at %s", decisionWatchRPCAddr)
 	}
+	cancel()
+
+	// Create the TUI model configured for RPC mode
+	m := decisionTUI.New()
+	m.SetRPCClient(client)
+
+	// Apply flags (same as non-RPC mode)
+	if decisionWatchUrgentOnly {
+		m.SetFilter("high")
+	}
+	if decisionWatchNotify {
+		m.SetNotify(true)
+	}
+
+	// Note: workspace/rig info not available in pure RPC mode,
+	// so crew creation will be disabled
+
+	// Run the TUI
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("error running decision watch: %w", err)
+	}
+
 	return nil
 }
 
