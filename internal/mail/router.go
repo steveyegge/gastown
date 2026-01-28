@@ -331,7 +331,9 @@ func agentBeadToAddress(bead *agentBead) string {
 
 	// Handle gt- prefixed IDs (legacy format)
 	if !strings.HasPrefix(id, "gt-") {
-		return "" // Not a valid agent bead ID
+		// For rig-prefixed IDs (e.g., jb-jbrs-witness), fall back to description parsing
+		// This handles agent beads created in rig-level beads databases
+		return parseAgentAddressFromDescription(bead.Description)
 	}
 
 	// Strip prefix
@@ -505,8 +507,58 @@ func (r *Router) resolveAgentsByRig(rig string) ([]string, error) {
 }
 
 // queryAgents queries agent beads using bd list with description filtering.
+// Queries both town-level and rig-level beads to find all agents.
 func (r *Router) queryAgents(descContains string) ([]*agentBead, error) {
-	beadsDir := r.resolveBeadsDir("")
+	var allAgents []*agentBead
+
+	// Query town-level beads
+	townBeadsDir := r.resolveBeadsDir("")
+	townAgents, err := r.queryAgentsInDir(townBeadsDir, descContains)
+	if err != nil {
+		// Log but don't fail - rig beads might still work
+		_ = err
+	} else {
+		allAgents = append(allAgents, townAgents...)
+	}
+
+	// Query rig-level beads if town root is set
+	if r.townRoot != "" {
+		rigsConfigPath := filepath.Join(r.townRoot, "mayor", "rigs.json")
+		rigsConfig, err := config.LoadRigsConfig(rigsConfigPath)
+		if err == nil && rigsConfig != nil {
+			for rigName, rigEntry := range rigsConfig.Rigs {
+				// Get rig path
+				rigPath := rigEntry.LocalRepo
+				if rigPath == "" {
+					rigPath = filepath.Join(r.townRoot, rigName)
+				}
+
+				// Query this rig's beads
+				rigBeadsDir := filepath.Join(rigPath, ".beads")
+				rigAgents, err := r.queryAgentsInDir(rigBeadsDir, descContains)
+				if err != nil {
+					continue // Skip rigs that fail
+				}
+				allAgents = append(allAgents, rigAgents...)
+			}
+		}
+	}
+
+	// Deduplicate by ID (in case same agent appears in multiple places)
+	seen := make(map[string]bool)
+	var unique []*agentBead
+	for _, agent := range allAgents {
+		if !seen[agent.ID] {
+			seen[agent.ID] = true
+			unique = append(unique, agent)
+		}
+	}
+
+	return unique, nil
+}
+
+// queryAgentsInDir queries agent beads in a specific beads directory.
+func (r *Router) queryAgentsInDir(beadsDir, descContains string) ([]*agentBead, error) {
 	args := []string{"list", "--type=agent", "--json", "--limit=0"}
 
 	if descContains != "" {
