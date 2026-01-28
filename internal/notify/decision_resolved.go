@@ -24,20 +24,21 @@ func DecisionResolved(townRoot, decisionID string, fields beads.DecisionFields, 
 		}
 	}
 
-	// 2. Send mail to requestor (persistent notification)
+	// 2. Determine notification target
+	router := mail.NewRouter(townRoot)
+	subject := fmt.Sprintf("[DECISION RESOLVED] %s → %s", truncate(fields.Question, 30), chosenLabel)
+	if rationale != "" {
+		subject += fmt.Sprintf(": %s", truncate(rationale, 40))
+	}
+	body := formatResolutionBody(decisionID, fields.Question, chosenLabel, rationale, resolvedBy)
+
+	// 3. Send mail to requestor (persistent notification)
 	if fields.RequestedBy != "" && fields.RequestedBy != "unknown" {
-		router := mail.NewRouter(townRoot)
-
-		subject := fmt.Sprintf("[DECISION RESOLVED] %s → %s", truncate(fields.Question, 30), chosenLabel)
-		if rationale != "" {
-			subject += fmt.Sprintf(": %s", truncate(rationale, 40))
-		}
-
 		msg := &mail.Message{
 			From:     resolvedBy,
 			To:       fields.RequestedBy,
 			Subject:  subject,
-			Body:     formatResolutionBody(decisionID, fields.Question, chosenLabel, rationale, resolvedBy),
+			Body:     body,
 			Type:     mail.TypeTask,
 			Priority: mail.PriorityNormal,
 		}
@@ -46,7 +47,7 @@ func DecisionResolved(townRoot, decisionID string, fields beads.DecisionFields, 
 			log.Printf("notify: FAILED to mail requestor %q: %v", fields.RequestedBy, err)
 		}
 
-		// 3. Nudge the requesting agent (immediate, best-effort).
+		// 4. Nudge the requesting agent (immediate, best-effort).
 		// Use --direct to send via tmux immediately rather than queuing to NudgeQueue.
 		// This is critical because the requesting agent is likely idle (blocked waiting
 		// for this decision), so queued nudges would never be drained (no hooks fire
@@ -59,9 +60,26 @@ func DecisionResolved(townRoot, decisionID string, fields beads.DecisionFields, 
 		if err := nudgeCmd.Run(); err != nil {
 			log.Printf("notify: failed to nudge requestor %q: %v", fields.RequestedBy, err)
 		}
+	} else {
+		// RequestedBy is empty or unknown - log this and send fallback notification to overseer
+		log.Printf("notify: decision %s has no requestor (RequestedBy=%q), sending fallback notification to overseer", decisionID, fields.RequestedBy)
+
+		// Fallback: notify overseer so they're aware of the resolution
+		msg := &mail.Message{
+			From:     resolvedBy,
+			To:       "overseer",
+			Subject:  subject + " [NO REQUESTOR]",
+			Body:     body + "\n\n---\nNote: Original requestor unknown, sending to overseer as fallback.",
+			Type:     mail.TypeTask,
+			Priority: mail.PriorityNormal,
+		}
+
+		if err := router.Send(msg); err != nil {
+			log.Printf("notify: FAILED to mail overseer (fallback): %v", err)
+		}
 	}
 
-	// 4. Log to activity feed
+	// 5. Log to activity feed
 	payload := map[string]interface{}{
 		"decision_id":  decisionID,
 		"question":     fields.Question,
