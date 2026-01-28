@@ -285,6 +285,111 @@ func TestEnsureSettingsForRole_UnknownProvider(t *testing.T) {
 	}
 }
 
+func TestGetStartupFallbackInfo_HooksWithPrompt(t *testing.T) {
+	// Claude: hooks enabled, prompt mode "arg"
+	rc := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "claude",
+		},
+	}
+
+	info := GetStartupFallbackInfo(rc)
+	if info.IncludePrimeInBeacon {
+		t.Error("Hooks+Prompt should NOT include prime instruction in beacon")
+	}
+	if info.SendStartupNudge {
+		t.Error("Hooks+Prompt should NOT need startup nudge (beacon has it)")
+	}
+}
+
+func TestGetStartupFallbackInfo_HooksNoPrompt(t *testing.T) {
+	// Hypothetical agent: hooks enabled but no prompt support
+	rc := &config.RuntimeConfig{
+		PromptMode: "none",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "claude",
+		},
+	}
+
+	info := GetStartupFallbackInfo(rc)
+	if info.IncludePrimeInBeacon {
+		t.Error("Hooks+NoPrompt should NOT include prime instruction (hooks run it)")
+	}
+	if !info.SendStartupNudge {
+		t.Error("Hooks+NoPrompt should need startup nudge (no prompt to include it)")
+	}
+	if info.StartupNudgeDelayMs != 0 {
+		t.Error("Hooks+NoPrompt should NOT wait (hooks already ran gt prime)")
+	}
+}
+
+func TestGetStartupFallbackInfo_NoHooksWithPrompt(t *testing.T) {
+	// Codex/Cursor: no hooks, but has prompt support
+	rc := &config.RuntimeConfig{
+		PromptMode: "arg",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "none",
+		},
+	}
+
+	info := GetStartupFallbackInfo(rc)
+	if !info.IncludePrimeInBeacon {
+		t.Error("NoHooks+Prompt should include prime instruction in beacon")
+	}
+	if !info.SendStartupNudge {
+		t.Error("NoHooks+Prompt should need startup nudge")
+	}
+	if info.StartupNudgeDelayMs <= 0 {
+		t.Error("NoHooks+Prompt should wait for gt prime to complete")
+	}
+}
+
+func TestGetStartupFallbackInfo_NoHooksNoPrompt(t *testing.T) {
+	// Auggie/AMP: no hooks, no prompt support
+	rc := &config.RuntimeConfig{
+		PromptMode: "none",
+		Hooks: &config.RuntimeHooksConfig{
+			Provider: "none",
+		},
+	}
+
+	info := GetStartupFallbackInfo(rc)
+	if !info.IncludePrimeInBeacon {
+		t.Error("NoHooks+NoPrompt should include prime instruction")
+	}
+	if !info.SendStartupNudge {
+		t.Error("NoHooks+NoPrompt should need startup nudge")
+	}
+	if info.StartupNudgeDelayMs <= 0 {
+		t.Error("NoHooks+NoPrompt should wait for gt prime to complete")
+	}
+	if !info.SendBeaconNudge {
+		t.Error("NoHooks+NoPrompt should send beacon via nudge (no prompt)")
+	}
+}
+
+func TestGetStartupFallbackInfo_NilConfig(t *testing.T) {
+	// Nil config defaults to Claude (hooks enabled, prompt "arg")
+	info := GetStartupFallbackInfo(nil)
+	if info.IncludePrimeInBeacon {
+		t.Error("Nil config (defaults to Claude) should NOT include prime instruction")
+	}
+	if info.SendStartupNudge {
+		t.Error("Nil config (defaults to Claude) should NOT need startup nudge")
+	}
+}
+
+func TestStartupNudgeContent(t *testing.T) {
+	content := StartupNudgeContent()
+	if content == "" {
+		t.Error("StartupNudgeContent should return non-empty string")
+	}
+	if !contains(content, "gt hook") {
+		t.Error("StartupNudgeContent should mention gt hook")
+	}
+}
+
 // Helper function
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && findSubstring(s, substr)

@@ -180,15 +180,22 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
+	// Get fallback info to determine beacon content based on agent capabilities.
+	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
+
 	// Build startup command with beacon for predecessor discovery.
-	// Topic "assigned" already includes instructions in FormatStartupBeacon.
+	// Configure beacon based on agent's hook/prompt capabilities.
 	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
-	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: address,
-		Sender:    "witness",
-		Topic:     "assigned",
-		MolID:     opts.Issue,
-	})
+	beaconConfig := session.BeaconConfig{
+		Recipient:               address,
+		Sender:                  "witness",
+		Topic:                   "assigned",
+		MolID:                   opts.Issue,
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
+	}
+	beacon := session.FormatStartupBeacon(beaconConfig)
 
 	command := opts.Command
 	if command == "" {
@@ -244,6 +251,31 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Wait for runtime to be fully ready at the prompt (not just started)
 	runtime.SleepForReadyDelay(runtimeConfig)
+
+	// Handle fallback nudges for non-hook agents.
+	// See StartupFallbackInfo in runtime package for the fallback matrix.
+	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
+		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
+		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
+		debugSession("SendCombinedNudge", m.tmux.NudgeSession(sessionID, combined))
+	} else {
+		if fallbackInfo.SendBeaconNudge {
+			// Agent doesn't support CLI prompt - send beacon via nudge
+			debugSession("SendBeaconNudge", m.tmux.NudgeSession(sessionID, beacon))
+		}
+
+		if fallbackInfo.StartupNudgeDelayMs > 0 {
+			// Wait for agent to run gt prime before sending work instructions
+			time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
+		}
+
+		if fallbackInfo.SendStartupNudge {
+			// Send work instructions via nudge
+			debugSession("SendStartupNudge", m.tmux.NudgeSession(sessionID, runtime.StartupNudgeContent()))
+		}
+	}
+
+	// Legacy fallback for other startup paths (non-fatal)
 	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)
 
 	// Verify session survived startup - if the command crashed, the session may have died.
