@@ -282,3 +282,21 @@ func requireSubcommand(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("unknown command %q for %q\n\nRun '%s --help' for available commands",
 		args[0], buildCommandPath(cmd), buildCommandPath(cmd))
 }
+
+// checkHelpFlag checks if --help or -h is the first argument and shows help if so.
+// Returns true if help was shown, false otherwise.
+//
+// This is needed for commands with DisableFlagParsing: true, which bypass
+// Cobra's automatic help flag handling.
+//
+// We only check the FIRST argument to avoid false positives like:
+//
+//	gt commit -m "--help"  # User wants message "--help", not help output
+//
+// This covers the common case (gt commit --help) without breaking edge cases.
+func checkHelpFlag(cmd *cobra.Command, args []string) (bool, error) {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		return true, cmd.Help()
+	}
+	return false, nil
+}
