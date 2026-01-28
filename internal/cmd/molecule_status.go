@@ -363,8 +363,16 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 	var hookBead *beads.Issue
 
 	if agentBeadID != "" {
+		// FIX (gt-0da72f): Use the correct beads location for rig agents.
+		// Rig agents (witness, refinery, crew) are stored in rig beads,
+		// not the local beads or town beads.
+		agentBeads := b
+		if townRoot != "" && roleCtx.Rig != "" && roleCtx.Role != RoleMayor && roleCtx.Role != RoleDeacon {
+			rigPath := filepath.Join(townRoot, roleCtx.Rig)
+			agentBeads = beads.New(rigPath)
+		}
 		// Try to fetch the agent bead
-		agentBead, err := b.Show(agentBeadID)
+		agentBead, err := agentBeads.Show(agentBeadID)
 		if err == nil && agentBead != nil && agentBead.Type == "agent" {
 			status.AgentBeadID = agentBeadID
 

@@ -448,7 +448,20 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 	var hookedBead *beads.Issue
 	agentBeadID := buildAgentBeadID(target, RoleUnknown, townRoot)
 	if agentBeadID != "" {
-		agentBead, err := b.Show(agentBeadID)
+		// FIX (gt-0da72f): Use the correct beads location for rig agents.
+		// Rig agents (witness, refinery, crew) are stored in rig beads,
+		// not the local beads or town beads.
+		agentBeads := b
+		if townRoot != "" {
+			parts := strings.Split(strings.TrimSuffix(target, "/"), "/")
+			if len(parts) >= 2 && parts[0] != "mayor" && parts[0] != "deacon" {
+				// Rig-level agent - use rig beads
+				rigName := parts[0]
+				rigPath := filepath.Join(townRoot, rigName)
+				agentBeads = beads.New(rigPath)
+			}
+		}
+		agentBead, err := agentBeads.Show(agentBeadID)
 		if err == nil && agentBead != nil && agentBead.Type == "agent" && agentBead.HookBead != "" {
 			// Found hook_bead in agent bead - fetch the actual bead
 			hookedBead, err = b.Show(agentBead.HookBead)
