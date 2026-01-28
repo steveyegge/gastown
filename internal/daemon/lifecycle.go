@@ -833,8 +833,8 @@ func (d *Daemon) checkRigGUPPViolations(rigName string) {
 		polecatName := strings.TrimPrefix(agent.ID, prefix)
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
-		// Check if tmux session exists and Claude is running
-		if d.tmux.IsClaudeRunning(sessionName) {
+		// Check if tmux session exists and agent is running
+		if d.tmux.IsAgentAlive(sessionName) {
 			// Session is alive - check if it's been stuck too long
 			updatedAt, err := time.Parse(time.RFC3339, agent.UpdatedAt)
 			if err != nil {
@@ -928,7 +928,7 @@ func (d *Daemon) checkRigOrphanedWork(rigName string) {
 		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
 
 		// Session running = not orphaned (work is being processed)
-		if d.tmux.IsClaudeRunning(sessionName) {
+		if d.tmux.IsAgentAlive(sessionName) {
 			continue
 		}
 

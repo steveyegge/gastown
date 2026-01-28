@@ -72,7 +72,7 @@ func (c *ZombieSessionCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 
 		// Check if Claude is running in this session
-		if t.IsClaudeRunning(sess) {
+		if t.IsAgentAlive(sess) {
 			healthyCount++
 		} else {
 			zombies = append(zombies, sess)
