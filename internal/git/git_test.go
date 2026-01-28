@@ -89,6 +89,61 @@ func TestCloneWithReferenceCreatesAlternates(t *testing.T) {
 	}
 }
 
+func TestCloneWithReferencePreservesSymlinks(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src")
+	dst := filepath.Join(tmp, "dst")
+
+	// Create test repo with symlink
+	if err := exec.Command("git", "init", src).Run(); err != nil {
+		t.Fatalf("init src: %v", err)
+	}
+	_ = exec.Command("git", "-C", src, "config", "user.email", "test@test.com").Run()
+	_ = exec.Command("git", "-C", src, "config", "user.name", "Test User").Run()
+
+	// Create a directory and a symlink to it
+	targetDir := filepath.Join(src, "target")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "file.txt"), []byte("content\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	linkPath := filepath.Join(src, "link")
+	if err := os.Symlink("target", linkPath); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	_ = exec.Command("git", "-C", src, "add", ".").Run()
+	_ = exec.Command("git", "-C", src, "commit", "-m", "initial").Run()
+
+	// Clone with reference
+	g := NewGit(tmp)
+	if err := g.CloneWithReference(src, dst, src); err != nil {
+		t.Fatalf("CloneWithReference: %v", err)
+	}
+
+	// Verify symlink was preserved
+	dstLink := filepath.Join(dst, "link")
+	info, err := os.Lstat(dstLink)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected %s to be a symlink, got mode %v", dstLink, info.Mode())
+	}
+
+	// Verify symlink target is correct
+	target, err := os.Readlink(dstLink)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if target != "target" {
+		t.Errorf("expected symlink target 'target', got %q", target)
+	}
+}
+
 func TestCurrentBranch(t *testing.T) {
 	dir := initTestRepo(t)
 	g := NewGit(dir)
