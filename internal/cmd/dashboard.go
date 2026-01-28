@@ -43,21 +43,27 @@ func init() {
 }
 
 func runDashboard(cmd *cobra.Command, args []string) error {
-	// Verify we're in a workspace
-	if _, err := workspace.FindFromCwdOrError(); err != nil {
-		return fmt.Errorf("not in a Gas Town workspace: %w", err)
-	}
+	// Check if we're in a workspace - if not, run in setup mode
+	var handler http.Handler
+	var err error
 
-	// Create the live convoy fetcher
-	fetcher, err := web.NewLiveConvoyFetcher()
-	if err != nil {
-		return fmt.Errorf("creating convoy fetcher: %w", err)
-	}
+	if _, wsErr := workspace.FindFromCwdOrError(); wsErr != nil {
+		// No workspace - run in setup mode
+		handler, err = web.NewSetupMux()
+		if err != nil {
+			return fmt.Errorf("creating setup handler: %w", err)
+		}
+	} else {
+		// In a workspace - run normal dashboard
+		fetcher, fetchErr := web.NewLiveConvoyFetcher()
+		if fetchErr != nil {
+			return fmt.Errorf("creating convoy fetcher: %w", fetchErr)
+		}
 
-	// Create the handler
-	handler, err := web.NewConvoyHandler(fetcher)
-	if err != nil {
-		return fmt.Errorf("creating convoy handler: %w", err)
+		handler, err = web.NewDashboardMux(fetcher)
+		if err != nil {
+			return fmt.Errorf("creating dashboard handler: %w", err)
+		}
 	}
 
 	// Build the URL
@@ -69,7 +75,8 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start the server with timeouts
-	fmt.Printf("🚚 Gas Town Dashboard starting at %s\n", url)
+	fmt.Printf("🚚 Gas Town Control Center starting at %s\n", url)
+	fmt.Printf("   API available at %s/api/\n", url)
 	fmt.Printf("   Press Ctrl+C to stop\n")
 
 	server := &http.Server{

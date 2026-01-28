@@ -2,12 +2,17 @@ package web
 
 import (
 	"context"
+	"embed"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"sync"
 	"time"
 )
+
+//go:embed static
+var staticFiles embed.FS
 
 // fetchTimeout is the maximum time allowed for all data fetches to complete.
 const fetchTimeout = 8 * time.Second
@@ -291,4 +296,28 @@ func computeSummary(workers []WorkerRow, hooks []HookRow, issues []IssueRow,
 		summary.HighPriorityIssues > 0
 
 	return summary
+}
+
+// NewDashboardMux creates an HTTP handler that serves both the dashboard and API.
+func NewDashboardMux(fetcher ConvoyFetcher) (http.Handler, error) {
+	convoyHandler, err := NewConvoyHandler(fetcher)
+	if err != nil {
+		return nil, err
+	}
+
+	apiHandler := NewAPIHandler()
+
+	// Create static file server from embedded files
+	staticFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		return nil, err
+	}
+	staticHandler := http.FileServer(http.FS(staticFS))
+
+	mux := http.NewServeMux()
+	mux.Handle("/api/", apiHandler)
+	mux.Handle("/static/", http.StripPrefix("/static/", staticHandler))
+	mux.Handle("/", convoyHandler)
+
+	return mux, nil
 }

@@ -140,10 +140,10 @@ type DashboardSummary struct {
 	EscalationCount int
 
 	// Alerts (things needing attention)
-	StuckPolecats     int // No activity > 5 min
-	StaleHooks        int // Hooked > 1 hour
+	StuckPolecats      int // No activity > 5 min
+	StaleHooks         int // Hooked > 1 hour
 	UnackedEscalations int
-	DeadSessions      int // Sessions that died recently
+	DeadSessions       int // Sessions that died recently
 	HighPriorityIssues int // P1/P2 issues
 
 	// Computed
@@ -152,17 +152,17 @@ type DashboardSummary struct {
 
 // MailRow represents a mail message in the dashboard.
 type MailRow struct {
-	ID          string // Message ID (e.g., "hq-msg-abc123")
-	From        string // Sender (e.g., "gastown/polecats/Toast")
-	FromRaw     string // Raw sender address for color hashing
-	To          string // Recipient (e.g., "mayor/")
-	Subject     string // Message subject
-	Timestamp   string // Formatted timestamp
-	Age         string // Human-readable age (e.g., "5m ago")
-	Priority    string // low, normal, high, urgent
-	Type        string // task, notification, reply
-	Read        bool   // Whether message has been read
-	SortKey     int64  // Unix timestamp for sorting
+	ID        string // Message ID (e.g., "hq-msg-abc123")
+	From      string // Sender (e.g., "gastown/polecats/Toast")
+	FromRaw   string // Raw sender address for color hashing
+	To        string // Recipient (e.g., "mayor/")
+	Subject   string // Message subject
+	Timestamp string // Formatted timestamp
+	Age       string // Human-readable age (e.g., "5m ago")
+	Priority  string // low, normal, high, urgent
+	Type      string // task, notification, reply
+	Read      bool   // Whether message has been read
+	SortKey   int64  // Unix timestamp for sorting
 }
 
 // WorkerRow represents a worker (polecat or refinery) in the dashboard.
@@ -214,15 +214,15 @@ type TrackedIssue struct {
 func LoadTemplates() (*template.Template, error) {
 	// Define template functions
 	funcMap := template.FuncMap{
-		"activityClass":       activityClass,
-		"statusClass":         statusClass,
-		"workStatusClass":     workStatusClass,
-		"progressPercent":     progressPercent,
-		"senderColorClass":    senderColorClass,
-		"severityClass":       severityClass,
-		"dogStateClass":       dogStateClass,
-		"queueStatusClass":    queueStatusClass,
-		"polecatStatusClass":  polecatStatusClass,
+		"activityClass":      activityClass,
+		"statusClass":        statusClass,
+		"workStatusClass":    workStatusClass,
+		"progressPercent":    progressPercent,
+		"senderColorClass":   senderColorClass,
+		"severityClass":      severityClass,
+		"dogStateClass":      dogStateClass,
+		"queueStatusClass":   queueStatusClass,
+		"polecatStatusClass": polecatStatusClass,
 	}
 
 	// Get the templates subdirectory

@@ -18,21 +18,21 @@ func TestConvoyTemplate_RendersConvoyList(t *testing.T) {
 	data := ConvoyData{
 		Convoys: []ConvoyRow{
 			{
-				ID:       "hq-cv-abc",
-				Title:    "Feature X",
-				Status:   "open",
-				Progress: "2/5",
-				Completed: 2,
-				Total:    5,
+				ID:           "hq-cv-abc",
+				Title:        "Feature X",
+				Status:       "open",
+				Progress:     "2/5",
+				Completed:    2,
+				Total:        5,
 				LastActivity: activity.Calculate(time.Now().Add(-1 * time.Minute)),
 			},
 			{
-				ID:       "hq-cv-def",
-				Title:    "Bugfix Y",
-				Status:   "open",
-				Progress: "1/3",
-				Completed: 1,
-				Total:    3,
+				ID:           "hq-cv-def",
+				Title:        "Bugfix Y",
+				Status:       "open",
+				Progress:     "1/3",
+				Completed:    1,
+				Total:        3,
 				LastActivity: activity.Calculate(time.Now().Add(-3 * time.Minute)),
 			},
 		},
@@ -65,9 +65,9 @@ func TestConvoyTemplate_LastActivityColors(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		age        time.Duration
-		wantClass  string
+		name      string
+		age       time.Duration
+		wantClass string
 	}{
 		{"green for 1 minute", 1 * time.Minute, "activity-green"},
 		{"yellow for 3 minutes", 3 * time.Minute, "activity-yellow"},

@@ -14,14 +14,15 @@ import (
 
 	"github.com/steveyegge/gastown/internal/activity"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Command timeout constants
 const (
-	cmdTimeout      = 5 * time.Second // timeout for most commands
-	ghCmdTimeout    = 10 * time.Second // longer timeout for GitHub API calls
-	tmuxCmdTimeout  = 2 * time.Second  // short timeout for tmux queries
+	cmdTimeout     = 15 * time.Second // timeout for most commands (bd can be slow with large datasets)
+	ghCmdTimeout   = 10 * time.Second // longer timeout for GitHub API calls
+	tmuxCmdTimeout = 2 * time.Second  // short timeout for tmux queries
 )
 
 // runCmd executes a command with a timeout and returns stdout.
@@ -53,9 +54,14 @@ func runBdCmd(beadsDir string, args ...string) (*bytes.Buffer, error) {
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("bd timed out after %v", cmdTimeout)
+		}
+		// If we got some output, return it anyway (bd may exit non-zero with warnings)
+		if stdout.Len() > 0 {
+			return &stdout, nil
 		}
 		return nil, err
 	}
@@ -80,7 +86,6 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 		townBeads: filepath.Join(townRoot, ".beads"),
 	}, nil
 }
-
 
 // FetchConvoys fetches all open convoys with their activity data.
 func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
@@ -741,7 +746,7 @@ func (f *LiveConvoyFetcher) FetchWorkers() ([]WorkerRow, error) {
 		if issue, ok := assignedIssues[assignee]; ok {
 			issueID = issue.ID
 			issueTitle = issue.Title
-		// Keep full title - CSS handles overflow
+			// Keep full title - CSS handles overflow
 		}
 
 		// Calculate work status based on activity age and issue assignment
@@ -919,13 +924,13 @@ func (f *LiveConvoyFetcher) FetchMail() ([]MailRow, error) {
 	}
 
 	var messages []struct {
-		ID        string `json:"id"`
-		Title     string `json:"title"`
-		Status    string `json:"status"`
-		CreatedAt string `json:"created_at"`
-		Priority  int    `json:"priority"`
-		Assignee  string `json:"assignee"`  // "to" address stored here
-		CreatedBy string `json:"created_by"` // "from" address
+		ID        string   `json:"id"`
+		Title     string   `json:"title"`
+		Status    string   `json:"status"`
+		CreatedAt string   `json:"created_at"`
+		Priority  int      `json:"priority"`
+		Assignee  string   `json:"assignee"`   // "to" address stored here
+		CreatedBy string   `json:"created_by"` // "from" address
 		Labels    []string `json:"labels"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &messages); err != nil {
@@ -1019,7 +1024,7 @@ func formatAgentAddress(addr string) string {
 	if addr == "mayor/" || addr == "mayor" {
 		return "Mayor"
 	}
-	
+
 	parts := strings.Split(addr, "/")
 	if len(parts) >= 3 && parts[1] == "polecats" {
 		return fmt.Sprintf("%s (%s)", parts[2], parts[0])
@@ -1218,7 +1223,7 @@ func (f *LiveConvoyFetcher) FetchHealth() (*HealthRow, error) {
 	heartbeatFile := filepath.Join(f.townRoot, "deacon", "heartbeat.json")
 	if data, err := os.ReadFile(heartbeatFile); err == nil {
 		var hb struct {
-			Timestamp       time.Time `json:"timestamp"`
+			LastHeartbeat   time.Time `json:"last_heartbeat"`
 			Cycle           int64     `json:"cycle"`
 			HealthyAgents   int       `json:"healthy_agents"`
 			UnhealthyAgents int       `json:"unhealthy_agents"`
@@ -1227,9 +1232,13 @@ func (f *LiveConvoyFetcher) FetchHealth() (*HealthRow, error) {
 			row.DeaconCycle = hb.Cycle
 			row.HealthyAgents = hb.HealthyAgents
 			row.UnhealthyAgents = hb.UnhealthyAgents
-			age := time.Since(hb.Timestamp)
-			row.DeaconHeartbeat = formatMailAge(age)
-			row.HeartbeatFresh = age < 5*time.Minute
+			if !hb.LastHeartbeat.IsZero() {
+				age := time.Since(hb.LastHeartbeat)
+				row.DeaconHeartbeat = formatMailAge(age)
+				row.HeartbeatFresh = age < 5*time.Minute
+			} else {
+				row.DeaconHeartbeat = "no timestamp"
+			}
 		}
 	} else {
 		row.DeaconHeartbeat = "no heartbeat"
@@ -1443,7 +1452,10 @@ func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
 		IsAttached: false,
 	}
 
-	// Check if gt-mayor tmux session exists
+	// Get the actual mayor session name (e.g., "hq-mayor")
+	mayorSessionName := session.MayorSessionName()
+
+	// Check if mayor tmux session exists
 	stdout, err := runCmd(tmuxCmdTimeout, "tmux", "list-sessions", "-F", "#{session_name}:#{session_activity}")
 	if err != nil {
 		// tmux not running or no sessions
@@ -1452,9 +1464,9 @@ func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
 
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	for _, line := range lines {
-		if strings.HasPrefix(line, "gt-mayor:") {
+		if strings.HasPrefix(line, mayorSessionName+":") {
 			status.IsAttached = true
-			status.SessionName = "gt-mayor"
+			status.SessionName = mayorSessionName
 
 			// Parse activity timestamp
 			parts := strings.SplitN(line, ":", 2)
