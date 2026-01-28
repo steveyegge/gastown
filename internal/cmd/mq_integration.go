@@ -67,6 +67,25 @@ func getGitUserName() string {
 	return strings.TrimSpace(string(out))
 }
 
+// getRigGitPath returns the path to the git repository for a rig.
+// Prefers the shared bare repo (.repo.git) if it exists, otherwise falls back to mayor/rig.
+// This is needed because the rig root directory is not itself a git repository.
+func getRigGitPath(rigPath string) (string, error) {
+	// First check for shared bare repo (new architecture)
+	bareRepoPath := filepath.Join(rigPath, ".repo.git")
+	if info, err := os.Stat(bareRepoPath); err == nil && info.IsDir() {
+		return bareRepoPath, nil
+	}
+
+	// Fall back to mayor/rig (legacy architecture)
+	mayorPath := filepath.Join(rigPath, "mayor", "rig")
+	if info, err := os.Stat(mayorPath); err == nil && info.IsDir() {
+		return mayorPath, nil
+	}
+
+	return "", fmt.Errorf("no git repo found in rig (neither .repo.git nor mayor/rig exists)")
+}
+
 // validateBranchName checks if a branch name is valid for git.
 // Returns an error if the branch name contains invalid characters.
 func validateBranchName(branchName string) error {
@@ -211,8 +230,12 @@ func runMqIntegrationCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid branch name: %w", err)
 	}
 
-	// Initialize git for the rig
-	g := git.NewGit(r.Path)
+	// Initialize git for the rig - must use .repo.git or mayor/rig, not rig root
+	gitPath, err := getRigGitPath(r.Path)
+	if err != nil {
+		return fmt.Errorf("finding git repo: %w", err)
+	}
+	g := git.NewGit(gitPath)
 
 	// Check if integration branch already exists locally
 	exists, err := g.BranchExists(branchName)
@@ -325,7 +348,11 @@ func runMqIntegrationLand(cmd *cobra.Command, args []string) error {
 
 	// Initialize beads and git for the rig
 	bd := beads.New(r.Path)
-	g := git.NewGit(r.Path)
+	gitPath, err := getRigGitPath(r.Path)
+	if err != nil {
+		return fmt.Errorf("finding git repo: %w", err)
+	}
+	g := git.NewGit(gitPath)
 
 	// Show what we're about to do
 	if mqIntegrationLandDryRun {
@@ -617,8 +644,12 @@ func runMqIntegrationStatus(cmd *cobra.Command, args []string) error {
 		branchName = buildIntegrationBranchName(defaultIntegrationBranchTemplate, epicID)
 	}
 
-	// Initialize git for the rig
-	g := git.NewGit(r.Path)
+	// Initialize git for the rig - must use .repo.git or mayor/rig, not rig root
+	gitPath, err := getRigGitPath(r.Path)
+	if err != nil {
+		return fmt.Errorf("finding git repo: %w", err)
+	}
+	g := git.NewGit(gitPath)
 
 	// Fetch from origin to ensure we have latest refs
 	if err := g.Fetch("origin"); err != nil {

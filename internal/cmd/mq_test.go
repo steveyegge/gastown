@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -797,6 +800,94 @@ func TestMRFilteringByLabel(t *testing.T) {
 			if got != tt.wantIsMR {
 				t.Errorf("HasLabel(%q, \"gt:merge-request\") = %v, want %v",
 					tt.issue.ID, got, tt.wantIsMR)
+			}
+		})
+	}
+}
+
+// TestGetRigGitPath verifies that getRigGitPath returns the correct git repo path.
+// This was a bug: gt mq integration create used the rig root path instead of .repo.git,
+// causing "origin does not appear to be a git repository" errors.
+func TestGetRigGitPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, rigPath string) // sets up the rig structure
+		wantSuffix string                             // expected suffix of returned path
+		wantErr    bool
+	}{
+		{
+			name: "bare repo exists (.repo.git)",
+			setup: func(t *testing.T, rigPath string) {
+				// Create .repo.git directory (bare repo)
+				bareRepo := filepath.Join(rigPath, ".repo.git")
+				if err := os.MkdirAll(bareRepo, 0755); err != nil {
+					t.Fatalf("mkdir .repo.git: %v", err)
+				}
+			},
+			wantSuffix: ".repo.git",
+			wantErr:    false,
+		},
+		{
+			name: "mayor/rig fallback",
+			setup: func(t *testing.T, rigPath string) {
+				// Create mayor/rig directory (legacy architecture)
+				mayorRig := filepath.Join(rigPath, "mayor", "rig")
+				if err := os.MkdirAll(mayorRig, 0755); err != nil {
+					t.Fatalf("mkdir mayor/rig: %v", err)
+				}
+				// Also need .git for it to be recognized as a repo
+				gitDir := filepath.Join(mayorRig, ".git")
+				if err := os.MkdirAll(gitDir, 0755); err != nil {
+					t.Fatalf("mkdir .git: %v", err)
+				}
+			},
+			wantSuffix: filepath.Join("mayor", "rig"),
+			wantErr:    false,
+		},
+		{
+			name: "no repo found",
+			setup: func(t *testing.T, rigPath string) {
+				// Don't create any repo structure
+			},
+			wantSuffix: "",
+			wantErr:    true,
+		},
+		{
+			name: "prefers .repo.git over mayor/rig",
+			setup: func(t *testing.T, rigPath string) {
+				// Create both - .repo.git should be preferred
+				bareRepo := filepath.Join(rigPath, ".repo.git")
+				if err := os.MkdirAll(bareRepo, 0755); err != nil {
+					t.Fatalf("mkdir .repo.git: %v", err)
+				}
+				mayorRig := filepath.Join(rigPath, "mayor", "rig", ".git")
+				if err := os.MkdirAll(mayorRig, 0755); err != nil {
+					t.Fatalf("mkdir mayor/rig/.git: %v", err)
+				}
+			},
+			wantSuffix: ".repo.git",
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rigPath := t.TempDir()
+			tt.setup(t, rigPath)
+
+			got, err := getRigGitPath(rigPath)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("getRigGitPath() expected error, got path %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("getRigGitPath() unexpected error: %v", err)
+				return
+			}
+			if !strings.HasSuffix(got, tt.wantSuffix) {
+				t.Errorf("getRigGitPath() = %q, want suffix %q", got, tt.wantSuffix)
 			}
 		})
 	}
