@@ -396,6 +396,10 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("checking bead status: %w", err)
 	}
+	// Reject slinging closed beads - prevents wasting polecat sessions (hq-kih0dt)
+	if info.Status == "closed" {
+		return fmt.Errorf("bead %s is already closed\nCannot sling completed work to agents", beadID)
+	}
 	if (info.Status == "pinned" || info.Status == "hooked") && !slingForce {
 		assignee := info.Assignee
 		if assignee == "" {
