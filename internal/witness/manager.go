@@ -116,10 +116,10 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Working directory
 	witnessDir := m.witnessDir()
 
-	// Ensure Claude settings exist in witness/ (not witness/rig/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	witnessParentDir := filepath.Join(m.rig.Path, "witness")
-	if err := claude.EnsureSettingsForRole(witnessParentDir, "witness"); err != nil {
+	// Ensure Claude settings exist in the working directory.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	if err := claude.EnsureSettingsForRole(witnessDir, "witness"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 

@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -390,19 +391,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 
-	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
-	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
-	agentsMDPath := filepath.Join(clonePath, "AGENTS.md")
-	if _, err := os.Stat(agentsMDPath); os.IsNotExist(err) {
-		srcPath := filepath.Join(m.rig.Path, "mayor", "rig", "AGENTS.md")
-		if srcData, readErr := os.ReadFile(srcPath); readErr == nil {
-			if writeErr := os.WriteFile(agentsMDPath, srcData, 0644); writeErr != nil {
-				fmt.Printf("Warning: could not copy AGENTS.md: %v\n", writeErr)
-			}
-		}
-	}
-
-	// NOTE: We intentionally do NOT write to CLAUDE.md here.
+	// NOTE: We intentionally do NOT write to CLAUDE.md or AGENTS.md here.
 	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
 	// Writing to CLAUDE.md would overwrite project instructions and could leak
 	// Gas Town internals into the project repo if merged.
@@ -433,6 +422,15 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// Ensure .gitignore has required Gas Town patterns
 	if err := rig.EnsureGitignorePatterns(clonePath); err != nil {
 		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+	}
+
+	// Install runtime settings INSIDE the worktree so Claude Code can find hooks.
+	// Claude Code does NOT traverse parent directories for settings.json, only for CLAUDE.md.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(clonePath, "polecat", runtimeConfig); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
 	}
 
 	// Run setup hooks from .runtime/setup-hooks/.
@@ -724,19 +722,7 @@ func (m *Manager) RepairWorktreeWithOptions(name string, force bool, opts AddOpt
 		return nil, fmt.Errorf("creating fresh worktree from %s: %w", startPoint, err)
 	}
 
-	// Ensure AGENTS.md exists - critical for polecats to "land the plane"
-	// Fall back to copy from mayor/rig if not in git (e.g., stale fetch, local-only file)
-	agentsMDPath := filepath.Join(newClonePath, "AGENTS.md")
-	if _, err := os.Stat(agentsMDPath); os.IsNotExist(err) {
-		srcPath := filepath.Join(m.rig.Path, "mayor", "rig", "AGENTS.md")
-		if srcData, readErr := os.ReadFile(srcPath); readErr == nil {
-			if writeErr := os.WriteFile(agentsMDPath, srcData, 0644); writeErr != nil {
-				fmt.Printf("Warning: could not copy AGENTS.md: %v\n", writeErr)
-			}
-		}
-	}
-
-	// NOTE: We intentionally do NOT write to CLAUDE.md here.
+	// NOTE: We intentionally do NOT write to CLAUDE.md or AGENTS.md here.
 	// Gas Town context is injected ephemerally via SessionStart hook (gt prime).
 
 	// Set up shared beads

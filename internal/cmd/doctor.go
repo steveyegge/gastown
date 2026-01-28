@@ -70,8 +70,8 @@ Routing checks (fixable):
   - prefix-mismatch          Detect rigs.json vs routes.jsonl prefix mismatches (fixable)
 
 Session hook checks:
-  - session-hooks            Check settings.json use session-start.sh
-  - claude-settings          Check Claude settings.json match templates (fixable)
+  - session-hooks            Check settings.local.json use session-start.sh
+  - claude-settings          Check Claude settings.local.json match templates (fixable)
 
 Patrol checks:
   - patrol-molecules-exist   Verify patrol molecules exist

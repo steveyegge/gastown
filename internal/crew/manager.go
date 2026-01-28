@@ -193,6 +193,14 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
 	}
 
+	// Install runtime settings in the working directory.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	if err := claude.EnsureSettingsForRole(crewPath, "crew"); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
+	}
+
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
@@ -476,11 +484,10 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		}
 	}
 
-	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	// All crew members share the same settings file.
-	crewBaseDir := filepath.Join(m.rig.Path, "crew")
-	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
+	// Ensure Claude settings exist in the working directory.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
+	if err := claude.EnsureSettingsForRole(worker.ClonePath, "crew"); err != nil {
 		return fmt.Errorf("ensuring Claude settings: %w", err)
 	}
 
