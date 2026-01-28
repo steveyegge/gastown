@@ -56,3 +56,10 @@ func PrintWarning(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	fmt.Printf("%s %s\n", Warning.Render(ui.IconWarn+" Warning:"), msg)
 }
+
+// PrintError prints an error message with consistent formatting.
+// The format and args work like fmt.Printf.
+func PrintError(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	fmt.Printf("%s %s\n", Error.Render(ui.IconFail+" Error:"), msg)
+}

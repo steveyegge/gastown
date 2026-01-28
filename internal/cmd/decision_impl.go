@@ -453,7 +453,9 @@ func runDecisionResolve(cmd *cobra.Command, args []string) error {
 		}
 
 		if err := router.Send(msg); err != nil {
-			style.PrintWarning("failed to notify requestor: %v", err)
+			style.PrintError("FAILED to notify requestor %q: %v", fields.RequestedBy, err)
+			style.PrintError("The requestor will NOT know their decision was resolved!")
+			style.PrintError("Fix: ensure agent bead exists for %s (gt crew add <rig> <name>)", fields.RequestedBy)
 		}
 
 		// Nudge the requesting agent so they see the resolution immediately
