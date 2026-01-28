@@ -48,9 +48,13 @@ func TestAgentBeadIDToAddress(t *testing.T) {
 		id   string
 		want string
 	}{
-		// Town-level agents
+		// Town-level agents (gt- prefix)
 		{"gt-mayor", "mayor/"},
 		{"gt-deacon", "deacon/"},
+
+		// Town-level agents (hq- prefix)
+		{"hq-mayor", "mayor/"},
+		{"hq-deacon", "deacon/"},
 
 		// Rig singletons
 		{"gt-gastown-witness", "gastown/witness"},

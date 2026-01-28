@@ -341,13 +341,22 @@ func (r *Resolver) resolveChannel(name string) ([]Recipient, error) {
 }
 
 // agentBeadIDToAddress converts an agent bead ID to a mail address.
-// E.g., "gt-gastown-crew-max" → "gastown/crew/max"
+// Handles both gt- (rig agents) and hq- (town agents) prefixes:
+//   - hq-mayor → mayor/
+//   - hq-deacon → deacon/
+//   - gt-gastown-crew-max → gastown/crew/max
 func agentBeadIDToAddress(id string) string {
-	if !strings.HasPrefix(id, "gt-") {
+	var rest string
+
+	// Handle both gt- (rig agents) and hq- (town agents) prefixes
+	if strings.HasPrefix(id, "gt-") {
+		rest = strings.TrimPrefix(id, "gt-")
+	} else if strings.HasPrefix(id, "hq-") {
+		rest = strings.TrimPrefix(id, "hq-")
+	} else {
 		return ""
 	}
 
-	rest := strings.TrimPrefix(id, "gt-")
 	parts := strings.Split(rest, "-")
 
 	switch len(parts) {
