@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deps"
 	"github.com/steveyegge/gastown/internal/formula"
@@ -209,20 +209,26 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// mayorDir already defined above
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
 		fmt.Printf("   %s Could not create mayor directory: %v\n", style.Dim.Render("⚠"), err)
-	} else if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
-		fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
 	} else {
-		fmt.Printf("   ✓ Created mayor/.claude/settings.json\n")
+		mayorRuntimeConfig := config.ResolveRoleAgentConfig("mayor", absPath, mayorDir)
+		if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", mayorRuntimeConfig); err != nil {
+			fmt.Printf("   %s Could not create mayor settings: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Created mayor/.claude/settings.json\n")
+		}
 	}
 
 	// Create deacon directory and settings (deacon runs from ~/gt/deacon/)
 	deaconDir := filepath.Join(absPath, "deacon")
 	if err := os.MkdirAll(deaconDir, 0755); err != nil {
 		fmt.Printf("   %s Could not create deacon directory: %v\n", style.Dim.Render("⚠"), err)
-	} else if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
-		fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
 	} else {
-		fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
+		deaconRuntimeConfig := config.ResolveRoleAgentConfig("deacon", absPath, deaconDir)
+		if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", deaconRuntimeConfig); err != nil {
+			fmt.Printf("   %s Could not create deacon settings: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Created deacon/.claude/settings.json\n")
+		}
 	}
 
 	// Create boot directory (deacon/dogs/boot/) for Boot watchdog.
