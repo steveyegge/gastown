@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -130,6 +131,15 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 		return nil, fmt.Errorf("getting polecat after creation: %w", err)
 	}
 
+	// Verify worktree was actually created (fixes #1070)
+	// The identity bead may exist but worktree creation can fail silently
+	if err := verifyWorktreeExists(polecatObj.ClonePath); err != nil {
+		// Clean up the partial state before returning error
+		_ = polecatMgr.Remove(polecatName, true) // force=true to clean up partial state
+		return nil, fmt.Errorf("worktree verification failed for %s: %w\nHint: try 'gt polecat nuke %s/%s --force' to clean up",
+			polecatName, err, rigName, polecatName)
+	}
+
 	// Resolve account for runtime config
 	accountsPath := constants.MayorAccountsPath(townRoot)
 	claudeConfigDir, accountHandle, err := config.ResolveAccountConfigDir(accountsPath, opts.Account)
@@ -229,4 +239,36 @@ func IsRigName(target string) (string, bool) {
 	}
 
 	return target, true
+}
+
+// verifyWorktreeExists checks that a git worktree was actually created at the given path.
+// Returns an error if the worktree is missing or invalid.
+func verifyWorktreeExists(clonePath string) error {
+	// Check if directory exists
+	info, err := os.Stat(clonePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("worktree directory does not exist: %s", clonePath)
+		}
+		return fmt.Errorf("checking worktree directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("worktree path is not a directory: %s", clonePath)
+	}
+
+	// Check for .git file (worktrees have a .git file, not a .git directory)
+	gitPath := filepath.Join(clonePath, ".git")
+	gitInfo, err := os.Stat(gitPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("worktree missing .git file (not a valid git worktree): %s", clonePath)
+		}
+		return fmt.Errorf("checking .git: %w", err)
+	}
+
+	// .git should be a file for worktrees (contains "gitdir: ..." pointer)
+	// or a directory for regular clones - either is valid
+	_ = gitInfo // Both file and directory are acceptable
+
+	return nil
 }
