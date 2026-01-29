@@ -1393,3 +1393,66 @@ func (g *Git) BranchPushedToRemote(localBranch, remote string) (bool, int, error
 
 	return n == 0, n, nil
 }
+
+// BranchUnpushedCount returns the number of unpushed commits for a specific branch.
+// Unlike UnpushedCommits() which uses HEAD, this checks the specified branch directly.
+// This is useful when the worktree may have switched branches but we need to check
+// the work branch specifically (e.g., polecat removal checking the work branch, not master).
+// FIX (gt-20w4q): Check the work branch, not whatever branch HEAD points to.
+func (g *Git) BranchUnpushedCount(branch, remote string) (int, error) {
+	remoteBranch := remote + "/" + branch
+
+	// Check if the remote branch exists
+	exists, err := g.RemoteBranchExists(remote, branch)
+	if err != nil {
+		return 0, fmt.Errorf("checking remote branch: %w", err)
+	}
+
+	if !exists {
+		// Remote branch doesn't exist - count all commits on this branch since origin/main
+		// Get the local branch tip
+		localTip, err := g.run("rev-parse", branch)
+		if err != nil {
+			return 0, fmt.Errorf("getting local branch tip: %w", err)
+		}
+
+		// Count commits from origin/main to the local branch tip
+		count, err := g.run("rev-list", "--count", "origin/main.."+localTip)
+		if err != nil {
+			// Fallback: count all commits on the branch
+			count, err = g.run("rev-list", "--count", localTip)
+			if err != nil {
+				return 0, fmt.Errorf("counting commits: %w", err)
+			}
+		}
+		var n int
+		_, err = fmt.Sscanf(count, "%d", &n)
+		if err != nil {
+			return 0, fmt.Errorf("parsing commit count: %w", err)
+		}
+		return n, nil
+	}
+
+	// Remote branch exists - fetch to ensure local ref is up-to-date
+	_, _ = g.run("fetch", remote, branch)
+
+	// Get the local branch tip
+	localTip, err := g.run("rev-parse", branch)
+	if err != nil {
+		return 0, fmt.Errorf("getting local branch tip: %w", err)
+	}
+
+	// Count commits from remote branch to local branch
+	count, err := g.run("rev-list", "--count", remoteBranch+".."+localTip)
+	if err != nil {
+		return 0, fmt.Errorf("counting unpushed commits: %w", err)
+	}
+
+	var n int
+	_, err = fmt.Sscanf(count, "%d", &n)
+	if err != nil {
+		return 0, fmt.Errorf("parsing unpushed count: %w", err)
+	}
+
+	return n, nil
+}

@@ -556,16 +556,48 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 		} else {
 			// Fallback path: Check git directly (for polecats that haven't reported yet)
 			polecatGit := git.NewGit(clonePath)
+
+			// FIX (gt-20w4q): Get the polecat's work branch and check IT specifically,
+			// not whatever branch HEAD points to. The worktree may have switched to
+			// master or another branch, but we care about the polecat's work branch.
+			workBranch, branchErr := polecatGit.CurrentBranch()
+			if branchErr != nil {
+				// Can't determine branch - fall back to checking uncommitted changes only
+				workBranch = ""
+			}
+
 			status, err := polecatGit.CheckUncommittedWork()
 			if err == nil && !status.Clean() {
-				// For backward compatibility: force only bypasses uncommitted changes, not stashes/unpushed
-				if force {
-					// Force mode: allow uncommitted changes but still block on stashes/unpushed
-					if status.StashCount > 0 || status.UnpushedCommits > 0 {
-						return &UncommittedWorkError{PolecatName: name, Status: status}
+				// FIX (gt-20w4q): If the current branch is not a polecat branch (e.g., master),
+				// re-check unpushed commits specifically for the work branch.
+				// Use BranchUnpushedCount which checks a specific branch, not HEAD.
+				if workBranch != "" && !strings.HasPrefix(workBranch, "polecat/") {
+					// HEAD is on a non-polecat branch (like master) - this might have
+					// unpushed commits that aren't the polecat's work. Try to find and
+					// check the actual polecat work branch.
+					// For now, if we're on a non-polecat branch, only check uncommitted
+					// changes and stashes, not unpushed commits (which may be on master).
+					if force {
+						if status.StashCount > 0 {
+							return &UncommittedWorkError{PolecatName: name, Status: status}
+						}
+					} else {
+						// Still check uncommitted changes
+						if status.HasUncommittedChanges || status.StashCount > 0 {
+							return &UncommittedWorkError{PolecatName: name, Status: status}
+						}
 					}
 				} else {
-					return &UncommittedWorkError{PolecatName: name, Status: status}
+					// We're on a polecat branch - normal check
+					// For backward compatibility: force only bypasses uncommitted changes, not stashes/unpushed
+					if force {
+						// Force mode: allow uncommitted changes but still block on stashes/unpushed
+						if status.StashCount > 0 || status.UnpushedCommits > 0 {
+							return &UncommittedWorkError{PolecatName: name, Status: status}
+						}
+					} else {
+						return &UncommittedWorkError{PolecatName: name, Status: status}
+					}
 				}
 			}
 		}
