@@ -311,6 +311,10 @@ func (b *Bot) handleInteraction(callback slack.InteractionCallback) {
 		switch action.ActionID {
 		case "view_decision":
 			b.handleViewDecision(callback, action.Value)
+		case "break_out":
+			b.handleBreakOut(callback, action.Value)
+		case "unbreak_out":
+			b.handleUnbreakOut(callback, action.Value)
 		default:
 			if strings.HasPrefix(action.ActionID, "resolve_") {
 				b.handleResolveDecision(callback, action)
@@ -413,6 +417,145 @@ func (b *Bot) handleViewDecision(callback slack.InteractionCallback, decisionID 
 	if err != nil {
 		log.Printf("Slack: Error posting decision view: %v", err)
 	}
+}
+
+// handleBreakOut creates a dedicated channel for an agent and routes their decisions there.
+func (b *Bot) handleBreakOut(callback slack.InteractionCallback, agent string) {
+	if b.router == nil {
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			"Break Out is not available: channel router not configured")
+		return
+	}
+
+	// Check if already broken out
+	if b.router.HasOverride(agent) {
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Agent %s already has a dedicated channel.", agent))
+		return
+	}
+
+	// Create dedicated channel name with FULL agent path
+	channelName := b.agentToBreakOutChannelName(agent)
+
+	// Find or create the channel
+	channelID, err := b.ensureBreakOutChannelExists(agent, channelName)
+	if err != nil {
+		log.Printf("Slack: Break Out failed for %s: %v", agent, err)
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Failed to create dedicated channel: %v", err))
+		return
+	}
+
+	// Add override to router
+	b.router.AddOverrideWithName(agent, channelID, channelName)
+
+	// Save the config
+	if err := b.router.Save(); err != nil {
+		log.Printf("Slack: Failed to save router config after Break Out: %v", err)
+		// Continue anyway - override is active in memory
+	}
+
+	log.Printf("Slack: Break Out: %s → #%s (%s)", agent, channelName, channelID)
+	b.postEphemeral(callback.Channel.ID, callback.User.ID,
+		fmt.Sprintf("✅ Broke out *%s* to dedicated channel <#%s>. Future decisions will go there.", agent, channelID))
+}
+
+// handleUnbreakOut removes the dedicated channel override for an agent.
+func (b *Bot) handleUnbreakOut(callback slack.InteractionCallback, agent string) {
+	if b.router == nil {
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			"Unbreak Out is not available: channel router not configured")
+		return
+	}
+
+	// Check if actually broken out
+	if !b.router.HasOverride(agent) {
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Agent %s doesn't have a dedicated channel override.", agent))
+		return
+	}
+
+	// Remove the override
+	prevChannel := b.router.RemoveOverride(agent)
+
+	// Save the config
+	if err := b.router.Save(); err != nil {
+		log.Printf("Slack: Failed to save router config after Unbreak Out: %v", err)
+		// Continue anyway - override is removed in memory
+	}
+
+	// Resolve what channel they'll go to now
+	result := b.router.Resolve(agent)
+	newChannel := result.ChannelID
+
+	log.Printf("Slack: Unbreak Out: %s removed override %s, now routes to %s", agent, prevChannel, newChannel)
+	b.postEphemeral(callback.Channel.ID, callback.User.ID,
+		fmt.Sprintf("✅ Unbroke out *%s*. Future decisions will go to <#%s>.", agent, newChannel))
+}
+
+// agentToBreakOutChannelName converts an agent identity to a dedicated Break Out channel name.
+// Unlike agentToChannelName, this includes the FULL agent path for dedicated channels.
+// Examples:
+//   - "gastown/crew/slack_decisions" → "gt-decisions-gastown-crew-slack_decisions"
+//   - "gastown/polecats/furiosa" → "gt-decisions-gastown-polecats-furiosa"
+func (b *Bot) agentToBreakOutChannelName(agent string) string {
+	parts := strings.Split(agent, "/")
+
+	// Use FULL agent path for dedicated break-out channels
+	name := b.channelPrefix + "-" + strings.Join(parts, "-")
+
+	// Sanitize for Slack: lowercase, replace invalid chars with hyphens
+	name = strings.ToLower(name)
+	name = regexp.MustCompile(`[^a-z0-9-_]`).ReplaceAllString(name, "-")
+	name = regexp.MustCompile(`-+`).ReplaceAllString(name, "-") // collapse multiple hyphens
+	name = strings.Trim(name, "-")
+
+	// Slack channel names max 80 chars
+	if len(name) > 80 {
+		name = name[:80]
+	}
+
+	return name
+}
+
+// ensureBreakOutChannelExists finds or creates a dedicated Break Out channel.
+func (b *Bot) ensureBreakOutChannelExists(agent, channelName string) (string, error) {
+	// Check cache first
+	b.channelCacheMu.RLock()
+	if cachedID, ok := b.channelCache[channelName]; ok {
+		b.channelCacheMu.RUnlock()
+		return cachedID, nil
+	}
+	b.channelCacheMu.RUnlock()
+
+	// Look up channel by name
+	channelID, err := b.findChannelByName(channelName)
+	if err == nil && channelID != "" {
+		b.cacheChannel(channelName, channelID)
+		log.Printf("Slack: Found existing Break Out channel #%s (%s) for agent %s", channelName, channelID, agent)
+		return channelID, nil
+	}
+
+	// Create the channel
+	channel, err := b.client.CreateConversation(slack.CreateConversationParams{
+		ChannelName: channelName,
+		IsPrivate:   false,
+	})
+	if err != nil {
+		// Check if it's a "name_taken" error (channel exists but we couldn't find it)
+		if strings.Contains(err.Error(), "name_taken") {
+			channelID, findErr := b.findChannelByName(channelName)
+			if findErr == nil && channelID != "" {
+				b.cacheChannel(channelName, channelID)
+				return channelID, nil
+			}
+		}
+		return "", fmt.Errorf("create channel %s: %w", channelName, err)
+	}
+
+	b.cacheChannel(channelName, channel.ID)
+	log.Printf("Slack: Created Break Out channel #%s (%s) for agent %s", channelName, channel.ID, agent)
+	return channel.ID, nil
 }
 
 func (b *Bot) handleResolveDecision(callback slack.InteractionCallback, action *slack.BlockAction) {
@@ -980,6 +1123,31 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 		blocks = append(blocks,
 			slack.NewContextBlock("",
 				slack.NewTextBlockObject("mrkdwn", optSummary, false, false),
+			),
+		)
+	}
+
+	// Add Break Out / Unbreak Out button if agent identity is available
+	if decision.RequestedBy != "" {
+		var breakOutButton *slack.ButtonBlockElement
+		if b.router != nil && b.router.HasOverride(decision.RequestedBy) {
+			// Agent already has dedicated channel - show Unbreak Out
+			breakOutButton = slack.NewButtonBlockElement(
+				"unbreak_out",
+				decision.RequestedBy,
+				slack.NewTextBlockObject("plain_text", "🔀 Unbreak Out", false, false),
+			)
+		} else {
+			// Agent uses grouped channel - show Break Out
+			breakOutButton = slack.NewButtonBlockElement(
+				"break_out",
+				decision.RequestedBy,
+				slack.NewTextBlockObject("plain_text", "🔀 Break Out", false, false),
+			)
+		}
+		blocks = append(blocks,
+			slack.NewActionBlock("",
+				breakOutButton,
 			),
 		)
 	}

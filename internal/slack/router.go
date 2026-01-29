@@ -30,6 +30,11 @@ type Config struct {
 	//   "beads/*"             → all agents in beads rig
 	Channels map[string]string `json:"channels"`
 
+	// Overrides maps exact agent identities to dedicated channel IDs.
+	// These take precedence over pattern matching. Created via "Break Out" button.
+	// Example: "gastown/crew/slack_decisions" → "C0987654321"
+	Overrides map[string]string `json:"overrides,omitempty"`
+
 	// ChannelNames maps channel IDs to human-readable names for display.
 	// Optional; used for logging and debugging.
 	ChannelNames map[string]string `json:"channel_names,omitempty"`
@@ -45,9 +50,10 @@ type Config struct {
 
 // Router resolves Slack channels for agent identities.
 type Router struct {
-	config   *Config
-	patterns []compiledPattern
-	mu       sync.RWMutex
+	config     *Config
+	configPath string // Path to config file for saving overrides
+	patterns   []compiledPattern
+	mu         sync.RWMutex
 }
 
 // compiledPattern is a pre-processed pattern for faster matching.
@@ -98,7 +104,9 @@ func LoadRouterFromFile(path string) (*Router, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	return NewRouter(&cfg), nil
+	r := NewRouter(&cfg)
+	r.configPath = path
+	return r, nil
 }
 
 // findConfigPath locates the Slack config file.
@@ -198,9 +206,23 @@ func countWildcards(segments []string) int {
 
 // Resolve finds the appropriate Slack channel for an agent identity.
 // Agent format: "rig/role/name" (e.g., "gastown/polecats/furiosa")
+// Priority: 1. Exact override, 2. Pattern match, 3. Default channel
 func (r *Router) Resolve(agent string) *RouteResult {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	// Check overrides first (exact agent match, highest priority)
+	if r.config.Overrides != nil {
+		if channelID, ok := r.config.Overrides[agent]; ok {
+			return &RouteResult{
+				ChannelID:   channelID,
+				ChannelName: r.config.ChannelNames[channelID],
+				WebhookURL:  r.getWebhookForChannel(channelID),
+				MatchedBy:   "(override)",
+				IsDefault:   false,
+			}
+		}
+	}
 
 	agentSegments := strings.Split(agent, "/")
 
@@ -278,4 +300,96 @@ func (r *Router) ResolveAll(agents []string) []*RouteResult {
 	}
 
 	return results
+}
+
+// HasOverride returns true if the agent has a dedicated channel override.
+func (r *Router) HasOverride(agent string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.config.Overrides == nil {
+		return false
+	}
+	_, ok := r.config.Overrides[agent]
+	return ok
+}
+
+// GetOverride returns the override channel ID for an agent, or empty string if none.
+func (r *Router) GetOverride(agent string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.config.Overrides == nil {
+		return ""
+	}
+	return r.config.Overrides[agent]
+}
+
+// AddOverride sets a dedicated channel override for an agent.
+// The override takes precedence over pattern matching.
+func (r *Router) AddOverride(agent, channelID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.config.Overrides == nil {
+		r.config.Overrides = make(map[string]string)
+	}
+	r.config.Overrides[agent] = channelID
+
+	// Also add to channel names if we know the name
+	if r.config.ChannelNames == nil {
+		r.config.ChannelNames = make(map[string]string)
+	}
+}
+
+// AddOverrideWithName sets a dedicated channel override and records the channel name.
+func (r *Router) AddOverrideWithName(agent, channelID, channelName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.config.Overrides == nil {
+		r.config.Overrides = make(map[string]string)
+	}
+	r.config.Overrides[agent] = channelID
+
+	if r.config.ChannelNames == nil {
+		r.config.ChannelNames = make(map[string]string)
+	}
+	r.config.ChannelNames[channelID] = channelName
+}
+
+// RemoveOverride removes a dedicated channel override for an agent.
+// Returns the previous channel ID if one existed, empty string otherwise.
+func (r *Router) RemoveOverride(agent string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.config.Overrides == nil {
+		return ""
+	}
+	prev := r.config.Overrides[agent]
+	delete(r.config.Overrides, agent)
+	return prev
+}
+
+// Save persists the current configuration to the config file.
+// Returns an error if no config path is known (e.g., router created with NewRouter directly).
+func (r *Router) Save() error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.configPath == "" {
+		return fmt.Errorf("no config path: router was not loaded from file")
+	}
+
+	data, err := json.MarshalIndent(r.config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(r.configPath, data, 0644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	return nil
 }
