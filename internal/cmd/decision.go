@@ -298,6 +298,7 @@ var decisionWatchRPCAddr string
 
 // Turn-check flags
 var decisionTurnCheckSoft bool
+var decisionTurnCheckVerbose bool
 
 // Dashboard-specific flags
 var decisionDashboardJSON bool
@@ -368,6 +369,7 @@ func init() {
 
 	// Turn-check flags
 	decisionTurnCheckCmd.Flags().BoolVar(&decisionTurnCheckSoft, "soft", false, "Soft mode: don't block, just allow")
+	decisionTurnCheckCmd.Flags().BoolVar(&decisionTurnCheckVerbose, "verbose", false, "Show detailed debugging info")
 
 	// Cancel flags
 	decisionCancelCmd.Flags().StringVar(&decisionCancelReason, "reason", "Canceled", "Reason for cancellation")

@@ -1103,17 +1103,40 @@ func runDecisionTurnMark(cmd *cobra.Command, args []string) error {
 func runDecisionTurnCheck(cmd *cobra.Command, args []string) error {
 	input, err := readTurnHookInput()
 	if err != nil {
+		if decisionTurnCheckVerbose {
+			fmt.Fprintf(os.Stderr, "[turn-check] Failed to read hook input: %v\n", err)
+		}
 		// Hooks should never fail
 		return nil
 	}
 
+	if decisionTurnCheckVerbose {
+		fmt.Fprintf(os.Stderr, "[turn-check] Session ID: %s\n", input.SessionID)
+		fmt.Fprintf(os.Stderr, "[turn-check] Last command: %s\n", input.ToolInput.Command)
+	}
+
 	if input.SessionID == "" {
+		if decisionTurnCheckVerbose {
+			fmt.Fprintf(os.Stderr, "[turn-check] No session ID, skipping check\n")
+		}
 		return nil
+	}
+
+	markerPath := turnMarkerPath(input.SessionID)
+	markerExists := turnMarkerExists(input.SessionID)
+
+	if decisionTurnCheckVerbose {
+		fmt.Fprintf(os.Stderr, "[turn-check] Marker path: %s\n", markerPath)
+		fmt.Fprintf(os.Stderr, "[turn-check] Marker exists: %v\n", markerExists)
+		fmt.Fprintf(os.Stderr, "[turn-check] Soft mode: %v\n", decisionTurnCheckSoft)
 	}
 
 	result := checkTurnMarker(input.SessionID, decisionTurnCheckSoft)
 
 	if result != nil {
+		if decisionTurnCheckVerbose {
+			fmt.Fprintf(os.Stderr, "[turn-check] BLOCKING: No decision offered this turn\n")
+		}
 		// Output block JSON
 		out, _ := json.Marshal(result)
 		fmt.Println(string(out))
@@ -1121,6 +1144,8 @@ func runDecisionTurnCheck(cmd *cobra.Command, args []string) error {
 		if !decisionTurnCheckSoft {
 			return NewSilentExit(1)
 		}
+	} else if decisionTurnCheckVerbose {
+		fmt.Fprintf(os.Stderr, "[turn-check] OK: Decision was offered or soft mode\n")
 	}
 
 	return nil
