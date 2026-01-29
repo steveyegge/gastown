@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
@@ -812,6 +813,290 @@ func TestDecisionRequestNoFileCheckFlag(t *testing.T) {
 	noFileCheckFlag := flags.Lookup("no-file-check")
 	if noFileCheckFlag == nil {
 		t.Error("missing --no-file-check flag")
+	}
+}
+
+// --- Decision Chaining Tests ---
+
+// TestContainsWholeWord tests word boundary detection.
+func TestContainsWholeWord(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		keyword string
+		want    bool
+	}{
+		{
+			name:    "exact match",
+			text:    "error",
+			keyword: "error",
+			want:    true,
+		},
+		{
+			name:    "word at start",
+			text:    "error occurred",
+			keyword: "error",
+			want:    true,
+		},
+		{
+			name:    "word at end",
+			text:    "an error",
+			keyword: "error",
+			want:    true,
+		},
+		{
+			name:    "word in middle",
+			text:    "an error occurred",
+			keyword: "error",
+			want:    true,
+		},
+		{
+			name:    "word with punctuation",
+			text:    "error: something failed",
+			keyword: "error",
+			want:    true,
+		},
+		{
+			name:    "word with comma",
+			text:    "error, warning, info",
+			keyword: "error",
+			want:    true,
+		},
+		{
+			name:    "partial match at start - should not match",
+			text:    "errors occurred",
+			keyword: "error",
+			want:    false,
+		},
+		{
+			name:    "partial match at end - should not match",
+			text:    "myerror",
+			keyword: "error",
+			want:    false,
+		},
+		{
+			name:    "partial match embedded - should not match",
+			text:    "myerrors",
+			keyword: "error",
+			want:    false,
+		},
+		{
+			name:    "keyword not present",
+			text:    "everything is fine",
+			keyword: "error",
+			want:    false,
+		},
+		{
+			name:    "empty text",
+			text:    "",
+			keyword: "error",
+			want:    false,
+		},
+		{
+			name:    "underscore boundary - should not match",
+			text:    "my_error_handler",
+			keyword: "error",
+			want:    false,
+		},
+		{
+			name:    "multiple occurrences, first partial second whole",
+			text:    "errors and an error",
+			keyword: "error",
+			want:    true,
+		},
+		{
+			name:    "hyphen boundary - should match",
+			text:    "non-error case",
+			keyword: "error",
+			want:    true,
+		},
+		{
+			name:    "parentheses boundary",
+			text:    "(error) message",
+			keyword: "error",
+			want:    true,
+		},
+		{
+			name:    "newline boundary",
+			text:    "line1\nerror\nline3",
+			keyword: "error",
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := containsWholeWord(tt.text, tt.keyword)
+			if got != tt.want {
+				t.Errorf("containsWholeWord(%q, %q) = %v, want %v", tt.text, tt.keyword, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsWordChar tests character classification.
+func TestIsWordChar(t *testing.T) {
+	tests := []struct {
+		char byte
+		want bool
+	}{
+		{'a', true},
+		{'z', true},
+		{'A', true},
+		{'Z', true},
+		{'0', true},
+		{'9', true},
+		{'_', true},
+		{' ', false},
+		{'-', false},
+		{'.', false},
+		{':', false},
+		{',', false},
+		{'(', false},
+		{')', false},
+		{'\n', false},
+		{'\t', false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.char), func(t *testing.T) {
+			got := isWordChar(tt.char)
+			if got != tt.want {
+				t.Errorf("isWordChar(%q) = %v, want %v", tt.char, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDecisionChainCmdExists tests that chain command exists with proper flags.
+func TestDecisionChainCmdExists(t *testing.T) {
+	// Find chain subcommand
+	var chainCmd *cobra.Command
+	for _, cmd := range decisionCmd.Commands() {
+		if strings.HasPrefix(cmd.Use, "chain ") {
+			chainCmd = cmd
+			break
+		}
+	}
+
+	if chainCmd == nil {
+		t.Fatal("missing 'chain' subcommand")
+	}
+
+	// Check flags
+	flags := chainCmd.Flags()
+
+	descendantsFlag := flags.Lookup("descendants")
+	if descendantsFlag == nil {
+		t.Error("missing --descendants flag")
+	}
+
+	jsonFlag := flags.Lookup("json")
+	if jsonFlag == nil {
+		t.Error("missing --json flag")
+	}
+}
+
+// TestDecisionRequestPredecessorFlag tests that predecessor flag exists.
+func TestDecisionRequestPredecessorFlag(t *testing.T) {
+	if decisionRequestCmd == nil {
+		t.Fatal("decisionRequestCmd is nil")
+	}
+
+	flags := decisionRequestCmd.Flags()
+
+	predecessorFlag := flags.Lookup("predecessor")
+	if predecessorFlag == nil {
+		t.Error("missing --predecessor flag")
+	}
+}
+
+// TestChainNodeStruct tests chainNode JSON marshaling.
+func TestChainNodeStruct(t *testing.T) {
+	node := chainNode{
+		ID:          "hq-dec-123",
+		Question:    "Which approach?",
+		ChosenIndex: 1,
+		ChosenLabel: "Option A",
+		Urgency:     "high",
+		RequestedBy: "test-agent",
+		RequestedAt: "2026-01-29T10:00:00Z",
+		ResolvedAt:  "2026-01-29T10:30:00Z",
+		Predecessor: "hq-dec-100",
+		IsTarget:    true,
+	}
+
+	// Test JSON marshaling
+	data, err := json.Marshal(node)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	// Verify key fields are present
+	jsonStr := string(data)
+	if !strings.Contains(jsonStr, `"id":"hq-dec-123"`) {
+		t.Error("missing id field in JSON")
+	}
+	if !strings.Contains(jsonStr, `"question":"Which approach?"`) {
+		t.Error("missing question field in JSON")
+	}
+	if !strings.Contains(jsonStr, `"chosen_label":"Option A"`) {
+		t.Error("missing chosen_label field in JSON")
+	}
+	if !strings.Contains(jsonStr, `"predecessor_id":"hq-dec-100"`) {
+		t.Error("missing predecessor_id field in JSON")
+	}
+	if !strings.Contains(jsonStr, `"is_target":true`) {
+		t.Error("missing is_target field in JSON")
+	}
+
+	// Test unmarshaling
+	var decoded chainNode
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if decoded.ID != node.ID {
+		t.Errorf("decoded.ID = %q, want %q", decoded.ID, node.ID)
+	}
+	if decoded.Predecessor != node.Predecessor {
+		t.Errorf("decoded.Predecessor = %q, want %q", decoded.Predecessor, node.Predecessor)
+	}
+}
+
+// TestChainNodeWithChildren tests chainNode tree structure.
+func TestChainNodeWithChildren(t *testing.T) {
+	root := &chainNode{
+		ID:       "hq-dec-1",
+		Question: "Root decision",
+		Children: []*chainNode{
+			{
+				ID:          "hq-dec-2",
+				Question:    "Child 1",
+				Predecessor: "hq-dec-1",
+			},
+			{
+				ID:          "hq-dec-3",
+				Question:    "Child 2",
+				Predecessor: "hq-dec-1",
+			},
+		},
+	}
+
+	// Test JSON marshaling with children
+	data, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent failed: %v", err)
+	}
+
+	jsonStr := string(data)
+	if !strings.Contains(jsonStr, "children") {
+		t.Error("missing children field in JSON")
+	}
+	if !strings.Contains(jsonStr, "hq-dec-2") {
+		t.Error("missing first child in JSON")
+	}
+	if !strings.Contains(jsonStr, "hq-dec-3") {
+		t.Error("missing second child in JSON")
 	}
 }
 
