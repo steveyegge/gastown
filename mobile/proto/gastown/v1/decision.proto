@@ -56,6 +56,7 @@ message CreateDecisionRequest {
   Urgency urgency = 5;                    // How urgent is this decision
   repeated string blockers = 6;           // Work IDs blocked by this decision
   string parent_bead = 7;                 // Optional parent bead ID for hierarchy
+  string predecessor_id = 8;              // Predecessor decision ID for chaining
 }
 
 message CreateDecisionResponse {
@@ -107,6 +108,7 @@ message Decision {
   repeated string blockers = 12; // Work IDs blocked by this decision
   bool resolved = 13;
   bool cancelled = 14;
+  string predecessor_id = 15;    // Predecessor decision ID for chaining
 }
 
 // An option in a decision

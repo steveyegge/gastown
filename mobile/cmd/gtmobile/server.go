@@ -368,13 +368,14 @@ func (s *DecisionServer) CreateDecision(
 
 	// Build decision fields
 	fields := &beads.DecisionFields{
-		Question:    req.Msg.Question,
-		Context:     req.Msg.Context,
-		Options:     options,
-		RequestedBy: formatAgentAddress(req.Msg.RequestedBy),
-		RequestedAt: time.Now().Format(time.RFC3339),
-		Urgency:     fromUrgency(req.Msg.Urgency),
-		Blockers:    req.Msg.Blockers,
+		Question:      req.Msg.Question,
+		Context:       req.Msg.Context,
+		Options:       options,
+		RequestedBy:   formatAgentAddress(req.Msg.RequestedBy),
+		RequestedAt:   time.Now().Format(time.RFC3339),
+		Urgency:       fromUrgency(req.Msg.Urgency),
+		Blockers:      req.Msg.Blockers,
+		PredecessorID: req.Msg.PredecessorId,
 	}
 
 	// Create the decision using bd decision create (canonical storage, hq-946577.39)
@@ -394,14 +395,15 @@ func (s *DecisionServer) CreateDecision(
 	}
 
 	decision := &gastownv1.Decision{
-		Id:          issue.ID,
-		Question:    fields.Question,
-		Context:     fields.Context,
-		Options:     protoOptions,
-		RequestedBy: req.Msg.RequestedBy,
-		Urgency:     req.Msg.Urgency,
-		Blockers:    fields.Blockers,
-		Resolved:    false,
+		Id:            issue.ID,
+		Question:      fields.Question,
+		Context:       fields.Context,
+		Options:       protoOptions,
+		RequestedBy:   req.Msg.RequestedBy,
+		Urgency:       req.Msg.Urgency,
+		Blockers:      fields.Blockers,
+		Resolved:      false,
+		PredecessorId: fields.PredecessorID,
 	}
 
 	// Publish event to bus for real-time notification

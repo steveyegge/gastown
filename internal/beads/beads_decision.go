@@ -44,7 +44,7 @@ type DecisionFields struct {
 	ResolvedAt    string           `json:"resolved_at,omitempty"`    // When resolved
 	Urgency       string           `json:"urgency"`                  // high, medium, low
 	Blockers      []string         `json:"blockers,omitempty"`       // Work IDs blocked by this decision
-	PredecessorID string           `json:"predecessor_id,omitempty"` // ID of predecessor decision for chaining
+	PredecessorID string           `json:"predecessor_id,omitempty"` // Predecessor decision ID for chaining
 }
 
 // DecisionState constants for decision status tracking.

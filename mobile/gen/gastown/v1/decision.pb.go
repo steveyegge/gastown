@@ -269,13 +269,14 @@ func (x *GetDecisionResponse) GetDecision() *Decision {
 
 type CreateDecisionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Question      string                 `protobuf:"bytes,1,opt,name=question,proto3" json:"question,omitempty"`                          // The prompt/question for the human
-	Context       string                 `protobuf:"bytes,2,opt,name=context,proto3" json:"context,omitempty"`                            // Additional context for the decision
-	Options       []*DecisionOption      `protobuf:"bytes,3,rep,name=options,proto3" json:"options,omitempty"`                            // Available options to choose from
-	RequestedBy   *AgentAddress          `protobuf:"bytes,4,opt,name=requested_by,json=requestedBy,proto3" json:"requested_by,omitempty"` // Agent requesting the decision
-	Urgency       Urgency                `protobuf:"varint,5,opt,name=urgency,proto3,enum=gastown.v1.Urgency" json:"urgency,omitempty"`   // How urgent is this decision
-	Blockers      []string               `protobuf:"bytes,6,rep,name=blockers,proto3" json:"blockers,omitempty"`                          // Work IDs blocked by this decision
-	ParentBead    string                 `protobuf:"bytes,7,opt,name=parent_bead,json=parentBead,proto3" json:"parent_bead,omitempty"`    // Optional parent bead ID for hierarchy
+	Question      string                 `protobuf:"bytes,1,opt,name=question,proto3" json:"question,omitempty"`                                // The prompt/question for the human
+	Context       string                 `protobuf:"bytes,2,opt,name=context,proto3" json:"context,omitempty"`                                  // Additional context for the decision
+	Options       []*DecisionOption      `protobuf:"bytes,3,rep,name=options,proto3" json:"options,omitempty"`                                  // Available options to choose from
+	RequestedBy   *AgentAddress          `protobuf:"bytes,4,opt,name=requested_by,json=requestedBy,proto3" json:"requested_by,omitempty"`       // Agent requesting the decision
+	Urgency       Urgency                `protobuf:"varint,5,opt,name=urgency,proto3,enum=gastown.v1.Urgency" json:"urgency,omitempty"`         // How urgent is this decision
+	Blockers      []string               `protobuf:"bytes,6,rep,name=blockers,proto3" json:"blockers,omitempty"`                                // Work IDs blocked by this decision
+	ParentBead    string                 `protobuf:"bytes,7,opt,name=parent_bead,json=parentBead,proto3" json:"parent_bead,omitempty"`          // Optional parent bead ID for hierarchy
+	PredecessorId string                 `protobuf:"bytes,8,opt,name=predecessor_id,json=predecessorId,proto3" json:"predecessor_id,omitempty"` // Predecessor decision ID for chaining
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -355,6 +356,13 @@ func (x *CreateDecisionRequest) GetBlockers() []string {
 func (x *CreateDecisionRequest) GetParentBead() string {
 	if x != nil {
 		return x.ParentBead
+	}
+	return ""
+}
+
+func (x *CreateDecisionRequest) GetPredecessorId() string {
+	if x != nil {
+		return x.PredecessorId
 	}
 	return ""
 }
@@ -656,6 +664,7 @@ type Decision struct {
 	Blockers      []string               `protobuf:"bytes,12,rep,name=blockers,proto3" json:"blockers,omitempty"` // Work IDs blocked by this decision
 	Resolved      bool                   `protobuf:"varint,13,opt,name=resolved,proto3" json:"resolved,omitempty"`
 	Cancelled     bool                   `protobuf:"varint,14,opt,name=cancelled,proto3" json:"cancelled,omitempty"`
+	PredecessorId string                 `protobuf:"bytes,15,opt,name=predecessor_id,json=predecessorId,proto3" json:"predecessor_id,omitempty"` // Predecessor decision ID for chaining
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -788,6 +797,13 @@ func (x *Decision) GetCancelled() bool {
 	return false
 }
 
+func (x *Decision) GetPredecessorId() string {
+	if x != nil {
+		return x.PredecessorId
+	}
+	return ""
+}
+
 // An option in a decision
 type DecisionOption struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -866,7 +882,7 @@ const file_gastown_v1_decision_proto_rawDesc = "" +
 	"\vdecision_id\x18\x01 \x01(\tR\n" +
 	"decisionId\"G\n" +
 	"\x13GetDecisionResponse\x120\n" +
-	"\bdecision\x18\x01 \x01(\v2\x14.gastown.v1.DecisionR\bdecision\"\xac\x02\n" +
+	"\bdecision\x18\x01 \x01(\v2\x14.gastown.v1.DecisionR\bdecision\"\xd3\x02\n" +
 	"\x15CreateDecisionRequest\x12\x1a\n" +
 	"\bquestion\x18\x01 \x01(\tR\bquestion\x12\x18\n" +
 	"\acontext\x18\x02 \x01(\tR\acontext\x124\n" +
@@ -875,7 +891,8 @@ const file_gastown_v1_decision_proto_rawDesc = "" +
 	"\aurgency\x18\x05 \x01(\x0e2\x13.gastown.v1.UrgencyR\aurgency\x12\x1a\n" +
 	"\bblockers\x18\x06 \x03(\tR\bblockers\x12\x1f\n" +
 	"\vparent_bead\x18\a \x01(\tR\n" +
-	"parentBead\"J\n" +
+	"parentBead\x12%\n" +
+	"\x0epredecessor_id\x18\b \x01(\tR\rpredecessorId\"J\n" +
 	"\x16CreateDecisionResponse\x120\n" +
 	"\bdecision\x18\x01 \x01(\v2\x14.gastown.v1.DecisionR\bdecision\"r\n" +
 	"\x0eResolveRequest\x12\x1f\n" +
@@ -892,7 +909,7 @@ const file_gastown_v1_decision_proto_rawDesc = "" +
 	"\x0eCancelResponse\"M\n" +
 	"\x15WatchDecisionsRequest\x124\n" +
 	"\vmin_urgency\x18\x01 \x01(\x0e2\x13.gastown.v1.UrgencyR\n" +
-	"minUrgency\"\xa6\x04\n" +
+	"minUrgency\"\xcd\x04\n" +
 	"\bDecision\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\bquestion\x18\x02 \x01(\tR\bquestion\x12\x18\n" +
@@ -910,7 +927,8 @@ const file_gastown_v1_decision_proto_rawDesc = "" +
 	"\aurgency\x18\v \x01(\x0e2\x13.gastown.v1.UrgencyR\aurgency\x12\x1a\n" +
 	"\bblockers\x18\f \x03(\tR\bblockers\x12\x1a\n" +
 	"\bresolved\x18\r \x01(\bR\bresolved\x12\x1c\n" +
-	"\tcancelled\x18\x0e \x01(\bR\tcancelled\"j\n" +
+	"\tcancelled\x18\x0e \x01(\bR\tcancelled\x12%\n" +
+	"\x0epredecessor_id\x18\x0f \x01(\tR\rpredecessorId\"j\n" +
 	"\x0eDecisionOption\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12 \n" +
