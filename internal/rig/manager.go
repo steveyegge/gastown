@@ -471,6 +471,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating refinery CLAUDE.md: %w", err)
 	}
+	// Copy overlay files from .runtime/overlay/ to refinery root.
+	// This allows services to have .env and other config files at their root.
+	if err := CopyOverlay(rigPath, refineryRigPath); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("  Warning: Could not copy overlay files to refinery: %v\n", err)
+	}
 	// Create refinery hooks for patrol triggering (at refinery/ level, not rig/)
 	refineryPath := filepath.Dir(refineryRigPath)
 	runtimeConfig := config.LoadRuntimeConfig(rigPath)
