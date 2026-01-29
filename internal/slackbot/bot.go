@@ -1086,6 +1086,12 @@ func (b *Bot) cacheChannel(name, id string) {
 // This is called by the SSE listener when a decision is resolved externally.
 // Uses the channel router to notify the same channel where the decision was originally posted.
 func (b *Bot) NotifyResolution(decision rpcclient.Decision) error {
+	// If resolved via Slack, skip - we already edited the original message
+	if strings.HasPrefix(decision.ResolvedBy, "slack:") {
+		log.Printf("Slack: Skipping resolution notification for %s (resolved via Slack, message already updated)", decision.ID)
+		return nil
+	}
+
 	// Resolve channel based on original requesting agent
 	targetChannel := b.resolveChannel(decision.RequestedBy)
 	if targetChannel == "" {
