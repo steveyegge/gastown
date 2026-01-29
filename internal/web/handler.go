@@ -16,6 +16,7 @@ type ConvoyFetcher interface {
 type ConvoyHandler struct {
 	fetcher  ConvoyFetcher
 	template *template.Template
+	RigPath  string // Path to display in footer (e.g., "~/gt/atmosphere")
 }
 
 // NewConvoyHandler creates a new convoy handler with the given fetcher.
@@ -55,6 +56,7 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Convoys:    convoys,
 		MergeQueue: mergeQueue,
 		Polecats:   polecats,
+		RigPath:    h.RigPath,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

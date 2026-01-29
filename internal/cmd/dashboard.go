@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -58,6 +59,18 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	handler, err := web.NewConvoyHandler(fetcher)
 	if err != nil {
 		return fmt.Errorf("creating convoy handler: %w", err)
+	}
+
+	// Set rig path for footer display (simplify path for display)
+	wsPath, _ := workspace.FindFromCwdOrError()
+	if wsPath != "" {
+		// Replace home dir with ~ for cleaner display
+		home, _ := os.UserHomeDir()
+		if home != "" && len(wsPath) > len(home) && wsPath[:len(home)] == home {
+			handler.RigPath = "~" + wsPath[len(home):]
+		} else {
+			handler.RigPath = wsPath
+		}
 	}
 
 	// Build the URL

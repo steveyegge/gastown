@@ -3,184 +3,333 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gas Town Dashboard</title>
+    <title>Mission Control - Gas Town</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <style>
         :root {
-            --bg-dark: #1a1a2e;
-            --bg-card: #16213e;
-            --text-primary: #eee;
-            --text-secondary: #aaa;
-            --border: #0f3460;
-            --green: #4ade80;
-            --yellow: #facc15;
-            --red: #f87171;
+            --bg-dark: #0a0e14;
+            --bg-card: #141a22;
+            --bg-card-alt: #111820;
+            --text-primary: #f0f6fc;
+            --text-secondary: #7d8590;
+            --text-muted: #484f58;
+            --border: #21262d;
+            --accent: #22d3ee;
+            --accent-dim: rgba(34, 211, 238, 0.15);
+            --green: #3fb950;
+            --yellow: #f5a623;
+            --red: #ff6b6b;
         }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
-            background: var(--bg-dark);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(180deg, #0a0e14 0%, #0d1117 50%, #0a0e14 100%);
+            background-attachment: fixed;
             color: var(--text-primary);
             padding: 20px;
             min-height: 100vh;
         }
 
-        .dashboard {
-            max-width: 1200px;
-            margin: 0 auto;
+        .dashboard { max-width: 1280px; margin: 0 auto; }
+
+        /* Header Row */
+        .header-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
         }
 
-        header {
+        .brand-section {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            margin-bottom: 24px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid var(--border);
+            gap: 12px;
+        }
+
+        .header-spacer { flex: 1; }
+
+        .logo {
+            height: 40px;
+            width: auto;
+            filter: drop-shadow(0 0 8px var(--accent-dim));
         }
 
         h1 {
-            font-size: 1.5rem;
+            font-size: 1.3rem;
             font-weight: 600;
+            background: linear-gradient(90deg, var(--text-primary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
-        .refresh-info {
+        /* Navigation Links */
+        .nav-links {
+            display: flex;
+            gap: 12px;
+            margin-right: 16px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
             color: var(--text-secondary);
-            font-size: 0.875rem;
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: 500;
+            transition: all 0.15s ease;
         }
 
+        .nav-link:hover {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .nav-icon { font-size: 1rem; }
+
+        /* LIVE indicator */
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--green);
+            margin-left: 8px;
+        }
+
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--green);
+            border-radius: 50%;
+            animation: pulse-live 2s infinite;
+        }
+
+        @keyframes pulse-live {
+            0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--green); }
+            50% { opacity: 0.5; box-shadow: 0 0 2px var(--green); }
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 10px var(--red); }
+            50% { box-shadow: 0 0 20px var(--red), 0 0 30px rgba(255, 107, 107, 0.5); }
+        }
+
+        /* Stats Row */
+        .stats-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .stat-mini {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 12px;
+            text-align: center;
+            min-width: 60px;
+        }
+
+        .stat-mini .value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            line-height: 1;
+            color: var(--text-secondary);
+        }
+
+        .stat-mini .label {
+            font-size: 0.55rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-top: 2px;
+        }
+
+        .stat-mini.highlight {
+            background: rgba(63, 185, 80, 0.1);
+            border-color: rgba(63, 185, 80, 0.3);
+        }
+
+        .stat-mini.highlight .value { color: var(--green); }
+        .stat-mini.highlight .label { color: var(--green); opacity: 0.7; }
+
+        /* Section headers */
+        .section-header {
+            margin-top: 24px;
+            margin-bottom: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .section-header::before {
+            content: '';
+            width: 4px;
+            height: 16px;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+
+        /* Tables */
         .convoy-table {
             width: 100%;
             border-collapse: collapse;
             background: var(--bg-card);
-            border-radius: 8px;
+            border-radius: 10px;
             overflow: hidden;
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
+            table-layout: fixed;
         }
 
-        .convoy-table th,
-        .convoy-table td {
-            padding: 12px 16px;
-            text-align: left;
+        .convoy-table th, .convoy-table td {
+            padding: 14px 20px;
+            text-align: center;
             border-bottom: 1px solid var(--border);
+            white-space: nowrap;
         }
+
+        .convoy-table .text-left { text-align: left !important; }
+
+        .convoy-table .col-status { width: 100px; padding-left: 20px; }
+        .convoy-table .col-shrink { width: 90px; }
+        .convoy-table .col-last-seen { width: 100px; text-align: center; }
+        .convoy-table .col-actions { width: 120px; padding-right: 20px; text-align: center; }
 
         .convoy-table th {
-            background: var(--bg-dark);
+            background: rgba(0,0,0,0.5);
             font-weight: 500;
             color: var(--text-secondary);
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.08em;
         }
 
-        .convoy-table tr:last-child td {
-            border-bottom: none;
+        .convoy-table tr:last-child td { border-bottom: none; }
+        .convoy-table tbody tr:nth-child(even) { background: var(--bg-card-alt); }
+        .convoy-table tbody tr { transition: background 0.15s ease; }
+        .convoy-table tbody tr:hover { background: var(--accent-dim); }
+
+        /* Warning/Critical rows */
+        .convoy-table tbody tr.row-warning,
+        .convoy-table tbody tr.row-warning:nth-child(even) {
+            box-shadow: inset 4px 0 0 var(--yellow);
+            background: rgba(245, 166, 35, 0.18) !important;
+        }
+        .convoy-table tbody tr.row-critical,
+        .convoy-table tbody tr.row-critical:nth-child(even) {
+            box-shadow: inset 4px 0 0 var(--red);
+            background: rgba(255, 107, 107, 0.18) !important;
         }
 
-        .convoy-table tr:hover {
-            background: rgba(255, 255, 255, 0.02);
-        }
-
-        /* Status indicators */
-        .status-indicator {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-
-        .status-open .status-indicator {
-            background: var(--yellow);
-        }
-
-        .status-closed .status-indicator {
-            background: var(--green);
-        }
-
-        /* Work status badges */
-        .work-status {
-            display: inline-block;
-            padding: 2px 8px;
+        /* Status badges */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
             border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 500;
+            font-size: 0.7rem;
+            font-weight: 600;
             text-transform: uppercase;
         }
 
-        .work-complete .work-status {
-            background: var(--green);
-            color: var(--bg-dark);
-        }
-
-        .work-active .work-status {
-            background: var(--green);
-            color: var(--bg-dark);
-        }
-
-        .work-stale .work-status {
-            background: var(--yellow);
-            color: var(--bg-dark);
-        }
-
-        .work-stuck .work-status {
-            background: var(--red);
-            color: var(--bg-dark);
-        }
-
-        .work-waiting .work-status {
-            background: var(--text-secondary);
-            color: var(--bg-dark);
-        }
-
-        /* Activity colors */
-        .activity-dot {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
+        .status-badge::before {
+            content: '';
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-            margin-right: 8px;
         }
 
-        .activity-green .activity-dot {
-            background: var(--green);
-            box-shadow: 0 0 8px var(--green);
+        .status-complete { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+        .status-complete::before { background: var(--green); }
+
+        .status-active { background: var(--accent-dim); color: var(--accent); }
+        .status-active::before { background: var(--accent); }
+
+        .status-stale { background: rgba(240, 180, 41, 0.2); color: var(--yellow); }
+        .status-stale::before { background: var(--yellow); box-shadow: 0 0 4px var(--yellow); }
+
+        .status-stuck { background: rgba(255, 107, 107, 0.2); color: var(--red); }
+        .status-stuck::before { background: var(--red); box-shadow: 0 0 6px var(--red); animation: pulse-red 1.5s infinite; }
+
+        .status-waiting { background: rgba(125, 133, 144, 0.2); color: var(--text-secondary); }
+        .status-waiting::before { background: var(--text-secondary); }
+
+        /* Worker status badges */
+        .status-healthy { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+        .status-healthy::before { background: var(--green); }
+
+        .status-warning { background: rgba(240, 180, 41, 0.2); color: var(--yellow); }
+        .status-warning::before { background: var(--yellow); box-shadow: 0 0 4px var(--yellow); }
+
+        .status-offline { background: rgba(255, 107, 107, 0.2); color: var(--red); }
+        .status-offline::before { background: var(--red); }
+
+        /* Merge queue status badges */
+        .status-ready { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+        .status-ready::before { background: var(--green); }
+
+        .status-blocked { background: rgba(255, 107, 107, 0.2); color: var(--red); }
+        .status-blocked::before { background: var(--red); }
+
+        .status-pending { background: rgba(240, 180, 41, 0.2); color: var(--yellow); }
+        .status-pending::before { background: var(--yellow); }
+
+        /* Progress */
+        .progress-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
-        .activity-yellow .activity-dot {
-            background: var(--yellow);
-            box-shadow: 0 0 8px var(--yellow);
+        .progress-ring {
+            position: relative;
+            width: 32px;
+            height: 32px;
+            flex-shrink: 0;
         }
 
-        .activity-red .activity-dot {
-            background: var(--red);
-            box-shadow: 0 0 8px var(--red);
-        }
+        .progress-ring svg { transform: rotate(-90deg); }
+        .progress-ring circle { fill: none; stroke-width: 3; }
+        .ring-bg { stroke: var(--border); }
+        .ring-fill { stroke-linecap: round; }
 
-        .activity-unknown .activity-dot {
-            background: var(--text-secondary);
-        }
+        .progress-ring.ring-critical .ring-bg { stroke: var(--red); opacity: 0.4; }
+        .progress-ring.ring-warning .ring-bg { stroke: var(--yellow); opacity: 0.4; }
 
-        .convoy-id {
-            font-weight: 500;
-            color: var(--text-primary);
-        }
-
-        .convoy-title {
+        .progress-ring .ring-value {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.5rem;
+            font-weight: 600;
+            font-family: 'SF Mono', monospace;
             color: var(--text-secondary);
-            margin-left: 8px;
         }
 
-        .progress {
-            font-variant-numeric: tabular-nums;
+        .progress-unit {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
         }
 
+        /* Legacy progress bar (fallback) */
         .progress-bar {
             width: 60px;
             height: 4px;
@@ -192,117 +341,133 @@
 
         .progress-fill {
             height: 100%;
-            background: var(--green);
+            background: var(--accent);
             border-radius: 2px;
         }
 
-        .empty-state {
-            text-align: center;
-            padding: 48px;
-            color: var(--text-secondary);
-        }
-
-        .empty-state h2 {
-            font-size: 1.25rem;
-            margin-bottom: 8px;
-        }
-
-        .empty-state p {
-            font-size: 0.875rem;
-        }
-
-        .empty-state-inline {
-            text-align: center;
-            padding: 24px;
-            color: var(--text-secondary);
-            background: var(--bg-card);
-            border-radius: 8px;
-        }
-
-        .empty-state-inline p {
-            font-size: 0.875rem;
-            margin: 0;
-        }
-
-        .status-hint {
-            color: var(--text-secondary);
-            font-size: 0.875rem;
-            max-width: 300px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .section-header {
-            margin-top: 32px;
-            margin-bottom: 16px;
-            font-size: 1.25rem;
+        /* Convoy/Worker IDs */
+        .convoy-id {
             font-weight: 600;
+            color: var(--text-primary);
+            font-family: 'SF Mono', monospace;
+            font-size: 0.8rem;
         }
 
-        /* Merge queue colors */
-        .mq-green {
-            background: rgba(74, 222, 128, 0.1);
+        .convoy-title {
+            color: var(--text-secondary);
+            margin-left: 10px;
+            font-size: 0.85rem;
         }
 
-        .mq-yellow {
-            background: rgba(250, 204, 21, 0.1);
-        }
-
-        .mq-red {
-            background: rgba(248, 113, 113, 0.1);
-        }
-
-        .ci-status, .merge-status {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
+        /* Activity */
+        .activity-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
             font-weight: 500;
         }
 
-        .ci-pass {
-            background: var(--green);
-            color: var(--bg-dark);
+        .activity-green .activity-indicator { color: var(--green); }
+        .activity-yellow .activity-indicator { color: var(--yellow); }
+        .activity-red .activity-indicator { color: var(--red); }
+        .activity-idle .activity-indicator { color: var(--text-muted); }
+        .activity-unknown .activity-indicator { color: var(--text-muted); }
+
+        .activity-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
         }
 
-        .ci-fail {
-            background: var(--red);
-            color: var(--bg-dark);
+        .activity-green .activity-dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+        .activity-yellow .activity-dot { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+        .activity-red .activity-dot { background: var(--red); box-shadow: 0 0 8px var(--red); animation: pulse-red 1.5s infinite; }
+        .activity-idle .activity-dot { background: var(--text-muted); }
+        .activity-unknown .activity-dot { background: var(--text-muted); }
+
+        /* ACTION BUTTONS */
+        .action-btn {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-decoration: none;
+            border: 1px solid transparent;
+            transition: all 0.15s ease;
+            cursor: pointer;
         }
 
-        .ci-pending {
-            background: var(--yellow);
-            color: var(--bg-dark);
+        .action-btn.muted {
+            color: var(--text-secondary);
+            border-color: var(--border);
+            opacity: 0.7;
+        }
+        .action-btn.muted:hover {
+            background: var(--bg-card-alt);
+            color: var(--text-primary);
+            opacity: 1;
         }
 
-        .merge-ready {
-            background: var(--green);
-            color: var(--bg-dark);
+        .action-btn.primary {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+        .action-btn.primary:hover {
+            background: var(--accent-dim);
         }
 
-        .merge-conflict {
-            background: var(--red);
-            color: var(--bg-dark);
+        .action-btn.warning {
+            color: var(--yellow);
+            border-color: var(--yellow);
+        }
+        .action-btn.warning:hover {
+            background: rgba(240, 180, 41, 0.15);
         }
 
-        .merge-pending {
-            background: var(--yellow);
-            color: var(--bg-dark);
+        .action-btn.danger {
+            color: var(--red);
+            border-color: var(--red);
+            font-weight: 600;
         }
+        .action-btn.danger:hover {
+            background: rgba(255, 107, 107, 0.15);
+        }
+
+        /* CI/Merge badges */
+        .ci-badge, .merge-badge {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+
+        .ci-pass { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+        .ci-fail { background: rgba(255, 107, 107, 0.15); color: var(--red); }
+        .ci-pending { background: rgba(240, 180, 41, 0.15); color: var(--yellow); }
+
+        .merge-ready { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+        .merge-conflict { background: rgba(255, 107, 107, 0.15); color: var(--red); }
+        .merge-pending { background: rgba(240, 180, 41, 0.15); color: var(--yellow); }
+
+        .mq-green { background: rgba(63, 185, 80, 0.06); }
+        .mq-yellow { background: rgba(240, 180, 41, 0.06); }
+        .mq-red { background: rgba(255, 107, 107, 0.06); }
+
+        .status-hint { color: var(--text-secondary); font-size: 0.85rem; }
+        .status-link { color: var(--accent); font-size: 0.85rem; text-decoration: none; }
+        .status-link:hover { text-decoration: underline; }
 
         .pr-link {
-            color: var(--text-primary);
+            color: var(--accent);
+            font-weight: 500;
             text-decoration: none;
         }
-
-        .pr-link:hover {
-            text-decoration: underline;
-        }
+        .pr-link:hover { text-decoration: underline; }
 
         .pr-title {
             color: var(--text-secondary);
-            margin-left: 8px;
             max-width: 400px;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -311,59 +476,146 @@
             vertical-align: middle;
         }
 
-        /* htmx loading indicator */
-        .htmx-request .htmx-indicator {
-            opacity: 1;
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            background: var(--bg-card);
+            border-radius: 10px;
+            border: 1px solid var(--border);
         }
 
-        .htmx-indicator {
-            opacity: 0;
-            transition: opacity 200ms ease-in;
+        .empty-state h2 {
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            font-size: 1.1rem;
         }
+
+        .empty-state p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .empty-state-inline {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-secondary);
+            background: var(--bg-card);
+            border-radius: 10px;
+            border: 1px solid var(--border);
+        }
+
+        .empty-state-inline p {
+            font-size: 0.875rem;
+            margin: 0;
+        }
+
+        /* Footer */
+        footer {
+            margin-top: 24px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        footer .updated {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.75rem;
+        }
+
+        /* htmx loading indicator */
+        .htmx-request .htmx-indicator { opacity: 1; }
+        .htmx-indicator { opacity: 0; transition: opacity 200ms ease-in; }
     </style>
 </head>
 <body>
     <div class="dashboard" hx-get="/" hx-trigger="every 10s" hx-swap="outerHTML">
-        <header>
-            <h1>🚚 Gas Town Convoys</h1>
-            <span class="refresh-info">
-                Auto-refresh: every 10s
-                <span class="htmx-indicator">⟳</span>
-            </span>
-        </header>
+        <!-- Header: Brand+Live | spacer | Nav + Stats -->
+        <div class="header-row">
+            <div class="brand-section">
+                <img src="https://atmosphere-aviation.com/wp-content/uploads/2023/04/atmosphere-aviation-private-jet-logo.png.webp" alt="Atmosphere Aviation" class="logo">
+                <h1>Mission Control</h1>
+                <div class="live-indicator">
+                    <span class="live-dot"></span>
+                    Live
+                    <span class="htmx-indicator">...</span>
+                </div>
+            </div>
 
+            <div class="header-spacer"></div>
+
+            <!-- Navigation -->
+            <div class="nav-links">
+                <a href="http://localhost:8082" target="_blank" class="nav-link" title="View Beads Dashboard">
+                    <span class="nav-icon">📿</span> Beads
+                </a>
+            </div>
+
+            <div class="stats-row">
+                <div class="stat-mini">
+                    <div class="value">{{len .Convoys}}</div>
+                    <div class="label">Convoys</div>
+                </div>
+                <div class="stat-mini highlight">
+                    <div class="value">{{countComplete .Convoys}}/{{len .Convoys}}</div>
+                    <div class="label">Complete</div>
+                </div>
+                <div class="stat-mini">
+                    <div class="value">{{len .MergeQueue}}</div>
+                    <div class="label">PRs</div>
+                </div>
+                <div class="stat-mini">
+                    <div class="value">{{len .Polecats}}</div>
+                    <div class="label">Workers</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONVOY TABLE -->
+        <h2 class="section-header">Convoys</h2>
         {{if .Convoys}}
         <table class="convoy-table">
             <thead>
                 <tr>
-                    <th>Status</th>
-                    <th>Convoy</th>
-                    <th>Progress</th>
-                    <th>Last Activity</th>
+                    <th class="col-status">Status</th>
+                    <th class="text-left">Convoy</th>
+                    <th class="col-shrink">Progress</th>
+                    <th class="col-last-seen">Last Seen</th>
+                    <th class="col-actions">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {{range .Convoys}}
-                <tr class="{{workStatusClass .WorkStatus}}">
-                    <td>
-                        <span class="work-status">{{.WorkStatus}}</span>
-                    </td>
-                    <td>
+                <tr class="{{rowClass .WorkStatus}}">
+                    <td><span class="status-badge {{statusBadgeClass .WorkStatus}}">{{.WorkStatus}}</span></td>
+                    <td class="text-left">
                         <span class="convoy-id">{{.ID}}</span>
                         <span class="convoy-title">{{.Title}}</span>
                     </td>
-                    <td class="progress">
-                        {{.Progress}}
-                        {{if .Total}}
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: {{progressPercent .Completed .Total}}%;"></div>
+                    <td>
+                        <div class="progress-cell">
+                            <div class="progress-ring {{ringClass .WorkStatus}}">
+                                <svg width="32" height="32" viewBox="0 0 32 32">
+                                    <circle class="ring-bg" cx="16" cy="16" r="13"/>
+                                    <circle class="ring-fill" cx="16" cy="16" r="13"
+                                        stroke-dasharray="82" stroke-dashoffset="{{ringOffset .Completed .Total}}" style="stroke: {{ringColor .WorkStatus}};"/>
+                                </svg>
+                                <span class="ring-value">{{.Completed}}/{{.Total}}</span>
+                            </div>
+                            <span class="progress-unit">tasks</span>
                         </div>
-                        {{end}}
                     </td>
                     <td class="{{activityClass .LastActivity}}">
-                        <span class="activity-dot"></span>
-                        {{.LastActivity.FormattedAge}}
+                        <span class="activity-indicator">{{.LastActivity.FormattedAge}}</span>
                     </td>
+                    <td><a href="#" class="action-btn {{actionBtnClass .WorkStatus}}">{{actionLabel .WorkStatus}}</a></td>
                 </tr>
                 {{end}}
             </tbody>
@@ -375,46 +627,29 @@
         </div>
         {{end}}
 
-        <h2 class="section-header">🔀 Refinery Merge Queue</h2>
+        <!-- MERGE QUEUE -->
+        <h2 class="section-header">Merge Queue</h2>
         {{if .MergeQueue}}
         <table class="convoy-table">
             <thead>
                 <tr>
-                    <th>PR #</th>
-                    <th>Repo</th>
-                    <th>Title</th>
-                    <th>CI Status</th>
-                    <th>Mergeable</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-shrink">PR</th>
+                    <th class="col-shrink">Repo</th>
+                    <th class="text-left">Title</th>
+                    <th class="col-last-seen">CI</th>
+                    <th class="col-actions">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {{range .MergeQueue}}
                 <tr class="{{.ColorClass}}">
-                    <td>
-                        <a href="{{.URL}}" target="_blank" class="pr-link">#{{.Number}}</a>
-                    </td>
+                    <td><span class="status-badge {{mergeStatusClass .Mergeable}}">{{mergeStatusLabel .Mergeable}}</span></td>
+                    <td><a href="{{.URL}}" target="_blank" class="pr-link">#{{.Number}}</a></td>
                     <td>{{.Repo}}</td>
-                    <td>
-                        <span class="pr-title">{{.Title}}</span>
-                    </td>
-                    <td>
-                        {{if eq .CIStatus "pass"}}
-                        <span class="ci-status ci-pass">✓ Pass</span>
-                        {{else if eq .CIStatus "fail"}}
-                        <span class="ci-status ci-fail">✗ Fail</span>
-                        {{else}}
-                        <span class="ci-status ci-pending">⏳ Pending</span>
-                        {{end}}
-                    </td>
-                    <td>
-                        {{if eq .Mergeable "ready"}}
-                        <span class="merge-status merge-ready">Ready</span>
-                        {{else if eq .Mergeable "conflict"}}
-                        <span class="merge-status merge-conflict">Conflict</span>
-                        {{else}}
-                        <span class="merge-status merge-pending">Pending</span>
-                        {{end}}
-                    </td>
+                    <td class="text-left"><span class="pr-title">{{.Title}}</span></td>
+                    <td><span class="ci-badge {{ciClass .CIStatus}}">{{ciLabel .CIStatus}}</span></td>
+                    <td><a href="{{.URL}}" target="_blank" class="action-btn {{if eq .Mergeable "ready"}}primary{{else}}muted{{end}}">{{if eq .Mergeable "ready"}}Merge{{else}}View{{end}}</a></td>
                 </tr>
                 {{end}}
             </tbody>
@@ -425,34 +660,40 @@
         </div>
         {{end}}
 
+        <!-- WORKERS -->
         {{if .Polecats}}
-        <h2 class="section-header">🐾 Polecat Workers</h2>
+        <h2 class="section-header">Workers</h2>
         <table class="convoy-table">
             <thead>
                 <tr>
-                    <th>Polecat</th>
-                    <th>Rig</th>
-                    <th>Last Activity</th>
-                    <th>Status</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-shrink">Rig</th>
+                    <th class="text-left">Worker</th>
+                    <th class="col-last-seen">Last Seen</th>
+                    <th class="col-actions">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {{range .Polecats}}
-                <tr>
-                    <td>
-                        <span class="convoy-id">{{.Name}}</span>
-                    </td>
-                    <td>{{.Rig}}</td>
+                <tr class="{{workerRowClass .LastActivity}}">
+                    <td><span class="status-badge {{workerStatusClass .LastActivity}}">{{workerStatusLabel .LastActivity}}</span></td>
+                    <td class="col-shrink">{{.Rig}}</td>
+                    <td class="text-left"><span class="convoy-id">{{.Name}}</span></td>
                     <td class="{{activityClass .LastActivity}}">
-                        <span class="activity-dot"></span>
-                        {{.LastActivity.FormattedAge}}
+                        <span class="activity-indicator">{{.LastActivity.FormattedAge}}</span>
                     </td>
-                    <td class="status-hint">{{.StatusHint}}</td>
+                    <td><a href="#" class="action-btn {{workerActionClass .LastActivity}}">{{workerActionLabel .LastActivity}}</a></td>
                 </tr>
                 {{end}}
             </tbody>
         </table>
         {{end}}
+
+        <footer>
+            <span>Gas Town v0.2.7</span>
+            <span>{{.RigPath}}</span>
+            <span class="updated">Updated just now</span>
+        </footer>
     </div>
 </body>
 </html>
