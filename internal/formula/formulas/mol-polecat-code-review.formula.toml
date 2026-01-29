@@ -292,6 +292,7 @@ Once you run `gt done`, you're gone. The command:
 
 **Run gt done:**
 ```bash
+bd sync
 gt done
 ```
 

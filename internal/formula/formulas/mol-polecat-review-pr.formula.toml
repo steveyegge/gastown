@@ -243,6 +243,11 @@ bd update {{issue}} --notes "Review complete. Decision: <APPROVE|REQUEST_CHANGES
 Followups filed: <list of bead IDs if any>"
 ```
 
+**4. Sync beads:**
+```bash
+bd sync
+```
+
 **Exit criteria:** All followup work captured as beads."""
 
 [[steps]]
