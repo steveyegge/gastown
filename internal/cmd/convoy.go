@@ -759,7 +759,7 @@ func runConvoyStranded(cmd *cobra.Command, args []string) error {
 
 // findStrandedConvoys finds convoys with ready work but no workers.
 func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
-	var stranded []strandedConvoyInfo
+	stranded := []strandedConvoyInfo{} // Initialize as empty slice for proper JSON encoding
 
 	// Get blocked issues (we need this to filter out blocked issues)
 	blockedIssues := getBlockedIssueIDs()
