@@ -108,6 +108,117 @@ Both backends are accessed through the `bd` CLI abstraction layer, which provide
 no-auto-import: true
 ```
 
+## Central Database Pattern
+
+Gas Town supports a **central database** architecture where all rigs in a town share a single Dolt database. This eliminates database synchronization issues and provides a unified view of all beads.
+
+### Architecture
+
+```
+Town (~/.gt or ~/gt)
+├── .beads/
+│   └── metadata.json  ──────► Central DB config
+│                               (dolt_server_enabled: true)
+├── gastown/
+│   ├── .beads/redirect ──────► ../.beads (town level)
+│   ├── mayor/rig/.beads/
+│   │   └── metadata.json ────► External DB path
+│   ├── crew/<name>/.beads/
+│   │   └── redirect ─────────► ../../mayor/rig/.beads
+│   └── polecats/<name>/.beads/
+│       └── redirect ─────────► ../../mayor/rig/.beads
+│
+└── ~/.beads-dolt/beads/  ◄─── Actual Dolt database
+    ├── .dolt/
+    └── issues (table)
+```
+
+### How It Works
+
+1. **Town-level metadata.json** declares the central database:
+   ```json
+   {
+     "database": "/home/user/.beads-dolt/beads",
+     "backend": "dolt",
+     "prefix": "hq-",
+     "dolt_server_enabled": true,
+     "dolt_server_host": "127.0.0.1",
+     "dolt_server_port": 3306
+   }
+   ```
+
+2. **Rig-level metadata.json** points to the external database:
+   ```json
+   {
+     "database": "/home/user/.beads-dolt/beads",
+     "backend": "dolt",
+     "prefix": "gt-",
+     "dolt_server_enabled": true,
+     "dolt_server_host": "127.0.0.1",
+     "dolt_server_port": 3306
+   }
+   ```
+
+3. **Crew and polecats use redirect files** that chain to the rig's `.beads`:
+   ```
+   # crew/emma/.beads/redirect
+   ../../mayor/rig/.beads
+   ```
+
+### Automatic Setup
+
+When you run `gt rig add`, Gas Town automatically detects if the town uses a central database and configures the new rig appropriately:
+
+1. **Checks `IsDoltServerMode(townBeadsDir)`** - looks for:
+   - `backend: "dolt"` AND
+   - `dolt_server_enabled: true` OR `dolt_mode: "server"`
+
+2. **If central DB detected**: Creates a redirect to town-level `.beads`
+3. **If no central DB**: Creates a local database for the rig
+
+### Dolt Server Management
+
+The central database requires a running Dolt SQL server:
+
+```bash
+# Start the server (from the database directory)
+cd ~/.beads-dolt/beads
+dolt sql-server --host 127.0.0.1 --port 3306 --remotesapi-port 8080 &
+
+# Verify it's running
+lsof -i :3306
+```
+
+**Note:** Consider using a systemd service for production (see `docs/design/systemctl-daemon-service.md`).
+
+### Prefix Conventions
+
+With a central database, use distinct prefixes per rig:
+
+| Rig | Prefix | Example IDs |
+|-----|--------|-------------|
+| HQ (town-level) | `hq-` | hq-abc123 |
+| gastown | `gt-` | gt-xyz789 |
+| beads | `bd-` | bd-def456 |
+
+### Benefits
+
+- **No sync conflicts**: All agents read/write the same database
+- **Unified view**: `bd list` shows all beads from all rigs
+- **Simplified operations**: No JSONL import/export between clones
+- **Better performance**: Single Dolt server handles all queries
+
+### Troubleshooting
+
+**New rig not using central DB:**
+- Check town-level `metadata.json` has `dolt_server_enabled: true`
+- Both `dolt_server_enabled` and `dolt_mode: "server"` are accepted
+
+**Daemon can't connect:**
+- Verify Dolt server is running: `lsof -i :3306`
+- Check server is using correct database directory
+- Verify `database` path in metadata.json is correct
+
 ### Version Control Features
 
 Dolt provides version control features through the `bd` CLI:
