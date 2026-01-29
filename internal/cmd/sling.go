@@ -194,6 +194,11 @@ func runSling(cmd *cobra.Command, args []string) error {
 	if len(args) > 1 {
 		target := args[1]
 
+		// Validate target format early to provide helpful error messages
+		if validation := ValidateTarget(target); !validation.Valid {
+			return fmt.Errorf("%s", FormatValidationError(validation))
+		}
+
 		// Resolve "." to current agent identity (like git's "." meaning current directory)
 		if target == "." {
 			targetAgent, targetPane, _, err = resolveSelfTarget()
