@@ -875,18 +875,18 @@ func ConfigureSparseCheckout(repoPath string) error {
 
 	// Write patterns directly to sparse-checkout file
 	// (git sparse-checkout set --stdin escapes the ! character incorrectly)
-	// Exclude all Claude Code context files to prevent source repo instructions
+	// Exclude Claude Code context files to prevent source repo instructions
 	// from interfering with Gas Town agent context:
 	// - .claude/      : settings, rules, agents, commands
 	// - CLAUDE.md     : primary context file
 	// - CLAUDE.local.md : personal context file
-	// - .mcp.json     : MCP server configuration
+	// Note: .mcp.json is NOT excluded so worktrees can inherit MCP server config
 	infoDir := filepath.Join(gitDir, "info")
 	if err := os.MkdirAll(infoDir, 0755); err != nil {
 		return fmt.Errorf("creating info dir: %w", err)
 	}
 	sparseFile := filepath.Join(infoDir, "sparse-checkout")
-	sparsePatterns := "/*\n!/.claude/\n!/CLAUDE.md\n!/CLAUDE.local.md\n!/.mcp.json\n"
+	sparsePatterns := "/*\n!/.claude/\n!/CLAUDE.md\n!/CLAUDE.local.md\n"
 	if err := os.WriteFile(sparseFile, []byte(sparsePatterns), 0644); err != nil {
 		return fmt.Errorf("writing sparse-checkout: %w", err)
 	}
@@ -910,11 +910,11 @@ func ConfigureSparseCheckout(repoPath string) error {
 }
 
 // ExcludedContextFiles lists all Claude context files that should be excluded by sparse checkout.
+// Note: .mcp.json is NOT excluded so worktrees can inherit MCP server config (e.g., Puppeteer).
 var ExcludedContextFiles = []string{
 	".claude",
 	"CLAUDE.md",
 	"CLAUDE.local.md",
-	".mcp.json",
 }
 
 // CheckExcludedFilesExist checks if any Claude context files still exist in the repo
