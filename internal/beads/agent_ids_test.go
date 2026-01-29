@@ -201,21 +201,30 @@ func TestCrewBeadIDWithPrefixDeduplication(t *testing.T) {
 // TestPolecatBeadIDTown tests the town-level Polecat bead ID (fix for loc-1augh).
 func TestPolecatBeadIDTown(t *testing.T) {
 	tests := []struct {
+		town  string
 		rig   string
 		pname string
 		want  string
 	}{
-		{"gastown", "toast", "hq-gastown-polecat-toast"},
-		{"local", "marten", "hq-local-polecat-marten"},
-		{"fhc", "stoat", "hq-fhc-polecat-stoat"},
+		// With town name (multi-town support)
+		{"gt11", "gastown", "toast", "hq-gt11-gastown-polecat-toast"},
+		{"gt11", "local", "marten", "hq-gt11-local-polecat-marten"},
+		{"gt11", "fhc", "stoat", "hq-gt11-fhc-polecat-stoat"},
+		// Without town name (backward compatibility, no double hyphens)
+		{"", "beads", "lex", "hq-beads-polecat-lex"},
+		{"", "gastown", "nux", "hq-gastown-polecat-nux"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.rig+"/"+tt.pname, func(t *testing.T) {
-			got := PolecatBeadIDTown(tt.rig, tt.pname)
+		name := tt.rig + "/" + tt.pname
+		if tt.town != "" {
+			name = tt.town + "/" + name
+		}
+		t.Run(name, func(t *testing.T) {
+			got := PolecatBeadIDTown(tt.town, tt.rig, tt.pname)
 			if got != tt.want {
-				t.Errorf("PolecatBeadIDTown(%q, %q) = %q, want %q",
-					tt.rig, tt.pname, got, tt.want)
+				t.Errorf("PolecatBeadIDTown(%q, %q, %q) = %q, want %q",
+					tt.town, tt.rig, tt.pname, got, tt.want)
 			}
 		})
 	}
@@ -224,19 +233,28 @@ func TestPolecatBeadIDTown(t *testing.T) {
 // TestWitnessBeadIDTown tests the town-level Witness bead ID.
 func TestWitnessBeadIDTown(t *testing.T) {
 	tests := []struct {
+		town string
 		rig  string
 		want string
 	}{
-		{"gastown", "hq-gastown-witness"},
-		{"local", "hq-local-witness"},
+		// With town name (multi-town support)
+		{"gt11", "gastown", "hq-gt11-gastown-witness"},
+		{"gt11", "local", "hq-gt11-local-witness"},
+		// Without town name (backward compatibility, no double hyphens)
+		{"", "gastown", "hq-gastown-witness"},
+		{"", "beads", "hq-beads-witness"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.rig, func(t *testing.T) {
-			got := WitnessBeadIDTown(tt.rig)
+		name := tt.rig
+		if tt.town != "" {
+			name = tt.town + "/" + name
+		}
+		t.Run(name, func(t *testing.T) {
+			got := WitnessBeadIDTown(tt.town, tt.rig)
 			if got != tt.want {
-				t.Errorf("WitnessBeadIDTown(%q) = %q, want %q",
-					tt.rig, got, tt.want)
+				t.Errorf("WitnessBeadIDTown(%q, %q) = %q, want %q",
+					tt.town, tt.rig, got, tt.want)
 			}
 		})
 	}
@@ -245,19 +263,28 @@ func TestWitnessBeadIDTown(t *testing.T) {
 // TestRefineryBeadIDTown tests the town-level Refinery bead ID.
 func TestRefineryBeadIDTown(t *testing.T) {
 	tests := []struct {
+		town string
 		rig  string
 		want string
 	}{
-		{"gastown", "hq-gastown-refinery"},
-		{"local", "hq-local-refinery"},
+		// With town name (multi-town support)
+		{"gt11", "gastown", "hq-gt11-gastown-refinery"},
+		{"gt11", "local", "hq-gt11-local-refinery"},
+		// Without town name (backward compatibility, no double hyphens)
+		{"", "gastown", "hq-gastown-refinery"},
+		{"", "beads", "hq-beads-refinery"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.rig, func(t *testing.T) {
-			got := RefineryBeadIDTown(tt.rig)
+		name := tt.rig
+		if tt.town != "" {
+			name = tt.town + "/" + name
+		}
+		t.Run(name, func(t *testing.T) {
+			got := RefineryBeadIDTown(tt.town, tt.rig)
 			if got != tt.want {
-				t.Errorf("RefineryBeadIDTown(%q) = %q, want %q",
-					tt.rig, got, tt.want)
+				t.Errorf("RefineryBeadIDTown(%q, %q) = %q, want %q",
+					tt.town, tt.rig, got, tt.want)
 			}
 		})
 	}
@@ -266,20 +293,29 @@ func TestRefineryBeadIDTown(t *testing.T) {
 // TestCrewBeadIDTown tests the town-level Crew bead ID.
 func TestCrewBeadIDTown(t *testing.T) {
 	tests := []struct {
+		town  string
 		rig   string
 		cname string
 		want  string
 	}{
-		{"gastown", "max", "hq-gastown-crew-max"},
-		{"local", "dave", "hq-local-crew-dave"},
+		// With town name (multi-town support)
+		{"gt11", "gastown", "max", "hq-gt11-gastown-crew-max"},
+		{"gt11", "local", "dave", "hq-gt11-local-crew-dave"},
+		// Without town name (backward compatibility, no double hyphens)
+		{"", "gastown", "max", "hq-gastown-crew-max"},
+		{"", "beads", "lex", "hq-beads-crew-lex"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.rig+"/"+tt.cname, func(t *testing.T) {
-			got := CrewBeadIDTown(tt.rig, tt.cname)
+		name := tt.rig + "/" + tt.cname
+		if tt.town != "" {
+			name = tt.town + "/" + name
+		}
+		t.Run(name, func(t *testing.T) {
+			got := CrewBeadIDTown(tt.town, tt.rig, tt.cname)
 			if got != tt.want {
-				t.Errorf("CrewBeadIDTown(%q, %q) = %q, want %q",
-					tt.rig, tt.cname, got, tt.want)
+				t.Errorf("CrewBeadIDTown(%q, %q, %q) = %q, want %q",
+					tt.town, tt.rig, tt.cname, got, tt.want)
 			}
 		})
 	}

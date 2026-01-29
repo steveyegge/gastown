@@ -104,26 +104,42 @@ func CrewRoleBeadIDTown() string {
 
 // WitnessBeadIDTown returns a Witness agent bead ID for town-level storage.
 // Uses hq- prefix with town name for multi-town support.
+// If town is empty, omits the town component to avoid double hyphens.
 func WitnessBeadIDTown(town, rig string) string {
+	if town == "" {
+		return fmt.Sprintf("%s-%s-witness", TownBeadsPrefix, rig)
+	}
 	return fmt.Sprintf("%s-%s-%s-witness", TownBeadsPrefix, town, rig)
 }
 
 // RefineryBeadIDTown returns a Refinery agent bead ID for town-level storage.
 // Uses hq- prefix with town name for multi-town support.
+// If town is empty, omits the town component to avoid double hyphens.
 func RefineryBeadIDTown(town, rig string) string {
+	if town == "" {
+		return fmt.Sprintf("%s-%s-refinery", TownBeadsPrefix, rig)
+	}
 	return fmt.Sprintf("%s-%s-%s-refinery", TownBeadsPrefix, town, rig)
 }
 
 // CrewBeadIDTown returns a Crew worker agent bead ID for town-level storage.
 // Uses hq- prefix with town name for multi-town support.
+// If town is empty, omits the town component to avoid double hyphens.
 func CrewBeadIDTown(town, rig, name string) string {
+	if town == "" {
+		return fmt.Sprintf("%s-%s-crew-%s", TownBeadsPrefix, rig, name)
+	}
 	return fmt.Sprintf("%s-%s-%s-crew-%s", TownBeadsPrefix, town, rig, name)
 }
 
 // PolecatBeadIDTown returns a Polecat agent bead ID for town-level storage.
 // Uses hq- prefix with town name for multi-town support.
+// If town is empty, omits the town component to avoid double hyphens.
 // This is the recommended function for creating polecat agent beads.
 func PolecatBeadIDTown(town, rig, name string) string {
+	if town == "" {
+		return fmt.Sprintf("%s-%s-polecat-%s", TownBeadsPrefix, rig, name)
+	}
 	return fmt.Sprintf("%s-%s-%s-polecat-%s", TownBeadsPrefix, town, rig, name)
 }
 
