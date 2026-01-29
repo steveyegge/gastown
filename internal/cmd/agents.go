@@ -284,6 +284,25 @@ func shortcutKey(index int) string {
 	return ""
 }
 
+// supportsDisplayMenu checks if the current terminal environment supports tmux display-menu.
+// Returns false for terminals known to not support popup menus (e.g., macOS Terminal.app)
+// or when not running inside a tmux session.
+func supportsDisplayMenu() bool {
+	// Must be inside tmux for display-menu to work
+	if !tmux.IsInsideTmux() {
+		return false
+	}
+
+	// macOS Terminal.app doesn't properly support tmux popup/menu overlays.
+	// The command runs but nothing appears on screen.
+	termProgram := os.Getenv("TERM_PROGRAM")
+	if termProgram == "Apple_Terminal" {
+		return false
+	}
+
+	return true
+}
+
 func runAgents(cmd *cobra.Command, args []string) error {
 	agents, err := getAgentSessions(agentsAllFlag)
 	if err != nil {
@@ -296,6 +315,23 @@ func runAgents(cmd *cobra.Command, args []string) error {
 		fmt.Println("  gt mayor start")
 		fmt.Println("  gt deacon start")
 		return nil
+	}
+
+	// Check if terminal supports display-menu, fall back to list if not
+	if !supportsDisplayMenu() {
+		// Print a hint about why we're showing the list
+		if !tmux.IsInsideTmux() {
+			fmt.Println("(Not inside tmux - showing list view. Run inside tmux for interactive menu.)")
+			fmt.Println()
+		} else {
+			termProgram := os.Getenv("TERM_PROGRAM")
+			if termProgram == "Apple_Terminal" {
+				fmt.Println("(macOS Terminal.app doesn't support tmux menus - showing list view.)")
+				fmt.Println("(Tip: Use iTerm2 or another terminal for the interactive menu.)")
+				fmt.Println()
+			}
+		}
+		return runAgentsList(cmd, args)
 	}
 
 	// Build display-menu arguments
