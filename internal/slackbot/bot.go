@@ -339,6 +339,9 @@ func (b *Bot) handleInteraction(callback slack.InteractionCallback) {
 		default:
 			if strings.HasPrefix(action.ActionID, "resolve_") {
 				b.handleResolveDecision(callback, action)
+			} else if strings.HasPrefix(action.ActionID, "show_context_") {
+				decisionID := strings.TrimPrefix(action.ActionID, "show_context_")
+				b.handleShowContext(callback, decisionID)
 			}
 		}
 	}
@@ -704,6 +707,123 @@ func (b *Bot) handleResolveDecision(callback slack.InteractionCallback, action *
 		log.Printf("Slack: Error opening modal: %v", err)
 		b.postEphemeral(callback.Channel.ID, callback.User.ID,
 			fmt.Sprintf("Error opening dialog: %v", err))
+	}
+}
+
+// handleShowContext opens a modal with the full decision context
+func (b *Bot) handleShowContext(callback slack.InteractionCallback, decisionID string) {
+	ctx := context.Background()
+
+	// Fetch decision details
+	decision, err := b.rpcClient.GetDecision(ctx, decisionID)
+	if err != nil {
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Error fetching decision: %v", err))
+		return
+	}
+
+	if decision == nil {
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Decision %s not found.", decisionID))
+		return
+	}
+
+	// Build and open the context modal
+	modalRequest := b.buildContextModal(decision)
+	_, err = b.client.OpenView(callback.TriggerID, modalRequest)
+	if err != nil {
+		log.Printf("Slack: Error opening context modal: %v", err)
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Error opening context modal: %v", err))
+	}
+}
+
+// buildContextModal creates a modal view for displaying full decision context
+func (b *Bot) buildContextModal(decision *rpcclient.Decision) slack.ModalViewRequest {
+	var blocks []slack.Block
+
+	// Question section
+	blocks = append(blocks, slack.NewSectionBlock(
+		slack.NewTextBlockObject("mrkdwn",
+			fmt.Sprintf("*Question:*\n%s", decision.Question),
+			false, false,
+		),
+		nil, nil,
+	))
+
+	blocks = append(blocks, slack.NewDividerBlock())
+
+	// Full context section
+	if decision.Context != "" {
+		// Pretty-print JSON if possible
+		contextDisplay := decision.Context
+		var jsonObj interface{}
+		if err := json.Unmarshal([]byte(decision.Context), &jsonObj); err == nil {
+			if prettyJSON, err := json.MarshalIndent(jsonObj, "", "  "); err == nil {
+				contextDisplay = string(prettyJSON)
+			}
+		}
+
+		// Slack text blocks have a 3000 char limit, split if needed
+		const maxBlockLen = 2900
+		if len(contextDisplay) <= maxBlockLen {
+			blocks = append(blocks, slack.NewSectionBlock(
+				slack.NewTextBlockObject("mrkdwn",
+					fmt.Sprintf("*Context:*\n```%s```", contextDisplay),
+					false, false,
+				),
+				nil, nil,
+			))
+		} else {
+			// Split into multiple blocks
+			blocks = append(blocks, slack.NewSectionBlock(
+				slack.NewTextBlockObject("mrkdwn", "*Context:*", false, false),
+				nil, nil,
+			))
+
+			for i := 0; i < len(contextDisplay); i += maxBlockLen {
+				end := i + maxBlockLen
+				if end > len(contextDisplay) {
+					end = len(contextDisplay)
+				}
+				chunk := contextDisplay[i:end]
+				blocks = append(blocks, slack.NewSectionBlock(
+					slack.NewTextBlockObject("mrkdwn",
+						fmt.Sprintf("```%s```", chunk),
+						false, false,
+					),
+					nil, nil,
+				))
+			}
+		}
+	} else {
+		blocks = append(blocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn", "*Context:* _(none provided)_", false, false),
+			nil, nil,
+		))
+	}
+
+	blocks = append(blocks, slack.NewDividerBlock())
+
+	// Metadata section
+	metaText := fmt.Sprintf("*ID:* `%s`\n*Urgency:* %s\n*Requested by:* %s",
+		decision.ID, decision.Urgency, decision.RequestedBy)
+	if decision.PredecessorID != "" {
+		metaText += fmt.Sprintf("\n*Predecessor:* `%s`", decision.PredecessorID)
+	}
+	blocks = append(blocks, slack.NewSectionBlock(
+		slack.NewTextBlockObject("mrkdwn", metaText, false, false),
+		nil, nil,
+	))
+
+	return slack.ModalViewRequest{
+		Type:       slack.VTModal,
+		CallbackID: "context_modal",
+		Title:      slack.NewTextBlockObject("plain_text", "Decision Context", false, false),
+		Close:      slack.NewTextBlockObject("plain_text", "Close", false, false),
+		Blocks: slack.Blocks{
+			BlockSet: blocks,
+		},
 	}
 }
 
