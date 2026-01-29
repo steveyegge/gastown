@@ -459,7 +459,9 @@ func sessionWorkDir(sessionName, townRoot string) (string, error) {
 
 	switch {
 	case sessionName == mayorSession:
-		return townRoot, nil
+		// Mayor runs from ~/gt/mayor/, not town root.
+		// Tools use workspace.FindFromCwd() which walks UP to find town root.
+		return townRoot + "/mayor", nil
 
 	case sessionName == deaconSession:
 		return townRoot + "/deacon", nil
