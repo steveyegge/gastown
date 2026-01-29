@@ -1019,3 +1019,52 @@ func NewEscalationConfig() *EscalationConfig {
 		MaxReescalations: 2,
 	}
 }
+
+// SlackConfig represents Slack integration configuration (settings/slack.json).
+// This defines channel routing for decision notifications based on agent identity.
+type SlackConfig struct {
+	Type    string `json:"type"`    // "slack"
+	Version int    `json:"version"` // schema version
+
+	// Enabled controls whether Slack notifications are active.
+	Enabled bool `json:"enabled"`
+
+	// DefaultChannel is the fallback channel when no pattern matches.
+	// Format: channel ID (e.g., "C0123456789") or name (e.g., "#decisions")
+	DefaultChannel string `json:"default_channel"`
+
+	// Channels maps agent patterns to Slack channel IDs.
+	// Patterns support wildcards: "*" matches any single path segment.
+	// Examples:
+	//   "gastown/polecats/*"  → all polecats in gastown
+	//   "*/crew/*"            → all crew members across rigs
+	//   "beads/*"             → all agents in beads rig
+	// Resolution order: exact match → fewer wildcards → more segments → first in config
+	Channels map[string]string `json:"channels,omitempty"`
+
+	// ChannelNames maps channel IDs to human-readable names for display.
+	// Optional; used for logging and debugging.
+	ChannelNames map[string]string `json:"channel_names,omitempty"`
+
+	// BotToken is the Slack bot OAuth token (xoxb-...).
+	// Can also be set via SLACK_BOT_TOKEN environment variable.
+	BotToken string `json:"bot_token,omitempty"`
+
+	// AppToken is the Slack app-level token for Socket Mode (xapp-...).
+	// Can also be set via SLACK_APP_TOKEN environment variable.
+	AppToken string `json:"app_token,omitempty"`
+}
+
+// CurrentSlackVersion is the current schema version for SlackConfig.
+const CurrentSlackVersion = 1
+
+// NewSlackConfig creates a new SlackConfig with sensible defaults.
+func NewSlackConfig() *SlackConfig {
+	return &SlackConfig{
+		Type:         "slack",
+		Version:      CurrentSlackVersion,
+		Enabled:      false,
+		Channels:     make(map[string]string),
+		ChannelNames: make(map[string]string),
+	}
+}
