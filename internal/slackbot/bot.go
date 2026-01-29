@@ -19,6 +19,12 @@ import (
 	"github.com/steveyegge/gastown/internal/util"
 )
 
+// messageInfo tracks a posted Slack message for later updates/deletion.
+type messageInfo struct {
+	channelID string
+	timestamp string
+}
+
 // Bot is a Slack bot for managing Gas Town decisions.
 type Bot struct {
 	client      *slack.Client
@@ -33,6 +39,10 @@ type Bot struct {
 	channelPrefix      string            // Prefix for created channels (e.g., "gt-decisions")
 	channelCache       map[string]string // Cache: agent pattern → channel ID
 	channelCacheMu     sync.RWMutex      // Protects channelCache
+
+	// Decision message tracking for auto-dismiss
+	decisionMessages   map[string]messageInfo // decision ID → message info
+	decisionMessagesMu sync.RWMutex           // Protects decisionMessages
 }
 
 // Config holds configuration for the Slack bot.
@@ -99,15 +109,16 @@ func New(cfg Config) (*Bot, error) {
 	}
 
 	return &Bot{
-		client:          client,
-		socketMode:      socketClient,
-		rpcClient:       rpcClient,
-		channelID:       cfg.ChannelID,
-		router:          router,
-		debug:           cfg.Debug,
-		dynamicChannels: cfg.DynamicChannels,
-		channelPrefix:   channelPrefix,
-		channelCache:    make(map[string]string),
+		client:           client,
+		socketMode:       socketClient,
+		rpcClient:        rpcClient,
+		channelID:        cfg.ChannelID,
+		router:           router,
+		debug:            cfg.Debug,
+		dynamicChannels:  cfg.DynamicChannels,
+		channelPrefix:    channelPrefix,
+		channelCache:     make(map[string]string),
+		decisionMessages: make(map[string]messageInfo),
 	}, nil
 }
 
@@ -774,7 +785,7 @@ func (b *Bot) handleViewSubmission(callback slack.InteractionCallback) {
 
 	// Edit the original message to show resolved state (collapsed view)
 	if messageTs != "" {
-		b.updateMessageAsResolved(channelID, messageTs, resolved.ID, resolved.Question, optionLabel, callback.User.ID)
+		b.updateMessageAsResolved(channelID, messageTs, resolved.ID, resolved.Question, resolved.Context, optionLabel, callback.User.ID)
 	} else {
 		// Fallback: post new message if we don't have the original timestamp
 		b.postResolutionConfirmation(channelID, callback.User.ID, resolved.ID, optionLabel, rationale)
@@ -829,18 +840,22 @@ func (b *Bot) postErrorMessage(channelID, userID, decisionID string, err error) 
 
 // updateMessageAsResolved edits the original decision notification to show a collapsed resolved view.
 // This keeps one message per decision instead of creating a new confirmation message.
-func (b *Bot) updateMessageAsResolved(channelID, messageTs, decisionID, question, chosenOption, userID string) {
+func (b *Bot) updateMessageAsResolved(channelID, messageTs, decisionID, question, context, chosenOption, userID string) {
 	// Generate semantic slug for display
 	semanticSlug := util.GenerateDecisionSlug(decisionID, question)
+
+	// Build resolved text with question and context preserved
+	resolvedText := fmt.Sprintf("✅ *%s* — Resolved\n\n", semanticSlug)
+	resolvedText += fmt.Sprintf("*Question:* %s\n", question)
+	if context != "" {
+		resolvedText += fmt.Sprintf("*Context:* %s\n", context)
+	}
+	resolvedText += fmt.Sprintf("\n*Choice:* %s\n*By:* <@%s>", chosenOption, userID)
 
 	// Build collapsed resolved view
 	blocks := []slack.Block{
 		slack.NewSectionBlock(
-			slack.NewTextBlockObject("mrkdwn",
-				fmt.Sprintf("✅ *%s* — Resolved\n\n*Choice:* %s\n*By:* <@%s>",
-					semanticSlug, chosenOption, userID),
-				false, false,
-			),
+			slack.NewTextBlockObject("mrkdwn", resolvedText, false, false),
 			nil, nil,
 		),
 	}
