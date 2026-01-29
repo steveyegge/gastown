@@ -813,7 +813,7 @@ func (b *Bot) handleViewSubmission(callback slack.InteractionCallback) {
 
 	// Edit the original message to show resolved state (collapsed view)
 	if messageTs != "" {
-		b.updateMessageAsResolved(channelID, messageTs, resolved.ID, resolved.Question, resolved.Context, optionLabel, callback.User.ID)
+		b.updateMessageAsResolved(channelID, messageTs, resolved.ID, resolved.Question, resolved.Context, optionLabel, rationale, callback.User.ID)
 	} else {
 		// Fallback: post new message if we don't have the original timestamp
 		b.postResolutionConfirmation(channelID, callback.User.ID, resolved.ID, optionLabel, rationale)
@@ -869,7 +869,7 @@ func (b *Bot) postErrorMessage(channelID, userID, decisionID string, err error) 
 // updateMessageAsResolved edits the original decision notification to show a collapsed resolved view.
 // This keeps one message per decision instead of creating a new confirmation message.
 // The resolverID can be a Slack user ID (will be formatted as mention) or a plain string.
-func (b *Bot) updateMessageAsResolved(channelID, messageTs, decisionID, question, context, chosenOption, resolverID string) {
+func (b *Bot) updateMessageAsResolved(channelID, messageTs, decisionID, question, context, chosenOption, rationale, resolverID string) {
 	// Generate semantic slug for display
 	semanticSlug := util.GenerateDecisionSlug(decisionID, question)
 
@@ -887,7 +887,16 @@ func (b *Bot) updateMessageAsResolved(channelID, messageTs, decisionID, question
 	if context != "" {
 		resolvedText += fmt.Sprintf("*Context:* %s\n", context)
 	}
-	resolvedText += fmt.Sprintf("\n*Choice:* %s\n*By:* %s", chosenOption, resolverText)
+	resolvedText += fmt.Sprintf("\n*Choice:* %s\n", chosenOption)
+	if rationale != "" {
+		// Truncate long rationales for display
+		displayRationale := rationale
+		if len(displayRationale) > 300 {
+			displayRationale = displayRationale[:297] + "..."
+		}
+		resolvedText += fmt.Sprintf("*Rationale:* %s\n", displayRationale)
+	}
+	resolvedText += fmt.Sprintf("*By:* %s", resolverText)
 
 	// Build collapsed resolved view
 	blocks := []slack.Block{
@@ -1157,7 +1166,7 @@ func (b *Bot) NotifyResolution(decision rpcclient.Decision) error {
 
 	if hasTrackedMessage {
 		// Update the existing message instead of posting a new one
-		b.updateMessageAsResolved(msgInfo.channelID, msgInfo.timestamp, decision.ID, decision.Question, decision.Context, optionLabel, resolvedBy)
+		b.updateMessageAsResolved(msgInfo.channelID, msgInfo.timestamp, decision.ID, decision.Question, decision.Context, optionLabel, decision.Rationale, resolvedBy)
 		// Remove from tracking
 		b.decisionMessagesMu.Lock()
 		delete(b.decisionMessages, decision.ID)
