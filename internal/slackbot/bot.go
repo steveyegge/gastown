@@ -4,6 +4,7 @@ package slackbot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
@@ -1256,15 +1257,23 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 		),
 	}
 
-	// Show context inline if available
-	if decision.Context != "" {
-		contextText := decision.Context
-		if len(contextText) > 300 {
-			contextText = contextText[:297] + "..."
-		}
+	// Show predecessor chain info if present
+	if decision.PredecessorID != "" {
+		chainInfo := buildChainInfoText(decision.PredecessorID)
 		blocks = append(blocks,
 			slack.NewContextBlock("",
+				slack.NewTextBlockObject("mrkdwn", chainInfo, false, false),
+			),
+		)
+	}
+
+	// Show context inline if available (with JSON formatting)
+	if decision.Context != "" {
+		contextText := formatContextForSlack(decision.Context, 500)
+		blocks = append(blocks,
+			slack.NewSectionBlock(
 				slack.NewTextBlockObject("mrkdwn", contextText, false, false),
+				nil, nil,
 			),
 		)
 	}
@@ -1404,14 +1413,23 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 		),
 	}
 
-	if decision.Context != "" {
-		contextText := decision.Context
-		if len(contextText) > 300 {
-			contextText = contextText[:297] + "..."
-		}
+	// Show predecessor chain info if present
+	if decision.PredecessorID != "" {
+		chainInfo := buildChainInfoText(decision.PredecessorID)
 		blocks = append(blocks,
 			slack.NewContextBlock("",
+				slack.NewTextBlockObject("mrkdwn", chainInfo, false, false),
+			),
+		)
+	}
+
+	// Show context inline with JSON formatting
+	if decision.Context != "" {
+		contextText := formatContextForSlack(decision.Context, 500)
+		blocks = append(blocks,
+			slack.NewSectionBlock(
 				slack.NewTextBlockObject("mrkdwn", contextText, false, false),
+				nil, nil,
 			),
 		)
 	}
@@ -1576,5 +1594,70 @@ func (b *Bot) JoinAllChannels() error {
 
 	log.Printf("Slack: Auto-join complete: joined %d channels, already member of %d", joinedCount, alreadyMemberCount)
 	return nil
+}
+
+// formatContextForSlack formats JSON context for Slack display.
+// If context is valid JSON, it pretty-prints it in a code block.
+// Otherwise returns the context as-is (truncated if needed).
+func formatContextForSlack(context string, maxLen int) string {
+	if context == "" {
+		return ""
+	}
+
+	// Try to parse as JSON
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(context), &parsed); err != nil {
+		// Not valid JSON, return truncated plain text
+		if len(context) > maxLen {
+			return context[:maxLen-3] + "..."
+		}
+		return context
+	}
+
+	// Check for successor_schemas - extract and display separately
+	var schemaInfo string
+	if obj, ok := parsed.(map[string]interface{}); ok {
+		if _, hasSchemas := obj["successor_schemas"]; hasSchemas {
+			schemaInfo = "\n📋 _Has successor schemas defined_"
+			// Remove from main display
+			delete(obj, "successor_schemas")
+			if len(obj) == 0 {
+				return schemaInfo
+			}
+			parsed = obj
+		}
+	}
+
+	// Pretty-print JSON
+	prettyJSON, err := json.MarshalIndent(parsed, "", "  ")
+	if err != nil {
+		// Fallback to truncated original
+		if len(context) > maxLen {
+			return context[:maxLen-3] + "..."
+		}
+		return context
+	}
+
+	// Format as Slack code block
+	formatted := "```\n" + string(prettyJSON) + "\n```"
+	if len(formatted) > maxLen {
+		// Truncate while preserving code block format
+		truncated := string(prettyJSON)
+		maxContent := maxLen - 10 // Account for code block markers
+		if len(truncated) > maxContent {
+			truncated = truncated[:maxContent-3] + "..."
+		}
+		formatted = "```\n" + truncated + "\n```"
+	}
+
+	return formatted + schemaInfo
+}
+
+// buildChainInfoText builds a text description of predecessor chain if present.
+func buildChainInfoText(predecessorID string) string {
+	if predecessorID == "" {
+		return ""
+	}
+	return fmt.Sprintf("🔗 _Chained from: %s_", predecessorID)
 }
 
