@@ -50,8 +50,10 @@ type decisionEvent struct {
 // Run starts listening for SSE events. Blocks until context is canceled.
 // Automatically reconnects on disconnect with exponential backoff.
 func (l *SSEListener) Run(ctx context.Context) error {
-	// Pre-populate seen map with existing pending decisions to avoid re-notifying on restart
-	l.prePopulateSeen(ctx)
+	// Note: We intentionally do NOT pre-populate the seen map.
+	// The SSE stream sends "pending" events for existing decisions (state dump)
+	// and "created" events for new ones. We only notify on "created" to avoid
+	// re-notifying on restart while still catching decisions created while down.
 
 	backoff := time.Second
 	maxBackoff := 30 * time.Second
@@ -156,8 +158,13 @@ func (l *SSEListener) handleEvent(evt sseEvent) {
 		log.Printf("SSE: Received decision event: id=%s type=%s question=%q", de.ID, de.Type, de.Question)
 
 		switch de.Type {
-		case "created", "pending":
+		case "created":
+			// Only notify on "created" events - these are genuinely new decisions
 			l.notifyNewDecision(de)
+		case "pending":
+			// "pending" events are the initial state dump on connect - skip to avoid duplicates
+			// The seen map still prevents duplicates if the same decision is created multiple times
+			log.Printf("SSE: Skipping pending event (state dump): %s", de.ID)
 		case "resolved":
 			l.notifyResolvedDecision(de)
 		case "cancelled", "canceled":
@@ -252,23 +259,3 @@ func (l *SSEListener) handleCancelledDecision(de decisionEvent) {
 	}
 }
 
-// prePopulateSeen marks all existing pending decisions as seen to avoid re-notifying on restart.
-// This prevents the duplicate notification problem when gtslack restarts.
-func (l *SSEListener) prePopulateSeen(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	decisions, err := l.rpcClient.ListPendingDecisions(ctx)
-	if err != nil {
-		log.Printf("SSE: Warning: could not pre-populate seen decisions: %v", err)
-		return
-	}
-
-	l.seenMu.Lock()
-	for _, d := range decisions {
-		l.seen[d.ID] = true
-	}
-	l.seenMu.Unlock()
-
-	log.Printf("SSE: Pre-populated %d existing pending decisions (will not re-notify)", len(decisions))
-}
