@@ -267,7 +267,7 @@ exit /b 0
 	t.Setenv("BD_LOG", logPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := CookFormula("mol-polecat-work", townRoot)
+	err := CookFormula("mol-polecat-work", townRoot, townRoot)
 	if err != nil {
 		t.Fatalf("CookFormula failed: %v", err)
 	}
