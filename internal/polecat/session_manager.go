@@ -173,10 +173,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
 
-	// Ensure runtime settings exist in polecats/ (not polecats/<name>/) so we don't
-	// write into the source repo. Runtime walks up the tree to find settings.
-	polecatsDir := filepath.Join(m.rig.Path, "polecats")
-	if err := runtime.EnsureSettingsForRole(polecatsDir, "polecat", runtimeConfig); err != nil {
+	// Ensure runtime settings exist in polecat's home directory (polecats/<name>/).
+	// This keeps settings out of the git worktree while allowing runtime to find them
+	// when walking up the tree from workDir (polecats/<name>/<rigname>/).
+	// Each polecat gets isolated settings rather than sharing a single settings file.
+	polecatHomeDir := m.polecatDir(polecat)
+	if err := runtime.EnsureSettingsForRole(polecatHomeDir, "polecat", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
