@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/git"
@@ -197,7 +196,9 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 	// Install runtime settings in the working directory.
 	// Claude Code does NOT traverse parent directories for settings.json.
 	// See: https://github.com/anthropics/claude-code/issues/12962
-	if err := claude.EnsureSettingsForRole(crewPath, "crew"); err != nil {
+	addTownRoot := filepath.Dir(m.rig.Path)
+	addRuntimeConfig := config.ResolveRoleAgentConfig("crew", addTownRoot, m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(crewPath, "crew", addRuntimeConfig); err != nil {
 		// Non-fatal - log warning but continue
 		fmt.Printf("Warning: could not install runtime settings: %v\n", err)
 	}
