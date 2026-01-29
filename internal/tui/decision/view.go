@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -168,12 +169,18 @@ func (m *Model) renderDetailPane() string {
 	b.WriteString(detailTitleStyle.Render(wrappedPrompt))
 	b.WriteString("\n\n")
 
-	// Context if available (wrap to terminal width)
+	// Predecessor chain info (if chained decision)
+	if d.PredecessorID != "" {
+		b.WriteString(detailLabelStyle.Render("Predecessor: "))
+		b.WriteString(detailValueStyle.Render(d.PredecessorID))
+		b.WriteString("\n\n")
+	}
+
+	// Context if available (with JSON formatting)
 	if d.Context != "" {
 		b.WriteString(detailLabelStyle.Render("Context:"))
 		b.WriteString("\n")
-		wrappedContext := ui.WrapText(d.Context, m.width-4)
-		b.WriteString(detailValueStyle.Render(wrappedContext))
+		b.WriteString(formatContextDisplay(d.Context, m.width-4))
 		b.WriteString("\n\n")
 	}
 
@@ -334,4 +341,107 @@ func (m *Model) renderPeekMode() string {
 	b.WriteString(helpStyle.Render("↑/↓/j/k: scroll  pgup/pgdn: page  any other key: close"))
 
 	return b.String()
+}
+
+// formatContextDisplay formats JSON context for display with pretty-printing
+// and extracts successor_schemas for separate display
+func formatContextDisplay(context string, maxWidth int) string {
+	if context == "" {
+		return ""
+	}
+
+	var b strings.Builder
+
+	// Try to parse as JSON
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(context), &parsed); err != nil {
+		// Not valid JSON, display as plain text
+		wrappedContext := ui.WrapText(context, maxWidth)
+		b.WriteString(detailValueStyle.Render(wrappedContext))
+		return b.String()
+	}
+
+	// Check for successor_schemas in context
+	if obj, ok := parsed.(map[string]interface{}); ok {
+		if schemas, hasSchemas := obj["successor_schemas"]; hasSchemas {
+			// Display successor schemas separately
+			b.WriteString(successorSchemaStyle.Render("  Successor Schemas:"))
+			b.WriteString("\n")
+
+			if schemaMap, ok := schemas.(map[string]interface{}); ok {
+				for optLabel, schema := range schemaMap {
+					b.WriteString(fmt.Sprintf("    %s:\n", optionLabelStyle.Render(optLabel)))
+					schemaJSON, _ := json.MarshalIndent(schema, "      ", "  ")
+					for _, line := range strings.Split(string(schemaJSON), "\n") {
+						b.WriteString("      ")
+						b.WriteString(jsonValueStyle.Render(line))
+						b.WriteString("\n")
+					}
+				}
+			}
+			b.WriteString("\n")
+
+			// Remove successor_schemas from main context display
+			delete(obj, "successor_schemas")
+			if len(obj) == 0 {
+				// Nothing left to display
+				return b.String()
+			}
+			parsed = obj
+		}
+	}
+
+	// Pretty-print the JSON with indentation
+	prettyJSON, err := json.MarshalIndent(parsed, "  ", "  ")
+	if err != nil {
+		// Fallback to plain text
+		wrappedContext := ui.WrapText(context, maxWidth)
+		b.WriteString(detailValueStyle.Render(wrappedContext))
+		return b.String()
+	}
+
+	// Display formatted JSON with syntax coloring
+	for _, line := range strings.Split(string(prettyJSON), "\n") {
+		b.WriteString("  ")
+		b.WriteString(colorizeJSONLine(line))
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+// colorizeJSONLine applies simple syntax highlighting to a JSON line
+func colorizeJSONLine(line string) string {
+	// Simple syntax highlighting for JSON
+	// Keys are in one color, string values in another, numbers/bools in another
+	result := line
+
+	// Highlight string values (after colon)
+	if strings.Contains(line, ":") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 2 {
+			key := parts[0]
+			value := parts[1]
+
+			// Style the key (quoted part)
+			key = jsonKeyStyle.Render(key)
+
+			// Style the value based on type
+			trimmedValue := strings.TrimSpace(value)
+			if strings.HasPrefix(trimmedValue, "\"") {
+				// String value
+				value = jsonStringStyle.Render(value)
+			} else if trimmedValue == "true" || trimmedValue == "false" || trimmedValue == "null" {
+				// Boolean or null
+				value = jsonBoolStyle.Render(value)
+			} else if len(trimmedValue) > 0 && (trimmedValue[0] >= '0' && trimmedValue[0] <= '9' || trimmedValue[0] == '-') {
+				// Number
+				value = jsonNumberStyle.Render(value)
+			}
+
+			return key + ":" + value
+		}
+	}
+
+	return jsonValueStyle.Render(result)
 }

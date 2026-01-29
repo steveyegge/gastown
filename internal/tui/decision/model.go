@@ -33,13 +33,14 @@ type Option struct {
 
 // DecisionItem represents a pending decision
 type DecisionItem struct {
-	ID          string    `json:"id"`
-	Prompt      string    `json:"prompt"`
-	Options     []Option  `json:"options"`
-	Urgency     string    `json:"urgency"`
-	RequestedBy string    `json:"requested_by"`
-	RequestedAt time.Time `json:"requested_at"`
-	Context     string    `json:"context"`
+	ID            string    `json:"id"`
+	Prompt        string    `json:"prompt"`
+	Options       []Option  `json:"options"`
+	Urgency       string    `json:"urgency"`
+	RequestedBy   string    `json:"requested_by"`
+	RequestedAt   time.Time `json:"requested_at"`
+	Context       string    `json:"context"`
+	PredecessorID string    `json:"predecessor_id,omitempty"` // For decision chaining
 }
 
 // rawDecisionItem is the actual JSON format from gt decision list --json
@@ -79,6 +80,9 @@ func (d *DecisionItem) UnmarshalJSON(data []byte) error {
 	if d.RequestedBy == "" {
 		d.RequestedBy = raw.CreatedBy
 	}
+
+	// Extract predecessor ID for decision chaining
+	d.PredecessorID = extractPredecessorFromDescription(raw.Description)
 
 	return nil
 }
@@ -179,6 +183,22 @@ func extractRequestedByFromDescription(desc string) string {
 		if strings.HasPrefix(line, "_Requested by:") && strings.HasSuffix(line, "_") {
 			// Extract between ":" and trailing "_"
 			inner := strings.TrimPrefix(line, "_Requested by:")
+			inner = strings.TrimSuffix(inner, "_")
+			return strings.TrimSpace(inner)
+		}
+	}
+	return ""
+}
+
+// extractPredecessorFromDescription extracts predecessor ID from markdown footer
+func extractPredecessorFromDescription(desc string) string {
+	// Look for "_Predecessor: xxx_" pattern
+	lines := strings.Split(desc, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "_Predecessor:") && strings.HasSuffix(line, "_") {
+			// Extract between ":" and trailing "_"
+			inner := strings.TrimPrefix(line, "_Predecessor:")
 			inner = strings.TrimSuffix(inner, "_")
 			return strings.TrimSpace(inner)
 		}

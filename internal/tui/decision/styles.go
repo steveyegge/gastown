@@ -100,6 +100,27 @@ var (
 	detailBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(colorSelected)
+
+	// JSON syntax highlighting styles
+	jsonKeyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("81")) // cyan - for JSON keys
+
+	jsonStringStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("107")) // green - for string values
+
+	jsonNumberStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("141")) // purple - for numbers
+
+	jsonBoolStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")) // orange - for booleans/null
+
+	jsonValueStyle = lipgloss.NewStyle().
+			Foreground(colorWhite) // default for other JSON
+
+	// Successor schema styling
+	successorSchemaStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("178")). // gold
+				Bold(true)
 )
 
 // urgencyIcon returns the icon for a given urgency level
