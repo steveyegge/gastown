@@ -146,7 +146,25 @@ func NewDaemonPatrolConfig() *DaemonPatrolConfig {
 
 // DeaconConfig represents deacon process settings.
 type DeaconConfig struct {
-	PatrolInterval string `json:"patrol_interval,omitempty"` // e.g., "5m"
+	PatrolInterval string        `json:"patrol_interval,omitempty"` // e.g., "5m"
+	Zombie         *ZombieConfig `json:"zombie,omitempty"`          // zombie auto-cleanup settings
+}
+
+// ZombieConfig represents zombie polecat auto-cleanup settings.
+type ZombieConfig struct {
+	// AutoCleanup enables automatic cleanup of zombie polecats.
+	// When true, the deacon will nuke polecats that have been idle
+	// past the IdleThreshold with no hooked work.
+	AutoCleanup bool `json:"auto_cleanup,omitempty"`
+
+	// IdleThreshold is the duration after which an idle polecat
+	// with no hooked work is considered a zombie and eligible for cleanup.
+	// Default: "2h" (2 hours)
+	IdleThreshold string `json:"idle_threshold,omitempty"`
+
+	// Protected is a list of polecat names that should never be auto-cleaned.
+	// Example: ["max", "dev"]
+	Protected []string `json:"protected,omitempty"`
 }
 
 // CurrentMayorConfigVersion is the current schema version for MayorConfig.
