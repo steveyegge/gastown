@@ -34,7 +34,7 @@ jobs:
           echo "No .beads/issues.jsonl changes detected"
 
   # Verify committed formulas allow build without go:generate
-  # This catches issues where go install @latest would fail
+  # internal/formula/formulas/ is the single source of truth for embedded formulas
   check-embedded-formulas:
     name: Check embedded formulas
     runs-on: ubuntu-latest
@@ -48,20 +48,9 @@ jobs:
 
       - name: Build without go:generate
         run: |
-          # This must succeed with committed formulas only
-          # If this fails, run: go generate ./... && git add -A && git commit
+          # Committed formulas in internal/formula/formulas/ must allow a clean build.
+          # This ensures go install @latest works for end users.
           go build -v ./cmd/gt
-
-      - name: Verify formulas are in sync
-        run: |
-          # Regenerate and check for differences
-          go generate ./internal/formula/...
-          if ! git diff --exit-code internal/formula/formulas/; then
-            echo ""
-            echo "ERROR: Committed formulas are out of sync with .beads/formulas/"
-            echo "Run: go generate ./... && git add -A && git commit"
-            exit 1
-          fi
 
   test:
     name: Test
