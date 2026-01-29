@@ -105,13 +105,14 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 
 	// Build decision fields
 	fields := &beads.DecisionFields{
-		Question:    decisionPrompt,
-		Context:     decisionContext,
-		Options:     options,
-		ChosenIndex: 0, // Pending
-		RequestedBy: agentID,
-		RequestedAt: time.Now().Format(time.RFC3339),
-		Urgency:     urgency,
+		Question:      decisionPrompt,
+		Context:       decisionContext,
+		Options:       options,
+		ChosenIndex:   0, // Pending
+		RequestedBy:   agentID,
+		RequestedAt:   time.Now().Format(time.RFC3339),
+		Urgency:       urgency,
+		PredecessorID: decisionPredecessor,
 	}
 
 	// Add blocker if specified
@@ -203,6 +204,9 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 	if decisionBlocks != "" {
 		payload["blocking"] = decisionBlocks
 	}
+	if decisionPredecessor != "" {
+		payload["predecessor_id"] = decisionPredecessor
+	}
 	_ = events.LogFeed(events.TypeDecisionRequested, agentID, payload)
 
 	// Output
@@ -217,6 +221,9 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		if decisionBlocks != "" {
 			result["blocking"] = decisionBlocks
 		}
+		if decisionPredecessor != "" {
+			result["predecessor_id"] = decisionPredecessor
+		}
 		out, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(out))
 	} else {
@@ -226,6 +233,9 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   Options: %s\n", formatOptionsSummary(options))
 		if decisionBlocks != "" {
 			fmt.Printf("   Blocking: %s\n", decisionBlocks)
+		}
+		if decisionPredecessor != "" {
+			fmt.Printf("   Predecessor: %s\n", decisionPredecessor)
 		}
 		fmt.Printf("\n→ Notified human (overseer)\n")
 		fmt.Printf("\nTo resolve: gt decision resolve %s --choice N --rationale \"...\"\n", issue.ID)
@@ -316,19 +326,20 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 
 	if decisionJSON {
 		data := map[string]interface{}{
-			"id":           issue.ID,
-			"question":     fields.Question,
-			"context":      fields.Context,
-			"options":      fields.Options,
-			"chosen_index": fields.ChosenIndex,
-			"rationale":    fields.Rationale,
-			"urgency":      fields.Urgency,
-			"requested_by": fields.RequestedBy,
-			"requested_at": fields.RequestedAt,
-			"resolved_by":  fields.ResolvedBy,
-			"resolved_at":  fields.ResolvedAt,
-			"blockers":     fields.Blockers,
-			"status":       issue.Status,
+			"id":             issue.ID,
+			"question":       fields.Question,
+			"context":        fields.Context,
+			"options":        fields.Options,
+			"chosen_index":   fields.ChosenIndex,
+			"rationale":      fields.Rationale,
+			"urgency":        fields.Urgency,
+			"requested_by":   fields.RequestedBy,
+			"requested_at":   fields.RequestedAt,
+			"resolved_by":    fields.ResolvedBy,
+			"resolved_at":    fields.ResolvedAt,
+			"blockers":       fields.Blockers,
+			"predecessor_id": fields.PredecessorID,
+			"status":         issue.Status,
 		}
 		out, _ := json.MarshalIndent(data, "", "  ")
 		fmt.Println(string(out))
@@ -371,6 +382,9 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Urgency: %s\n", fields.Urgency)
 	if len(fields.Blockers) > 0 {
 		fmt.Printf("Blocking: %s\n", strings.Join(fields.Blockers, ", "))
+	}
+	if fields.PredecessorID != "" {
+		fmt.Printf("Predecessor: %s\n", fields.PredecessorID)
 	}
 
 	if fields.ChosenIndex > 0 {

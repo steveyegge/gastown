@@ -6,19 +6,20 @@ import (
 
 // Decision command flags
 var (
-	decisionPrompt      string   // Primary flag (--prompt)
-	decisionContext     string
-	decisionOptions     []string
-	decisionRecommend   int
-	decisionBlocks      string   // Primary flag (--blocks)
-	decisionParent      string   // Parent bead relationship
-	decisionUrgency     string
-	decisionJSON        bool
-	decisionListJSON    bool
-	decisionListAll     bool
-	decisionChoice      int
-	decisionRationale   string
-	decisionAwaitTimeout string  // For await command
+	decisionPrompt       string   // Primary flag (--prompt)
+	decisionContext      string
+	decisionOptions      []string
+	decisionRecommend    int
+	decisionBlocks       string   // Primary flag (--blocks)
+	decisionParent       string   // Parent bead relationship
+	decisionPredecessor  string   // Predecessor decision for chaining
+	decisionUrgency      string
+	decisionJSON         bool
+	decisionListJSON     bool
+	decisionListAll      bool
+	decisionChoice       int
+	decisionRationale    string
+	decisionAwaitTimeout string   // For await command
 )
 
 var decisionCmd = &cobra.Command{
@@ -327,6 +328,7 @@ func init() {
 	decisionRequestCmd.Flags().IntVarP(&decisionRecommend, "recommend", "r", 0, "Mark option N as recommended (1-indexed)")
 	decisionRequestCmd.Flags().StringVar(&decisionBlocks, "blocks", "", "Bead ID that this decision blocks")
 	decisionRequestCmd.Flags().StringVar(&decisionParent, "parent", "", "Parent bead for hierarchy")
+	decisionRequestCmd.Flags().StringVar(&decisionPredecessor, "predecessor", "", "Predecessor decision ID for chaining")
 	decisionRequestCmd.Flags().StringVarP(&decisionUrgency, "urgency", "u", "medium", "Urgency level: high, medium, low")
 	decisionRequestCmd.Flags().BoolVar(&decisionJSON, "json", false, "Output as JSON")
 	decisionRequestCmd.Flags().BoolVar(&decisionNoFileCheck, "no-file-check", false, "Skip FILE option validation for failure contexts")

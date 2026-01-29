@@ -33,17 +33,18 @@ type DecisionOption struct {
 // DecisionFields holds structured fields for decision beads.
 // These are stored as structured data in the description.
 type DecisionFields struct {
-	Question    string           `json:"question"`              // The decision to be made
-	Context     string           `json:"context,omitempty"`     // Background/analysis
-	Options     []DecisionOption `json:"options"`               // Available choices
-	ChosenIndex int              `json:"chosen_index"`          // Index of selected option (0 = pending, 1-indexed when resolved)
-	Rationale   string           `json:"rationale,omitempty"`   // Why this choice was made
-	RequestedBy string           `json:"requested_by"`          // Agent that requested decision
-	RequestedAt string           `json:"requested_at"`          // When requested
-	ResolvedBy  string           `json:"resolved_by,omitempty"` // Who made the decision
-	ResolvedAt  string           `json:"resolved_at,omitempty"` // When resolved
-	Urgency     string           `json:"urgency"`               // high, medium, low
-	Blockers    []string         `json:"blockers,omitempty"`    // Work IDs blocked by this decision
+	Question      string           `json:"question"`                 // The decision to be made
+	Context       string           `json:"context,omitempty"`        // Background/analysis
+	Options       []DecisionOption `json:"options"`                  // Available choices
+	ChosenIndex   int              `json:"chosen_index"`             // Index of selected option (0 = pending, 1-indexed when resolved)
+	Rationale     string           `json:"rationale,omitempty"`      // Why this choice was made
+	RequestedBy   string           `json:"requested_by"`             // Agent that requested decision
+	RequestedAt   string           `json:"requested_at"`             // When requested
+	ResolvedBy    string           `json:"resolved_by,omitempty"`    // Who made the decision
+	ResolvedAt    string           `json:"resolved_at,omitempty"`    // When resolved
+	Urgency       string           `json:"urgency"`                  // high, medium, low
+	Blockers      []string         `json:"blockers,omitempty"`       // Work IDs blocked by this decision
+	PredecessorID string           `json:"predecessor_id,omitempty"` // ID of predecessor decision for chaining
 }
 
 // DecisionState constants for decision status tracking.
@@ -289,6 +290,11 @@ func (b *Beads) CreateBdDecision(fields *DecisionFields) (*Issue, error) {
 	// Add blocks dependency
 	if len(fields.Blockers) > 0 {
 		args = append(args, "--blocks="+fields.Blockers[0])
+	}
+
+	// Add predecessor for decision chaining
+	if fields.PredecessorID != "" {
+		args = append(args, "--predecessor="+fields.PredecessorID)
 	}
 
 	out, err := b.run(args...)
