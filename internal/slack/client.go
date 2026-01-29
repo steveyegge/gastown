@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // Client is an HTTP client for posting to Slack webhooks.
@@ -154,6 +156,7 @@ func (c *Client) buildDecisionBlocks(d *Decision) []map[string]interface{} {
 	}
 
 	// Urgency and ID fields
+	semanticSlug := util.GenerateDecisionSlug(d.ID, d.Question)
 	fields := []map[string]interface{}{
 		{
 			"type": "mrkdwn",
@@ -161,7 +164,7 @@ func (c *Client) buildDecisionBlocks(d *Decision) []map[string]interface{} {
 		},
 		{
 			"type": "mrkdwn",
-			"text": fmt.Sprintf("*ID:* `%s`", d.ID),
+			"text": fmt.Sprintf("*ID:* `%s`", semanticSlug),
 		},
 	}
 
