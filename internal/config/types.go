@@ -361,6 +361,7 @@ func (rc *RuntimeConfig) BuildCommand() string {
 // BuildCommandWithPrompt returns the full command line with an initial prompt.
 // If the config has an InitialPrompt, it's appended as a quoted argument.
 // If prompt is provided, it overrides the config's InitialPrompt.
+// For opencode, uses --prompt flag; for other agents, uses positional argument.
 func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 	resolved := normalizeRuntimeConfig(rc)
 	base := resolved.BuildCommand()
@@ -375,7 +376,13 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base
 	}
 
-	// Quote the prompt for shell safety
+	// OpenCode requires --prompt flag for initial prompt in interactive mode.
+	// Positional argument causes opencode to exit immediately.
+	if resolved.Command == "opencode" {
+		return base + " --prompt " + quoteForShell(p)
+	}
+
+	// Quote the prompt for shell safety (positional arg for claude and others)
 	return base + " " + quoteForShell(p)
 }
 
