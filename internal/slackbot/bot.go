@@ -225,17 +225,20 @@ func (b *Bot) handleDecisionsCommand(cmd slack.SlashCommand) {
 			agentTag = fmt.Sprintf(" (%s)", d.RequestedBy)
 		}
 
+		// Generate semantic slug for human-friendly display
+		semanticSlug := generateSemanticSlug(d.ID, d.Question)
+
 		blocks = append(blocks,
 			slack.NewSectionBlock(
 				slack.NewTextBlockObject("mrkdwn",
-					fmt.Sprintf("%s%s %s", urgencyEmoji, agentTag, question),
+					fmt.Sprintf("%s *%s*%s\n%s", urgencyEmoji, semanticSlug, agentTag, question),
 					false, false,
 				),
 				nil,
 				slack.NewAccessory(
 					slack.NewButtonBlockElement(
 						"view_decision",
-						d.ID,
+						d.ID, // Keep original ID for button action
 						slack.NewTextBlockObject("plain_text", "View", false, false),
 					),
 				),
@@ -296,10 +299,13 @@ func (b *Bot) handleViewDecision(callback slack.InteractionCallback, decisionID 
 		return
 	}
 
+	// Generate semantic slug for human-friendly display
+	semanticSlug := generateSemanticSlug(decision.ID, decision.Question)
+
 	// Build detailed decision view with option buttons
 	blocks := []slack.Block{
 		slack.NewHeaderBlock(
-			slack.NewTextBlockObject("plain_text", "Decision Required", false, false),
+			slack.NewTextBlockObject("plain_text", fmt.Sprintf("Decision: %s", semanticSlug), false, false),
 		),
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject("mrkdwn",
@@ -669,14 +675,17 @@ func (b *Bot) NotifyResolution(decision rpcclient.Decision) error {
 		resolverText = fmt.Sprintf("<@%s>", strings.TrimPrefix(resolvedBy, "slack:"))
 	}
 
+	// Generate semantic slug for human-friendly display
+	semanticSlug := generateSemanticSlug(decision.ID, decision.Question)
+
 	blocks := []slack.Block{
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject("mrkdwn",
-				fmt.Sprintf("📋 *Decision Resolved*\n\n"+
+				fmt.Sprintf("📋 *Decision Resolved: %s*\n\n"+
 					"*Question:* %s\n"+
 					"*Choice:* %s\n"+
 					"*Resolved by:* %s",
-					decision.Question, optionLabel, resolverText),
+					semanticSlug, decision.Question, optionLabel, resolverText),
 				false, false,
 			),
 			nil, nil,
@@ -721,18 +730,21 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 		agentInfo = fmt.Sprintf(" from *%s*", decision.RequestedBy)
 	}
 
+	// Generate semantic slug for human-friendly display
+	semanticSlug := generateSemanticSlug(decision.ID, decision.Question)
+
 	blocks := []slack.Block{
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject("mrkdwn",
 				fmt.Sprintf("%s *%s*%s\n%s",
-					urgencyEmoji, decision.ID, agentInfo, decision.Question),
+					urgencyEmoji, semanticSlug, agentInfo, decision.Question),
 				false, false,
 			),
 			nil,
 			slack.NewAccessory(
 				slack.NewButtonBlockElement(
 					"view_decision",
-					decision.ID,
+					decision.ID, // Keep original ID for button action
 					slack.NewTextBlockObject("plain_text", "View & Resolve", false, false),
 				),
 			),
@@ -857,4 +869,110 @@ func (b *Bot) JoinAllChannels() error {
 
 	log.Printf("Slack: Auto-join complete: joined %d channels, already member of %d", joinedCount, alreadyMemberCount)
 	return nil
+}
+
+// generateSemanticSlug creates a human-readable semantic slug from a decision.
+// Format: prefix-type-title_slugrandom (e.g., gt-dec-cache_strategyzfyl8)
+func generateSemanticSlug(id, question string) string {
+	// Extract prefix and random from ID (e.g., "gt-zfyl8" -> prefix="gt", random="zfyl8")
+	parts := strings.SplitN(id, "-", 2)
+	if len(parts) != 2 {
+		return id // Can't parse, return original
+	}
+	prefix := parts[0]
+	random := parts[1]
+
+	// Strip child suffix if present (e.g., "zfyl8.1" -> "zfyl8")
+	if dotIdx := strings.Index(random, "."); dotIdx > 0 {
+		random = random[:dotIdx]
+	}
+
+	// Generate slug from question
+	slug := generateSlug(question)
+	if slug == "" {
+		slug = "decision"
+	}
+
+	// Decision type code is "dec"
+	return fmt.Sprintf("%s-dec-%s%s", prefix, slug, random)
+}
+
+// generateSlug converts a title/question to a slug.
+// Removes stop words, lowercases, replaces non-alphanumeric with underscores.
+func generateSlug(title string) string {
+	if title == "" {
+		return "untitled"
+	}
+
+	// Lowercase
+	slug := strings.ToLower(title)
+
+	// Stop words to remove
+	stopWords := map[string]bool{
+		"a": true, "an": true, "the": true,
+		"in": true, "on": true, "at": true, "to": true, "for": true,
+		"of": true, "with": true, "by": true, "from": true, "as": true,
+		"and": true, "or": true, "but": true, "nor": true,
+		"is": true, "are": true, "was": true, "were": true,
+		"be": true, "been": true, "being": true,
+		"have": true, "has": true, "had": true,
+		"do": true, "does": true, "did": true,
+		"this": true, "that": true, "these": true, "those": true,
+		"it": true, "its": true,
+		"should": true, "would": true, "could": true,
+		"how": true, "what": true, "which": true, "who": true,
+		"we": true, "i": true, "you": true, "they": true,
+	}
+
+	// Replace non-alphanumeric with spaces
+	var result []rune
+	for _, r := range slug {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			result = append(result, r)
+		} else {
+			result = append(result, ' ')
+		}
+	}
+	slug = string(result)
+
+	// Split and filter stop words
+	words := strings.Fields(slug)
+	var filtered []string
+	for _, word := range words {
+		if !stopWords[word] && len(word) > 0 {
+			filtered = append(filtered, word)
+		}
+	}
+
+	// Fallback if all words were filtered
+	if len(filtered) == 0 && len(words) > 0 {
+		filtered = []string{words[0]}
+	}
+
+	// Join with underscores
+	slug = strings.Join(filtered, "_")
+
+	// Ensure starts with letter
+	if len(slug) > 0 && (slug[0] >= '0' && slug[0] <= '9') {
+		slug = "n" + slug
+	}
+
+	// Truncate to 40 chars at word boundary
+	if len(slug) > 40 {
+		truncated := slug[:40]
+		if lastUnderscore := strings.LastIndex(truncated, "_"); lastUnderscore > 20 {
+			truncated = truncated[:lastUnderscore]
+		}
+		slug = truncated
+	}
+
+	// Ensure minimum length
+	if len(slug) < 3 {
+		slug = slug + strings.Repeat("x", 3-len(slug))
+	}
+
+	// Clean up
+	slug = strings.Trim(slug, "_")
+
+	return slug
 }
