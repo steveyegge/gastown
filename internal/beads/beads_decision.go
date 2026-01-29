@@ -468,11 +468,26 @@ func (b *Beads) GetDecisionBead(id string) (*Issue, *DecisionFields, error) {
 		}
 
 		// Parse options from bd decision
+		// First try the top-level Options array (parsed by bd decision show)
 		for _, opt := range bdDecision.Options {
 			fields.Options = append(fields.Options, DecisionOption{
 				Label:       opt.Label,
 				Description: opt.Description,
 			})
+		}
+
+		// Fallback: if Options is empty but raw options string exists, parse it
+		// This handles cases where bd decision show doesn't populate the top-level Options
+		if len(fields.Options) == 0 && bdDecision.DecisionPoint.Options != "" {
+			var rawOptions []BdDecisionOption
+			if err := json.Unmarshal([]byte(bdDecision.DecisionPoint.Options), &rawOptions); err == nil {
+				for _, opt := range rawOptions {
+					fields.Options = append(fields.Options, DecisionOption{
+						Label:       opt.Label,
+						Description: opt.Description,
+					})
+				}
+			}
 		}
 
 		// Populate resolution fields if the decision has been resolved
