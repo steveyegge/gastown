@@ -1138,3 +1138,186 @@ exit /b 0
 		t.Errorf("--no-merge flag not stored in bead description\nLog:\n%s", string(logBytes))
 	}
 }
+
+// TestValidateSpawningFlags verifies that spawning flags (--create, --account, --agent)
+// are rejected when slinging to self or an existing agent (non-spawning context).
+// Issue #905: LLMs repeatedly hallucinate these flags in non-spawning contexts.
+func TestValidateSpawningFlags(t *testing.T) {
+	tests := []struct {
+		name       string
+		willSpawn  bool
+		create     bool
+		account    string
+		agent      string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name:      "spawning context with --create is valid",
+			willSpawn: true,
+			create:    true,
+			wantErr:   false,
+		},
+		{
+			name:      "spawning context with --account is valid",
+			willSpawn: true,
+			account:   "work",
+			wantErr:   false,
+		},
+		{
+			name:      "spawning context with --agent is valid",
+			willSpawn: true,
+			agent:     "gemini",
+			wantErr:   false,
+		},
+		{
+			name:       "non-spawning context with --create errors",
+			willSpawn:  false,
+			create:     true,
+			wantErr:    true,
+			errContain: "--create",
+		},
+		{
+			name:       "non-spawning context with --account errors",
+			willSpawn:  false,
+			account:    "work",
+			wantErr:    true,
+			errContain: "--account",
+		},
+		{
+			name:       "non-spawning context with --agent errors",
+			willSpawn:  false,
+			agent:      "gemini",
+			wantErr:    true,
+			errContain: "--agent",
+		},
+		{
+			name:       "non-spawning context with multiple flags shows all",
+			willSpawn:  false,
+			create:     true,
+			account:    "work",
+			agent:      "codex",
+			wantErr:    true,
+			errContain: "--create, --account, --agent",
+		},
+		{
+			name:      "non-spawning context with no spawning flags is valid",
+			willSpawn: false,
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore global flag state
+			prevCreate := slingCreate
+			prevAccount := slingAccount
+			prevAgent := slingAgent
+			t.Cleanup(func() {
+				slingCreate = prevCreate
+				slingAccount = prevAccount
+				slingAgent = prevAgent
+			})
+
+			// Set test flags
+			slingCreate = tt.create
+			slingAccount = tt.account
+			slingAgent = tt.agent
+
+			// Run validation
+			err := validateSpawningFlags(tt.willSpawn, "gt-test123")
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.errContain)
+				} else if !strings.Contains(err.Error(), tt.errContain) {
+					t.Errorf("expected error containing %q, got %q", tt.errContain, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestSlingRejectsSpawningFlagsWhenSlingToSelf verifies that gt sling errors
+// when spawning flags are used without a rig target.
+// This is an integration test for issue #905.
+func TestSlingRejectsSpawningFlagsWhenSlingToSelf(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create minimal workspace structure
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create stub bd
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	bdScript := `#!/bin/sh
+if [ "$1" = "--no-daemon" ]; then shift; fi
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" set "cmd=%2"
+if "%cmd%"=="show" (
+  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+  exit /b 0
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("TMUX_PANE", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flags
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	prevCreate := slingCreate
+	t.Cleanup(func() {
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+		slingCreate = prevCreate
+	})
+
+	slingDryRun = true
+	slingNoConvoy = true
+	slingCreate = true // This should cause an error when slinging to self
+
+	// Sling to self (no target specified)
+	err = runSling(nil, []string{"gt-test123"})
+
+	if err == nil {
+		t.Error("expected error when using --create without rig target, got nil")
+	} else if !strings.Contains(err.Error(), "--create") {
+		t.Errorf("expected error mentioning --create, got: %v", err)
+	} else if !strings.Contains(err.Error(), "spawn target") {
+		t.Errorf("expected error mentioning 'spawn target', got: %v", err)
+	}
+}

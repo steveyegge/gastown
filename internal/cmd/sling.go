@@ -190,6 +190,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 	var targetPane string
 	var hookWorkDir string     // Working directory for running bd hook commands
 	var hookSetAtomically bool // True if hook was set during polecat spawn (skip redundant update)
+	var willSpawn bool         // True if polecat/dog spawning will occur (validates spawning flags)
 
 	if len(args) > 1 {
 		target := args[1]
@@ -206,6 +207,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("resolving self for '.' target: %w", err)
 			}
 		} else if dogName, isDog := IsDogTarget(target); isDog {
+			willSpawn = true // Dog dispatch uses spawning flags
 			if slingDryRun {
 				if dogName == "" {
 					fmt.Printf("Would dispatch to idle dog in kennel\n")
@@ -228,6 +230,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
+			willSpawn = true // Rig target spawns a new polecat
 			// Check if target is a rig name (auto-spawn polecat)
 			if slingDryRun {
 				// Dry run - just indicate what would happen
@@ -267,6 +270,7 @@ func runSling(cmd *cobra.Command, args []string) error {
 					// Extract rig name from polecat target (format: rig/polecats/name)
 					parts := strings.Split(target, "/")
 					if len(parts) >= 3 && parts[1] == "polecats" {
+						willSpawn = true // Dead polecat respawn uses spawning flags
 						rigName := parts[0]
 						fmt.Printf("Target polecat has no active session, spawning fresh polecat in rig '%s'...\n", rigName)
 						spawnOpts := SlingSpawnOptions{
@@ -310,6 +314,12 @@ func runSling(cmd *cobra.Command, args []string) error {
 		if selfWorkDir != "" {
 			hookWorkDir = selfWorkDir
 		}
+	}
+
+	// Validate that spawning flags are only used when spawning will occur.
+	// Issue #905: LLMs repeatedly hallucinate these flags in non-spawning contexts.
+	if err := validateSpawningFlags(willSpawn, beadID); err != nil {
+		return err
 	}
 
 	// Display what we're doing

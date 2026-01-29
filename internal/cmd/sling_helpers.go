@@ -594,3 +594,48 @@ func CookFormula(formulaName, workDir string) error {
 	cookCmd.Stderr = os.Stderr
 	return cookCmd.Run()
 }
+
+// validateSpawningFlags checks that polecat/dog spawning flags are only used
+// when spawning will actually occur. Returns an error with a helpful message
+// if spawning flags are set but no spawning will happen.
+//
+// Issue #905: LLMs repeatedly hallucinate these flags in non-spawning contexts,
+// e.g., "gt sling gt-abc --create" when slinging to self. Previously these flags
+// were silently ignored, confusing agents about what the command actually does.
+//
+// Note: --force is NOT validated here because it has dual meaning:
+// 1. Force spawn even if polecat has unread mail (spawning context)
+// 2. Force re-sling even if bead is already assigned (non-spawning context)
+// The re-sling use case is valid, so we only validate --create, --account, --agent.
+func validateSpawningFlags(willSpawn bool, beadID string) error {
+	if willSpawn {
+		return nil // Spawning will occur, flags are valid
+	}
+
+	// Check which spawning-only flags are set
+	// (--force is excluded because it's also used for re-slinging)
+	var invalidFlags []string
+	if slingCreate {
+		invalidFlags = append(invalidFlags, "--create")
+	}
+	if slingAccount != "" {
+		invalidFlags = append(invalidFlags, "--account")
+	}
+	if slingAgent != "" {
+		invalidFlags = append(invalidFlags, "--agent")
+	}
+
+	if len(invalidFlags) == 0 {
+		return nil // No spawning-only flags set
+	}
+
+	// Build a helpful error message
+	flagList := strings.Join(invalidFlags, ", ")
+	return fmt.Errorf("spawning flags used without a spawn target: %s\n\n"+
+		"These flags control polecat/dog spawning behavior, but the target\n"+
+		"is not a rig or dog (no spawning will occur).\n\n"+
+		"To spawn a new polecat, specify a rig as the target:\n"+
+		"  gt sling %s <rig-name>\n\n"+
+		"To sling to an existing agent, omit the spawning flags:\n"+
+		"  gt sling %s [target]", flagList, beadID, beadID)
+}
