@@ -466,11 +466,12 @@ func (b *Beads) GetDecisionBead(id string) (*Issue, *DecisionFields, error) {
 	if bdErr == nil && bdDecision != nil && bdDecision.DecisionPoint != nil {
 		// Convert bd decision to DecisionFields format
 		fields := &DecisionFields{
-			Question:    bdDecision.DecisionPoint.Prompt,
-			RequestedAt: bdDecision.DecisionPoint.CreatedAt,
-			RequestedBy: bdDecision.DecisionPoint.RequestedBy,
-			Urgency:     bdDecision.DecisionPoint.Urgency,
-			ChosenIndex: 0, // Default pending, will be updated if resolved
+			Question:      bdDecision.DecisionPoint.Prompt,
+			RequestedAt:   bdDecision.DecisionPoint.CreatedAt,
+			RequestedBy:   bdDecision.DecisionPoint.RequestedBy,
+			Urgency:       bdDecision.DecisionPoint.Urgency,
+			PredecessorID: bdDecision.DecisionPoint.PriorID, // Decision chaining support
+			ChosenIndex:   0,                                // Default pending, will be updated if resolved
 		}
 
 		// Parse options from bd decision
@@ -627,6 +628,7 @@ type BdDecisionPointData struct {
 	ResponseText   string `json:"response_text,omitempty"`   // Rationale/comment
 	RequestedBy    string `json:"requested_by,omitempty"`    // Who requested the decision
 	Urgency        string `json:"urgency,omitempty"`         // Urgency level
+	PriorID        string `json:"prior_id,omitempty"`        // Predecessor decision ID for chaining
 }
 
 // BdDecisionShowResponse represents the response from bd decision show
