@@ -68,6 +68,7 @@ Rig checks (with --rig flag):
 Routing checks (fixable):
   - routes-config            Check beads routing configuration
   - prefix-mismatch          Detect rigs.json vs routes.jsonl prefix mismatches (fixable)
+  - database-prefix          Detect database vs routes.jsonl prefix mismatches (fixable)
 
 Session hook checks:
   - session-hooks            Check settings.json use session-start.sh
@@ -131,6 +132,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewFormulaCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
 	d.Register(doctor.NewPrefixMismatchCheck())
+	d.Register(doctor.NewDatabasePrefixCheck())
 	d.Register(doctor.NewRoutesCheck())
 	d.Register(doctor.NewRigRoutesJSONLCheck())
 	d.Register(doctor.NewRoutingModeCheck())
