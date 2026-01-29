@@ -102,7 +102,7 @@ func runBatchSling(beadIDs []string, rigName string, townBeadsDir string) error 
 		// Cook once (lazy), then instantiate for each bead
 		if !formulaCooked {
 			workDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
-			if err := CookFormula(formulaName, workDir); err != nil {
+			if err := CookFormula(formulaName, workDir, townRoot); err != nil {
 				fmt.Printf("  %s Could not cook formula %s: %v\n", style.Dim.Render("Warning:"), formulaName, err)
 				// Fall back to raw hook if formula cook fails
 			} else {

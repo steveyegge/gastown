@@ -541,6 +541,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	if !skipCook {
 		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
 		cookCmd.Dir = formulaWorkDir
+		cookCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
 		cookCmd.Stderr = os.Stderr
 		if err := cookCmd.Run(); err != nil {
 			return nil, fmt.Errorf("cooking formula %s: %w", formulaName, err)
@@ -596,9 +597,11 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 
 // CookFormula cooks a formula to ensure its proto exists.
 // This is useful for batch mode where we cook once before processing multiple beads.
-func CookFormula(formulaName, workDir string) error {
+// townRoot is required for GT_ROOT so bd can find town-level formulas.
+func CookFormula(formulaName, workDir, townRoot string) error {
 	cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
 	cookCmd.Dir = workDir
+	cookCmd.Env = append(os.Environ(), "GT_ROOT="+townRoot)
 	cookCmd.Stderr = os.Stderr
 	return cookCmd.Run()
 }
