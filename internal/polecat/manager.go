@@ -49,7 +49,6 @@ type Manager struct {
 	rig      *rig.Rig
 	git      *git.Git
 	beads    *beads.Beads // Rig-level beads for issue and agent bead operations
-	prefix   string       // Rig's configured prefix (e.g., "gt", "fhc") without hyphen
 	namePool *NamePool
 	tmux     *tmux.Tmux
 
@@ -65,12 +64,6 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 	// For local beads: rig/.beads is the database, so use rig root
 	resolvedBeads := beads.ResolveBeadsDir(r.Path)
 	beadsPath := filepath.Dir(resolvedBeads) // Get the directory containing .beads
-
-	// Get rig's configured prefix for agent bead IDs (e.g., "gt", "fhc").
-	// Agent beads are stored in the rig's beads database with the rig's prefix,
-	// aligning with existing beads infrastructure (fix for gt-qub).
-	townRoot := filepath.Dir(r.Path)
-	prefix := beads.GetPrefixForRig(townRoot, r.Name)
 
 	// Try to load rig settings for namepool config
 	settingsPath := filepath.Join(r.Path, "settings", "config.json")
@@ -96,7 +89,6 @@ func NewManager(r *rig.Rig, g *git.Git, t *tmux.Tmux) *Manager {
 		rig:      r,
 		git:      g,
 		beads:    beads.NewWithBeadsDir(beadsPath, resolvedBeads),
-		prefix:   prefix,
 		namePool: pool,
 		tmux:     t,
 	}
@@ -109,12 +101,11 @@ func (m *Manager) assigneeID(name string) string {
 }
 
 // agentBeadID returns the agent bead ID for a polecat.
-// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast")
-// When prefix equals rig name, the rig is deduplicated (e.g., "fhc-polecat-Toast").
-// Polecat agent beads are stored in the rig's beads database with the rig's
-// configured prefix, aligning with existing beads infrastructure (fix for gt-qub).
+// Format: "hq-<rig>-polecat-<name>" (e.g., "hq-gastown-polecat-Toast")
+// Polecat agent beads are stored in town beads with the hq- prefix to avoid
+// prefix/database mismatch issues (fix for gt-3d5ok.1, gt-myc).
 func (m *Manager) agentBeadID(name string) string {
-	return beads.PolecatBeadIDWithPrefix(m.prefix, m.rig.Name, name)
+	return beads.PolecatBeadIDTown(m.rig.Name, name)
 }
 
 // getCleanupStatusFromBead reads the cleanup_status from the polecat's agent bead.
