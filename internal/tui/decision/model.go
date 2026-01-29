@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/steveyegge/gastown/internal/rpcclient"
 	crewTUI "github.com/steveyegge/gastown/internal/tui/crew"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // pollInterval is how often we check for new decisions
@@ -318,14 +319,16 @@ type tickMsg time.Time
 
 // resolvedMsg is sent when a decision is resolved
 type resolvedMsg struct {
-	id  string
-	err error
+	id     string
+	prompt string // For generating semantic slug in status
+	err    error
 }
 
 // dismissedMsg is sent when a decision is dismissed/canceled
 type dismissedMsg struct {
-	id  string
-	err error
+	id     string
+	prompt string // For generating semantic slug in status
+	err    error
 }
 
 // streamMsg is sent when decisions arrive via RPC streaming
@@ -513,7 +516,7 @@ func (m *Model) reconnectStream() tea.Cmd {
 }
 
 // resolveDecision resolves a decision with the given option
-func (m *Model) resolveDecision(decisionID string, choice int, rationale string) tea.Cmd {
+func (m *Model) resolveDecision(decisionID, prompt string, choice int, rationale string) tea.Cmd {
 	// Capture rpcClient for closure
 	rpcClient := m.rpcClient
 
@@ -525,9 +528,9 @@ func (m *Model) resolveDecision(decisionID string, choice int, rationale string)
 		if rpcClient != nil {
 			_, err := rpcClient.ResolveDecision(ctx, decisionID, choice, rationale, "tui")
 			if err != nil {
-				return resolvedMsg{id: decisionID, err: fmt.Errorf("RPC resolve failed: %w", err)}
+				return resolvedMsg{id: decisionID, prompt: prompt, err: fmt.Errorf("RPC resolve failed: %w", err)}
 			}
-			return resolvedMsg{id: decisionID}
+			return resolvedMsg{id: decisionID, prompt: prompt}
 		}
 
 		// Fall back to CLI command
@@ -541,15 +544,15 @@ func (m *Model) resolveDecision(decisionID string, choice int, rationale string)
 		cmd.Stderr = &stderr
 
 		if err := cmd.Run(); err != nil {
-			return resolvedMsg{id: decisionID, err: fmt.Errorf("%s", stderr.String())}
+			return resolvedMsg{id: decisionID, prompt: prompt, err: fmt.Errorf("%s", stderr.String())}
 		}
 
-		return resolvedMsg{id: decisionID}
+		return resolvedMsg{id: decisionID, prompt: prompt}
 	}
 }
 
 // dismissDecision cancels/dismisses a decision
-func (m *Model) dismissDecision(decisionID string, reason string) tea.Cmd {
+func (m *Model) dismissDecision(decisionID, prompt, reason string) tea.Cmd {
 	// Capture rpcClient for closure
 	rpcClient := m.rpcClient
 
@@ -559,7 +562,7 @@ func (m *Model) dismissDecision(decisionID string, reason string) tea.Cmd {
 
 		// RPC mode doesn't support cancel yet - return error
 		if rpcClient != nil {
-			return dismissedMsg{id: decisionID, err: fmt.Errorf("dismiss not supported in RPC mode")}
+			return dismissedMsg{id: decisionID, prompt: prompt, err: fmt.Errorf("dismiss not supported in RPC mode")}
 		}
 
 		// Fall back to CLI command
@@ -573,10 +576,10 @@ func (m *Model) dismissDecision(decisionID string, reason string) tea.Cmd {
 		cmd.Stderr = &stderr
 
 		if err := cmd.Run(); err != nil {
-			return dismissedMsg{id: decisionID, err: fmt.Errorf("%s", stderr.String())}
+			return dismissedMsg{id: decisionID, prompt: prompt, err: fmt.Errorf("%s", stderr.String())}
 		}
 
-		return dismissedMsg{id: decisionID}
+		return dismissedMsg{id: decisionID, prompt: prompt}
 	}
 }
 
@@ -759,8 +762,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedOption > 0 && len(m.decisions) > 0 && m.selected < len(m.decisions) {
 				d := m.decisions[m.selected]
 				if m.selectedOption <= len(d.Options) {
-					cmds = append(cmds, m.resolveDecision(d.ID, m.selectedOption, m.rationale))
-					m.status = fmt.Sprintf("Resolving %s...", d.ID)
+					cmds = append(cmds, m.resolveDecision(d.ID, d.Prompt, m.selectedOption, m.rationale))
+					slug := util.GenerateDecisionSlug(d.ID, d.Prompt)
+					m.status = fmt.Sprintf("Resolving %s...", slug)
 				}
 			}
 
@@ -771,8 +775,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Dismiss):
 			if len(m.decisions) > 0 && m.selected < len(m.decisions) {
 				d := m.decisions[m.selected]
-				cmds = append(cmds, m.dismissDecision(d.ID, "Dismissed via TUI"))
-				m.status = fmt.Sprintf("Dismissing %s...", d.ID)
+				cmds = append(cmds, m.dismissDecision(d.ID, d.Prompt, "Dismissed via TUI"))
+				slug := util.GenerateDecisionSlug(d.ID, d.Prompt)
+				m.status = fmt.Sprintf("Dismissing %s...", slug)
 			}
 
 		case key.Matches(msg, m.keys.FilterHigh):
@@ -821,7 +826,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.status = fmt.Sprintf("Error: %v", msg.err)
 		} else {
-			m.status = fmt.Sprintf("Resolved: %s", msg.id)
+			slug := util.GenerateDecisionSlug(msg.id, msg.prompt)
+			m.status = fmt.Sprintf("Resolved: %s", slug)
 			m.selectedOption = 0
 			m.rationale = ""
 			cmds = append(cmds, m.fetchDecisions())
@@ -832,7 +838,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.status = fmt.Sprintf("Dismiss error: %v", msg.err)
 		} else {
-			m.status = fmt.Sprintf("Dismissed: %s", msg.id)
+			slug := util.GenerateDecisionSlug(msg.id, msg.prompt)
+			m.status = fmt.Sprintf("Dismissed: %s", slug)
 			m.selectedOption = 0
 			cmds = append(cmds, m.fetchDecisions())
 		}
@@ -916,7 +923,7 @@ func (m *Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.selectedOption > 0 && len(m.decisions) > 0 && m.selected < len(m.decisions) {
 				d := m.decisions[m.selected]
 				if m.selectedOption <= len(d.Options) {
-					return m, m.resolveDecision(d.ID, m.selectedOption, m.rationale)
+					return m, m.resolveDecision(d.ID, d.Prompt, m.selectedOption, m.rationale)
 				}
 			}
 		} else if m.inputMode == ModeText {

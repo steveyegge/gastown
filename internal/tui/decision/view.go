@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/ui"
+	"github.com/steveyegge/gastown/internal/util"
 )
 
 // renderView renders the entire view
@@ -125,20 +126,20 @@ func (m *Model) renderDecisionLine(d DecisionItem, selected bool) string {
 	// Time ago
 	timeAgo := formatTimeAgo(d.RequestedAt)
 
-	// Truncate prompt if needed
-	prompt := d.Prompt
-	maxPromptLen := m.width - 40
-	if maxPromptLen < 20 {
-		maxPromptLen = 20
-	}
-	if len(prompt) > maxPromptLen {
-		prompt = prompt[:maxPromptLen-3] + "..."
+	// Generate semantic slug for display
+	semanticSlug := util.GenerateDecisionSlug(d.ID, d.Prompt)
+
+	// Truncate semantic slug if needed (semantic slugs can be long)
+	maxSlugLen := 45
+	displaySlug := semanticSlug
+	if len(displaySlug) > maxSlugLen {
+		displaySlug = displaySlug[:maxSlugLen-3] + "..."
 	}
 
-	// Build line
-	line := fmt.Sprintf(" %s %s - %s", urgency, d.ID, prompt)
+	// Build line with semantic slug instead of raw ID
+	line := fmt.Sprintf(" %s %s", urgency, displaySlug)
 
-	// Add requester and time
+	// Add requester and time on meta line
 	meta := fmt.Sprintf("  %s · %s", detailLabelStyle.Render(d.RequestedBy), detailLabelStyle.Render(timeAgo))
 
 	if selected {
