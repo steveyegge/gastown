@@ -189,9 +189,10 @@ func runSling(cmd *cobra.Command, args []string) error {
 	// Determine target agent (self or specified)
 	var targetAgent string
 	var targetPane string
-	var hookWorkDir string     // Working directory for running bd hook commands
-	var hookSetAtomically bool // True if hook was set during polecat spawn (skip redundant update)
-	var willSpawn bool         // True if polecat/dog spawning will occur (validates spawning flags)
+	var hookWorkDir string              // Working directory for running bd hook commands
+	var hookSetAtomically bool          // True if hook was set during polecat spawn (skip redundant update)
+	var willSpawn bool                  // True if polecat/dog spawning will occur (validates spawning flags)
+	var delayedDogInfo *DogDispatchInfo // For delayed dog session start after hook is set
 
 	if len(args) > 1 {
 		target := args[1]
@@ -221,14 +222,20 @@ func runSling(cmd *cobra.Command, args []string) error {
 				}
 				targetPane = "<dog-pane>"
 			} else {
-				// Dispatch to dog
-				dispatchInfo, dispatchErr := DispatchToDog(dogName, slingCreate)
+				// Dispatch to dog with delayed session start
+				// Session starts after hook is set to avoid race condition
+				dispatchOpts := DogDispatchOptions{
+					Create:            slingCreate,
+					WorkDesc:          beadID,
+					DelaySessionStart: true,
+				}
+				dispatchInfo, dispatchErr := DispatchToDog(dogName, dispatchOpts)
 				if dispatchErr != nil {
 					return fmt.Errorf("dispatching to dog: %w", dispatchErr)
 				}
 				targetAgent = dispatchInfo.AgentID
-				targetPane = dispatchInfo.Pane
-				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
+				delayedDogInfo = dispatchInfo // Store for later session start
+				fmt.Printf("Dispatched to dog %s (session start delayed)\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
 			willSpawn = true // Rig target spawns a new polecat
@@ -579,6 +586,16 @@ func runSling(cmd *cobra.Command, args []string) error {
 			// Warn but don't fail - polecat can still work through steps
 			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
 		}
+	}
+
+	// Start delayed dog session now that hook is set
+	// This ensures dog sees the hook when gt prime runs on session start
+	if delayedDogInfo != nil {
+		pane, err := delayedDogInfo.StartDelayedSession()
+		if err != nil {
+			return fmt.Errorf("starting delayed dog session: %w", err)
+		}
+		targetPane = pane
 	}
 
 	// Try to inject the "start now" prompt (graceful if no tmux)
