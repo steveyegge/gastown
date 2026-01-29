@@ -27,6 +27,7 @@ import (
 	gitpkg "github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mayor"
 	"github.com/steveyegge/gastown/internal/polecat"
+	"github.com/steveyegge/gastown/internal/ratelimit"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -344,6 +345,10 @@ func (d *Daemon) heartbeat(state *State) {
 	// 0. Ensure Dolt server is running (if configured)
 	// This must happen before beads operations that depend on Dolt.
 	d.ensureDoltServerRunning()
+
+	// 0.5. Check for rate limit reset and wake agents if needed
+	// This runs early so agents are notified promptly after rate limits expire.
+	d.checkRateLimitReset()
 
 	// 1. Ensure Deacon is running (restart if dead)
 	// Check patrol config - can be disabled in mayor/daemon.json
@@ -1545,6 +1550,100 @@ Manual intervention may be required.`,
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of crashed polecat: %v", err)
 	}
+}
+
+// checkRateLimitReset checks if a rate limit has expired and wakes agents.
+// When Claude Pro/Max API rate limits are hit, agents stop processing.
+// This method detects when the rate limit period ends and nudges agents to resume.
+func (d *Daemon) checkRateLimitReset() {
+	shouldWake, state, err := ratelimit.ShouldWake(d.config.TownRoot)
+	if err != nil {
+		d.logger.Printf("Error checking rate limit state: %v", err)
+		return
+	}
+
+	if !shouldWake {
+		if state != nil && state.Active {
+			remaining := time.Until(state.ResetAt)
+			if remaining > 0 {
+				d.logger.Printf("Rate limit active, resets in %s", remaining.Round(time.Second))
+			}
+		}
+		return
+	}
+
+	d.logger.Printf("Rate limit reset detected (was set by %s: %s), waking agents...",
+		state.RecordedBy, state.Reason)
+
+	// Record this wake attempt before actually waking
+	if err := ratelimit.RecordWakeAttempt(d.config.TownRoot); err != nil {
+		d.logger.Printf("Warning: failed to record wake attempt: %v", err)
+	}
+
+	// Wake all active agent sessions
+	woken := d.wakeRateLimitedAgents()
+
+	if woken > 0 {
+		d.logger.Printf("Woke %d agent(s) after rate limit reset", woken)
+		// Clear the rate limit state since we successfully woke agents
+		if err := ratelimit.Clear(d.config.TownRoot); err != nil {
+			d.logger.Printf("Warning: failed to clear rate limit state: %v", err)
+		}
+	} else {
+		d.logger.Printf("No agents to wake after rate limit reset (attempt %d/%d)",
+			state.WakeAttempts+1, 3)
+	}
+}
+
+// wakeRateLimitedAgents nudges all active agent sessions to resume after rate limit reset.
+// Returns the number of agents successfully woken.
+func (d *Daemon) wakeRateLimitedAgents() int {
+	woken := 0
+
+	// Wake Deacon if running
+	deaconSession := d.getDeaconSessionName()
+	if hasSession, _ := d.tmux.HasSession(deaconSession); hasSession {
+		if err := d.tmux.NudgeSession(deaconSession, "Rate limit has reset - resuming operations"); err == nil {
+			woken++
+		}
+	}
+
+	// Wake all witness and refinery sessions
+	rigs := d.getKnownRigs()
+	for _, rigName := range rigs {
+		// Wake witness
+		witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
+		if hasSession, _ := d.tmux.HasSession(witnessSession); hasSession {
+			if err := d.tmux.NudgeSession(witnessSession, "Rate limit has reset - resuming operations"); err == nil {
+				woken++
+			}
+		}
+
+		// Wake refinery
+		refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
+		if hasSession, _ := d.tmux.HasSession(refinerySession); hasSession {
+			if err := d.tmux.NudgeSession(refinerySession, "Rate limit has reset - resuming operations"); err == nil {
+				woken++
+			}
+		}
+
+		// Wake all polecats for this rig
+		polecatsDir := filepath.Join(d.config.TownRoot, rigName, "polecats")
+		polecats, err := listPolecatWorktrees(polecatsDir)
+		if err != nil {
+			continue
+		}
+		for _, polecatName := range polecats {
+			polecatSession := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+			if hasSession, _ := d.tmux.HasSession(polecatSession); hasSession {
+				if err := d.tmux.NudgeSession(polecatSession, "Rate limit has reset - resuming operations"); err == nil {
+					woken++
+				}
+			}
+		}
+	}
+
+	return woken
 }
 
 // cleanupOrphanedProcesses kills orphaned claude subagent processes.
