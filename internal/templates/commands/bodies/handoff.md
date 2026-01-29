@@ -1,9 +1,3 @@
----
-description: Hand off to fresh session, work continues from hook
-allowed-tools: Bash(gt handoff:*)
-argument-hint: [message]
----
-
 Hand off to a fresh session.
 
 User's handoff message (if any): $ARGUMENTS
