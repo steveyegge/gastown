@@ -1405,13 +1405,27 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 
 	// Show context inline if available (with JSON formatting)
 	if decision.Context != "" {
-		contextText := formatContextForSlack(decision.Context, 500)
+		const contextPreviewThreshold = 500
+		contextText := formatContextForSlack(decision.Context, contextPreviewThreshold)
 		blocks = append(blocks,
 			slack.NewSectionBlock(
 				slack.NewTextBlockObject("mrkdwn", contextText, false, false),
 				nil, nil,
 			),
 		)
+
+		// Add "Show Full Context" button if context is long
+		if len(decision.Context) > contextPreviewThreshold {
+			blocks = append(blocks,
+				slack.NewActionBlock("",
+					slack.NewButtonBlockElement(
+						fmt.Sprintf("show_context_%s", decision.ID),
+						decision.ID,
+						slack.NewTextBlockObject("plain_text", "Show Full Context", false, false),
+					),
+				),
+			)
+		}
 	}
 
 	// Show options inline with resolve buttons (gt-1bc64)
@@ -1561,13 +1575,27 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 
 	// Show context inline with JSON formatting
 	if decision.Context != "" {
-		contextText := formatContextForSlack(decision.Context, 500)
+		const contextPreviewThreshold = 500
+		contextText := formatContextForSlack(decision.Context, contextPreviewThreshold)
 		blocks = append(blocks,
 			slack.NewSectionBlock(
 				slack.NewTextBlockObject("mrkdwn", contextText, false, false),
 				nil, nil,
 			),
 		)
+
+		// Add "Show Full Context" button if context is long
+		if len(decision.Context) > contextPreviewThreshold {
+			blocks = append(blocks,
+				slack.NewActionBlock("",
+					slack.NewButtonBlockElement(
+						fmt.Sprintf("show_context_%s", decision.ID),
+						decision.ID,
+						slack.NewTextBlockObject("plain_text", "Show Full Context", false, false),
+					),
+				),
+			)
+		}
 	}
 
 	if len(decision.Options) > 0 {
