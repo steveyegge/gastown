@@ -546,6 +546,19 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 		}
 	}
 
+	// Close agent bead FIRST, before any filesystem operations.
+	// This prevents a race where a concurrent sling allocates the same name,
+	// sets hook_bead, and then has it cleared by this cleanup. By closing
+	// the agent bead first, concurrent slings see a CLOSED bead and
+	// CreateOrReopenAgentBead safely reopens it with fresh state.
+	agentID := m.agentBeadID(name)
+	if err := m.beads.CloseAndClearAgentBead(agentID, "polecat removed"); err != nil {
+		// Only log if not "not found" - it's ok if it doesn't exist
+		if !errors.Is(err, beads.ErrNotFound) {
+			fmt.Printf("Warning: could not close agent bead %s: %v\n", agentID, err)
+		}
+	}
+
 	// Get repo base to remove the worktree properly
 	repoGit, err := m.repoBase()
 	if err != nil {
@@ -593,17 +606,6 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear bool) error {
 	// Release name back to pool if it's a pooled name (non-fatal: state file update)
 	m.namePool.Release(name)
 	_ = m.namePool.Save()
-
-	// Close agent bead (non-fatal: may not exist or beads may not be available)
-	// NOTE: We use CloseAndClearAgentBead instead of DeleteAgentBead because bd delete --hard
-	// creates tombstones that cannot be reopened.
-	agentID := m.agentBeadID(name)
-	if err := m.beads.CloseAndClearAgentBead(agentID, "polecat removed"); err != nil {
-		// Only log if not "not found" - it's ok if it doesn't exist
-		if !errors.Is(err, beads.ErrNotFound) {
-			fmt.Printf("Warning: could not close agent bead %s: %v\n", agentID, err)
-		}
-	}
 
 	return nil
 }
