@@ -133,6 +133,14 @@ func runSling(cmd *cobra.Command, args []string) error {
 	}
 	townBeadsDir := filepath.Join(townRoot, ".beads")
 
+	// Normalize target arguments: trim trailing slashes from target to handle tab-completion
+	// artifacts like "gt sling sl-123 slingshot/" → "gt sling sl-123 slingshot"
+	// This makes sling more forgiving without breaking existing functionality.
+	// Note: Internal agent IDs like "mayor/" are outputs, not user inputs.
+	for i := range args {
+		args[i] = strings.TrimRight(args[i], "/")
+	}
+
 	// Batch mode detection: multiple beads with rig target
 	// Pattern: gt sling gt-abc gt-def gt-ghi gastown
 	// When len(args) > 2 and last arg is a rig, sling each bead to its own polecat
