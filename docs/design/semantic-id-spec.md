@@ -1,6 +1,6 @@
 # Semantic Issue ID Format Specification
 
-**Status:** Draft v0.3
+**Status:** Draft v0.4
 **Author:** gastown/crew/semantic_id_design
 **Date:** 2026-01-29
 **Parent Epic:** gt-zfyl8
@@ -81,37 +81,40 @@ epc-semantic_ids        # Within same rig (prefix optional)
 
 ## Hierarchical Slugs
 
-### Dotted Notation (Current System)
+### Canonical IDs vs Slugs
 
-Today's hierarchy uses numeric dot suffixes:
+Canonical IDs use numeric dot suffixes:
 - `gt-zfyl8` - Parent (epic)
 - `gt-zfyl8.1` - First child (task)
 - `gt-zfyl8.2` - Second child
 
-### Slug Hierarchy Options
+Slugs use **named** dot suffixes derived from titles:
+- `epc-semantic_ids` → `gt-zfyl8`
+- `epc-semantic_ids.format_spec` → `gt-zfyl8.1`
+- `epc-semantic_ids.validation` → `gt-zfyl8.8`
 
-**Option A: Numeric suffix (mirrors IDs)**
+### Why Named Children?
+
+Titles are **already mandatory** for all beads. Since every bead has a title,
+we can always generate a meaningful slug. No need for numeric suffixes in slugs.
+
+### Examples
+
+| Canonical ID | Title | Slug |
+|--------------|-------|------|
+| `gt-zfyl8` | Semantic Issue IDs | `epc-semantic_ids` |
+| `gt-zfyl8.1` | ID format specification | `epc-semantic_ids.format_spec` |
+| `gt-zfyl8.8` | Validation preview | `epc-semantic_ids.validation` |
+| `gt-zfyl8.6` | Migration tool | `epc-semantic_ids.migration_tool` |
+
+### Child Slug Generation
+
+Children inherit parent slug as prefix:
 ```
-epc-semantic_ids      → gt-zfyl8
-epc-semantic_ids.1    → gt-zfyl8.1
-epc-semantic_ids.2    → gt-zfyl8.2
+child_slug = parent_slug + "." + slugify(child_title)
 ```
 
-**Option B: Named children (more semantic)**
-```
-epc-semantic_ids                → gt-zfyl8
-epc-semantic_ids/format_spec    → gt-zfyl8.1
-epc-semantic_ids/validation     → gt-zfyl8.8
-```
-
-**Option C: Hybrid (numbered + optional names)**
-```
-epc-semantic_ids.1              → gt-zfyl8.1
-epc-semantic_ids.1:format_spec  → gt-zfyl8.1 (with alias)
-```
-
-**Recommendation:** Start with **Option A** (numeric suffix) for simplicity.
-Named children (Option B) can be added later as an enhancement.
+No type code on children (parent provides context).
 
 ## Slug Rules
 
@@ -122,10 +125,8 @@ Named children (Option B) can be added later as an enhancement.
 | `a-z` | Yes | Lowercase letters |
 | `0-9` | Yes | Digits (not at start of descriptive part) |
 | `_` | Yes | Word separator within descriptive part |
-| `-` | Yes | Type-slug separator (exactly one) |
-| `.` | Yes | Hierarchy separator |
-| `:` | Reserved | Future: child naming |
-| `/` | Reserved | Future: path-style hierarchy |
+| `-` | Yes | Type-slug separator (exactly one per segment) |
+| `.` | Yes | Hierarchy separator (parent.child) |
 
 ### Length Constraints
 
@@ -138,8 +139,14 @@ Named children (Option B) can be added later as an enhancement.
 ### Validation Regex
 
 ```regex
-^(epc|bug|tsk|ftr|dec|cnv|mol|wsp|agt|rol|mrq)-[a-z][a-z0-9_]{2,39}(\.\d+)*$
+^(epc|bug|tsk|ftr|dec|cnv|mol|wsp|agt|rol|mrq)-[a-z][a-z0-9_]{2,39}(\.[a-z][a-z0-9_]{2,39})*$
 ```
+
+**Breakdown:**
+- `^(epc|bug|...)` - Type code
+- `-` - Type separator
+- `[a-z][a-z0-9_]{2,39}` - Root slug (3-40 chars, starts with letter)
+- `(\.[a-z][a-z0-9_]{2,39})*` - Optional named children (dot + name)
 
 ### Normalization
 
@@ -259,23 +266,24 @@ No migration required. Slugs are:
 
 ### Phase 1: Core (MVP)
 - [ ] Add `slug` column to issues table
-- [ ] Implement slug validation
-- [ ] Add `bd slug` command
-- [ ] Lookup by slug in `bd show`
+- [ ] Implement slug validation regex
+- [ ] Add `bd slug` command (set/clear/show)
+- [ ] Lookup by slug in `bd show`, `bd update`, etc.
 
 ### Phase 2: Auto-Generation
-- [ ] Auto-generate slug on `bd create`
+- [ ] Auto-generate slug on `bd create` from type + title
 - [ ] `--slug` and `--no-slug` flags
-- [ ] Collision handling with numeric suffix
+- [ ] Collision handling with `_2`, `_3` suffix
 
 ### Phase 3: Hierarchy
-- [ ] Support dotted slugs for children
-- [ ] Inherit parent slug prefix
+- [ ] Child slugs inherit parent prefix: `parent.child`
+- [ ] Auto-generate child slug from parent slug + child title
+- [ ] Validate parent exists when creating hierarchical slug
 
 ### Phase 4: Enhancements (Future)
-- [ ] Named children (`epc-semantic_ids/format_spec`)
 - [ ] Slug aliases (multiple slugs → same bead)
-- [ ] Slug history/redirects
+- [ ] Slug history/redirects (old slug → new slug)
+- [ ] Bulk slug generation for existing beads
 
 ## Test Cases
 
@@ -286,8 +294,9 @@ epc-semantic_ids
 bug-fix_login_timeout
 tsk-add_user_auth
 dec-cache_strategy
-epc-semantic_ids.1
-epc-semantic_ids.2
+epc-semantic_ids.format_spec
+epc-semantic_ids.validation
+epc-semantic_ids.format_spec.regex_pattern
 bug-login_timeout_2
 ```
 
@@ -299,6 +308,8 @@ epc-ab                 # Too short (min 3 chars)
 epc-Fix_Login          # Uppercase
 bug-fix-login          # Hyphen in descriptive part
 EPC-test               # Uppercase type
+epc-semantic_ids.1     # Numeric child (use names, not numbers)
+epc-semantic_ids/child # Wrong separator (use dot, not slash)
 ```
 
 ## Open Questions
@@ -308,17 +319,20 @@ EPC-test               # Uppercase type
 1. **Q: Replace IDs or alias?**
    A: **Alias**. Slugs are lookup helpers, IDs remain canonical.
 
-2. **Q: Hierarchy notation?**
-   A: Dotted numeric for now (`.1`, `.2`). Named children deferred.
+2. **Q: Hierarchy separator?**
+   A: **Dot** (`.`). Same as IDs but with names: `epc-semantic_ids.format_spec`
 
-3. **Q: Auto-generate or manual?**
+3. **Q: Numeric or named children?**
+   A: **Named**. Titles are mandatory, so always derive from title.
+
+4. **Q: Auto-generate or manual?**
    A: Auto-generate by default, with opt-out.
 
 ### Deferred
 
-1. Named child slugs (`epc-semantic_ids/format_spec`)
-2. Slug aliases (multiple slugs → one bead)
-3. Slug redirects (old slug → new slug)
+1. Slug aliases (multiple slugs → one bead)
+2. Slug redirects (old slug → new slug)
+3. Deep nesting limits (how many `.` levels allowed?)
 
 ## Changelog
 
@@ -327,3 +341,4 @@ EPC-test               # Uppercase type
 | 0.1 | 2026-01-29 | Initial draft: single-hyphen replacement format |
 | 0.2 | 2026-01-29 | Added type code and random suffix |
 | 0.3 | 2026-01-29 | **Pivot**: Slug as alias, not replacement. Random IDs remain canonical. |
+| 0.4 | 2026-01-29 | Named children: `epc-semantic_ids.format_spec` (dot separator, title-derived) |
