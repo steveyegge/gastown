@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -472,13 +473,61 @@ func runSling(cmd *cobra.Command, args []string) error {
 		// - Base bead left orphaned after gt done
 	}
 
-	// Hook the bead using bd update.
+	// Hook the bead using bd update with retry logic.
+	// Dolt can fail with concurrency errors (HTTP 400) when multiple agents write simultaneously.
+	// We retry with exponential backoff and verify the hook actually stuck.
 	// See: https://github.com/steveyegge/gastown/issues/148
-	hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
-	hookCmd.Dir = beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
-	hookCmd.Stderr = os.Stderr
-	if err := hookCmd.Run(); err != nil {
-		return fmt.Errorf("hooking bead: %w", err)
+	hookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
+	const maxRetries = 3
+	skipVerify := os.Getenv("GT_TEST_SKIP_HOOK_VERIFY") != "" // For tests with stub bd
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+targetAgent)
+		hookCmd.Dir = hookDir
+		hookCmd.Stderr = os.Stderr
+		if err := hookCmd.Run(); err != nil {
+			lastErr = err
+			if attempt < maxRetries {
+				backoff := time.Duration(attempt*500) * time.Millisecond
+				fmt.Printf("%s Hook attempt %d failed, retrying in %v...\n", style.Warning.Render("⚠"), attempt, backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("hooking bead after %d attempts: %w", maxRetries, err)
+		}
+
+		// Skip verification in test mode (stubs don't track state)
+		if skipVerify {
+			break
+		}
+
+		// Verify the hook actually stuck (Dolt concurrency can cause silent failures)
+		verifyInfo, verifyErr := getBeadInfo(beadID)
+		if verifyErr != nil {
+			lastErr = fmt.Errorf("verifying hook: %w", verifyErr)
+			if attempt < maxRetries {
+				backoff := time.Duration(attempt*500) * time.Millisecond
+				fmt.Printf("%s Hook verification failed, retrying in %v...\n", style.Warning.Render("⚠"), backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("verifying hook after %d attempts: %w", maxRetries, lastErr)
+		}
+
+		if verifyInfo.Status != "hooked" || verifyInfo.Assignee != targetAgent {
+			lastErr = fmt.Errorf("hook did not stick: status=%s, assignee=%s (expected hooked, %s)",
+				verifyInfo.Status, verifyInfo.Assignee, targetAgent)
+			if attempt < maxRetries {
+				backoff := time.Duration(attempt*500) * time.Millisecond
+				fmt.Printf("%s %v, retrying in %v...\n", style.Warning.Render("⚠"), lastErr, backoff)
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("hook failed after %d attempts: %w", maxRetries, lastErr)
+		}
+
+		// Success!
+		break
 	}
 
 	fmt.Printf("%s Work attached to hook (status=hooked)\n", style.Bold.Render("✓"))
