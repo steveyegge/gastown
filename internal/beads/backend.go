@@ -25,7 +25,8 @@ type MetadataConfig struct {
 	JSONLExport       string `json:"jsonl_export"`
 	Backend           string `json:"backend"`
 	Prefix            string `json:"prefix"`
-	DoltServerEnabled bool   `json:"dolt_server_enabled"`
+	DoltServerEnabled bool   `json:"dolt_server_enabled"` // Legacy field
+	DoltMode          string `json:"dolt_mode"`           // Preferred: "embedded" or "server"
 	DoltServerHost    string `json:"dolt_server_host"`
 	DoltServerPort    int    `json:"dolt_server_port"`
 	DoltServerUser    string `json:"dolt_server_user"`
@@ -33,6 +34,7 @@ type MetadataConfig struct {
 
 // IsDoltServerMode returns true if the beads directory uses Dolt server mode.
 // Server mode connects to a centralized dolt sql-server instead of embedded driver.
+// Checks both dolt_server_enabled (legacy) and dolt_mode: "server" (preferred).
 func IsDoltServerMode(beadsDir string) bool {
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	data, err := os.ReadFile(metadataPath) //nolint:gosec // G304: path is constructed internally
@@ -45,7 +47,8 @@ func IsDoltServerMode(beadsDir string) bool {
 		return false
 	}
 
-	return config.Backend == BackendDolt && config.DoltServerEnabled
+	// Check both legacy (dolt_server_enabled) and preferred (dolt_mode: "server") fields
+	return config.Backend == BackendDolt && (config.DoltServerEnabled || strings.ToLower(config.DoltMode) == "server")
 }
 
 // IsDoltNative returns true if beads uses dolt-native mode (shared via symlinks).

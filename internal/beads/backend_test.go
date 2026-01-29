@@ -207,6 +207,93 @@ func TestConcurrentAccess_Dolt(t *testing.T) {
 	})
 }
 
+// TestIsDoltServerMode tests detection of Dolt server mode from metadata.json.
+// This function supports both legacy (dolt_server_enabled) and preferred (dolt_mode) fields.
+func TestIsDoltServerMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata string
+		expected bool
+	}{
+		{
+			name: "dolt_server_enabled: true (legacy)",
+			metadata: `{
+				"backend": "dolt",
+				"dolt_server_enabled": true,
+				"dolt_server_host": "127.0.0.1",
+				"dolt_server_port": 3306
+			}`,
+			expected: true,
+		},
+		{
+			name: "dolt_mode: server (preferred)",
+			metadata: `{
+				"backend": "dolt",
+				"dolt_mode": "server",
+				"dolt_server_host": "127.0.0.1",
+				"dolt_server_port": 3306
+			}`,
+			expected: true,
+		},
+		{
+			name: "both fields set",
+			metadata: `{
+				"backend": "dolt",
+				"dolt_server_enabled": true,
+				"dolt_mode": "server"
+			}`,
+			expected: true,
+		},
+		{
+			name: "dolt_mode: embedded",
+			metadata: `{
+				"backend": "dolt",
+				"dolt_mode": "embedded"
+			}`,
+			expected: false,
+		},
+		{
+			name: "no server fields (embedded default)",
+			metadata: `{
+				"backend": "dolt"
+			}`,
+			expected: false,
+		},
+		{
+			name: "sqlite backend with server fields",
+			metadata: `{
+				"backend": "sqlite",
+				"dolt_server_enabled": true
+			}`,
+			expected: false,
+		},
+		{
+			name: "dolt_server_enabled: false",
+			metadata: `{
+				"backend": "dolt",
+				"dolt_server_enabled": false
+			}`,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			metadataPath := filepath.Join(tmpDir, "metadata.json")
+
+			if err := os.WriteFile(metadataPath, []byte(tt.metadata), 0644); err != nil {
+				t.Fatalf("Failed to write metadata.json: %v", err)
+			}
+
+			got := beads.IsDoltServerMode(tmpDir)
+			if got != tt.expected {
+				t.Errorf("IsDoltServerMode() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestBackendSwitching tests migration between SQLite and Dolt backends.
 func TestBackendSwitching(t *testing.T) {
 	if testing.Short() {
