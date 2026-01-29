@@ -1389,7 +1389,7 @@ func containsString(slice []string, s string) bool {
 // These are matched as whole words (with word boundaries) to avoid false positives like
 // "delivered" matching "error" or "fail" matching "failure-mode" in design discussions.
 var failureKeywords = []string{
-	"error", "errors", "failed", "failing", "failure", "bug", "bugs",
+	"error", "errors", "failed", "fails", "failing", "failure", "bug", "bugs",
 	"broke", "broken", "stuck", "crash", "crashed", "crashing",
 	"exception", "panic", "panicked", "fatal",
 	"cannot", "unable", "doesn't work", "does not work", "not working",

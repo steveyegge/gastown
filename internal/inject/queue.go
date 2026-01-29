@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/constants"
@@ -92,10 +91,10 @@ func (q *Queue) Enqueue(entryType EntryType, content string) error {
 	defer f.Close()
 
 	// Acquire exclusive lock for write
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFileExclusive(f); err != nil {
 		return fmt.Errorf("acquiring file lock: %w", err)
 	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = unlockFile(f) }()
 
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("writing to queue: %w", err)
@@ -118,10 +117,10 @@ func (q *Queue) Drain() ([]Entry, error) {
 	defer f.Close()
 
 	// Acquire exclusive lock
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFileExclusive(f); err != nil {
 		return nil, fmt.Errorf("acquiring file lock: %w", err)
 	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = unlockFile(f) }()
 
 	// Read queue file
 	data, err := os.ReadFile(q.queueFile())
@@ -167,10 +166,10 @@ func (q *Queue) Peek() ([]Entry, error) {
 	defer f.Close()
 
 	// Acquire shared lock for read
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+	if err := lockFileShared(f); err != nil {
 		return nil, fmt.Errorf("acquiring file lock: %w", err)
 	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = unlockFile(f) }()
 
 	// Read queue file
 	data, err := os.ReadFile(q.queueFile())
@@ -285,10 +284,10 @@ func (nq *NudgeQueue) Enqueue(content string) error {
 	defer f.Close()
 
 	// Acquire exclusive lock for write
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFileExclusive(f); err != nil {
 		return fmt.Errorf("acquiring nudge queue lock: %w", err)
 	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = unlockFile(f) }()
 
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("writing to nudge queue: %w", err)
@@ -309,10 +308,10 @@ func (nq *NudgeQueue) Drain() ([]Entry, error) {
 	defer f.Close()
 
 	// Acquire exclusive lock
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFileExclusive(f); err != nil {
 		return nil, fmt.Errorf("acquiring nudge queue lock: %w", err)
 	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = unlockFile(f) }()
 
 	// Read queue file
 	data, err := os.ReadFile(nq.queueFile())

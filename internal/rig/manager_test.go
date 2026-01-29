@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 )
@@ -524,6 +525,16 @@ esac
 	t.Setenv("AGENT_LOG", agentLog)
 	t.Setenv("BEADS_DIR_LOG", beadsDirLog)
 	t.Setenv("BEADS_DIR", "") // Clear any existing BEADS_DIR
+
+	// Override the cached bd path to use our fake bd script.
+	// The beads package caches resolvedBdPath at init time, so we must
+	// use SetBdPathForTest to inject our stub.
+	fakeBdPath := filepath.Join(binDir, "bd")
+	if runtime.GOOS == "windows" {
+		fakeBdPath = filepath.Join(binDir, "bd.cmd")
+	}
+	cleanup := beads.SetBdPathForTest(fakeBdPath)
+	defer cleanup()
 
 	manager := &Manager{townRoot: townRoot}
 	if err := manager.initAgentBeads(rigPath, "demo", "gt"); err != nil {
