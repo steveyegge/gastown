@@ -374,9 +374,10 @@ func (r *Router) RemoveOverride(agent string) string {
 
 // Save persists the current configuration to the config file.
 // Returns an error if no config path is known (e.g., router created with NewRouter directly).
+// Uses atomic write (temp file + rename) to prevent data corruption.
 func (r *Router) Save() error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	if r.configPath == "" {
 		return fmt.Errorf("no config path: router was not loaded from file")
@@ -387,8 +388,15 @@ func (r *Router) Save() error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(r.configPath, data, 0644); err != nil {
-		return fmt.Errorf("write config: %w", err)
+	// Write to temp file first, then rename for atomicity
+	tmpPath := r.configPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("write temp config: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, r.configPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename config: %w", err)
 	}
 
 	return nil
