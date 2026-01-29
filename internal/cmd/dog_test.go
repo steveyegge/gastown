@@ -60,6 +60,9 @@ func setupTestDog(t *testing.T, m *dog.Manager, townRoot, name string, state *do
 // TestDetectDogNameFromPath tests the path parsing logic used by runDogDone
 // to auto-detect the dog name from the current working directory.
 func TestDetectDogNameFromPath(t *testing.T) {
+	// Use filepath.Join for cross-platform path construction
+	base := filepath.Join("Users", "user", "gt")
+
 	tests := []struct {
 		name     string
 		path     string
@@ -68,55 +71,55 @@ func TestDetectDogNameFromPath(t *testing.T) {
 	}{
 		{
 			name:     "dog worktree root",
-			path:     "/Users/user/gt/deacon/dogs/alpha",
+			path:     filepath.Join(base, "deacon", "dogs", "alpha"),
 			wantName: "alpha",
 			wantOK:   true,
 		},
 		{
 			name:     "dog rig worktree",
-			path:     "/Users/user/gt/deacon/dogs/alpha/gastown",
+			path:     filepath.Join(base, "deacon", "dogs", "alpha", "gastown"),
 			wantName: "alpha",
 			wantOK:   true,
 		},
 		{
 			name:     "deep path in dog worktree",
-			path:     "/Users/user/gt/deacon/dogs/bravo/beads/internal/cmd",
+			path:     filepath.Join(base, "deacon", "dogs", "bravo", "beads", "internal", "cmd"),
 			wantName: "bravo",
 			wantOK:   true,
 		},
 		{
 			name:     "hyphenated dog name",
-			path:     "/Users/user/gt/deacon/dogs/my-dog/gastown",
+			path:     filepath.Join(base, "deacon", "dogs", "my-dog", "gastown"),
 			wantName: "my-dog",
 			wantOK:   true,
 		},
 		{
 			name:     "numeric dog name",
-			path:     "/Users/user/gt/deacon/dogs/dog123/beads",
+			path:     filepath.Join(base, "deacon", "dogs", "dog123", "beads"),
 			wantName: "dog123",
 			wantOK:   true,
 		},
 		{
 			name:     "not a dog path - polecat",
-			path:     "/Users/user/gt/gastown/polecats/fixer/internal",
+			path:     filepath.Join(base, "gastown", "polecats", "fixer", "internal"),
 			wantName: "",
 			wantOK:   false,
 		},
 		{
 			name:     "not a dog path - crew",
-			path:     "/Users/user/gt/gastown/crew/george/internal",
+			path:     filepath.Join(base, "gastown", "crew", "george", "internal"),
 			wantName: "",
 			wantOK:   false,
 		},
 		{
 			name:     "deacon but not dogs directory",
-			path:     "/Users/user/gt/deacon/boot",
+			path:     filepath.Join(base, "deacon", "boot"),
 			wantName: "",
 			wantOK:   false,
 		},
 		{
 			name:     "dogs without deacon parent",
-			path:     "/Users/user/gt/some/dogs/alpha",
+			path:     filepath.Join(base, "some", "dogs", "alpha"),
 			wantName: "",
 			wantOK:   false,
 		},
@@ -128,7 +131,7 @@ func TestDetectDogNameFromPath(t *testing.T) {
 		},
 		{
 			name:     "root path",
-			path:     "/",
+			path:     string(filepath.Separator),
 			wantName: "",
 			wantOK:   false,
 		},
