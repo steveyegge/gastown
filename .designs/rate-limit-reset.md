@@ -95,33 +95,9 @@ func (d *Daemon) checkForRateLimit(sessionName string) (*RateLimitInfo, error) {
 
 **Approach**: Use existing keepalive system to detect "agent stopped without handoff".
 
-**Current Behavior**:
-- `keepalive.Touch()` called on gt commands
-- Staleness detected after configurable threshold
-
-**Enhanced Detection**:
-```go
-type RateLimitHeuristic struct {
-    // All agents stopped simultaneously
-    AllAgentsStopped bool
-    // No crash markers present
-    NoCrashMarkers   bool
-    // Last keepalive was recent (agent was active)
-    RecentActivity   bool
-    // Time of day matches typical reset window
-    TimeWindowMatch  bool
-}
-```
-
-**Pros**:
-- Works with existing infrastructure
-- No parsing required
-- Catches rate limits even if message format changes
-
-**Cons**:
-- Can't determine exact reset time
-- False positives possible (all agents could crash)
-- Requires heuristic tuning
+**REJECTED**: This approach doesn't work because agents only receive the rate limit
+message when they receive a prompt AFTER the rate limit is hit. Idle agents never
+hit the rate limit, so "all agents stopped simultaneously" is not a reliable signal.
 
 ### Option 1D: Anthropic API Probe (External)
 
@@ -137,12 +113,14 @@ type RateLimitHeuristic struct {
 - May itself be rate-limited
 - Privacy/security concerns (daemon shouldn't have API key)
 
-### Recommendation: 1A + 1C Hybrid
+### Recommendation: 1A (Tmux Output Parsing)
 
-Primary: Parse tmux output for rate limit messages (1A)
-Fallback: Heuristic detection when all agents stop without handoff (1C)
+Parse tmux output for rate limit messages. The message format is documented in
+the original GitHub issue. When a rate-limited session is detected, record the
+reset time and mark that agent as rate-limited.
 
-This provides accurate reset times when available, with graceful fallback.
+No heuristic fallback needed - we simply check agents that are marked as
+rate-limited and poke them to continue when the time comes.
 
 ---
 
@@ -357,101 +335,34 @@ func (d *Daemon) executeRateLimitRecovery() {
 
 ## Exploration Dimension 4: Context Preservation
 
-### Option 4A: Rely on Existing Handoff
+### Key Insight: Context is Already Present
 
-**Approach**: Use checkpoint + handoff mail system as-is.
+When a session hits a rate limit, the Claude Code session is **paused, not killed**.
+The context remains in the session. Recovery is simple:
 
-**Current Behavior**:
-- Checkpoint captures molecule_id, current_step, hooked_bead, modified files
-- Handoff mail contains context for next session
-- SessionStart hook injects mail
+1. Send input "1" to select the retry option (if presented)
+2. Send message: "Your rate limit has reset, continue your work"
 
-**Gap**: Rate-limited session didn't handoff (it was killed mid-flight).
+**No checkpoint recovery or handoff mail needed** - the agent's context is intact.
 
-**Mitigation**:
-- Checkpoint is written periodically, so recent state exists
-- Hooked bead persists in agent bead
-- Modified files are in git worktree
+### Implementation
 
-**Pros**:
-- No new code needed
-- Uses existing patterns
-
-**Cons**:
-- Checkpoint may be stale
-- No handoff mail means reduced context
-
-### Option 4B: Emergency Checkpoint on Rate Limit
-
-**Approach**: Detect rate limit and capture emergency checkpoint.
-
-**Implementation**:
 ```go
-// When rate limit detected for a session
-func (d *Daemon) captureEmergencyCheckpoint(sessionName string) {
-    // Get pane content for context
-    output, _ := d.tmux.CapturePane(sessionName, 200)
+func (d *Daemon) pokeRateLimitedSession(sessionName string) {
+    // Send "1" to select retry option if rate limit dialog is showing
+    d.tmux.SendKeys(sessionName, "1", true)
+    time.Sleep(500 * time.Millisecond)
 
-    checkpoint := EmergencyCheckpoint{
-        Timestamp:   time.Now(),
-        PaneContent: output,
-        Reason:      "rate_limit",
-    }
-
-    // Write to agent's checkpoint file
-    path := d.getCheckpointPath(sessionName)
-    json.Marshal(checkpoint)
-    os.WriteFile(path + ".emergency", data, 0644)
+    // Send continuation message
+    d.tmux.SendKeys(sessionName, "Your rate limit has reset, continue your work", true)
+    d.tmux.SendKeys(sessionName, "Enter", false)
 }
 ```
 
-**Pros**:
-- Captures last-known state
-- Can include tmux pane content for context
+### Recommendation
 
-**Cons**:
-- May be incomplete (session already halted)
-- Adds complexity
-
-### Option 4C: Rate Limit Handoff Mail
-
-**Approach**: Create synthetic handoff mail for recovery.
-
-**Implementation**:
-When waking from rate limit:
-```go
-func (d *Daemon) sendRateLimitRecoveryMail(agentIdentity string, checkpoint Checkpoint) {
-    subject := "RATE_LIMIT_RECOVERY: Work continuation"
-    body := fmt.Sprintf(`Resuming after rate limit.
-
-Previous state:
-- Hooked bead: %s
-- Last step: %s
-- Last commit: %s
-
-Check your hook and continue work.`,
-        checkpoint.HookedBead,
-        checkpoint.CurrentStep,
-        checkpoint.LastCommit)
-
-    d.sendMail(agentIdentity, subject, body)
-}
-```
-
-**Pros**:
-- Fits existing mail-based handoff pattern
-- Provides explicit context to agent
-- Observable (mail shows in inbox)
-
-**Cons**:
-- Requires checkpoint to be meaningful
-- Mail may be verbose
-
-### Recommendation: 4A + 4C
-
-Rely on existing checkpoint system (4A), but generate synthetic handoff mail (4C)
-when waking from rate limit. This provides explicit context to the agent about
-why it's being restarted.
+No complex context preservation needed. Simply poke rate-limited sessions with
+a continuation message when their reset time arrives.
 
 ---
 
@@ -585,60 +496,35 @@ type TownSettings struct {
 **Deliverables**:
 - `checkRateLimitStatus()` in daemon heartbeat
 - `RateLimitState` struct and file persistence
-- Basic tmux output parsing for rate limit messages
+- Tmux output parsing for rate limit messages (format from GitHub issue)
 - `gt daemon rate-limit-status` command
 
 **Effort**: Small
 **Risk**: Low
 
-### Phase 2: Scheduled Wake-Up
+### Phase 2: Scheduled Poke
 
-**Goal**: Automatically wake agents at reset time.
+**Goal**: Automatically poke rate-limited agents at reset time.
 
 **Deliverables**:
 - In-memory timer scheduling
 - State recovery on daemon restart
-- Simple cascade restart
+- `pokeRateLimitedSession()` - send "1" + continuation message
+- Simple cascade with grace periods between agents
 - KRC event logging
 
 **Effort**: Medium
 **Risk**: Medium (timer reliability)
 
-### Phase 3: Context Preservation
+### Phase 3: Observability (Optional)
 
-**Goal**: Preserve work context across rate limit.
-
-**Deliverables**:
-- Rate limit handoff mail generation
-- Integration with existing checkpoint
-- SessionStart hook for rate limit context
-
-**Effort**: Small
-**Risk**: Low
-
-### Phase 4: Observability
-
-**Goal**: Make rate limit status visible.
+**Goal**: Make rate limit status visible in `gt status`.
 
 **Deliverables**:
 - `gt status` shows rate limit state
-- Dashboard rate limit indicator
 - Feed events for rate limit detection/recovery
 
 **Effort**: Small
-**Risk**: Low
-
-### Phase 5: Advanced Features (Future)
-
-**Goal**: Refined behavior.
-
-**Deliverables**:
-- Per-model rate limit tracking
-- Configuration options
-- Manual wake command
-- Proactive warnings
-
-**Effort**: Medium
 **Risk**: Low
 
 ---
@@ -649,10 +535,10 @@ type TownSettings struct {
 
 | Dimension | Recommendation | Rationale |
 |-----------|---------------|-----------|
-| Detection | Tmux output + heuristics | Accurate when parseable, fallback when not |
+| Detection | Tmux output parsing | Parse rate limit message for reset time |
 | Architecture | Daemon + persistent state | Self-contained, survives restarts |
 | Wake-up | Simple cascade with work filter | Reliable, efficient |
-| Context | Existing checkpoint + recovery mail | Minimal new code, explicit context |
+| Context | **None needed** | Session context intact, just poke to continue |
 | Config | TownSettings.RateLimits | Fits existing pattern |
 
 ### Key Design Decisions
@@ -661,27 +547,26 @@ type TownSettings struct {
 
 2. **Persist state to file**: Survives daemon restarts without external deps.
 
-3. **Cascade restart with grace periods**: Prevents immediate re-rate-limit.
+3. **Cascade poke with grace periods**: Prevents immediate re-rate-limit.
 
-4. **Generate recovery mail**: Provides explicit context to waking agents.
+4. **No context recovery needed**: Sessions are paused, not killed. Just poke to continue.
 
-5. **Default to conservative reset time**: If multiple models, use latest.
+5. **Simple poke mechanism**: Send "1" + "Your rate limit has reset, continue your work".
 
-### Open Questions for Human Decision
+### Open Questions (Resolved)
 
-1. **Rate limit message format**: What does Claude Code actually output when
-   rate-limited? Need to capture real examples for regex pattern.
+1. **Rate limit message format**: See the original GitHub issue for the exact
+   message format that Claude Code outputs when rate-limited.
 
-2. **API key in daemon**: Should daemon probe Anthropic API directly for status?
-   This would be authoritative but raises security concerns.
+2. **API key in daemon**: **No.** Daemon should not probe Anthropic API directly.
+   Simply track which agents are rate-limited and poke them to continue when the
+   reset time arrives.
 
-3. **Per-model tracking**: Is it worth tracking different models' limits separately,
-   or is global sufficient for v1?
+3. **Per-model tracking**: **Not needed for v1.** Global tracking is sufficient.
 
-4. **Proactive warnings**: Should we track token usage and warn before hitting
-   limits? This is useful but complex.
+4. **Dashboard integration**: **Not a priority.** Skip for initial implementation.
 
-5. **Dashboard integration**: Priority on rate limit visualization in dashboard?
+5. **Proactive warnings**: Out of scope for v1.
 
 ---
 
