@@ -144,12 +144,13 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		}
 
 		decision, rpcErr := rpcClient.CreateDecision(context.Background(), rpcclient.CreateDecisionRequest{
-			Question:    decisionPrompt,
-			Context:     decisionContext,
-			Options:     rpcOptions,
-			RequestedBy: agentID,
-			Urgency:     urgency,
-			Blockers:    fields.Blockers,
+			Question:      decisionPrompt,
+			Context:       decisionContext,
+			Options:       rpcOptions,
+			RequestedBy:   agentID,
+			Urgency:       urgency,
+			Blockers:      fields.Blockers,
+			PredecessorID: fields.PredecessorID,
 		})
 		if rpcErr == nil {
 			// RPC succeeded - use the returned decision
