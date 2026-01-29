@@ -31,6 +31,7 @@ import (
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Daemon is the town-level background service.
@@ -1006,7 +1007,8 @@ func (d *Daemon) checkPolecatHealth(rigName, polecatName string) {
 
 	// Session is dead. Check if the polecat has work-on-hook.
 	// Agent beads use hq- prefix and are stored in town beads (fix for gt-myc).
-	agentBeadID := beads.PolecatBeadIDTown(d.townName(), rigName, polecatName)
+	townName, _ := workspace.GetTownName(d.config.TownRoot)
+	agentBeadID := beads.PolecatBeadIDTown(townName, rigName, polecatName)
 	info, err := d.getAgentBeadInfo(agentBeadID)
 	if err != nil {
 		// Agent bead doesn't exist or error - polecat might not be registered

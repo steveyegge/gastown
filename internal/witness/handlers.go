@@ -158,6 +158,15 @@ func HandleLifecycleShutdown(workDir, rigName string, msg *mail.Message) *Handle
 	}
 	polecatName := matches[1]
 
+	// FIX (gt-7nssj): Check for stale shutdown messages before nuking.
+	// If the polecat name was recycled, the message might be from a previous incarnation.
+	// This prevents nuking newly spawned polecats when stale shutdown messages are processed.
+	if isStale, reason := isStalePolecatDone(rigName, polecatName, msg); isStale {
+		result.Handled = true
+		result.Action = fmt.Sprintf("ignored stale LIFECYCLE:Shutdown for %s (%s)", polecatName, reason)
+		return result
+	}
+
 	// Shutdown means no pending work - try to auto-nuke immediately
 	nukeResult := AutoNukeIfClean(workDir, rigName, polecatName)
 	if nukeResult.Nuked {
@@ -532,7 +541,7 @@ func getCleanupStatus(workDir, rigName, polecatName string) string {
 	// Construct agent bead ID using hq- prefix for town-level storage (fix for gt-myc).
 	// All polecat agent beads are stored in town beads with hq- prefix to match manager.go.
 	townRoot, _ := workspace.Find(workDir)
-	townName := workspace.TownNameFromRoot(townRoot)
+	townName, _ := workspace.GetTownName(townRoot)
 	agentBeadID := beads.PolecatBeadIDTown(townName, rigName, polecatName)
 
 	output, err := util.ExecWithOutput(workDir, "bd", "show", agentBeadID, "--json")

@@ -260,7 +260,7 @@ func (m *AddModel) createCrew() tea.Cmd {
 		// Town-level storage ensures mail routing can validate recipients.
 		var agentBead string
 		bd := beads.New(beads.ResolveBeadsDir(m.townRoot))
-		townName := workspace.TownNameFromRoot(m.townRoot)
+		townName, _ := workspace.GetTownName(m.townRoot)
 		crewID := beads.CrewBeadIDTown(townName, rigName, crewName)
 		if _, err := bd.Show(crewID); err != nil {
 			// Agent bead doesn't exist, create it

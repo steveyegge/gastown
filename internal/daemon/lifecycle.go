@@ -730,7 +730,7 @@ func (d *Daemon) identityToAgentBeadID(identity string) string {
 		return beads.CrewBeadIDWithPrefix(prefix, parsed.RigName, parsed.AgentName)
 	case "polecat":
 		// Polecat agent beads use hq- prefix and are stored in town beads (fix for gt-myc).
-		townName := workspace.TownNameFromRoot(d.config.TownRoot)
+		townName, _ := workspace.GetTownName(d.config.TownRoot)
 		return beads.PolecatBeadIDTown(townName, parsed.RigName, parsed.AgentName)
 	default:
 		return ""

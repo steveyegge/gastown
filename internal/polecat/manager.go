@@ -19,6 +19,7 @@ import (
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Common errors
@@ -101,11 +102,13 @@ func (m *Manager) assigneeID(name string) string {
 }
 
 // agentBeadID returns the agent bead ID for a polecat.
-// Format: "hq-<rig>-polecat-<name>" (e.g., "hq-gastown-polecat-Toast")
+// Format: "hq-<town>-<rig>-polecat-<name>" (e.g., "hq-gt11-gastown-polecat-Toast")
 // Polecat agent beads are stored in town beads with the hq- prefix to avoid
 // prefix/database mismatch issues (fix for gt-3d5ok.1, gt-myc).
 func (m *Manager) agentBeadID(name string) string {
-	return beads.PolecatBeadIDTown(m.rig.Name, name)
+	townRoot := filepath.Dir(m.rig.Path)
+	townName, _ := workspace.GetTownName(townRoot)
+	return beads.PolecatBeadIDTown(townName, m.rig.Name, name)
 }
 
 // getCleanupStatusFromBead reads the cleanup_status from the polecat's agent bead.

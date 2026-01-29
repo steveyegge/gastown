@@ -121,7 +121,7 @@ func runCrewAdd(cmd *cobra.Command, args []string) error {
 
 		// Create agent bead for the crew worker in town beads (hq- prefix).
 		// Town-level storage ensures mail routing can validate recipients.
-		townName := workspace.TownNameFromRoot(townRoot)
+		townName, _ := workspace.GetTownName(townRoot)
 		crewID := beads.CrewBeadIDTown(townName, rigName, name)
 		if _, err := bd.Show(crewID); err != nil {
 			// Agent bead doesn't exist, create it
