@@ -116,12 +116,12 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 	// Working directory
 	witnessDir := m.witnessDir()
 
-	// Ensure runtime settings exist in witness/ (not witness/rig/) so we don't
-	// write into the source repo. Claude walks up the tree to find settings.
-	witnessParentDir := filepath.Join(m.rig.Path, "witness")
+	// Ensure runtime settings exist in the working directory.
+	// Claude Code does NOT traverse parent directories for settings.json.
+	// See: https://github.com/anthropics/claude-code/issues/12962
 	townRoot := m.townRoot()
 	runtimeConfig := config.ResolveRoleAgentConfig("witness", townRoot, m.rig.Path)
-	if err := runtime.EnsureSettingsForRole(witnessParentDir, "witness", runtimeConfig); err != nil {
+	if err := runtime.EnsureSettingsForRole(witnessDir, "witness", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
