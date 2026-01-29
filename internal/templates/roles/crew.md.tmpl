@@ -738,12 +738,18 @@ gt decision request \
   --option "Redis: Distributed, persistent caching" \
   --option "In-memory: Simple and fast" \
   --option "SQLite: Hybrid approach" \
+  --context '{"current_latency_ms": 200, "target_latency_ms": 50}' \
   --blocks <work-bead-blocked-by-this> \
   --parent <parent-bead> \
   --urgency high
 ```
 
 This creates a gate that blocks dependent work until resolved.
+
+**Context must be valid JSON.** Use it to provide structured data for decision-making:
+- `--context '{"key": "value"}'` - Object
+- `--context '["item1", "item2"]'` - Array
+- `--context '"simple string"'` - String
 
 ### Checking Decision Status
 
@@ -760,6 +766,37 @@ gt decision await <id>        # Block until resolved (for scripts)
 ```bash
 gt decision resolve <id> --choice 1 --rationale "Redis fits our scaling needs"
 ```
+
+### Decision Chaining
+
+Decisions can be linked to form chains using `--predecessor`:
+
+```bash
+# First decision in chain
+gt decision request \
+  --prompt "What's the root cause?" \
+  --option "Config error: Missing environment variable" \
+  --option "Code bug: Logic error in handler" \
+  --option "Infra issue: Resource exhaustion" \
+  --context '{"error_message": "connection refused", "timestamp": "2026-01-29T10:00:00Z"}'
+
+# Follow-up decision referencing the first
+gt decision request \
+  --prompt "How should we fix the config error?" \
+  --option "Add env var to deployment" \
+  --option "Use fallback default" \
+  --predecessor <first-decision-id> \
+  --context '{"env_var": "DATABASE_URL", "suggested_value": "..."}'
+```
+
+**Viewing decision chains:**
+```bash
+gt decision chain <id>              # Show ancestry (root to this decision)
+gt decision chain <id> --descendants  # Show follow-up decisions
+```
+
+**Successor schemas** (optional): Predecessors can define required context fields
+for their successors. This enables enforcing structure across decision chains.
 
 ### When to Use Decisions vs Escalation
 
