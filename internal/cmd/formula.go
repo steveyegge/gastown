@@ -26,6 +26,7 @@ var (
 	formulaRunPR      int
 	formulaRunRig     string
 	formulaRunDryRun  bool
+	formulaRunVars    []string
 	formulaCreateType string
 )
 
@@ -109,16 +110,18 @@ If no formula name is provided, uses the default formula configured in
 the rig's settings/config.json under workflow.default_formula.
 
 Options:
-  --pr=N      Run formula on GitHub PR #N
-  --rig=NAME  Target specific rig (default: current or gastown)
-  --dry-run   Show what would happen without executing
+  --pr=N           Run formula on GitHub PR #N
+  --rig=NAME       Target specific rig (default: current or gastown)
+  --dry-run        Show what would happen without executing
+  --var key=value  Pass variable to formula (can be repeated)
 
 Examples:
   gt formula run shiny                    # Run formula in current rig
   gt formula run                          # Run default formula from rig config
   gt formula run shiny --pr=123           # Run on PR #123
   gt formula run security-audit --rig=beads  # Run in specific rig
-  gt formula run release --dry-run        # Preview execution`,
+  gt formula run release --dry-run        # Preview execution
+  gt formula run design --var problem="Add caching" --var scope=medium`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runFormulaRun,
 }
@@ -155,6 +158,7 @@ func init() {
 	formulaRunCmd.Flags().IntVar(&formulaRunPR, "pr", 0, "GitHub PR number to run formula on")
 	formulaRunCmd.Flags().StringVar(&formulaRunRig, "rig", "", "Target rig (default: current or gastown)")
 	formulaRunCmd.Flags().BoolVar(&formulaRunDryRun, "dry-run", false, "Preview execution without running")
+	formulaRunCmd.Flags().StringArrayVar(&formulaRunVars, "var", nil, "Formula variable (key=value), can be repeated")
 
 	// Create flags
 	formulaCreateCmd.Flags().StringVar(&formulaCreateType, "type", "task", "Formula type: task, workflow, or patrol")
@@ -257,9 +261,12 @@ func runFormulaRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("parsing formula: %w", err)
 	}
 
+	// Parse variables from --var flags
+	vars := parseFormulaVars(formulaRunVars)
+
 	// Handle dry-run mode
 	if formulaRunDryRun {
-		return dryRunFormula(f, formulaName, targetRig)
+		return dryRunFormula(f, formulaName, targetRig, vars)
 	}
 
 	// Currently only convoy formulas are supported for execution
@@ -276,17 +283,42 @@ func runFormulaRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute convoy formula
-	return executeConvoyFormula(f, formulaName, targetRig)
+	return executeConvoyFormula(f, formulaName, targetRig, vars)
+}
+
+// parseFormulaVars parses key=value pairs from --var flags
+func parseFormulaVars(varFlags []string) map[string]string {
+	vars := make(map[string]string)
+	for _, v := range varFlags {
+		if idx := strings.Index(v, "="); idx > 0 {
+			key := v[:idx]
+			value := v[idx+1:]
+			vars[key] = value
+		}
+	}
+	return vars
 }
 
 // dryRunFormula shows what would happen without executing
-func dryRunFormula(f *formulaData, formulaName, targetRig string) error {
+func dryRunFormula(f *formulaData, formulaName, targetRig string, vars map[string]string) error {
 	fmt.Printf("%s Would execute formula:\n", style.Dim.Render("[dry-run]"))
 	fmt.Printf("  Formula: %s\n", style.Bold.Render(formulaName))
 	fmt.Printf("  Type:    %s\n", f.Type)
 	fmt.Printf("  Rig:     %s\n", targetRig)
 	if formulaRunPR > 0 {
 		fmt.Printf("  PR:      #%d\n", formulaRunPR)
+	}
+
+	if len(vars) > 0 {
+		fmt.Printf("\n  Variables:\n")
+		for k, v := range vars {
+			// Truncate long values for display
+			displayVal := v
+			if len(displayVal) > 60 {
+				displayVal = displayVal[:57] + "..."
+			}
+			fmt.Printf("    %s: %s\n", k, displayVal)
+		}
 	}
 
 	if f.Type == "convoy" && len(f.Legs) > 0 {
@@ -304,7 +336,7 @@ func dryRunFormula(f *formulaData, formulaName, targetRig string) error {
 }
 
 // executeConvoyFormula spawns a convoy of polecats to execute a convoy formula
-func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
+func executeConvoyFormula(f *formulaData, formulaName, targetRig string, vars map[string]string) error {
 	fmt.Printf("%s Executing convoy formula: %s\n\n",
 		style.Bold.Render("🚚"), formulaName)
 
@@ -317,16 +349,29 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 
 	// Step 1: Create convoy bead
 	convoyID := fmt.Sprintf("hq-cv-%s", generateFormulaShortID())
-	convoyTitle := fmt.Sprintf("%s: %s", formulaName, f.Description)
+
+	// Build convoy title from formula name and problem variable (if present)
+	convoyTitle := formulaName
+	if problem, ok := vars["problem"]; ok {
+		convoyTitle = fmt.Sprintf("%s: %s", formulaName, problem)
+	} else if f.Description != "" {
+		convoyTitle = fmt.Sprintf("%s: %s", formulaName, f.Description)
+	}
 	if len(convoyTitle) > 80 {
 		convoyTitle = convoyTitle[:77] + "..."
 	}
 
-	// Build description with formula context
+	// Build description with formula context and variables
 	description := fmt.Sprintf("Formula convoy: %s\n\nLegs: %d\nRig: %s",
 		formulaName, len(f.Legs), targetRig)
 	if formulaRunPR > 0 {
 		description += fmt.Sprintf("\nPR: #%d", formulaRunPR)
+	}
+	if len(vars) > 0 {
+		description += "\n\nVariables:"
+		for k, v := range vars {
+			description += fmt.Sprintf("\n  %s: %s", k, v)
+		}
 	}
 
 	createArgs := []string{
@@ -354,11 +399,22 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 	for _, leg := range f.Legs {
 		legBeadID := fmt.Sprintf("hq-leg-%s", generateFormulaShortID())
 
-		// Build leg description with prompt if available
+		// Build leg description with variables and prompt
 		legDesc := leg.Description
+
+		// Prepend variables context so polecat knows what to work on
+		if len(vars) > 0 {
+			varContext := "## Input Variables\n"
+			for k, v := range vars {
+				varContext += fmt.Sprintf("- **%s**: %s\n", k, v)
+			}
+			legDesc = varContext + "\n---\n\n" + legDesc
+		}
+
+		// Append base prompt if available
 		if f.Prompts != nil {
 			if basePrompt, ok := f.Prompts["base"]; ok {
-				legDesc = fmt.Sprintf("%s\n\n---\nBase Prompt:\n%s", leg.Description, basePrompt)
+				legDesc = fmt.Sprintf("%s\n\n---\nBase Prompt:\n%s", legDesc, basePrompt)
 			}
 		}
 
@@ -403,6 +459,15 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 		synDesc := f.Synthesis.Description
 		if synDesc == "" {
 			synDesc = "Synthesize findings from all legs into unified output"
+		}
+
+		// Prepend variables context
+		if len(vars) > 0 {
+			varContext := "## Input Variables\n"
+			for k, v := range vars {
+				varContext += fmt.Sprintf("- **%s**: %s\n", k, v)
+			}
+			synDesc = varContext + "\n---\n\n" + synDesc
 		}
 
 		synArgs := []string{
