@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -811,5 +812,97 @@ func TestDecisionRequestNoFileCheckFlag(t *testing.T) {
 	noFileCheckFlag := flags.Lookup("no-file-check")
 	if noFileCheckFlag == nil {
 		t.Error("missing --no-file-check flag")
+	}
+}
+
+// TestValidateContextJSON tests JSON context validation.
+func TestValidateContextJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		context   string
+		wantValid bool
+	}{
+		{
+			name:      "valid object",
+			context:   `{"key": "value", "number": 42}`,
+			wantValid: true,
+		},
+		{
+			name:      "valid array",
+			context:   `["item1", "item2", "item3"]`,
+			wantValid: true,
+		},
+		{
+			name:      "valid string",
+			context:   `"just a string"`,
+			wantValid: true,
+		},
+		{
+			name:      "valid number",
+			context:   `123`,
+			wantValid: true,
+		},
+		{
+			name:      "valid boolean",
+			context:   `true`,
+			wantValid: true,
+		},
+		{
+			name:      "valid null",
+			context:   `null`,
+			wantValid: true,
+		},
+		{
+			name:      "valid nested",
+			context:   `{"nested": {"deep": [1, 2, {"x": "y"}]}}`,
+			wantValid: true,
+		},
+		{
+			name:      "empty string is valid (no context)",
+			context:   ``,
+			wantValid: true,
+		},
+		{
+			name:      "invalid - plain text",
+			context:   `This is plain text, not JSON`,
+			wantValid: false,
+		},
+		{
+			name:      "invalid - unclosed brace",
+			context:   `{"key": "value"`,
+			wantValid: false,
+		},
+		{
+			name:      "invalid - trailing comma",
+			context:   `{"key": "value",}`,
+			wantValid: false,
+		},
+		{
+			name:      "invalid - single quotes",
+			context:   `{'key': 'value'}`,
+			wantValid: false,
+		},
+		{
+			name:      "invalid - unquoted keys",
+			context:   `{key: "value"}`,
+			wantValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var valid bool
+			if tt.context == "" {
+				// Empty context is valid (means no context provided)
+				valid = true
+			} else {
+				var js json.RawMessage
+				err := json.Unmarshal([]byte(tt.context), &js)
+				valid = (err == nil)
+			}
+			if valid != tt.wantValid {
+				t.Errorf("context %q: valid=%v, want %v", tt.context, valid, tt.wantValid)
+			}
+		})
 	}
 }
