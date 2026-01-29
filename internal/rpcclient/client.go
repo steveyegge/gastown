@@ -251,7 +251,7 @@ type CreateDecisionRequest struct {
 	Urgency       string
 	Blockers      []string
 	ParentBead    string
-	PredecessorID string // For decision chaining
+	PredecessorID string
 }
 
 // CreateDecision creates a new decision via the RPC server.

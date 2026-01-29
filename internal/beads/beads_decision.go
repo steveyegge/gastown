@@ -283,6 +283,11 @@ func (b *Beads) CreateBdDecision(fields *DecisionFields) (*Issue, error) {
 		args = append(args, "--context="+fields.Context)
 	}
 
+	// Add predecessor for decision chaining
+	if fields.PredecessorID != "" {
+		args = append(args, "--predecessor="+fields.PredecessorID)
+	}
+
 	// Add requested-by for wake notifications
 	if fields.RequestedBy != "" {
 		args = append(args, "--requested-by="+fields.RequestedBy)
@@ -468,12 +473,12 @@ func (b *Beads) GetDecisionBead(id string) (*Issue, *DecisionFields, error) {
 		// Convert bd decision to DecisionFields format
 		fields := &DecisionFields{
 			Question:      bdDecision.DecisionPoint.Prompt,
-			Context:       bdDecision.DecisionPoint.Context, // Decision context for display
+			Context:       bdDecision.DecisionPoint.Context,
 			RequestedAt:   bdDecision.DecisionPoint.CreatedAt,
 			RequestedBy:   bdDecision.DecisionPoint.RequestedBy,
 			Urgency:       bdDecision.DecisionPoint.Urgency,
-			PredecessorID: bdDecision.DecisionPoint.PriorID, // Decision chaining support
-			ChosenIndex:   0,                                // Default pending, will be updated if resolved
+			PredecessorID: bdDecision.DecisionPoint.PriorID,
+			ChosenIndex:   0, // Default pending, will be updated if resolved
 		}
 
 		// Parse options from bd decision
@@ -622,7 +627,7 @@ type BdDecisionOption struct {
 type BdDecisionPointData struct {
 	IssueID        string `json:"issue_id"`
 	Prompt         string `json:"prompt"`
-	Context        string `json:"context,omitempty"`         // Decision context (JSON or text)
+	Context        string `json:"context,omitempty"`         // Decision context (JSON)
 	Options        string `json:"options"`                   // JSON string of options (raw)
 	CreatedAt      string `json:"created_at"`
 	SelectedOption string `json:"selected_option,omitempty"` // Option ID if resolved
@@ -631,7 +636,7 @@ type BdDecisionPointData struct {
 	ResponseText   string `json:"response_text,omitempty"`   // Rationale/comment
 	RequestedBy    string `json:"requested_by,omitempty"`    // Who requested the decision
 	Urgency        string `json:"urgency,omitempty"`         // Urgency level
-	PriorID        string `json:"prior_id,omitempty"`        // Predecessor decision ID for chaining
+	PriorID        string `json:"prior_id,omitempty"`        // Predecessor decision ID
 }
 
 // BdDecisionShowResponse represents the response from bd decision show
