@@ -97,10 +97,15 @@ func New(cfg Config) (*Bot, error) {
 		// Try auto-discovery from standard locations
 		var err error
 		router, err = slackrouter.LoadRouter()
-		if err == nil && router.IsEnabled() {
-			log.Printf("Slack: Channel router auto-loaded")
+		if err != nil {
+			log.Printf("Slack: Router auto-discovery failed: %v", err)
+		} else if router == nil {
+			log.Printf("Slack: Router loaded but is nil")
+		} else if !router.IsEnabled() {
+			log.Printf("Slack: Router loaded but not enabled")
+		} else {
+			log.Printf("Slack: Channel router auto-loaded (enabled=%v)", router.IsEnabled())
 		}
-		// Silence errors for auto-discovery - config may not exist
 	}
 
 	// Set default channel prefix
@@ -109,7 +114,7 @@ func New(cfg Config) (*Bot, error) {
 		channelPrefix = "gt-decisions"
 	}
 
-	return &Bot{
+	bot := &Bot{
 		client:           client,
 		socketMode:       socketClient,
 		rpcClient:        rpcClient,
@@ -120,7 +125,9 @@ func New(cfg Config) (*Bot, error) {
 		channelPrefix:    channelPrefix,
 		channelCache:     make(map[string]string),
 		decisionMessages: make(map[string]messageInfo),
-	}, nil
+	}
+	log.Printf("Slack: Bot created with router=%v", bot.router != nil)
+	return bot, nil
 }
 
 // Run starts the bot event loop. Blocks until context is canceled.
