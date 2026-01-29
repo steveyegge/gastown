@@ -452,3 +452,182 @@ func TestModelViewRendering(t *testing.T) {
 		t.Error("View() in peek mode returned empty string")
 	}
 }
+
+// --- Decision Chaining Integration Tests ---
+
+// TestDecisionWithPredecessor tests handling decisions with predecessor IDs.
+func TestDecisionWithPredecessor(t *testing.T) {
+	m := New()
+	m.width = 80
+	m.height = 24
+	now := time.Now()
+
+	// Create a chained decision
+	m.decisions = []DecisionItem{
+		{
+			ID:            "hq-child",
+			Prompt:        "Follow-up decision",
+			Options:       []Option{{Label: "A"}, {Label: "B"}},
+			Urgency:       "medium",
+			RequestedAt:   now,
+			PredecessorID: "hq-parent-123",
+		},
+	}
+
+	// Render the view
+	view := m.View()
+	if view == "" {
+		t.Error("View() returned empty string for chained decision")
+	}
+
+	// Predecessor info should be visible (we check it doesn't panic)
+	// The actual display formatting is tested in view tests
+}
+
+// TestDecisionWithJSONContext tests handling decisions with JSON context.
+func TestDecisionWithJSONContext(t *testing.T) {
+	m := New()
+	m.width = 80
+	m.height = 24
+	now := time.Now()
+
+	// Create a decision with JSON context
+	m.decisions = []DecisionItem{
+		{
+			ID:          "hq-json-ctx",
+			Prompt:      "Decision with JSON context",
+			Options:     []Option{{Label: "A"}, {Label: "B"}},
+			Urgency:     "high",
+			RequestedAt: now,
+			Context:     `{"error_code": 500, "attempts": 3, "service": "api"}`,
+		},
+	}
+
+	// Render the view
+	view := m.View()
+	if view == "" {
+		t.Error("View() returned empty string for JSON context decision")
+	}
+}
+
+// TestDecisionWithSuccessorSchemas tests handling decisions with successor_schemas in context.
+func TestDecisionWithSuccessorSchemas(t *testing.T) {
+	m := New()
+	m.width = 80
+	m.height = 24
+	now := time.Now()
+
+	// Create a decision with successor_schemas in context
+	contextWithSchemas := `{
+		"diagnosis": "rate limiting",
+		"successor_schemas": {
+			"Fix upstream": {"required": ["fix_approach", "estimated_effort"]},
+			"Add retry": {"required": ["backoff_strategy"]}
+		}
+	}`
+
+	m.decisions = []DecisionItem{
+		{
+			ID:          "hq-schema",
+			Prompt:      "How to handle rate limiting?",
+			Options:     []Option{{Label: "Fix upstream"}, {Label: "Add retry"}},
+			Urgency:     "high",
+			RequestedAt: now,
+			Context:     contextWithSchemas,
+		},
+	}
+
+	// Render the view
+	view := m.View()
+	if view == "" {
+		t.Error("View() returned empty string for decision with successor schemas")
+	}
+}
+
+// TestChainedDecisionFetch tests fetching chained decisions.
+func TestChainedDecisionFetch(t *testing.T) {
+	m := New()
+	now := time.Now()
+
+	// Simulate fetching a chain of decisions
+	decisions := []DecisionItem{
+		{
+			ID:            "hq-3",
+			Prompt:        "Third in chain",
+			Urgency:       "low",
+			RequestedAt:   now,
+			PredecessorID: "hq-2",
+		},
+		{
+			ID:            "hq-2",
+			Prompt:        "Second in chain",
+			Urgency:       "medium",
+			RequestedAt:   now.Add(-1 * time.Hour),
+			PredecessorID: "hq-1",
+		},
+		{
+			ID:          "hq-1",
+			Prompt:      "First in chain (root)",
+			Urgency:     "high",
+			RequestedAt: now.Add(-2 * time.Hour),
+		},
+	}
+
+	msg := fetchDecisionsMsg{decisions: decisions}
+	updated, _ := m.Update(msg)
+	model := updated.(*Model)
+
+	// Should be sorted by urgency
+	if len(model.decisions) != 3 {
+		t.Errorf("expected 3 decisions, got %d", len(model.decisions))
+	}
+
+	// First should be high urgency (hq-1)
+	if model.decisions[0].ID != "hq-1" {
+		t.Errorf("expected first decision to be hq-1 (high urgency), got %s", model.decisions[0].ID)
+	}
+
+	// Check predecessors are preserved
+	for _, d := range model.decisions {
+		if d.ID == "hq-2" && d.PredecessorID != "hq-1" {
+			t.Errorf("expected hq-2 predecessor to be hq-1, got %s", d.PredecessorID)
+		}
+		if d.ID == "hq-3" && d.PredecessorID != "hq-2" {
+			t.Errorf("expected hq-3 predecessor to be hq-2, got %s", d.PredecessorID)
+		}
+	}
+}
+
+// TestViewWithChainingInfo tests that view renders chaining info correctly.
+func TestViewWithChainingInfo(t *testing.T) {
+	m := New()
+	m.width = 100
+	m.height = 40
+	now := time.Now()
+
+	// Decision with both predecessor and JSON context with schemas
+	m.decisions = []DecisionItem{
+		{
+			ID:            "hq-chained",
+			Prompt:        "Chained decision with context",
+			Options:       []Option{{Label: "Option A", Description: "First option"}, {Label: "Option B", Description: "Second option"}},
+			Urgency:       "high",
+			RequestedAt:   now,
+			RequestedBy:   "gastown/crew/test",
+			PredecessorID: "hq-parent",
+			Context:       `{"key": "value", "nested": {"a": 1}}`,
+		},
+	}
+	m.selected = 0
+
+	// Render the view
+	view := m.View()
+
+	// Basic checks - view should contain decision info
+	if view == "" {
+		t.Fatal("View() returned empty string")
+	}
+
+	// View should render without errors (we rely on visual inspection
+	// for exact formatting, but we verify it doesn't crash)
+}
