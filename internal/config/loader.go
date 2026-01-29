@@ -1178,6 +1178,37 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		result.Args = []string{"--dangerously-skip-permissions"}
 	}
 
+	// Auto-fill Hooks defaults based on command for agents that support hooks.
+	// This ensures EnsureSettingsForRole creates the correct settings/plugin
+	// for custom agents defined in town/rig settings.
+	if result.Hooks == nil {
+		switch result.Command {
+		case "claude":
+			result.Hooks = &RuntimeHooksConfig{
+				Provider:     "claude",
+				Dir:          ".claude",
+				SettingsFile: "settings.json",
+			}
+		case "opencode":
+			result.Hooks = &RuntimeHooksConfig{
+				Provider:     "opencode",
+				Dir:          ".opencode/plugin",
+				SettingsFile: "gastown.js",
+			}
+		}
+	}
+
+	// Auto-fill Env defaults for opencode (YOLO mode).
+	// Custom opencode agents need OPENCODE_PERMISSION to run autonomously.
+	if result.Command == "opencode" {
+		if result.Env == nil {
+			result.Env = make(map[string]string)
+		}
+		if _, ok := result.Env["OPENCODE_PERMISSION"]; !ok {
+			result.Env["OPENCODE_PERMISSION"] = `{"*":"allow"}`
+		}
+	}
+
 	return result
 }
 
