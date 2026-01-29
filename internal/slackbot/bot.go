@@ -315,6 +315,8 @@ func (b *Bot) handleInteraction(callback slack.InteractionCallback) {
 			b.handleBreakOut(callback, action.Value)
 		case "unbreak_out":
 			b.handleUnbreakOut(callback, action.Value)
+		case "dismiss_decision":
+			b.handleDismissDecision(callback, action.Value)
 		default:
 			if strings.HasPrefix(action.ActionID, "resolve_") {
 				b.handleResolveDecision(callback, action)
@@ -513,6 +515,30 @@ func (b *Bot) handleUnbreakOut(callback slack.InteractionCallback, agent string)
 	log.Printf("Slack: Unbreak Out: %s removed override %s, now routes to %s", agent, prevChannel, newChannel)
 	b.postEphemeral(callback.Channel.ID, callback.User.ID,
 		fmt.Sprintf("✅ Unbroke out *%s*. Future decisions will go to <#%s>.", agent, newChannel))
+}
+
+// handleDismissDecision deletes the decision notification from Slack.
+// The decision itself remains in the system but is removed from chat.
+func (b *Bot) handleDismissDecision(callback slack.InteractionCallback, decisionID string) {
+	// Get the message timestamp from the callback
+	messageTs := callback.Message.Timestamp
+	if messageTs == "" {
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			"Could not dismiss: message timestamp not found")
+		return
+	}
+
+	// Delete the message
+	_, _, err := b.client.DeleteMessage(callback.Channel.ID, messageTs)
+	if err != nil {
+		log.Printf("Slack: Failed to delete decision message %s: %v", decisionID, err)
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Failed to dismiss: %v", err))
+		return
+	}
+
+	log.Printf("Slack: Dismissed decision %s (deleted message %s)", decisionID, messageTs)
+	// No confirmation needed - the message disappearing IS the confirmation
 }
 
 // agentToBreakOutChannelName converts an agent identity to a dedicated Break Out channel name.
@@ -1175,18 +1201,22 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 		}
 	}
 
-	// Add Break Out / Unbreak Out button if agent identity is available
+	// Add action buttons: Dismiss, and Break Out / Unbreak Out
+	dismissButton := slack.NewButtonBlockElement(
+		"dismiss_decision",
+		decision.ID,
+		slack.NewTextBlockObject("plain_text", "🗑️ Dismiss", false, false),
+	)
+
 	if decision.RequestedBy != "" {
 		var breakOutButton *slack.ButtonBlockElement
 		if b.router != nil && b.router.HasOverride(decision.RequestedBy) {
-			// Agent already has dedicated channel - show Unbreak Out
 			breakOutButton = slack.NewButtonBlockElement(
 				"unbreak_out",
 				decision.RequestedBy,
 				slack.NewTextBlockObject("plain_text", "🔀 Unbreak Out", false, false),
 			)
 		} else {
-			// Agent uses grouped channel - show Break Out
 			breakOutButton = slack.NewButtonBlockElement(
 				"break_out",
 				decision.RequestedBy,
@@ -1195,7 +1225,15 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 		}
 		blocks = append(blocks,
 			slack.NewActionBlock("",
+				dismissButton,
 				breakOutButton,
+			),
+		)
+	} else {
+		// No agent identity - just show dismiss
+		blocks = append(blocks,
+			slack.NewActionBlock("",
+				dismissButton,
 			),
 		)
 	}
@@ -1295,15 +1333,28 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 		}
 	}
 
-	// Show Unbreak Out button (since we're in a break-out channel)
+	// Show Dismiss and Unbreak Out buttons (since we're in a break-out channel)
+	dismissButton := slack.NewButtonBlockElement(
+		"dismiss_decision",
+		decision.ID,
+		slack.NewTextBlockObject("plain_text", "🗑️ Dismiss", false, false),
+	)
+
 	if decision.RequestedBy != "" {
 		blocks = append(blocks,
 			slack.NewActionBlock("",
+				dismissButton,
 				slack.NewButtonBlockElement(
 					"unbreak_out",
 					decision.RequestedBy,
 					slack.NewTextBlockObject("plain_text", "🔀 Unbreak Out", false, false),
 				),
+			),
+		)
+	} else {
+		blocks = append(blocks,
+			slack.NewActionBlock("",
+				dismissButton,
 			),
 		)
 	}
