@@ -103,6 +103,13 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Validate successor schema if predecessor is specified (decision chaining)
+	if decisionPredecessor != "" {
+		if err := validateSuccessorSchema(townRoot, decisionPredecessor, decisionContext); err != nil {
+			return fmt.Errorf("successor schema validation failed: %w", err)
+		}
+	}
+
 	// Build decision fields
 	fields := &beads.DecisionFields{
 		Question:      decisionPrompt,
@@ -1498,5 +1505,104 @@ func hasFileOption(options []beads.DecisionOption) bool {
 // suggestFileOption returns a suggested option text for filing a bug.
 func suggestFileOption() string {
 	return "File bug: Create tracking bead to investigate root cause"
+}
+
+// --- Decision Chaining Validation ---
+
+// validateSuccessorSchema validates that the current decision's context conforms
+// to the successor schema defined by the predecessor's chosen option.
+//
+// Schema format in predecessor's context:
+//
+//	{
+//	  "successor_schemas": {
+//	    "Option Label": {
+//	      "required": ["key1", "key2"],
+//	      "type": "object"
+//	    }
+//	  }
+//	}
+func validateSuccessorSchema(townRoot, predecessorID, currentContext string) error {
+	// Load predecessor decision
+	bd := beads.New(beads.ResolveBeadsDir(townRoot))
+	_, predFields, err := bd.GetDecisionBead(predecessorID)
+	if err != nil {
+		return fmt.Errorf("failed to load predecessor %s: %w", predecessorID, err)
+	}
+	if predFields == nil {
+		return fmt.Errorf("predecessor decision not found: %s", predecessorID)
+	}
+
+	// Check if predecessor is resolved
+	if predFields.ChosenIndex == 0 {
+		return fmt.Errorf("predecessor decision %s is not yet resolved", predecessorID)
+	}
+
+	// Get chosen option label
+	if predFields.ChosenIndex < 1 || predFields.ChosenIndex > len(predFields.Options) {
+		return fmt.Errorf("predecessor has invalid chosen index: %d", predFields.ChosenIndex)
+	}
+	chosenLabel := predFields.Options[predFields.ChosenIndex-1].Label
+
+	// Parse predecessor's context to get successor schemas
+	if predFields.Context == "" {
+		// No context, no schema to validate against
+		return nil
+	}
+
+	var predContext map[string]interface{}
+	if err := json.Unmarshal([]byte(predFields.Context), &predContext); err != nil {
+		// Predecessor context isn't a JSON object, skip validation
+		return nil
+	}
+
+	// Look for successor_schemas
+	schemas, ok := predContext["successor_schemas"].(map[string]interface{})
+	if !ok {
+		// No successor_schemas defined, skip validation
+		return nil
+	}
+
+	// Get schema for chosen option
+	schema, ok := schemas[chosenLabel].(map[string]interface{})
+	if !ok {
+		// No schema for this option, skip validation
+		return nil
+	}
+
+	// Parse current context
+	if currentContext == "" {
+		// Check if schema has required fields
+		if required, ok := schema["required"].([]interface{}); ok && len(required) > 0 {
+			return fmt.Errorf("successor schema requires context with keys: %v", required)
+		}
+		return nil
+	}
+
+	var ctx map[string]interface{}
+	if err := json.Unmarshal([]byte(currentContext), &ctx); err != nil {
+		// Current context isn't an object, can't validate required fields
+		return nil
+	}
+
+	// Validate required fields
+	if required, ok := schema["required"].([]interface{}); ok {
+		var missing []string
+		for _, r := range required {
+			key, ok := r.(string)
+			if !ok {
+				continue
+			}
+			if _, exists := ctx[key]; !exists {
+				missing = append(missing, key)
+			}
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("successor schema requires missing context keys: %v\nChosen option '%s' from predecessor %s defines schema: %v",
+				missing, chosenLabel, predecessorID, schema)
+		}
+	}
+
+	return nil
 }
 
