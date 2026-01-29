@@ -137,3 +137,9 @@ func Names() []string {
 	}
 	return names
 }
+
+// IsKnownAgent returns true if the agent is registered.
+func IsKnownAgent(agent string) bool {
+	_, ok := Agents[strings.ToLower(agent)]
+	return ok
+}

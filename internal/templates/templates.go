@@ -15,7 +15,6 @@ import (
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
 
-
 // Templates manages role and message templates.
 type Templates struct {
 	roleTemplates    *template.Template
