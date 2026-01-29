@@ -22,6 +22,7 @@ import (
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 	decisionTUI "github.com/steveyegge/gastown/internal/tui/decision"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -211,7 +212,8 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		out, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(out))
 	} else {
-		fmt.Printf("📋 Decision requested: %s\n", issue.ID)
+		slug := util.GenerateDecisionSlug(issue.ID, decisionPrompt)
+		fmt.Printf("📋 Decision requested: %s\n", slug)
 		fmt.Printf("   Question: %s\n", decisionPrompt)
 		fmt.Printf("   Options: %s\n", formatOptionsSummary(options))
 		if decisionBlocks != "" {
@@ -271,7 +273,8 @@ func runDecisionList(cmd *cobra.Command, args []string) error {
 			status = "CANCELED"
 		}
 
-		fmt.Printf("  %s %s [%s] %s\n", emoji, issue.ID, status, truncateString(fields.Question, 50))
+		slug := util.GenerateDecisionSlug(issue.ID, fields.Question)
+		fmt.Printf("  %s %s [%s] %s\n", emoji, slug, status, truncateString(fields.Question, 50))
 		fmt.Printf("     Requested by: %s | %s\n", fields.RequestedBy, formatRelativeTimeSimple(issue.CreatedAt))
 		fmt.Printf("     Options: %s\n", formatOptionsSummary(fields.Options))
 		if len(fields.Blockers) > 0 {
@@ -330,7 +333,8 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 		status = "RESOLVED"
 	}
 
-	fmt.Printf("%s Decision: %s [%s]\n\n", emoji, issue.ID, status)
+	slug := util.GenerateDecisionSlug(issue.ID, fields.Question)
+	fmt.Printf("%s Decision: %s [%s]\n\n", emoji, slug, status)
 	fmt.Printf("Question: %s\n\n", fields.Question)
 
 	if fields.Context != "" {
@@ -504,19 +508,22 @@ func runDecisionDashboard(cmd *cobra.Command, args []string) error {
 		for _, issue := range pendingHigh {
 			fields := beads.ParseDecisionFields(issue.Description)
 			age := formatDecisionAge(issue.CreatedAt)
-			fmt.Printf("  🔴 [HIGH] %s: %s (%s)\n", issue.ID, truncateString(fields.Question, 40), age)
+			slug := util.GenerateDecisionSlug(issue.ID, fields.Question)
+			fmt.Printf("  🔴 [HIGH] %s: %s (%s)\n", slug, truncateString(fields.Question, 40), age)
 		}
 		// Medium urgency
 		for _, issue := range pendingMedium {
 			fields := beads.ParseDecisionFields(issue.Description)
 			age := formatDecisionAge(issue.CreatedAt)
-			fmt.Printf("  🟡 [MEDIUM] %s: %s (%s)\n", issue.ID, truncateString(fields.Question, 40), age)
+			slug := util.GenerateDecisionSlug(issue.ID, fields.Question)
+			fmt.Printf("  🟡 [MEDIUM] %s: %s (%s)\n", slug, truncateString(fields.Question, 40), age)
 		}
 		// Low urgency
 		for _, issue := range pendingLow {
 			fields := beads.ParseDecisionFields(issue.Description)
 			age := formatDecisionAge(issue.CreatedAt)
-			fmt.Printf("  🟢 [LOW] %s: %s (%s)\n", issue.ID, truncateString(fields.Question, 40), age)
+			slug := util.GenerateDecisionSlug(issue.ID, fields.Question)
+			fmt.Printf("  🟢 [LOW] %s: %s (%s)\n", slug, truncateString(fields.Question, 40), age)
 		}
 	}
 	fmt.Println()
@@ -537,7 +544,8 @@ func runDecisionDashboard(cmd *cobra.Command, args []string) error {
 				chosen = fields.Options[fields.ChosenIndex-1].Label
 			}
 			age := formatDecisionAge(issue.ClosedAt)
-			fmt.Printf("  ✓ %s: %s → \"%s\" (%s)\n", issue.ID, truncateString(fields.Question, 30), chosen, age)
+			slug := util.GenerateDecisionSlug(issue.ID, fields.Question)
+			fmt.Printf("  ✓ %s: %s → \"%s\" (%s)\n", slug, truncateString(fields.Question, 30), chosen, age)
 		}
 	}
 	fmt.Println()
@@ -548,7 +556,8 @@ func runDecisionDashboard(cmd *cobra.Command, args []string) error {
 		for _, issue := range staleDecisions {
 			fields := beads.ParseDecisionFields(issue.Description)
 			age := formatDecisionAge(issue.CreatedAt)
-			fmt.Printf("  ⚠️  %s: %s (%s old)\n", issue.ID, truncateString(fields.Question, 40), age)
+			slug := util.GenerateDecisionSlug(issue.ID, fields.Question)
+			fmt.Printf("  ⚠️  %s: %s (%s old)\n", slug, truncateString(fields.Question, 40), age)
 		}
 		fmt.Println()
 	}
@@ -1297,7 +1306,8 @@ func runDecisionCheck(cmd *cobra.Command, args []string) error {
 				for _, issue := range relevant {
 					fields := beads.ParseDecisionFields(issue.Description)
 					emoji := urgencyEmoji(fields.Urgency)
-					buf.WriteString(fmt.Sprintf("- %s %s [%s]: %s\n", emoji, issue.ID, strings.ToUpper(fields.Urgency), truncateString(fields.Question, 50)))
+					slug := util.GenerateDecisionSlug(issue.ID, fields.Question)
+					buf.WriteString(fmt.Sprintf("- %s %s [%s]: %s\n", emoji, slug, strings.ToUpper(fields.Urgency), truncateString(fields.Question, 50)))
 				}
 				buf.WriteString("\n")
 				buf.WriteString("Run 'gt decision list' to see details, or 'gt decision resolve <id> --choice N' to resolve.\n")
@@ -1314,7 +1324,8 @@ func runDecisionCheck(cmd *cobra.Command, args []string) error {
 					if fields.ChosenIndex > 0 && fields.ChosenIndex <= len(fields.Options) {
 						chosenLabel = fields.Options[fields.ChosenIndex-1].Label
 					}
-					buf.WriteString(fmt.Sprintf("- %s: Chose \"%s\"", issue.ID, chosenLabel))
+					slug := util.GenerateDecisionSlug(issue.ID, fields.Question)
+					buf.WriteString(fmt.Sprintf("- %s: Chose \"%s\"", slug, chosenLabel))
 					if fields.Rationale != "" {
 						buf.WriteString(fmt.Sprintf(" - %s", truncateString(fields.Rationale, 60)))
 					}

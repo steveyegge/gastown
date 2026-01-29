@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -143,7 +144,8 @@ func runEscalate(cmd *cobra.Command, args []string) error {
 		fmt.Println(string(out))
 	} else {
 		emoji := severityEmoji(severity)
-		fmt.Printf("%s Escalation created: %s\n", emoji, issue.ID)
+		slug := util.GenerateEscalationSlug(issue.ID, description)
+		fmt.Printf("%s Escalation created: %s\n", emoji, slug)
 		fmt.Printf("  Severity: %s\n", severity)
 		if escalateSource != "" {
 			fmt.Printf("  Source: %s\n", escalateSource)
@@ -200,7 +202,8 @@ func runEscalateList(cmd *cobra.Command, args []string) error {
 			status = "acked"
 		}
 
-		fmt.Printf("  %s %s [%s] %s\n", emoji, issue.ID, status, issue.Title)
+		slug := util.GenerateEscalationSlug(issue.ID, issue.Title)
+		fmt.Printf("  %s %s [%s] %s\n", emoji, slug, status, issue.Title)
 		fmt.Printf("     Severity: %s | From: %s | %s\n",
 			fields.Severity, fields.EscalatedBy, formatRelativeTimeSimple(issue.CreatedAt))
 		if fields.AckedBy != "" {
@@ -320,15 +323,16 @@ func runEscalateStale(cmd *cobra.Command, args []string) error {
 			}
 
 			emoji := severityEmoji(fields.Severity)
+			slug := util.GenerateEscalationSlug(issue.ID, issue.Title)
 			if willSkip {
-				fmt.Printf("  %s %s [SKIP] %s\n", emoji, issue.ID, issue.Title)
+				fmt.Printf("  %s %s [SKIP] %s\n", emoji, slug, issue.Title)
 				if fields.Severity == "critical" {
 					fmt.Printf("     Already at critical severity\n")
 				} else {
 					fmt.Printf("     Already at max reescalations (%d)\n", maxReescalations)
 				}
 			} else {
-				fmt.Printf("  %s %s %s\n", emoji, issue.ID, issue.Title)
+				fmt.Printf("  %s %s %s\n", emoji, slug, issue.Title)
 				fmt.Printf("     %s → %s (reescalation %d/%d)\n",
 					fields.Severity, newSeverity, fields.ReescalationCount+1, maxReescalations)
 			}
@@ -421,8 +425,9 @@ func runEscalateStale(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		emoji := severityEmoji(result.NewSeverity)
+		slug := util.GenerateEscalationSlug(result.ID, result.Title)
 		fmt.Printf("  %s %s: %s → %s (reescalation %d)\n",
-			emoji, result.ID, result.OldSeverity, result.NewSeverity, result.ReescalationNum)
+			emoji, slug, result.OldSeverity, result.NewSeverity, result.ReescalationNum)
 	}
 
 	if skipped > 0 {
@@ -499,7 +504,8 @@ func runEscalateShow(cmd *cobra.Command, args []string) error {
 	}
 
 	emoji := severityEmoji(fields.Severity)
-	fmt.Printf("%s Escalation: %s\n", emoji, issue.ID)
+	slug := util.GenerateEscalationSlug(issue.ID, issue.Title)
+	fmt.Printf("%s Escalation: %s\n", emoji, slug)
 	fmt.Printf("  Title: %s\n", issue.Title)
 	fmt.Printf("  Status: %s\n", issue.Status)
 	fmt.Printf("  Severity: %s\n", fields.Severity)
