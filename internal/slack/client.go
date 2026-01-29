@@ -140,19 +140,48 @@ func (c *Client) buildDecisionBlocks(d *Decision) []map[string]interface{} {
 
 	// Context section if provided
 	if d.Context != "" {
-		// Truncate context if too long for Slack (max 3000 chars per text block)
-		contextText := d.Context
-		if len(contextText) > 2500 {
-			contextText = contextText[:2497] + "..."
-		}
+		// Threshold for showing "Show Full Context" button
+		const contextPreviewThreshold = 500
 
-		blocks = append(blocks, map[string]interface{}{
-			"type": "section",
-			"text": map[string]interface{}{
-				"type": "mrkdwn",
-				"text": fmt.Sprintf("*Context:*\n%s", contextText),
-			},
-		})
+		if len(d.Context) <= contextPreviewThreshold {
+			// Short context: show inline without button
+			blocks = append(blocks, map[string]interface{}{
+				"type": "section",
+				"text": map[string]interface{}{
+					"type": "mrkdwn",
+					"text": fmt.Sprintf("*Context:*\n%s", d.Context),
+				},
+			})
+		} else {
+			// Long context: show preview with "Show Full Context" button
+			preview := d.Context[:contextPreviewThreshold] + "..."
+
+			blocks = append(blocks, map[string]interface{}{
+				"type": "section",
+				"text": map[string]interface{}{
+					"type": "mrkdwn",
+					"text": fmt.Sprintf("*Context:*\n%s", preview),
+				},
+			})
+
+			// Add "Show Full Context" button
+			// action_id encodes decision ID for modal lookup
+			blocks = append(blocks, map[string]interface{}{
+				"type": "actions",
+				"elements": []map[string]interface{}{
+					{
+						"type": "button",
+						"text": map[string]interface{}{
+							"type":  "plain_text",
+							"text":  "Show Full Context",
+							"emoji": true,
+						},
+						"action_id": fmt.Sprintf("show_context_%s", d.ID),
+						"style":     "primary",
+					},
+				},
+			})
+		}
 	}
 
 	// Urgency and ID fields
