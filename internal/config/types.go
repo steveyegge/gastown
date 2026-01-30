@@ -272,6 +272,11 @@ type RuntimeConfig struct {
 	// Default: "arg" for claude/generic, "none" for codex.
 	PromptMode string `json:"prompt_mode,omitempty"`
 
+	// PromptPrefix is inserted before the prompt argument.
+	// Some CLIs require "--" before positional arguments (e.g., Devin).
+	// If empty, the prompt is appended directly after args.
+	PromptPrefix string `json:"prompt_prefix,omitempty"`
+
 	// Session config controls environment integration for runtime session IDs.
 	Session *RuntimeSessionConfig `json:"session,omitempty"`
 
@@ -349,6 +354,7 @@ func (rc *RuntimeConfig) BuildCommand() string {
 // BuildCommandWithPrompt returns the full command line with an initial prompt.
 // If the config has an InitialPrompt, it's appended as a quoted argument.
 // If prompt is provided, it overrides the config's InitialPrompt.
+// If PromptPrefix is set (e.g., "--" for Devin), it's inserted before the prompt.
 func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 	resolved := normalizeRuntimeConfig(rc)
 	base := resolved.BuildCommand()
@@ -363,7 +369,10 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base
 	}
 
-	// Quote the prompt for shell safety
+	// Build prompt argument with optional prefix (e.g., "--" for Devin)
+	if resolved.PromptPrefix != "" {
+		return base + " " + resolved.PromptPrefix + " " + quoteForShell(p)
+	}
 	return base + " " + quoteForShell(p)
 }
 
@@ -378,6 +387,10 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	}
 
 	if p != "" && resolved.PromptMode != "none" {
+		// Add prompt prefix if configured (e.g., "--" for Devin)
+		if resolved.PromptPrefix != "" {
+			args = append(args, resolved.PromptPrefix)
+		}
 		args = append(args, p)
 	}
 

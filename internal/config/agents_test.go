@@ -69,16 +69,17 @@ func TestGetAgentPresetByName(t *testing.T) {
 func TestRuntimeConfigFromPreset(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		preset      AgentPreset
-		wantCommand string
+		preset           AgentPreset
+		wantCommand      string
+		wantPromptPrefix string
 	}{
-		{AgentClaude, "claude"},
-		{AgentGemini, "gemini"},
-		{AgentCodex, "codex"},
-		{AgentCursor, "cursor-agent"},
-		{AgentAuggie, "auggie"},
-		{AgentAmp, "amp"},
-		{AgentDevin, "devin"},
+		{AgentClaude, "claude", ""},
+		{AgentGemini, "gemini", ""},
+		{AgentCodex, "codex", ""},
+		{AgentCursor, "cursor-agent", ""},
+		{AgentAuggie, "auggie", ""},
+		{AgentAmp, "amp", ""},
+		{AgentDevin, "devin", "--"}, // Devin requires -- before prompt
 	}
 
 	for _, tt := range tests {
@@ -87,6 +88,10 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 			if rc.Command != tt.wantCommand {
 				t.Errorf("RuntimeConfigFromPreset(%s).Command = %v, want %v",
 					tt.preset, rc.Command, tt.wantCommand)
+			}
+			if rc.PromptPrefix != tt.wantPromptPrefix {
+				t.Errorf("RuntimeConfigFromPreset(%s).PromptPrefix = %v, want %v",
+					tt.preset, rc.PromptPrefix, tt.wantPromptPrefix)
 			}
 		})
 	}

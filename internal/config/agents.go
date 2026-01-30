@@ -71,6 +71,11 @@ type AgentPresetInfo struct {
 
 	// NonInteractive contains settings for non-interactive mode.
 	NonInteractive *NonInteractiveConfig `json:"non_interactive,omitempty"`
+
+	// PromptPrefix is inserted before the prompt argument.
+	// Some CLIs require "--" before positional arguments (e.g., Devin).
+	// If empty, the prompt is appended directly after args.
+	PromptPrefix string `json:"prompt_prefix,omitempty"`
 }
 
 // NonInteractiveConfig contains settings for running agents non-interactively.
@@ -189,6 +194,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ResumeStyle:         "flag",
 		SupportsHooks:       false,
 		SupportsForkSession: false,
+		PromptPrefix:        "--", // Devin requires -- before positional prompt argument
 	},
 }
 
@@ -341,8 +347,9 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	}
 
 	return &RuntimeConfig{
-		Command: info.Command,
-		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
+		Command:      info.Command,
+		Args:         append([]string(nil), info.Args...), // Copy to avoid mutation
+		PromptPrefix: info.PromptPrefix,
 	}
 }
 

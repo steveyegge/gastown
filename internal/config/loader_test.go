@@ -913,6 +913,18 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 			prompt: "custom prompt",
 			want:   `aider "custom prompt"`,
 		},
+		{
+			name:   "prompt prefix (devin style)",
+			rc:     &RuntimeConfig{Command: "devin", Args: []string{"--permission-mode", "bypass"}, PromptPrefix: "--"},
+			prompt: "hello world",
+			want:   `devin --permission-mode bypass -- "hello world"`,
+		},
+		{
+			name:   "prompt prefix with no prompt",
+			rc:     &RuntimeConfig{Command: "devin", Args: []string{"--permission-mode", "bypass"}, PromptPrefix: "--"},
+			prompt: "",
+			want:   `devin --permission-mode bypass`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -2633,5 +2645,69 @@ func TestBuildStartupCommandWithAgentOverride_IncludesGTRoot(t *testing.T) {
 	// Should include GT_ROOT in export
 	if !strings.Contains(cmd, "GT_ROOT="+townRoot) {
 		t.Errorf("expected GT_ROOT=%s in command, got: %q", townRoot, cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_UsesGTRootFromEnvVars(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// Create town settings with devin as default agent
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "devin"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Call with empty rigPath but GT_ROOT in envVars (like mayor startup does)
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{
+			"GT_ROLE": "mayor",
+			"GT_ROOT": townRoot,
+		},
+		"", // empty rigPath
+		"",
+		"", // no override
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should use devin from town settings, not fall back to claude
+	if !strings.Contains(cmd, "devin") {
+		t.Errorf("expected devin (from town default_agent) in command, got: %q", cmd)
+	}
+	if strings.Contains(cmd, "claude") {
+		t.Errorf("did not expect claude fallback when GT_ROOT is provided: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommand_UsesGTRootFromEnvVars(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// Create town settings with devin as default agent
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "devin"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Call with empty rigPath but GT_ROOT in envVars (like mayor startup does)
+	cmd := BuildStartupCommand(
+		map[string]string{
+			"GT_ROLE": "mayor",
+			"GT_ROOT": townRoot,
+		},
+		"", // empty rigPath
+		"",
+	)
+
+	// Should use devin from town settings, not fall back to claude
+	if !strings.Contains(cmd, "devin") {
+		t.Errorf("expected devin (from town default_agent) in command, got: %q", cmd)
+	}
+	if strings.Contains(cmd, "claude") {
+		t.Errorf("did not expect claude fallback when GT_ROOT is provided: %q", cmd)
 	}
 }
