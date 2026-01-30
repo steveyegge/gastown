@@ -205,7 +205,6 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// Use respawn-pane to replace shell with runtime directly
 		// This gives cleaner lifecycle: runtime exits → session ends (no intermediate shell)
 		// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-		// Dolt server env vars are automatically prepended by BuildCrewStartupCommandWithAgentOverride
 		startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, beacon, crewAgentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command: %w", err)
@@ -253,7 +252,6 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 
 			// Use respawn-pane to replace shell with runtime directly
 			// Export GT_ROLE and BD_ACTOR since tmux SetEnvironment only affects new panes
-			// Dolt server env vars are automatically prepended by BuildCrewStartupCommandWithAgentOverride
 			startupCmd, err := config.BuildCrewStartupCommandWithAgentOverride(r.Name, name, r.Path, beacon, crewAgentOverride)
 			if err != nil {
 				return fmt.Errorf("building startup command: %w", err)

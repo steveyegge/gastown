@@ -189,7 +189,7 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	}
 
 	// Set environment in tmux session for new panes/windows
-	// The main agent process already has dolt env vars from the command string
+	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "boot",
 		TownRoot: b.townRoot,
