@@ -781,13 +781,17 @@ func (d *Daemon) cleanupTownServiceBeads() {
 // migrateBeadsToTown pipes issues from source beads dir to town beads dir.
 // Uses bd export | bd import which is backend-agnostic (works with SQLite or Dolt).
 func (d *Daemon) migrateBeadsToTown(srcBeadsDir, dstBeadsDir string) error {
+	// Kill any bd daemon for the source beads directory first.
+	// The daemon holds the database lock, preventing export from reading.
+	d.killBeadsDaemon(srcBeadsDir)
+
 	// Set up export command (reads from source)
 	exportCmd := exec.Command("bd", "export", "--no-daemon")
 	exportCmd.Env = append(os.Environ(), "BEADS_DIR="+srcBeadsDir)
 	exportCmd.Dir = filepath.Dir(srcBeadsDir)
 
 	// Set up import command (writes to destination)
-	importCmd := exec.Command("bd", "import", "--no-daemon", "-")
+	importCmd := exec.Command("bd", "import", "--no-daemon")
 	importCmd.Env = append(os.Environ(), "BEADS_DIR="+dstBeadsDir)
 	importCmd.Dir = filepath.Dir(dstBeadsDir)
 
@@ -812,9 +816,18 @@ func (d *Daemon) migrateBeadsToTown(srcBeadsDir, dstBeadsDir string) error {
 		return fmt.Errorf("failed to start import: %w", err)
 	}
 
-	// Wait for both to complete
-	exportErr := exportCmd.Wait()
-	importErr := importCmd.Wait()
+	// Wait for both commands concurrently to avoid pipe deadlock.
+	// If we wait for export first, it may block on a full pipe buffer
+	// while import is also blocked, causing a deadlock.
+	// By waiting concurrently, we allow both processes to make progress.
+	var exportErr, importErr error
+	done := make(chan struct{})
+	go func() {
+		exportErr = exportCmd.Wait()
+		close(done)
+	}()
+	importErr = importCmd.Wait()
+	<-done // Wait for export goroutine to complete
 
 	if exportErr != nil {
 		return fmt.Errorf("export failed: %s", strings.TrimSpace(exportStderr.String()))
@@ -824,6 +837,47 @@ func (d *Daemon) migrateBeadsToTown(srcBeadsDir, dstBeadsDir string) error {
 	}
 
 	return nil
+}
+
+// killBeadsDaemon kills any bd daemon running for the given beads directory.
+// This is needed before export because the daemon holds the database lock.
+func (d *Daemon) killBeadsDaemon(beadsDir string) {
+	pidFile := filepath.Join(beadsDir, "daemon.pid")
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return // No daemon.pid file, nothing to kill
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return // Invalid PID
+	}
+
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+
+	// Check if process is alive
+	if err := process.Signal(syscall.Signal(0)); err != nil {
+		return // Process not running
+	}
+
+	// Kill the daemon
+	d.logger.Printf("Killing bd daemon (PID %d) for errant beads at %s", pid, beadsDir)
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		d.logger.Printf("Warning: failed to send SIGTERM to bd daemon: %v", err)
+		return
+	}
+
+	// Wait briefly for graceful shutdown
+	time.Sleep(100 * time.Millisecond)
+
+	// Force kill if still alive
+	if err := process.Signal(syscall.Signal(0)); err == nil {
+		_ = process.Signal(syscall.SIGKILL)
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // shutdown performs graceful shutdown.
