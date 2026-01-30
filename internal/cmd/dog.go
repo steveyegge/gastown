@@ -26,6 +26,8 @@ var (
 	dogForce      bool
 	dogRemoveAll  bool
 	dogCallAll    bool
+	dogClearAll   bool
+	dogClearForce bool
 
 	// Dispatch flags
 	dogDispatchPlugin string
@@ -155,6 +157,34 @@ Examples:
 	RunE: runDogStatus,
 }
 
+var dogClearCmd = &cobra.Command{
+	Use:   "clear <name>... | --all",
+	Short: "Clear stuck dog(s) back to idle state",
+	Long: `Clear one or more dogs back to idle state.
+
+Resets the dog's state from "working" to "idle" and clears any work assignment.
+Use this to recover dogs that are stuck in working state without actual work.
+
+Use --force to clear even if the dog appears to be actively working
+(has a recent last-active timestamp).
+
+Examples:
+  gt dog clear alpha
+  gt dog clear alpha bravo charlie
+  gt dog clear --all
+  gt dog clear alpha --force`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if dogClearAll {
+			return nil
+		}
+		if len(args) < 1 {
+			return fmt.Errorf("requires at least 1 dog name (or use --all)")
+		}
+		return nil
+	},
+	RunE: runDogClear,
+}
+
 var dogDispatchCmd = &cobra.Command{
 	Use:   "dispatch --plugin <name>",
 	Short: "Dispatch plugin execution to a dog",
@@ -196,6 +226,10 @@ func init() {
 	// Status flags
 	dogStatusCmd.Flags().BoolVar(&dogStatusJSON, "json", false, "Output as JSON")
 
+	// Clear flags
+	dogClearCmd.Flags().BoolVar(&dogClearAll, "all", false, "Clear all stuck dogs")
+	dogClearCmd.Flags().BoolVarP(&dogClearForce, "force", "f", false, "Force clear even if recently active")
+
 	// Dispatch flags
 	dogDispatchCmd.Flags().StringVar(&dogDispatchPlugin, "plugin", "", "Plugin name to dispatch (required)")
 	dogDispatchCmd.Flags().StringVar(&dogDispatchRig, "rig", "", "Limit plugin search to specific rig")
@@ -211,6 +245,7 @@ func init() {
 	dogCmd.AddCommand(dogListCmd)
 	dogCmd.AddCommand(dogCallCmd)
 	dogCmd.AddCommand(dogStatusCmd)
+	dogCmd.AddCommand(dogClearCmd)
 	dogCmd.AddCommand(dogDispatchCmd)
 
 	rootCmd.AddCommand(dogCmd)
@@ -830,6 +865,70 @@ func ifStr(cond bool, ifTrue, ifFalse string) string {
 		return ifTrue
 	}
 	return ifFalse
+}
+
+// runDogClear clears stuck dogs back to idle state.
+func runDogClear(cmd *cobra.Command, args []string) error {
+	mgr, err := getDogManager()
+	if err != nil {
+		return err
+	}
+
+	var names []string
+	if dogClearAll {
+		dogs, err := mgr.List()
+		if err != nil {
+			return fmt.Errorf("listing dogs: %w", err)
+		}
+		// Only clear dogs that are in working state
+		for _, d := range dogs {
+			if d.State == dog.StateWorking {
+				names = append(names, d.Name)
+			}
+		}
+		if len(names) == 0 {
+			fmt.Println("No stuck dogs to clear (all dogs are idle)")
+			return nil
+		}
+	} else {
+		names = args
+	}
+
+	cleared := 0
+	for _, name := range names {
+		d, err := mgr.Get(name)
+		if err != nil {
+			fmt.Printf("Warning: dog %s not found, skipping\n", name)
+			continue
+		}
+
+		// Check if already idle
+		if d.State == dog.StateIdle {
+			fmt.Printf("Dog %s is already idle\n", name)
+			continue
+		}
+
+		// Check if recently active (last 5 minutes) - may still be working
+		if !dogClearForce && time.Since(d.LastActive) < 5*time.Minute {
+			fmt.Printf("Warning: dog %s was active %s - may still be working (use --force to clear anyway)\n",
+				name, dogFormatTimeAgo(d.LastActive))
+			continue
+		}
+
+		// Clear the dog's work and set to idle
+		if err := mgr.ClearWork(name); err != nil {
+			return fmt.Errorf("clearing dog %s: %w", name, err)
+		}
+
+		fmt.Printf("✓ Cleared dog %s (was working on: %s)\n", name, d.Work)
+		cleared++
+	}
+
+	if cleared > 0 {
+		fmt.Printf("\n%d dog(s) cleared and ready\n", cleared)
+	}
+
+	return nil
 }
 
 // formatPluginMailBody formats the plugin as instructions for the dog.
