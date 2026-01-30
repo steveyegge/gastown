@@ -893,31 +893,31 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 			name:   "with prompt",
 			rc:     DefaultRuntimeConfig(),
 			prompt: "gt prime",
-			want:   `claude --dangerously-skip-permissions "gt prime"`,
+			want:   `claude --dangerously-skip-permissions $'gt prime'`,
 		},
 		{
 			name:   "prompt with quotes",
 			rc:     DefaultRuntimeConfig(),
 			prompt: `Hello "world"`,
-			want:   `claude --dangerously-skip-permissions "Hello \"world\""`,
+			want:   `claude --dangerously-skip-permissions $'Hello "world"'`,
 		},
 		{
 			name:   "config initial prompt used if no override",
 			rc:     &RuntimeConfig{Command: "aider", Args: []string{}, InitialPrompt: "/help"},
 			prompt: "",
-			want:   `aider "/help"`,
+			want:   `aider $'/help'`,
 		},
 		{
 			name:   "override takes precedence over config",
 			rc:     &RuntimeConfig{Command: "aider", Args: []string{}, InitialPrompt: "/help"},
 			prompt: "custom prompt",
-			want:   `aider "custom prompt"`,
+			want:   `aider $'custom prompt'`,
 		},
 		{
 			name:   "prompt prefix (devin style)",
 			rc:     &RuntimeConfig{Command: "devin", Args: []string{"--permission-mode", "dangerous"}, PromptPrefix: "--"},
 			prompt: "hello world",
-			want:   `devin --permission-mode dangerous -- "hello world"`,
+			want:   `devin --permission-mode dangerous -- $'hello world'`,
 		},
 		{
 			name:   "prompt prefix with no prompt",
@@ -929,13 +929,25 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 			name:   "prompt with backticks",
 			rc:     DefaultRuntimeConfig(),
 			prompt: "Run `gt hook` now",
-			want:   "claude --dangerously-skip-permissions \"Run \\`gt hook\\` now\"",
+			want:   "claude --dangerously-skip-permissions $'Run `gt hook` now'",
 		},
 		{
 			name:   "prompt with dollar sign",
 			rc:     DefaultRuntimeConfig(),
 			prompt: "Value is $HOME",
-			want:   `claude --dangerously-skip-permissions "Value is \$HOME"`,
+			want:   `claude --dangerously-skip-permissions $'Value is $HOME'`,
+		},
+		{
+			name:   "prompt with newlines",
+			rc:     DefaultRuntimeConfig(),
+			prompt: "line1\nline2\nline3",
+			want:   `claude --dangerously-skip-permissions $'line1\nline2\nline3'`,
+		},
+		{
+			name:   "prompt with single quotes",
+			rc:     DefaultRuntimeConfig(),
+			prompt: "It's working",
+			want:   `claude --dangerously-skip-permissions $'It\'s working'`,
 		},
 	}
 
@@ -2719,8 +2731,8 @@ func TestBuildAgentStartupCommandWithDevinAndPrompt(t *testing.T) {
 	}
 
 	// Should have -- before the prompt (Devin's PromptPrefix)
-	if !strings.Contains(cmd, "-- \"test beacon message\"") {
-		t.Errorf("expected '-- \"test beacon message\"' in command (Devin requires -- before prompt), got: %q", cmd)
+	if !strings.Contains(cmd, "-- $'test beacon message'") {
+		t.Errorf("expected '-- $'test beacon message'' in command (Devin requires -- before prompt), got: %q", cmd)
 	}
 }
 

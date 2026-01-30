@@ -604,18 +604,18 @@ func defaultInstructionsFile(provider string) string {
 	return "CLAUDE.md"
 }
 
-// quoteForShell quotes a string for safe shell usage.
+// quoteForShell quotes a string for safe shell usage using ANSI-C quoting ($'...').
+// This properly handles newlines, tabs, and other special characters that would
+// break double-quoted strings when passed through tmux to bash.
 func quoteForShell(s string) string {
-	// Escape special characters for double-quoted shell strings:
-	// - backslash must be escaped first (to avoid double-escaping)
-	// - double quotes must be escaped
-	// - backticks must be escaped (command substitution)
-	// - dollar signs must be escaped (variable expansion)
+	// Use ANSI-C quoting ($'...') which interprets escape sequences.
+	// Escape order matters: backslash first, then single quote, then control chars.
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
-	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	escaped = strings.ReplaceAll(escaped, "`", "\\`")
-	escaped = strings.ReplaceAll(escaped, `$`, `\$`)
-	return `"` + escaped + `"`
+	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
+	escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+	escaped = strings.ReplaceAll(escaped, "\t", `\t`)
+	escaped = strings.ReplaceAll(escaped, "\r", `\r`)
+	return `$'` + escaped + `'`
 }
 
 // ThemeConfig represents tmux theme settings for a rig.
