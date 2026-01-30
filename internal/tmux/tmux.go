@@ -183,10 +183,10 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 		// Note: Processes that called setsid() will have a new PGID and won't be killed here
 		pgid := getProcessGroupID(pid)
 		if pgid != "" && pgid != "0" && pgid != "1" {
-			// Kill process group using syscall.Kill() directly, rather than shelling
-			// out to /usr/bin/kill which has parsing ambiguity with negative PGIDs.
-			// procps-ng kill (v4.0.4+) misparses "-PGID" and can kill ALL processes.
-			// syscall.Kill with negative PID targets the process group (POSIX).
+			// Kill process group using platform-specific implementation.
+			// We avoid shelling out to /usr/bin/kill which has parsing ambiguity
+			// with negative PGIDs. procps-ng kill (v4.0.4+) misparses "-PGID"
+			// and can kill ALL processes.
 			pgidInt, _ := strconv.Atoi(pgid)
 			killProcessGroup(pgidInt)
 		}
@@ -354,7 +354,7 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 	// - Are not direct children but stayed in the same process group
 	pgid := getProcessGroupID(pid)
 	if pgid != "" && pgid != "0" && pgid != "1" {
-		// Kill process group using syscall.Kill() directly.
+		// Kill process group using platform-specific implementation.
 		// See comment in KillSessionWithProcesses for why we avoid exec.Command("kill").
 		pgidInt, _ := strconv.Atoi(pgid)
 		killProcessGroup(pgidInt)
