@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
-	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -173,8 +172,8 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	}, "Run `gt boot triage` now.")
 
 	var startCmd string
+	var err error
 	if agentOverride != "" {
-		var err error
 		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", initialPrompt, agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
@@ -189,15 +188,12 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		return fmt.Errorf("creating boot session: %w", err)
 	}
 
-	// Set environment using centralized AgentEnv for consistency
-	doltServer, err := doltserver.EnsureRunningIfMigrated(b.townRoot)
-	if err != nil {
-		return fmt.Errorf("dolt server check: %w", err)
-	}
+	// Set environment in tmux session for new panes/windows
+	// The main agent process already has dolt env vars from the command string
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:               "boot",
 		TownRoot:           b.townRoot,
-		DoltServerMode:     doltServer,
+		DoltServerMode:     config.IsDoltServerMode(b.townRoot),
 		DoltServerDatabase: "hq",
 	})
 	for k, v := range envVars {
@@ -216,14 +212,10 @@ func (b *Boot) spawnDegraded() error {
 	cmd.Dir = b.deaconDir
 
 	// Use centralized AgentEnv for consistency with tmux mode
-	doltServerDegraded, err := doltserver.EnsureRunningIfMigrated(b.townRoot)
-	if err != nil {
-		return fmt.Errorf("dolt server check: %w", err)
-	}
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:               "boot",
 		TownRoot:           b.townRoot,
-		DoltServerMode:     doltServerDegraded,
+		DoltServerMode:     config.IsDoltServerMode(b.townRoot),
 		DoltServerDatabase: "hq",
 	})
 	cmd.Env = config.EnvForExecCommand(envVars)

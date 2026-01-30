@@ -21,7 +21,6 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
-	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/feed"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -1125,17 +1124,13 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 	}
 
 	// Set environment variables using centralized AgentEnv
-	doltServer, err := doltserver.EnsureRunningIfMigrated(d.config.TownRoot)
-	if err != nil {
-		return fmt.Errorf("dolt server check: %w", err)
-	}
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:               "polecat",
 		Rig:                rigName,
 		AgentName:          polecatName,
 		TownRoot:           d.config.TownRoot,
 		BeadsNoDaemon:      true,
-		DoltServerMode:     doltServer,
+		DoltServerMode:     config.IsDoltServerMode(d.config.TownRoot),
 		DoltServerDatabase: rigName,
 	})
 

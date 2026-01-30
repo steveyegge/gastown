@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -164,6 +165,33 @@ func AgentEnvSimple(role, rig, agentName string) map[string]string {
 		Rig:       rig,
 		AgentName: agentName,
 	})
+}
+
+// IsDoltServerMode checks if dolt server mode is enabled by detecting migrated databases.
+// Returns true if .dolt-data/ directory exists and contains entries.
+// This is a simple filesystem check with no external dependencies.
+func IsDoltServerMode(townRoot string) bool {
+	if townRoot == "" {
+		return false
+	}
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	entries, err := os.ReadDir(dataDir)
+	return err == nil && len(entries) > 0
+}
+
+// DoltServerEnv returns the environment variables needed for dolt server mode.
+// If doltServerMode is false, returns nil (no env vars to prepend).
+// This is used to prepend dolt env vars to startup commands before the agent starts.
+func DoltServerEnv(doltServerMode bool, database string) map[string]string {
+	if !doltServerMode {
+		return nil
+	}
+	return map[string]string{
+		"BEADS_DOLT_SERVER_MODE":     "1",
+		"BEADS_DOLT_SERVER_HOST":     "127.0.0.1",
+		"BEADS_DOLT_SERVER_PORT":     strconv.Itoa(DefaultDoltServerPort),
+		"BEADS_DOLT_SERVER_DATABASE": database,
+	}
 }
 
 // ShellQuote returns a shell-safe quoted string.

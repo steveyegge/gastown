@@ -1491,6 +1491,16 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	return cmd, nil
 }
 
+// prependDoltServerEnv prepends dolt server env vars with the appropriate database name.
+// For town-level (empty rig), uses "hq". For rig-level, uses the rig name.
+func prependDoltServerEnv(cmd, rig string) string {
+	dbName := rig
+	if dbName == "" {
+		dbName = "hq"
+	}
+	return PrependEnv(cmd, DoltServerEnv(true, dbName))
+}
+
 // BuildAgentStartupCommand is a convenience function for starting agent sessions.
 // It uses AgentEnv to set all standard environment variables.
 // For rig-level roles (witness, refinery), pass the rig name and rigPath.
@@ -1501,7 +1511,11 @@ func BuildAgentStartupCommand(role, rig, townRoot, rigPath, prompt string) strin
 		Rig:      rig,
 		TownRoot: townRoot,
 	})
-	return BuildStartupCommand(envVars, rigPath, prompt)
+	cmd := BuildStartupCommand(envVars, rigPath, prompt)
+	if IsDoltServerMode(townRoot) {
+		cmd = prependDoltServerEnv(cmd, rig)
+	}
+	return cmd
 }
 
 // BuildAgentStartupCommandWithAgentOverride is like BuildAgentStartupCommand, but uses agentOverride if non-empty.
@@ -1511,7 +1525,14 @@ func BuildAgentStartupCommandWithAgentOverride(role, rig, townRoot, rigPath, pro
 		Rig:      rig,
 		TownRoot: townRoot,
 	})
-	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+	cmd, err := BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+	if err != nil {
+		return "", err
+	}
+	if IsDoltServerMode(townRoot) {
+		cmd = prependDoltServerEnv(cmd, rig)
+	}
+	return cmd, nil
 }
 
 // BuildPolecatStartupCommand builds the startup command for a polecat.
@@ -1527,7 +1548,11 @@ func BuildPolecatStartupCommand(rigName, polecatName, rigPath, prompt string) st
 		AgentName: polecatName,
 		TownRoot:  townRoot,
 	})
-	return BuildStartupCommand(envVars, rigPath, prompt)
+	cmd := BuildStartupCommand(envVars, rigPath, prompt)
+	if IsDoltServerMode(townRoot) {
+		cmd = prependDoltServerEnv(cmd, rigName)
+	}
+	return cmd
 }
 
 // BuildPolecatStartupCommandWithAgentOverride is like BuildPolecatStartupCommand, but uses agentOverride if non-empty.
@@ -1542,7 +1567,14 @@ func BuildPolecatStartupCommandWithAgentOverride(rigName, polecatName, rigPath, 
 		AgentName: polecatName,
 		TownRoot:  townRoot,
 	})
-	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+	cmd, err := BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+	if err != nil {
+		return "", err
+	}
+	if IsDoltServerMode(townRoot) {
+		cmd = prependDoltServerEnv(cmd, rigName)
+	}
+	return cmd, nil
 }
 
 // BuildCrewStartupCommand builds the startup command for a crew member.
@@ -1558,7 +1590,11 @@ func BuildCrewStartupCommand(rigName, crewName, rigPath, prompt string) string {
 		AgentName: crewName,
 		TownRoot:  townRoot,
 	})
-	return BuildStartupCommand(envVars, rigPath, prompt)
+	cmd := BuildStartupCommand(envVars, rigPath, prompt)
+	if IsDoltServerMode(townRoot) {
+		cmd = prependDoltServerEnv(cmd, rigName)
+	}
+	return cmd
 }
 
 // BuildCrewStartupCommandWithAgentOverride is like BuildCrewStartupCommand, but uses agentOverride if non-empty.
@@ -1573,7 +1609,14 @@ func BuildCrewStartupCommandWithAgentOverride(rigName, crewName, rigPath, prompt
 		AgentName: crewName,
 		TownRoot:  townRoot,
 	})
-	return BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+	cmd, err := BuildStartupCommandWithAgentOverride(envVars, rigPath, prompt, agentOverride)
+	if err != nil {
+		return "", err
+	}
+	if IsDoltServerMode(townRoot) {
+		cmd = prependDoltServerEnv(cmd, rigName)
+	}
+	return cmd, nil
 }
 
 // ExpectedPaneCommands returns tmux pane command names that indicate the runtime is running.
