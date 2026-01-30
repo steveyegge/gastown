@@ -327,6 +327,153 @@ bd config set slack.channels '{"gastown/polecats/*": "C1111111111"}'
 bd config set slack.overrides '{"gastown/crew/slack_decisions": "C3333333333"}'
 ```
 
+## Slug Derivation
+
+**Location:** `internal/util/slug.go`
+
+The slug derivation system converts human-readable titles (epic names, convoy titles)
+into Slack-safe channel name suffixes.
+
+### Algorithm
+
+```go
+func DeriveChannelSlug(title string) string {
+    return DeriveChannelSlugWithMaxLen(title, 30)  // Default max 30 chars
+}
+
+func DeriveChannelSlugWithMaxLen(title string, maxLen int) string {
+    // 1. Lowercase
+    slug = strings.ToLower(title)
+
+    // 2. Replace non-alphanumeric with hyphens
+    // [^a-z0-9] → "-"
+
+    // 3. Collapse consecutive hyphens
+    // "foo--bar" → "foo-bar"
+
+    // 4. Strip leading/trailing hyphens
+
+    // 5. Truncate at word boundary (if > maxLen)
+    // Find last hyphen in first maxLen chars
+    // Truncate there to avoid mid-word cuts
+
+    return slug
+}
+```
+
+### Examples
+
+| Input | Output |
+|-------|--------|
+| `"Ephemeral Polecat Merge Workflow: Rebase-as-Work"` | `ephemeral-polecat-merge` |
+| `"Fix bug #123 in parser"` | `fix-bug-123-in-parser` |
+| `"This is a very long title that exceeds limit"` | `this-is-a-very-long-title` |
+| `"!@#$%^&*()"` (only special chars) | `""` |
+| `"---leading and trailing---"` | `leading-and-trailing` |
+
+### Usage in Channel Naming
+
+```go
+// In ensureEpicChannelExists:
+slug := util.DeriveChannelSlug(epicTitle)    // "ephemeral-polecat-merge"
+channelName := b.channelPrefix + "-" + slug  // "gt-decisions-ephemeral-polecat-merge"
+
+// Additional sanitization for Slack:
+channelName = strings.ToLower(channelName)
+channelName = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(channelName, "-")
+channelName = regexp.MustCompile(`-+`).ReplaceAllString(channelName, "-")
+channelName = strings.Trim(channelName, "-")
+
+// Slack limit: 80 chars max
+if len(channelName) > 80 {
+    channelName = channelName[:80]
+}
+```
+
+## Channel Caching
+
+**Location:** `internal/slackbot/bot.go`
+
+The bot caches channel name→ID mappings to avoid repeated Slack API lookups.
+
+### Data Structure
+
+```go
+type Bot struct {
+    channelCache   map[string]string  // name → ID
+    channelCacheMu sync.RWMutex       // Thread-safe access
+}
+```
+
+### Cache Operations
+
+```go
+// Read (with read lock)
+b.channelCacheMu.RLock()
+if cachedID, ok := b.channelCache[channelName]; ok {
+    b.channelCacheMu.RUnlock()
+    return cachedID, nil
+}
+b.channelCacheMu.RUnlock()
+
+// Write (with write lock)
+func (b *Bot) cacheChannel(name, id string) {
+    b.channelCacheMu.Lock()
+    b.channelCache[name] = id
+    b.channelCacheMu.Unlock()
+}
+```
+
+### Cache Population
+
+Cache is populated in three scenarios:
+
+1. **Channel found by name lookup:**
+   ```go
+   channelID, err := b.findChannelByName(channelName)
+   if err == nil && channelID != "" {
+       b.cacheChannel(channelName, channelID)  // ← cached
+       return channelID, nil
+   }
+   ```
+
+2. **Channel created:**
+   ```go
+   channel, err := b.client.CreateConversation(...)
+   if err == nil {
+       b.cacheChannel(channelName, channel.ID)  // ← cached
+       return channel.ID, nil
+   }
+   ```
+
+3. **"name_taken" recovery:**
+   ```go
+   if strings.Contains(err.Error(), "name_taken") {
+       channelID, _ := b.findChannelByName(channelName)
+       if channelID != "" {
+           b.cacheChannel(channelName, channelID)  // ← cached
+           return channelID, nil
+       }
+   }
+   ```
+
+### Cache Characteristics
+
+| Property | Value |
+|----------|-------|
+| Lifetime | Bot process lifetime (no TTL) |
+| Eviction | None (grows unbounded) |
+| Persistence | None (memory only) |
+| Thread safety | RWMutex protected |
+
+### Potential Improvements
+
+For the dynamic routing epic, consider:
+- **TTL**: Add expiration for renamed/deleted channels
+- **Size limit**: Bound cache size with LRU eviction
+- **Warm-up**: Pre-populate cache on startup
+- **Invalidation**: React to Slack channel events
+
 ## Files Reference
 
 | File | Purpose |
