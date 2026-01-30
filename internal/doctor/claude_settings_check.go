@@ -477,7 +477,7 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 			// For mayor CLAUDE.md at town root, create at mayor/
 			if sf.agentType == "mayor" && strings.HasSuffix(sf.path, "CLAUDE.md") && !strings.Contains(sf.path, "/mayor/") {
 				townName, _ := workspace.GetTownName(ctx.TownRoot)
-				if err := templates.CreateMayorCLAUDEmd(
+				if _, err := templates.CreateMayorCLAUDEmd(
 					mayorDir,
 					ctx.TownRoot,
 					townName,
