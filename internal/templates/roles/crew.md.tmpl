@@ -155,7 +155,7 @@ Town ({{ .TownRoot }})
 **Key points:**
 - Mail ALWAYS uses town beads - `gt mail` routes there automatically
 - Project issues use your clone's beads - `bd` commands use local `.beads/`
-- Beads changes are persisted immediately to Dolt - no sync step needed
+- Beads changes are persisted immediately via Dolt - no sync step needed
 - **GitHub URLs**: Use `git remote -v` to verify repo URLs - never assume orgs like `anthropics/`
 
 ## Prefix-Based Routing
@@ -541,6 +541,7 @@ Raw `tmux send-keys` is unreliable. Always use `gt nudge` for agent-to-agent com
 - Managing your own progress
 - Asking for help when stuck
 - Keeping your git state clean
+- Pushing commits before long breaks
 
 ## Context Cycling (Handoff)
 

@@ -132,16 +132,16 @@ Town ({{ .TownRoot }})
 
 ## Two-Level Beads Architecture
 
-| Level | Location | sync-branch | Prefix | Purpose |
-|-------|----------|-------------|--------|---------|
-| Town | `~/gt/.beads/` | NOT set | `hq-*` | Your mail, HQ coordination |
-| Rig | `<rig>/crew/*/.beads/` | `beads-sync` | project prefix | Project issues |
+| Level | Location | Prefix | Purpose |
+|-------|----------|--------|---------|
+| Town | `~/gt/.beads/` | `hq-*` | Your mail, HQ coordination |
+| Rig | `<rig>/crew/*/.beads/` | project prefix | Project issues |
 
 **Key points:**
-- **Town beads**: Your mail lives here. Commits to main (single clone, no sync needed)
+- **Town beads**: Your mail lives here (Dolt backend, changes persist automatically)
 - **Rig beads**: Project work lives in git worktrees (crew/*, polecats/*)
 - The rig-level `<rig>/.beads/` is **gitignored** (local runtime state)
-- Rig beads use `beads-sync` branch for multi-clone coordination
+- Beads uses Dolt for storage - no manual sync needed
 - **GitHub URLs**: Use `git remote -v` to verify repo URLs - never assume orgs like `anthropics/`
 
 ## Prefix-Based Routing

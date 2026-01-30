@@ -162,6 +162,7 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	for _, msg := range stoppedAgents {
 		fmt.Printf("  %s\n", msg)
 	}
+	fmt.Printf("  Beads changes persisted via Dolt\n")
 
 	return nil
 }

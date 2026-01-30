@@ -114,7 +114,7 @@ var polecatSyncCmd = &cobra.Command{
 	Short: "Sync beads for a polecat (deprecated with Dolt backend)",
 	Long: `Sync beads for a polecat's worktree.
 
-NOTE: With Dolt backend, beads changes are persisted immediately.
+Legacy command: with Dolt backend, beads changes are persisted automatically.
 This command is a no-op when using Dolt.
 
 Use --all to sync all polecats in a rig.
