@@ -4,7 +4,9 @@ package slack
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -50,10 +52,11 @@ type Config struct {
 
 // Router resolves Slack channels for agent identities.
 type Router struct {
-	config     *Config
-	configPath string // Path to config file for saving overrides
-	patterns   []compiledPattern
-	mu         sync.RWMutex
+	config      *Config
+	configPath  string // Path to config file for saving overrides
+	beadsBacked bool   // True if config loaded from beads (not file)
+	patterns    []compiledPattern
+	mu          sync.RWMutex
 }
 
 // compiledPattern is a pre-processed pattern for faster matching.
@@ -81,15 +84,92 @@ func NewRouter(cfg *Config) *Router {
 	return r
 }
 
-// LoadRouter loads router configuration from the standard location.
-// Config file: ~/gt/settings/slack.json or $GT_ROOT/settings/slack.json
+// LoadRouter loads router configuration from beads first, then falls back to file.
+// Priority: 1. Beads config (bd config slack.*), 2. File ($GT_ROOT/settings/slack.json)
 func LoadRouter() (*Router, error) {
+	// Try loading from beads first
+	if router, err := LoadRouterFromBeads(); err == nil {
+		return router, nil
+	}
+
+	// Fall back to file-based config
 	configPath, err := findConfigPath()
 	if err != nil {
 		return nil, err
 	}
 
 	return LoadRouterFromFile(configPath)
+}
+
+// LoadRouterFromBeads loads router configuration from beads config namespace.
+// Uses bd config get slack.* to retrieve configuration values.
+func LoadRouterFromBeads() (*Router, error) {
+	cfg := &Config{
+		Type:         "slack",
+		Version:      1,
+		Channels:     make(map[string]string),
+		Overrides:    make(map[string]string),
+		ChannelNames: make(map[string]string),
+	}
+
+	// Check if slack config exists in beads
+	enabled, err := bdConfigGet("slack.enabled")
+	if err != nil || enabled == "" {
+		return nil, fmt.Errorf("slack config not found in beads")
+	}
+	cfg.Enabled = enabled == "true"
+
+	// Get default channel
+	if defaultChannel, err := bdConfigGet("slack.default_channel"); err == nil && defaultChannel != "" {
+		cfg.DefaultChannel = defaultChannel
+	}
+
+	// Get channel patterns (JSON map)
+	if channelsJSON, err := bdConfigGet("slack.channels"); err == nil && channelsJSON != "" {
+		if err := json.Unmarshal([]byte(channelsJSON), &cfg.Channels); err != nil {
+			log.Printf("slack: failed to parse slack.channels: %v", err)
+		}
+	}
+
+	// Get overrides (JSON map)
+	if overridesJSON, err := bdConfigGet("slack.overrides"); err == nil && overridesJSON != "" {
+		if err := json.Unmarshal([]byte(overridesJSON), &cfg.Overrides); err != nil {
+			log.Printf("slack: failed to parse slack.overrides: %v", err)
+		}
+	}
+
+	// Get channel names (JSON map)
+	if namesJSON, err := bdConfigGet("slack.channel_names"); err == nil && namesJSON != "" {
+		if err := json.Unmarshal([]byte(namesJSON), &cfg.ChannelNames); err != nil {
+			log.Printf("slack: failed to parse slack.channel_names: %v", err)
+		}
+	}
+
+	r := NewRouter(cfg)
+	r.beadsBacked = true
+	return r, nil
+}
+
+// bdConfigGet retrieves a value from beads config using bd CLI.
+// Returns empty string if key is not set.
+func bdConfigGet(key string) (string, error) {
+	cmd := exec.Command("bd", "config", "get", key, "--quiet")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSpace(string(output))
+	// bd config get returns "key (not set)" when key doesn't exist
+	if strings.HasSuffix(value, "(not set)") {
+		return "", nil
+	}
+	return value, nil
+}
+
+// bdConfigSet sets a value in beads config using bd CLI.
+func bdConfigSet(key, value string) error {
+	cmd := exec.Command("bd", "config", "set", key, value)
+	return cmd.Run()
 }
 
 // LoadRouterFromFile loads router configuration from a specific file.
@@ -372,13 +452,74 @@ func (r *Router) RemoveOverride(agent string) string {
 	return prev
 }
 
-// Save persists the current configuration to the config file.
-// Returns an error if no config path is known (e.g., router created with NewRouter directly).
-// Uses atomic write (temp file + rename) to prevent data corruption.
+// Save persists the current configuration to beads or file.
+// If loaded from beads, saves to beads. Otherwise saves to config file.
+// Uses atomic write for file-based storage to prevent data corruption.
 func (r *Router) Save() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.beadsBacked {
+		return r.saveToBeadsLocked()
+	}
+
+	return r.saveToFileLocked()
+}
+
+// saveToBeadsLocked saves config to beads (must hold lock).
+func (r *Router) saveToBeadsLocked() error {
+	// Save enabled flag
+	enabledStr := "false"
+	if r.config.Enabled {
+		enabledStr = "true"
+	}
+	if err := bdConfigSet("slack.enabled", enabledStr); err != nil {
+		return fmt.Errorf("save slack.enabled: %w", err)
+	}
+
+	// Save default channel
+	if err := bdConfigSet("slack.default_channel", r.config.DefaultChannel); err != nil {
+		return fmt.Errorf("save slack.default_channel: %w", err)
+	}
+
+	// Save channels (JSON)
+	if len(r.config.Channels) > 0 {
+		channelsJSON, err := json.Marshal(r.config.Channels)
+		if err != nil {
+			return fmt.Errorf("marshal channels: %w", err)
+		}
+		if err := bdConfigSet("slack.channels", string(channelsJSON)); err != nil {
+			return fmt.Errorf("save slack.channels: %w", err)
+		}
+	}
+
+	// Save overrides (JSON)
+	if len(r.config.Overrides) > 0 {
+		overridesJSON, err := json.Marshal(r.config.Overrides)
+		if err != nil {
+			return fmt.Errorf("marshal overrides: %w", err)
+		}
+		if err := bdConfigSet("slack.overrides", string(overridesJSON)); err != nil {
+			return fmt.Errorf("save slack.overrides: %w", err)
+		}
+	}
+
+	// Save channel names (JSON)
+	if len(r.config.ChannelNames) > 0 {
+		namesJSON, err := json.Marshal(r.config.ChannelNames)
+		if err != nil {
+			return fmt.Errorf("marshal channel_names: %w", err)
+		}
+		if err := bdConfigSet("slack.channel_names", string(namesJSON)); err != nil {
+			return fmt.Errorf("save slack.channel_names: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// saveToFileLocked saves config to file (must hold lock).
+func (r *Router) saveToFileLocked() error {
 	if r.configPath == "" {
 		return fmt.Errorf("no config path: router was not loaded from file")
 	}
@@ -398,6 +539,33 @@ func (r *Router) Save() error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("rename config: %w", err)
 	}
+
+	return nil
+}
+
+// IsBeadsBacked returns true if this router is backed by beads config.
+func (r *Router) IsBeadsBacked() bool {
+	return r.beadsBacked
+}
+
+// MigrateToBeads migrates the current file-based config to beads.
+// After migration, the router switches to beads-backed mode.
+func (r *Router) MigrateToBeads() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.beadsBacked {
+		return fmt.Errorf("already backed by beads")
+	}
+
+	// Save to beads
+	if err := r.saveToBeadsLocked(); err != nil {
+		return fmt.Errorf("migrate to beads: %w", err)
+	}
+
+	// Switch to beads-backed mode
+	r.beadsBacked = true
+	r.configPath = ""
 
 	return nil
 }
