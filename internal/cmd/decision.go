@@ -6,21 +6,24 @@ import (
 
 // Decision command flags
 var (
-	decisionPrompt       string   // Primary flag (--prompt)
-	decisionContext      string
-	decisionOptions      []string
-	decisionRecommend    int
-	decisionBlocks       string   // Primary flag (--blocks)
-	decisionParent       string   // Parent bead relationship
-	decisionPredecessor  string   // Predecessor decision for chaining
-	decisionType         string   // Decision type for validation
-	decisionUrgency      string
-	decisionJSON         bool
-	decisionListJSON     bool
-	decisionListAll      bool
-	decisionChoice       int
-	decisionRationale    string
-	decisionAwaitTimeout string   // For await command
+	decisionPrompt             string   // Primary flag (--prompt)
+	decisionContext            string
+	decisionOptions            []string
+	decisionRecommend          int
+	decisionBlocks             string   // Primary flag (--blocks)
+	decisionParent             string   // Parent bead relationship
+	decisionPredecessor        string   // Predecessor decision for chaining
+	decisionType               string   // Decision type for validation
+	decisionUrgency            string
+	decisionJSON               bool
+	decisionListJSON           bool
+	decisionListAll            bool
+	decisionChoice             int
+	decisionRationale          string
+	decisionAwaitTimeout       string   // For await command
+	decisionAutoCloseThreshold string   // For auto-close command
+	decisionAutoCloseInject    bool
+	decisionAutoCloseDryRun    bool
 )
 
 var decisionCmd = &cobra.Command{
@@ -297,6 +300,36 @@ Examples:
 	RunE: runDecisionCancel,
 }
 
+var decisionAutoCloseCmd = &cobra.Command{
+	Use:   "auto-close",
+	Short: "Auto-close stale decisions (for hooks)",
+	Long: `Auto-close pending decisions that are older than a threshold.
+
+Used by UserPromptSubmit hooks to clean up stale decisions before each turn.
+Decisions older than the threshold are closed with reason "Stale: no response".
+
+This enforces the "single decision at a time" principle by cleaning up
+decisions that were never resolved.
+
+Flags:
+  --threshold    Age threshold (e.g., "5m", "1h"). Default: 10m
+  --inject       Output as system-reminder for Claude Code hooks
+  --dry-run      Show what would be closed without closing
+
+Examples:
+  # For UserPromptSubmit hook
+  gt decision auto-close --inject
+
+  # Preview what would be closed
+  gt decision auto-close --dry-run
+
+  # Custom threshold
+  gt decision auto-close --threshold 30m`,
+	RunE:          runDecisionAutoClose,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+}
+
 var decisionCheckCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Check for pending decisions (for hooks)",
@@ -434,6 +467,11 @@ func init() {
 	// Cancel flags
 	decisionCancelCmd.Flags().StringVar(&decisionCancelReason, "reason", "Canceled", "Reason for cancellation")
 
+	// Auto-close flags
+	decisionAutoCloseCmd.Flags().StringVar(&decisionAutoCloseThreshold, "threshold", "10m", "Age threshold for stale decisions")
+	decisionAutoCloseCmd.Flags().BoolVar(&decisionAutoCloseInject, "inject", false, "Output as system-reminder for Claude Code hooks")
+	decisionAutoCloseCmd.Flags().BoolVar(&decisionAutoCloseDryRun, "dry-run", false, "Show what would be closed without closing")
+
 	// Check flags
 	decisionCheckCmd.Flags().BoolVar(&decisionCheckInject, "inject", false, "Output format for Claude Code hooks (queues content)")
 	decisionCheckCmd.Flags().BoolVar(&decisionCheckJSON, "json", false, "Output as JSON")
@@ -457,6 +495,7 @@ func init() {
 	decisionCmd.AddCommand(decisionTurnMarkCmd)
 	decisionCmd.AddCommand(decisionTurnCheckCmd)
 	decisionCmd.AddCommand(decisionCancelCmd)
+	decisionCmd.AddCommand(decisionAutoCloseCmd)
 	decisionCmd.AddCommand(decisionCheckCmd)
 	decisionCmd.AddCommand(decisionChainCmd)
 

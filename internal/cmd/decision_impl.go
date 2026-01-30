@@ -72,15 +72,30 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		agentID = "unknown"
 	}
 
+	bd := beads.New(beads.ResolveBeadsDir(townRoot))
+
 	// Validate --parent if specified
 	if decisionParent != "" {
-		bd := beads.New(beads.ResolveBeadsDir(townRoot))
 		parentIssue, err := bd.Show(decisionParent)
 		if err != nil {
 			return fmt.Errorf("--parent validation failed: bead %q not found: %w", decisionParent, err)
 		}
 		if parentIssue.Type != "epic" {
 			return fmt.Errorf("--parent validation failed: bead %q is type %q, but must be an epic", decisionParent, parentIssue.Type)
+		}
+	}
+
+	// Enforce single-decision rule: auto-close existing pending decisions
+	pendingDecisions, err := bd.ListPendingDecisionsForRequester(agentID)
+	if err == nil && len(pendingDecisions) > 0 {
+		for _, pending := range pendingDecisions {
+			// Will be superseded by the new decision (ID assigned later)
+			// For now, mark as superseded with placeholder
+			if closeErr := bd.CloseDecisionAsSuperseded(pending.ID, "new-decision"); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to auto-close %s: %v\n", pending.ID, closeErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "⚠ Auto-closed stale decision %s (superseded by new request)\n", pending.ID)
+			}
 		}
 	}
 
@@ -1398,6 +1413,99 @@ func runDecisionCancel(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("✓ Canceled %s: %s\n", decisionID, reason)
+	return nil
+}
+
+func runDecisionAutoClose(cmd *cobra.Command, args []string) error {
+	// Parse threshold duration
+	threshold, err := time.ParseDuration(decisionAutoCloseThreshold)
+	if err != nil {
+		if decisionAutoCloseInject {
+			return nil // Hooks should never fail
+		}
+		return fmt.Errorf("invalid threshold '%s': %w", decisionAutoCloseThreshold, err)
+	}
+
+	// Find workspace
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		if decisionAutoCloseInject {
+			return nil // Hooks should never fail
+		}
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Detect agent identity for filtering
+	agentID := detectSender()
+
+	bd := beads.New(beads.ResolveBeadsDir(townRoot))
+
+	// Get stale decisions for this agent
+	staleDecisions, err := bd.ListStaleDecisions(threshold)
+	if err != nil {
+		if decisionAutoCloseInject {
+			return nil // Hooks should never fail
+		}
+		return fmt.Errorf("listing stale decisions: %w", err)
+	}
+
+	// Filter to decisions requested by this agent
+	var toClose []*beads.Issue
+	for _, issue := range staleDecisions {
+		fields := beads.ParseDecisionFields(issue.Description)
+		if fields.RequestedBy == agentID {
+			toClose = append(toClose, issue)
+		}
+	}
+
+	if len(toClose) == 0 {
+		if !decisionAutoCloseInject && !decisionAutoCloseDryRun {
+			fmt.Println("No stale decisions to close")
+		}
+		return nil
+	}
+
+	// Dry run: just show what would be closed
+	if decisionAutoCloseDryRun {
+		fmt.Printf("Would close %d stale decision(s):\n", len(toClose))
+		for _, issue := range toClose {
+			fmt.Printf("  - %s: %s\n", issue.ID, issue.Title)
+		}
+		return nil
+	}
+
+	// Close each stale decision
+	var closed []string
+	for _, issue := range toClose {
+		reason := fmt.Sprintf("Stale: no response after %s", threshold)
+		if closeErr := bd.CloseWithReason(reason, issue.ID); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close %s: %v\n", issue.ID, closeErr)
+			continue
+		}
+
+		// Update labels
+		newLabels := []string{}
+		for _, label := range issue.Labels {
+			if label != "decision:pending" {
+				newLabels = append(newLabels, label)
+			}
+		}
+		newLabels = append(newLabels, "decision:stale")
+		_ = bd.Update(issue.ID, beads.UpdateOptions{SetLabels: newLabels})
+
+		closed = append(closed, issue.ID)
+	}
+
+	// Output
+	if decisionAutoCloseInject {
+		if len(closed) > 0 {
+			fmt.Printf("<system-reminder>\n⚠ Auto-closed %d stale decision(s): %s\n</system-reminder>\n",
+				len(closed), strings.Join(closed, ", "))
+		}
+	} else {
+		fmt.Printf("✓ Closed %d stale decision(s): %s\n", len(closed), strings.Join(closed, ", "))
+	}
+
 	return nil
 }
 

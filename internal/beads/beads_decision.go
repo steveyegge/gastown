@@ -839,3 +839,47 @@ func (b *Beads) ListRecentlyResolvedDecisions(within time.Duration) ([]*Issue, e
 
 	return recent, nil
 }
+
+// ListPendingDecisionsForRequester returns pending decisions requested by a specific agent.
+// Used to enforce single-decision-per-agent rule.
+func (b *Beads) ListPendingDecisionsForRequester(requesterID string) ([]*Issue, error) {
+	decisions, err := b.ListDecisions()
+	if err != nil {
+		return nil, err
+	}
+
+	var matching []*Issue
+	for _, issue := range decisions {
+		fields := ParseDecisionFields(issue.Description)
+		if fields.RequestedBy == requesterID {
+			matching = append(matching, issue)
+		}
+	}
+
+	return matching, nil
+}
+
+// CloseDecisionAsSuperseded closes a pending decision because a new one was requested.
+// Records the superseding decision ID in the close reason.
+func (b *Beads) CloseDecisionAsSuperseded(decisionID, supersedingID string) error {
+	reason := fmt.Sprintf("Superseded by %s", supersedingID)
+	if err := b.CloseWithReason(reason, decisionID); err != nil {
+		return err
+	}
+
+	// Update labels: remove decision:pending, add decision:superseded
+	issue, err := b.Show(decisionID)
+	if err != nil {
+		return nil // Non-fatal, decision is already closed
+	}
+
+	newLabels := []string{}
+	for _, label := range issue.Labels {
+		if label != "decision:pending" {
+			newLabels = append(newLabels, label)
+		}
+	}
+	newLabels = append(newLabels, "decision:superseded")
+
+	return b.Update(decisionID, UpdateOptions{SetLabels: newLabels})
+}
