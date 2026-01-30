@@ -140,10 +140,16 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Embed type in context if specified (for Slack rendering)
+	contextToStore := decisionContext
+	if decisionType != "" {
+		contextToStore = embedTypeInContext(decisionContext, decisionType)
+	}
+
 	// Build decision fields
 	fields := &beads.DecisionFields{
 		Question:      decisionPrompt,
-		Context:       decisionContext,
+		Context:       contextToStore,
 		Options:       options,
 		ChosenIndex:   0, // Pending
 		RequestedBy:   agentID,
@@ -1664,6 +1670,59 @@ func printChainTree(node *chainNode, prefix string, isLast bool) {
 		}
 		printChainTree(child, childPrefix, i == len(node.Children)-1)
 	}
+}
+
+// embedTypeInContext adds a _type field to the context JSON.
+// If context is empty, creates a new object with just the type.
+// If context is an object, adds _type to it.
+// If context is a non-object JSON value, wraps it in {_type: type, _value: original}.
+func embedTypeInContext(context, decisionType string) string {
+	if context == "" {
+		// Empty context: create minimal object with just type
+		obj := map[string]interface{}{"_type": decisionType}
+		result, _ := json.Marshal(obj)
+		return string(result)
+	}
+
+	// Try to parse existing context
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(context), &parsed); err != nil {
+		// Invalid JSON - return as-is (shouldn't happen due to earlier validation)
+		return context
+	}
+
+	// If it's already an object, add _type field
+	if obj, ok := parsed.(map[string]interface{}); ok {
+		obj["_type"] = decisionType
+		result, _ := json.Marshal(obj)
+		return string(result)
+	}
+
+	// Non-object (array, string, number): wrap in object
+	wrapper := map[string]interface{}{
+		"_type":  decisionType,
+		"_value": parsed,
+	}
+	result, _ := json.Marshal(wrapper)
+	return string(result)
+}
+
+// extractTypeFromContext extracts the _type field from context JSON.
+// Returns empty string if not found or not parseable.
+func extractTypeFromContext(context string) string {
+	if context == "" {
+		return ""
+	}
+
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(context), &obj); err != nil {
+		return ""
+	}
+
+	if typeVal, ok := obj["_type"].(string); ok {
+		return typeVal
+	}
+	return ""
 }
 
 // Note: Fail-then-File and successor schema validation moved to scripts:

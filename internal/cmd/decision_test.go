@@ -636,172 +636,8 @@ func TestDecisionTurnCmdExists(t *testing.T) {
 	}
 }
 
-// --- Fail-then-File validation tests ---
-
-// TestHasFailureContext tests failure keyword detection.
-func TestHasFailureContext(t *testing.T) {
-	tests := []struct {
-		name    string
-		prompt  string
-		context string
-		want    bool
-	}{
-		{
-			name:   "error in prompt",
-			prompt: "API call failed with 400 error. What next?",
-			want:   true,
-		},
-		{
-			name:   "fail in prompt",
-			prompt: "Build fails intermittently",
-			want:   true,
-		},
-		{
-			name:   "bug in prompt",
-			prompt: "Found a bug in the auth flow",
-			want:   true,
-		},
-		{
-			name:   "broken in prompt",
-			prompt: "Tests are broken after merge",
-			want:   true,
-		},
-		{
-			name:    "error in context",
-			prompt:  "What should we do?",
-			context: "Getting 500 error from the API",
-			want:    true,
-		},
-		{
-			name:   "http error code",
-			prompt: "API returns 404",
-			want:   true,
-		},
-		{
-			name:   "no failure",
-			prompt: "Which authentication method should we use?",
-			want:   false,
-		},
-		{
-			name:   "no failure positive words",
-			prompt: "The feature is working great. What's next?",
-			want:   false,
-		},
-		{
-			name:   "case insensitive",
-			prompt: "Getting ERROR from server",
-			want:   true,
-		},
-		{
-			name:   "doesn't work",
-			prompt: "The login doesn't work",
-			want:   true,
-		},
-		{
-			name:   "unable to",
-			prompt: "Unable to connect to database",
-			want:   true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := hasFailureContext(tt.prompt, tt.context)
-			if got != tt.want {
-				t.Errorf("hasFailureContext(%q, %q) = %v, want %v", tt.prompt, tt.context, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestHasFileOption tests FILE option detection.
-func TestHasFileOption(t *testing.T) {
-	tests := []struct {
-		name    string
-		options []beads.DecisionOption
-		want    bool
-	}{
-		{
-			name: "file in label",
-			options: []beads.DecisionOption{
-				{Label: "Retry"},
-				{Label: "File bug"},
-			},
-			want: true,
-		},
-		{
-			name: "track in description",
-			options: []beads.DecisionOption{
-				{Label: "Skip", Description: "Skip and track for later"},
-			},
-			want: true,
-		},
-		{
-			name: "bd create in description",
-			options: []beads.DecisionOption{
-				{Label: "Track", Description: "Use bd create to log issue"},
-			},
-			want: true,
-		},
-		{
-			name: "investigate in label",
-			options: []beads.DecisionOption{
-				{Label: "Retry"},
-				{Label: "Investigate root cause"},
-			},
-			want: true,
-		},
-		{
-			name: "no file option",
-			options: []beads.DecisionOption{
-				{Label: "Retry with backoff"},
-				{Label: "Skip this operation"},
-			},
-			want: false,
-		},
-		{
-			name: "create issue",
-			options: []beads.DecisionOption{
-				{Label: "Create issue", Description: "Open issue for this"},
-			},
-			want: true,
-		},
-		{
-			name:    "empty options",
-			options: nil,
-			want:    false,
-		},
-		{
-			name: "case insensitive",
-			options: []beads.DecisionOption{
-				{Label: "FILE BUG"},
-			},
-			want: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := hasFileOption(tt.options)
-			if got != tt.want {
-				t.Errorf("hasFileOption() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestSuggestFileOption tests the suggested option text.
-func TestSuggestFileOption(t *testing.T) {
-	suggestion := suggestFileOption()
-	if suggestion == "" {
-		t.Error("suggestFileOption() should not return empty string")
-	}
-	// Should contain file-related keywords
-	lower := strings.ToLower(suggestion)
-	if !strings.Contains(lower, "file") && !strings.Contains(lower, "bug") && !strings.Contains(lower, "track") {
-		t.Errorf("suggestFileOption() = %q, should contain file/bug/track keyword", suggestion)
-	}
-}
+// Note: hasFailureContext, hasFileOption, suggestFileOption moved to external scripts.
+// See validators/create-decision-fail-file.sh for the script-based implementation.
 
 // TestDecisionRequestNoFileCheckFlag tests that --no-file-check flag exists.
 func TestDecisionRequestNoFileCheckFlag(t *testing.T) {
@@ -817,156 +653,8 @@ func TestDecisionRequestNoFileCheckFlag(t *testing.T) {
 }
 
 // --- Decision Chaining Tests ---
-
-// TestContainsWholeWord tests word boundary detection.
-func TestContainsWholeWord(t *testing.T) {
-	tests := []struct {
-		name    string
-		text    string
-		keyword string
-		want    bool
-	}{
-		{
-			name:    "exact match",
-			text:    "error",
-			keyword: "error",
-			want:    true,
-		},
-		{
-			name:    "word at start",
-			text:    "error occurred",
-			keyword: "error",
-			want:    true,
-		},
-		{
-			name:    "word at end",
-			text:    "an error",
-			keyword: "error",
-			want:    true,
-		},
-		{
-			name:    "word in middle",
-			text:    "an error occurred",
-			keyword: "error",
-			want:    true,
-		},
-		{
-			name:    "word with punctuation",
-			text:    "error: something failed",
-			keyword: "error",
-			want:    true,
-		},
-		{
-			name:    "word with comma",
-			text:    "error, warning, info",
-			keyword: "error",
-			want:    true,
-		},
-		{
-			name:    "partial match at start - should not match",
-			text:    "errors occurred",
-			keyword: "error",
-			want:    false,
-		},
-		{
-			name:    "partial match at end - should not match",
-			text:    "myerror",
-			keyword: "error",
-			want:    false,
-		},
-		{
-			name:    "partial match embedded - should not match",
-			text:    "myerrors",
-			keyword: "error",
-			want:    false,
-		},
-		{
-			name:    "keyword not present",
-			text:    "everything is fine",
-			keyword: "error",
-			want:    false,
-		},
-		{
-			name:    "empty text",
-			text:    "",
-			keyword: "error",
-			want:    false,
-		},
-		{
-			name:    "underscore boundary - should not match",
-			text:    "my_error_handler",
-			keyword: "error",
-			want:    false,
-		},
-		{
-			name:    "multiple occurrences, first partial second whole",
-			text:    "errors and an error",
-			keyword: "error",
-			want:    true,
-		},
-		{
-			name:    "hyphen boundary - should match",
-			text:    "non-error case",
-			keyword: "error",
-			want:    true,
-		},
-		{
-			name:    "parentheses boundary",
-			text:    "(error) message",
-			keyword: "error",
-			want:    true,
-		},
-		{
-			name:    "newline boundary",
-			text:    "line1\nerror\nline3",
-			keyword: "error",
-			want:    true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := containsWholeWord(tt.text, tt.keyword)
-			if got != tt.want {
-				t.Errorf("containsWholeWord(%q, %q) = %v, want %v", tt.text, tt.keyword, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestIsWordChar tests character classification.
-func TestIsWordChar(t *testing.T) {
-	tests := []struct {
-		char byte
-		want bool
-	}{
-		{'a', true},
-		{'z', true},
-		{'A', true},
-		{'Z', true},
-		{'0', true},
-		{'9', true},
-		{'_', true},
-		{' ', false},
-		{'-', false},
-		{'.', false},
-		{':', false},
-		{',', false},
-		{'(', false},
-		{')', false},
-		{'\n', false},
-		{'\t', false},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.char), func(t *testing.T) {
-			got := isWordChar(tt.char)
-			if got != tt.want {
-				t.Errorf("isWordChar(%q) = %v, want %v", tt.char, got, tt.want)
-			}
-		})
-	}
-}
+// Note: containsWholeWord and isWordChar moved to external validator scripts.
+// See validators/create-decision-fail-file.sh for the script-based implementation.
 
 // TestDecisionChainCmdExists tests that chain command exists with proper flags.
 func TestDecisionChainCmdExists(t *testing.T) {
@@ -1481,5 +1169,131 @@ func TestFormatPredecessorInfo(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// --- Type Embedding Tests ---
+
+// TestEmbedTypeInContext tests type embedding in context JSON.
+func TestEmbedTypeInContext(t *testing.T) {
+	tests := []struct {
+		name     string
+		context  string
+		dtype    string
+		wantType string
+	}{
+		{
+			name:     "empty context",
+			context:  "",
+			dtype:    "tradeoff",
+			wantType: "tradeoff",
+		},
+		{
+			name:     "existing object",
+			context:  `{"key": "value"}`,
+			dtype:    "confirmation",
+			wantType: "confirmation",
+		},
+		{
+			name:     "JSON array",
+			context:  `["item1", "item2"]`,
+			dtype:    "checkpoint",
+			wantType: "checkpoint",
+		},
+		{
+			name:     "JSON string",
+			context:  `"simple string"`,
+			dtype:    "scope",
+			wantType: "scope",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := embedTypeInContext(tt.context, tt.dtype)
+
+			// Parse result and check for _type field
+			var obj map[string]interface{}
+			if err := json.Unmarshal([]byte(result), &obj); err != nil {
+				t.Fatalf("embedTypeInContext returned invalid JSON: %v", err)
+			}
+
+			typeVal, ok := obj["_type"].(string)
+			if !ok {
+				t.Error("result missing _type field")
+			} else if typeVal != tt.wantType {
+				t.Errorf("_type = %q, want %q", typeVal, tt.wantType)
+			}
+		})
+	}
+}
+
+// TestExtractTypeFromContextImpl tests type extraction from context.
+func TestExtractTypeFromContextImpl(t *testing.T) {
+	tests := []struct {
+		name     string
+		context  string
+		wantType string
+	}{
+		{
+			name:     "empty context",
+			context:  "",
+			wantType: "",
+		},
+		{
+			name:     "context with type",
+			context:  `{"_type": "tradeoff", "key": "value"}`,
+			wantType: "tradeoff",
+		},
+		{
+			name:     "context without type",
+			context:  `{"key": "value"}`,
+			wantType: "",
+		},
+		{
+			name:     "invalid JSON",
+			context:  "not json",
+			wantType: "",
+		},
+		{
+			name:     "JSON array",
+			context:  `["item1", "item2"]`,
+			wantType: "",
+		},
+		{
+			name:     "type is number",
+			context:  `{"_type": 42}`,
+			wantType: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractTypeFromContext(tt.context)
+			if got != tt.wantType {
+				t.Errorf("extractTypeFromContext() = %q, want %q", got, tt.wantType)
+			}
+		})
+	}
+}
+
+// TestRoundTripTypeEmbedding tests embed then extract.
+func TestRoundTripTypeEmbedding(t *testing.T) {
+	types := []string{"tradeoff", "confirmation", "checkpoint", "assessment", "custom"}
+	contexts := []string{
+		"",
+		`{"existing": "data"}`,
+		`{"nested": {"deep": true}}`,
+	}
+
+	for _, dtype := range types {
+		for i, ctx := range contexts {
+			embedded := embedTypeInContext(ctx, dtype)
+			extracted := extractTypeFromContext(embedded)
+
+			if extracted != dtype {
+				t.Errorf("roundtrip failed for type=%q context[%d]: got %q", dtype, i, extracted)
+			}
+		}
 	}
 }

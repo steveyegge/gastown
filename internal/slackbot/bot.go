@@ -1383,13 +1383,22 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 	// Generate semantic slug for human-friendly display
 	semanticSlug := util.GenerateDecisionSlug(decision.ID, decision.Question)
 
+	// Build type-aware header
+	typeEmoji, typeLabel := buildTypeHeader(decision.Context)
+	headerText := ""
+	if typeLabel != "" {
+		// Type-aware format: "⚖️ Tradeoff Decision: caching-strategy from agent"
+		headerText = fmt.Sprintf("%s %s *%s*: %s%s\n%s",
+			urgencyEmoji, typeEmoji, typeLabel, semanticSlug, agentInfo, decision.Question)
+	} else {
+		// Standard format (no type)
+		headerText = fmt.Sprintf("%s *%s*%s\n%s",
+			urgencyEmoji, semanticSlug, agentInfo, decision.Question)
+	}
+
 	blocks := []slack.Block{
 		slack.NewSectionBlock(
-			slack.NewTextBlockObject("mrkdwn",
-				fmt.Sprintf("%s *%s*%s\n%s",
-					urgencyEmoji, semanticSlug, agentInfo, decision.Question),
-				false, false,
-			),
+			slack.NewTextBlockObject("mrkdwn", headerText, false, false),
 			nil,
 			slack.NewAccessory(
 				slack.NewButtonBlockElement(
@@ -1553,13 +1562,20 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 
 	semanticSlug := util.GenerateDecisionSlug(decision.ID, decision.Question)
 
+	// Build type-aware header
+	typeEmoji, typeLabel := buildTypeHeader(decision.Context)
+	headerText := ""
+	if typeLabel != "" {
+		headerText = fmt.Sprintf("%s %s *%s*: %s%s\n%s",
+			urgencyEmoji, typeEmoji, typeLabel, semanticSlug, agentInfo, decision.Question)
+	} else {
+		headerText = fmt.Sprintf("%s *%s*%s\n%s",
+			urgencyEmoji, semanticSlug, agentInfo, decision.Question)
+	}
+
 	blocks := []slack.Block{
 		slack.NewSectionBlock(
-			slack.NewTextBlockObject("mrkdwn",
-				fmt.Sprintf("%s *%s*%s\n%s",
-					urgencyEmoji, semanticSlug, agentInfo, decision.Question),
-				false, false,
-			),
+			slack.NewTextBlockObject("mrkdwn", headerText, false, false),
 			nil,
 			slack.NewAccessory(
 				slack.NewButtonBlockElement(
@@ -1768,9 +1784,49 @@ func (b *Bot) JoinAllChannels() error {
 	return nil
 }
 
+// decisionTypeEmoji maps decision types to display emojis.
+var decisionTypeEmoji = map[string]string{
+	"tradeoff":      "⚖️",
+	"confirmation":  "✅",
+	"checkpoint":    "🚧",
+	"assessment":    "📊",
+	"decomposition": "🧩",
+	"root-cause":    "🔍",
+	"scope":         "📐",
+	"custom":        "🔧",
+}
+
+// decisionTypeLabel maps decision types to display labels.
+var decisionTypeLabel = map[string]string{
+	"tradeoff":      "Tradeoff Decision",
+	"confirmation":  "Confirmation",
+	"checkpoint":    "Checkpoint",
+	"assessment":    "Assessment",
+	"decomposition": "Decomposition",
+	"root-cause":    "Root Cause Analysis",
+	"scope":         "Scope Decision",
+	"custom":        "Custom Decision",
+}
+
+// extractTypeFromContext extracts the _type field from context JSON.
+func extractTypeFromContext(context string) string {
+	if context == "" {
+		return ""
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(context), &obj); err != nil {
+		return ""
+	}
+	if typeVal, ok := obj["_type"].(string); ok {
+		return typeVal
+	}
+	return ""
+}
+
 // formatContextForSlack formats JSON context for Slack display.
 // If context is valid JSON, it pretty-prints it in a code block.
 // Otherwise returns the context as-is (truncated if needed).
+// Removes internal fields like _type from display.
 func formatContextForSlack(context string, maxLen int) string {
 	if context == "" {
 		return ""
@@ -1786,18 +1842,26 @@ func formatContextForSlack(context string, maxLen int) string {
 		return context
 	}
 
-	// Check for successor_schemas - extract and display separately
+	// Extract and handle special fields
 	var schemaInfo string
 	if obj, ok := parsed.(map[string]interface{}); ok {
+		// Remove internal fields from display
+		delete(obj, "_type")
+		delete(obj, "_value")
+
 		if _, hasSchemas := obj["successor_schemas"]; hasSchemas {
 			schemaInfo = "\n📋 _Has successor schemas defined_"
-			// Remove from main display
 			delete(obj, "successor_schemas")
-			if len(obj) == 0 {
+		}
+
+		// If object is now empty, just return schema info
+		if len(obj) == 0 {
+			if schemaInfo != "" {
 				return schemaInfo
 			}
-			parsed = obj
+			return ""
 		}
+		parsed = obj
 	}
 
 	// Pretty-print JSON
@@ -1823,6 +1887,27 @@ func formatContextForSlack(context string, maxLen int) string {
 	}
 
 	return formatted + schemaInfo
+}
+
+// buildTypeHeader creates a type-aware header for a decision.
+// Returns emoji and label for the decision type, or empty strings if no type.
+func buildTypeHeader(context string) (emoji string, label string) {
+	decisionType := extractTypeFromContext(context)
+	if decisionType == "" {
+		return "", ""
+	}
+
+	emoji = decisionTypeEmoji[decisionType]
+	if emoji == "" {
+		emoji = "📋" // Default emoji for unknown types
+	}
+
+	label = decisionTypeLabel[decisionType]
+	if label == "" {
+		label = strings.Title(decisionType) + " Decision"
+	}
+
+	return emoji, label
 }
 
 // buildChainInfoText builds a text description of predecessor chain if present.

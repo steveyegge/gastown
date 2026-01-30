@@ -1,6 +1,7 @@
 package slackbot
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -371,4 +372,120 @@ func TestFormatContextForSlack_EdgeCases(t *testing.T) {
 			t.Errorf("result too long for maxLen=50: %d chars", len(result))
 		}
 	})
+
+	t.Run("context with _type field removed", func(t *testing.T) {
+		context := `{"_type": "tradeoff", "key": "value"}`
+		result := formatContextForSlack(context, 500)
+		// _type should be removed from display
+		if strings.Contains(result, "_type") {
+			t.Error("_type field should be removed from display")
+		}
+		if !strings.Contains(result, "key") {
+			t.Error("regular fields should be preserved")
+		}
+	})
+
+	t.Run("context with only _type field", func(t *testing.T) {
+		context := `{"_type": "tradeoff"}`
+		result := formatContextForSlack(context, 500)
+		// Should return empty since only internal field
+		if result != "" {
+			t.Errorf("context with only _type should be empty, got: %s", result)
+		}
+	})
+}
+
+func TestExtractTypeFromContext(t *testing.T) {
+	tests := []struct {
+		name     string
+		context  string
+		wantType string
+	}{
+		{
+			name:     "empty context",
+			context:  "",
+			wantType: "",
+		},
+		{
+			name:     "context with type",
+			context:  `{"_type": "tradeoff", "key": "value"}`,
+			wantType: "tradeoff",
+		},
+		{
+			name:     "context without type",
+			context:  `{"key": "value"}`,
+			wantType: "",
+		},
+		{
+			name:     "invalid JSON",
+			context:  "not json",
+			wantType: "",
+		},
+		{
+			name:     "JSON array",
+			context:  `["item1", "item2"]`,
+			wantType: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractTypeFromContext(tt.context)
+			if got != tt.wantType {
+				t.Errorf("extractTypeFromContext() = %q, want %q", got, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestBuildTypeHeader(t *testing.T) {
+	tests := []struct {
+		name       string
+		context    string
+		wantEmoji  string
+		wantLabel  string
+	}{
+		{
+			name:       "no type",
+			context:    `{"key": "value"}`,
+			wantEmoji:  "",
+			wantLabel:  "",
+		},
+		{
+			name:       "tradeoff type",
+			context:    `{"_type": "tradeoff"}`,
+			wantEmoji:  "⚖️",
+			wantLabel:  "Tradeoff Decision",
+		},
+		{
+			name:       "confirmation type",
+			context:    `{"_type": "confirmation"}`,
+			wantEmoji:  "✅",
+			wantLabel:  "Confirmation",
+		},
+		{
+			name:       "checkpoint type",
+			context:    `{"_type": "checkpoint"}`,
+			wantEmoji:  "🚧",
+			wantLabel:  "Checkpoint",
+		},
+		{
+			name:       "unknown type",
+			context:    `{"_type": "foobar"}`,
+			wantEmoji:  "📋",
+			wantLabel:  "Foobar Decision",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			emoji, label := buildTypeHeader(tt.context)
+			if emoji != tt.wantEmoji {
+				t.Errorf("emoji = %q, want %q", emoji, tt.wantEmoji)
+			}
+			if label != tt.wantLabel {
+				t.Errorf("label = %q, want %q", label, tt.wantLabel)
+			}
+		})
+	}
 }
