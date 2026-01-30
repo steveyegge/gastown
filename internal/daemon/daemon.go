@@ -348,11 +348,9 @@ func (d *Daemon) getDeaconSessionName() string {
 func (d *Daemon) ensureBootRunning() {
 	b := boot.New(d.config.TownRoot)
 
-	// Check if Boot is already running (recent marker)
-	if b.IsRunning() {
-		d.logger.Println("Boot already running, skipping spawn")
-		return
-	}
+	// Boot is ephemeral - always spawn fresh each tick.
+	// spawnTmux() kills any existing session before spawning, ensuring
+	// Boot never accumulates context across triage cycles.
 
 	// Check for degraded mode
 	degraded := os.Getenv("GT_DEGRADED") == "true"

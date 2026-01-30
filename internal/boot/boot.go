@@ -139,10 +139,10 @@ func (b *Boot) LoadStatus() (*Status, error) {
 // Boot runs the mol-boot-triage molecule and exits when done.
 // In degraded mode (no tmux), it runs in a subprocess.
 // The agentOverride parameter allows specifying an agent alias to use instead of the town default.
+// Boot is ephemeral - each spawn kills any existing session and starts fresh.
 func (b *Boot) Spawn(agentOverride string) error {
-	if b.IsRunning() {
-		return fmt.Errorf("boot is already running")
-	}
+	// No IsRunning() guard here - Boot is ephemeral by design.
+	// spawnTmux() kills any existing session before spawning fresh.
 
 	// Check for degraded mode
 	if b.degraded {
