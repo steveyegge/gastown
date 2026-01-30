@@ -271,10 +271,11 @@ func (b *Beads) CreateBdDecision(fields *DecisionFields) (*Issue, error) {
 	}
 
 	// Build bd decision create command
+	// Note: bd decision create doesn't support --urgency flag (gt-7rpua)
+	// Urgency is stored at gt-level, not in bd's decision_points table
 	args := []string{"decision", "create", "--json",
 		"--prompt=" + fields.Question,
 		"--options=" + string(optionsJSON),
-		"--urgency=" + fields.Urgency,
 		"--no-daemon", // Use direct mode to avoid daemon issues
 	}
 
