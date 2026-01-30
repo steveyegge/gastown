@@ -197,6 +197,9 @@ type MRFields struct {
 	// Convoy tracking (for priority scoring - convoy starvation prevention)
 	ConvoyID        string // Parent convoy ID if part of a convoy
 	ConvoyCreatedAt string // Convoy creation time (ISO 8601) for starvation prevention
+
+	// PR stacking (for dependency-aware merge ordering)
+	DependsOn string // Branch name this PR depends on (for stacked PRs)
 }
 
 // ParseMRFields extracts structured merge-request fields from an issue's description.
@@ -271,6 +274,9 @@ func ParseMRFields(issue *Issue) *MRFields {
 		case "convoy_created_at", "convoy-created-at", "convoycreatedat":
 			fields.ConvoyCreatedAt = value
 			hasFields = true
+		case "depends_on", "depends-on", "dependson":
+			fields.DependsOn = value
+			hasFields = true
 		}
 	}
 
@@ -334,6 +340,9 @@ func FormatMRFields(fields *MRFields) string {
 	}
 	if fields.ConvoyCreatedAt != "" {
 		lines = append(lines, "convoy_created_at: "+fields.ConvoyCreatedAt)
+	}
+	if fields.DependsOn != "" {
+		lines = append(lines, "depends_on: "+fields.DependsOn)
 	}
 
 	return strings.Join(lines, "\n")
