@@ -1,5 +1,5 @@
 .PHONY: build install clean test test-safe generate deploy \
-        build-slackbot install-slackbot deploy-slackbot deploy-all
+        build-slackbot install-slackbot deploy-slackbot deploy-all proto
 
 BINARY := gt
 SLACKBOT := gtslack
@@ -20,6 +20,10 @@ LDFLAGS := -X github.com/steveyegge/gastown/internal/cmd.Version=$(VERSION) \
 
 generate:
 	go generate ./...
+
+# Regenerate protobuf files (requires buf CLI)
+proto:
+	buf generate proto
 
 build: generate
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/gt
@@ -67,27 +71,33 @@ test:
 test-safe:
 	GOMAXPROCS=2 go test -p 1 -v ./...
 
-# === Slackbot (gtslack) targets ===
+# === DEPRECATED: Slackbot (gtslack) standalone targets ===
+# These targets build the legacy standalone gtslack binary.
+# The preferred approach is now 'gt slack start'.
+# These will be removed in a future version.
 
 build-slackbot: generate
+	@echo "WARNING: gtslack is deprecated. Use 'gt slack start' instead."
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(SLACKBOT) ./cmd/gtslack
-	@echo "Built $(SLACKBOT)"
+	@echo "Built $(SLACKBOT) (deprecated)"
 
 install-slackbot: build-slackbot
 	@mkdir -p $(INSTALL_DIR)
 	@rm -f $(INSTALL_DIR)/$(SLACKBOT)
 	@cp $(BUILD_DIR)/$(SLACKBOT) $(INSTALL_DIR)/$(SLACKBOT)
-	@echo "Installed $(SLACKBOT) to $(INSTALL_DIR)/$(SLACKBOT)"
+	@echo "Installed $(SLACKBOT) to $(INSTALL_DIR)/$(SLACKBOT) (deprecated)"
 
 deploy-slackbot: generate
+	@echo "WARNING: gtslack is deprecated. Use 'gt slack start' instead."
 	@echo "==> Building $(SLACKBOT) to temp location..."
 	go build -ldflags "$(LDFLAGS)" -o /tmp/$(SLACKBOT)-build ./cmd/gtslack
 	@echo "==> Creating deploy directory if needed..."
 	@mkdir -p $(DEPLOY_DIR)
 	@echo "==> Deploying $(SLACKBOT) to $(DEPLOY_DIR)/$(SLACKBOT)..."
 	@mv /tmp/$(SLACKBOT)-build $(DEPLOY_DIR)/$(SLACKBOT)
-	@echo "✓ Deployed $(SLACKBOT) to $(DEPLOY_DIR)/$(SLACKBOT)"
+	@echo "✓ Deployed $(SLACKBOT) to $(DEPLOY_DIR)/$(SLACKBOT) (deprecated)"
 
-# Deploy both gt and gtslack
+# Deploy both gt and gtslack (gtslack deprecated)
 deploy-all: deploy deploy-slackbot
 	@echo "✓ Deployed all binaries"
+	@echo "NOTE: gtslack is deprecated. Use 'gt slack start' instead."

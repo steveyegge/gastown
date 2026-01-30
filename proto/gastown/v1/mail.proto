@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package gastown.v1;
+
+option go_package = "github.com/steveyegge/gastown/mobile/gen/gastown/v1;gastownv1";
+
+import "google/protobuf/timestamp.proto";
+import "gastown/v1/common.proto";
+
+// MailService handles inter-agent and human messaging
+service MailService {
+  // ListInbox returns messages for an address
+  rpc ListInbox(ListInboxRequest) returns (ListInboxResponse);
+
+  // ReadMessage returns a specific message
+  rpc ReadMessage(ReadMessageRequest) returns (ReadMessageResponse);
+
+  // SendMessage sends a new message
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+
+  // MarkRead marks a message as read
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+
+  // DeleteMessage deletes a message
+  rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
+
+  // WatchInbox streams new messages in real-time
+  rpc WatchInbox(WatchInboxRequest) returns (stream Message);
+}
+
+message ListInboxRequest {
+  AgentAddress address = 1;  // Empty = overseer inbox
+  bool unread_only = 2;
+  int32 limit = 3;           // Max messages to return (0 = all)
+}
+
+message ListInboxResponse {
+  repeated Message messages = 1;
+  int32 total = 2;
+  int32 unread = 3;
+}
+
+message ReadMessageRequest {
+  string message_id = 1;
+}
+
+message ReadMessageResponse {
+  Message message = 1;
+}
+
+message SendMessageRequest {
+  AgentAddress to = 1;       // Recipient address
+  string subject = 2;
+  string body = 3;
+  Priority priority = 4;
+  MessageType type = 5;
+  Delivery delivery = 6;
+  string reply_to = 7;       // Message ID if this is a reply
+  repeated AgentAddress cc = 8;
+}
+
+message SendMessageResponse {
+  string message_id = 1;
+}
+
+message MarkReadRequest {
+  string message_id = 1;
+}
+
+message MarkReadResponse {}
+
+message DeleteMessageRequest {
+  string message_id = 1;
+}
+
+message DeleteMessageResponse {}
+
+message WatchInboxRequest {
+  AgentAddress address = 1;
+}
+
+// Message types
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_TASK = 1;
+  MESSAGE_TYPE_SCAVENGE = 2;
+  MESSAGE_TYPE_NOTIFICATION = 3;
+  MESSAGE_TYPE_REPLY = 4;
+}
+
+// Delivery modes
+enum Delivery {
+  DELIVERY_UNSPECIFIED = 0;
+  DELIVERY_QUEUE = 1;      // Delivered to inbox
+  DELIVERY_INTERRUPT = 2;  // Injected into tmux session
+}
+
+// A mail message
+message Message {
+  string id = 1;
+  AgentAddress from = 2;
+  AgentAddress to = 3;
+  string subject = 4;
+  string body = 5;
+  google.protobuf.Timestamp timestamp = 6;
+  bool read = 7;
+  Priority priority = 8;
+  MessageType type = 9;
+  Delivery delivery = 10;
+  string thread_id = 11;
+  string reply_to = 12;
+  bool pinned = 13;
+  repeated AgentAddress cc = 14;
+}

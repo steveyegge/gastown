@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package gastown.v1;
+
+option go_package = "github.com/steveyegge/gastown/mobile/gen/gastown/v1;gastownv1";
+
+import "google/protobuf/timestamp.proto";
+import "gastown/v1/common.proto";
+
+// DecisionService handles human-in-the-loop decision points
+service DecisionService {
+  // ListPending returns all pending decisions
+  rpc ListPending(ListPendingRequest) returns (ListPendingResponse);
+
+  // GetDecision returns a specific decision
+  rpc GetDecision(GetDecisionRequest) returns (GetDecisionResponse);
+
+  // CreateDecision creates a new decision request
+  // This is the primary way to create decisions when gtmobile is running,
+  // enabling real-time notification via the event bus.
+  rpc CreateDecision(CreateDecisionRequest) returns (CreateDecisionResponse);
+
+  // Resolve resolves a decision with the chosen option
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+
+  // Cancel cancels a pending decision
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+
+  // WatchDecisions streams new decision requests
+  rpc WatchDecisions(WatchDecisionsRequest) returns (stream Decision);
+}
+
+message ListPendingRequest {
+  Urgency min_urgency = 1;  // Filter by minimum urgency
+  string requested_by = 2;  // Filter by requesting agent
+}
+
+message ListPendingResponse {
+  repeated Decision decisions = 1;
+  int32 total = 2;
+}
+
+message GetDecisionRequest {
+  string decision_id = 1;
+}
+
+message GetDecisionResponse {
+  Decision decision = 1;
+}
+
+message CreateDecisionRequest {
+  string question = 1;                    // The prompt/question for the human
+  string context = 2;                     // Additional context for the decision
+  repeated DecisionOption options = 3;    // Available options to choose from
+  AgentAddress requested_by = 4;          // Agent requesting the decision
+  Urgency urgency = 5;                    // How urgent is this decision
+  repeated string blockers = 6;           // Work IDs blocked by this decision
+  string parent_bead = 7;                 // Optional parent bead ID for hierarchy
+  string predecessor_id = 8;              // Predecessor decision ID for chaining
+}
+
+message CreateDecisionResponse {
+  Decision decision = 1;                  // The created decision with assigned ID
+}
+
+message ResolveRequest {
+  string decision_id = 1;
+  int32 chosen_index = 2;  // 1-indexed option number
+  string rationale = 3;    // Explanation for the choice
+}
+
+message ResolveResponse {
+  Decision decision = 1;
+}
+
+message CancelRequest {
+  string decision_id = 1;
+  string reason = 2;
+}
+
+message CancelResponse {}
+
+message WatchDecisionsRequest {
+  Urgency min_urgency = 1;
+}
+
+// Urgency levels for decisions
+enum Urgency {
+  URGENCY_UNSPECIFIED = 0;
+  URGENCY_LOW = 1;
+  URGENCY_MEDIUM = 2;
+  URGENCY_HIGH = 3;
+}
+
+// A decision point requiring human input
+message Decision {
+  string id = 1;
+  string question = 2;
+  string context = 3;
+  repeated DecisionOption options = 4;
+  int32 chosen_index = 5;        // 0 = pending, 1-indexed when resolved
+  string rationale = 6;          // Set after resolution
+  AgentAddress requested_by = 7;
+  google.protobuf.Timestamp requested_at = 8;
+  string resolved_by = 9;
+  google.protobuf.Timestamp resolved_at = 10;
+  Urgency urgency = 11;
+  repeated string blockers = 12; // Work IDs blocked by this decision
+  bool resolved = 13;
+  bool cancelled = 14;
+  string predecessor_id = 15;    // Predecessor decision ID for chaining
+  string parent_bead = 16;       // Parent bead ID (e.g., epic) for hierarchy/routing
+  string parent_bead_title = 17; // Parent bead title for channel derivation
+}
+
+// An option in a decision
+message DecisionOption {
+  string label = 1;
+  string description = 2;
+  bool recommended = 3;
+}

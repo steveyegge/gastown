@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package gastown.v1;
+
+option go_package = "github.com/steveyegge/gastown/mobile/gen/gastown/v1;gastownv1";
+
+import "google/protobuf/timestamp.proto";
+import "gastown/v1/common.proto";
+
+// StatusService provides town and rig status information
+service StatusService {
+  // GetTownStatus returns the full status of the town
+  rpc GetTownStatus(GetTownStatusRequest) returns (GetTownStatusResponse);
+
+  // GetRigStatus returns status for a specific rig
+  rpc GetRigStatus(GetRigStatusRequest) returns (GetRigStatusResponse);
+
+  // GetAgentStatus returns status for a specific agent
+  rpc GetAgentStatus(GetAgentStatusRequest) returns (GetAgentStatusResponse);
+
+  // WatchStatus streams status updates in real-time
+  rpc WatchStatus(WatchStatusRequest) returns (stream StatusUpdate);
+}
+
+message GetTownStatusRequest {
+  bool fast = 1;      // Skip mail lookups for faster response
+  bool verbose = 2;   // Include detailed agent info
+}
+
+message GetTownStatusResponse {
+  TownStatus status = 1;
+}
+
+message GetRigStatusRequest {
+  string rig_name = 1;
+}
+
+message GetRigStatusResponse {
+  RigStatus status = 1;
+}
+
+message GetAgentStatusRequest {
+  AgentAddress address = 1;
+}
+
+message GetAgentStatusResponse {
+  AgentRuntime agent = 1;
+}
+
+message WatchStatusRequest {
+  repeated string rigs = 1;  // Empty = watch all rigs
+  bool include_agents = 2;   // Include agent state changes
+}
+
+message StatusUpdate {
+  google.protobuf.Timestamp timestamp = 1;
+  oneof update {
+    TownStatus town = 2;
+    RigStatus rig = 3;
+    AgentRuntime agent = 4;
+  }
+}
+
+// Full town status
+message TownStatus {
+  string name = 1;
+  string location = 2;
+  OverseerInfo overseer = 3;
+  repeated AgentRuntime global_agents = 4;  // Mayor, Deacon, Boot
+  repeated RigStatus rigs = 5;
+}
+
+// Status of a single rig
+message RigStatus {
+  string name = 1;
+  string path = 2;
+  repeated string polecats = 3;
+  repeated string crews = 4;
+  bool has_witness = 5;
+  bool has_refinery = 6;
+  repeated AgentRuntime agents = 7;
+  repeated AgentHookInfo hooks = 8;
+  MQSummary merge_queue = 9;
+}
+
+// Runtime status of an agent
+message AgentRuntime {
+  string name = 1;
+  AgentAddress address = 2;
+  string session = 3;       // tmux session name
+  string role = 4;          // crew, polecat, witness, etc.
+  bool running = 5;         // tmux session exists
+  bool has_work = 6;        // work hooked
+  string work_title = 7;    // title of hooked work
+  string hook_bead = 8;     // ID of hooked bead
+  string state = 9;         // stuck, awaiting-gate, muted, working
+  int32 unread_mail = 10;
+  string first_subject = 11; // First unread mail subject
+}
+
+// Hook info for an agent
+message AgentHookInfo {
+  AgentAddress agent = 1;
+  string bead_id = 2;
+  string bead_title = 3;
+}
+
+// Merge queue summary
+message MQSummary {
+  int32 pending = 1;
+  int32 in_progress = 2;
+  int32 completed_today = 3;
+  repeated BeadRef queue = 4;
+}

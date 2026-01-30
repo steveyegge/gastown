@@ -1,0 +1,12 @@
+version: v2
+modules:
+  - path: proto
+    name: buf.build/gastown/mobile
+deps:
+  - buf.build/protocolbuffers/wellknowntypes
+lint:
+  use:
+    - DEFAULT
+breaking:
+  use:
+    - FILE

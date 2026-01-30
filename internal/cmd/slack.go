@@ -1,14 +1,22 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"os/signal"
+	"strings"
+	"syscall"
 
+	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/slack"
+	"github.com/steveyegge/gastown/internal/slackbot"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // printSuccess prints a success message with a checkmark prefix.
@@ -85,6 +93,42 @@ After migration, the router will use beads as the primary config source.`,
 var slackRouteJSON bool
 var slackRouteChannelName string
 
+// Slack bot start command flags
+var (
+	slackBotToken        string
+	slackAppToken        string
+	slackRPCURL          string
+	slackChannelID       string
+	slackDynamicChannels bool
+	slackChannelPrefix   string
+	slackTownRoot        string
+	slackAutoInvite      string
+	slackDebug           bool
+)
+
+const slackLockFile = "/tmp/gtslack.lock"
+
+var slackStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start the Slack bot",
+	Long: `Start the Gas Town Slack bot for decision management.
+
+The bot connects to Slack via Socket Mode and to the RPC server to
+allow humans to view and resolve pending decisions from Slack.
+
+Environment variables can also be used:
+  SLACK_BOT_TOKEN   - Bot OAuth token (xoxb-...)
+  SLACK_APP_TOKEN   - App-level token for Socket Mode (xapp-...)
+  GTMOBILE_RPC      - RPC endpoint URL
+  SLACK_CHANNEL     - Channel ID for decision notifications
+  SLACK_AUTO_INVITE - Comma-separated Slack user IDs to auto-invite
+
+Examples:
+  gt slack start -bot-token=xoxb-... -app-token=xapp-...
+  gt slack start --channel=C12345 --dynamic-channels`,
+	RunE: runSlackStart,
+}
+
 // Channel mode commands
 var slackModeCmd = &cobra.Command{
 	Use:   "channel-mode",
@@ -151,6 +195,7 @@ func init() {
 	slackCmd.AddCommand(slackRouteCmd)
 	slackCmd.AddCommand(slackMigrateCmd)
 	slackCmd.AddCommand(slackModeCmd)
+	slackCmd.AddCommand(slackStartCmd)
 
 	slackRouteCmd.AddCommand(slackRouteListCmd)
 	slackRouteCmd.AddCommand(slackRouteSetCmd)
@@ -163,6 +208,17 @@ func init() {
 
 	slackRouteListCmd.Flags().BoolVar(&slackRouteJSON, "json", false, "Output as JSON")
 	slackRouteSetCmd.Flags().StringVar(&slackRouteChannelName, "name", "", "Human-readable channel name")
+
+	// Slack bot start command flags
+	slackStartCmd.Flags().StringVar(&slackBotToken, "bot-token", "", "Slack bot token (xoxb-...)")
+	slackStartCmd.Flags().StringVar(&slackAppToken, "app-token", "", "Slack app token for Socket Mode (xapp-...)")
+	slackStartCmd.Flags().StringVar(&slackRPCURL, "rpc", "http://localhost:8443", "RPC endpoint URL")
+	slackStartCmd.Flags().StringVar(&slackChannelID, "channel", "", "Default channel ID for decision notifications")
+	slackStartCmd.Flags().BoolVar(&slackDynamicChannels, "dynamic-channels", false, "Enable automatic channel creation per agent")
+	slackStartCmd.Flags().StringVar(&slackChannelPrefix, "channel-prefix", "gt-decisions", "Prefix for dynamically created channels")
+	slackStartCmd.Flags().StringVar(&slackTownRoot, "town-root", "", "Town root directory (auto-discovered if empty)")
+	slackStartCmd.Flags().StringVar(&slackAutoInvite, "auto-invite", "", "Comma-separated Slack user IDs to auto-invite")
+	slackStartCmd.Flags().BoolVar(&slackDebug, "debug", false, "Enable debug logging")
 }
 
 func runSlackStatus(cmd *cobra.Command, args []string) error {
@@ -454,5 +510,115 @@ func runSlackMigrate(cmd *cobra.Command, args []string) error {
 	syncCmd.Stderr = os.Stderr
 	_ = syncCmd.Run()
 
+	return nil
+}
+
+func runSlackStart(cmd *cobra.Command, args []string) error {
+	// Acquire exclusive lock to prevent multiple instances.
+	// This prevents duplicate Slack notifications from concurrent processes.
+	fileLock := flock.New(slackLockFile)
+	locked, err := fileLock.TryLock()
+	if err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("another slack bot instance is already running (lock file: %s)", slackLockFile)
+	}
+	defer func() { _ = fileLock.Unlock() }()
+
+	// Allow environment variable overrides
+	if slackBotToken == "" {
+		slackBotToken = os.Getenv("SLACK_BOT_TOKEN")
+	}
+	if slackAppToken == "" {
+		slackAppToken = os.Getenv("SLACK_APP_TOKEN")
+	}
+	if os.Getenv("GTMOBILE_RPC") != "" {
+		slackRPCURL = os.Getenv("GTMOBILE_RPC")
+	}
+	if slackChannelID == "" {
+		slackChannelID = os.Getenv("SLACK_CHANNEL")
+	}
+	if slackAutoInvite == "" {
+		slackAutoInvite = os.Getenv("SLACK_AUTO_INVITE")
+	}
+
+	if slackBotToken == "" || slackAppToken == "" {
+		return fmt.Errorf("both --bot-token and --app-token are required (or set SLACK_BOT_TOKEN and SLACK_APP_TOKEN)")
+	}
+
+	// Parse auto-invite user IDs (comma-separated)
+	var autoInviteUsers []string
+	if slackAutoInvite != "" {
+		for _, u := range strings.Split(slackAutoInvite, ",") {
+			u = strings.TrimSpace(u)
+			if u != "" {
+				autoInviteUsers = append(autoInviteUsers, u)
+			}
+		}
+	}
+
+	// Auto-discover town root if not specified
+	townRoot := slackTownRoot
+	if townRoot == "" {
+		townRoot, _ = workspace.FindFromCwd()
+	}
+
+	cfg := slackbot.Config{
+		BotToken:        slackBotToken,
+		AppToken:        slackAppToken,
+		RPCEndpoint:     slackRPCURL,
+		ChannelID:       slackChannelID,
+		DynamicChannels: slackDynamicChannels,
+		ChannelPrefix:   slackChannelPrefix,
+		TownRoot:        townRoot,
+		AutoInviteUsers: autoInviteUsers,
+		Debug:           slackDebug,
+	}
+
+	bot, err := slackbot.New(cfg)
+	if err != nil {
+		return fmt.Errorf("create bot: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		log.Println("Shutting down...")
+		cancel()
+	}()
+
+	log.Printf("Starting Gas Town Slack bot")
+	log.Printf("RPC endpoint: %s", slackRPCURL)
+	if slackChannelID != "" {
+		log.Printf("Default notifications channel: %s", slackChannelID)
+	}
+	if slackDynamicChannels {
+		log.Printf("Dynamic channel creation enabled (prefix: %s)", slackChannelPrefix)
+	}
+	if len(autoInviteUsers) > 0 {
+		log.Printf("Auto-invite users: %v", autoInviteUsers)
+	}
+
+	// Start SSE listener for real-time decision notifications
+	if slackChannelID != "" {
+		sseURL := slackRPCURL + "/events/decisions"
+		sseListener := slackbot.NewSSEListener(sseURL, bot, bot.RPCClient())
+		go func() {
+			log.Printf("Starting SSE listener: %s", sseURL)
+			if err := sseListener.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("SSE listener error: %v", err)
+			}
+		}()
+	}
+
+	if err := bot.Run(ctx); err != nil {
+		return fmt.Errorf("bot error: %w", err)
+	}
 	return nil
 }
