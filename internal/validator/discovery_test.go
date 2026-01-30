@@ -115,24 +115,29 @@ func TestDiscoverValidators(t *testing.T) {
 		t.Fatalf("DiscoverValidators failed: %v", err)
 	}
 
-	if len(validators) != 1 {
-		t.Errorf("got %d validators, want 1", len(validators))
+	// Find our test validator (may also find user-config validators)
+	var foundTest bool
+	var foundNoExec bool
+	for _, v := range validators {
+		if v.Name == "test" && v.Source == "beads" {
+			foundTest = true
+			if v.When != "create" {
+				t.Errorf("When = %q, want %q", v.When, "create")
+			}
+			if v.Scope != "decision" {
+				t.Errorf("Scope = %q, want %q", v.Scope, "decision")
+			}
+		}
+		if v.Name == "noexec" {
+			foundNoExec = true
+		}
 	}
 
-	if len(validators) > 0 {
-		v := validators[0]
-		if v.Name != "test" {
-			t.Errorf("Name = %q, want %q", v.Name, "test")
-		}
-		if v.When != "create" {
-			t.Errorf("When = %q, want %q", v.When, "create")
-		}
-		if v.Scope != "decision" {
-			t.Errorf("Scope = %q, want %q", v.Scope, "decision")
-		}
-		if v.Source != "beads" {
-			t.Errorf("Source = %q, want %q", v.Source, "beads")
-		}
+	if !foundTest {
+		t.Error("expected to find test validator from beads dir")
+	}
+	if foundNoExec {
+		t.Error("non-executable validator should not be discovered")
 	}
 }
 
@@ -167,9 +172,29 @@ func TestDiscoverForScope(t *testing.T) {
 		t.Fatalf("DiscoverForScope failed: %v", err)
 	}
 
-	// Should get decision-scoped and any-scoped, but not task-scoped
-	if len(validators) != 2 {
-		t.Errorf("got %d validators, want 2", len(validators))
+	// Should get decision-scoped and any-scoped from beads dir, but not task-scoped
+	// Note: may also find validators from ~/.config/gt/validators if they match
+	var foundCheck, foundLog, foundTask bool
+	for _, v := range validators {
+		if v.Name == "check" && v.Source == "beads" {
+			foundCheck = true
+		}
+		if v.Name == "log" && v.Source == "beads" {
+			foundLog = true
+		}
+		if v.Name == "verify" && v.Scope == "task" {
+			foundTask = true
+		}
+	}
+
+	if !foundCheck {
+		t.Error("expected to find decision-scoped check validator from beads dir")
+	}
+	if !foundLog {
+		t.Error("expected to find any-scoped log validator from beads dir")
+	}
+	if foundTask {
+		t.Error("task-scoped validator should not be included for decision scope")
 	}
 }
 
