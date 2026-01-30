@@ -850,6 +850,9 @@ func (b *Bot) buildResolveModal(decisionID string, chosenIndex int, question, op
 	// Using | as separator for label since it might contain colons
 	metadata := fmt.Sprintf("%s:%d:%s:%s|%s", decisionID, chosenIndex, channelID, messageTs, metadataLabel)
 
+	// Build schema type options for successor dropdown
+	schemaOptions := buildSchemaTypeOptions()
+
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,
 		CallbackID:      "resolve_decision_modal",
@@ -887,9 +890,54 @@ func (b *Bot) buildResolveModal(decisionID string, chosenIndex int, question, op
 					ib.Optional = true
 					return ib
 				}(),
+				func() *slack.InputBlock {
+					selectElement := slack.NewOptionsSelectBlockElement(
+						slack.OptTypeStatic,
+						slack.NewTextBlockObject("plain_text", "Select a schema type...", false, false),
+						"successor_type_select",
+						schemaOptions...,
+					)
+					ib := slack.NewInputBlock(
+						"successor_type_block",
+						slack.NewTextBlockObject("plain_text", "Successor Decision Type", false, false),
+						slack.NewTextBlockObject("plain_text", "Suggest a schema type for follow-up decisions", false, false),
+						selectElement,
+					)
+					ib.Optional = true
+					return ib
+				}(),
 			},
 		},
 	}
+}
+
+// buildSchemaTypeOptions creates the option objects for the successor type dropdown.
+func buildSchemaTypeOptions() []*slack.OptionBlockObject {
+	// Define schema types with their descriptions
+	types := []struct {
+		value string
+		label string
+	}{
+		{"none", "None (no suggestion)"},
+		{"tradeoff", "⚖️ Tradeoff - weighing alternatives"},
+		{"ambiguity", "❓ Ambiguity - clarifying interpretations"},
+		{"confirmation", "✅ Confirmation - before irreversible action"},
+		{"checkpoint", "🚧 Checkpoint - end of phase review"},
+		{"exception", "⚠️ Exception - handling unexpected cases"},
+		{"prioritization", "📋 Prioritization - ordering work"},
+		{"quality", "✨ Quality - evaluating readiness"},
+		{"stuck", "🚨 Stuck - need help after attempts"},
+	}
+
+	options := make([]*slack.OptionBlockObject, len(types))
+	for i, t := range types {
+		options[i] = slack.NewOptionBlockObject(
+			t.value,
+			slack.NewTextBlockObject("plain_text", t.label, false, false),
+			nil,
+		)
+	}
+	return options
 }
 
 func (b *Bot) handleViewSubmission(callback slack.InteractionCallback) {
@@ -927,12 +975,27 @@ func (b *Bot) handleViewSubmission(callback slack.InteractionCallback) {
 		}
 	}
 
+	// Get successor type suggestion from form
+	successorType := ""
+	if successorBlock, ok := callback.View.State.Values["successor_type_block"]; ok {
+		if successorSelect, ok := successorBlock["successor_type_select"]; ok {
+			if successorSelect.SelectedOption.Value != "" && successorSelect.SelectedOption.Value != "none" {
+				successorType = successorSelect.SelectedOption.Value
+			}
+		}
+	}
+
 	// Add user attribution if rationale is empty or append to existing
 	userAttribution := fmt.Sprintf("Resolved via Slack by <@%s>", callback.User.ID)
 	if rationale == "" {
 		rationale = userAttribution
 	} else {
 		rationale = rationale + "\n\n— " + userAttribution
+	}
+
+	// Append successor type hint if specified
+	if successorType != "" {
+		rationale = rationale + fmt.Sprintf("\n\n→ [Suggested successor type: %s]", successorType)
 	}
 
 	// Resolve via RPC with Slack user identity
