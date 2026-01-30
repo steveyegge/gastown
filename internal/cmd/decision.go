@@ -80,10 +80,29 @@ FLAGS:
   --urgency       Priority level: high, medium, low (default: medium)
 
 CONTEXT FORMAT:
-  Context must be valid JSON. Examples:
-    --context '{"key": "value"}'
-    --context '[1, 2, 3]'
-    --context '"simple string"'
+  Context must be valid JSON. Good context helps humans make informed decisions
+  quickly without needing to ask follow-up questions.
+
+  WHAT TO INCLUDE:
+    - What you investigated and what you found
+    - Why you can't proceed without human input
+    - Relevant metrics, error messages, or observations
+    - Constraints or requirements that shape the options
+    - What's blocked if this decision isn't resolved
+
+  EXAMPLES:
+    # Research findings with recommendation
+    --context '{"investigated": ["Redis", "Memcached"], "recommendation": "Redis", "reason": "better persistence"}'
+
+    # Error context for debugging decision
+    --context '{"error": "connection timeout", "attempts": 3, "last_success": "2h ago"}'
+
+    # Architectural decision with constraints
+    --context '{"current_latency_ms": 200, "target_latency_ms": 50, "budget": "no new infrastructure"}'
+
+  BAD CONTEXT (avoid):
+    --context '{"status": "need decision"}'  # Too vague
+    --context '{}'                            # Empty/useless
 
 DECISION CHAINING:
   Use --predecessor to link decisions in a chain:
