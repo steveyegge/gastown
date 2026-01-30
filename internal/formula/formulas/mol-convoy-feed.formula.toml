@@ -268,3 +268,45 @@ mail is optional but useful for visibility.
 [vars.convoy]
 description = "The convoy ID to feed"
 required = true
+
+# Computed variables - filled in by the dog during execution
+# These need default="" to pass variable validation (issue #1133)
+[vars.ready_count]
+description = "Computed: number of ready issues found in convoy"
+default = ""
+
+[vars.available_count]
+description = "Computed: number of available polecats"
+default = ""
+
+[vars.dispatch_count]
+description = "Computed: number of issues dispatched"
+default = ""
+
+[vars.issue_id]
+description = "Computed: current issue ID in dispatch loop"
+default = ""
+
+[vars.title]
+description = "Computed: current issue title in dispatch loop"
+default = ""
+
+[vars.rig]
+description = "Computed: target rig for dispatch"
+default = ""
+
+[vars.polecat]
+description = "Computed: target polecat name"
+default = ""
+
+[vars.error]
+description = "Computed: error message if dispatch fails"
+default = ""
+
+[vars.error_count]
+description = "Computed: number of dispatch errors"
+default = ""
+
+[vars.report_summary]
+description = "Computed: summary for completion report"
+default = ""

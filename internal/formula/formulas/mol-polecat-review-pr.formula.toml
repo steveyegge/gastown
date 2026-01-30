@@ -281,3 +281,7 @@ required = true
 [vars.issue]
 description = "The tracking issue for this review task"
 required = true
+
+[vars.rig]
+description = "The rig name where the polecat is running"
+required = true
