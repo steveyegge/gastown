@@ -94,6 +94,17 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 			result.Error = fmt.Errorf("updating wisp state: %w", err)
 		}
 
+		// Clear hook_bead from agent bead since work is now handed off to MR.
+		// The polecat's work is done - clearing hook_bead allows nuke when MR completes.
+		// This fixes bd-bug-gt_polecat_nuke_blocks_clean_polecats.
+		townRoot, _ := workspace.Find(workDir)
+		if townRoot != "" {
+			townName, _ := workspace.GetTownName(townRoot)
+			agentBeadID := beads.PolecatBeadIDTown(townName, rigName, payload.PolecatName)
+			bd := beads.New(filepath.Join(townRoot, rigName))
+			_ = bd.ClearHookBead(agentBeadID) // Non-fatal if this fails
+		}
+
 		result.Handled = true
 		result.WispCreated = wispID
 		result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, local branch preserved for conflict resolution)", payload.PolecatName, payload.MRID)
