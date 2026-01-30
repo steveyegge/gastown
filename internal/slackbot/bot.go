@@ -1280,7 +1280,7 @@ func (b *Bot) resolveChannelForDecision(decision rpcclient.Decision) string {
 		if decision.ParentBeadTitle != "" {
 			channelID, err := b.ensureEpicChannelExists(decision.ParentBeadTitle)
 			if err != nil {
-				log.Printf("Slack: Failed to ensure epic channel for %q: %v (falling back)", decision.ParentBeadTitle, err)
+				log.Printf("Slack: Failed to ensure epic channel for %q: %v (falling back to general)", decision.ParentBeadTitle, err)
 			} else if channelID != "" {
 				if b.debug {
 					log.Printf("Slack: Routing decision %s to epic channel (mode=epic) for %q", decision.ID, decision.ParentBeadTitle)
@@ -1288,14 +1288,18 @@ func (b *Bot) resolveChannelForDecision(decision rpcclient.Decision) string {
 				return channelID
 			}
 		}
-		// Fall through to agent routing if no epic
+		// No parent epic available - fall back to general channel, not agent channel
+		if b.debug {
+			log.Printf("Slack: mode=epic but no parent epic, using general channel")
+		}
+		return b.channelID
 
 	case slackrouter.ChannelModeAgent:
 		// Route to dedicated agent channel
 		if b.dynamicChannels && agent != "" {
 			channelID, err := b.ensureChannelExists(agent)
 			if err != nil {
-				log.Printf("Slack: Failed to ensure agent channel for %s: %v (falling back)", agent, err)
+				log.Printf("Slack: Failed to ensure agent channel for %s: %v (falling back to general)", agent, err)
 			} else if channelID != "" {
 				if b.debug {
 					log.Printf("Slack: Routing decision %s to agent channel (mode=agent) for %s", decision.ID, agent)
@@ -1303,7 +1307,11 @@ func (b *Bot) resolveChannelForDecision(decision rpcclient.Decision) string {
 				return channelID
 			}
 		}
-		// Fall through to default if can't create agent channel
+		// Can't create agent channel (disabled or no agent) - fall back to general
+		if b.debug {
+			log.Printf("Slack: mode=agent but can't create channel, using general channel")
+		}
+		return b.channelID
 
 	case slackrouter.ChannelModeDM:
 		// DM mode - fall through to default for now (DM not yet implemented)
