@@ -311,6 +311,11 @@ func (d *Daemon) heartbeat(state *State) {
 	// This is a safety net - Deacon patrol also does this more frequently.
 	d.cleanupOrphanedProcesses()
 
+	// 13. Clean up errant .beads directories in town-level service directories.
+	// Mayor and Deacon should use town beads (~/gt/.beads) via parent directory walk.
+	// If they have local .beads with databases, bd uses the wrong database.
+	d.cleanupTownServiceBeads()
+
 	// Update state
 	state.LastHeartbeat = time.Now()
 	state.HeartbeatCount++
@@ -708,6 +713,117 @@ func (d *Daemon) triggerPendingSpawns() {
 // processLifecycleRequests checks for and processes lifecycle requests.
 func (d *Daemon) processLifecycleRequests() {
 	d.ProcessLifecycleRequests()
+}
+
+// cleanupTownServiceBeads detects and cleans up errant .beads directories in town-level service directories.
+// Mayor and Deacon should use the town beads database (~/gt/.beads) via parent directory walk.
+// If they have local .beads directories with databases, bd commands use the wrong database.
+// This can happen if an agent runs "bd init" from the wrong directory.
+//
+// Process:
+// 1. Pipe issues from errant db to town db (bd export | bd import)
+// 2. Remove the errant .beads directory
+//
+// This uses bd export/import which are backend-agnostic (work with SQLite or Dolt).
+func (d *Daemon) cleanupTownServiceBeads() {
+	// Town-level service directories that should NOT have their own .beads
+	serviceDirs := []string{"mayor", "deacon"}
+	townBeadsDir := filepath.Join(d.config.TownRoot, ".beads")
+
+	for _, svc := range serviceDirs {
+		svcBeadsDir := filepath.Join(d.config.TownRoot, svc, ".beads")
+
+		// Check if .beads directory exists
+		info, err := os.Stat(svcBeadsDir)
+		if err != nil || !info.IsDir() {
+			continue // No .beads directory, nothing to clean
+		}
+
+		// Check if it has a redirect file (that's ok - it's pointing elsewhere)
+		redirectPath := filepath.Join(svcBeadsDir, "redirect")
+		if _, err := os.Stat(redirectPath); err == nil {
+			continue // Has redirect, working as expected
+		}
+
+		// Check if it has database files (the actual problem)
+		hasDB := false
+		dbPatterns := []string{"*.db", "beads.db", "hq.db", "dolt"}
+		for _, pattern := range dbPatterns {
+			matches, _ := filepath.Glob(filepath.Join(svcBeadsDir, pattern))
+			if len(matches) > 0 {
+				hasDB = true
+				break
+			}
+		}
+
+		if !hasDB {
+			continue // No database, probably just empty or has other files
+		}
+
+		d.logger.Printf("Found errant .beads in %s - migrating to town beads", svc)
+
+		// Migrate: pipe export from errant db directly to import in town db
+		// This avoids temporary files and is backend-agnostic (works with SQLite or Dolt)
+		if err := d.migrateBeadsToTown(svcBeadsDir, townBeadsDir); err != nil {
+			d.logger.Printf("Warning: failed to migrate %s/.beads: %v", svc, err)
+			continue
+		}
+
+		// Remove the errant .beads directory
+		if err := os.RemoveAll(svcBeadsDir); err != nil {
+			d.logger.Printf("Warning: failed to remove %s/.beads: %v", svc, err)
+		} else {
+			d.logger.Printf("Migrated %s/.beads to town beads and cleaned up", svc)
+		}
+	}
+}
+
+// migrateBeadsToTown pipes issues from source beads dir to town beads dir.
+// Uses bd export | bd import which is backend-agnostic (works with SQLite or Dolt).
+func (d *Daemon) migrateBeadsToTown(srcBeadsDir, dstBeadsDir string) error {
+	// Set up export command (reads from source)
+	exportCmd := exec.Command("bd", "export", "--no-daemon")
+	exportCmd.Env = append(os.Environ(), "BEADS_DIR="+srcBeadsDir)
+	exportCmd.Dir = filepath.Dir(srcBeadsDir)
+
+	// Set up import command (writes to destination)
+	importCmd := exec.Command("bd", "import", "--no-daemon", "-")
+	importCmd.Env = append(os.Environ(), "BEADS_DIR="+dstBeadsDir)
+	importCmd.Dir = filepath.Dir(dstBeadsDir)
+
+	// Pipe export stdout to import stdin
+	pipe, err := exportCmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create pipe: %w", err)
+	}
+	importCmd.Stdin = pipe
+
+	// Capture stderr for error reporting
+	var exportStderr, importStderr strings.Builder
+	exportCmd.Stderr = &exportStderr
+	importCmd.Stderr = &importStderr
+
+	// Start both commands
+	if err := exportCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start export: %w", err)
+	}
+	if err := importCmd.Start(); err != nil {
+		_ = exportCmd.Process.Kill()
+		return fmt.Errorf("failed to start import: %w", err)
+	}
+
+	// Wait for both to complete
+	exportErr := exportCmd.Wait()
+	importErr := importCmd.Wait()
+
+	if exportErr != nil {
+		return fmt.Errorf("export failed: %s", strings.TrimSpace(exportStderr.String()))
+	}
+	if importErr != nil {
+		return fmt.Errorf("import failed: %s", strings.TrimSpace(importStderr.String()))
+	}
+
+	return nil
 }
 
 // shutdown performs graceful shutdown.
