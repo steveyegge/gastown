@@ -158,15 +158,20 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check if predecessor suggested a successor type
-	if decisionPredecessor != "" {
+	// Check if predecessor suggested a successor type (blocking unless --ignore-suggested-type)
+	if decisionPredecessor != "" && !decisionIgnoreSuggestedType {
 		suggestedType := checkPredecessorSuggestedType(townRoot, decisionPredecessor)
 		if suggestedType != "" {
 			if decisionType == "" {
-				style.PrintWarning("Predecessor suggested successor type '%s' but --type was not specified", suggestedType)
-				style.PrintWarning("Consider: gt decision request --type=%s ...", suggestedType)
+				style.PrintError("Predecessor suggested successor type '%s' but --type was not specified", suggestedType)
+				style.PrintWarning("Use: gt decision request --type=%s ...", suggestedType)
+				style.PrintWarning("Or override with: --ignore-suggested-type")
+				return fmt.Errorf("successor type enforcement: predecessor suggested '%s'", suggestedType)
 			} else if decisionType != suggestedType {
-				style.PrintWarning("Predecessor suggested successor type '%s' but --type=%s was used", suggestedType, decisionType)
+				style.PrintError("Predecessor suggested successor type '%s' but --type=%s was used", suggestedType, decisionType)
+				style.PrintWarning("Use: gt decision request --type=%s ...", suggestedType)
+				style.PrintWarning("Or override with: --ignore-suggested-type")
+				return fmt.Errorf("successor type enforcement: expected '%s', got '%s'", suggestedType, decisionType)
 			}
 		}
 	}

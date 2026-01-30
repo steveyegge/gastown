@@ -1481,15 +1481,6 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 				slack.NewTextBlockObject("mrkdwn", chainInfo, false, false),
 			),
 		)
-
-		// Check for type mismatch warning
-		if mismatchWarning := checkSuccessorTypeMismatch(b.rpcClient, decision.PredecessorID, decision.Context); mismatchWarning != "" {
-			blocks = append(blocks,
-				slack.NewContextBlock("",
-					slack.NewTextBlockObject("mrkdwn", mismatchWarning, false, false),
-				),
-			)
-		}
 	}
 
 	// Show context inline if available (with JSON formatting)
@@ -1667,15 +1658,6 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 				slack.NewTextBlockObject("mrkdwn", chainInfo, false, false),
 			),
 		)
-
-		// Check for type mismatch warning
-		if mismatchWarning := checkSuccessorTypeMismatch(b.rpcClient, decision.PredecessorID, decision.Context); mismatchWarning != "" {
-			blocks = append(blocks,
-				slack.NewContextBlock("",
-					slack.NewTextBlockObject("mrkdwn", mismatchWarning, false, false),
-				),
-			)
-		}
 	}
 
 	// Show context inline with JSON formatting
