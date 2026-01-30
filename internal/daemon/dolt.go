@@ -280,7 +280,7 @@ func (m *DoltServerManager) startLocked() error {
 	// Don't wait for it - it's a long-running server
 	go func() {
 		_ = cmd.Wait()
-		logFile.Close()
+		_ = logFile.Close()
 	}()
 
 	m.process = cmd.Process
