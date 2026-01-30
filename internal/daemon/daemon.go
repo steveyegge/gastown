@@ -758,10 +758,36 @@ func (d *Daemon) Stop() {
 // isShutdownInProgress checks if a shutdown is currently in progress.
 // The shutdown.lock file is created by gt down before terminating sessions.
 // This prevents the daemon from fighting shutdown by auto-restarting killed agents.
+//
+// Uses flock to check actual lock status rather than file existence, since
+// the lock file may persist after shutdown completes. If the file exists but
+// is not locked, it is removed as self-healing cleanup.
 func (d *Daemon) isShutdownInProgress() bool {
 	lockPath := filepath.Join(d.config.TownRoot, "daemon", "shutdown.lock")
-	_, err := os.Stat(lockPath)
-	return err == nil
+
+	// If file doesn't exist, no shutdown in progress
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		return false
+	}
+
+	// Try non-blocking lock acquisition to check if shutdown holds the lock
+	lock := flock.New(lockPath)
+	locked, err := lock.TryLock()
+	if err != nil {
+		// Error acquiring lock - assume shutdown in progress to be safe
+		return true
+	}
+
+	if locked {
+		// We acquired the lock, so no shutdown is holding it
+		// Release immediately and clean up stale file
+		_ = lock.Unlock()
+		_ = os.Remove(lockPath) // Self-healing: remove orphaned lock file
+		return false
+	}
+
+	// Could not acquire lock - shutdown is in progress
+	return true
 }
 
 // IsRunning checks if a daemon is running for the given town.
