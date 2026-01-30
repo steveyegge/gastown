@@ -227,3 +227,65 @@ func isAlphanumeric(s string) bool {
 	}
 	return true
 }
+
+// DeriveChannelSlug derives a Slack channel-safe slug from a title string.
+// Used for creating epic-based decision channel names.
+//
+// Rules:
+//   - Lowercase
+//   - Replace spaces/punctuation with hyphens
+//   - Remove consecutive hyphens
+//   - Truncate to maxLen chars (default 30)
+//   - Strip leading/trailing hyphens
+//
+// Examples:
+//
+//	"Ephemeral Polecat Merge Workflow: Rebase-as-Work Architecture" -> "ephemeral-polecat-merge"
+//	"Fix bug #123 in the parser" -> "fix-bug-123-in-the-parser"
+func DeriveChannelSlug(title string) string {
+	return DeriveChannelSlugWithMaxLen(title, 30)
+}
+
+// DeriveChannelSlugWithMaxLen derives a channel slug with a custom max length.
+func DeriveChannelSlugWithMaxLen(title string, maxLen int) string {
+	if title == "" {
+		return ""
+	}
+
+	// Lowercase
+	slug := strings.ToLower(title)
+
+	// Replace non-alphanumeric characters with hyphens
+	var result []rune
+	for _, r := range slug {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			result = append(result, r)
+		} else {
+			result = append(result, '-')
+		}
+	}
+	slug = string(result)
+
+	// Remove consecutive hyphens
+	for strings.Contains(slug, "--") {
+		slug = strings.ReplaceAll(slug, "--", "-")
+	}
+
+	// Strip leading/trailing hyphens
+	slug = strings.Trim(slug, "-")
+
+	// Truncate to maxLen at word boundary if possible
+	if len(slug) > maxLen {
+		truncated := slug[:maxLen]
+		// Find last hyphen to truncate at word boundary
+		if lastHyphen := strings.LastIndex(truncated, "-"); lastHyphen > maxLen/2 {
+			truncated = truncated[:lastHyphen]
+		}
+		slug = truncated
+	}
+
+	// Final cleanup - strip trailing hyphens after truncation
+	slug = strings.TrimRight(slug, "-")
+
+	return slug
+}
