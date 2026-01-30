@@ -713,23 +713,6 @@ func LoadOrCreateMessagingConfig(path string) (*MessagingConfig, error) {
 	return config, nil
 }
 
-// LoadRuntimeConfig loads the RuntimeConfig from a rig's settings.
-// Falls back to defaults if settings don't exist or don't specify runtime config.
-// rigPath should be the path to the rig directory (e.g., ~/gt/gastown).
-//
-// Deprecated: Use ResolveAgentConfig for full agent resolution with town settings.
-func LoadRuntimeConfig(rigPath string) *RuntimeConfig {
-	settingsPath := filepath.Join(rigPath, "settings", "config.json")
-	settings, err := LoadRigSettings(settingsPath)
-	if err != nil {
-		return DefaultRuntimeConfig()
-	}
-	if settings.Runtime == nil {
-		return DefaultRuntimeConfig()
-	}
-	return normalizeRuntimeConfig(settings.Runtime)
-}
-
 // TownSettingsPath returns the path to town settings file.
 func TownSettingsPath(townRoot string) string {
 	return filepath.Join(townRoot, "settings", "config.json")
