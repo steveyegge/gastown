@@ -375,6 +375,8 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		rc.Command = resolveClaudePath()
 	}
 
+	// Apply defaults including hook configuration for agents that support them.
+	// This ensures Hooks is properly set up based on the provider.
 	return normalizeRuntimeConfig(rc)
 }
 
