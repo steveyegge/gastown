@@ -379,7 +379,9 @@ func (m *SessionManager) Status(polecat string) (*SessionInfo, error) {
 	return info, nil
 }
 
-// List returns information about all polecat sessions for this rig.
+// List returns information about all sessions for this rig.
+// This includes polecats, witness, refinery, and crew sessions.
+// Use ListPolecats() to get only polecat sessions.
 func (m *SessionManager) List() ([]SessionInfo, error) {
 	sessions, err := m.tmux.ListSessions()
 	if err != nil {
@@ -404,6 +406,26 @@ func (m *SessionManager) List() ([]SessionInfo, error) {
 	}
 
 	return infos, nil
+}
+
+// ListPolecats returns information only about polecat sessions for this rig.
+// Filters out witness, refinery, and crew sessions.
+func (m *SessionManager) ListPolecats() ([]SessionInfo, error) {
+	infos, err := m.List()
+	if err != nil {
+		return nil, err
+	}
+
+	var filtered []SessionInfo
+	for _, info := range infos {
+		// Skip non-polecat sessions
+		if info.Polecat == "witness" || info.Polecat == "refinery" || strings.HasPrefix(info.Polecat, "crew-") {
+			continue
+		}
+		filtered = append(filtered, info)
+	}
+
+	return filtered, nil
 }
 
 // Attach attaches to a polecat session.
@@ -471,7 +493,7 @@ func (m *SessionManager) Inject(polecat, message string) error {
 
 // StopAll terminates all polecat sessions for this rig.
 func (m *SessionManager) StopAll(force bool) error {
-	infos, err := m.List()
+	infos, err := m.ListPolecats()
 	if err != nil {
 		return err
 	}
