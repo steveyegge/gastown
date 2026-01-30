@@ -23,8 +23,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/slackbot"
 )
+
+const lockFile = "/tmp/gtslack.lock"
 
 var (
 	botToken        = flag.String("bot-token", "", "Slack bot token (xoxb-...)")
@@ -38,6 +41,18 @@ var (
 
 func main() {
 	flag.Parse()
+
+	// Acquire exclusive lock to prevent multiple instances.
+	// This prevents duplicate Slack notifications from concurrent processes.
+	fileLock := flock.New(lockFile)
+	locked, err := fileLock.TryLock()
+	if err != nil {
+		log.Fatalf("Failed to acquire lock: %v", err)
+	}
+	if !locked {
+		log.Fatalf("Another gtslack instance is already running (lock file: %s)", lockFile)
+	}
+	defer func() { _ = fileLock.Unlock() }()
 
 	// Allow environment variable overrides
 	if *botToken == "" {
