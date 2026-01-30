@@ -1786,26 +1786,36 @@ func (b *Bot) JoinAllChannels() error {
 
 // decisionTypeEmoji maps decision types to display emojis.
 var decisionTypeEmoji = map[string]string{
-	"tradeoff":      "⚖️",
-	"confirmation":  "✅",
-	"checkpoint":    "🚧",
-	"assessment":    "📊",
-	"decomposition": "🧩",
-	"root-cause":    "🔍",
-	"scope":         "📐",
-	"custom":        "🔧",
+	"tradeoff":       "⚖️",
+	"confirmation":   "✅",
+	"checkpoint":     "🚧",
+	"assessment":     "📊",
+	"decomposition":  "🧩",
+	"root-cause":     "🔍",
+	"scope":          "📐",
+	"custom":         "🔧",
+	"ambiguity":      "❓",
+	"exception":      "⚠️",
+	"prioritization": "📋",
+	"quality":        "✨",
+	"stuck":          "🚨",
 }
 
 // decisionTypeLabel maps decision types to display labels.
 var decisionTypeLabel = map[string]string{
-	"tradeoff":      "Tradeoff Decision",
-	"confirmation":  "Confirmation",
-	"checkpoint":    "Checkpoint",
-	"assessment":    "Assessment",
-	"decomposition": "Decomposition",
-	"root-cause":    "Root Cause Analysis",
-	"scope":         "Scope Decision",
-	"custom":        "Custom Decision",
+	"tradeoff":       "Tradeoff Decision",
+	"confirmation":   "Confirmation",
+	"checkpoint":     "Checkpoint",
+	"assessment":     "Assessment",
+	"decomposition":  "Decomposition",
+	"root-cause":     "Root Cause Analysis",
+	"scope":          "Scope Decision",
+	"custom":         "Custom Decision",
+	"ambiguity":      "Ambiguity Clarification",
+	"exception":      "Exception Handling",
+	"prioritization": "Prioritization",
+	"quality":        "Quality Assessment",
+	"stuck":          "Stuck - Need Help",
 }
 
 // extractTypeFromContext extracts the _type field from context JSON.
