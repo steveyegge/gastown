@@ -72,6 +72,18 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		agentID = "unknown"
 	}
 
+	// Validate --parent if specified
+	if decisionParent != "" {
+		bd := beads.New(beads.ResolveBeadsDir(townRoot))
+		parentIssue, err := bd.Show(decisionParent)
+		if err != nil {
+			return fmt.Errorf("--parent validation failed: bead %q not found: %w", decisionParent, err)
+		}
+		if parentIssue.Type != "epic" {
+			return fmt.Errorf("--parent validation failed: bead %q is type %q, but must be an epic", decisionParent, parentIssue.Type)
+		}
+	}
+
 	// Parse options
 	var options []beads.DecisionOption
 	for i, optStr := range decisionOptions {
@@ -192,6 +204,7 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		RequestedAt:   time.Now().Format(time.RFC3339),
 		Urgency:       urgency,
 		PredecessorID: decisionPredecessor,
+		ParentID:      decisionParent,
 	}
 
 	// Add blocker if specified
@@ -223,6 +236,7 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 			Urgency:       urgency,
 			Blockers:      fields.Blockers,
 			PredecessorID: fields.PredecessorID,
+			ParentBead:    decisionParent,
 		})
 		if rpcErr == nil {
 			// RPC succeeded - use the returned decision
@@ -287,6 +301,9 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 	if decisionPredecessor != "" {
 		payload["predecessor_id"] = decisionPredecessor
 	}
+	if decisionParent != "" {
+		payload["parent_id"] = decisionParent
+	}
 	_ = events.LogFeed(events.TypeDecisionRequested, agentID, payload)
 
 	// Output
@@ -304,6 +321,9 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		if decisionPredecessor != "" {
 			result["predecessor_id"] = decisionPredecessor
 		}
+		if decisionParent != "" {
+			result["parent_id"] = decisionParent
+		}
 		out, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(out))
 	} else {
@@ -316,6 +336,9 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		}
 		if decisionPredecessor != "" {
 			fmt.Printf("   Predecessor: %s\n", decisionPredecessor)
+		}
+		if decisionParent != "" {
+			fmt.Printf("   Parent: %s\n", decisionParent)
 		}
 		fmt.Printf("\n→ Notified human (overseer)\n")
 		fmt.Printf("\nTo resolve: gt decision resolve %s --choice N --rationale \"...\"\n", issue.ID)

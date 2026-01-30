@@ -45,6 +45,7 @@ type DecisionFields struct {
 	Urgency       string           `json:"urgency"`                  // high, medium, low
 	Blockers      []string         `json:"blockers,omitempty"`       // Work IDs blocked by this decision
 	PredecessorID string           `json:"predecessor_id,omitempty"` // Predecessor decision ID for chaining
+	ParentID      string           `json:"parent_id,omitempty"`      // Parent bead (epic) for hierarchy
 }
 
 // DecisionState constants for decision status tracking.
@@ -302,9 +303,9 @@ func (b *Beads) CreateBdDecision(fields *DecisionFields) (*Issue, error) {
 		args = append(args, "--blocks="+fields.Blockers[0])
 	}
 
-	// Add predecessor for decision chaining
-	if fields.PredecessorID != "" {
-		args = append(args, "--predecessor="+fields.PredecessorID)
+	// Add parent for hierarchy
+	if fields.ParentID != "" {
+		args = append(args, "--parent="+fields.ParentID)
 	}
 
 	out, err := b.run(args...)
