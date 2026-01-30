@@ -1,0 +1,31 @@
+/**
+ * Any CSS included here will be global. The classic template
+ * bundles Infima by default. Infima is a CSS framework designed to
+ * work well for content-centric websites.
+ */
+
+/* You can override the default Infima variables here. */
+/* Gas Town steampunk color palette - warm bronze/copper tones */
+:root {
+  --ifm-color-primary: #B87333;
+  --ifm-color-primary-dark: #A5672E;
+  --ifm-color-primary-darker: #9C612B;
+  --ifm-color-primary-darkest: #805023;
+  --ifm-color-primary-light: #C68038;
+  --ifm-color-primary-lighter: #CD873B;
+  --ifm-color-primary-lightest: #D9994D;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(184, 115, 51, 0.1);
+}
+
+/* For readability concerns, you should choose a lighter palette in dark mode. */
+[data-theme='dark'] {
+  --ifm-color-primary: #D4A574;
+  --ifm-color-primary-dark: #CB9560;
+  --ifm-color-primary-darker: #C68D55;
+  --ifm-color-primary-darkest: #B87333;
+  --ifm-color-primary-light: #DDB588;
+  --ifm-color-primary-lighter: #E2BD93;
+  --ifm-color-primary-lightest: #EDD4B3;
+  --docusaurus-highlighted-code-line-bg: rgba(212, 165, 116, 0.3);
+}
