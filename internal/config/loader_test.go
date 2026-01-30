@@ -1185,6 +1185,38 @@ func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
 	}
 }
 
+func TestBuildPolecatStartupCommandWithDevinOverride(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildPolecatStartupCommandWithAgentOverride("testrig", "toast", rigPath, "", "devin")
+	if err != nil {
+		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
+	}
+	if !strings.Contains(cmd, "GT_ROLE=polecat") {
+		t.Fatalf("expected GT_ROLE export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_RIG=testrig") {
+		t.Fatalf("expected GT_RIG export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_POLECAT=toast") {
+		t.Fatalf("expected GT_POLECAT export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "devin --permission-mode bypass") {
+		t.Fatalf("expected devin command in output: %q", cmd)
+	}
+}
+
 func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()

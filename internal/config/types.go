@@ -466,6 +466,8 @@ func defaultRuntimeCommand(provider string) string {
 		return "codex"
 	case "opencode":
 		return "opencode"
+	case "devin":
+		return "devin"
 	case "generic":
 		return ""
 	default:
@@ -477,6 +479,8 @@ func defaultRuntimeArgs(provider string) []string {
 	switch provider {
 	case "claude":
 		return []string{"--dangerously-skip-permissions"}
+	case "devin":
+		return []string{"--permission-mode", "bypass"}
 	default:
 		return nil
 	}
@@ -524,6 +528,8 @@ func defaultHooksDir(provider string) string {
 		return ".claude"
 	case "opencode":
 		return ".opencode/plugin"
+	case "devin":
+		return ".cognition"
 	default:
 		return ""
 	}
@@ -535,6 +541,8 @@ func defaultHooksFile(provider string) string {
 		return "settings.json"
 	case "opencode":
 		return "gastown.js"
+	case "devin":
+		return "config.json"
 	default:
 		return ""
 	}
@@ -543,6 +551,9 @@ func defaultHooksFile(provider string) string {
 func defaultProcessNames(provider, command string) []string {
 	if provider == "claude" {
 		return []string{"node"}
+	}
+	if provider == "devin" {
+		return []string{"devin"}
 	}
 	if command != "" {
 		return []string{filepath.Base(command)}
@@ -572,6 +583,9 @@ func defaultInstructionsFile(provider string) string {
 		return "AGENTS.md"
 	}
 	if provider == "opencode" {
+		return "AGENTS.md"
+	}
+	if provider == "devin" {
 		return "AGENTS.md"
 	}
 	return "CLAUDE.md"

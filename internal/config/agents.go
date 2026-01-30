@@ -27,6 +27,8 @@ const (
 	AgentAuggie AgentPreset = "auggie"
 	// AgentAmp is Sourcegraph AMP.
 	AgentAmp AgentPreset = "amp"
+	// AgentDevin is Devin CLI (Devin for Terminal).
+	AgentDevin AgentPreset = "devin"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -174,6 +176,17 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SessionIDEnv:        "",
 		ResumeFlag:          "threads continue",
 		ResumeStyle:         "subcommand", // 'amp threads continue <threadId>'
+		SupportsHooks:       false,
+		SupportsForkSession: false,
+	},
+	AgentDevin: {
+		Name:                AgentDevin,
+		Command:             "devin",
+		Args:                []string{"--permission-mode", "bypass"},
+		ProcessNames:        []string{"devin"},
+		SessionIDEnv:        "",
+		ResumeFlag:          "-c",
+		ResumeStyle:         "flag",
 		SupportsHooks:       false,
 		SupportsForkSession: false,
 	},
