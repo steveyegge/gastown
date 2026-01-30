@@ -453,6 +453,12 @@ func runDecisionShow(cmd *cobra.Command, args []string) error {
 	status := "PENDING"
 	if beads.HasLabel(issue, "decision:resolved") {
 		status = "RESOLVED"
+	} else if beads.HasLabel(issue, "decision:canceled") {
+		status = "CANCELED"
+	} else if issue.Status == "closed" {
+		// Bead was closed without resolution (e.g., stale cleanup)
+		// Fix for gt-bug-gt_decision_show_reports_pending_closed
+		status = "CLOSED"
 	}
 
 	slug := util.GenerateDecisionSlug(issue.ID, fields.Question)
