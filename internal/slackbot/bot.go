@@ -1241,11 +1241,14 @@ func (b *Bot) resolveChannel(agent string) string {
 // resolveChannelForDecision determines the appropriate channel for a decision.
 // Priority order:
 // 1. Convoy-based channel (if parent issue is tracked by a convoy)
-// 2. Epic-based channel (if decision has parent epic)
-// 3. Static router config (if available and matches)
-// 4. Dynamic channel creation (if enabled)
-// 5. Default channelID
+// 2. Agent channel mode preference (general, agent, epic, dm)
+// 3. Epic-based channel (if decision has parent epic)
+// 4. Static router config (if available and matches)
+// 5. Dynamic channel creation (if enabled)
+// 6. Default channelID
 func (b *Bot) resolveChannelForDecision(decision rpcclient.Decision) string {
+	agent := decision.RequestedBy
+
 	// Priority 1: Convoy-based channel routing
 	// Check if the decision's parent issue is tracked by a convoy
 	if decision.ParentBeadID != "" && b.townRoot != "" {
@@ -1253,7 +1256,7 @@ func (b *Bot) resolveChannelForDecision(decision rpcclient.Decision) string {
 		if convoyTitle != "" {
 			channelID, err := b.ensureEpicChannelExists(convoyTitle)
 			if err != nil {
-				log.Printf("Slack: Failed to ensure convoy channel for %q: %v (falling back to epic routing)",
+				log.Printf("Slack: Failed to ensure convoy channel for %q: %v (falling back to mode routing)",
 					convoyTitle, err)
 			} else if channelID != "" {
 				if b.debug {
@@ -1265,8 +1268,62 @@ func (b *Bot) resolveChannelForDecision(decision rpcclient.Decision) string {
 		}
 	}
 
-	// Priority 2: Epic-based channel routing
-	if decision.ParentBeadTitle != "" {
+	// Priority 2: Agent channel mode preference
+	channelMode := b.getEffectiveChannelMode(agent)
+	if b.debug {
+		log.Printf("Slack: Agent %s has channel mode: %s", agent, channelMode)
+	}
+
+	switch channelMode {
+	case slackrouter.ChannelModeEpic:
+		// Route to epic channel if parent epic available
+		if decision.ParentBeadTitle != "" {
+			channelID, err := b.ensureEpicChannelExists(decision.ParentBeadTitle)
+			if err != nil {
+				log.Printf("Slack: Failed to ensure epic channel for %q: %v (falling back)", decision.ParentBeadTitle, err)
+			} else if channelID != "" {
+				if b.debug {
+					log.Printf("Slack: Routing decision %s to epic channel (mode=epic) for %q", decision.ID, decision.ParentBeadTitle)
+				}
+				return channelID
+			}
+		}
+		// Fall through to agent routing if no epic
+
+	case slackrouter.ChannelModeAgent:
+		// Route to dedicated agent channel
+		if b.dynamicChannels && agent != "" {
+			channelID, err := b.ensureChannelExists(agent)
+			if err != nil {
+				log.Printf("Slack: Failed to ensure agent channel for %s: %v (falling back)", agent, err)
+			} else if channelID != "" {
+				if b.debug {
+					log.Printf("Slack: Routing decision %s to agent channel (mode=agent) for %s", decision.ID, agent)
+				}
+				return channelID
+			}
+		}
+		// Fall through to default if can't create agent channel
+
+	case slackrouter.ChannelModeDM:
+		// DM mode - fall through to default for now (DM not yet implemented)
+		if b.debug {
+			log.Printf("Slack: DM mode requested but not yet implemented, using default")
+		}
+
+	case slackrouter.ChannelModeGeneral:
+		// General mode - skip to default channel
+		if b.debug {
+			log.Printf("Slack: Using general channel (mode=general)")
+		}
+		return b.channelID
+
+	default:
+		// No mode or unknown - use legacy routing
+	}
+
+	// Priority 3: Epic-based channel routing (legacy, for unset mode)
+	if decision.ParentBeadTitle != "" && channelMode == "" {
 		channelID, err := b.ensureEpicChannelExists(decision.ParentBeadTitle)
 		if err != nil {
 			log.Printf("Slack: Failed to ensure epic channel for %q: %v (falling back to agent routing)",
@@ -1280,8 +1337,36 @@ func (b *Bot) resolveChannelForDecision(decision rpcclient.Decision) string {
 		}
 	}
 
-	// Fall back to agent-based routing
-	return b.resolveChannel(decision.RequestedBy)
+	// Fall back to agent-based routing (priorities 4-6)
+	return b.resolveChannel(agent)
+}
+
+// getEffectiveChannelMode returns the effective channel mode for an agent.
+// Checks agent-specific preference first, then falls back to default mode.
+func (b *Bot) getEffectiveChannelMode(agent string) slackrouter.ChannelMode {
+	if agent == "" {
+		return ""
+	}
+
+	// Check agent-specific mode
+	mode, err := slackrouter.GetAgentChannelMode(agent)
+	if err != nil {
+		if b.debug {
+			log.Printf("Slack: Error getting channel mode for %s: %v", agent, err)
+		}
+	}
+	if mode != "" {
+		return mode
+	}
+
+	// Fall back to default mode
+	defaultMode, err := slackrouter.GetDefaultChannelMode()
+	if err != nil {
+		if b.debug {
+			log.Printf("Slack: Error getting default channel mode: %v", err)
+		}
+	}
+	return defaultMode
 }
 
 // getTrackingConvoyTitle looks up which convoy (if any) tracks the given issue ID
