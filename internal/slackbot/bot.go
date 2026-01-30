@@ -181,8 +181,10 @@ func (b *Bot) handleEvent(evt socketmode.Event) {
 	case socketmode.EventTypeInteractive:
 		callback, ok := evt.Data.(slack.InteractionCallback)
 		if !ok {
+			log.Printf("Slack: Interactive event data type assertion failed")
 			return
 		}
+		log.Printf("Slack: Interactive event received: type=%s user=%s", callback.Type, callback.User.ID)
 		b.socketMode.Ack(*evt.Request)
 		b.handleInteraction(callback)
 	}
@@ -321,12 +323,15 @@ func (b *Bot) handleDecisionsCommand(cmd slack.SlashCommand) {
 func (b *Bot) handleInteraction(callback slack.InteractionCallback) {
 	// Handle view submissions (modal form submissions)
 	if callback.Type == slack.InteractionTypeViewSubmission {
+		log.Printf("Slack: View submission received")
 		b.handleViewSubmission(callback)
 		return
 	}
 
 	// Handle block actions (button clicks, etc.)
+	log.Printf("Slack: Block actions count: %d", len(callback.ActionCallback.BlockActions))
 	for _, action := range callback.ActionCallback.BlockActions {
+		log.Printf("Slack: Action received: action_id=%s value=%s", action.ActionID, action.Value)
 		switch action.ActionID {
 		case "view_decision":
 			b.handleViewDecision(callback, action.Value)
