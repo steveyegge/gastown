@@ -339,6 +339,43 @@ source_issue: gt-pqr`,
 				SourceIssue: "gt-pqr",
 			},
 		},
+		{
+			name: "with depends_on field",
+			issue: &Issue{
+				Description: `branch: feat/add-feature
+target: main
+depends_on: fix/ci-fixes
+worker: mal`,
+			},
+			wantFields: &MRFields{
+				Branch:    "feat/add-feature",
+				Target:    "main",
+				DependsOn: "fix/ci-fixes",
+				Worker:    "mal",
+			},
+		},
+		{
+			name: "depends_on hyphenated format",
+			issue: &Issue{
+				Description: `branch: feat/other
+depends-on: base-branch`,
+			},
+			wantFields: &MRFields{
+				Branch:    "feat/other",
+				DependsOn: "base-branch",
+			},
+		},
+		{
+			name: "depends_on no hyphen format",
+			issue: &Issue{
+				Description: `branch: feat/third
+dependson: another-branch`,
+			},
+			wantFields: &MRFields{
+				Branch:    "feat/third",
+				DependsOn: "another-branch",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -376,6 +413,9 @@ source_issue: gt-pqr`,
 			}
 			if fields.CloseReason != tt.wantFields.CloseReason {
 				t.Errorf("CloseReason = %q, want %q", fields.CloseReason, tt.wantFields.CloseReason)
+			}
+			if fields.DependsOn != tt.wantFields.DependsOn {
+				t.Errorf("DependsOn = %q, want %q", fields.DependsOn, tt.wantFields.DependsOn)
 			}
 		})
 	}
@@ -438,6 +478,19 @@ worker: Toast`,
 			},
 			want: `merge_commit: deadbeef
 close_reason: rejected`,
+		},
+		{
+			name: "with depends_on",
+			fields: &MRFields{
+				Branch:    "feat/stacked-pr",
+				Target:    "main",
+				DependsOn: "fix/base-fixes",
+				Worker:    "mal",
+			},
+			want: `branch: feat/stacked-pr
+target: main
+worker: mal
+depends_on: fix/base-fixes`,
 		},
 	}
 

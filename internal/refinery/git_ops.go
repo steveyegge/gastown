@@ -277,8 +277,8 @@ func NewTestRepo(name string) (*TestRepo, error) {
 
 	git := NewRealGitOps(dir)
 
-	// Initialize repo
-	if _, err := git.run("init"); err != nil {
+	// Initialize repo with main as default branch
+	if _, err := git.run("init", "-b", "main"); err != nil {
 		os.RemoveAll(dir)
 		return nil, err
 	}
@@ -305,8 +305,8 @@ func NewBareTestRepo(name string) (*TestRepo, error) {
 
 	git := NewRealGitOps(dir)
 
-	// Initialize bare repo
-	if _, err := git.run("init", "--bare"); err != nil {
+	// Initialize bare repo with main as default branch
+	if _, err := git.run("init", "--bare", "-b", "main"); err != nil {
 		os.RemoveAll(dir)
 		return nil, err
 	}
