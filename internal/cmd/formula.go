@@ -942,8 +942,8 @@ func fetchPRInfo(prNumber int) (string, []map[string]interface{}) {
 			parts := strings.Fields(line)
 			if len(parts) >= 3 {
 				var additions, deletions int
-				fmt.Sscanf(parts[1], "%d", &additions)
-				fmt.Sscanf(parts[2], "%d", &deletions)
+				_, _ = fmt.Sscanf(parts[1], "%d", &additions)
+				_, _ = fmt.Sscanf(parts[2], "%d", &deletions)
 				changedFiles = append(changedFiles, map[string]interface{}{
 					"path":      parts[0],
 					"additions": additions,

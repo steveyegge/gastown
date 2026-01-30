@@ -694,10 +694,7 @@ func TestParseValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseValue(tt.input)
-			if err != nil {
-				t.Fatalf("parseValue(%q) error: %v", tt.input, err)
-			}
+			got := parseValue(tt.input)
 
 			// Type check
 			switch tt.wantType {
