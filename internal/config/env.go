@@ -48,10 +48,10 @@ type AgentEnvConfig struct {
 	// DoltServerPort is the dolt server port (default 3307).
 	DoltServerPort int
 
-	// DoltServerDatabase is the dolt server database name.
-	// This is the rig name (e.g., "gastown", "beads") for rig-level agents,
+	// DoltServerDatabase is the dolt server database name (optional).
+	// Auto-inferred from Rig if not set: uses Rig name for rig-level agents,
 	// or "hq" for town-level agents (mayor, deacon, boot).
-	// Maps to the directory name under .dolt-data/.
+	// Only set explicitly if you need to override the default inference.
 	DoltServerDatabase string
 }
 
@@ -145,9 +145,16 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 			port = DefaultDoltServerPort
 		}
 		env["BEADS_DOLT_SERVER_PORT"] = strconv.Itoa(port)
-		if cfg.DoltServerDatabase != "" {
-			env["BEADS_DOLT_SERVER_DATABASE"] = cfg.DoltServerDatabase
+		// Auto-infer database from Rig if not explicitly set
+		// Rig-level agents use rig name, town-level agents use "hq"
+		dbName := cfg.DoltServerDatabase
+		if dbName == "" {
+			dbName = cfg.Rig
+			if dbName == "" {
+				dbName = "hq"
+			}
 		}
+		env["BEADS_DOLT_SERVER_DATABASE"] = dbName
 	}
 
 	return env
@@ -173,21 +180,6 @@ func IsDoltServerMode(townRoot string) bool {
 	dataDir := filepath.Join(townRoot, ".dolt-data")
 	entries, err := os.ReadDir(dataDir)
 	return err == nil && len(entries) > 0
-}
-
-// DoltServerEnv returns the environment variables needed for dolt server mode.
-// If doltServerMode is false, returns nil (no env vars to prepend).
-// This is used to prepend dolt env vars to startup commands before the agent starts.
-func DoltServerEnv(doltServerMode bool, database string) map[string]string {
-	if !doltServerMode {
-		return nil
-	}
-	return map[string]string{
-		"BEADS_DOLT_SERVER_MODE":     "1",
-		"BEADS_DOLT_SERVER_HOST":     "127.0.0.1",
-		"BEADS_DOLT_SERVER_PORT":     strconv.Itoa(DefaultDoltServerPort),
-		"BEADS_DOLT_SERVER_DATABASE": database,
-	}
 }
 
 // ShellQuote returns a shell-safe quoted string.

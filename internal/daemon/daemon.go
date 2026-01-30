@@ -1125,12 +1125,11 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 
 	// Set environment variables using centralized AgentEnv
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:               "polecat",
-		Rig:                rigName,
-		AgentName:          polecatName,
-		TownRoot:           d.config.TownRoot,
-		BeadsNoDaemon:      true,
-		DoltServerDatabase: rigName,
+		Role:          "polecat",
+		Rig:           rigName,
+		AgentName:     polecatName,
+		TownRoot:      d.config.TownRoot,
+		BeadsNoDaemon: true,
 	})
 
 	// Set all env vars in tmux session (for debugging) and they'll also be exported to Claude

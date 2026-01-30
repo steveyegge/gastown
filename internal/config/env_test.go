@@ -214,7 +214,7 @@ func TestAgentEnv_DoltServerModeEnabled(t *testing.T) {
 	assertEnv(t, env, "BEADS_DOLT_SERVER_PORT", "3307")
 }
 
-func TestAgentEnv_DoltServerModeWithDatabase(t *testing.T) {
+func TestAgentEnv_DoltServerModeInfersRigDatabase(t *testing.T) {
 	t.Parallel()
 	// Create temp town with .dolt-data/
 	townRoot := t.TempDir()
@@ -223,19 +223,19 @@ func TestAgentEnv_DoltServerModeWithDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Database is auto-inferred from Rig
 	env := AgentEnv(AgentEnvConfig{
-		Role:               "polecat",
-		Rig:                "gastown",
-		AgentName:          "Toast",
-		TownRoot:           townRoot,
-		DoltServerDatabase: "gastown",
+		Role:      "polecat",
+		Rig:       "gastown",
+		AgentName: "Toast",
+		TownRoot:  townRoot,
 	})
 
 	assertEnv(t, env, "BEADS_DOLT_SERVER_MODE", "1")
 	assertEnv(t, env, "BEADS_DOLT_SERVER_DATABASE", "gastown")
 }
 
-func TestAgentEnv_DoltServerModeHqDatabase(t *testing.T) {
+func TestAgentEnv_DoltServerModeInfersHqForTownLevel(t *testing.T) {
 	t.Parallel()
 	// Create temp town with .dolt-data/
 	townRoot := t.TempDir()
@@ -244,34 +244,36 @@ func TestAgentEnv_DoltServerModeHqDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Town-level agents (no Rig) get "hq" database
 	env := AgentEnv(AgentEnvConfig{
-		Role:               "mayor",
-		TownRoot:           townRoot,
-		DoltServerDatabase: "hq",
+		Role:     "mayor",
+		TownRoot: townRoot,
 	})
 
 	assertEnv(t, env, "BEADS_DOLT_SERVER_MODE", "1")
 	assertEnv(t, env, "BEADS_DOLT_SERVER_DATABASE", "hq")
 }
 
-func TestAgentEnv_DoltServerModeNoDatabaseOmitted(t *testing.T) {
+func TestAgentEnv_DoltServerModeExplicitDatabaseOverride(t *testing.T) {
 	t.Parallel()
 	// Create temp town with .dolt-data/
 	townRoot := t.TempDir()
-	dataDir := filepath.Join(townRoot, ".dolt-data", "myrig")
+	dataDir := filepath.Join(townRoot, ".dolt-data", "custom")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
+	// Explicit DoltServerDatabase overrides the inferred value
 	env := AgentEnv(AgentEnvConfig{
-		Role:      "polecat",
-		Rig:       "myrig",
-		AgentName: "Toast",
-		TownRoot:  townRoot,
+		Role:               "polecat",
+		Rig:                "myrig",
+		AgentName:          "Toast",
+		TownRoot:           townRoot,
+		DoltServerDatabase: "custom",
 	})
 
 	assertEnv(t, env, "BEADS_DOLT_SERVER_MODE", "1")
-	assertNotSet(t, env, "BEADS_DOLT_SERVER_DATABASE")
+	assertEnv(t, env, "BEADS_DOLT_SERVER_DATABASE", "custom")
 }
 
 func TestAgentEnv_DoltServerModeCustomHostPort(t *testing.T) {

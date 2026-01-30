@@ -165,13 +165,12 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 		// Set environment (non-fatal: session works without these)
 		// Use centralized AgentEnv for consistency across all role startup paths
 		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:               "crew",
-			Rig:                r.Name,
-			AgentName:          name,
-			TownRoot:           townRoot,
-			RuntimeConfigDir:   claudeConfigDir,
-			BeadsNoDaemon:      true,
-			DoltServerDatabase: r.Name,
+			Role:             "crew",
+			Rig:              r.Name,
+			AgentName:        name,
+			TownRoot:         townRoot,
+			RuntimeConfigDir: claudeConfigDir,
+			BeadsNoDaemon:    true,
 		})
 		for k, v := range envVars {
 			_ = t.SetEnvironment(sessionID, k, v)

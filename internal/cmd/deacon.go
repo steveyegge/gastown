@@ -433,9 +433,8 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	// Set environment (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:               "deacon",
-		TownRoot:           townRoot,
-		DoltServerDatabase: "hq",
+		Role:     "deacon",
+		TownRoot: townRoot,
 	})
 	for k, v := range envVars {
 		_ = t.SetEnvironment(sessionName, k, v)

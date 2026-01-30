@@ -156,11 +156,10 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Set environment in tmux session for new panes/windows
 	// The main agent process already has dolt env vars from the command string
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:               "refinery",
-		Rig:                m.rig.Name,
-		TownRoot:           townRoot,
-		BeadsNoDaemon:      true,
-		DoltServerDatabase: m.rig.Name,
+		Role:          "refinery",
+		Rig:           m.rig.Name,
+		TownRoot:      townRoot,
+		BeadsNoDaemon: true,
 	})
 
 	// Add refinery-specific flag

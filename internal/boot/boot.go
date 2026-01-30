@@ -191,9 +191,8 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	// Set environment in tmux session for new panes/windows
 	// The main agent process already has dolt env vars from the command string
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:               "boot",
-		TownRoot:           b.townRoot,
-		DoltServerDatabase: "hq",
+		Role:     "boot",
+		TownRoot: b.townRoot,
 	})
 	for k, v := range envVars {
 		_ = b.tmux.SetEnvironment(session.BootSessionName(), k, v)
@@ -212,9 +211,8 @@ func (b *Boot) spawnDegraded() error {
 
 	// Use centralized AgentEnv for consistency with tmux mode
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:               "boot",
-		TownRoot:           b.townRoot,
-		DoltServerDatabase: "hq",
+		Role:     "boot",
+		TownRoot: b.townRoot,
 	})
 	cmd.Env = config.EnvForExecCommand(envVars)
 	cmd.Env = append(cmd.Env, "GT_DEGRADED=true")

@@ -493,12 +493,11 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
 		}
 		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:               "polecat",
-			Rig:                parsed.RigName,
-			AgentName:          parsed.AgentName,
-			TownRoot:           d.config.TownRoot,
-			SessionIDEnv:       sessionIDEnv,
-			DoltServerDatabase: parsed.RigName,
+			Role:         "polecat",
+			Rig:          parsed.RigName,
+			AgentName:    parsed.AgentName,
+			TownRoot:     d.config.TownRoot,
+			SessionIDEnv: sessionIDEnv,
 		})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
@@ -509,12 +508,11 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			sessionIDEnv = runtimeConfig.Session.SessionIDEnv
 		}
 		envVars := config.AgentEnv(config.AgentEnvConfig{
-			Role:               "crew",
-			Rig:                parsed.RigName,
-			AgentName:          parsed.AgentName,
-			TownRoot:           d.config.TownRoot,
-			SessionIDEnv:       sessionIDEnv,
-			DoltServerDatabase: parsed.RigName,
+			Role:         "crew",
+			Rig:          parsed.RigName,
+			AgentName:    parsed.AgentName,
+			TownRoot:     d.config.TownRoot,
+			SessionIDEnv: sessionIDEnv,
 		})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
 	}
@@ -526,17 +524,12 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 // Uses centralized AgentEnv for consistency, plus custom env vars from role config if available.
 func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
 	// Use centralized AgentEnv for base environment variables
-	// Dolt server mode is auto-detected from TownRoot in AgentEnv
-	doltDB := parsed.RigName
-	if doltDB == "" {
-		doltDB = "hq"
-	}
+	// Dolt server mode and database are auto-detected from TownRoot and Rig
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:               parsed.RoleType,
-		Rig:                parsed.RigName,
-		AgentName:          parsed.AgentName,
-		TownRoot:           d.config.TownRoot,
-		DoltServerDatabase: doltDB,
+		Role:      parsed.RoleType,
+		Rig:       parsed.RigName,
+		AgentName: parsed.AgentName,
+		TownRoot:  d.config.TownRoot,
 	})
 	for k, v := range envVars {
 		_ = d.tmux.SetEnvironment(sessionName, k, v)

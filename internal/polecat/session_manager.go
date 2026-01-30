@@ -218,13 +218,12 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	// Use centralized AgentEnv for consistency across all role startup paths
 	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
-		Role:               "polecat",
-		Rig:                m.rig.Name,
-		AgentName:          polecat,
-		TownRoot:           townRoot,
-		RuntimeConfigDir:   opts.RuntimeConfigDir,
-		BeadsNoDaemon:      true,
-		DoltServerDatabase: m.rig.Name,
+		Role:             "polecat",
+		Rig:              m.rig.Name,
+		AgentName:        polecat,
+		TownRoot:         townRoot,
+		RuntimeConfigDir: opts.RuntimeConfigDir,
+		BeadsNoDaemon:    true,
 	})
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
