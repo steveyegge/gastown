@@ -342,32 +342,172 @@ bd script run check-url-exists --arg "https://example.com"
 
 ## Default Type Metadata
 
-Ship these type metadata beads by default:
+Ship these type metadata beads by default. Decision types are organized by **action pattern** (how the decision works) rather than domain (what it's about), based on analysis of actual Gas Town formula patterns.
 
-### Decision Types
-- `meta-decision-architecture` (📐)
-- `meta-decision-architecture-database` (🗄️)
-- `meta-decision-architecture-api` (🔌)
-- `meta-decision-debugging` (🔍)
-- `meta-decision-debugging-performance` (⚡)
-- `meta-decision-debugging-crash` (💥)
-- `meta-decision-feature` (✨)
-- `meta-decision-process` (⚙️)
-- `meta-decision-prioritization` (🎯)
+### Decision Types (Action-Based)
+
+#### 1. `meta-decision-approval` (✅)
+**Binary yes/no gate decisions with structured criteria.**
+
+Derived from: code-review synthesis, mol-polecat-review-pr
+
+**Required fields:**
+- `subject` - What is being evaluated
+- `criteria` - Checklist of evaluation criteria
+- `recommendation` - APPROVE | REQUEST_CHANGES | BLOCK
+
+**Example options:** Approve | Request Changes | Needs Discussion | Block
+
+**Subtypes:**
+- `approval/merge` - Code review merge decisions
+- `approval/deploy` - Deployment go/no-go
+- `approval/access` - Permission grants
+
+---
+
+#### 2. `meta-decision-triage` (🔀)
+**Multi-option routing decisions with condition→action mappings.**
+
+Derived from: mol-boot-triage, mol-upstream-pr-intake
+
+**Required fields:**
+- `situation` - Current state being triaged
+- `decision_matrix` - Condition → Action mappings considered
+- `selected_action` - Which action and why
+
+**Example options:** START | NOTHING | NUDGE | WAKE | INTERRUPT
+
+**Subtypes:**
+- `triage/alert` - Incident response routing
+- `triage/intake` - New work categorization
+- `triage/support` - User request routing
+
+---
+
+#### 3. `meta-decision-investigation` (🔍)
+**Open-ended exploration before committing to an approach.**
+
+Derived from: design.formula convoy, mol-goblin-scout-patrol
+
+**Required fields:**
+- `question` - What are we trying to understand?
+- `findings` - What was discovered
+- `dimensions` - Aspects explored (optional, for convoy-style)
+
+**Example options:** Proceed with finding A | Explore further | Escalate for input
+
+**Subtypes:**
+- `investigation/bug` - Root cause analysis
+- `investigation/design` - Architecture exploration
+- `investigation/research` - Technical research
+
+---
+
+#### 4. `meta-decision-resolution` (🔧)
+**How to handle failures, conflicts, or blockers.**
+
+Derived from: mol-refinery-patrol conflict handling, mol-convoy-feed dispatch failures
+
+**Required fields:**
+- `failure` - What went wrong
+- `options_tried` - What was already attempted
+- `proposed_fix` - Recommended resolution
+
+**Example options:** Retry | Skip | Abort | Escalate | Manual fix
+
+**Subtypes:**
+- `resolution/conflict` - Merge/rebase conflicts
+- `resolution/failure` - Test/build failures
+- `resolution/blocker` - Dependency blockers
+
+---
+
+#### 5. `meta-decision-scope` (📏)
+**Mode/preset selection before work begins.**
+
+Derived from: code-review presets, design scope hints, upstream-pr-intake modes
+
+**Required fields:**
+- `modes_available` - What options exist
+- `tradeoffs` - Pros/cons of each mode
+- `context` - Why this scope decision matters
+
+**Example options:** Light (fast) | Standard | Thorough (comprehensive)
+
+**Subtypes:**
+- `scope/review` - Review depth (gate vs full)
+- `scope/implementation` - MVP vs complete
+- `scope/rollout` - Phased deployment scope
+
+---
+
+#### 6. `meta-decision-escalation` (🚨)
+**When to involve humans or higher-level coordination.**
+
+Derived from: polecat stuck patterns, deacon patrol escalation chains
+
+**Required fields:**
+- `blocker` - What's preventing progress
+- `attempted` - What autonomous resolution was tried
+- `why_escalate` - Why human input is needed
+
+**Example options:** Continue trying | Escalate to human | Abort task
+
+**Subtypes:**
+- `escalation/stuck` - Agent is blocked
+- `escalation/conflict` - Multiple agents disagree
+- `escalation/risk` - High-risk action needs approval
+
+---
+
+#### 7. `meta-decision-synthesis` (🧩)
+**Combining multiple inputs into a unified recommendation.**
+
+Derived from: design.formula synthesis, code-review synthesis
+
+**Required fields:**
+- `inputs` - Sources being synthesized (legs, dimensions, etc.)
+- `conflicts` - Where inputs disagree
+- `unified_recommendation` - Combined output
+
+**Example options:** Accept synthesis | Request more input | Split decision
+
+**Subtypes:**
+- `synthesis/review` - Combining reviewer feedback
+- `synthesis/design` - Combining design dimensions
+- `synthesis/consensus` - Multi-stakeholder alignment
+
+---
+
+### Legacy Domain Types (for backwards compatibility)
+
+These content-based types map to the action types above:
+
+| Legacy Type | Maps To | Notes |
+|-------------|---------|-------|
+| `architecture` | `investigation/design` | Design exploration |
+| `debugging` | `investigation/bug` + `resolution/failure` | Root cause + fix |
+| `feature` | `scope/implementation` | Scope decisions |
+| `process` | `approval` or `scope` | Depends on context |
+| `prioritization` | `triage/intake` | Work routing |
 
 ### Validators
-- `vld-url-exists` - Check URL returns 200
+- `vld-not-empty` - Check field has content
+- `vld-has-options` - Check decision has at least 2 options
+- `vld-bead-exists` - Check referenced bead ID exists
+- `vld-matrix-format` - Check condition→action matrix format
+- `vld-json-valid` - Check valid JSON structure
 - `vld-url-format` - Check URL format valid
-- `vld-bead-exists` - Check bead ID exists
-- `vld-json-valid` - Check valid JSON
-- `vld-not-empty` - Check field not empty
+- `vld-url-exists` - Check URL returns 200
 
 ### Scripts
-- `scr-check-url-exists` - curl HTTP check
-- `scr-check-url-format` - regex validation
+- `scr-check-not-empty` - String length check
+- `scr-check-options-count` - Count options >= 2
 - `scr-check-bead-exists` - bd show exit code
+- `scr-check-matrix-format` - Validate triage matrix
 - `scr-check-json-valid` - jq validation
-- `scr-check-not-empty` - string length check
+- `scr-check-url-format` - Regex validation
+- `scr-check-url-exists` - curl HTTP check
 
 ## Migration Path
 
