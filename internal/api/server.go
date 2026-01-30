@@ -1,6 +1,21 @@
 // ABOUTME: HTTP API server for Gas Town.
 // ABOUTME: Exposes Gas Town functionality via REST API for web integrations.
 
+// @title Gas Town API
+// @version 1.0
+// @description REST API for Gas Town - Multi-agent orchestration system for Claude Code
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name API Support
+// @contact.url https://github.com/steveyegge/gastown
+
+// @license.name Apache 2.0
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @host localhost:8080
+// @BasePath /api
+// @schemes http https
+
 package api
 
 import (
@@ -17,6 +32,298 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 )
+
+// ============================================================================
+// Common Response Types
+// ============================================================================
+
+// ErrorResponse represents an error response
+type ErrorResponse struct {
+	Error string `json:"error" example:"resource not found"`
+}
+
+// SuccessResponse represents a generic success response
+type SuccessResponse struct {
+	Status string `json:"status" example:"ok"`
+	Output string `json:"output,omitempty" example:"Operation completed successfully"`
+}
+
+// ============================================================================
+// Health Types
+// ============================================================================
+
+// HealthResponse represents the health check response
+type HealthResponse struct {
+	Status    string `json:"status" example:"ok"`
+	TownRoot  string `json:"town_root" example:"/home/user/gt"`
+	Timestamp string `json:"timestamp" example:"2024-01-15T10:30:00Z"`
+}
+
+// ============================================================================
+// Rig Types
+// ============================================================================
+
+// RigInfo represents information about a rig (project)
+type RigInfo struct {
+	Name      string `json:"name" example:"myproject"`
+	Path      string `json:"path" example:"/home/user/gt/myproject"`
+	HasBeads  bool   `json:"has_beads" example:"true"`
+	HasConfig bool   `json:"has_config" example:"true"`
+}
+
+// RigListResponse represents the response for listing rigs
+type RigListResponse struct {
+	Rigs  []RigInfo `json:"rigs"`
+	Count int       `json:"count" example:"3"`
+}
+
+// RigDetailResponse represents detailed rig information
+type RigDetailResponse struct {
+	Name         string                 `json:"name" example:"myproject"`
+	Path         string                 `json:"path" example:"/home/user/gt/myproject"`
+	Config       map[string]interface{} `json:"config"`
+	PolecatCount int                    `json:"polecat_count" example:"5"`
+	CrewCount    int                    `json:"crew_count" example:"2"`
+}
+
+// ============================================================================
+// Job (Bead) Types
+// ============================================================================
+
+// CreateJobRequest represents a request to create a new job/bead
+type CreateJobRequest struct {
+	// Title of the job (required)
+	Title string `json:"title" example:"Implement user authentication" binding:"required"`
+	// Detailed description of what needs to be done
+	Description string `json:"description" example:"Add JWT-based auth to the API endpoints"`
+	// Type of job: task, bug, feature, etc.
+	Type string `json:"type" example:"task"`
+	// Priority level (1=highest, 5=lowest)
+	Priority int `json:"priority" example:"2"`
+}
+
+// UpdateJobRequest represents a request to update an existing job
+type UpdateJobRequest struct {
+	// New status: open, in_progress, closed
+	Status string `json:"status,omitempty" example:"in_progress"`
+	// Additional notes to append
+	Notes string `json:"notes,omitempty" example:"Started working on this"`
+	// Updated description
+	Description string `json:"description,omitempty"`
+	// Assign to an agent
+	Assignee string `json:"assignee,omitempty" example:"myproject/polecats/jasper"`
+}
+
+// CloseJobRequest represents a request to close a job
+type CloseJobRequest struct {
+	// Reason for closing
+	Reason string `json:"reason,omitempty" example:"Completed successfully"`
+}
+
+// JobResponse represents a job in responses
+type JobResponse struct {
+	ID          string `json:"id" example:"mp-12345"`
+	Title       string `json:"title" example:"Fix login bug"`
+	Description string `json:"description"`
+	Type        string `json:"type" example:"bug"`
+	Status      string `json:"status" example:"open"`
+	Priority    int    `json:"priority" example:"1"`
+	Assignee    string `json:"assignee,omitempty"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// JobListResponse represents the response for listing jobs
+type JobListResponse struct {
+	Jobs  []interface{} `json:"jobs"`
+	Count int           `json:"count" example:"10"`
+}
+
+// ============================================================================
+// Sling Types
+// ============================================================================
+
+// SlingRequest represents a request to dispatch work to polecats
+type SlingRequest struct {
+	// Bead ID to work on (either this or formula required)
+	BeadID string `json:"bead_id,omitempty" example:"mp-12345"`
+	// Formula to execute (either this or bead_id required)
+	Formula string `json:"formula,omitempty" example:"mol-polecat-work"`
+	// Additional arguments for the formula
+	Args string `json:"args,omitempty" example:"--verbose"`
+	// Skip convoy creation
+	NoConvoy bool `json:"no_convoy,omitempty" example:"false"`
+}
+
+// SlingResponse represents the response from a sling operation
+type SlingResponse struct {
+	Status string `json:"status" example:"slung"`
+	BeadID string `json:"bead_id" example:"mp-12345"`
+	Rig    string `json:"rig" example:"myproject"`
+	Output string `json:"output"`
+}
+
+// ============================================================================
+// Merge Queue Types
+// ============================================================================
+
+// MQSubmitRequest represents a request to submit to the merge queue
+type MQSubmitRequest struct {
+	// Branch to submit (optional, uses current branch if empty)
+	Branch string `json:"branch,omitempty" example:"feature/new-api"`
+	// Associated issue ID
+	Issue string `json:"issue,omitempty" example:"mp-12345"`
+	// Priority in queue (higher = processed first)
+	Priority int `json:"priority,omitempty" example:"1"`
+}
+
+// MQSubmitResponse represents the response from MQ submit
+type MQSubmitResponse struct {
+	Status string `json:"status" example:"submitted"`
+	Output string `json:"output"`
+}
+
+// ============================================================================
+// Polecat Types
+// ============================================================================
+
+// PolecatInfo represents information about a polecat worker
+type PolecatInfo struct {
+	Name           string `json:"name" example:"jasper"`
+	Rig            string `json:"rig" example:"myproject"`
+	State          string `json:"state" example:"working"`
+	SessionRunning bool   `json:"session_running" example:"true"`
+}
+
+// PolecatListResponse represents the response for listing polecats
+type PolecatListResponse struct {
+	Polecats interface{} `json:"polecats"`
+}
+
+// PolecatStatusResponse represents a polecat's status
+type PolecatStatusResponse struct {
+	Name   string `json:"name" example:"jasper"`
+	Rig    string `json:"rig" example:"myproject"`
+	Status string `json:"status"`
+}
+
+// PolecatNukeResponse represents the response from nuking a polecat
+type PolecatNukeResponse struct {
+	Status string `json:"status" example:"nuked"`
+	Name   string `json:"name" example:"jasper"`
+	Rig    string `json:"rig" example:"myproject"`
+	Output string `json:"output"`
+}
+
+// ============================================================================
+// Refinery Types
+// ============================================================================
+
+// RefineryStatusResponse represents refinery status
+type RefineryStatusResponse struct {
+	Rig    string `json:"rig" example:"myproject"`
+	Status string `json:"status"`
+}
+
+// RefineryActionResponse represents response from refinery start/stop
+type RefineryActionResponse struct {
+	Status string `json:"status" example:"started"`
+	Rig    string `json:"rig" example:"myproject"`
+	Output string `json:"output"`
+}
+
+// ============================================================================
+// Mayor Types
+// ============================================================================
+
+// MayorStatusResponse represents mayor status
+type MayorStatusResponse struct {
+	Status string `json:"status"`
+}
+
+// MayorActionResponse represents response from mayor start/stop
+type MayorActionResponse struct {
+	Status string `json:"status" example:"started"`
+	Output string `json:"output"`
+}
+
+// ============================================================================
+// Witness Types
+// ============================================================================
+
+// WitnessStatusResponse represents witness status
+type WitnessStatusResponse struct {
+	Rig    string `json:"rig" example:"myproject"`
+	Status string `json:"status"`
+}
+
+// WitnessActionResponse represents response from witness start/stop
+type WitnessActionResponse struct {
+	Status string `json:"status" example:"started"`
+	Rig    string `json:"rig" example:"myproject"`
+	Output string `json:"output"`
+}
+
+// ============================================================================
+// Convoy Types
+// ============================================================================
+
+// ConvoyInfo represents information about a convoy
+type ConvoyInfo struct {
+	ID        string `json:"id" example:"hq-cv-12345"`
+	Title     string `json:"title" example:"Feature batch"`
+	Status    string `json:"status" example:"open"`
+	CreatedAt string `json:"created_at"`
+}
+
+// ConvoyListResponse represents the response for listing convoys
+type ConvoyListResponse struct {
+	Convoys interface{} `json:"convoys"`
+}
+
+// CreateConvoyRequest represents a request to create a convoy
+type CreateConvoyRequest struct {
+	// Title of the convoy
+	Title string `json:"title" example:"Feature batch" binding:"required"`
+	// Bead IDs to track in this convoy
+	Tracks []string `json:"tracks" example:"mp-123,mp-456" binding:"required"`
+}
+
+// ConvoyStatusResponse represents convoy status
+type ConvoyStatusResponse struct {
+	ConvoyID string `json:"convoy_id" example:"hq-cv-12345"`
+	Status   string `json:"status"`
+}
+
+// ============================================================================
+// Mail Types
+// ============================================================================
+
+// SendMailRequest represents a request to send mail to an agent
+type SendMailRequest struct {
+	// Recipient agent address (e.g., "myproject/witness" or "mayor")
+	To string `json:"to" example:"myproject/witness" binding:"required"`
+	// Subject line
+	Subject string `json:"subject" example:"Help needed" binding:"required"`
+	// Message body
+	Body string `json:"body,omitempty" example:"I'm stuck on the authentication issue"`
+}
+
+// SendMailResponse represents the response from sending mail
+type SendMailResponse struct {
+	Status string `json:"status" example:"sent"`
+	To     string `json:"to" example:"myproject/witness"`
+	Output string `json:"output"`
+}
+
+// InboxResponse represents an agent's inbox
+type InboxResponse struct {
+	Agent string `json:"agent" example:"myproject/witness"`
+	Inbox string `json:"inbox"`
+}
+
+// ============================================================================
+// Server
+// ============================================================================
 
 // Server is the HTTP API server for Gas Town.
 type Server struct {
@@ -89,6 +396,10 @@ func (s *Server) Start() error {
 	// Health check
 	mux.HandleFunc("GET /health", s.handleHealth)
 
+	// Swagger docs
+	mux.HandleFunc("GET /swagger/", s.handleSwagger)
+	mux.HandleFunc("GET /api/docs", s.handleAPIDocs)
+
 	// Rigs
 	mux.HandleFunc("GET /api/rigs", s.handleListRigs)
 	mux.HandleFunc("GET /api/rigs/{rig}", s.handleGetRig)
@@ -149,6 +460,9 @@ func (s *Server) Start() error {
 	fmt.Printf("🚀 Gas Town API server starting on port %d\n", s.port)
 	fmt.Printf("   Town root: %s\n", s.townRoot)
 	fmt.Printf("   GT binary: %s\n", s.gtBinary)
+	fmt.Printf("\n   Documentation:\n")
+	fmt.Printf("     GET  /api/docs          - API documentation (JSON)\n")
+	fmt.Printf("     GET  /swagger/          - Swagger UI\n")
 	fmt.Printf("\n   Endpoints:\n")
 	fmt.Printf("   Health:\n")
 	fmt.Printf("     GET  /health\n")
@@ -222,32 +536,729 @@ func jsonResponse(w http.ResponseWriter, status int, data interface{}) {
 }
 
 func jsonError(w http.ResponseWriter, status int, message string) {
-	jsonResponse(w, status, map[string]string{"error": message})
+	jsonResponse(w, status, ErrorResponse{Error: message})
 }
 
 // ============================================================================
 // Health
 // ============================================================================
 
+// handleHealth godoc
+// @Summary Health check
+// @Description Check if the API server is running and healthy
+// @Tags health
+// @Accept json
+// @Produce json
+// @Success 200 {object} HealthResponse
+// @Router /health [get]
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status":    "ok",
-		"town_root": s.townRoot,
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	jsonResponse(w, http.StatusOK, HealthResponse{
+		Status:    "ok",
+		TownRoot:  s.townRoot,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// ============================================================================
+// Swagger/Documentation
+// ============================================================================
+
+// handleAPIDocs serves the OpenAPI specification as JSON
+func (s *Server) handleAPIDocs(w http.ResponseWriter, r *http.Request) {
+	docs := s.generateOpenAPISpec()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(docs)
+}
+
+// handleSwagger serves a simple Swagger UI
+func (s *Server) handleSwagger(w http.ResponseWriter, r *http.Request) {
+	html := `<!DOCTYPE html>
+<html>
+<head>
+    <title>Gas Town API Documentation</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+        window.onload = function() {
+            SwaggerUIBundle({
+                url: "/api/docs",
+                dom_id: '#swagger-ui',
+                presets: [SwaggerUIBundle.presets.apis],
+                layout: "BaseLayout"
+            });
+        }
+    </script>
+</body>
+</html>`
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
+}
+
+// generateOpenAPISpec generates the OpenAPI 3.0 specification
+func (s *Server) generateOpenAPISpec() map[string]interface{} {
+	return map[string]interface{}{
+		"openapi": "3.0.0",
+		"info": map[string]interface{}{
+			"title":       "Gas Town API",
+			"description": "REST API for Gas Town - Multi-agent orchestration system for Claude Code. Gas Town coordinates AI agents (polecats) working on software development tasks, manages merge queues, and provides supervision through witnesses and refineries.",
+			"version":     "1.0.0",
+			"contact": map[string]string{
+				"name": "Gas Town",
+				"url":  "https://github.com/steveyegge/gastown",
+			},
+		},
+		"servers": []map[string]string{
+			{"url": fmt.Sprintf("http://localhost:%d", s.port), "description": "Local server"},
+		},
+		"tags": []map[string]string{
+			{"name": "health", "description": "Health check endpoints"},
+			{"name": "rigs", "description": "Project management - Rigs are isolated project environments"},
+			{"name": "jobs", "description": "Job/Bead management - Work items tracked in the system"},
+			{"name": "sling", "description": "Work dispatch - Assign work to polecat agents"},
+			{"name": "merge-queue", "description": "Merge queue operations - Queue and process completed work"},
+			{"name": "polecats", "description": "Polecat management - Ephemeral worker agents"},
+			{"name": "refinery", "description": "Refinery management - Merge queue processor service"},
+			{"name": "mayor", "description": "Mayor management - Global town coordinator"},
+			{"name": "witness", "description": "Witness management - Polecat supervisor service"},
+			{"name": "convoys", "description": "Convoy management - Batch work tracking"},
+			{"name": "mail", "description": "Inter-agent messaging system"},
+		},
+		"paths": s.generatePaths(),
+		"components": map[string]interface{}{
+			"schemas": s.generateSchemas(),
+		},
+	}
+}
+
+func (s *Server) generatePaths() map[string]interface{} {
+	return map[string]interface{}{
+		"/health": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"health"},
+				"summary":     "Health check",
+				"description": "Check if the API server is running and healthy",
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{
+						"description": "Server is healthy",
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]string{"$ref": "#/components/schemas/HealthResponse"},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/rigs": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"rigs"},
+				"summary":     "List all rigs",
+				"description": "Get a list of all configured rigs (projects) in this Gas Town instance",
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{
+						"description": "List of rigs",
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]string{"$ref": "#/components/schemas/RigListResponse"},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/rigs/{rig}": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"rigs"},
+				"summary":     "Get rig details",
+				"description": "Get detailed information about a specific rig including config, polecat count, and crew count",
+				"parameters": []map[string]interface{}{
+					{
+						"name":        "rig",
+						"in":          "path",
+						"required":    true,
+						"description": "Rig name",
+						"schema":      map[string]string{"type": "string"},
+					},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{
+						"description": "Rig details",
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]string{"$ref": "#/components/schemas/RigDetailResponse"},
+							},
+						},
+					},
+					"404": map[string]interface{}{
+						"description": "Rig not found",
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]string{"$ref": "#/components/schemas/ErrorResponse"},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/rigs/{rig}/jobs": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"jobs"},
+				"summary":     "List jobs",
+				"description": "Get all jobs/beads in a rig. Filter by status or type using query parameters.",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+					{"name": "status", "in": "query", "description": "Filter by status (open, in_progress, closed)", "schema": map[string]string{"type": "string"}},
+					{"name": "type", "in": "query", "description": "Filter by type (task, bug, feature)", "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{
+						"description": "List of jobs",
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]string{"$ref": "#/components/schemas/JobListResponse"},
+							},
+						},
+					},
+				},
+			},
+			"post": map[string]interface{}{
+				"tags":        []string{"jobs"},
+				"summary":     "Create a job",
+				"description": "Create a new job/bead in the rig. Jobs are work items that can be assigned to polecats.",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"requestBody": map[string]interface{}{
+					"required": true,
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{
+							"schema": map[string]string{"$ref": "#/components/schemas/CreateJobRequest"},
+						},
+					},
+				},
+				"responses": map[string]interface{}{
+					"201": map[string]interface{}{
+						"description": "Job created",
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]string{"$ref": "#/components/schemas/JobResponse"},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/rigs/{rig}/jobs/{id}": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"jobs"},
+				"summary":     "Get job details",
+				"description": "Get detailed information about a specific job",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+					{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Job details"},
+					"404": map[string]interface{}{"description": "Job not found"},
+				},
+			},
+			"put": map[string]interface{}{
+				"tags":        []string{"jobs"},
+				"summary":     "Update a job",
+				"description": "Update job status, notes, or assignee",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+					{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"requestBody": map[string]interface{}{
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{
+							"schema": map[string]string{"$ref": "#/components/schemas/UpdateJobRequest"},
+						},
+					},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Job updated"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/jobs/{id}/close": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"jobs"},
+				"summary":     "Close a job",
+				"description": "Close a job with an optional reason",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+					{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"requestBody": map[string]interface{}{
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{
+							"schema": map[string]string{"$ref": "#/components/schemas/CloseJobRequest"},
+						},
+					},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Job closed"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/sling": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"sling"},
+				"summary":     "Dispatch work to polecats",
+				"description": "Sling a job to polecat workers. This spawns polecat agents to work on the specified bead using the given formula (workflow template).",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"requestBody": map[string]interface{}{
+					"required": true,
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{
+							"schema": map[string]string{"$ref": "#/components/schemas/SlingRequest"},
+						},
+					},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{
+						"description": "Work dispatched",
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]string{"$ref": "#/components/schemas/SlingResponse"},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/rigs/{rig}/mq": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"merge-queue"},
+				"summary":     "List merge queue",
+				"description": "Get the current state of the merge queue for a rig",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Merge queue state"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/mq/submit": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"merge-queue"},
+				"summary":     "Submit to merge queue",
+				"description": "Submit a branch to the merge queue for processing by the refinery",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"requestBody": map[string]interface{}{
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{
+							"schema": map[string]string{"$ref": "#/components/schemas/MQSubmitRequest"},
+						},
+					},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Submitted to queue"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/polecats": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"polecats"},
+				"summary":     "List polecats",
+				"description": "Get all polecat workers in a rig with their current status",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{
+						"description": "List of polecats",
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]string{"$ref": "#/components/schemas/PolecatListResponse"},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/rigs/{rig}/polecats/{name}": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"polecats"},
+				"summary":     "Get polecat status",
+				"description": "Get detailed status of a specific polecat worker",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+					{"name": "name", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Polecat status"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/polecats/{name}/nuke": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"polecats"},
+				"summary":     "Nuke a polecat",
+				"description": "Terminate and remove a polecat worker, cleaning up its worktree",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+					{"name": "name", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Polecat nuked"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/refinery": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"refinery"},
+				"summary":     "Get refinery status",
+				"description": "Get the status of the refinery (merge queue processor) for a rig",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Refinery status"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/refinery/start": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"refinery"},
+				"summary":     "Start the refinery",
+				"description": "Start the refinery service to process the merge queue",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Refinery started"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/refinery/stop": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"refinery"},
+				"summary":     "Stop the refinery",
+				"description": "Stop the refinery service",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Refinery stopped"},
+				},
+			},
+		},
+		"/api/mayor": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"mayor"},
+				"summary":     "Get mayor status",
+				"description": "Get the status of the Mayor (global town coordinator). The Mayor handles cross-rig coordination and town-level operations.",
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Mayor status"},
+				},
+			},
+		},
+		"/api/mayor/start": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"mayor"},
+				"summary":     "Start the mayor",
+				"description": "Start the Mayor session",
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Mayor started"},
+				},
+			},
+		},
+		"/api/mayor/stop": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"mayor"},
+				"summary":     "Stop the mayor",
+				"description": "Stop the Mayor session",
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Mayor stopped"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/witness": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"witness"},
+				"summary":     "Get witness status",
+				"description": "Get the status of the Witness (polecat supervisor). The Witness monitors polecats, handles nudges, and manages cleanup.",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Witness status"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/witness/start": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"witness"},
+				"summary":     "Start the witness",
+				"description": "Start the Witness service for a rig",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Witness started"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/witness/stop": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"witness"},
+				"summary":     "Stop the witness",
+				"description": "Stop the Witness service for a rig",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Witness stopped"},
+				},
+			},
+		},
+		"/api/convoys": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"convoys"},
+				"summary":     "List convoys",
+				"description": "Get all convoys. Convoys are batch work tracking units that group related beads together.",
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "List of convoys"},
+				},
+			},
+			"post": map[string]interface{}{
+				"tags":        []string{"convoys"},
+				"summary":     "Create a convoy",
+				"description": "Create a new convoy to track a batch of related work items",
+				"requestBody": map[string]interface{}{
+					"required": true,
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{
+							"schema": map[string]string{"$ref": "#/components/schemas/CreateConvoyRequest"},
+						},
+					},
+				},
+				"responses": map[string]interface{}{
+					"201": map[string]interface{}{"description": "Convoy created"},
+				},
+			},
+		},
+		"/api/convoys/{id}": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"convoys"},
+				"summary":     "Get convoy status",
+				"description": "Get the status of a specific convoy",
+				"parameters": []map[string]interface{}{
+					{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Convoy status"},
+				},
+			},
+		},
+		"/api/mail/send": map[string]interface{}{
+			"post": map[string]interface{}{
+				"tags":        []string{"mail"},
+				"summary":     "Send mail",
+				"description": "Send a message to an agent. Agents can be addressed as 'mayor', 'rig/witness', 'rig/polecats/name', etc.",
+				"requestBody": map[string]interface{}{
+					"required": true,
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{
+							"schema": map[string]string{"$ref": "#/components/schemas/SendMailRequest"},
+						},
+					},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Mail sent"},
+				},
+			},
+		},
+		"/api/rigs/{rig}/agents/{agent}/inbox": map[string]interface{}{
+			"get": map[string]interface{}{
+				"tags":        []string{"mail"},
+				"summary":     "Get agent inbox",
+				"description": "Get the inbox for a specific agent",
+				"parameters": []map[string]interface{}{
+					{"name": "rig", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+					{"name": "agent", "in": "path", "required": true, "description": "Agent type (witness, refinery, polecats/name)", "schema": map[string]string{"type": "string"}},
+				},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "Agent inbox"},
+				},
+			},
+		},
+	}
+}
+
+func (s *Server) generateSchemas() map[string]interface{} {
+	return map[string]interface{}{
+		"ErrorResponse": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"error": map[string]interface{}{"type": "string", "example": "resource not found"},
+			},
+		},
+		"HealthResponse": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"status":    map[string]interface{}{"type": "string", "example": "ok"},
+				"town_root": map[string]interface{}{"type": "string", "example": "/home/user/gt"},
+				"timestamp": map[string]interface{}{"type": "string", "format": "date-time"},
+			},
+		},
+		"RigInfo": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name":       map[string]interface{}{"type": "string", "example": "myproject"},
+				"path":       map[string]interface{}{"type": "string", "example": "/home/user/gt/myproject"},
+				"has_beads":  map[string]interface{}{"type": "boolean"},
+				"has_config": map[string]interface{}{"type": "boolean"},
+			},
+		},
+		"RigListResponse": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"rigs":  map[string]interface{}{"type": "array", "items": map[string]string{"$ref": "#/components/schemas/RigInfo"}},
+				"count": map[string]interface{}{"type": "integer"},
+			},
+		},
+		"RigDetailResponse": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name":          map[string]interface{}{"type": "string"},
+				"path":          map[string]interface{}{"type": "string"},
+				"config":        map[string]interface{}{"type": "object"},
+				"polecat_count": map[string]interface{}{"type": "integer"},
+				"crew_count":    map[string]interface{}{"type": "integer"},
+			},
+		},
+		"CreateJobRequest": map[string]interface{}{
+			"type":     "object",
+			"required": []string{"title"},
+			"properties": map[string]interface{}{
+				"title":       map[string]interface{}{"type": "string", "description": "Job title", "example": "Implement user authentication"},
+				"description": map[string]interface{}{"type": "string", "description": "Detailed description"},
+				"type":        map[string]interface{}{"type": "string", "enum": []string{"task", "bug", "feature"}, "default": "task"},
+				"priority":    map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 5, "default": 3},
+			},
+		},
+		"UpdateJobRequest": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"status":      map[string]interface{}{"type": "string", "enum": []string{"open", "in_progress", "closed"}},
+				"notes":       map[string]interface{}{"type": "string"},
+				"description": map[string]interface{}{"type": "string"},
+				"assignee":    map[string]interface{}{"type": "string", "example": "myproject/polecats/jasper"},
+			},
+		},
+		"CloseJobRequest": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"reason": map[string]interface{}{"type": "string", "example": "Completed successfully"},
+			},
+		},
+		"JobListResponse": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"jobs":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}},
+				"count": map[string]interface{}{"type": "integer"},
+			},
+		},
+		"JobResponse": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id":          map[string]interface{}{"type": "string"},
+				"title":       map[string]interface{}{"type": "string"},
+				"description": map[string]interface{}{"type": "string"},
+				"type":        map[string]interface{}{"type": "string"},
+				"status":      map[string]interface{}{"type": "string"},
+				"priority":    map[string]interface{}{"type": "integer"},
+				"assignee":    map[string]interface{}{"type": "string"},
+				"created_at":  map[string]interface{}{"type": "string", "format": "date-time"},
+			},
+		},
+		"SlingRequest": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"bead_id":   map[string]interface{}{"type": "string", "description": "Bead ID to work on"},
+				"formula":   map[string]interface{}{"type": "string", "description": "Formula (workflow) to execute", "example": "mol-polecat-work"},
+				"args":      map[string]interface{}{"type": "string", "description": "Additional arguments"},
+				"no_convoy": map[string]interface{}{"type": "boolean", "description": "Skip convoy creation"},
+			},
+		},
+		"SlingResponse": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"status":  map[string]interface{}{"type": "string", "example": "slung"},
+				"bead_id": map[string]interface{}{"type": "string"},
+				"rig":     map[string]interface{}{"type": "string"},
+				"output":  map[string]interface{}{"type": "string"},
+			},
+		},
+		"MQSubmitRequest": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"branch":   map[string]interface{}{"type": "string", "description": "Branch to submit"},
+				"issue":    map[string]interface{}{"type": "string", "description": "Associated issue ID"},
+				"priority": map[string]interface{}{"type": "integer", "description": "Priority in queue"},
+			},
+		},
+		"PolecatListResponse": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"polecats": map[string]interface{}{
+					"type": "array",
+					"items": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"name":            map[string]interface{}{"type": "string"},
+							"rig":             map[string]interface{}{"type": "string"},
+							"state":           map[string]interface{}{"type": "string"},
+							"session_running": map[string]interface{}{"type": "boolean"},
+						},
+					},
+				},
+			},
+		},
+		"CreateConvoyRequest": map[string]interface{}{
+			"type":     "object",
+			"required": []string{"title", "tracks"},
+			"properties": map[string]interface{}{
+				"title":  map[string]interface{}{"type": "string", "description": "Convoy title"},
+				"tracks": map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}, "description": "Bead IDs to track"},
+			},
+		},
+		"SendMailRequest": map[string]interface{}{
+			"type":     "object",
+			"required": []string{"to", "subject"},
+			"properties": map[string]interface{}{
+				"to":      map[string]interface{}{"type": "string", "description": "Recipient address", "example": "myproject/witness"},
+				"subject": map[string]interface{}{"type": "string", "description": "Subject line"},
+				"body":    map[string]interface{}{"type": "string", "description": "Message body"},
+			},
+		},
+	}
 }
 
 // ============================================================================
 // Rigs
 // ============================================================================
 
-type RigInfo struct {
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	HasBeads  bool   `json:"has_beads"`
-	HasConfig bool   `json:"has_config"`
-}
-
+// handleListRigs godoc
+// @Summary List all rigs
+// @Description Get a list of all configured rigs (projects)
+// @Tags rigs
+// @Accept json
+// @Produce json
+// @Success 200 {object} RigListResponse
+// @Router /api/rigs [get]
 func (s *Server) handleListRigs(w http.ResponseWriter, r *http.Request) {
 	entries, err := os.ReadDir(s.townRoot)
 	if err != nil {
@@ -284,12 +1295,22 @@ func (s *Server) handleListRigs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"rigs":  rigs,
-		"count": len(rigs),
+	jsonResponse(w, http.StatusOK, RigListResponse{
+		Rigs:  rigs,
+		Count: len(rigs),
 	})
 }
 
+// handleGetRig godoc
+// @Summary Get rig details
+// @Description Get detailed information about a specific rig
+// @Tags rigs
+// @Accept json
+// @Produce json
+// @Param rig path string true "Rig name"
+// @Success 200 {object} RigDetailResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/rigs/{rig} [get]
 func (s *Server) handleGetRig(w http.ResponseWriter, r *http.Request) {
 	rigName := r.PathValue("rig")
 	rigPath := filepath.Join(s.townRoot, rigName)
@@ -334,12 +1355,12 @@ func (s *Server) handleGetRig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"name":          rigName,
-		"path":          rigPath,
-		"config":        config,
-		"polecat_count": polecatCount,
-		"crew_count":    crewCount,
+	jsonResponse(w, http.StatusOK, RigDetailResponse{
+		Name:         rigName,
+		Path:         rigPath,
+		Config:       config,
+		PolecatCount: polecatCount,
+		CrewCount:    crewCount,
 	})
 }
 
@@ -347,13 +1368,18 @@ func (s *Server) handleGetRig(w http.ResponseWriter, r *http.Request) {
 // Jobs (Beads)
 // ============================================================================
 
-type CreateJobRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Type        string `json:"type"`
-	Priority    int    `json:"priority"`
-}
-
+// handleCreateJob godoc
+// @Summary Create a job
+// @Description Create a new job/bead in the rig
+// @Tags jobs
+// @Accept json
+// @Produce json
+// @Param rig path string true "Rig name"
+// @Param job body CreateJobRequest true "Job details"
+// @Success 201 {object} JobResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/rigs/{rig}/jobs [post]
 func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	rigName := r.PathValue("rig")
 
@@ -397,6 +1423,18 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusCreated, issue)
 }
 
+// handleListJobs godoc
+// @Summary List jobs
+// @Description Get all jobs in a rig with optional filters
+// @Tags jobs
+// @Accept json
+// @Produce json
+// @Param rig path string true "Rig name"
+// @Param status query string false "Filter by status"
+// @Param type query string false "Filter by type"
+// @Success 200 {object} JobListResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/rigs/{rig}/jobs [get]
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	rigName := r.PathValue("rig")
 	status := r.URL.Query().Get("status")
@@ -421,12 +1459,29 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"jobs":  issues,
-		"count": len(issues),
+	// Convert to interface slice for JSON
+	jobList := make([]interface{}, len(issues))
+	for i, issue := range issues {
+		jobList[i] = issue
+	}
+
+	jsonResponse(w, http.StatusOK, JobListResponse{
+		Jobs:  jobList,
+		Count: len(issues),
 	})
 }
 
+// handleGetJob godoc
+// @Summary Get job details
+// @Description Get detailed information about a specific job
+// @Tags jobs
+// @Accept json
+// @Produce json
+// @Param rig path string true "Rig name"
+// @Param id path string true "Job ID"
+// @Success 200 {object} JobResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/rigs/{rig}/jobs/{id} [get]
 func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	rigName := r.PathValue("rig")
 	jobID := r.PathValue("id")
@@ -448,13 +1503,18 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, issue)
 }
 
-type UpdateJobRequest struct {
-	Status      string `json:"status,omitempty"`
-	Notes       string `json:"notes,omitempty"`
-	Description string `json:"description,omitempty"`
-	Assignee    string `json:"assignee,omitempty"`
-}
-
+// handleUpdateJob godoc
+// @Summary Update a job
+// @Description Update job status, notes, or assignee
+// @Tags jobs
+// @Accept json
+// @Produce json
+// @Param rig path string true "Rig name"
+// @Param id path string true "Job ID"
+// @Param update body UpdateJobRequest true "Update details"
+// @Success 200 {object} SuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Router /api/rigs/{rig}/jobs/{id} [put]
 func (s *Server) handleUpdateJob(w http.ResponseWriter, r *http.Request) {
 	rigName := r.PathValue("rig")
 	jobID := r.PathValue("id")
@@ -484,16 +1544,23 @@ func (s *Server) handleUpdateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status":  "updated",
-		"job_id":  jobID,
-		"output":  stdout,
+		"status": "updated",
+		"job_id": jobID,
+		"output": stdout,
 	})
 }
 
-type CloseJobRequest struct {
-	Reason string `json:"reason,omitempty"`
-}
-
+// handleCloseJob godoc
+// @Summary Close a job
+// @Description Close a job with an optional reason
+// @Tags jobs
+// @Accept json
+// @Produce json
+// @Param rig path string true "Rig name"
+// @Param id path string true "Job ID"
+// @Param close body CloseJobRequest false "Close details"
+// @Success 200 {object} SuccessResponse
+// @Router /api/rigs/{rig}/jobs/{id}/close [post]
 func (s *Server) handleCloseJob(w http.ResponseWriter, r *http.Request) {
 	rigName := r.PathValue("rig")
 	jobID := r.PathValue("id")
@@ -523,13 +1590,17 @@ func (s *Server) handleCloseJob(w http.ResponseWriter, r *http.Request) {
 // Sling
 // ============================================================================
 
-type SlingRequest struct {
-	BeadID   string `json:"bead_id"`
-	Formula  string `json:"formula,omitempty"`
-	Args     string `json:"args,omitempty"`
-	NoConvoy bool   `json:"no_convoy,omitempty"`
-}
-
+// handleSling godoc
+// @Summary Dispatch work to polecats
+// @Description Sling a job to polecat workers using a formula
+// @Tags sling
+// @Accept json
+// @Produce json
+// @Param rig path string true "Rig name"
+// @Param sling body SlingRequest true "Sling request"
+// @Success 200 {object} SlingResponse
+// @Failure 400 {object} ErrorResponse
+// @Router /api/rigs/{rig}/sling [post]
 func (s *Server) handleSling(w http.ResponseWriter, r *http.Request) {
 	rigName := r.PathValue("rig")
 
@@ -569,11 +1640,11 @@ func (s *Server) handleSling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status":  "slung",
-		"bead_id": req.BeadID,
-		"rig":     rigName,
-		"output":  stdout,
+	jsonResponse(w, http.StatusOK, SlingResponse{
+		Status: "slung",
+		BeadID: req.BeadID,
+		Rig:    rigName,
+		Output: stdout,
 	})
 }
 
@@ -609,12 +1680,6 @@ func (s *Server) handleListMergeQueue(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, result)
 }
 
-type MQSubmitRequest struct {
-	Branch   string `json:"branch,omitempty"`
-	Issue    string `json:"issue,omitempty"`
-	Priority int    `json:"priority,omitempty"`
-}
-
 func (s *Server) handleMQSubmit(w http.ResponseWriter, r *http.Request) {
 	rigName := r.PathValue("rig")
 
@@ -644,9 +1709,9 @@ func (s *Server) handleMQSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status": "submitted",
-		"output": stdout.String(),
+	jsonResponse(w, http.StatusOK, MQSubmitResponse{
+		Status: "submitted",
+		Output: stdout.String(),
 	})
 }
 
@@ -676,8 +1741,8 @@ func (s *Server) handleListPolecats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"polecats": result,
+	jsonResponse(w, http.StatusOK, PolecatListResponse{
+		Polecats: result,
 	})
 }
 
@@ -692,10 +1757,10 @@ func (s *Server) handleGetPolecat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"name":   name,
-		"rig":    rigName,
-		"status": stdout,
+	jsonResponse(w, http.StatusOK, PolecatStatusResponse{
+		Name:   name,
+		Rig:    rigName,
+		Status: stdout,
 	})
 }
 
@@ -710,11 +1775,11 @@ func (s *Server) handleNukePolecat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status": "nuked",
-		"name":   name,
-		"rig":    rigName,
-		"output": stdout,
+	jsonResponse(w, http.StatusOK, PolecatNukeResponse{
+		Status: "nuked",
+		Name:   name,
+		Rig:    rigName,
+		Output: stdout,
 	})
 }
 
@@ -731,9 +1796,9 @@ func (s *Server) handleRefineryStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"rig":    rigName,
-		"status": stdout,
+	jsonResponse(w, http.StatusOK, RefineryStatusResponse{
+		Rig:    rigName,
+		Status: stdout,
 	})
 }
 
@@ -746,10 +1811,10 @@ func (s *Server) handleRefineryStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status": "started",
-		"rig":    rigName,
-		"output": stdout,
+	jsonResponse(w, http.StatusOK, RefineryActionResponse{
+		Status: "started",
+		Rig:    rigName,
+		Output: stdout,
 	})
 }
 
@@ -762,10 +1827,10 @@ func (s *Server) handleRefineryStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status": "stopped",
-		"rig":    rigName,
-		"output": stdout,
+	jsonResponse(w, http.StatusOK, RefineryActionResponse{
+		Status: "stopped",
+		Rig:    rigName,
+		Output: stdout,
 	})
 }
 
@@ -780,8 +1845,8 @@ func (s *Server) handleMayorStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status": stdout,
+	jsonResponse(w, http.StatusOK, MayorStatusResponse{
+		Status: stdout,
 	})
 }
 
@@ -792,9 +1857,9 @@ func (s *Server) handleMayorStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status": "started",
-		"output": stdout,
+	jsonResponse(w, http.StatusOK, MayorActionResponse{
+		Status: "started",
+		Output: stdout,
 	})
 }
 
@@ -805,9 +1870,9 @@ func (s *Server) handleMayorStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status": "stopped",
-		"output": stdout,
+	jsonResponse(w, http.StatusOK, MayorActionResponse{
+		Status: "stopped",
+		Output: stdout,
 	})
 }
 
@@ -824,9 +1889,9 @@ func (s *Server) handleWitnessStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"rig":    rigName,
-		"status": stdout,
+	jsonResponse(w, http.StatusOK, WitnessStatusResponse{
+		Rig:    rigName,
+		Status: stdout,
 	})
 }
 
@@ -839,10 +1904,10 @@ func (s *Server) handleWitnessStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status": "started",
-		"rig":    rigName,
-		"output": stdout,
+	jsonResponse(w, http.StatusOK, WitnessActionResponse{
+		Status: "started",
+		Rig:    rigName,
+		Output: stdout,
 	})
 }
 
@@ -855,10 +1920,10 @@ func (s *Server) handleWitnessStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status": "stopped",
-		"rig":    rigName,
-		"output": stdout,
+	jsonResponse(w, http.StatusOK, WitnessActionResponse{
+		Status: "stopped",
+		Rig:    rigName,
+		Output: stdout,
 	})
 }
 
@@ -885,14 +1950,9 @@ func (s *Server) handleListConvoys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"convoys": result,
+	jsonResponse(w, http.StatusOK, ConvoyListResponse{
+		Convoys: result,
 	})
-}
-
-type CreateConvoyRequest struct {
-	Title  string   `json:"title"`
-	Tracks []string `json:"tracks"` // Bead IDs to track
 }
 
 func (s *Server) handleCreateConvoy(w http.ResponseWriter, r *http.Request) {
@@ -931,21 +1991,15 @@ func (s *Server) handleGetConvoy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"convoy_id": convoyID,
-		"status":    stdout,
+	jsonResponse(w, http.StatusOK, ConvoyStatusResponse{
+		ConvoyID: convoyID,
+		Status:   stdout,
 	})
 }
 
 // ============================================================================
 // Mail
 // ============================================================================
-
-type SendMailRequest struct {
-	To      string `json:"to"`
-	Subject string `json:"subject"`
-	Body    string `json:"body"`
-}
 
 func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request) {
 	var req SendMailRequest
@@ -970,10 +2024,10 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"status": "sent",
-		"to":     req.To,
-		"output": stdout,
+	jsonResponse(w, http.StatusOK, SendMailResponse{
+		Status: "sent",
+		To:     req.To,
+		Output: stdout,
 	})
 }
 
@@ -990,8 +2044,8 @@ func (s *Server) handleGetInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"agent": agentAddr,
-		"inbox": stdout,
+	jsonResponse(w, http.StatusOK, InboxResponse{
+		Agent: agentAddr,
+		Inbox: stdout,
 	})
 }
