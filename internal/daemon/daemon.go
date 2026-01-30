@@ -1130,7 +1130,6 @@ func (d *Daemon) restartPolecatSession(rigName, polecatName, sessionName string)
 		AgentName:          polecatName,
 		TownRoot:           d.config.TownRoot,
 		BeadsNoDaemon:      true,
-		DoltServerMode:     config.IsDoltServerMode(d.config.TownRoot),
 		DoltServerDatabase: rigName,
 	})
 

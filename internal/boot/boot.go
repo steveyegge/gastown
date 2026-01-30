@@ -193,7 +193,6 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:               "boot",
 		TownRoot:           b.townRoot,
-		DoltServerMode:     config.IsDoltServerMode(b.townRoot),
 		DoltServerDatabase: "hq",
 	})
 	for k, v := range envVars {
@@ -215,7 +214,6 @@ func (b *Boot) spawnDegraded() error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:               "boot",
 		TownRoot:           b.townRoot,
-		DoltServerMode:     config.IsDoltServerMode(b.townRoot),
 		DoltServerDatabase: "hq",
 	})
 	cmd.Env = config.EnvForExecCommand(envVars)

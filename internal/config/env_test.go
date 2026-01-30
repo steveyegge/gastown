@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -177,11 +179,13 @@ func TestAgentEnv_EmptyTownRootOmitted(t *testing.T) {
 
 func TestAgentEnv_DoltServerModeDisabled(t *testing.T) {
 	t.Parallel()
+	// TownRoot without .dolt-data/ should not enable dolt server mode
+	townRoot := t.TempDir()
 	env := AgentEnv(AgentEnvConfig{
-		Role:     "polecat",
-		Rig:      "myrig",
+		Role:      "polecat",
+		Rig:       "myrig",
 		AgentName: "Toast",
-		TownRoot: "/town",
+		TownRoot:  townRoot,
 	})
 
 	assertNotSet(t, env, "BEADS_DOLT_SERVER_MODE")
@@ -191,12 +195,18 @@ func TestAgentEnv_DoltServerModeDisabled(t *testing.T) {
 
 func TestAgentEnv_DoltServerModeEnabled(t *testing.T) {
 	t.Parallel()
+	// Create temp town with .dolt-data/ containing an entry
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data", "hq")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	env := AgentEnv(AgentEnvConfig{
-		Role:           "polecat",
-		Rig:            "myrig",
-		AgentName:      "Toast",
-		TownRoot:       "/town",
-		DoltServerMode: true,
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  townRoot,
 	})
 
 	assertEnv(t, env, "BEADS_DOLT_SERVER_MODE", "1")
@@ -206,12 +216,18 @@ func TestAgentEnv_DoltServerModeEnabled(t *testing.T) {
 
 func TestAgentEnv_DoltServerModeWithDatabase(t *testing.T) {
 	t.Parallel()
+	// Create temp town with .dolt-data/
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data", "gastown")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	env := AgentEnv(AgentEnvConfig{
 		Role:               "polecat",
 		Rig:                "gastown",
 		AgentName:          "Toast",
-		TownRoot:           "/town",
-		DoltServerMode:     true,
+		TownRoot:           townRoot,
 		DoltServerDatabase: "gastown",
 	})
 
@@ -221,10 +237,16 @@ func TestAgentEnv_DoltServerModeWithDatabase(t *testing.T) {
 
 func TestAgentEnv_DoltServerModeHqDatabase(t *testing.T) {
 	t.Parallel()
+	// Create temp town with .dolt-data/
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data", "hq")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	env := AgentEnv(AgentEnvConfig{
 		Role:               "mayor",
-		TownRoot:           "/town",
-		DoltServerMode:     true,
+		TownRoot:           townRoot,
 		DoltServerDatabase: "hq",
 	})
 
@@ -234,12 +256,18 @@ func TestAgentEnv_DoltServerModeHqDatabase(t *testing.T) {
 
 func TestAgentEnv_DoltServerModeNoDatabaseOmitted(t *testing.T) {
 	t.Parallel()
+	// Create temp town with .dolt-data/
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data", "myrig")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	env := AgentEnv(AgentEnvConfig{
-		Role:           "polecat",
-		Rig:            "myrig",
-		AgentName:      "Toast",
-		TownRoot:       "/town",
-		DoltServerMode: true,
+		Role:      "polecat",
+		Rig:       "myrig",
+		AgentName: "Toast",
+		TownRoot:  townRoot,
 	})
 
 	assertEnv(t, env, "BEADS_DOLT_SERVER_MODE", "1")
@@ -248,11 +276,17 @@ func TestAgentEnv_DoltServerModeNoDatabaseOmitted(t *testing.T) {
 
 func TestAgentEnv_DoltServerModeCustomHostPort(t *testing.T) {
 	t.Parallel()
+	// Create temp town with .dolt-data/
+	townRoot := t.TempDir()
+	dataDir := filepath.Join(townRoot, ".dolt-data", "myrig")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	env := AgentEnv(AgentEnvConfig{
 		Role:           "witness",
 		Rig:            "myrig",
-		TownRoot:       "/town",
-		DoltServerMode: true,
+		TownRoot:       townRoot,
 		DoltServerHost: "192.168.1.10",
 		DoltServerPort: 3308,
 	})

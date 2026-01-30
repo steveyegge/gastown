@@ -435,7 +435,6 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:               "deacon",
 		TownRoot:           townRoot,
-		DoltServerMode:     config.IsDoltServerMode(townRoot),
 		DoltServerDatabase: "hq",
 	})
 	for k, v := range envVars {

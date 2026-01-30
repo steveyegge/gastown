@@ -486,9 +486,6 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 		defaultCmd = config.PrependEnv(defaultCmd, map[string]string{"GT_SESSION_ID_ENV": runtimeConfig.Session.SessionIDEnv})
 	}
 
-	// Check dolt server status for env passthrough
-	doltServer := config.IsDoltServerMode(d.config.TownRoot)
-
 	// Polecats and crew need environment variables set in the command
 	if parsed.RoleType == "polecat" {
 		var sessionIDEnv string
@@ -501,7 +498,6 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			AgentName:          parsed.AgentName,
 			TownRoot:           d.config.TownRoot,
 			SessionIDEnv:       sessionIDEnv,
-			DoltServerMode:     doltServer,
 			DoltServerDatabase: parsed.RigName,
 		})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
@@ -518,7 +514,6 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 			AgentName:          parsed.AgentName,
 			TownRoot:           d.config.TownRoot,
 			SessionIDEnv:       sessionIDEnv,
-			DoltServerMode:     doltServer,
 			DoltServerDatabase: parsed.RigName,
 		})
 		return config.PrependEnv("exec "+runtimeConfig.BuildCommandWithPrompt(prompt), envVars)
@@ -530,10 +525,8 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 // setSessionEnvironment sets environment variables for the tmux session.
 // Uses centralized AgentEnv for consistency, plus custom env vars from role config if available.
 func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
-	// Check dolt server status for env passthrough
-	doltServer := config.IsDoltServerMode(d.config.TownRoot)
-
 	// Use centralized AgentEnv for base environment variables
+	// Dolt server mode is auto-detected from TownRoot in AgentEnv
 	doltDB := parsed.RigName
 	if doltDB == "" {
 		doltDB = "hq"
@@ -543,7 +536,6 @@ func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.Rol
 		Rig:                parsed.RigName,
 		AgentName:          parsed.AgentName,
 		TownRoot:           d.config.TownRoot,
-		DoltServerMode:     doltServer,
 		DoltServerDatabase: doltDB,
 	})
 	for k, v := range envVars {

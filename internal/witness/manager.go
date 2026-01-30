@@ -151,7 +151,6 @@ func (m *Manager) Start(foreground bool, agentOverride string, envOverrides []st
 		Role:               "witness",
 		Rig:                m.rig.Name,
 		TownRoot:           townRoot,
-		DoltServerMode:     config.IsDoltServerMode(townRoot),
 		DoltServerDatabase: m.rig.Name,
 	})
 	for k, v := range envVars {

@@ -171,7 +171,6 @@ func runCrewAt(cmd *cobra.Command, args []string) error {
 			TownRoot:           townRoot,
 			RuntimeConfigDir:   claudeConfigDir,
 			BeadsNoDaemon:      true,
-			DoltServerMode:     config.IsDoltServerMode(townRoot),
 			DoltServerDatabase: r.Name,
 		})
 		for k, v := range envVars {

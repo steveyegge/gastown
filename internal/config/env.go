@@ -42,11 +42,6 @@ type AgentEnvConfig struct {
 	// Used for polecats that should bypass the beads daemon
 	BeadsNoDaemon bool
 
-	// DoltServerMode enables dolt server mode env vars for agent sessions.
-	// When true, BEADS_DOLT_SERVER_MODE=1 and connection vars are set.
-	// Callers must verify the server is running before setting this.
-	DoltServerMode bool
-
 	// DoltServerHost is the dolt server host (default 127.0.0.1).
 	DoltServerHost string
 
@@ -137,7 +132,8 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	}
 
 	// Set dolt server mode env vars for beads CLI
-	if cfg.DoltServerMode {
+	// Auto-detect from TownRoot: if .dolt-data/ exists with entries, enable dolt server mode
+	if IsDoltServerMode(cfg.TownRoot) {
 		env["BEADS_DOLT_SERVER_MODE"] = "1"
 		host := cfg.DoltServerHost
 		if host == "" {

@@ -224,7 +224,6 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		TownRoot:           townRoot,
 		RuntimeConfigDir:   opts.RuntimeConfigDir,
 		BeadsNoDaemon:      true,
-		DoltServerMode:     config.IsDoltServerMode(townRoot),
 		DoltServerDatabase: m.rig.Name,
 	})
 	for k, v := range envVars {

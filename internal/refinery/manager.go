@@ -160,7 +160,6 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		Rig:                m.rig.Name,
 		TownRoot:           townRoot,
 		BeadsNoDaemon:      true,
-		DoltServerMode:     config.IsDoltServerMode(townRoot),
 		DoltServerDatabase: m.rig.Name,
 	})
 
