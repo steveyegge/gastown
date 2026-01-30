@@ -925,6 +925,18 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 			prompt: "",
 			want:   `devin --permission-mode dangerous`,
 		},
+		{
+			name:   "prompt with backticks",
+			rc:     DefaultRuntimeConfig(),
+			prompt: "Run `gt hook` now",
+			want:   "claude --dangerously-skip-permissions \"Run \\`gt hook\\` now\"",
+		},
+		{
+			name:   "prompt with dollar sign",
+			rc:     DefaultRuntimeConfig(),
+			prompt: "Value is $HOME",
+			want:   `claude --dangerously-skip-permissions "Value is \$HOME"`,
+		},
 	}
 
 	for _, tt := range tests {

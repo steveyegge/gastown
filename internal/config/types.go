@@ -606,9 +606,15 @@ func defaultInstructionsFile(provider string) string {
 
 // quoteForShell quotes a string for safe shell usage.
 func quoteForShell(s string) string {
-	// Simple quoting: wrap in double quotes, escape internal quotes
+	// Escape special characters for double-quoted shell strings:
+	// - backslash must be escaped first (to avoid double-escaping)
+	// - double quotes must be escaped
+	// - backticks must be escaped (command substitution)
+	// - dollar signs must be escaped (variable expansion)
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	escaped = strings.ReplaceAll(escaped, "`", "\\`")
+	escaped = strings.ReplaceAll(escaped, `$`, `\$`)
 	return `"` + escaped + `"`
 }
 
