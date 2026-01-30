@@ -517,14 +517,21 @@ notifyWitness:
 	if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
 		selfCleanAttempted = true
 
-		// Step 1: Nuke the worktree (only for COMPLETED - other statuses preserve work)
-		if exitType == ExitCompleted {
+		// Step 1: Nuke the worktree (only for COMPLETED without pending MR)
+		// BUG FIX (de-zq5eo): If there's a pending MR, DON'T nuke the worktree.
+		// The local branch is needed for conflict resolution if merge fails.
+		// The Witness will nuke after receiving MERGED signal from Refinery.
+		// This aligns with handlers.go HandlePolecatDone which defers cleanup for pending MRs.
+		if exitType == ExitCompleted && mrID == "" {
 			if err := selfNukePolecat(roleInfo, townRoot); err != nil {
 				// Non-fatal: Witness will clean up if we fail
 				style.PrintWarning("worktree nuke failed: %v (Witness will clean up)", err)
 			} else {
 				fmt.Printf("%s Worktree nuked\n", style.Bold.Render("✓"))
 			}
+		} else if exitType == ExitCompleted && mrID != "" {
+			// Pending MR - preserve worktree for conflict resolution
+			fmt.Printf("%s Worktree preserved (pending MR=%s, Witness will cleanup after merge)\n", style.Bold.Render("→"), mrID)
 		}
 
 		// Step 2: Kill our own session (this terminates Claude and the shell)
