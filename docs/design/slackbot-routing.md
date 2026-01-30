@@ -181,6 +181,152 @@ resolveChannelForDecision(decision)
    - Add `ChannelHint` field to Decision struct
    - Useful for workflows that know their target channel
 
+## Static Router Deep Dive
+
+**Location:** `internal/slack/router.go`
+
+The Router provides pattern-based channel routing from configuration. It supports
+two configuration backends: file-based (`slack.json`) and beads-backed (`bd config`).
+
+### Configuration Structure
+
+```go
+type Config struct {
+    Enabled        bool              // Master switch
+    DefaultChannel string            // Fallback when no pattern matches
+    Channels       map[string]string // Pattern → ChannelID
+    Overrides      map[string]string // ExactAgent → ChannelID (highest priority)
+    ChannelNames   map[string]string // ChannelID → DisplayName
+    ChannelWebhooks map[string]string // ChannelID → WebhookURL
+}
+```
+
+### Pattern Syntax
+
+Patterns use `/`-delimited segments with `*` wildcard:
+
+| Pattern | Matches | Does NOT Match |
+|---------|---------|----------------|
+| `gastown/polecats/*` | `gastown/polecats/furiosa` | `gastown/crew/joe` |
+| `*/crew/*` | `gastown/crew/joe`, `beads/crew/wolf` | `gastown/polecats/nux` |
+| `beads/*` | Nothing (2 segments vs 3) | `beads/crew/wolf` |
+| `beads/*/*` | `beads/crew/wolf`, `beads/polecats/slit` | `beads` |
+
+**Key insight:** Segments must match exactly. `*` matches one segment only.
+
+### Resolution Priority
+
+```
+1. Exact Override (config.Overrides[agent])
+   └─ Created via "Break Out" button in Slack
+   └─ Example: "gastown/crew/slack_decisions" → "C0987654321"
+
+2. Pattern Match (sorted by specificity)
+   └─ More segments = higher priority
+   └─ Fewer wildcards = higher priority
+   └─ Alphabetical tie-breaker
+
+3. Default Channel (config.DefaultChannel)
+```
+
+### Pattern Sorting Algorithm
+
+Patterns are pre-compiled and sorted for deterministic matching:
+
+```go
+func patternLessThan(a, b compiledPattern) bool {
+    // 1. More segments = more specific = higher priority
+    if len(a.segments) != len(b.segments) {
+        return len(a.segments) > len(b.segments)
+    }
+    // 2. Fewer wildcards = more specific = higher priority
+    if countWildcards(a) != countWildcards(b) {
+        return countWildcards(a) < countWildcards(b)
+    }
+    // 3. Alphabetical for determinism
+    return a.original < b.original
+}
+```
+
+**Example sorting:**
+```
+gastown/polecats/furiosa  (3 segments, 0 wildcards) ← checked first
+gastown/polecats/*        (3 segments, 1 wildcard)
+*/polecats/*              (3 segments, 2 wildcards)
+gastown/*                 (2 segments, 1 wildcard)  ← never matches 3-segment agents
+```
+
+### Override System
+
+Overrides are agent-specific channel assignments created dynamically:
+
+```go
+// Created when user clicks "Break Out" in Slack
+router.AddOverrideWithName(
+    "gastown/crew/slack_decisions",  // agent
+    "C0987654321",                   // channelID
+    "gt-decisions-slack-decisions",  // displayName
+)
+```
+
+Overrides persist to configuration (file or beads) via `router.Save()`.
+
+### Configuration Loading
+
+Priority order:
+1. **Beads config** (`bd config get slack.*`) - distributed, versioned
+2. **File config** (`$GT_ROOT/settings/slack.json`) - local fallback
+
+```go
+func LoadRouter() (*Router, error) {
+    // Try beads first
+    if router, err := LoadRouterFromBeads(); err == nil {
+        return router, nil
+    }
+    // Fall back to file
+    return LoadRouterFromFile(findConfigPath())
+}
+```
+
+### Thread Safety
+
+Router uses `sync.RWMutex` for concurrent access:
+- `Resolve()` takes read lock
+- `AddOverride()`, `Save()` take write lock
+
+### Example Configuration
+
+**File-based (`slack.json`):**
+```json
+{
+  "type": "slack",
+  "version": 1,
+  "enabled": true,
+  "default_channel": "C0123456789",
+  "channels": {
+    "gastown/polecats/*": "C1111111111",
+    "*/crew/*": "C2222222222"
+  },
+  "overrides": {
+    "gastown/crew/slack_decisions": "C3333333333"
+  },
+  "channel_names": {
+    "C0123456789": "#gt-decisions-general",
+    "C1111111111": "#gt-decisions-polecats",
+    "C2222222222": "#gt-decisions-crew",
+    "C3333333333": "#gt-decisions-slack-decisions"
+  }
+}
+```
+
+**Beads-backed:**
+```bash
+bd config set slack.enabled true
+bd config set slack.default_channel C0123456789
+bd config set slack.channels '{"gastown/polecats/*": "C1111111111"}'
+bd config set slack.overrides '{"gastown/crew/slack_decisions": "C3333333333"}'
+```
+
 ## Files Reference
 
 | File | Purpose |
