@@ -213,3 +213,80 @@ func TestPolecatCommandFormat(t *testing.T) {
 		t.Error("GT_ROLE must be 'polecat', not 'mayor' or 'crew'")
 	}
 }
+
+// TestSessionManager_resolveBeadsDir verifies that SessionManager correctly
+// resolves the beads directory for cross-rig issues via routes.jsonl.
+// This is a regression test for GitHub issue #1056.
+//
+// The bug was that hookIssue/validateIssue used workDir directly instead of
+// resolving via routes.jsonl. Now they call resolveBeadsDir which we test here.
+func TestSessionManager_resolveBeadsDir(t *testing.T) {
+	// Set up a mock town with routes.jsonl
+	townRoot := t.TempDir()
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create routes.jsonl with cross-rig routing
+	routesContent := `{"prefix": "gt-", "path": "gastown/mayor/rig"}
+{"prefix": "bd-", "path": "beads/mayor/rig"}
+{"prefix": "hq-", "path": "."}
+`
+	if err := os.WriteFile(filepath.Join(townBeadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a rig inside the town (simulating gastown rig)
+	rigPath := filepath.Join(townRoot, "gastown")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create SessionManager with the rig
+	r := &rig.Rig{
+		Name: "gastown",
+		Path: rigPath,
+	}
+	m := NewSessionManager(tmux.NewTmux(), r)
+
+	polecatWorkDir := filepath.Join(rigPath, "polecats", "Toast")
+
+	tests := []struct {
+		name        string
+		issueID     string
+		expectedDir string
+	}{
+		{
+			name:        "same-rig bead resolves to rig path",
+			issueID:     "gt-abc123",
+			expectedDir: filepath.Join(townRoot, "gastown/mayor/rig"),
+		},
+		{
+			name:        "cross-rig bead (beads) resolves to beads rig path",
+			issueID:     "bd-xyz789",
+			expectedDir: filepath.Join(townRoot, "beads/mayor/rig"),
+		},
+		{
+			name:        "town-level bead resolves to town root",
+			issueID:     "hq-town123",
+			expectedDir: townRoot,
+		},
+		{
+			name:        "unknown prefix falls back to fallbackDir",
+			issueID:     "xx-unknown",
+			expectedDir: polecatWorkDir,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Test the SessionManager's resolveBeadsDir method directly
+			resolved := m.resolveBeadsDir(tc.issueID, polecatWorkDir)
+			if resolved != tc.expectedDir {
+				t.Errorf("resolveBeadsDir(%q, %q) = %q, want %q",
+					tc.issueID, polecatWorkDir, resolved, tc.expectedDir)
+			}
+		})
+	}
+}
