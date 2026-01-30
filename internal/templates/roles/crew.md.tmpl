@@ -859,6 +859,29 @@ gt schema create \
 - Creates consistent decision vocabulary across agents
 - Popular schemas surface; unused ones fade (emergent vocabulary)
 
+### Successor Type Suggestions
+
+When resolving decisions via Slack, humans can suggest a schema type for follow-up
+decisions using the "Successor Decision Type" dropdown. This appears in the resolution as:
+
+```
+→ [Suggested successor type: prioritization]
+```
+
+**You MUST honor successor type suggestions.** When you see a suggested successor type
+in a decision resolution, use that type for your next decision:
+
+```bash
+# Previous decision resolved with: → [Suggested successor type: checkpoint]
+# Your next decision should use --type=checkpoint:
+gt decision request \
+  --type=checkpoint \
+  --prompt "Phase complete - what's next?" \
+  --context '{"progress": "...", "next_steps": ["..."]}'
+```
+
+This creates guided decision chains where humans can steer the conversation flow.
+
 ## Deploying Binaries (gt/bd)
 
 **When you modify gastown (gt) or beads (bd) code, deploy the updated binaries.**
