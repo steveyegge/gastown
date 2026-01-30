@@ -19,12 +19,14 @@ type ValidationResult struct {
 
 // DecisionInput is the JSON sent to validators on stdin.
 type DecisionInput struct {
-	ID          string                 `json:"id"`
-	Prompt      string                 `json:"prompt"`
-	Context     map[string]interface{} `json:"context,omitempty"`
-	Options     []OptionInput          `json:"options"`
-	ChosenIndex int                    `json:"chosen_index,omitempty"`
-	Event       string                 `json:"event"` // "create", "stop", "resolve"
+	ID            string                 `json:"id"`
+	Prompt        string                 `json:"prompt"`
+	Context       map[string]interface{} `json:"context,omitempty"`
+	Options       []OptionInput          `json:"options"`
+	ChosenIndex   int                    `json:"chosen_index,omitempty"`
+	Event         string                 `json:"event"` // "create", "stop", "resolve"
+	PredecessorID string                 `json:"predecessor_id,omitempty"`
+	Type          string                 `json:"type,omitempty"`
 }
 
 // OptionInput represents a decision option.
