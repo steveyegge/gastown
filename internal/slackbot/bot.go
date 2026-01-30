@@ -90,7 +90,29 @@ func New(cfg Config) (*Bot, error) {
 
 	rpcClient := rpcclient.NewClient(cfg.RPCEndpoint)
 
+	// Discover town root FIRST - needed for beads commands and convoy routing
+	// (fixes gt-bug-gtslack_channel_mode_lookup_fails_when)
+	townRoot := cfg.TownRoot
+	if townRoot == "" {
+		// Auto-discover from current working directory
+		if cwd, err := os.Getwd(); err == nil {
+			townRoot = beads.FindTownRoot(cwd)
+		}
+	}
+	if townRoot != "" {
+		log.Printf("Slack: Town root discovered: %s", townRoot)
+		// Set BEADS_DIR so bd commands can find the database even when
+		// gtslack runs from a different directory (e.g., root /)
+		beadsDir := filepath.Join(townRoot, ".beads")
+		if err := os.Setenv("BEADS_DIR", beadsDir); err != nil {
+			log.Printf("Slack: Warning: failed to set BEADS_DIR: %v", err)
+		} else {
+			log.Printf("Slack: Set BEADS_DIR=%s for bd commands", beadsDir)
+		}
+	}
+
 	// Load channel router for per-agent routing
+	// (Must come after BEADS_DIR is set for bd config commands to work)
 	var router *slackrouter.Router
 	if cfg.RouterConfigPath != "" {
 		var err error
@@ -119,18 +141,6 @@ func New(cfg Config) (*Bot, error) {
 	channelPrefix := cfg.ChannelPrefix
 	if channelPrefix == "" {
 		channelPrefix = "gt-decisions"
-	}
-
-	// Discover town root for convoy-based channel routing
-	townRoot := cfg.TownRoot
-	if townRoot == "" {
-		// Auto-discover from current working directory
-		if cwd, err := os.Getwd(); err == nil {
-			townRoot = beads.FindTownRoot(cwd)
-		}
-	}
-	if townRoot != "" {
-		log.Printf("Slack: Town root for convoy lookup: %s", townRoot)
 	}
 
 	bot := &Bot{
