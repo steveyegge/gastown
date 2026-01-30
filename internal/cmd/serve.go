@@ -16,19 +16,25 @@ import (
 )
 
 var (
-	servePort int
-	serveTown string
+	servePort        int
+	serveTown        string
+	serveNoDashboard bool
 )
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Start the Gas Town HTTP API server",
-	Long: `Start an HTTP API server that exposes Gas Town functionality via REST API.
+	Short: "Start the Gas Town HTTP server (API + Dashboard)",
+	Long: `Start an HTTP server that serves both the REST API and HTML dashboard.
+
+By default, this serves:
+  /                    HTML Dashboard (convoy tracking UI)
+  /swagger/            Swagger API documentation
+  /api/...             REST API endpoints
 
 This allows web applications and other services to interact with Gas Town
 programmatically without shelling out to CLI commands.
 
-Endpoints:
+API Endpoints:
   GET  /health                    Health check
   GET  /api/rigs                  List all rigs
   GET  /api/rigs/{rig}            Get rig details
@@ -39,11 +45,15 @@ Endpoints:
   GET  /api/rigs/{rig}/mq         List merge queue
   GET  /api/rigs/{rig}/polecats   List polecats
   GET  /api/rigs/{rig}/refinery   Refinery status
+  GET  /api/mayor                 Mayor status
+  POST /api/mayor/start           Start mayor
+  POST /api/mayor/stop            Stop mayor
 
 Examples:
   gt serve                        # Start on default port 8080
   gt serve --port 3000            # Start on port 3000
-  gt serve --town ~/my-town       # Specify town root`,
+  gt serve --town ~/my-town       # Specify town root
+  gt serve --no-dashboard         # API only (no HTML dashboard)`,
 	RunE: runServe,
 }
 
@@ -52,6 +62,7 @@ func init() {
 
 	serveCmd.Flags().IntVar(&servePort, "port", 8080, "Port to listen on")
 	serveCmd.Flags().StringVar(&serveTown, "town", "", "Town root directory (default: auto-detect)")
+	serveCmd.Flags().BoolVar(&serveNoDashboard, "no-dashboard", false, "Disable HTML dashboard (API only)")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -84,8 +95,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("town root does not exist: %s", townRoot)
 	}
 
-	// Create and start server
-	server := api.NewServer(townRoot, servePort)
+	// Create and start server with options
+	var opts []api.ServerOption
+	if !serveNoDashboard {
+		opts = append(opts, api.WithDashboard())
+	}
+	server := api.NewServer(townRoot, servePort, opts...)
 
 	// Handle graceful shutdown
 	go func() {

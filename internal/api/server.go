@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/web"
 )
 
 // ============================================================================
@@ -327,14 +328,25 @@ type InboxResponse struct {
 
 // Server is the HTTP API server for Gas Town.
 type Server struct {
-	townRoot string
-	port     int
-	server   *http.Server
-	gtBinary string // Path to gt binary
+	townRoot         string
+	port             int
+	server           *http.Server
+	gtBinary         string // Path to gt binary
+	includeDashboard bool   // Whether to serve the HTML dashboard at /
+}
+
+// ServerOption is a functional option for configuring the server.
+type ServerOption func(*Server)
+
+// WithDashboard enables the HTML dashboard at /.
+func WithDashboard() ServerOption {
+	return func(s *Server) {
+		s.includeDashboard = true
+	}
 }
 
 // NewServer creates a new API server.
-func NewServer(townRoot string, port int) *Server {
+func NewServer(townRoot string, port int, opts ...ServerOption) *Server {
 	// Find gt binary - use absolute path for reliability
 	gtBinary := "gt" // Default to PATH
 
@@ -354,11 +366,18 @@ func NewServer(townRoot string, port int) *Server {
 		}
 	}
 
-	return &Server{
+	s := &Server{
 		townRoot: townRoot,
 		port:     port,
 		gtBinary: gtBinary,
 	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	return s
 }
 
 // runGT executes a gt command and returns stdout, stderr, and error.
@@ -447,6 +466,24 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/mail/send", s.handleSendMail)
 	mux.HandleFunc("GET /api/rigs/{rig}/agents/{agent}/inbox", s.handleGetInbox)
 
+	// Dashboard (HTML UI) - mount if enabled
+	if s.includeDashboard {
+		fetcher, err := web.NewLiveConvoyFetcher()
+		if err != nil {
+			return fmt.Errorf("creating convoy fetcher: %w", err)
+		}
+
+		dashboardHandler, err := web.NewConvoyHandler(fetcher)
+		if err != nil {
+			return fmt.Errorf("creating dashboard handler: %w", err)
+		}
+
+		// Serve static files and dashboard
+		staticHandler := web.StaticHandler()
+		mux.Handle("/static/", http.StripPrefix("/static/", staticHandler))
+		mux.Handle("GET /", dashboardHandler)
+	}
+
 	// CORS middleware
 	handler := corsMiddleware(mux)
 
@@ -460,10 +497,15 @@ func (s *Server) Start() error {
 	fmt.Printf("🚀 Gas Town API server starting on port %d\n", s.port)
 	fmt.Printf("   Town root: %s\n", s.townRoot)
 	fmt.Printf("   GT binary: %s\n", s.gtBinary)
+	if s.includeDashboard {
+		fmt.Printf("\n   Dashboard:\n")
+		fmt.Printf("     GET  /                   - HTML Dashboard\n")
+		fmt.Printf("     GET  /static/            - Static assets\n")
+	}
 	fmt.Printf("\n   Documentation:\n")
-	fmt.Printf("     GET  /api/docs          - API documentation (JSON)\n")
-	fmt.Printf("     GET  /swagger/          - Swagger UI\n")
-	fmt.Printf("\n   Endpoints:\n")
+	fmt.Printf("     GET  /api/docs           - API documentation (JSON)\n")
+	fmt.Printf("     GET  /swagger/           - Swagger UI\n")
+	fmt.Printf("\n   REST API Endpoints:\n")
 	fmt.Printf("   Health:\n")
 	fmt.Printf("     GET  /health\n")
 	fmt.Printf("   Rigs:\n")

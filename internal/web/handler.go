@@ -17,6 +17,16 @@ var staticFiles embed.FS
 // fetchTimeout is the maximum time allowed for all data fetches to complete.
 const fetchTimeout = 8 * time.Second
 
+// StaticHandler returns an http.Handler that serves the embedded static files.
+func StaticHandler() http.Handler {
+	staticFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		// This should never happen with embedded files
+		panic(err)
+	}
+	return http.FileServer(http.FS(staticFS))
+}
+
 // ConvoyFetcher defines the interface for fetching convoy data.
 type ConvoyFetcher interface {
 	FetchConvoys() ([]ConvoyRow, error)
