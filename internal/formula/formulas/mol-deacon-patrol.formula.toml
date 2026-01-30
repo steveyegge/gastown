@@ -236,30 +236,31 @@ Check convoy completion status.
 
 Convoys are coordination beads that track multiple issues across rigs. When all tracked issues close, the convoy auto-closes.
 
+**IMPORTANT**: Use `gt convoy` commands (not `bd list`) because convoys are stored in
+town-level HQ beads and the Deacon runs from ~/gt/deacon/. The `gt` commands are
+town-aware and will find convoys regardless of current directory.
+
 **Step 1: Find open convoys**
 ```bash
-bd list --type=convoy --status=open
+gt convoy list
 ```
 
-**Step 2: For each open convoy, check tracked issues**
+**Step 2: Check and auto-close completed convoys**
 ```bash
-bd show <convoy-id>
-# Look for 'tracks' or 'dependencies' field listing tracked issues
+gt convoy check
 ```
 
-**Step 3: If all tracked issues are closed, close the convoy**
-```bash
-# Check each tracked issue
-for issue in tracked_issues:
-    bd show <issue-id>
-    # If status is open/in_progress, convoy stays open
-    # If all are closed (completed, wontfix, etc.), convoy is complete
+This command:
+- Finds all open convoys
+- Checks if all tracked issues are closed (handles cross-rig resolution)
+- Auto-closes convoys where all tracked work is complete
+- Sends notifications to convoy owners
 
-# Close convoy when all tracked issues are done
-bd close <convoy-id> --reason "All tracked issues completed"
-```
+**Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues).
+The `gt convoy` commands handle cross-rig issue resolution automatically.
 
-**Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues). Use full IDs when checking."""
+Stranded convoy detection (ready work, no workers) is handled by the separate
+`feed-stranded-convoys` step."""
 
 [[steps]]
 id = "resolve-external-deps"
