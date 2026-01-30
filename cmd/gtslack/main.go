@@ -36,6 +36,7 @@ var (
 	channelID       = flag.String("channel", "", "Default channel ID for decision notifications")
 	dynamicChannels = flag.Bool("dynamic-channels", false, "Enable automatic channel creation per agent")
 	channelPrefix   = flag.String("channel-prefix", "gt-decisions", "Prefix for dynamically created channels")
+	townRoot        = flag.String("town-root", "", "Town root directory for convoy lookup (auto-discovered if empty)")
 	debug           = flag.Bool("debug", false, "Enable debug logging")
 )
 
@@ -79,6 +80,7 @@ func main() {
 		ChannelID:       *channelID,
 		DynamicChannels: *dynamicChannels,
 		ChannelPrefix:   *channelPrefix,
+		TownRoot:        *townRoot,
 		Debug:           *debug,
 	}
 

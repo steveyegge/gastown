@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -15,6 +17,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/rpcclient"
 	slackrouter "github.com/steveyegge/gastown/internal/slack"
 	"github.com/steveyegge/gastown/internal/util"
@@ -34,6 +37,7 @@ type Bot struct {
 	channelID   string                  // Default channel to post decision notifications
 	router      *slackrouter.Router     // Channel router for per-agent routing
 	debug       bool
+	townRoot    string                  // Town root directory for beads queries (convoy lookup)
 
 	// Dynamic channel creation
 	dynamicChannels    bool              // Enable automatic channel creation
@@ -55,6 +59,7 @@ type Config struct {
 	RouterConfigPath string // Optional path to slack.json for per-agent routing
 	DynamicChannels  bool   // Enable automatic channel creation based on agent identity
 	ChannelPrefix    string // Prefix for dynamically created channels (default: "gt-decisions")
+	TownRoot         string // Town root directory for convoy lookup (auto-discovered if empty)
 	Debug            bool
 }
 
@@ -114,6 +119,18 @@ func New(cfg Config) (*Bot, error) {
 		channelPrefix = "gt-decisions"
 	}
 
+	// Discover town root for convoy-based channel routing
+	townRoot := cfg.TownRoot
+	if townRoot == "" {
+		// Auto-discover from current working directory
+		if cwd, err := os.Getwd(); err == nil {
+			townRoot = beads.FindTownRoot(cwd)
+		}
+	}
+	if townRoot != "" {
+		log.Printf("Slack: Town root for convoy lookup: %s", townRoot)
+	}
+
 	bot := &Bot{
 		client:           client,
 		socketMode:       socketClient,
@@ -121,6 +138,7 @@ func New(cfg Config) (*Bot, error) {
 		channelID:        cfg.ChannelID,
 		router:           router,
 		debug:            cfg.Debug,
+		townRoot:         townRoot,
 		dynamicChannels:  cfg.DynamicChannels,
 		channelPrefix:    channelPrefix,
 		channelCache:     make(map[string]string),
@@ -1219,12 +1237,32 @@ func (b *Bot) resolveChannel(agent string) string {
 
 // resolveChannelForDecision determines the appropriate channel for a decision.
 // Priority order:
-// 1. Epic-based channel (if decision has parent epic)
-// 2. Static router config (if available and matches)
-// 3. Dynamic channel creation (if enabled)
-// 4. Default channelID
+// 1. Convoy-based channel (if parent issue is tracked by a convoy)
+// 2. Epic-based channel (if decision has parent epic)
+// 3. Static router config (if available and matches)
+// 4. Dynamic channel creation (if enabled)
+// 5. Default channelID
 func (b *Bot) resolveChannelForDecision(decision rpcclient.Decision) string {
-	// Priority 1: Epic-based channel routing
+	// Priority 1: Convoy-based channel routing
+	// Check if the decision's parent issue is tracked by a convoy
+	if decision.ParentBeadID != "" && b.townRoot != "" {
+		convoyTitle := b.getTrackingConvoyTitle(decision.ParentBeadID)
+		if convoyTitle != "" {
+			channelID, err := b.ensureEpicChannelExists(convoyTitle)
+			if err != nil {
+				log.Printf("Slack: Failed to ensure convoy channel for %q: %v (falling back to epic routing)",
+					convoyTitle, err)
+			} else if channelID != "" {
+				if b.debug {
+					log.Printf("Slack: Routing decision %s to convoy channel for %q (parent: %s)",
+						decision.ID, convoyTitle, decision.ParentBeadID)
+				}
+				return channelID
+			}
+		}
+	}
+
+	// Priority 2: Epic-based channel routing
 	if decision.ParentBeadTitle != "" {
 		channelID, err := b.ensureEpicChannelExists(decision.ParentBeadTitle)
 		if err != nil {
@@ -1241,6 +1279,53 @@ func (b *Bot) resolveChannelForDecision(decision rpcclient.Decision) string {
 
 	// Fall back to agent-based routing
 	return b.resolveChannel(decision.RequestedBy)
+}
+
+// getTrackingConvoyTitle looks up which convoy (if any) tracks the given issue ID
+// and returns the convoy's title for channel derivation.
+// Returns empty string if no convoy tracks this issue or lookup fails.
+func (b *Bot) getTrackingConvoyTitle(issueID string) string {
+	if b.townRoot == "" {
+		return ""
+	}
+
+	townBeads := filepath.Join(b.townRoot, ".beads")
+
+	// Query for convoys that track this issue
+	// Convoys use "tracks" type: convoy -> tracked issue (depends_on_id)
+	safeIssueID := strings.ReplaceAll(issueID, "'", "''")
+	query := fmt.Sprintf(`
+		SELECT i.id, i.title FROM issues i
+		JOIN dependencies d ON i.id = d.issue_id
+		WHERE d.type = 'tracks'
+		AND (d.depends_on_id = '%s' OR d.depends_on_id LIKE '%%:%s')
+		AND i.status != 'closed'
+		LIMIT 1
+	`, safeIssueID, safeIssueID)
+
+	results, err := beads.RunQuery(townBeads, query)
+	if err != nil {
+		if b.debug {
+			log.Printf("Slack: Convoy lookup query failed: %v", err)
+		}
+		return ""
+	}
+
+	if len(results) == 0 {
+		return ""
+	}
+
+	title, ok := results[0]["title"].(string)
+	if !ok || title == "" {
+		return ""
+	}
+
+	if b.debug {
+		convoyID, _ := results[0]["id"].(string)
+		log.Printf("Slack: Found convoy %s (%q) tracking issue %s", convoyID, title, issueID)
+	}
+
+	return title
 }
 
 // ensureEpicChannelExists looks up or creates a channel for the given epic title.
