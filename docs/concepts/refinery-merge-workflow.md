@@ -2,6 +2,19 @@
 
 > How the Refinery processes completed polecat work and merges it to main
 
+## The Rebase-as-Work Philosophy
+
+The Refinery implements **rebase-as-work** - the architectural pattern that makes Gas Town scale:
+
+| Concept | Meaning |
+|---------|---------|
+| **"Polecat done at MR submit"** | Polecats exit immediately after `gt done`. They don't wait for merge results. |
+| **"Conflicts are new work"** | Merge conflicts spawn fresh polecats. Work is never "sent back" to the original. |
+| **"Convoy age creates pressure"** | Old convoys automatically get priority boosted via the scoring function. |
+| **"Priority function is deterministic"** | MR scoring is mechanical - no human judgment in the queue. |
+
+This pattern means polecats never block on merge outcomes, resources are freed immediately, and fresh polecats handle conflicts with clean context.
+
 ## Overview
 
 The **Refinery** is Gas Town's merge queue processor - the Engineer in the engine room. It receives completed work from polecats, rebases branches sequentially on main, runs tests, and pushes merged changes. This document explains the complete merge workflow from polecat completion to main branch integration.

@@ -76,8 +76,9 @@ Both do project work, but with fundamentally different purposes:
 | **Lifecycle** | Persistent (user controls) | Transient (Witness controls) |
 | **Monitoring** | Self-directed | Witness watches, nudges, recycles |
 | **Work assignment** | Subscribes to formula-matching work | Spawned by crew with molecule |
-| **Git state** | Pushes to main directly | Works on branch, Refinery merges |
-| **Cleanup** | Manual | Automatic on completion |
+| **Git state** | Pushes to main directly | Pushes branch, submits MR, exits |
+| **Exit point** | User-controlled | MR submission (`gt done`) |
+| **Cleanup** | Manual | Automatic on `gt done` |
 | **Identity** | `<rig>/crew/<name>` | `<rig>/polecats/<name>` |
 
 ### The Core Principle
@@ -208,6 +209,40 @@ Identity is preserved even when working cross-rig:
 - `gastown/crew/joe` working in `~/gt/beads/crew/gastown-joe/`
 - Commits still attributed to `gastown/crew/joe`
 - Work appears on joe's CV, not beads rig's workers
+
+## The Rebase-as-Work Architecture
+
+Gas Town uses a fundamentally different approach to merge conflicts than traditional workflows:
+
+**Traditional approach (doesn't scale):**
+```
+Polecat finishes → waits for merge → handles conflicts → re-submits → waits...
+```
+
+**Gas Town approach (rebase-as-work):**
+```
+Polecat finishes → submits to MQ → EXITS IMMEDIATELY
+Refinery handles rebase → conflict? → spawn FRESH polecat
+```
+
+### Key Principles
+
+1. **"Polecat done at MR submit"** - A polecat's job ends when it runs `gt done`. It doesn't wait for merge results, doesn't handle conflicts, doesn't get feedback. It submits and dies.
+
+2. **"Conflicts are new work"** - Merge conflicts aren't "fixes to existing work" - they're new tasks that happen to have context from a previous attempt. The Refinery creates a conflict-resolution task and a fresh polecat handles it.
+
+3. **"Convoy age creates pressure"** - Old convoys automatically get priority boosted. No manual escalation needed - the system applies backpressure naturally.
+
+4. **"Priority function is deterministic"** - MR scoring is purely mechanical: base priority, retry penalty, convoy age bonus, age tiebreaker. No human judgment in the queue.
+
+### Why This Works
+
+- **No blocking** - Polecats never wait for merge outcomes
+- **Clean context** - Fresh polecats don't carry accumulated confusion
+- **Linear history** - Sequential rebasing prevents cascading conflicts
+- **Resource efficiency** - Polecat resources freed immediately on completion
+
+See [PRIMING.md](../PRIMING.md) for the quick-start guide and [Refinery Merge Workflow](concepts/refinery-merge-workflow.md) for implementation details.
 
 ## The Propulsion Principle
 

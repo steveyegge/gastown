@@ -48,13 +48,17 @@ never sit idle. The simple model: **sandbox dies with session**.
 - **Faster turnover** - Resources freed immediately on completion
 - **Simpler mental model** - Done means gone
 
-### What About Pending Merges?
+### What About Pending Merges? (Rebase-as-Work)
 
 The Refinery owns the merge queue. Once `gt done` submits work:
 - The branch is pushed to origin
 - Work exists in the MQ, not in the polecat
 - If rebase fails, Refinery re-implements on new baseline (fresh polecat)
 - The original polecat is already gone - no sending work "back"
+
+This is the **rebase-as-work** pattern: conflicts are treated as new work, not fixes to
+existing work. The original polecat's job ended at MR submission. A fresh polecat with
+clean context handles any re-implementation needed.
 
 ## The Three Layers
 
@@ -307,6 +311,8 @@ This distinction matters for:
 
 ## Related Documentation
 
+- [PRIMING.md](../../PRIMING.md) - Quick-start guide for Gas Town agents
 - [Overview](../overview.md) - Role taxonomy and architecture
+- [Refinery Merge Workflow](refinery-merge-workflow.md) - Merge queue and rebase-as-work details
 - [Molecules](molecules.md) - Molecule execution and polecat workflow
 - [Propulsion Principle](propulsion-principle.md) - Why work triggers immediate execution
