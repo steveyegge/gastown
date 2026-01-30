@@ -174,7 +174,8 @@ func execAgent(cfg *config.RuntimeConfig, prompt string) error {
 // Used when we're already in the target session and just need to start the runtime.
 // If prompt is provided, it's passed according to the runtime's prompt mode.
 func execRuntime(prompt, rigPath, configDir string) error {
-	runtimeConfig := config.LoadRuntimeConfig(rigPath)
+	townRoot := filepath.Dir(rigPath)
+	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, rigPath)
 	args := runtimeConfig.BuildArgsWithPrompt(prompt)
 	if len(args) == 0 {
 		return fmt.Errorf("runtime command not configured")
