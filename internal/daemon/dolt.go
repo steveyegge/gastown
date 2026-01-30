@@ -273,7 +273,7 @@ func (m *DoltServerManager) startLocked() error {
 	setSysProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		_ = logFile.Close()
 		return fmt.Errorf("starting dolt sql-server: %w", err)
 	}
 
