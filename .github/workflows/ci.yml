@@ -239,7 +239,9 @@ jobs:
         run: go install github.com/steveyegge/beads/cmd/bd@v0.47.1
 
       - name: Build gt
-        run: make build
+        run: |
+          make build
+          cp gt $(go env GOPATH)/bin/
 
       - name: Add to PATH
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
