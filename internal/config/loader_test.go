@@ -2450,6 +2450,7 @@ func TestRoleAgentConfigWithCustomAgent(t *testing.T) {
 		t.Skip("test has Windows file I/O issues - settings not persisting before read")
 	}
 	t.Parallel()
+	skipIfAgentBinaryMissing(t, "claude", "opencode")
 
 	townRoot := t.TempDir()
 	rigPath := filepath.Join(townRoot, "testrig")
@@ -2634,6 +2635,7 @@ func TestCustomClaudeVariants(t *testing.T) {
 		t.Skip("test has Windows file I/O issues - settings not persisting before read")
 	}
 	t.Parallel()
+	skipIfAgentBinaryMissing(t, "claude")
 
 	// Verify that claude-opus/sonnet/haiku are NOT built-in presets
 	variants := []string{"claude-opus", "claude-sonnet", "claude-haiku"}
