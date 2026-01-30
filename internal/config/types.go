@@ -493,7 +493,7 @@ func defaultRuntimeArgs(provider string) []string {
 	case "claude":
 		return []string{"--dangerously-skip-permissions"}
 	case "devin":
-		return []string{"--permission-mode", "bypass"}
+		return []string{"--permission-mode", "dangerous"}
 	default:
 		return nil
 	}

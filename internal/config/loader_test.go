@@ -915,15 +915,15 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 		},
 		{
 			name:   "prompt prefix (devin style)",
-			rc:     &RuntimeConfig{Command: "devin", Args: []string{"--permission-mode", "bypass"}, PromptPrefix: "--"},
+			rc:     &RuntimeConfig{Command: "devin", Args: []string{"--permission-mode", "dangerous"}, PromptPrefix: "--"},
 			prompt: "hello world",
-			want:   `devin --permission-mode bypass -- "hello world"`,
+			want:   `devin --permission-mode dangerous -- "hello world"`,
 		},
 		{
 			name:   "prompt prefix with no prompt",
-			rc:     &RuntimeConfig{Command: "devin", Args: []string{"--permission-mode", "bypass"}, PromptPrefix: "--"},
+			rc:     &RuntimeConfig{Command: "devin", Args: []string{"--permission-mode", "dangerous"}, PromptPrefix: "--"},
 			prompt: "",
-			want:   `devin --permission-mode bypass`,
+			want:   `devin --permission-mode dangerous`,
 		},
 	}
 
@@ -1224,7 +1224,7 @@ func TestBuildPolecatStartupCommandWithDevinOverride(t *testing.T) {
 	if !strings.Contains(cmd, "GT_POLECAT=toast") {
 		t.Fatalf("expected GT_POLECAT export in command: %q", cmd)
 	}
-	if !strings.Contains(cmd, "devin --permission-mode bypass") {
+	if !strings.Contains(cmd, "devin --permission-mode dangerous") {
 		t.Fatalf("expected devin command in output: %q", cmd)
 	}
 }
@@ -2682,6 +2682,36 @@ func TestBuildStartupCommandWithAgentOverride_UsesGTRootFromEnvVars(t *testing.T
 	}
 }
 
+func TestBuildAgentStartupCommandWithDevinAndPrompt(t *testing.T) {
+	t.Parallel()
+	ResetRegistryForTesting()
+	townRoot := t.TempDir()
+
+	// Create town settings with devin as default agent
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "devin"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// This is what mayor.Start() calls - with a beacon prompt
+	beacon := "test beacon message"
+	cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "", townRoot, "", beacon, "")
+	if err != nil {
+		t.Fatalf("BuildAgentStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should use devin with --permission-mode dangerous
+	if !strings.Contains(cmd, "devin --permission-mode dangerous") {
+		t.Errorf("expected 'devin --permission-mode dangerous' in command, got: %q", cmd)
+	}
+
+	// Should have -- before the prompt (Devin's PromptPrefix)
+	if !strings.Contains(cmd, "-- \"test beacon message\"") {
+		t.Errorf("expected '-- \"test beacon message\"' in command (Devin requires -- before prompt), got: %q", cmd)
+	}
+}
+
 func TestBuildStartupCommand_UsesGTRootFromEnvVars(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()
@@ -2709,5 +2739,9 @@ func TestBuildStartupCommand_UsesGTRootFromEnvVars(t *testing.T) {
 	}
 	if strings.Contains(cmd, "claude") {
 		t.Errorf("did not expect claude fallback when GT_ROOT is provided: %q", cmd)
+	}
+	// Should have --permission-mode dangerous
+	if !strings.Contains(cmd, "--permission-mode dangerous") {
+		t.Errorf("expected --permission-mode dangerous in command, got: %q", cmd)
 	}
 }

@@ -187,7 +187,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 	AgentDevin: {
 		Name:                AgentDevin,
 		Command:             "devin",
-		Args:                []string{"--permission-mode", "bypass"},
+		Args:                []string{"--permission-mode", "dangerous"},
 		ProcessNames:        []string{"devin"},
 		SessionIDEnv:        "",
 		ResumeFlag:          "-c",

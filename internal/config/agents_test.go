@@ -461,7 +461,7 @@ func TestAgentCommandGeneration(t *testing.T) {
 		{
 			preset:       AgentDevin,
 			wantCommand:  "devin",
-			wantContains: []string{"--permission-mode", "bypass"},
+			wantContains: []string{"--permission-mode", "dangerous"},
 		},
 	}
 
@@ -548,17 +548,17 @@ func TestDevinAgentPreset(t *testing.T) {
 	}
 
 	hasPermissionMode := false
-	hasBypass := false
+	hasDangerous := false
 	for _, arg := range info.Args {
 		if arg == "--permission-mode" {
 			hasPermissionMode = true
 		}
-		if arg == "bypass" {
-			hasBypass = true
+		if arg == "dangerous" {
+			hasDangerous = true
 		}
 	}
-	if !hasPermissionMode || !hasBypass {
-		t.Errorf("devin args %v missing --permission-mode bypass", info.Args)
+	if !hasPermissionMode || !hasDangerous {
+		t.Errorf("devin args %v missing --permission-mode dangerous", info.Args)
 	}
 
 	if len(info.ProcessNames) == 0 {
