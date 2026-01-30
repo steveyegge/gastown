@@ -1,8 +1,0 @@
-description = "Shiny workflow with security audit aspect applied."
-extends = ["shiny"]
-formula = "shiny-secure"
-type = "workflow"
-version = 1
-
-[compose]
-aspects = ["security-audit"]
