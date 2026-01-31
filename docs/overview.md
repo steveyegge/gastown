@@ -253,6 +253,36 @@ All Gas Town agents follow the same core principle:
 This applies regardless of role. The hook is your assignment. Execute it immediately
 without waiting for confirmation. Gas Town is a steam engine - agents are pistons.
 
+## Agent Advice System
+
+The [Agent Advice](concepts/agent-advice.md) system provides dynamic guidance to agents
+based on learned patterns and operational experience. Unlike static role templates, advice
+can be created, updated, and removed at runtime.
+
+Advice is scoped hierarchically:
+- **Global** - applies to all agents everywhere
+- **Role** - applies to a role type (polecat, crew, witness)
+- **Rig** - applies to all agents in a specific rig
+- **Agent** - applies to a specific agent identity
+
+Advice is delivered during `gt prime` and appears in the agent's context.
+
+```bash
+# Create global advice
+bd advice add "Always verify git status before pushing"
+
+# Create role-specific advice
+bd advice add --role polecat "Check hook before checking mail"
+
+# Create rig-specific advice
+bd advice add --rig gastown "Use fimbaz account for spawning"
+
+# List all advice
+bd advice list
+```
+
+See [Agent Advice](concepts/agent-advice.md) for full documentation.
+
 ## Model Evaluation and A/B Testing
 
 Gas Town's attribution and work history features enable objective model comparison:

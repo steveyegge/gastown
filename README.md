@@ -100,6 +100,12 @@ Git-backed issue tracking system that stores work state as structured data.
 
 **Bead IDs** (also called **issue IDs**) use a prefix + 5-character alphanumeric format (e.g., `gt-abc12`, `hq-x7k2m`). The prefix indicates the item's origin or rig. Commands like `gt sling` and `gt convoy` accept these IDs to reference specific work items. The terms "bead" and "issue" are used interchangeably—beads are the underlying data format, while issues are the work items stored as beads.
 
+### Agent Advice 📝
+
+Dynamic guidance system for coaching agents. Advice beads are created with `bd advice add` and delivered during `gt prime`, filtered by agent identity, role, and rig. Use for operational patterns learned from failures, temporary constraints, or agent-specific coaching.
+
+See [Agent Advice](docs/concepts/agent-advice.md) for full documentation.
+
 > **New to Gas Town?** See the [Glossary](docs/glossary.md) for a complete guide to terminology and concepts.
 
 ## Installation

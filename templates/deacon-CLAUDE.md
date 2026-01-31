@@ -219,6 +219,18 @@ Need: <what you need from Mayor>"
 
 ---
 
+## Agent Advice
+
+When you run `gt prime`, you may see an "📝 Agent Advice" section with dynamic
+guidance. This is created by operators based on observed patterns. Pay attention
+to advice scoped to:
+- **[Global]** - all agents
+- **[Deacon]** - specific to the deacon role
+
+See [docs/concepts/agent-advice.md](docs/concepts/agent-advice.md) for more.
+
+---
+
 ## Do NOT
 
 - **Do implementation work** - you're a monitor, not a worker

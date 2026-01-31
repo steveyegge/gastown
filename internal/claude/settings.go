@@ -11,16 +11,17 @@ import (
 //go:embed config/*.json config/*.md
 var configFS embed.FS
 
-// RoleType indicates whether a role is autonomous or interactive.
+// RoleType indicates the settings template to use for a role.
 type RoleType string
 
 const (
-	// Autonomous roles (polecat, witness, refinery) need mail in SessionStart
+	// Autonomous roles (polecat, witness, refinery, deacon, boot) need mail in SessionStart
 	// because they may be triggered externally without user input.
+	// They do NOT have decision hooks - they work autonomously without human escalation.
 	Autonomous RoleType = "autonomous"
 
 	// Interactive roles (mayor, crew) wait for user input, so UserPromptSubmit
-	// handles mail injection.
+	// handles mail injection. They have decision hooks for human-in-the-loop.
 	Interactive RoleType = "interactive"
 )
 

@@ -1209,9 +1209,30 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 	return os.WriteFile(claudePath, []byte(bootstrap), 0644)
 }
 
-// createPatrolHooks creates .claude/settings.json with hooks for patrol roles.
+// claudeSettings represents the Claude Code settings.json structure for hook merging.
+type claudeSettings struct {
+	EnabledPlugins map[string]bool                `json:"enabledPlugins,omitempty"`
+	Hooks          map[string][]claudeHookMatcher `json:"hooks,omitempty"`
+}
+
+// claudeHookMatcher represents a hook matcher entry.
+type claudeHookMatcher struct {
+	Matcher string       `json:"matcher"`
+	Hooks   []claudeHook `json:"hooks"`
+}
+
+// claudeHook represents an individual hook command.
+type claudeHook struct {
+	Type    string `json:"type"`
+	Command string `json:"command,omitempty"`
+}
+
+// createPatrolHooks creates or updates .claude/settings.json with hooks for patrol roles.
 // These hooks trigger gt prime on session start and inject mail, enabling
 // autonomous patrol execution for Witness and Refinery roles.
+//
+// IMPORTANT: This function merges patrol hooks into existing settings rather than
+// overwriting them. This preserves hooks from claude-flow or other sources.
 func (m *Manager) createPatrolHooks(workspacePath string, runtimeConfig *config.RuntimeConfig) error {
 	if runtimeConfig == nil || runtimeConfig.Hooks == nil || runtimeConfig.Hooks.Provider != "claude" {
 		return nil
@@ -1225,47 +1246,101 @@ func (m *Manager) createPatrolHooks(workspacePath string, runtimeConfig *config.
 		return fmt.Errorf("creating settings dir: %w", err)
 	}
 
-	// Standard patrol hooks - same as deacon
-	hooksJSON := `{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt prime && gt mail check --inject"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt prime"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt mail check --inject"
-          }
-        ]
-      }
-    ]
-  }
-}
-`
 	settingsPath := filepath.Join(settingsDir, runtimeConfig.Hooks.SettingsFile)
-	return os.WriteFile(settingsPath, []byte(hooksJSON), 0600)
+
+	// Define the patrol hooks we want to ensure exist
+	patrolHooks := map[string][]claudeHookMatcher{
+		"SessionStart": {
+			{
+				Matcher: "",
+				Hooks: []claudeHook{
+					{Type: "command", Command: "gt prime && gt mail check --inject"},
+				},
+			},
+		},
+		"PreCompact": {
+			{
+				Matcher: "",
+				Hooks: []claudeHook{
+					{Type: "command", Command: "gt prime"},
+				},
+			},
+		},
+		"UserPromptSubmit": {
+			{
+				Matcher: "",
+				Hooks: []claudeHook{
+					{Type: "command", Command: "gt mail check --inject"},
+				},
+			},
+		},
+	}
+
+	// Read existing settings if present
+	var settings claudeSettings
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			// If existing file is invalid JSON, start fresh but warn
+			fmt.Printf("Warning: could not parse existing %s, will recreate: %v\n", settingsPath, err)
+			settings = claudeSettings{}
+		}
+	}
+
+	// Initialize hooks map if nil
+	if settings.Hooks == nil {
+		settings.Hooks = make(map[string][]claudeHookMatcher)
+	}
+
+	// Merge patrol hooks into existing settings
+	for hookType, patrolMatchers := range patrolHooks {
+		for _, patrolMatcher := range patrolMatchers {
+			for _, patrolHook := range patrolMatcher.Hooks {
+				if !m.hasHookCommand(settings.Hooks[hookType], patrolHook.Command) {
+					// Add this patrol hook to existing matchers or create new one
+					settings.Hooks[hookType] = m.mergeHookMatcher(settings.Hooks[hookType], patrolMatcher.Matcher, patrolHook)
+				}
+			}
+		}
+	}
+
+	// Write merged settings
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling settings: %w", err)
+	}
+
+	return os.WriteFile(settingsPath, data, 0600)
+}
+
+// hasHookCommand checks if any matcher in the hook list contains the specified command.
+func (m *Manager) hasHookCommand(matchers []claudeHookMatcher, command string) bool {
+	for _, matcher := range matchers {
+		for _, hook := range matcher.Hooks {
+			if hook.Command == command {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mergeHookMatcher adds a hook to existing matchers or creates a new matcher entry.
+// If a matcher with the same pattern exists, appends the hook to it.
+// Otherwise creates a new matcher entry with the hook.
+func (m *Manager) mergeHookMatcher(matchers []claudeHookMatcher, pattern string, hook claudeHook) []claudeHookMatcher {
+	// Look for existing matcher with the same pattern
+	for i, matcher := range matchers {
+		if matcher.Matcher == pattern {
+			matchers[i].Hooks = append(matchers[i].Hooks, hook)
+			return matchers
+		}
+	}
+
+	// No matching pattern found, create new matcher
+	return append(matchers, claudeHookMatcher{
+		Matcher: pattern,
+		Hooks:   []claudeHook{hook},
+	})
 }
 
 // seedPatrolMolecules creates patrol molecule prototypes in the rig's beads database.

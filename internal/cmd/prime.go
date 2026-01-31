@@ -64,7 +64,16 @@ HOOK MODE (--hook):
   Claude Code sends JSON on stdin:
     {"session_id": "uuid", "transcript_path": "/path", "source": "startup|resume"}
 
-  Other agents can set GT_SESSION_ID environment variable instead.`,
+  Other agents can set GT_SESSION_ID environment variable instead.
+
+Output includes:
+  - Role-specific context from templates
+  - Agent Advice (filtered by role, rig, and agent identity)
+  - Handoff content from previous sessions
+  - Auto-seance project context
+  - Hooked work details (for autonomous mode)
+
+See docs/concepts/agent-advice.md for advice system documentation.`,
 	RunE: runPrime,
 }
 

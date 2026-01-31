@@ -123,6 +123,54 @@ bd create -t bug "No docs for multi-rig bead routing" --parent hq-8af330 \
 
 ---
 
+## Agent Advice System
+
+**Advice appears automatically in `gt prime` output.** Advice is persistent guidance that helps
+agents work effectively. It's surfaced at session start, not buried in docs.
+
+### Advice Scopes (Hierarchy)
+
+| Scope | Audience | Example Use |
+|-------|----------|-------------|
+| **Global** | All agents | "Always verify git status before pushing" |
+| **Rig** | Agents in a rig | "Use fimbaz account for spawning in gastown" |
+| **Role** | Role type in a rig | "Polecats in beads should use go test ./..." |
+| **Agent** | Specific agent | "quartz owns the CLI implementation" |
+
+### When to Create Advice
+
+Create advice when you discover something others should know:
+- **Workarounds** for known issues
+- **Conventions** for a codebase
+- **Gotchas** that caused you pain
+- **Ownership** assignments
+
+```bash
+# Global advice (everyone sees this)
+bd advice add "Always check hook before mail" -d "Hook takes priority per GUPP"
+
+# Rig advice (only this rig)
+bd advice add "Use go test for testing" --rig beads -d "Not pytest"
+
+# Role advice (requires rig)
+bd advice add "Complete work before gt done" --rig gastown --role polecat \
+  -d "Polecats should never have uncommitted changes at session end"
+```
+
+### Advice vs Beads
+
+| Use | Advice | Bead |
+|-----|--------|------|
+| Persistent guidance | ✓ | |
+| Known workaround | ✓ | |
+| Track a bug | | ✓ |
+| Track work to do | | ✓ |
+| Document a convention | ✓ | |
+
+**Rule of thumb:** Advice is "how to work here". Beads are "what work to do".
+
+---
+
 ## Cross-Rig Work Permissions
 
 **You are allowed to create beads and sling work across rigs.**

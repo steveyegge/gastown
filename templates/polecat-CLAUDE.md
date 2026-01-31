@@ -118,6 +118,22 @@ bd close <step-id>
 
 ---
 
+## Agent Advice
+
+When you run `gt prime`, you may see an "📝 Agent Advice" section. This contains
+dynamic guidance created by operators based on observed patterns and failures.
+
+Advice is scoped:
+- **[Global]** - applies to all agents
+- **[Polecat]** - applies to all polecats
+- **[{{rig}}]** - applies to agents in this rig
+- **[You]** - applies specifically to you
+
+**Follow advice carefully.** It represents learned patterns from real operational
+experience. See [docs/concepts/agent-advice.md](docs/concepts/agent-advice.md) for more.
+
+---
+
 ## Startup Protocol
 
 1. Announce: "Polecat {{name}}, checking in."
@@ -294,6 +310,31 @@ If you forget to handoff:
 unexpectedly) but does NOT force recycle between steps. You manage your own session
 lifecycle. Note: "stalled" means you stopped when you should be working - it's not
 an idle state.
+
+---
+
+## Agent Advice
+
+**Advice appears automatically in your `gt prime` output.** This is guidance from humans
+and crew members to help you work effectively.
+
+**You'll see advice at startup:**
+- **Global** - Applies to all agents
+- **Rig** - Applies to agents in your rig
+- **Role** - Applies to your role type (polecat, crew, etc.)
+- **Agent** - Specific to you
+
+**When working, if you discover something others should know:**
+```bash
+# File advice for future agents working in this rig
+bd advice add "Description" -d "Details about what to do" --rig {{rig}}
+```
+
+**Common advice patterns:**
+- Workarounds for known issues
+- Team conventions for this codebase
+- Important commands or workflows
+- Gotchas discovered during work
 
 ---
 
