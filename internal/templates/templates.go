@@ -8,13 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"text/template"
+
+	"github.com/steveyegge/gastown/internal/templates/commands"
 )
 
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
-
-//go:embed commands/*.md
-var commandsFS embed.FS
 
 // Templates manages role and message templates.
 type Templates struct {
@@ -189,84 +188,35 @@ func GetAllRoleTemplates() (map[string][]byte, error) {
 // even if the source repo doesn't have them tracked.
 // If a command already exists, it is skipped (no overwrite).
 func ProvisionCommands(workspacePath string) error {
-	entries, err := commandsFS.ReadDir("commands")
-	if err != nil {
-		return fmt.Errorf("reading commands directory: %w", err)
-	}
+	return commands.ProvisionFor(workspacePath, "claude")
+}
 
-	// Create .claude/commands/ directory
-	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
-	if err := os.MkdirAll(commandsDir, 0755); err != nil {
-		return fmt.Errorf("creating commands directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		destPath := filepath.Join(commandsDir, entry.Name())
-
-		// Skip if command already exists (don't overwrite user customizations)
-		if _, err := os.Stat(destPath); err == nil {
-			continue
-		}
-
-		content, err := commandsFS.ReadFile("commands/" + entry.Name())
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", entry.Name(), err)
-		}
-
-		if err := os.WriteFile(destPath, content, 0644); err != nil { //nolint:gosec // G306: template files are non-sensitive
-			return fmt.Errorf("writing %s: %w", entry.Name(), err)
-		}
-	}
-
-	return nil
+// ProvisionCommandsFor provisions commands for a specific agent.
+func ProvisionCommandsFor(workspacePath, agent string) error {
+	return commands.ProvisionFor(workspacePath, agent)
 }
 
 // CommandNames returns the list of embedded slash commands.
-func CommandNames() ([]string, error) {
-	entries, err := commandsFS.ReadDir("commands")
-	if err != nil {
-		return nil, fmt.Errorf("reading commands directory: %w", err)
-	}
-
-	var names []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			names = append(names, entry.Name())
-		}
-	}
-	return names, nil
+func CommandNames() []string {
+	return commands.Names()
 }
 
 // HasCommands checks if a workspace has the .claude/commands/ directory provisioned.
 func HasCommands(workspacePath string) bool {
-	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
-	info, err := os.Stat(commandsDir)
-	return err == nil && info.IsDir()
+	return HasCommandsFor(workspacePath, "claude")
+}
+
+// HasCommandsFor checks if a workspace has commands provisioned for an agent.
+func HasCommandsFor(workspacePath, agent string) bool {
+	return len(commands.MissingFor(workspacePath, agent)) == 0
 }
 
 // MissingCommands returns the list of embedded commands missing from the workspace.
-func MissingCommands(workspacePath string) ([]string, error) {
-	entries, err := commandsFS.ReadDir("commands")
-	if err != nil {
-		return nil, fmt.Errorf("reading commands directory: %w", err)
-	}
+func MissingCommands(workspacePath string) []string {
+	return commands.MissingFor(workspacePath, "claude")
+}
 
-	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
-	var missing []string
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		destPath := filepath.Join(commandsDir, entry.Name())
-		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			missing = append(missing, entry.Name())
-		}
-	}
-
-	return missing, nil
+// MissingCommandsFor returns missing commands for a specific agent.
+func MissingCommandsFor(workspacePath, agent string) []string {
+	return commands.MissingFor(workspacePath, agent)
 }

@@ -34,18 +34,10 @@ func (c *CommandsCheck) Run(ctx *CheckContext) *CheckResult {
 	c.missingCommands = nil
 
 	// Check town-level commands
-	missing, err := templates.MissingCommands(ctx.TownRoot)
-	if err != nil {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Error checking town-level commands: %v", err),
-		}
-	}
+	missing := templates.MissingCommands(ctx.TownRoot)
 
 	if len(missing) == 0 {
-		// Get command names for the success message
-		names, _ := templates.CommandNames()
+		names := templates.CommandNames()
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,

@@ -9,10 +9,17 @@ import (
 	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/opencode"
+	"github.com/steveyegge/gastown/internal/templates/commands"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
-// EnsureSettingsForRole installs runtime hook settings when supported.
+// EnsureSettingsForRole provisions all agent-specific configuration for a role.
+// This includes settings/plugins AND slash commands.
+//
+// Design note: We keep this function name (vs creating EnsureAgentSetup) to minimize
+// changes across the codebase. All existing callers automatically get command
+// provisioning without code changes. The name is still accurate as commands are
+// part of agent settings/configuration.
 func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error {
 	if rc == nil {
 		rc = config.DefaultRuntimeConfig()
@@ -22,14 +29,32 @@ func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error
 		return nil
 	}
 
-	switch rc.Hooks.Provider {
-	case "claude":
-		return claude.EnsureSettingsForRoleAt(workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile)
-	case "opencode":
-		return opencode.EnsurePluginAt(workDir, rc.Hooks.Dir, rc.Hooks.SettingsFile)
-	default:
+	provider := rc.Hooks.Provider
+	if provider == "" || provider == "none" {
 		return nil
 	}
+
+	// 1. Provider-specific settings (settings.json for Claude, plugin for OpenCode)
+	switch provider {
+	case "claude":
+		if err := claude.EnsureSettingsForRoleAt(workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
+			return err
+		}
+	case "opencode":
+		if err := opencode.EnsurePluginAt(workDir, rc.Hooks.Dir, rc.Hooks.SettingsFile); err != nil {
+			return err
+		}
+	}
+
+	// 2. Slash commands (agent-agnostic, uses shared body with provider-specific frontmatter)
+	// Only provision for known agents to maintain backwards compatibility
+	if commands.IsKnownAgent(provider) {
+		if err := commands.ProvisionFor(workDir, provider); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // SessionIDFromEnv returns the runtime session ID, if present.
