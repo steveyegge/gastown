@@ -280,6 +280,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 
 	// Track whether user explicitly provided --prefix (before deriving)
 	userProvidedPrefix := opts.BeadsPrefix != ""
+	opts.BeadsPrefix = strings.TrimSuffix(opts.BeadsPrefix, "-")
 
 	// Derive defaults
 	if opts.BeadsPrefix == "" {
@@ -398,7 +399,7 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		if sourcePrefix := detectBeadsPrefixFromConfig(sourceBeadsConfig); sourcePrefix != "" {
 			fmt.Printf("  Detected existing beads prefix '%s' from source repo\n", sourcePrefix)
 			// Only error on mismatch if user explicitly provided --prefix
-			if userProvidedPrefix && opts.BeadsPrefix != sourcePrefix {
+			if userProvidedPrefix && strings.TrimSuffix(opts.BeadsPrefix, "-") != strings.TrimSuffix(sourcePrefix, "-") {
 				return nil, fmt.Errorf("prefix mismatch: source repo uses '%s' but --prefix '%s' was provided; use --prefix %s to match existing issues", sourcePrefix, opts.BeadsPrefix, sourcePrefix)
 			}
 			// Use detected prefix (overrides derived prefix)
@@ -905,7 +906,7 @@ func detectBeadsPrefixFromConfig(configPath string) string {
 				// Remove quotes if present
 				value = strings.Trim(value, `"'`)
 				if value != "" && isValidBeadsPrefix(value) {
-					return value
+					return strings.TrimSuffix(value, "-")
 				}
 			}
 		}
