@@ -1317,6 +1317,135 @@ func TestChainNodeWithChildren(t *testing.T) {
 	}
 }
 
+// TestCancelDecision tests canceling/dismissing a decision.
+func TestCancelDecision(t *testing.T) {
+	t.Run("successful cancellation", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/gastown.v1.DecisionService/Cancel" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			if r.Method != "POST" {
+				t.Errorf("method = %s, want POST", r.Method)
+			}
+
+			var req map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&req)
+
+			if req["decisionId"] != "dec-123" {
+				t.Errorf("decisionId = %v, want dec-123", req["decisionId"])
+			}
+			if req["reason"] != "No longer needed" {
+				t.Errorf("reason = %v, want 'No longer needed'", req["reason"])
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{})
+		}))
+		defer server.Close()
+
+		c := NewClient(server.URL)
+		err := c.CancelDecision(context.Background(), "dec-123", "No longer needed")
+		if err != nil {
+			t.Fatalf("CancelDecision failed: %v", err)
+		}
+	})
+
+	t.Run("cancellation without reason", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&req)
+
+			if req["decisionId"] != "dec-456" {
+				t.Errorf("decisionId = %v, want dec-456", req["decisionId"])
+			}
+			// reason should not be present if empty
+			if _, hasReason := req["reason"]; hasReason {
+				t.Error("reason should not be included when empty")
+			}
+
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		c := NewClient(server.URL)
+		err := c.CancelDecision(context.Background(), "dec-456", "")
+		if err != nil {
+			t.Fatalf("CancelDecision failed: %v", err)
+		}
+	})
+
+	t.Run("with API key", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiKey := r.Header.Get("X-GT-API-Key")
+			if apiKey != "secret-key" {
+				t.Errorf("X-GT-API-Key = %q, want secret-key", apiKey)
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		c := NewClient(server.URL, WithAPIKey("secret-key"))
+		err := c.CancelDecision(context.Background(), "dec-789", "test")
+		if err != nil {
+			t.Fatalf("CancelDecision failed: %v", err)
+		}
+	})
+
+	t.Run("server error - not found", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		c := NewClient(server.URL)
+		err := c.CancelDecision(context.Background(), "nonexistent", "reason")
+		if err == nil {
+			t.Error("expected error for not found decision")
+		}
+		if !strings.Contains(err.Error(), "404") {
+			t.Errorf("error = %v, expected to contain 404", err)
+		}
+	})
+
+	t.Run("server error - internal", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		c := NewClient(server.URL)
+		err := c.CancelDecision(context.Background(), "dec-123", "reason")
+		if err == nil {
+			t.Error("expected error for server error response")
+		}
+	})
+
+	t.Run("context cancellation", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(5 * time.Second)
+		}))
+		defer server.Close()
+
+		c := NewClient(server.URL)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		err := c.CancelDecision(ctx, "dec-123", "reason")
+		if err == nil {
+			t.Error("expected error for cancelled context")
+		}
+	})
+
+	t.Run("connection refused", func(t *testing.T) {
+		c := NewClient("http://localhost:9999")
+		err := c.CancelDecision(context.Background(), "dec-123", "reason")
+		if err == nil {
+			t.Error("expected error for unreachable server")
+		}
+	})
+}
+
 // TestCreateDecisionWithPredecessor tests creating a chained decision.
 func TestCreateDecisionWithPredecessor(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
