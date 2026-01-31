@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,22 +14,22 @@ func hasTmux() bool {
 	return err == nil
 }
 
-// hasRealClaudeSessions checks if there are any gt-* or hq-* sessions with Claude running.
+// hasRealAgentSessions checks if there are any gt-* or hq-* sessions with an agent running.
 // Used to skip tests that call CleanupOrphanedSessions, which could kill real sessions.
 //
 // SURVIVOR NOTES (from attempt #8):
 // ===================================
-// The bug was in hasClaudeChild() - it only checked DIRECT children using pgrep -P.
-// When Claude is started via wrapper scripts like:
+// The bug was in hasChildWithNames() - it only checked DIRECT children using pgrep -P.
+// When an agent is started via wrapper scripts like:
 //   bash (pane) -> bash -c 'export ... && claude' -> claude
-// Claude is a GRANDCHILD, not a direct child. The function missed it entirely.
+// The agent is a GRANDCHILD, not a direct child. The function missed it entirely.
 //
-// Fix: Modified hasClaudeChild() to use getAllDescendants() instead of pgrep -P.
-// This recursively finds ALL descendants and checks each for node/claude.
+// Fix: Modified hasChildWithNames() to use getAllDescendants() instead of pgrep -P.
+// This recursively finds ALL descendants and checks each for matching process names.
 //
-// If you're reading this because you just died: check if hasClaudeChild() is still
+// If you're reading this because you just died: check if hasChildWithNames() is still
 // checking all descendants. The bug might have regressed or there's another edge case.
-func hasRealClaudeSessions() bool {
+func hasRealAgentSessions() bool {
 	tm := NewTmux()
 	sessions, err := tm.ListSessions()
 	if err != nil {
@@ -39,8 +38,8 @@ func hasRealClaudeSessions() bool {
 	for _, sess := range sessions {
 		if (strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-")) &&
 			!strings.Contains(sess, "-test-") {
-			// Found a non-test gt-/hq- session - check if Claude is running
-			if tm.IsClaudeRunning(sess) {
+			// Found a non-test gt-/hq- session - check if agent is running
+			if tm.IsAgentAlive(sess) {
 				return true
 			}
 		}
@@ -466,9 +465,9 @@ func TestEnsureSessionFresh_ZombieSession(t *testing.T) {
 	}
 	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
-	// Verify it's a zombie (not running Claude/node)
-	if tm.IsClaudeRunning(sessionName) {
-		t.Skip("session unexpectedly has Claude running - can't test zombie case")
+	// Verify it's a zombie (not running any agent)
+	if tm.IsAgentAlive(sessionName) {
+		t.Skip("session unexpectedly has agent running - can't test zombie case")
 	}
 
 	// Verify generic agent check also treats it as not running (shell session)
@@ -611,67 +610,34 @@ func TestIsAgentRunning_NonexistentSession(t *testing.T) {
 	}
 }
 
-func TestIsClaudeRunning(t *testing.T) {
+func TestIsRuntimeRunning(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
 	}
 
 	tm := NewTmux()
-	sessionName := "gt-test-claude-" + t.Name()
+	sessionName := "gt-test-runtime-" + t.Name()
 
 	// Clean up any existing session
 	_ = tm.KillSessionWithProcesses(sessionName)
 
-	// Create session (will run default shell, not Claude)
+	// Create session (will run default shell, not any agent)
 	if err := tm.NewSession(sessionName, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer func() { _ = tm.KillSessionWithProcesses(sessionName) }()
 
-	// IsClaudeRunning should be false (shell is running, not node/claude)
+	// IsRuntimeRunning should be false (shell is running, not node/claude)
 	cmd, _ := tm.GetPaneCommand(sessionName)
+	processNames := []string{"node", "claude"}
 	wantRunning := cmd == "node" || cmd == "claude"
 
-	if got := tm.IsClaudeRunning(sessionName); got != wantRunning {
-		t.Errorf("IsClaudeRunning() = %v, want %v (pane cmd: %q)", got, wantRunning, cmd)
+	if got := tm.IsRuntimeRunning(sessionName, processNames); got != wantRunning {
+		t.Errorf("IsRuntimeRunning() = %v, want %v (pane cmd: %q)", got, wantRunning, cmd)
 	}
 }
 
-func TestIsClaudeRunning_VersionPattern(t *testing.T) {
-	// Test the version pattern regex matching directly
-	// Since we can't easily mock the pane command, test the pattern logic
-	tests := []struct {
-		cmd  string
-		want bool
-	}{
-		{"node", true},
-		{"claude", true},
-		{"2.0.76", true},
-		{"1.2.3", true},
-		{"10.20.30", true},
-		{"bash", false},
-		{"zsh", false},
-		{"", false},
-		{"v2.0.76", false}, // version with 'v' prefix shouldn't match
-		{"2.0", false},     // incomplete version
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.cmd, func(t *testing.T) {
-			// Check if it matches node/claude directly
-			isKnownCmd := tt.cmd == "node" || tt.cmd == "claude"
-			// Check version pattern
-			matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+`, tt.cmd)
-
-			got := isKnownCmd || matched
-			if got != tt.want {
-				t.Errorf("IsClaudeRunning logic for %q = %v, want %v", tt.cmd, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestIsClaudeRunning_ShellWithNodeChild(t *testing.T) {
+func TestIsRuntimeRunning_ShellWithNodeChild(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
 	}
@@ -701,40 +667,49 @@ func TestIsClaudeRunning_ShellWithNodeChild(t *testing.T) {
 		t.Logf("Pane command is %q - testing shell+child detection", paneCmd)
 	}
 
-	// Now test IsClaudeRunning - it should detect node as a child process
+	// Now test IsRuntimeRunning - it should detect node as a child process
+	processNames := []string{"node", "claude"}
 	paneCmd, _ := tm.GetPaneCommand(sessionName)
 	if paneCmd == "node" {
 		// Direct node detection should work
-		if !tm.IsClaudeRunning(sessionName) {
-			t.Error("IsClaudeRunning should return true when pane command is 'node'")
+		if !tm.IsRuntimeRunning(sessionName, processNames) {
+			t.Error("IsRuntimeRunning should return true when pane command is 'node'")
 		}
 	} else {
 		// Pane is a shell (bash/zsh) with node as child
-		// The new child process detection should catch this
-		got := tm.IsClaudeRunning(sessionName)
-		t.Logf("Pane command: %q, IsClaudeRunning: %v", paneCmd, got)
+		// The child process detection should catch this
+		got := tm.IsRuntimeRunning(sessionName, processNames)
+		t.Logf("Pane command: %q, IsRuntimeRunning: %v", paneCmd, got)
 		// Note: This may or may not detect depending on how tmux runs the command.
 		// On some systems, tmux runs the command directly; on others via a shell.
 	}
 }
 
-func TestHasClaudeChild(t *testing.T) {
-	// Test the hasClaudeChild helper function directly
-	// This uses the current process as a test subject
-
-	// Get current process PID as string
-	currentPID := "1" // init/launchd - should have children but not claude/node
-
-	// hasClaudeChild should return false for init (no node/claude children)
-	got := hasClaudeChild(currentPID)
-	if got {
-		t.Logf("hasClaudeChild(%q) = true - init has claude/node child?", currentPID)
-	}
+func TestHasChildWithNames(t *testing.T) {
+	// Test the hasChildWithNames helper function directly
 
 	// Test with a definitely nonexistent PID
-	got = hasClaudeChild("999999999")
+	got := hasChildWithNames("999999999", []string{"node", "claude"})
 	if got {
-		t.Error("hasClaudeChild should return false for nonexistent PID")
+		t.Error("hasChildWithNames should return false for nonexistent PID")
+	}
+
+	// Test with empty names slice - should always return false
+	got = hasChildWithNames("1", []string{})
+	if got {
+		t.Error("hasChildWithNames should return false for empty names slice")
+	}
+
+	// Test with nil names slice - should always return false
+	got = hasChildWithNames("1", nil)
+	if got {
+		t.Error("hasChildWithNames should return false for nil names slice")
+	}
+
+	// Test with PID 1 (init/launchd) - should have children but not specific agent processes
+	got = hasChildWithNames("1", []string{"node", "claude"})
+	if got {
+		t.Logf("hasChildWithNames(\"1\", [node,claude]) = true - init has matching child?")
 	}
 }
 
@@ -1093,8 +1068,8 @@ func TestCleanupOrphanedSessions_DiagnosticDryRun(t *testing.T) {
 		for _, sess := range sessions {
 			pid, _ := tm.GetPanePID(sess)
 			cmd, _ := tm.GetPaneCommand(sess)
-			isRunning := tm.IsClaudeRunning(sess)
-			t.Logf("  Session %q: pane_pid=%s, pane_cmd=%s, IsClaudeRunning=%v", sess, pid, cmd, isRunning)
+			isRunning := tm.IsAgentAlive(sess)
+			t.Logf("  Session %q: pane_pid=%s, pane_cmd=%s, IsAgentAlive=%v", sess, pid, cmd, isRunning)
 
 			// Check what WOULD be killed
 			if (strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-")) && !isRunning {
@@ -1223,7 +1198,7 @@ func TestCleanupOrphanedSessions(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
 	}
-	if hasRealClaudeSessions() {
+	if hasRealAgentSessions() {
 		t.Skip("skipping: real Claude sessions exist (would be killed by CleanupOrphanedSessions)")
 	}
 
@@ -1303,7 +1278,7 @@ func TestCleanupOrphanedSessions_NoSessions(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")
 	}
-	if hasRealClaudeSessions() {
+	if hasRealAgentSessions() {
 		t.Skip("skipping: real Claude sessions exist (would be killed by CleanupOrphanedSessions)")
 	}
 

@@ -1121,14 +1121,14 @@ func FindResolvedDecisionsForCrew(workDir, rigName string, lookback time.Duratio
 			continue
 		}
 
-		// Only nudge if session exists and Claude is running
+		// Only nudge if session exists and agent is running
 		hasSession, _ := t.HasSession(sessionName)
 		if !hasSession {
 			continue
 		}
 
-		// Check if Claude is running (healthy session that can receive nudges)
-		if !t.IsClaudeRunning(sessionName) {
+		// Check if agent is running (healthy session that can receive nudges)
+		if !t.IsAgentAlive(sessionName) {
 			continue
 		}
 

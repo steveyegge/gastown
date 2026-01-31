@@ -220,8 +220,8 @@ func recoverFullEscalation(t *tmux.Tmux, sessionName, targetType, rigName, agent
 	}
 	time.Sleep(3 * time.Second)
 
-	// Check if Claude is responding
-	if t.IsClaudeRunning(sessionName) {
+	// Check if agent is responding
+	if t.IsAgentAlive(sessionName) {
 		fmt.Printf("%s Recovery appears successful after /clear.\n", style.SuccessPrefix)
 		fmt.Printf("         Hooked work is preserved.\n")
 		return nil

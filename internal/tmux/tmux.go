@@ -1014,16 +1014,28 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// hasClaudeChild checks if a process has a descendant running claude/node.
-// Used when the pane command is a shell (bash, zsh) that launched claude.
+// hasChildWithNames checks if a process has a descendant matching any of the given names.
+// Used when the pane command is a shell (bash, zsh) that launched an agent.
 //
 // IMPORTANT: This checks ALL descendants, not just direct children.
-// Claude is often started via wrapper scripts like:
-//   bash (pane) -> bash -c 'export ... && claude' -> claude
-// In this case, Claude is a grandchild, not a direct child.
+// Agents are often started via wrapper scripts like:
+//
+//	bash (pane) -> bash -c 'export ... && claude' -> claude
+//
+// In this case, the agent is a grandchild, not a direct child.
 // Using only pgrep -P (direct children) would miss this case and cause
-// CleanupOrphanedSessions to kill sessions with running Claude agents.
-func hasClaudeChild(pid string) bool {
+// CleanupOrphanedSessions to kill sessions with running agents.
+func hasChildWithNames(pid string, names []string) bool {
+	if len(names) == 0 {
+		return false
+	}
+
+	// Build a set of names for fast lookup
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+
 	// Get all descendant PIDs recursively
 	descendants := getAllDescendants(pid)
 	if len(descendants) == 0 {
@@ -1038,7 +1050,7 @@ func hasClaudeChild(pid string) bool {
 			continue
 		}
 		name := strings.TrimSpace(string(out))
-		if name == "node" || name == "claude" {
+		if nameSet[name] {
 			return true
 		}
 		// Also check for version pattern (Claude Code shows version as process name)
@@ -1243,40 +1255,9 @@ func (t *Tmux) IsAgentRunning(session string, expectedPaneCommands ...string) bo
 	return cmd != ""
 }
 
-// IsClaudeRunning checks if Claude appears to be running in the session.
-// Only trusts the pane command - UI markers in scrollback cause false positives.
-// Claude can report as "node", "claude", or a version number like "2.0.76".
-// Also checks for child processes when the pane is a shell running claude via "bash -c".
-func (t *Tmux) IsClaudeRunning(session string) bool {
-	// Check for known command names first
-	if t.IsAgentRunning(session, "node", "claude") {
-		return true
-	}
-	// Check for version pattern (e.g., "2.0.76") - Claude Code shows version as pane command
-	cmd, err := t.GetPaneCommand(session)
-	if err != nil {
-		return false
-	}
-	if versionPattern.MatchString(cmd) {
-		return true
-	}
-	// If pane command is a shell, check for claude/node child processes.
-	// This handles the case where sessions are started with "bash -c 'export ... && claude ...'"
-	for _, shell := range constants.SupportedShells {
-		if cmd == shell {
-			pid, err := t.GetPanePID(session)
-			if err == nil && pid != "" {
-				return hasClaudeChild(pid)
-			}
-			break
-		}
-	}
-	return false
-}
-
 // IsRuntimeRunning checks if a runtime appears to be running in the session.
-// Only trusts the pane command - UI markers in scrollback cause false positives.
-// This is the runtime-config-aware version of IsAgentRunning.
+// Checks both pane command and child processes (for agents started via shell).
+// This is the unified agent detection method for all agent types.
 func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 	if len(processNames) == 0 {
 		return false
@@ -1285,12 +1266,34 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 	if err != nil {
 		return false
 	}
+	// Check direct pane command match
 	for _, name := range processNames {
 		if cmd == name {
 			return true
 		}
 	}
+	// If pane command is a shell, check for child processes.
+	// This handles agents started with "bash -c 'export ... && agent ...'"
+	for _, shell := range constants.SupportedShells {
+		if cmd == shell {
+			pid, err := t.GetPanePID(session)
+			if err == nil && pid != "" {
+				return hasChildWithNames(pid, processNames)
+			}
+			break
+		}
+	}
 	return false
+}
+
+// IsAgentAlive checks if an agent is running in the session using agent-agnostic detection.
+// It reads GT_AGENT from the session environment to determine which process names to check.
+// Falls back to Claude's process names if GT_AGENT is not set (legacy sessions).
+// This is the preferred method for zombie detection across all agent types.
+func (t *Tmux) IsAgentAlive(session string) bool {
+	agentName, _ := t.GetEnvironment(session, "GT_AGENT")
+	processNames := config.GetProcessNames(agentName) // Returns Claude defaults if empty
+	return t.IsRuntimeRunning(session, processNames)
 }
 
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.
@@ -1709,8 +1712,8 @@ func (t *Tmux) CleanupOrphanedSessions() (cleaned int, err error) {
 			continue
 		}
 
-		// Check if the session is a zombie (tmux alive, Claude dead)
-		if !t.IsClaudeRunning(sess) {
+		// Check if the session is a zombie (tmux alive, agent dead)
+		if !t.IsAgentAlive(sess) {
 			// Kill the zombie session
 			if killErr := t.KillSessionWithProcesses(sess); killErr != nil {
 				// Log but continue - other sessions may still need cleanup
