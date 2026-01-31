@@ -468,7 +468,7 @@ func (s *Server) Start() error {
 
 	// Dashboard (HTML UI) - mount if enabled
 	if s.includeDashboard {
-		fetcher, err := web.NewLiveConvoyFetcher()
+		fetcher, err := web.NewLiveConvoyFetcherWithRoot(s.townRoot)
 		if err != nil {
 			return fmt.Errorf("creating convoy fetcher: %w", err)
 		}
@@ -479,9 +479,10 @@ func (s *Server) Start() error {
 		}
 
 		// Serve static files and dashboard
+		// Note: Register "/" last and without method prefix to avoid conflicts
 		staticHandler := web.StaticHandler()
-		mux.Handle("/static/", http.StripPrefix("/static/", staticHandler))
-		mux.Handle("GET /", dashboardHandler)
+		mux.Handle("GET /static/", http.StripPrefix("/static/", staticHandler))
+		mux.HandleFunc("GET /{$}", dashboardHandler.ServeHTTP)
 	}
 
 	// CORS middleware
