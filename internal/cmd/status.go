@@ -380,12 +380,8 @@ func runStatusOnce(_ *cobra.Command, _ []string) error {
 				rs.CrewCount = len(workers)
 			}
 
-			// Discover hooks for all agents in this rig
-			// In --fast mode, skip expensive handoff bead lookups. Hook info comes from
-			// preloaded agent beads via discoverRigAgents instead.
-			if !statusFast {
-				rs.Hooks = discoverRigHooks(r, rs.Crews)
-			}
+			// Discover hooks for all agents in this rig (uses pre-fetched data for O(1) lookups)
+			rs.Hooks = discoverRigHooks(r, rs.Crews, allAgentBeads, allHookBeads)
 			activeHooks := 0
 			for _, hook := range rs.Hooks {
 				if hook.HasWork {
@@ -891,35 +887,59 @@ func capitalizeFirst(s string) string {
 }
 
 // discoverRigHooks finds all hook attachments for agents in a rig.
-// It scans polecats, crew workers, witness, and refinery for handoff beads.
-func discoverRigHooks(r *rig.Rig, crews []string) []AgentHookInfo {
+// Uses pre-fetched agent beads and hook beads for O(1) lookups (no beads calls).
+func discoverRigHooks(r *rig.Rig, crews []string, allAgentBeads map[string]*beads.Issue, allHookBeads map[string]*beads.Issue) []AgentHookInfo {
 	var hooks []AgentHookInfo
+	townRoot := filepath.Dir(r.Path)
+	prefix := beads.GetPrefixForRig(townRoot, r.Name)
 
-	// Create beads instance for the rig
-	b := beads.New(r.Path)
+	// Helper to build hook info from pre-fetched data
+	buildHook := func(beadID, agentAddress, roleType string) AgentHookInfo {
+		hook := AgentHookInfo{
+			Agent: agentAddress,
+			Role:  roleType,
+		}
+		if issue, ok := allAgentBeads[beadID]; ok {
+			hookBeadID := issue.HookBead
+			if hookBeadID == "" {
+				fields := beads.ParseAgentFields(issue.Description)
+				if fields != nil {
+					hookBeadID = fields.HookBead
+				}
+			}
+			if hookBeadID != "" {
+				hook.HasWork = true
+				hook.Molecule = hookBeadID
+				if hookBead, ok := allHookBeads[hookBeadID]; ok {
+					hook.Title = hookBead.Title
+				}
+			}
+		}
+		return hook
+	}
 
 	// Check polecats
 	for _, name := range r.Polecats {
-		hook := getAgentHook(b, name, r.Name+"/"+name, "polecat")
-		hooks = append(hooks, hook)
+		beadID := beads.PolecatBeadIDWithPrefix(prefix, r.Name, name)
+		hooks = append(hooks, buildHook(beadID, r.Name+"/"+name, "polecat"))
 	}
 
 	// Check crew workers
 	for _, name := range crews {
-		hook := getAgentHook(b, name, r.Name+"/crew/"+name, "crew")
-		hooks = append(hooks, hook)
+		beadID := beads.CrewBeadIDWithPrefix(prefix, r.Name, name)
+		hooks = append(hooks, buildHook(beadID, r.Name+"/crew/"+name, "crew"))
 	}
 
 	// Check witness
 	if r.HasWitness {
-		hook := getAgentHook(b, "witness", r.Name+"/witness", "witness")
-		hooks = append(hooks, hook)
+		beadID := beads.WitnessBeadIDWithPrefix(prefix, r.Name)
+		hooks = append(hooks, buildHook(beadID, r.Name+"/witness", "witness"))
 	}
 
 	// Check refinery
 	if r.HasRefinery {
-		hook := getAgentHook(b, "refinery", r.Name+"/refinery", "refinery")
-		hooks = append(hooks, hook)
+		beadID := beads.RefineryBeadIDWithPrefix(prefix, r.Name)
+		hooks = append(hooks, buildHook(beadID, r.Name+"/refinery", "refinery"))
 	}
 
 	return hooks
@@ -1222,30 +1242,3 @@ func getMQSummary(r *rig.Rig) *MQSummary {
 	}
 }
 
-// getAgentHook retrieves hook status for a specific agent.
-func getAgentHook(b *beads.Beads, role, agentAddress, roleType string) AgentHookInfo {
-	hook := AgentHookInfo{
-		Agent: agentAddress,
-		Role:  roleType,
-	}
-
-	// Find handoff bead for this role
-	handoff, err := b.FindHandoffBead(role)
-	if err != nil || handoff == nil {
-		return hook
-	}
-
-	// Check for attachment
-	attachment := beads.ParseAttachmentFields(handoff)
-	if attachment != nil && attachment.AttachedMolecule != "" {
-		hook.HasWork = true
-		hook.Molecule = attachment.AttachedMolecule
-		hook.Title = handoff.Title
-	} else if handoff.Description != "" {
-		// Has content but no molecule - still has work
-		hook.HasWork = true
-		hook.Title = handoff.Title
-	}
-
-	return hook
-}
