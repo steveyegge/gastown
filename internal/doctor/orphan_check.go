@@ -132,9 +132,9 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix kills all orphaned sessions, except crew sessions which are protected.
-func (c *OrphanSessionCheck) Fix(ctx *CheckContext) error {
+func (c *OrphanSessionCheck) Fix(ctx *CheckContext) (string, error) {
 	if len(c.orphanSessions) == 0 {
-		return nil
+		return "", nil
 	}
 
 	t := tmux.NewTmux()
@@ -155,7 +155,7 @@ func (c *OrphanSessionCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	return lastErr
+	return "", lastErr
 }
 
 // isCrewSession returns true if the session name matches the crew pattern.

@@ -112,21 +112,21 @@ func (c *SparseCheckoutCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix configures sparse checkout for affected repos to exclude Claude context files.
-func (c *SparseCheckoutCheck) Fix(ctx *CheckContext) error {
+func (c *SparseCheckoutCheck) Fix(ctx *CheckContext) (string, error) {
 	for _, repoPath := range c.affectedRepos {
 		if err := git.ConfigureSparseCheckout(repoPath); err != nil {
 			relPath, _ := filepath.Rel(c.rigPath, repoPath)
-			return fmt.Errorf("failed to configure sparse checkout for %s: %w", relPath, err)
+			return "", fmt.Errorf("failed to configure sparse checkout for %s: %w", relPath, err)
 		}
 
 		// Check if any excluded files remain (untracked or modified files won't be removed by git read-tree)
 		if remaining := git.CheckExcludedFilesExist(repoPath); len(remaining) > 0 {
 			relPath, _ := filepath.Rel(c.rigPath, repoPath)
-			return fmt.Errorf("sparse checkout configured for %s but these files still exist: %s\n"+
+			return "", fmt.Errorf("sparse checkout configured for %s but these files still exist: %s\n"+
 				"These files are untracked or modified and were not removed by git.\n"+
 				"Please manually remove or revert these files in %s",
 				relPath, strings.Join(remaining, ", "), repoPath)
 		}
 	}
-	return nil
+	return "", nil
 }

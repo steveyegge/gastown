@@ -129,7 +129,7 @@ func (c *WispGCCheck) countAbandonedWisps(rigPath string) int {
 }
 
 // Fix runs bd mol wisp gc in each rig with abandoned wisps.
-func (c *WispGCCheck) Fix(ctx *CheckContext) error {
+func (c *WispGCCheck) Fix(ctx *CheckContext) (string, error) {
 	var lastErr error
 
 	for rigName := range c.abandonedRigs {
@@ -143,5 +143,5 @@ func (c *WispGCCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	return lastErr
+	return "", lastErr
 }

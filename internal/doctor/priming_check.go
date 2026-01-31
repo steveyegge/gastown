@@ -350,7 +350,7 @@ func (c *PrimingCheck) countLines(path string) int {
 }
 
 // Fix attempts to fix priming issues.
-func (c *PrimingCheck) Fix(ctx *CheckContext) error {
+func (c *PrimingCheck) Fix(ctx *CheckContext) (string, error) {
 	var errors []string
 
 	for _, issue := range c.issues {
@@ -388,7 +388,7 @@ func (c *PrimingCheck) Fix(ctx *CheckContext) error {
 	}
 
 	if len(errors) > 0 {
-		return fmt.Errorf("%s", strings.Join(errors, "; "))
+		return "", fmt.Errorf("%s", strings.Join(errors, "; "))
 	}
-	return nil
+	return "", nil
 }

@@ -68,7 +68,7 @@ func TestZombieSessionCheck_FixProtectsCrewSessions(t *testing.T) {
 
 	// Fix should skip crew sessions due to safeguard
 	// (We can't fully test this without mocking tmux, but the safeguard is in place)
-	_ = check.Fix(ctx)
+	_, _ = check.Fix(ctx)
 
 	// The test passes if no panic occurred and crew sessions are protected by the safeguard
 }

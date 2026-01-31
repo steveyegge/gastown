@@ -111,10 +111,10 @@ func (c *FormulaCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix updates outdated and missing formulas.
-func (c *FormulaCheck) Fix(ctx *CheckContext) error {
+func (c *FormulaCheck) Fix(ctx *CheckContext) (string, error) {
 	updated, skipped, reinstalled, err := formula.UpdateFormulas(ctx.TownRoot)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Log what was done (caller will re-run check to show new status)
@@ -126,5 +126,5 @@ func (c *FormulaCheck) Fix(ctx *CheckContext) error {
 		_ = skipped
 	}
 
-	return nil
+	return "", nil
 }

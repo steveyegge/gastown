@@ -159,16 +159,16 @@ func (c *BranchProtectionCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix adds branch protection to the post-checkout hook.
-func (c *BranchProtectionCheck) Fix(ctx *CheckContext) error {
+func (c *BranchProtectionCheck) Fix(ctx *CheckContext) (string, error) {
 	if !c.needsUpdate {
-		return nil
+		return "", nil
 	}
 
 	hooksDir := filepath.Join(ctx.TownRoot, ".git", "hooks")
 
 	// Ensure hooks directory exists
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
-		return fmt.Errorf("creating hooks directory: %w", err)
+		return "", fmt.Errorf("creating hooks directory: %w", err)
 	}
 
 	// Remove obsolete pre-checkout hook if it's ours
@@ -184,7 +184,7 @@ func (c *BranchProtectionCheck) Fix(ctx *CheckContext) error {
 	// Read existing hook content (if any)
 	existingContent, err := os.ReadFile(hookPath)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("reading existing hook: %w", err)
+		return "", fmt.Errorf("reading existing hook: %w", err)
 	}
 
 	var newContent string
@@ -193,7 +193,7 @@ func (c *BranchProtectionCheck) Fix(ctx *CheckContext) error {
 		newContent = "#!/bin/sh\n" + branchProtectionScript
 	} else if strings.Contains(string(existingContent), branchProtectionMarker) {
 		// Already has branch protection
-		return nil
+		return "", nil
 	} else {
 		// Prepend branch protection after shebang
 		content := string(existingContent)
@@ -212,10 +212,10 @@ func (c *BranchProtectionCheck) Fix(ctx *CheckContext) error {
 
 	// Write the hook
 	if err := os.WriteFile(hookPath, []byte(newContent), 0755); err != nil {
-		return fmt.Errorf("writing hook: %w", err)
+		return "", fmt.Errorf("writing hook: %w", err)
 	}
 
-	return nil
+	return "", nil
 }
 
 // Legacy type alias for backwards compatibility

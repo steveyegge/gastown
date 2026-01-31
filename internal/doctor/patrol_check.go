@@ -180,8 +180,8 @@ func (c *PatrolHooksWiredCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix creates the daemon patrol config with defaults.
-func (c *PatrolHooksWiredCheck) Fix(ctx *CheckContext) error {
-	return config.EnsureDaemonPatrolConfig(ctx.TownRoot)
+func (c *PatrolHooksWiredCheck) Fix(ctx *CheckContext) (string, error) {
+	return "", config.EnsureDaemonPatrolConfig(ctx.TownRoot)
 }
 
 // PatrolNotStuckCheck detects wisps that have been in_progress too long.
@@ -368,13 +368,13 @@ func (c *PatrolPluginsAccessibleCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix creates missing plugin directories.
-func (c *PatrolPluginsAccessibleCheck) Fix(ctx *CheckContext) error {
+func (c *PatrolPluginsAccessibleCheck) Fix(ctx *CheckContext) (string, error) {
 	for _, dir := range c.missingDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("creating %s: %w", dir, err)
+			return "", fmt.Errorf("creating %s: %w", dir, err)
 		}
 	}
-	return nil
+	return "", nil
 }
 
 // PatrolRolesHavePromptsCheck verifies that internal/templates/roles/*.md.tmpl exist for each rig.
@@ -479,10 +479,10 @@ func (c *PatrolRolesHavePromptsCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 }
 
-func (c *PatrolRolesHavePromptsCheck) Fix(ctx *CheckContext) error {
+func (c *PatrolRolesHavePromptsCheck) Fix(ctx *CheckContext) (string, error) {
 	allTemplates, err := templates.GetAllRoleTemplates()
 	if err != nil {
-		return fmt.Errorf("getting embedded templates: %w", err)
+		return "", fmt.Errorf("getting embedded templates: %w", err)
 	}
 
 	for rigName, missingFiles := range c.missingByRig {
@@ -490,7 +490,7 @@ func (c *PatrolRolesHavePromptsCheck) Fix(ctx *CheckContext) error {
 		templatesDir := filepath.Join(mayorRig, "internal", "templates", "roles")
 
 		if err := os.MkdirAll(templatesDir, 0755); err != nil {
-			return fmt.Errorf("creating %s: %w", templatesDir, err)
+			return "", fmt.Errorf("creating %s: %w", templatesDir, err)
 		}
 
 		for _, roleFile := range missingFiles {
@@ -501,12 +501,12 @@ func (c *PatrolRolesHavePromptsCheck) Fix(ctx *CheckContext) error {
 
 			destPath := filepath.Join(templatesDir, roleFile)
 			if err := os.WriteFile(destPath, content, 0644); err != nil {
-				return fmt.Errorf("writing %s in %s: %w", roleFile, rigName, err)
+				return "", fmt.Errorf("writing %s in %s: %w", roleFile, rigName, err)
 			}
 		}
 	}
 
-	return nil
+	return "", nil
 }
 
 // discoverRigs finds all registered rigs.

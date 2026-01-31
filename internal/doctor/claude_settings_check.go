@@ -11,7 +11,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
-	"github.com/steveyegge/gastown/internal/style"
+
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -440,9 +440,10 @@ func (c *ClaudeSettingsCheck) hookHasPattern(hooks map[string]any, hookName, pat
 
 // Fix deletes stale settings files and restarts affected agents.
 // Files with local modifications are skipped to avoid losing user changes.
-func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
+func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) (string, error) {
 	var errors []string
 	var skipped []string
+	var messages []string
 	t := tmux.NewTmux()
 
 	for _, sf := range c.staleSettings {
@@ -492,8 +493,7 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 			// Warn user to restart agents - don't auto-kill sessions as that's too disruptive,
 			// especially since deacon runs gt doctor automatically which would create a loop.
 			// Settings are only read at startup, so running agents already have config loaded.
-			fmt.Printf("\n  %s Town-root settings were moved. Restart agents to pick up new config:\n", style.Warning.Render("⚠"))
-			fmt.Printf("      gt up --restart\n\n")
+			messages = append(messages, "Town-root settings moved; restart agents with: gt up --restart")
 			continue
 		}
 
@@ -521,17 +521,16 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	// Report skipped files as warnings, not errors
-	if len(skipped) > 0 {
-		for _, s := range skipped {
-			fmt.Printf("  Warning: %s\n", s)
-		}
+	// Report skipped files as warnings
+	for _, s := range skipped {
+		messages = append(messages, "Warning: "+s)
 	}
 
+	msg := strings.Join(messages, "; ")
 	if len(errors) > 0 {
-		return fmt.Errorf("%s", strings.Join(errors, "; "))
+		return msg, fmt.Errorf("%s", strings.Join(errors, "; "))
 	}
-	return nil
+	return msg, nil
 }
 
 // fileExists checks if a file exists.

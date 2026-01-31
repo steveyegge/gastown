@@ -36,14 +36,14 @@ func (m *mockCheck) CanFix() bool {
 	return m.fixable
 }
 
-func (m *mockCheck) Fix(ctx *CheckContext) error {
+func (m *mockCheck) Fix(ctx *CheckContext) (string, error) {
 	m.fixCount++
 	if m.fixError != nil {
-		return m.fixError
+		return "", m.fixError
 	}
 	// Simulate successful fix by changing status
 	m.status = StatusOK
-	return nil
+	return "", nil
 }
 
 func TestCheckStatus_String(t *testing.T) {
@@ -345,7 +345,7 @@ func TestBaseCheck(t *testing.T) {
 	if b.CanFix() {
 		t.Error("BaseCheck.CanFix() should return false")
 	}
-	if err := b.Fix(nil); err != ErrCannotFix {
+	if _, err := b.Fix(nil); err != ErrCannotFix {
 		t.Errorf("BaseCheck.Fix() should return ErrCannotFix, got %v", err)
 	}
 }

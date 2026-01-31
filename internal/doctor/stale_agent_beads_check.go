@@ -124,18 +124,18 @@ func (c *StaleAgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix closes stale agent beads for crew members that no longer exist on disk.
-func (c *StaleAgentBeadsCheck) Fix(ctx *CheckContext) error {
+func (c *StaleAgentBeadsCheck) Fix(ctx *CheckContext) (string, error) {
 	// Re-run detection to get current stale list
 	result := c.Run(ctx)
 	if result.Status == StatusOK {
-		return nil
+		return "", nil
 	}
 
 	// Load routes to get beads paths
 	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
 	routes, err := beads.LoadRoutes(beadsDir)
 	if err != nil {
-		return fmt.Errorf("loading routes.jsonl: %w", err)
+		return "", fmt.Errorf("loading routes.jsonl: %w", err)
 	}
 
 	// Build prefix -> beads path map
@@ -166,9 +166,9 @@ func (c *StaleAgentBeadsCheck) Fix(ctx *CheckContext) error {
 		if err := bd.Update(beadID, beads.UpdateOptions{
 			Status: &closedStatus,
 		}); err != nil {
-			return fmt.Errorf("closing stale bead %s: %w", beadID, err)
+			return "", fmt.Errorf("closing stale bead %s: %w", beadID, err)
 		}
 	}
 
-	return nil
+	return "", nil
 }

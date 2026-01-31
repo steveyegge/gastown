@@ -115,7 +115,7 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 
 // Fix attempts to rebuild the database from JSONL.
 // Note: This fix is for SQLite backend. With Dolt backend, this is a no-op.
-func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
+func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) (string, error) {
 	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
 	issuesDB := filepath.Join(beadsDir, "issues.db")
 	issuesJSONL := filepath.Join(beadsDir, "issues.jsonl")
@@ -127,7 +127,7 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 	if dbErr == nil && dbInfo.Size() == 0 && jsonlErr == nil && jsonlInfo.Size() > 0 {
 		// Delete the empty database file
 		if err := os.Remove(issuesDB); err != nil {
-			return err
+			return "", err
 		}
 
 		// Run bd import to rebuild from JSONL
@@ -136,7 +136,7 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
-			return err
+			return "", err
 		}
 	}
 
@@ -151,7 +151,7 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 
 		if rigDBErr == nil && rigDBInfo.Size() == 0 && rigJSONLErr == nil && rigJSONLInfo.Size() > 0 {
 			if err := os.Remove(rigDB); err != nil {
-				return err
+				return "", err
 			}
 
 			cmd := exec.Command("bd", "import")
@@ -159,12 +159,12 @@ func (c *BeadsDatabaseCheck) Fix(ctx *CheckContext) error {
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			if err := cmd.Run(); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
 
-	return nil
+	return "", nil
 }
 
 // PrefixConflictCheck detects duplicate prefixes across rigs in routes.jsonl.
@@ -346,20 +346,20 @@ func (c *PrefixMismatchCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix updates rigs.json to match the prefixes in routes.jsonl.
-func (c *PrefixMismatchCheck) Fix(ctx *CheckContext) error {
+func (c *PrefixMismatchCheck) Fix(ctx *CheckContext) (string, error) {
 	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
 
 	// Load routes.jsonl
 	routes, err := beads.LoadRoutes(beadsDir)
 	if err != nil || len(routes) == 0 {
-		return nil // Nothing to fix
+		return "", nil // Nothing to fix
 	}
 
 	// Load rigs.json
 	rigsPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
 	rigsConfig, err := loadRigsConfig(rigsPath)
 	if err != nil {
-		return nil // Nothing to fix
+		return "", nil // Nothing to fix
 	}
 
 	// Build map of route path -> prefix from routes.jsonl
@@ -391,10 +391,10 @@ func (c *PrefixMismatchCheck) Fix(ctx *CheckContext) error {
 	}
 
 	if modified {
-		return saveRigsConfig(rigsPath, rigsConfig)
+		return "", saveRigsConfig(rigsPath, rigsConfig)
 	}
 
-	return nil
+	return "", nil
 }
 
 // rigsConfigEntry is a local type for loading rigs.json without importing config package
@@ -568,13 +568,13 @@ func (c *RoleLabelCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix adds the gt:role label to role beads that are missing it.
-func (c *RoleLabelCheck) Fix(ctx *CheckContext) error {
+func (c *RoleLabelCheck) Fix(ctx *CheckContext) (string, error) {
 	for _, roleID := range c.missingLabel {
 		if err := c.labelAdder.AddLabel(c.townRoot, roleID, "gt:role"); err != nil {
-			return err
+			return "", err
 		}
 	}
-	return nil
+	return "", nil
 }
 
 // DatabasePrefixCheck detects when a rig's database has a different issue_prefix
@@ -715,21 +715,21 @@ func (c *DatabasePrefixCheck) getDBPrefix(beadsDir string) (string, error) {
 }
 
 // Fix updates database configs to match routes.jsonl prefixes.
-func (c *DatabasePrefixCheck) Fix(ctx *CheckContext) error {
+func (c *DatabasePrefixCheck) Fix(ctx *CheckContext) (string, error) {
 	// Re-run check to populate mismatches if needed
 	if len(c.mismatches) == 0 {
 		result := c.Run(ctx)
 		if result.Status == StatusOK {
-			return nil // Nothing to fix
+			return "", nil // Nothing to fix
 		}
 	}
 
 	for _, m := range c.mismatches {
 		cmd := exec.Command("bd", "config", "set", "issue_prefix", m.routesPrefix, "--db", m.beadsDir)
 		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("updating %s: %s", m.rigPath, strings.TrimSpace(string(output)))
+			return "", fmt.Errorf("updating %s: %s", m.rigPath, strings.TrimSpace(string(output)))
 		}
 	}
 
-	return nil
+	return "", nil
 }

@@ -294,7 +294,7 @@ func TestPrefixMismatchCheck_Fix(t *testing.T) {
 	}
 
 	// Fix it
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix() failed: %v", err)
 	}
 
@@ -543,7 +543,7 @@ func TestRoleLabelCheck_Fix(t *testing.T) {
 	}
 
 	// Now fix
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix() failed: %v", err)
 	}
 
@@ -596,7 +596,7 @@ func TestRoleLabelCheck_FixMultiple(t *testing.T) {
 	}
 
 	// Now fix
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix() failed: %v", err)
 	}
 

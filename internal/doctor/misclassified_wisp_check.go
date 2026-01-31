@@ -195,9 +195,9 @@ func (c *CheckMisclassifiedWisps) shouldBeWisp(id, title, issueType string, labe
 }
 
 // Fix marks misclassified issues as wisps using bd update --ephemeral.
-func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
+func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) (string, error) {
 	if len(c.misclassified) == 0 {
-		return nil
+		return "", nil
 	}
 
 	var lastErr error
@@ -219,5 +219,5 @@ func (c *CheckMisclassifiedWisps) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	return lastErr
+	return "", lastErr
 }

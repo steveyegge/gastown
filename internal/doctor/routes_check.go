@@ -230,12 +230,12 @@ func (c *RoutesCheck) checkRoutesValid(ctx *CheckContext, routes []beads.Route) 
 }
 
 // Fix attempts to add missing routing entries.
-func (c *RoutesCheck) Fix(ctx *CheckContext) error {
+func (c *RoutesCheck) Fix(ctx *CheckContext) (string, error) {
 	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
 
 	// Ensure .beads directory exists
 	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
-		return fmt.Errorf(".beads directory does not exist; run 'bd init' first")
+		return "", fmt.Errorf(".beads directory does not exist; run 'bd init' first")
 	}
 
 	// Load existing routes
@@ -273,9 +273,9 @@ func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 	if err != nil {
 		// No rigs config - just write town root route if we added it
 		if modified {
-			return beads.WriteRoutes(beadsDir, routes)
+			return "", beads.WriteRoutes(beadsDir, routes)
 		}
-		return nil
+		return "", nil
 	}
 
 	// Add missing routes for each rig
@@ -301,8 +301,8 @@ func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 	}
 
 	if modified {
-		return beads.WriteRoutes(beadsDir, routes)
+		return "", beads.WriteRoutes(beadsDir, routes)
 	}
 
-	return nil
+	return "", nil
 }

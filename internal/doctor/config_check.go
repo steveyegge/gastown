@@ -87,13 +87,13 @@ func (c *SettingsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix creates missing settings/ directories.
-func (c *SettingsCheck) Fix(ctx *CheckContext) error {
+func (c *SettingsCheck) Fix(ctx *CheckContext) (string, error) {
 	for _, path := range c.missingSettings {
 		if err := os.MkdirAll(path, 0755); err != nil {
-			return fmt.Errorf("failed to create %s: %w", path, err)
+			return "", fmt.Errorf("failed to create %s: %w", path, err)
 		}
 	}
-	return nil
+	return "", nil
 }
 
 // RuntimeGitignoreCheck verifies .runtime/ is gitignored at town and rig levels.
@@ -253,13 +253,13 @@ func (c *LegacyGastownCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix removes legacy .gastown/ directories.
-func (c *LegacyGastownCheck) Fix(ctx *CheckContext) error {
+func (c *LegacyGastownCheck) Fix(ctx *CheckContext) (string, error) {
 	for _, dir := range c.legacyDirs {
 		if err := os.RemoveAll(dir); err != nil {
-			return fmt.Errorf("failed to remove %s: %w", dir, err)
+			return "", fmt.Errorf("failed to remove %s: %w", dir, err)
 		}
 	}
-	return nil
+	return "", nil
 }
 
 // findRigs returns rig directories within the town.
@@ -336,13 +336,13 @@ func (c *SessionHookCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix updates settings.json files to use 'gt prime --hook' instead of bare 'gt prime'.
-func (c *SessionHookCheck) Fix(ctx *CheckContext) error {
+func (c *SessionHookCheck) Fix(ctx *CheckContext) (string, error) {
 	for _, path := range c.filesToFix {
 		if err := c.fixSettingsFile(path); err != nil {
-			return fmt.Errorf("failed to fix %s: %w", path, err)
+			return "", fmt.Errorf("failed to fix %s: %w", path, err)
 		}
 	}
-	return nil
+	return "", nil
 }
 
 // fixSettingsFile updates a single settings.json file.
@@ -766,12 +766,12 @@ func parseConfigOutput(output []byte) string {
 }
 
 // Fix registers the missing custom types.
-func (c *CustomTypesCheck) Fix(ctx *CheckContext) error {
+func (c *CustomTypesCheck) Fix(ctx *CheckContext) (string, error) {
 	cmd := exec.Command("bd", "--no-daemon", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	cmd.Dir = c.townRoot
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
 	}
-	return nil
+	return "", nil
 }

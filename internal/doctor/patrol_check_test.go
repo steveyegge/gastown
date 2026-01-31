@@ -149,7 +149,7 @@ func TestPatrolRolesHavePromptsCheck_Fix(t *testing.T) {
 		t.Fatalf("missingByRig = %d, want 3", len(check.missingByRig["myproject"]))
 	}
 
-	err := check.Fix(ctx)
+	_, err := check.Fix(ctx)
 	if err != nil {
 		t.Fatalf("Fix() error = %v", err)
 	}
@@ -193,7 +193,7 @@ func TestPatrolRolesHavePromptsCheck_FixPartial(t *testing.T) {
 		t.Fatalf("missing = %d, want 2", len(check.missingByRig["myproject"]))
 	}
 
-	err := check.Fix(ctx)
+	_, err := check.Fix(ctx)
 	if err != nil {
 		t.Fatalf("Fix() error = %v", err)
 	}
@@ -295,7 +295,7 @@ func TestPatrolRolesHavePromptsCheck_FixMultipleRigs(t *testing.T) {
 		t.Fatalf("missingByRig count = %d, want 2 (project2, project3)", len(check.missingByRig))
 	}
 
-	err := check.Fix(ctx)
+	_, err := check.Fix(ctx)
 	if err != nil {
 		t.Fatalf("Fix() error = %v", err)
 	}
@@ -493,7 +493,7 @@ func TestPatrolHooksWiredCheck_Fix(t *testing.T) {
 		t.Fatalf("Initial Status = %v, want Warning", result.Status)
 	}
 
-	err := check.Fix(ctx)
+	_, err := check.Fix(ctx)
 	if err != nil {
 		t.Fatalf("Fix() error = %v", err)
 	}
@@ -539,7 +539,7 @@ func TestPatrolHooksWiredCheck_FixPreservesExisting(t *testing.T) {
 		t.Errorf("Status = %v, want OK (has patrols)", result.Status)
 	}
 
-	err := check.Fix(ctx)
+	_, err := check.Fix(ctx)
 	if err != nil {
 		t.Fatalf("Fix() error = %v", err)
 	}

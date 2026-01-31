@@ -84,10 +84,10 @@ func (c *TownRootBranchCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix switches the town root back to main branch.
-func (c *TownRootBranchCheck) Fix(ctx *CheckContext) error {
+func (c *TownRootBranchCheck) Fix(ctx *CheckContext) (string, error) {
 	// Only fix if we're not already on main
 	if c.currentBranch == "main" || c.currentBranch == "master" {
-		return nil
+		return "", nil
 	}
 
 	// Check for uncommitted changes that would block checkout
@@ -95,11 +95,11 @@ func (c *TownRootBranchCheck) Fix(ctx *CheckContext) error {
 	cmd.Dir = ctx.TownRoot
 	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("failed to check git status: %w", err)
+		return "", fmt.Errorf("failed to check git status: %w", err)
 	}
 
 	if strings.TrimSpace(string(out)) != "" {
-		return fmt.Errorf("cannot switch to main: uncommitted changes in town root (stash or commit first)")
+		return "", fmt.Errorf("cannot switch to main: uncommitted changes in town root (stash or commit first)")
 	}
 
 	// Switch to main
@@ -110,9 +110,9 @@ func (c *TownRootBranchCheck) Fix(ctx *CheckContext) error {
 		cmd = exec.Command("git", "checkout", "master")
 		cmd.Dir = ctx.TownRoot
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to checkout main: %w", err)
+			return "", fmt.Errorf("failed to checkout main: %w", err)
 		}
 	}
 
-	return nil
+	return "", nil
 }

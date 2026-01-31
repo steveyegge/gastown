@@ -270,7 +270,7 @@ func TestSparseCheckoutCheck_Fix(t *testing.T) {
 	}
 
 	// Apply fix
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -311,7 +311,7 @@ func TestSparseCheckoutCheck_FixNoOp(t *testing.T) {
 	}
 
 	// Fix should be a no-op (no affected repos)
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -453,7 +453,7 @@ func TestSparseCheckoutCheck_FixUpgradesLegacyPatterns(t *testing.T) {
 	}
 
 	// Apply fix
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -503,7 +503,7 @@ func TestSparseCheckoutCheck_FixFailsWithUntrackedCLAUDEMD(t *testing.T) {
 	}
 
 	// Fix should fail because CLAUDE.md is untracked and won't be removed
-	err := check.Fix(ctx)
+	_, err := check.Fix(ctx)
 	if err == nil {
 		t.Fatal("expected Fix to return error for untracked CLAUDE.md, but it succeeded")
 	}
@@ -548,7 +548,7 @@ func TestSparseCheckoutCheck_FixFailsWithUntrackedClaudeDir(t *testing.T) {
 	}
 
 	// Fix should fail because .claude/ is untracked and won't be removed
-	err := check.Fix(ctx)
+	_, err := check.Fix(ctx)
 	if err == nil {
 		t.Fatal("expected Fix to return error for untracked .claude/, but it succeeded")
 	}
@@ -599,7 +599,7 @@ func TestSparseCheckoutCheck_FixFailsWithModifiedCLAUDEMD(t *testing.T) {
 	}
 
 	// Fix should fail because CLAUDE.md is modified and git won't remove it
-	err := check.Fix(ctx)
+	_, err := check.Fix(ctx)
 	if err == nil {
 		t.Fatal("expected Fix to return error for modified CLAUDE.md, but it succeeded")
 	}
@@ -638,7 +638,7 @@ func TestSparseCheckoutCheck_FixFailsWithMultipleProblems(t *testing.T) {
 	}
 
 	// Fix should fail and list multiple files
-	err := check.Fix(ctx)
+	_, err := check.Fix(ctx)
 	if err == nil {
 		t.Fatal("expected Fix to return error for multiple untracked files, but it succeeded")
 	}

@@ -158,7 +158,7 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix creates missing agent beads.
-func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
+func (c *AgentBeadsCheck) Fix(ctx *CheckContext) (string, error) {
 	// Create global agents (Mayor, Deacon) in town beads
 	// These use hq- prefix and are stored in ~/gt/.beads/
 	townBeadsPath := beads.GetTownBeadsPath(ctx.TownRoot)
@@ -173,7 +173,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		}
 		desc := "Deacon (daemon beacon) - receives mechanical heartbeats, runs town plugins and monitoring."
 		if _, err := townBd.CreateAgentBead(deaconID, desc, fields); err != nil {
-			return fmt.Errorf("creating %s: %w", deaconID, err)
+			return "", fmt.Errorf("creating %s: %w", deaconID, err)
 		}
 	}
 
@@ -186,7 +186,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		}
 		desc := "Mayor - global coordinator, handles cross-rig communication and escalations."
 		if _, err := townBd.CreateAgentBead(mayorID, desc, fields); err != nil {
-			return fmt.Errorf("creating %s: %w", mayorID, err)
+			return "", fmt.Errorf("creating %s: %w", mayorID, err)
 		}
 	}
 
@@ -194,7 +194,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
 	routes, err := beads.LoadRoutes(beadsDir)
 	if err != nil {
-		return fmt.Errorf("loading routes.jsonl: %w", err)
+		return "", fmt.Errorf("loading routes.jsonl: %w", err)
 	}
 
 	// Build prefix -> rigInfo map from routes
@@ -212,7 +212,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	}
 
 	if len(prefixToRig) == 0 {
-		return nil // No rigs to process
+		return "", nil // No rigs to process
 	}
 
 	// Create missing agents for each rig
@@ -232,7 +232,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			}
 			desc := fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName)
 			if _, err := bd.CreateAgentBead(witnessID, desc, fields); err != nil {
-				return fmt.Errorf("creating %s: %w", witnessID, err)
+				return "", fmt.Errorf("creating %s: %w", witnessID, err)
 			}
 		}
 
@@ -245,7 +245,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			}
 			desc := fmt.Sprintf("Refinery for %s - processes merge queue.", rigName)
 			if _, err := bd.CreateAgentBead(refineryID, desc, fields); err != nil {
-				return fmt.Errorf("creating %s: %w", refineryID, err)
+				return "", fmt.Errorf("creating %s: %w", refineryID, err)
 			}
 		}
 
@@ -261,13 +261,13 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 				}
 				desc := fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName)
 				if _, err := bd.CreateAgentBead(crewID, desc, fields); err != nil {
-					return fmt.Errorf("creating %s: %w", crewID, err)
+					return "", fmt.Errorf("creating %s: %w", crewID, err)
 				}
 			}
 		}
 	}
 
-	return nil
+	return "", nil
 }
 
 // listCrewWorkers returns the names of all crew workers in a rig.

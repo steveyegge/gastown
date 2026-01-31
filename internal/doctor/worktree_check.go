@@ -88,11 +88,11 @@ func (c *BeadsSyncWorktreeCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix removes orphaned beads-sync worktrees.
-func (c *BeadsSyncWorktreeCheck) Fix(ctx *CheckContext) error {
+func (c *BeadsSyncWorktreeCheck) Fix(ctx *CheckContext) (string, error) {
 	for _, worktreePath := range c.orphanedWorktrees {
 		// Remove the orphaned worktree directory
 		if err := os.RemoveAll(worktreePath); err != nil {
-			return fmt.Errorf("removing %s: %w", worktreePath, err)
+			return "", fmt.Errorf("removing %s: %w", worktreePath, err)
 		}
 
 		// Also clean up the parent beads-worktrees dir if now empty
@@ -102,7 +102,7 @@ func (c *BeadsSyncWorktreeCheck) Fix(ctx *CheckContext) error {
 			_ = os.Remove(parentDir) // Best effort, ignore errors
 		}
 	}
-	return nil
+	return "", nil
 }
 
 // findRedirectedWorkspaces finds all crew and polecat workspaces that might

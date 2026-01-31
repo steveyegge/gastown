@@ -197,21 +197,21 @@ func (c *GitExcludeConfiguredCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix appends missing entries to .git/info/exclude.
-func (c *GitExcludeConfiguredCheck) Fix(ctx *CheckContext) error {
+func (c *GitExcludeConfiguredCheck) Fix(ctx *CheckContext) (string, error) {
 	if len(c.missingEntries) == 0 {
-		return nil
+		return "", nil
 	}
 
 	// Ensure info directory exists
 	infoDir := filepath.Dir(c.excludePath)
 	if err := os.MkdirAll(infoDir, 0755); err != nil {
-		return fmt.Errorf("failed to create info directory: %w", err)
+		return "", fmt.Errorf("failed to create info directory: %w", err)
 	}
 
 	// Append missing entries
 	f, err := os.OpenFile(c.excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
-		return fmt.Errorf("failed to open exclude file: %w", err)
+		return "", fmt.Errorf("failed to open exclude file: %w", err)
 	}
 	defer f.Close()
 
@@ -219,22 +219,22 @@ func (c *GitExcludeConfiguredCheck) Fix(ctx *CheckContext) error {
 	info, _ := f.Stat()
 	if info.Size() == 0 {
 		if _, err := f.WriteString("# Gas Town directories\n"); err != nil {
-			return err
+			return "", err
 		}
 	} else {
 		// Add newline before new entries
 		if _, err := f.WriteString("\n# Gas Town directories\n"); err != nil {
-			return err
+			return "", err
 		}
 	}
 
 	for _, entry := range c.missingEntries {
 		if _, err := f.WriteString(entry + "\n"); err != nil {
-			return err
+			return "", err
 		}
 	}
 
-	return nil
+	return "", nil
 }
 
 // HooksPathConfiguredCheck verifies all clones have core.hooksPath set to .githooks.
@@ -348,14 +348,14 @@ func (c *HooksPathConfiguredCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix configures core.hooksPath for all unconfigured clones.
-func (c *HooksPathConfiguredCheck) Fix(ctx *CheckContext) error {
+func (c *HooksPathConfiguredCheck) Fix(ctx *CheckContext) (string, error) {
 	for _, clonePath := range c.unconfiguredClones {
 		cmd := exec.Command("git", "-C", clonePath, "config", "core.hooksPath", ".githooks")
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to configure hooks for %s: %w", clonePath, err)
+			return "", fmt.Errorf("failed to configure hooks for %s: %w", clonePath, err)
 		}
 	}
-	return nil
+	return "", nil
 }
 
 // WitnessExistsCheck verifies the witness directory structure exists.
@@ -437,32 +437,32 @@ func (c *WitnessExistsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix creates missing witness structure.
-func (c *WitnessExistsCheck) Fix(ctx *CheckContext) error {
+func (c *WitnessExistsCheck) Fix(ctx *CheckContext) (string, error) {
 	witnessDir := filepath.Join(c.rigPath, "witness")
 
 	if c.needsCreate {
 		if err := os.MkdirAll(witnessDir, 0755); err != nil {
-			return fmt.Errorf("failed to create witness/: %w", err)
+			return "", fmt.Errorf("failed to create witness/: %w", err)
 		}
 	}
 
 	if c.needsMail {
 		mailDir := filepath.Join(witnessDir, "mail")
 		if err := os.MkdirAll(mailDir, 0755); err != nil {
-			return fmt.Errorf("failed to create witness/mail/: %w", err)
+			return "", fmt.Errorf("failed to create witness/mail/: %w", err)
 		}
 		inboxPath := filepath.Join(mailDir, "inbox.jsonl")
 		if err := os.WriteFile(inboxPath, []byte{}, 0644); err != nil {
-			return fmt.Errorf("failed to create inbox.jsonl: %w", err)
+			return "", fmt.Errorf("failed to create inbox.jsonl: %w", err)
 		}
 	}
 
 	// Note: Cannot auto-fix clone without knowing the repo URL
 	if c.needsClone {
-		return fmt.Errorf("cannot auto-create witness/rig/ clone (requires repo URL)")
+		return "", fmt.Errorf("cannot auto-create witness/rig/ clone (requires repo URL)")
 	}
 
-	return nil
+	return "", nil
 }
 
 // RefineryExistsCheck verifies the refinery directory structure exists.
@@ -544,32 +544,32 @@ func (c *RefineryExistsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix creates missing refinery structure.
-func (c *RefineryExistsCheck) Fix(ctx *CheckContext) error {
+func (c *RefineryExistsCheck) Fix(ctx *CheckContext) (string, error) {
 	refineryDir := filepath.Join(c.rigPath, "refinery")
 
 	if c.needsCreate {
 		if err := os.MkdirAll(refineryDir, 0755); err != nil {
-			return fmt.Errorf("failed to create refinery/: %w", err)
+			return "", fmt.Errorf("failed to create refinery/: %w", err)
 		}
 	}
 
 	if c.needsMail {
 		mailDir := filepath.Join(refineryDir, "mail")
 		if err := os.MkdirAll(mailDir, 0755); err != nil {
-			return fmt.Errorf("failed to create refinery/mail/: %w", err)
+			return "", fmt.Errorf("failed to create refinery/mail/: %w", err)
 		}
 		inboxPath := filepath.Join(mailDir, "inbox.jsonl")
 		if err := os.WriteFile(inboxPath, []byte{}, 0644); err != nil {
-			return fmt.Errorf("failed to create inbox.jsonl: %w", err)
+			return "", fmt.Errorf("failed to create inbox.jsonl: %w", err)
 		}
 	}
 
 	// Note: Cannot auto-fix clone without knowing the repo URL
 	if c.needsClone {
-		return fmt.Errorf("cannot auto-create refinery/rig/ clone (requires repo URL)")
+		return "", fmt.Errorf("cannot auto-create refinery/rig/ clone (requires repo URL)")
 	}
 
-	return nil
+	return "", nil
 }
 
 // MayorCloneExistsCheck verifies the mayor/rig clone exists.
@@ -642,21 +642,21 @@ func (c *MayorCloneExistsCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix creates missing mayor structure.
-func (c *MayorCloneExistsCheck) Fix(ctx *CheckContext) error {
+func (c *MayorCloneExistsCheck) Fix(ctx *CheckContext) (string, error) {
 	mayorDir := filepath.Join(c.rigPath, "mayor")
 
 	if c.needsCreate {
 		if err := os.MkdirAll(mayorDir, 0755); err != nil {
-			return fmt.Errorf("failed to create mayor/: %w", err)
+			return "", fmt.Errorf("failed to create mayor/: %w", err)
 		}
 	}
 
 	// Note: Cannot auto-fix clone without knowing the repo URL
 	if c.needsClone {
-		return fmt.Errorf("cannot auto-create mayor/rig/ clone (requires repo URL)")
+		return "", fmt.Errorf("cannot auto-create mayor/rig/ clone (requires repo URL)")
 	}
 
-	return nil
+	return "", nil
 }
 
 // PolecatClonesValidCheck verifies each polecat directory is a valid clone.
@@ -855,9 +855,9 @@ func (c *BeadsConfigValidCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix is a no-op with Dolt backend (no sync needed).
-func (c *BeadsConfigValidCheck) Fix(ctx *CheckContext) error {
+func (c *BeadsConfigValidCheck) Fix(ctx *CheckContext) (string, error) {
 	// With Dolt backend, beads changes are persisted immediately - no sync needed
-	return nil
+	return "", nil
 }
 
 // BeadsRedirectCheck verifies that rig-level beads redirect exists for tracked beads.
@@ -983,9 +983,9 @@ func (c *BeadsRedirectCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix creates or corrects the rig-level beads redirect, or initializes beads if missing.
-func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
+func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) (string, error) {
 	if ctx.RigName == "" {
-		return nil
+		return "", nil
 	}
 
 	rigPath := ctx.RigPath()
@@ -1012,7 +1012,7 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 
 		// Create .beads directory
 		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
-			return fmt.Errorf("creating .beads directory: %w", err)
+			return "", fmt.Errorf("creating .beads directory: %w", err)
 		}
 
 		// Run bd init with the configured prefix
@@ -1023,7 +1023,7 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 			configPath := filepath.Join(rigBeadsDir, "config.yaml")
 			configContent := fmt.Sprintf("prefix: %s\n", prefix)
 			if writeErr := os.WriteFile(configPath, []byte(configContent), 0644); writeErr != nil {
-				return fmt.Errorf("bd init failed (%v) and fallback config creation failed: %w", err, writeErr)
+				return "", fmt.Errorf("bd init failed (%v) and fallback config creation failed: %w", err, writeErr)
 			}
 			// Continue - minimal config created
 		} else {
@@ -1033,7 +1033,7 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 			configCmd.Dir = rigPath
 			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
 		}
-		return nil
+		return "", nil
 	}
 
 	// Case 2: Tracked beads exist - create redirect (may need to remove conflicting local beads)
@@ -1042,22 +1042,22 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 		if hasLocalBeads && hasBeadsData(rigBeadsDir) {
 			// Remove conflicting local beads directory
 			if err := os.RemoveAll(rigBeadsDir); err != nil {
-				return fmt.Errorf("removing conflicting local beads: %w", err)
+				return "", fmt.Errorf("removing conflicting local beads: %w", err)
 			}
 		}
 
 		// Create .beads directory if needed
 		if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
-			return fmt.Errorf("creating .beads directory: %w", err)
+			return "", fmt.Errorf("creating .beads directory: %w", err)
 		}
 
 		// Write redirect file
 		if err := os.WriteFile(redirectPath, []byte("mayor/rig/.beads\n"), 0644); err != nil {
-			return fmt.Errorf("writing redirect file: %w", err)
+			return "", fmt.Errorf("writing redirect file: %w", err)
 		}
 	}
 
-	return nil
+	return "", nil
 }
 
 // hasBeadsData checks if a beads directory has actual data (issues.jsonl, issues.db, config.yaml)
@@ -1152,23 +1152,23 @@ func (c *BareRepoRefspecCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix sets the correct refspec on the bare repo.
-func (c *BareRepoRefspecCheck) Fix(ctx *CheckContext) error {
+func (c *BareRepoRefspecCheck) Fix(ctx *CheckContext) (string, error) {
 	if ctx.RigName == "" {
-		return nil
+		return "", nil
 	}
 
 	bareRepoPath := filepath.Join(ctx.RigPath(), ".repo.git")
 	if _, err := os.Stat(bareRepoPath); os.IsNotExist(err) {
-		return nil // No bare repo to fix
+		return "", nil // No bare repo to fix
 	}
 
 	cmd := exec.Command("git", "-C", bareRepoPath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("setting refspec: %s", strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("setting refspec: %s", strings.TrimSpace(stderr.String()))
 	}
-	return nil
+	return "", nil
 }
 
 // RigChecks returns all rig-level health checks.

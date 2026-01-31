@@ -176,8 +176,8 @@ func (c *CrashReportCheck) Run(ctx *CheckContext) *CheckResult {
 }
 
 // Fix does nothing - crash reports are informational.
-func (c *CrashReportCheck) Fix(ctx *CheckContext) error {
-	return nil
+func (c *CrashReportCheck) Fix(ctx *CheckContext) (string, error) {
+	return "", nil
 }
 
 // CanFix returns false - crash reports cannot be auto-fixed.

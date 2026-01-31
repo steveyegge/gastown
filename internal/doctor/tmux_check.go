@@ -114,9 +114,9 @@ func (c *LinkedPaneCheck) Run(ctx *CheckContext) *CheckResult {
 
 // Fix kills sessions with linked panes (except mayor session).
 // The daemon will recreate them with independent panes.
-func (c *LinkedPaneCheck) Fix(ctx *CheckContext) error {
+func (c *LinkedPaneCheck) Fix(ctx *CheckContext) (string, error) {
 	if len(c.linkedSessions) == 0 {
-		return nil
+		return "", nil
 	}
 
 	t := tmux.NewTmux()
@@ -129,7 +129,7 @@ func (c *LinkedPaneCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	return lastErr
+	return "", lastErr
 }
 
 // getSessionPanes returns all pane IDs for a session.

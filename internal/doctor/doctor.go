@@ -134,6 +134,8 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 
 		// Attempt fix if check failed and is fixable
 		if result.Status != StatusOK && check.CanFix() {
+			originalMessage := result.Message
+
 			// Stream: show the problem with fixing indicator (all on same line)
 			if w != nil {
 				var problemIcon string
@@ -150,7 +152,7 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 				fmt.Fprintf(w, "%s", ui.RenderMuted(" (fixing)..."))
 			}
 
-			err := check.Fix(ctx)
+			fixMsg, err := check.Fix(ctx)
 			if err == nil {
 				// Re-run check to verify fix worked
 				result = check.Run(ctx)
@@ -161,9 +163,11 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 				if cg, ok := check.(categoryGetter); ok && result.Category == "" {
 					result.Category = cg.Category()
 				}
-				// Update message to indicate fix was applied
+				// Mark as fixed if the re-run now passes
 				if result.Status == StatusOK {
-					result.Message = result.Message + " (fixed)"
+					result.Fixed = true
+					result.FixMessage = fixMsg
+					result.Message = originalMessage + " (fixed)"
 				}
 			} else {
 				// Fix failed, add error to details
@@ -177,17 +181,25 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 		// Stream: overwrite line with final result
 		if w != nil {
 			var statusIcon string
-			switch result.Status {
-			case StatusOK:
-				statusIcon = ui.RenderPassIcon()
-			case StatusWarning:
-				statusIcon = ui.RenderWarnIcon()
-			case StatusError:
-				statusIcon = ui.RenderFailIcon()
+			if result.Fixed {
+				statusIcon = ui.RenderFixIcon()
+			} else {
+				switch result.Status {
+				case StatusOK:
+					statusIcon = ui.RenderPassIcon()
+				case StatusWarning:
+					statusIcon = ui.RenderWarnIcon()
+				case StatusError:
+					statusIcon = ui.RenderFailIcon()
+				}
 			}
 			// Check if slow (hourglass replaces spaces to maintain alignment)
+			// Fix icon (🔧) is double-width, so use one less padding space
 			isSlow := slowThreshold > 0 && result.Elapsed >= slowThreshold
 			slowIndicator := "  "
+			if result.Fixed {
+				slowIndicator = " "
+			}
 			if isSlow {
 				report.Summary.Slow++
 				slowIndicator = "⏳"
@@ -195,6 +207,9 @@ func (d *Doctor) FixStreaming(ctx *CheckContext, w io.Writer, slowThreshold time
 			fmt.Fprintf(w, "\r  %s%s%s", statusIcon, slowIndicator, result.Name)
 			if result.Message != "" {
 				fmt.Fprintf(w, "%s", ui.RenderMuted(" "+result.Message))
+			}
+			if result.FixMessage != "" {
+				fmt.Fprintf(w, "%s", ui.RenderMuted(" — "+result.FixMessage))
 			}
 			if isSlow {
 				fmt.Fprintf(w, "%s", ui.RenderMuted(" ("+formatDuration(result.Elapsed)+")"))
@@ -237,8 +252,8 @@ func (b *BaseCheck) CanFix() bool {
 }
 
 // Fix returns an error indicating this check cannot be auto-fixed.
-func (b *BaseCheck) Fix(ctx *CheckContext) error {
-	return ErrCannotFix
+func (b *BaseCheck) Fix(ctx *CheckContext) (string, error) {
+	return "", ErrCannotFix
 }
 
 // FixableCheck provides a base implementation for checks that support auto-fix.

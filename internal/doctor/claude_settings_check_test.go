@@ -537,7 +537,7 @@ func TestClaudeSettingsCheck_FixDeletesStaleFile(t *testing.T) {
 	}
 
 	// Apply fix
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -864,7 +864,7 @@ func TestClaudeSettingsCheck_FixSkipsModifiedFiles(t *testing.T) {
 	}
 
 	// Apply fix - should NOT delete the modified file
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -899,7 +899,7 @@ func TestClaudeSettingsCheck_FixDeletesUntrackedFiles(t *testing.T) {
 	}
 
 	// Apply fix - should delete the untracked file
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -935,7 +935,7 @@ func TestClaudeSettingsCheck_FixDeletesTrackedCleanFiles(t *testing.T) {
 	}
 
 	// Apply fix - should delete the tracked clean file
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -1001,7 +1001,7 @@ func TestClaudeSettingsCheck_FixMovesCLAUDEmdToMayor(t *testing.T) {
 	}
 
 	// Apply fix
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
@@ -1068,7 +1068,7 @@ func TestClaudeSettingsCheck_TownRootSettingsWarnsInsteadOfKilling(t *testing.T)
 
 	// Apply fix - should NOT return error and should NOT kill sessions
 	// (session killing would require tmux which isn't available in tests)
-	if err := check.Fix(ctx); err != nil {
+	if _, err := check.Fix(ctx); err != nil {
 		t.Fatalf("Fix failed: %v", err)
 	}
 
