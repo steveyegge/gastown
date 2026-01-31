@@ -24,8 +24,9 @@ A Decision Point is a **gate** that blocks workflow until a human responds. The 
 
 The human can:
 1. **Select an option** - Choose one of the presented options
-2. **Provide text guidance** - Give custom instructions (triggers refinement)
-3. **Accept as-is** - Proceed with agent's recommendation (after iteration 1)
+2. **Select "Other"** - Enter custom text response (resolves decision directly)
+3. **Provide text guidance** - Give custom instructions (triggers refinement)
+4. **Accept as-is** - Proceed with agent's recommendation (after iteration 1)
 
 ### Decision Flow
 
@@ -382,6 +383,58 @@ Each option should:
 | `medium` | Standard decision, response within a day (default) |
 | `low` | Can wait, informational, nice-to-have input |
 
+## Decision Lifecycle
+
+### Auto-close Stale Decisions
+
+Decisions that go unanswered are automatically closed to prevent clutter:
+
+```bash
+# Auto-close decisions older than 10 minutes (default)
+gt decision auto-close
+
+# Preview what would be closed
+gt decision auto-close --dry-run
+
+# Custom threshold
+gt decision auto-close --threshold 30m
+
+# For hooks (outputs system-reminder)
+gt decision auto-close --inject
+```
+
+The auto-close command runs as part of the `UserPromptSubmit` hook, cleaning up
+stale decisions before each agent turn.
+
+### Single Decision Rule
+
+Each agent can have only one pending decision at a time. When a new decision is
+created, any existing pending decisions from the same agent are automatically
+closed as "superseded".
+
+This enforces clean decision workflows and prevents decision pile-up.
+
+### Custom Text Responses ("Other")
+
+When none of the predefined options fit, users can provide a custom text response:
+
+**Via Slack:**
+1. Click the "Other" button on the decision notification
+2. Enter your response in the modal
+3. Submit - the decision is resolved with your custom text
+
+**Via TUI:**
+1. Navigate to the decision
+2. Press `t` to enter text mode
+3. Type your response and submit
+
+**Via CLI:**
+```bash
+bd decision respond <id> --text="Your custom response" --accept-guidance
+```
+
+Custom text responses are marked with the `implicit:custom_text` label for tracking.
+
 ## Related Commands
 
 | Command | Purpose |
@@ -390,9 +443,11 @@ Each option should:
 | `gt decision list` | List pending decisions |
 | `gt decision show <id>` | View decision details |
 | `gt decision resolve <id>` | Respond to a decision |
+| `gt decision cancel <id>` | Cancel/dismiss a decision |
 | `gt decision watch` | Interactive TUI for monitoring/responding |
 | `gt decision dashboard` | Summary view by urgency |
 | `gt decision await <id>` | Block until resolved (scripting) |
+| `gt decision auto-close` | Clean up stale decisions (for hooks) |
 | `bd decision create` | Low-level decision creation |
 | `bd decision respond` | Low-level response recording |
 

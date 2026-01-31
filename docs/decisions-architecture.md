@@ -388,9 +388,15 @@ Human: gt decision resolve hq-abc123 --choice 1 --rationale "Performance needs"
 
 **Solution:** `turn-check` doesn't clear the marker (only `turn-clear` does), allowing multiple checks to pass.
 
-### 5.3 Custom Text Not Implemented
+### 5.3 Custom Text Responses (Implemented)
 
-The TUI shows "text" mode (key: t) but custom text responses are not yet supported. The mode displays a message explaining this limitation.
+Custom text responses are fully supported via the "Other" option:
+
+- **TUI**: Press `t` to enter custom text mode
+- **Slack**: Click "Other" button to open a modal for custom text input
+- **CLI**: `bd decision respond <id> --text="..." --accept-guidance`
+
+Custom text resolutions are marked with the `implicit:custom_text` label for tracking.
 
 ---
 
@@ -428,13 +434,20 @@ Test coverage in `internal/cmd/decision_test.go`:
 
 ---
 
-## 8. Future Considerations
+## 8. Recent Additions and Future Considerations
 
-1. **RPC layer** - Recent `--rpc` flag added to watch command for potential mobile/remote integration
-2. **Text iteration** - Allow custom text responses for iteration without predefined options
-3. **Batch resolution** - Resolve multiple decisions in single command
-4. **Decision analytics** - Track resolution times, common patterns
-5. **Automatic escalation** - Escalate unresolved high-urgency decisions after timeout
+### 8.1 Recently Implemented
+
+1. **Custom text responses** - "Other" option via Slack modal, TUI, and CLI (Phase 2)
+2. **Auto-close stale decisions** - `gt decision auto-close` command for hooks
+3. **Single-decision enforcement** - New decisions auto-close pending ones from same agent
+4. **RPC layer** - `--rpc` flag on watch command for mobile/remote integration
+
+### 8.2 Future Work
+
+1. **Batch resolution** - Resolve multiple decisions in single command
+2. **Decision analytics** - Track resolution times, common patterns, custom text usage
+3. **Automatic escalation** - Escalate unresolved high-urgency decisions after timeout
 
 ---
 
