@@ -1289,7 +1289,7 @@ func TestBuildPolecatStartupCommandWithDevinOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
 	}
-	if !strings.Contains(cmd, "GT_ROLE=polecat") {
+	if !strings.Contains(cmd, "GT_ROLE=testrig/polecats/toast") {
 		t.Fatalf("expected GT_ROLE export in command: %q", cmd)
 	}
 	if !strings.Contains(cmd, "GT_RIG=testrig") {
@@ -3481,42 +3481,52 @@ func TestQuoteForShell(t *testing.T) {
 		{
 			name:  "simple string",
 			input: "hello",
-			want:  `"hello"`,
+			want:  `$'hello'`,
 		},
 		{
 			name:  "string with double quote",
 			input: `say "hello"`,
-			want:  `"say \"hello\""`,
+			want:  `$'say "hello"'`,
 		},
 		{
 			name:  "string with backslash",
 			input: `path\to\file`,
-			want:  `"path\\to\\file"`,
+			want:  `$'path\\to\\file'`,
 		},
 		{
 			name:  "string with backtick",
 			input: "run `cmd`",
-			want:  "\"run \\`cmd\\`\"",
+			want:  "$'run `cmd`'",
 		},
 		{
 			name:  "string with dollar sign",
 			input: "cost is $100",
-			want:  `"cost is \$100"`,
+			want:  `$'cost is $100'`,
 		},
 		{
 			name:  "variable expansion prevented",
 			input: "$HOME/path",
-			want:  `"\$HOME/path"`,
+			want:  `$'$HOME/path'`,
 		},
 		{
 			name:  "empty string",
 			input: "",
-			want:  `""`,
+			want:  `$''`,
 		},
 		{
 			name:  "combined special chars",
 			input: "`$HOME`",
-			want:  "\"\\`\\$HOME\\`\"",
+			want:  "$'`$HOME`'",
+		},
+		{
+			name:  "string with single quote",
+			input: "it's working",
+			want:  `$'it\'s working'`,
+		},
+		{
+			name:  "string with newline",
+			input: "line1\nline2",
+			want:  `$'line1\nline2'`,
 		},
 	}
 
