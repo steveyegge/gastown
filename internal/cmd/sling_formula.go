@@ -60,8 +60,8 @@ func verifyFormulaExists(formulaName string) error {
 		return nil
 	}
 
-	// Try with mol- prefix
-	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "mol-"+formulaName, "--allow-stale")
+	// Try with oc- prefix
+	cmd = exec.Command("bd", "--no-daemon", "formula", "show", "oc-"+formulaName, "--allow-stale")
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		return nil
 	}
