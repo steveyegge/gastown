@@ -336,8 +336,8 @@ func (b *Beads) ListByAssignee(assignee string) ([]*Issue, error) {
 	})
 }
 
-// GetAssignedIssue returns the first open issue assigned to the given assignee.
-// Returns nil if no open issue is assigned.
+// GetAssignedIssue returns the first open or hooked issue assigned to the given assignee.
+// Returns nil if no open or hooked issue is assigned.
 func (b *Beads) GetAssignedIssue(assignee string) (*Issue, error) {
 	issues, err := b.List(ListOptions{
 		Status:   "open",
@@ -352,6 +352,18 @@ func (b *Beads) GetAssignedIssue(assignee string) (*Issue, error) {
 	if len(issues) == 0 {
 		issues, err = b.List(ListOptions{
 			Status:   "in_progress",
+			Assignee: assignee,
+			Priority: -1,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Also check hooked status - polecat may have work attached but not yet started
+	if len(issues) == 0 {
+		issues, err = b.List(ListOptions{
+			Status:   "hooked",
 			Assignee: assignee,
 			Priority: -1,
 		})
