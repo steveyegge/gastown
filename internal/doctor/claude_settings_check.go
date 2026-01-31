@@ -477,7 +477,7 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 			// For mayor CLAUDE.md at town root, create at mayor/
 			if sf.agentType == "mayor" && strings.HasSuffix(sf.path, "CLAUDE.md") && !strings.Contains(sf.path, "/mayor/") {
 				townName, _ := workspace.GetTownName(ctx.TownRoot)
-				if err := templates.CreateMayorCLAUDEmd(
+				if _, err := templates.CreateMayorCLAUDEmd(
 					mayorDir,
 					ctx.TownRoot,
 					townName,
@@ -486,6 +486,8 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 				); err != nil {
 					errors = append(errors, fmt.Sprintf("failed to create mayor/CLAUDE.md: %v", err))
 				}
+				// Note: We don't check the 'created' return here because we just deleted
+				// the wrong-location file, so if mayor/CLAUDE.md exists, that's fine.
 			}
 
 			// Town-root files were inherited by ALL agents via directory traversal.

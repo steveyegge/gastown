@@ -478,9 +478,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		}
 	}
 
-	// Create mayor CLAUDE.md (overrides any from cloned repo)
-	if err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
+	// Create mayor CLAUDE.md (preserves existing from cloned repo)
+	if created, err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
+	} else if !created {
+		fmt.Printf("   ✓ Preserved existing mayor/rig/CLAUDE.md\n")
 	}
 
 	// Initialize beads at rig level BEFORE creating worktrees.
@@ -516,9 +518,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := beads.SetupRedirect(m.townRoot, refineryRigPath); err != nil {
 		fmt.Printf("  Warning: Could not set up refinery beads redirect: %v\n", err)
 	}
-	// Create refinery CLAUDE.md (overrides any from cloned repo)
-	if err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
+	// Create refinery CLAUDE.md (preserves existing from cloned repo)
+	if created, err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating refinery CLAUDE.md: %w", err)
+	} else if !created {
+		fmt.Printf("   ✓ Preserved existing refinery/rig/CLAUDE.md\n")
 	}
 	// Copy overlay files from .runtime/overlay/ to refinery root.
 	// This allows services to have .env and other config files at their root.
@@ -1134,7 +1138,19 @@ func (m *Manager) ListRigNames() []string {
 // createRoleCLAUDEmd creates a minimal bootstrap pointer CLAUDE.md file.
 // Full context is injected ephemerally by `gt prime` at session start.
 // This keeps on-disk files small (<30 lines) per the priming architecture.
-func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName string, workerName string) error {
+//
+// Returns (created bool, error) - created is false if file already exists.
+// Existing files are preserved to respect user customizations from cloned repos.
+func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName string, workerName string) (bool, error) {
+	claudePath := filepath.Join(workspacePath, "CLAUDE.md")
+
+	// Check if file already exists - preserve existing from cloned repo
+	if _, err := os.Stat(claudePath); err == nil {
+		return false, nil // File exists, preserve it
+	} else if !os.IsNotExist(err) {
+		return false, err // Unexpected error
+	}
+
 	// Create role-specific bootstrap pointer
 	var bootstrap string
 	switch role {
@@ -1198,8 +1214,7 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 `
 	}
 
-	claudePath := filepath.Join(workspacePath, "CLAUDE.md")
-	return os.WriteFile(claudePath, []byte(bootstrap), 0644)
+	return true, os.WriteFile(claudePath, []byte(bootstrap), 0644)
 }
 
 // createPatrolHooks creates .claude/settings.json with hooks for patrol roles.
