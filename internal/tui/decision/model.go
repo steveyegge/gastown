@@ -580,9 +580,13 @@ func (m *Model) dismissDecision(decisionID, prompt, reason string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		// RPC mode doesn't support cancel yet - return error
+		// Use RPC if client is configured
 		if rpcClient != nil {
-			return dismissedMsg{id: decisionID, prompt: prompt, err: fmt.Errorf("dismiss not supported in RPC mode")}
+			err := rpcClient.CancelDecision(ctx, decisionID, reason)
+			if err != nil {
+				return dismissedMsg{id: decisionID, prompt: prompt, err: fmt.Errorf("RPC cancel failed: %w", err)}
+			}
+			return dismissedMsg{id: decisionID, prompt: prompt}
 		}
 
 		// Fall back to CLI command

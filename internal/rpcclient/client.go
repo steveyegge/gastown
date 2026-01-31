@@ -487,6 +487,44 @@ func (c *Client) ResolveDecisionWithCustomText(ctx context.Context, decisionID, 
 	}, nil
 }
 
+// CancelDecision cancels/dismisses a decision via the RPC server.
+func (c *Client) CancelDecision(ctx context.Context, decisionID, reason string) error {
+	body := map[string]interface{}{
+		"decisionId": decisionID,
+	}
+	if reason != "" {
+		body["reason"] = reason
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encoding request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		c.baseURL+"/gastown.v1.DecisionService/Cancel",
+		strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-GT-API-Key", c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("RPC error: %s", resp.Status)
+	}
+
+	return nil
+}
+
 // GetDecision fetches a specific decision by ID via the RPC server.
 func (c *Client) GetDecision(ctx context.Context, decisionID string) (*Decision, error) {
 	body := map[string]interface{}{
