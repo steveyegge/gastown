@@ -1,122 +1,99 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// TestEnsureAgentBeadExistsAgentIDParsing tests agent ID parsing in ensureAgentBeadExists.
-// Fix for hq-cc7214.26: Sling fails when agent bead doesn't exist.
-func TestEnsureAgentBeadExistsAgentIDParsing(t *testing.T) {
-	// This test verifies that the agent ID parsing logic correctly extracts
-	// role type, rig name, and agent name from various agent ID formats.
+// TestNudgeRefinerySessionName verifies that nudgeRefinery constructs the
+// correct tmux session name (gt-<rigName>-refinery) and passes the message.
+func TestNudgeRefinerySessionName(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "nudge.log")
+	t.Setenv("GT_TEST_NUDGE_LOG", logPath)
 
 	tests := []struct {
 		name        string
-		agentID     string
-		wantParsed  bool
-		wantRole    string
-		wantRig     string
-		wantAgent   string
+		rigName     string
+		message     string
+		wantSession string
 	}{
 		{
-			name:       "crew agent",
-			agentID:    "testrig/crew/worker1",
-			wantParsed: true,
-			wantRole:   "crew",
-			wantRig:    "testrig",
-			wantAgent:  "worker1",
+			name:        "simple rig name",
+			rigName:     "gastown",
+			message:     "MR submitted: gt-abc branch=polecat/Nux/gt-abc",
+			wantSession: "gt-gastown-refinery",
 		},
 		{
-			name:       "polecat agent",
-			agentID:    "testrig/polecats/Toast",
-			wantParsed: true,
-			wantRole:   "polecat",
-			wantRig:    "testrig",
-			wantAgent:  "Toast",
-		},
-		{
-			name:       "witness agent",
-			agentID:    "testrig/witness",
-			wantParsed: true,
-			wantRole:   "witness",
-			wantRig:    "testrig",
-			wantAgent:  "",
-		},
-		{
-			name:       "refinery agent",
-			agentID:    "testrig/refinery",
-			wantParsed: true,
-			wantRole:   "refinery",
-			wantRig:    "testrig",
-			wantAgent:  "",
-		},
-		{
-			name:       "trailing slash",
-			agentID:    "testrig/crew/worker1/",
-			wantParsed: true,
-			wantRole:   "crew",
-			wantRig:    "testrig",
-			wantAgent:  "worker1",
-		},
-		{
-			name:       "invalid - single part",
-			agentID:    "invalidid",
-			wantParsed: false,
-		},
-		{
-			name:       "invalid - unknown role",
-			agentID:    "testrig/unknown/foo",
-			wantParsed: false,
+			name:        "hyphenated rig name",
+			rigName:     "my-project",
+			message:     "MR submitted: mp-xyz branch=polecat/Toast/mp-xyz",
+			wantSession: "gt-my-project-refinery",
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Parse agent ID using the same logic as ensureAgentBeadExists
-			parts := strings.Split(strings.TrimSuffix(tc.agentID, "/"), "/")
-
-			var parsed bool
-			var roleType, rigName, agentName string
-
-			if len(parts) >= 2 {
-				switch {
-				case len(parts) == 3 && parts[1] == "crew":
-					parsed = true
-					roleType = "crew"
-					rigName = parts[0]
-					agentName = parts[2]
-				case len(parts) == 3 && parts[1] == "polecats":
-					parsed = true
-					roleType = "polecat"
-					rigName = parts[0]
-					agentName = parts[2]
-				case len(parts) == 2 && parts[1] == "witness":
-					parsed = true
-					roleType = "witness"
-					rigName = parts[0]
-				case len(parts) == 2 && parts[1] == "refinery":
-					parsed = true
-					roleType = "refinery"
-					rigName = parts[0]
-				}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Truncate log for each subtest
+			if err := os.WriteFile(logPath, nil, 0644); err != nil {
+				t.Fatalf("truncate log: %v", err)
 			}
 
-			if parsed != tc.wantParsed {
-				t.Errorf("parsed = %v, want %v", parsed, tc.wantParsed)
+			nudgeRefinery(tt.rigName, tt.message)
+
+			logBytes, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatalf("read log: %v", err)
+			}
+			logContent := string(logBytes)
+
+			// Verify session name
+			wantPrefix := "nudge:" + tt.wantSession + ":"
+			if !strings.Contains(logContent, wantPrefix) {
+				t.Errorf("nudgeRefinery(%q) session = got log %q, want prefix %q",
+					tt.rigName, logContent, wantPrefix)
 			}
 
-			if tc.wantParsed {
-				if roleType != tc.wantRole {
-					t.Errorf("roleType = %q, want %q", roleType, tc.wantRole)
-				}
-				if rigName != tc.wantRig {
-					t.Errorf("rigName = %q, want %q", rigName, tc.wantRig)
-				}
-				if agentName != tc.wantAgent {
-					t.Errorf("agentName = %q, want %q", agentName, tc.wantAgent)
-				}
+			// Verify message is passed through
+			if !strings.Contains(logContent, tt.message) {
+				t.Errorf("nudgeRefinery() message not found in log: got %q, want %q",
+					logContent, tt.message)
 			}
 		})
 	}
+}
+
+// TestWakeRigAgentsDoesNotNudgeRefinery verifies that wakeRigAgents only
+// nudges the witness, not the refinery. The refinery should only be nudged
+// when an MR is actually created (via nudgeRefinery), not at polecat dispatch time.
+func TestWakeRigAgentsDoesNotNudgeRefinery(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "nudge.log")
+	t.Setenv("GT_TEST_NUDGE_LOG", logPath)
+
+	// wakeRigAgents calls exec.Command("gt", "rig", "boot", ...) and tmux.NudgeSession.
+	// The boot command and witness nudge will fail silently (no real rig/tmux).
+	// We only care that nudgeRefinery is NOT called (no log entries).
+	wakeRigAgents("testrig")
+
+	// Check that no refinery nudge was logged
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		// File doesn't exist = no nudges logged = correct
+		return
+	}
+	if strings.Contains(string(logBytes), "refinery") {
+		t.Errorf("wakeRigAgents() should not nudge refinery, but log contains: %s", string(logBytes))
+	}
+}
+
+// TestNudgeRefineryNoOpWithoutLog verifies that nudgeRefinery doesn't panic
+// or error when called without the test log env var and without a real tmux session.
+// The tmux NudgeSession call should fail silently.
+func TestNudgeRefineryNoOpWithoutLog(t *testing.T) {
+	// Ensure test log is NOT set so we exercise the real tmux path
+	t.Setenv("GT_TEST_NUDGE_LOG", "")
+
+	// Should not panic even though no tmux session exists
+	nudgeRefinery("nonexistent-rig", "test message")
 }
