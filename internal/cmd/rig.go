@@ -331,6 +331,10 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	}
 	gitURL := args[1]
 
+	if !isGitRemoteURL(gitURL) {
+		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)\n\nTo register a local directory, use:\n  gt rig add %s --adopt", gitURL, name)
+	}
+
 	// Ensure beads (bd) is available before proceeding
 	if err := deps.EnsureBeads(true); err != nil {
 		return fmt.Errorf("beads dependency check failed: %w", err)
@@ -585,6 +589,11 @@ func runRigAdopt(_ *cobra.Command, args []string) error {
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
 
 	fmt.Printf("Adopting existing rig %s...\n", style.Bold.Render(name))
+
+	// Validate --url if provided
+	if rigAddAdoptURL != "" && !isGitRemoteURL(rigAddAdoptURL) {
+		return fmt.Errorf("invalid git URL %q: expected a remote URL (https://, git@, ssh://, git://)", rigAddAdoptURL)
+	}
 
 	// Register the existing rig
 	result, err := mgr.RegisterRig(rig.RegisterRigOptions{
@@ -1625,4 +1634,48 @@ func getRigOperationalState(townRoot, rigName string) (state string, source stri
 
 	// Default: operational
 	return "OPERATIONAL", "default"
+}
+
+// isGitRemoteURL returns true if s looks like a remote git URL
+// (https, http, ssh, git protocol, or SCP-style) rather than a local path.
+func isGitRemoteURL(s string) bool {
+	// Reject flag-like strings (defense-in-depth against argument injection)
+	if strings.HasPrefix(s, "-") {
+		return false
+	}
+	// Reject absolute paths
+	if strings.HasPrefix(s, "/") {
+		return false
+	}
+	// Reject Windows-style paths (C:\...)
+	if len(s) >= 3 && s[1] == ':' && (s[2] == '/' || s[2] == '\\') {
+		return false
+	}
+	// Reject relative paths
+	if strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") {
+		return false
+	}
+	// Reject home-relative paths
+	if strings.HasPrefix(s, "~/") {
+		return false
+	}
+	// Reject file:// URIs (local filesystem access)
+	if strings.HasPrefix(s, "file://") {
+		return false
+	}
+	// Accept known remote URL schemes
+	if strings.HasPrefix(s, "https://") ||
+		strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "ssh://") ||
+		strings.HasPrefix(s, "git://") {
+		return true
+	}
+	// Accept SCP-style SSH URLs (user@host:path) where user and host are non-empty
+	// and host contains no slashes (distinguishes from file:// or path-like strings)
+	atIdx := strings.Index(s, "@")
+	colonIdx := strings.Index(s, ":")
+	if atIdx > 0 && colonIdx > atIdx+1 && !strings.Contains(s[:colonIdx], "/") {
+		return true
+	}
+	return false
 }
