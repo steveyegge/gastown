@@ -455,7 +455,17 @@ gt config agent remove <name>     # Remove custom agent (built-ins protected)
 gt config default-agent [name]    # Get or set town default agent
 ```
 
-**Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`
+**Built-in agents**: `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `copilot`, `opencode`
+
+**Copilot trust**: Copilot CLI requires the town root in `~/.copilot/config.json`
+under `trusted_folders`. If the file exists, you can run:
+
+```bash
+gt install <path> --trust-copilot
+```
+
+If Copilot is installed after `gt install` or the config file did not exist,
+add the town root manually or run `gt doctor --fix`.
 
 **Custom agents**: Define per-town via CLI or JSON:
 ```bash
@@ -474,6 +484,7 @@ gt config default-agent claude-glm       # Set default
       "args": [],
       "resume_flag": "--session",
       "resume_style": "flag",
+      "interactive_prompt_flag": "-i",
       "non_interactive": {
         "subcommand": "run",
         "output_flag": "--format json"
