@@ -1,0 +1,147 @@
+# =============================================================================
+# DRAFT .gitignore for Town Root (~/gt11)
+# =============================================================================
+# Prepared by: gastown/crew/town_audit
+# Date: 2026-01-29
+# Bead: gt-zrw0o.1
+#
+# This is a DRAFT for review before deployment to ~/gt11/.gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SECRETS (CRITICAL)
+# -----------------------------------------------------------------------------
+.slack-env
+*.env
+.env.*
+credentials.json
+secrets.json
+
+# -----------------------------------------------------------------------------
+# BINARIES & BUILD ARTIFACTS
+# -----------------------------------------------------------------------------
+# gt binary (should be built, not versioned)
+/gt
+
+# SQLite databases at root
+/*.db
+/*.db-journal
+/*.db-wal
+/*.db-shm
+
+# -----------------------------------------------------------------------------
+# RUNTIME EVENT LOGS
+# -----------------------------------------------------------------------------
+# Large event streams (grow continuously)
+.events.jsonl
+.feed.jsonl
+
+# Town logs
+logs/town.log
+logs/*.log
+
+# -----------------------------------------------------------------------------
+# DAEMON RUNTIME FILES
+# -----------------------------------------------------------------------------
+daemon/daemon.log
+daemon/daemon.lock
+daemon/daemon.pid
+daemon/shutdown.lock
+daemon/state.json
+daemon/activity.json
+
+# -----------------------------------------------------------------------------
+# BEADS RUNTIME (supplements .beads/.gitignore)
+# -----------------------------------------------------------------------------
+# Dolt database directory (96MB+, has own versioning)
+.beads/beads/
+.beads/beads-dolt-backup/
+
+# Dolt symlink
+.beads/dolt
+
+# Runtime JSONL (data is in Dolt)
+.beads/issues.jsonl
+.beads/interactions.jsonl
+
+# Backup and corrupted files
+.beads/*.backup
+.beads/*.backup.*
+.beads/*.corrupted.*
+
+# Local markers
+.beads/.gt-types-configured
+.beads/.local_version
+.beads/README.md
+
+# Git hooks that aren't committed upstream
+# (Keep on_decision_respond, ignore new hooks unless reviewed)
+# .beads/hooks/post-checkout
+# .beads/hooks/post-merge
+# .beads/hooks/pre-commit
+# .beads/hooks/pre-push
+# .beads/hooks/prepare-commit-msg
+
+# -----------------------------------------------------------------------------
+# GLOBAL RUNTIME DIRECTORY
+# -----------------------------------------------------------------------------
+.runtime/
+
+# -----------------------------------------------------------------------------
+# RIG RUNTIME DATA
+# -----------------------------------------------------------------------------
+# Each rig has runtime data that shouldn't be versioned
+*/metadata.json
+*/.runtime/
+*/witness/state.json
+*/refinery/mq/
+*/refinery/merged/
+
+# Crew and polecat workspaces (have their own git)
+*/crew/*/
+*/polecats/*/
+
+# Deacon-specific
+deacon/.beads/
+deacon/dogs/
+deacon/heartbeat.json
+deacon/state.json
+deacon/dolt-server.pid
+
+# Rig-level beads databases
+*/.beads/*.db
+*/.beads/*.db-*
+*/.beads/daemon.*
+*/.beads/last-touched
+*/.beads/.local_version
+
+# -----------------------------------------------------------------------------
+# OS/EDITOR FILES
+# -----------------------------------------------------------------------------
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.orig
+
+# -----------------------------------------------------------------------------
+# KEEP THESE (negation patterns)
+# -----------------------------------------------------------------------------
+# Core beads config
+!.beads/config.yaml
+!.beads/metadata.json
+!.beads/routes.jsonl
+!.beads/.gitignore
+!.beads/formulas/
+
+# Claude config
+!.claude/
+
+# Mayor config
+!mayor/
+
+# Documentation
+!AGENTS.md
+!plugins/README.md

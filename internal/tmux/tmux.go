@@ -3,6 +3,7 @@ package tmux
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,10 @@ import (
 	"github.com/steveyegge/gastown/internal/constants"
 )
 
+// DefaultTimeout is the default timeout for tmux commands.
+// Most tmux operations should complete quickly; hangs indicate issues.
+const DefaultTimeout = 10 * time.Second
+
 // sessionNudgeLocks serializes nudges to the same session.
 // This prevents interleaving when multiple nudges arrive concurrently,
 // which can cause garbled input and missed Enter keys.
@@ -25,6 +30,9 @@ var sessionNudgeLocks sync.Map // map[string]*sync.Mutex
 
 // validSessionNameRe validates session names to prevent shell injection
 var validSessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// versionPattern matches Claude Code version strings as process names (e.g., "1.0.16")
+var versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
 // Common errors
 var (
@@ -42,14 +50,27 @@ func NewTmux() *Tmux {
 }
 
 // run executes a tmux command and returns stdout.
+// Uses a default timeout to prevent hangs from blocking operations.
 func (t *Tmux) run(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
+	return t.runWithTimeout(DefaultTimeout, args...)
+}
+
+// runWithTimeout executes a tmux command with a custom timeout.
+func (t *Tmux) runWithTimeout(timeout time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "tmux", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	if err != nil {
+		// Check if the error was due to context timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("tmux command timed out after %v: %v", timeout, args)
+		}
 		return "", t.wrapError(err, stderr.String(), args)
 	}
 
@@ -95,15 +116,77 @@ func (t *Tmux) NewSession(name, workDir string) error {
 // or the command arrives before the shell prompt. The command runs directly as the
 // initial process of the pane.
 // See: https://github.com/anthropics/gastown/issues/280
+//
+// This function ensures remain-on-exit is set BEFORE the actual command runs.
+// This prevents a race condition where fast-exiting commands (auth failures, missing
+// binaries) could cause the session to be destroyed before remain-on-exit is set,
+// losing diagnostic output. See: gt-958e7d
 func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
+	// Strategy: Create session with a brief sleep, set remain-on-exit, then respawn
+	// with the actual command. This avoids quoting issues that arise from trying to
+	// wrap arbitrary commands in shell strings.
+	//
+	// 1. Create session with a dummy command (sleep) to hold the session open
+	// 2. Set remain-on-exit on the window
+	// 3. Respawn the pane with the actual command
+	//
+	// The sleep ensures the session exists long enough for us to set remain-on-exit.
+	// The respawn-pane then runs the actual command with remain-on-exit already set.
 	args := []string{"new-session", "-d", "-s", name}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
 	}
-	// Add the command as the last argument - tmux runs it as the pane's initial process
-	args = append(args, command)
+	// Start with a sleep command to hold the session open briefly
+	args = append(args, "sleep 60")
 	_, err := t.run(args...)
+	if err != nil {
+		return err
+	}
+
+	// Set remain-on-exit BEFORE running the actual command
+	// This ensures the pane is preserved even if the command exits immediately
+	_, _ = t.run("set-window-option", "-t", name, "remain-on-exit", "on")
+
+	// Now respawn the pane with the actual command
+	// respawn-pane -k kills the current process (sleep) and starts the new command
+	// The -t flag targets the session's default pane
+	_, err = t.run("respawn-pane", "-k", "-t", name, command)
 	return err
+}
+
+// IsPaneDead checks if the pane's command has exited (pane_dead=1).
+// With remain-on-exit enabled, the pane stays around after command exit,
+// allowing us to capture diagnostic output before cleanup.
+func (t *Tmux) IsPaneDead(session string) (bool, error) {
+	out, err := t.run("display-message", "-t", session, "-p", "#{pane_dead}")
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrNoServer) {
+			return false, err
+		}
+		return false, err
+	}
+	return strings.TrimSpace(out) == "1", nil
+}
+
+// CaptureDeadPaneOutput captures output from a dead pane for diagnostics.
+// Returns empty string if capture fails (non-fatal since this is for debugging).
+func (t *Tmux) CaptureDeadPaneOutput(session string, lines int) string {
+	output, err := t.CapturePane(session, lines)
+	if err != nil {
+		return ""
+	}
+	return output
+}
+
+// GetPaneExitStatus returns the exit status of a dead pane.
+// Returns empty string if the pane is not dead or if the status cannot be retrieved.
+// Note: Requires tmux 2.0+ for pane_dead_status support.
+func (t *Tmux) GetPaneExitStatus(session string) string {
+	out, err := t.run("display-message", "-t", session, "-p", "#{pane_dead_status}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // EnsureSessionFresh ensures a session is available and healthy.
@@ -218,10 +301,11 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 	}
 
 	// Kill the tmux session
-	// Ignore "session not found" - killing the pane process may have already
-	// caused tmux to destroy the session automatically
+	// Ignore "session not found" or "no server" - killing the pane process may have already
+	// caused tmux to destroy the session automatically. If it was the last session,
+	// the tmux server itself shuts down, resulting in "no server" instead of "session not found".
 	err = t.KillSession(name)
-	if err == ErrSessionNotFound {
+	if err == ErrSessionNotFound || err == ErrNoServer {
 		return nil
 	}
 	return err
@@ -298,10 +382,11 @@ func (t *Tmux) KillSessionWithProcessesExcluding(name string, excludePIDs []stri
 	}
 
 	// Kill the tmux session - this will terminate the excluded process too
-	// Ignore "session not found" - if we killed all non-excluded processes,
-	// tmux may have already destroyed the session automatically
+	// Ignore "session not found" or "no server" - if we killed all non-excluded processes,
+	// tmux may have already destroyed the session automatically. If it was the last session,
+	// the tmux server itself shuts down, resulting in "no server" instead of "session not found".
 	err = t.KillSession(name)
-	if err == ErrSessionNotFound {
+	if err == ErrSessionNotFound || err == ErrNoServer {
 		return nil
 	}
 	return err
@@ -526,6 +611,16 @@ func (t *Tmux) HasSession(name string) (bool, error) {
 	return true, nil
 }
 
+// GetCurrentSessionName returns the name of the current tmux session.
+// This only works when called from within a tmux session.
+func (t *Tmux) GetCurrentSessionName() (string, error) {
+	out, err := t.run("display-message", "-p", "#{session_name}")
+	if err != nil {
+		return "", fmt.Errorf("getting current session name: %w", err)
+	}
+	return out, nil
+}
+
 // ListSessions returns all session names.
 func (t *Tmux) ListSessions() ([]string, error) {
 	out, err := t.run("list-sessions", "-F", "#{session_name}")
@@ -736,11 +831,12 @@ func (t *Tmux) IsSessionAttached(target string) bool {
 // Note: This always performs the resize. Use WakePaneIfDetached to skip
 // attached sessions where the wake is unnecessary.
 func (t *Tmux) WakePane(target string) {
-	// Resize pane down by 1 row, then up by 1 row
+	// Shrink pane by 1 row (-D = down/shrink), then grow back by 1 row (-U = up/grow)
 	// This triggers SIGWINCH without changing the final pane size
-	_, _ = t.run("resize-pane", "-t", target, "-y", "-1")
+	// Note: -D/-U are for relative adjustments; -y sets absolute height (which doesn't work here)
+	_, _ = t.run("resize-pane", "-t", target, "-D", "1")
 	time.Sleep(50 * time.Millisecond)
-	_, _ = t.run("resize-pane", "-t", target, "-y", "+1")
+	_, _ = t.run("resize-pane", "-t", target, "-U", "1")
 }
 
 // WakePaneIfDetached triggers a SIGWINCH only if the session is detached.
@@ -921,36 +1017,48 @@ func (t *Tmux) GetPanePID(session string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// hasChildWithNames checks if a process has a child matching any of the given names.
+// hasChildWithNames checks if a process has a descendant matching any of the given names.
 // Used when the pane command is a shell (bash, zsh) that launched an agent.
+//
+// IMPORTANT: This checks ALL descendants, not just direct children.
+// Agents are often started via wrapper scripts like:
+//
+//	bash (pane) -> bash -c 'export ... && claude' -> claude
+//
+// In this case, the agent is a grandchild, not a direct child.
+// Using only pgrep -P (direct children) would miss this case and cause
+// CleanupOrphanedSessions to kill sessions with running agents.
 func hasChildWithNames(pid string, names []string) bool {
 	if len(names) == 0 {
 		return false
 	}
-	// Use pgrep to find child processes
-	cmd := exec.Command("pgrep", "-P", pid, "-l")
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
+
 	// Build a set of names for fast lookup
 	nameSet := make(map[string]bool, len(names))
 	for _, n := range names {
 		nameSet[n] = true
 	}
-	// Check if any child matches
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+
+	// Get all descendant PIDs recursively
+	descendants := getAllDescendants(pid)
+	if len(descendants) == 0 {
+		return false
+	}
+
+	// Check each descendant's command name
+	for _, dpid := range descendants {
+		// Get the command name for this PID
+		out, err := exec.Command("ps", "-o", "comm=", "-p", dpid).Output()
+		if err != nil {
 			continue
 		}
-		// Format: "PID name" e.g., "29677 node"
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			if nameSet[parts[1]] {
-				return true
-			}
+		name := strings.TrimSpace(string(out))
+		if nameSet[name] {
+			return true
+		}
+		// Also check for version pattern (Claude Code shows version as process name)
+		if versionPattern.MatchString(name) {
+			return true
 		}
 	}
 	return false
@@ -1429,6 +1537,9 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.SetFeedBinding(session); err != nil {
 		return fmt.Errorf("setting feed binding: %w", err)
 	}
+	if err := t.SetAgentsBinding(session); err != nil {
+		return fmt.Errorf("setting agents binding: %w", err)
+	}
 	if err := t.SetCycleBindings(session); err != nil {
 		return fmt.Errorf("setting cycle bindings: %w", err)
 	}
@@ -1476,9 +1587,8 @@ func (t *Tmux) RespawnPane(pane, command string) error {
 	return err
 }
 
-// RespawnPaneWithWorkDir kills all processes in a pane and starts a new command
-// in the specified working directory. Use this when the pane's current working
-// directory may have been deleted.
+// RespawnPaneWithWorkDir kills all processes in a pane and starts a new command with a working directory.
+// Like RespawnPane but allows specifying the working directory for the new process.
 func (t *Tmux) RespawnPaneWithWorkDir(pane, workDir, command string) error {
 	args := []string{"respawn-pane", "-k", "-t", pane}
 	if workDir != "" {
@@ -1581,6 +1691,20 @@ func (t *Tmux) SetFeedBinding(session string) error {
 		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
 		"run-shell 'gt feed --window'",
 		"display-message 'C-b a is for Gas Town sessions only'")
+	return err
+}
+
+// SetAgentsBinding configures C-b g to open the agent switcher popup menu.
+// This runs `gt agents` which displays a tmux popup with all Gas Town agents.
+//
+// IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
+// (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
+func (t *Tmux) SetAgentsBinding(session string) error {
+	// C-b g → gt agents for GT sessions, help message otherwise
+	_, err := t.run("bind-key", "-T", "prefix", "g",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"run-shell 'gt agents'",
+		"display-message 'C-b g is for Gas Town sessions only'")
 	return err
 }
 

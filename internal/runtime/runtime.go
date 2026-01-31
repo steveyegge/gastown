@@ -3,6 +3,7 @@ package runtime
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,7 +14,15 @@ import (
 )
 
 // EnsureSettingsForRole installs runtime hook settings when supported.
+// Deprecated: Use EnsureSettingsForRoleWithAccount for account-aware settings.
 func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error {
+	return EnsureSettingsForRoleWithAccount(workDir, role, "", rc)
+}
+
+// EnsureSettingsForRoleWithAccount installs runtime hook settings when supported.
+// If accountConfigDir is provided, settings are installed per-account (shared across workspaces).
+// If accountConfigDir is empty, settings are installed per-workspace (legacy behavior).
+func EnsureSettingsForRoleWithAccount(workDir, role, accountConfigDir string, rc *config.RuntimeConfig) error {
 	if rc == nil {
 		rc = config.DefaultRuntimeConfig()
 	}
@@ -24,7 +33,7 @@ func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error
 
 	switch rc.Hooks.Provider {
 	case "claude":
-		return claude.EnsureSettingsForRoleAt(workDir, role, rc.Hooks.Dir, rc.Hooks.SettingsFile)
+		return claude.EnsureSettingsForAccount(workDir, role, accountConfigDir)
 	case "opencode":
 		return opencode.EnsurePluginAt(workDir, rc.Hooks.Dir, rc.Hooks.SettingsFile)
 	default:
@@ -33,14 +42,52 @@ func EnsureSettingsForRole(workDir, role string, rc *config.RuntimeConfig) error
 }
 
 // SessionIDFromEnv returns the runtime session ID, if present.
-// It checks GT_SESSION_ID_ENV first, then falls back to CLAUDE_SESSION_ID.
+// It checks GT_SESSION_ID_ENV first, then CLAUDE_SESSION_ID env var,
+// then falls back to the persisted .runtime/session_id file.
+// The file fallback is needed because hook subprocesses (UserPromptSubmit,
+// PostToolUse) don't inherit env vars set by gt prime --hook.
 func SessionIDFromEnv() string {
 	if envName := os.Getenv("GT_SESSION_ID_ENV"); envName != "" {
 		if sessionID := os.Getenv(envName); sessionID != "" {
 			return sessionID
 		}
 	}
-	return os.Getenv("CLAUDE_SESSION_ID")
+	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
+		return id
+	}
+	return readPersistedSessionID()
+}
+
+// readPersistedSessionID reads the session ID from .runtime/session_id.
+// It checks cwd first, then walks up parent directories looking for the file.
+func readPersistedSessionID() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	// Check cwd and walk up to find .runtime/session_id
+	dir := cwd
+	for {
+		sessionFile := filepath.Join(dir, ".runtime", "session_id")
+		data, err := os.ReadFile(sessionFile)
+		if err == nil {
+			lines := strings.SplitN(string(data), "\n", 2)
+			if len(lines) > 0 {
+				id := strings.TrimSpace(lines[0])
+				if id != "" {
+					return id
+				}
+			}
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 // SleepForReadyDelay sleeps for the runtime's configured readiness delay.

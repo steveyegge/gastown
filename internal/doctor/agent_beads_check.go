@@ -70,6 +70,7 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	var missing []string
+	var missingLabels []string // Beads that exist but lack gt:agent label
 	var checked int
 
 	// Check global agents (Mayor, Deacon) in town beads
@@ -80,13 +81,17 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 	deaconID := beads.DeaconBeadIDTown()
 	mayorID := beads.MayorBeadIDTown()
 
-	if _, err := townBd.Show(deaconID); err != nil {
+	if issue, err := townBd.Show(deaconID); err != nil {
 		missing = append(missing, deaconID)
+	} else if !beads.HasLabel(issue, "gt:agent") {
+		missingLabels = append(missingLabels, deaconID)
 	}
 	checked++
 
-	if _, err := townBd.Show(mayorID); err != nil {
+	if issue, err := townBd.Show(mayorID); err != nil {
 		missing = append(missing, mayorID)
+	} else if !beads.HasLabel(issue, "gt:agent") {
+		missingLabels = append(missingLabels, mayorID)
 	}
 	checked++
 
@@ -119,13 +124,17 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
 
-		if _, err := bd.Show(witnessID); err != nil {
+		if issue, err := bd.Show(witnessID); err != nil {
 			missing = append(missing, witnessID)
+		} else if !beads.HasLabel(issue, "gt:agent") {
+			missingLabels = append(missingLabels, witnessID)
 		}
 		checked++
 
-		if _, err := bd.Show(refineryID); err != nil {
+		if issue, err := bd.Show(refineryID); err != nil {
 			missing = append(missing, refineryID)
+		} else if !beads.HasLabel(issue, "gt:agent") {
+			missingLabels = append(missingLabels, refineryID)
 		}
 		checked++
 
@@ -133,31 +142,40 @@ func (c *AgentBeadsCheck) Run(ctx *CheckContext) *CheckResult {
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
 			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
-			if _, err := bd.Show(crewID); err != nil {
+			if issue, err := bd.Show(crewID); err != nil {
 				missing = append(missing, crewID)
+			} else if !beads.HasLabel(issue, "gt:agent") {
+				missingLabels = append(missingLabels, crewID)
 			}
 			checked++
 		}
 	}
 
-	if len(missing) == 0 {
+	if len(missing) == 0 && len(missingLabels) == 0 {
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: fmt.Sprintf("All %d agent beads exist", checked),
+			Message: fmt.Sprintf("All %d agent beads exist with gt:agent label", checked),
 		}
+	}
+
+	// Build combined details
+	var details []string
+	details = append(details, missing...)
+	for _, id := range missingLabels {
+		details = append(details, id+" (missing gt:agent label)")
 	}
 
 	return &CheckResult{
 		Name:    c.Name(),
 		Status:  StatusError,
-		Message: fmt.Sprintf("%d agent bead(s) missing", len(missing)),
-		Details: missing,
-		FixHint: "Run 'gt doctor --fix' to create missing agent beads",
+		Message: fmt.Sprintf("%d agent bead(s) missing, %d missing gt:agent label", len(missing), len(missingLabels)),
+		Details: details,
+		FixHint: "Run 'gt doctor --fix' to create missing agent beads and add missing labels",
 	}
 }
 
-// Fix creates missing agent beads.
+// Fix creates missing agent beads and adds missing gt:agent labels.
 func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	// Create global agents (Mayor, Deacon) in town beads
 	// These use hq- prefix and are stored in ~/gt/.beads/
@@ -165,7 +183,7 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 	townBd := beads.New(townBeadsPath)
 
 	deaconID := beads.DeaconBeadIDTown()
-	if _, err := townBd.Show(deaconID); err != nil {
+	if issue, err := townBd.Show(deaconID); err != nil {
 		fields := &beads.AgentFields{
 			RoleType:   "deacon",
 			Rig:        "",
@@ -175,10 +193,14 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		if _, err := townBd.CreateAgentBead(deaconID, desc, fields); err != nil {
 			return fmt.Errorf("creating %s: %w", deaconID, err)
 		}
+	} else if !beads.HasLabel(issue, "gt:agent") {
+		if err := townBd.AddLabel(deaconID, "gt:agent"); err != nil {
+			return fmt.Errorf("adding gt:agent label to %s: %w", deaconID, err)
+		}
 	}
 
 	mayorID := beads.MayorBeadIDTown()
-	if _, err := townBd.Show(mayorID); err != nil {
+	if issue, err := townBd.Show(mayorID); err != nil {
 		fields := &beads.AgentFields{
 			RoleType:   "mayor",
 			Rig:        "",
@@ -187,6 +209,10 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		desc := "Mayor - global coordinator, handles cross-rig communication and escalations."
 		if _, err := townBd.CreateAgentBead(mayorID, desc, fields); err != nil {
 			return fmt.Errorf("creating %s: %w", mayorID, err)
+		}
+	} else if !beads.HasLabel(issue, "gt:agent") {
+		if err := townBd.AddLabel(mayorID, "gt:agent"); err != nil {
+			return fmt.Errorf("adding gt:agent label to %s: %w", mayorID, err)
 		}
 	}
 
@@ -222,9 +248,9 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 		bd := beads.New(rigBeadsPath)
 		rigName := info.name
 
-		// Create rig-specific agents if missing (using canonical naming: prefix-rig-role-name)
+		// Create rig-specific agents if missing or add label if missing (using canonical naming: prefix-rig-role-name)
 		witnessID := beads.WitnessBeadIDWithPrefix(prefix, rigName)
-		if _, err := bd.Show(witnessID); err != nil {
+		if issue, err := bd.Show(witnessID); err != nil {
 			fields := &beads.AgentFields{
 				RoleType:   "witness",
 				Rig:        rigName,
@@ -234,10 +260,14 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			if _, err := bd.CreateAgentBead(witnessID, desc, fields); err != nil {
 				return fmt.Errorf("creating %s: %w", witnessID, err)
 			}
+		} else if !beads.HasLabel(issue, "gt:agent") {
+			if err := bd.AddLabel(witnessID, "gt:agent"); err != nil {
+				return fmt.Errorf("adding gt:agent label to %s: %w", witnessID, err)
+			}
 		}
 
 		refineryID := beads.RefineryBeadIDWithPrefix(prefix, rigName)
-		if _, err := bd.Show(refineryID); err != nil {
+		if issue, err := bd.Show(refineryID); err != nil {
 			fields := &beads.AgentFields{
 				RoleType:   "refinery",
 				Rig:        rigName,
@@ -247,13 +277,17 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 			if _, err := bd.CreateAgentBead(refineryID, desc, fields); err != nil {
 				return fmt.Errorf("creating %s: %w", refineryID, err)
 			}
+		} else if !beads.HasLabel(issue, "gt:agent") {
+			if err := bd.AddLabel(refineryID, "gt:agent"); err != nil {
+				return fmt.Errorf("adding gt:agent label to %s: %w", refineryID, err)
+			}
 		}
 
-		// Create crew worker agents if missing
+		// Create crew worker agents if missing or add label if missing
 		crewWorkers := listCrewWorkers(ctx.TownRoot, rigName)
 		for _, workerName := range crewWorkers {
 			crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, workerName)
-			if _, err := bd.Show(crewID); err != nil {
+			if issue, err := bd.Show(crewID); err != nil {
 				fields := &beads.AgentFields{
 					RoleType:   "crew",
 					Rig:        rigName,
@@ -262,6 +296,10 @@ func (c *AgentBeadsCheck) Fix(ctx *CheckContext) error {
 				desc := fmt.Sprintf("Crew worker %s in %s - human-managed persistent workspace.", workerName, rigName)
 				if _, err := bd.CreateAgentBead(crewID, desc, fields); err != nil {
 					return fmt.Errorf("creating %s: %w", crewID, err)
+				}
+			} else if !beads.HasLabel(issue, "gt:agent") {
+				if err := bd.AddLabel(crewID, "gt:agent"); err != nil {
+					return fmt.Errorf("adding gt:agent label to %s: %w", crewID, err)
 				}
 			}
 		}

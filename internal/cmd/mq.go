@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/refinery"
@@ -29,6 +31,9 @@ var (
 	// Reject flags
 	mqRejectReason string
 	mqRejectNotify bool
+
+	// Close flags
+	mqCloseMerged bool
 
 	// List command flags
 	mqListReady  bool
@@ -158,6 +163,20 @@ Examples:
 	RunE: runMQReject,
 }
 
+var mqCloseCmd = &cobra.Command{
+	Use:   "close <mr-id>",
+	Short: "Close a merge request",
+	Long: `Close a merge request with a specific close reason.
+
+Use --merged to indicate the MR was successfully merged (typically called
+by the refinery after pushing to main).
+
+Examples:
+  gt mq close mr-Nux-12345 --merged   # Mark as successfully merged`,
+	Args: cobra.ExactArgs(1),
+	RunE: runMQClose,
+}
+
 var mqStatusCmd = &cobra.Command{
 	Use:   "status <id>",
 	Short: "Show detailed merge request status",
@@ -171,6 +190,29 @@ Example:
 	Args: cobra.ExactArgs(1),
 	RunE: runMqStatus,
 }
+
+var mqConfigCmd = &cobra.Command{
+	Use:   "config [rig]",
+	Short: "Show merge queue configuration",
+	Long: `Display merge queue configuration for a rig.
+
+Shows the configured merge strategy, target branch, and PR options.
+
+Merge Strategies:
+  direct_merge     - Merge directly to target (default, for maintainer repos)
+  pr_to_main       - Create PR targeting main
+  pr_to_branch     - Create PR targeting a specific branch
+  direct_to_branch - Merge directly to a specific branch
+
+Examples:
+  gt mq config gastown       # Show gastown's merge queue config
+  gt mq config               # Show current rig's config
+  gt mq config --json        # Output as JSON`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runMqConfig,
+}
+
+var mqConfigJSON bool
 
 var mqIntegrationCmd = &cobra.Command{
 	Use:   "integration",
@@ -292,15 +334,23 @@ func init() {
 	mqRejectCmd.Flags().BoolVar(&mqRejectNotify, "notify", false, "Send mail notification to worker")
 	_ = mqRejectCmd.MarkFlagRequired("reason") // cobra flags: error only at runtime if missing
 
+	// Close flags
+	mqCloseCmd.Flags().BoolVar(&mqCloseMerged, "merged", false, "Mark the MR as successfully merged")
+
 	// Status flags
 	mqStatusCmd.Flags().BoolVar(&mqStatusJSON, "json", false, "Output as JSON")
+
+	// Config flags
+	mqConfigCmd.Flags().BoolVar(&mqConfigJSON, "json", false, "Output as JSON")
 
 	// Add subcommands
 	mqCmd.AddCommand(mqSubmitCmd)
 	mqCmd.AddCommand(mqRetryCmd)
 	mqCmd.AddCommand(mqListCmd)
 	mqCmd.AddCommand(mqRejectCmd)
+	mqCmd.AddCommand(mqCloseCmd)
 	mqCmd.AddCommand(mqStatusCmd)
+	mqCmd.AddCommand(mqConfigCmd)
 
 	// Integration branch subcommands
 	mqIntegrationCreateCmd.Flags().StringVar(&mqIntegrationCreateBranch, "branch", "", "Override branch name template (supports {epic}, {prefix}, {user})")
@@ -324,24 +374,34 @@ func init() {
 // findCurrentRig determines the current rig from the working directory.
 // Returns the rig name and rig object, or an error if not in a rig.
 func findCurrentRig(townRoot string) (string, *rig.Rig, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", nil, fmt.Errorf("getting current directory: %w", err)
-	}
+	var rigName string
 
-	// Get relative path from town root to cwd
-	relPath, err := filepath.Rel(townRoot, cwd)
-	if err != nil {
-		return "", nil, fmt.Errorf("computing relative path: %w", err)
-	}
+	// Try GT_RIG environment variable first (rig-2c303f)
+	// This fixes mail routing where polecats were sending to wrong rig's witness
+	// because cwd detection was unreliable (e.g., worktree deleted, wrong location)
+	if envRig := os.Getenv("GT_RIG"); envRig != "" {
+		rigName = envRig
+	} else {
+		// Fallback: derive from current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", nil, fmt.Errorf("getting current directory: %w", err)
+		}
 
-	// The first component of the relative path should be the rig name
-	parts := strings.Split(relPath, string(filepath.Separator))
-	if len(parts) == 0 || parts[0] == "" || parts[0] == "." {
-		return "", nil, fmt.Errorf("not inside a rig directory")
-	}
+		// Get relative path from town root to cwd
+		relPath, err := filepath.Rel(townRoot, cwd)
+		if err != nil {
+			return "", nil, fmt.Errorf("computing relative path: %w", err)
+		}
 
-	rigName := parts[0]
+		// The first component of the relative path should be the rig name
+		parts := strings.Split(relPath, string(filepath.Separator))
+		if len(parts) == 0 || parts[0] == "" || parts[0] == "." {
+			return "", nil, fmt.Errorf("not inside a rig directory")
+		}
+
+		rigName = parts[0]
+	}
 
 	// Load rig manager and get the rig
 	rigsConfigPath := filepath.Join(townRoot, "mayor", "rigs.json")
@@ -431,4 +491,128 @@ func runMQReject(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runMQClose(cmd *cobra.Command, args []string) error {
+	mrID := args[0]
+
+	// Require at least one close reason flag
+	if !mqCloseMerged {
+		return fmt.Errorf("must specify a close reason (e.g., --merged)")
+	}
+
+	// Determine close reason
+	var closeReason string
+	if mqCloseMerged {
+		closeReason = "merged"
+	}
+
+	// Use current working directory for beads operations
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	// Initialize beads client and close the MR
+	bd := beads.New(workDir)
+	if err := bd.CloseWithReason(closeReason, mrID); err != nil {
+		return fmt.Errorf("closing MR: %w", err)
+	}
+
+	fmt.Printf("%s Closed: %s (reason: %s)\n", style.Bold.Render("✓"), mrID, closeReason)
+	return nil
+}
+
+func runMqConfig(cmd *cobra.Command, args []string) error {
+	var rigName string
+	if len(args) > 0 {
+		rigName = args[0]
+	}
+
+	mgr, r, rigName, err := getRefineryManager(rigName)
+	if err != nil {
+		return err
+	}
+
+	// Load config to get merge queue settings
+	if err := mgr.LoadConfig(); err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	cfg := mgr.Config()
+
+	if mqConfigJSON {
+		// JSON output
+		output := struct {
+			Rig          string                    `json:"rig"`
+			Enabled      bool                      `json:"enabled"`
+			Strategy     string                    `json:"strategy"`
+			TargetBranch string                    `json:"target_branch"`
+			PROptions    *refinery.PROptions       `json:"pr_options,omitempty"`
+		}{
+			Rig:          rigName,
+			Enabled:      cfg.Enabled,
+			Strategy:     cfg.Strategy,
+			TargetBranch: cfg.TargetBranch,
+			PROptions:    cfg.PROptions,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(output)
+	}
+
+	// Human-readable output
+	fmt.Printf("%s Merge Queue Configuration\n\n", style.Bold.Render("⚙"))
+	fmt.Printf("  Rig:           %s\n", rigName)
+	fmt.Printf("  Path:          %s\n", r.Path)
+	fmt.Println()
+	fmt.Printf("  %s\n", style.Bold.Render("Strategy"))
+	fmt.Printf("  Strategy:      %s\n", strategyDescription(cfg.Strategy))
+	fmt.Printf("  Target branch: %s\n", cfg.TargetBranch)
+	fmt.Printf("  Enabled:       %v\n", cfg.Enabled)
+
+	// Show PR options if using a PR strategy
+	if refinery.IsPRStrategy(cfg.Strategy) && cfg.PROptions != nil {
+		fmt.Println()
+		fmt.Printf("  %s\n", style.Bold.Render("PR Options"))
+		if cfg.PROptions.AutoMerge {
+			fmt.Printf("  Auto-merge:    enabled\n")
+		}
+		if cfg.PROptions.Draft {
+			fmt.Printf("  Draft:         enabled\n")
+		}
+		if len(cfg.PROptions.Labels) > 0 {
+			fmt.Printf("  Labels:        %s\n", strings.Join(cfg.PROptions.Labels, ", "))
+		}
+		if len(cfg.PROptions.Reviewers) > 0 {
+			fmt.Printf("  Reviewers:     %s\n", strings.Join(cfg.PROptions.Reviewers, ", "))
+		}
+	}
+
+	// Show other settings
+	fmt.Println()
+	fmt.Printf("  %s\n", style.Bold.Render("Processing"))
+	fmt.Printf("  Run tests:     %v\n", cfg.RunTests)
+	if cfg.TestCommand != "" {
+		fmt.Printf("  Test command:  %s\n", cfg.TestCommand)
+	}
+	fmt.Printf("  Delete branches after merge: %v\n", cfg.DeleteMergedBranches)
+
+	return nil
+}
+
+// strategyDescription returns a human-readable description of a merge strategy.
+func strategyDescription(strategy string) string {
+	switch strategy {
+	case refinery.StrategyDirectMerge:
+		return "direct_merge (merge directly to target, no PR)"
+	case refinery.StrategyPRToMain:
+		return "pr_to_main (create PR targeting main)"
+	case refinery.StrategyPRToBranch:
+		return "pr_to_branch (create PR targeting specific branch)"
+	case refinery.StrategyDirectToBranch:
+		return "direct_to_branch (merge directly to specific branch)"
+	default:
+		return strategy
+	}
 }

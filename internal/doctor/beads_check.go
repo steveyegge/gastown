@@ -12,6 +12,40 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 )
 
+// beadsMetadata represents the metadata.json file in .beads directory.
+type beadsMetadata struct {
+	Database    string `json:"database,omitempty"`
+	JSONLExport string `json:"jsonl_export,omitempty"`
+	Backend     string `json:"backend,omitempty"` // "sqlite" (default) or "dolt"
+	Prefix      string `json:"prefix,omitempty"`
+}
+
+// detectBackend reads metadata.json and returns the backend type.
+// Returns "sqlite" (default), "dolt", or error if metadata cannot be read.
+func detectBackend(beadsDir string) (string, error) {
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No metadata.json means SQLite (default)
+			return "sqlite", nil
+		}
+		return "", err
+	}
+
+	var meta beadsMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return "", err
+	}
+
+	// Default to SQLite if backend not specified
+	if meta.Backend == "" {
+		return "sqlite", nil
+	}
+
+	return meta.Backend, nil
+}
+
 // BeadsDatabaseCheck verifies that the beads database is properly initialized.
 // It detects when issues.db is empty or missing critical columns, and can
 // auto-fix by triggering a re-import from the JSONL file.
@@ -45,6 +79,56 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
+	// Detect backend type (SQLite or Dolt)
+	backend, err := detectBackend(beadsDir)
+	if err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not detect backend: %v", err),
+		}
+	}
+
+	// Check based on backend type
+	if backend == "dolt" {
+		return c.checkDoltBackend(beadsDir, ctx)
+	}
+	return c.checkSqliteBackend(beadsDir, ctx)
+}
+
+// checkDoltBackend checks Dolt-specific database health.
+func (c *BeadsDatabaseCheck) checkDoltBackend(beadsDir string, _ *CheckContext) *CheckResult {
+	doltDir := filepath.Join(beadsDir, "dolt")
+	if _, err := os.Stat(doltDir); os.IsNotExist(err) {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusWarning,
+			Message: "Dolt backend configured but dolt/ directory not found",
+			FixHint: "Run 'bd init --backend dolt' to initialize Dolt backend",
+		}
+	}
+
+	// Check if dolt CLI is available
+	if _, err := exec.LookPath("dolt"); err != nil {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusError,
+			Message: "Dolt backend configured but dolt CLI not found",
+			FixHint: "Install dolt: https://docs.dolthub.com/introduction/installation",
+		}
+	}
+
+	// TODO: Add more Dolt-specific health checks (e.g., check for .dolt/noms directory, check dolt status)
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusOK,
+		Message: "Dolt backend properly initialized",
+	}
+}
+
+// checkSqliteBackend checks SQLite-specific database health.
+func (c *BeadsDatabaseCheck) checkSqliteBackend(beadsDir string, ctx *CheckContext) *CheckResult {
 	// Check if issues.db exists and has content
 	issuesDB := filepath.Join(beadsDir, "issues.db")
 	issuesJSONL := filepath.Join(beadsDir, "issues.jsonl")
@@ -78,28 +162,32 @@ func (c *BeadsDatabaseCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Also check rig-level beads if a rig is specified
+	// Also check rig-level beads if a rig is specified (SQLite only)
 	// Follows redirect if present (rig root may redirect to mayor/rig/.beads)
 	if ctx.RigName != "" {
 		rigBeadsDir := beads.ResolveBeadsDir(ctx.RigPath())
 		if _, err := os.Stat(rigBeadsDir); err == nil {
-			rigDB := filepath.Join(rigBeadsDir, "issues.db")
-			rigJSONL := filepath.Join(rigBeadsDir, "issues.jsonl")
+			// Detect backend for rig
+			rigBackend, err := detectBackend(rigBeadsDir)
+			if err == nil && rigBackend == "sqlite" {
+				rigDB := filepath.Join(rigBeadsDir, "issues.db")
+				rigJSONL := filepath.Join(rigBeadsDir, "issues.jsonl")
 
-			rigDBInfo, rigDBErr := os.Stat(rigDB)
-			rigJSONLInfo, rigJSONLErr := os.Stat(rigJSONL)
+				rigDBInfo, rigDBErr := os.Stat(rigDB)
+				rigJSONLInfo, rigJSONLErr := os.Stat(rigJSONL)
 
-			if rigDBErr == nil && rigDBInfo.Size() == 0 {
-				if rigJSONLErr == nil && rigJSONLInfo.Size() > 0 {
-					return &CheckResult{
-						Name:    c.Name(),
-						Status:  StatusError,
-						Message: "Rig issues.db is empty but issues.jsonl has content",
-						Details: []string{
-							"Rig: " + ctx.RigName,
-							"This can cause 'table issues has no column named pinned' errors",
-						},
-						FixHint: "Run 'gt doctor --fix' or delete the rig's issues.db",
+				if rigDBErr == nil && rigDBInfo.Size() == 0 {
+					if rigJSONLErr == nil && rigJSONLInfo.Size() > 0 {
+						return &CheckResult{
+							Name:    c.Name(),
+							Status:  StatusError,
+							Message: "Rig issues.db is empty but issues.jsonl has content",
+							Details: []string{
+								"Rig: " + ctx.RigName,
+								"This can cause 'table issues has no column named pinned' errors",
+							},
+							FixHint: "Run 'gt doctor --fix' or delete the rig's issues.db",
+						}
 					}
 				}
 			}

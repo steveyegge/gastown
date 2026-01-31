@@ -203,11 +203,14 @@ id = "run-tests"
 title = "Run test suite"
 needs = ["process-branch"]
 description = """
-Run the test suite.
+Run the test suite from the repository root (where go.mod lives).
 
 ```bash
-go test ./...
+cd $(git rev-parse --show-toplevel) && go test ./...
 ```
+
+**IMPORTANT**: Always run tests from the repo root, not from your working directory.
+The refinery rig directory does not contain go.mod, so `go test ./...` will fail there.
 
 Track results: pass count, fail count, specific failures."""
 

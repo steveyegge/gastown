@@ -489,6 +489,12 @@ func (g *Git) RemoteURL(remote string) (string, error) {
 	return g.run("remote", "get-url", remote)
 }
 
+// SetConfig sets a git config value in the repository.
+func (g *Git) SetConfig(key, value string) error {
+	_, err := g.run("config", key, value)
+	return err
+}
+
 // Remotes returns the list of configured remote names.
 func (g *Git) Remotes() ([]string, error) {
 	out, err := g.run("remote")
@@ -727,6 +733,13 @@ func (g *Git) ResetBranch(name, ref string) error {
 // Rev returns the commit hash for the given ref.
 func (g *Git) Rev(ref string) (string, error) {
 	return g.run("rev-parse", ref)
+}
+
+// RefExists checks if a ref (branch, tag, remote tracking ref) exists locally.
+// This is useful for checking if refs like "origin/main" exist before using them.
+func (g *Git) RefExists(ref string) bool {
+	_, err := g.run("rev-parse", "--verify", ref)
+	return err == nil
 }
 
 // IsAncestor checks if ancestor is an ancestor of descendant.
@@ -1078,15 +1091,56 @@ func (g *Git) StashCount() (int, error) {
 
 // UnpushedCommits returns the number of commits that are not pushed to the remote.
 // It checks if the current branch has an upstream and counts commits ahead.
-// Returns 0 if there is no upstream configured.
+// For branches without upstream (like polecat branches), it checks against origin/<branch>
+// if the branch exists on origin, otherwise against origin/<default-branch>.
 func (g *Git) UnpushedCommits() (int, error) {
 	// Get the upstream branch
 	upstream, err := g.run("rev-parse", "--abbrev-ref", "@{u}")
 	if err != nil {
-		// No upstream configured - this is common for polecat branches
-		// Check if we can compare against origin/main instead
-		// If we can't get any reference, return 0 (benefit of the doubt)
-		return 0, nil
+		// No upstream configured - this is common for polecat branches.
+		// Check against origin/<branch> if it exists, otherwise origin/<default-branch>.
+		branch, branchErr := g.CurrentBranch()
+		if branchErr != nil {
+			// Can't determine branch - return 0 as fallback
+			return 0, nil
+		}
+
+		// Check if origin/<branch> exists on the remote (not just local refs).
+		// Fix for gt-8ba: Using rev-parse --verify only checks local refs, which
+		// may be stale if the branch was pushed but not fetched. Use ls-remote
+		// to query the actual remote state.
+		remoteBranch := "origin/" + branch
+		exists, existsErr := g.RemoteBranchExists("origin", branch)
+		if existsErr == nil && exists {
+			// Remote branch exists - fetch to ensure local ref is up-to-date
+			_, _ = g.run("fetch", "origin", branch)
+			// Count commits from origin/<branch>..HEAD
+			out, countErr := g.run("rev-list", "--count", remoteBranch+"..HEAD")
+			if countErr != nil {
+				return 0, nil // Fallback to safe value on error
+			}
+			var count int
+			_, err = fmt.Sscanf(out, "%d", &count)
+			if err != nil {
+				return 0, nil
+			}
+			return count, nil
+		}
+
+		// Remote branch doesn't exist - check against origin/<default-branch>.
+		// All commits since the branch point are unpushed since the branch itself isn't on origin.
+		defaultBranch := g.RemoteDefaultBranch()
+		remoteBranch = "origin/" + defaultBranch
+		out, countErr := g.run("rev-list", "--count", remoteBranch+"..HEAD")
+		if countErr != nil {
+			return 0, nil // Fallback to safe value on error
+		}
+		var count int
+		_, err = fmt.Sscanf(out, "%d", &count)
+		if err != nil {
+			return 0, nil
+		}
+		return count, nil
 	}
 
 	// Count commits between upstream and HEAD
@@ -1281,4 +1335,67 @@ func (g *Git) BranchPushedToRemote(localBranch, remote string) (bool, int, error
 	}
 
 	return n == 0, n, nil
+}
+
+// BranchUnpushedCount returns the number of unpushed commits for a specific branch.
+// Unlike UnpushedCommits() which uses HEAD, this checks the specified branch directly.
+// This is useful when the worktree may have switched branches but we need to check
+// the work branch specifically (e.g., polecat removal checking the work branch, not master).
+// FIX (gt-20w4q): Check the work branch, not whatever branch HEAD points to.
+func (g *Git) BranchUnpushedCount(branch, remote string) (int, error) {
+	remoteBranch := remote + "/" + branch
+
+	// Check if the remote branch exists
+	exists, err := g.RemoteBranchExists(remote, branch)
+	if err != nil {
+		return 0, fmt.Errorf("checking remote branch: %w", err)
+	}
+
+	if !exists {
+		// Remote branch doesn't exist - count all commits on this branch since origin/main
+		// Get the local branch tip
+		localTip, err := g.run("rev-parse", branch)
+		if err != nil {
+			return 0, fmt.Errorf("getting local branch tip: %w", err)
+		}
+
+		// Count commits from origin/main to the local branch tip
+		count, err := g.run("rev-list", "--count", "origin/main.."+localTip)
+		if err != nil {
+			// Fallback: count all commits on the branch
+			count, err = g.run("rev-list", "--count", localTip)
+			if err != nil {
+				return 0, fmt.Errorf("counting commits: %w", err)
+			}
+		}
+		var n int
+		_, err = fmt.Sscanf(count, "%d", &n)
+		if err != nil {
+			return 0, fmt.Errorf("parsing commit count: %w", err)
+		}
+		return n, nil
+	}
+
+	// Remote branch exists - fetch to ensure local ref is up-to-date
+	_, _ = g.run("fetch", remote, branch)
+
+	// Get the local branch tip
+	localTip, err := g.run("rev-parse", branch)
+	if err != nil {
+		return 0, fmt.Errorf("getting local branch tip: %w", err)
+	}
+
+	// Count commits from remote branch to local branch
+	count, err := g.run("rev-list", "--count", remoteBranch+".."+localTip)
+	if err != nil {
+		return 0, fmt.Errorf("counting unpushed commits: %w", err)
+	}
+
+	var n int
+	_, err = fmt.Sscanf(count, "%d", &n)
+	if err != nil {
+		return 0, fmt.Errorf("parsing unpushed count: %w", err)
+	}
+
+	return n, nil
 }

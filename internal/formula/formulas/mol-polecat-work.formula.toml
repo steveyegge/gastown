@@ -90,9 +90,36 @@ Question: <what you need clarified>"
 **Exit criteria:** You understand the work and can begin implementation."""
 
 [[steps]]
+id = "context-check"
+title = "Check context limits and API errors"
+needs = ["load-context"]
+description = """
+Check for context limit issues before starting implementation.
+
+**1. Check for recent context length errors:**
+```bash
+gt context --errors
+```
+
+**2. Check circuit breaker status:**
+```bash
+gt context --circuit-breaker-status
+```
+
+**3. If circuit breaker tripped (N consecutive failures):**
+- Auto-mail witness: `gt mail send witness -s 'CONTEXT_LIMIT: <polecat>'`
+- Consider escalation: `gt escalate --severity high --reason "Context limit circuit breaker tripped" --source "polecat/{{polecat}}"`
+
+**4. If context usage high (>80%):**
+- Use `gt handoff` to cycle to fresh session
+
+**Exit criteria:** No active context limit errors, circuit breaker not tripped, ready to proceed.
+"""
+
+[[steps]]
 id = "branch-setup"
 title = "Set up working branch"
-needs = ["load-context"]
+needs = ["context-check"]
 description = """
 Ensure you're on a clean feature branch ready for work.
 

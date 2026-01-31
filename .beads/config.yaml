@@ -68,5 +68,12 @@ sync-branch: beads-sync
 external_projects:
   beads: ../../../beads/mayor/rig
 
-# Custom issue types for Gas Town (fallback when database is unavailable)
-types.custom: "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"
+routing.mode: "direct"
+
+# Storage backend: sqlite (default) or dolt (version-controlled)
+storage-backend: dolt
+
+sync.mode: "dolt-native"
+
+# Disable daemon (dolt backend connects directly to dolt sql-server)
+no-daemon: true

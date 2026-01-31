@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -93,6 +94,21 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 			result.Error = fmt.Errorf("updating wisp state: %w", err)
 		}
 
+		// Clear hook_bead from agent bead since work is now handed off to MR.
+		// The polecat's work is done - clearing hook_bead allows nuke when MR completes.
+		// This fixes bd-bug-gt_polecat_nuke_blocks_clean_polecats.
+		townRoot, _ := workspace.Find(workDir)
+		if townRoot != "" {
+			townName, _ := workspace.GetTownName(townRoot)
+			agentBeadID := beads.PolecatBeadIDTown(townName, rigName, payload.PolecatName)
+			// Use town root for beads client since agent beads use hq- prefix (town-level storage)
+			bd := beads.New(townRoot)
+			if err := bd.ClearHookBead(agentBeadID); err != nil {
+				// Log but don't fail - clearing hook is non-fatal
+				fmt.Printf("Warning: failed to clear hook_bead for %s: %v\n", agentBeadID, err)
+			}
+		}
+
 		result.Handled = true
 		result.WispCreated = wispID
 		result.Action = fmt.Sprintf("deferred cleanup for %s (pending MR=%s, local branch preserved for conflict resolution)", payload.PolecatName, payload.MRID)
@@ -156,6 +172,15 @@ func HandleLifecycleShutdown(workDir, rigName string, msg *mail.Message) *Handle
 		return result
 	}
 	polecatName := matches[1]
+
+	// FIX (gt-7nssj): Check for stale shutdown messages before nuking.
+	// If the polecat name was recycled, the message might be from a previous incarnation.
+	// This prevents nuking newly spawned polecats when stale shutdown messages are processed.
+	if isStale, reason := isStalePolecatDone(rigName, polecatName, msg); isStale {
+		result.Handled = true
+		result.Action = fmt.Sprintf("ignored stale LIFECYCLE:Shutdown for %s (%s)", polecatName, reason)
+		return result
+	}
 
 	// Shutdown means no pending work - try to auto-nuke immediately
 	nukeResult := AutoNukeIfClean(workDir, rigName, polecatName)
@@ -441,16 +466,28 @@ func createCleanupWisp(workDir, polecatName, issueID, branch string) (string, er
 		return "", err
 	}
 
-	// Extract wisp ID from output (bd create outputs "Created: <id>")
+	// Extract wisp ID from output
+	// Handle various bd create output formats:
+	// - "Created: <id>" (old format)
+	// - "✓ Created issue: <id>" (new format)
 	if strings.HasPrefix(output, "Created:") {
 		return strings.TrimSpace(strings.TrimPrefix(output, "Created:")), nil
+	}
+
+	// New format: "✓ Created issue: hq-tsk-..."
+	if strings.Contains(output, "Created issue:") {
+		parts := strings.SplitN(output, "Created issue: ", 2)
+		if len(parts) == 2 {
+			id := strings.TrimSpace(strings.Split(parts[1], "\n")[0])
+			return id, nil
+		}
 	}
 
 	// Try to extract ID from output
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		// Look for bead ID pattern (e.g., "gt-abc123")
-		if strings.Contains(line, "-") && len(line) < 20 {
+		// Look for bead ID pattern (e.g., "gt-abc123" or "hq-tsk-cleanup_testnux")
+		if strings.Contains(line, "-") && len(line) < 40 {
 			return line, nil
 		}
 	}
@@ -528,15 +565,11 @@ type agentBeadResponse struct {
 // ZFC #10: This enables the Witness to verify it's safe to nuke before proceeding.
 // The polecat self-reports its git state when running `gt done`, and we trust that report.
 func getCleanupStatus(workDir, rigName, polecatName string) string {
-	// Construct agent bead ID using the rig's configured prefix
-	// This supports non-gt prefixes like "bd-" for the beads rig
-	townRoot, err := workspace.Find(workDir)
-	if err != nil || townRoot == "" {
-		// Fall back to default prefix
-		townRoot = workDir
-	}
-	prefix := beads.GetPrefixForRig(townRoot, rigName)
-	agentBeadID := beads.PolecatBeadIDWithPrefix(prefix, rigName, polecatName)
+	// Construct agent bead ID using hq- prefix for town-level storage (fix for gt-myc).
+	// All polecat agent beads are stored in town beads with hq- prefix to match manager.go.
+	townRoot, _ := workspace.Find(workDir)
+	townName, _ := workspace.GetTownName(townRoot)
+	agentBeadID := beads.PolecatBeadIDTown(townName, rigName, polecatName)
 
 	output, err := util.ExecWithOutput(workDir, "bd", "show", agentBeadID, "--json")
 	if err != nil {
@@ -674,7 +707,7 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 	// Update with new state
 	newLabels := strings.Join(CleanupWispLabels(polecatName, newState), ",")
 
-	return util.ExecRun(workDir, "bd", "update", wispID, "--labels", newLabels)
+	return util.ExecRun(workDir, "bd", "update", wispID, "--set-labels", newLabels)
 }
 
 // NukePolecat executes the actual nuke operation for a polecat.
@@ -696,7 +729,7 @@ func NukePolecat(workDir, rigName, polecatName string) error {
 		// Brief delay for graceful handling
 		time.Sleep(100 * time.Millisecond)
 		// Force kill the session
-		if err := t.KillSession(sessionName); err != nil {
+		if err := t.KillSessionWithProcesses(sessionName); err != nil {
 			// Log but continue - session might already be dead
 			// The important thing is we tried
 		}
@@ -844,4 +877,398 @@ func verifyCommitOnMain(workDir, rigName, polecatName string) (bool, error) {
 
 	// Commit is not on any remote's default branch
 	return false, nil
+}
+
+// PolecatsWithHookedWork contains info about polecats that have hooked work but no active session.
+type PolecatsWithHookedWork struct {
+	PolecatName string
+	HookBead    string
+	RigName     string
+}
+
+// FindPolecatsWithHookedWork finds polecats that have hooked work but no active tmux session.
+// These are polecats that completed work (gt done) but then had new work slung to them via gt sling.
+// They need to be respawned to process the hooked work.
+// Returns a list of such polecats that should be respawned.
+//
+// FIX (hq-50u3h): This function addresses the bug where done polecats don't process hooked work.
+// The fix checks each polecat's agent bead for hook_bead and verifies no active tmux session.
+//
+// FIX (hq-dtwfqa): Validate hook_bead exists before including in respawn list.
+// If hook_bead points to a deleted/non-existent bead, clear it and skip this polecat.
+// This prevents respawn failures when orphaned polecats have stale hook_bead references.
+func FindPolecatsWithHookedWork(workDir, rigName string) ([]*PolecatsWithHookedWork, error) {
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		return nil, fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Get beads directory
+	rigPath := filepath.Join(townRoot, rigName)
+	bd := beads.New(rigPath)
+	t := tmux.NewTmux()
+
+	var result []*PolecatsWithHookedWork
+
+	// Get all polecat agent beads (returns map of bead ID to Issue)
+	agentBeads, err := bd.ListAgentBeads()
+	if err != nil {
+		return nil, fmt.Errorf("listing agent beads: %w", err)
+	}
+
+	// Filter for polecat agents in this rig
+	// Format: <prefix>-<rig>-polecat-<name>
+	polecatSuffix := fmt.Sprintf("%s-polecat-", rigName)
+	for agentID := range agentBeads {
+		// Check if this is a polecat agent bead for this rig
+		if !strings.Contains(agentID, polecatSuffix) {
+			continue
+		}
+
+		// Extract polecat name from agent ID
+		parts := strings.Split(agentID, "-polecat-")
+		if len(parts) < 2 {
+			continue
+		}
+		polecatName := parts[len(parts)-1]
+
+		// Get agent bead fields to check hook_bead
+		_, fields, err := bd.GetAgentBead(agentID)
+		if err != nil || fields == nil {
+			// Skip if we can't get agent bead info
+			continue
+		}
+
+		// Check if hook_bead is set (indicating work is waiting)
+		if fields.HookBead == "" {
+			continue
+		}
+
+		// FIX (hq-dtwfqa): Validate that hook_bead actually exists before adding to respawn list.
+		// If the bead was deleted or doesn't exist, clear the stale reference.
+		_, err = bd.Show(fields.HookBead)
+		if err != nil {
+			// Hook bead doesn't exist - clear the stale reference
+			// This is non-fatal; we log and continue
+			if clearErr := bd.ClearHookBead(agentID); clearErr != nil {
+				// Couldn't clear - log but continue
+				fmt.Printf("Warning: could not clear stale hook_bead %s from %s: %v\n", fields.HookBead, agentID, clearErr)
+			} else {
+				fmt.Printf("Cleared stale hook_bead %s from %s (bead no longer exists)\n", fields.HookBead, agentID)
+			}
+			continue
+		}
+
+		// Check if polecat has an active tmux session
+		sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+		hasSession, _ := t.HasSession(sessionName)
+
+		if hasSession {
+			// Session is active - polecat is already working
+			continue
+		}
+
+		// Polecat has hooked work but no active session - needs respawn
+		result = append(result, &PolecatsWithHookedWork{
+			PolecatName: polecatName,
+			HookBead:    fields.HookBead,
+			RigName:     rigName,
+		})
+	}
+
+	return result, nil
+}
+
+// RespawnPolecatWithHookedWork respawns a polecat to process its hooked work.
+// This is used when a polecat has completed work (gt done) but new work was slung to it.
+// The polecat's session is restarted to process the hooked work.
+//
+// FIX (hq-50u3h): This function respawns polecats with hooked work but no active session.
+// FIX (hq-dtwfqa): Validate hook_bead exists before attempting respawn.
+func RespawnPolecatWithHookedWork(workDir, rigName, polecatName string) error {
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	rigPath := filepath.Join(townRoot, rigName)
+	// Create rig struct directly (no LoadRig function exists)
+	r := &rig.Rig{
+		Name: rigName,
+		Path: rigPath,
+	}
+
+	// Get the polecat manager
+	g := git.NewGit(rigPath)
+	t := tmux.NewTmux()
+	mgr := polecat.NewManager(r, g, t)
+
+	// Get the hook_bead from the agent bead.
+	// All polecat agent beads use hq- prefix and are stored in town beads (fix for gt-myc).
+	townName, _ := workspace.GetTownName(townRoot)
+	agentBeadID := beads.PolecatBeadIDTown(townName, rigName, polecatName)
+	bd := beads.New(rigPath)
+	_, fields, err := bd.GetAgentBead(agentBeadID)
+	if err != nil || fields == nil {
+		return fmt.Errorf("getting agent bead: %w", err)
+	}
+
+	if fields.HookBead == "" {
+		return fmt.Errorf("no hooked work found for polecat %s", polecatName)
+	}
+
+	// FIX (hq-dtwfqa): Validate hook_bead exists before attempting respawn.
+	// If the bead was deleted between finding and respawning, clear it and return error.
+	_, err = bd.Show(fields.HookBead)
+	if err != nil {
+		// Hook bead doesn't exist - clear the stale reference
+		if clearErr := bd.ClearHookBead(agentBeadID); clearErr != nil {
+			return fmt.Errorf("hook_bead %s no longer exists and failed to clear: %w", fields.HookBead, clearErr)
+		}
+		return fmt.Errorf("hook_bead %s no longer exists (cleared stale reference)", fields.HookBead)
+	}
+
+	// Check if polecat directory exists (using Get to check if polecat exists)
+	_, err = mgr.Get(polecatName)
+	if err != nil {
+		// Polecat doesn't exist - need to create it fresh
+		_, err := mgr.AddWithOptions(polecatName, polecat.AddOptions{
+			HookBead: fields.HookBead,
+		})
+		if err != nil {
+			return fmt.Errorf("creating polecat: %w", err)
+		}
+	} else {
+		// Polecat exists - repair it to get a fresh worktree
+		_, err := mgr.RepairWorktreeWithOptions(polecatName, true, polecat.AddOptions{
+			HookBead: fields.HookBead,
+		})
+		if err != nil {
+			return fmt.Errorf("repairing polecat worktree: %w", err)
+		}
+	}
+
+	// Start a new tmux session for the polecat
+	sessionMgr := polecat.NewSessionManager(t, r)
+
+	err = sessionMgr.Start(polecatName, polecat.SessionStartOptions{
+		Issue: fields.HookBead,
+	})
+	if err != nil {
+		return fmt.Errorf("starting polecat session: %w", err)
+	}
+
+	return nil
+}
+
+// ResolvedDecisionInfo contains info about a resolved decision needing notification.
+type ResolvedDecisionInfo struct {
+	DecisionID   string
+	Question     string
+	ChosenOption string
+	Rationale    string
+	ResolvedBy   string
+	RequestedBy  string // Crew address that requested this decision
+}
+
+// FindResolvedDecisionsForCrew finds recently resolved decisions that were requested
+// by crew members in this rig and haven't been notified yet.
+// Returns a list of decisions that need crew notification.
+func FindResolvedDecisionsForCrew(workDir, rigName string, lookback time.Duration) ([]*ResolvedDecisionInfo, error) {
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		return nil, fmt.Errorf("finding town root: %w", err)
+	}
+
+	// Use town beads for decisions (they're stored with hq- prefix)
+	bd := beads.NewWithBeadsDir(townRoot, beads.ResolveBeadsDir(townRoot))
+
+	// Get recently resolved decisions
+	decisions, err := bd.ListRecentlyResolvedDecisions(lookback)
+	if err != nil {
+		return nil, fmt.Errorf("listing resolved decisions: %w", err)
+	}
+
+	var results []*ResolvedDecisionInfo
+	t := tmux.NewTmux()
+
+	for _, issue := range decisions {
+		// Parse decision fields to get requestor
+		fields := beads.ParseDecisionFields(issue.Description)
+		if fields == nil {
+			continue
+		}
+
+		// Check if requested by crew in this rig
+		// Format: "rigname/crew/crewname" or "rigname/crewname"
+		if !strings.HasPrefix(fields.RequestedBy, rigName+"/") {
+			continue
+		}
+
+		// Check if this is a crew member (not polecat, witness, etc.)
+		if !strings.Contains(fields.RequestedBy, "/crew/") && !isCrewPath(fields.RequestedBy, rigName) {
+			continue
+		}
+
+		// Check if already notified (has decision:notified label)
+		if beads.HasLabel(issue, "decision:notified") {
+			continue
+		}
+
+		// Check if crew session is at a prompt (idle)
+		sessionName := crewSessionName(fields.RequestedBy, rigName)
+		if sessionName == "" {
+			continue
+		}
+
+		// Only nudge if session exists and agent is running
+		hasSession, _ := t.HasSession(sessionName)
+		if !hasSession {
+			continue
+		}
+
+		// Check if agent is running (healthy session that can receive nudges)
+		if !t.IsAgentAlive(sessionName) {
+			continue
+		}
+
+		// Build notification info
+		chosenOption := ""
+		if fields.ChosenIndex > 0 && fields.ChosenIndex <= len(fields.Options) {
+			chosenOption = fields.Options[fields.ChosenIndex-1].Label
+		}
+
+		results = append(results, &ResolvedDecisionInfo{
+			DecisionID:   issue.ID,
+			Question:     fields.Question,
+			ChosenOption: chosenOption,
+			Rationale:    fields.Rationale,
+			ResolvedBy:   fields.ResolvedBy,
+			RequestedBy:  fields.RequestedBy,
+		})
+	}
+
+	return results, nil
+}
+
+// isCrewPath checks if a requestor path is a crew member path.
+func isCrewPath(path, rigName string) bool {
+	// Handle formats like "gastown/decision" (old format)
+	parts := strings.Split(path, "/")
+	if len(parts) == 2 && parts[0] == rigName {
+		// Check if it's NOT a system role
+		role := parts[1]
+		if role != "witness" && role != "refinery" && role != "polecats" {
+			return true
+		}
+	}
+	return false
+}
+
+// crewSessionName returns the tmux session name for a crew member.
+func crewSessionName(requestedBy, _ string) string {
+	// Handle formats:
+	// - "gastown/crew/worker" -> "gt-gastown-crew-worker"
+	// - "gastown/worker" (old format) -> try crew first, then polecat
+	parts := strings.Split(requestedBy, "/")
+
+	if len(parts) == 3 && parts[1] == "crew" {
+		// New format: rig/crew/name -> gt-rig-crew-name
+		return session.CrewSessionName(parts[0], parts[2])
+	}
+
+	if len(parts) == 2 {
+		// Old format: rig/name - assume crew for non-system roles
+		role := parts[1]
+		if role != "witness" && role != "refinery" && role != "polecats" {
+			return session.CrewSessionName(parts[0], role)
+		}
+	}
+
+	return ""
+}
+
+// NudgeCrewWithDecision sends a nudge to a crew session about a resolved decision.
+// Returns the session name that was nudged.
+func NudgeCrewWithDecision(workDir, rigName string, info *ResolvedDecisionInfo) (string, error) {
+	sessionName := crewSessionName(info.RequestedBy, rigName)
+	if sessionName == "" {
+		return "", fmt.Errorf("could not determine session name for %s", info.RequestedBy)
+	}
+
+	// Build the nudge message
+	var msg strings.Builder
+	msg.WriteString(fmt.Sprintf("Decision %s resolved: %s", info.DecisionID, info.ChosenOption))
+	if info.Rationale != "" {
+		msg.WriteString(fmt.Sprintf(" (Rationale: %s)", info.Rationale))
+	}
+	msg.WriteString(". Check your mail or continue work.")
+
+	// Send the nudge via gt nudge (uses proper tmux formatting).
+	// Direct send is now the default - the crew is likely idle (blocked waiting for
+	// this decision), so direct delivery is needed to wake up the session.
+	if err := util.ExecRun(workDir, "gt", "nudge", info.RequestedBy, msg.String()); err != nil {
+		return sessionName, fmt.Errorf("nudging crew: %w", err)
+	}
+
+	return sessionName, nil
+}
+
+// MarkDecisionNotified marks a decision as having been notified to the crew.
+// This prevents duplicate notifications.
+func MarkDecisionNotified(workDir, decisionID string) error {
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+
+	bd := beads.NewWithBeadsDir(townRoot, beads.ResolveBeadsDir(townRoot))
+
+	return bd.Update(decisionID, beads.UpdateOptions{
+		AddLabels: []string{"decision:notified"},
+	})
+}
+
+// NotifyCrewOfResolvedDecisions is the main function for the witness patrol loop.
+// It finds resolved decisions for crew in this rig and nudges them.
+// Returns a list of notifications sent.
+func NotifyCrewOfResolvedDecisions(workDir, rigName string) ([]*HandlerResult, error) {
+	// Look back 1 hour for recently resolved decisions
+	lookback := time.Hour
+
+	decisions, err := FindResolvedDecisionsForCrew(workDir, rigName, lookback)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []*HandlerResult
+
+	for _, info := range decisions {
+		result := &HandlerResult{
+			MessageID:    info.DecisionID,
+			ProtocolType: "DECISION_RESOLVED",
+		}
+
+		// Nudge the crew
+		sessionName, err := NudgeCrewWithDecision(workDir, rigName, info)
+		if err != nil {
+			result.Error = err
+			result.Action = fmt.Sprintf("failed to nudge %s: %v", info.RequestedBy, err)
+			results = append(results, result)
+			continue
+		}
+
+		// Mark as notified to prevent duplicates
+		if err := MarkDecisionNotified(workDir, info.DecisionID); err != nil {
+			// Non-fatal - notification was sent
+			result.Error = fmt.Errorf("notification sent but failed to mark: %w", err)
+		}
+
+		result.Handled = true
+		result.Action = fmt.Sprintf("nudged %s about decision %s resolved as '%s'",
+			sessionName, info.DecisionID, info.ChosenOption)
+		results = append(results, result)
+	}
+
+	return results, nil
 }

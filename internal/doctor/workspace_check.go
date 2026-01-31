@@ -386,5 +386,6 @@ func WorkspaceChecks() []Check {
 		NewRigsRegistryExistsCheck(),
 		NewRigsRegistryValidCheck(),
 		NewMayorExistsCheck(),
+		NewBeadsCustomTypesTownCheck(),
 	}
 }

@@ -30,6 +30,9 @@ var (
 
 	// SWARM_START - mayor initiating batch work
 	PatternSwarmStart = regexp.MustCompile(`^SWARM_START`)
+
+	// RATE_LIMITED <source> - rate limit detected
+	PatternRateLimited = regexp.MustCompile(`^RATE_LIMITED\s+(\S+)`)
 )
 
 // ProtocolType identifies the type of protocol message.
@@ -43,6 +46,7 @@ const (
 	ProtoMergeFailed       ProtocolType = "merge_failed"
 	ProtoHandoff           ProtocolType = "handoff"
 	ProtoSwarmStart        ProtocolType = "swarm_start"
+	ProtoRateLimited       ProtocolType = "rate_limited"
 	ProtoUnknown           ProtocolType = "unknown"
 )
 
@@ -92,6 +96,15 @@ type SwarmStartPayload struct {
 	StartedAt time.Time
 }
 
+// RateLimitedPayload contains parsed data from a RATE_LIMITED message.
+type RateLimitedPayload struct {
+	Source          string        // Where rate limit was detected (e.g., "polecat:nux", "spawn")
+	Account         string        // Account that hit the limit (if known)
+	BackoffDuration time.Duration // Recommended backoff duration
+	ConsecutiveHits int           // Number of consecutive rate limit hits
+	DetectedAt      time.Time     // When the rate limit was detected
+}
+
 // ClassifyMessage determines the protocol type from a message subject.
 func ClassifyMessage(subject string) ProtocolType {
 	switch {
@@ -109,6 +122,8 @@ func ClassifyMessage(subject string) ProtocolType {
 		return ProtoHandoff
 	case PatternSwarmStart.MatchString(subject):
 		return ProtoSwarmStart
+	case PatternRateLimited.MatchString(subject):
+		return ProtoRateLimited
 	default:
 		return ProtoUnknown
 	}
@@ -275,6 +290,49 @@ func ParseSwarmStart(body string) (*SwarmStartPayload, error) {
 			payload.SwarmID = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "SwarmID:"), "swarm_id:"))
 		} else if strings.HasPrefix(line, "Total:") {
 			_, _ = fmt.Sscanf(line, "Total: %d", &payload.Total)
+		}
+	}
+
+	return payload, nil
+}
+
+// ParseRateLimited extracts payload from a RATE_LIMITED message.
+// Subject format: RATE_LIMITED <source>
+// Body format:
+//
+//	Account: <account>
+//	BackoffSeconds: <duration>
+//	ConsecutiveHits: <count>
+//	DetectedAt: <timestamp>
+func ParseRateLimited(subject, body string) (*RateLimitedPayload, error) {
+	matches := PatternRateLimited.FindStringSubmatch(subject)
+	if len(matches) < 2 {
+		return nil, fmt.Errorf("invalid RATE_LIMITED subject: %s", subject)
+	}
+
+	payload := &RateLimitedPayload{
+		Source:     matches[1],
+		DetectedAt: time.Now(),
+	}
+
+	// Parse body for structured fields
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "Account:"):
+			payload.Account = strings.TrimSpace(strings.TrimPrefix(line, "Account:"))
+		case strings.HasPrefix(line, "BackoffSeconds:"):
+			var seconds int
+			if _, err := fmt.Sscanf(line, "BackoffSeconds: %d", &seconds); err == nil {
+				payload.BackoffDuration = time.Duration(seconds) * time.Second
+			}
+		case strings.HasPrefix(line, "ConsecutiveHits:"):
+			_, _ = fmt.Sscanf(line, "ConsecutiveHits: %d", &payload.ConsecutiveHits)
+		case strings.HasPrefix(line, "DetectedAt:"):
+			ts := strings.TrimSpace(strings.TrimPrefix(line, "DetectedAt:"))
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				payload.DetectedAt = t
+			}
 		}
 	}
 

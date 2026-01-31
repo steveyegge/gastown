@@ -168,5 +168,12 @@ func registerCustomTypes(workDir string) error {
 		}
 		return fmt.Errorf("%s", strings.TrimSpace(outStr))
 	}
+
+	// Disable contributor routing to use gastown's rig-based routing instead
+	// This prevents issues being routed to ~/.beads-planning
+	routingCmd := exec.Command("bd", "config", "set", "routing.mode", "direct")
+	routingCmd.Dir = workDir
+	_, _ = routingCmd.CombinedOutput() // Ignore errors - not critical
+
 	return nil
 }

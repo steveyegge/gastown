@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
-	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -82,7 +80,7 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find current rig
-	rigName, _, err := findCurrentRig(townRoot)
+	rigName, r, err := findCurrentRig(townRoot)
 	if err != nil {
 		return err
 	}
@@ -103,11 +101,8 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get configured default branch for this rig
-	defaultBranch := "main" // fallback
-	if rigCfg, err := rig.LoadRigConfig(filepath.Join(townRoot, rigName)); err == nil && rigCfg.DefaultBranch != "" {
-		defaultBranch = rigCfg.DefaultBranch
-	}
+	// Get configured default branch for validation (can't submit default branch itself)
+	defaultBranch := r.DefaultBranch()
 
 	if branch == defaultBranch || branch == "master" {
 		return fmt.Errorf("cannot submit %s/master branch to merge queue", defaultBranch)
@@ -131,7 +126,8 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 	bd := beads.New(cwd)
 
 	// Determine target branch
-	target := defaultBranch
+	// Use rig's TargetBranch (may be a release branch if configured)
+	target := r.TargetBranch()
 	if mqSubmitEpic != "" {
 		// Explicit --epic flag takes precedence
 		target = "integration/" + mqSubmitEpic
@@ -139,7 +135,7 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		// Auto-detect: check if source issue has a parent epic with an integration branch
 		autoTarget, err := detectIntegrationBranch(bd, g, issueID)
 		if err != nil {
-			// Non-fatal: log and continue with default branch as target
+			// Non-fatal: log and continue with target branch as default
 			fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("(note: %v)", err)))
 		} else if autoTarget != "" {
 			target = autoTarget

@@ -1,3 +1,5 @@
+<!-- Polecat lifecycle test: 20260129-183509 -->
+<!-- Last reviewed: 2026-01-23 -->
 # Changelog
 
 All notable changes to the Gas Town project will be documented in this file.

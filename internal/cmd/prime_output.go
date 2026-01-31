@@ -9,6 +9,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/checkpoint"
 	"github.com/steveyegge/gastown/internal/deacon"
+	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
@@ -49,12 +50,34 @@ func outputPrimeContext(ctx RoleContext) error {
 	// Get town name for session names
 	townName, _ := workspace.GetTownName(ctx.TownRoot)
 
-	// Get default branch from rig config (default to "main" if not set)
+	// Get default branch, target branch, and merge strategy from rig config
 	defaultBranch := "main"
+	targetBranch := "main"
+	mergeStrategy := "direct_merge" // Default strategy
 	if ctx.Rig != "" && ctx.TownRoot != "" {
 		rigPath := filepath.Join(ctx.TownRoot, ctx.Rig)
-		if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.DefaultBranch != "" {
-			defaultBranch = rigCfg.DefaultBranch
+		if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil {
+			if rigCfg.DefaultBranch != "" {
+				defaultBranch = rigCfg.DefaultBranch
+			}
+			// TargetBranch overrides DefaultBranch for merge operations
+			if rigCfg.TargetBranch != "" {
+				targetBranch = rigCfg.TargetBranch
+			} else {
+				targetBranch = defaultBranch
+			}
+		}
+
+		// Load merge queue config from config.json (separate from rig.json)
+		// The refinery engineer loads this, but we need it for template rendering
+		mqCfg := refinery.LoadMergeQueueConfigFromPath(rigPath)
+		if mqCfg != nil {
+			if mqCfg.Strategy != "" {
+				mergeStrategy = mqCfg.Strategy
+			}
+			if mqCfg.TargetBranch != "" {
+				targetBranch = mqCfg.TargetBranch
+			}
 		}
 	}
 
@@ -65,6 +88,8 @@ func outputPrimeContext(ctx RoleContext) error {
 		TownName:      townName,
 		WorkDir:       ctx.WorkDir,
 		DefaultBranch: defaultBranch,
+		TargetBranch:  targetBranch,
+		MergeStrategy: mergeStrategy,
 		Polecat:       ctx.Polecat,
 		MayorSession:  session.MayorSessionName(),
 		DeaconSession: session.DeaconSessionName(),

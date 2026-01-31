@@ -15,6 +15,7 @@ func TestAgentEnv_Mayor(t *testing.T) {
 	assertEnv(t, env, "BD_ACTOR", "mayor")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "mayor")
 	assertEnv(t, env, "GT_ROOT", "/town")
+	assertEnv(t, env, "GIT_CEILING_DIRECTORIES", "/town") // prevents git walking to umbrella
 	assertNotSet(t, env, "GT_RIG")
 	assertNotSet(t, env, "BEADS_NO_DAEMON")
 }
@@ -51,6 +52,7 @@ func TestAgentEnv_Polecat(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "Toast")
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/Toast")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 }
 
 func TestAgentEnv_Crew(t *testing.T) {
@@ -70,6 +72,7 @@ func TestAgentEnv_Crew(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "emma")
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/emma")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 }
 
 func TestAgentEnv_Refinery(t *testing.T) {
@@ -86,6 +89,7 @@ func TestAgentEnv_Refinery(t *testing.T) {
 	assertEnv(t, env, "BD_ACTOR", "myrig/refinery")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "myrig/refinery")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertEnv(t, env, "BEADS_AUTO_START_DAEMON", "false")
 }
 
 func TestAgentEnv_Deacon(t *testing.T) {
@@ -169,6 +173,7 @@ func TestAgentEnv_EmptyTownRootOmitted(t *testing.T) {
 
 	// Key should be absent, not empty string
 	assertNotSet(t, env, "GT_ROOT")
+	assertNotSet(t, env, "GIT_CEILING_DIRECTORIES") // also not set when TownRoot empty
 
 	// Other keys should still be set
 	assertEnv(t, env, "GT_ROLE", "myrig/polecats/Toast") // compound format

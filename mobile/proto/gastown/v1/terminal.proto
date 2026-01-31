@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package gastown.v1;
+
+option go_package = "github.com/steveyegge/gastown/mobile/gen/gastown/v1";
+
+import "gastown/v1/common.proto";
+
+// TerminalService provides access to tmux terminal output for Gas Town agents.
+service TerminalService {
+  // PeekSession captures the last N lines from a tmux session's pane
+  rpc PeekSession(PeekSessionRequest) returns (PeekSessionResponse);
+
+  // ListSessions returns all active tmux sessions
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+
+  // HasSession checks if a specific session exists
+  rpc HasSession(HasSessionRequest) returns (HasSessionResponse);
+
+  // WatchSession streams terminal output updates in real-time
+  rpc WatchSession(WatchSessionRequest) returns (stream TerminalUpdate);
+}
+
+// PeekSessionRequest captures terminal output from a session
+message PeekSessionRequest {
+  // Session name (e.g., "gt-gastown-witness")
+  string session = 1;
+
+  // Number of lines to capture (default: 50, max: 1000)
+  int32 lines = 2;
+
+  // If true, capture all scrollback history
+  bool all = 3;
+}
+
+// PeekSessionResponse returns captured terminal output
+message PeekSessionResponse {
+  // The captured terminal output
+  string output = 1;
+
+  // Individual lines (if requested)
+  repeated string lines = 2;
+
+  // Session exists flag
+  bool exists = 3;
+}
+
+// ListSessionsRequest returns all tmux sessions
+message ListSessionsRequest {
+  // Filter by prefix (e.g., "gt-" for Gas Town sessions)
+  string prefix = 1;
+}
+
+// ListSessionsResponse returns session names
+message ListSessionsResponse {
+  // List of session names
+  repeated string sessions = 1;
+}
+
+// HasSessionRequest checks if a session exists
+message HasSessionRequest {
+  // Session name to check
+  string session = 1;
+}
+
+// HasSessionResponse returns session existence
+message HasSessionResponse {
+  // True if the session exists
+  bool exists = 1;
+}
+
+// WatchSessionRequest streams terminal updates
+message WatchSessionRequest {
+  // Session name to watch
+  string session = 1;
+
+  // Number of lines to capture per update (default: 50)
+  int32 lines = 2;
+
+  // Update interval in milliseconds (default: 1000, min: 100)
+  int32 interval_ms = 3;
+}
+
+// TerminalUpdate is a streaming update of terminal content
+message TerminalUpdate {
+  // The captured terminal output
+  string output = 1;
+
+  // Individual lines
+  repeated string lines = 2;
+
+  // Whether the session still exists
+  bool exists = 3;
+
+  // Timestamp of the capture
+  string timestamp = 4;
+}

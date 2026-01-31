@@ -29,6 +29,28 @@ func generateShortID() string {
 	return strings.ToLower(base32.StdEncoding.EncodeToString(b)[:5])
 }
 
+// newBdCmd creates a bd command with proper environment for the given beads directory.
+// This ensures bd commands respect the storage backend configuration (SQLite vs Dolt).
+//
+// IMPORTANT: cmd.Dir is set to the PARENT of beadsDir (e.g., townRoot), not beadsDir itself.
+// This is because bd discovers .beads relative to cwd, and if cwd is .beads itself,
+// it would find .beads/.beads/ (a nested directory) instead of the intended database.
+//
+// BEADS_DIR is set explicitly to ensure bd uses the correct beads directory and
+// respects the storage-backend setting in config.yaml.
+func newBdCmd(beadsDir string, args ...string) *exec.Cmd {
+	cmd := exec.Command("bd", args...)
+
+	// Set working directory to parent of beadsDir (e.g., townRoot)
+	// This prevents bd from finding nested .beads/.beads/ directories
+	cmd.Dir = filepath.Dir(beadsDir)
+
+	// Set BEADS_DIR so bd finds the configuration and respects storage-backend setting
+	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+
+	return cmd
+}
+
 // looksLikeIssueID checks if a string looks like a beads issue ID.
 // Issue IDs have the format: prefix-id (e.g., gt-abc, bd-xyz, hq-123).
 func looksLikeIssueID(s string) bool {
@@ -61,19 +83,21 @@ func looksLikeIssueID(s string) bool {
 
 // Convoy command flags
 var (
-	convoyMolecule     string
-	convoyNotify       string
-	convoyOwner        string
-	convoyStatusJSON   bool
-	convoyListJSON     bool
-	convoyListStatus   string
-	convoyListAll      bool
-	convoyListTree     bool
-	convoyInteractive  bool
-	convoyStrandedJSON bool
-	convoyCloseReason  string
-	convoyCloseNotify  string
-	convoyCheckDryRun  bool
+	convoyMolecule      string
+	convoyNotify        string
+	convoyOwner         string
+	convoyOwned         bool   // Caller-owned convoy (no witness/refinery management)
+	convoyMergeStrategy string // Merge strategy: direct, mr, local
+	convoyStatusJSON    bool
+	convoyListJSON      bool
+	convoyListStatus    string
+	convoyListAll       bool
+	convoyListTree      bool
+	convoyInteractive   bool
+	convoyStrandedJSON  bool
+	convoyCloseReason   string
+	convoyCloseNotify   string
+	convoyCheckDryRun   bool
 )
 
 var convoyCmd = &cobra.Command{
@@ -128,12 +152,27 @@ The --owner flag specifies who requested the convoy (receives completion
 notification by default). If not specified, defaults to created_by.
 The --notify flag adds additional subscribers beyond the owner.
 
+OWNERSHIP MODES:
+  Standard (default): Witness monitors, Refinery merges, auto-close on completion.
+
+  Caller-owned (--owned): Caller manages lifecycle directly:
+    - No witness monitoring or death warrant involvement
+    - Caller polls status with 'gt convoy status'
+    - Caller finalizes with 'gt convoy land' when complete
+    - Useful for human-supervised or development work
+
+MERGE STRATEGIES (--merge):
+  mr (default):  Create MR, Refinery manages merge queue
+  direct:        Push directly to main (trusted work, no MR)
+  local:         Merge locally, push to main (review in worktree)
+
 Examples:
   gt convoy create "Deploy v2.0" gt-abc bd-xyz
   gt convoy create "Release prep" gt-abc --notify           # defaults to mayor/
   gt convoy create "Release prep" gt-abc --notify ops/      # notify ops/
   gt convoy create "Feature rollout" gt-a gt-b --owner mayor/ --notify ops/
-  gt convoy create "Feature rollout" gt-a gt-b gt-c --molecule mol-release`,
+  gt convoy create "Feature rollout" gt-a gt-b gt-c --molecule mol-release
+  gt convoy create "Quick fix" gt-xyz --owned --merge=direct  # caller-owned, direct push`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runConvoyCreate,
 }
@@ -238,12 +277,47 @@ Examples:
 	RunE: runConvoyClose,
 }
 
+// Land command flags
+var (
+	convoyLandForce   bool
+	convoyLandDryRun  bool
+	convoyLandCleanup bool
+)
+
+var convoyLandCmd = &cobra.Command{
+	Use:   "land <convoy-id>",
+	Short: "Finalize a caller-owned convoy",
+	Long: `Finalize a caller-owned convoy when all work is complete.
+
+This is the caller-managed equivalent of auto-close. For --owned convoys,
+the caller is responsible for landing the convoy when work is done.
+
+WHAT LAND DOES:
+  1. Verifies all tracked issues are complete (closed status)
+  2. Optionally cleans up polecat worktrees (--cleanup)
+  3. Closes the convoy bead
+
+Unlike 'convoy close', 'land' verifies work completion first. Use 'close'
+when you want to force-close regardless of status.
+
+Examples:
+  gt convoy land hq-cv-abc                    # Land when all complete
+  gt convoy land hq-cv-abc --force            # Land even if incomplete
+  gt convoy land hq-cv-abc --cleanup          # Also remove worktrees
+  gt convoy land hq-cv-abc --dry-run          # Preview without acting`,
+	Args: cobra.ExactArgs(1),
+	RunE: runConvoyLand,
+}
+
 func init() {
 	// Create flags
 	convoyCreateCmd.Flags().StringVar(&convoyMolecule, "molecule", "", "Associated molecule ID")
 	convoyCreateCmd.Flags().StringVar(&convoyOwner, "owner", "", "Owner who requested convoy (gets completion notification)")
 	convoyCreateCmd.Flags().StringVar(&convoyNotify, "notify", "", "Additional address to notify on completion (default: mayor/ if flag used without value)")
 	convoyCreateCmd.Flags().Lookup("notify").NoOptDefVal = "mayor/"
+	convoyCreateCmd.Flags().BoolVar(&convoyOwned, "owned", false, "Caller-owned convoy (caller manages lifecycle, no witness/refinery)")
+	convoyCreateCmd.Flags().StringVar(&convoyMergeStrategy, "merge", "", "Merge strategy for tracked work: direct (push to main), mr (refinery), local (merge locally)")
+	convoyCreateCmd.Flags().Lookup("merge").NoOptDefVal = "mr"
 
 	// Status flags
 	convoyStatusCmd.Flags().BoolVar(&convoyStatusJSON, "json", false, "Output as JSON")
@@ -267,6 +341,11 @@ func init() {
 	convoyCloseCmd.Flags().StringVar(&convoyCloseReason, "reason", "", "Reason for closing the convoy")
 	convoyCloseCmd.Flags().StringVar(&convoyCloseNotify, "notify", "", "Agent to notify on close (e.g., mayor/)")
 
+	// Land flags
+	convoyLandCmd.Flags().BoolVarP(&convoyLandForce, "force", "f", false, "Land even if tracked issues are incomplete")
+	convoyLandCmd.Flags().BoolVar(&convoyLandDryRun, "dry-run", false, "Preview what would happen without acting")
+	convoyLandCmd.Flags().BoolVar(&convoyLandCleanup, "cleanup", false, "Also remove polecat worktrees")
+
 	// Add subcommands
 	convoyCmd.AddCommand(convoyCreateCmd)
 	convoyCmd.AddCommand(convoyStatusCmd)
@@ -275,6 +354,7 @@ func init() {
 	convoyCmd.AddCommand(convoyCheckCmd)
 	convoyCmd.AddCommand(convoyStrandedCmd)
 	convoyCmd.AddCommand(convoyCloseCmd)
+	convoyCmd.AddCommand(convoyLandCmd)
 
 	rootCmd.AddCommand(convoyCmd)
 }
@@ -332,6 +412,12 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	if convoyMolecule != "" {
 		description += fmt.Sprintf("\nMolecule: %s", convoyMolecule)
 	}
+	if convoyOwned {
+		description += "\nOwned: true"
+	}
+	if convoyMergeStrategy != "" {
+		description += fmt.Sprintf("\nMerge: %s", convoyMergeStrategy)
+	}
 
 	// Generate convoy ID with cv- prefix
 	convoyID := fmt.Sprintf("hq-cv-%s", generateShortID())
@@ -348,8 +434,7 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 		createArgs = append(createArgs, "--force")
 	}
 
-	createCmd := exec.Command("bd", createArgs...)
-	createCmd.Dir = townBeads
+	createCmd := newBdCmd(townBeads, createArgs...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	createCmd.Stdout = &stdout
@@ -365,9 +450,10 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	trackedCount := 0
 	for _, issueID := range trackedIssues {
 		// Use --type=tracks for non-blocking tracking relation
-		depArgs := []string{"dep", "add", convoyID, issueID, "--type=tracks"}
-		depCmd := exec.Command("bd", depArgs...)
-		depCmd.Dir = townBeads
+		// Format cross-rig beads as external references for proper resolution
+		trackID := formatTrackBeadID(issueID)
+		depArgs := []string{"dep", "add", convoyID, trackID, "--type=tracks"}
+		depCmd := newBdCmd(townBeads, depArgs...)
 		var depStderr bytes.Buffer
 		depCmd.Stderr = &depStderr
 
@@ -398,8 +484,18 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	if convoyMolecule != "" {
 		fmt.Printf("  Molecule: %s\n", convoyMolecule)
 	}
+	if convoyOwned {
+		fmt.Printf("  Owned:    %s\n", style.Bold.Render("caller-managed"))
+	}
+	if convoyMergeStrategy != "" {
+		fmt.Printf("  Merge:    %s\n", convoyMergeStrategy)
+	}
 
-	fmt.Printf("\n  %s\n", style.Dim.Render("Convoy auto-closes when all tracked issues complete"))
+	if convoyOwned {
+		fmt.Printf("\n  %s\n", style.Dim.Render("Use 'gt convoy land' to finalize when complete"))
+	} else {
+		fmt.Printf("\n  %s\n", style.Dim.Render("Convoy auto-closes when all tracked issues complete"))
+	}
 
 	return nil
 }
@@ -415,8 +511,7 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 
 	// Validate convoy exists and get its status
 	showArgs := []string{"show", convoyID, "--json"}
-	showCmd := exec.Command("bd", showArgs...)
-	showCmd.Dir = townBeads
+	showCmd := newBdCmd(townBeads, showArgs...)
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 
@@ -424,6 +519,10 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("convoy '%s' not found", convoyID)
 	}
 
+	// Handle empty stdout (bd show --json may return empty string for non-existent issues)
+	if len(stdout.Bytes()) == 0 {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
 	var convoys []struct {
 		ID     string `json:"id"`
 		Title  string `json:"title"`
@@ -449,8 +548,7 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 	reopened := false
 	if convoy.Status == "closed" {
 		reopenArgs := []string{"update", convoyID, "--status=open"}
-		reopenCmd := exec.Command("bd", reopenArgs...)
-		reopenCmd.Dir = townBeads
+		reopenCmd := newBdCmd(townBeads, reopenArgs...)
 		if err := reopenCmd.Run(); err != nil {
 			return fmt.Errorf("couldn't reopen convoy: %w", err)
 		}
@@ -461,9 +559,10 @@ func runConvoyAdd(cmd *cobra.Command, args []string) error {
 	// Add 'tracks' relations for each issue
 	addedCount := 0
 	for _, issueID := range issuesToAdd {
-		depArgs := []string{"dep", "add", convoyID, issueID, "--type=tracks"}
-		depCmd := exec.Command("bd", depArgs...)
-		depCmd.Dir = townBeads
+		// Format cross-rig beads as external references for proper resolution
+		trackID := formatTrackBeadID(issueID)
+		depArgs := []string{"dep", "add", convoyID, trackID, "--type=tracks"}
+		depCmd := newBdCmd(townBeads, depArgs...)
 		var depStderr bytes.Buffer
 		depCmd.Stderr = &depStderr
 
@@ -620,8 +719,7 @@ func runConvoyClose(cmd *cobra.Command, args []string) error {
 
 	// Get convoy details
 	showArgs := []string{"show", convoyID, "--json"}
-	showCmd := exec.Command("bd", showArgs...)
-	showCmd.Dir = townBeads
+	showCmd := newBdCmd(townBeads, showArgs...)
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 
@@ -629,6 +727,10 @@ func runConvoyClose(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("convoy '%s' not found", convoyID)
 	}
 
+	// Handle empty stdout (bd show --json may return empty string for non-existent issues)
+	if len(stdout.Bytes()) == 0 {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
 	var convoys []struct {
 		ID          string `json:"id"`
 		Title       string `json:"title"`
@@ -665,8 +767,7 @@ func runConvoyClose(cmd *cobra.Command, args []string) error {
 
 	// Close the convoy
 	closeArgs := []string{"close", convoyID, "-r", reason}
-	closeCmd := exec.Command("bd", closeArgs...)
-	closeCmd.Dir = townBeads
+	closeCmd := newBdCmd(townBeads, closeArgs...)
 
 	if err := closeCmd.Run(); err != nil {
 		return fmt.Errorf("closing convoy: %w", err)
@@ -700,6 +801,146 @@ func sendCloseNotification(addr, convoyID, title, reason string) {
 	} else {
 		fmt.Printf("  Notified: %s\n", addr)
 	}
+}
+
+// runConvoyLand finalizes a caller-owned convoy when all work is complete.
+func runConvoyLand(cmd *cobra.Command, args []string) error {
+	convoyID := args[0]
+
+	townBeads, err := getTownBeadsDir()
+	if err != nil {
+		return err
+	}
+
+	// Get convoy details
+	showArgs := []string{"show", convoyID, "--json"}
+	showCmd := newBdCmd(townBeads, showArgs...)
+	var stdout bytes.Buffer
+	showCmd.Stdout = &stdout
+
+	if err := showCmd.Run(); err != nil {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
+
+	if len(stdout.Bytes()) == 0 {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
+
+	var convoys []struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Status      string `json:"status"`
+		Type        string `json:"issue_type"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &convoys); err != nil {
+		return fmt.Errorf("parsing convoy data: %w", err)
+	}
+
+	if len(convoys) == 0 {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
+
+	convoy := convoys[0]
+
+	// Verify it's actually a convoy type
+	if convoy.Type != "convoy" {
+		return fmt.Errorf("'%s' is not a convoy (type: %s)", convoyID, convoy.Type)
+	}
+
+	// Idempotent: if already closed, just report it
+	if convoy.Status == "closed" {
+		fmt.Printf("%s Convoy %s is already landed\n", style.Dim.Render("○"), convoyID)
+		return nil
+	}
+
+	// Get tracked issues and check completion status
+	tracked := getTrackedIssues(townBeads, convoyID)
+	var incomplete []trackedIssueInfo
+	for _, t := range tracked {
+		if t.Status != "closed" {
+			incomplete = append(incomplete, t)
+		}
+	}
+
+	// Report status
+	if convoyLandDryRun {
+		fmt.Printf("%s DRY RUN - Would land convoy 🚚 %s: %s\n\n", style.Warning.Render("⚠"), convoyID, convoy.Title)
+	}
+
+	fmt.Printf("  Tracked: %d issues (%d complete, %d incomplete)\n", len(tracked), len(tracked)-len(incomplete), len(incomplete))
+
+	// If incomplete and not forced, show details and fail
+	if len(incomplete) > 0 && !convoyLandForce {
+		fmt.Printf("\n  %s Incomplete issues:\n", style.Warning.Render("⚠"))
+		for _, t := range incomplete {
+			symbol := "○"
+			if t.Status == "in_progress" {
+				symbol = "▶"
+			}
+			fmt.Printf("    %s %s: %s [%s]\n", symbol, t.ID, t.Title, t.Status)
+		}
+		fmt.Printf("\n  Use --force to land anyway, or wait for work to complete.\n")
+		return fmt.Errorf("convoy has %d incomplete issues", len(incomplete))
+	}
+
+	if convoyLandDryRun {
+		if convoyLandCleanup {
+			fmt.Printf("  Would clean up worktrees for completed issues\n")
+		}
+		fmt.Printf("  Would close convoy bead\n")
+		return nil
+	}
+
+	// Optional: clean up polecat worktrees
+	if convoyLandCleanup {
+		cleanedCount := cleanupConvoyWorktrees(tracked)
+		if cleanedCount > 0 {
+			fmt.Printf("  Cleaned up %d worktree(s)\n", cleanedCount)
+		}
+	}
+
+	// Close the convoy
+	reason := "Landed via gt convoy land"
+	if len(incomplete) > 0 {
+		reason = fmt.Sprintf("Force-landed with %d incomplete issues", len(incomplete))
+	}
+
+	closeArgs := []string{"close", convoyID, "-r", reason}
+	closeCmd := newBdCmd(townBeads, closeArgs...)
+
+	if err := closeCmd.Run(); err != nil {
+		return fmt.Errorf("closing convoy: %w", err)
+	}
+
+	fmt.Printf("%s Landed convoy 🚚 %s: %s\n", style.Bold.Render("✓"), convoyID, convoy.Title)
+
+	// Send completion notification
+	notifyConvoyCompletion(townBeads, convoyID, convoy.Title)
+
+	return nil
+}
+
+// cleanupConvoyWorktrees removes worktrees for completed issues in a convoy.
+// Returns the number of worktrees cleaned up.
+func cleanupConvoyWorktrees(tracked []trackedIssueInfo) int {
+	cleanedCount := 0
+	for _, t := range tracked {
+		if t.Status == "closed" && t.Assignee != "" {
+			// Try to clean up worktree - this is best-effort
+			// The assignee format is like "gastown/polecats/nux"
+			parts := strings.Split(t.Assignee, "/")
+			if len(parts) >= 3 && parts[1] == "polecats" {
+				polecatName := parts[2]
+				// Use gt worktree remove to clean up
+				wtCmd := exec.Command("gt", "worktree", "remove", polecatName, "--force")
+				if err := wtCmd.Run(); err == nil {
+					cleanedCount++
+				}
+			}
+		}
+	}
+	return cleanedCount
 }
 
 // strandedConvoyInfo holds info about a stranded convoy.
@@ -766,8 +1007,7 @@ func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
 
 	// List all open convoys
 	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townBeads
+	listCmd := newBdCmd(townBeads, listArgs...)
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 
@@ -883,8 +1123,7 @@ func checkAndCloseCompletedConvoys(townBeads string, dryRun bool) ([]struct{ ID,
 
 	// List all open convoys
 	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townBeads
+	listCmd := newBdCmd(townBeads, listArgs...)
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 
@@ -925,8 +1164,7 @@ func checkAndCloseCompletedConvoys(townBeads string, dryRun bool) ([]struct{ ID,
 
 			// Close the convoy
 			closeArgs := []string{"close", convoy.ID, "-r", "All tracked issues completed"}
-			closeCmd := exec.Command("bd", closeArgs...)
-			closeCmd.Dir = townBeads
+			closeCmd := newBdCmd(townBeads, closeArgs...)
 
 			if err := closeCmd.Run(); err != nil {
 				style.PrintWarning("couldn't close convoy %s: %v", convoy.ID, err)
@@ -947,8 +1185,7 @@ func checkAndCloseCompletedConvoys(townBeads string, dryRun bool) ([]struct{ ID,
 func notifyConvoyCompletion(townBeads, convoyID, title string) {
 	// Get convoy description to find owner and notify addresses
 	showArgs := []string{"show", convoyID, "--json"}
-	showCmd := exec.Command("bd", showArgs...)
-	showCmd.Dir = townBeads
+	showCmd := newBdCmd(townBeads, showArgs...)
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 
@@ -1011,8 +1248,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 
 	// Get convoy details
 	showArgs := []string{"show", convoyID, "--json"}
-	showCmd := exec.Command("bd", showArgs...)
-	showCmd.Dir = townBeads
+	showCmd := newBdCmd(townBeads, showArgs...)
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 
@@ -1021,6 +1257,10 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse convoy data
+	// Handle empty stdout (bd show --json may return empty string for non-existent issues)
+	if len(stdout.Bytes()) == 0 {
+		return fmt.Errorf("convoy '%s' not found", convoyID)
+	}
 	var convoys []struct {
 		ID          string   `json:"id"`
 		Title       string   `json:"title"`
@@ -1040,7 +1280,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 
 	convoy := convoys[0]
 
-	// Get tracked issues by querying SQLite directly
+	// Get tracked issues (bd dep list doesn't properly show cross-rig external dependencies)
 	// (bd dep list doesn't properly show cross-rig external dependencies)
 	type trackedIssue struct {
 		ID        string `json:"id"`
@@ -1130,8 +1370,7 @@ func runConvoyStatus(cmd *cobra.Command, args []string) error {
 func showAllConvoyStatus(townBeads string) error {
 	// List all convoy-type issues
 	listArgs := []string{"list", "--type=convoy", "--status=open", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townBeads
+	listCmd := newBdCmd(townBeads, listArgs...)
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 
@@ -1184,8 +1423,7 @@ func runConvoyList(cmd *cobra.Command, args []string) error {
 	}
 	// Default (no flags) = open only (bd's default behavior)
 
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townBeads
+	listCmd := newBdCmd(townBeads, listArgs...)
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 
@@ -1316,7 +1554,7 @@ func getTrackedIssues(townBeads, convoyID string) []trackedIssueInfo {
 	// Use bd dep list to get tracked dependencies
 	// Run from town root (parent of .beads) so bd routes correctly
 	townRoot := filepath.Dir(townBeads)
-	depCmd := exec.Command("bd", "--no-daemon", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
+	depCmd := exec.Command("bd", "dep", "list", convoyID, "--direction=down", "--type=tracks", "--json")
 	depCmd.Dir = townRoot
 
 	var stdout bytes.Buffer
@@ -1388,7 +1626,7 @@ func getExternalIssueDetails(townBeads, rigName, issueID string) *issueDetails {
 
 	// Query the rig database by running bd show from the rig directory
 	// Use --allow-stale to handle cases where JSONL and DB are out of sync
-	showCmd := exec.Command("bd", "--no-daemon", "show", issueID, "--json", "--allow-stale")
+	showCmd := exec.Command("bd", "show", issueID, "--json", "--allow-stale")
 	showCmd.Dir = rigDir // Set working directory to rig directory
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
@@ -1532,7 +1770,7 @@ type workerInfo struct {
 // Returns a map from issue ID to worker info.
 //
 // Optimized to batch queries per rig (O(R) instead of O(N×R)) and
-// parallelize across rigs.
+// parallelize across rigs. Supports both SQLite and Dolt backends.
 func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 	result := make(map[string]*workerInfo)
 	if len(issueIDs) == 0 {
@@ -1545,18 +1783,9 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		return result
 	}
 
-	// Discover rigs with beads databases
-	rigDirs, _ := filepath.Glob(filepath.Join(townRoot, "*", "polecats"))
-	var beadsDBS []string
-	for _, polecatsDir := range rigDirs {
-		rigDir := filepath.Dir(polecatsDir)
-		beadsDB := filepath.Join(rigDir, "mayor", "rig", ".beads", "beads.db")
-		if _, err := os.Stat(beadsDB); err == nil {
-			beadsDBS = append(beadsDBS, beadsDB)
-		}
-	}
-
-	if len(beadsDBS) == 0 {
+	// Discover rigs with beads databases (respects backend config)
+	beadsDirs, err := beads.FindBeadsDBsInRigs(townRoot)
+	if err != nil || len(beadsDirs) == 0 {
 		return result
 	}
 
@@ -1575,36 +1804,25 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 
 	// Query all rigs in parallel
 	type rigResult struct {
-		agents []struct {
-			ID           string `json:"id"`
-			HookBead     string `json:"hook_bead"`
-			LastActivity string `json:"last_activity"`
-		}
+		agents []beads.QueryResult
 	}
 
-	resultChan := make(chan rigResult, len(beadsDBS))
+	resultChan := make(chan rigResult, len(beadsDirs))
 	var wg sync.WaitGroup
 
-	for _, beadsDB := range beadsDBS {
+	for _, beadsDir := range beadsDirs {
 		wg.Add(1)
-		go func(db string) {
+		go func(dir string) {
 			defer wg.Done()
 
-			queryCmd := exec.Command("sqlite3", "-json", db, query)
-			var stdout bytes.Buffer
-			queryCmd.Stdout = &stdout
-			if err := queryCmd.Run(); err != nil {
+			// Use backend-aware query (works with SQLite or Dolt)
+			agents, err := beads.RunQuery(dir, query)
+			if err != nil {
 				resultChan <- rigResult{}
 				return
 			}
-
-			var rr rigResult
-			if err := json.Unmarshal(stdout.Bytes(), &rr.agents); err != nil {
-				resultChan <- rigResult{}
-				return
-			}
-			resultChan <- rr
-		}(beadsDB)
+			resultChan <- rigResult{agents: agents}
+		}(beadsDir)
 	}
 
 	// Wait for all queries to complete
@@ -1616,26 +1834,34 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 	// Collect results from all rigs
 	for rr := range resultChan {
 		for _, agent := range rr.agents {
-			// Skip if we already found a worker for this issue
-			if _, ok := result[agent.HookBead]; ok {
+			// Extract fields from query result
+			hookBead, _ := agent["hook_bead"].(string)
+			agentID, _ := agent["id"].(string)
+			lastActivity, _ := agent["last_activity"].(string)
+
+			// Skip if no hook_bead or we already found a worker for this issue
+			if hookBead == "" {
+				continue
+			}
+			if _, ok := result[hookBead]; ok {
 				continue
 			}
 
 			// Parse agent ID to get worker identity
-			workerID := parseWorkerFromAgentBead(agent.ID)
+			workerID := parseWorkerFromAgentBead(agentID)
 			if workerID == "" {
 				continue
 			}
 
 			// Calculate age from last_activity
 			age := ""
-			if agent.LastActivity != "" {
-				if t, err := time.Parse(time.RFC3339, agent.LastActivity); err == nil {
+			if lastActivity != "" {
+				if t, err := time.Parse(time.RFC3339, lastActivity); err == nil {
 					age = formatWorkerAge(time.Since(t))
 				}
 			}
 
-			result[agent.HookBead] = &workerInfo{
+			result[hookBead] = &workerInfo{
 				Worker: workerID,
 				Age:    age,
 			}
@@ -1694,8 +1920,7 @@ func runConvoyTUI() error {
 func resolveConvoyNumber(townBeads string, n int) (string, error) {
 	// Get convoy list (same query as runConvoyList)
 	listArgs := []string{"list", "--type=convoy", "--json"}
-	listCmd := exec.Command("bd", listArgs...)
-	listCmd.Dir = townBeads
+	listCmd := newBdCmd(townBeads, listArgs...)
 	var stdout bytes.Buffer
 	listCmd.Stdout = &stdout
 

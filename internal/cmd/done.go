@@ -271,6 +271,14 @@ func runDone(cmd *cobra.Command, args []string) error {
 		// Check if branch has commits ahead of origin/default
 		// If not, work may have been pushed directly to main - that's fine, just skip MR
 		originDefault := "origin/" + defaultBranch
+
+		// FIX (gt-fpak7): Fetch origin before checking commits ahead.
+		// Stale origin refs can cause aheadCount to be 0 when there are actually
+		// unpushed commits, leading to skipped push and lost work.
+		if err := g.Fetch("origin"); err != nil {
+			style.PrintWarning("could not fetch origin: %v", err)
+		}
+
 		aheadCount, err := g.CommitsAhead(originDefault, "HEAD")
 		if err != nil {
 			// Fallback to local branch comparison if origin not available
@@ -285,12 +293,21 @@ func runDone(cmd *cobra.Command, args []string) error {
 		// If no commits ahead, work was likely pushed directly to main (or already merged)
 		// This is valid - skip MR creation but still complete successfully
 		if aheadCount == 0 {
-			fmt.Printf("%s Branch has no commits ahead of %s\n", style.Bold.Render("→"), originDefault)
-			fmt.Printf("  Work was likely pushed directly to main or already merged.\n")
-			fmt.Printf("  Skipping MR creation - completing without merge request.\n\n")
+			// FIX (gt-fpak7): Double-check that our branch exists on remote before skipping push.
+			// If the branch doesn't exist on remote, we have work that needs pushing.
+			branchExistsOnRemote, _ := g.RemoteBranchExists("origin", branch)
+			if !branchExistsOnRemote {
+				// Branch doesn't exist on remote - we need to push even if aheadCount is 0.
+				// This handles the case where origin/main is stale or equal to our branch base.
+				fmt.Printf("%s Branch not on remote, pushing...\n", style.Bold.Render("→"))
+			} else {
+				fmt.Printf("%s Branch has no commits ahead of %s\n", style.Bold.Render("→"), originDefault)
+				fmt.Printf("  Work was likely pushed directly to main or already merged.\n")
+				fmt.Printf("  Skipping MR creation - completing without merge request.\n\n")
 
-			// Skip straight to witness notification (no MR needed)
-			goto notifyWitness
+				// Skip straight to witness notification (no MR needed)
+				goto notifyWitness
+			}
 		}
 
 		// CRITICAL: Push branch BEFORE creating MR bead (hq-6dk53, hq-a4ksk)
@@ -339,6 +356,37 @@ func runDone(cmd *cobra.Command, args []string) error {
 
 				// Skip MR creation, go to witness notification
 				goto notifyWitness
+			}
+
+			// Check for merge_strategy - direct/local merge locally, mr uses refinery
+			if attachmentFields != nil && attachmentFields.MergeStrategy != "" {
+				mergeStrategy := attachmentFields.MergeStrategy
+				if mergeStrategy == "direct" || mergeStrategy == "local" {
+					fmt.Printf("%s Merge strategy: %s (direct push to main)\n", style.Bold.Render("→"), mergeStrategy)
+					fmt.Printf("  Branch: %s\n", branch)
+					fmt.Printf("  Issue: %s\n", issueID)
+					fmt.Println()
+
+					// Checkout main, merge feature branch, push
+					if err := g.Checkout(defaultBranch); err != nil {
+						return fmt.Errorf("checkout %s: %w", defaultBranch, err)
+					}
+					if err := g.Pull("origin", defaultBranch); err != nil {
+						style.PrintWarning("could not pull latest %s: %v", defaultBranch, err)
+					}
+					if err := g.Merge(branch); err != nil {
+						return fmt.Errorf("merge %s into %s: %w\nResolve conflicts manually and retry.", branch, defaultBranch, err)
+					}
+					if err := g.Push("origin", defaultBranch, false); err != nil {
+						return fmt.Errorf("push %s to origin: %w", defaultBranch, err)
+					}
+
+					fmt.Printf("%s Merged and pushed directly to %s\n", style.Bold.Render("✓"), defaultBranch)
+
+					// Skip MR creation, go to witness notification
+					goto notifyWitness
+				}
+				// For "mr" strategy, fall through to normal MR creation
 			}
 		}
 
@@ -487,18 +535,35 @@ notifyWitness:
 	}
 
 	// Notify dispatcher if work was dispatched by another agent
+	// BUG FIX (hq--bug-stale_polecat_sends_duplicate_work_done): Deduplicate WORK_DONE notifications.
+	// If session dies after sending WORK_DONE but before clearing hook_bead, the polecat may be
+	// respawned and send WORK_DONE again. We track sent notifications via a label on the bead.
 	if issueID != "" {
 		if dispatcher := getDispatcherFromBead(cwd, issueID); dispatcher != "" && dispatcher != sender {
-			dispatcherNotification := &mail.Message{
-				To:      dispatcher,
-				From:    sender,
-				Subject: fmt.Sprintf("WORK_DONE: %s", issueID),
-				Body:    strings.Join(bodyLines, "\n"),
-			}
-			if err := townRouter.Send(dispatcherNotification); err != nil {
-				style.PrintWarning("could not notify dispatcher %s: %v", dispatcher, err)
+			// Check if WORK_DONE was already sent for this bead (prevents duplicates)
+			bd := beads.New(beads.ResolveBeadsDir(cwd))
+			issue, err := bd.Show(issueID)
+			alreadySent := err == nil && beads.HasLabel(issue, "gt:work_done_sent")
+
+			if alreadySent {
+				fmt.Printf("%s Dispatcher notification skipped (already sent for %s)\n", style.Dim.Render("→"), issueID)
 			} else {
-				fmt.Printf("%s Dispatcher %s notified of %s\n", style.Bold.Render("✓"), dispatcher, exitType)
+				dispatcherNotification := &mail.Message{
+					To:      dispatcher,
+					From:    sender,
+					Subject: fmt.Sprintf("WORK_DONE: %s", issueID),
+					Body:    strings.Join(bodyLines, "\n"),
+				}
+				if err := townRouter.Send(dispatcherNotification); err != nil {
+					style.PrintWarning("could not notify dispatcher %s: %v", dispatcher, err)
+				} else {
+					fmt.Printf("%s Dispatcher %s notified of %s\n", style.Bold.Render("✓"), dispatcher, exitType)
+					// Mark WORK_DONE as sent to prevent duplicates on respawn
+					if err := bd.Update(issueID, beads.UpdateOptions{AddLabels: []string{"gt:work_done_sent"}}); err != nil {
+						// Non-fatal: notification was sent, just couldn't mark it
+						style.PrintWarning("could not mark WORK_DONE as sent: %v", err)
+					}
+				}
 			}
 		}
 	}
@@ -601,17 +666,11 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		return
 	}
 
-	// Use rig path for slot commands - bd slot doesn't route from town root
-	// IMPORTANT: Use the rig's directory (not polecat worktree) so bd commands
-	// work even if the polecat worktree is deleted.
-	var beadsPath string
-	switch ctx.Role {
-	case RoleMayor, RoleDeacon:
-		beadsPath = townRoot
-	default:
-		beadsPath = filepath.Join(townRoot, ctx.Rig)
-	}
-	bd := beads.New(beadsPath)
+	// BUG FIX (hq--bug-polecat_done_doesn_t_clear_hook_bead): Use town root for all agent beads.
+	// Agent beads now use hq- prefix and are stored in town-level beads, regardless of role.
+	// Previously, polecats used rig path which couldn't find hq-* prefixed agent beads.
+	// The witness handlers already use townRoot correctly (see handlers.go:105).
+	bd := beads.New(townRoot)
 
 	// BUG FIX (gt-vwjz6): Close hooked beads before clearing the hook.
 	// Previously, the agent's hook_bead slot was cleared but the hooked bead itself

@@ -79,6 +79,9 @@ const HQGitignore = `# Gas Town HQ .gitignore
 # Crew workspaces (user-managed)
 **/crew/
 
+# Bare repo mirrors (worktree source, has own git)
+**/.repo.git/
+
 # =============================================================================
 # Runtime state directories (gitignored ephemeral data)
 # =============================================================================
@@ -141,6 +144,11 @@ func runGitInit(cmd *cobra.Command, args []string) error {
 	// Install pre-checkout hook to prevent accidental branch switches
 	if err := InstallPreCheckoutHook(hqRoot); err != nil {
 		fmt.Printf("   %s Could not install pre-checkout hook: %v\n", style.Dim.Render("⚠"), err)
+	}
+
+	// Install pre-commit hook to prevent .repo.git and rig file commits
+	if err := InstallPreCommitHook(hqRoot); err != nil {
+		fmt.Printf("   %s Could not install pre-commit hook: %v\n", style.Dim.Render("⚠"), err)
 	}
 
 	// Ensure beads database has repository fingerprint now that git is initialized.
@@ -322,6 +330,11 @@ func InitGitForHarness(hqRoot string, github string, private bool) error {
 		fmt.Printf("   %s Could not install pre-checkout hook: %v\n", style.Dim.Render("⚠"), err)
 	}
 
+	// Install pre-commit hook to prevent .repo.git and rig file commits
+	if err := InstallPreCommitHook(hqRoot); err != nil {
+		fmt.Printf("   %s Could not install pre-commit hook: %v\n", style.Dim.Render("⚠"), err)
+	}
+
 	// Ensure beads database has repository fingerprint now that git is initialized.
 	// This fixes the case where 'gt install' ran before git, leaving the database
 	// without a fingerprint (causes slow bd commands due to daemon startup failures).
@@ -476,4 +489,145 @@ func IsBranchProtectionInstalled(hqRoot string) bool {
 	}
 
 	return strings.Contains(string(content), BranchProtectionMarker)
+}
+
+// PreCommitHookScript is the git pre-commit hook that prevents accidental commits
+// containing .repo.git directories or rig files to the town root.
+const PreCommitHookScript = `#!/bin/bash
+# Gas Town pre-commit hook
+# Prevents accidental commits to the umbrella repo that contain:
+# 1. .repo.git directories (bare repos for worktrees)
+# 2. Rig files (should be committed in their respective rig repos)
+
+# Get the list of staged files
+STAGED_FILES=$(git diff --cached --name-only 2>/dev/null)
+
+if [ -z "$STAGED_FILES" ]; then
+    exit 0
+fi
+
+BLOCKED_FILES=""
+REASON=""
+
+# Check for .repo.git paths (bare repos should never be tracked)
+for FILE in $STAGED_FILES; do
+    if [[ "$FILE" == *".repo.git"* ]]; then
+        BLOCKED_FILES="$BLOCKED_FILES\n  - $FILE"
+        REASON="bare_repo"
+    fi
+done
+
+if [ -n "$BLOCKED_FILES" ] && [ "$REASON" = "bare_repo" ]; then
+    echo ""
+    echo "⚠️  BLOCKED: Attempted to commit .repo.git files to town repo"
+    echo ""
+    echo "   The following files are from bare repo directories:"
+    echo -e "$BLOCKED_FILES"
+    echo ""
+    echo "   .repo.git directories are bare repos used for worktrees and"
+    echo "   should never be tracked in the parent town repo."
+    echo ""
+    echo "   To fix: Remove these from staging with:"
+    echo "     git reset HEAD <file>"
+    echo ""
+    echo "   To bypass (not recommended): git commit --no-verify"
+    echo ""
+    exit 1
+fi
+
+# Check for rig paths that shouldn't be committed to umbrella
+# These are the main rig directories that have their own git repos
+RIG_PATHS="gastown/ beads/ deacon/ fics_helm_chart/ test_rig_e2e/"
+
+BLOCKED_FILES=""
+for RIG in $RIG_PATHS; do
+    for FILE in $STAGED_FILES; do
+        if [[ "$FILE" == "$RIG"* ]]; then
+            BLOCKED_FILES="$BLOCKED_FILES\n  - $FILE"
+        fi
+    done
+done
+
+if [ -n "$BLOCKED_FILES" ]; then
+    echo ""
+    echo "⚠️  BLOCKED: Attempted to commit rig files to umbrella repo"
+    echo ""
+    echo "   The following files belong to rig repos, not the umbrella:"
+    echo -e "$BLOCKED_FILES"
+    echo ""
+    echo "   These changes should be committed in the respective rig repo:"
+    echo "   - gastown/ -> commit in gastown worktree"
+    echo "   - beads/ -> commit in beads worktree"
+    echo "   etc."
+    echo ""
+    echo "   If you really need to commit these to the umbrella, you can:"
+    echo "   1. git commit --no-verify (bypass this hook)"
+    echo ""
+    exit 1
+fi
+
+exit 0
+`
+
+// InstallPreCommitHook installs the pre-commit hook in the town root.
+// This prevents accidental commits of .repo.git directories and rig files.
+func InstallPreCommitHook(hqRoot string) error {
+	hooksDir := filepath.Join(hqRoot, ".git", "hooks")
+
+	// Ensure hooks directory exists
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		return fmt.Errorf("creating hooks directory: %w", err)
+	}
+
+	hookPath := filepath.Join(hooksDir, "pre-commit")
+
+	// Check if hook already exists
+	if _, err := os.Stat(hookPath); err == nil {
+		// Read existing hook to see if it's ours
+		content, err := os.ReadFile(hookPath)
+		if err != nil {
+			return fmt.Errorf("reading existing hook: %w", err)
+		}
+
+		// Check if it already has .repo.git protection
+		if strings.Contains(string(content), "Gas Town pre-commit hook") &&
+			strings.Contains(string(content), ".repo.git") {
+			fmt.Printf("   ✓ Pre-commit hook already installed with .repo.git protection\n")
+			return nil
+		}
+
+		// Check if it's a Gas Town hook that needs updating
+		if strings.Contains(string(content), "Gas Town pre-commit hook") {
+			// Update to new version with .repo.git protection
+			if err := os.WriteFile(hookPath, []byte(PreCommitHookScript), 0755); err != nil {
+				return fmt.Errorf("updating hook: %w", err)
+			}
+			fmt.Printf("   ✓ Updated pre-commit hook with .repo.git protection\n")
+			return nil
+		}
+
+		// There's an existing hook that's not ours - don't overwrite
+		fmt.Printf("   %s Pre-commit hook exists but is not Gas Town's (skipping)\n", style.Dim.Render("⚠"))
+		return nil
+	}
+
+	// Install the hook
+	if err := os.WriteFile(hookPath, []byte(PreCommitHookScript), 0755); err != nil {
+		return fmt.Errorf("writing hook: %w", err)
+	}
+
+	fmt.Printf("   ✓ Installed pre-commit hook (prevents .repo.git and rig file commits)\n")
+	return nil
+}
+
+// IsPreCommitHookInstalled checks if the Gas Town pre-commit hook is installed.
+func IsPreCommitHookInstalled(hqRoot string) bool {
+	hookPath := filepath.Join(hqRoot, ".git", "hooks", "pre-commit")
+
+	content, err := os.ReadFile(hookPath)
+	if err != nil {
+		return false
+	}
+
+	return strings.Contains(string(content), "Gas Town pre-commit hook")
 }

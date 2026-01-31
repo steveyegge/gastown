@@ -12,6 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -62,7 +64,16 @@ HOOK MODE (--hook):
   Claude Code sends JSON on stdin:
     {"session_id": "uuid", "transcript_path": "/path", "source": "startup|resume"}
 
-  Other agents can set GT_SESSION_ID environment variable instead.`,
+  Other agents can set GT_SESSION_ID environment variable instead.
+
+Output includes:
+  - Role-specific context from templates
+  - Agent Advice (filtered by role, rig, and agent identity)
+  - Handoff content from previous sessions
+  - Auto-seance project context
+  - Hooked work details (for autonomous mode)
+
+See docs/concepts/agent-advice.md for advice system documentation.`,
 	RunE: runPrime,
 }
 
@@ -209,8 +220,15 @@ func runPrime(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Output applicable advice for this agent
+	outputAdviceContext(ctx)
+
 	// Output handoff content if present
 	outputHandoffContent(ctx)
+
+	// Run auto-seance for cold project context recovery
+	// Order: Handoff Mail -> Auto-Seance -> Role Instructions
+	outputAutoSeanceContext(ctx)
 
 	// Output attachment status (for autonomous work detection)
 	outputAttachmentStatus(ctx)
@@ -343,7 +361,7 @@ func detectRole(cwd, townRoot string) RoleInfo {
 // runBdPrime runs `bd prime` and outputs the result.
 // This provides beads workflow context to the agent.
 func runBdPrime(workDir string) {
-	cmd := exec.Command("bd", "prime")
+	cmd := exec.Command("bd", "--no-daemon", "prime")
 	cmd.Dir = workDir
 
 	var stdout, stderr bytes.Buffer
@@ -401,34 +419,66 @@ func checkSlungWork(ctx RoleContext) bool {
 		return false
 	}
 
-	// Check for hooked beads (work on the agent's hook)
 	b := beads.New(ctx.WorkDir)
-	hookedBeads, err := b.List(beads.ListOptions{
-		Status:   beads.StatusHooked,
-		Assignee: agentID,
-		Priority: -1,
-	})
-	if err != nil {
-		return false
+
+	// PREFERRED: Read hook_bead from agent bead (authoritative source)
+	// This prevents race conditions when polecat names are recycled - the old
+	// beads may still have assignee set to the recycled name, but the agent
+	// bead's hook_bead field is atomically updated by gt sling.
+	var hookedBead *beads.Issue
+	townRoot, _ := findTownRoot()
+	agentBeadID := buildAgentBeadIDFromContext(ctx, townRoot)
+	if agentBeadID != "" {
+		// FIX (gt-0da72f): Use the correct beads location for rig agents.
+		// Rig agents (witness, refinery, crew) are stored in rig beads,
+		// not the local beads or town beads.
+		agentBeads := b
+		if townRoot != "" && ctx.Rig != "" && ctx.Role != RoleMayor && ctx.Role != RoleDeacon {
+			rigPath := filepath.Join(townRoot, ctx.Rig)
+			agentBeads = beads.New(rigPath)
+		}
+		agentBead, err := agentBeads.Show(agentBeadID)
+		if err == nil && agentBead != nil && agentBead.Type == "agent" && agentBead.HookBead != "" {
+			// Found hook_bead in agent bead - fetch the actual bead
+			hookedBead, err = b.Show(agentBead.HookBead)
+			if err != nil && townRoot != "" {
+				// Try town beads if not found in rig beads
+				townB := beads.New(townRoot)
+				hookedBead, _ = townB.Show(agentBead.HookBead)
+			}
+		}
 	}
 
-	// If no hooked beads found, also check in_progress beads assigned to this agent.
-	// This handles the case where work was claimed (status changed to in_progress)
-	// but the session was interrupted before completion. The hook should persist.
-	if len(hookedBeads) == 0 {
-		inProgressBeads, err := b.List(beads.ListOptions{
-			Status:   "in_progress",
+	// FALLBACK: Query by assignee (legacy behavior, may have race conditions)
+	// Only used if hook_bead is not set or agent bead doesn't exist
+	if hookedBead == nil {
+		hookedBeads, err := b.List(beads.ListOptions{
+			Status:   beads.StatusHooked,
 			Assignee: agentID,
 			Priority: -1,
 		})
-		if err != nil || len(inProgressBeads) == 0 {
+		if err != nil {
 			return false
 		}
-		hookedBeads = inProgressBeads
-	}
 
-	// Use the first hooked bead (agents typically have one)
-	hookedBead := hookedBeads[0]
+		// If no hooked beads found, also check in_progress beads assigned to this agent.
+		// This handles the case where work was claimed (status changed to in_progress)
+		// but the session was interrupted before completion. The hook should persist.
+		if len(hookedBeads) == 0 {
+			inProgressBeads, err := b.List(beads.ListOptions{
+				Status:   "in_progress",
+				Assignee: agentID,
+				Priority: -1,
+			})
+			if err != nil || len(inProgressBeads) == 0 {
+				return false
+			}
+			hookedBeads = inProgressBeads
+		}
+
+		// Use the first hooked bead (agents typically have one)
+		hookedBead = hookedBeads[0]
+	}
 
 	// Build the role announcement string
 	roleAnnounce := buildRoleAnnouncement(ctx)
@@ -511,7 +561,7 @@ func checkSlungWork(ctx RoleContext) bool {
 	} else {
 		// No molecule - show bead preview using bd show
 		fmt.Println("**Bead details:**")
-		cmd := exec.Command("bd", "show", hookedBead.ID)
+		cmd := exec.Command("bd", "--no-daemon", "show", hookedBead.ID)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -587,6 +637,46 @@ func getAgentIdentity(ctx RoleContext) string {
 		return fmt.Sprintf("%s/witness", ctx.Rig)
 	case RoleRefinery:
 		return fmt.Sprintf("%s/refinery", ctx.Rig)
+	default:
+		return ""
+	}
+}
+
+// buildAgentBeadIDFromContext constructs the agent bead ID from a RoleContext.
+// Uses canonical naming: prefix-rig-role-name
+// Town-level agents use hq- prefix; rig-level agents use rig's prefix.
+func buildAgentBeadIDFromContext(ctx RoleContext, townRoot string) string {
+	getPrefix := func(rig string) string {
+		return config.GetRigPrefix(townRoot, rig)
+	}
+
+	switch ctx.Role {
+	case RoleMayor:
+		return beads.MayorBeadIDTown()
+	case RoleDeacon:
+		return beads.DeaconBeadIDTown()
+	case RoleWitness:
+		if ctx.Rig != "" {
+			return beads.WitnessBeadIDWithPrefix(getPrefix(ctx.Rig), ctx.Rig)
+		}
+		return ""
+	case RoleRefinery:
+		if ctx.Rig != "" {
+			return beads.RefineryBeadIDWithPrefix(getPrefix(ctx.Rig), ctx.Rig)
+		}
+		return ""
+	case RolePolecat:
+		if ctx.Rig != "" && ctx.Polecat != "" {
+			// Polecat agent beads use hq- prefix for town beads (fix for gt-3d5ok.1, gt-myc)
+			townName, _ := workspace.GetTownName(townRoot)
+			return beads.PolecatBeadIDTown(townName, ctx.Rig, ctx.Polecat)
+		}
+		return ""
+	case RoleCrew:
+		if ctx.Rig != "" && ctx.Polecat != "" {
+			return beads.CrewBeadIDWithPrefix(getPrefix(ctx.Rig), ctx.Rig, ctx.Polecat)
+		}
+		return ""
 	default:
 		return ""
 	}
@@ -669,8 +759,9 @@ func getAgentBeadID(ctx RoleContext) string {
 		return ""
 	case RolePolecat:
 		if ctx.Rig != "" && ctx.Polecat != "" {
-			prefix := beads.GetPrefixForRig(ctx.TownRoot, ctx.Rig)
-			return beads.PolecatBeadIDWithPrefix(prefix, ctx.Rig, ctx.Polecat)
+			// Polecat agent beads use hq- prefix for town beads (fix for gt-myc)
+			townName, _ := workspace.GetTownName(ctx.TownRoot)
+			return beads.PolecatBeadIDTown(townName, ctx.Rig, ctx.Polecat)
 		}
 		return ""
 	case RoleCrew:
@@ -687,6 +778,7 @@ func getAgentBeadID(ctx RoleContext) string {
 // ensureBeadsRedirect ensures the .beads/redirect file exists for worktree-based roles.
 // This handles cases where git clean or other operations delete the redirect file.
 // Uses the shared SetupRedirect helper which handles both tracked and local beads.
+// Also ensures beads.role=maintainer is set to prevent writes going to ~/.beads-planning.
 func ensureBeadsRedirect(ctx RoleContext) {
 	// Only applies to worktree-based roles that use shared beads
 	if ctx.Role != RoleCrew && ctx.Role != RolePolecat && ctx.Role != RoleRefinery {
@@ -695,20 +787,23 @@ func ensureBeadsRedirect(ctx RoleContext) {
 
 	// Check if redirect already exists
 	redirectPath := filepath.Join(ctx.WorkDir, ".beads", "redirect")
-	if _, err := os.Stat(redirectPath); err == nil {
-		// Redirect exists, nothing to do
-		return
+	if _, err := os.Stat(redirectPath); err != nil {
+		// Use shared helper - silently ignore errors during prime
+		_ = beads.SetupRedirect(ctx.TownRoot, ctx.WorkDir)
 	}
 
-	// Use shared helper - silently ignore errors during prime
-	_ = beads.SetupRedirect(ctx.TownRoot, ctx.WorkDir)
+	// Always ensure beads.role=maintainer is set to prevent beads from routing
+	// writes to ~/.beads-planning (the default for HTTPS-cloned repos without credentials).
+	// This fixes existing workers that were created before the fix. See: gt-3ml66
+	g := git.NewGit(ctx.WorkDir)
+	_ = g.SetConfig("beads.role", "maintainer")
 }
 
 // checkPendingEscalations queries for open escalation beads and displays them prominently.
 // This is called on Mayor startup to surface issues needing human attention.
 func checkPendingEscalations(ctx RoleContext) {
 	// Query for open escalations using bd list with tag filter
-	cmd := exec.Command("bd", "list", "--status=open", "--tag=escalation", "--json")
+	cmd := exec.Command("bd", "--no-daemon", "list", "--status=open", "--tag=escalation", "--json")
 	cmd.Dir = ctx.WorkDir
 
 	var stdout, stderr bytes.Buffer

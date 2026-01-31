@@ -3,11 +3,12 @@ package convoy
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // CheckConvoysForIssue finds any convoys tracking the given issue and triggers
@@ -55,10 +56,9 @@ func CheckConvoysForIssue(townRoot, issueID, observer string, logger func(format
 }
 
 // getTrackingConvoys returns convoy IDs that track the given issue.
-// Uses direct SQLite query for efficiency (same approach as daemon/convoy_watcher).
+// Uses beads.RunQuery to respect storage backend configuration (SQLite or Dolt).
 func getTrackingConvoys(townRoot, issueID string) []string {
 	townBeads := filepath.Join(townRoot, ".beads")
-	dbPath := filepath.Join(townBeads, "beads.db")
 
 	// Query for convoys that track this issue
 	// Handle both direct ID and external reference format
@@ -72,24 +72,17 @@ func getTrackingConvoys(townRoot, issueID string) []string {
 		AND (depends_on_id = '%s' OR depends_on_id LIKE '%%:%s')
 	`, safeIssueID, safeIssueID)
 
-	queryCmd := exec.Command("sqlite3", "-json", dbPath, query)
-	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
-
-	if err := queryCmd.Run(); err != nil {
-		return nil
-	}
-
-	var results []struct {
-		IssueID string `json:"issue_id"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
+	// Use beads.RunQuery to respect storage backend configuration (SQLite or Dolt)
+	results, err := beads.RunQuery(townBeads, query)
+	if err != nil {
 		return nil
 	}
 
 	convoyIDs := make([]string, 0, len(results))
 	for _, r := range results {
-		convoyIDs = append(convoyIDs, r.IssueID)
+		if id, ok := r["issue_id"].(string); ok {
+			convoyIDs = append(convoyIDs, id)
+		}
 	}
 	return convoyIDs
 }
@@ -97,27 +90,22 @@ func getTrackingConvoys(townRoot, issueID string) []string {
 // isConvoyClosed checks if a convoy is already closed.
 func isConvoyClosed(townRoot, convoyID string) bool {
 	townBeads := filepath.Join(townRoot, ".beads")
-	dbPath := filepath.Join(townBeads, "beads.db")
 
 	safeConvoyID := strings.ReplaceAll(convoyID, "'", "''")
 	query := fmt.Sprintf(`SELECT status FROM issues WHERE id = '%s'`, safeConvoyID)
 
-	queryCmd := exec.Command("sqlite3", "-json", dbPath, query)
-	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
-
-	if err := queryCmd.Run(); err != nil {
+	// Use beads.RunQuery to respect storage backend configuration (SQLite or Dolt)
+	results, err := beads.RunQuery(townBeads, query)
+	if err != nil || len(results) == 0 {
 		return false
 	}
 
-	var results []struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil || len(results) == 0 {
+	status, ok := results[0]["status"].(string)
+	if !ok {
 		return false
 	}
 
-	return results[0].Status == "closed"
+	return status == "closed"
 }
 
 // runConvoyCheck runs `gt convoy check <convoy-id>` to check a specific convoy.

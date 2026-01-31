@@ -104,6 +104,11 @@ func getBootManager() (*boot.Boot, error) {
 	return boot.New(townRoot), nil
 }
 
+// getBootSessionName returns the Boot session name.
+func getBootSessionName() string {
+	return boot.SessionName
+}
+
 func runBootStatus(cmd *cobra.Command, args []string) error {
 	b, err := getBootManager()
 	if err != nil {
@@ -287,9 +292,12 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 	}
 
 	if !hasDeacon {
-		// Deacon not running - this is unusual, daemon should have restarted it
-		// In degraded mode, we just report - let daemon handle restart
-		return "report", "deacon-missing", nil
+		// Deacon not running - start it (gt-mlmys)
+		fmt.Println("Deacon not running - starting...")
+		if err := startDeaconSession(tm, deaconSession, ""); err != nil {
+			return "error", "deacon-start-failed", fmt.Errorf("starting deacon: %w", err)
+		}
+		return "start", "deacon-missing", nil
 	}
 
 	// Deacon exists - check heartbeat to detect stuck sessions
@@ -306,6 +314,10 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 				// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 				fmt.Printf("Deacon heartbeat is %s old - restarting session\n", age.Round(time.Minute))
 				if err := tm.KillSessionWithProcesses(deaconSession); err == nil {
+					// Actually restart the deacon (gt-mlmys)
+					if err := startDeaconSession(tm, deaconSession, ""); err != nil {
+						return "error", "deacon-restart-failed", fmt.Errorf("restarting deacon: %w", err)
+					}
 					return "restart", "deacon-stuck", nil
 				}
 			} else {

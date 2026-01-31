@@ -16,6 +16,12 @@ func TestAddressToIdentity(t *testing.T) {
 		{"deacon", "deacon/"},
 		{"deacon/", "deacon/"},
 
+		// beads/ prefixed town-level agents unify to same identity
+		{"beads/mayor", "mayor/"},
+		{"beads/mayor/", "mayor/"},
+		{"beads/deacon", "deacon/"},
+		{"beads/deacon/", "deacon/"},
+
 		// Rig-level agents: crew/ and polecats/ normalized to canonical form
 		{"gastown/polecats/Toast", "gastown/Toast"},
 		{"gastown/crew/max", "gastown/max"},

@@ -68,27 +68,46 @@ When issues close, the convoy lands. See [Convoys](concepts/convoy.md) for detai
 
 ## Crew vs Polecats
 
-Both do project work, but with key differences:
+Both do project work, but with fundamentally different purposes:
 
 | Aspect | Crew | Polecat |
 |--------|------|---------|
+| **Primary role** | Formula owners | Formula executors |
 | **Lifecycle** | Persistent (user controls) | Transient (Witness controls) |
-| **Monitoring** | None | Witness watches, nudges, recycles |
-| **Work assignment** | Human-directed or self-assigned | Slung via `gt sling` |
-| **Git state** | Pushes to main directly | Works on branch, Refinery merges |
-| **Cleanup** | Manual | Automatic on completion |
+| **Monitoring** | Self-directed | Witness watches, nudges, recycles |
+| **Work assignment** | Subscribes to formula-matching work | Spawned by crew with molecule |
+| **Git state** | Pushes to main directly | Pushes branch, submits MR, exits |
+| **Exit point** | User-controlled | MR submission (`gt done`) |
+| **Cleanup** | Manual | Automatic on `gt done` |
 | **Identity** | `<rig>/crew/<name>` | `<rig>/polecats/<name>` |
 
+### The Core Principle
+
+**Crew build formulas, polecats run them.**
+
+Each crew member owns exactly one formula:
+- `crew/code_review` owns `code-review.formula.toml`
+- `crew/conflict_resolve` owns `mol-polecat-conflict-resolve.formula.toml`
+
+Crew responsibilities:
+1. **Own the formula** - Canonical source of truth for one workflow
+2. **Spawn polecats** - When work arrives, dispatch to workers
+3. **Collect feedback** - Aggregate execution results
+4. **Iterate** - Improve formula based on execution patterns
+5. **Never execute directly** - Crew orchestrate, polecats execute
+
+See [Crew Formula Ownership](design/crew-formula-ownership.md) for full details.
+
 **When to use Crew**:
-- Exploratory work
-- Long-running projects
-- Work requiring human judgment
-- Tasks where you want direct control
+- Formula development and iteration
+- Orchestrating parallel polecat workflows
+- Long-running oversight of specific workflow types
+- Work requiring human judgment on formula design
 
 **When to use Polecats**:
+- Executing molecules (formulas instantiated as work)
 - Discrete, well-defined tasks
 - Batch work (tracked via convoys)
-- Parallelizable work
 - Work that benefits from supervision
 
 ## Dogs vs Crew
@@ -191,6 +210,40 @@ Identity is preserved even when working cross-rig:
 - Commits still attributed to `gastown/crew/joe`
 - Work appears on joe's CV, not beads rig's workers
 
+## The Rebase-as-Work Architecture
+
+Gas Town uses a fundamentally different approach to merge conflicts than traditional workflows:
+
+**Traditional approach (doesn't scale):**
+```
+Polecat finishes → waits for merge → handles conflicts → re-submits → waits...
+```
+
+**Gas Town approach (rebase-as-work):**
+```
+Polecat finishes → submits to MQ → EXITS IMMEDIATELY
+Refinery handles rebase → conflict? → spawn FRESH polecat
+```
+
+### Key Principles
+
+1. **"Polecat done at MR submit"** - A polecat's job ends when it runs `gt done`. It doesn't wait for merge results, doesn't handle conflicts, doesn't get feedback. It submits and dies.
+
+2. **"Conflicts are new work"** - Merge conflicts aren't "fixes to existing work" - they're new tasks that happen to have context from a previous attempt. The Refinery creates a conflict-resolution task and a fresh polecat handles it.
+
+3. **"Convoy age creates pressure"** - Old convoys automatically get priority boosted. No manual escalation needed - the system applies backpressure naturally.
+
+4. **"Priority function is deterministic"** - MR scoring is purely mechanical: base priority, retry penalty, convoy age bonus, age tiebreaker. No human judgment in the queue.
+
+### Why This Works
+
+- **No blocking** - Polecats never wait for merge outcomes
+- **Clean context** - Fresh polecats don't carry accumulated confusion
+- **Linear history** - Sequential rebasing prevents cascading conflicts
+- **Resource efficiency** - Polecat resources freed immediately on completion
+
+See [PRIMING.md](../PRIMING.md) for the quick-start guide and [Refinery Merge Workflow](concepts/refinery-merge-workflow.md) for implementation details.
+
 ## The Propulsion Principle
 
 All Gas Town agents follow the same core principle:
@@ -199,6 +252,36 @@ All Gas Town agents follow the same core principle:
 
 This applies regardless of role. The hook is your assignment. Execute it immediately
 without waiting for confirmation. Gas Town is a steam engine - agents are pistons.
+
+## Agent Advice System
+
+The [Agent Advice](concepts/agent-advice.md) system provides dynamic guidance to agents
+based on learned patterns and operational experience. Unlike static role templates, advice
+can be created, updated, and removed at runtime.
+
+Advice is scoped hierarchically:
+- **Global** - applies to all agents everywhere
+- **Role** - applies to a role type (polecat, crew, witness)
+- **Rig** - applies to all agents in a specific rig
+- **Agent** - applies to a specific agent identity
+
+Advice is delivered during `gt prime` and appears in the agent's context.
+
+```bash
+# Create global advice
+bd advice add "Always verify git status before pushing"
+
+# Create role-specific advice
+bd advice add --role polecat "Check hook before checking mail"
+
+# Create rig-specific advice
+bd advice add --rig gastown "Use fimbaz account for spawning"
+
+# List all advice
+bd advice list
+```
+
+See [Agent Advice](concepts/agent-advice.md) for full documentation.
 
 ## Model Evaluation and A/B Testing
 
@@ -220,6 +303,46 @@ This is particularly valuable for:
 - **Model selection:** Which model handles your codebase best?
 - **Capability mapping:** Claude for architecture, GPT for tests?
 - **Cost optimization:** When is a smaller model sufficient?
+
+## Crew-Polecat Coordination
+
+Crew own formulas and dispatch polecats to execute them. This creates a clean
+separation between workflow design (crew) and workflow execution (polecat).
+
+**The Dispatch Flow:**
+1. Work arrives matching crew's formula subscription (label, type, etc.)
+2. Crew runs `gt crew dispatch <bead>` to spawn a polecat
+3. Polecat receives molecule from crew's formula
+4. Polecat executes work autonomously
+5. Polecat calls `gt done` when complete
+6. Execution report generated for crew feedback
+7. Crew receives `WORK_DONE: <issue-id>` mail
+
+**The Feedback Loop:**
+1. Polecat execution reports accumulate in crew's feedback inbox
+2. Crew periodically reviews execution patterns
+3. Common failures or slow steps trigger formula improvements
+4. Updated formula benefits all future executions
+
+**Example:**
+```bash
+# Crew discovers work matching their formula
+gt crew prime  # Shows pending work for code-review formula
+
+# Crew dispatches to polecat
+gt crew dispatch gt-review-456
+
+# ... polecat works ...
+
+# Crew reviews execution feedback
+gt crew feedback
+# Shows: 95% success rate, step 3 avg 45s, 2 timeouts this week
+
+# Crew iterates on formula if needed
+gt crew formula edit
+```
+
+See [Crew Formula Ownership](design/crew-formula-ownership.md) for the full model.
 
 ## Common Mistakes
 

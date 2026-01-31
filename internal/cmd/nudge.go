@@ -9,6 +9,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/inject"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -17,11 +18,20 @@ import (
 
 var nudgeMessageFlag string
 var nudgeForceFlag bool
+var nudgeDirectFlag bool // deprecated: direct is now default
+var nudgeQueueFlag bool
+var nudgeDrainQuiet bool
 
 func init() {
 	rootCmd.AddCommand(nudgeCmd)
 	nudgeCmd.Flags().StringVarP(&nudgeMessageFlag, "message", "m", "", "Message to send")
 	nudgeCmd.Flags().BoolVarP(&nudgeForceFlag, "force", "f", false, "Send even if target has DND enabled")
+	nudgeCmd.Flags().BoolVar(&nudgeDirectFlag, "direct", false, "DEPRECATED: direct is now the default behavior")
+	nudgeCmd.Flags().BoolVar(&nudgeQueueFlag, "queue", false, "Queue the nudge for later delivery (use when target may be busy processing tools)")
+
+	// Add drain subcommand
+	nudgeCmd.AddCommand(nudgeDrainCmd)
+	nudgeDrainCmd.Flags().BoolVarP(&nudgeDrainQuiet, "quiet", "q", false, "Exit 0 even if queue is empty")
 }
 
 var nudgeCmd = &cobra.Command{
@@ -33,6 +43,17 @@ var nudgeCmd = &cobra.Command{
 Delivers a message directly to any worker's Claude Code session: polecats, crew,
 witness, refinery, mayor, or deacon. Use this for real-time coordination when
 you need immediate attention from another worker.
+
+DELIVERY MODES:
+  Direct (default): Sends immediately via tmux. Use this to wake up idle agents
+                    waiting for decisions, stale agents, or any agent you need to
+                    respond immediately. May cause API 400 errors if the target is
+                    actively processing tools (recoverable - message still arrives).
+
+  Queued (--queue): Buffers the nudge for later delivery via the target's
+                    PostToolUse hook. Use this when sending many nudges to a busy
+                    agent to avoid API errors. WARNING: Queued nudges are NEVER
+                    delivered to idle agents (no tools running = no hooks firing).
 
 Uses a reliable delivery pattern:
 1. Sends text in literal mode (-l flag)
@@ -112,7 +133,10 @@ func runNudge(cmd *cobra.Command, args []string) error {
 	message = fmt.Sprintf("[from %s] %s", sender, message)
 
 	// Check DND status for target (unless force flag or channel target)
-	townRoot, _ := workspace.FindFromCwd()
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		townRoot = "" // Not in a workspace, will use direct nudge
+	}
 	if townRoot != "" && !nudgeForceFlag && !strings.HasPrefix(target, "channel:") {
 		shouldSend, level, _ := shouldNudgeTarget(townRoot, target, nudgeForceFlag)
 		if !shouldSend {
@@ -127,7 +151,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 	// Expand role shortcuts to session names
 	// These shortcuts let users type "mayor" instead of "gt-mayor"
 	switch target {
-	case "mayor":
+	case "mayor", "mayor/":
 		target = session.MayorSessionName()
 	case "witness", "refinery":
 		// These need the current rig
@@ -146,7 +170,7 @@ func runNudge(cmd *cobra.Command, args []string) error {
 	}
 
 	// Special case: "deacon" target maps to the Deacon session
-	if target == "deacon" {
+	if target == "deacon" || target == "deacon/" {
 		deaconSession := session.DeaconSessionName()
 		// Check if Deacon session exists
 		exists, err := t.HasSession(deaconSession)
@@ -159,14 +183,14 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		if err := t.NudgeSession(deaconSession, message); err != nil {
+		if err := sendOrQueueNudge(t, townRoot, deaconSession, message); err != nil {
 			return fmt.Errorf("nudging deacon: %w", err)
 		}
 
 		fmt.Printf("%s Nudged deacon\n", style.Bold.Render("✓"))
 
 		// Log nudge event
-		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		if townRoot != "" {
 			_ = LogNudge(townRoot, "deacon", message)
 		}
 		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload("", "deacon", message))
@@ -204,15 +228,15 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Send nudge using the reliable NudgeSession
-		if err := t.NudgeSession(sessionName, message); err != nil {
+		// Send nudge using queue (safe) or direct (may cause API 400)
+		if err := sendOrQueueNudge(t, townRoot, sessionName, message); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
 		fmt.Printf("%s Nudged %s/%s\n", style.Bold.Render("✓"), rigName, polecatName)
 
 		// Log nudge event
-		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		if townRoot != "" {
 			_ = LogNudge(townRoot, target, message)
 		}
 		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload(rigName, target, message))
@@ -226,14 +250,14 @@ func runNudge(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("session %q not found", target)
 		}
 
-		if err := t.NudgeSession(target, message); err != nil {
+		if err := sendOrQueueNudge(t, townRoot, target, message); err != nil {
 			return fmt.Errorf("nudging session: %w", err)
 		}
 
 		fmt.Printf("✓ Nudged %s\n", target)
 
 		// Log nudge event
-		if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		if townRoot != "" {
 			_ = LogNudge(townRoot, target, message)
 		}
 		_ = events.LogFeed(events.TypeNudge, sender, events.NudgePayload("", target, message))
@@ -469,9 +493,9 @@ func shouldNudgeTarget(townRoot, targetAddress string, force bool) (bool, string
 func addressToAgentBeadID(address string) string {
 	// Handle special cases
 	switch address {
-	case "mayor":
+	case "mayor", "mayor/":
 		return session.MayorSessionName()
-	case "deacon":
+	case "deacon", "deacon/":
 		return session.DeaconSessionName()
 	}
 
@@ -501,4 +525,91 @@ func addressToAgentBeadID(address string) string {
 		}
 		return fmt.Sprintf("gt-%s-polecat-%s", rig, role)
 	}
+}
+
+// sendOrQueueNudge sends a nudge either directly via tmux (default) or queued for later delivery.
+// By default, nudges are sent directly to wake up idle agents immediately.
+// Use --queue flag to buffer nudges when the target may be busy processing tools.
+func sendOrQueueNudge(t *tmux.Tmux, townRoot, sessionName, message string) error {
+	// If --queue flag is set and we're in a workspace, queue the nudge
+	if nudgeQueueFlag && townRoot != "" {
+		nq := inject.NewNudgeQueue(townRoot, sessionName)
+		if err := nq.Enqueue(message); err != nil {
+			// Fall back to direct send if queueing fails
+			return t.NudgeSession(sessionName, message)
+		}
+		return nil
+	}
+
+	// Default: send directly via tmux to wake up the target immediately
+	return t.NudgeSession(sessionName, message)
+}
+
+// nudgeDrainCmd drains the nudge queue for the current session.
+var nudgeDrainCmd = &cobra.Command{
+	Use:   "drain",
+	Short: "Output and clear queued nudge messages",
+	Long: `Drain the nudge queue, outputting all queued nudge messages.
+
+This command should be called from a PostToolUse hook to safely
+deliver nudge messages that were queued while tools were running.
+
+This prevents API 400 errors that occur when nudges are sent
+directly via tmux while Claude is processing a tool.
+
+Exit codes:
+  0 - Content was drained (or queue empty with --quiet)
+  1 - Queue empty (normal mode)
+
+Examples:
+  gt nudge drain          # Output and clear queue
+  gt nudge drain --quiet  # Silent if empty`,
+	RunE:          runNudgeDrain,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+}
+
+func runNudgeDrain(cmd *cobra.Command, args []string) error {
+	// Get tmux session name via tmux display-message
+	t := tmux.NewTmux()
+	sessionName, err := t.GetCurrentSessionName()
+	if err != nil {
+		if nudgeDrainQuiet {
+			return nil
+		}
+		return fmt.Errorf("cannot determine session name: %w", err)
+	}
+
+	// Find town root
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		if nudgeDrainQuiet {
+			return nil
+		}
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Create nudge queue and drain
+	nq := inject.NewNudgeQueue(townRoot, sessionName)
+	entries, err := nq.Drain()
+	if err != nil {
+		if nudgeDrainQuiet {
+			return nil
+		}
+		return fmt.Errorf("draining nudge queue: %w", err)
+	}
+
+	if len(entries) == 0 {
+		if nudgeDrainQuiet {
+			return nil
+		}
+		return NewSilentExit(1)
+	}
+
+	// Output each nudge as a system reminder
+	for _, entry := range entries {
+		fmt.Printf("<system-reminder>\n📬 Nudge received:\n%s\n</system-reminder>\n", entry.Content)
+	}
+
+	return nil
 }

@@ -316,3 +316,55 @@ func TestOrphanedAttachmentsCheck_AgentExists(t *testing.T) {
 		}
 	}
 }
+
+// Tests for HookErrorsCheck
+
+func TestNewHookErrorsCheck(t *testing.T) {
+	check := NewHookErrorsCheck()
+
+	if check.Name() != "hook-errors" {
+		t.Errorf("expected name 'hook-errors', got %q", check.Name())
+	}
+
+	if check.Description() != "Check for recent hook execution errors" {
+		t.Errorf("unexpected description: %q", check.Description())
+	}
+
+	if !check.CanFix() {
+		t.Error("expected CanFix to return true")
+	}
+}
+
+func TestHookErrorsCheck_NoErrorLog(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	check := NewHookErrorsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// No error log means no errors, should be OK
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when no error log, got %v: %s", result.Status, result.Message)
+	}
+}
+
+func TestHookErrorsCheck_TruncateStr(t *testing.T) {
+	tests := []struct {
+		input    string
+		maxLen   int
+		expected string
+	}{
+		{"short", 10, "short"},
+		{"exactly ten", 11, "exactly ten"},
+		{"this is a long string", 10, "this is..."},
+		{"ab", 5, "ab"},
+	}
+
+	for _, tt := range tests {
+		result := truncateStr(tt.input, tt.maxLen)
+		if result != tt.expected {
+			t.Errorf("truncateStr(%q, %d) = %q, want %q", tt.input, tt.maxLen, result, tt.expected)
+		}
+	}
+}

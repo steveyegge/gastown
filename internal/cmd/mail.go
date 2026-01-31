@@ -182,7 +182,9 @@ var mailPeekCmd = &cobra.Command{
 
 Useful for status bar popups - shows subject, sender, and body preview.
 Exits silently with code 1 if no unread messages.`,
-	RunE: runMailPeek,
+	RunE:          runMailPeek,
+	SilenceUsage:  true, // Exit codes signal status, not errors
+	SilenceErrors: true, // Suppress "Error: exit 1" message
 }
 
 var mailDeleteCmd = &cobra.Command{
@@ -271,7 +273,9 @@ Examples:
   gt mail check                           # Simple check (auto-detect identity)
   gt mail check --inject                  # For hooks
   gt mail check --identity greenplace/Toast  # Explicit polecat identity`,
-	RunE: runMailCheck,
+	RunE:          runMailCheck,
+	SilenceUsage:  true, // Exit codes signal status, not errors
+	SilenceErrors: true, // Suppress "Error: exit 1" message
 }
 
 var mailThreadCmd = &cobra.Command{

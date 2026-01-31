@@ -1,0 +1,31 @@
+{
+  "type": "slack",
+  "version": 1,
+  "enabled": true,
+  "default_channel": "C0123456789",
+  "channels": {
+    "gastown/polecats/*": "C_GASTOWN_POLECATS",
+    "gastown/crew/*": "C_GASTOWN_CREW",
+    "gastown/*": "C_GASTOWN",
+    "beads/polecats/*": "C_BEADS_POLECATS",
+    "beads/crew/*": "C_BEADS_CREW",
+    "beads/*": "C_BEADS",
+    "*/polecats/*": "C_ALL_POLECATS",
+    "*/crew/*": "C_ALL_CREW"
+  },
+  "channel_names": {
+    "C0123456789": "#decisions",
+    "C_GASTOWN_POLECATS": "#gastown-polecats",
+    "C_GASTOWN_CREW": "#gastown-crew",
+    "C_GASTOWN": "#gastown",
+    "C_BEADS_POLECATS": "#beads-polecats",
+    "C_BEADS_CREW": "#beads-crew",
+    "C_BEADS": "#beads",
+    "C_ALL_POLECATS": "#all-polecats",
+    "C_ALL_CREW": "#all-crew"
+  },
+  "webhook_url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+  "channel_webhooks": {
+    "C_GASTOWN": "https://hooks.slack.com/services/GASTOWN/WEBHOOK/URL"
+  }
+}

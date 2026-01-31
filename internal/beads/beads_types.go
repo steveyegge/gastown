@@ -105,7 +105,7 @@ func EnsureCustomTypes(beadsDir string) error {
 
 	// Configure custom types via bd CLI
 	typesList := strings.Join(constants.BeadsCustomTypesList(), ",")
-	cmd := exec.Command("bd", "config", "set", "types.custom", typesList)
+	cmd := exec.Command(resolvedBdPath, "config", "set", "types.custom", typesList)
 	cmd.Dir = beadsDir
 	// Set BEADS_DIR explicitly to ensure bd operates on the correct database
 	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)

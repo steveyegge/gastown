@@ -35,13 +35,19 @@ func (e *bdError) ContainsError(substr string) bool {
 }
 
 // runBdCommand executes a bd command with proper environment setup.
-// workDir is the directory to run the command in.
+// workDir is kept for API compatibility but ignored - we use current directory
+// to avoid bd daemon health check timeout when running from town root (hq-33lwcx).
 // beadsDir is the BEADS_DIR environment variable value.
 // extraEnv contains additional environment variables to set (e.g., "BD_IDENTITY=...").
 // Returns stdout bytes on success, or a *bdError on failure.
 func runBdCommand(args []string, workDir, beadsDir string, extraEnv ...string) ([]byte, error) {
+	_ = workDir // Intentionally unused - see comment above
+
+	// Use the daemon for connection pooling. Previous --no-daemon was causing
+	// massive connection churn (~17 connections/second with 32 agents).
+	// See: hq-i97ri for the fix, hq-vvbubs/hq-33lwcx for original daemon issues.
 	cmd := exec.Command("bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
-	cmd.Dir = workDir
+	// Don't set cmd.Dir - use current directory to avoid daemon timeout issue
 
 	env := append(cmd.Environ(), "BEADS_DIR="+beadsDir)
 	env = append(env, extraEnv...)

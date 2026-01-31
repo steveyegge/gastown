@@ -9,6 +9,7 @@ import (
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // polecatTarget represents a polecat to operate on.
@@ -183,7 +184,10 @@ func rigPrefix(r *rig.Rig) string {
 }
 
 func polecatBeadIDForRig(r *rig.Rig, rigName, polecatName string) string {
-	return beads.PolecatBeadIDWithPrefix(rigPrefix(r), rigName, polecatName)
+	// All polecat agent beads use hq- prefix and are stored in town beads (fix for gt-myc).
+	townRoot := filepath.Dir(r.Path)
+	townName, _ := workspace.GetTownName(townRoot)
+	return beads.PolecatBeadIDTown(townName, rigName, polecatName)
 }
 
 // displaySafetyCheckBlocked prints blocked polecats and guidance.

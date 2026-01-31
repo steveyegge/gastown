@@ -694,7 +694,7 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 
 	// Get current custom types configuration
 	// Use Output() not CombinedOutput() to avoid capturing bd's stderr messages
-	cmd := exec.Command("bd", "--no-daemon", "config", "get", "types.custom")
+	cmd := exec.Command("bd", "config", "get", "types.custom")
 	cmd.Dir = ctx.TownRoot
 	output, err := cmd.Output()
 	if err != nil {
@@ -767,7 +767,7 @@ func parseConfigOutput(output []byte) string {
 
 // Fix registers the missing custom types.
 func (c *CustomTypesCheck) Fix(ctx *CheckContext) error {
-	cmd := exec.Command("bd", "--no-daemon", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	cmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	cmd.Dir = c.townRoot
 	output, err := cmd.CombinedOutput()
 	if err != nil {

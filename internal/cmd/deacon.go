@@ -730,8 +730,8 @@ func runDeaconHealthCheck(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("checking session: %w", err)
 	}
 	if !exists {
-		fmt.Printf("%s Agent %s session not running\n", style.Dim.Render("○"), agent)
-		return nil
+		fmt.Printf("%s Agent %s session not running - needs restart\n", style.Bold.Render("⚠"), agent)
+		os.Exit(3) // Exit code 3 = session not running, needs restart
 	}
 
 	// Get current bead update time

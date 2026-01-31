@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -24,10 +25,15 @@ func TestAtomicWriteJSON(t *testing.T) {
 		t.Fatal("File was not created")
 	}
 
-	// Verify temp file was cleaned up
-	tmpFile := testFile + ".tmp"
-	if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
-		t.Fatal("Temp file was not cleaned up")
+	// Verify no temp files left behind
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadDir error: %v", err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp.") {
+			t.Fatalf("Temp file was not cleaned up: %s", e.Name())
+		}
 	}
 
 	// Read and verify content
@@ -59,10 +65,15 @@ func TestAtomicWriteFile(t *testing.T) {
 		t.Fatalf("Unexpected content: %s", content)
 	}
 
-	// Verify temp file was cleaned up
-	tmpFile := testFile + ".tmp"
-	if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
-		t.Fatal("Temp file was not cleaned up")
+	// Verify no temp files left behind
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadDir error: %v", err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp.") {
+			t.Fatalf("Temp file was not cleaned up: %s", e.Name())
+		}
 	}
 }
 
@@ -182,10 +193,15 @@ func TestAtomicWriteJSONUnmarshallable(t *testing.T) {
 		t.Fatal("File should not exist after marshal error")
 	}
 
-	// Verify temp file was not left behind
-	tmpFile := testFile + ".tmp"
-	if _, statErr := os.Stat(tmpFile); !os.IsNotExist(statErr) {
-		t.Fatal("Temp file should not exist after marshal error")
+	// Verify no temp files left behind (marshal error happens before temp file creation)
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadDir error: %v", err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp.") {
+			t.Fatalf("Temp file should not exist after marshal error: %s", e.Name())
+		}
 	}
 }
 
@@ -259,33 +275,46 @@ func TestAtomicWriteFileConcurrent(t *testing.T) {
 		t.Fatalf("ReadDir error: %v", err)
 	}
 	for _, e := range entries {
-		if filepath.Ext(e.Name()) == ".tmp" {
-			t.Errorf("Temp file left behind: %s", e.Name())
+		// CreateTemp creates files with pattern like "name.tmp.123456789"
+		name := e.Name()
+		if name != "concurrent.txt" && strings.Contains(name, ".tmp.") {
+			t.Errorf("Temp file left behind: %s", name)
 		}
 	}
 }
 
 func TestAtomicWritePreservesOnFailure(t *testing.T) {
-	tmpDir := t.TempDir()
-	testFile := filepath.Join(tmpDir, "preserve.txt")
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based read-only directories are not reliable on Windows")
+	}
 
-	// Write initial content
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "subdir", "preserve.txt")
+
+	// Create parent directory and write initial content
+	if err := os.MkdirAll(filepath.Dir(testFile), 0755); err != nil {
+		t.Fatalf("Failed to create parent dir: %v", err)
+	}
 	initialContent := []byte("original content")
 	if err := AtomicWriteFile(testFile, initialContent, 0644); err != nil {
 		t.Fatalf("Initial write error: %v", err)
 	}
 
-	// Create a subdirectory with the .tmp name to cause rename to fail
-	tmpFile := testFile + ".tmp"
-	if err := os.Mkdir(tmpFile, 0755); err != nil {
-		t.Fatalf("Failed to create blocking dir: %v", err)
+	// Make parent directory read-only to cause temp file creation to fail
+	parentDir := filepath.Dir(testFile)
+	if err := os.Chmod(parentDir, 0555); err != nil {
+		t.Fatalf("Failed to chmod parent dir: %v", err)
 	}
+	defer os.Chmod(parentDir, 0755) // Restore permissions for cleanup
 
-	// Attempt write which should fail at rename
+	// Attempt write which should fail when creating temp file
 	err := AtomicWriteFile(testFile, []byte("new content"), 0644)
 	if err == nil {
-		t.Fatal("Expected error when .tmp is a directory")
+		t.Fatal("Expected error when directory is read-only")
 	}
+
+	// Restore permissions to read the file
+	os.Chmod(parentDir, 0755)
 
 	// Verify original content is preserved
 	content, err := os.ReadFile(testFile)

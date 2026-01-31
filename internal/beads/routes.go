@@ -254,3 +254,51 @@ func ResolveHookDir(townRoot, beadID, hookWorkDir string) string {
 	}
 	return townRoot
 }
+
+// ResolveToExternalRef converts a bead ID to an external reference format
+// compatible with bd's routing expectations.
+//
+// External refs use the format "external:<project>:<bead-id>" where project
+// is derived from the route path (e.g., "gastown", "beads"), not from the
+// bead ID prefix.
+//
+// Examples (with routes {"prefix":"gt-","path":"gastown/mayor/rig"}):
+//   - "gt-mol-abc123" -> "external:gastown:gt-mol-abc123"
+//   - "bd-xyz" -> "external:beads:bd-xyz" (if route exists)
+//   - "hq-abc" -> "" (hq- beads are local, no external ref needed)
+//   - "unknown-id" -> "" (no matching route)
+//
+// Returns empty string if:
+//   - The bead ID has an "hq-" prefix (local to town beads)
+//   - No route matches the bead ID prefix
+//   - The route path doesn't contain a project name
+func ResolveToExternalRef(townRoot, beadID string) string {
+	// HQ beads are local - no external ref needed
+	if strings.HasPrefix(beadID, "hq-") {
+		return ""
+	}
+
+	prefix := ExtractPrefix(beadID)
+	if prefix == "" {
+		return ""
+	}
+
+	beadsDir := filepath.Join(townRoot, ".beads")
+	routes, err := LoadRoutes(beadsDir)
+	if err != nil || routes == nil {
+		return ""
+	}
+
+	for _, route := range routes {
+		if route.Prefix == prefix {
+			// Extract project name from route path (first path component)
+			// e.g., "gastown/mayor/rig" -> "gastown"
+			parts := strings.SplitN(route.Path, "/", 2)
+			if len(parts) > 0 && parts[0] != "" && parts[0] != "." {
+				return fmt.Sprintf("external:%s:%s", parts[0], beadID)
+			}
+		}
+	}
+
+	return ""
+}

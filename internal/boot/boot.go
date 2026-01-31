@@ -11,10 +11,21 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
+
+// deaconSession is the deacon session name, duplicated here to avoid import cycle with session package.
+const deaconSession = "hq-deacon"
+
+// SessionName is the tmux session name for Boot.
+// Note: We use "gt-boot" instead of "hq-deacon-boot" to avoid tmux prefix
+// matching collisions. Tmux matches session names by prefix, so "hq-deacon-boot"
+// would match when checking for "hq-deacon", causing HasSession("hq-deacon")
+// to return true when only Boot is running.
+const SessionName = "gt-boot"
 
 // MarkerFileName is the lock file for Boot startup coordination.
 const MarkerFileName = ".boot-running"
@@ -79,9 +90,34 @@ func (b *Boot) IsSessionAlive() bool {
 	return err == nil && has
 }
 
+// IsCurrentSession checks if we're already running inside the Boot tmux session.
+// This handles the case where Claude inside gt-boot runs `gt boot triage` - we
+// ARE the boot session, so we shouldn't fail the lock check.
+func (b *Boot) IsCurrentSession() bool {
+	currentSession, err := b.tmux.GetCurrentSessionName()
+	if err != nil {
+		return false
+	}
+	return currentSession == session.BootSessionName()
+}
+
 // AcquireLock creates the marker file to indicate Boot is starting.
-// Returns error if Boot is already running.
+// Returns error if Boot is already running (unless we ARE the current boot session).
+// FIX (hq-yitkgc): Skip lock check if we're already inside the boot session.
 func (b *Boot) AcquireLock() error {
+	// If we're already the boot session, we don't need to check/acquire lock
+	if b.IsCurrentSession() {
+		// Still create the marker file for consistency
+		if err := b.EnsureDir(); err != nil {
+			return fmt.Errorf("ensuring boot dir: %w", err)
+		}
+		f, err := os.Create(b.markerPath())
+		if err != nil {
+			return fmt.Errorf("creating marker: %w", err)
+		}
+		return f.Close()
+	}
+
 	if b.IsRunning() {
 		return fmt.Errorf("boot is already running (session exists)")
 	}
@@ -160,7 +196,7 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		_ = b.tmux.KillSessionWithProcesses(session.BootSessionName())
 	}
 
-	// Ensure boot directory exists (it should have CLAUDE.md with Boot context)
+	// Ensure boot directory exists
 	if err := b.EnsureDir(); err != nil {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
@@ -180,6 +216,11 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		}
 	} else {
 		startCmd = config.BuildAgentStartupCommand("boot", "", b.townRoot, "", initialPrompt)
+	}
+
+	// Ensure Claude settings exist for boot (autonomous role)
+	if err := claude.EnsureSettingsForRole(b.bootDir, "boot"); err != nil {
+		return fmt.Errorf("ensuring boot settings: %w", err)
 	}
 
 	// Create session with command directly to avoid send-keys race condition.

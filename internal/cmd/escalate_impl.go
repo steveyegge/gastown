@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -141,7 +144,8 @@ func runEscalate(cmd *cobra.Command, args []string) error {
 		fmt.Println(string(out))
 	} else {
 		emoji := severityEmoji(severity)
-		fmt.Printf("%s Escalation created: %s\n", emoji, issue.ID)
+		slug := util.GenerateEscalationSlug(issue.ID, description)
+		fmt.Printf("%s Escalation created: %s\n", emoji, slug)
 		fmt.Printf("  Severity: %s\n", severity)
 		if escalateSource != "" {
 			fmt.Printf("  Source: %s\n", escalateSource)
@@ -198,9 +202,10 @@ func runEscalateList(cmd *cobra.Command, args []string) error {
 			status = "acked"
 		}
 
-		fmt.Printf("  %s %s [%s] %s\n", emoji, issue.ID, status, issue.Title)
+		slug := util.GenerateEscalationSlug(issue.ID, issue.Title)
+		fmt.Printf("  %s %s [%s] %s\n", emoji, slug, status, issue.Title)
 		fmt.Printf("     Severity: %s | From: %s | %s\n",
-			fields.Severity, fields.EscalatedBy, formatRelativeTime(issue.CreatedAt))
+			fields.Severity, fields.EscalatedBy, formatRelativeTimeSimple(issue.CreatedAt))
 		if fields.AckedBy != "" {
 			fmt.Printf("     Acked by: %s\n", fields.AckedBy)
 		}
@@ -211,7 +216,7 @@ func runEscalateList(cmd *cobra.Command, args []string) error {
 }
 
 func runEscalateAck(cmd *cobra.Command, args []string) error {
-	escalationID := args[0]
+	escalationID := util.ResolveSemanticSlug(args[0])
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -240,7 +245,7 @@ func runEscalateAck(cmd *cobra.Command, args []string) error {
 }
 
 func runEscalateClose(cmd *cobra.Command, args []string) error {
-	escalationID := args[0]
+	escalationID := util.ResolveSemanticSlug(args[0])
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -318,15 +323,16 @@ func runEscalateStale(cmd *cobra.Command, args []string) error {
 			}
 
 			emoji := severityEmoji(fields.Severity)
+			slug := util.GenerateEscalationSlug(issue.ID, issue.Title)
 			if willSkip {
-				fmt.Printf("  %s %s [SKIP] %s\n", emoji, issue.ID, issue.Title)
+				fmt.Printf("  %s %s [SKIP] %s\n", emoji, slug, issue.Title)
 				if fields.Severity == "critical" {
 					fmt.Printf("     Already at critical severity\n")
 				} else {
 					fmt.Printf("     Already at max reescalations (%d)\n", maxReescalations)
 				}
 			} else {
-				fmt.Printf("  %s %s %s\n", emoji, issue.ID, issue.Title)
+				fmt.Printf("  %s %s %s\n", emoji, slug, issue.Title)
 				fmt.Printf("     %s → %s (reescalation %d/%d)\n",
 					fields.Severity, newSeverity, fields.ReescalationCount+1, maxReescalations)
 			}
@@ -419,8 +425,9 @@ func runEscalateStale(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		emoji := severityEmoji(result.NewSeverity)
+		slug := util.GenerateEscalationSlug(result.ID, result.Title)
 		fmt.Printf("  %s %s: %s → %s (reescalation %d)\n",
-			emoji, result.ID, result.OldSeverity, result.NewSeverity, result.ReescalationNum)
+			emoji, slug, result.OldSeverity, result.NewSeverity, result.ReescalationNum)
 	}
 
 	if skipped > 0 {
@@ -459,7 +466,7 @@ func formatReescalationMailBody(result *beads.ReescalationResult, reescalatedBy 
 }
 
 func runEscalateShow(cmd *cobra.Command, args []string) error {
-	escalationID := args[0]
+	escalationID := util.ResolveSemanticSlug(args[0])
 
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
@@ -497,11 +504,12 @@ func runEscalateShow(cmd *cobra.Command, args []string) error {
 	}
 
 	emoji := severityEmoji(fields.Severity)
-	fmt.Printf("%s Escalation: %s\n", emoji, issue.ID)
+	slug := util.GenerateEscalationSlug(issue.ID, issue.Title)
+	fmt.Printf("%s Escalation: %s\n", emoji, slug)
 	fmt.Printf("  Title: %s\n", issue.Title)
 	fmt.Printf("  Status: %s\n", issue.Status)
 	fmt.Printf("  Severity: %s\n", fields.Severity)
-	fmt.Printf("  Created: %s\n", formatRelativeTime(issue.CreatedAt))
+	fmt.Printf("  Created: %s\n", formatRelativeTimeSimple(issue.CreatedAt))
 	fmt.Printf("  Escalated by: %s\n", fields.EscalatedBy)
 	if fields.Reason != "" {
 		fmt.Printf("  Reason: %s\n", fields.Reason)
@@ -539,8 +547,7 @@ func extractMailTargetsFromActions(actions []string) []string {
 }
 
 // executeExternalActions processes external notification actions (email:, sms:, slack).
-// For now, this logs warnings if contacts aren't configured - actual sending is future work.
-func executeExternalActions(actions []string, cfg *config.EscalationConfig, _, _, _ string) {
+func executeExternalActions(actions []string, cfg *config.EscalationConfig, beadID, severity, description string) {
 	for _, action := range actions {
 		switch {
 		case strings.HasPrefix(action, "email:"):
@@ -563,8 +570,11 @@ func executeExternalActions(actions []string, cfg *config.EscalationConfig, _, _
 			if cfg.Contacts.SlackWebhook == "" {
 				style.PrintWarning("slack action skipped: contacts.slack_webhook not configured in settings/escalation.json")
 			} else {
-				// TODO: Implement actual Slack webhook posting
-				fmt.Printf("  💬 Would post to Slack (not yet implemented)\n")
+				if err := postSlackWebhook(cfg.Contacts.SlackWebhook, beadID, severity, description); err != nil {
+					style.PrintWarning("slack webhook failed: %v", err)
+				} else {
+					fmt.Printf("  💬 Posted escalation to Slack\n")
+				}
 			}
 
 		case action == "log":
@@ -573,6 +583,70 @@ func executeExternalActions(actions []string, cfg *config.EscalationConfig, _, _
 			fmt.Printf("  📝 Logged to escalation log\n")
 		}
 	}
+}
+
+// postSlackWebhook sends an escalation notification to a Slack incoming webhook.
+func postSlackWebhook(webhookURL, beadID, severity, description string) error {
+	urgencyEmoji := map[string]string{
+		"critical": "🔴",
+		"high":     "🟠",
+		"medium":   "🟡",
+		"low":      "🟢",
+	}
+	emoji := urgencyEmoji[severity]
+	if emoji == "" {
+		emoji = "⚪"
+	}
+
+	payload := map[string]interface{}{
+		"blocks": []map[string]interface{}{
+			{
+				"type": "header",
+				"text": map[string]string{
+					"type":  "plain_text",
+					"text":  fmt.Sprintf("%s Escalation: %s", emoji, beadID),
+					"emoji": "true",
+				},
+			},
+			{
+				"type": "section",
+				"fields": []map[string]string{
+					{"type": "mrkdwn", "text": fmt.Sprintf("*Severity:*\n%s %s", emoji, severity)},
+					{"type": "mrkdwn", "text": fmt.Sprintf("*Bead:*\n%s", beadID)},
+				},
+			},
+			{
+				"type": "section",
+				"text": map[string]string{
+					"type": "mrkdwn",
+					"text": fmt.Sprintf("*Description:*\n%s", description),
+				},
+			},
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("post webhook: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func formatEscalationMailBody(beadID, severity, reason, from, related string) string {
@@ -611,7 +685,7 @@ func severityEmoji(severity string) string {
 	}
 }
 
-func formatRelativeTime(timestamp string) string {
+func formatRelativeTimeSimple(timestamp string) string {
 	t, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil {
 		return timestamp

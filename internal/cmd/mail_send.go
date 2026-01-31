@@ -49,6 +49,9 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("address required (or use --self)")
 	}
 
+	// Expand role shortcuts to addresses (consistent with gt nudge)
+	to = expandMailShortcut(to)
+
 	// All mail uses town beads (two-level architecture)
 	workDir, err := findMailWorkDir()
 	if err != nil {
@@ -187,4 +190,25 @@ func generateThreadID() string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b) // crypto/rand.Read only fails on broken system
 	return "thread-" + hex.EncodeToString(b)
+}
+
+// expandMailShortcut expands role shortcuts to full mail addresses.
+// This provides consistency with gt nudge which accepts the same shortcuts.
+func expandMailShortcut(address string) string {
+	switch address {
+	case "mayor":
+		return "mayor/"
+	case "witness", "refinery":
+		// These need the current rig context
+		roleInfo, err := GetRole()
+		if err != nil || roleInfo.Rig == "" {
+			return address // Can't expand without rig context
+		}
+		return fmt.Sprintf("%s/%s", roleInfo.Rig, address)
+	case "deacon":
+		// Deacon doesn't have a mail inbox, return as-is to get proper error
+		return address
+	default:
+		return address
+	}
 }

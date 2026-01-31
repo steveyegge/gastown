@@ -460,6 +460,7 @@ func outputStatusText(status TownStatus) error {
 	roleIcons := map[string]string{
 		constants.RoleMayor:    constants.EmojiMayor,
 		constants.RoleDeacon:   constants.EmojiDeacon,
+		constants.RoleBoot:     constants.EmojiBoot,
 		constants.RoleWitness:  constants.EmojiWitness,
 		constants.RoleRefinery: constants.EmojiRefinery,
 		constants.RoleCrew:     constants.EmojiCrew,
@@ -652,8 +653,9 @@ func renderAgentDetails(agent AgentRuntime, indent string, hooks []AgentHookInfo
 			} else if parts[1] == "refinery" {
 				agentBeadID = beads.RefineryBeadIDWithPrefix(prefix, rig)
 			} else if len(parts) == 2 {
-				// polecat: rig/name
-				agentBeadID = beads.PolecatBeadIDWithPrefix(prefix, rig, parts[1])
+				// polecat: rig/name - uses hq- prefix for town beads (fix for gt-myc)
+				townName, _ := workspace.GetTownName(townRoot)
+				agentBeadID = beads.PolecatBeadIDTown(townName, rig, parts[1])
 			}
 		}
 	}
@@ -934,9 +936,10 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 	// Get session names dynamically
 	mayorSession := getMayorSessionName()
 	deaconSession := getDeaconSessionName()
+	bootSession := getBootSessionName()
 
 	// Define agents to discover
-	// Note: Mayor and Deacon are town-level agents with hq- prefix bead IDs
+	// Note: Mayor, Deacon, and Boot are town-level agents with hq- prefix bead IDs
 	agentDefs := []struct {
 		name    string
 		address string
@@ -946,6 +949,7 @@ func discoverGlobalAgents(allSessions map[string]bool, allAgentBeads map[string]
 	}{
 		{"mayor", "mayor/", mayorSession, "coordinator", beads.MayorBeadIDTown()},
 		{"deacon", "deacon/", deaconSession, "health-check", beads.DeaconBeadIDTown()},
+		{"boot", "boot/", bootSession, "boot", beads.BootBeadIDTown()},
 	}
 
 	agents := make([]AgentRuntime, len(agentDefs))
@@ -1067,14 +1071,15 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 		})
 	}
 
-	// Polecats
+	// Polecats - use hq- prefix for town beads (fix for gt-myc)
+	townName, _ := workspace.GetTownName(townRoot)
 	for _, name := range r.Polecats {
 		defs = append(defs, agentDef{
 			name:    name,
 			address: r.Name + "/" + name,
 			session: fmt.Sprintf("gt-%s-%s", r.Name, name),
 			role:    "polecat",
-			beadID:  beads.PolecatBeadIDWithPrefix(prefix, r.Name, name),
+			beadID:  beads.PolecatBeadIDTown(townName, r.Name, name),
 		})
 	}
 

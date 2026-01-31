@@ -33,7 +33,8 @@ var (
 type Manager struct {
 	rig     *rig.Rig
 	workDir string
-	output  io.Writer // Output destination for user-facing messages
+	output  io.Writer          // Output destination for user-facing messages
+	config  *MergeQueueConfig  // Merge queue configuration (lazy-loaded)
 }
 
 // NewManager creates a new refinery manager for a rig.
@@ -42,7 +43,27 @@ func NewManager(r *rig.Rig) *Manager {
 		rig:     r,
 		workDir: r.Path,
 		output:  os.Stdout,
+		config:  DefaultMergeQueueConfig(), // Use defaults until LoadConfig is called
 	}
+}
+
+// LoadConfig loads merge queue configuration from the rig's config.json.
+// This delegates to Engineer.LoadConfig which does the actual parsing.
+func (m *Manager) LoadConfig() error {
+	// Create a temporary Engineer just to load config
+	// The Engineer has the config parsing logic we need
+	eng := NewEngineer(m.rig)
+	if err := eng.LoadConfig(); err != nil {
+		return err
+	}
+	m.config = eng.Config()
+	return nil
+}
+
+// Config returns the current merge queue configuration.
+// If LoadConfig hasn't been called, returns defaults.
+func (m *Manager) Config() *MergeQueueConfig {
+	return m.config
 }
 
 // SetOutput sets the output writer for user-facing messages.
@@ -205,8 +226,8 @@ func (m *Manager) Stop() error {
 		return ErrNotRunning
 	}
 
-	// Kill the tmux session
-	return t.KillSession(sessionID)
+	// Kill the tmux session - use KillSessionWithProcesses to prevent orphan Claude processes.
+	return t.KillSessionWithProcesses(sessionID)
 }
 
 // Queue returns the current merge queue.

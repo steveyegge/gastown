@@ -11,6 +11,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/rig"
 )
 
 // RigIsGitRepoCheck verifies the rig has a valid mayor/rig git clone.
@@ -1015,8 +1016,10 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 			return fmt.Errorf("creating .beads directory: %w", err)
 		}
 
-		// Run bd init with the configured prefix
-		cmd := exec.Command("bd", "init", "--prefix", prefix)
+		// Run bd init with --no-auto-import to create database WITHOUT importing from JSONL.
+		// This allows us to configure custom types BEFORE the import runs (bd-3q6.10).
+		// Without this, auto-import fails when issues.jsonl contains custom types like merge-request.
+		cmd := exec.Command("bd", "init", "--prefix", prefix, "--no-auto-import")
 		cmd.Dir = rigPath
 		if output, err := cmd.CombinedOutput(); err != nil {
 			// bd might not be installed - create minimal config.yaml
@@ -1029,9 +1032,16 @@ func (c *BeadsRedirectCheck) Fix(ctx *CheckContext) error {
 		} else {
 			_ = output // bd init succeeded
 			// Configure custom types for Gas Town (beads v0.46.0+)
+			// IMPORTANT: This must run BEFORE any auto-import to avoid validation failures (bd-3q6.10).
 			configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 			configCmd.Dir = rigPath
 			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
+
+			// Trigger JSONL import now that custom types are configured.
+			// bd sync will import from issues.jsonl and validate types correctly.
+			syncCmd := exec.Command("bd", "sync")
+			syncCmd.Dir = rigPath
+			_, _ = syncCmd.CombinedOutput() // Ignore errors - JSONL might not exist yet
 		}
 		return nil
 	}
@@ -1171,6 +1181,192 @@ func (c *BareRepoRefspecCheck) Fix(ctx *CheckContext) error {
 	return nil
 }
 
+// BareRepoIntegrityCheck verifies that the shared bare repo (.repo.git) has all required
+// files for a valid git repository. Missing files (HEAD, config, etc.) can cause
+// "fatal: not a git repository" errors during polecat spawn and other operations.
+// See: hq--bug-gastown_repo_git_missing_head_config
+type BareRepoIntegrityCheck struct {
+	FixableCheck
+	missingFiles []string
+	missingDirs  []string
+	bareRepoPath string
+	rigConfig    *rig.RigConfig
+}
+
+// NewBareRepoIntegrityCheck creates a new bare repo integrity check.
+func NewBareRepoIntegrityCheck() *BareRepoIntegrityCheck {
+	return &BareRepoIntegrityCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "bare-repo-integrity",
+				CheckDescription: "Verify .repo.git has required files (HEAD, config, etc.)",
+				CheckCategory:    CategoryRig,
+			},
+		},
+	}
+}
+
+// Run checks if the bare repo has all required files and directories.
+func (c *BareRepoIntegrityCheck) Run(ctx *CheckContext) *CheckResult {
+	if ctx.RigName == "" {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No rig specified, skipping bare repo integrity check",
+		}
+	}
+
+	c.bareRepoPath = filepath.Join(ctx.RigPath(), ".repo.git")
+	if _, err := os.Stat(c.bareRepoPath); os.IsNotExist(err) {
+		// No bare repo - might be using a different architecture
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No shared bare repo found (using individual clones)",
+		}
+	}
+
+	// Load rig config for fix phase (need default branch and remote URL)
+	rigCfg, err := rig.LoadRigConfig(ctx.RigPath())
+	if err == nil {
+		c.rigConfig = rigCfg
+	}
+
+	// Check required files for a valid bare git repository
+	requiredFiles := []string{"HEAD", "config"}
+	requiredDirs := []string{"objects", "refs"}
+
+	c.missingFiles = nil
+	c.missingDirs = nil
+
+	for _, file := range requiredFiles {
+		path := filepath.Join(c.bareRepoPath, file)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			c.missingFiles = append(c.missingFiles, file)
+		}
+	}
+
+	for _, dir := range requiredDirs {
+		path := filepath.Join(c.bareRepoPath, dir)
+		info, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			c.missingDirs = append(c.missingDirs, dir)
+		} else if err == nil && !info.IsDir() {
+			c.missingDirs = append(c.missingDirs, dir+" (exists but not a directory)")
+		}
+	}
+
+	// Also check standard directories that git expects
+	standardDirs := []string{"info", "hooks", "branches"}
+	for _, dir := range standardDirs {
+		path := filepath.Join(c.bareRepoPath, dir)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			c.missingDirs = append(c.missingDirs, dir)
+		}
+	}
+
+	if len(c.missingFiles) == 0 && len(c.missingDirs) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "Bare repo has all required files",
+		}
+	}
+
+	var details []string
+	if len(c.missingFiles) > 0 {
+		details = append(details, fmt.Sprintf("Missing files: %s", strings.Join(c.missingFiles, ", ")))
+	}
+	if len(c.missingDirs) > 0 {
+		details = append(details, fmt.Sprintf("Missing directories: %s", strings.Join(c.missingDirs, ", ")))
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusError,
+		Message: fmt.Sprintf("Bare repo missing %d file(s) and %d directory(ies)", len(c.missingFiles), len(c.missingDirs)),
+		Details: append(details, []string{
+			"This can cause 'fatal: not a git repository' errors during polecat spawn",
+			"Root cause: possibly a partial initialization or cleanup that removed files",
+		}...),
+		FixHint: "Run 'gt doctor --fix' to recreate missing files",
+	}
+}
+
+// Fix recreates missing files and directories in the bare repo.
+func (c *BareRepoIntegrityCheck) Fix(ctx *CheckContext) error {
+	if c.bareRepoPath == "" {
+		return nil
+	}
+
+	// Create missing directories first
+	for _, dir := range c.missingDirs {
+		// Skip entries that are warnings about non-directories
+		if strings.Contains(dir, "(exists but") {
+			continue
+		}
+		dirPath := filepath.Join(c.bareRepoPath, dir)
+		if err := os.MkdirAll(dirPath, 0755); err != nil {
+			return fmt.Errorf("creating directory %s: %w", dir, err)
+		}
+	}
+
+	// Recreate missing files
+	for _, file := range c.missingFiles {
+		filePath := filepath.Join(c.bareRepoPath, file)
+		switch file {
+		case "HEAD":
+			// Default to refs/heads/main, use rig config if available
+			defaultBranch := "main"
+			if c.rigConfig != nil && c.rigConfig.DefaultBranch != "" {
+				defaultBranch = c.rigConfig.DefaultBranch
+			}
+			content := fmt.Sprintf("ref: refs/heads/%s\n", defaultBranch)
+			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+				return fmt.Errorf("creating HEAD: %w", err)
+			}
+
+		case "config":
+			// Create minimal bare repo config
+			// Try to get remote URL from rig config
+			remoteURL := ""
+			if c.rigConfig != nil && c.rigConfig.GitURL != "" {
+				remoteURL = c.rigConfig.GitURL
+			}
+
+			var configContent string
+			if remoteURL != "" {
+				configContent = fmt.Sprintf(`[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = true
+[remote "origin"]
+	url = %s
+	fetch = +refs/heads/*:refs/remotes/origin/*
+`, remoteURL)
+			} else {
+				configContent = `[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = true
+`
+			}
+			if err := os.WriteFile(filePath, []byte(configContent), 0644); err != nil {
+				return fmt.Errorf("creating config: %w", err)
+			}
+		}
+	}
+
+	// Create description file if it doesn't exist (standard git file)
+	descPath := filepath.Join(c.bareRepoPath, "description")
+	if _, err := os.Stat(descPath); os.IsNotExist(err) {
+		content := "Unnamed repository; edit this file 'description' to name the repository.\n"
+		_ = os.WriteFile(descPath, []byte(content), 0644) // Best effort
+	}
+
+	return nil
+}
+
 // RigChecks returns all rig-level health checks.
 func RigChecks() []Check {
 	return []Check{
@@ -1178,6 +1374,7 @@ func RigChecks() []Check {
 		NewGitExcludeConfiguredCheck(),
 		NewHooksPathConfiguredCheck(),
 		NewSparseCheckoutCheck(),
+		NewBareRepoIntegrityCheck(),
 		NewBareRepoRefspecCheck(),
 		NewWitnessExistsCheck(),
 		NewRefineryExistsCheck(),
@@ -1185,5 +1382,6 @@ func RigChecks() []Check {
 		NewPolecatClonesValidCheck(),
 		NewBeadsConfigValidCheck(),
 		NewBeadsRedirectCheck(),
+		NewBeadsCustomTypesCheck(),
 	}
 }

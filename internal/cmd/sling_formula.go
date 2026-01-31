@@ -90,7 +90,13 @@ func runSlingFormula(args []string) error {
 	// Resolve target agent and pane
 	var targetAgent string
 	var targetPane string
-	var delayedDogInfo *DogDispatchInfo // For delayed session start after hook is set
+	var delayedDogInfo *DogDispatchInfo // For delayed dog session start after hook is set
+
+	// Track deferred rig spawn - we create wisp BEFORE spawning polecat to avoid race condition
+	// where polecat starts and checks its hook before wisp exists.
+	// See: TestSlingFormulaRigTargetCreatesWispBeforeSpawn, bd-gj3
+	var deferredRigName string
+	var deferredSpawnOpts SlingSpawnOptions
 
 	if target != "" {
 		// Resolve "." to current agent identity (like git's "." meaning current directory)
@@ -135,23 +141,20 @@ func runSlingFormula(args []string) error {
 				targetAgent = fmt.Sprintf("%s/polecats/<new>", rigName)
 				targetPane = "<new-pane>"
 			} else {
-				// Spawn a fresh polecat in the rig
+				// DEFERRED SPAWN: Don't spawn polecat yet - we need to create wisp first.
+				// This prevents race condition where polecat starts before its work exists.
+				// We'll spawn after wisp creation below.
 				fmt.Printf("Target is rig '%s', spawning fresh polecat...\n", rigName)
-				spawnOpts := SlingSpawnOptions{
+				deferredRigName = rigName
+				deferredSpawnOpts = SlingSpawnOptions{
 					Force:   slingForce,
 					Account: slingAccount,
 					Create:  slingCreate,
 					Agent:   slingAgent,
 				}
-				spawnInfo, spawnErr := SpawnPolecatForSling(rigName, spawnOpts)
-				if spawnErr != nil {
-					return fmt.Errorf("spawning polecat: %w", spawnErr)
-				}
-				targetAgent = spawnInfo.AgentID()
-				targetPane = spawnInfo.Pane
-
-				// Wake witness and refinery to monitor the new polecat
-				wakeRigAgents(rigName)
+				// Use placeholder values - will be updated after spawn
+				targetAgent = fmt.Sprintf("%s/polecats/<pending>", rigName)
+				targetPane = ""
 			}
 		} else {
 			// Slinging to an existing agent
@@ -217,6 +220,26 @@ func runSlingFormula(args []string) error {
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
 	attachedMoleculeID := wispRootID
+
+	// Step 2.5: Spawn polecat if deferred (rig target case)
+	// We spawn AFTER wisp exists so polecat doesn't race to check hook before work is ready.
+	if deferredRigName != "" {
+		// Set HookBead atomically at spawn time to prevent race condition (GH #hq-3d01de).
+		// Without this, the polecat might start before bd update sets the hook.
+		deferredSpawnOpts.HookBead = wispRootID
+
+		fmt.Printf("  Allocated polecat: ")
+		spawnInfo, spawnErr := SpawnPolecatForSling(deferredRigName, deferredSpawnOpts)
+		if spawnErr != nil {
+			return fmt.Errorf("spawning polecat: %w", spawnErr)
+		}
+		targetAgent = spawnInfo.AgentID()
+		targetPane = spawnInfo.Pane
+		fmt.Printf("%s\n", spawnInfo.PolecatName)
+
+		// Wake witness and refinery to monitor the new polecat
+		wakeRigAgents(deferredRigName)
+	}
 
 	// Step 3: Hook the wisp bead using bd update.
 	// See: https://github.com/steveyegge/gastown/issues/148

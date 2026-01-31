@@ -453,3 +453,294 @@ func TestBeadsRedirectCheck_FixConflictingLocalBeads(t *testing.T) {
 		t.Errorf("expected StatusOK after fix, got %v", result.Status)
 	}
 }
+
+// Tests for BareRepoIntegrityCheck
+
+func TestNewBareRepoIntegrityCheck(t *testing.T) {
+	check := NewBareRepoIntegrityCheck()
+
+	if check.Name() != "bare-repo-integrity" {
+		t.Errorf("expected name 'bare-repo-integrity', got %q", check.Name())
+	}
+
+	if !check.CanFix() {
+		t.Error("expected CanFix to return true")
+	}
+}
+
+func TestBareRepoIntegrityCheck_NoRigSpecified(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	check := NewBareRepoIntegrityCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: ""}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when no rig specified, got %v", result.Status)
+	}
+	if !strings.Contains(result.Message, "skipping") {
+		t.Errorf("expected message about skipping, got %q", result.Message)
+	}
+}
+
+func TestBareRepoIntegrityCheck_NoBareRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+	if err := os.MkdirAll(rigDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBareRepoIntegrityCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK when no bare repo, got %v", result.Status)
+	}
+	if !strings.Contains(result.Message, "No shared bare repo") {
+		t.Errorf("expected message about no bare repo, got %q", result.Message)
+	}
+}
+
+func TestBareRepoIntegrityCheck_ValidBareRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+	bareRepoDir := filepath.Join(rigDir, ".repo.git")
+
+	// Create a valid bare repo structure
+	dirs := []string{"objects", "refs", "info", "hooks", "branches"}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(filepath.Join(bareRepoDir, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create required files
+	if err := os.WriteFile(filepath.Join(bareRepoDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bareRepoDir, "config"), []byte("[core]\nbare = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBareRepoIntegrityCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK for valid bare repo, got %v: %s", result.Status, result.Message)
+	}
+}
+
+func TestBareRepoIntegrityCheck_MissingHEAD(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+	bareRepoDir := filepath.Join(rigDir, ".repo.git")
+
+	// Create bare repo structure without HEAD
+	dirs := []string{"objects", "refs", "info", "hooks", "branches"}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(filepath.Join(bareRepoDir, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Only create config, not HEAD
+	if err := os.WriteFile(filepath.Join(bareRepoDir, "config"), []byte("[core]\nbare = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBareRepoIntegrityCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for missing HEAD, got %v", result.Status)
+	}
+	if !strings.Contains(result.Message, "missing") {
+		t.Errorf("expected message about missing files, got %q", result.Message)
+	}
+}
+
+func TestBareRepoIntegrityCheck_MissingConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+	bareRepoDir := filepath.Join(rigDir, ".repo.git")
+
+	// Create bare repo structure without config
+	dirs := []string{"objects", "refs", "info", "hooks", "branches"}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(filepath.Join(bareRepoDir, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Only create HEAD, not config
+	if err := os.WriteFile(filepath.Join(bareRepoDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBareRepoIntegrityCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for missing config, got %v", result.Status)
+	}
+}
+
+func TestBareRepoIntegrityCheck_MissingDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+	bareRepoDir := filepath.Join(rigDir, ".repo.git")
+
+	// Create bare repo with files but no directories
+	if err := os.MkdirAll(bareRepoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bareRepoDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bareRepoDir, "config"), []byte("[core]\nbare = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBareRepoIntegrityCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	result := check.Run(ctx)
+
+	if result.Status != StatusError {
+		t.Errorf("expected StatusError for missing directories, got %v", result.Status)
+	}
+	if !strings.Contains(strings.Join(result.Details, " "), "objects") {
+		t.Errorf("expected details to mention objects directory, got %v", result.Details)
+	}
+}
+
+func TestBareRepoIntegrityCheck_Fix(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+	bareRepoDir := filepath.Join(rigDir, ".repo.git")
+
+	// Create empty bare repo directory (missing everything)
+	if err := os.MkdirAll(bareRepoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBareRepoIntegrityCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	// Verify fix is needed
+	result := check.Run(ctx)
+	if result.Status != StatusError {
+		t.Fatalf("expected StatusError before fix, got %v", result.Status)
+	}
+
+	// Apply fix
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix failed: %v", err)
+	}
+
+	// Verify HEAD was created
+	headContent, err := os.ReadFile(filepath.Join(bareRepoDir, "HEAD"))
+	if err != nil {
+		t.Fatalf("HEAD not created: %v", err)
+	}
+	if !strings.Contains(string(headContent), "refs/heads/main") {
+		t.Errorf("HEAD content = %q, expected ref to main", string(headContent))
+	}
+
+	// Verify config was created
+	configContent, err := os.ReadFile(filepath.Join(bareRepoDir, "config"))
+	if err != nil {
+		t.Fatalf("config not created: %v", err)
+	}
+	if !strings.Contains(string(configContent), "bare = true") {
+		t.Errorf("config content = %q, expected bare = true", string(configContent))
+	}
+
+	// Verify directories were created
+	for _, dir := range []string{"objects", "refs", "info", "hooks", "branches"} {
+		info, err := os.Stat(filepath.Join(bareRepoDir, dir))
+		if os.IsNotExist(err) {
+			t.Errorf("directory %s not created", dir)
+		} else if !info.IsDir() {
+			t.Errorf("%s exists but is not a directory", dir)
+		}
+	}
+
+	// Verify check now passes
+	result = check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK after fix, got %v: %s", result.Status, result.Message)
+	}
+}
+
+func TestBareRepoIntegrityCheck_FixWithRigConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+	bareRepoDir := filepath.Join(rigDir, ".repo.git")
+
+	// Create rig config with default branch and git URL
+	if err := os.MkdirAll(rigDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	rigConfig := `{
+		"type": "rig",
+		"version": 1,
+		"name": "testrig",
+		"git_url": "https://github.com/example/test.git",
+		"default_branch": "develop"
+	}`
+	if err := os.WriteFile(filepath.Join(rigDir, "config.json"), []byte(rigConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create empty bare repo directory
+	if err := os.MkdirAll(bareRepoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewBareRepoIntegrityCheck()
+	ctx := &CheckContext{TownRoot: tmpDir, RigName: rigName}
+
+	// Run check to populate rigConfig
+	result := check.Run(ctx)
+	if result.Status != StatusError {
+		t.Fatalf("expected StatusError before fix, got %v", result.Status)
+	}
+
+	// Apply fix
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix failed: %v", err)
+	}
+
+	// Verify HEAD uses the configured default branch
+	headContent, err := os.ReadFile(filepath.Join(bareRepoDir, "HEAD"))
+	if err != nil {
+		t.Fatalf("HEAD not created: %v", err)
+	}
+	if !strings.Contains(string(headContent), "refs/heads/develop") {
+		t.Errorf("HEAD content = %q, expected ref to develop", string(headContent))
+	}
+
+	// Verify config includes remote URL
+	configContent, err := os.ReadFile(filepath.Join(bareRepoDir, "config"))
+	if err != nil {
+		t.Fatalf("config not created: %v", err)
+	}
+	if !strings.Contains(string(configContent), "https://github.com/example/test.git") {
+		t.Errorf("config content = %q, expected to contain remote URL", string(configContent))
+	}
+}

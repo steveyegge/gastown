@@ -86,29 +86,29 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Find town root and rig path for agent beads
+	// Find town root for beads resolution
 	townRoot, err := workspace.FindFromCwd()
 	if err != nil {
 		return fmt.Errorf("finding town root: %w", err)
 	}
 
-	// Extract rig name from agent ID (e.g., "gastown/crew/joe" -> "gastown")
-	// For town-level agents like "mayor/", use town root
-	rigName := strings.Split(agentID, "/")[0]
-	var beadsPath string
-	if rigName == "mayor" || rigName == "deacon" {
-		beadsPath = townRoot
-	} else {
-		beadsPath = filepath.Join(townRoot, rigName)
-	}
-
-	b := beads.New(beadsPath)
-
-	// Convert agent ID to agent bead ID and look up the agent bead
+	// Convert agent ID to agent bead ID
 	agentBeadID := agentIDToBeadID(agentID, townRoot)
 	if agentBeadID == "" {
 		return fmt.Errorf("could not convert agent ID %s to bead ID", agentID)
 	}
+
+	// Determine the correct beads location based on agent type.
+	// FIX (gt-0da72f): Rig agents (witness, refinery, crew) are stored in rig beads,
+	// not town beads. Extract rig from agent ID and use rig beads path.
+	beadsPath := townRoot
+	parts := strings.Split(strings.TrimSuffix(agentID, "/"), "/")
+	if len(parts) >= 2 && parts[0] != "mayor" && parts[0] != "deacon" {
+		// Rig-level agent - use rig beads
+		rigName := parts[0]
+		beadsPath = filepath.Join(townRoot, rigName)
+	}
+	b := beads.New(beadsPath)
 
 	// Get the agent bead to find current hook
 	agentBead, err := b.Show(agentBeadID)

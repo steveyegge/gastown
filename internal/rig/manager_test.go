@@ -1,6 +1,7 @@
 package rig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 )
@@ -525,6 +527,16 @@ esac
 	t.Setenv("BEADS_DIR_LOG", beadsDirLog)
 	t.Setenv("BEADS_DIR", "") // Clear any existing BEADS_DIR
 
+	// Override the cached bd path to use our fake bd script.
+	// The beads package caches resolvedBdPath at init time, so we must
+	// use SetBdPathForTest to inject our stub.
+	fakeBdPath := filepath.Join(binDir, "bd")
+	if runtime.GOOS == "windows" {
+		fakeBdPath = filepath.Join(binDir, "bd.cmd")
+	}
+	cleanup := beads.SetBdPathForTest(fakeBdPath)
+	defer cleanup()
+
 	manager := &Manager{townRoot: townRoot}
 	if err := manager.initAgentBeads(rigPath, "demo", "gt"); err != nil {
 		t.Fatalf("initAgentBeads: %v", err)
@@ -621,6 +633,101 @@ func TestInitBeadsRejectsInvalidPrefix(t *testing.T) {
 				t.Errorf("initBeads(%q) error = %q, want error containing 'invalid beads prefix'", prefix, err.Error())
 			}
 		})
+	}
+}
+
+func TestInitBeads_InheritsDoltBackendFromTown(t *testing.T) {
+	// Cannot use t.Parallel() due to t.Setenv
+	// When town uses Dolt backend, new rigs should inherit it.
+	// This test verifies that initBeads passes --backend dolt when town uses Dolt.
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "newrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir rig: %v", err)
+	}
+
+	// Create town-level .beads with Dolt backend (non-server mode)
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+		t.Fatalf("mkdir town beads: %v", err)
+	}
+	// Set storage-backend: dolt in config.yaml (non-server mode)
+	configYAML := "prefix: hq\nstorage-backend: dolt\n"
+	if err := os.WriteFile(filepath.Join(townBeadsDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatalf("write town config.yaml: %v", err)
+	}
+
+	// Use fake bd that captures the init arguments
+	argsLog := filepath.Join(t.TempDir(), "bd-args.log")
+	script := `#!/usr/bin/env bash
+set -e
+echo "$@" >> "` + argsLog + `"
+exit 0
+`
+	windowsScript := "@echo off\r\necho %* >> \"" + argsLog + "\"\r\nexit /b 0\r\n"
+	binDir := writeFakeBD(t, script, windowsScript)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	manager := &Manager{townRoot: townRoot}
+	if err := manager.initBeads(rigPath, "nr"); err != nil {
+		t.Fatalf("initBeads: %v", err)
+	}
+
+	// Verify --backend dolt was passed to bd init
+	argsData, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatalf("reading args log: %v", err)
+	}
+	argsContent := string(argsData)
+	if !strings.Contains(argsContent, "--backend dolt") {
+		t.Errorf("bd init should include --backend dolt when town uses Dolt; got: %s", argsContent)
+	}
+}
+
+func TestInitBeads_DoltServerMode_CreatesRedirect(t *testing.T) {
+	t.Parallel()
+	// When town uses Dolt server mode, new rigs should create a redirect
+	// to the town-level .beads instead of a local database.
+
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "newrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("mkdir rig: %v", err)
+	}
+
+	// Create town-level .beads with Dolt server mode enabled
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(townBeadsDir, 0755); err != nil {
+		t.Fatalf("mkdir town beads: %v", err)
+	}
+	// Set up metadata.json with Dolt server mode
+	metadata := `{
+  "backend": "dolt",
+  "dolt_server_enabled": true,
+  "dolt_server_host": "127.0.0.1",
+  "dolt_server_port": 3306
+}`
+	if err := os.WriteFile(filepath.Join(townBeadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatalf("write town metadata.json: %v", err)
+	}
+
+	manager := &Manager{townRoot: townRoot}
+	if err := manager.initBeads(rigPath, "nr"); err != nil {
+		t.Fatalf("initBeads: %v", err)
+	}
+
+	// Verify redirect file was created pointing to town-level .beads
+	redirectPath := filepath.Join(rigPath, ".beads", "redirect")
+	content, err := os.ReadFile(redirectPath)
+	if err != nil {
+		t.Fatalf("reading redirect file: %v", err)
+	}
+
+	// Should contain a relative path to town .beads (../.beads)
+	got := strings.TrimSpace(string(content))
+	if !strings.HasSuffix(got, ".beads") {
+		t.Errorf("redirect should point to .beads; got: %s", got)
 	}
 }
 
@@ -766,4 +873,319 @@ func TestConvertToSSH(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreatePatrolHooks_MergesWithExisting(t *testing.T) {
+	t.Parallel()
+	// When settings.json already exists with custom hooks, createPatrolHooks
+	// should merge patrol hooks into existing settings rather than overwriting.
+	// This preserves hooks from claude-flow or other sources.
+
+	tempDir := t.TempDir()
+	claudeDir := filepath.Join(tempDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+
+	// Create existing settings with custom hooks
+	existingSettings := `{
+  "enabledPlugins": {"myPlugin": true},
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "echo existing-hook"}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "cleanup-command"}
+        ]
+      }
+    ]
+  }
+}`
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(existingSettings), 0600); err != nil {
+		t.Fatalf("write existing settings: %v", err)
+	}
+
+	// Create runtime config that enables claude hooks
+	runtimeConfig := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:     "claude",
+			Dir:          ".claude",
+			SettingsFile: "settings.json",
+		},
+	}
+
+	manager := &Manager{}
+	if err := manager.createPatrolHooks(tempDir, runtimeConfig); err != nil {
+		t.Fatalf("createPatrolHooks: %v", err)
+	}
+
+	// Read the merged settings
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("reading merged settings: %v", err)
+	}
+
+	var settings claudeSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("parsing merged settings: %v", err)
+	}
+
+	// Verify existing plugin is preserved
+	if !settings.EnabledPlugins["myPlugin"] {
+		t.Error("expected existing plugin 'myPlugin' to be preserved")
+	}
+
+	// Verify existing SessionStart hook is preserved
+	foundExisting := false
+	foundPatrol := false
+	for _, matcher := range settings.Hooks["SessionStart"] {
+		for _, hook := range matcher.Hooks {
+			if hook.Command == "echo existing-hook" {
+				foundExisting = true
+			}
+			if hook.Command == "gt prime && gt mail check --inject" {
+				foundPatrol = true
+			}
+		}
+	}
+	if !foundExisting {
+		t.Error("expected existing SessionStart hook to be preserved")
+	}
+	if !foundPatrol {
+		t.Error("expected patrol SessionStart hook to be added")
+	}
+
+	// Verify existing Stop hook is preserved
+	foundStopHook := false
+	for _, matcher := range settings.Hooks["Stop"] {
+		for _, hook := range matcher.Hooks {
+			if hook.Command == "cleanup-command" {
+				foundStopHook = true
+			}
+		}
+	}
+	if !foundStopHook {
+		t.Error("expected existing Stop hook to be preserved")
+	}
+
+	// Verify patrol PreCompact hook was added
+	if _, ok := settings.Hooks["PreCompact"]; !ok {
+		t.Error("expected PreCompact patrol hook to be added")
+	}
+
+	// Verify patrol UserPromptSubmit hook was added
+	if _, ok := settings.Hooks["UserPromptSubmit"]; !ok {
+		t.Error("expected UserPromptSubmit patrol hook to be added")
+	}
+}
+
+func TestCreatePatrolHooks_CreatesNewSettings(t *testing.T) {
+	t.Parallel()
+	// When settings.json doesn't exist, createPatrolHooks should create it
+	// with the patrol hooks.
+
+	tempDir := t.TempDir()
+
+	runtimeConfig := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:     "claude",
+			Dir:          ".claude",
+			SettingsFile: "settings.json",
+		},
+	}
+
+	manager := &Manager{}
+	if err := manager.createPatrolHooks(tempDir, runtimeConfig); err != nil {
+		t.Fatalf("createPatrolHooks: %v", err)
+	}
+
+	// Read the created settings
+	settingsPath := filepath.Join(tempDir, ".claude", "settings.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("reading created settings: %v", err)
+	}
+
+	var settings claudeSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("parsing created settings: %v", err)
+	}
+
+	// Verify all patrol hooks are present
+	expectedHookTypes := []string{"SessionStart", "PreCompact", "UserPromptSubmit"}
+	for _, hookType := range expectedHookTypes {
+		if _, ok := settings.Hooks[hookType]; !ok {
+			t.Errorf("expected %s hook to be created", hookType)
+		}
+	}
+}
+
+func TestCreatePatrolHooks_DoesNotDuplicateHooks(t *testing.T) {
+	t.Parallel()
+	// When patrol hooks already exist, createPatrolHooks should not add duplicates.
+
+	tempDir := t.TempDir()
+	claudeDir := filepath.Join(tempDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+
+	// Create existing settings that already have patrol hooks
+	existingSettings := `{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "gt prime && gt mail check --inject"}
+        ]
+      }
+    ]
+  }
+}`
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(existingSettings), 0600); err != nil {
+		t.Fatalf("write existing settings: %v", err)
+	}
+
+	runtimeConfig := &config.RuntimeConfig{
+		Hooks: &config.RuntimeHooksConfig{
+			Provider:     "claude",
+			Dir:          ".claude",
+			SettingsFile: "settings.json",
+		},
+	}
+
+	manager := &Manager{}
+	if err := manager.createPatrolHooks(tempDir, runtimeConfig); err != nil {
+		t.Fatalf("createPatrolHooks: %v", err)
+	}
+
+	// Read the merged settings
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("reading merged settings: %v", err)
+	}
+
+	var settings claudeSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("parsing merged settings: %v", err)
+	}
+
+	// Count SessionStart patrol hooks - should only be 1
+	count := 0
+	for _, matcher := range settings.Hooks["SessionStart"] {
+		for _, hook := range matcher.Hooks {
+			if hook.Command == "gt prime && gt mail check --inject" {
+				count++
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 patrol SessionStart hook, got %d", count)
+	}
+}
+
+func TestHasHookCommand(t *testing.T) {
+	t.Parallel()
+	manager := &Manager{}
+
+	matchers := []claudeHookMatcher{
+		{
+			Matcher: "",
+			Hooks: []claudeHook{
+				{Type: "command", Command: "echo hello"},
+				{Type: "command", Command: "gt prime"},
+			},
+		},
+		{
+			Matcher: "*.go",
+			Hooks: []claudeHook{
+				{Type: "command", Command: "go test"},
+			},
+		},
+	}
+
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{"echo hello", true},
+		{"gt prime", true},
+		{"go test", true},
+		{"missing command", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			got := manager.hasHookCommand(matchers, tt.command)
+			if got != tt.want {
+				t.Errorf("hasHookCommand(%q) = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMergeHookMatcher(t *testing.T) {
+	t.Parallel()
+	manager := &Manager{}
+
+	t.Run("appends to existing matcher with same pattern", func(t *testing.T) {
+		matchers := []claudeHookMatcher{
+			{
+				Matcher: "",
+				Hooks:   []claudeHook{{Type: "command", Command: "existing"}},
+			},
+		}
+		newHook := claudeHook{Type: "command", Command: "new"}
+
+		result := manager.mergeHookMatcher(matchers, "", newHook)
+
+		if len(result) != 1 {
+			t.Fatalf("expected 1 matcher, got %d", len(result))
+		}
+		if len(result[0].Hooks) != 2 {
+			t.Errorf("expected 2 hooks, got %d", len(result[0].Hooks))
+		}
+	})
+
+	t.Run("creates new matcher for different pattern", func(t *testing.T) {
+		matchers := []claudeHookMatcher{
+			{
+				Matcher: "*.go",
+				Hooks:   []claudeHook{{Type: "command", Command: "existing"}},
+			},
+		}
+		newHook := claudeHook{Type: "command", Command: "new"}
+
+		result := manager.mergeHookMatcher(matchers, "", newHook)
+
+		if len(result) != 2 {
+			t.Fatalf("expected 2 matchers, got %d", len(result))
+		}
+	})
+
+	t.Run("creates first matcher when empty", func(t *testing.T) {
+		var matchers []claudeHookMatcher
+		newHook := claudeHook{Type: "command", Command: "new"}
+
+		result := manager.mergeHookMatcher(matchers, "", newHook)
+
+		if len(result) != 1 {
+			t.Fatalf("expected 1 matcher, got %d", len(result))
+		}
+		if len(result[0].Hooks) != 1 {
+			t.Errorf("expected 1 hook, got %d", len(result[0].Hooks))
+		}
+	})
 }

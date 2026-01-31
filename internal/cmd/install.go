@@ -35,6 +35,7 @@ var (
 	installPublic     bool
 	installShell      bool
 	installWrappers   bool
+	installSymlinks   bool
 )
 
 var installCmd = &cobra.Command{
@@ -61,7 +62,8 @@ Examples:
   gt install ~/gt --git                        # Also init git with .gitignore
   gt install ~/gt --github=user/repo           # Create private GitHub repo (default)
   gt install ~/gt --github=user/repo --public  # Create public GitHub repo
-  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)`,
+  gt install ~/gt --shell                      # Install shell integration (sets GT_TOWN_ROOT/GT_RIG)
+  gt install ~/gt --symlink                    # Symlink gt and bd to /usr/local/bin`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInstall,
 }
@@ -77,6 +79,7 @@ func init() {
 	installCmd.Flags().BoolVar(&installPublic, "public", false, "Make GitHub repo public (use with --github)")
 	installCmd.Flags().BoolVar(&installShell, "shell", false, "Install shell integration (sets GT_TOWN_ROOT/GT_RIG env vars)")
 	installCmd.Flags().BoolVar(&installWrappers, "wrappers", false, "Install gt-codex/gt-opencode wrapper scripts to ~/bin/")
+	installCmd.Flags().BoolVar(&installSymlinks, "symlink", false, "Create symlinks for gt and bd in /usr/local/bin (requires sudo)")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -115,6 +118,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("installing wrapper scripts: %w", err)
 			}
 			fmt.Printf("✓ Installed gt-codex and gt-opencode to %s\n", wrappers.BinDir())
+			return nil
+		}
+		// If only --symlink is requested in existing town, just install symlinks and exit
+		if installSymlinks {
+			if err := wrappers.InstallSymlinks(); err != nil {
+				return fmt.Errorf("creating symlinks: %w", err)
+			}
+			fmt.Printf("✓ Created symlinks for gt and bd in /usr/local/bin\n")
 			return nil
 		}
 		return fmt.Errorf("directory is already a Gas Town HQ (use --force to reinitialize)")
@@ -352,6 +363,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if installSymlinks {
+		fmt.Println()
+		if err := wrappers.InstallSymlinks(); err != nil {
+			fmt.Printf("   %s Could not create symlinks: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Created symlinks for gt and bd in /usr/local/bin\n")
+		}
+	}
+
 	fmt.Printf("\n%s HQ created successfully!\n", style.Bold.Render("✓"))
 	fmt.Println()
 	fmt.Println("Next steps:")
@@ -421,8 +441,11 @@ func writeJSON(path string, data interface{}) error {
 // initTownBeads initializes town-level beads database using bd init.
 // Town beads use the "hq-" prefix for mayor mail and cross-rig coordination.
 func initTownBeads(townPath string) error {
-	// Run: bd init --prefix hq
-	cmd := exec.Command("bd", "init", "--prefix", "hq")
+	// Run: bd init --prefix hq --no-auto-import
+	// Use --no-auto-import to create database WITHOUT importing from JSONL.
+	// This allows us to configure custom types BEFORE the import runs (bd-3q6.10).
+	// Without this, auto-import fails when issues.jsonl contains custom types like merge-request.
+	cmd := exec.Command("bd", "init", "--prefix", "hq", "--no-auto-import")
 	cmd.Dir = townPath
 
 	output, err := cmd.CombinedOutput()
@@ -448,11 +471,21 @@ func initTownBeads(townPath string) error {
 		return fmt.Errorf("bd config set issue_prefix failed: %s", strings.TrimSpace(string(prefixOutput)))
 	}
 
-	// Configure custom types for Gas Town (agent, role, rig, convoy, slot).
+	// Configure custom types for Gas Town (agent, role, rig, convoy, slot, merge-request, etc).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
-	if err := beads.EnsureCustomTypes(beadsDir); err != nil {
-		return fmt.Errorf("ensuring custom types: %w", err)
+	// IMPORTANT: This must run BEFORE any auto-import to avoid validation failures (bd-3q6.10).
+	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	configCmd.Dir = townPath
+	if configOutput, configErr := configCmd.CombinedOutput(); configErr != nil {
+		// Non-fatal: older beads versions don't need this, newer ones do
+		fmt.Printf("   %s Could not set custom types: %s\n", style.Dim.Render("⚠"), strings.TrimSpace(string(configOutput)))
 	}
+
+	// Trigger JSONL import now that custom types are configured.
+	// bd sync will import from issues.jsonl and validate types correctly.
+	syncCmd := exec.Command("bd", "sync")
+	syncCmd.Dir = townPath
+	_, _ = syncCmd.CombinedOutput() // Ignore errors - JSONL might not exist yet
 
 	// Configure allowed_prefixes for convoy beads (hq-cv-* IDs).
 	// This allows bd create --id=hq-cv-xxx to pass prefix validation.
@@ -521,6 +554,13 @@ func ensureCustomTypes(beadsPath string) error {
 	if err != nil {
 		return fmt.Errorf("bd config set types.custom: %s", strings.TrimSpace(string(output)))
 	}
+
+	// Disable contributor routing to use gastown's rig-based routing instead
+	// This prevents issues being routed to ~/.beads-planning
+	routingCmd := exec.Command("bd", "config", "set", "routing.mode", "direct")
+	routingCmd.Dir = beadsPath
+	_, _ = routingCmd.CombinedOutput() // Ignore errors - not critical
+
 	return nil
 }
 

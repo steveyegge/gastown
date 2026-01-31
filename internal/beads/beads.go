@@ -22,6 +22,45 @@ var (
 	ErrNotFound     = errors.New("issue not found")
 )
 
+// resolvedBdPath caches the resolved absolute path to the bd binary.
+// This ensures subprocesses (e.g. gtmobile) find the correct bd version
+// even when their PATH doesn't include ~/.local/bin.
+var resolvedBdPath string
+
+func init() {
+	resolvedBdPath = resolveBdPath()
+}
+
+// SetBdPathForTest overrides the cached bd path for testing purposes.
+// Returns a cleanup function that restores the original path.
+// This allows tests to inject a stub bd script.
+func SetBdPathForTest(path string) func() {
+	original := resolvedBdPath
+	resolvedBdPath = path
+	return func() {
+		resolvedBdPath = original
+	}
+}
+
+// resolveBdPath finds the bd binary, preferring ~/.local/bin/bd over system PATH.
+// The system PATH may contain an older bd that doesn't support Dolt backend.
+func resolveBdPath() string {
+	// Prefer ~/.local/bin/bd (where make install puts it)
+	home, err := os.UserHomeDir()
+	if err == nil {
+		localBd := filepath.Join(home, ".local", "bin", "bd")
+		if _, err := os.Stat(localBd); err == nil {
+			return localBd
+		}
+	}
+	// Fall back to PATH lookup
+	path, err := exec.LookPath("bd")
+	if err != nil {
+		return "bd" // let exec.Command fail with a clear error
+	}
+	return path
+}
+
 // Issue represents a beads issue.
 type Issue struct {
 	ID          string   `json:"id"`
@@ -201,7 +240,7 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 		fullArgs = append([]string{"--db", beadsDB}, fullArgs...)
 	}
 
-	cmd := exec.Command("bd", fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
+	cmd := exec.Command(resolvedBdPath, fullArgs...) //nolint:gosec // G204: bd is a trusted internal tool
 	cmd.Dir = b.workDir
 
 	// Build environment: filter beads env vars when in isolated mode (tests)
@@ -293,12 +332,12 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 	if opts.Status != "" {
 		args = append(args, "--status="+opts.Status)
 	}
-	// Prefer Label over Type (Type is deprecated)
+	// Prefer Label over Type (Type queries the deprecated issue_type column)
 	if opts.Label != "" {
 		args = append(args, "--label="+opts.Label)
 	} else if opts.Type != "" {
-		// Deprecated: convert type to label for backward compatibility
-		args = append(args, "--label=gt:"+opts.Type)
+		// Use --type for backward compatibility with existing beads using issue_type column
+		args = append(args, "--type="+opts.Type)
 	}
 	if opts.Priority >= 0 {
 		args = append(args, fmt.Sprintf("--priority=%d", opts.Priority))
@@ -471,8 +510,9 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
 	}
-	// Type is deprecated: convert to gt:<type> label
+	// Set issue type AND add gt:<type> label for backwards compatibility
 	if opts.Type != "" {
+		args = append(args, "--type="+opts.Type)
 		args = append(args, "--labels=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {
@@ -522,8 +562,9 @@ func (b *Beads) CreateWithID(id string, opts CreateOptions) (*Issue, error) {
 	if opts.Title != "" {
 		args = append(args, "--title="+opts.Title)
 	}
-	// Type is deprecated: convert to gt:<type> label
+	// Set issue type AND add gt:<type> label for backwards compatibility
 	if opts.Type != "" {
+		args = append(args, "--type="+opts.Type)
 		args = append(args, "--labels=gt:"+opts.Type)
 	}
 	if opts.Priority >= 0 {
@@ -595,6 +636,12 @@ func (b *Beads) Update(id string, opts UpdateOptions) error {
 	return err
 }
 
+// AddLabel adds a label to an issue.
+func (b *Beads) AddLabel(id, label string) error {
+	_, err := b.run("label", "add", id, label)
+	return err
+}
+
 // Close closes one or more issues.
 // If a runtime session ID is set in the environment, it is passed to bd close
 // for work attribution tracking (see decision 009-session-events-architecture.md).
@@ -659,6 +706,37 @@ func (b *Beads) ReleaseWithReason(id, reason string) error {
 func (b *Beads) AddDependency(issue, dependsOn string) error {
 	_, err := b.run("dep", "add", issue, dependsOn)
 	return err
+}
+
+// AddTypedDependency adds a typed dependency (e.g., "blocks", "tracks").
+func (b *Beads) AddTypedDependency(issue, dependsOn, depType string) error {
+	_, err := b.run("dep", "add", issue, dependsOn, "--type="+depType)
+	return err
+}
+
+// ListDependencies lists dependencies for an issue.
+// direction: "up" (what this depends on), "down" (what depends on this)
+// depType: filter by type (e.g., "blocks", "tracks"), empty for all
+func (b *Beads) ListDependencies(issue, direction, depType string) ([]*Issue, error) {
+	args := []string{"dep", "list", issue, "--json"}
+	if direction != "" {
+		args = append(args, "--direction="+direction)
+	}
+	if depType != "" {
+		args = append(args, "--type="+depType)
+	}
+
+	out, err := b.run(args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []*Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("parsing dep list output: %w", err)
+	}
+
+	return issues, nil
 }
 
 // RemoveDependency removes a dependency.

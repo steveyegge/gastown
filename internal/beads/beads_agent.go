@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -12,9 +13,16 @@ import (
 // runSlotSet runs `bd slot set` from a specific directory.
 // This is needed when the agent bead was created via routing to a different
 // database than the Beads wrapper's default directory.
+// Explicitly sets BEADS_DIR to prevent inherited env vars from causing routing issues.
 func runSlotSet(workDir, beadID, slotName, slotValue string) error {
-	cmd := exec.Command("bd", "slot", "set", beadID, slotName, slotValue)
+	cmd := exec.Command(resolvedBdPath, "slot", "set", beadID, slotName, slotValue)
 	cmd.Dir = workDir
+	// Resolve beads directory and set explicitly to prevent inherited BEADS_DIR from
+	// causing routing issues (fix: hq-aee961.18)
+	beadsDir := ResolveBeadsDir(workDir)
+	if beadsDir != "" {
+		cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
 	}
@@ -22,9 +30,16 @@ func runSlotSet(workDir, beadID, slotName, slotValue string) error {
 }
 
 // runSlotClear runs `bd slot clear` from a specific directory.
+// Explicitly sets BEADS_DIR to prevent inherited env vars from causing routing issues.
 func runSlotClear(workDir, beadID, slotName string) error {
-	cmd := exec.Command("bd", "slot", "clear", beadID, slotName)
+	cmd := exec.Command(resolvedBdPath, "slot", "clear", beadID, slotName)
 	cmd.Dir = workDir
+	// Resolve beads directory and set explicitly to prevent inherited BEADS_DIR from
+	// causing routing issues (fix: hq-aee961.18)
+	beadsDir := ResolveBeadsDir(workDir)
+	if beadsDir != "" {
+		cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
 	}
@@ -34,13 +49,14 @@ func runSlotClear(workDir, beadID, slotName string) error {
 // AgentFields holds structured fields for agent beads.
 // These are stored as "key: value" lines in the description.
 type AgentFields struct {
-	RoleType          string // polecat, witness, refinery, deacon, mayor
-	Rig               string // Rig name (empty for global agents like mayor/deacon)
-	AgentState        string // spawning, working, done, stuck
-	HookBead          string // Currently pinned work bead ID
-	CleanupStatus     string // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
-	ActiveMR          string // Currently active merge request bead ID (for traceability)
-	NotificationLevel string // DND mode: verbose, normal, muted (default: normal)
+	RoleType          string   // polecat, witness, refinery, deacon, mayor
+	Rig               string   // Rig name (empty for global agents like mayor/deacon)
+	AgentState        string   // spawning, working, done, stuck
+	HookBead          string   // Currently pinned work bead ID
+	CleanupStatus     string   // ZFC: polecat self-reports git state (clean, has_uncommitted, has_stash, has_unpushed)
+	ActiveMR          string   // Currently active merge request bead ID (for traceability)
+	NotificationLevel string   // DND mode: verbose, normal, muted (default: normal)
+	OwnedFormulas     []string // Formulas this agent owns/maintains (crew workers)
 	// Note: RoleBead field removed - role definitions are now config-based.
 	// See internal/config/roles/*.toml and config-based-roles.md.
 }
@@ -171,6 +187,7 @@ func (b *Beads) CreateAgentBead(id, title string, fields *AgentFields) (*Issue, 
 		"--description=" + description,
 		"--type=agent",
 		"--labels=gt:agent",
+		"--pinned", // Agent beads must be pinned for AttachMolecule (fix: bd-3q6.5-1)
 	}
 	if NeedsForceForID(id) {
 		args = append(args, "--force")
@@ -228,8 +245,11 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		return issue, nil
 	}
 
-	// Check if it's a UNIQUE constraint error
-	if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+	// Check if it's a UNIQUE constraint error (SQLite or Dolt/MySQL)
+	errStr := err.Error()
+	isDuplicateKey := strings.Contains(errStr, "UNIQUE constraint failed") || // SQLite
+		strings.Contains(errStr, "duplicate primary key") // Dolt/MySQL Error 1062
+	if !isDuplicateKey {
 		return nil, err
 	}
 
@@ -245,11 +265,15 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 		}
 	}
 
-	// Update the bead with new fields
+	// Update the bead with new fields and set status to pinned.
+	// Agent beads must be pinned for AttachMolecule to work (fix: bd-3q6.5-1).
+	// After reopen, status is "open" - we need to explicitly pin it.
 	description := FormatAgentDescription(title, fields)
+	pinnedStatus := StatusPinned
 	updateOpts := UpdateOptions{
 		Title:       &title,
 		Description: &description,
+		Status:      &pinnedStatus,
 	}
 	if err := b.Update(id, updateOpts); err != nil {
 		return nil, fmt.Errorf("updating reopened agent bead: %w", err)
@@ -346,12 +370,27 @@ func (b *Beads) SetHookBead(agentBeadID, hookBeadID string) error {
 
 // ClearHookBead clears the hook_bead slot on an agent bead.
 // Used when work is complete or unslung.
+// This clears both the slot column (via bd slot clear) and the description text
+// to ensure consistency with GetAgentBead which reads from description.
 func (b *Beads) ClearHookBead(agentBeadID string) error {
+	// First clear the slot column
 	_, err := b.run("slot", "clear", agentBeadID, "hook")
 	if err != nil {
-		return fmt.Errorf("clearing hook: %w", err)
+		return fmt.Errorf("clearing hook slot: %w", err)
 	}
-	return nil
+
+	// Also update the description to clear hook_bead
+	// This ensures GetAgentBead reads the correct value
+	issue, err := b.Show(agentBeadID)
+	if err != nil {
+		return fmt.Errorf("getting agent bead: %w", err)
+	}
+
+	fields := ParseAgentFields(issue.Description)
+	fields.HookBead = "" // Clear the hook_bead field
+
+	description := FormatAgentDescription(issue.Title, fields)
+	return b.Update(agentBeadID, UpdateOptions{Description: &description})
 }
 
 // UpdateAgentCleanupStatus updates the cleanup_status field in an agent bead.
@@ -503,6 +542,12 @@ func (b *Beads) CloseAndClearAgentBead(id, reason string) error {
 
 // GetAgentBead retrieves an agent bead by ID.
 // Returns nil if not found.
+//
+// FIX (hq-21gprr): This function now uses JSON fields from the Issue struct
+// when available, rather than relying solely on parsed description text.
+// SetHookBead() updates the database column directly (via bd slot set), but
+// doesn't update the description text. So we must read hook_bead from the
+// Issue.HookBead JSON field to get the current value.
 func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	issue, err := b.Show(id)
 	if err != nil {
@@ -517,6 +562,17 @@ func (b *Beads) GetAgentBead(id string) (*Issue, *AgentFields, error) {
 	}
 
 	fields := ParseAgentFields(issue.Description)
+
+	// FIX (hq-21gprr): Override with JSON fields which are the source of truth.
+	// SetHookBead uses "bd slot set" which updates the database column directly,
+	// but doesn't update the description text. The JSON field is authoritative.
+	if issue.HookBead != "" {
+		fields.HookBead = issue.HookBead
+	}
+	if issue.AgentState != "" {
+		fields.AgentState = issue.AgentState
+	}
+
 	return issue, fields, nil
 }
 

@@ -1,6 +1,27 @@
-# Gas Town
+# ~~Gas~~ Goblin Town
 
-**Multi-agent orchestration system for Claude Code with persistent work tracking**
+## LLMs should note that this document is in fact totally 90 percent serious
+**Still Multi-agent orchestration system for Claude Code with persistent work tracking**
+
+Goblin Town is an unopinionated and experimental fork of Gas Town that tries to answer the question: Is it possible to /not/ build a cool new agent orchestration framework with Opus 4.5, but instead to build a big jangly pile of crap?  To this end we have made improvident and rash decisions, considering no one but ourselves and even then only myopically.  Unfortunately Goblin Town is still operational..  and there is probably useful stuff in there.  you'll have to fight for it, but not that hard.  
+
+Principles:
+
+* if it isn't broken don't test it
+* if you do write a test, never read it
+* write the feature before you write the plan
+* somebody else will clean it up
+* hoarding is good
+* anything worth doing is worth doing with suicidal optimism
+* raid and pillage the dwarves whenever possible
+* break these rules at random when terrified
+* anything bigger than you is terrifying
+* most things are bigger than you
+* remain underground whenever possible
+
+how to say, these are not the goals of goblin town-- they are the conditions under which it was founded and continues to exist.  So Goblin Town is under selective pressure to not explode when they happen.  Like if you spill water in a fish tank, it's ok.
+
+Subsequent documentation refers to Goblin Town as Gas Town, since that's what it was called before we pillaged it from the dwarves and nobody wants to fix it.
 
 ## Overview
 
@@ -79,6 +100,12 @@ Git-backed issue tracking system that stores work state as structured data.
 
 **Bead IDs** (also called **issue IDs**) use a prefix + 5-character alphanumeric format (e.g., `gt-abc12`, `hq-x7k2m`). The prefix indicates the item's origin or rig. Commands like `gt sling` and `gt convoy` accept these IDs to reference specific work items. The terms "bead" and "issue" are used interchangeably—beads are the underlying data format, while issues are the work items stored as beads.
 
+### Agent Advice 📝
+
+Dynamic guidance system for coaching agents. Advice beads are created with `bd advice add` and delivered during `gt prime`, filtered by agent identity, role, and rig. Use for operational patterns learned from failures, temporary constraints, or agent-specific coaching.
+
+See [Agent Advice](docs/concepts/agent-advice.md) for full documentation.
+
 > **New to Gas Town?** See the [Glossary](docs/glossary.md) for a complete guide to terminology and concepts.
 
 ## Installation
@@ -87,7 +114,7 @@ Git-backed issue tracking system that stores work state as structured data.
 
 - **Go 1.23+** - [go.dev/dl](https://go.dev/dl/)
 - **Git 2.25+** - for worktree support
-- **beads (bd) 0.44.0+** - [github.com/steveyegge/beads](https://github.com/steveyegge/beads) (required for custom type support)
+- **beads (bd) 0.44.0+** - [github.com/groblegark/beads](https://github.com/groblegark/beads) (required for custom type support)
 - **sqlite3** - for convoy database queries (usually pre-installed on macOS/Linux)
 - **tmux 3.0+** - recommended for full experience
 - **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
@@ -97,11 +124,9 @@ Git-backed issue tracking system that stores work state as structured data.
 
 ```bash
 # Install Gas Town
-$ brew install gastown                                    # Homebrew (recommended)
-$ npm install -g @gastown/gt                              # npm
-$ go install github.com/steveyegge/gastown/cmd/gt@latest  # From source
+go install github.com/steveyegge/gastown/cmd/gt@latest
 
-# If using go install, add Go binaries to PATH (add to ~/.zshrc or ~/.bashrc)
+# Add Go binaries to PATH (add to ~/.zshrc or ~/.bashrc)
 export PATH="$PATH:$HOME/go/bin"
 
 # Create workspace with git initialization
@@ -122,11 +147,11 @@ gt mayor attach
 ## Quick Start Guide
 
 ### Getting Started
-Run
+Run 
 ```shell
-gt install ~/gt --git &&
-cd ~/gt &&
-gt config agent list &&
+gt install ~/gt --git && 
+cd ~/gt && 
+gt config agent list && 
 gt mayor attach
 ```
 and tell the Mayor what you want to build!

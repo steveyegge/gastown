@@ -38,6 +38,9 @@ func buildAgentBeadID(identity string, role Role, townRoot string) string {
 		return config.GetRigPrefix(townRoot, rig)
 	}
 
+	// Get town name for polecat bead IDs
+	townName, _ := workspace.GetTownName(townRoot)
+
 	// If role is unknown or empty, try to infer from identity
 	if role == RoleUnknown || role == Role("") {
 		switch {
@@ -50,14 +53,14 @@ func buildAgentBeadID(identity string, role Role, townRoot string) string {
 		case len(parts) == 2 && parts[1] == "refinery":
 			return beads.RefineryBeadIDWithPrefix(getPrefix(parts[0]), parts[0])
 		case len(parts) == 2:
-			// Assume rig/name is a polecat
-			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[1])
+			// Assume rig/name is a polecat - uses hq- prefix for town beads (fix for gt-myc)
+			return beads.PolecatBeadIDTown(townName, parts[0], parts[1])
 		case len(parts) == 3 && parts[1] == "crew":
 			// rig/crew/name - crew member
 			return beads.CrewBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
 		case len(parts) == 3 && parts[1] == "polecats":
-			// rig/polecats/name - explicit polecat
-			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
+			// rig/polecats/name - explicit polecat - uses hq- prefix for town beads (fix for gt-myc)
+			return beads.PolecatBeadIDTown(townName, parts[0], parts[2])
 		default:
 			return ""
 		}
@@ -80,11 +83,12 @@ func buildAgentBeadID(identity string, role Role, townRoot string) string {
 		return ""
 	case RolePolecat:
 		// Handle both 2-part (rig/name) and 3-part (rig/polecats/name) formats
+		// Polecat agent beads use hq- prefix for town beads (fix for gt-myc)
 		if len(parts) == 3 && parts[1] == "polecats" {
-			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[2])
+			return beads.PolecatBeadIDTown(townName, parts[0], parts[2])
 		}
 		if len(parts) >= 2 {
-			return beads.PolecatBeadIDWithPrefix(getPrefix(parts[0]), parts[0], parts[1])
+			return beads.PolecatBeadIDTown(townName, parts[0], parts[1])
 		}
 		return ""
 	case RoleCrew:
@@ -362,8 +366,16 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 	var hookBead *beads.Issue
 
 	if agentBeadID != "" {
+		// FIX (gt-0da72f): Use the correct beads location for rig agents.
+		// Rig agents (witness, refinery, crew) are stored in rig beads,
+		// not the local beads or town beads.
+		agentBeads := b
+		if townRoot != "" && roleCtx.Rig != "" && roleCtx.Role != RoleMayor && roleCtx.Role != RoleDeacon {
+			rigPath := filepath.Join(townRoot, roleCtx.Rig)
+			agentBeads = beads.New(rigPath)
+		}
 		// Try to fetch the agent bead
-		agentBead, err := b.Show(agentBeadID)
+		agentBead, err := agentBeads.Show(agentBeadID)
 		if err == nil && agentBead != nil && agentBead.Type == "agent" {
 			status.AgentBeadID = agentBeadID
 
@@ -375,8 +387,22 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 				// Fetch the bead on the hook
 				hookBead, err = b.Show(agentBead.HookBead)
 				if err != nil {
-					// Hook bead referenced but not found - report error but continue
-					hookBead = nil
+					// Hook bead not found in rig's beads - check town beads
+					// This handles cross-database references (e.g., agent bead in rig, work in town)
+					if !isTownLevelRole(target) && townRoot != "" {
+						townBeadsDir := filepath.Join(townRoot, ".beads")
+						if _, err := os.Stat(townBeadsDir); err == nil {
+							townB := beads.New(townRoot)
+							hookBead, err = townB.Show(agentBead.HookBead)
+							if err != nil {
+								// Not found in town beads either
+								hookBead = nil
+							}
+						}
+					}
+					if hookBead == nil {
+						// Still not found - will fall through to fallback approach
+					}
 				}
 			}
 		}
@@ -416,6 +442,23 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		})
 		if err != nil {
 			return fmt.Errorf("listing hooked beads: %w", err)
+		}
+
+		// For rig-level agents (polecat/witness/refinery), also check town beads
+		// since hooked work might be in the town beads location (hq- prefix)
+		if len(hookedBeads) == 0 && !isTownLevelRole(target) && townRoot != "" {
+			townBeadsDir := filepath.Join(townRoot, ".beads")
+			if _, err := os.Stat(townBeadsDir); err == nil {
+				townB := beads.New(townRoot)
+				townHookedBeads, err := townB.List(beads.ListOptions{
+					Status:   beads.StatusHooked,
+					Assignee: target,
+					Priority: -1,
+				})
+				if err == nil && len(townHookedBeads) > 0 {
+					hookedBeads = townHookedBeads
+				}
+			}
 		}
 
 		// If no hooked beads found, also check in_progress beads assigned to this agent.

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/runtime"
@@ -110,7 +111,7 @@ func (c *ClaudeSettingsCheck) Run(ctx *CheckContext) *CheckResult {
 
 	fixHint := "Run 'gt doctor --fix' to update settings and restart affected agents"
 	if hasModifiedFiles {
-		fixHint = "Run 'gt doctor --fix' to fix safe issues. Files with local modifications require manual review."
+		fixHint = "Run 'gt doctor --fix' to fix issues. Files with local modifications will be renamed to .bak files."
 	}
 
 	return &CheckResult{
@@ -127,18 +128,31 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 	var files []staleSettingsInfo
 
 	// Check for STALE settings at town root (~/gt/.claude/settings.json)
-	// This is WRONG - settings here pollute ALL child workspaces via directory traversal.
+	// A regular file here is WRONG - it pollutes ALL child workspaces via directory traversal.
 	// Mayor settings should be at ~/gt/mayor/.claude/ instead.
+	// However, a symlink pointing to mayor/.claude/settings.json is CORRECT -
+	// the mayor session runs from town root and needs this symlink to find its hooks.
 	staleTownRootSettings := filepath.Join(townRoot, ".claude", "settings.json")
 	if fileExists(staleTownRootSettings) {
-		files = append(files, staleSettingsInfo{
-			path:          staleTownRootSettings,
-			agentType:     "mayor",
-			sessionName:   "hq-mayor",
-			wrongLocation: true,
-			gitStatus:     c.getGitFileStatus(staleTownRootSettings),
-			missing:       []string{"should be at mayor/.claude/settings.json, not town root"},
-		})
+		isValidSymlink := false
+		if info, err := os.Lstat(staleTownRootSettings); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if target, err := os.Readlink(staleTownRootSettings); err == nil {
+				expectedTarget := filepath.Join("..", "mayor", ".claude", "settings.json")
+				if target == expectedTarget {
+					isValidSymlink = true
+				}
+			}
+		}
+		if !isValidSymlink {
+			files = append(files, staleSettingsInfo{
+				path:          staleTownRootSettings,
+				agentType:     "mayor",
+				sessionName:   "hq-mayor",
+				wrongLocation: true,
+				gitStatus:     c.getGitFileStatus(staleTownRootSettings),
+				missing:       []string{"should be a symlink to mayor/.claude/settings.json, not a regular file"},
+			})
+		}
 	}
 
 	// Check for STALE CLAUDE.md at town root (~/gt/CLAUDE.md)
@@ -259,7 +273,14 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 				if !crewEntry.IsDir() || crewEntry.Name() == ".claude" {
 					continue
 				}
-				crewWrongSettings := filepath.Join(crewDir, crewEntry.Name(), ".claude", "settings.json")
+				crewClaudeDir := filepath.Join(crewDir, crewEntry.Name(), ".claude")
+				// Skip if .claude is a symlink to the shared parent directory.
+				// Crew workers use `.claude -> ../.claude` symlinks so all workers
+				// share crew/.claude/settings.json (the correct location).
+				if isSymlinkToSharedDir(crewClaudeDir, filepath.Join(crewDir, ".claude")) {
+					continue
+				}
+				crewWrongSettings := filepath.Join(crewClaudeDir, "settings.json")
 				if fileExists(crewWrongSettings) {
 					files = append(files, staleSettingsInfo{
 						path:          crewWrongSettings,
@@ -293,14 +314,27 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 				// Check for wrong settings in both structures:
 				// Old structure: polecats/<name>/.claude/settings.json
 				// New structure: polecats/<name>/<rigname>/.claude/settings.json
-				wrongPaths := []string{
-					filepath.Join(polecatsDir, pcEntry.Name(), ".claude", "settings.json"),
-					filepath.Join(polecatsDir, pcEntry.Name(), rigName, ".claude", "settings.json"),
+				wrongPaths := []struct {
+					claudeDir    string
+					settingsPath string
+				}{
+					{
+						filepath.Join(polecatsDir, pcEntry.Name(), ".claude"),
+						filepath.Join(polecatsDir, pcEntry.Name(), ".claude", "settings.json"),
+					},
+					{
+						filepath.Join(polecatsDir, pcEntry.Name(), rigName, ".claude"),
+						filepath.Join(polecatsDir, pcEntry.Name(), rigName, ".claude", "settings.json"),
+					},
 				}
-				for _, pcWrongSettings := range wrongPaths {
-					if fileExists(pcWrongSettings) {
+				for _, wp := range wrongPaths {
+					// Skip if .claude is a symlink to the shared parent directory.
+					if isSymlinkToSharedDir(wp.claudeDir, filepath.Join(polecatsDir, ".claude")) {
+						continue
+					}
+					if fileExists(wp.settingsPath) {
 						files = append(files, staleSettingsInfo{
-							path:          pcWrongSettings,
+							path:          wp.settingsPath,
 							agentType:     "polecat",
 							rigName:       rigName,
 							sessionName:   fmt.Sprintf("gt-%s-%s", rigName, pcEntry.Name()),
@@ -317,8 +351,8 @@ func (c *ClaudeSettingsCheck) findSettingsFiles(townRoot string) []staleSettings
 
 // checkSettings compares a settings file against the expected template.
 // Returns a list of what's missing.
-// agentType is reserved for future role-specific validation.
-func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
+// agentType is used for role-specific validation (autonomous vs interactive).
+func (c *ClaudeSettingsCheck) checkSettings(path, agentType string) []string {
 	var missing []string
 
 	// Read the actual settings
@@ -335,9 +369,8 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 	// Check for required elements based on template
 	// All templates should have:
 	// 1. enabledPlugins
-	// 2. PATH export in hooks
-	// 3. Stop hook with gt costs record (for autonomous)
-	// 4. gt nudge deacon session-started in SessionStart
+	// 2. Stop hook with gt costs record (for autonomous)
+	// 3. gt nudge deacon session-started in SessionStart
 
 	// Check enabledPlugins
 	if _, ok := actual["enabledPlugins"]; !ok {
@@ -350,11 +383,6 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 		return append(missing, "hooks")
 	}
 
-	// Check SessionStart hook has PATH export
-	if !c.hookHasPattern(hooks, "SessionStart", "PATH=") {
-		missing = append(missing, "PATH export")
-	}
-
 	// Check SessionStart hook has deacon nudge
 	if !c.hookHasPattern(hooks, "SessionStart", "gt nudge deacon session-started") {
 		missing = append(missing, "deacon nudge")
@@ -363,6 +391,39 @@ func (c *ClaudeSettingsCheck) checkSettings(path, _ string) []string {
 	// Check Stop hook exists with gt costs record (for all roles)
 	if !c.hookHasPattern(hooks, "Stop", "gt costs record") {
 		missing = append(missing, "Stop hook")
+	}
+
+	// Check Stop hook has turn-check (turn enforcement)
+	if !c.hookHasPattern(hooks, "Stop", "gt decision turn-check") {
+		missing = append(missing, "turn-check hook")
+	}
+
+	// Check UserPromptSubmit hook has bd decision check --inject
+	if !c.hookHasPattern(hooks, "UserPromptSubmit", "bd decision check --inject") {
+		missing = append(missing, "decision check hook")
+	}
+
+	// Check UserPromptSubmit hook has turn-clear (turn enforcement)
+	if !c.hookHasPattern(hooks, "UserPromptSubmit", "gt decision turn-clear") {
+		missing = append(missing, "turn-clear hook")
+	}
+
+	// Check PostToolUse hook has turn-mark (turn enforcement)
+	if !c.hookHasPattern(hooks, "PostToolUse", "gt decision turn-mark") {
+		missing = append(missing, "turn-mark hook")
+	}
+
+	// Check PostToolUse hook has inject drain (queue-based injection pipeline)
+	if !c.hookHasPattern(hooks, "PostToolUse", "gt inject drain") {
+		missing = append(missing, "inject drain hook")
+	}
+
+	// Check SessionStart hook has mail inject (autonomous roles only).
+	// Interactive roles (mayor, crew) receive mail via UserPromptSubmit instead.
+	if isAutonomousAgentType(agentType) {
+		if !c.hookHasPattern(hooks, "SessionStart", "gt mail check --inject") {
+			missing = append(missing, "mail inject hook")
+		}
 	}
 
 	return missing
@@ -439,23 +500,32 @@ func (c *ClaudeSettingsCheck) hookHasPattern(hooks map[string]any, hookName, pat
 }
 
 // Fix deletes stale settings files and restarts affected agents.
-// Files with local modifications are skipped to avoid losing user changes.
+// Files with local modifications are renamed to .bak.<timestamp> instead of being skipped.
 func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 	var errors []string
-	var skipped []string
+	var renamed []string
 	t := tmux.NewTmux()
 
 	for _, sf := range c.staleSettings {
-		// Skip files with local modifications - require manual review
+		wasRenamed := false
+
+		// Files with local modifications get renamed to preserve changes
 		if sf.wrongLocation && sf.gitStatus == gitStatusTrackedModified {
-			skipped = append(skipped, fmt.Sprintf("%s: has local modifications, skipping", sf.path))
-			continue
+			backupPath := fmt.Sprintf("%s.bak.%d", sf.path, time.Now().Unix())
+			if err := os.Rename(sf.path, backupPath); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to rename %s to backup: %v", sf.path, err))
+				continue
+			}
+			renamed = append(renamed, fmt.Sprintf("%s → %s", sf.path, backupPath))
+			wasRenamed = true
 		}
 
-		// Delete the stale settings file
-		if err := os.Remove(sf.path); err != nil {
-			errors = append(errors, fmt.Sprintf("failed to delete %s: %v", sf.path, err))
-			continue
+		// Delete the stale settings file (skip if already renamed)
+		if !wasRenamed {
+			if err := os.Remove(sf.path); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to delete %s: %v", sf.path, err))
+				continue
+			}
 		}
 
 		// Also delete parent .claude directory if empty
@@ -467,10 +537,19 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 			mayorDir := filepath.Join(ctx.TownRoot, "mayor")
 
 			// For mayor settings.json at town root, create at mayor/.claude/
+			// and symlink from town root so the mayor session (which runs from
+			// town root) can find its hooks.
 			if sf.agentType == "mayor" && strings.HasSuffix(claudeDir, ".claude") && !strings.Contains(sf.path, "/mayor/") {
 				if err := os.MkdirAll(mayorDir, 0755); err == nil {
 					runtimeConfig := config.ResolveRoleAgentConfig("mayor", ctx.TownRoot, mayorDir)
 					_ = runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig)
+				}
+				// Create symlink from town root to mayor settings
+				townClaudeDir := filepath.Join(ctx.TownRoot, ".claude")
+				symlinkPath := filepath.Join(townClaudeDir, "settings.json")
+				if err := os.MkdirAll(townClaudeDir, 0755); err == nil {
+					relTarget := filepath.Join("..", "mayor", ".claude", "settings.json")
+					_ = os.Symlink(relTarget, symlinkPath)
 				}
 			}
 
@@ -521,10 +600,11 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 		}
 	}
 
-	// Report skipped files as warnings, not errors
-	if len(skipped) > 0 {
-		for _, s := range skipped {
-			fmt.Printf("  Warning: %s\n", s)
+	// Report renamed files as info
+	if len(renamed) > 0 {
+		fmt.Printf("  Renamed files with local modifications (backups preserved):\n")
+		for _, r := range renamed {
+			fmt.Printf("    %s\n", r)
 		}
 	}
 
@@ -532,6 +612,36 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 		return fmt.Errorf("%s", strings.Join(errors, "; "))
 	}
 	return nil
+}
+
+// isSymlinkToSharedDir checks if claudeDir is a symlink that resolves to sharedDir.
+// This prevents gt doctor --fix from deleting shared settings files that are
+// correctly symlinked from worker directories (e.g., crew/<name>/.claude -> ../.claude).
+func isSymlinkToSharedDir(claudeDir, sharedDir string) bool {
+	fi, err := os.Lstat(claudeDir)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(claudeDir)
+	if err != nil {
+		return false
+	}
+	sharedResolved, err := filepath.EvalSymlinks(sharedDir)
+	if err != nil {
+		// If the shared dir doesn't exist, compare against the raw path
+		sharedResolved = sharedDir
+	}
+	return resolved == sharedResolved
+}
+
+// isAutonomousAgentType returns true for agent types that use autonomous settings.
+func isAutonomousAgentType(agentType string) bool {
+	switch agentType {
+	case "polecat", "witness", "refinery", "deacon", "boot":
+		return true
+	default:
+		return false
+	}
 }
 
 // fileExists checks if a file exists.

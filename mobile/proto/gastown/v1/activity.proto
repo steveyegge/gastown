@@ -1,0 +1,169 @@
+syntax = "proto3";
+
+package gastown.v1;
+
+option go_package = "github.com/steveyegge/gastown/mobile/gen/gastown/v1";
+
+import "google/protobuf/struct.proto";
+
+// ActivityService provides access to the Gas Town event/activity feed.
+service ActivityService {
+  // ListEvents returns events from the activity feed
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+
+  // WatchEvents streams new events in real-time
+  rpc WatchEvents(WatchEventsRequest) returns (stream ActivityEvent);
+
+  // EmitEvent writes a new event to the activity log
+  rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
+}
+
+// Visibility levels for events
+enum Visibility {
+  VISIBILITY_UNSPECIFIED = 0;
+  VISIBILITY_AUDIT = 1;  // Only in raw events log
+  VISIBILITY_FEED = 2;   // Appears in curated feed
+  VISIBILITY_BOTH = 3;   // Both audit and feed
+}
+
+// Common event types
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_SLING = 1;
+  EVENT_TYPE_HOOK = 2;
+  EVENT_TYPE_UNHOOK = 3;
+  EVENT_TYPE_HANDOFF = 4;
+  EVENT_TYPE_DONE = 5;
+  EVENT_TYPE_MAIL = 6;
+  EVENT_TYPE_SPAWN = 7;
+  EVENT_TYPE_KILL = 8;
+  EVENT_TYPE_NUDGE = 9;
+  EVENT_TYPE_BOOT = 10;
+  EVENT_TYPE_HALT = 11;
+  EVENT_TYPE_SESSION_START = 12;
+  EVENT_TYPE_SESSION_END = 13;
+  EVENT_TYPE_SESSION_DEATH = 14;
+  EVENT_TYPE_MASS_DEATH = 15;
+  EVENT_TYPE_PATROL_STARTED = 16;
+  EVENT_TYPE_POLECAT_CHECKED = 17;
+  EVENT_TYPE_POLECAT_NUDGED = 18;
+  EVENT_TYPE_ESCALATION_SENT = 19;
+  EVENT_TYPE_ESCALATION_ACKED = 20;
+  EVENT_TYPE_ESCALATION_CLOSED = 21;
+  EVENT_TYPE_PATROL_COMPLETE = 22;
+  EVENT_TYPE_MERGE_STARTED = 23;
+  EVENT_TYPE_MERGED = 24;
+  EVENT_TYPE_MERGE_FAILED = 25;
+  EVENT_TYPE_MERGE_SKIPPED = 26;
+  EVENT_TYPE_DECISION_REQUESTED = 27;
+  EVENT_TYPE_DECISION_RESOLVED = 28;
+  EVENT_TYPE_HOOK_ERROR = 29;
+}
+
+// ActivityEvent represents an event in the activity feed
+message ActivityEvent {
+  // Timestamp in RFC3339 format
+  string timestamp = 1;
+
+  // Source of the event (e.g., "gt")
+  string source = 2;
+
+  // Type of event (string for flexibility with custom types)
+  string type = 3;
+
+  // Actor who triggered the event (e.g., "gastown/crew/joe")
+  string actor = 4;
+
+  // Event payload as a JSON object
+  google.protobuf.Struct payload = 5;
+
+  // Visibility level
+  Visibility visibility = 6;
+
+  // Summary (for curated feed events)
+  string summary = 7;
+
+  // Count (for aggregated events)
+  int32 count = 8;
+}
+
+// EventFilter specifies criteria for filtering events
+message EventFilter {
+  // Filter by event types (empty = all types)
+  repeated string types = 1;
+
+  // Filter by actor (empty = all actors)
+  string actor = 2;
+
+  // Filter by rig (empty = all rigs)
+  string rig = 3;
+
+  // Filter by visibility (UNSPECIFIED = all)
+  Visibility visibility = 4;
+
+  // Only return events after this timestamp (RFC3339)
+  string after = 5;
+
+  // Only return events before this timestamp (RFC3339)
+  string before = 6;
+}
+
+// ListEventsRequest requests events from the activity feed
+message ListEventsRequest {
+  // Filter criteria
+  EventFilter filter = 1;
+
+  // Maximum number of events to return (default: 100, max: 1000)
+  int32 limit = 2;
+
+  // Read from curated feed (true) or raw events (false)
+  bool curated = 3;
+}
+
+// ListEventsResponse returns events from the activity feed
+message ListEventsResponse {
+  // List of events
+  repeated ActivityEvent events = 1;
+
+  // Total count (may be > len(events) if limited)
+  int32 total_count = 2;
+}
+
+// WatchEventsRequest requests real-time event streaming
+message WatchEventsRequest {
+  // Filter criteria for events to receive
+  EventFilter filter = 1;
+
+  // Include initial backfill of recent events (default: false)
+  bool include_backfill = 2;
+
+  // Number of events to backfill (default: 10, max: 100)
+  int32 backfill_count = 3;
+
+  // Watch curated feed (true) or raw events (false)
+  bool curated = 4;
+}
+
+// EmitEventRequest writes a new event to the activity log
+message EmitEventRequest {
+  // Event type (required)
+  string type = 1;
+
+  // Actor (required)
+  string actor = 2;
+
+  // Event payload
+  google.protobuf.Struct payload = 3;
+
+  // Visibility level (default: VISIBILITY_FEED)
+  Visibility visibility = 4;
+}
+
+// EmitEventResponse confirms event was written
+message EmitEventResponse {
+  // Timestamp of the written event
+  string timestamp = 1;
+
+  // Success flag
+  bool success = 2;
+}

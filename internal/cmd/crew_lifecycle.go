@@ -309,13 +309,60 @@ func runCrewStart(cmd *cobra.Command, args []string) error {
 		townRoot = filepath.Dir(r.Path)
 	}
 	accountsPath := constants.MayorAccountsPath(townRoot)
-	claudeConfigDir, _, _ := config.ResolveAccountConfigDir(accountsPath, crewAccount)
+	resolvedAccount, err := config.ResolveAccount(accountsPath, crewAccount)
+	if err != nil {
+		return fmt.Errorf("resolving account: %w", err)
+	}
+
+	// Validate that the account has credentials before starting
+	// This prevents OAuth prompts from appearing in crew sessions
+	if err := config.ValidateAccountAuth(resolvedAccount); err != nil {
+		return err
+	}
+
+	// Extract account fields (handle nil account)
+	var claudeConfigDir, authToken, baseURL string
+	if resolvedAccount != nil {
+		claudeConfigDir = resolvedAccount.ConfigDir
+		authToken = resolvedAccount.AuthToken
+		baseURL = resolvedAccount.BaseURL
+	}
+
+	// Validate --hook flag: only valid when starting a single crew member
+	if crewHook != "" && len(crewNames) != 1 {
+		return fmt.Errorf("--hook requires exactly one crew member name (got %d)", len(crewNames))
+	}
 
 	// Build start options (shared across all crew members)
 	opts := crew.StartOptions{
 		Account:         crewAccount,
 		ClaudeConfigDir: claudeConfigDir,
 		AgentOverride:   crewAgentOverride,
+		AuthToken:       authToken,
+		BaseURL:         baseURL,
+		HookBead:        crewHook,
+	}
+
+	// Sync workspaces from origin if enabled (default: true, unless --no-sync)
+	shouldSync := crewSync && !crewNoSync
+	if shouldSync {
+		fmt.Printf("Syncing %d workspace(s) from origin...\n", len(crewNames))
+		for _, name := range crewNames {
+			// Skip sync for workspaces that don't exist yet (will be created fresh)
+			if _, err := crewMgr.Get(name); err == nil {
+				result, err := crewMgr.Pristine(name)
+				if err != nil {
+					fmt.Printf("  %s %s/%s: sync failed: %v\n", style.WarningPrefix, rigName, name, err)
+				} else if result.PullError != "" {
+					fmt.Printf("  %s %s/%s: pull warning: %s\n", style.WarningPrefix, rigName, name, result.PullError)
+				} else if result.Pulled {
+					fmt.Printf("  %s %s/%s: synced\n", style.Dim.Render("↓"), rigName, name)
+				} else {
+					fmt.Printf("  %s %s/%s: up to date\n", style.Dim.Render("○"), rigName, name)
+				}
+			}
+		}
+		fmt.Println()
 	}
 
 	// Start each crew member in parallel

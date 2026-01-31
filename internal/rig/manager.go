@@ -78,6 +78,7 @@ type RigConfig struct {
 	GitURL        string       `json:"git_url"`                  // repository URL
 	LocalRepo     string       `json:"local_repo,omitempty"`     // optional local reference repo
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
+	TargetBranch  string       `json:"target_branch,omitempty"`  // override for merge target (e.g., release/v1.0)
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
 	Beads         *BeadsConfig `json:"beads,omitempty"`
 }
@@ -415,17 +416,30 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 
 		// Initialize bd database if it doesn't exist.
 		// beads.db is gitignored so it won't exist after clone - we need to create it.
-		// bd init --prefix will create the database and auto-import from issues.jsonl.
+		// Use --no-auto-import to configure custom types BEFORE importing (bd-3q6.10).
 		if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
-			cmd := exec.Command("bd", "init", "--prefix", opts.BeadsPrefix) // opts.BeadsPrefix validated earlier
+			// Check if town-level beads uses Dolt backend - inherit it
+			townBeadsDir := filepath.Join(m.townRoot, ".beads")
+			townBackend := beads.DetectBackend(townBeadsDir)
+			initArgs := []string{"init", "--prefix", opts.BeadsPrefix, "--no-auto-import"} // opts.BeadsPrefix validated earlier
+			if townBackend == "dolt" {
+				initArgs = append(initArgs, "--backend", "dolt")
+			}
+			cmd := exec.Command("bd", initArgs...)
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
 				fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
 			}
 			// Configure custom types for Gas Town (beads v0.46.0+)
+			// IMPORTANT: This must run BEFORE any auto-import to avoid validation failures (bd-3q6.10).
 			configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 			configCmd.Dir = mayorRigPath
 			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
+
+			// Trigger JSONL import now that custom types are configured.
+			syncCmd := exec.Command("bd", "sync")
+			syncCmd.Dir = mayorRigPath
+			_, _ = syncCmd.CombinedOutput() // Ignore errors - JSONL might not exist yet
 		}
 	}
 
@@ -626,10 +640,25 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	beadsDir := filepath.Join(rigPath, ".beads")
 	mayorRigBeads := filepath.Join(rigPath, "mayor", "rig", ".beads")
 
+	// Check if town-level uses dolt-native mode (shared database via symlinks).
+	townBeadsDir := filepath.Join(m.townRoot, ".beads")
+	townIsDoltNative := beads.IsDoltNative(townBeadsDir)
+
 	// Check if source repo has tracked .beads/ (cloned into mayor/rig).
 	// If so, create a redirect file instead of a new database.
 	if _, err := os.Stat(mayorRigBeads); err == nil {
-		// Tracked beads exist - create redirect to mayor/rig/.beads
+		// Tracked beads exist
+
+		// If town is dolt-native, set up symlinks to shared database.
+		// This keeps tracked config/formulas but shares the dolt database.
+		if townIsDoltNative {
+			if err := beads.SetupDoltNativeSymlinks(mayorRigBeads, townBeadsDir); err != nil {
+				fmt.Printf("   Warning: Could not setup dolt-native symlinks: %v\n", err)
+				// Continue - rig will work but with isolated database
+			}
+		}
+
+		// Create redirect to mayor/rig/.beads
 		if err := os.MkdirAll(beadsDir, 0755); err != nil {
 			return err
 		}
@@ -640,7 +669,27 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		return nil
 	}
 
-	// No tracked beads - create local database
+	// Check if town-level uses Dolt server mode (centralized database).
+	// If so, create a redirect to town-level .beads instead of local database.
+	// Note: townBeadsDir was declared earlier for dolt-native check.
+	if beads.IsDoltServerMode(townBeadsDir) {
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			return err
+		}
+		// Calculate relative path from rig to town-level .beads
+		// rigPath is like ~/gt/gastown, town is ~/gt, so relative is ../.beads
+		relPath, err := filepath.Rel(rigPath, townBeadsDir)
+		if err != nil {
+			relPath = "../.beads" // Fallback to common case
+		}
+		redirectPath := filepath.Join(beadsDir, "redirect")
+		if err := os.WriteFile(redirectPath, []byte(relPath+"\n"), 0644); err != nil {
+			return fmt.Errorf("creating redirect file: %w", err)
+		}
+		return nil
+	}
+
+	// No tracked beads and no server mode - create local database
 	if err := os.MkdirAll(beadsDir, 0755); err != nil {
 		return err
 	}
@@ -656,8 +705,18 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	}
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
-	// Run bd init if available
-	cmd := exec.Command("bd", "init", "--prefix", prefix)
+	// Check if town-level beads uses Dolt backend - inherit it for new rigs
+	// Note: townBeadsDir is declared earlier for dolt-native check
+	townBackend := beads.DetectBackend(townBeadsDir)
+
+	// Run bd init with --no-auto-import to create database WITHOUT importing from JSONL.
+	// This allows us to configure custom types BEFORE the import runs (bd-3q6.10).
+	// Without this, auto-import fails when issues.jsonl contains custom types like merge-request.
+	initArgs := []string{"init", "--prefix", prefix, "--no-auto-import"}
+	if townBackend == "dolt" {
+		initArgs = append(initArgs, "--backend", "dolt")
+	}
+	cmd := exec.Command("bd", initArgs...)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
 	_, err := cmd.CombinedOutput()
@@ -671,13 +730,21 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		}
 	}
 
-	// Configure custom types for Gas Town (agent, role, rig, convoy).
+	// Configure custom types for Gas Town (agent, role, rig, convoy, merge-request, etc).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
+	// IMPORTANT: This must run BEFORE any auto-import to avoid validation failures (bd-3q6.10).
 	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	configCmd.Dir = rigPath
 	configCmd.Env = filteredEnv
 	// Ignore errors - older beads versions don't need this
 	_, _ = configCmd.CombinedOutput()
+
+	// Trigger JSONL import now that custom types are configured.
+	// bd sync will import from issues.jsonl and validate types correctly.
+	syncCmd := exec.Command("bd", "sync")
+	syncCmd.Dir = rigPath
+	syncCmd.Env = filteredEnv
+	_, _ = syncCmd.CombinedOutput() // Ignore errors - JSONL might not exist yet
 
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
@@ -1142,9 +1209,30 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 	return os.WriteFile(claudePath, []byte(bootstrap), 0644)
 }
 
-// createPatrolHooks creates .claude/settings.json with hooks for patrol roles.
+// claudeSettings represents the Claude Code settings.json structure for hook merging.
+type claudeSettings struct {
+	EnabledPlugins map[string]bool                `json:"enabledPlugins,omitempty"`
+	Hooks          map[string][]claudeHookMatcher `json:"hooks,omitempty"`
+}
+
+// claudeHookMatcher represents a hook matcher entry.
+type claudeHookMatcher struct {
+	Matcher string       `json:"matcher"`
+	Hooks   []claudeHook `json:"hooks"`
+}
+
+// claudeHook represents an individual hook command.
+type claudeHook struct {
+	Type    string `json:"type"`
+	Command string `json:"command,omitempty"`
+}
+
+// createPatrolHooks creates or updates .claude/settings.json with hooks for patrol roles.
 // These hooks trigger gt prime on session start and inject mail, enabling
 // autonomous patrol execution for Witness and Refinery roles.
+//
+// IMPORTANT: This function merges patrol hooks into existing settings rather than
+// overwriting them. This preserves hooks from claude-flow or other sources.
 func (m *Manager) createPatrolHooks(workspacePath string, runtimeConfig *config.RuntimeConfig) error {
 	if runtimeConfig == nil || runtimeConfig.Hooks == nil || runtimeConfig.Hooks.Provider != "claude" {
 		return nil
@@ -1158,47 +1246,101 @@ func (m *Manager) createPatrolHooks(workspacePath string, runtimeConfig *config.
 		return fmt.Errorf("creating settings dir: %w", err)
 	}
 
-	// Standard patrol hooks - same as deacon
-	hooksJSON := `{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt prime && gt mail check --inject"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt prime"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gt mail check --inject"
-          }
-        ]
-      }
-    ]
-  }
-}
-`
 	settingsPath := filepath.Join(settingsDir, runtimeConfig.Hooks.SettingsFile)
-	return os.WriteFile(settingsPath, []byte(hooksJSON), 0600)
+
+	// Define the patrol hooks we want to ensure exist
+	patrolHooks := map[string][]claudeHookMatcher{
+		"SessionStart": {
+			{
+				Matcher: "",
+				Hooks: []claudeHook{
+					{Type: "command", Command: "gt prime && gt mail check --inject"},
+				},
+			},
+		},
+		"PreCompact": {
+			{
+				Matcher: "",
+				Hooks: []claudeHook{
+					{Type: "command", Command: "gt prime"},
+				},
+			},
+		},
+		"UserPromptSubmit": {
+			{
+				Matcher: "",
+				Hooks: []claudeHook{
+					{Type: "command", Command: "gt mail check --inject"},
+				},
+			},
+		},
+	}
+
+	// Read existing settings if present
+	var settings claudeSettings
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			// If existing file is invalid JSON, start fresh but warn
+			fmt.Printf("Warning: could not parse existing %s, will recreate: %v\n", settingsPath, err)
+			settings = claudeSettings{}
+		}
+	}
+
+	// Initialize hooks map if nil
+	if settings.Hooks == nil {
+		settings.Hooks = make(map[string][]claudeHookMatcher)
+	}
+
+	// Merge patrol hooks into existing settings
+	for hookType, patrolMatchers := range patrolHooks {
+		for _, patrolMatcher := range patrolMatchers {
+			for _, patrolHook := range patrolMatcher.Hooks {
+				if !m.hasHookCommand(settings.Hooks[hookType], patrolHook.Command) {
+					// Add this patrol hook to existing matchers or create new one
+					settings.Hooks[hookType] = m.mergeHookMatcher(settings.Hooks[hookType], patrolMatcher.Matcher, patrolHook)
+				}
+			}
+		}
+	}
+
+	// Write merged settings
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling settings: %w", err)
+	}
+
+	return os.WriteFile(settingsPath, data, 0600)
+}
+
+// hasHookCommand checks if any matcher in the hook list contains the specified command.
+func (m *Manager) hasHookCommand(matchers []claudeHookMatcher, command string) bool {
+	for _, matcher := range matchers {
+		for _, hook := range matcher.Hooks {
+			if hook.Command == command {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mergeHookMatcher adds a hook to existing matchers or creates a new matcher entry.
+// If a matcher with the same pattern exists, appends the hook to it.
+// Otherwise creates a new matcher entry with the hook.
+func (m *Manager) mergeHookMatcher(matchers []claudeHookMatcher, pattern string, hook claudeHook) []claudeHookMatcher {
+	// Look for existing matcher with the same pattern
+	for i, matcher := range matchers {
+		if matcher.Matcher == pattern {
+			matchers[i].Hooks = append(matchers[i].Hooks, hook)
+			return matchers
+		}
+	}
+
+	// No matching pattern found, create new matcher
+	return append(matchers, claudeHookMatcher{
+		Matcher: pattern,
+		Hooks:   []claudeHook{hook},
+	})
 }
 
 // seedPatrolMolecules creates patrol molecule prototypes in the rig's beads database.

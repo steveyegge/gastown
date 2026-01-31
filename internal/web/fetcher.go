@@ -202,13 +202,12 @@ type trackedIssueInfo struct {
 
 // getTrackedIssues fetches tracked issues for a convoy.
 func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo {
-	dbPath := filepath.Join(f.townBeads, "beads.db")
+	// Use bd CLI instead of direct sqlite3 access to support both SQLite and Dolt backends
+	cmd := exec.Command("bd", "dep", "list", convoyID, "--json")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 
-	// Query tracked dependencies from SQLite
-	safeConvoyID := strings.ReplaceAll(convoyID, "'", "''")
-	query := fmt.Sprintf(`SELECT depends_on_id, type FROM dependencies WHERE issue_id = '%s' AND type = 'tracks'`, safeConvoyID)
-	stdout, err := runCmd(cmdTimeout, "sqlite3", "-json", dbPath, query)
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		return nil
 	}
 
@@ -220,9 +219,12 @@ func (f *LiveConvoyFetcher) getTrackedIssues(convoyID string) []trackedIssueInfo
 		return nil
 	}
 
-	// Collect issue IDs (normalize external refs)
+	// Filter for "tracks" type dependencies and collect issue IDs (normalize external refs)
 	issueIDs := make([]string, 0, len(deps))
 	for _, dep := range deps {
+		if dep.Type != "tracks" {
+			continue
+		}
 		issueID := dep.DependsOnID
 		if strings.HasPrefix(issueID, "external:") {
 			parts := strings.SplitN(issueID, ":", 3)

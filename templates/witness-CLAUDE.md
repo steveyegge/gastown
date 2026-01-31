@@ -169,6 +169,19 @@ gt mail send mayor/ -s "RECOVERY_NEEDED {{RIG}}/<polecat>" -m "..."  # Escalate
 
 ---
 
+## Agent Advice
+
+When you run `gt prime`, you may see an "📝 Agent Advice" section with dynamic
+guidance. This is created by operators based on observed patterns. Pay attention
+to advice scoped to:
+- **[Global]** - all agents
+- **[Witness]** - all witnesses
+- **[{{RIG}}]** - agents in your rig
+
+See [docs/concepts/agent-advice.md](docs/concepts/agent-advice.md) for more.
+
+---
+
 ## Do NOT
 
 - **Nuke polecats with unpushed work** - always check-recovery first

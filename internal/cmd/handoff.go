@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
@@ -296,7 +298,25 @@ func resolveRoleToSession(role string) (string, error) {
 		return fmt.Sprintf("gt-%s-refinery", rig), nil
 
 	default:
-		// Assume it's a direct session name (e.g., gt-gastown-crew-max)
+		// FIX (hq-cc7214.25): Check if the name is a crew member in any rig
+		// Before assuming it's a direct session name, scan all rigs for crew/<name>
+		townRoot := detectTownRootFromCwd()
+		if townRoot != "" {
+			rigs, err := os.ReadDir(townRoot)
+			if err == nil {
+				for _, rigEntry := range rigs {
+					if !rigEntry.IsDir() || strings.HasPrefix(rigEntry.Name(), ".") {
+						continue
+					}
+					crewPath := filepath.Join(townRoot, rigEntry.Name(), "crew", role)
+					if info, err := os.Stat(crewPath); err == nil && info.IsDir() {
+						// Found a crew member with this name
+						return fmt.Sprintf("gt-%s-crew-%s", rigEntry.Name(), role), nil
+					}
+				}
+			}
+		}
+		// Not a crew member - assume it's a direct session name (e.g., gt-gastown-crew-max)
 		return role, nil
 	}
 }
@@ -640,17 +660,63 @@ func handoffRemoteSession(t *tmux.Tmux, targetSession, restartCmd string) error 
 }
 
 // getSessionPane returns the pane identifier for a session's main pane.
+// Includes retry logic to handle race conditions when called immediately after
+// session creation (tmux new-session may return before pane is queryable).
+//
+// The race condition occurs because tmux new-session returns before the session
+// is fully initialized and queryable via list-panes. This is especially common
+// on slower systems or under load. We use 30 retries at 100ms intervals (3 seconds
+// total) which provides ample time for tmux to initialize.
 func getSessionPane(sessionName string) (string, error) {
-	// Get the pane ID for the first pane in the session
-	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}").Output()
-	if err != nil {
-		return "", err
+	const maxRetries = 30
+	const retryDelay = 100 * time.Millisecond
+	debug := os.Getenv("GT_DEBUG_SLING") != ""
+
+	if debug {
+		fmt.Fprintf(os.Stderr, "[sling-debug] getSessionPane: looking for session %q\n", sessionName)
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 0 || lines[0] == "" {
-		return "", fmt.Errorf("no panes found in session")
+
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		// Get the pane ID for the first pane in the session
+		cmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}")
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err != nil {
+			// Capture stderr for better error diagnosis
+			stderrStr := strings.TrimSpace(stderr.String())
+			if stderrStr != "" {
+				lastErr = fmt.Errorf("%w: %s", err, stderrStr)
+			} else if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+				lastErr = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
+			} else {
+				lastErr = err
+			}
+			if debug && i%5 == 0 {
+				// Check if session exists at all
+				hasCmd := exec.Command("tmux", "has-session", "-t", "="+sessionName)
+				hasErr := hasCmd.Run()
+				fmt.Fprintf(os.Stderr, "[sling-debug] retry %d: list-panes failed: %v, has-session: %v\n", i, lastErr, hasErr)
+			}
+			time.Sleep(retryDelay)
+			continue
+		}
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(lines) == 0 || lines[0] == "" {
+			lastErr = fmt.Errorf("no panes found in session")
+			if debug {
+				fmt.Fprintf(os.Stderr, "[sling-debug] retry %d: session exists but no panes\n", i)
+			}
+			time.Sleep(retryDelay)
+			continue
+		}
+		if debug {
+			fmt.Fprintf(os.Stderr, "[sling-debug] found pane %s after %d retries\n", lines[0], i)
+		}
+		return lines[0], nil
 	}
-	return lines[0], nil
+	return "", fmt.Errorf("pane lookup failed after %d retries: %w", maxRetries, lastErr)
 }
 
 // sendHandoffMail sends a handoff mail to self and auto-hooks it.
@@ -689,7 +755,7 @@ func sendHandoffMail(subject, message string) (string, error) {
 	// Create mail bead directly using bd create with --silent to get the ID
 	// Mail goes to town-level beads (hq- prefix)
 	args := []string{
-		"create", subject,
+		"--no-daemon", "create", subject,
 		"--type", "message",
 		"--assignee", agentID,
 		"-d", message,
@@ -722,7 +788,7 @@ func sendHandoffMail(subject, message string) (string, error) {
 	}
 
 	// Auto-hook the created mail bead
-	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
+	hookCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=hooked", "--assignee="+agentID)
 	hookCmd.Dir = townRoot
 	hookCmd.Env = append(os.Environ(), "BEADS_DIR="+filepath.Join(townRoot, ".beads"))
 	hookCmd.Stderr = os.Stderr
@@ -773,7 +839,7 @@ func looksLikeBeadID(s string) bool {
 // hookBeadForHandoff attaches a bead to the current agent's hook.
 func hookBeadForHandoff(beadID string) error {
 	// Verify the bead exists first
-	verifyCmd := exec.Command("bd", "show", beadID, "--json")
+	verifyCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json")
 	if err := verifyCmd.Run(); err != nil {
 		return fmt.Errorf("bead '%s' not found", beadID)
 	}
@@ -792,7 +858,7 @@ func hookBeadForHandoff(beadID string) error {
 	}
 
 	// Pin the bead using bd update (discovery-based approach)
-	pinCmd := exec.Command("bd", "update", beadID, "--status=pinned", "--assignee="+agentID)
+	pinCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--status=pinned", "--assignee="+agentID)
 	pinCmd.Stderr = os.Stderr
 	if err := pinCmd.Run(); err != nil {
 		return fmt.Errorf("pinning bead: %w", err)

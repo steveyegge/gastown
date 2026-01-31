@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
@@ -11,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
+	crewtui "github.com/steveyegge/gastown/internal/tui/crew"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -19,6 +21,23 @@ func runCrewAdd(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Launch TUI wizard if --tui flag is set
+	if crewTUI {
+		currentRig := crewRig
+		if currentRig == "" {
+			currentRig, _ = inferRigFromCwd(townRoot)
+		}
+		if currentRig == "" {
+			currentRig = "gastown" // fallback
+		}
+		m := crewtui.NewAddModel(townRoot, currentRig)
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			return fmt.Errorf("running TUI: %w", err)
+		}
+		return nil
 	}
 
 	// Load rigs config
@@ -56,7 +75,10 @@ func runCrewAdd(cmd *cobra.Command, args []string) error {
 	crewGit := git.NewGit(r.Path)
 	crewMgr := crew.NewManager(r, crewGit)
 
-	bd := beads.New(beads.ResolveBeadsDir(r.Path))
+	// Use town-level beads for agent beads (hq- prefix).
+	// Agent beads are coordination artifacts accessible to all rigs,
+	// and the mail router validates recipients against town beads.
+	bd := beads.New(beads.ResolveBeadsDir(townRoot))
 
 	// Track results
 	var created []string
@@ -97,9 +119,10 @@ func runCrewAdd(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Path: %s\n", worker.ClonePath)
 		fmt.Printf("  Branch: %s\n", worker.Branch)
 
-		// Create agent bead for the crew worker
-		prefix := beads.GetPrefixForRig(townRoot, rigName)
-		crewID := beads.CrewBeadIDWithPrefix(prefix, rigName, name)
+		// Create agent bead for the crew worker in town beads (hq- prefix).
+		// Town-level storage ensures mail routing can validate recipients.
+		townName, _ := workspace.GetTownName(townRoot)
+		crewID := beads.CrewBeadIDTown(townName, rigName, name)
 		if _, err := bd.Show(crewID); err != nil {
 			// Agent bead doesn't exist, create it
 			fields := &beads.AgentFields{

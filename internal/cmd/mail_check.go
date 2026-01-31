@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/inject"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -60,7 +63,7 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 		return enc.Encode(result)
 	}
 
-	// Inject mode: output system-reminder if mail exists
+	// Inject mode: queue system-reminder if mail exists
 	if mailCheckInject {
 		if unread > 0 {
 			// Get subjects for context
@@ -70,14 +73,30 @@ func runMailCheck(cmd *cobra.Command, args []string) error {
 				subjects = append(subjects, fmt.Sprintf("- %s from %s: %s", msg.ID, msg.From, msg.Subject))
 			}
 
-			fmt.Println("<system-reminder>")
-			fmt.Printf("You have %d unread message(s) in your inbox.\n\n", unread)
+			// Build the system-reminder content
+			var buf bytes.Buffer
+			buf.WriteString("<system-reminder>\n")
+			buf.WriteString(fmt.Sprintf("You have %d unread message(s) in your inbox.\n\n", unread))
 			for _, s := range subjects {
-				fmt.Println(s)
+				buf.WriteString(s + "\n")
 			}
-			fmt.Println()
-			fmt.Println("Run 'gt mail inbox' to see your messages, or 'gt mail read <id>' for a specific message.")
-			fmt.Println("</system-reminder>")
+			buf.WriteString("\n")
+			buf.WriteString("Run 'gt mail inbox' to see your messages, or 'gt mail read <id>' for a specific message.\n")
+			buf.WriteString("</system-reminder>\n")
+
+			// Check if we should queue or output directly
+			sessionID := runtime.SessionIDFromEnv()
+			if sessionID != "" {
+				// Session ID available - use queue
+				queue := inject.NewQueue(workDir, sessionID)
+				if err := queue.Enqueue(inject.TypeMail, buf.String()); err != nil {
+					// Fall back to direct output on queue error
+					fmt.Print(buf.String())
+				}
+			} else {
+				// No session ID - output directly (legacy behavior)
+				fmt.Print(buf.String())
+			}
 		}
 		return nil
 	}

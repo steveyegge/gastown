@@ -1,7 +1,9 @@
 package runtime
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -27,9 +29,15 @@ func TestSessionIDFromEnv_Default(t *testing.T) {
 	os.Unsetenv("GT_SESSION_ID_ENV")
 	os.Unsetenv("CLAUDE_SESSION_ID")
 
+	// Change to a temp dir with no .runtime/session_id file
+	tmpDir := t.TempDir()
+	oldCwd, _ := os.Getwd()
+	defer os.Chdir(oldCwd)
+	os.Chdir(tmpDir)
+
 	result := SessionIDFromEnv()
 	if result != "" {
-		t.Errorf("SessionIDFromEnv() with no env vars should return empty, got %q", result)
+		t.Errorf("SessionIDFromEnv() with no env vars and no persisted file should return empty, got %q", result)
 	}
 }
 
@@ -87,6 +95,81 @@ func TestSessionIDFromEnv_CustomEnvVar(t *testing.T) {
 	result := SessionIDFromEnv()
 	if result != "custom-session-456" {
 		t.Errorf("SessionIDFromEnv() with custom env = %q, want %q", result, "custom-session-456")
+	}
+}
+
+func TestSessionIDFromEnv_PersistedFile(t *testing.T) {
+	// Clear env vars so we fall through to file-based lookup
+	oldGSEnv := os.Getenv("GT_SESSION_ID_ENV")
+	oldClaudeID := os.Getenv("CLAUDE_SESSION_ID")
+	defer func() {
+		if oldGSEnv != "" {
+			os.Setenv("GT_SESSION_ID_ENV", oldGSEnv)
+		} else {
+			os.Unsetenv("GT_SESSION_ID_ENV")
+		}
+		if oldClaudeID != "" {
+			os.Setenv("CLAUDE_SESSION_ID", oldClaudeID)
+		} else {
+			os.Unsetenv("CLAUDE_SESSION_ID")
+		}
+	}()
+	os.Unsetenv("GT_SESSION_ID_ENV")
+	os.Unsetenv("CLAUDE_SESSION_ID")
+
+	// Create a temp dir with .runtime/session_id
+	tmpDir := t.TempDir()
+	runtimeDir := filepath.Join(tmpDir, ".runtime")
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(runtimeDir, "session_id")
+	if err := os.WriteFile(sessionFile, []byte(fmt.Sprintf("persisted-session-abc\n2026-01-28T00:00:00Z\n")), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Change to that directory so readPersistedSessionID finds it
+	oldCwd, _ := os.Getwd()
+	defer os.Chdir(oldCwd)
+	os.Chdir(tmpDir)
+
+	result := SessionIDFromEnv()
+	if result != "persisted-session-abc" {
+		t.Errorf("SessionIDFromEnv() with persisted file = %q, want %q", result, "persisted-session-abc")
+	}
+}
+
+func TestSessionIDFromEnv_EnvTakesPrecedenceOverFile(t *testing.T) {
+	oldGSEnv := os.Getenv("GT_SESSION_ID_ENV")
+	oldClaudeID := os.Getenv("CLAUDE_SESSION_ID")
+	defer func() {
+		if oldGSEnv != "" {
+			os.Setenv("GT_SESSION_ID_ENV", oldGSEnv)
+		} else {
+			os.Unsetenv("GT_SESSION_ID_ENV")
+		}
+		if oldClaudeID != "" {
+			os.Setenv("CLAUDE_SESSION_ID", oldClaudeID)
+		} else {
+			os.Unsetenv("CLAUDE_SESSION_ID")
+		}
+	}()
+	os.Unsetenv("GT_SESSION_ID_ENV")
+	os.Setenv("CLAUDE_SESSION_ID", "env-session-xyz")
+
+	// Create a temp dir with .runtime/session_id (should NOT be used)
+	tmpDir := t.TempDir()
+	runtimeDir := filepath.Join(tmpDir, ".runtime")
+	os.MkdirAll(runtimeDir, 0755)
+	os.WriteFile(filepath.Join(runtimeDir, "session_id"), []byte("file-session-should-not-be-used\n"), 0644)
+
+	oldCwd, _ := os.Getwd()
+	defer os.Chdir(oldCwd)
+	os.Chdir(tmpDir)
+
+	result := SessionIDFromEnv()
+	if result != "env-session-xyz" {
+		t.Errorf("SessionIDFromEnv() should prefer env over file, got %q, want %q", result, "env-session-xyz")
 	}
 }
 

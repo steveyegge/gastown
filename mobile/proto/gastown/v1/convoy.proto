@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package gastown.v1;
+
+option go_package = "github.com/steveyegge/gastown/mobile/gen/gastown/v1;gastownv1";
+
+import "google/protobuf/timestamp.proto";
+import "gastown/v1/common.proto";
+
+// ConvoyService manages convoys - batches of tracked work
+service ConvoyService {
+  // ListConvoys returns convoys filtered by status
+  rpc ListConvoys(ListConvoysRequest) returns (ListConvoysResponse);
+
+  // GetConvoyStatus returns detailed status for a convoy
+  rpc GetConvoyStatus(GetConvoyStatusRequest) returns (GetConvoyStatusResponse);
+
+  // CreateConvoy creates a new convoy tracking issues
+  rpc CreateConvoy(CreateConvoyRequest) returns (CreateConvoyResponse);
+
+  // AddToConvoy adds issues to an existing convoy
+  rpc AddToConvoy(AddToConvoyRequest) returns (AddToConvoyResponse);
+
+  // CloseConvoy closes a convoy
+  rpc CloseConvoy(CloseConvoyRequest) returns (CloseConvoyResponse);
+
+  // WatchConvoys streams convoy updates in real-time
+  rpc WatchConvoys(WatchConvoysRequest) returns (stream ConvoyUpdate);
+}
+
+// Convoy status filter
+enum ConvoyStatusFilter {
+  CONVOY_STATUS_FILTER_UNSPECIFIED = 0;
+  CONVOY_STATUS_FILTER_OPEN = 1;
+  CONVOY_STATUS_FILTER_CLOSED = 2;
+  CONVOY_STATUS_FILTER_ALL = 3;
+}
+
+message ListConvoysRequest {
+  ConvoyStatusFilter status = 1;
+  bool tree = 2;  // Include tracked issues in response
+}
+
+message ListConvoysResponse {
+  repeated Convoy convoys = 1;
+  int32 total = 2;
+}
+
+message GetConvoyStatusRequest {
+  string convoy_id = 1;
+}
+
+message GetConvoyStatusResponse {
+  Convoy convoy = 1;
+  repeated TrackedIssue tracked = 2;
+  int32 completed = 3;
+  int32 total = 4;
+}
+
+message CreateConvoyRequest {
+  string name = 1;
+  repeated string issue_ids = 2;
+  string owner = 3;
+  string notify = 4;
+  string molecule = 5;
+  bool owned = 6;  // Caller-owned convoy
+  string merge_strategy = 7;  // direct, mr, local
+}
+
+message CreateConvoyResponse {
+  Convoy convoy = 1;
+  int32 tracked_count = 2;
+}
+
+message AddToConvoyRequest {
+  string convoy_id = 1;
+  repeated string issue_ids = 2;
+}
+
+message AddToConvoyResponse {
+  Convoy convoy = 1;
+  int32 added_count = 2;
+  bool reopened = 3;  // True if convoy was reopened
+}
+
+message CloseConvoyRequest {
+  string convoy_id = 1;
+  string reason = 2;
+  string notify = 3;
+}
+
+message CloseConvoyResponse {
+  Convoy convoy = 1;
+}
+
+message WatchConvoysRequest {
+  ConvoyStatusFilter status = 1;
+}
+
+message ConvoyUpdate {
+  google.protobuf.Timestamp timestamp = 1;
+  string convoy_id = 2;
+  string update_type = 3;  // created, updated, closed
+  Convoy convoy = 4;
+}
+
+// A convoy tracking batched work
+message Convoy {
+  string id = 1;
+  string title = 2;
+  string status = 3;  // open, closed
+  string owner = 4;
+  string notify = 5;
+  string molecule = 6;
+  bool owned = 7;  // Caller-owned
+  string merge_strategy = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp closed_at = 10;
+  int32 tracked_count = 11;
+  int32 completed_count = 12;
+  string progress = 13;  // e.g., "2/5"
+}
+
+// An issue tracked by a convoy
+message TrackedIssue {
+  string id = 1;
+  string title = 2;
+  string status = 3;  // open, in_progress, hooked, closed
+  string issue_type = 4;  // task, bug, etc.
+  string assignee = 5;  // Assigned agent path
+  string worker = 6;  // Worker currently assigned
+  string worker_age = 7;  // How long worker has been assigned
+}

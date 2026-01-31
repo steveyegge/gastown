@@ -14,7 +14,7 @@ import (
 const MinBeadsVersion = "0.43.0"
 
 // BeadsInstallPath is the go install path for beads.
-const BeadsInstallPath = "github.com/steveyegge/beads/cmd/bd@latest"
+const BeadsInstallPath = "github.com/groblegark/beads/cmd/bd@latest"
 
 // BeadsStatus represents the state of the beads installation.
 type BeadsStatus int

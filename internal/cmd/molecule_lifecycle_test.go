@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 // TestSlingFormulaOnBeadHooksBaseBead verifies that when using
@@ -462,8 +464,8 @@ case "$cmd" in
   show)
     beadID="$1"
     case "$beadID" in
-      gt-gastown-polecat-nux)
-        echo '[{"id":"gt-gastown-polecat-nux","title":"Polecat nux","status":"open","hook_bead":"gt-abc123","agent_state":"working"}]'
+      hq-gastown-polecat-nux)
+        echo '[{"id":"hq-gastown-polecat-nux","title":"Polecat nux","status":"open","hook_bead":"gt-abc123","agent_state":"working"}]'
         ;;
       gt-abc123)
         echo '[{"id":"gt-abc123","title":"Bug to fix","status":"hooked","description":"attached_molecule: gt-wisp-xyz"}]'
@@ -541,6 +543,14 @@ exit /b 0
 			t.Fatalf("write bd stub: %v", err)
 		}
 	}
+
+	// Override the cached bd path to use our stub
+	bdStubPath := filepath.Join(binDir, "bd")
+	if runtime.GOOS == "windows" {
+		bdStubPath = filepath.Join(binDir, "bd.cmd")
+	}
+	cleanup := beads.SetBdPathForTest(bdStubPath)
+	t.Cleanup(cleanup)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GT_ROLE", "polecat")

@@ -86,7 +86,7 @@ func runPark(cmd *cobra.Command, args []string) error {
 	gateID := args[0]
 
 	// Verify gate exists and is open
-	gateCheck := exec.Command("bd", "gate", "show", gateID, "--json")
+	gateCheck := exec.Command("bd", "--no-daemon", "gate", "show", gateID, "--json")
 	gateOutput, err := gateCheck.Output()
 	if err != nil {
 		return fmt.Errorf("gate '%s' not found or not accessible", gateID)
@@ -168,7 +168,7 @@ func runPark(cmd *cobra.Command, args []string) error {
 	}
 
 	// Add agent as waiter on the gate
-	waitCmd := exec.Command("bd", "gate", "wait", gateID, "--notify", agentID)
+	waitCmd := exec.Command("bd", "--no-daemon", "gate", "wait", gateID, "--notify", agentID)
 	if err := waitCmd.Run(); err != nil {
 		// Not fatal - might already be a waiter
 		fmt.Printf("%s Note: could not add as waiter (may already be registered)\n", style.Dim.Render("⚠"))

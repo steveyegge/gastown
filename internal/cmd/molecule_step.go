@@ -403,7 +403,7 @@ func handleStepContinue(cwd, townRoot, _ string, nextStep *beads.Issue, dryRun b
 	}
 
 	// Pin the next step bead
-	pinCmd := exec.Command("bd", "update", nextStep.ID, "--status=pinned", "--assignee="+agentID)
+	pinCmd := exec.Command("bd", "--no-daemon", "update", nextStep.ID, "--status=pinned", "--assignee="+agentID)
 	pinCmd.Dir = gitRoot
 	pinCmd.Stderr = os.Stderr
 	if err := pinCmd.Run(); err != nil {
@@ -576,7 +576,7 @@ func handleMoleculeComplete(cwd, townRoot, moleculeID string, dryRun bool) error
 		})
 		if err == nil && len(pinnedBeads) > 0 {
 			// Unpin by setting status to open
-			unpinCmd := exec.Command("bd", "update", pinnedBeads[0].ID, "--status=open")
+			unpinCmd := exec.Command("bd", "--no-daemon", "update", pinnedBeads[0].ID, "--status=open")
 			unpinCmd.Dir = gitRoot
 			unpinCmd.Stderr = os.Stderr
 			if err := unpinCmd.Run(); err != nil {
@@ -588,10 +588,12 @@ func handleMoleculeComplete(cwd, townRoot, moleculeID string, dryRun bool) error
 	}
 
 	// For polecats, use gt done to signal completion
+	// Note: We use COMPLETED status because the molecule is fully done.
+	// This triggers MR submission to the merge queue.
 	if roleCtx.Role == RolePolecat {
 		fmt.Printf("%s Signaling completion to witness...\n", style.Bold.Render("📤"))
 
-		doneCmd := exec.Command("gt", "done", "--exit", "DEFERRED")
+		doneCmd := exec.Command("gt", "done", "--status", "COMPLETED")
 		doneCmd.Stdout = os.Stdout
 		doneCmd.Stderr = os.Stderr
 		return doneCmd.Run()

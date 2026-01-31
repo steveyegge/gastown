@@ -295,6 +295,8 @@ type agentBead struct {
 // Handles multiple ID formats:
 //   - hq-mayor → mayor/
 //   - hq-deacon → deacon/
+//   - hq-gastown-witness → gastown/witness
+//   - hq-gastown-crew-max → gastown/max
 //   - gt-gastown-crew-max → gastown/max (legacy)
 //   - ppf-pyspark_pipeline_framework-polecat-Toast → pyspark_pipeline_framework/Toast (rig prefix)
 func agentBeadToAddress(bead *agentBead) string {
@@ -304,27 +306,18 @@ func agentBeadToAddress(bead *agentBead) string {
 
 	id := bead.ID
 
-	// Handle hq- prefixed IDs (town-level format)
-	if strings.HasPrefix(id, "hq-") {
-		// Well-known town-level agents
-		if id == "hq-mayor" {
-			return "mayor/"
-		}
-		if id == "hq-deacon" {
-			return "deacon/"
-		}
-
-		// For other hq- agents, fall back to description parsing
-		return parseAgentAddressFromDescription(bead.Description)
-	}
-
-	// Handle gt- prefixed IDs (legacy format)
-	// Also handle rig-prefixed IDs (e.g., ppf-) by extracting rig from description
+	// Parse agent bead IDs by stripping the prefix and extracting components.
+	// Both hq- and gt- prefixed IDs follow the same structure after the prefix:
+	//   <prefix>-<role>                    → town-level singleton (mayor, deacon)
+	//   <prefix>-<rig>-<role>              → rig-level singleton (witness, refinery)
+	//   <prefix>-<rig>-<role>-<name>       → rig-level named agent (crew, polecat)
 	var rest string
-	if strings.HasPrefix(id, "gt-") {
+	if strings.HasPrefix(id, "hq-") {
+		rest = strings.TrimPrefix(id, "hq-")
+	} else if strings.HasPrefix(id, "gt-") {
 		rest = strings.TrimPrefix(id, "gt-")
 	} else {
-		// For rig-prefixed IDs, extract rig and role from description
+		// For rig-prefixed IDs (e.g., ppf-), extract rig and role from description
 		return parseRigAgentAddress(bead)
 	}
 
@@ -332,16 +325,25 @@ func agentBeadToAddress(bead *agentBead) string {
 
 	switch len(parts) {
 	case 1:
-		// Town-level: gt-mayor, gt-deacon
+		// Town-level singleton: hq-mayor → mayor/, gt-deacon → deacon/
 		return parts[0] + "/"
 	case 2:
-		// Rig singleton: gt-gastown-witness
+		// Could be rig singleton or town-level named agent (dogs)
+		if parts[0] == "dog" {
+			// Town-level named: hq-dog-alpha → dog/alpha
+			return "dog/" + parts[1]
+		}
+		// Rig singleton: hq-gastown-witness → gastown/witness
 		return parts[0] + "/" + parts[1]
 	default:
-		// Rig named agent: gt-gastown-crew-max, gt-gastown-polecat-Toast
-		// Skip the role part (parts[1]) and use rig/name format
+		// Rig named agent: hq-gastown-crew-max, gt-gastown-polecat-Toast
+		// Use rig/name format (role is implicit in the bead, not in the address)
 		if len(parts) >= 3 {
-			// Rejoin if name has hyphens: gt-gastown-polecat-my-agent
+			if parts[0] == "dog" {
+				// Town-level dog with hyphenated name: hq-dog-my-dog → dog/my-dog
+				return "dog/" + strings.Join(parts[1:], "-")
+			}
+			// Rejoin if name has hyphens: gt-gastown-polecat-my-agent → gastown/my-agent
 			name := strings.Join(parts[2:], "-")
 			return parts[0] + "/" + name
 		}
@@ -603,10 +605,12 @@ func (r *Router) queryAgentsInDir(beadsDir, descContains string) ([]*agentBead, 
 		return nil, fmt.Errorf("parsing agent query result: %w", err)
 	}
 
-	// Filter for open agents only (closed agents are inactive)
+	// Filter for active agents only (closed agents are inactive).
+	// Agent beads use "pinned" status (required for AttachMolecule, fix: bd-3q6.5-1),
+	// so we must include pinned in addition to open/in_progress.
 	var active []*agentBead
 	for _, agent := range agents {
-		if agent.Status == "open" || agent.Status == "in_progress" {
+		if agent.Status == "open" || agent.Status == "in_progress" || agent.Status == "pinned" {
 			active = append(active, agent)
 		}
 	}
@@ -725,7 +729,12 @@ func (r *Router) validateRecipient(identity string) error {
 		return nil
 	}
 
-	// Query agents from town-level beads
+	// Town-level singletons may not have agent beads but are always valid
+	if identity == "mayor/" || identity == "deacon/" {
+		return nil
+	}
+
+	// Query all agents and check if any match this identity
 	agents, err := r.queryAgents("")
 	if err != nil {
 		return fmt.Errorf("failed to query town agents: %w", err)
@@ -788,6 +797,10 @@ func (r *Router) sendToSingle(msg *Message) error {
 		ccIdentity := AddressToIdentity(cc)
 		labels = append(labels, "cc:"+ccIdentity)
 	}
+	// Add read label if pre-read (bd-bug-mail_inbox_shows_decision_resolutions)
+	if msg.PreRead {
+		labels = append(labels, "read")
+	}
 
 	// Build command: bd create <subject> --type=message --assignee=<recipient> -d <body>
 	args := []string{"create", msg.Subject,
@@ -824,7 +837,8 @@ func (r *Router) sendToSingle(msg *Message) error {
 
 	// Notify recipient if they have an active session (best-effort notification)
 	// Skip notification for self-mail (handoffs to future-self don't need present-self notified)
-	if !isSelfMail(msg.From, msg.To) {
+	// Skip notification if SkipNotify is set (caller is sending a separate nudge - hq-t1wcr5)
+	if !isSelfMail(msg.From, msg.To) && !msg.SkipNotify {
 		_ = r.notifyRecipient(msg)
 	}
 

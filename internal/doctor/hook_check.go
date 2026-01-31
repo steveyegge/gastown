@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/hooks"
 )
 
 // HookAttachmentValidCheck verifies that attached molecules exist and are not closed.
@@ -495,4 +496,84 @@ func dirExists(path string) bool {
 // formatOrphan formats an orphaned handoff for display.
 func (c *OrphanedAttachmentsCheck) formatOrphan(orph orphanedHandoff) string {
 	return fmt.Sprintf("%s: agent %q no longer exists", orph.beadID, orph.agent)
+}
+
+// HookErrorsCheck detects recent hook execution errors.
+// This surfaces errors that were logged via "gt hooks report-error" so they
+// can be investigated rather than silently ignored.
+type HookErrorsCheck struct {
+	FixableCheck
+	errorCount int
+}
+
+// NewHookErrorsCheck creates a new hook errors check.
+func NewHookErrorsCheck() *HookErrorsCheck {
+	return &HookErrorsCheck{
+		FixableCheck: FixableCheck{
+			BaseCheck: BaseCheck{
+				CheckName:        "hook-errors",
+				CheckDescription: "Check for recent hook execution errors",
+				CheckCategory:    CategoryHooks,
+			},
+		},
+	}
+}
+
+// Run checks for recent hook errors.
+func (c *HookErrorsCheck) Run(ctx *CheckContext) *CheckResult {
+	log := hooks.NewErrorLog(ctx.TownRoot)
+
+	// Get errors from the last hour (recent enough to be actionable)
+	errors, err := log.GetRecentErrors(10)
+	if err != nil {
+		// Can't read errors - this is OK, might not exist yet
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No hook error log found",
+		}
+	}
+
+	if len(errors) == 0 {
+		return &CheckResult{
+			Name:    c.Name(),
+			Status:  StatusOK,
+			Message: "No recent hook errors",
+		}
+	}
+
+	c.errorCount = len(errors)
+
+	// Build details list
+	var details []string
+	for _, e := range errors {
+		countStr := ""
+		if e.Count > 1 {
+			countStr = fmt.Sprintf(" (x%d)", e.Count)
+		}
+		details = append(details, fmt.Sprintf("%s [%s] exit %d%s - %s",
+			e.HookType, truncateStr(e.Command, 30), e.ExitCode, countStr, e.Role))
+	}
+
+	return &CheckResult{
+		Name:    c.Name(),
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("Found %d recent hook error(s)", len(errors)),
+		Details: details,
+		FixHint: "View with 'gt hooks errors' or clear with 'gt hooks errors --clear'",
+	}
+}
+
+// truncateStr truncates a string to maxLen characters.
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
+// Fix clears the hook error log.
+func (c *HookErrorsCheck) Fix(ctx *CheckContext) error {
+	log := hooks.NewErrorLog(ctx.TownRoot)
+	return log.ClearErrors()
 }

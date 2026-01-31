@@ -62,7 +62,7 @@ func (m *Manager) Start(agentOverride string) error {
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but agent dead. Kill and recreate.
-		if err := t.KillSession(sessionID); err != nil {
+		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
 	}
@@ -77,6 +77,15 @@ func (m *Manager) Start(agentOverride string) error {
 	runtimeConfig := config.ResolveRoleAgentConfig("mayor", m.townRoot, mayorDir)
 	if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
+	}
+
+	// Symlink settings.json from town root to mayor's settings.
+	// Mayor session runs from townRoot (not mayorDir) per issue #280,
+	// but Claude Code only looks in cwd for .claude/settings.json.
+	// The town root .claude/ dir has other content (commands/, skills/),
+	// so we symlink just the settings.json file.
+	if err := m.ensureTownRootSettingsSymlink(); err != nil {
+		return fmt.Errorf("symlinking mayor settings to town root: %w", err)
 	}
 
 	// Build startup beacon with explicit instructions (matches gt handoff behavior)
@@ -133,6 +142,60 @@ func (m *Manager) Start(agentOverride string) error {
 	return nil
 }
 
+// ensureTownRootSettingsSymlink creates a symlink from townRoot/.claude/settings.json
+// to mayor/.claude/settings.json. The mayor session runs from townRoot (not mayorDir)
+// per issue #280, but Claude Code only looks in cwd for .claude/settings.json.
+// The town root .claude/ directory contains other content (commands/, skills/,
+// settings.local.json), so we symlink just the settings.json file rather than
+// the whole directory.
+func (m *Manager) ensureTownRootSettingsSymlink() error {
+	townClaudeDir := filepath.Join(m.townRoot, ".claude")
+	symlinkPath := filepath.Join(townClaudeDir, "settings.json")
+	mayorSettings := filepath.Join(m.mayorDir(), ".claude", "settings.json")
+
+	// Ensure town root .claude/ directory exists
+	if err := os.MkdirAll(townClaudeDir, 0755); err != nil {
+		return fmt.Errorf("creating town root .claude dir: %w", err)
+	}
+
+	// Check if something already exists at the symlink path
+	if info, err := os.Lstat(symlinkPath); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			// Already a symlink - check if it points to the right place
+			target, err := os.Readlink(symlinkPath)
+			if err == nil {
+				expectedTarget := filepath.Join("..", "mayor", ".claude", "settings.json")
+				if target == expectedTarget {
+					return nil // Already correctly set up
+				}
+			}
+			// Wrong target - remove and recreate
+			if err := os.Remove(symlinkPath); err != nil {
+				return fmt.Errorf("removing stale settings.json symlink: %w", err)
+			}
+		} else {
+			// Regular file - back it up and replace with symlink
+			backupPath := symlinkPath + ".bak"
+			if err := os.Rename(symlinkPath, backupPath); err != nil {
+				return fmt.Errorf("backing up existing settings.json: %w", err)
+			}
+		}
+	}
+
+	// Verify the mayor settings file exists
+	if _, err := os.Stat(mayorSettings); os.IsNotExist(err) {
+		return fmt.Errorf("mayor settings not found at %s", mayorSettings)
+	}
+
+	// Create relative symlink: ../mayor/.claude/settings.json
+	relTarget := filepath.Join("..", "mayor", ".claude", "settings.json")
+	if err := os.Symlink(relTarget, symlinkPath); err != nil {
+		return fmt.Errorf("creating settings.json symlink: %w", err)
+	}
+
+	return nil
+}
+
 // Stop stops the mayor session.
 func (m *Manager) Stop() error {
 	t := tmux.NewTmux()
@@ -151,8 +214,10 @@ func (m *Manager) Stop() error {
 	_ = t.SendKeysRaw(sessionID, "C-c")
 	time.Sleep(100 * time.Millisecond)
 
-	// Kill the session
-	if err := t.KillSession(sessionID); err != nil {
+	// Kill the session with explicit process cleanup.
+	// Claude processes can ignore SIGHUP, so we need to explicitly SIGTERM/SIGKILL
+	// all descendants before killing the tmux session to prevent orphans.
+	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 

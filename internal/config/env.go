@@ -35,6 +35,14 @@ type AgentEnvConfig struct {
 	// BeadsNoDaemon sets BEADS_NO_DAEMON=1 if true
 	// Used for polecats that should bypass the beads daemon
 	BeadsNoDaemon bool
+
+	// AuthToken is an optional ANTHROPIC_AUTH_TOKEN for API authentication.
+	// If set, this takes precedence over OAuth credentials.
+	AuthToken string
+
+	// BaseURL is an optional ANTHROPIC_BASE_URL for custom API endpoints.
+	// Used with AuthToken for alternative API providers (e.g., LiteLLM).
+	BaseURL string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -92,6 +100,11 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Empty values would override tmux session environment
 	if cfg.TownRoot != "" {
 		env["GT_ROOT"] = cfg.TownRoot
+		// Prevent git from walking up to umbrella repo when running in rig worktrees.
+		// This stops accidental commits to the umbrella when running git commands from
+		// intermediate directories (e.g., polecats/) that don't have their own .git.
+		// See: bd-tsk-implement_git_context_protection_both
+		env["GIT_CEILING_DIRECTORIES"] = cfg.TownRoot
 	}
 
 	// Set BEADS_AGENT_NAME for polecat/crew (uses same format as BD_ACTOR)
@@ -103,6 +116,10 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["BEADS_NO_DAEMON"] = "1"
 	}
 
+	// Prevent daemon auto-start race condition (bd-63o).
+	// All agents should use an existing daemon but never try to start one.
+	env["BEADS_AUTO_START_DAEMON"] = "false"
+
 	// Add optional runtime config directory
 	if cfg.RuntimeConfigDir != "" {
 		env["CLAUDE_CONFIG_DIR"] = cfg.RuntimeConfigDir
@@ -111,6 +128,16 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Add session ID env var name if provided
 	if cfg.SessionIDEnv != "" {
 		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
+	}
+
+	// Add optional Anthropic API auth token (for API key authentication)
+	if cfg.AuthToken != "" {
+		env["ANTHROPIC_AUTH_TOKEN"] = cfg.AuthToken
+	}
+
+	// Add optional Anthropic API base URL (for custom endpoints like LiteLLM)
+	if cfg.BaseURL != "" {
+		env["ANTHROPIC_BASE_URL"] = cfg.BaseURL
 	}
 
 	return env

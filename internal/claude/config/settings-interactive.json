@@ -10,7 +10,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt tap guard pr-workflow"
           }
         ]
       },
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt tap guard pr-workflow"
           }
         ]
       },
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\" && gt tap guard pr-workflow"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt tap guard pr-workflow"
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime --hook && gt nudge deacon session-started"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt prime --hook && gt nudge deacon session-started"
           }
         ]
       }
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt prime --hook"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt prime --hook"
           }
         ]
       }
@@ -61,7 +61,27 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt mail check --inject"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && (gt decision auto-close --inject || true) && (gt mail check --inject || true) && (bd decision check --inject || true) && (gt decision turn-clear || true)"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt inject drain --quiet && gt nudge drain --quiet"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt decision turn-mark"
           }
         ]
       }
@@ -72,7 +92,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/go/bin:$HOME/bin:$PATH\" && gt costs record"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && _stdin=$(cat) && echo \"$_stdin\" | gt costs record && echo \"$_stdin\" | gt decision turn-check"
           }
         ]
       }
