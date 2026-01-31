@@ -448,54 +448,67 @@ type PristineResult struct {
 	SyncError  string `json:"sync_error,omitempty"`
 }
 
-// setupClaudeSymlink creates a symlink from the crew worker's .claude directory to the shared
-// crew/.claude directory. Claude Code only looks in the current working directory for
-// .claude/settings.json (no parent directory traversal), so this symlink is required for
-// crew workers to inherit the shared hook configuration.
+// setupClaudeSymlink creates symlinks from the crew worker to the shared crew/ configuration:
+// - .claude/ directory (for settings.json and hooks)
+// - .mcp.json file (for MCP server configuration like Playwright)
 //
-// The symlink is relative to work across different mount points and locations.
+// Claude Code only looks in the current working directory for these files (no parent directory
+// traversal), so symlinks are required for crew workers to inherit shared configuration.
+//
+// The symlinks are relative to work across different mount points and locations.
 // Fix for: hq-cc7214.22 (crew not loading Claude hooks)
+// Fix for: gt-9212oz (crew not loading MCP servers)
 func (m *Manager) setupClaudeSymlink(crewPath string) error {
-	symlinkPath := filepath.Join(crewPath, ".claude")
+	// Set up .claude symlink
+	if err := m.setupSymlink(crewPath, ".claude"); err != nil {
+		return err
+	}
 
-	// Check if something already exists at .claude
+	// Set up .mcp.json symlink for MCP server configuration
+	if err := m.setupSymlink(crewPath, ".mcp.json"); err != nil {
+		// Non-fatal: MCP is optional, .claude is more critical
+		fmt.Printf("Warning: could not set up .mcp.json symlink: %v\n", err)
+	}
+
+	return nil
+}
+
+// setupSymlink creates a symlink from the crew worker to the shared crew/ directory.
+// From: crew/<name>/<target> -> crew/<target>
+// Relative path: ../<target>
+func (m *Manager) setupSymlink(crewPath, target string) error {
+	symlinkPath := filepath.Join(crewPath, target)
+	expectedRelTarget := filepath.Join("..", target)
+
+	// Check if something already exists at the symlink path
 	if info, err := os.Lstat(symlinkPath); err == nil {
 		// If it's already a symlink, check if it points to the right place
 		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(symlinkPath)
-			if err == nil {
-				// Calculate expected relative path to crew/.claude
-				// From: crew/<name>/.claude
-				// To: crew/.claude
-				// Relative: ../.claude
-				expectedTarget := filepath.Join("..", ".claude")
-				if target == expectedTarget {
-					return nil // Already correctly set up
-				}
+			actualTarget, err := os.Readlink(symlinkPath)
+			if err == nil && actualTarget == expectedRelTarget {
+				return nil // Already correctly set up
 			}
 			// Wrong target - remove and recreate
 			if err := os.Remove(symlinkPath); err != nil {
-				return fmt.Errorf("removing stale .claude symlink: %w", err)
+				return fmt.Errorf("removing stale %s symlink: %w", target, err)
 			}
 		} else {
 			// It's a regular file or directory - don't touch it
-			// This could be a legitimate .claude directory from the source repo
+			// This could be legitimate content from the source repo
 			return nil
 		}
 	}
 
-	// Check if the target .claude directory exists
-	targetDir := filepath.Join(m.rig.Path, "crew", ".claude")
-	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
+	// Check if the target exists in shared crew/ directory
+	targetPath := filepath.Join(m.rig.Path, "crew", target)
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
 		// Target doesn't exist - nothing to symlink to
 		return nil
 	}
 
-	// Create relative symlink: ../.claude
-	// From: crew/<name>/.claude -> crew/.claude
-	relTarget := filepath.Join("..", ".claude")
-	if err := os.Symlink(relTarget, symlinkPath); err != nil {
-		return fmt.Errorf("creating .claude symlink: %w", err)
+	// Create relative symlink
+	if err := os.Symlink(expectedRelTarget, symlinkPath); err != nil {
+		return fmt.Errorf("creating %s symlink: %w", target, err)
 	}
 
 	return nil

@@ -117,6 +117,37 @@ func ProvisionFileAfterFail(workDir string) error {
 	return nil
 }
 
+// EnsureMCPConfig ensures .mcp.json exists in the given directory.
+// This configures MCP servers (like Playwright) for Claude Code.
+// If the file already exists, it's left unchanged.
+func EnsureMCPConfig(workDir string) error {
+	return EnsureMCPConfigAt(workDir, ".mcp.json")
+}
+
+// EnsureMCPConfigAt ensures .mcp.json exists at a custom path.
+// If the file already exists, it's left unchanged.
+func EnsureMCPConfigAt(workDir, mcpFile string) error {
+	mcpPath := filepath.Join(workDir, mcpFile)
+
+	// If MCP config already exists, don't overwrite
+	if _, err := os.Stat(mcpPath); err == nil {
+		return nil
+	}
+
+	// Read MCP template
+	content, err := configFS.ReadFile("config/mcp.json")
+	if err != nil {
+		return fmt.Errorf("reading mcp.json template: %w", err)
+	}
+
+	// Write MCP config file
+	if err := os.WriteFile(mcpPath, content, 0644); err != nil {
+		return fmt.Errorf("writing .mcp.json: %w", err)
+	}
+
+	return nil
+}
+
 // EnsureSettingsForAccount ensures settings.json exists for a specific account.
 // If accountConfigDir is provided, settings are installed there (per-account).
 // If accountConfigDir is empty, falls back to workDir (per-workspace).
