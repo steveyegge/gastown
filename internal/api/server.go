@@ -87,6 +87,27 @@ type RigDetailResponse struct {
 	CrewCount    int                    `json:"crew_count" example:"2"`
 }
 
+// CreateRigRequest represents a request to create a new rig
+type CreateRigRequest struct {
+	// Name of the rig (required)
+	Name string `json:"name" example:"my-project" binding:"required"`
+	// Git URL to clone (required)
+	GitURL string `json:"git_url" example:"https://github.com/user/repo.git" binding:"required"`
+	// Optional branch name (defaults to auto-detected from remote)
+	Branch string `json:"branch,omitempty" example:"main"`
+	// Optional beads issue prefix (defaults to derived from name)
+	Prefix string `json:"prefix,omitempty" example:"mp"`
+	// Optional description for the rig
+	Description string `json:"description,omitempty" example:"My awesome project"`
+}
+
+// CreateRigResponse represents the response from creating a rig
+type CreateRigResponse struct {
+	Status string  `json:"status" example:"created"`
+	Rig    RigInfo `json:"rig"`
+	Output string  `json:"output,omitempty"`
+}
+
 // ============================================================================
 // Job (Bead) Types
 // ============================================================================
@@ -421,6 +442,7 @@ func (s *Server) Start() error {
 
 	// Rigs
 	mux.HandleFunc("GET /api/rigs", s.handleListRigs)
+	mux.HandleFunc("POST /api/rigs", s.handleCreateRig)
 	mux.HandleFunc("GET /api/rigs/{rig}", s.handleGetRig)
 
 	// Jobs (Beads)
@@ -511,6 +533,7 @@ func (s *Server) Start() error {
 	fmt.Printf("     GET  /health\n")
 	fmt.Printf("   Rigs:\n")
 	fmt.Printf("     GET  /api/rigs\n")
+	fmt.Printf("     POST /api/rigs\n")
 	fmt.Printf("     GET  /api/rigs/{rig}\n")
 	fmt.Printf("   Jobs:\n")
 	fmt.Printf("     POST /api/rigs/{rig}/jobs\n")
@@ -1341,6 +1364,74 @@ func (s *Server) handleListRigs(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, RigListResponse{
 		Rigs:  rigs,
 		Count: len(rigs),
+	})
+}
+
+// handleCreateRig godoc
+// @Summary Create a new rig
+// @Description Create a new rig by cloning a git repository
+// @Tags rigs
+// @Accept json
+// @Produce json
+// @Param request body CreateRigRequest true "Rig creation request"
+// @Success 201 {object} CreateRigResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/rigs [post]
+func (s *Server) handleCreateRig(w http.ResponseWriter, r *http.Request) {
+	var req CreateRigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	// Validate required fields
+	if req.Name == "" {
+		jsonError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if req.GitURL == "" {
+		jsonError(w, http.StatusBadRequest, "git_url is required")
+		return
+	}
+
+	// Check if rig already exists
+	rigPath := filepath.Join(s.townRoot, req.Name)
+	if _, err := os.Stat(rigPath); err == nil {
+		jsonError(w, http.StatusBadRequest, fmt.Sprintf("rig already exists: %s", req.Name))
+		return
+	}
+
+	// Build gt rig add command
+	args := []string{"rig", "add", req.Name, req.GitURL}
+	if req.Branch != "" {
+		args = append(args, "--branch", req.Branch)
+	}
+	if req.Prefix != "" {
+		args = append(args, "--prefix", req.Prefix)
+	}
+
+	stdout, stderr, err := s.runGT(args...)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("gt rig add failed: %s %s", stderr, err))
+		return
+	}
+
+	// Check if rig was created
+	configPath := filepath.Join(rigPath, "config.json")
+	beadsPath := filepath.Join(rigPath, ".beads")
+	_, hasConfig := os.Stat(configPath)
+	_, hasBeads := os.Stat(beadsPath)
+
+	jsonResponse(w, http.StatusCreated, CreateRigResponse{
+		Status: "created",
+		Rig: RigInfo{
+			Name:      req.Name,
+			Path:      rigPath,
+			HasConfig: hasConfig == nil,
+			HasBeads:  hasBeads == nil,
+		},
+		Output: stdout,
 	})
 }
 
