@@ -488,21 +488,41 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	}
 }
 
-// wakeRigAgents wakes the witness and refinery for a rig after polecat dispatch.
-// This ensures the patrol agents are ready to monitor and merge.
+// wakeRigAgents wakes the witness for a rig after polecat dispatch.
+// This ensures the witness is ready to monitor. The refinery is nudged
+// separately when an MR is actually created (by nudgeRefinery).
 func wakeRigAgents(rigName string) {
 	// Boot the rig (idempotent - no-op if already running)
 	bootCmd := exec.Command("gt", "rig", "boot", rigName)
 	_ = bootCmd.Run() // Ignore errors - rig might already be running
 
-	// Nudge witness and refinery to clear any backoff
+	// Nudge witness to clear any backoff
 	t := tmux.NewTmux()
 	witnessSession := fmt.Sprintf("gt-%s-witness", rigName)
+
+	// Silent nudge - session might not exist yet
+	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
+}
+
+// nudgeRefinery wakes the refinery for a rig after an MR is created.
+// This ensures the refinery picks up the new merge request promptly
+// instead of waiting for its next poll cycle.
+func nudgeRefinery(rigName, message string) {
 	refinerySession := fmt.Sprintf("gt-%s-refinery", rigName)
 
-	// Silent nudges - sessions might not exist yet
-	_ = t.NudgeSession(witnessSession, "Polecat dispatched - check for work")
-	_ = t.NudgeSession(refinerySession, "Polecat dispatched - check for merge requests")
+	// Test hook: log nudge for test observability (same pattern as GT_TEST_ATTACHED_MOLECULE_LOG)
+	if logPath := os.Getenv("GT_TEST_NUDGE_LOG"); logPath != "" {
+		entry := fmt.Sprintf("nudge:%s:%s\n", refinerySession, message)
+		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			_, _ = f.WriteString(entry)
+			_ = f.Close()
+		}
+		return // Don't actually nudge tmux in tests
+	}
+
+	t := tmux.NewTmux()
+	_ = t.NudgeSession(refinerySession, message)
 }
 
 // isPolecatTarget checks if the target string refers to a polecat.

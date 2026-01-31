@@ -415,6 +415,9 @@ func runDone(cmd *cobra.Command, args []string) error {
 			// Success output
 			fmt.Printf("%s Work submitted to merge queue\n", style.Bold.Render("✓"))
 			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
+
+			// Nudge refinery to pick up the new MR
+			nudgeRefinery(rigName, fmt.Sprintf("MR submitted: %s branch=%s", mrID, branch))
 		}
 		fmt.Printf("  Source: %s\n", branch)
 		fmt.Printf("  Target: %s\n", target)
