@@ -17,7 +17,7 @@ func isClaudeCmd(cmd string) bool {
 func TestBuiltinPresets(t *testing.T) {
 	t.Parallel()
 	// Ensure all built-in presets are accessible
-	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	presets := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentDevin}
 
 	for _, preset := range presets {
 		info := GetAgentPreset(preset)
@@ -50,7 +50,8 @@ func TestGetAgentPresetByName(t *testing.T) {
 		{"cursor", AgentCursor, false},
 		{"auggie", AgentAuggie, false},
 		{"amp", AgentAmp, false},
-		{"aider", "", true},               // Not built-in, can be added via config
+{"devin", AgentDevin, false},
+		{"aider", "", true},                // Not built-in, can be added via config
 		{"opencode", AgentOpenCode, false}, // Built-in multi-model CLI agent
 		{"unknown", "", true},
 	}
@@ -74,15 +75,18 @@ func TestGetAgentPresetByName(t *testing.T) {
 func TestRuntimeConfigFromPreset(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		preset      AgentPreset
-		wantCommand string
+		preset           AgentPreset
+		wantCommand      string
+		wantPromptPrefix string
 	}{
-		{AgentClaude, "claude"}, // Note: claude may resolve to full path
-		{AgentGemini, "gemini"},
-		{AgentCodex, "codex"},
-		{AgentCursor, "cursor-agent"},
-		{AgentAuggie, "auggie"},
-		{AgentAmp, "amp"},
+{AgentClaude, "claude", ""},
+		{AgentGemini, "gemini", ""},
+		{AgentCodex, "codex", ""},
+		{AgentCursor, "cursor-agent", ""},
+		{AgentAuggie, "auggie", ""},
+		{AgentAmp, "amp", ""},
+		{AgentDevin, "devin", "--"},    // Devin requires -- before prompt
+		{AgentOpenCode, "opencode", ""}, // OpenCode multi-model CLI
 	}
 
 	for _, tt := range tests {
@@ -97,6 +101,10 @@ func TestRuntimeConfigFromPreset(t *testing.T) {
 			} else if rc.Command != tt.wantCommand {
 				t.Errorf("RuntimeConfigFromPreset(%s).Command = %v, want %v",
 					tt.preset, rc.Command, tt.wantCommand)
+			}
+			if rc.PromptPrefix != tt.wantPromptPrefix {
+				t.Errorf("RuntimeConfigFromPreset(%s).PromptPrefix = %v, want %v",
+					tt.preset, rc.PromptPrefix, tt.wantPromptPrefix)
 			}
 		})
 	}
@@ -129,6 +137,7 @@ func TestIsKnownPreset(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
+		{"devin", true},
 		{"aider", false},    // Not built-in, can be added via config
 		{"opencode", true},  // Built-in multi-model CLI agent
 		{"unknown", false},
@@ -342,6 +351,7 @@ func TestSupportsSessionResume(t *testing.T) {
 		{"cursor", true},
 		{"auggie", true},
 		{"amp", true},
+		{"devin", true},
 		{"unknown", false},
 	}
 
@@ -366,6 +376,7 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 		{"cursor", ""},   // Cursor uses --resume with chatId directly
 		{"auggie", ""},   // Auggie uses --resume directly
 		{"amp", ""},      // AMP uses 'threads continue' subcommand
+		{"devin", ""},    // Devin uses -c for continue
 		{"unknown", ""},
 	}
 
@@ -390,6 +401,7 @@ func TestGetProcessNames(t *testing.T) {
 		{"cursor", []string{"cursor-agent"}},
 		{"auggie", []string{"auggie"}},
 		{"amp", []string{"amp"}},
+{"devin", []string{"devin"}},
 		{"opencode", []string{"opencode", "node", "bun"}},
 		{"unknown", []string{"node", "claude"}}, // Falls back to Claude's process
 	}
@@ -413,7 +425,7 @@ func TestGetProcessNames(t *testing.T) {
 func TestListAgentPresetsMatchesConstants(t *testing.T) {
 	t.Parallel()
 	// Ensure all AgentPreset constants are returned by ListAgentPresets
-	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp}
+	allConstants := []AgentPreset{AgentClaude, AgentGemini, AgentCodex, AgentCursor, AgentAuggie, AgentAmp, AgentDevin}
 	presets := ListAgentPresets()
 
 	// Convert to map for quick lookup
@@ -474,6 +486,11 @@ func TestAgentCommandGeneration(t *testing.T) {
 			preset:       AgentAmp,
 			wantCommand:  "amp",
 			wantContains: []string{"--dangerously-allow-all", "--no-ide"},
+		},
+		{
+			preset:       AgentDevin,
+			wantCommand:  "devin",
+			wantContains: []string{"--permission-mode", "dangerous"},
 		},
 	}
 
@@ -550,6 +567,53 @@ func TestCursorAgentPreset(t *testing.T) {
 	}
 	if info.ResumeStyle != "flag" {
 		t.Errorf("cursor ResumeStyle = %q, want flag", info.ResumeStyle)
+	}
+}
+
+func TestDevinAgentPreset(t *testing.T) {
+	t.Parallel()
+	info := GetAgentPreset(AgentDevin)
+	if info == nil {
+		t.Fatal("devin preset not found")
+	}
+
+	if info.Command != "devin" {
+		t.Errorf("devin command = %q, want devin", info.Command)
+	}
+
+	hasPermissionMode := false
+	hasDangerous := false
+	for _, arg := range info.Args {
+		if arg == "--permission-mode" {
+			hasPermissionMode = true
+		}
+		if arg == "dangerous" {
+			hasDangerous = true
+		}
+	}
+	if !hasPermissionMode || !hasDangerous {
+		t.Errorf("devin args %v missing --permission-mode dangerous", info.Args)
+	}
+
+	if len(info.ProcessNames) == 0 {
+		t.Error("devin ProcessNames is empty")
+	}
+	if info.ProcessNames[0] != "devin" {
+		t.Errorf("devin ProcessNames[0] = %q, want devin", info.ProcessNames[0])
+	}
+
+	if info.ResumeFlag != "-c" {
+		t.Errorf("devin ResumeFlag = %q, want -c", info.ResumeFlag)
+	}
+	if info.ResumeStyle != "flag" {
+		t.Errorf("devin ResumeStyle = %q, want flag", info.ResumeStyle)
+	}
+
+	if info.SupportsHooks {
+		t.Error("devin SupportsHooks should be false")
+	}
+	if info.SupportsForkSession {
+		t.Error("devin SupportsForkSession should be false")
 	}
 }
 

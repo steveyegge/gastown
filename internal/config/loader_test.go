@@ -917,33 +917,75 @@ func TestRuntimeConfigBuildCommandWithPrompt(t *testing.T) {
 			wantContains: []string{"--dangerously-skip-permissions"},
 			isClaudeCmd:  true,
 		},
-		{
+{
 			name:         "with prompt",
 			rc:           DefaultRuntimeConfig(),
 			prompt:       "gt prime",
-			wantContains: []string{"--dangerously-skip-permissions", `"gt prime"`},
+			wantContains: []string{"--dangerously-skip-permissions", `$'gt prime'`},
 			isClaudeCmd:  true,
 		},
 		{
 			name:         "prompt with quotes",
 			rc:           DefaultRuntimeConfig(),
 			prompt:       `Hello "world"`,
-			wantContains: []string{"--dangerously-skip-permissions", `"Hello \"world\""`},
+			wantContains: []string{"--dangerously-skip-permissions", `$'Hello "world"'`},
 			isClaudeCmd:  true,
 		},
 		{
 			name:         "config initial prompt used if no override",
 			rc:           &RuntimeConfig{Command: "aider", Args: []string{}, InitialPrompt: "/help"},
 			prompt:       "",
-			wantContains: []string{"aider", `"/help"`},
+			wantContains: []string{"aider", `$'/help'`},
 			isClaudeCmd:  false,
 		},
 		{
 			name:         "override takes precedence over config",
 			rc:           &RuntimeConfig{Command: "aider", Args: []string{}, InitialPrompt: "/help"},
 			prompt:       "custom prompt",
-			wantContains: []string{"aider", `"custom prompt"`},
+			wantContains: []string{"aider", `$'custom prompt'`},
 			isClaudeCmd:  false,
+		},
+		{
+			name:         "prompt prefix (devin style)",
+			rc:           &RuntimeConfig{Command: "devin", Args: []string{"--permission-mode", "dangerous"}, PromptPrefix: "--"},
+			prompt:       "hello world",
+			wantContains: []string{"devin", "--permission-mode", "dangerous", "--", `$'hello world'`},
+			isClaudeCmd:  false,
+		},
+		{
+			name:         "prompt prefix with no prompt",
+			rc:           &RuntimeConfig{Command: "devin", Args: []string{"--permission-mode", "dangerous"}, PromptPrefix: "--"},
+			prompt:       "",
+			wantContains: []string{"devin", "--permission-mode", "dangerous"},
+			isClaudeCmd:  false,
+		},
+		{
+			name:         "prompt with backticks",
+			rc:           DefaultRuntimeConfig(),
+			prompt:       "Run `gt hook` now",
+			wantContains: []string{"--dangerously-skip-permissions", "$'Run `gt hook` now'"},
+			isClaudeCmd:  true,
+		},
+		{
+			name:         "prompt with dollar sign",
+			rc:           DefaultRuntimeConfig(),
+			prompt:       "Value is $HOME",
+			wantContains: []string{"--dangerously-skip-permissions", `$'Value is $HOME'`},
+			isClaudeCmd:  true,
+		},
+		{
+			name:         "prompt with newlines",
+			rc:           DefaultRuntimeConfig(),
+			prompt:       "line1\nline2\nline3",
+			wantContains: []string{"--dangerously-skip-permissions", `$'line1\nline2\nline3'`},
+			isClaudeCmd:  true,
+		},
+		{
+			name:         "prompt with single quotes",
+			rc:           DefaultRuntimeConfig(),
+			prompt:       "It's working",
+			wantContains: []string{"--dangerously-skip-permissions", `$'It\'s working'`},
+			isClaudeCmd:  true,
 		},
 	}
 
@@ -1226,6 +1268,38 @@ func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
 	}
 	if !strings.Contains(cmd, "gemini --approval-mode yolo") {
 		t.Fatalf("expected gemini command in output: %q", cmd)
+	}
+}
+
+func TestBuildPolecatStartupCommandWithDevinOverride(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildPolecatStartupCommandWithAgentOverride("testrig", "toast", rigPath, "", "devin")
+	if err != nil {
+		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
+	}
+	if !strings.Contains(cmd, "GT_ROLE=testrig/polecats/toast") {
+		t.Fatalf("expected GT_ROLE export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_RIG=testrig") {
+		t.Fatalf("expected GT_RIG export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_POLECAT=toast") {
+		t.Fatalf("expected GT_POLECAT export in command: %q", cmd)
+	}
+	if !strings.Contains(cmd, "devin --permission-mode dangerous") {
+		t.Fatalf("expected devin command in output: %q", cmd)
 	}
 }
 
@@ -3407,42 +3481,52 @@ func TestQuoteForShell(t *testing.T) {
 		{
 			name:  "simple string",
 			input: "hello",
-			want:  `"hello"`,
+			want:  `$'hello'`,
 		},
 		{
 			name:  "string with double quote",
 			input: `say "hello"`,
-			want:  `"say \"hello\""`,
+			want:  `$'say "hello"'`,
 		},
 		{
 			name:  "string with backslash",
 			input: `path\to\file`,
-			want:  `"path\\to\\file"`,
+			want:  `$'path\\to\\file'`,
 		},
 		{
 			name:  "string with backtick",
 			input: "run `cmd`",
-			want:  "\"run \\`cmd\\`\"",
+			want:  "$'run `cmd`'",
 		},
 		{
 			name:  "string with dollar sign",
 			input: "cost is $100",
-			want:  `"cost is \$100"`,
+			want:  `$'cost is $100'`,
 		},
 		{
 			name:  "variable expansion prevented",
 			input: "$HOME/path",
-			want:  `"\$HOME/path"`,
+			want:  `$'$HOME/path'`,
 		},
 		{
 			name:  "empty string",
 			input: "",
-			want:  `""`,
+			want:  `$''`,
 		},
 		{
 			name:  "combined special chars",
 			input: "`$HOME`",
-			want:  "\"\\`\\$HOME\\`\"",
+			want:  "$'`$HOME`'",
+		},
+		{
+			name:  "string with single quote",
+			input: "it's working",
+			want:  `$'it\'s working'`,
+		},
+		{
+			name:  "string with newline",
+			input: "line1\nline2",
+			want:  `$'line1\nline2'`,
 		},
 	}
 
@@ -3513,5 +3597,103 @@ func TestBuildStartupCommandWithAgentOverride_NoGTAgentWhenNoOverride(t *testing
 	// Should NOT include GT_AGENT when no override is used
 	if strings.Contains(cmd, "GT_AGENT=") {
 		t.Errorf("expected no GT_AGENT in command when no override, got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_UsesGTRootFromEnvVars(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// Create town settings with devin as default agent
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "devin"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Call with empty rigPath but GT_ROOT in envVars (like mayor startup does)
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{
+			"GT_ROLE": "mayor",
+			"GT_ROOT": townRoot,
+		},
+		"", // empty rigPath
+		"",
+		"", // no override
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should use devin from town settings, not fall back to claude
+	if !strings.Contains(cmd, "devin") {
+		t.Errorf("expected devin (from town default_agent) in command, got: %q", cmd)
+	}
+	if strings.Contains(cmd, "claude") {
+		t.Errorf("did not expect claude fallback when GT_ROOT is provided: %q", cmd)
+	}
+}
+
+func TestBuildAgentStartupCommandWithDevinAndPrompt(t *testing.T) {
+	t.Parallel()
+	ResetRegistryForTesting()
+	townRoot := t.TempDir()
+
+	// Create town settings with devin as default agent
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "devin"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// This is what mayor.Start() calls - with a beacon prompt
+	beacon := "test beacon message"
+	cmd, err := BuildAgentStartupCommandWithAgentOverride("mayor", "", townRoot, "", beacon, "")
+	if err != nil {
+		t.Fatalf("BuildAgentStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should use devin with --permission-mode dangerous
+	if !strings.Contains(cmd, "devin --permission-mode dangerous") {
+		t.Errorf("expected 'devin --permission-mode dangerous' in command, got: %q", cmd)
+	}
+
+	// Should have -- before the prompt (Devin's PromptPrefix)
+	if !strings.Contains(cmd, "-- $'test beacon message'") {
+		t.Errorf("expected '-- $'test beacon message'' in command (Devin requires -- before prompt), got: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommand_UsesGTRootFromEnvVars(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+
+	// Create town settings with devin as default agent
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "devin"
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Call with empty rigPath but GT_ROOT in envVars (like mayor startup does)
+	cmd := BuildStartupCommand(
+		map[string]string{
+			"GT_ROLE": "mayor",
+			"GT_ROOT": townRoot,
+		},
+		"", // empty rigPath
+		"",
+	)
+
+	// Should use devin from town settings, not fall back to claude
+	if !strings.Contains(cmd, "devin") {
+		t.Errorf("expected devin (from town default_agent) in command, got: %q", cmd)
+	}
+	if strings.Contains(cmd, "claude") {
+		t.Errorf("did not expect claude fallback when GT_ROOT is provided: %q", cmd)
+	}
+	// Should have --permission-mode dangerous
+	if !strings.Contains(cmd, "--permission-mode dangerous") {
+		t.Errorf("expected --permission-mode dangerous in command, got: %q", cmd)
 	}
 }

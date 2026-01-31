@@ -54,11 +54,15 @@ func (m *Manager) Start(agentOverride string) error {
 	t := tmux.NewTmux()
 	sessionID := m.SessionName()
 
+	// Resolve agent config to get expected process names for detection
+	agentCfg, _, _ := config.ResolveAgentConfigWithOverride(m.townRoot, "", agentOverride)
+	expectedCmds := config.ExpectedPaneCommands(agentCfg)
+
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
 		// Session exists - check if agent is actually running (healthy vs zombie)
-		if t.IsAgentAlive(sessionID) {
+		if t.IsAgentRunning(sessionID, expectedCmds...) {
 			return ErrAlreadyRunning
 		}
 		// Zombie - tmux alive but agent dead. Kill and recreate.
@@ -115,7 +119,7 @@ func (m *Manager) Start(agentOverride string) error {
 	theme := tmux.MayorTheme()
 	_ = t.ConfigureGasTownSession(sessionID, theme, "", "Mayor", "coordinator")
 
-	// Wait for Claude to start - fatal if Claude fails to launch
+	// Wait for agent to start - fatal if agent fails to launch
 	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
