@@ -51,3 +51,10 @@ CLAUDE.md
 
 # Embedded formulas are committed so `go install @latest` works
 # Run `go generate ./...` after modifying .beads/formulas/
+
+# Gas Town (added by gt)
+.beads/
+.logs/
+logs/
+settings/
+.events.jsonl

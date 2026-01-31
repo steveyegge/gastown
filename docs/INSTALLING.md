@@ -44,8 +44,8 @@ sudo apt update
 sudo apt install -y git
 
 # Install Go (apt version may be outdated, use official installer)
-wget https://go.dev/dl/go1.24.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.24.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.24.12.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.24.12.linux-amd64.tar.gz
 echo 'export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin' >> ~/.bashrc
 source ~/.bashrc
 
@@ -268,13 +268,13 @@ ssh -T git@github.com
 git config --global credential.helper cache
 ```
 
-### Beads sync issues
+### Beads issues
 
-If beads aren't syncing across clones:
+If experiencing beads problems:
 
 ```bash
 cd ~/gt/myproject/mayor/rig
-bd sync --status           # Check sync status
+bd status                  # Check database health
 bd doctor                  # Run beads health check
 ```
 

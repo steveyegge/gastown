@@ -44,8 +44,8 @@ type Issue struct {
 
 	// Agent bead slots (type=agent only)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
-	RoleBead   string `json:"role_bead,omitempty"`   // Role definition bead (shared)
 	AgentState string `json:"agent_state,omitempty"` // Agent lifecycle state (spawning, working, done, stuck)
+	// Note: role_bead field removed - role definitions are now config-based
 
 	// Counts from list output
 	DependencyCount int `json:"dependency_count,omitempty"`
@@ -114,6 +114,11 @@ type Beads struct {
 	workDir  string
 	beadsDir string // Optional BEADS_DIR override for cross-database access
 	isolated bool   // If true, suppress inherited beads env vars (for test isolation)
+
+	// Lazy-cached town root for routing resolution.
+	// Populated on first call to getTownRoot() to avoid filesystem walk on every operation.
+	townRoot     string
+	searchedRoot bool
 }
 
 // New creates a new Beads wrapper for the given directory.
@@ -142,6 +147,26 @@ func (b *Beads) getActor() string {
 		return ""
 	}
 	return os.Getenv("BD_ACTOR")
+}
+
+// getTownRoot returns the Gas Town root directory, using lazy caching.
+// The town root is found by walking up from workDir looking for mayor/town.json.
+// Returns empty string if not in a Gas Town project.
+func (b *Beads) getTownRoot() string {
+	if !b.searchedRoot {
+		b.townRoot = FindTownRoot(b.workDir)
+		b.searchedRoot = true
+	}
+	return b.townRoot
+}
+
+// getResolvedBeadsDir returns the beads directory this wrapper is operating on.
+// This follows any redirects and returns the actual beads directory path.
+func (b *Beads) getResolvedBeadsDir() string {
+	if b.beadsDir != "" {
+		return b.beadsDir
+	}
+	return ResolveBeadsDir(b.workDir)
 }
 
 // Init initializes a new beads database in the working directory.
@@ -302,7 +327,7 @@ func (b *Beads) List(opts ListOptions) ([]*Issue, error) {
 }
 
 // ListByAssignee returns all issues assigned to a specific assignee.
-// The assignee is typically in the format "rig/polecatName" (e.g., "gastown/Toast").
+// The assignee is typically in the format "rig/polecats/polecatName" (e.g., "gastown/polecats/Toast").
 func (b *Beads) ListByAssignee(assignee string) ([]*Issue, error) {
 	return b.List(ListOptions{
 		Status:   "all", // Include both open and closed for state derivation
@@ -722,18 +747,15 @@ This is physics, not politeness. Gas Town is a steam engine - you are a piston.
 - ` + "`gt mol status`" + ` - Check your hooked work
 - ` + "`gt mail inbox`" + ` - Check for messages
 - ` + "`bd ready`" + ` - Find available work (no blockers)
-- ` + "`bd sync`" + ` - Sync beads changes
 
 ## Session Close Protocol
 
 Before signaling completion:
 1. git status (check what changed)
 2. git add <files> (stage code changes)
-3. bd sync (commit beads changes)
-4. git commit -m "..." (commit code)
-5. bd sync (commit any new beads changes)
-6. git push (push to remote)
-7. ` + "`gt done`" + ` (submit to merge queue and exit)
+3. git commit -m "..." (commit code)
+4. git push (push to remote)
+5. ` + "`gt done`" + ` (submit to merge queue and exit)
 
 **Polecats MUST call ` + "`gt done`" + ` - this submits work and exits the session.**
 `

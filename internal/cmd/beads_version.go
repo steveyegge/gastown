@@ -91,10 +91,12 @@ func (v beadsVersion) compare(other beadsVersion) int {
 var beadsVersionRe = regexp.MustCompile(`bd version (\d+\.\d+(?:\.\d+)?(?:-\w+)?)`)
 
 func getBeadsVersion() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bd", "version")
+	// Use --no-daemon to avoid contention when multiple agents start simultaneously.
+	// Version check doesn't need database access, so direct mode is faster and more reliable.
+	cmd := exec.CommandContext(ctx, "bd", "version", "--no-daemon")
 	output, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {

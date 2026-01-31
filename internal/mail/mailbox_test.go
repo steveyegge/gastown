@@ -11,7 +11,7 @@ import (
 
 func TestNewMailbox(t *testing.T) {
 	m := NewMailbox("/tmp/test")
-	if m.path != "/tmp/test/inbox.jsonl" {
+	if filepath.ToSlash(m.path) != "/tmp/test/inbox.jsonl" {
 		t.Errorf("NewMailbox path = %q, want %q", m.path, "/tmp/test/inbox.jsonl")
 	}
 	if !m.legacy {
@@ -264,6 +264,56 @@ func TestMailboxLegacyListUnread(t *testing.T) {
 	}
 }
 
+func TestMailboxMarkReadOnlyExcludesFromUnread(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewMailbox(tmpDir)
+
+	msgs := []*Message{
+		{ID: "msg-001", Read: false, Subject: "First"},
+		{ID: "msg-002", Read: false, Subject: "Second"},
+	}
+	for _, msg := range msgs {
+		if err := m.Append(msg); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+	}
+
+	// Both should be unread initially
+	unread, err := m.ListUnread()
+	if err != nil {
+		t.Fatalf("ListUnread error: %v", err)
+	}
+	if len(unread) != 2 {
+		t.Errorf("ListUnread returned %d, want 2", len(unread))
+	}
+
+	// Mark one as read-only (simulates gt mail read behavior)
+	if err := m.MarkReadOnly("msg-001"); err != nil {
+		t.Fatalf("MarkReadOnly error: %v", err)
+	}
+
+	// Should only have 1 unread now
+	unread, err = m.ListUnread()
+	if err != nil {
+		t.Fatalf("ListUnread error: %v", err)
+	}
+	if len(unread) != 1 {
+		t.Errorf("ListUnread returned %d after MarkReadOnly, want 1", len(unread))
+	}
+	if len(unread) == 1 && unread[0].ID != "msg-002" {
+		t.Errorf("Expected msg-002 to be unread, got %s", unread[0].ID)
+	}
+
+	// The marked message should still be in full list
+	all, err := m.List()
+	if err != nil {
+		t.Fatalf("List error: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("List returned %d, want 2 (MarkReadOnly should not remove)", len(all))
+	}
+}
+
 func TestMailboxLegacyListByThread(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewMailbox(tmpDir)
@@ -332,7 +382,7 @@ func TestMailboxIdentityAndPath(t *testing.T) {
 	if legacy.Identity() != "" {
 		t.Errorf("Legacy mailbox identity = %q, want empty", legacy.Identity())
 	}
-	if legacy.Path() != "/tmp/test/inbox.jsonl" {
+	if filepath.ToSlash(legacy.Path()) != "/tmp/test/inbox.jsonl" {
 		t.Errorf("Legacy mailbox path = %q, want /tmp/test/inbox.jsonl", legacy.Path())
 	}
 
@@ -379,7 +429,7 @@ func TestNewMailboxWithBeadsDir(t *testing.T) {
 	if m.identity != "gastown/Toast" {
 		t.Errorf("identity = %q, want 'gastown/Toast'", m.identity)
 	}
-	if m.beadsDir != "/custom/.beads" {
+	if filepath.ToSlash(m.beadsDir) != "/custom/.beads" {
 		t.Errorf("beadsDir = %q, want '/custom/.beads'", m.beadsDir)
 	}
 }

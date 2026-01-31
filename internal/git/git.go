@@ -33,6 +33,25 @@ func (e *GitError) Unwrap() error {
 	return e.Err
 }
 
+// moveDir moves a directory from src to dest. It first tries os.Rename for
+// efficiency, but falls back to copy+delete if src and dest are on different
+// filesystems (which causes EXDEV error on rename).
+func moveDir(src, dest string) error {
+	// Try rename first - works if same filesystem
+	if err := os.Rename(src, dest); err == nil {
+		return nil
+	}
+
+	// Rename failed, use platform-specific copy for cross-filesystem moves
+	if err := copyDirPreserving(src, dest); err != nil {
+		return fmt.Errorf("copying directory: %w", err)
+	}
+	if err := os.RemoveAll(src); err != nil {
+		return fmt.Errorf("removing source after copy: %w", err)
+	}
+	return nil
+}
+
 // Git wraps git operations for a working directory.
 type Git struct {
 	workDir string
@@ -116,13 +135,35 @@ func (g *Git) wrapError(err error, stdout, stderr string, args []string) error {
 
 // Clone clones a repository to the destination.
 func (g *Git) Clone(url, dest string) error {
-	cmd := exec.Command("git", "clone", url, dest)
+	// Ensure destination directory's parent exists
+	destParent := filepath.Dir(dest)
+	if err := os.MkdirAll(destParent, 0755); err != nil {
+		return fmt.Errorf("creating destination parent: %w", err)
+	}
+	// Run clone from a temporary directory to completely isolate from any
+	// git repo at the process cwd. Then move the result to the destination.
+	tmpDir, err := os.MkdirTemp("", "gt-clone-*")
+	if err != nil {
+		return fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
+	cmd := exec.Command("git", "clone", url, tmpDest)
+	cmd.Dir = tmpDir
+	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+tmpDir)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", url})
 	}
+
+	// Move to final destination (handles cross-filesystem moves)
+	if err := moveDir(tmpDest, dest); err != nil {
+		return fmt.Errorf("moving clone to destination: %w", err)
+	}
+
 	// Configure hooks path for Gas Town clones
 	if err := configureHooksPath(dest); err != nil {
 		return err
@@ -134,13 +175,35 @@ func (g *Git) Clone(url, dest string) error {
 // CloneWithReference clones a repository using a local repo as an object reference.
 // This saves disk by sharing objects without changing remotes.
 func (g *Git) CloneWithReference(url, dest, reference string) error {
-	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, dest)
+	// Ensure destination directory's parent exists
+	destParent := filepath.Dir(dest)
+	if err := os.MkdirAll(destParent, 0755); err != nil {
+		return fmt.Errorf("creating destination parent: %w", err)
+	}
+	// Run clone from a temporary directory to completely isolate from any
+	// git repo at the process cwd. Then move the result to the destination.
+	tmpDir, err := os.MkdirTemp("", "gt-clone-*")
+	if err != nil {
+		return fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
+	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, tmpDest)
+	cmd.Dir = tmpDir
+	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+tmpDir)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--reference-if-able", url})
 	}
+
+	// Move to final destination (handles cross-filesystem moves)
+	if err := moveDir(tmpDest, dest); err != nil {
+		return fmt.Errorf("moving clone to destination: %w", err)
+	}
+
 	// Configure hooks path for Gas Town clones
 	if err := configureHooksPath(dest); err != nil {
 		return err
@@ -152,13 +215,35 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 // CloneBare clones a repository as a bare repo (no working directory).
 // This is used for the shared repo architecture where all worktrees share a single git database.
 func (g *Git) CloneBare(url, dest string) error {
-	cmd := exec.Command("git", "clone", "--bare", url, dest)
+	// Ensure destination directory's parent exists
+	destParent := filepath.Dir(dest)
+	if err := os.MkdirAll(destParent, 0755); err != nil {
+		return fmt.Errorf("creating destination parent: %w", err)
+	}
+	// Run clone from a temporary directory to completely isolate from any
+	// git repo at the process cwd. Then move the result to the destination.
+	tmpDir, err := os.MkdirTemp("", "gt-clone-*")
+	if err != nil {
+		return fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
+	cmd := exec.Command("git", "clone", "--bare", url, tmpDest)
+	cmd.Dir = tmpDir
+	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+tmpDir)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--bare", url})
 	}
+
+	// Move to final destination (handles cross-filesystem moves)
+	if err := moveDir(tmpDest, dest); err != nil {
+		return fmt.Errorf("moving clone to destination: %w", err)
+	}
+
 	// Configure refspec so worktrees can fetch and see origin/* refs
 	return configureRefspec(dest)
 }
@@ -188,30 +273,59 @@ func configureHooksPath(repoPath string) error {
 // and origin/main never appears in refs/remotes/origin/main.
 // See: https://github.com/anthropics/gastown/issues/286
 func configureRefspec(repoPath string) error {
-	cmd := exec.Command("git", "-C", repoPath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	gitDir := repoPath
+	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err == nil {
+		gitDir = filepath.Join(repoPath, ".git")
+	}
+	gitDir = filepath.Clean(gitDir)
+
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	configCmd := exec.Command("git", "--git-dir", gitDir, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	configCmd.Stderr = &stderr
+	if err := configCmd.Run(); err != nil {
 		return fmt.Errorf("configuring refspec: %s", strings.TrimSpace(stderr.String()))
 	}
-	// Fetch to populate refs/remotes/origin/* so worktrees can use origin/main
-	fetchCmd := exec.Command("git", "-C", repoPath, "fetch", "origin")
+
+	fetchCmd := exec.Command("git", "--git-dir", gitDir, "fetch", "origin")
 	fetchCmd.Stderr = &stderr
 	if err := fetchCmd.Run(); err != nil {
 		return fmt.Errorf("fetching origin: %s", strings.TrimSpace(stderr.String()))
 	}
+
 	return nil
 }
 
 // CloneBareWithReference clones a bare repository using a local repo as an object reference.
 func (g *Git) CloneBareWithReference(url, dest, reference string) error {
-	cmd := exec.Command("git", "clone", "--bare", "--reference-if-able", reference, url, dest)
+	// Ensure destination directory's parent exists
+	destParent := filepath.Dir(dest)
+	if err := os.MkdirAll(destParent, 0755); err != nil {
+		return fmt.Errorf("creating destination parent: %w", err)
+	}
+	// Run clone from a temporary directory to completely isolate from any
+	// git repo at the process cwd. Then move the result to the destination.
+	tmpDir, err := os.MkdirTemp("", "gt-clone-*")
+	if err != nil {
+		return fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
+	cmd := exec.Command("git", "clone", "--bare", "--reference-if-able", reference, url, tmpDest)
+	cmd.Dir = tmpDir
+	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+tmpDir)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--bare", "--reference-if-able", url})
 	}
+
+	// Move to final destination (handles cross-filesystem moves)
+	if err := moveDir(tmpDest, dest); err != nil {
+		return fmt.Errorf("moving clone to destination: %w", err)
+	}
+
 	// Configure refspec so worktrees can fetch and see origin/* refs
 	return configureRefspec(dest)
 }
@@ -387,6 +501,17 @@ func (g *Git) Remotes() ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
+// ConfigGet returns the value of a git config key.
+// Returns empty string if the key is not set.
+func (g *Git) ConfigGet(key string) (string, error) {
+	out, err := g.run("config", "--get", key)
+	if err != nil {
+		// git config --get returns exit code 1 if key not found
+		return "", nil
+	}
+	return out, nil
+}
+
 // Merge merges the given branch into the current branch.
 func (g *Git) Merge(branch string) error {
 	_, err := g.run("merge", branch)
@@ -397,6 +522,27 @@ func (g *Git) Merge(branch string) error {
 func (g *Git) MergeNoFF(branch, message string) error {
 	_, err := g.run("merge", "--no-ff", "-m", message, branch)
 	return err
+}
+
+// MergeSquash performs a squash merge of the given branch and commits with the provided message.
+// This stages all changes from the branch without creating a merge commit, then commits them
+// as a single commit with the given message. This eliminates redundant merge commits while
+// preserving the original commit message from the source branch.
+func (g *Git) MergeSquash(branch, message string) error {
+	// Stage all changes from the branch without committing
+	if _, err := g.run("merge", "--squash", branch); err != nil {
+		return err
+	}
+	// Commit the staged changes with the provided message
+	_, err := g.run("commit", "-m", message)
+	return err
+}
+
+// GetBranchCommitMessage returns the commit message of the HEAD commit on the given branch.
+// This is useful for preserving the original conventional commit message (feat:/fix:) when
+// performing squash merges.
+func (g *Git) GetBranchCommitMessage(branch string) (string, error) {
+	return g.run("log", "-1", "--format=%B", branch)
 }
 
 // DeleteRemoteBranch deletes a branch on the remote.
@@ -672,18 +818,18 @@ func ConfigureSparseCheckout(repoPath string) error {
 
 	// Write patterns directly to sparse-checkout file
 	// (git sparse-checkout set --stdin escapes the ! character incorrectly)
-	// Exclude all Claude Code context files to prevent source repo instructions
+	// Exclude Claude Code context files to prevent source repo instructions
 	// from interfering with Gas Town agent context:
 	// - .claude/      : settings, rules, agents, commands
 	// - CLAUDE.md     : primary context file
 	// - CLAUDE.local.md : personal context file
-	// - .mcp.json     : MCP server configuration
+	// Note: .mcp.json is NOT excluded so worktrees can inherit MCP server config
 	infoDir := filepath.Join(gitDir, "info")
 	if err := os.MkdirAll(infoDir, 0755); err != nil {
 		return fmt.Errorf("creating info dir: %w", err)
 	}
 	sparseFile := filepath.Join(infoDir, "sparse-checkout")
-	sparsePatterns := "/*\n!/.claude/\n!/CLAUDE.md\n!/CLAUDE.local.md\n!/.mcp.json\n"
+	sparsePatterns := "/*\n!/.claude/\n!/CLAUDE.md\n!/CLAUDE.local.md\n"
 	if err := os.WriteFile(sparseFile, []byte(sparsePatterns), 0644); err != nil {
 		return fmt.Errorf("writing sparse-checkout: %w", err)
 	}
@@ -707,11 +853,11 @@ func ConfigureSparseCheckout(repoPath string) error {
 }
 
 // ExcludedContextFiles lists all Claude context files that should be excluded by sparse checkout.
+// Note: .mcp.json is NOT excluded so worktrees can inherit MCP server config (e.g., Puppeteer).
 var ExcludedContextFiles = []string{
 	".claude",
 	"CLAUDE.md",
 	"CLAUDE.local.md",
-	".mcp.json",
 }
 
 // CheckExcludedFilesExist checks if any Claude context files still exist in the repo

@@ -99,3 +99,79 @@ func isAutonomousRole(role string) bool {
 		return false
 	}
 }
+
+// DefaultPrimeWaitMs is the default wait time in milliseconds for non-hook agents
+// to run gt prime before sending work instructions.
+const DefaultPrimeWaitMs = 2000
+
+// StartupFallbackInfo describes what fallback actions are needed for agent startup
+// based on the agent's hook and prompt capabilities.
+//
+// Fallback matrix based on agent capabilities:
+//
+//	| Hooks | Prompt | Beacon Content           | Context Source      | Work Instructions   |
+//	|-------|--------|--------------------------|---------------------|---------------------|
+//	| ✓     | ✓      | Standard                 | Hook runs gt prime  | In beacon           |
+//	| ✓     | ✗      | Standard (via nudge)     | Hook runs gt prime  | Same nudge          |
+//	| ✗     | ✓      | "Run gt prime" (prompt)  | Agent runs manually | Delayed nudge       |
+//	| ✗     | ✗      | "Run gt prime" (nudge)   | Agent runs manually | Delayed nudge       |
+type StartupFallbackInfo struct {
+	// IncludePrimeInBeacon indicates the beacon should include "Run gt prime" instruction.
+	// True for non-hook agents where gt prime doesn't run automatically.
+	IncludePrimeInBeacon bool
+
+	// SendBeaconNudge indicates the beacon must be sent via nudge (agent has no prompt support).
+	// True for agents with PromptMode "none".
+	SendBeaconNudge bool
+
+	// SendStartupNudge indicates work instructions need to be sent via nudge.
+	// True when beacon doesn't include work instructions (non-hook agents, or hook agents without prompt).
+	SendStartupNudge bool
+
+	// StartupNudgeDelayMs is milliseconds to wait before sending work instructions nudge.
+	// Allows gt prime to complete for non-hook agents (where it's not automatic).
+	StartupNudgeDelayMs int
+}
+
+// GetStartupFallbackInfo returns the fallback actions needed based on agent capabilities.
+func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
+	if rc == nil {
+		rc = config.DefaultRuntimeConfig()
+	}
+
+	hasHooks := rc.Hooks != nil && rc.Hooks.Provider != "" && rc.Hooks.Provider != "none"
+	hasPrompt := rc.PromptMode != "none"
+
+	info := &StartupFallbackInfo{}
+
+	if !hasHooks {
+		// Non-hook agents need to be told to run gt prime
+		info.IncludePrimeInBeacon = true
+		info.SendStartupNudge = true
+		info.StartupNudgeDelayMs = DefaultPrimeWaitMs
+
+		if !hasPrompt {
+			// No prompt support - beacon must be sent via nudge
+			info.SendBeaconNudge = true
+		}
+	} else if !hasPrompt {
+		// Has hooks but no prompt - need to nudge beacon + work instructions together
+		// Hook runs gt prime synchronously, so no wait needed
+		info.SendBeaconNudge = true
+		info.SendStartupNudge = true
+		info.StartupNudgeDelayMs = 0
+	}
+	// else: hooks + prompt - nothing needed, all in CLI prompt + hook
+
+	return info
+}
+
+// StartupNudgeContent returns the work instructions to send as a startup nudge.
+func StartupNudgeContent() string {
+	return "Check your hook with `gt hook`. If work is present, begin immediately."
+}
+
+// BeaconPrimeInstruction returns the instruction to add to beacon for non-hook agents.
+func BeaconPrimeInstruction() string {
+	return "\n\nRun `gt prime` to initialize your context."
+}

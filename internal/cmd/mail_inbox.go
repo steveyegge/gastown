@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/mail"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -30,6 +33,11 @@ func getMailbox(address string) (*mail.Mailbox, error) {
 }
 
 func runMailInbox(cmd *cobra.Command, args []string) error {
+	// Check for mutually exclusive flags
+	if mailInboxAll && mailInboxUnread {
+		return errors.New("--all and --unread are mutually exclusive")
+	}
+
 	// Determine which inbox to check (priority: --identity flag, positional arg, auto-detect)
 	address := ""
 	if mailInboxIdentity != "" {
@@ -46,6 +54,8 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get messages
+	// --all is the default behavior (shows all messages)
+	// --unread filters to only unread messages
 	var messages []*mail.Message
 	if mailInboxUnread {
 		messages, err = mailbox.ListUnread()
@@ -73,7 +83,7 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	for _, msg := range messages {
+	for i, msg := range messages {
 		readMarker := "●"
 		if msg.Read {
 			readMarker = "○"
@@ -91,11 +101,13 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 			wispMarker = " " + style.Dim.Render("(wisp)")
 		}
 
-		fmt.Printf("  %s %s%s%s%s\n", readMarker, msg.Subject, typeMarker, priorityMarker, wispMarker)
-		fmt.Printf("    %s from %s\n",
+		// Show 1-based index for easy reference with 'gt mail read <n>'
+		indexStr := style.Dim.Render(fmt.Sprintf("%d.", i+1))
+		fmt.Printf("  %s %s %s%s%s%s\n", indexStr, readMarker, msg.Subject, typeMarker, priorityMarker, wispMarker)
+		fmt.Printf("      %s from %s\n",
 			style.Dim.Render(msg.ID),
 			msg.From)
-		fmt.Printf("    %s\n",
+		fmt.Printf("      %s\n",
 			style.Dim.Render(msg.Timestamp.Format("2006-01-02 15:04")))
 	}
 
@@ -104,9 +116,9 @@ func runMailInbox(cmd *cobra.Command, args []string) error {
 
 func runMailRead(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
-		return errors.New("msgID argument required")
+		return errors.New("message ID or index required")
 	}
-	msgID := args[0]
+	msgRef := args[0]
 
 	// Determine which inbox
 	address := detectSender()
@@ -116,14 +128,34 @@ func runMailRead(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Check if the argument is a numeric index (1-based)
+	var msgID string
+	if idx, err := strconv.Atoi(msgRef); err == nil && idx > 0 {
+		// Numeric index: resolve to message ID by listing inbox
+		messages, err := mailbox.List()
+		if err != nil {
+			return fmt.Errorf("listing messages: %w", err)
+		}
+		if idx > len(messages) {
+			return fmt.Errorf("index %d out of range (inbox has %d messages)", idx, len(messages))
+		}
+		msgID = messages[idx-1].ID
+	} else {
+		msgID = msgRef
+	}
+
 	msg, err := mailbox.Get(msgID)
 	if err != nil {
 		return fmt.Errorf("getting message: %w", err)
 	}
 
-	// Note: We intentionally do NOT mark as read/ack on read.
-	// User must explicitly delete/ack the message.
-	// This preserves handoff messages for reference.
+	// Mark as read when viewed (adds "read" label, does not close/archive).
+	// Handoff messages are preserved via the hook mechanism, so marking
+	// read here is safe — hooked mail is found via gt hook, not the inbox.
+	if err := mailbox.MarkReadOnly(msgID); err != nil {
+		// Non-fatal: message was retrieved, just couldn't mark
+		style.PrintWarning("could not mark message as read: %v", err)
+	}
 
 	// JSON output
 	if mailReadJSON {
@@ -217,11 +249,6 @@ func runMailPeek(cmd *cobra.Command, args []string) error {
 }
 
 func runMailDelete(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 {
-		return errors.New("msgID argument required")
-	}
-	msgID := args[0]
-
 	// Determine which inbox
 	address := detectSender()
 
@@ -230,11 +257,32 @@ func runMailDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := mailbox.Delete(msgID); err != nil {
-		return fmt.Errorf("deleting message: %w", err)
+	// Delete all specified messages
+	deleted := 0
+	var errors []string
+	for _, msgID := range args {
+		if err := mailbox.Delete(msgID); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", msgID, err))
+		} else {
+			deleted++
+		}
 	}
 
-	fmt.Printf("%s Message deleted\n", style.Bold.Render("✓"))
+	// Report results
+	if len(errors) > 0 {
+		fmt.Printf("%s Deleted %d/%d messages\n",
+			style.Bold.Render("⚠"), deleted, len(args))
+		for _, e := range errors {
+			fmt.Printf("  Error: %s\n", e)
+		}
+		return fmt.Errorf("failed to delete %d messages", len(errors))
+	}
+
+	if len(args) == 1 {
+		fmt.Printf("%s Message deleted\n", style.Bold.Render("✓"))
+	} else {
+		fmt.Printf("%s Deleted %d messages\n", style.Bold.Render("✓"), deleted)
+	}
 	return nil
 }
 
@@ -245,6 +293,23 @@ func runMailArchive(cmd *cobra.Command, args []string) error {
 	mailbox, err := getMailbox(address)
 	if err != nil {
 		return err
+	}
+
+	if mailArchiveStale {
+		if len(args) > 0 {
+			return errors.New("--stale cannot be combined with message IDs")
+		}
+		return runMailArchiveStale(mailbox, address)
+	}
+	if len(args) == 0 {
+		return errors.New("message ID required unless using --stale")
+	}
+	if mailArchiveDryRun {
+		fmt.Printf("%s Would archive %d message(s)\n", style.Dim.Render("(dry-run)"), len(args))
+		for _, msgID := range args {
+			fmt.Printf("  %s\n", style.Dim.Render(msgID))
+		}
+		return nil
 	}
 
 	// Archive all specified messages
@@ -274,6 +339,87 @@ func runMailArchive(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Archived %d messages\n", style.Bold.Render("✓"), archived)
 	}
 	return nil
+}
+
+type staleMessage struct {
+	Message *mail.Message
+	Reason  string
+}
+
+func runMailArchiveStale(mailbox *mail.Mailbox, address string) error {
+	identity, err := session.ParseAddress(address)
+	if err != nil {
+		return fmt.Errorf("determining session for %s: %w", address, err)
+	}
+
+	sessionName := identity.SessionName()
+	if sessionName == "" {
+		return fmt.Errorf("could not determine session name for %s", address)
+	}
+
+	sessionStart, err := session.SessionCreatedAt(sessionName)
+	if err != nil {
+		return fmt.Errorf("getting session start time for %s: %w", sessionName, err)
+	}
+
+	messages, err := mailbox.List()
+	if err != nil {
+		return fmt.Errorf("listing messages: %w", err)
+	}
+
+	staleMessages := staleMessagesForSession(messages, sessionStart)
+	if mailArchiveDryRun {
+		if len(staleMessages) == 0 {
+			fmt.Printf("%s No stale messages found\n", style.Success.Render("✓"))
+			return nil
+		}
+		fmt.Printf("%s Would archive %d stale message(s):\n", style.Dim.Render("(dry-run)"), len(staleMessages))
+		for _, stale := range staleMessages {
+			fmt.Printf("  %s %s\n", style.Dim.Render(stale.Message.ID), stale.Message.Subject)
+		}
+		return nil
+	}
+
+	if len(staleMessages) == 0 {
+		fmt.Printf("%s No stale messages to archive\n", style.Success.Render("✓"))
+		return nil
+	}
+
+	archived := 0
+	var errors []string
+	for _, stale := range staleMessages {
+		if err := mailbox.Delete(stale.Message.ID); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", stale.Message.ID, err))
+		} else {
+			archived++
+		}
+	}
+
+	if len(errors) > 0 {
+		fmt.Printf("%s Archived %d/%d stale messages\n", style.Bold.Render("⚠"), archived, len(staleMessages))
+		for _, e := range errors {
+			fmt.Printf("  Error: %s\n", e)
+		}
+		return fmt.Errorf("failed to archive %d stale messages", len(errors))
+	}
+
+	if archived == 1 {
+		fmt.Printf("%s Stale message archived\n", style.Bold.Render("✓"))
+	} else {
+		fmt.Printf("%s Archived %d stale messages\n", style.Bold.Render("✓"), archived)
+	}
+	return nil
+}
+
+func staleMessagesForSession(messages []*mail.Message, sessionStart time.Time) []staleMessage {
+	var staleMessages []staleMessage
+	for _, msg := range messages {
+		stale, reason := session.StaleReasonForTimes(msg.Timestamp, sessionStart)
+		if stale {
+			staleMessages = append(staleMessages, staleMessage{Message: msg, Reason: reason})
+		}
+	}
+	return staleMessages
 }
 
 func runMailMarkRead(cmd *cobra.Command, args []string) error {

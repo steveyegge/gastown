@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,10 +13,12 @@ import (
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/style"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 var hookCmd = &cobra.Command{
 	Use:     "hook [bead-id]",
+	Aliases: []string{"work"},
 	GroupID: GroupWork,
 	Short:   "Show or attach work on your hook",
 	Long: `Show what's on your hook, or attach new work.
@@ -231,14 +234,29 @@ func runHook(_ *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Find town root - needed for bd routing and agent bead updates
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding town root: %w", err)
+	}
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+
 	// Hook the bead using bd update (discovery-based approach)
+	// Run from town root so bd can find routes.jsonl for prefix-based routing.
+	// This is essential for hooking convoys (hq-* prefix) stored in town beads.
 	hookCmd := exec.Command("bd", "update", beadID, "--status=hooked", "--assignee="+agentID)
+	hookCmd.Dir = townRoot
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {
 		return fmt.Errorf("hooking bead: %w", err)
 	}
 
 	fmt.Printf("%s Work attached to hook (hooked bead)\n", style.Bold.Render("✓"))
+
+	// Update agent bead's hook_bead field (matches gt sling behavior)
+	// This ensures gt hook / gt mol status can find hooked work via the agent bead
+	updateAgentHookBead(agentID, beadID, workDir, townBeadsDir)
+
 	fmt.Printf("  Use 'gt handoff' to restart with this work\n")
 	fmt.Printf("  Use 'gt hook' to see hook status\n")
 
@@ -309,11 +327,30 @@ func runHookShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("listing hooked beads: %w", err)
 	}
 
-	// If nothing found, try scanning all rigs for town-level roles
-	if len(hookedBeads) == 0 && isTownLevelRole(target) {
+	// If nothing found in local beads, also check town beads for hooked convoys.
+	// Convoys (hq-cv-*) are stored in town beads (~/gt/.beads) and any agent
+	// can hook them for convoy-driver mode.
+	if len(hookedBeads) == 0 {
 		townRoot, err := findTownRoot()
 		if err == nil && townRoot != "" {
-			hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
+			// Check town beads for hooked items
+			townBeadsDir := filepath.Join(townRoot, ".beads")
+			if _, err := os.Stat(townBeadsDir); err == nil {
+				townBeads := beads.New(townBeadsDir)
+				townHooked, err := townBeads.List(beads.ListOptions{
+					Status:   beads.StatusHooked,
+					Assignee: target,
+					Priority: -1,
+				})
+				if err == nil && len(townHooked) > 0 {
+					hookedBeads = townHooked
+				}
+			}
+
+			// If still nothing found and town-level role, scan all rigs
+			if len(hookedBeads) == 0 && isTownLevelRole(target) {
+				hookedBeads = scanAllRigsForHookedBeads(townRoot, target)
+			}
 		}
 	}
 

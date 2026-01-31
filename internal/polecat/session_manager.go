@@ -173,17 +173,35 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	runtimeConfig := config.LoadRuntimeConfig(m.rig.Path)
 
-	// Ensure runtime settings exist in polecats/ (not polecats/<name>/) so we don't
-	// write into the source repo. Runtime walks up the tree to find settings.
-	polecatsDir := filepath.Join(m.rig.Path, "polecats")
-	if err := runtime.EnsureSettingsForRole(polecatsDir, "polecat", runtimeConfig); err != nil {
+	// Ensure runtime settings exist in polecat's home directory (polecats/<name>/).
+	// This keeps settings out of the git worktree while allowing runtime to find them
+	// when walking up the tree from workDir (polecats/<name>/<rigname>/).
+	// Each polecat gets isolated settings rather than sharing a single settings file.
+	polecatHomeDir := m.polecatDir(polecat)
+	if err := runtime.EnsureSettingsForRole(polecatHomeDir, "polecat", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
-	// Build startup command first
+	// Get fallback info to determine beacon content based on agent capabilities.
+	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
+
+	// Build startup command with beacon for predecessor discovery.
+	// Configure beacon based on agent's hook/prompt capabilities.
+	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
+	beaconConfig := session.BeaconConfig{
+		Recipient:               address,
+		Sender:                  "witness",
+		Topic:                   "assigned",
+		MolID:                   opts.Issue,
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
+	}
+	beacon := session.FormatStartupBeacon(beaconConfig)
+
 	command := opts.Command
 	if command == "" {
-		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
+		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, beacon)
 	}
 	// Prepend runtime config dir env if needed
 	if runtimeConfig.Session != nil && runtimeConfig.Session.ConfigDirEnv != "" && opts.RuntimeConfigDir != "" {
@@ -235,20 +253,32 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Wait for runtime to be fully ready at the prompt (not just started)
 	runtime.SleepForReadyDelay(runtimeConfig)
+
+	// Handle fallback nudges for non-hook agents.
+	// See StartupFallbackInfo in runtime package for the fallback matrix.
+	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
+		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
+		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
+		debugSession("SendCombinedNudge", m.tmux.NudgeSession(sessionID, combined))
+	} else {
+		if fallbackInfo.SendBeaconNudge {
+			// Agent doesn't support CLI prompt - send beacon via nudge
+			debugSession("SendBeaconNudge", m.tmux.NudgeSession(sessionID, beacon))
+		}
+
+		if fallbackInfo.StartupNudgeDelayMs > 0 {
+			// Wait for agent to run gt prime before sending work instructions
+			time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
+		}
+
+		if fallbackInfo.SendStartupNudge {
+			// Send work instructions via nudge
+			debugSession("SendStartupNudge", m.tmux.NudgeSession(sessionID, runtime.StartupNudgeContent()))
+		}
+	}
+
+	// Legacy fallback for other startup paths (non-fatal)
 	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
-	debugSession("StartupNudge", session.StartupNudge(m.tmux, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "witness",
-		Topic:     "assigned",
-		MolID:     opts.Issue,
-	}))
-
-	// GUPP: Send propulsion nudge to trigger autonomous work execution
-	time.Sleep(2 * time.Second)
-	debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
 
 	// Verify session survived startup - if the command crashed, the session may have died.
 	// Without this check, Start() would return success even if the pane died during initialization.
@@ -275,32 +305,19 @@ func (m *SessionManager) Stop(polecat string, force bool) error {
 		return ErrSessionNotFound
 	}
 
-	// Sync beads before shutdown (non-fatal)
-	if !force {
-		polecatDir := m.polecatDir(polecat)
-		if err := m.syncBeads(polecatDir); err != nil {
-			fmt.Printf("Warning: beads sync failed: %v\n", err)
-		}
-	}
-
 	// Try graceful shutdown first
 	if !force {
 		_ = m.tmux.SendKeysRaw(sessionID, "C-c")
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if err := m.tmux.KillSession(sessionID); err != nil {
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+	// This prevents orphan bash processes from Claude's Bash tool surviving session termination.
+	if err := m.tmux.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
 	return nil
-}
-
-// syncBeads runs bd sync in the given directory.
-func (m *SessionManager) syncBeads(workDir string) error {
-	cmd := exec.Command("bd", "sync")
-	cmd.Dir = workDir
-	return cmd.Run()
 }
 
 // IsRunning checks if a polecat session is active.

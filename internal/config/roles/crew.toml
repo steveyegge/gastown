@@ -1,0 +1,23 @@
+# Crew role definition
+# Persistent user-managed workspaces. Multiple per rig.
+
+role = "crew"
+scope = "rig"
+nudge = "Check your hook and mail, then act accordingly."
+prompt_template = "crew.md.tmpl"
+
+[session]
+pattern = "gt-{rig}-crew-{name}"
+work_dir = "{town}/{rig}/crew/{name}"
+needs_pre_sync = true
+start_command = "exec claude --dangerously-skip-permissions"
+
+[env]
+GT_ROLE = "crew"
+GT_SCOPE = "rig"
+
+[health]
+ping_timeout = "30s"
+consecutive_failures = 3
+kill_cooldown = "5m"
+stuck_threshold = "4h"

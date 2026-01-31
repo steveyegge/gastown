@@ -24,7 +24,7 @@ func TestDefaultStuckConfig(t *testing.T) {
 func TestHealthCheckStateFile(t *testing.T) {
 	path := HealthCheckStateFile("/tmp/test-town")
 	expected := "/tmp/test-town/deacon/health-check-state.json"
-	if path != expected {
+	if filepath.ToSlash(path) != expected {
 		t.Errorf("HealthCheckStateFile = %q, want %q", path, expected)
 	}
 }

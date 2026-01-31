@@ -12,12 +12,15 @@ import (
 
 // Version information - set at build time via ldflags
 var (
-	Version = "0.4.0"
+	Version = "0.5.0"
 	// Build can be set via ldflags at compile time
 	Build = "dev"
 	// Commit and Branch - the git revision the binary was built from (optional ldflag)
 	Commit = ""
 	Branch = ""
+	// BuiltProperly is set to "1" by `make build`. If empty, the binary was built
+	// with raw `go build` and is likely unsigned (will be killed on macOS).
+	BuiltProperly = ""
 )
 
 var versionCmd = &cobra.Command{

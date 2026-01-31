@@ -83,8 +83,25 @@ func runNamepool(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a rig directory")
 	}
 
-	// Load pool
-	pool := polecat.NewNamePool(rigPath, rigName)
+	// Load settings for namepool config
+	settingsPath := filepath.Join(rigPath, "settings", "config.json")
+	var pool *polecat.NamePool
+
+	settings, err := config.LoadRigSettings(settingsPath)
+	if err == nil && settings.Namepool != nil {
+		// Use configured namepool settings
+		pool = polecat.NewNamePoolWithConfig(
+			rigPath,
+			rigName,
+			settings.Namepool.Style,
+			settings.Namepool.Names,
+			settings.Namepool.MaxBeforeNumbering,
+		)
+	} else {
+		// Use defaults
+		pool = polecat.NewNamePool(rigPath, rigName)
+	}
+
 	if err := pool.Load(); err != nil {
 		// Pool doesn't exist yet, show defaults
 		fmt.Printf("Rig: %s\n", rigName)
@@ -104,9 +121,8 @@ func runNamepool(cmd *cobra.Command, args []string) error {
 		fmt.Printf("In use: %s\n", strings.Join(activeNames, ", "))
 	}
 
-	// Check if configured
-	settingsPath := filepath.Join(rigPath, "settings", "config.json")
-	if settings, err := config.LoadRigSettings(settingsPath); err == nil && settings.Namepool != nil {
+	// Check if configured (already loaded above)
+	if settings.Namepool != nil {
 		fmt.Printf("(configured in settings/config.json)\n")
 	}
 

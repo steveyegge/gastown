@@ -27,8 +27,10 @@ const (
 	AgentAuggie AgentPreset = "auggie"
 	// AgentAmp is Sourcegraph AMP.
 	AgentAmp AgentPreset = "amp"
-	// AgentDevin is Devin CLI (Devin for Terminal).
+// AgentDevin is Devin CLI (Devin for Terminal).
 	AgentDevin AgentPreset = "devin"
+	// AgentOpenCode is OpenCode multi-model CLI.
+	AgentOpenCode AgentPreset = "opencode"
 )
 
 // AgentPresetInfo contains the configuration details for an agent preset.
@@ -42,6 +44,11 @@ type AgentPresetInfo struct {
 
 	// Args are the default command-line arguments for autonomous mode.
 	Args []string `json:"args"`
+
+	// Env are environment variables to set when starting the agent.
+	// These are merged with the standard GT_* variables.
+	// Used for agent-specific configuration like OPENCODE_PERMISSION.
+	Env map[string]string `json:"env,omitempty"`
 
 	// ProcessNames are the process names to look for when detecting if the agent is running.
 	// Used by tmux.IsAgentRunning to check pane_current_command.
@@ -109,7 +116,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Name:                AgentClaude,
 		Command:             "claude",
 		Args:                []string{"--dangerously-skip-permissions"},
-		ProcessNames:        []string{"node"}, // Claude runs as Node.js
+		ProcessNames:        []string{"node", "claude"}, // Claude runs as Node.js
 		SessionIDEnv:        "CLAUDE_SESSION_ID",
 		ResumeFlag:          "--resume",
 		ResumeStyle:         "flag",
@@ -184,7 +191,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SupportsHooks:       false,
 		SupportsForkSession: false,
 	},
-	AgentDevin: {
+AgentDevin: {
 		Name:                AgentDevin,
 		Command:             "devin",
 		Args:                []string{"--permission-mode", "dangerous"},
@@ -195,6 +202,25 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SupportsHooks:       false,
 		SupportsForkSession: false,
 		PromptPrefix:        "--", // Devin requires -- before positional prompt argument
+	},
+	AgentOpenCode: {
+		Name:    AgentOpenCode,
+		Command: "opencode",
+		Args:    []string{}, // No CLI flags needed, YOLO via OPENCODE_PERMISSION env
+		Env: map[string]string{
+			// Auto-approve all tool calls (equivalent to --dangerously-skip-permissions)
+			"OPENCODE_PERMISSION": `{"*":"allow"}`,
+		},
+		ProcessNames:        []string{"opencode", "node", "bun"}, // Runs as Node.js or Bun
+		SessionIDEnv:        "",                                  // OpenCode manages sessions internally
+		ResumeFlag:          "",                                  // No resume support yet
+		ResumeStyle:         "",
+		SupportsHooks:       true, // Uses .opencode/plugin/gastown.js
+		SupportsForkSession: false,
+		NonInteractive: &NonInteractiveConfig{
+			Subcommand: "run",
+			OutputFlag: "--format json",
+		},
 	},
 }
 
@@ -337,7 +363,7 @@ func DefaultAgentPreset() AgentPreset {
 }
 
 // RuntimeConfigFromPreset creates a RuntimeConfig from an agent preset.
-// This provides the basic Command/Args; additional fields from AgentPresetInfo
+// This provides the basic Command/Args/Env; additional fields from AgentPresetInfo
 // can be accessed separately for extended functionality.
 func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	info := GetAgentPreset(preset)
@@ -346,11 +372,29 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		return DefaultRuntimeConfig()
 	}
 
-	return &RuntimeConfig{
+// Copy Env map to avoid mutation
+	var envCopy map[string]string
+	if len(info.Env) > 0 {
+		envCopy = make(map[string]string, len(info.Env))
+		for k, v := range info.Env {
+			envCopy[k] = v
+		}
+	}
+
+	rc := &RuntimeConfig{
 		Command:      info.Command,
 		Args:         append([]string(nil), info.Args...), // Copy to avoid mutation
+		Env:          envCopy,
 		PromptPrefix: info.PromptPrefix,
 	}
+
+	// Resolve command path for claude preset (handles alias installations)
+	// Uses resolveClaudePath() from types.go which finds ~/.claude/local/claude
+	if preset == AgentClaude && rc.Command == "claude" {
+		rc.Command = resolveClaudePath()
+	}
+
+	return rc
 }
 
 // BuildResumeCommand builds a command to resume an agent session.
@@ -405,8 +449,8 @@ func GetSessionIDEnvVar(agentName string) string {
 func GetProcessNames(agentName string) []string {
 	info := GetAgentPresetByName(agentName)
 	if info == nil || len(info.ProcessNames) == 0 {
-		// Default to Claude's process name for backwards compatibility
-		return []string{"node"}
+		// Default to Claude's process names for backwards compatibility
+		return []string{"node", "claude"}
 	}
 	return info.ProcessNames
 }

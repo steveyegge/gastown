@@ -8,6 +8,11 @@
 #   polecat/*         - Polecat working branches (Refinery merges these)
 
 while read local_ref local_sha remote_ref remote_sha; do
+  # Skip tags - they're allowed for releases
+  if [[ "$remote_ref" == refs/tags/* ]]; then
+    continue
+  fi
+
   branch="${remote_ref#refs/heads/}"
 
   case "$branch" in
@@ -15,17 +20,22 @@ while read local_ref local_sha remote_ref remote_sha; do
       # Allowed branches
       ;;
     *)
-      echo "ERROR: Invalid branch for Gas Town agents."
-      echo ""
-      echo "Blocked push to: $branch"
-      echo ""
-      echo "Allowed branches:"
-      echo "  main        - Crew workers push here directly"
-      echo "  polecat/*   - Polecat working branches"
-      echo "  beads-sync  - Beads synchronization"
-      echo ""
-      echo "Do NOT create PRs. Push to main or let Refinery merge polecat work."
-      exit 1
+      # Allow feature branches when contributing to upstream (fork workflow).
+      # If an 'upstream' remote exists, this is a contribution setup where
+      # feature branches are needed for PRs. See: #848
+      if ! git remote get-url upstream &>/dev/null; then
+        echo "ERROR: Invalid branch for Gas Town agents."
+        echo ""
+        echo "Blocked push to: $branch"
+        echo ""
+        echo "Allowed branches:"
+        echo "  main        - Crew workers push here directly"
+        echo "  polecat/*   - Polecat working branches"
+        echo "  beads-sync  - Beads synchronization"
+        echo ""
+        echo "Do NOT create PRs. Push to main or let Refinery merge polecat work."
+        exit 1
+      fi
       ;;
   esac
 done

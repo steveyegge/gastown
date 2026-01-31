@@ -17,10 +17,21 @@ var errFetchFailed = errors.New("fetch failed")
 
 // MockConvoyFetcher is a mock implementation for testing.
 type MockConvoyFetcher struct {
-	Convoys    []ConvoyRow
-	MergeQueue []MergeQueueRow
-	Polecats   []PolecatRow
-	Error      error
+	Convoys     []ConvoyRow
+	MergeQueue  []MergeQueueRow
+	Workers     []WorkerRow
+	Mail        []MailRow
+	Rigs        []RigRow
+	Dogs        []DogRow
+	Escalations []EscalationRow
+	Health      *HealthRow
+	Queues      []QueueRow
+	Sessions    []SessionRow
+	Hooks       []HookRow
+	Mayor       *MayorStatus
+	Issues      []IssueRow
+	Activity    []ActivityRow
+	Error       error
 }
 
 func (m *MockConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
@@ -31,8 +42,52 @@ func (m *MockConvoyFetcher) FetchMergeQueue() ([]MergeQueueRow, error) {
 	return m.MergeQueue, nil
 }
 
-func (m *MockConvoyFetcher) FetchPolecats() ([]PolecatRow, error) {
-	return m.Polecats, nil
+func (m *MockConvoyFetcher) FetchWorkers() ([]WorkerRow, error) {
+	return m.Workers, nil
+}
+
+func (m *MockConvoyFetcher) FetchMail() ([]MailRow, error) {
+	return m.Mail, nil
+}
+
+func (m *MockConvoyFetcher) FetchRigs() ([]RigRow, error) {
+	return m.Rigs, nil
+}
+
+func (m *MockConvoyFetcher) FetchDogs() ([]DogRow, error) {
+	return m.Dogs, nil
+}
+
+func (m *MockConvoyFetcher) FetchEscalations() ([]EscalationRow, error) {
+	return m.Escalations, nil
+}
+
+func (m *MockConvoyFetcher) FetchHealth() (*HealthRow, error) {
+	return m.Health, nil
+}
+
+func (m *MockConvoyFetcher) FetchQueues() ([]QueueRow, error) {
+	return m.Queues, nil
+}
+
+func (m *MockConvoyFetcher) FetchSessions() ([]SessionRow, error) {
+	return m.Sessions, nil
+}
+
+func (m *MockConvoyFetcher) FetchHooks() ([]HookRow, error) {
+	return m.Hooks, nil
+}
+
+func (m *MockConvoyFetcher) FetchMayor() (*MayorStatus, error) {
+	return m.Mayor, nil
+}
+
+func (m *MockConvoyFetcher) FetchIssues() ([]IssueRow, error) {
+	return m.Issues, nil
+}
+
+func (m *MockConvoyFetcher) FetchActivity() ([]ActivityRow, error) {
+	return m.Activity, nil
 }
 
 func TestConvoyHandler_RendersTemplate(t *testing.T) {
@@ -70,9 +125,7 @@ func TestConvoyHandler_RendersTemplate(t *testing.T) {
 	if !strings.Contains(body, "hq-cv-abc") {
 		t.Error("Response should contain convoy ID")
 	}
-	if !strings.Contains(body, "Test Convoy") {
-		t.Error("Response should contain convoy title")
-	}
+	// Note: Convoy titles are no longer shown in the simplified dashboard table view
 	if !strings.Contains(body, "2/5") {
 		t.Error("Response should contain progress")
 	}
@@ -140,7 +193,7 @@ func TestConvoyHandler_EmptyConvoys(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "No convoys") {
+	if !strings.Contains(body, "No active convoys") {
 		t.Error("Response should show empty state message")
 	}
 }
@@ -196,6 +249,8 @@ func TestConvoyHandler_MultipleConvoys(t *testing.T) {
 }
 
 // Integration tests for error handling
+// Note: The refactored dashboard handler treats fetch errors as non-fatal,
+// rendering an empty section instead of returning an error.
 
 func TestConvoyHandler_FetchConvoysError(t *testing.T) {
 	mock := &MockConvoyFetcher{
@@ -212,13 +267,15 @@ func TestConvoyHandler_FetchConvoysError(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Status = %d, want %d", w.Code, http.StatusInternalServerError)
+	// Fetch errors are now non-fatal - the dashboard still renders
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d (fetch errors are non-fatal)", w.Code, http.StatusOK)
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "Failed to fetch convoys") {
-		t.Error("Response should contain error message")
+	// Should show the empty state for convoys section
+	if !strings.Contains(body, "No active convoys") {
+		t.Error("Response should show empty state when fetch fails")
 	}
 }
 
@@ -266,7 +323,7 @@ func TestConvoyHandler_MergeQueueRendering(t *testing.T) {
 	body := w.Body.String()
 
 	// Check merge queue section header
-	if !strings.Contains(body, "Refinery Merge Queue") {
+	if !strings.Contains(body, "Merge Queue") {
 		t.Error("Response should contain merge queue section header")
 	}
 
@@ -283,12 +340,12 @@ func TestConvoyHandler_MergeQueueRendering(t *testing.T) {
 		t.Error("Response should contain repo 'roxas'")
 	}
 
-	// Check CI status badges
-	if !strings.Contains(body, "ci-pass") {
-		t.Error("Response should contain ci-pass class for passing PR")
+	// Check CI status badges (now display text, not classes)
+	if !strings.Contains(body, "CI Pass") {
+		t.Error("Response should contain 'CI Pass' text for passing PR")
 	}
-	if !strings.Contains(body, "ci-pending") {
-		t.Error("Response should contain ci-pending class for pending PR")
+	if !strings.Contains(body, "CI Running") {
+		t.Error("Response should contain 'CI Running' text for pending PR")
 	}
 }
 
@@ -321,7 +378,7 @@ func TestConvoyHandler_EmptyMergeQueue(t *testing.T) {
 func TestConvoyHandler_PolecatWorkersRendering(t *testing.T) {
 	mock := &MockConvoyFetcher{
 		Convoys: []ConvoyRow{},
-		Polecats: []PolecatRow{
+		Workers: []WorkerRow{
 			{
 				Name:         "dag",
 				Rig:          "roxas",
@@ -356,8 +413,8 @@ func TestConvoyHandler_PolecatWorkersRendering(t *testing.T) {
 	body := w.Body.String()
 
 	// Check polecat section header
-	if !strings.Contains(body, "Polecat Workers") {
-		t.Error("Response should contain polecat workers section header")
+	if !strings.Contains(body, "Polecats") {
+		t.Error("Response should contain polecat section header")
 	}
 
 	// Check polecat names
@@ -373,10 +430,7 @@ func TestConvoyHandler_PolecatWorkersRendering(t *testing.T) {
 		t.Error("Response should contain rig 'roxas'")
 	}
 
-	// Check status hints
-	if !strings.Contains(body, "Running tests...") {
-		t.Error("Response should contain status hint")
-	}
+	// Note: StatusHint is no longer displayed in the simplified dashboard view
 
 	// Check activity colors (dag should be green, nux should be yellow/red)
 	if !strings.Contains(body, "activity-green") {
@@ -393,11 +447,11 @@ func TestConvoyHandler_WorkStatusRendering(t *testing.T) {
 		wantClass      string
 		wantStatusText string
 	}{
-		{"complete status", "complete", "work-complete", "complete"},
-		{"active status", "active", "work-active", "active"},
-		{"stale status", "stale", "work-stale", "stale"},
-		{"stuck status", "stuck", "work-stuck", "stuck"},
-		{"waiting status", "waiting", "work-waiting", "waiting"},
+		{"complete status", "complete", "badge-green", "✓"},
+		{"active status", "active", "badge-green", "Active"},
+		{"stale status", "stale", "badge-yellow", "Stale"},
+		{"stuck status", "stuck", "badge-red", "Stuck"},
+		{"waiting status", "waiting", "badge-muted", "Wait"},
 	}
 
 	for _, tt := range tests {
@@ -548,7 +602,7 @@ func TestConvoyHandler_FullDashboard(t *testing.T) {
 				ColorClass: "mq-green",
 			},
 		},
-		Polecats: []PolecatRow{
+		Workers: []WorkerRow{
 			{
 				Name:         "worker1",
 				Rig:          "testrig",
@@ -576,19 +630,19 @@ func TestConvoyHandler_FullDashboard(t *testing.T) {
 	body := w.Body.String()
 
 	// Verify all three sections are present
-	if !strings.Contains(body, "Gas Town Convoys") {
-		t.Error("Response should contain main header")
+	if !strings.Contains(body, "Convoys") {
+		t.Error("Response should contain convoy section")
 	}
 	if !strings.Contains(body, "hq-cv-full") {
 		t.Error("Response should contain convoy data")
 	}
-	if !strings.Contains(body, "Refinery Merge Queue") {
+	if !strings.Contains(body, "Merge Queue") {
 		t.Error("Response should contain merge queue section")
 	}
 	if !strings.Contains(body, "#789") {
 		t.Error("Response should contain PR data")
 	}
-	if !strings.Contains(body, "Polecat Workers") {
+	if !strings.Contains(body, "Polecats") {
 		t.Error("Response should contain polecat section")
 	}
 	if !strings.Contains(body, "worker1") {
@@ -626,7 +680,7 @@ func TestE2E_Server_FullDashboard(t *testing.T) {
 				ColorClass: "mq-green",
 			},
 		},
-		Polecats: []PolecatRow{
+		Workers: []WorkerRow{
 			{
 				Name:         "furiosa",
 				Rig:          "roxas",
@@ -676,17 +730,15 @@ func TestE2E_Server_FullDashboard(t *testing.T) {
 		name    string
 		content string
 	}{
-		{"Convoy section header", "Gas Town Convoys"},
+		{"Convoy section", "Convoys"},
 		{"Convoy ID", "hq-cv-e2e"},
-		{"Convoy title", "E2E Test Convoy"},
 		{"Convoy progress", "2/4"},
-		{"Merge queue section", "Refinery Merge Queue"},
+		{"Merge queue section", "Merge Queue"},
 		{"PR number", "#101"},
 		{"PR repo", "roxas"},
-		{"Polecat section", "Polecat Workers"},
+		{"Polecat section", "Polecats"},
 		{"Polecat name", "furiosa"},
-		{"Polecat status", "Running E2E tests"},
-		{"HTMX auto-refresh", `hx-trigger="every 10s"`},
+		{"HTMX auto-refresh", `hx-trigger="every 10s`}, // trigger has conditional suffix
 	}
 
 	for _, check := range checks {
@@ -711,7 +763,7 @@ func TestE2E_Server_ActivityColors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &MockConvoyFetcher{
-				Polecats: []PolecatRow{
+				Workers: []WorkerRow{
 					{
 						Name:         "test-worker",
 						Rig:          "test-rig",
@@ -751,7 +803,7 @@ func TestE2E_Server_MergeQueueEmpty(t *testing.T) {
 	mock := &MockConvoyFetcher{
 		Convoys:    []ConvoyRow{},
 		MergeQueue: []MergeQueueRow{},
-		Polecats:   []PolecatRow{},
+		Workers:   []WorkerRow{},
 	}
 
 	handler, err := NewConvoyHandler(mock)
@@ -772,7 +824,7 @@ func TestE2E_Server_MergeQueueEmpty(t *testing.T) {
 	body := string(bodyBytes)
 
 	// Section header should always be visible
-	if !strings.Contains(body, "Refinery Merge Queue") {
+	if !strings.Contains(body, "Merge Queue") {
 		t.Error("Merge queue section should always be visible")
 	}
 
@@ -792,10 +844,10 @@ func TestE2E_Server_MergeQueueStatuses(t *testing.T) {
 		wantCI     string
 		wantMerge  string
 	}{
-		{"green when ready", "pass", "ready", "mq-green", "ci-pass", "merge-ready"},
-		{"red when CI fails", "fail", "ready", "mq-red", "ci-fail", "merge-ready"},
-		{"red when conflict", "pass", "conflict", "mq-red", "ci-pass", "merge-conflict"},
-		{"yellow when pending", "pending", "pending", "mq-yellow", "ci-pending", "merge-pending"},
+		{"green when ready", "pass", "ready", "mq-green", "CI Pass", "Ready"},
+		{"red when CI fails", "fail", "ready", "mq-red", "CI Fail", "Ready"},
+		{"red when conflict", "pass", "conflict", "mq-red", "CI Pass", "Conflict"},
+		{"yellow when pending", "pending", "pending", "mq-yellow", "CI Running", "Pending"},
 	}
 
 	for _, tt := range tests {
@@ -835,10 +887,10 @@ func TestE2E_Server_MergeQueueStatuses(t *testing.T) {
 				t.Errorf("Should contain row class %q", tt.colorClass)
 			}
 			if !strings.Contains(body, tt.wantCI) {
-				t.Errorf("Should contain CI class %q", tt.wantCI)
+				t.Errorf("Should contain CI text %q", tt.wantCI)
 			}
 			if !strings.Contains(body, tt.wantMerge) {
-				t.Errorf("Should contain merge class %q", tt.wantMerge)
+				t.Errorf("Should contain merge text %q", tt.wantMerge)
 			}
 		})
 	}
@@ -883,19 +935,16 @@ func TestE2E_Server_HTMLStructure(t *testing.T) {
 		}
 	}
 
-	// Validate CSS variables for theming
-	cssVars := []string{"--bg-dark", "--green", "--yellow", "--red"}
-	for _, v := range cssVars {
-		if !strings.Contains(body, v) {
-			t.Errorf("Should contain CSS variable %q", v)
-		}
+	// Validate CSS file is linked (CSS variables are now in external file)
+	if !strings.Contains(body, `href="/static/dashboard.css"`) {
+		t.Error("Should link to external CSS file dashboard.css")
 	}
 }
 
 // TestE2E_Server_RefineryInPolecats tests that refinery appears in polecat workers.
 func TestE2E_Server_RefineryInPolecats(t *testing.T) {
 	mock := &MockConvoyFetcher{
-		Polecats: []PolecatRow{
+		Workers: []WorkerRow{
 			{
 				Name:         "refinery",
 				Rig:          "roxas",
@@ -934,9 +983,7 @@ func TestE2E_Server_RefineryInPolecats(t *testing.T) {
 	if !strings.Contains(body, "refinery") {
 		t.Error("Refinery should appear in polecat workers section")
 	}
-	if !strings.Contains(body, "Idle - Waiting for PRs") {
-		t.Error("Refinery idle status should be shown")
-	}
+	// Note: StatusHint is no longer displayed in the simplified dashboard view
 
 	// Regular polecats should also appear
 	if !strings.Contains(body, "dag") {
@@ -947,9 +994,9 @@ func TestE2E_Server_RefineryInPolecats(t *testing.T) {
 // Test that merge queue and polecat errors are non-fatal
 
 type MockConvoyFetcherWithErrors struct {
-	Convoys          []ConvoyRow
-	MergeQueueError  error
-	PolecatsError    error
+	Convoys         []ConvoyRow
+	MergeQueueError error
+	WorkersError    error
 }
 
 func (m *MockConvoyFetcherWithErrors) FetchConvoys() ([]ConvoyRow, error) {
@@ -960,8 +1007,52 @@ func (m *MockConvoyFetcherWithErrors) FetchMergeQueue() ([]MergeQueueRow, error)
 	return nil, m.MergeQueueError
 }
 
-func (m *MockConvoyFetcherWithErrors) FetchPolecats() ([]PolecatRow, error) {
-	return nil, m.PolecatsError
+func (m *MockConvoyFetcherWithErrors) FetchWorkers() ([]WorkerRow, error) {
+	return nil, m.WorkersError
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchMail() ([]MailRow, error) {
+	return nil, nil
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchRigs() ([]RigRow, error) {
+	return nil, nil
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchDogs() ([]DogRow, error) {
+	return nil, nil
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchEscalations() ([]EscalationRow, error) {
+	return nil, nil
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchHealth() (*HealthRow, error) {
+	return nil, nil
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchQueues() ([]QueueRow, error) {
+	return nil, nil
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchSessions() ([]SessionRow, error) {
+	return nil, nil
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchHooks() ([]HookRow, error) {
+	return nil, nil
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchMayor() (*MayorStatus, error) {
+	return nil, nil
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchIssues() ([]IssueRow, error) {
+	return nil, nil
+}
+
+func (m *MockConvoyFetcherWithErrors) FetchActivity() ([]ActivityRow, error) {
+	return nil, nil
 }
 
 func TestConvoyHandler_NonFatalErrors(t *testing.T) {
@@ -970,7 +1061,7 @@ func TestConvoyHandler_NonFatalErrors(t *testing.T) {
 			{ID: "hq-cv-test", Title: "Test", Status: "open", WorkStatus: "active"},
 		},
 		MergeQueueError: errFetchFailed,
-		PolecatsError:   errFetchFailed,
+		WorkersError:    errFetchFailed,
 	}
 
 	handler, err := NewConvoyHandler(mock)

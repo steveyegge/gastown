@@ -462,3 +462,66 @@ func TestThemeForRigDeterministic(t *testing.T) {
 		t.Errorf("theme not deterministic: got %q and %q", theme1, theme2)
 	}
 }
+
+func TestNamePool_ReservedNamesExcluded(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "namepool-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Test all themes to ensure reserved names are excluded
+	for themeName := range BuiltinThemes {
+		pool := NewNamePoolWithConfig(tmpDir, "testrig", themeName, nil, 100)
+
+		// Allocate all available names (up to 100)
+		allocated := make(map[string]bool)
+		for i := 0; i < 100; i++ {
+			name, err := pool.Allocate()
+			if err != nil {
+				t.Fatalf("Allocate error: %v", err)
+			}
+			allocated[name] = true
+		}
+
+		// Verify no reserved names were allocated
+		for reserved := range ReservedInfraAgentNames {
+			if allocated[reserved] {
+				t.Errorf("theme %q allocated reserved name %q", themeName, reserved)
+			}
+		}
+
+		pool.Reset()
+	}
+}
+
+func TestNamePool_ReservedNamesInCustomNames(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "namepool-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Custom names that include reserved names should have them filtered out
+	custom := []string{"alpha", "witness", "beta", "mayor", "gamma"}
+	pool := NewNamePoolWithConfig(tmpDir, "testrig", "", custom, 10)
+
+	// Allocate all names
+	allocated := make(map[string]bool)
+	for i := 0; i < 5; i++ {
+		name, _ := pool.Allocate()
+		allocated[name] = true
+	}
+
+	// Should only get alpha, beta, gamma (3 non-reserved names)
+	// Then overflow names for the remaining allocations
+	if allocated["witness"] {
+		t.Error("allocated reserved name 'witness' from custom names")
+	}
+	if allocated["mayor"] {
+		t.Error("allocated reserved name 'mayor' from custom names")
+	}
+	if !allocated["alpha"] || !allocated["beta"] || !allocated["gamma"] {
+		t.Errorf("expected alpha, beta, gamma to be allocated, got %v", allocated)
+	}
+}

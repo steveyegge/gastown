@@ -11,7 +11,6 @@ to commit." This breaks the Gas Town model. The system is designed for autonomou
 
 **When implementation is complete:**
 - Push your commits: `git push`
-- Sync beads: `bd sync`
 - Either continue with next task OR cycle: `gt handoff`
 
 **Do NOT:**
@@ -132,7 +131,7 @@ Town ({{ .TownRoot }})
 **Key points:**
 - Mail ALWAYS uses town beads - `gt mail` routes there automatically
 - Project issues use your clone's beads - `bd` commands use local `.beads/`
-- Run `bd sync` to push/pull beads changes via the `beads-sync` branch
+- Beads changes are persisted immediately via Dolt - no sync step needed
 - **GitHub URLs**: Use `git remote -v` to verify repo URLs - never assume orgs like `anthropics/`
 
 ## Prefix-Based Routing
@@ -195,6 +194,22 @@ gt worktree remove beads
 **Note**: Dogs are Deacon infrastructure helpers (like Boot). They're NOT for user-facing
 work. If you need to fix something in another rig, use worktrees, not dogs.
 
+## Where to File Beads
+
+**File in the rig that OWNS the code, not your current rig.**
+
+You're working in **{{ .RigName }}** (prefix `{{ .IssuePrefix }}-`). Issues about THIS rig's code
+go here by default. But if you discover bugs/issues in OTHER projects:
+
+| Issue is about... | File in | Command |
+|-------------------|---------|---------|
+| This rig's code ({{ .RigName }}) | Here (default) | `bd create "..."` |
+| `bd` CLI (beads tool) | **beads** | `bd create --rig beads "..."` |
+| `gt` CLI (gas town tool) | **gastown** | `bd create --rig gastown "..."` |
+| Cross-rig coordination | **HQ** | `bd create --prefix hq- "..."` |
+
+**The test**: "Which repo would the fix be committed to?"
+
 ## Gotchas when Filing Beads
 
 **Temporal language inverts dependencies.** "Phase 1 blocks Phase 2" is backwards.
@@ -230,7 +245,7 @@ Your hooked work persists across sessions. The handoff mail is just context note
 ## Hookable Mail
 
 Mail beads can be hooked for ad-hoc instruction handoff:
-- `gt hook attach <mail-id>` - Hook existing mail as your assignment
+- `gt mail hook <mail-id>` - Hook existing mail as your assignment
 - `gt handoff -m "..."` - Create and hook new instructions for next session
 
 If you find mail on your hook (not a molecule), GUPP applies: read the mail
@@ -305,7 +320,6 @@ ONE exception where branches are created. But the rule still applies:
 - `bd update <id> --status=in_progress` - Claim an issue
 - `bd show <id>` - View issue details
 - `bd close <id>` - Mark issue complete
-- `bd sync` - Sync beads changes
 
 ### Communication
 - `gt mail send <addr> -s "Subject" -m "Message"` - Send mail (async, queued)
@@ -365,7 +379,7 @@ Raw `tmux send-keys` is unreliable. Always use `gt nudge` for agent-to-agent com
 - Managing your own progress
 - Asking for help when stuck
 - Keeping your git state clean
-- Syncing beads before long breaks
+- Pushing commits before long breaks
 
 ## Context Cycling (Handoff)
 
@@ -404,7 +418,6 @@ Before ending your session:
 ```
 [ ] git status              (check for uncommitted changes)
 [ ] git push                (push any commits)
-[ ] bd sync                 (sync beads if configured)
 [ ] Check inbox             (any messages needing response?)
 [ ] gt handoff              (cycle to fresh session)
     # Or with context: gt handoff -s "Brief" -m "Details"

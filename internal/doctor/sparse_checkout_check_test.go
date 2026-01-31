@@ -120,7 +120,7 @@ func TestSparseCheckoutCheck_MayorRigMissingSparseCheckout(t *testing.T) {
 	if !strings.Contains(result.Message, "1 repo(s) missing") {
 		t.Errorf("expected message about missing config, got %q", result.Message)
 	}
-	if len(result.Details) != 1 || !strings.Contains(result.Details[0], "mayor/rig") {
+	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "mayor/rig") {
 		t.Errorf("expected details to contain mayor/rig, got %v", result.Details)
 	}
 }
@@ -164,7 +164,7 @@ func TestSparseCheckoutCheck_CrewMissingSparseCheckout(t *testing.T) {
 	if result.Status != StatusError {
 		t.Errorf("expected StatusError for missing sparse checkout, got %v", result.Status)
 	}
-	if len(result.Details) != 1 || !strings.Contains(result.Details[0], "crew/agent1") {
+	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "crew/agent1") {
 		t.Errorf("expected details to contain crew/agent1, got %v", result.Details)
 	}
 }
@@ -186,7 +186,7 @@ func TestSparseCheckoutCheck_PolecatMissingSparseCheckout(t *testing.T) {
 	if result.Status != StatusError {
 		t.Errorf("expected StatusError for missing sparse checkout, got %v", result.Status)
 	}
-	if len(result.Details) != 1 || !strings.Contains(result.Details[0], "polecats/pc1") {
+	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "polecats/pc1") {
 		t.Errorf("expected details to contain polecats/pc1, got %v", result.Details)
 	}
 }
@@ -244,7 +244,7 @@ func TestSparseCheckoutCheck_MixedConfigured(t *testing.T) {
 	if !strings.Contains(result.Message, "1 repo(s) missing") {
 		t.Errorf("expected message about 1 missing repo, got %q", result.Message)
 	}
-	if len(result.Details) != 1 || !strings.Contains(result.Details[0], "crew/agent1") {
+	if len(result.Details) != 1 || !strings.Contains(filepath.ToSlash(result.Details[0]), "crew/agent1") {
 		t.Errorf("expected details to contain only crew/agent1, got %v", result.Details)
 	}
 }
@@ -370,11 +370,11 @@ func TestSparseCheckoutCheck_VerifiesAllPatterns(t *testing.T) {
 	contentStr := string(content)
 
 	// Verify all required patterns are present
+	// Note: .mcp.json is NOT excluded so worktrees inherit MCP server config
 	requiredPatterns := []string{
 		"!/.claude/",        // Settings, rules, agents, commands
 		"!/CLAUDE.md",       // Primary context file
 		"!/CLAUDE.local.md", // Personal context file
-		"!/.mcp.json",       // MCP server configuration
 	}
 
 	for _, pattern := range requiredPatterns {
@@ -464,7 +464,7 @@ func TestSparseCheckoutCheck_FixUpgradesLegacyPatterns(t *testing.T) {
 	}
 
 	contentStr := string(content)
-	requiredPatterns := []string{"!/.claude/", "!/CLAUDE.md", "!/CLAUDE.local.md", "!/.mcp.json"}
+	requiredPatterns := []string{"!/.claude/", "!/CLAUDE.md", "!/CLAUDE.local.md"}
 	for _, pattern := range requiredPatterns {
 		if !strings.Contains(contentStr, pattern) {
 			t.Errorf("after fix, sparse-checkout file missing pattern %q", pattern)
@@ -620,10 +620,11 @@ func TestSparseCheckoutCheck_FixFailsWithMultipleProblems(t *testing.T) {
 	initGitRepo(t, mayorRig)
 
 	// Create multiple untracked context files
+	// Note: .mcp.json is NOT excluded (worktrees inherit MCP config), so we test with CLAUDE.md and CLAUDE.local.md
 	if err := os.WriteFile(filepath.Join(mayorRig, "CLAUDE.md"), []byte("# Context\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(mayorRig, ".mcp.json"), []byte("{}"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(mayorRig, "CLAUDE.local.md"), []byte("# Local context\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -647,7 +648,7 @@ func TestSparseCheckoutCheck_FixFailsWithMultipleProblems(t *testing.T) {
 	if !strings.Contains(errStr, "CLAUDE.md") {
 		t.Errorf("expected error to mention CLAUDE.md, got: %v", err)
 	}
-	if !strings.Contains(errStr, ".mcp.json") {
-		t.Errorf("expected error to mention .mcp.json, got: %v", err)
+	if !strings.Contains(errStr, "CLAUDE.local.md") {
+		t.Errorf("expected error to mention CLAUDE.local.md, got: %v", err)
 	}
 }

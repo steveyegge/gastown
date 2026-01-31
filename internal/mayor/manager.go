@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -77,14 +77,15 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
-	// Ensure Claude settings exist
-	if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	// Ensure runtime settings exist
+	runtimeConfig := config.ResolveRoleAgentConfig("mayor", m.townRoot, mayorDir)
+	if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	// Build startup beacon with explicit instructions (matches gt handoff behavior)
 	// This ensures the agent has clear context immediately, not after nudges arrive
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
 		Recipient: "mayor",
 		Sender:    "human",
 		Topic:     "cold-start",
@@ -97,10 +98,10 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
-	// Create session in townRoot (not mayorDir) to match gt handoff behavior
-	// This ensures Mayor works from the town root where all tools work correctly
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, m.townRoot, startupCmd); err != nil {
+	// Create session in mayorDir - Mayor's home directory within the town.
+	// Tools like gt prime use workspace.FindFromCwd() which walks UP to find
+	// town root, so running from ~/gt/mayor/ still finds ~/gt/ correctly.
+	if err := t.NewSessionWithCommand(sessionID, mayorDir, startupCmd); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 

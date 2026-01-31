@@ -132,16 +132,16 @@ Town ({{ .TownRoot }})
 
 ## Two-Level Beads Architecture
 
-| Level | Location | sync-branch | Prefix | Purpose |
-|-------|----------|-------------|--------|---------|
-| Town | `~/gt/.beads/` | NOT set | `hq-*` | Your mail, HQ coordination |
-| Rig | `<rig>/crew/*/.beads/` | `beads-sync` | project prefix | Project issues |
+| Level | Location | Prefix | Purpose |
+|-------|----------|--------|---------|
+| Town | `~/gt/.beads/` | `hq-*` | Your mail, HQ coordination |
+| Rig | `<rig>/crew/*/.beads/` | project prefix | Project issues |
 
 **Key points:**
-- **Town beads**: Your mail lives here. Commits to main (single clone, no sync needed)
+- **Town beads**: Your mail lives here (Dolt backend, changes persist automatically)
 - **Rig beads**: Project work lives in git worktrees (crew/*, polecats/*)
 - The rig-level `<rig>/.beads/` is **gitignored** (local runtime state)
-- Rig beads use `beads-sync` branch for multi-clone coordination
+- Beads uses Dolt for storage - no manual sync needed
 - **GitHub URLs**: Use `git remote -v` to verify repo URLs - never assume orgs like `anthropics/`
 
 ## Prefix-Based Routing
@@ -161,6 +161,29 @@ bd show hq-abc      # Routes to town beads
 **Debug routing:** `BD_DEBUG_ROUTING=1 bd show <id>`
 
 **Conflicts:** If two rigs share a prefix, use `bd rename-prefix <new>` to fix.
+
+## Where to File Beads - Create issues (CRITICAL)
+
+**File in the rig that OWNS the code, not where you're standing.**
+
+| Issue is about... | File in | Command |
+|-------------------|---------|---------|
+| `bd` CLI (beads tool bugs, features, docs) | **beads** | `bd create --rig beads "..."` |
+| `gt` CLI (gas town tool bugs, features) | **gastown** | `bd create --rig gastown "..."` |
+| Polecat/witness/refinery/convoy code | **gastown** | `bd create --rig gastown "..."` |
+| Wyvern game features | **wyvern** | `bd create --rig wyvern "..."` |
+| Cross-rig coordination, convoys, mail threads | **HQ** | `bd create "..."` (default) |
+| Agent role descriptions, assignments | **HQ** | `bd create "..."` (default) |
+
+**IMPORTANT: Issues are created with `bd create`, not `gt` commands.** There is no `gt issue`, `gt issues`, or `gt bd create` command. Always use `bd create`.
+
+**The test**: "Which repo would the fix be committed to?"
+- Fix in `anthropics/beads` → file in beads rig
+- Fix in `anthropics/gas-town` → file in gastown rig
+- Pure coordination (no code) → file in HQ
+
+**Common mistake**: Filing `bd` CLI issues in HQ because you're "coordinating."
+Wrong. The issue is about beads code, so it goes in the beads rig.
 
 ## Gotchas when Filing Beads
 
@@ -186,6 +209,7 @@ bd show hq-abc      # Routes to town beads
 - `gt mail inbox` - Check your messages
 - `gt mail read <id>` - Read a specific message
 - `gt mail send <addr> -s "Subject" -m "Message"` - Send mail
+- `gt mail mark-read <id>` - Mark a message as read, when no action based on it remains to be done
 
 ### Coordination
 - `gt nudge <target> "message"` - Send message to agent session
@@ -257,7 +281,7 @@ Your hooked work persists across sessions. Handoff mail (🤝 HANDOFF subject) p
 ## Hookable Mail
 
 Mail beads can be hooked for ad-hoc instruction handoff:
-- `gt hook attach <mail-id>` - Hook existing mail as your assignment
+- `gt mail hook <mail-id>` - Hook existing mail as your assignment
 - `gt handoff -m "..."` - Create and hook new instructions for next session
 
 If you find mail on your hook (not a molecule), GUPP applies: read the mail
@@ -274,12 +298,20 @@ cross-session continuity when work doesn't fit neatly into a bead.
 ```
 [ ] git status              (check what changed)
 [ ] git add <files>         (stage code changes)
-[ ] bd sync                 (commit beads changes)
 [ ] git commit -m "..."     (commit code)
-[ ] bd sync                 (commit any new beads changes)
 [ ] git push                (push to remote)
 [ ] HANDOFF (if incomplete work):
     gt mail send mayor/ -s "🤝 HANDOFF: <brief>" -m "<context>"
+```
+
+Note: Beads changes are persisted immediately to Dolt - no sync step needed.
+
+## Pull Requests
+
+When creating PRs, default to `--repo` with the origin remote (gh CLI defaults to upstream for forks):
+
+```bash
+gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\.git/\1/')
 ```
 
 Town root: {{ .TownRoot }}

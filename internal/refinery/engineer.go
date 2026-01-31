@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/protocol"
@@ -318,13 +319,20 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		_, _ = fmt.Fprintln(e.output, "[Engineer] Tests passed")
 	}
 
-	// Step 5: Perform the actual merge
-	mergeMsg := fmt.Sprintf("Merge %s into %s", branch, target)
-	if sourceIssue != "" {
-		mergeMsg = fmt.Sprintf("Merge %s into %s (%s)", branch, target, sourceIssue)
+	// Step 5: Perform the actual merge using squash merge
+	// Get the original commit message from the polecat branch to preserve the
+	// conventional commit format (feat:/fix:) instead of creating redundant merge commits
+	originalMsg, err := e.git.GetBranchCommitMessage(branch)
+	if err != nil {
+		// Fallback to a descriptive message if we can't get the original
+		originalMsg = fmt.Sprintf("Squash merge %s into %s", branch, target)
+		if sourceIssue != "" {
+			originalMsg = fmt.Sprintf("Squash merge %s into %s (%s)", branch, target, sourceIssue)
+		}
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not get original commit message: %v\n", err)
 	}
-	_, _ = fmt.Fprintf(e.output, "[Engineer] Merging with message: %s\n", mergeMsg)
-	if err := e.git.MergeNoFF(branch, mergeMsg); err != nil {
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Squash merging with message: %s\n", strings.TrimSpace(originalMsg))
+	if err := e.git.MergeSquash(branch, originalMsg); err != nil {
 		// ZFC: Use git's porcelain output to detect conflicts instead of parsing stderr.
 		// GetConflictingFiles() uses `git diff --diff-filter=U` which is proper.
 		conflicts, conflictErr := e.git.GetConflictingFiles()
@@ -449,6 +457,12 @@ func (e *Engineer) handleSuccess(mr *beads.Issue, result ProcessResult) {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mrFields.SourceIssue, err)
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mrFields.SourceIssue)
+
+			// Redundant convoy observer: check if merged issue is tracked by a convoy
+			logger := func(format string, args ...interface{}) {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] "+format+"\n", args...)
+			}
+			convoy.CheckConvoysForIssue(e.rig.Path, mrFields.SourceIssue, "refinery", logger)
 		}
 	}
 
@@ -557,6 +571,12 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to close source issue %s: %v\n", mr.SourceIssue, err)
 		} else {
 			_, _ = fmt.Fprintf(e.output, "[Engineer] Closed source issue: %s\n", mr.SourceIssue)
+
+			// Redundant convoy observer: check if merged issue is tracked by a convoy
+			logger := func(format string, args ...interface{}) {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] "+format+"\n", args...)
+			}
+			convoy.CheckConvoysForIssue(e.rig.Path, mr.SourceIssue, "refinery", logger)
 		}
 	}
 

@@ -1,0 +1,23 @@
+# Witness role definition
+# Per-rig worker monitor with progressive nudging. One per rig.
+
+role = "witness"
+scope = "rig"
+nudge = "Run 'gt prime' to check worker status and begin patrol cycle."
+prompt_template = "witness.md.tmpl"
+
+[session]
+pattern = "gt-{rig}-witness"
+work_dir = "{town}/{rig}/witness"
+needs_pre_sync = false
+start_command = "exec claude --dangerously-skip-permissions"
+
+[env]
+GT_ROLE = "witness"
+GT_SCOPE = "rig"
+
+[health]
+ping_timeout = "30s"
+consecutive_failures = 3
+kill_cooldown = "5m"
+stuck_threshold = "1h"

@@ -133,3 +133,82 @@ func TestParseHooksFileEmptyHooks(t *testing.T) {
 		t.Errorf("expected 0 hooks, got %d", len(hooks))
 	}
 }
+
+func TestDiscoverHooksCrewLevel(t *testing.T) {
+	// Create a temp directory structure simulating a Gas Town workspace
+	tmpDir := t.TempDir()
+
+	// Create rig structure with crew-level and polecats-level settings
+	rigName := "testrig"
+	rigDir := filepath.Join(tmpDir, rigName)
+
+	// Create crew-level settings (inherited by all crew members)
+	crewClaudeDir := filepath.Join(rigDir, "crew", ".claude")
+	if err := os.MkdirAll(crewClaudeDir, 0755); err != nil {
+		t.Fatalf("failed to create crew/.claude dir: %v", err)
+	}
+
+	crewSettings := ClaudeSettings{
+		Hooks: map[string][]ClaudeHookMatcher{
+			"SessionStart": {
+				{
+					Matcher: "",
+					Hooks: []ClaudeHook{
+						{Type: "command", Command: "crew-level-hook"},
+					},
+				},
+			},
+		},
+	}
+	crewData, _ := json.Marshal(crewSettings)
+	if err := os.WriteFile(filepath.Join(crewClaudeDir, "settings.json"), crewData, 0644); err != nil {
+		t.Fatalf("failed to write crew settings: %v", err)
+	}
+
+	// Create polecats-level settings (inherited by all polecats)
+	polecatsClaudeDir := filepath.Join(rigDir, "polecats", ".claude")
+	if err := os.MkdirAll(polecatsClaudeDir, 0755); err != nil {
+		t.Fatalf("failed to create polecats/.claude dir: %v", err)
+	}
+
+	polecatsSettings := ClaudeSettings{
+		Hooks: map[string][]ClaudeHookMatcher{
+			"PreToolUse": {
+				{
+					Matcher: "",
+					Hooks: []ClaudeHook{
+						{Type: "command", Command: "polecats-level-hook"},
+					},
+				},
+			},
+		},
+	}
+	polecatsData, _ := json.Marshal(polecatsSettings)
+	if err := os.WriteFile(filepath.Join(polecatsClaudeDir, "settings.json"), polecatsData, 0644); err != nil {
+		t.Fatalf("failed to write polecats settings: %v", err)
+	}
+
+	// Discover hooks
+	hooks, err := discoverHooks(tmpDir)
+	if err != nil {
+		t.Fatalf("discoverHooks failed: %v", err)
+	}
+
+	// Verify crew-level hook was discovered
+	var foundCrewLevel, foundPolecatsLevel bool
+	for _, h := range hooks {
+		if h.Agent == "testrig/crew" && len(h.Commands) > 0 && h.Commands[0] == "crew-level-hook" {
+			foundCrewLevel = true
+		}
+		if h.Agent == "testrig/polecats" && len(h.Commands) > 0 && h.Commands[0] == "polecats-level-hook" {
+			foundPolecatsLevel = true
+		}
+	}
+
+	if !foundCrewLevel {
+		t.Error("expected crew-level hook to be discovered (testrig/crew)")
+	}
+	if !foundPolecatsLevel {
+		t.Error("expected polecats-level hook to be discovered (testrig/polecats)")
+	}
+}

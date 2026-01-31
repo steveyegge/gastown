@@ -75,8 +75,29 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "0.5.0",
+		Date:    "2026-01-22",
+		Changes: []string{
+			"NEW: gt mail read <index> - Read messages by inbox position",
+			"NEW: gt mail hook - Shortcut for gt hook attach from mail",
+			"NEW: --body alias for --message in gt mail send/reply",
+			"NEW: gt bd alias for gt bead, gt work alias for gt hook",
+			"NEW: OpenCode as built-in agent preset (gt config set agent opencode)",
+			"NEW: Config-based role definition system",
+			"NEW: Deacon icon in mayor status line",
+			"NEW: gt hooks - Hook registry and install command",
+			"NEW: Squash merge in refinery for cleaner history",
+			"CHANGED: Parallel mail inbox queries (~6x speedup)",
+			"FIX: Crew session stability - Don't kill pane processes on new sessions",
+			"FIX: Auto-recover from stale tmux pane references",
+			"FIX: KillPaneProcesses now kills pane process itself, not just descendants",
+			"FIX: Convoy ID propagation in refinery and convoy watcher",
+			"FIX: Multi-repo routing for custom types and role slots",
+		},
+	},
+	{
 		Version: "0.4.0",
-		Date:    "2026-01-17",
+		Date:    "2026-01-19",
 		Changes: []string{
 			"FIX: Orphan cleanup skips valid tmux sessions - Prevents false kills of witnesses/refineries/deacon during startup by checking gt-*/hq-* session membership",
 		},

@@ -34,6 +34,11 @@ Examples:
 }
 
 func runShow(cmd *cobra.Command, args []string) error {
+	// Handle --help since DisableFlagParsing bypasses Cobra's help handling
+	if helped, err := checkHelpFlag(cmd, args); helped || err != nil {
+		return err
+	}
+
 	if len(args) == 0 {
 		return fmt.Errorf("bead ID required\n\nUsage: gt show <bead-id> [flags]")
 	}

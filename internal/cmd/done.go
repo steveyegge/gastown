@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -81,6 +82,14 @@ func init() {
 }
 
 func runDone(cmd *cobra.Command, args []string) error {
+	// Guard: Only polecats should call gt done
+	// Crew, deacons, witnesses etc. don't use gt done - they persist across tasks.
+	// Polecats are ephemeral workers that self-destruct after completing work.
+	actor := os.Getenv("BD_ACTOR")
+	if actor != "" && !isPolecatActor(actor) {
+		return fmt.Errorf("gt done is for polecats only (you are %s)\nPolecats are ephemeral workers that self-destruct after completing work.\nOther roles persist across tasks and don't use gt done.", actor)
+	}
+
 	// Handle --phase-complete flag (overrides --status)
 	var exitType string
 	if donePhaseComplete {
@@ -259,19 +268,29 @@ func runDone(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cannot complete: uncommitted changes would be lost\nCommit your changes first, or use --status DEFERRED to exit without completing\nUncommitted: %s", workStatus.String())
 		}
 
-		// Check that branch has commits ahead of origin/default (not local default)
-		// This ensures we compare against the remote, not a potentially stale local copy
+		// Check if branch has commits ahead of origin/default
+		// If not, work may have been pushed directly to main - that's fine, just skip MR
 		originDefault := "origin/" + defaultBranch
 		aheadCount, err := g.CommitsAhead(originDefault, "HEAD")
 		if err != nil {
 			// Fallback to local branch comparison if origin not available
 			aheadCount, err = g.CommitsAhead(defaultBranch, branch)
 			if err != nil {
-				return fmt.Errorf("checking commits ahead of %s: %w", defaultBranch, err)
+				// Can't determine - assume work exists and continue
+				style.PrintWarning("could not check commits ahead of %s: %v", defaultBranch, err)
+				aheadCount = 1
 			}
 		}
+
+		// If no commits ahead, work was likely pushed directly to main (or already merged)
+		// This is valid - skip MR creation but still complete successfully
 		if aheadCount == 0 {
-			return fmt.Errorf("branch '%s' has 0 commits ahead of %s; nothing to merge\nMake and commit changes first, or use --status DEFERRED to exit without completing", branch, originDefault)
+			fmt.Printf("%s Branch has no commits ahead of %s\n", style.Bold.Render("→"), originDefault)
+			fmt.Printf("  Work was likely pushed directly to main or already merged.\n")
+			fmt.Printf("  Skipping MR creation - completing without merge request.\n\n")
+
+			// Skip straight to witness notification (no MR needed)
+			goto notifyWitness
 		}
 
 		// CRITICAL: Push branch BEFORE creating MR bead (hq-6dk53, hq-a4ksk)
@@ -290,6 +309,38 @@ func runDone(cmd *cobra.Command, args []string) error {
 
 		// Initialize beads
 		bd := beads.New(beads.ResolveBeadsDir(cwd))
+
+		// Check for no_merge flag - if set, skip merge queue and notify for review
+		sourceIssueForNoMerge, err := bd.Show(issueID)
+		if err == nil {
+			attachmentFields := beads.ParseAttachmentFields(sourceIssueForNoMerge)
+			if attachmentFields != nil && attachmentFields.NoMerge {
+				fmt.Printf("%s No-merge mode: skipping merge queue\n", style.Bold.Render("→"))
+				fmt.Printf("  Branch: %s\n", branch)
+				fmt.Printf("  Issue: %s\n", issueID)
+				fmt.Println()
+				fmt.Printf("%s\n", style.Dim.Render("Work stays on feature branch for human review."))
+
+				// Mail dispatcher with READY_FOR_REVIEW
+				if dispatcher := attachmentFields.DispatchedBy; dispatcher != "" {
+					townRouter := mail.NewRouter(townRoot)
+					reviewMsg := &mail.Message{
+						To:      dispatcher,
+						From:    detectSender(),
+						Subject: fmt.Sprintf("READY_FOR_REVIEW: %s", issueID),
+						Body:    fmt.Sprintf("Branch: %s\nIssue: %s\nReady for review.", branch, issueID),
+					}
+					if err := townRouter.Send(reviewMsg); err != nil {
+						style.PrintWarning("could not notify dispatcher: %v", err)
+					} else {
+						fmt.Printf("%s Dispatcher notified: READY_FOR_REVIEW\n", style.Bold.Render("✓"))
+					}
+				}
+
+				// Skip MR creation, go to witness notification
+				goto notifyWitness
+			}
+		}
 
 		// Determine target branch (auto-detect integration branch if applicable)
 		target := defaultBranch
@@ -401,6 +452,7 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Branch: %s\n", branch)
 	}
 
+notifyWitness:
 	// Notify Witness about completion
 	// Use town-level beads for cross-agent mail
 	townRouter := mail.NewRouter(townRoot)
@@ -462,27 +514,28 @@ func runDone(cmd *cobra.Command, args []string) error {
 	// This is the self-cleaning model - polecats clean up after themselves
 	// "done means gone" - both worktree and session are terminated
 	selfCleanAttempted := false
-	if exitType == ExitCompleted {
-		if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
-			selfCleanAttempted = true
+	if roleInfo, err := GetRoleWithContext(cwd, townRoot); err == nil && roleInfo.Role == RolePolecat {
+		selfCleanAttempted = true
 
-			// Step 1: Nuke the worktree
+		// Step 1: Nuke the worktree (only for COMPLETED - other statuses preserve work)
+		if exitType == ExitCompleted {
 			if err := selfNukePolecat(roleInfo, townRoot); err != nil {
 				// Non-fatal: Witness will clean up if we fail
 				style.PrintWarning("worktree nuke failed: %v (Witness will clean up)", err)
 			} else {
 				fmt.Printf("%s Worktree nuked\n", style.Bold.Render("✓"))
 			}
-
-			// Step 2: Kill our own session (this terminates Claude and the shell)
-			// This is the last thing we do - the process will be killed when tmux session dies
-			fmt.Printf("%s Terminating session (done means gone)\n", style.Bold.Render("→"))
-			if err := selfKillSession(townRoot, roleInfo); err != nil {
-				// If session kill fails, fall through to os.Exit
-				style.PrintWarning("session kill failed: %v", err)
-			}
-			// If selfKillSession succeeds, we won't reach here (process killed by tmux)
 		}
+
+		// Step 2: Kill our own session (this terminates Claude and the shell)
+		// This is the last thing we do - the process will be killed when tmux session dies
+		// All exit types kill the session - "done means gone"
+		fmt.Printf("%s Terminating session (done means gone)\n", style.Bold.Render("→"))
+		if err := selfKillSession(townRoot, roleInfo); err != nil {
+			// If session kill fails, fall through to os.Exit
+			style.PrintWarning("session kill failed: %v", err)
+		}
+		// If selfKillSession succeeds, we won't reach here (process killed by tmux)
 	}
 
 	// Fallback exit for non-polecats or if self-clean failed
@@ -582,6 +635,19 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		hookedBeadID := agentBead.HookBead
 		// Only close if the hooked bead exists and is still in "hooked" status
 		if hookedBead, err := bd.Show(hookedBeadID); err == nil && hookedBead.Status == beads.StatusHooked {
+			// BUG FIX: Close attached molecule (wisp) BEFORE closing hooked bead.
+			// When using formula-on-bead (gt sling formula --on bead), the base bead
+			// has attached_molecule pointing to the wisp. Without this fix, gt done
+			// only closed the hooked bead, leaving the wisp orphaned.
+			// Order matters: wisp closes -> unblocks base bead -> base bead closes.
+			attachment := beads.ParseAttachmentFields(hookedBead)
+			if attachment != nil && attachment.AttachedMolecule != "" {
+				if err := bd.Close(attachment.AttachedMolecule); err != nil {
+					// Non-fatal: warn but continue
+					fmt.Fprintf(os.Stderr, "Warning: couldn't close attached molecule %s: %v\n", attachment.AttachedMolecule, err)
+				}
+			}
+
 			if err := bd.Close(hookedBeadID); err != nil {
 				// Non-fatal: warn but continue
 				fmt.Fprintf(os.Stderr, "Warning: couldn't close hooked bead %s: %v\n", hookedBeadID, err)
@@ -699,11 +765,20 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 
 	// Use nuclear=true since we know we just pushed our work
 	// The branch is pushed, MR is created, we're clean
-	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, true); err != nil {
+	// selfNuke=true because polecat is deleting its own worktree from inside it
+	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, true, true); err != nil {
 		return fmt.Errorf("removing worktree: %w", err)
 	}
 
 	return nil
+}
+
+// isPolecatActor checks if a BD_ACTOR value represents a polecat.
+// Polecat actors have format: rigname/polecats/polecatname
+// Non-polecat actors have formats like: gastown/crew/name, rigname/witness, etc.
+func isPolecatActor(actor string) bool {
+	parts := strings.Split(actor, "/")
+	return len(parts) >= 2 && parts[1] == "polecats"
 }
 
 // selfKillSession terminates the polecat's own tmux session after logging the event.
@@ -745,9 +820,12 @@ func selfKillSession(townRoot string, roleInfo RoleInfo) error {
 
 	// Kill our own tmux session with proper process cleanup
 	// This will terminate Claude and all child processes, completing the self-cleaning cycle.
-	// We use KillSessionWithProcesses to ensure no orphaned processes are left behind.
+	// We use KillSessionWithProcessesExcluding to ensure no orphaned processes are left behind,
+	// while excluding our own PID to avoid killing ourselves before cleanup completes.
+	// The tmux kill-session at the end will terminate us along with the session.
 	t := tmux.NewTmux()
-	if err := t.KillSessionWithProcesses(sessionName); err != nil {
+	myPID := strconv.Itoa(os.Getpid())
+	if err := t.KillSessionWithProcessesExcluding(sessionName, []string{myPID}); err != nil {
 		return fmt.Errorf("killing session %s: %w", sessionName, err)
 	}
 

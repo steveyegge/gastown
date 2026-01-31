@@ -188,7 +188,7 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 			}
 
 			// Build startup beacon for context (like gt handoff does)
-			beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+			beacon := session.FormatStartupBeacon(session.BeaconConfig{
 				Recipient: "mayor",
 				Sender:    "human",
 				Topic:     "attach",
@@ -200,6 +200,20 @@ func runMayorAttach(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("building startup command: %w", err)
 			}
 
+			// Set remain-on-exit so the pane survives process death during respawn.
+			// Without this, killing processes causes tmux to destroy the pane.
+			if err := t.SetRemainOnExit(paneID, true); err != nil {
+				style.PrintWarning("could not set remain-on-exit: %v", err)
+			}
+
+			// Kill all processes in the pane before respawning to prevent orphan leaks
+			// RespawnPane's -k flag only sends SIGHUP which Claude/Node may ignore
+			if err := t.KillPaneProcesses(paneID); err != nil {
+				// Non-fatal but log the warning
+				style.PrintWarning("could not kill pane processes: %v", err)
+			}
+
+			// Note: respawn-pane automatically resets remain-on-exit to off
 			if err := t.RespawnPane(paneID, startupCmd); err != nil {
 				return fmt.Errorf("restarting runtime: %w", err)
 			}

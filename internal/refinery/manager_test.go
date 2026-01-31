@@ -1,11 +1,9 @@
 package refinery
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/steveyegge/gastown/internal/rig"
 )
@@ -28,145 +26,96 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	return NewManager(r), rigPath
 }
 
-func TestManager_GetMR(t *testing.T) {
+func TestManager_SessionName(t *testing.T) {
 	mgr, _ := setupTestManager(t)
 
-	// Create a test MR in the pending queue
-	mr := &MergeRequest{
-		ID:       "gt-mr-abc123",
-		Branch:   "polecat/Toast/gt-xyz",
-		Worker:   "Toast",
-		IssueID:  "gt-xyz",
-		Status:   MROpen,
-		Error:    "test failure",
+	want := "gt-testrig-refinery"
+	got := mgr.SessionName()
+	if got != want {
+		t.Errorf("SessionName() = %s, want %s", got, want)
 	}
-
-	if err := mgr.RegisterMR(mr); err != nil {
-		t.Fatalf("RegisterMR: %v", err)
-	}
-
-	t.Run("find existing MR", func(t *testing.T) {
-		found, err := mgr.GetMR("gt-mr-abc123")
-		if err != nil {
-			t.Errorf("GetMR() unexpected error: %v", err)
-		}
-		if found == nil {
-			t.Fatal("GetMR() returned nil")
-		}
-		if found.ID != mr.ID {
-			t.Errorf("GetMR() ID = %s, want %s", found.ID, mr.ID)
-		}
-	})
-
-	t.Run("MR not found", func(t *testing.T) {
-		_, err := mgr.GetMR("nonexistent-mr")
-		if err != ErrMRNotFound {
-			t.Errorf("GetMR() error = %v, want %v", err, ErrMRNotFound)
-		}
-	})
 }
 
-func TestManager_Retry(t *testing.T) {
-	t.Run("retry failed MR clears error", func(t *testing.T) {
-		mgr, _ := setupTestManager(t)
+func TestManager_IsRunning_NoSession(t *testing.T) {
+	mgr, _ := setupTestManager(t)
 
-		// Create a failed MR
-		mr := &MergeRequest{
-			ID:       "gt-mr-failed",
-			Branch:   "polecat/Toast/gt-xyz",
-			Worker:   "Toast",
-			Status:   MROpen,
-			Error:    "merge conflict",
-		}
-
-		if err := mgr.RegisterMR(mr); err != nil {
-			t.Fatalf("RegisterMR: %v", err)
-		}
-
-		// Retry without processing
-		err := mgr.Retry("gt-mr-failed", false)
-		if err != nil {
-			t.Errorf("Retry() unexpected error: %v", err)
-		}
-
-		// Verify error was cleared
-		found, _ := mgr.GetMR("gt-mr-failed")
-		if found.Error != "" {
-			t.Errorf("Retry() error not cleared, got %s", found.Error)
-		}
-	})
-
-	t.Run("retry non-failed MR fails", func(t *testing.T) {
-		mgr, _ := setupTestManager(t)
-
-		// Create a successful MR (no error)
-		mr := &MergeRequest{
-			ID:     "gt-mr-success",
-			Branch: "polecat/Toast/gt-abc",
-			Worker: "Toast",
-			Status: MROpen,
-			Error:  "", // No error
-		}
-
-		if err := mgr.RegisterMR(mr); err != nil {
-			t.Fatalf("RegisterMR: %v", err)
-		}
-
-		err := mgr.Retry("gt-mr-success", false)
-		if err != ErrMRNotFailed {
-			t.Errorf("Retry() error = %v, want %v", err, ErrMRNotFailed)
-		}
-	})
-
-	t.Run("retry nonexistent MR fails", func(t *testing.T) {
-		mgr, _ := setupTestManager(t)
-
-		err := mgr.Retry("nonexistent", false)
-		if err != ErrMRNotFound {
-			t.Errorf("Retry() error = %v, want %v", err, ErrMRNotFound)
-		}
-	})
-}
-
-func TestManager_RegisterMR(t *testing.T) {
-	mgr, rigPath := setupTestManager(t)
-
-	mr := &MergeRequest{
-		ID:           "gt-mr-new",
-		Branch:       "polecat/Cheedo/gt-123",
-		Worker:       "Cheedo",
-		IssueID:      "gt-123",
-		TargetBranch: "main",
-		CreatedAt:    time.Now(),
-		Status:       MROpen,
-	}
-
-	if err := mgr.RegisterMR(mr); err != nil {
-		t.Fatalf("RegisterMR: %v", err)
-	}
-
-	// Verify it was saved to disk
-	stateFile := filepath.Join(rigPath, ".runtime", "refinery.json")
-	data, err := os.ReadFile(stateFile)
+	// Without a tmux session, IsRunning should return false
+	// Note: this test doesn't create a tmux session, so it tests the "not running" case
+	running, err := mgr.IsRunning()
 	if err != nil {
-		t.Fatalf("reading state file: %v", err)
+		// If tmux server isn't running, HasSession returns an error
+		// This is expected in test environments without tmux
+		t.Logf("IsRunning returned error (expected without tmux): %v", err)
+		return
 	}
 
-	var ref Refinery
-	if err := json.Unmarshal(data, &ref); err != nil {
-		t.Fatalf("unmarshal state: %v", err)
+	if running {
+		t.Error("IsRunning() = true, want false (no session created)")
+	}
+}
+
+func TestManager_Status_NotRunning(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Without a tmux session, Status should return ErrNotRunning
+	_, err := mgr.Status()
+	if err == nil {
+		t.Error("Status() expected error when not running")
+	}
+	// May return ErrNotRunning or a tmux server error
+	t.Logf("Status returned error (expected): %v", err)
+}
+
+func TestManager_Queue_NoBeads(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Queue returns error when no beads database exists
+	// This is expected - beads requires initialization
+	_, err := mgr.Queue()
+	if err == nil {
+		// If beads is somehow available, queue should be empty
+		t.Log("Queue() succeeded unexpectedly (beads may be available)")
+		return
+	}
+	// Error is expected when beads isn't initialized
+	t.Logf("Queue() returned error (expected without beads): %v", err)
+}
+
+func TestManager_FindMR_NoBeads(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// FindMR returns error when no beads database exists
+	_, err := mgr.FindMR("nonexistent-mr")
+	if err == nil {
+		t.Error("FindMR() expected error")
+	}
+	// Any error is acceptable when beads isn't initialized
+	t.Logf("FindMR() returned error (expected): %v", err)
+}
+
+func TestManager_RegisterMR_Deprecated(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	mr := &MergeRequest{
+		ID:     "gt-mr-test",
+		Branch: "polecat/Test/gt-123",
+		Worker: "Test",
+		Status: MROpen,
 	}
 
-	if ref.PendingMRs == nil {
-		t.Fatal("PendingMRs is nil")
+	// RegisterMR should return an error indicating deprecation
+	err := mgr.RegisterMR(mr)
+	if err == nil {
+		t.Error("RegisterMR() expected error (deprecated)")
 	}
+}
 
-	saved, ok := ref.PendingMRs["gt-mr-new"]
-	if !ok {
-		t.Fatal("MR not found in PendingMRs")
-	}
+func TestManager_Retry_Deprecated(t *testing.T) {
+	mgr, _ := setupTestManager(t)
 
-	if saved.Worker != "Cheedo" {
-		t.Errorf("saved MR worker = %s, want Cheedo", saved.Worker)
+	// Retry is deprecated and should not error, just print a message
+	err := mgr.Retry("any-id", false)
+	if err != nil {
+		t.Errorf("Retry() unexpected error: %v", err)
 	}
 }

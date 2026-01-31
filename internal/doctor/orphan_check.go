@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/events"
@@ -95,8 +94,8 @@ func (c *OrphanSessionCheck) Run(ctx *CheckContext) *CheckResult {
 			continue
 		}
 
-		// Only check gt-* sessions (Gas Town sessions)
-		if !strings.HasPrefix(sess, "gt-") {
+		// Only check gt-* and hq-* sessions (Gas Town sessions)
+		if !strings.HasPrefix(sess, "gt-") && !strings.HasPrefix(sess, "hq-") {
 			continue
 		}
 
@@ -150,7 +149,8 @@ func (c *OrphanSessionCheck) Fix(ctx *CheckContext) error {
 		// Log pre-death event for crash investigation (before killing)
 		_ = events.LogFeed(events.TypeSessionDeath, sess,
 			events.SessionDeathPayload(sess, "unknown", "orphan cleanup", "gt doctor"))
-		if err := t.KillSession(sess); err != nil {
+		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+		if err := t.KillSessionWithProcesses(sess); err != nil {
 			lastErr = err
 		}
 	}
@@ -200,8 +200,8 @@ func (c *OrphanSessionCheck) getValidRigs(townRoot string) []string {
 
 // isValidSession checks if a session name matches expected Gas Town patterns.
 // Valid patterns:
-//   - gt-{town}-mayor (dynamic based on town name)
-//   - gt-{town}-deacon (dynamic based on town name)
+//   - hq-mayor (headquarters mayor session)
+//   - hq-deacon (headquarters deacon session)
 //   - gt-<rig>-witness
 //   - gt-<rig>-refinery
 //   - gt-<rig>-<polecat> (where polecat is any name)
@@ -354,8 +354,9 @@ func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //noli
 
 	// Find tmux server processes using ps instead of pgrep.
 	// pgrep -x tmux is unreliable on macOS - it often misses the actual server.
-	// We use ps with awk to find processes where comm is exactly "tmux".
-	out, err := exec.Command("sh", "-c", `ps ax -o pid,comm | awk '$2 == "tmux" || $2 ~ /\/tmux$/ { print $1 }'`).Output()
+	// We use ps with awk to find processes where comm is exactly "tmux" or starts with "tmux:".
+	// On Linux, tmux servers show as "tmux: server" in the comm field.
+	out, err := exec.Command("sh", "-c", `ps ax -o pid,comm | awk '$2 == "tmux" || $2 ~ /\/tmux$/ || $2 ~ /^tmux:/ { print $1 }'`).Output()
 	if err != nil {
 		// No tmux server running
 		return pids, nil
@@ -388,23 +389,16 @@ func (c *OrphanProcessCheck) getTmuxSessionPIDs() (map[int]bool, error) { //noli
 	return pids, nil
 }
 
-// findRuntimeProcesses finds all running runtime CLI processes.
-// Excludes Claude.app desktop application and its helpers.
+// findRuntimeProcesses finds Gas Town Claude processes (those with --dangerously-skip-permissions).
+// Only detects processes started by Gas Town, not user's personal Claude sessions.
 func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
 	var procs []processInfo
 
-	// Use ps to find runtime processes
-	out, err := exec.Command("ps", "-eo", "pid,ppid,comm").Output()
+	// Use ps with args to get full command line (needed to check for Gas Town signature)
+	out, err := exec.Command("ps", "-eo", "pid,ppid,args").Output()
 	if err != nil {
 		return nil, err
 	}
-
-	// Regex to match runtime CLI processes (not Claude.app)
-	// Match: "claude", "claude-code", or "codex" (or paths ending in those)
-	runtimePattern := regexp.MustCompile(`(?i)(^claude$|/claude$|^claude-code$|/claude-code$|^codex$|/codex$)`)
-
-	// Pattern to exclude Claude.app and related desktop processes
-	excludePattern := regexp.MustCompile(`(?i)(Claude\.app|claude-native|chrome-native)`)
 
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
@@ -412,16 +406,24 @@ func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
 			continue
 		}
 
-		// Check if command matches runtime CLI
-		cmd := strings.Join(fields[2:], " ")
+		// Extract command name (without path)
+		cmd := fields[2]
+		if idx := strings.LastIndex(cmd, "/"); idx >= 0 {
+			cmd = cmd[idx+1:]
+		}
 
-		// Skip desktop app processes
-		if excludePattern.MatchString(cmd) {
+		// Only match claude/codex processes, not tmux or other launchers
+		// (tmux command line may contain --dangerously-skip-permissions as part of the launched command)
+		if cmd != "claude" && cmd != "claude-code" && cmd != "codex" {
 			continue
 		}
 
-		// Only match CLI runtime processes
-		if !runtimePattern.MatchString(cmd) {
+		// Get full args
+		args := strings.Join(fields[2:], " ")
+
+		// Only match Gas Town Claude processes (have --dangerously-skip-permissions)
+		// This excludes user's personal Claude sessions
+		if !strings.Contains(args, "--dangerously-skip-permissions") {
 			continue
 		}
 
@@ -436,7 +438,7 @@ func (c *OrphanProcessCheck) findRuntimeProcesses() ([]processInfo, error) {
 		procs = append(procs, processInfo{
 			pid:  pid,
 			ppid: ppid,
-			cmd:  cmd,
+			cmd:  args,
 		})
 	}
 

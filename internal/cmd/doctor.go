@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/doctor"
@@ -14,6 +15,7 @@ var (
 	doctorVerbose         bool
 	doctorRig             string
 	doctorRestartSessions bool
+	doctorSlow            string
 )
 
 var doctorCmd = &cobra.Command{
@@ -68,6 +70,7 @@ Rig checks (with --rig flag):
 Routing checks (fixable):
   - routes-config            Check beads routing configuration
   - prefix-mismatch          Detect rigs.json vs routes.jsonl prefix mismatches (fixable)
+  - database-prefix          Detect database vs routes.jsonl prefix mismatches (fixable)
 
 Session hook checks:
   - session-hooks            Check settings.json use session-start.sh
@@ -81,7 +84,8 @@ Patrol checks:
   - patrol-roles-have-prompts Verify role prompts exist
 
 Use --fix to attempt automatic fixes for issues that support it.
-Use --rig to check a specific rig instead of the entire workspace.`,
+Use --rig to check a specific rig instead of the entire workspace.
+Use --slow to highlight slow checks (default threshold: 1s, e.g. --slow=500ms).`,
 	RunE: runDoctor,
 }
 
@@ -90,6 +94,9 @@ func init() {
 	doctorCmd.Flags().BoolVarP(&doctorVerbose, "verbose", "v", false, "Show detailed output")
 	doctorCmd.Flags().StringVar(&doctorRig, "rig", "", "Check specific rig only")
 	doctorCmd.Flags().BoolVar(&doctorRestartSessions, "restart-sessions", false, "Restart patrol sessions when fixing stale settings (use with --fix)")
+	doctorCmd.Flags().StringVar(&doctorSlow, "slow", "", "Highlight slow checks (optional threshold, default 1s)")
+	// Allow --slow without a value (uses default 1s)
+	doctorCmd.Flags().Lookup("slow").NoOptDefVal = "1s"
 	rootCmd.AddCommand(doctorCmd)
 }
 
@@ -129,17 +136,20 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewCustomTypesCheck())
 	d.Register(doctor.NewRoleLabelCheck())
 	d.Register(doctor.NewFormulaCheck())
-	d.Register(doctor.NewBdDaemonCheck())
 	d.Register(doctor.NewPrefixConflictCheck())
 	d.Register(doctor.NewPrefixMismatchCheck())
+	d.Register(doctor.NewDatabasePrefixCheck())
 	d.Register(doctor.NewRoutesCheck())
 	d.Register(doctor.NewRigRoutesJSONLCheck())
+	d.Register(doctor.NewRoutingModeCheck())
 	d.Register(doctor.NewOrphanSessionCheck())
 	d.Register(doctor.NewZombieSessionCheck())
 	d.Register(doctor.NewOrphanProcessCheck())
 	d.Register(doctor.NewWispGCCheck())
+	d.Register(doctor.NewCheckMisclassifiedWisps())
 	d.Register(doctor.NewBranchCheck())
 	d.Register(doctor.NewBeadsSyncOrphanCheck())
+	d.Register(doctor.NewBeadsSyncWorktreeCheck())
 	d.Register(doctor.NewCloneDivergenceCheck())
 	d.Register(doctor.NewIdentityCollisionCheck())
 	d.Register(doctor.NewLinkedPaneCheck())
@@ -154,6 +164,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	d.Register(doctor.NewPatrolPluginsAccessibleCheck())
 	d.Register(doctor.NewPatrolRolesHavePromptsCheck())
 	d.Register(doctor.NewAgentBeadsCheck())
+	d.Register(doctor.NewStaleAgentBeadsCheck())
 	d.Register(doctor.NewRigBeadsCheck())
 	d.Register(doctor.NewRoleBeadsCheck())
 
@@ -187,16 +198,27 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		d.RegisterAll(doctor.RigChecks()...)
 	}
 
-	// Run checks
-	var report *doctor.Report
-	if doctorFix {
-		report = d.Fix(ctx)
-	} else {
-		report = d.Run(ctx)
+	// Parse slow threshold (0 = disabled)
+	var slowThreshold time.Duration
+	if doctorSlow != "" {
+		var err error
+		slowThreshold, err = time.ParseDuration(doctorSlow)
+		if err != nil {
+			return fmt.Errorf("invalid --slow duration %q: %w", doctorSlow, err)
+		}
 	}
 
-	// Print report
-	report.Print(os.Stdout, doctorVerbose)
+	// Run checks with streaming output
+	fmt.Println() // Initial blank line
+	var report *doctor.Report
+	if doctorFix {
+		report = d.FixStreaming(ctx, os.Stdout, slowThreshold)
+	} else {
+		report = d.RunStreaming(ctx, os.Stdout, slowThreshold)
+	}
+
+	// Print summary (checks were already printed during streaming)
+	report.PrintSummaryOnly(os.Stdout, doctorVerbose, slowThreshold)
 
 	// Exit with error code if there are errors
 	if report.HasErrors() {

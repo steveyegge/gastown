@@ -5,14 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/session"
@@ -188,6 +187,12 @@ func (m *Manager) Add(name string, createBranch bool) (*CrewWorker, error) {
 		fmt.Printf("Warning: could not copy overlay files: %v\n", err)
 	}
 
+	// Ensure .gitignore has required Gas Town patterns
+	if err := rig.EnsureGitignorePatterns(crewPath); err != nil {
+		// Non-fatal - log warning but continue
+		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+	}
+
 	// NOTE: Slash commands (.claude/commands/) are provisioned at town level by gt install.
 	// All agents inherit them via Claude's directory traversal - no per-workspace copies needed.
 
@@ -315,15 +320,14 @@ func (m *Manager) loadState(name string) (*CrewWorker, error) {
 		return nil, fmt.Errorf("parsing state: %w", err)
 	}
 
-	// Backfill essential fields if missing (handles empty or incomplete state.json)
-	if crew.Name == "" {
-		crew.Name = name
-	}
+	// Directory name is source of truth for Name and ClonePath.
+	// state.json can become stale after directory rename, copy, or corruption.
+	crew.Name = name
+	crew.ClonePath = m.crewDir(name)
+
+	// Rig only needs backfill when empty (less likely to drift)
 	if crew.Rig == "" {
 		crew.Rig = m.rig.Name
-	}
-	if crew.ClonePath == "" {
-		crew.ClonePath = m.crewDir(name)
 	}
 
 	return &crew, nil
@@ -368,7 +372,7 @@ func (m *Manager) Rename(oldName, newName string) error {
 }
 
 // Pristine ensures a crew worker is up-to-date with remote.
-// It runs git pull --rebase and bd sync.
+// It runs git pull --rebase.
 func (m *Manager) Pristine(name string) (*PristineResult, error) {
 	if err := validateCrewName(name); err != nil {
 		return nil, err
@@ -398,21 +402,10 @@ func (m *Manager) Pristine(name string) (*PristineResult, error) {
 		result.Pulled = true
 	}
 
-	// Run bd sync
-	if err := m.runBdSync(crewPath); err != nil {
-		result.SyncError = err.Error()
-	} else {
-		result.Synced = true
-	}
+	// Note: With Dolt backend, beads changes are persisted immediately - no sync needed
+	result.Synced = true
 
 	return result, nil
-}
-
-// runBdSync runs bd sync in the given directory.
-func (m *Manager) runBdSync(dir string) error {
-	cmd := exec.Command("bd", "sync")
-	cmd.Dir = dir
-	return cmd.Run()
 }
 
 // PristineResult captures the results of a pristine operation.
@@ -465,28 +458,32 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	}
 	if running {
 		if opts.KillExisting {
-			// Restart mode - kill existing session
-			if err := t.KillSession(sessionID); err != nil {
+			// Restart mode - kill existing session.
+			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
 		} else {
-			// Normal start - session exists, check if Claude is actually running
-			if t.IsClaudeRunning(sessionID) {
+			// Normal start - session exists, check if agent is actually running
+			if t.IsAgentAlive(sessionID) {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
-			// Zombie session - kill and recreate
-			if err := t.KillSession(sessionID); err != nil {
+			// Zombie session - kill and recreate.
+			// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+			if err := t.KillSessionWithProcesses(sessionID); err != nil {
 				return fmt.Errorf("killing zombie session: %w", err)
 			}
 		}
 	}
 
-	// Ensure Claude settings exist in crew/ (not crew/<name>/) so we don't
+	// Ensure runtime settings exist in crew/ (not crew/<name>/) so we don't
 	// write into the source repo. Claude walks up the tree to find settings.
 	// All crew members share the same settings file.
 	crewBaseDir := filepath.Join(m.rig.Path, "crew")
-	if err := claude.EnsureSettingsForRole(crewBaseDir, "crew"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	townRoot := filepath.Dir(m.rig.Path)
+	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(crewBaseDir, "crew", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	// Build the startup beacon for predecessor discovery via /resume
@@ -496,7 +493,7 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	if topic == "" {
 		topic = "start"
 	}
-	beacon := session.FormatStartupNudge(session.StartupNudgeConfig{
+	beacon := session.FormatStartupBeacon(session.BeaconConfig{
 		Recipient: address,
 		Sender:    "human",
 		Topic:     topic,
@@ -522,7 +519,6 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 
 	// Set environment variables (non-fatal: session works without these)
 	// Use centralized AgentEnv for consistency across all role startup paths
-	townRoot := filepath.Dir(m.rig.Path)
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:             "crew",
 		Rig:              m.rig.Name,
@@ -542,10 +538,10 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
 	_ = t.SetCrewCycleBindings(sessionID)
 
-	// Note: We intentionally don't wait for Claude to start here.
+	// Note: We intentionally don't wait for the agent to start here.
 	// The session is created in detached mode, and blocking for 60 seconds
-	// serves no purpose. If the caller needs to know when Claude is ready,
-	// they can check with IsClaudeRunning().
+	// serves no purpose. If the caller needs to know when the agent is ready,
+	// they can check with IsAgentAlive().
 
 	return nil
 }
@@ -568,8 +564,10 @@ func (m *Manager) Stop(name string) error {
 		return ErrSessionNotFound
 	}
 
-	// Kill the session
-	if err := t.KillSession(sessionID); err != nil {
+	// Kill the session.
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+	// This prevents orphan bash processes from Claude's Bash tool surviving session termination.
+	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
 
@@ -582,3 +580,4 @@ func (m *Manager) IsRunning(name string) (bool, error) {
 	sessionID := m.SessionName(name)
 	return t.HasSession(sessionID)
 }
+

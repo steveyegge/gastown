@@ -3,9 +3,38 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func writeBDStub(t *testing.T, binDir string, unixScript string, windowsScript string) string {
+	t.Helper()
+
+	var path string
+	if runtime.GOOS == "windows" {
+		path = filepath.Join(binDir, "bd.cmd")
+		if err := os.WriteFile(path, []byte(windowsScript), 0644); err != nil {
+			t.Fatalf("write bd stub: %v", err)
+		}
+		return path
+	}
+
+	path = filepath.Join(binDir, "bd")
+	if err := os.WriteFile(path, []byte(unixScript), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	return path
+}
+
+func containsVarArg(line, key, value string) bool {
+	plain := "--var " + key + "=" + value
+	if strings.Contains(line, plain) {
+		return true
+	}
+	quoted := "--var \"" + key + "=" + value + "\""
+	return strings.Contains(line, quoted)
+}
 
 func TestParseWispIDFromJSON(t *testing.T) {
 	tests := []struct {
@@ -220,7 +249,6 @@ func TestSlingFormulaOnBeadRoutesBDCommandsToTargetRig(t *testing.T) {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
 	logPath := filepath.Join(townRoot, "bd.log")
-	bdPath := filepath.Join(binDir, "bd")
 	bdScript := `#!/bin/sh
 set -e
 echo "$(pwd)|$*" >> "${BD_LOG}"
@@ -256,11 +284,41 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+echo %CD%^|%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  set "sub=%3"
+)
+if "%cmd%"=="show" (
+  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+  exit /b 0
+)
+if "%cmd%"=="formula" (
+  echo {"name":"test-formula"}
+  exit /b 0
+)
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {"new_epic_id":"gt-wisp-xyz"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    echo {"root_id":"gt-wisp-xyz"}
+    exit /b 0
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
@@ -295,6 +353,7 @@ exit 0
 
 	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
 	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1") // Stub bd doesn't track state
 
 	if err := runSling(nil, []string{"mol-review"}); err != nil {
 		t.Fatalf("runSling: %v", err)
@@ -381,7 +440,6 @@ func TestSlingFormulaOnBeadPassesFeatureAndIssueVars(t *testing.T) {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
 	logPath := filepath.Join(townRoot, "bd.log")
-	bdPath := filepath.Join(binDir, "bd")
 	// The stub returns a specific title so we can verify it appears in --var feature=
 	bdScript := `#!/bin/sh
 set -e
@@ -418,11 +476,41 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+echo ARGS:%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  set "sub=%3"
+)
+if "%cmd%"=="show" (
+  echo [{^"title^":^"My Test Feature^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
+  exit /b 0
+)
+if "%cmd%"=="formula" (
+  echo {^"name^":^"mol-review^"}
+  exit /b 0
+)
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    echo {^"root_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+)
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
@@ -457,6 +545,7 @@ exit 0
 
 	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
 	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1") // Stub bd doesn't track state
 
 	if err := runSling(nil, []string{"mol-review"}); err != nil {
 		t.Fatalf("runSling: %v", err)
@@ -482,12 +571,12 @@ exit 0
 	}
 
 	// Verify --var feature=<title> is present
-	if !strings.Contains(wispLine, "--var feature=My Test Feature") {
+	if !containsVarArg(wispLine, "feature", "My Test Feature") {
 		t.Errorf("mol wisp missing --var feature=<title>\ngot: %s", wispLine)
 	}
 
 	// Verify --var issue=<beadID> is present
-	if !strings.Contains(wispLine, "--var issue=gt-abc123") {
+	if !containsVarArg(wispLine, "issue", "gt-abc123") {
 		t.Errorf("mol wisp missing --var issue=<beadID>\ngot: %s", wispLine)
 	}
 }
@@ -510,7 +599,6 @@ func TestVerifyBeadExistsAllowStale(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
-	bdPath := filepath.Join(binDir, "bd")
 	bdScript := `#!/bin/sh
 # Check for --allow-stale flag
 allow_stale=false
@@ -535,9 +623,24 @@ fi
 echo '[{"title":"Test bead","status":"open","assignee":""}]'
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+set "allow=false"
+for %%A in (%*) do (
+  if "%%~A"=="--allow-stale" set "allow=true"
+)
+if "%1"=="--no-daemon" (
+  if "%allow%"=="true" (
+    echo [{"title":"Test bead","status":"open","assignee":""}]
+    exit /b 0
+  )
+  echo {"error":"Database out of sync with JSONL."}
+  exit /b 1
+)
+echo [{"title":"Test bead","status":"open","assignee":""}]
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -573,7 +676,6 @@ func TestSlingWithAllowStale(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
-	bdPath := filepath.Join(binDir, "bd")
 	bdScript := `#!/bin/sh
 # Check for --allow-stale flag
 allow_stale=false
@@ -608,9 +710,34 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+set "allow=false"
+for %%A in (%*) do (
+  if "%%~A"=="--allow-stale" set "allow=true"
+)
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  if "%cmd%"=="show" (
+    if "%allow%"=="true" (
+      echo [{"title":"Synced bead","status":"open","assignee":""}]
+      exit /b 0
+    )
+    echo {"error":"Database out of sync"}
+    exit /b 1
+  )
+  exit /b 0
+)
+set "cmd=%1"
+if "%cmd%"=="show" (
+  echo [{"title":"Synced bead","status":"open","assignee":""}]
+  exit /b 0
+)
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "crew")
@@ -747,7 +874,6 @@ func TestSlingFormulaOnBeadSetsAttachedMolecule(t *testing.T) {
 		t.Fatalf("mkdir binDir: %v", err)
 	}
 	logPath := filepath.Join(townRoot, "bd.log")
-	bdPath := filepath.Join(binDir, "bd")
 	// The stub logs all commands to a file for verification
 	bdScript := `#!/bin/sh
 set -e
@@ -787,11 +913,42 @@ case "$cmd" in
 esac
 exit 0
 `
-	if err := os.WriteFile(bdPath, []byte(bdScript), 0755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
+bdScriptWindows := `@echo off
+setlocal enableextensions
+echo %CD%^|%*>>"%BD_LOG%"
+set "cmd=%1"
+set "sub=%2"
+if "%cmd%"=="--no-daemon" (
+  set "cmd=%2"
+  set "sub=%3"
+)
+if "%cmd%"=="show" (
+  echo [{^"title^":^"Bug to fix^",^"status^":^"open^",^"assignee^":^"^",^"description^":^"^"}]
+  exit /b 0
+)
+if "%cmd%"=="formula" (
+  echo {^"name^":^"mol-polecat-work^"}
+  exit /b 0
+)
+if "%cmd%"=="cook" exit /b 0
+if "%cmd%"=="mol" (
+  if "%sub%"=="wisp" (
+    echo {^"new_epic_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+  if "%sub%"=="bond" (
+    echo {^"root_id^":^"gt-wisp-xyz^"}
+    exit /b 0
+  )
+)
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
 
 	t.Setenv("BD_LOG", logPath)
+	attachedLogPath := filepath.Join(townRoot, "attached-molecule.log")
+	t.Setenv("GT_TEST_ATTACHED_MOLECULE_LOG", attachedLogPath)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(EnvGTRole, "mayor")
 	t.Setenv("GT_POLECAT", "")
@@ -826,6 +983,7 @@ exit 0
 
 	// Prevent real tmux nudge from firing during tests (causes agent self-interruption)
 	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1") // Stub bd doesn't track state
 
 	if err := runSling(nil, []string{"mol-polecat-work"}); err != nil {
 		t.Fatalf("runSling: %v", err)
@@ -862,8 +1020,125 @@ exit 0
 	}
 
 	if !foundAttachedMolecule {
+		if descBytes, err := os.ReadFile(attachedLogPath); err == nil {
+			if strings.Contains(string(descBytes), "attached_molecule") {
+				foundAttachedMolecule = true
+			}
+		}
+	}
+
+	if !foundAttachedMolecule {
+		attachedLog := "<missing>"
+		if descBytes, err := os.ReadFile(attachedLogPath); err == nil {
+			attachedLog = string(descBytes)
+		}
 		t.Errorf("after mol bond, expected update with attached_molecule in description\n"+
 			"This is required for gt hook to recognize the molecule attachment.\n"+
-			"Log output:\n%s", string(logBytes))
+			"Log output:\n%s\nAttached log:\n%s", string(logBytes), attachedLog)
+	}
+}
+
+// TestSlingNoMergeFlag verifies that gt sling --no-merge stores the no_merge flag
+// in the bead's description. This flag tells gt done to skip the merge queue
+// and keep work on the feature branch for human review.
+func TestSlingNoMergeFlag(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Minimal workspace marker so workspace.FindFromCwd() succeeds.
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor", "rig"), 0755); err != nil {
+		t.Fatalf("mkdir mayor/rig: %v", err)
+	}
+
+	// Create stub bd that logs update commands
+	binDir := filepath.Join(townRoot, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir binDir: %v", err)
+	}
+	logPath := filepath.Join(townRoot, "bd.log")
+	bdScript := `#!/bin/sh
+set -e
+echo "ARGS:$*" >> "${BD_LOG}"
+if [ "$1" = "--no-daemon" ]; then
+  shift
+fi
+cmd="$1"
+shift || true
+case "$cmd" in
+  show)
+    echo '[{"title":"Test issue","status":"open","assignee":"","description":""}]'
+    ;;
+  update)
+    exit 0
+    ;;
+esac
+exit 0
+`
+	bdScriptWindows := `@echo off
+setlocal enableextensions
+echo ARGS:%*>>"%BD_LOG%"
+set "cmd=%1"
+if "%cmd%"=="--no-daemon" set "cmd=%2"
+if "%cmd%"=="show" (
+  echo [{"title":"Test issue","status":"open","assignee":"","description":""}]
+  exit /b 0
+)
+if "%cmd%"=="update" exit /b 0
+exit /b 0
+`
+	_ = writeBDStub(t, binDir, bdScript, bdScriptWindows)
+
+	t.Setenv("BD_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(EnvGTRole, "mayor")
+	t.Setenv("GT_CREW", "")
+	t.Setenv("GT_POLECAT", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("GT_TEST_NO_NUDGE", "1")
+	t.Setenv("GT_TEST_SKIP_HOOK_VERIFY", "1") // Stub bd doesn't track state
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Join(townRoot, "mayor", "rig")); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Save and restore global flags
+	prevDryRun := slingDryRun
+	prevNoConvoy := slingNoConvoy
+	prevNoMerge := slingNoMerge
+	t.Cleanup(func() {
+		slingDryRun = prevDryRun
+		slingNoConvoy = prevNoConvoy
+		slingNoMerge = prevNoMerge
+	})
+
+	slingDryRun = false
+	slingNoConvoy = true
+	slingNoMerge = true // This is what we're testing
+
+	if err := runSling(nil, []string{"gt-test123"}); err != nil {
+		t.Fatalf("runSling: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read bd log: %v", err)
+	}
+
+	// Look for update command that includes no_merge in description
+	logLines := strings.Split(string(logBytes), "\n")
+	foundNoMerge := false
+	for _, line := range logLines {
+		if strings.Contains(line, "update") && strings.Contains(line, "no_merge") {
+			foundNoMerge = true
+			break
+		}
+	}
+
+	if !foundNoMerge {
+		t.Errorf("--no-merge flag not stored in bead description\nLog:\n%s", string(logBytes))
 	}
 }

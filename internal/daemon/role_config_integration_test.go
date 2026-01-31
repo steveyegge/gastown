@@ -5,41 +5,60 @@ package daemon
 import (
 	"io"
 	"log"
-	"os/exec"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-func runBd(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("bd", args...) //nolint:gosec // bd is a trusted internal tool in this repo
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("bd %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+// TestGetRoleConfigForIdentity_UsesBuiltinDefaults tests that the daemon
+// uses built-in role definitions from embedded TOML files when no overrides exist.
+func TestGetRoleConfigForIdentity_UsesBuiltinDefaults(t *testing.T) {
+	townRoot := t.TempDir()
+
+	d := &Daemon{
+		config: &Config{TownRoot: townRoot},
+		logger: log.New(io.Discard, "", 0),
 	}
-	return string(out)
+
+	// Should load witness role from built-in defaults
+	cfg, parsed, err := d.getRoleConfigForIdentity("myrig-witness")
+	if err != nil {
+		t.Fatalf("getRoleConfigForIdentity: %v", err)
+	}
+	if parsed == nil || parsed.RoleType != "witness" {
+		t.Fatalf("parsed = %#v, want roleType witness", parsed)
+	}
+	if cfg == nil {
+		t.Fatal("cfg is nil, expected built-in defaults")
+	}
+	// Built-in witness has session pattern "gt-{rig}-witness"
+	if cfg.SessionPattern != "gt-{rig}-witness" {
+		t.Errorf("cfg.SessionPattern = %q, want %q", cfg.SessionPattern, "gt-{rig}-witness")
+	}
 }
 
-func TestGetRoleConfigForIdentity_PrefersTownRoleBead(t *testing.T) {
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Skip("bd not installed")
+// TestGetRoleConfigForIdentity_TownOverride tests that town-level TOML overrides
+// are merged with built-in defaults.
+func TestGetRoleConfigForIdentity_TownOverride(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create town-level override
+	rolesDir := filepath.Join(townRoot, "roles")
+	if err := os.MkdirAll(rolesDir, 0755); err != nil {
+		t.Fatalf("mkdir roles: %v", err)
 	}
 
-	townRoot := t.TempDir()
-	runBd(t, townRoot, "init", "--quiet", "--prefix", "hq")
+	// Override start_command for witness role
+	witnessOverride := `
+role = "witness"
+scope = "rig"
 
-	runBd(t, townRoot, "config", "set", "types.custom", "agent,role,rig,convoy,event")
-
-	runBd(t, townRoot, "config", "set", "types.custom", "agent,role,rig,convoy,event")
-
-	// Create canonical role bead.
-	runBd(t, townRoot, "create",
-		"--id", "hq-witness-role",
-		"--type", "role",
-		"--title", "Witness Role",
-		"--description", "start_command: exec echo hq\n",
-	)
+[session]
+start_command = "exec echo custom-town-command"
+`
+	if err := os.WriteFile(filepath.Join(rolesDir, "witness.toml"), []byte(witnessOverride), 0644); err != nil {
+		t.Fatalf("write witness.toml: %v", err)
+	}
 
 	d := &Daemon{
 		config: &Config{TownRoot: townRoot},
@@ -53,30 +72,56 @@ func TestGetRoleConfigForIdentity_PrefersTownRoleBead(t *testing.T) {
 	if parsed == nil || parsed.RoleType != "witness" {
 		t.Fatalf("parsed = %#v, want roleType witness", parsed)
 	}
-	if cfg == nil || cfg.StartCommand != "exec echo hq" {
-		t.Fatalf("cfg.StartCommand = %#v, want %q", cfg, "exec echo hq")
+	if cfg == nil {
+		t.Fatal("cfg is nil")
+	}
+	// Should have the overridden start_command
+	if cfg.StartCommand != "exec echo custom-town-command" {
+		t.Errorf("cfg.StartCommand = %q, want %q", cfg.StartCommand, "exec echo custom-town-command")
+	}
+	// Should still have built-in session pattern (not overridden)
+	if cfg.SessionPattern != "gt-{rig}-witness" {
+		t.Errorf("cfg.SessionPattern = %q, want %q", cfg.SessionPattern, "gt-{rig}-witness")
 	}
 }
 
-func TestGetRoleConfigForIdentity_FallsBackToLegacyRoleBead(t *testing.T) {
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Skip("bd not installed")
+// TestGetRoleConfigForIdentity_RigOverride tests that rig-level TOML overrides
+// take precedence over town-level overrides.
+func TestGetRoleConfigForIdentity_RigOverride(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+
+	// Create town-level override
+	townRolesDir := filepath.Join(townRoot, "roles")
+	if err := os.MkdirAll(townRolesDir, 0755); err != nil {
+		t.Fatalf("mkdir town roles: %v", err)
+	}
+	townOverride := `
+role = "witness"
+scope = "rig"
+
+[session]
+start_command = "exec echo town-command"
+`
+	if err := os.WriteFile(filepath.Join(townRolesDir, "witness.toml"), []byte(townOverride), 0644); err != nil {
+		t.Fatalf("write town witness.toml: %v", err)
 	}
 
-	townRoot := t.TempDir()
-	runBd(t, townRoot, "init", "--quiet", "--prefix", "gt")
+	// Create rig-level override (should take precedence)
+	rigRolesDir := filepath.Join(rigPath, "roles")
+	if err := os.MkdirAll(rigRolesDir, 0755); err != nil {
+		t.Fatalf("mkdir rig roles: %v", err)
+	}
+	rigOverride := `
+role = "witness"
+scope = "rig"
 
-	runBd(t, townRoot, "config", "set", "types.custom", "agent,role,rig,convoy,event")
-
-	runBd(t, townRoot, "config", "set", "types.custom", "agent,role,rig,convoy,event")
-
-	// Only legacy role bead exists.
-	runBd(t, townRoot, "create",
-		"--id", "gt-witness-role",
-		"--type", "role",
-		"--title", "Witness Role (legacy)",
-		"--description", "start_command: exec echo gt\n",
-	)
+[session]
+start_command = "exec echo rig-command"
+`
+	if err := os.WriteFile(filepath.Join(rigRolesDir, "witness.toml"), []byte(rigOverride), 0644); err != nil {
+		t.Fatalf("write rig witness.toml: %v", err)
+	}
 
 	d := &Daemon{
 		config: &Config{TownRoot: townRoot},
@@ -90,7 +135,11 @@ func TestGetRoleConfigForIdentity_FallsBackToLegacyRoleBead(t *testing.T) {
 	if parsed == nil || parsed.RoleType != "witness" {
 		t.Fatalf("parsed = %#v, want roleType witness", parsed)
 	}
-	if cfg == nil || cfg.StartCommand != "exec echo gt" {
-		t.Fatalf("cfg.StartCommand = %#v, want %q", cfg, "exec echo gt")
+	if cfg == nil {
+		t.Fatal("cfg is nil")
+	}
+	// Should have the rig-level override (takes precedence over town)
+	if cfg.StartCommand != "exec echo rig-command" {
+		t.Errorf("cfg.StartCommand = %q, want %q", cfg.StartCommand, "exec echo rig-command")
 	}
 }

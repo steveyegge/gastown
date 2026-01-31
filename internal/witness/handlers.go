@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/convoy"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/mail"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -49,6 +51,12 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 	payload, err := ParsePolecatDone(msg.Subject, msg.Body)
 	if err != nil {
 		result.Error = fmt.Errorf("parsing POLECAT_DONE: %w", err)
+		return result
+	}
+
+	if stale, reason := isStalePolecatDone(rigName, payload.PolecatName, msg); stale {
+		result.Handled = true
+		result.Action = fmt.Sprintf("ignored stale POLECAT_DONE for %s (%s)", payload.PolecatName, reason)
 		return result
 	}
 
@@ -115,6 +123,21 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 	result.Action = fmt.Sprintf("created cleanup wisp %s for %s (needs manual cleanup: %s)", wispID, payload.PolecatName, nukeResult.Reason)
 
 	return result
+}
+
+func isStalePolecatDone(rigName, polecatName string, msg *mail.Message) (bool, string) {
+	if msg == nil {
+		return false, ""
+	}
+
+	sessionName := fmt.Sprintf("gt-%s-%s", rigName, polecatName)
+	createdAt, err := session.SessionCreatedAt(sessionName)
+	if err != nil {
+		// Session not found or tmux not running - can't determine staleness, allow message
+		return false, ""
+	}
+
+	return session.StaleReasonForTimes(msg.Timestamp, createdAt)
 }
 
 // HandleLifecycleShutdown processes a LIFECYCLE:Shutdown message.
@@ -244,6 +267,17 @@ func HandleMerged(workDir, rigName string, msg *mail.Message) *HandlerResult {
 		result.Error = fmt.Errorf("polecat %s commit is NOT on main - MERGED signal may be stale, DO NOT NUKE", payload.PolecatName)
 		result.Action = fmt.Sprintf("BLOCKED: %s commit not verified on main, merge may have failed", payload.PolecatName)
 		return result
+	}
+
+	// Redundant convoy observer: check if completed issue is tracked by a convoy.
+	// Run this after verifyCommitOnMain succeeds, regardless of cleanup status.
+	// The work is confirmed merged at this point, so convoys tracking this issue
+	// can potentially close even if polecat cleanup is blocked.
+	if onMain && payload.IssueID != "" {
+		townRoot, _ := workspace.Find(workDir)
+		if townRoot != "" {
+			convoy.CheckConvoysForIssue(townRoot, payload.IssueID, "witness", nil)
+		}
 	}
 
 	// ZFC #10: Check cleanup_status before allowing nuke

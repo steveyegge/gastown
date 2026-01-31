@@ -2,8 +2,10 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,47 +46,39 @@ var (
 var costsCmd = &cobra.Command{
 	Use:     "costs",
 	GroupID: GroupDiag,
-	Short:   "Show costs for running Claude sessions [DISABLED]",
+	Short:   "Show costs for running Claude sessions",
 	Long: `Display costs for Claude Code sessions in Gas Town.
 
-⚠️  COST TRACKING IS CURRENTLY DISABLED
-
-Claude Code displays costs in the TUI status bar, which cannot be captured
-via tmux. All sessions will show $0.00 until Claude Code exposes cost data
-through an API or environment variable.
-
-What we need from Claude Code:
-  - Stop hook env var (e.g., $CLAUDE_SESSION_COST)
-  - Or queryable file/API endpoint
-
-See: GH#24, gt-7awfj
-
-The infrastructure remains in place and will work once cost data is available.
+Costs are calculated from Claude Code transcript files at ~/.claude/projects/
+by summing token usage from assistant messages and applying model-specific pricing.
 
 Examples:
   gt costs              # Live costs from running sessions
-  gt costs --today      # Today's costs from wisps (not yet digested)
-  gt costs --week       # This week's costs from digest beads + today's wisps
+  gt costs --today      # Today's costs from log file (not yet digested)
+  gt costs --week       # This week's costs from digest beads + today's log
   gt costs --by-role    # Breakdown by role (polecat, witness, etc.)
   gt costs --by-rig     # Breakdown by rig
   gt costs --json       # Output as JSON
+  gt costs -v           # Show debug output for failures
 
 Subcommands:
-  gt costs record       # Record session cost as ephemeral wisp (Stop hook)
-  gt costs digest       # Aggregate wisps into daily digest bead (Deacon patrol)`,
+  gt costs record       # Record session cost to local log file (Stop hook)
+  gt costs digest       # Aggregate log entries into daily digest bead (Deacon patrol)`,
 	RunE: runCosts,
 }
 
 var costsRecordCmd = &cobra.Command{
 	Use:   "record",
-	Short: "Record session cost as an ephemeral wisp (called by Stop hook)",
-	Long: `Record the final cost of a session as an ephemeral wisp.
+	Short: "Record session cost to local log file (called by Stop hook)",
+	Long: `Record the final cost of a session to a local log file.
 
 This command is intended to be called from a Claude Code Stop hook.
-It captures the final cost from the tmux session and creates an ephemeral
-event that is NOT exported to JSONL (avoiding log-in-database pollution).
+It reads token usage from the Claude Code transcript file (~/.claude/projects/...)
+and calculates the cost based on model pricing, then appends it to
+~/.gt/costs.jsonl. This is a simple append operation that never fails
+due to database availability.
 
-Session cost wisps are aggregated daily by 'gt costs digest' into a single
+Session costs are aggregated daily by 'gt costs digest' into a single
 permanent "Cost Report YYYY-MM-DD" bead for audit purposes.
 
 Examples:
@@ -95,12 +89,12 @@ Examples:
 
 var costsDigestCmd = &cobra.Command{
 	Use:   "digest",
-	Short: "Aggregate session cost wisps into a daily digest bead",
-	Long: `Aggregate ephemeral session cost wisps into a permanent daily digest.
+	Short: "Aggregate session cost log entries into a daily digest bead",
+	Long: `Aggregate session cost log entries into a permanent daily digest.
 
 This command is intended to be run by Deacon patrol (daily) or manually.
-It queries session.ended wisps for a target date, creates a single aggregate
-"Cost Report YYYY-MM-DD" bead, then deletes the source wisps.
+It reads entries from ~/.gt/costs.jsonl for a target date, creates a single
+aggregate "Cost Report YYYY-MM-DD" bead, then removes the source entries.
 
 The resulting digest bead is permanent (exported to JSONL, synced via git)
 and provides an audit trail without log-in-database pollution.
@@ -114,18 +108,18 @@ Examples:
 
 var costsMigrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Migrate legacy session.ended beads to the new wisp architecture",
+	Short: "Migrate legacy session.ended beads to the new log-file architecture",
 	Long: `Migrate legacy session.ended event beads to the new cost tracking system.
 
 This command handles the transition from the old architecture (where each
-session.ended event was a permanent bead) to the new wisp-based system.
+session.ended event was a permanent bead) to the new log-file-based system.
 
 The migration:
 1. Finds all open session.ended event beads (should be none if auto-close worked)
-2. Closes them with reason "migrated to wisp architecture"
+2. Closes them with reason "migrated to log-file architecture"
 
 Legacy beads remain in the database for historical queries but won't interfere
-with the new wisp-based cost tracking.
+with the new log-file-based cost tracking.
 
 Examples:
   gt costs migrate            # Migrate legacy beads
@@ -192,6 +186,56 @@ type CostsOutput struct {
 // costRegex matches cost patterns like "$1.23" or "$12.34"
 var costRegex = regexp.MustCompile(`\$(\d+\.\d{2})`)
 
+// TranscriptMessage represents a message from a Claude Code transcript file.
+type TranscriptMessage struct {
+	Type      string                 `json:"type"`
+	SessionID string                 `json:"sessionId"`
+	CWD       string                 `json:"cwd"`
+	Message   *TranscriptMessageBody `json:"message,omitempty"`
+}
+
+// TranscriptMessageBody contains the message content and usage info.
+type TranscriptMessageBody struct {
+	Model string          `json:"model"`
+	Role  string          `json:"role"`
+	Usage *TranscriptUsage `json:"usage,omitempty"`
+}
+
+// TranscriptUsage contains token usage information.
+type TranscriptUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+}
+
+// TokenUsage aggregates token usage across a session.
+type TokenUsage struct {
+	Model                    string
+	InputTokens              int
+	CacheCreationInputTokens int
+	CacheReadInputTokens     int
+	OutputTokens             int
+}
+
+// Model pricing per million tokens (as of Jan 2025).
+// See: https://www.anthropic.com/pricing
+var modelPricing = map[string]struct {
+	InputPerMillion       float64
+	OutputPerMillion      float64
+	CacheReadPerMillion   float64 // 90% discount on input price
+	CacheCreatePerMillion float64 // 25% premium on input price
+}{
+	// Claude Opus 4.5
+	"claude-opus-4-5-20251101": {15.0, 75.0, 1.5, 18.75},
+	// Claude Sonnet 4
+	"claude-sonnet-4-20250514": {3.0, 15.0, 0.3, 3.75},
+	// Claude Haiku 3.5
+	"claude-3-5-haiku-20241022": {1.0, 5.0, 0.1, 1.25},
+	// Fallback for unknown models (use Sonnet pricing)
+	"default": {3.0, 15.0, 0.3, 3.75},
+}
+
 func runCosts(cmd *cobra.Command, args []string) error {
 	// If querying ledger, use ledger functions
 	if costsToday || costsWeek || costsByRole || costsByRig {
@@ -203,11 +247,6 @@ func runCosts(cmd *cobra.Command, args []string) error {
 }
 
 func runLiveCosts() error {
-	// Warn that cost tracking is disabled
-	fmt.Fprintf(os.Stderr, "%s Cost tracking is disabled - Claude Code does not expose session costs.\n",
-		style.Warning.Render("⚠"))
-	fmt.Fprintf(os.Stderr, "   All sessions will show $0.00. See: GH#24, gt-7awfj\n\n")
-
 	t := tmux.NewTmux()
 
 	// Get all tmux sessions
@@ -228,14 +267,24 @@ func runLiveCosts() error {
 		// Parse session name to get role/rig/worker
 		role, rig, worker := parseSessionName(session)
 
-		// Capture pane content
-		content, err := t.CapturePaneAll(session)
+		// Get working directory of the session
+		workDir, err := getTmuxSessionWorkDir(session)
 		if err != nil {
-			continue // Skip sessions we can't capture
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not get workdir for %s: %v\n", session, err)
+			}
+			continue
 		}
 
-		// Extract cost from content
-		cost := extractCost(content)
+		// Extract cost from Claude transcript
+		cost, err := extractCostFromWorkDir(workDir)
+		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not extract cost for %s: %v\n", session, err)
+			}
+			// Still include the session with zero cost
+			cost = 0.0
+		}
 
 		// Check if an agent appears to be running
 		running := t.IsAgentRunning(session)
@@ -267,11 +316,6 @@ func runLiveCosts() error {
 }
 
 func runCostsFromLedger() error {
-	// Warn that cost tracking is disabled
-	fmt.Fprintf(os.Stderr, "%s Cost tracking is disabled - Claude Code does not expose session costs.\n",
-		style.Warning.Render("⚠"))
-	fmt.Fprintf(os.Stderr, "   Historical data may show $0.00 for all sessions. See: GH#24, gt-7awfj\n\n")
-
 	now := time.Now()
 	var entries []CostEntry
 	var err error
@@ -279,7 +323,7 @@ func runCostsFromLedger() error {
 	if costsToday {
 		// For today: query ephemeral wisps (not yet digested)
 		// This gives real-time view of today's costs
-		entries, err = querySessionCostWisps(now)
+		entries, err = querySessionCostEntries(now)
 		if err != nil {
 			return fmt.Errorf("querying session cost wisps: %w", err)
 		}
@@ -292,10 +336,17 @@ func runCostsFromLedger() error {
 		}
 
 		// Also include today's wisps (not yet digested)
-		todayWisps, _ := querySessionCostWisps(now)
-		entries = append(entries, todayWisps...)
+		todayEntries, _ := querySessionCostEntries(now)
+		entries = append(entries, todayEntries...)
+	} else if costsByRole || costsByRig {
+		// When using --by-role or --by-rig without time filter, default to today
+		// (querying all historical events would be expensive and likely empty)
+		entries, err = querySessionCostEntries(now)
+		if err != nil {
+			return fmt.Errorf("querying session cost entries: %w", err)
+		}
 	} else {
-		// No time filter: query both digests and legacy session.ended events
+		// No time filter and no breakdown flags: query both digests and legacy session.ended events
 		// (for backwards compatibility during migration)
 		entries = querySessionEvents()
 	}
@@ -636,7 +687,9 @@ func parseSessionName(session string) (role, rig, worker string) {
 }
 
 // extractCost finds the most recent cost value in pane content.
-// Claude Code displays cost in the format "$X.XX" in the status area.
+// DEPRECATED: Claude Code no longer displays cost in a scrapable format.
+// This is kept for backwards compatibility but always returns 0.0.
+// Use extractCostFromTranscript instead.
 func extractCost(content string) float64 {
 	matches := costRegex.FindAllStringSubmatch(content, -1)
 	if len(matches) == 0 {
@@ -652,6 +705,156 @@ func extractCost(content string) float64 {
 	var cost float64
 	_, _ = fmt.Sscanf(lastMatch[1], "%f", &cost)
 	return cost
+}
+
+// getClaudeProjectDir returns the Claude Code project directory for a working directory.
+// Claude Code stores transcripts in ~/.claude/projects/<path-with-dashes-instead-of-slashes>/
+func getClaudeProjectDir(workDir string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	// Convert path to Claude's directory naming: replace / with -
+	// Keep leading slash - it becomes a leading dash in Claude's encoding
+	projectName := strings.ReplaceAll(workDir, "/", "-")
+	return filepath.Join(home, ".claude", "projects", projectName), nil
+}
+
+// findLatestTranscript finds the most recently modified .jsonl file in a directory.
+func findLatestTranscript(projectDir string) (string, error) {
+	var latestPath string
+	var latestTime time.Time
+
+	err := filepath.WalkDir(projectDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && path != projectDir {
+			return fs.SkipDir // Don't recurse into subdirectories
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".jsonl") {
+			info, err := d.Info()
+			if err != nil {
+				return nil // Skip files we can't stat
+			}
+			if info.ModTime().After(latestTime) {
+				latestTime = info.ModTime()
+				latestPath = path
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+	if latestPath == "" {
+		return "", fmt.Errorf("no transcript files found in %s", projectDir)
+	}
+	return latestPath, nil
+}
+
+// parseTranscriptUsage reads a transcript file and sums token usage from assistant messages.
+func parseTranscriptUsage(transcriptPath string) (*TokenUsage, error) {
+	file, err := os.Open(transcriptPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	usage := &TokenUsage{}
+	scanner := bufio.NewScanner(file)
+	// Increase buffer for potentially large JSON lines
+	buf := make([]byte, 0, 256*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var msg TranscriptMessage
+		if err := json.Unmarshal(line, &msg); err != nil {
+			continue // Skip malformed lines
+		}
+
+		// Only process assistant messages with usage info
+		if msg.Type != "assistant" || msg.Message == nil || msg.Message.Usage == nil {
+			continue
+		}
+
+		// Capture the model (use first one found, they should all be the same)
+		if usage.Model == "" && msg.Message.Model != "" {
+			usage.Model = msg.Message.Model
+		}
+
+		// Sum token usage
+		u := msg.Message.Usage
+		usage.InputTokens += u.InputTokens
+		usage.CacheCreationInputTokens += u.CacheCreationInputTokens
+		usage.CacheReadInputTokens += u.CacheReadInputTokens
+		usage.OutputTokens += u.OutputTokens
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return usage, nil
+}
+
+// calculateCost converts token usage to USD cost based on model pricing.
+func calculateCost(usage *TokenUsage) float64 {
+	if usage == nil {
+		return 0.0
+	}
+
+	// Look up pricing for the model
+	pricing, ok := modelPricing[usage.Model]
+	if !ok {
+		pricing = modelPricing["default"]
+	}
+
+	// Calculate cost (prices are per million tokens)
+	inputCost := float64(usage.InputTokens) / 1_000_000 * pricing.InputPerMillion
+	cacheReadCost := float64(usage.CacheReadInputTokens) / 1_000_000 * pricing.CacheReadPerMillion
+	cacheCreateCost := float64(usage.CacheCreationInputTokens) / 1_000_000 * pricing.CacheCreatePerMillion
+	outputCost := float64(usage.OutputTokens) / 1_000_000 * pricing.OutputPerMillion
+
+	return inputCost + cacheReadCost + cacheCreateCost + outputCost
+}
+
+// extractCostFromWorkDir extracts cost from Claude Code transcript for a working directory.
+// This reads the most recent transcript file and sums all token usage.
+func extractCostFromWorkDir(workDir string) (float64, error) {
+	projectDir, err := getClaudeProjectDir(workDir)
+	if err != nil {
+		return 0, fmt.Errorf("getting project dir: %w", err)
+	}
+
+	transcriptPath, err := findLatestTranscript(projectDir)
+	if err != nil {
+		return 0, fmt.Errorf("finding transcript: %w", err)
+	}
+
+	usage, err := parseTranscriptUsage(transcriptPath)
+	if err != nil {
+		return 0, fmt.Errorf("parsing transcript: %w", err)
+	}
+
+	return calculateCost(usage), nil
+}
+
+// getTmuxSessionWorkDir gets the current working directory of a tmux session.
+func getTmuxSessionWorkDir(session string) (string, error) {
+	cmd := exec.Command("tmux", "display-message", "-t", session, "-p", "#{pane_current_path}")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func outputCostsJSON(output CostsOutput) error {
@@ -738,8 +941,29 @@ func outputLedgerHuman(output CostsOutput, entries []CostEntry) error {
 	return nil
 }
 
-// runCostsRecord captures the final cost from a session and records it as a bead event.
-// This is called by the Claude Code Stop hook.
+// CostLogEntry represents a single entry in the costs.jsonl log file.
+type CostLogEntry struct {
+	SessionID string    `json:"session_id"`
+	Role      string    `json:"role"`
+	Rig       string    `json:"rig,omitempty"`
+	Worker    string    `json:"worker,omitempty"`
+	CostUSD   float64   `json:"cost_usd"`
+	EndedAt   time.Time `json:"ended_at"`
+	WorkItem  string    `json:"work_item,omitempty"`
+}
+
+// getCostsLogPath returns the path to the costs log file (~/.gt/costs.jsonl).
+func getCostsLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "/tmp/gt-costs.jsonl" // Fallback
+	}
+	return filepath.Join(home, ".gt", "costs.jsonl")
+}
+
+// runCostsRecord captures the final cost from a session and appends it to a local log file.
+// This is called by the Claude Code Stop hook. It's designed to never fail due to
+// database availability - it's a simple file append operation.
 func runCostsRecord(cmd *cobra.Command, args []string) error {
 	// Get session from flag or try to detect from environment
 	session := recordSession
@@ -758,107 +982,78 @@ func runCostsRecord(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--session flag required (or set GT_SESSION env var, or GT_RIG/GT_ROLE)")
 	}
 
-	t := tmux.NewTmux()
-
-	// Capture pane content
-	content, err := t.CapturePaneAll(session)
-	if err != nil {
-		// Session may already be gone - that's OK, we'll record with zero cost
-		content = ""
+	// Get working directory from environment or tmux session
+	workDir := os.Getenv("GT_CWD")
+	if workDir == "" {
+		// Try to get from tmux session
+		var err error
+		workDir, err = getTmuxSessionWorkDir(session)
+		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not get workdir for %s: %v\n", session, err)
+			}
+		}
 	}
 
-	// Extract cost
-	cost := extractCost(content)
+	// Extract cost from Claude transcript
+	var cost float64
+	if workDir != "" {
+		var err error
+		cost, err = extractCostFromWorkDir(workDir)
+		if err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] could not extract cost from transcript: %v\n", err)
+			}
+			cost = 0.0
+		}
+	}
 
 	// Parse session name
 	role, rig, worker := parseSessionName(session)
 
-	// Build agent path for actor field
-	agentPath := buildAgentPath(role, rig, worker)
-
-	// Build event title
-	title := fmt.Sprintf("Session ended: %s", session)
-	if recordWorkItem != "" {
-		title = fmt.Sprintf("Session: %s completed %s", session, recordWorkItem)
+	// Build log entry
+	entry := CostLogEntry{
+		SessionID: session,
+		Role:      role,
+		Rig:       rig,
+		Worker:    worker,
+		CostUSD:   cost,
+		EndedAt:   time.Now(),
+		WorkItem:  recordWorkItem,
 	}
 
-	// Build payload JSON
-	payload := map[string]interface{}{
-		"cost_usd":   cost,
-		"session_id": session,
-		"role":       role,
-		"ended_at":   time.Now().Format(time.RFC3339),
-	}
-	if rig != "" {
-		payload["rig"] = rig
-	}
-	if worker != "" {
-		payload["worker"] = worker
-	}
-	payloadJSON, err := json.Marshal(payload)
+	// Marshal to JSON
+	entryJSON, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("marshaling payload: %w", err)
+		return fmt.Errorf("marshaling cost entry: %w", err)
 	}
 
-	// Build bd create command for ephemeral wisp
-	// Using --ephemeral creates a wisp that:
-	// - Is stored locally only (not exported to JSONL)
-	// - Won't pollute git history with O(sessions/day) events
-	// - Will be aggregated into daily digests by 'gt costs digest'
-	bdArgs := []string{
-		"create",
-		"--ephemeral",
-		"--type=event",
-		"--title=" + title,
-		"--event-category=session.ended",
-		"--event-actor=" + agentPath,
-		"--event-payload=" + string(payloadJSON),
-		"--silent",
+	// Append to log file
+	logPath := getCostsLogPath()
+
+	// Ensure directory exists
+	logDir := filepath.Dir(logPath)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return fmt.Errorf("creating log directory: %w", err)
 	}
 
-	// Add work item as event target if specified
-	if recordWorkItem != "" {
-		bdArgs = append(bdArgs, "--event-target="+recordWorkItem)
-	}
-
-	// NOTE: We intentionally don't use --rig flag here because it causes
-	// event fields (event_kind, actor, payload) to not be stored properly.
-	// The bd command will auto-detect the correct rig from cwd.
-
-	// Find town root so bd can find the .beads database.
-	// The stop hook may run from a role subdirectory (e.g., mayor/) that
-	// doesn't have its own .beads, so we need to run bd from town root.
-	townRoot, err := workspace.FindFromCwd()
+	// Open file for append (create if doesn't exist).
+	// O_APPEND writes are atomic on POSIX for writes < PIPE_BUF (~4KB).
+	// A JSON log entry is ~200 bytes, so concurrent appends are safe.
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("finding town root: %w", err)
+		return fmt.Errorf("opening costs log: %w", err)
 	}
-	if townRoot == "" {
-		return fmt.Errorf("not in a Gas Town workspace")
-	}
+	defer f.Close()
 
-	// Execute bd create from town root
-	bdCmd := exec.Command("bd", bdArgs...)
-	bdCmd.Dir = townRoot
-	output, err := bdCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("creating session cost wisp: %w\nOutput: %s", err, string(output))
-	}
-
-	wispID := strings.TrimSpace(string(output))
-
-	// Auto-close session cost wisps immediately after creation.
-	// These are informational records that don't need to stay open.
-	// The wisp data is preserved and queryable until digested.
-	closeCmd := exec.Command("bd", "close", wispID, "--reason=auto-closed session cost wisp")
-	closeCmd.Dir = townRoot
-	if closeErr := closeCmd.Run(); closeErr != nil {
-		// Non-fatal: wisp was created, just couldn't auto-close
-		fmt.Fprintf(os.Stderr, "warning: could not auto-close session cost wisp %s: %v\n", wispID, closeErr)
+	// Write entry with newline
+	if _, err := f.Write(append(entryJSON, '\n')); err != nil {
+		return fmt.Errorf("writing to costs log: %w", err)
 	}
 
 	// Output confirmation (silent if cost is zero and no work item)
 	if cost > 0 || recordWorkItem != "" {
-		fmt.Printf("%s Recorded $%.2f for %s (wisp: %s)", style.Success.Render("✓"), cost, session, wispID)
+		fmt.Printf("%s Recorded $%.2f for %s", style.Success.Render("✓"), cost, session)
 		if recordWorkItem != "" {
 			fmt.Printf(" (work: %s)", recordWorkItem)
 		}
@@ -928,44 +1123,6 @@ func detectCurrentTmuxSession() string {
 	return ""
 }
 
-// buildAgentPath builds the agent path from role, rig, and worker.
-// Examples: "mayor", "gastown/witness", "gastown/polecats/toast"
-func buildAgentPath(role, rig, worker string) string {
-	switch role {
-	case constants.RoleMayor, constants.RoleDeacon:
-		return role
-	case constants.RoleWitness, constants.RoleRefinery:
-		if rig != "" {
-			return rig + "/" + role
-		}
-		return role
-	case constants.RolePolecat:
-		if rig != "" && worker != "" {
-			return rig + "/polecats/" + worker
-		}
-		if rig != "" {
-			return rig + "/polecat"
-		}
-		return "polecat/" + worker
-	case constants.RoleCrew:
-		if rig != "" && worker != "" {
-			return rig + "/crew/" + worker
-		}
-		if rig != "" {
-			return rig + "/crew"
-		}
-		return "crew/" + worker
-	default:
-		if rig != "" && worker != "" {
-			return rig + "/" + worker
-		}
-		if rig != "" {
-			return rig
-		}
-		return worker
-	}
-}
-
 // CostDigest represents the aggregated daily cost report.
 type CostDigest struct {
 	Date         string             `json:"date"`
@@ -976,21 +1133,7 @@ type CostDigest struct {
 	ByRig        map[string]float64 `json:"by_rig,omitempty"`
 }
 
-// WispListOutput represents the JSON output from bd mol wisp list.
-type WispListOutput struct {
-	Wisps []WispItem `json:"wisps"`
-	Count int        `json:"count"`
-}
-
-// WispItem represents a single wisp from bd mol wisp list.
-type WispItem struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// runCostsDigest aggregates session cost wisps into a daily digest bead.
+// runCostsDigest aggregates session cost entries into a daily digest bead.
 func runCostsDigest(cmd *cobra.Command, args []string) error {
 	// Determine target date
 	var targetDate time.Time
@@ -1009,31 +1152,31 @@ func runCostsDigest(cmd *cobra.Command, args []string) error {
 
 	dateStr := targetDate.Format("2006-01-02")
 
-	// Query ephemeral session.ended wisps for target date
-	wisps, err := querySessionCostWisps(targetDate)
+	// Query session cost entries for target date
+	costEntries, err := querySessionCostEntries(targetDate)
 	if err != nil {
-		return fmt.Errorf("querying session cost wisps: %w", err)
+		return fmt.Errorf("querying session cost entries: %w", err)
 	}
 
-	if len(wisps) == 0 {
-		fmt.Printf("%s No session cost wisps found for %s\n", style.Dim.Render("○"), dateStr)
+	if len(costEntries) == 0 {
+		fmt.Printf("%s No session cost entries found for %s\n", style.Dim.Render("○"), dateStr)
 		return nil
 	}
 
 	// Build digest
 	digest := CostDigest{
 		Date:     dateStr,
-		Sessions: wisps,
+		Sessions: costEntries,
 		ByRole:   make(map[string]float64),
 		ByRig:    make(map[string]float64),
 	}
 
-	for _, w := range wisps {
-		digest.TotalUSD += w.CostUSD
+	for _, e := range costEntries {
+		digest.TotalUSD += e.CostUSD
 		digest.SessionCount++
-		digest.ByRole[w.Role] += w.CostUSD
-		if w.Rig != "" {
-			digest.ByRig[w.Rig] += w.CostUSD
+		digest.ByRole[e.Role] += e.CostUSD
+		if e.Rig != "" {
+			digest.ByRig[e.Rig] += e.CostUSD
 		}
 	}
 
@@ -1060,105 +1203,70 @@ func runCostsDigest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating digest bead: %w", err)
 	}
 
-	// Delete source wisps (they're ephemeral, use bd mol burn)
-	deletedCount, deleteErr := deleteSessionCostWisps(targetDate)
+	// Delete source entries from log file
+	deletedCount, deleteErr := deleteSessionCostEntries(targetDate)
 	if deleteErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to delete some source wisps: %v\n", deleteErr)
+		fmt.Fprintf(os.Stderr, "warning: failed to delete some source entries: %v\n", deleteErr)
 	}
 
 	fmt.Printf("%s Created Cost Report %s (bead: %s)\n", style.Success.Render("✓"), dateStr, digestID)
 	fmt.Printf("  Total: $%.2f from %d sessions\n", digest.TotalUSD, digest.SessionCount)
 	if deletedCount > 0 {
-		fmt.Printf("  Deleted %d source wisps\n", deletedCount)
+		fmt.Printf("  Removed %d entries from costs log\n", deletedCount)
 	}
 
 	return nil
 }
 
-// querySessionCostWisps queries ephemeral session.ended events for a target date.
-func querySessionCostWisps(targetDate time.Time) ([]CostEntry, error) {
-	// List all wisps including closed ones
-	listCmd := exec.Command("bd", "mol", "wisp", "list", "--all", "--json")
-	listOutput, err := listCmd.Output()
+// querySessionCostEntries reads session cost entries from the local log file for a target date.
+func querySessionCostEntries(targetDate time.Time) ([]CostEntry, error) {
+	logPath := getCostsLogPath()
+
+	// Read log file
+	data, err := os.ReadFile(logPath)
 	if err != nil {
-		// No wisps database or command failed
-		if costsVerbose {
-			fmt.Fprintf(os.Stderr, "[costs] wisp list failed: %v\n", err)
+		if os.IsNotExist(err) {
+			return nil, nil // No log file yet
 		}
-		return nil, nil
+		return nil, fmt.Errorf("reading costs log: %w", err)
 	}
 
-	var wispList WispListOutput
-	if err := json.Unmarshal(listOutput, &wispList); err != nil {
-		return nil, fmt.Errorf("parsing wisp list: %w", err)
-	}
-
-	if wispList.Count == 0 {
-		return nil, nil
-	}
-
-	// Batch all wisp IDs into a single bd show call to avoid N+1 queries
-	showArgs := []string{"show", "--json"}
-	for _, wisp := range wispList.Wisps {
-		showArgs = append(showArgs, wisp.ID)
-	}
-
-	showCmd := exec.Command("bd", showArgs...)
-	showOutput, err := showCmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("showing wisps: %w", err)
-	}
-
-	var events []SessionEvent
-	if err := json.Unmarshal(showOutput, &events); err != nil {
-		return nil, fmt.Errorf("parsing wisp details: %w", err)
-	}
-
-	var sessionCostWisps []CostEntry
 	targetDay := targetDate.Format("2006-01-02")
+	var entries []CostEntry
 
-	for _, event := range events {
-		// Filter for session.ended events only
-		if event.EventKind != "session.ended" {
+	// Parse each line as a CostLogEntry
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
 
-		// Parse payload
-		var payload SessionPayload
-		if event.Payload != "" {
-			if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-				if costsVerbose {
-					fmt.Fprintf(os.Stderr, "[costs] payload unmarshal failed for event %s: %v\n", event.ID, err)
-				}
-				continue
+		var logEntry CostLogEntry
+		if err := json.Unmarshal([]byte(line), &logEntry); err != nil {
+			if costsVerbose {
+				fmt.Fprintf(os.Stderr, "[costs] failed to parse log entry: %v\n", err)
 			}
-		}
-
-		// Parse ended_at and filter by target date
-		endedAt := event.CreatedAt
-		if payload.EndedAt != "" {
-			if parsed, err := time.Parse(time.RFC3339, payload.EndedAt); err == nil {
-				endedAt = parsed
-			}
-		}
-
-		// Check if this event is from the target date
-		if endedAt.Format("2006-01-02") != targetDay {
 			continue
 		}
 
-		sessionCostWisps = append(sessionCostWisps, CostEntry{
-			SessionID: payload.SessionID,
-			Role:      payload.Role,
-			Rig:       payload.Rig,
-			Worker:    payload.Worker,
-			CostUSD:   payload.CostUSD,
-			EndedAt:   endedAt,
-			WorkItem:  event.Target,
+		// Filter by target date
+		if logEntry.EndedAt.Format("2006-01-02") != targetDay {
+			continue
+		}
+
+		entries = append(entries, CostEntry{
+			SessionID: logEntry.SessionID,
+			Role:      logEntry.Role,
+			Rig:       logEntry.Rig,
+			Worker:    logEntry.Worker,
+			CostUSD:   logEntry.CostUSD,
+			EndedAt:   logEntry.EndedAt,
+			WorkItem:  logEntry.WorkItem,
 		})
 	}
 
-	return sessionCostWisps, nil
+	return entries, nil
 }
 
 // createCostDigestBead creates a permanent bead for the daily cost digest.
@@ -1228,96 +1336,63 @@ func createCostDigestBead(digest CostDigest) (string, error) {
 	return digestID, nil
 }
 
-// deleteSessionCostWisps deletes ephemeral session.ended wisps for a target date.
-func deleteSessionCostWisps(targetDate time.Time) (int, error) {
-	// List all wisps
-	listCmd := exec.Command("bd", "mol", "wisp", "list", "--all", "--json")
-	listOutput, err := listCmd.Output()
-	if err != nil {
-		if costsVerbose {
-			fmt.Fprintf(os.Stderr, "[costs] wisp list failed in deletion: %v\n", err)
-		}
-		return 0, nil
-	}
+// deleteSessionCostEntries removes entries for a target date from the costs log file.
+// It rewrites the file without the entries for that date.
+func deleteSessionCostEntries(targetDate time.Time) (int, error) {
+	logPath := getCostsLogPath()
 
-	var wispList WispListOutput
-	if err := json.Unmarshal(listOutput, &wispList); err != nil {
-		return 0, fmt.Errorf("parsing wisp list: %w", err)
+	// Read log file
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil // No log file
+		}
+		return 0, fmt.Errorf("reading costs log: %w", err)
 	}
 
 	targetDay := targetDate.Format("2006-01-02")
+	var keepLines []string
+	deletedCount := 0
 
-	// Collect all wisp IDs that match our criteria
-	var wispIDsToDelete []string
-
-	for _, wisp := range wispList.Wisps {
-		// Get full wisp details to check if it's a session.ended event
-		showCmd := exec.Command("bd", "show", wisp.ID, "--json")
-		showOutput, err := showCmd.Output()
-		if err != nil {
-			if costsVerbose {
-				fmt.Fprintf(os.Stderr, "[costs] bd show failed for wisp %s: %v\n", wisp.ID, err)
-			}
+	// Filter out entries for target date
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
 
-		var events []SessionEvent
-		if err := json.Unmarshal(showOutput, &events); err != nil {
-			if costsVerbose {
-				fmt.Fprintf(os.Stderr, "[costs] JSON unmarshal failed for wisp %s: %v\n", wisp.ID, err)
-			}
+		var logEntry CostLogEntry
+		if err := json.Unmarshal([]byte(line), &logEntry); err != nil {
+			// Keep unparseable lines (shouldn't happen but be safe)
+			keepLines = append(keepLines, line)
 			continue
 		}
 
-		if len(events) == 0 {
+		// Remove entries from target date
+		if logEntry.EndedAt.Format("2006-01-02") == targetDay {
+			deletedCount++
 			continue
 		}
 
-		event := events[0]
-
-		// Only delete session.ended wisps
-		if event.EventKind != "session.ended" {
-			continue
-		}
-
-		// Parse payload to get ended_at for date filtering
-		var payload SessionPayload
-		if event.Payload != "" {
-			if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-				if costsVerbose {
-					fmt.Fprintf(os.Stderr, "[costs] payload unmarshal failed for wisp %s: %v\n", wisp.ID, err)
-				}
-				continue
-			}
-		}
-
-		endedAt := event.CreatedAt
-		if payload.EndedAt != "" {
-			if parsed, err := time.Parse(time.RFC3339, payload.EndedAt); err == nil {
-				endedAt = parsed
-			}
-		}
-
-		// Only delete wisps from the target date
-		if endedAt.Format("2006-01-02") != targetDay {
-			continue
-		}
-
-		wispIDsToDelete = append(wispIDsToDelete, wisp.ID)
+		keepLines = append(keepLines, line)
 	}
 
-	if len(wispIDsToDelete) == 0 {
+	if deletedCount == 0 {
 		return 0, nil
 	}
 
-	// Batch delete all wisps in a single subprocess call
-	burnArgs := append([]string{"mol", "burn", "--force"}, wispIDsToDelete...)
-	burnCmd := exec.Command("bd", burnArgs...)
-	if burnErr := burnCmd.Run(); burnErr != nil {
-		return 0, fmt.Errorf("batch burn failed: %w", burnErr)
+	// Rewrite file without deleted entries
+	newContent := strings.Join(keepLines, "\n")
+	if len(keepLines) > 0 {
+		newContent += "\n"
 	}
 
-	return len(wispIDsToDelete), nil
+	if err := os.WriteFile(logPath, []byte(newContent), 0644); err != nil {
+		return 0, fmt.Errorf("rewriting costs log: %w", err)
+	}
+
+	return deletedCount, nil
 }
 
 // runCostsMigrate migrates legacy session.ended beads to the new architecture.
@@ -1399,7 +1474,7 @@ func runCostsMigrate(cmd *cobra.Command, args []string) error {
 	// Close all open session.ended events
 	closedMigrated := 0
 	for _, event := range openEvents {
-		closeCmd := exec.Command("bd", "close", event.ID, "--reason=migrated to wisp architecture")
+		closeCmd := exec.Command("bd", "close", event.ID, "--reason=migrated to log-file architecture")
 		if err := closeCmd.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not close %s: %v\n", event.ID, err)
 			continue
@@ -1409,7 +1484,7 @@ func runCostsMigrate(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n%s Migrated %d session.ended events (closed)\n", style.Success.Render("✓"), closedMigrated)
 	fmt.Println(style.Dim.Render("Legacy beads preserved for historical queries."))
-	fmt.Println(style.Dim.Render("New session costs will use ephemeral wisps + daily digests."))
+	fmt.Println(style.Dim.Render("New session costs will use ~/.gt/costs.jsonl + daily digests."))
 
 	return nil
 }

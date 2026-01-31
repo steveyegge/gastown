@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -132,7 +133,10 @@ func runReady(cmd *cobra.Command, args []string) error {
 			} else {
 				// Filter out formula scaffolds (gt-579)
 				formulaNames := getFormulaNames(townBeadsPath)
-				src.Issues = filterFormulaScaffolds(issues, formulaNames)
+				filtered := filterFormulaScaffolds(issues, formulaNames)
+				// Defense-in-depth: also filter wisps that shouldn't appear in ready work
+				wispIDs := getWispIDs(townBeadsPath)
+				src.Issues = filterWisps(filtered, wispIDs)
 			}
 			sources = append(sources, src)
 		}()
@@ -143,9 +147,9 @@ func runReady(cmd *cobra.Command, args []string) error {
 		wg.Add(1)
 		go func(r *rig.Rig) {
 			defer wg.Done()
-			// Use mayor/rig path where rig-level beads are stored
-			rigBeadsPath := constants.RigMayorPath(r.Path)
-			rigBeads := beads.New(rigBeadsPath)
+			// Use rig root path where rig-level beads are stored
+			// BeadsPath returns rig root; redirect system handles mayor/rig routing
+			rigBeads := beads.New(r.BeadsPath())
 			issues, err := rigBeads.Ready()
 
 			mu.Lock()
@@ -155,8 +159,11 @@ func runReady(cmd *cobra.Command, args []string) error {
 				src.Error = err.Error()
 			} else {
 				// Filter out formula scaffolds (gt-579)
-				formulaNames := getFormulaNames(rigBeadsPath)
-				src.Issues = filterFormulaScaffolds(issues, formulaNames)
+				formulaNames := getFormulaNames(r.BeadsPath())
+				filtered := filterFormulaScaffolds(issues, formulaNames)
+				// Defense-in-depth: also filter wisps that shouldn't appear in ready work
+				wispIDs := getWispIDs(r.BeadsPath())
+				src.Issues = filterWisps(filtered, wispIDs)
 			}
 			sources = append(sources, src)
 		}(r)
@@ -343,6 +350,59 @@ func filterFormulaScaffolds(issues []*beads.Issue, formulaNames map[string]bool)
 		}
 
 		filtered = append(filtered, issue)
+	}
+	return filtered
+}
+
+// getWispIDs reads the issues.jsonl and returns a set of IDs that are wisps.
+// Wisps are ephemeral issues (wisp: true flag) that shouldn't appear in ready work.
+// This is a defense-in-depth exclusion - bd ready should already filter wisps,
+// but we double-check at the display layer to ensure operational work doesn't leak.
+func getWispIDs(beadsPath string) map[string]bool {
+	beadsDir := beads.ResolveBeadsDir(beadsPath)
+	issuesPath := filepath.Join(beadsDir, "issues.jsonl")
+	file, err := os.Open(issuesPath)
+	if err != nil {
+		return nil // No issues file
+	}
+	defer file.Close()
+
+	wispIDs := make(map[string]bool)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var issue struct {
+			ID   string `json:"id"`
+			Wisp bool   `json:"wisp"`
+		}
+		if err := json.Unmarshal([]byte(line), &issue); err != nil {
+			continue
+		}
+
+		if issue.Wisp {
+			wispIDs[issue.ID] = true
+		}
+	}
+
+	return wispIDs
+}
+
+// filterWisps removes wisp issues from the list.
+// Wisps are ephemeral operational work that shouldn't appear in ready work.
+func filterWisps(issues []*beads.Issue, wispIDs map[string]bool) []*beads.Issue {
+	if wispIDs == nil || len(wispIDs) == 0 {
+		return issues
+	}
+
+	filtered := make([]*beads.Issue, 0, len(issues))
+	for _, issue := range issues {
+		if !wispIDs[issue.ID] {
+			filtered = append(filtered, issue)
+		}
 	}
 	return filtered
 }

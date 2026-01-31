@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/boot"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/tmux"
 )
@@ -22,7 +21,7 @@ type TownSession struct {
 func TownSessions() []TownSession {
 	return []TownSession{
 		{"Mayor", MayorSessionName()},
-		{"Boot", boot.SessionName},
+		{"Boot", BootSessionName()},
 		{"Deacon", DeaconSessionName()},
 	}
 }
@@ -68,8 +67,9 @@ func stopTownSessionInternal(t *tmux.Tmux, ts TownSession, force bool) (bool, er
 	_ = events.LogFeed(events.TypeSessionDeath, ts.SessionID,
 		events.SessionDeathPayload(ts.SessionID, ts.Name, reason, "gt down"))
 
-	// Kill the session
-	if err := t.KillSession(ts.SessionID); err != nil {
+	// Kill the session.
+	// Use KillSessionWithProcesses to ensure all descendant processes are killed.
+	if err := t.KillSessionWithProcesses(ts.SessionID); err != nil {
 		return false, fmt.Errorf("killing %s session: %w", ts.Name, err)
 	}
 

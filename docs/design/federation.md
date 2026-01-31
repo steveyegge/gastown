@@ -185,9 +185,108 @@ bd audit --actor=greenplace/crew/joe
 - [x] BD_ACTOR default in beads create
 - [x] Workspace metadata file (.town.json)
 - [x] Cross-workspace URI scheme (hop://, beads://, local forms)
-- [ ] Remote registration
+- [x] Dolt remotes configured (DoltHub endpoints)
+- [x] Local remotesapi enabled (port 8000)
+- [ ] DoltHub authentication (`dolt login`)
+- [ ] Remote registration (gt remote add)
 - [ ] Cross-workspace queries
 - [ ] Delegation primitives
+
+## Dolt Federation Configuration
+
+### Current Setup
+
+Town-level Dolt databases have remotes configured pointing to DoltHub:
+
+```bash
+# Check configured remotes for town database
+cd ~/gt/.dolt-data/town && dolt remote -v
+# origin https://doltremoteapi.dolthub.com/steveyegge/gastown-town {}
+# local  http://localhost:8000/town {}
+```
+
+### Configured Remotes
+
+| Database | Remote Name | URL | Purpose |
+|----------|-------------|-----|---------|
+| town | origin | `steveyegge/gastown-town` | DoltHub public federation |
+| town | local | `http://localhost:8000/town` | Local development/testing |
+| gastown | origin | `steveyegge/gastown-rig` | DoltHub public federation |
+| beads | origin | `steveyegge/gastown-beads` | DoltHub public federation |
+
+### Federation Endpoint Options
+
+**1. DoltHub (Recommended for Public Federation)**
+
+Like GitHub for Dolt - public, hosted, zero infrastructure:
+
+```bash
+# Login to DoltHub (one-time setup)
+dolt login
+
+# Push to remote
+cd ~/gt/.dolt-data/town
+dolt push origin main
+```
+
+**2. Local Remotesapi (Development/Testing)**
+
+Already enabled in `~/gt/.dolt-data/config.yaml`:
+- Port: 8000
+- Mode: read-only (set `read_only: false` for full federation)
+
+```bash
+# Test local remote
+dolt push local main
+```
+
+**3. Self-Hosted DoltLab (Enterprise)**
+
+For private federation within an organization:
+- Deploy DoltLab instance
+- Configure remote: `dolt remote add corp https://doltlab.corp.example.com/org/repo`
+
+**4. Direct Town-to-Town (Advanced)**
+
+Two Gas Town instances federating directly:
+- Town A runs remotesapi on accessible endpoint
+- Town B adds Town A as remote: `dolt remote add town-a http://town-a.example.com:8000/town`
+
+### Enabling Full Federation
+
+To push/pull from configured remotes:
+
+1. **DoltHub Authentication:**
+   ```bash
+   dolt login
+   # Opens browser for OAuth
+   # Creates credentials in ~/.dolt/creds/
+   ```
+
+2. **Create DoltHub Repository:**
+   - Visit https://www.dolthub.com
+   - Create repository matching remote name (e.g., `steveyegge/gastown-town`)
+
+3. **Initial Push:**
+   ```bash
+   cd ~/gt/.dolt-data/town
+   dolt push -u origin main
+   ```
+
+4. **Enable Write for Local Remotesapi:**
+   Edit `~/gt/.dolt-data/config.yaml`:
+   ```yaml
+   remotesapi:
+     port: 8000
+     read_only: false  # Enable writes
+   ```
+   Restart daemon: `gt down && gt up`
+
+### Security Considerations
+
+- **DoltHub**: Public by default; use private repos for sensitive data
+- **Local remotesapi**: Bind to localhost only; use TLS for network access
+- **Authentication**: DoltHub uses OAuth; self-hosted can use TLS client certs
 
 ## Use Cases
 

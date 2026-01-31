@@ -44,8 +44,10 @@ type Daemon struct {
 	logger       *log.Logger
 	ctx          context.Context
 	cancel       context.CancelFunc
-	curator      *feed.Curator
+	curator       *feed.Curator
 	convoyWatcher *ConvoyWatcher
+	doltServer    *DoltServerManager
+	krcPruner     *KRCPruner
 
 	// Mass death detection: track recent session deaths
 	deathsMu     sync.Mutex
@@ -93,6 +95,15 @@ func New(config *Config) (*Daemon, error) {
 		logger.Printf("Loaded patrol config from %s", PatrolConfigFile(config.TownRoot))
 	}
 
+	// Initialize Dolt server manager if configured
+	var doltServer *DoltServerManager
+	if patrolConfig != nil && patrolConfig.Patrols != nil && patrolConfig.Patrols.DoltServer != nil {
+		doltServer = NewDoltServerManager(config.TownRoot, patrolConfig.Patrols.DoltServer, logger.Printf)
+		if doltServer.IsEnabled() {
+			logger.Printf("Dolt server management enabled (port %d)", patrolConfig.Patrols.DoltServer.Port)
+		}
+	}
+
 	return &Daemon{
 		config:       config,
 		patrolConfig: patrolConfig,
@@ -100,6 +111,7 @@ func New(config *Config) (*Daemon, error) {
 		logger:       logger,
 		ctx:          ctx,
 		cancel:       cancel,
+		doltServer:   doltServer,
 	}, nil
 }
 
@@ -167,6 +179,19 @@ func (d *Daemon) Run() error {
 		d.logger.Println("Convoy watcher started")
 	}
 
+	// Start KRC pruner for automatic ephemeral data cleanup
+	krcPruner, err := NewKRCPruner(d.config.TownRoot, d.logger.Printf)
+	if err != nil {
+		d.logger.Printf("Warning: failed to create KRC pruner: %v", err)
+	} else {
+		d.krcPruner = krcPruner
+		if err := d.krcPruner.Start(); err != nil {
+			d.logger.Printf("Warning: failed to start KRC pruner: %v", err)
+		} else {
+			d.logger.Println("KRC pruner started")
+		}
+	}
+
 	// Initial heartbeat
 	d.heartbeat(state)
 
@@ -209,7 +234,19 @@ const recoveryHeartbeatInterval = 3 * time.Minute
 // - Agents with work-on-hook not progressing (GUPP violation)
 // - Orphaned work (assigned to dead agents)
 func (d *Daemon) heartbeat(state *State) {
+	// Skip heartbeat if shutdown is in progress.
+	// This prevents the daemon from fighting shutdown by auto-restarting killed agents.
+	// The shutdown.lock file is created by gt down before terminating sessions.
+	if d.isShutdownInProgress() {
+		d.logger.Println("Shutdown in progress, skipping heartbeat")
+		return
+	}
+
 	d.logger.Println("Heartbeat starting (recovery-focused)")
+
+	// 0. Ensure Dolt server is running (if configured)
+	// This must happen before beads operations that depend on Dolt.
+	d.ensureDoltServerRunning()
 
 	// 1. Ensure Deacon is running (restart if dead)
 	// Check patrol config - can be disabled in mayor/daemon.json
@@ -282,6 +319,18 @@ func (d *Daemon) heartbeat(state *State) {
 	}
 
 	d.logger.Printf("Heartbeat complete (#%d)", state.HeartbeatCount)
+}
+
+// ensureDoltServerRunning ensures the Dolt SQL server is running if configured.
+// This provides the backend for beads database access in server mode.
+func (d *Daemon) ensureDoltServerRunning() {
+	if d.doltServer == nil || !d.doltServer.IsEnabled() {
+		return
+	}
+
+	if err := d.doltServer.EnsureRunning(); err != nil {
+		d.logger.Printf("Error ensuring Dolt server is running: %v", err)
+	}
 }
 
 // DeaconRole is the role name for the Deacon's handoff bead.
@@ -430,12 +479,15 @@ func (d *Daemon) checkDeaconHeartbeat() {
 
 	// Session exists but heartbeat is stale - Deacon is stuck
 	if age > 30*time.Minute {
-		// Very stuck - restart the session
+		// Very stuck - restart the session.
+		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 		d.logger.Printf("Deacon stuck for %s - restarting session", age.Round(time.Minute))
-		if err := d.tmux.KillSession(sessionName); err != nil {
+		if err := d.tmux.KillSessionWithProcesses(sessionName); err != nil {
 			d.logger.Printf("Error killing stuck Deacon: %v", err)
 		}
-		// ensureDeaconRunning will restart on next heartbeat
+		// Spawn new Deacon immediately instead of waiting for next heartbeat
+		// (kill may fail if session disappeared between check and kill)
+		d.ensureDeaconRunning()
 	} else {
 		// Stuck but not critically - nudge to wake up
 		d.logger.Printf("Deacon stuck for %s - nudging session", age.Round(time.Minute))
@@ -558,13 +610,32 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 		d.logger.Printf("Warning: no wisp config for %s - parked state may have been lost", rigName)
 	}
 
-	// Check rig status - parked and docked rigs should not have agents auto-started
+	// Check wisp layer first (local/ephemeral overrides)
 	status := cfg.GetString("status")
 	switch status {
 	case "parked":
 		return false, "rig is parked"
 	case "docked":
 		return false, "rig is docked"
+	}
+
+	// Check rig bead labels (global/synced docked status)
+	// This is the persistent docked state set by 'gt rig dock'
+	rigPath := filepath.Join(d.config.TownRoot, rigName)
+	if rigCfg, err := rig.LoadRigConfig(rigPath); err == nil && rigCfg.Beads != nil {
+		rigBeadID := fmt.Sprintf("%s-rig-%s", rigCfg.Beads.Prefix, rigName)
+		rigBeadsDir := beads.ResolveBeadsDir(rigPath)
+		bd := beads.NewWithBeadsDir(rigPath, rigBeadsDir)
+		if issue, err := bd.Show(rigBeadID); err == nil {
+			for _, label := range issue.Labels {
+				if label == "status:docked" {
+					return false, "rig is docked (global)"
+				}
+				if label == "status:parked" {
+					return false, "rig is parked (global)"
+				}
+			}
+		}
 	}
 
 	// Check auto_restart config
@@ -655,6 +726,21 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 		d.logger.Println("Convoy watcher stopped")
 	}
 
+	// Stop KRC pruner
+	if d.krcPruner != nil {
+		d.krcPruner.Stop()
+		d.logger.Println("KRC pruner stopped")
+	}
+
+	// Stop Dolt server if we're managing it
+	if d.doltServer != nil && d.doltServer.IsEnabled() && !d.doltServer.IsExternal() {
+		if err := d.doltServer.Stop(); err != nil {
+			d.logger.Printf("Warning: failed to stop Dolt server: %v", err)
+		} else {
+			d.logger.Println("Dolt server stopped")
+		}
+	}
+
 	state.Running = false
 	if err := SaveState(d.config.TownRoot, state); err != nil {
 		d.logger.Printf("Warning: failed to save final state: %v", err)
@@ -669,6 +755,15 @@ func (d *Daemon) Stop() {
 	d.cancel()
 }
 
+// isShutdownInProgress checks if a shutdown is currently in progress.
+// The shutdown.lock file is created by gt down before terminating sessions.
+// This prevents the daemon from fighting shutdown by auto-restarting killed agents.
+func (d *Daemon) isShutdownInProgress() bool {
+	lockPath := filepath.Join(d.config.TownRoot, "daemon", "shutdown.lock")
+	_, err := os.Stat(lockPath)
+	return err == nil
+}
+
 // IsRunning checks if a daemon is running for the given town.
 // It checks the PID file and verifies the process is alive.
 // Note: The file lock in Run() is the authoritative mechanism for preventing
@@ -680,29 +775,60 @@ func IsRunning(townRoot string) (bool, int, error) {
 		if os.IsNotExist(err) {
 			return false, 0, nil
 		}
-		return false, 0, err
+		// Return error for other failures (permissions, I/O)
+		return false, 0, fmt.Errorf("reading PID file: %w", err)
 	}
 
-	pid, err := strconv.Atoi(string(data))
+	pidStr := strings.TrimSpace(string(data))
+	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
-		return false, 0, nil
+		// Corrupted PID file - return error, not silent false
+		return false, 0, fmt.Errorf("invalid PID in file %q: %w", pidStr, err)
 	}
 
-	// Check if process is running
+	// Check if process is alive
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return false, 0, nil
 	}
 
 	// On Unix, FindProcess always succeeds. Send signal 0 to check if alive.
-	err = process.Signal(syscall.Signal(0))
-	if err != nil {
+	if err := process.Signal(syscall.Signal(0)); err != nil {
 		// Process not running, clean up stale PID file
-		_ = os.Remove(pidFile)
+		if err := os.Remove(pidFile); err == nil {
+			// Successfully cleaned up stale file
+			return false, 0, fmt.Errorf("removed stale PID file (process %d not found)", pid)
+		}
+		return false, 0, nil
+	}
+
+	// CRITICAL: Verify it's actually our daemon, not PID reuse
+	if !isGasTownDaemon(pid) {
+		// PID reused by different process
+		if err := os.Remove(pidFile); err == nil {
+			return false, 0, fmt.Errorf("removed stale PID file (PID %d is not gt daemon)", pid)
+		}
 		return false, 0, nil
 	}
 
 	return true, pid, nil
+}
+
+// isGasTownDaemon checks if a PID is actually a gt daemon run process.
+// This prevents false positives from PID reuse.
+// Uses ps command for cross-platform compatibility (Linux, macOS).
+func isGasTownDaemon(pid int) bool {
+	// Use ps to get command for the PID (works on Linux and macOS)
+	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=")
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	cmdline := strings.TrimSpace(string(output))
+
+	// Check if it's "gt daemon run" or "/path/to/gt daemon run"
+	return strings.Contains(cmdline, "gt") && strings.Contains(cmdline, "daemon") && strings.Contains(cmdline, "run")
 }
 
 // StopDaemon stops the running daemon for the given town.
@@ -741,6 +867,74 @@ func StopDaemon(townRoot string) error {
 	_ = os.Remove(pidFile)
 
 	return nil
+}
+
+// FindOrphanedDaemons finds all gt daemon run processes that aren't tracked by PID file.
+// Returns list of orphaned PIDs.
+func FindOrphanedDaemons() ([]int, error) {
+	// Use pgrep to find all "daemon run" processes (broad search, then verify with isGasTownDaemon)
+	cmd := exec.Command("pgrep", "-f", "daemon run")
+	output, err := cmd.Output()
+	if err != nil {
+		// Exit code 1 means no processes found - that's OK
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("pgrep failed: %w", err)
+	}
+
+	// Parse PIDs
+	var pids []int
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+		// Verify it's actually gt daemon (filters out unrelated processes)
+		if isGasTownDaemon(pid) {
+			pids = append(pids, pid)
+		}
+	}
+
+	return pids, nil
+}
+
+// KillOrphanedDaemons finds and kills any orphaned gt daemon processes.
+// Returns number of processes killed.
+func KillOrphanedDaemons() (int, error) {
+	pids, err := FindOrphanedDaemons()
+	if err != nil {
+		return 0, err
+	}
+
+	killed := 0
+	for _, pid := range pids {
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+
+		// Try SIGTERM first
+		if err := process.Signal(syscall.SIGTERM); err != nil {
+			continue
+		}
+
+		// Wait for graceful shutdown
+		time.Sleep(200 * time.Millisecond)
+
+		// Check if still alive
+		if err := process.Signal(syscall.Signal(0)); err == nil {
+			// Still alive, force kill
+			_ = process.Signal(syscall.SIGKILL)
+		}
+
+		killed++
+	}
+
+	return killed, nil
 }
 
 // checkPolecatSessionHealth proactively validates polecat tmux sessions.
@@ -982,6 +1176,7 @@ Manual intervention may be required.`,
 
 	cmd := exec.Command("gt", "mail", "send", witnessAddr, "-s", subject, "-m", body) //nolint:gosec // G204: args are constructed internally
 	cmd.Dir = d.config.TownRoot
+	cmd.Env = os.Environ() // Inherit PATH to find gt executable
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of crashed polecat: %v", err)
 	}

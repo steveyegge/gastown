@@ -138,6 +138,23 @@ func runGitInit(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   ✓ Git repository already exists\n")
 	}
 
+	// Install pre-checkout hook to prevent accidental branch switches
+	if err := InstallPreCheckoutHook(hqRoot); err != nil {
+		fmt.Printf("   %s Could not install pre-checkout hook: %v\n", style.Dim.Render("⚠"), err)
+	}
+
+	// Ensure beads database has repository fingerprint now that git is initialized.
+	// This fixes the case where 'gt install' ran before git, leaving the database
+	// without a fingerprint (causes slow bd commands due to daemon startup failures).
+	beadsDir := filepath.Join(hqRoot, ".beads")
+	if _, err := os.Stat(beadsDir); err == nil {
+		if err := ensureRepoFingerprint(hqRoot); err != nil {
+			fmt.Printf("   %s Could not update beads fingerprint: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Updated beads repository fingerprint\n")
+		}
+	}
+
 	// Create GitHub repo if requested
 	if gitInitGitHub != "" {
 		if err := createGitHubRepo(hqRoot, gitInitGitHub, !gitInitPublic); err != nil {
@@ -223,6 +240,12 @@ func createGitHubRepo(hqRoot, repo string, private bool) error {
 	}
 	fmt.Printf("   → Creating %s GitHub repository %s...\n", visibility, repo)
 
+	// Ensure there's at least one commit before pushing.
+	// gh repo create --push fails on empty repos with no commits.
+	if err := ensureInitialCommit(hqRoot); err != nil {
+		return fmt.Errorf("creating initial commit: %w", err)
+	}
+
 	// Build gh repo create command
 	args := []string{"repo", "create", repo, "--source", hqRoot}
 	if private {
@@ -244,6 +267,33 @@ func createGitHubRepo(hqRoot, repo string, private bool) error {
 	if private {
 		fmt.Printf("   ℹ To make this repo public: %s\n", style.Dim.Render("gh repo edit "+repo+" --visibility public"))
 	}
+	return nil
+}
+
+// ensureInitialCommit creates an initial commit if the repo has no commits.
+// gh repo create --push requires at least one commit to push.
+func ensureInitialCommit(hqRoot string) error {
+	// Check if commits exist
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = hqRoot
+	if cmd.Run() == nil {
+		return nil
+	}
+
+	// Stage and commit
+	addCmd := exec.Command("git", "add", ".")
+	addCmd.Dir = hqRoot
+	if err := addCmd.Run(); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+
+	commitCmd := exec.Command("git", "commit", "-m", "Initial Gas Town HQ")
+	commitCmd.Dir = hqRoot
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %s", strings.TrimSpace(string(output)))
+	}
+
+	fmt.Printf("   ✓ Created initial commit\n")
 	return nil
 }
 
@@ -272,6 +322,18 @@ func InitGitForHarness(hqRoot string, github string, private bool) error {
 		fmt.Printf("   %s Could not install pre-checkout hook: %v\n", style.Dim.Render("⚠"), err)
 	}
 
+	// Ensure beads database has repository fingerprint now that git is initialized.
+	// This fixes the case where 'gt install' ran before git, leaving the database
+	// without a fingerprint (causes slow bd commands due to daemon startup failures).
+	beadsDir := filepath.Join(hqRoot, ".beads")
+	if _, err := os.Stat(beadsDir); err == nil {
+		if err := ensureRepoFingerprint(hqRoot); err != nil {
+			fmt.Printf("   %s Could not update beads fingerprint: %v\n", style.Dim.Render("⚠"), err)
+		} else {
+			fmt.Printf("   ✓ Updated beads repository fingerprint\n")
+		}
+	}
+
 	// Create GitHub repo if requested
 	if github != "" {
 		if err := createGitHubRepo(hqRoot, github, private); err != nil {
@@ -282,57 +344,63 @@ func InitGitForHarness(hqRoot string, github string, private bool) error {
 	return nil
 }
 
-// PreCheckoutHookScript is the git pre-checkout hook that prevents accidental
-// branch switches in the town root. The town root should always stay on main.
-const PreCheckoutHookScript = `#!/bin/bash
-# Gas Town pre-checkout hook
-# Prevents accidental branch switches in the town root (HQ).
+// BranchProtectionMarker identifies our branch protection code in post-checkout.
+const BranchProtectionMarker = "Gas Town branch protection"
+
+// BranchProtectionScript is the code to prepend to post-checkout hook.
+// It auto-reverts to main if a non-main branch was checked out in the town root.
+//
+// NOTE: Git does NOT support "pre-checkout" hooks. We use post-checkout to
+// detect and auto-revert bad checkouts immediately after they happen.
+const BranchProtectionScript = `# Gas Town branch protection
+# Auto-reverts to main if a non-main branch is checked out in the town root.
 # The town root must stay on main to avoid breaking gt commands.
+# NOTE: Git does NOT support pre-checkout hooks, so we auto-revert after.
 
 # Only check branch checkouts (not file checkouts)
-# $3 is 1 for file checkout, 0 for branch checkout
+# $3 is 1 for branch checkout, 0 for file checkout
 if [ "$3" = "1" ]; then
-    exit 0
+    # Get current branch after checkout
+    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
+
+    # If on main or master, all good
+    if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+        : # OK, continue with rest of hook
+    elif [ -n "$CURRENT_BRANCH" ]; then
+        # Non-main branch detected - auto-revert!
+        echo "" >&2
+        echo "⚠️  AUTO-REVERTING: Town root must stay on main branch" >&2
+        echo "" >&2
+        echo "   Detected checkout to '$CURRENT_BRANCH' in the Gas Town HQ directory." >&2
+        echo "   The town root should always be on main. Switching back..." >&2
+        echo "" >&2
+
+        # Revert to main
+        if git checkout main >/dev/null 2>&1; then
+            echo "   ✓ Reverted to main branch" >&2
+        elif git checkout master >/dev/null 2>&1; then
+            echo "   ✓ Reverted to master branch" >&2
+        else
+            echo "   ✗ Failed to revert - please run: git checkout main" >&2
+        fi
+        echo "" >&2
+    fi
 fi
 
-# Get the target branch name
-TARGET_BRANCH=$(git rev-parse --abbrev-ref "$2" 2>/dev/null)
-
-# Allow checkout to main or master
-if [ "$TARGET_BRANCH" = "main" ] || [ "$TARGET_BRANCH" = "master" ]; then
-    exit 0
-fi
-
-# Get current branch
-CURRENT_BRANCH=$(git branch --show-current)
-
-# If already not on main, allow (might be fixing the situation)
-if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "master" ]; then
-    exit 0
-fi
-
-# Block the checkout with a warning
-echo ""
-echo "⚠️  BLOCKED: Town root must stay on main branch"
-echo ""
-echo "   You're trying to switch from '$CURRENT_BRANCH' to '$TARGET_BRANCH'"
-echo "   in the Gas Town HQ directory."
-echo ""
-echo "   The town root (~/gt) should always be on main. Switching branches"
-echo "   can break gt commands (missing rigs.json, wrong configs, etc.)."
-echo ""
-echo "   If you really need to switch branches, you can:"
-echo "   1. Temporarily rename .git/hooks/pre-checkout"
-echo "   2. Do your work"
-echo "   3. Switch back to main"
-echo "   4. Restore the hook"
-echo ""
-exit 1
 `
 
-// InstallPreCheckoutHook installs the pre-checkout hook in the town root.
-// This prevents accidental branch switches that can break gt commands.
+// InstallPreCheckoutHook installs branch protection in the post-checkout hook.
+// This auto-reverts accidental branch switches that can break gt commands.
+//
+// NOTE: The function name is kept for backwards compatibility, but it now
+// installs protection in post-checkout (git doesn't support pre-checkout).
 func InstallPreCheckoutHook(hqRoot string) error {
+	return InstallBranchProtection(hqRoot)
+}
+
+// InstallBranchProtection adds branch protection to the post-checkout hook.
+// If a non-main branch is checked out in the town root, it auto-reverts to main.
+func InstallBranchProtection(hqRoot string) error {
 	hooksDir := filepath.Join(hqRoot, ".git", "hooks")
 
 	// Ensure hooks directory exists
@@ -340,43 +408,72 @@ func InstallPreCheckoutHook(hqRoot string) error {
 		return fmt.Errorf("creating hooks directory: %w", err)
 	}
 
-	hookPath := filepath.Join(hooksDir, "pre-checkout")
-
-	// Check if hook already exists
-	if _, err := os.Stat(hookPath); err == nil {
-		// Read existing hook to see if it's ours
-		content, err := os.ReadFile(hookPath)
-		if err != nil {
-			return fmt.Errorf("reading existing hook: %w", err)
-		}
-
+	// Remove obsolete pre-checkout hook if it's ours
+	preCheckoutPath := filepath.Join(hooksDir, "pre-checkout")
+	if content, err := os.ReadFile(preCheckoutPath); err == nil {
 		if strings.Contains(string(content), "Gas Town pre-checkout hook") {
-			fmt.Printf("   ✓ Pre-checkout hook already installed\n")
-			return nil
+			_ = os.Remove(preCheckoutPath) // Best effort removal
+			fmt.Printf("   ✓ Removed obsolete pre-checkout hook\n")
 		}
+	}
 
-		// There's an existing hook that's not ours - don't overwrite
-		fmt.Printf("   %s Pre-checkout hook exists but is not Gas Town's (skipping)\n", style.Dim.Render("⚠"))
+	hookPath := filepath.Join(hooksDir, "post-checkout")
+
+	// Read existing hook content (if any)
+	existingContent, err := os.ReadFile(hookPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading existing hook: %w", err)
+	}
+
+	// Check if already has branch protection
+	if strings.Contains(string(existingContent), BranchProtectionMarker) {
+		fmt.Printf("   ✓ Branch protection already installed\n")
 		return nil
 	}
 
-	// Install the hook
-	if err := os.WriteFile(hookPath, []byte(PreCheckoutHookScript), 0755); err != nil {
+	var newContent string
+	if len(existingContent) == 0 {
+		// No existing hook - create new one with shebang
+		newContent = "#!/bin/sh\n" + BranchProtectionScript
+	} else {
+		// Prepend branch protection after shebang
+		content := string(existingContent)
+		if strings.HasPrefix(content, "#!") {
+			// Find end of shebang line
+			idx := strings.Index(content, "\n")
+			if idx != -1 {
+				newContent = content[:idx+1] + BranchProtectionScript + content[idx+1:]
+			} else {
+				newContent = content + "\n" + BranchProtectionScript
+			}
+		} else {
+			newContent = "#!/bin/sh\n" + BranchProtectionScript + content
+		}
+	}
+
+	// Write the hook
+	if err := os.WriteFile(hookPath, []byte(newContent), 0755); err != nil {
 		return fmt.Errorf("writing hook: %w", err)
 	}
 
-	fmt.Printf("   ✓ Installed pre-checkout hook (prevents accidental branch switches)\n")
+	fmt.Printf("   ✓ Installed branch protection (auto-reverts non-main checkouts)\n")
 	return nil
 }
 
-// IsPreCheckoutHookInstalled checks if the Gas Town pre-checkout hook is installed.
+// IsPreCheckoutHookInstalled checks if branch protection is installed.
+// NOTE: Function name kept for backwards compatibility.
 func IsPreCheckoutHookInstalled(hqRoot string) bool {
-	hookPath := filepath.Join(hqRoot, ".git", "hooks", "pre-checkout")
+	return IsBranchProtectionInstalled(hqRoot)
+}
+
+// IsBranchProtectionInstalled checks if branch protection is in post-checkout.
+func IsBranchProtectionInstalled(hqRoot string) bool {
+	hookPath := filepath.Join(hqRoot, ".git", "hooks", "post-checkout")
 
 	content, err := os.ReadFile(hookPath)
 	if err != nil {
 		return false
 	}
 
-	return strings.Contains(string(content), "Gas Town pre-checkout hook")
+	return strings.Contains(string(content), BranchProtectionMarker)
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -87,6 +88,7 @@ func (w *ConvoyWatcher) run() {
 func (w *ConvoyWatcher) watchActivity() error {
 	cmd := exec.CommandContext(w.ctx, "bd", "activity", "--follow", "--town", "--json")
 	cmd.Dir = w.townRoot
+	cmd.Env = os.Environ() // Inherit PATH to find bd executable
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -168,6 +170,7 @@ func (w *ConvoyWatcher) getTrackingConvoys(issueID string) []string {
 	`, safeIssueID, safeIssueID)
 
 	queryCmd := exec.Command("sqlite3", "-json", dbPath, query)
+	queryCmd.Env = os.Environ() // Inherit PATH to find sqlite3 executable
 	var stdout bytes.Buffer
 	queryCmd.Stdout = &stdout
 
@@ -200,6 +203,7 @@ func (w *ConvoyWatcher) checkConvoyCompletion(convoyID string) {
 		strings.ReplaceAll(convoyID, "'", "''"))
 
 	queryCmd := exec.Command("sqlite3", "-json", dbPath, convoyQuery)
+	queryCmd.Env = os.Environ() // Inherit PATH to find sqlite3 executable
 	var stdout bytes.Buffer
 	queryCmd.Stdout = &stdout
 
@@ -218,12 +222,13 @@ func (w *ConvoyWatcher) checkConvoyCompletion(convoyID string) {
 		return // Already closed
 	}
 
-	// Run gt convoy check to handle the completion
+	// Run gt convoy check with specific convoy ID for targeted check
 	// This reuses the existing logic which handles notifications, etc.
 	w.logger("convoy watcher: running completion check for %s", convoyID)
 
-	checkCmd := exec.Command("gt", "convoy", "check")
+	checkCmd := exec.Command("gt", "convoy", "check", convoyID)
 	checkCmd.Dir = w.townRoot
+	checkCmd.Env = os.Environ() // Inherit PATH to find gt executable
 	var checkStdout, checkStderr bytes.Buffer
 	checkCmd.Stdout = &checkStdout
 	checkCmd.Stderr = &checkStderr

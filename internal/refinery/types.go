@@ -1,48 +1,14 @@
 // Package refinery provides the merge queue processing agent.
+//
+// ZFC-compliant: Running state is derived from tmux sessions, not stored in files.
+// Merge queue is derived from beads merge-request issues.
 package refinery
 
 import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/steveyegge/gastown/internal/agent"
 )
-
-// State is an alias for agent.State for backwards compatibility.
-type State = agent.State
-
-// State constants - re-exported from agent package for backwards compatibility.
-const (
-	StateStopped = agent.StateStopped
-	StateRunning = agent.StateRunning
-	StatePaused  = agent.StatePaused
-)
-
-// Refinery represents a rig's merge queue processor.
-type Refinery struct {
-	// RigName is the rig this refinery processes.
-	RigName string `json:"rig_name"`
-
-	// State is the current running state.
-	State State `json:"state"`
-
-	// PID is the process ID if running in background.
-	PID int `json:"pid,omitempty"`
-
-	// StartedAt is when the refinery was started.
-	StartedAt *time.Time `json:"started_at,omitempty"`
-
-	// CurrentMR is the merge request currently being processed.
-	CurrentMR *MergeRequest `json:"current_mr,omitempty"`
-
-	// PendingMRs tracks merge requests that have been submitted.
-	// Key is the MR ID.
-	PendingMRs map[string]*MergeRequest `json:"pending_mrs,omitempty"`
-
-	// LastMergeAt is when the last successful merge happened.
-	LastMergeAt *time.Time `json:"last_merge_at,omitempty"`
-}
 
 // MergeRequest represents a branch waiting to be merged.
 type MergeRequest struct {

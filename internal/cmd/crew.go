@@ -237,7 +237,7 @@ var crewPristineCmd = &cobra.Command{
 	Short: "Sync crew workspaces with remote",
 	Long: `Ensure crew workspace(s) are up-to-date.
 
-Runs git pull and bd sync for the specified crew, or all crew workers.
+Runs git pull for the specified crew, or all crew workers.
 Reports any uncommitted changes that may need attention.
 
 Examples:

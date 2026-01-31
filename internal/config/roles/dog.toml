@@ -1,0 +1,23 @@
+# Dog role definition
+# Town-level workers for cross-rig tasks. Dispatched by Deacon.
+
+role = "dog"
+scope = "town"
+nudge = "Check your hook for work assignments."
+prompt_template = "dog.md.tmpl"
+
+[session]
+pattern = "gt-dog-{name}"
+work_dir = "{town}/deacon/dogs/{name}"
+needs_pre_sync = false
+start_command = "exec claude --dangerously-skip-permissions"
+
+[env]
+GT_ROLE = "dog"
+GT_SCOPE = "town"
+
+[health]
+ping_timeout = "30s"
+consecutive_failures = 3
+kill_cooldown = "5m"
+stuck_threshold = "2h"

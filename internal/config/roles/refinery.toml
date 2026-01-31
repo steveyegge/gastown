@@ -1,0 +1,23 @@
+# Refinery role definition
+# Merge queue processor with verification gates. One per rig.
+
+role = "refinery"
+scope = "rig"
+nudge = "Run 'gt prime' to check merge queue and begin processing."
+prompt_template = "refinery.md.tmpl"
+
+[session]
+pattern = "gt-{rig}-refinery"
+work_dir = "{town}/{rig}/refinery/rig"
+needs_pre_sync = true
+start_command = "exec claude --dangerously-skip-permissions"
+
+[env]
+GT_ROLE = "refinery"
+GT_SCOPE = "rig"
+
+[health]
+ping_timeout = "30s"
+consecutive_failures = 3
+kill_cooldown = "5m"
+stuck_threshold = "2h"

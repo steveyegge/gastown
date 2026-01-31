@@ -90,6 +90,7 @@ func runSlingFormula(args []string) error {
 	// Resolve target agent and pane
 	var targetAgent string
 	var targetPane string
+	var delayedDogInfo *DogDispatchInfo // For delayed session start after hook is set
 
 	if target != "" {
 		// Resolve "." to current agent identity (like git's "." meaning current directory)
@@ -111,14 +112,20 @@ func runSlingFormula(args []string) error {
 				}
 				targetPane = "<dog-pane>"
 			} else {
-				// Dispatch to dog
-				dispatchInfo, dispatchErr := DispatchToDog(dogName, slingCreate)
+				// Dispatch to dog with delayed session start
+				// Session starts after hook is set to avoid race condition
+				dispatchOpts := DogDispatchOptions{
+					Create:            slingCreate,
+					WorkDesc:          formulaName,
+					DelaySessionStart: true,
+				}
+				dispatchInfo, dispatchErr := DispatchToDog(dogName, dispatchOpts)
 				if dispatchErr != nil {
 					return fmt.Errorf("dispatching to dog: %w", dispatchErr)
 				}
 				targetAgent = dispatchInfo.AgentID
-				targetPane = dispatchInfo.Pane
-				fmt.Printf("Dispatched to dog %s\n", dispatchInfo.DogName)
+				delayedDogInfo = dispatchInfo // Store for later session start
+				fmt.Printf("Dispatched to dog %s (session start delayed)\n", dispatchInfo.DogName)
 			}
 		} else if rigName, isRig := IsRigName(target); isRig {
 			// Check if target is a rig name (auto-spawn polecat)
@@ -209,13 +216,7 @@ func runSlingFormula(args []string) error {
 	}
 
 	fmt.Printf("%s Wisp created: %s\n", style.Bold.Render("✓"), wispRootID)
-
-	// Record the attached molecule in the wisp's description.
-	// This is required for gt hook to recognize the molecule attachment.
-	if err := storeAttachedMoleculeInBead(wispRootID, wispRootID); err != nil {
-		// Warn but don't fail - polecat can still work through steps
-		fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
-	}
+	attachedMoleculeID := wispRootID
 
 	// Step 3: Hook the wisp bead using bd update.
 	// See: https://github.com/steveyegge/gastown/issues/148
@@ -250,6 +251,24 @@ func runSlingFormula(args []string) error {
 		} else {
 			fmt.Printf("%s Args stored in bead (durable)\n", style.Bold.Render("✓"))
 		}
+	}
+
+	// Record the attached molecule after other description updates to avoid overwrite.
+	if attachedMoleculeID != "" {
+		if err := storeAttachedMoleculeInBead(wispRootID, attachedMoleculeID); err != nil {
+			// Warn but don't fail - polecat can still work through steps
+			fmt.Printf("%s Could not store attached_molecule: %v\n", style.Dim.Render("Warning:"), err)
+		}
+	}
+
+	// Start delayed dog session now that hook is set
+	// This ensures dog sees the hook when gt prime runs on session start
+	if delayedDogInfo != nil {
+		pane, err := delayedDogInfo.StartDelayedSession()
+		if err != nil {
+			return fmt.Errorf("starting delayed dog session: %w", err)
+		}
+		targetPane = pane
 	}
 
 	// Step 4: Nudge to start (graceful if no tmux)

@@ -1,6 +1,6 @@
 ---
 description: Hand off to fresh session, work continues from hook
-allowed-tools: Bash(gt mail send:*),Bash(gt handoff:*)
+allowed-tools: Bash(gt handoff:*)
 argument-hint: [message]
 ---
 
@@ -10,11 +10,10 @@ User's handoff message (if any): $ARGUMENTS
 
 Execute these steps in order:
 
-1. If user provided a message, send handoff mail to yourself first.
-   Construct your mail address from your identity (e.g., gastown/crew/max for crew, mayor/ for mayor).
-   Example: `gt mail send gastown/crew/max -s "HANDOFF: Session cycling" -m "USER_MESSAGE_HERE"`
+1. If user provided a message, run the handoff command with a subject and message.
+   Example: `gt handoff -s "HANDOFF: Session cycling" -m "USER_MESSAGE_HERE"`
 
-2. Run the handoff command (this will respawn your session with a fresh Claude):
+2. If no message was provided, run the handoff command:
    `gt handoff`
 
 Note: The new session will auto-prime via the SessionStart hook and find your handoff mail.
