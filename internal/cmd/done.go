@@ -535,18 +535,35 @@ notifyWitness:
 	}
 
 	// Notify dispatcher if work was dispatched by another agent
+	// BUG FIX (hq--bug-stale_polecat_sends_duplicate_work_done): Deduplicate WORK_DONE notifications.
+	// If session dies after sending WORK_DONE but before clearing hook_bead, the polecat may be
+	// respawned and send WORK_DONE again. We track sent notifications via a label on the bead.
 	if issueID != "" {
 		if dispatcher := getDispatcherFromBead(cwd, issueID); dispatcher != "" && dispatcher != sender {
-			dispatcherNotification := &mail.Message{
-				To:      dispatcher,
-				From:    sender,
-				Subject: fmt.Sprintf("WORK_DONE: %s", issueID),
-				Body:    strings.Join(bodyLines, "\n"),
-			}
-			if err := townRouter.Send(dispatcherNotification); err != nil {
-				style.PrintWarning("could not notify dispatcher %s: %v", dispatcher, err)
+			// Check if WORK_DONE was already sent for this bead (prevents duplicates)
+			bd := beads.New(beads.ResolveBeadsDir(cwd))
+			issue, err := bd.Show(issueID)
+			alreadySent := err == nil && beads.HasLabel(issue, "gt:work_done_sent")
+
+			if alreadySent {
+				fmt.Printf("%s Dispatcher notification skipped (already sent for %s)\n", style.Dim.Render("→"), issueID)
 			} else {
-				fmt.Printf("%s Dispatcher %s notified of %s\n", style.Bold.Render("✓"), dispatcher, exitType)
+				dispatcherNotification := &mail.Message{
+					To:      dispatcher,
+					From:    sender,
+					Subject: fmt.Sprintf("WORK_DONE: %s", issueID),
+					Body:    strings.Join(bodyLines, "\n"),
+				}
+				if err := townRouter.Send(dispatcherNotification); err != nil {
+					style.PrintWarning("could not notify dispatcher %s: %v", dispatcher, err)
+				} else {
+					fmt.Printf("%s Dispatcher %s notified of %s\n", style.Bold.Render("✓"), dispatcher, exitType)
+					// Mark WORK_DONE as sent to prevent duplicates on respawn
+					if err := bd.Update(issueID, beads.UpdateOptions{AddLabels: []string{"gt:work_done_sent"}}); err != nil {
+						// Non-fatal: notification was sent, just couldn't mark it
+						style.PrintWarning("could not mark WORK_DONE as sent: %v", err)
+					}
+				}
 			}
 		}
 	}
