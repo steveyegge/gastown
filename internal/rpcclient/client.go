@@ -1434,3 +1434,401 @@ func visibilityToString(v string) string {
 		return "feed"
 	}
 }
+
+// MailMessage represents a mail message from the RPC API.
+type MailMessage struct {
+	ID        string
+	From      string
+	To        string
+	Subject   string
+	Body      string
+	Timestamp time.Time
+	Read      bool
+	Priority  string
+	Type      string
+	ThreadID  string
+	ReplyTo   string
+	Pinned    bool
+	CC        []string
+}
+
+// ListInboxRequest contains the parameters for listing inbox messages.
+type ListInboxRequest struct {
+	Address    string // Recipient address (empty = overseer)
+	UnreadOnly bool
+	Limit      int
+}
+
+// ListInbox fetches messages from an inbox via RPC.
+func (c *Client) ListInbox(ctx context.Context, req ListInboxRequest) ([]MailMessage, int, int, error) {
+	body := map[string]interface{}{}
+	if req.Address != "" {
+		body["address"] = map[string]string{"name": req.Address}
+	}
+	if req.UnreadOnly {
+		body["unreadOnly"] = true
+	}
+	if req.Limit > 0 {
+		body["limit"] = req.Limit
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("encoding request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		c.baseURL+"/gastown.v1.MailService/ListInbox",
+		strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-GT-API-Key", c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, 0, 0, fmt.Errorf("RPC error: %s", resp.Status)
+	}
+
+	var result struct {
+		Messages []struct {
+			ID        string `json:"id"`
+			From      struct{ Name string } `json:"from"`
+			To        struct{ Name string } `json:"to"`
+			Subject   string `json:"subject"`
+			Body      string `json:"body"`
+			Timestamp string `json:"timestamp"`
+			Read      bool   `json:"read"`
+			Priority  string `json:"priority"`
+			Type      string `json:"type"`
+			ThreadID  string `json:"threadId"`
+			ReplyTo   string `json:"replyTo"`
+			Pinned    bool   `json:"pinned"`
+			CC        []struct{ Name string } `json:"cc"`
+		} `json:"messages"`
+		Total  int `json:"total"`
+		Unread int `json:"unread"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, 0, 0, fmt.Errorf("decoding response: %w", err)
+	}
+
+	var messages []MailMessage
+	for _, m := range result.Messages {
+		ts, _ := time.Parse(time.RFC3339, m.Timestamp)
+		msg := MailMessage{
+			ID:        m.ID,
+			From:      m.From.Name,
+			To:        m.To.Name,
+			Subject:   m.Subject,
+			Body:      m.Body,
+			Timestamp: ts,
+			Read:      m.Read,
+			Priority:  priorityToString(m.Priority),
+			Type:      messageTypeToString(m.Type),
+			ThreadID:  m.ThreadID,
+			ReplyTo:   m.ReplyTo,
+			Pinned:    m.Pinned,
+		}
+		for _, cc := range m.CC {
+			msg.CC = append(msg.CC, cc.Name)
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, result.Total, result.Unread, nil
+}
+
+// ReadMailMessage fetches a specific message by ID via RPC.
+func (c *Client) ReadMailMessage(ctx context.Context, messageID string) (*MailMessage, error) {
+	body := map[string]interface{}{
+		"messageId": messageID,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encoding request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		c.baseURL+"/gastown.v1.MailService/ReadMessage",
+		strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-GT-API-Key", c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("RPC error: %s", resp.Status)
+	}
+
+	var result struct {
+		Message struct {
+			ID        string `json:"id"`
+			From      struct{ Name string } `json:"from"`
+			To        struct{ Name string } `json:"to"`
+			Subject   string `json:"subject"`
+			Body      string `json:"body"`
+			Timestamp string `json:"timestamp"`
+			Read      bool   `json:"read"`
+			Priority  string `json:"priority"`
+			Type      string `json:"type"`
+			ThreadID  string `json:"threadId"`
+			ReplyTo   string `json:"replyTo"`
+			Pinned    bool   `json:"pinned"`
+			CC        []struct{ Name string } `json:"cc"`
+		} `json:"message"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+
+	m := result.Message
+	ts, _ := time.Parse(time.RFC3339, m.Timestamp)
+	msg := &MailMessage{
+		ID:        m.ID,
+		From:      m.From.Name,
+		To:        m.To.Name,
+		Subject:   m.Subject,
+		Body:      m.Body,
+		Timestamp: ts,
+		Read:      m.Read,
+		Priority:  priorityToString(m.Priority),
+		Type:      messageTypeToString(m.Type),
+		ThreadID:  m.ThreadID,
+		ReplyTo:   m.ReplyTo,
+		Pinned:    m.Pinned,
+	}
+	for _, cc := range m.CC {
+		msg.CC = append(msg.CC, cc.Name)
+	}
+
+	return msg, nil
+}
+
+// SendMailRequest contains the parameters for sending a mail message via RPC.
+type SendMailRequest struct {
+	To       string
+	Subject  string
+	Body     string
+	Priority string
+	Type     string
+	ReplyTo  string
+	CC       []string
+}
+
+// SendMail sends a new mail message via RPC.
+func (c *Client) SendMail(ctx context.Context, req SendMailRequest) (string, error) {
+	body := map[string]interface{}{
+		"to":      map[string]string{"name": req.To},
+		"subject": req.Subject,
+		"body":    req.Body,
+	}
+	if req.Priority != "" {
+		body["priority"] = priorityToProto(req.Priority)
+	}
+	if req.Type != "" {
+		body["type"] = messageTypeToProto(req.Type)
+	}
+	if req.ReplyTo != "" {
+		body["replyTo"] = req.ReplyTo
+	}
+	if len(req.CC) > 0 {
+		var ccAddrs []map[string]string
+		for _, cc := range req.CC {
+			ccAddrs = append(ccAddrs, map[string]string{"name": cc})
+		}
+		body["cc"] = ccAddrs
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("encoding request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		c.baseURL+"/gastown.v1.MailService/SendMessage",
+		strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-GT-API-Key", c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("RPC error: %s", resp.Status)
+	}
+
+	var result struct {
+		MessageID string `json:"messageId"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decoding response: %w", err)
+	}
+
+	return result.MessageID, nil
+}
+
+// MarkMailRead marks a mail message as read via RPC.
+func (c *Client) MarkMailRead(ctx context.Context, messageID string) error {
+	body := map[string]interface{}{
+		"messageId": messageID,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encoding request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		c.baseURL+"/gastown.v1.MailService/MarkRead",
+		strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-GT-API-Key", c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("RPC error: %s", resp.Status)
+	}
+
+	return nil
+}
+
+// DeleteMail deletes/archives a mail message via RPC.
+func (c *Client) DeleteMail(ctx context.Context, messageID string) error {
+	body := map[string]interface{}{
+		"messageId": messageID,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encoding request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		c.baseURL+"/gastown.v1.MailService/DeleteMessage",
+		strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-GT-API-Key", c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("RPC error: %s", resp.Status)
+	}
+
+	return nil
+}
+
+func priorityToString(p string) string {
+	switch p {
+	case "PRIORITY_URGENT":
+		return "urgent"
+	case "PRIORITY_HIGH":
+		return "high"
+	case "PRIORITY_NORMAL":
+		return "normal"
+	case "PRIORITY_LOW":
+		return "low"
+	default:
+		if p != "" {
+			return p
+		}
+		return "normal"
+	}
+}
+
+func priorityToProto(p string) string {
+	switch p {
+	case "urgent":
+		return "PRIORITY_URGENT"
+	case "high":
+		return "PRIORITY_HIGH"
+	case "normal":
+		return "PRIORITY_NORMAL"
+	case "low":
+		return "PRIORITY_LOW"
+	default:
+		return "PRIORITY_NORMAL"
+	}
+}
+
+func messageTypeToString(t string) string {
+	switch t {
+	case "MESSAGE_TYPE_TASK":
+		return "task"
+	case "MESSAGE_TYPE_SCAVENGE":
+		return "scavenge"
+	case "MESSAGE_TYPE_NOTIFICATION":
+		return "notification"
+	case "MESSAGE_TYPE_REPLY":
+		return "reply"
+	default:
+		if t != "" {
+			return t
+		}
+		return "notification"
+	}
+}
+
+func messageTypeToProto(t string) string {
+	switch t {
+	case "task":
+		return "MESSAGE_TYPE_TASK"
+	case "scavenge":
+		return "MESSAGE_TYPE_SCAVENGE"
+	case "notification":
+		return "MESSAGE_TYPE_NOTIFICATION"
+	case "reply":
+		return "MESSAGE_TYPE_REPLY"
+	default:
+		return "MESSAGE_TYPE_NOTIFICATION"
+	}
+}

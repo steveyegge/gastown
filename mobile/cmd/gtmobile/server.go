@@ -848,28 +848,113 @@ func (s *MailServer) ReadMessage(
 	ctx context.Context,
 	req *connect.Request[gastownv1.ReadMessageRequest],
 ) (*connect.Response[gastownv1.ReadMessageResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("ReadMessage not yet implemented"))
+	mailRouter := mail.NewRouter(s.townRoot)
+
+	// Get message from all known mailboxes
+	// First try overseer, then search other mailboxes
+	addresses := []string{"overseer"}
+
+	for _, addr := range addresses {
+		mailbox, err := mailRouter.GetMailbox(addr)
+		if err != nil {
+			continue
+		}
+
+		msg, err := mailbox.Get(req.Msg.MessageId)
+		if err == nil && msg != nil {
+			return connect.NewResponse(&gastownv1.ReadMessageResponse{
+				Message: s.mailToProto(msg),
+			}), nil
+		}
+	}
+
+	return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("message not found: %s", req.Msg.MessageId))
 }
 
 func (s *MailServer) SendMessage(
 	ctx context.Context,
 	req *connect.Request[gastownv1.SendMessageRequest],
 ) (*connect.Response[gastownv1.SendMessageResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("SendMessage not yet implemented"))
+	mailRouter := mail.NewRouter(s.townRoot)
+
+	// Build message
+	msg := &mail.Message{
+		From:      "rpc-client",
+		To:        formatAgentAddress(req.Msg.To),
+		Subject:   req.Msg.Subject,
+		Body:      req.Msg.Body,
+		Timestamp: time.Now(),
+		Priority:  fromPriority(req.Msg.Priority),
+		Type:      fromMessageType(req.Msg.Type),
+	}
+
+	if req.Msg.ReplyTo != "" {
+		msg.ReplyTo = req.Msg.ReplyTo
+	}
+
+	// Handle CC recipients
+	if len(req.Msg.Cc) > 0 {
+		var ccAddrs []string
+		for _, cc := range req.Msg.Cc {
+			ccAddrs = append(ccAddrs, formatAgentAddress(cc))
+		}
+		msg.CC = ccAddrs
+	}
+
+	// Send the message
+	if err := mailRouter.Send(msg); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("sending message: %w", err))
+	}
+
+	return connect.NewResponse(&gastownv1.SendMessageResponse{
+		MessageId: msg.ID,
+	}), nil
 }
 
 func (s *MailServer) MarkRead(
 	ctx context.Context,
 	req *connect.Request[gastownv1.MarkReadRequest],
 ) (*connect.Response[gastownv1.MarkReadResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("MarkRead not yet implemented"))
+	mailRouter := mail.NewRouter(s.townRoot)
+
+	// Try overseer mailbox first
+	mailbox, err := mailRouter.GetMailbox("overseer")
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Try to mark as read
+	if err := mailbox.MarkReadOnly(req.Msg.MessageId); err != nil {
+		if err == mail.ErrMessageNotFound {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&gastownv1.MarkReadResponse{}), nil
 }
 
 func (s *MailServer) DeleteMessage(
 	ctx context.Context,
 	req *connect.Request[gastownv1.DeleteMessageRequest],
 ) (*connect.Response[gastownv1.DeleteMessageResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("DeleteMessage not yet implemented"))
+	mailRouter := mail.NewRouter(s.townRoot)
+
+	// Try overseer mailbox first
+	mailbox, err := mailRouter.GetMailbox("overseer")
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Archive the message (marks as read and removes from inbox)
+	if err := mailbox.Archive(req.Msg.MessageId); err != nil {
+		if err == mail.ErrMessageNotFound {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&gastownv1.DeleteMessageResponse{}), nil
 }
 
 func (s *MailServer) WatchInbox(
@@ -935,6 +1020,73 @@ func toPriority(s string) gastownv1.Priority {
 	default:
 		return gastownv1.Priority_PRIORITY_UNSPECIFIED
 	}
+}
+
+func fromPriority(p gastownv1.Priority) mail.Priority {
+	switch p {
+	case gastownv1.Priority_PRIORITY_URGENT:
+		return mail.PriorityUrgent
+	case gastownv1.Priority_PRIORITY_HIGH:
+		return mail.PriorityHigh
+	case gastownv1.Priority_PRIORITY_LOW:
+		return mail.PriorityLow
+	default:
+		return mail.PriorityNormal
+	}
+}
+
+func fromMessageType(t gastownv1.MessageType) mail.MessageType {
+	switch t {
+	case gastownv1.MessageType_MESSAGE_TYPE_TASK:
+		return mail.TypeTask
+	case gastownv1.MessageType_MESSAGE_TYPE_SCAVENGE:
+		return mail.TypeScavenge
+	case gastownv1.MessageType_MESSAGE_TYPE_NOTIFICATION:
+		return mail.TypeNotification
+	case gastownv1.MessageType_MESSAGE_TYPE_REPLY:
+		return mail.TypeReply
+	default:
+		return mail.TypeNotification
+	}
+}
+
+func toMessageType(t mail.MessageType) gastownv1.MessageType {
+	switch t {
+	case mail.TypeTask:
+		return gastownv1.MessageType_MESSAGE_TYPE_TASK
+	case mail.TypeScavenge:
+		return gastownv1.MessageType_MESSAGE_TYPE_SCAVENGE
+	case mail.TypeNotification:
+		return gastownv1.MessageType_MESSAGE_TYPE_NOTIFICATION
+	case mail.TypeReply:
+		return gastownv1.MessageType_MESSAGE_TYPE_REPLY
+	default:
+		return gastownv1.MessageType_MESSAGE_TYPE_UNSPECIFIED
+	}
+}
+
+func (s *MailServer) mailToProto(msg *mail.Message) *gastownv1.Message {
+	protoMsg := &gastownv1.Message{
+		Id:        msg.ID,
+		From:      &gastownv1.AgentAddress{Name: msg.From},
+		To:        &gastownv1.AgentAddress{Name: msg.To},
+		Subject:   msg.Subject,
+		Body:      msg.Body,
+		Timestamp: timestamppb.New(msg.Timestamp),
+		Read:      msg.Read,
+		Priority:  toPriority(string(msg.Priority)),
+		Type:      toMessageType(msg.Type),
+		ThreadId:  msg.ThreadID,
+		ReplyTo:   msg.ReplyTo,
+		Pinned:    msg.Pinned,
+	}
+
+	// Handle CC recipients
+	for _, cc := range msg.CC {
+		protoMsg.Cc = append(protoMsg.Cc, &gastownv1.AgentAddress{Name: cc})
+	}
+
+	return protoMsg
 }
 
 // APIKeyInterceptor validates API keys for authentication.
