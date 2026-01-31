@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -249,14 +250,18 @@ func getSessionFromPane(pane string) string {
 func ensureAgentReady(sessionName string) error {
 	t := tmux.NewTmux()
 
-	// If an agent is already running, assume it's ready (session was started earlier)
 	if t.IsAgentRunning(sessionName) {
-		return nil
-	}
-
-	// Agent not running yet - wait for it to start (shell → program transition)
-	if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
-		return fmt.Errorf("waiting for agent to start: %w", err)
+		// Agent process is detected, but it may have just started (fresh spawn).
+		// Check session age — if < 15s old, the agent likely isn't ready for input yet.
+		if !isSessionYoung(sessionName, 15*time.Second) {
+			return nil
+		}
+		// Fall through to apply startup delay for young sessions.
+	} else {
+		// Agent not running yet - wait for it to start (shell → program transition)
+		if err := t.WaitForCommand(sessionName, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+			return fmt.Errorf("waiting for agent to start: %w", err)
+		}
 	}
 
 	// Claude-only: accept bypass permissions warning if present
@@ -272,6 +277,19 @@ func ensureAgentReady(sessionName string) error {
 	}
 
 	return nil
+}
+
+// isSessionYoung returns true if the tmux session was created less than maxAge ago.
+func isSessionYoung(sessionName string, maxAge time.Duration) bool {
+	out, err := exec.Command("tmux", "display-message", "-t", sessionName, "-p", "#{session_created}").Output()
+	if err != nil {
+		return false
+	}
+	createdUnix, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return false
+	}
+	return time.Since(time.Unix(createdUnix, 0)) < maxAge
 }
 
 // detectCloneRoot finds the root of the current git clone.
