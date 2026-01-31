@@ -99,7 +99,7 @@ export PATH="$PATH:$HOME/go/bin"
 
 ```bash
 # Create a Gas Town workspace (HQ)
-gt install ~/gt
+gt install ~/gt --shell
 
 # This creates:
 #   ~/gt/
