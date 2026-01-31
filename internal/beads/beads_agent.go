@@ -372,12 +372,27 @@ func (b *Beads) SetHookBead(agentBeadID, hookBeadID string) error {
 
 // ClearHookBead clears the hook_bead slot on an agent bead.
 // Used when work is complete or unslung.
+// This clears both the slot column (via bd slot clear) and the description text
+// to ensure consistency with GetAgentBead which reads from description.
 func (b *Beads) ClearHookBead(agentBeadID string) error {
+	// First clear the slot column
 	_, err := b.run("slot", "clear", agentBeadID, "hook")
 	if err != nil {
-		return fmt.Errorf("clearing hook: %w", err)
+		return fmt.Errorf("clearing hook slot: %w", err)
 	}
-	return nil
+
+	// Also update the description to clear hook_bead
+	// This ensures GetAgentBead reads the correct value
+	issue, err := b.Show(agentBeadID)
+	if err != nil {
+		return fmt.Errorf("getting agent bead: %w", err)
+	}
+
+	fields := ParseAgentFields(issue.Description)
+	fields.HookBead = "" // Clear the hook_bead field
+
+	description := FormatAgentDescription(issue.Title, fields)
+	return b.Update(agentBeadID, UpdateOptions{Description: &description})
 }
 
 // UpdateAgentCleanupStatus updates the cleanup_status field in an agent bead.

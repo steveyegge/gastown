@@ -101,8 +101,12 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 		if townRoot != "" {
 			townName, _ := workspace.GetTownName(townRoot)
 			agentBeadID := beads.PolecatBeadIDTown(townName, rigName, payload.PolecatName)
-			bd := beads.New(filepath.Join(townRoot, rigName))
-			_ = bd.ClearHookBead(agentBeadID) // Non-fatal if this fails
+			// Use town root for beads client since agent beads use hq- prefix (town-level storage)
+			bd := beads.New(townRoot)
+			if err := bd.ClearHookBead(agentBeadID); err != nil {
+				// Log but don't fail - clearing hook is non-fatal
+				fmt.Printf("Warning: failed to clear hook_bead for %s: %v\n", agentBeadID, err)
+			}
 		}
 
 		result.Handled = true
@@ -462,16 +466,28 @@ func createCleanupWisp(workDir, polecatName, issueID, branch string) (string, er
 		return "", err
 	}
 
-	// Extract wisp ID from output (bd create outputs "Created: <id>")
+	// Extract wisp ID from output
+	// Handle various bd create output formats:
+	// - "Created: <id>" (old format)
+	// - "✓ Created issue: <id>" (new format)
 	if strings.HasPrefix(output, "Created:") {
 		return strings.TrimSpace(strings.TrimPrefix(output, "Created:")), nil
+	}
+
+	// New format: "✓ Created issue: hq-tsk-..."
+	if strings.Contains(output, "Created issue:") {
+		parts := strings.SplitN(output, "Created issue: ", 2)
+		if len(parts) == 2 {
+			id := strings.TrimSpace(strings.Split(parts[1], "\n")[0])
+			return id, nil
+		}
 	}
 
 	// Try to extract ID from output
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		// Look for bead ID pattern (e.g., "gt-abc123")
-		if strings.Contains(line, "-") && len(line) < 20 {
+		// Look for bead ID pattern (e.g., "gt-abc123" or "hq-tsk-cleanup_testnux")
+		if strings.Contains(line, "-") && len(line) < 40 {
 			return line, nil
 		}
 	}
@@ -691,7 +707,7 @@ func UpdateCleanupWispState(workDir, wispID, newState string) error {
 	// Update with new state
 	newLabels := strings.Join(CleanupWispLabels(polecatName, newState), ",")
 
-	return util.ExecRun(workDir, "bd", "update", wispID, "--labels", newLabels)
+	return util.ExecRun(workDir, "bd", "update", wispID, "--set-labels", newLabels)
 }
 
 // NukePolecat executes the actual nuke operation for a polecat.
