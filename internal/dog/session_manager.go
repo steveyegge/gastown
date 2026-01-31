@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -103,9 +103,10 @@ func (m *SessionManager) Start(dogName string, opts SessionStartOptions) error {
 		}
 	}
 
-	// Ensure Claude settings exist for dogs
-	if err := claude.EnsureSettingsForRole(kennelDir, "dog"); err != nil {
-		return fmt.Errorf("ensuring Claude settings: %w", err)
+	// Ensure runtime settings exist for dogs
+	runtimeConfig := config.ResolveRoleAgentConfig("dog", m.townRoot, kennelDir)
+	if err := runtime.EnsureSettingsForRole(kennelDir, "dog", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	// Build startup prompt - dogs check mail for work
