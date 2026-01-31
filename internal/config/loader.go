@@ -933,9 +933,9 @@ func lookupAgentConfigIfExists(name string, townSettings *TownSettings, rigSetti
 		}
 	}
 
-	// Check built-in presets
+	// Check built-in presets - use normalizeRuntimeConfig for full defaults including Hooks
 	if preset := GetAgentPresetByName(name); preset != nil {
-		return RuntimeConfigFromPreset(AgentPreset(name))
+		return normalizeRuntimeConfig(RuntimeConfigFromPreset(AgentPreset(name)))
 	}
 
 	return nil
@@ -1065,9 +1065,9 @@ func lookupAgentConfig(name string, townSettings *TownSettings, rigSettings *Rig
 		}
 	}
 
-	// Check built-in presets from agents.go
+	// Check built-in presets from agents.go - use normalizeRuntimeConfig for full defaults including Hooks
 	if preset := GetAgentPresetByName(name); preset != nil {
-		return RuntimeConfigFromPreset(AgentPreset(name))
+		return normalizeRuntimeConfig(RuntimeConfigFromPreset(AgentPreset(name)))
 	}
 
 	// Fallback to claude defaults

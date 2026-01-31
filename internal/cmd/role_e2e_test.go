@@ -287,7 +287,8 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 			name: "witness from witness dir",
 			cwd:  filepath.Join(hqPath, rigName, "witness"),
 			want: []string{
-				"export GT_ROLE=witness",
+				// GT_ROLE uses compound format (rig/witness) for beads compatibility
+				"export GT_ROLE=" + rigName + "/witness",
 				"export GT_RIG=" + rigName,
 				"export BD_ACTOR=" + rigName + "/witness",
 				"export GT_ROLE_HOME=" + filepath.Join(hqPath, rigName, "witness"),
@@ -297,7 +298,8 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 			name: "refinery from refinery/rig dir",
 			cwd:  filepath.Join(hqPath, rigName, "refinery", "rig"),
 			want: []string{
-				"export GT_ROLE=refinery",
+				// GT_ROLE uses compound format (rig/refinery) for beads compatibility
+				"export GT_ROLE=" + rigName + "/refinery",
 				"export GT_RIG=" + rigName,
 				"export BD_ACTOR=" + rigName + "/refinery",
 				"export GT_ROLE_HOME=" + filepath.Join(hqPath, rigName, "refinery", "rig"),
@@ -307,7 +309,8 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 			name: "polecat from polecats/Toast/rig dir",
 			cwd:  filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
 			want: []string{
-				"export GT_ROLE=polecat",
+				// GT_ROLE uses compound format (rig/polecats/name) for beads compatibility
+				"export GT_ROLE=" + rigName + "/polecats/Toast",
 				"export GT_RIG=" + rigName,
 				"export GT_POLECAT=Toast",
 				"export BD_ACTOR=" + rigName + "/polecats/Toast",
@@ -318,7 +321,8 @@ func TestRoleEnvCwdDetection(t *testing.T) {
 			name: "crew from crew/worker1/rig dir",
 			cwd:  filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
 			want: []string{
-				"export GT_ROLE=crew",
+				// GT_ROLE uses compound format (rig/crew/name) for beads compatibility
+				"export GT_ROLE=" + rigName + "/crew/worker1",
 				"export GT_RIG=" + rigName,
 				"export GT_CREW=worker1",
 				"export BD_ACTOR=" + rigName + "/crew/worker1",
@@ -808,33 +812,36 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 		wantStderr string   // Expected warning in stderr
 	}{
 		{
-			name: "GT_ROLE=witness without GT_RIG, filled from cwd",
-			cwd:  filepath.Join(hqPath, rigName, "witness"),
+			name:    "GT_ROLE=witness without GT_RIG, filled from cwd",
+			cwd:     filepath.Join(hqPath, rigName, "witness"),
 			envVars: []string{"GT_ROLE=witness"},
 			wantExport: []string{
-				"export GT_ROLE=witness",
+				// GT_ROLE uses compound format (rig/witness) for beads compatibility
+				"export GT_ROLE=" + rigName + "/witness",
 				"export GT_RIG=" + rigName,
 				"export BD_ACTOR=" + rigName + "/witness",
 			},
 			wantStderr: "env vars incomplete",
 		},
 		{
-			name: "GT_ROLE=refinery without GT_RIG, filled from cwd",
-			cwd:  filepath.Join(hqPath, rigName, "refinery", "rig"),
+			name:    "GT_ROLE=refinery without GT_RIG, filled from cwd",
+			cwd:     filepath.Join(hqPath, rigName, "refinery", "rig"),
 			envVars: []string{"GT_ROLE=refinery"},
 			wantExport: []string{
-				"export GT_ROLE=refinery",
+				// GT_ROLE uses compound format (rig/refinery) for beads compatibility
+				"export GT_ROLE=" + rigName + "/refinery",
 				"export GT_RIG=" + rigName,
 				"export BD_ACTOR=" + rigName + "/refinery",
 			},
 			wantStderr: "env vars incomplete",
 		},
 		{
-			name: "GT_ROLE=polecat without GT_RIG or GT_POLECAT, filled from cwd",
-			cwd:  filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
+			name:    "GT_ROLE=polecat without GT_RIG or GT_POLECAT, filled from cwd",
+			cwd:     filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
 			envVars: []string{"GT_ROLE=polecat"},
 			wantExport: []string{
-				"export GT_ROLE=polecat",
+				// GT_ROLE uses compound format (rig/polecats/name) for beads compatibility
+				"export GT_ROLE=" + rigName + "/polecats/Toast",
 				"export GT_RIG=" + rigName,
 				"export GT_POLECAT=Toast",
 				"export BD_ACTOR=" + rigName + "/polecats/Toast",
@@ -842,11 +849,12 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 			wantStderr: "env vars incomplete",
 		},
 		{
-			name: "GT_ROLE=polecat with GT_RIG but no GT_POLECAT, filled from cwd",
-			cwd:  filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
+			name:    "GT_ROLE=polecat with GT_RIG but no GT_POLECAT, filled from cwd",
+			cwd:     filepath.Join(hqPath, rigName, "polecats", "Toast", "rig"),
 			envVars: []string{"GT_ROLE=polecat", "GT_RIG=" + rigName},
 			wantExport: []string{
-				"export GT_ROLE=polecat",
+				// GT_ROLE uses compound format (rig/polecats/name) for beads compatibility
+				"export GT_ROLE=" + rigName + "/polecats/Toast",
 				"export GT_RIG=" + rigName,
 				"export GT_POLECAT=Toast",
 				"export BD_ACTOR=" + rigName + "/polecats/Toast",
@@ -854,11 +862,12 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 			wantStderr: "env vars incomplete",
 		},
 		{
-			name: "GT_ROLE=crew without GT_RIG or GT_CREW, filled from cwd",
-			cwd:  filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
+			name:    "GT_ROLE=crew without GT_RIG or GT_CREW, filled from cwd",
+			cwd:     filepath.Join(hqPath, rigName, "crew", "worker1", "rig"),
 			envVars: []string{"GT_ROLE=crew"},
 			wantExport: []string{
-				"export GT_ROLE=crew",
+				// GT_ROLE uses compound format (rig/crew/name) for beads compatibility
+				"export GT_ROLE=" + rigName + "/crew/worker1",
 				"export GT_RIG=" + rigName,
 				"export GT_CREW=worker1",
 				"export BD_ACTOR=" + rigName + "/crew/worker1",
@@ -866,11 +875,12 @@ func TestRoleEnvIncompleteEnvVars(t *testing.T) {
 			wantStderr: "env vars incomplete",
 		},
 		{
-			name: "Complete env vars - no warning",
-			cwd:  filepath.Join(hqPath, rigName, "witness"),
+			name:    "Complete env vars - no warning",
+			cwd:     filepath.Join(hqPath, rigName, "witness"),
 			envVars: []string{"GT_ROLE=witness", "GT_RIG=" + rigName},
 			wantExport: []string{
-				"export GT_ROLE=witness",
+				// GT_ROLE uses compound format (rig/witness) for beads compatibility
+				"export GT_ROLE=" + rigName + "/witness",
 				"export GT_RIG=" + rigName,
 				"export BD_ACTOR=" + rigName + "/witness",
 			},

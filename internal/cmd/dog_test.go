@@ -136,7 +136,9 @@ func TestDetectDogNameFromPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotName, gotOK := detectDogNameFromPath(tt.path)
+			// Convert Unix-style paths to native format for cross-platform testing
+			testPath := filepath.FromSlash(tt.path)
+			gotName, gotOK := detectDogNameFromPath(testPath)
 			if gotName != tt.wantName {
 				t.Errorf("detectDogNameFromPath(%q) name = %q, want %q", tt.path, gotName, tt.wantName)
 			}
