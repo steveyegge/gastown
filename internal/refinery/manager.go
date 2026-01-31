@@ -137,8 +137,8 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	}, "Check your hook and begin patrol.")
 
 	var command string
+	var err error
 	if agentOverride != "" {
-		var err error
 		command, err = config.BuildAgentStartupCommandWithAgentOverride("refinery", m.rig.Name, townRoot, m.rig.Path, initialPrompt, agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
@@ -153,7 +153,7 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
-	// Set environment variables (non-fatal: session works without these)
+	// Set environment in tmux session for new panes/windows
 	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:          "refinery",

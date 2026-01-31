@@ -4,9 +4,15 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+// DefaultDoltServerPort is the default port for the Dolt SQL server.
+// Matches doltserver.DefaultPort but defined here to avoid circular imports.
+const DefaultDoltServerPort = 3307
 
 // AgentEnvConfig specifies the configuration for generating agent environment variables.
 // This is the single source of truth for all agent environment configuration.
@@ -35,6 +41,18 @@ type AgentEnvConfig struct {
 	// BeadsNoDaemon sets BEADS_NO_DAEMON=1 if true
 	// Used for polecats that should bypass the beads daemon
 	BeadsNoDaemon bool
+
+	// DoltServerHost is the dolt server host (default 127.0.0.1).
+	DoltServerHost string
+
+	// DoltServerPort is the dolt server port (default 3307).
+	DoltServerPort int
+
+	// DoltServerDatabase is the dolt server database name (optional).
+	// Auto-inferred from Rig if not set: uses Rig name for rig-level agents,
+	// or "hq" for town-level agents (mayor, deacon, boot).
+	// Only set explicitly if you need to override the default inference.
+	DoltServerDatabase string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -113,6 +131,32 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["GT_SESSION_ID_ENV"] = cfg.SessionIDEnv
 	}
 
+	// Set dolt server mode env vars for beads CLI
+	// Auto-detect from TownRoot: if .dolt-data/ exists with entries, enable dolt server mode
+	if IsDoltServerMode(cfg.TownRoot) {
+		env["BEADS_DOLT_SERVER_MODE"] = "1"
+		host := cfg.DoltServerHost
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		env["BEADS_DOLT_SERVER_HOST"] = host
+		port := cfg.DoltServerPort
+		if port == 0 {
+			port = DefaultDoltServerPort
+		}
+		env["BEADS_DOLT_SERVER_PORT"] = strconv.Itoa(port)
+		// Auto-infer database from Rig if not explicitly set
+		// Rig-level agents use rig name, town-level agents use "hq"
+		dbName := cfg.DoltServerDatabase
+		if dbName == "" {
+			dbName = cfg.Rig
+			if dbName == "" {
+				dbName = "hq"
+			}
+		}
+		env["BEADS_DOLT_SERVER_DATABASE"] = dbName
+	}
+
 	return env
 }
 
@@ -124,6 +168,18 @@ func AgentEnvSimple(role, rig, agentName string) map[string]string {
 		Rig:       rig,
 		AgentName: agentName,
 	})
+}
+
+// IsDoltServerMode checks if dolt server mode is enabled by detecting migrated databases.
+// Returns true if .dolt-data/ directory exists and contains entries.
+// This is a simple filesystem check with no external dependencies.
+func IsDoltServerMode(townRoot string) bool {
+	if townRoot == "" {
+		return false
+	}
+	dataDir := filepath.Join(townRoot, ".dolt-data")
+	entries, err := os.ReadDir(dataDir)
+	return err == nil && len(entries) > 0
 }
 
 // ShellQuote returns a shell-safe quoted string.

@@ -524,6 +524,7 @@ func (d *Daemon) getStartCommand(roleConfig *beads.RoleConfig, parsed *ParsedIde
 // Uses centralized AgentEnv for consistency, plus custom env vars from role config if available.
 func (d *Daemon) setSessionEnvironment(sessionName string, roleConfig *beads.RoleConfig, parsed *ParsedIdentity) {
 	// Use centralized AgentEnv for base environment variables
+	// Dolt server mode and database are auto-detected from TownRoot and Rig
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:      parsed.RoleType,
 		Rig:       parsed.RigName,

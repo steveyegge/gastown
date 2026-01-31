@@ -172,8 +172,8 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 	}, "Run `gt boot triage` now.")
 
 	var startCmd string
+	var err error
 	if agentOverride != "" {
-		var err error
 		startCmd, err = config.BuildAgentStartupCommandWithAgentOverride("boot", "", b.townRoot, "", initialPrompt, agentOverride)
 		if err != nil {
 			return fmt.Errorf("building startup command with agent override: %w", err)
@@ -188,7 +188,8 @@ func (b *Boot) spawnTmux(agentOverride string) error {
 		return fmt.Errorf("creating boot session: %w", err)
 	}
 
-	// Set environment using centralized AgentEnv for consistency
+	// Set environment in tmux session for new panes/windows
+	// Use centralized AgentEnv for consistency across all role startup paths
 	envVars := config.AgentEnv(config.AgentEnvConfig{
 		Role:     "boot",
 		TownRoot: b.townRoot,
