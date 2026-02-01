@@ -33,6 +33,12 @@ func init() {
 }
 
 func runStatusLine(cmd *cobra.Command, args []string) error {
+	// Early exit if status line is disabled (for debugging high Dolt CPU)
+	// Set GT_STATUSLINE_DISABLED=1 to disable all status-line queries
+	if os.Getenv("GT_STATUSLINE_DISABLED") == "1" {
+		return nil
+	}
+
 	t := tmux.NewTmux()
 
 	// Get session environment
