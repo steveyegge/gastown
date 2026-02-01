@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +112,9 @@ func (l *SSEListener) connect(ctx context.Context) error {
 	}
 
 	log.Println("SSE: Connected to decision events stream")
+
+	// Catch up on missed notifications: find decisions without slack_notified label
+	l.catchUpMissedDecisions()
 
 	scanner := bufio.NewScanner(resp.Body)
 	var currentEvent sseEvent
@@ -219,6 +223,8 @@ func (l *SSEListener) notifyNewDecision(de decisionEvent) {
 		log.Printf("SSE: Error notifying Slack: %v", err)
 	} else {
 		log.Printf("SSE: Successfully notified Slack for decision %s", de.ID)
+		// Mark as notified via label
+		l.addSlackNotifiedLabel(de.ID)
 	}
 }
 
@@ -256,6 +262,73 @@ func (l *SSEListener) handleCancelledDecision(de decisionEvent) {
 		log.Printf("SSE: Auto-dismissed cancelled decision %s", de.ID)
 	} else {
 		log.Printf("SSE: No tracked message for cancelled decision %s (may not have been posted)", de.ID)
+	}
+}
+
+// catchUpMissedDecisions queries for decisions that were created while the bot was down
+// and notifies Slack about them. Uses the slack_notified label to track notification state.
+func (l *SSEListener) catchUpMissedDecisions() {
+	// Query for open gate-type decisions without the slack_notified label
+	out, err := exec.Command("bd", "q", "type:gate status:open -label:slack_notified", "--ids").Output()
+	if err != nil {
+		log.Printf("SSE: Error querying for missed decisions: %v", err)
+		return
+	}
+
+	ids := strings.TrimSpace(string(out))
+	if ids == "" {
+		log.Println("SSE: No missed decisions to catch up on")
+		return
+	}
+
+	for _, id := range strings.Split(ids, "\n") {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			l.notifyMissedDecision(id)
+		}
+	}
+}
+
+// notifyMissedDecision notifies Slack about a decision that was missed during bot downtime.
+func (l *SSEListener) notifyMissedDecision(decisionID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	decision, err := l.rpcClient.GetDecision(ctx, decisionID)
+	if err != nil {
+		log.Printf("SSE: Error fetching missed decision %s: %v", decisionID, err)
+		return
+	}
+
+	if decision == nil || decision.Resolved {
+		log.Printf("SSE: Missed decision %s is nil or already resolved, skipping", decisionID)
+		return
+	}
+
+	// Check if we've already notified (in case of race with event stream)
+	l.seenMu.Lock()
+	if l.seen[decisionID] {
+		l.seenMu.Unlock()
+		return
+	}
+	l.seen[decisionID] = true
+	l.seenMu.Unlock()
+
+	log.Printf("SSE: Notifying missed decision %s", decisionID)
+	if err := l.bot.NotifyNewDecision(*decision); err != nil {
+		log.Printf("SSE: Error notifying missed decision: %v", err)
+		return
+	}
+
+	// Mark as notified
+	l.addSlackNotifiedLabel(decisionID)
+	log.Printf("SSE: Successfully notified missed decision %s", decisionID)
+}
+
+// addSlackNotifiedLabel adds the slack_notified label to a decision bead.
+func (l *SSEListener) addSlackNotifiedLabel(decisionID string) {
+	if err := exec.Command("bd", "label", "add", decisionID, "slack_notified").Run(); err != nil {
+		log.Printf("SSE: Warning: failed to add slack_notified label to %s: %v", decisionID, err)
 	}
 }
 
