@@ -840,12 +840,12 @@ func getBlockedIssueIDs() map[string]bool {
 
 // isReadyIssue checks if an issue is ready for dispatch (stranded).
 // An issue is ready if:
-// - status = "open" (not in_progress, closed, hooked)
-// - not in blocked set
-// - no assignee OR assignee session is dead
+// - status = "open" AND (no assignee OR assignee session is dead)
+// - OR status = "in_progress"/"hooked" AND assignee session is dead (orphaned molecule)
+// - AND not in blocked set
 func isReadyIssue(t trackedIssueInfo, blockedIssues map[string]bool) bool {
-	// Must be open status (not in_progress, closed, hooked)
-	if t.Status != "open" {
+	// Closed issues are never ready
+	if t.Status == "closed" || t.Status == "tombstone" {
 		return false
 	}
 
@@ -854,9 +854,17 @@ func isReadyIssue(t trackedIssueInfo, blockedIssues map[string]bool) bool {
 		return false
 	}
 
-	// Check assignee
+	// Open issues with no assignee are trivially ready
+	if t.Status == "open" && t.Assignee == "" {
+		return true
+	}
+
+	// For issues with an assignee (or non-open status with molecule attached),
+	// check if the worker session is still alive
 	if t.Assignee == "" {
-		return true // No assignee = ready
+		// Non-open status but no assignee is an edge case (shouldn't happen
+		// normally, but could occur if molecule detached improperly)
+		return true
 	}
 
 	// Has assignee - check if session is alive
@@ -869,10 +877,13 @@ func isReadyIssue(t trackedIssueInfo, blockedIssues map[string]bool) bool {
 	// Check if tmux session exists
 	checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
 	if err := checkCmd.Run(); err != nil {
-		return true // Session doesn't exist = ready
+		// Session doesn't exist = orphaned molecule or dead worker
+		// This is the key fix: issues with in_progress/hooked status but
+		// dead workers are now correctly detected as stranded
+		return true
 	}
 
-	return false // Session exists = not ready (worker is active)
+	return false // Session exists = worker is active
 }
 
 // checkAndCloseCompletedConvoys finds open convoys where all tracked issues are closed
