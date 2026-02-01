@@ -374,24 +374,49 @@ bd mol list                 # List active instances
 
 Gas Town includes built-in formulas for common workflows. See `.beads/formulas/` for available recipes.
 
-## Dashboard
+## Web Dashboard & REST API
 
-Gas Town includes a web dashboard for monitoring:
+Gas Town includes a web server that provides both a monitoring dashboard and a REST API:
 
 ```bash
-# Start dashboard
-gt dashboard --port 8080
+# Start the server (dashboard + API)
+gt serve --port 8080
 
-# Open in browser
+# Or specify town root explicitly
+gt serve --town ~/gt --port 8080
+
+# API only (no dashboard)
+gt serve --no-dashboard
+
+# Open dashboard in browser
 open http://localhost:8080
 ```
 
-Features:
+### Dashboard Features
 
-- Real-time agent status
+- Real-time agent status and activity
 - Convoy progress tracking
+- Merge queue monitoring
 - Hook state visualization
-- Configuration management
+- Mail/messaging overview
+
+### REST API
+
+The API enables programmatic access to Gas Town:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /api/rigs` | List all projects |
+| `GET /api/rigs/{rig}/jobs` | List jobs/beads |
+| `POST /api/rigs/{rig}/jobs` | Create a job |
+| `POST /api/rigs/{rig}/sling` | Dispatch work to polecat |
+| `GET /api/rigs/{rig}/polecats` | List worker agents |
+| `GET /api/mayor` | Mayor status |
+| `POST /api/mayor/start` | Start Mayor |
+| `POST /api/mail/send` | Send inter-agent mail |
+
+Full API documentation available at `/swagger/` when the server is running.
 
 ## Advanced Concepts
 
