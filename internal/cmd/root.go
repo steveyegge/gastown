@@ -101,8 +101,12 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Check beads version
-	return CheckBeadsVersion()
+	// Check beads version (non-blocking - warn only)
+	if err := CheckBeadsVersion(); err != nil {
+		// Just warn, don't block - beads issues shouldn't prevent gt from running
+		fmt.Fprintf(os.Stderr, "⚠ beads check: %v\n", err)
+	}
+	return nil
 }
 
 // initCLITheme initializes the CLI color theme based on settings and environment.
