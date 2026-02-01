@@ -1873,6 +1873,55 @@ func TestSetupRedirect(t *testing.T) {
 			t.Errorf("resolved = %q, want %q", resolved, mayorRigBeads)
 		}
 	})
+
+	t.Run("handles stale .beads file (not directory)", func(t *testing.T) {
+		// Edge case: .beads exists as a file instead of directory
+		// This can happen with unusual clone state or failed operations
+		townRoot := t.TempDir()
+		rigRoot := filepath.Join(townRoot, "testrig")
+		rigBeads := filepath.Join(rigRoot, ".beads")
+		crewPath := filepath.Join(rigRoot, "crew", "max")
+
+		// Create rig structure
+		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+			t.Fatalf("mkdir rig beads: %v", err)
+		}
+		if err := os.MkdirAll(crewPath, 0755); err != nil {
+			t.Fatalf("mkdir crew: %v", err)
+		}
+
+		// Create .beads as a FILE (not directory) - simulating stale state
+		staleBeadsFile := filepath.Join(crewPath, ".beads")
+		if err := os.WriteFile(staleBeadsFile, []byte("stale content"), 0644); err != nil {
+			t.Fatalf("write stale .beads file: %v", err)
+		}
+
+		// SetupRedirect should remove the file and create the directory
+		if err := SetupRedirect(townRoot, crewPath); err != nil {
+			t.Fatalf("SetupRedirect failed: %v", err)
+		}
+
+		// Verify .beads is now a directory
+		info, err := os.Stat(staleBeadsFile)
+		if err != nil {
+			t.Fatalf("stat .beads: %v", err)
+		}
+		if !info.IsDir() {
+			t.Errorf(".beads should be a directory, but is a file")
+		}
+
+		// Verify redirect was created
+		redirectPath := filepath.Join(crewPath, ".beads", "redirect")
+		content, err := os.ReadFile(redirectPath)
+		if err != nil {
+			t.Fatalf("read redirect: %v", err)
+		}
+
+		want := "../../.beads\n"
+		if string(content) != want {
+			t.Errorf("redirect content = %q, want %q", string(content), want)
+		}
+	})
 }
 
 // TestAgentBeadTombstoneBug demonstrates the bd bug where `bd delete --hard --force`

@@ -199,6 +199,16 @@ func SetupRedirect(townRoot, worktreePath string) error {
 
 	// Clean up runtime files in .beads/ but preserve tracked files (formulas/, README.md, etc.)
 	worktreeBeadsDir := filepath.Join(worktreePath, ".beads")
+
+	// Handle edge case: if .beads exists as a file (not directory), remove it.
+	// This can happen with stale state from previous failed operations or
+	// unusual clone state. MkdirAll would fail with "file exists" in this case.
+	if info, err := os.Stat(worktreeBeadsDir); err == nil && !info.IsDir() {
+		if err := os.Remove(worktreeBeadsDir); err != nil {
+			return fmt.Errorf("removing stale .beads file: %w", err)
+		}
+	}
+
 	if err := cleanBeadsRuntimeFiles(worktreeBeadsDir); err != nil {
 		return fmt.Errorf("cleaning runtime files: %w", err)
 	}
