@@ -1429,6 +1429,9 @@ func (t *Tmux) ConfigureGasTownSession(session string, theme Theme, rig, worker,
 	if err := t.SetFeedBinding(session); err != nil {
 		return fmt.Errorf("setting feed binding: %w", err)
 	}
+	if err := t.SetAgentsBinding(session); err != nil {
+		return fmt.Errorf("setting agents binding: %w", err)
+	}
 	if err := t.SetCycleBindings(session); err != nil {
 		return fmt.Errorf("setting cycle bindings: %w", err)
 	}
@@ -1581,6 +1584,20 @@ func (t *Tmux) SetFeedBinding(session string) error {
 		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
 		"run-shell 'gt feed --window'",
 		"display-message 'C-b a is for Gas Town sessions only'")
+	return err
+}
+
+// SetAgentsBinding configures C-b g to open the agent switcher popup menu.
+// This runs `gt agents` which displays a tmux popup with all Gas Town agents.
+//
+// IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
+// (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
+func (t *Tmux) SetAgentsBinding(session string) error {
+	// C-b g → gt agents for GT sessions, help message otherwise
+	_, err := t.run("bind-key", "-T", "prefix", "g",
+		"if-shell", "echo '#{session_name}' | grep -Eq '^(gt|hq)-'",
+		"run-shell 'gt agents'",
+		"display-message 'C-b g is for Gas Town sessions only'")
 	return err
 }
 
