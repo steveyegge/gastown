@@ -285,6 +285,105 @@ func TestDogDone_NotFound(t *testing.T) {
 }
 
 // =============================================================================
+// Dog Clear Tests
+// =============================================================================
+
+// TestDogClear_WorkingToIdle verifies that dogClear transitions a working
+// dog back to idle state.
+func TestDogClear_WorkingToIdle(t *testing.T) {
+	m, tmpDir := testDogManager(t)
+
+	now := time.Now()
+	state := &dog.DogState{
+		Name:       "alpha",
+		State:      dog.StateWorking,
+		Work:       "mol-convoy-feed",
+		LastActive: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	setupTestDog(t, m, tmpDir, "alpha", state)
+
+	// Verify dog is working
+	d, err := m.Get("alpha")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if d.State != dog.StateWorking {
+		t.Errorf("Initial State = %q, want %q", d.State, dog.StateWorking)
+	}
+
+	// Clear the dog (simulates gt dog clear alpha)
+	err = m.ClearWork("alpha")
+	if err != nil {
+		t.Fatalf("ClearWork() error = %v", err)
+	}
+
+	// Verify dog is now idle
+	d, err = m.Get("alpha")
+	if err != nil {
+		t.Fatalf("Get() after clear error = %v", err)
+	}
+	if d.State != dog.StateIdle {
+		t.Errorf("After ClearWork: State = %q, want %q", d.State, dog.StateIdle)
+	}
+	if d.Work != "" {
+		t.Errorf("After ClearWork: Work = %q, want empty", d.Work)
+	}
+}
+
+// TestDogClear_AlreadyIdle verifies that dogClear handles the case where
+// a dog is already idle gracefully.
+func TestDogClear_AlreadyIdle(t *testing.T) {
+	m, tmpDir := testDogManager(t)
+
+	now := time.Now()
+	state := &dog.DogState{
+		Name:       "alpha",
+		State:      dog.StateIdle,
+		Work:       "",
+		LastActive: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	setupTestDog(t, m, tmpDir, "alpha", state)
+
+	// Get the dog and verify it's idle
+	d, err := m.Get("alpha")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if d.State != dog.StateIdle {
+		t.Errorf("Initial State = %q, want %q", d.State, dog.StateIdle)
+	}
+
+	// ClearWork on an already idle dog should succeed (idempotent)
+	err = m.ClearWork("alpha")
+	if err != nil {
+		t.Errorf("ClearWork() on idle dog error = %v, want nil", err)
+	}
+
+	// Verify dog is still idle
+	d, err = m.Get("alpha")
+	if err != nil {
+		t.Fatalf("Get() after clear error = %v", err)
+	}
+	if d.State != dog.StateIdle {
+		t.Errorf("After ClearWork: State = %q, want %q", d.State, dog.StateIdle)
+	}
+}
+
+// TestDogClear_NotFound verifies error handling for non-existent dog.
+func TestDogClear_NotFound(t *testing.T) {
+	m, _ := testDogManager(t)
+
+	err := m.ClearWork("nonexistent")
+	if err != dog.ErrDogNotFound {
+		t.Errorf("ClearWork() error = %v, want ErrDogNotFound", err)
+	}
+}
+
+// =============================================================================
 // Path Splitting Tests
 // =============================================================================
 

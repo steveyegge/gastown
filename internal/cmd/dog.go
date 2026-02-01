@@ -151,6 +151,24 @@ Examples:
 	RunE: runDogDone,
 }
 
+var dogClearCmd = &cobra.Command{
+	Use:   "clear <name>",
+	Short: "Reset a stuck dog to idle state",
+	Long: `Reset a stuck dog to idle state.
+
+Use this when a dog is stuck in "working" state but its session has died.
+The Deacon uses this during patrol to clear dogs that have timed out.
+
+By default, refuses to clear a dog if its tmux session still exists.
+Use --force to clear even if the session is alive.
+
+Examples:
+  gt dog clear alpha           # Clear if session is dead
+  gt dog clear alpha --force   # Force clear even if session exists`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDogClear,
+}
+
 var dogStatusCmd = &cobra.Command{
 	Use:   "status [name]",
 	Short: "Show detailed dog status",
@@ -212,6 +230,9 @@ func init() {
 	// Call flags
 	dogCallCmd.Flags().BoolVar(&dogCallAll, "all", false, "Wake all idle dogs")
 
+	// Clear flags (reuses dogForce from remove)
+	dogClearCmd.Flags().BoolVarP(&dogForce, "force", "f", false, "Force clear even if session exists")
+
 	// Status flags
 	dogStatusCmd.Flags().BoolVar(&dogStatusJSON, "json", false, "Output as JSON")
 
@@ -229,6 +250,7 @@ func init() {
 	dogCmd.AddCommand(dogRemoveCmd)
 	dogCmd.AddCommand(dogListCmd)
 	dogCmd.AddCommand(dogCallCmd)
+	dogCmd.AddCommand(dogClearCmd)
 	dogCmd.AddCommand(dogDoneCmd)
 	dogCmd.AddCommand(dogStatusCmd)
 	dogCmd.AddCommand(dogDispatchCmd)
@@ -501,6 +523,50 @@ func runDogCall(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("✓ Called %s - ready for work\n", d.Name)
+	return nil
+}
+
+func runDogClear(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	mgr, err := getDogManager()
+	if err != nil {
+		return err
+	}
+
+	d, err := mgr.Get(name)
+	if err != nil {
+		return fmt.Errorf("getting dog %s: %w", name, err)
+	}
+
+	// Check if already idle
+	if d.State == dog.StateIdle && d.Work == "" {
+		fmt.Printf("Dog %s is already idle\n", name)
+		return nil
+	}
+
+	// Check for live tmux session
+	townRoot, _ := workspace.FindFromCwd()
+	if townRoot != "" && !dogForce {
+		townName, err := workspace.GetTownName(townRoot)
+		if err == nil {
+			sessionName := fmt.Sprintf("gt-%s-deacon-%s", townName, name)
+			tm := tmux.NewTmux()
+			if has, _ := tm.HasSession(sessionName); has {
+				return fmt.Errorf("dog %s has an active session (%s)\nUse --force to clear anyway", name, sessionName)
+			}
+		}
+	}
+
+	// Clear work and return to idle
+	if err := mgr.ClearWork(name); err != nil {
+		return fmt.Errorf("clearing work for dog %s: %w", name, err)
+	}
+
+	fmt.Printf("✓ Cleared dog %s (now idle)\n", name)
+	if d.Work != "" {
+		fmt.Printf("  Previous work: %s\n", d.Work)
+	}
 	return nil
 }
 
