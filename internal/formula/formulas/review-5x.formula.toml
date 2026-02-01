@@ -1,0 +1,33 @@
+description = "5-pass code review using rule-of-five methodology"
+formula = "review-5x"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "draft-review"
+title = "Draft Review: Initial Assessment"
+description = "Initial review of the implementation. Get the shape right - identify major concerns, architecture issues, obvious bugs. Breadth over depth."
+
+[[steps]]
+id = "refine-1"
+title = "Refine 1: Correctness"
+needs = ["draft-review"]
+description = "First refinement pass. Focus: CORRECTNESS. Check logic, error handling, edge cases. Is the code sound?"
+
+[[steps]]
+id = "refine-2"
+title = "Refine 2: Clarity"
+needs = ["refine-1"]
+description = "Second refinement pass. Focus: CLARITY. Is the code readable? Good naming? Appropriate comments? Would another dev understand this?"
+
+[[steps]]
+id = "refine-3"
+title = "Refine 3: Edge Cases"
+needs = ["refine-2"]
+description = "Third refinement pass. Focus: EDGE CASES. What could go wrong? Missing validation? Race conditions? Resource leaks?"
+
+[[steps]]
+id = "refine-4"
+title = "Refine 4: Excellence"
+needs = ["refine-3"]
+description = "Final polish. Focus: EXCELLENCE. This is the last pass. Is this code you'd be proud to ship? Any final improvements?"

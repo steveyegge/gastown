@@ -1,0 +1,92 @@
+description = """
+Update Gas Town (gt) from upstream and rebuild.
+
+This formula pulls the latest changes from origin/main, rebuilds gt,
+and installs the new binary. Use this to keep your local gt up to date.
+
+## Usage
+
+```bash
+gt formula run gt-update
+```
+
+Or manually:
+```bash
+cd ~/gt/gastown/crew/<name>  # or any gastown clone
+git pull origin main
+make install
+```
+"""
+formula = "gt-update"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "pull"
+title = "Pull latest from upstream"
+description = """
+Fetch and merge the latest changes from origin/main.
+
+```bash
+git fetch origin
+git pull origin main
+```
+
+If there are merge conflicts, resolve them before continuing.
+If you have local changes, stash or commit them first.
+
+**Exit criteria:** Git is up to date with origin/main."""
+
+[[steps]]
+id = "build"
+title = "Build and install gt"
+needs = ["pull"]
+description = """
+Rebuild gt with the new code and install the binary.
+
+```bash
+make install
+```
+
+This will:
+1. Run go generate (embed templates, etc.)
+2. Build with version info from git
+3. Install to ~/.local/bin/gt
+
+**Verify installation:**
+```bash
+gt version
+```
+
+Should show the new version matching the latest commit.
+
+**If gt version shows old version:**
+Check your PATH - there may be multiple gt binaries:
+```bash
+which gt
+ls -la ~/go/bin/gt ~/.local/bin/gt
+```
+
+Copy the new binary to the location in your PATH:
+```bash
+cp ~/.local/bin/gt ~/go/bin/gt
+```
+
+**Exit criteria:** `gt version` shows the new commit hash."""
+
+[[steps]]
+id = "verify"
+title = "Verify installation"
+needs = ["build"]
+description = """
+Confirm gt is working correctly with the new version.
+
+```bash
+gt version
+gt doctor
+```
+
+The version should show the latest commit from origin/main.
+Doctor should report no critical issues.
+
+**Exit criteria:** gt version and doctor pass."""
