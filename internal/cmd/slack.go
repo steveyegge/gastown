@@ -514,6 +514,23 @@ func runSlackMigrate(cmd *cobra.Command, args []string) error {
 }
 
 func runSlackStart(cmd *cobra.Command, args []string) error {
+	// Check if this should be managed by systemd instead
+	if os.Getenv("GT_SLACK_SYSTEMD") == "" {
+		// Not launched by systemd - check if systemd unit exists and is enabled
+		if isSystemdUnitEnabled("gt-slack.service") {
+			fmt.Fprintln(os.Stderr, style.Warning.Render("⚠ gt slack start is managed by systemd"))
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "Use systemctl to manage the Slack bot:")
+			fmt.Fprintln(os.Stderr, "  systemctl --user status gt-slack    # Check status")
+			fmt.Fprintln(os.Stderr, "  systemctl --user restart gt-slack   # Restart after rebuild")
+			fmt.Fprintln(os.Stderr, "  journalctl --user -u gt-slack -f    # View logs")
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "To disable systemd management:")
+			fmt.Fprintln(os.Stderr, "  systemctl --user disable gt-slack")
+			return fmt.Errorf("use 'systemctl --user restart gt-slack' instead")
+		}
+	}
+
 	// Acquire exclusive lock to prevent multiple instances.
 	// This prevents duplicate Slack notifications from concurrent processes.
 	fileLock := flock.New(slackLockFile)
@@ -621,4 +638,11 @@ func runSlackStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("bot error: %w", err)
 	}
 	return nil
+}
+
+// isSystemdUnitEnabled checks if a systemd user unit is enabled.
+func isSystemdUnitEnabled(unit string) bool {
+	cmd := exec.Command("systemctl", "--user", "is-enabled", unit)
+	err := cmd.Run()
+	return err == nil
 }

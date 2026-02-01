@@ -3,9 +3,13 @@ package cmd
 import (
 	"fmt"
 	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/rpcserver"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -65,13 +69,32 @@ func init() {
 }
 
 func runRPCServe(cmd *cobra.Command, args []string) error {
-	// Find town root
+	// Find town root first (needed for systemd unit name)
 	root := rpcTownRoot
 	if root == "" {
 		var err error
 		root, err = workspace.FindFromCwdOrError()
 		if err != nil {
 			return fmt.Errorf("not in a Gas Town workspace: %w", err)
+		}
+	}
+
+	// Check if this should be managed by systemd instead
+	if os.Getenv("GT_RPC_SYSTEMD") == "" {
+		// Build the systemd unit name (gt-rpc@<escaped-path>.service)
+		absRoot, _ := filepath.Abs(root)
+		unitName := fmt.Sprintf("gt-rpc@%s.service", systemdEscapePath(absRoot))
+		if isRPCSystemdUnitEnabled(unitName) {
+			fmt.Fprintln(os.Stderr, style.Warning.Render("⚠ gt rpc serve is managed by systemd"))
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "Use systemctl to manage the RPC server:")
+			fmt.Fprintf(os.Stderr, "  systemctl --user status %s    # Check status\n", unitName)
+			fmt.Fprintf(os.Stderr, "  systemctl --user restart %s   # Restart after rebuild\n", unitName)
+			fmt.Fprintf(os.Stderr, "  journalctl --user -u %s -f    # View logs\n", unitName)
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "To disable systemd management:")
+			fmt.Fprintf(os.Stderr, "  systemctl --user disable %s\n", unitName)
+			return fmt.Errorf("use 'systemctl --user restart %s' instead", unitName)
 		}
 	}
 
@@ -87,4 +110,36 @@ func runRPCServe(cmd *cobra.Command, args []string) error {
 		log.Fatalf("Server failed: %v", err)
 	}
 	return nil
+}
+
+// systemdEscapePath escapes a path for use in systemd unit names.
+func systemdEscapePath(path string) string {
+	cmd := exec.Command("systemd-escape", "--path", path)
+	out, err := cmd.Output()
+	if err != nil {
+		// Fallback: manual escape (replace / with -)
+		escaped := path
+		if len(escaped) > 0 && escaped[0] == '/' {
+			escaped = escaped[1:] // Remove leading /
+		}
+		// Replace path separators
+		escaped = filepath.ToSlash(escaped)
+		result := ""
+		for _, c := range escaped {
+			if c == '/' {
+				result += "-"
+			} else {
+				result += string(c)
+			}
+		}
+		return result
+	}
+	return string(out[:len(out)-1]) // Remove trailing newline
+}
+
+// isRPCSystemdUnitEnabled checks if a systemd user unit is enabled.
+func isRPCSystemdUnitEnabled(unit string) bool {
+	cmd := exec.Command("systemctl", "--user", "is-enabled", unit)
+	err := cmd.Run()
+	return err == nil
 }
