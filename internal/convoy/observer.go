@@ -15,7 +15,7 @@ import (
 // multiple agents (Witness, Refinery, Daemon).
 //
 // The check is idempotent - running it multiple times for the same issue is safe.
-// The underlying `gt convoy check` handles already-closed convoys gracefully.
+// The underlying `" + cli.Name() + " convoy check` handles already-closed convoys gracefully.
 //
 // Parameters:
 //   - townRoot: path to the town root directory
@@ -120,7 +120,7 @@ func isConvoyClosed(townRoot, convoyID string) bool {
 	return results[0].Status == "closed"
 }
 
-// runConvoyCheck runs `gt convoy check <convoy-id>` to check a specific convoy.
+// runConvoyCheck runs `" + cli.Name() + " convoy check <convoy-id>` to check a specific convoy.
 // This is idempotent and handles already-closed convoys gracefully.
 func runConvoyCheck(townRoot, convoyID string) error {
 	cmd := exec.Command("gt", "convoy", "check", convoyID)

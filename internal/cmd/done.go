@@ -747,7 +747,7 @@ func parseCleanupStatus(s string) polecat.CleanupStatus {
 }
 
 // selfNukePolecat deletes this polecat's worktree (self-cleaning model).
-// Called by polecats when they complete work via `gt done`.
+// Called by polecats when they complete work via `" + cli.Name() + " done`.
 // This is safe because:
 // 1. Work has been pushed to origin (MR is in queue)
 // 2. We're about to exit anyway

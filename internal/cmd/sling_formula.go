@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -284,9 +285,9 @@ func runSlingFormula(args []string) error {
 
 	var prompt string
 	if slingArgs != "" {
-		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `gt hook` to see your hook, then execute using these args.", formulaName, slingArgs)
+		prompt = fmt.Sprintf("Formula %s slung. Args: %s. Run `" + cli.Name() + " hook` to see your hook, then execute using these args.", formulaName, slingArgs)
 	} else {
-		prompt = fmt.Sprintf("Formula %s slung. Run `gt hook` to see your hook, then execute the steps.", formulaName)
+		prompt = fmt.Sprintf("Formula %s slung. Run `" + cli.Name() + " hook` to see your hook, then execute the steps.", formulaName)
 	}
 	t := tmux.NewTmux()
 	if err := t.NudgePane(targetPane, prompt); err != nil {

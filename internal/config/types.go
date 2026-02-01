@@ -202,7 +202,7 @@ type RigConfig struct {
 
 // WorkflowConfig represents workflow settings for a rig.
 type WorkflowConfig struct {
-	// DefaultFormula is the formula to use when `gt formula run` is called without arguments.
+	// DefaultFormula is the formula to use when `" + cli.Name() + " formula run` is called without arguments.
 	// If empty, no default is set and a formula name must be provided.
 	DefaultFormula string `json:"default_formula,omitempty"`
 }

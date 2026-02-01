@@ -217,7 +217,7 @@ func (c *CrewStateCheck) findAllCrewDirs(townRoot string) []crewDir {
 }
 
 // CrewWorktreeCheck detects stale cross-rig worktrees in crew directories.
-// Cross-rig worktrees are created by `gt worktree <rig>` and live in crew/
+// Cross-rig worktrees are created by `" + cli.Name() + " worktree <rig>` and live in crew/
 // with names like `<source-rig>-<crewname>`. They should be cleaned up when
 // no longer needed to avoid confusion with regular crew workspaces.
 type CrewWorktreeCheck struct {
@@ -297,7 +297,7 @@ func (c *CrewWorktreeCheck) Fix(ctx *CheckContext) error {
 
 // findCrewWorktrees finds cross-rig worktrees in crew directories.
 // These are worktrees with hyphenated names (e.g., "beads-dave") that
-// indicate they were created via `gt worktree` for cross-rig work.
+// indicate they were created via `" + cli.Name() + " worktree` for cross-rig work.
 func (c *CrewWorktreeCheck) findCrewWorktrees(townRoot string) []staleWorktree {
 	var worktrees []staleWorktree
 
@@ -336,7 +336,7 @@ func (c *CrewWorktreeCheck) findCrewWorktrees(townRoot string) []staleWorktree {
 			}
 
 			// Check for hyphenated name pattern: <source-rig>-<crewname>
-			// This indicates a cross-rig worktree created by `gt worktree`
+			// This indicates a cross-rig worktree created by `" + cli.Name() + " worktree`
 			parts := strings.SplitN(name, "-", 2)
 			if len(parts) != 2 {
 				// Not a cross-rig worktree pattern
