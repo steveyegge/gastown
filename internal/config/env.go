@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -35,6 +36,26 @@ type AgentEnvConfig struct {
 	// BeadsNoDaemon sets BEADS_NO_DAEMON=1 if true
 	// Used for polecats that should bypass the beads daemon
 	BeadsNoDaemon bool
+
+	// WorkDir is the working directory for the agent session.
+	// For crew/polecat roles, this is used to check for beads redirects.
+	// When a redirect is detected, BEADS_SYNC_BRANCH is set to "" to suppress
+	// warnings, since the redirect target handles sync operations.
+	WorkDir string
+}
+
+// hasBeadsRedirect checks if the workDir has a beads redirect file.
+// This indicates the workdir uses a shared beads database (e.g., crew/polecat clones).
+func hasBeadsRedirect(workDir string) bool {
+	if workDir == "" {
+		return false
+	}
+	if filepath.Base(workDir) == ".beads" {
+		workDir = filepath.Dir(workDir)
+	}
+	redirectPath := filepath.Join(workDir, ".beads", "redirect")
+	_, err := os.Stat(redirectPath)
+	return err == nil
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -97,6 +118,12 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Set BEADS_AGENT_NAME for polecat/crew (uses same format as BD_ACTOR)
 	if cfg.Role == "polecat" || cfg.Role == "crew" {
 		env["BEADS_AGENT_NAME"] = fmt.Sprintf("%s/%s", cfg.Rig, cfg.AgentName)
+	}
+
+	// Disable sync-branch when redirect is active - the canonical location
+	// (e.g., mayor/rig/.beads) handles sync operations.
+	if hasBeadsRedirect(cfg.WorkDir) {
+		env["BEADS_SYNC_BRANCH"] = ""
 	}
 
 	if cfg.BeadsNoDaemon {

@@ -254,6 +254,36 @@ This is THE command for dispatching work. It:
 Prefer delegating to Refineries, not directly to polecats:
 - `gt send <rig>/refinery -s "Subject" -m "Message"`
 
+### Epic/Feature Detection
+
+When the user discusses:
+- Adding a new feature to a rig
+- Contributing something upstream
+- "I want to implement X in <project>"
+- Making substantial changes to a rig
+
+Recognize this as a potential **epic** and suggest:
+
+```
+It looks like you're hoping to add a substantial feature to <rig>.
+Would you like me to initiate an epic for this? This will:
+- Create a tracked epic bead
+- Load the project's CONTRIBUTING.md guidelines
+- Set up a crew member for you to plan with
+```
+
+**Epic commands:**
+- `gt epic start <rig> "Title"` - Create epic, discover CONTRIBUTING.md
+- `gt epic ready [id]` - Parse plan into subtasks
+- `gt epic sling [id]` - Dispatch subtasks to workers
+- `gt epic status [id]` - Show progress
+- `gt epic submit [id]` - Create upstream PRs
+
+**When to use epics:**
+- Multi-step features that need planning
+- Upstream contributions (respect CONTRIBUTING.md)
+- Work that spans multiple subtasks with dependencies
+
 ## Startup Protocol: Propulsion
 
 > **The Universal Gas Town Propulsion Principle: If you find something on your hook, YOU RUN IT.**
