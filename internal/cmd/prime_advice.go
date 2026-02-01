@@ -9,20 +9,18 @@ import (
 
 // AdviceBead represents an advice issue from beads.
 type AdviceBead struct {
-	ID                string `json:"id"`
-	Title             string `json:"title"`
-	Description       string `json:"description"`
-	AdviceTargetRig   string `json:"advice_target_rig,omitempty"`
-	AdviceTargetRole  string `json:"advice_target_role,omitempty"`
-	AdviceTargetAgent string `json:"advice_target_agent,omitempty"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Labels      []string `json:"labels,omitempty"`
 }
 
 // outputAdviceContext queries and outputs advice applicable to this agent.
-// Advice is matched using hierarchical targeting (most specific wins):
-// 1. Agent-specific (advice_target_agent matches agent ID)
-// 2. Role-specific (advice_target_role matches role type)
-// 3. Rig-specific (advice_target_rig matches rig name)
-// 4. Global (all targeting fields empty)
+// Advice is matched using label-based targeting:
+// 1. Agent-specific: label "agent:<id>" matches agent ID
+// 2. Role-specific: label "role:<type>" matches role type
+// 3. Rig-specific: label "rig:<name>" matches rig name
+// 4. Global: label "global" or no targeting labels
 func outputAdviceContext(ctx RoleInfo) {
 	// Build agent identity for matching
 	agentID := buildAgentID(ctx)
@@ -120,11 +118,7 @@ func queryAdviceBeads() ([]AdviceBead, error) {
 }
 
 // filterApplicableAdvice returns advice beads that apply to this agent.
-// Advice matches if any of these conditions are true:
-// - advice_target_agent matches agentID exactly
-// - advice_target_role matches roleType (and agent/rig are empty)
-// - advice_target_rig matches rigName (and agent/role are empty)
-// - All targeting fields are empty (global advice)
+// Advice matches based on label targeting - see matchesAdvice for details.
 func filterApplicableAdvice(beads []AdviceBead, agentID, roleType, rigName string) []AdviceBead {
 	var result []AdviceBead
 
@@ -138,36 +132,68 @@ func filterApplicableAdvice(beads []AdviceBead, agentID, roleType, rigName strin
 }
 
 // matchesAdvice checks if an advice bead applies to the given agent context.
+// Advice uses label-based targeting:
+//   - agent:<id> matches specific agent
+//   - role:<type> matches role type (polecat, crew, witness, etc.)
+//   - rig:<name> matches all agents in a rig
+//   - global or no targeting labels = applies to everyone
 func matchesAdvice(bead AdviceBead, agentID, roleType, rigName string) bool {
-	// Most specific: agent-level targeting
-	if bead.AdviceTargetAgent != "" {
-		return bead.AdviceTargetAgent == agentID
+	// Check for targeting labels
+	hasAgentLabel := false
+	hasRoleLabel := false
+	hasRigLabel := false
+	hasGlobalLabel := false
+
+	for _, label := range bead.Labels {
+		switch {
+		case strings.HasPrefix(label, "agent:"):
+			hasAgentLabel = true
+			targetAgent := strings.TrimPrefix(label, "agent:")
+			if targetAgent == agentID {
+				return true
+			}
+		case strings.HasPrefix(label, "role:"):
+			hasRoleLabel = true
+			targetRole := strings.TrimPrefix(label, "role:")
+			if targetRole == roleType {
+				return true
+			}
+		case strings.HasPrefix(label, "rig:"):
+			hasRigLabel = true
+			targetRig := strings.TrimPrefix(label, "rig:")
+			if targetRig == rigName {
+				return true
+			}
+		case label == "global":
+			hasGlobalLabel = true
+		}
 	}
 
-	// Role-level targeting
-	if bead.AdviceTargetRole != "" {
-		return bead.AdviceTargetRole == roleType
+	// If any targeting labels were present but didn't match, exclude
+	if hasAgentLabel || hasRoleLabel || hasRigLabel {
+		return false
 	}
 
-	// Rig-level targeting
-	if bead.AdviceTargetRig != "" {
-		return bead.AdviceTargetRig == rigName
-	}
-
-	// Global advice (no targeting = applies to everyone)
-	return true
+	// Global label or no targeting labels = applies to everyone
+	return hasGlobalLabel || len(bead.Labels) == 0
 }
 
 // getAdviceScope returns a human-readable scope indicator for the advice.
 func getAdviceScope(bead AdviceBead) string {
-	if bead.AdviceTargetAgent != "" {
-		return "Agent"
-	}
-	if bead.AdviceTargetRole != "" {
-		return strings.Title(bead.AdviceTargetRole)
-	}
-	if bead.AdviceTargetRig != "" {
-		return bead.AdviceTargetRig
+	for _, label := range bead.Labels {
+		switch {
+		case strings.HasPrefix(label, "agent:"):
+			return "Agent"
+		case strings.HasPrefix(label, "role:"):
+			role := strings.TrimPrefix(label, "role:")
+			// Capitalize first letter
+			if len(role) > 0 {
+				return strings.ToUpper(role[:1]) + role[1:]
+			}
+			return role
+		case strings.HasPrefix(label, "rig:"):
+			return strings.TrimPrefix(label, "rig:")
+		}
 	}
 	return "Global"
 }

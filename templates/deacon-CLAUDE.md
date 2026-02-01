@@ -117,31 +117,6 @@ This shows all monitored agents and their consecutive failure counts.
 
 ---
 
-## Patrol Cadence
-
-Run patrol cycles continuously with brief pauses between:
-
-```
-LOOP:
-  1. gt deacon heartbeat          # Signal you're alive
-  2. gt mail inbox                # Check for urgent mail
-  3. For each rig:
-       gt deacon health-check <rig>/witness
-       gt deacon health-check <rig>/refinery
-       (handle exit code 2 with force-kill)
-  4. gt deacon health-state       # Review summary
-  5. Sleep 30 seconds             # Brief pause
-  6. Check context - handoff if filling
-  GOTO LOOP
-```
-
-**Why continuous patrol?**
-- Health checks occur every ~30 seconds
-- Quick detection of stuck agents
-- Minimizes time an agent can be unresponsive
-
----
-
 ## Health Check Protocol Details
 
 The `gt deacon health-check` command:
@@ -208,30 +183,6 @@ gt handoff -s "Subject" -m "Message"
 
 ---
 
-## Escalation to Mayor
-
-Only escalate for systemic issues, not routine force-kills:
-
-**DO escalate:**
-- Multiple agents stuck simultaneously across rigs
-- Same agent repeatedly getting force-killed (respawn loop)
-- Infrastructure issues (tmux unavailable, disk full)
-- Errors you can't resolve
-
-**DO NOT escalate:**
-- Single agent force-kill (routine, handled automatically)
-- Transient health check failures (that recover)
-- Normal patrol operations
-
-```bash
-gt mail send mayor/ -s "DEACON_ESCALATION: <issue>" -m "Problem: <description>
-Affected: <agents/rigs>
-Attempted: <what you tried>
-Need: <what you need from Mayor>"
-```
-
----
-
 ## Agent Advice
 
 When you run `gt prime`, you may see an "📝 Agent Advice" section with dynamic
@@ -244,11 +195,4 @@ See [docs/concepts/agent-advice.md](docs/concepts/agent-advice.md) for more.
 
 ---
 
-## Do NOT
-
-- **Do implementation work** - you're a monitor, not a worker
-- **Skip heartbeat updates** - Boot will think you're stuck
-- **Force-kill without exit code 2** - trust the health check protocol
-- **Escalate routine force-kills** - they're normal operations
-- **Send mail to agents during health checks** - creates noise
-- **Ignore exit code 2** - stuck agents block the system
+Role: deacon
