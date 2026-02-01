@@ -373,7 +373,10 @@ func (b *Bot) handleInteraction(callback slack.InteractionCallback) {
 		case "dismiss_decision":
 			b.handleDismissDecision(callback, action.Value)
 		default:
-			if strings.HasPrefix(action.ActionID, "resolve_other_") {
+			if strings.HasPrefix(action.ActionID, "peek_") {
+				decisionID := strings.TrimPrefix(action.ActionID, "peek_")
+				b.handlePeekButton(callback, decisionID)
+			} else if strings.HasPrefix(action.ActionID, "resolve_other_") {
 				decisionID := strings.TrimPrefix(action.ActionID, "resolve_other_")
 				b.handleResolveOther(callback, decisionID)
 			} else if strings.HasPrefix(action.ActionID, "resolve_") {
@@ -2185,11 +2188,17 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 		)
 	}
 
-	// Add action buttons: Dismiss, and Break Out / Unbreak Out
+	// Add action buttons: Dismiss, Peek, and Break Out / Unbreak Out
 	dismissButton := slack.NewButtonBlockElement(
 		"dismiss_decision",
 		decision.ID,
 		slack.NewTextBlockObject("plain_text", "🗑️ Dismiss", false, false),
+	)
+
+	peekButton := slack.NewButtonBlockElement(
+		"peek_"+decision.ID,
+		decision.ID,
+		slack.NewTextBlockObject("plain_text", "👁️ Peek", false, false),
 	)
 
 	if decision.RequestedBy != "" {
@@ -2210,14 +2219,16 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 		blocks = append(blocks,
 			slack.NewActionBlock("",
 				dismissButton,
+				peekButton,
 				breakOutButton,
 			),
 		)
 	} else {
-		// No agent identity - just show dismiss
+		// No agent identity - just show dismiss and peek
 		blocks = append(blocks,
 			slack.NewActionBlock("",
 				dismissButton,
+				peekButton,
 			),
 		)
 	}
@@ -2374,17 +2385,24 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 		)
 	}
 
-	// Show Dismiss and Unbreak Out buttons (since we're in a break-out channel)
+	// Show Dismiss, Peek, and Unbreak Out buttons (since we're in a break-out channel)
 	dismissButton := slack.NewButtonBlockElement(
 		"dismiss_decision",
 		decision.ID,
 		slack.NewTextBlockObject("plain_text", "🗑️ Dismiss", false, false),
 	)
 
+	peekButton := slack.NewButtonBlockElement(
+		"peek_"+decision.ID,
+		decision.ID,
+		slack.NewTextBlockObject("plain_text", "👁️ Peek", false, false),
+	)
+
 	if decision.RequestedBy != "" {
 		blocks = append(blocks,
 			slack.NewActionBlock("",
 				dismissButton,
+				peekButton,
 				slack.NewButtonBlockElement(
 					"unbreak_out",
 					decision.RequestedBy,
@@ -2396,6 +2414,7 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 		blocks = append(blocks,
 			slack.NewActionBlock("",
 				dismissButton,
+				peekButton,
 			),
 		)
 	}
