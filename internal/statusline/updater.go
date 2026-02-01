@@ -73,18 +73,19 @@ func (u *Updater) getRegisteredRigs() map[string]bool {
 }
 
 // updateTownIdentities updates Mayor and Deacon status data.
+// Uses canonical identity format with trailing slash (per AddressToIdentity).
 func (u *Updater) updateTownIdentities(cache *Cache) {
-	// Mayor identity
+	// Mayor identity - use "mayor/" canonical format for consistent cache keys
 	mayorData := &IdentityData{}
-	u.populateHookedWork(mayorData, "mayor", u.townRoot)
+	u.populateHookedWork(mayorData, "mayor/", u.townRoot)
 	u.populateMail(mayorData, "mayor/", u.townRoot)
-	cache.SetIdentity("mayor", mayorData)
+	cache.SetIdentity("mayor/", mayorData)
 
-	// Deacon identity
+	// Deacon identity - use "deacon/" canonical format for consistent cache keys
 	deaconData := &IdentityData{}
-	u.populateHookedWork(deaconData, "deacon", u.townRoot)
+	u.populateHookedWork(deaconData, "deacon/", u.townRoot)
 	u.populateMail(deaconData, "deacon/", u.townRoot)
-	cache.SetIdentity("deacon", deaconData)
+	cache.SetIdentity("deacon/", deaconData)
 }
 
 // updateRigIdentities updates identities for a specific rig.

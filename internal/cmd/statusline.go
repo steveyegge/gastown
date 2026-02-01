@@ -378,9 +378,10 @@ func runMayorStatusLine(t *tmux.Tmux) error {
 	}
 
 	// Priority 1: Check for hooked work (town beads for mayor)
+	// Use canonical "mayor/" format to match cache keys
 	hookedWork := ""
 	if townRoot != "" {
-		hookedWork = getHookedWork("mayor", 40, townRoot)
+		hookedWork = getHookedWork("mayor/", 40, townRoot)
 	}
 	if hookedWork != "" {
 		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
@@ -447,9 +448,10 @@ func runDeaconStatusLine(t *tmux.Tmux) error {
 	parts = append(parts, fmt.Sprintf("%d rigs", rigCount))
 
 	// Priority 1: Check for hooked work (town beads for deacon)
+	// Use canonical "deacon/" format to match cache keys
 	hookedWork := ""
 	if townRoot != "" {
-		hookedWork = getHookedWork("deacon", 35, townRoot)
+		hookedWork = getHookedWork("deacon/", 35, townRoot)
 	}
 	if hookedWork != "" {
 		parts = append(parts, fmt.Sprintf("🪝 %s", hookedWork))
