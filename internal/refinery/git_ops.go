@@ -28,12 +28,12 @@ type GitOperations interface {
 	// Rebase operations
 	CanRebase(branch, onto string) (bool, []string, error) // returns canRebase, conflictFiles, error
 	Rebase(branch, onto string) error
-	AbortRebase() error
+	AbortRebase()
 
 	// Merge operations
 	CanMerge(branch, into string) (bool, []string, error)
 	Merge(branch, into string, squash bool) error
-	AbortMerge() error
+	AbortMerge()
 
 	// Remote operations
 	Fetch(remote string) error
@@ -68,14 +68,14 @@ func (g *RealGitOps) run(args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-func (g *RealGitOps) runAllowFailure(args ...string) (string, error) {
+func (g *RealGitOps) runAllowFailure(args ...string) string {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = g.WorkDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	_ = cmd.Run() // ignore error
-	return strings.TrimSpace(stdout.String()), nil
+	return strings.TrimSpace(stdout.String())
 }
 
 func (g *RealGitOps) GetCurrentBranch() (string, error) {
@@ -146,27 +146,24 @@ func (g *RealGitOps) CanRebase(branch, onto string) (bool, []string, error) {
 	_, err = g.run("rebase", "--no-commit", onto)
 	if err != nil {
 		// Get conflict files
-		conflictFiles, _ := g.getConflictFiles()
-		_ = g.AbortRebase()
+		conflictFiles := g.getConflictFiles()
+		g.AbortRebase()
 		_ = g.CheckoutBranch(currentBranch)
 		return false, conflictFiles, nil
 	}
 
 	// Abort the successful rebase (we just wanted to check)
-	_ = g.AbortRebase()
+	g.AbortRebase()
 	_ = g.CheckoutBranch(currentBranch)
 	return true, nil, nil
 }
 
-func (g *RealGitOps) getConflictFiles() ([]string, error) {
-	output, err := g.runAllowFailure("diff", "--name-only", "--diff-filter=U")
-	if err != nil {
-		return nil, err
-	}
+func (g *RealGitOps) getConflictFiles() []string {
+	output := g.runAllowFailure("diff", "--name-only", "--diff-filter=U")
 	if output == "" {
-		return nil, nil
+		return nil
 	}
-	return strings.Split(output, "\n"), nil
+	return strings.Split(output, "\n")
 }
 
 func (g *RealGitOps) Rebase(branch, onto string) error {
@@ -177,9 +174,8 @@ func (g *RealGitOps) Rebase(branch, onto string) error {
 	return err
 }
 
-func (g *RealGitOps) AbortRebase() error {
-	_, err := g.runAllowFailure("rebase", "--abort")
-	return err
+func (g *RealGitOps) AbortRebase() {
+	g.runAllowFailure("rebase", "--abort")
 }
 
 func (g *RealGitOps) CanMerge(branch, into string) (bool, []string, error) {
@@ -197,14 +193,14 @@ func (g *RealGitOps) CanMerge(branch, into string) (bool, []string, error) {
 	// Try merge with no commit
 	_, err = g.run("merge", "--no-commit", "--no-ff", branch)
 	if err != nil {
-		conflictFiles, _ := g.getConflictFiles()
-		_ = g.AbortMerge()
+		conflictFiles := g.getConflictFiles()
+		g.AbortMerge()
 		_ = g.CheckoutBranch(currentBranch)
 		return false, conflictFiles, nil
 	}
 
 	// Abort the successful merge
-	_ = g.AbortMerge()
+	g.AbortMerge()
 	_ = g.CheckoutBranch(currentBranch)
 	return true, nil, nil
 }
@@ -226,9 +222,8 @@ func (g *RealGitOps) Merge(branch, into string, squash bool) error {
 	return err
 }
 
-func (g *RealGitOps) AbortMerge() error {
-	_, err := g.runAllowFailure("merge", "--abort")
-	return err
+func (g *RealGitOps) AbortMerge() {
+	g.runAllowFailure("merge", "--abort")
 }
 
 func (g *RealGitOps) Fetch(remote string) error {
@@ -279,17 +274,17 @@ func NewTestRepo(name string) (*TestRepo, error) {
 
 	// Initialize repo with main as default branch
 	if _, err := git.run("init", "-b", "main"); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return nil, err
 	}
 
 	// Configure git for tests
 	if _, err := git.run("config", "user.email", "test@example.com"); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return nil, err
 	}
 	if _, err := git.run("config", "user.name", "Test User"); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return nil, err
 	}
 
@@ -307,7 +302,7 @@ func NewBareTestRepo(name string) (*TestRepo, error) {
 
 	// Initialize bare repo with main as default branch
 	if _, err := git.run("init", "--bare", "-b", "main"); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return nil, err
 	}
 
@@ -316,7 +311,7 @@ func NewBareTestRepo(name string) (*TestRepo, error) {
 
 // Cleanup removes the test repository.
 func (r *TestRepo) Cleanup() {
-	os.RemoveAll(r.Path)
+	_ = os.RemoveAll(r.Path)
 }
 
 // AddRemote adds a remote to this repo.
