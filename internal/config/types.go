@@ -284,6 +284,11 @@ type RuntimeConfig struct {
 	// Default: "arg" for claude/generic, "none" for codex.
 	PromptMode string `json:"prompt_mode,omitempty"`
 
+	// PromptPrefix is inserted before the prompt argument.
+	// Some CLIs require "--" before positional arguments (e.g., Devin).
+	// If empty, the prompt is appended directly after args.
+	PromptPrefix string `json:"prompt_prefix,omitempty"`
+
 	// Session config controls environment integration for runtime session IDs.
 	Session *RuntimeSessionConfig `json:"session,omitempty"`
 
@@ -361,6 +366,7 @@ func (rc *RuntimeConfig) BuildCommand() string {
 // BuildCommandWithPrompt returns the full command line with an initial prompt.
 // If the config has an InitialPrompt, it's appended as a quoted argument.
 // If prompt is provided, it overrides the config's InitialPrompt.
+// If PromptPrefix is set (e.g., "--" for Devin), it's inserted before the prompt.
 func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 	resolved := normalizeRuntimeConfig(rc)
 	base := resolved.BuildCommand()
@@ -375,7 +381,10 @@ func (rc *RuntimeConfig) BuildCommandWithPrompt(prompt string) string {
 		return base
 	}
 
-	// Quote the prompt for shell safety
+	// Build prompt argument with optional prefix (e.g., "--" for Devin)
+	if resolved.PromptPrefix != "" {
+		return base + " " + resolved.PromptPrefix + " " + quoteForShell(p)
+	}
 	return base + " " + quoteForShell(p)
 }
 
@@ -390,6 +399,10 @@ func (rc *RuntimeConfig) BuildArgsWithPrompt(prompt string) []string {
 	}
 
 	if p != "" && resolved.PromptMode != "none" {
+		// Add prompt prefix if configured (e.g., "--" for Devin)
+		if resolved.PromptPrefix != "" {
+			args = append(args, resolved.PromptPrefix)
+		}
 		args = append(args, p)
 	}
 
@@ -478,6 +491,8 @@ func defaultRuntimeCommand(provider string) string {
 		return "codex"
 	case "opencode":
 		return "opencode"
+	case "devin":
+		return "devin"
 	case "generic":
 		return ""
 	default:
@@ -514,6 +529,8 @@ func defaultRuntimeArgs(provider string) []string {
 	switch provider {
 	case "claude":
 		return []string{"--dangerously-skip-permissions"}
+	case "devin":
+		return []string{"--permission-mode", "dangerous"}
 	default:
 		return nil
 	}
@@ -561,6 +578,8 @@ func defaultHooksDir(provider string) string {
 		return ".claude"
 	case "opencode":
 		return ".opencode/plugin"
+	case "devin":
+		return ".cognition"
 	default:
 		return ""
 	}
@@ -572,6 +591,8 @@ func defaultHooksFile(provider string) string {
 		return "settings.json"
 	case "opencode":
 		return "gastown.js"
+	case "devin":
+		return "config.json"
 	default:
 		return ""
 	}
@@ -580,6 +601,9 @@ func defaultHooksFile(provider string) string {
 func defaultProcessNames(provider, command string) []string {
 	if provider == "claude" {
 		return []string{"node"}
+	}
+if provider == "devin" {
+		return []string{"devin"}
 	}
 	if provider == "opencode" {
 		// OpenCode runs as Node.js process, need both for IsAgentRunning detection.
@@ -623,21 +647,24 @@ func defaultInstructionsFile(provider string) string {
 	if provider == "opencode" {
 		return "AGENTS.md"
 	}
+	if provider == "devin" {
+		return "AGENTS.md"
+	}
 	return "CLAUDE.md"
 }
 
-// quoteForShell quotes a string for safe shell usage.
+// quoteForShell quotes a string for safe shell usage using ANSI-C quoting ($'...').
+// This properly handles newlines, tabs, and other special characters that would
+// break double-quoted strings when passed through tmux to bash.
 func quoteForShell(s string) string {
-	// Wrap in double quotes, escaping characters that are special in double-quoted strings:
-	// - backslash (escape character)
-	// - double quote (string delimiter)
-	// - backtick (command substitution)
-	// - dollar sign (variable expansion)
+// Use ANSI-C quoting ($'...') which interprets escape sequences.
+	// Escape order matters: backslash first, then single quote, then control chars.
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
-	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	escaped = strings.ReplaceAll(escaped, "`", "\\`")
-	escaped = strings.ReplaceAll(escaped, "$", `\$`)
-	return `"` + escaped + `"`
+	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
+	escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+	escaped = strings.ReplaceAll(escaped, "\t", `\t`)
+	escaped = strings.ReplaceAll(escaped, "\r", `\r`)
+	return `$'` + escaped + `'`
 }
 
 // ThemeConfig represents tmux theme settings for a rig.

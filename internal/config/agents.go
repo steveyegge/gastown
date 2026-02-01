@@ -27,6 +27,8 @@ const (
 	AgentAuggie AgentPreset = "auggie"
 	// AgentAmp is Sourcegraph AMP.
 	AgentAmp AgentPreset = "amp"
+// AgentDevin is Devin CLI (Devin for Terminal).
+	AgentDevin AgentPreset = "devin"
 	// AgentOpenCode is OpenCode multi-model CLI.
 	AgentOpenCode AgentPreset = "opencode"
 )
@@ -76,6 +78,11 @@ type AgentPresetInfo struct {
 
 	// NonInteractive contains settings for non-interactive mode.
 	NonInteractive *NonInteractiveConfig `json:"non_interactive,omitempty"`
+
+	// PromptPrefix is inserted before the prompt argument.
+	// Some CLIs require "--" before positional arguments (e.g., Devin).
+	// If empty, the prompt is appended directly after args.
+	PromptPrefix string `json:"prompt_prefix,omitempty"`
 }
 
 // NonInteractiveConfig contains settings for running agents non-interactively.
@@ -184,6 +191,18 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SupportsHooks:       false,
 		SupportsForkSession: false,
 	},
+AgentDevin: {
+		Name:                AgentDevin,
+		Command:             "devin",
+		Args:                []string{"--permission-mode", "dangerous"},
+		ProcessNames:        []string{"devin"},
+		SessionIDEnv:        "",
+		ResumeFlag:          "-c",
+		ResumeStyle:         "flag",
+		SupportsHooks:       false,
+		SupportsForkSession: false,
+		PromptPrefix:        "--", // Devin requires -- before positional prompt argument
+	},
 	AgentOpenCode: {
 		Name:    AgentOpenCode,
 		Command: "opencode",
@@ -193,10 +212,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 			"OPENCODE_PERMISSION": `{"*":"allow"}`,
 		},
 		ProcessNames:        []string{"opencode", "node", "bun"}, // Runs as Node.js or Bun
-		SessionIDEnv:        "",                           // OpenCode manages sessions internally
-		ResumeFlag:          "",                           // No resume support yet
+		SessionIDEnv:        "",                                  // OpenCode manages sessions internally
+		ResumeFlag:          "",                                  // No resume support yet
 		ResumeStyle:         "",
-		SupportsHooks:       true,  // Uses .opencode/plugin/gastown.js
+		SupportsHooks:       true, // Uses .opencode/plugin/gastown.js
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "run",
@@ -353,7 +372,7 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		return DefaultRuntimeConfig()
 	}
 
-	// Copy Env map to avoid mutation
+// Copy Env map to avoid mutation
 	var envCopy map[string]string
 	if len(info.Env) > 0 {
 		envCopy = make(map[string]string, len(info.Env))
@@ -363,9 +382,10 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	}
 
 	rc := &RuntimeConfig{
-		Command: info.Command,
-		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
-		Env:     envCopy,
+		Command:      info.Command,
+		Args:         append([]string(nil), info.Args...), // Copy to avoid mutation
+		Env:          envCopy,
+		PromptPrefix: info.PromptPrefix,
 	}
 
 	// Resolve command path for claude preset (handles alias installations)
