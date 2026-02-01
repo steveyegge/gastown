@@ -1,0 +1,69 @@
+# gt-slack.service - Systemd user service for gt slack bot
+#
+# This service runs the Gas Town Slack bot for decision notifications.
+# Install to: ~/.config/systemd/user/gt-slack.service
+#
+# Configuration:
+#   Create ~/.config/gt/slack.env with your Slack tokens:
+#     SLACK_BOT_TOKEN=xoxb-...
+#     SLACK_APP_TOKEN=xapp-...
+#     SLACK_CHANNEL=C0123456789
+#     GT_TOWN_ROOT=/home/ubuntu/gt11
+#
+# Usage:
+#   systemctl --user enable gt-slack.service
+#   systemctl --user start gt-slack.service
+#   systemctl --user status gt-slack.service
+#   journalctl --user -u gt-slack.service
+#
+#   # Restart after binary rebuild
+#   systemctl --user restart gt-slack.service
+
+[Unit]
+Description=Gas Town Slack Decision Bot
+Documentation=https://github.com/steveyegge/gastown
+
+# Start after RPC server is available
+After=default.target
+
+[Service]
+Type=simple
+
+# Indicate this is a systemd-managed service
+Environment=GT_SLACK_SYSTEMD=1
+
+# Load Slack configuration from env file
+EnvironmentFile=/home/ubuntu/.config/gt/slack.env
+
+# Run gt slack start with environment variables
+ExecStart=/home/ubuntu/.local/bin/gt slack start \
+    --bot-token=${SLACK_BOT_TOKEN} \
+    --app-token=${SLACK_APP_TOKEN} \
+    --channel=${SLACK_CHANNEL} \
+    --town-root=${GT_TOWN_ROOT} \
+    --rpc=http://localhost:8443 \
+    --dynamic-channels
+
+# Remove lock file on start (in case of unclean shutdown)
+ExecStartPre=-/bin/rm -f /tmp/gtslack.lock
+
+# Restart policy - always restart to ensure availability
+Restart=always
+RestartSec=5
+
+# Give up after 5 failures in 60 seconds
+StartLimitIntervalSec=60
+StartLimitBurst=5
+StartLimitAction=none
+
+# Graceful shutdown
+TimeoutStopSec=10
+KillSignal=SIGTERM
+
+# Logging to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gt-slack
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,63 @@
+# gt-rpc@.service - Template systemd user service for gt rpc serve
+#
+# This is a template unit for running gt rpc serve per-town.
+# Install to: ~/.config/systemd/user/gt-rpc@.service
+#
+# Usage:
+#   # Encode town path
+#   UNIT_NAME=$(systemd-escape --path /home/ubuntu/gt11)
+#
+#   # Enable and start for a town
+#   systemctl --user enable gt-rpc@${UNIT_NAME}.service
+#   systemctl --user start gt-rpc@${UNIT_NAME}.service
+#
+#   # Check status
+#   systemctl --user status gt-rpc@${UNIT_NAME}.service
+#
+#   # View logs
+#   journalctl --user -u gt-rpc@${UNIT_NAME}.service
+#
+#   # Restart after binary rebuild
+#   systemctl --user restart gt-rpc@${UNIT_NAME}.service
+#
+# The %I specifier is the unescaped instance name (town path).
+# The %i specifier is the escaped instance name (for filenames).
+
+[Unit]
+Description=Gas Town RPC server for %I
+Documentation=https://github.com/steveyegge/gastown
+
+# Start after user session is ready
+After=default.target
+
+[Service]
+Type=simple
+
+# Indicate this is a systemd-managed service
+Environment=GT_RPC_SYSTEMD=1
+
+# Run gt rpc serve
+# The town path is passed via %I (unescaped instance name)
+ExecStart=/home/ubuntu/.local/bin/gt rpc serve --town /%I --port 8443
+WorkingDirectory=/%I
+
+# Restart policy - always restart to ensure availability
+Restart=always
+RestartSec=5
+
+# Give up after 5 failures in 60 seconds
+StartLimitIntervalSec=60
+StartLimitBurst=5
+StartLimitAction=none
+
+# Graceful shutdown
+TimeoutStopSec=10
+KillSignal=SIGTERM
+
+# Logging to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gt-rpc-%i
+
+[Install]
+WantedBy=default.target
