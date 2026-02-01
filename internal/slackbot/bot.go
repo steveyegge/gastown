@@ -388,25 +388,24 @@ func (b *Bot) handleInteraction(callback slack.InteractionCallback) {
 
 func (b *Bot) handleViewDecision(callback slack.InteractionCallback, decisionID string) {
 	ctx := context.Background()
-	decisions, err := b.rpcClient.ListPendingDecisions(ctx)
+
+	// Fetch decision by ID (works for both pending and resolved decisions)
+	decision, err := b.rpcClient.GetDecision(ctx, decisionID)
 	if err != nil {
 		b.postEphemeral(callback.Channel.ID, callback.User.ID,
 			fmt.Sprintf("Error fetching decision: %v", err))
 		return
 	}
 
-	// Find the decision
-	var decision *rpcclient.Decision
-	for _, d := range decisions {
-		if d.ID == decisionID {
-			decision = &d
-			break
-		}
-	}
-
 	if decision == nil {
 		b.postEphemeral(callback.Channel.ID, callback.User.ID,
-			fmt.Sprintf("Decision %s not found or already resolved.", decisionID))
+			fmt.Sprintf("Decision %s not found.", decisionID))
+		return
+	}
+
+	// If decision is already resolved, show read-only view
+	if decision.Resolved {
+		b.showResolvedDecisionView(callback, decision)
 		return
 	}
 
@@ -479,6 +478,112 @@ func (b *Bot) handleViewDecision(callback slack.InteractionCallback, decisionID 
 	)
 	if err != nil {
 		log.Printf("Slack: Error posting decision view: %v", err)
+	}
+}
+
+// showResolvedDecisionView displays a read-only view of a resolved decision.
+func (b *Bot) showResolvedDecisionView(callback slack.InteractionCallback, decision *rpcclient.Decision) {
+	// Generate semantic slug for human-friendly display
+	semanticSlug := util.GenerateDecisionSlug(decision.ID, decision.Question)
+
+	// Format resolver
+	resolverText := decision.ResolvedBy
+	if resolverText == "" {
+		resolverText = "unknown"
+	} else if strings.HasPrefix(resolverText, "slack:") {
+		// Format Slack user as mention
+		resolverText = fmt.Sprintf("<@%s>", strings.TrimPrefix(resolverText, "slack:"))
+	}
+
+	// Build read-only resolved view
+	blocks := []slack.Block{
+		slack.NewHeaderBlock(
+			slack.NewTextBlockObject("plain_text", fmt.Sprintf("✅ Resolved: %s", semanticSlug), false, false),
+		),
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn",
+				fmt.Sprintf("*From:* %s\n*Question:* %s", decision.RequestedBy, decision.Question),
+				false, false,
+			),
+			nil, nil,
+		),
+	}
+
+	if decision.Context != "" {
+		// Format context nicely
+		contextText := formatContextForSlack(decision.Context, 500)
+		if contextText != "" {
+			blocks = append(blocks,
+				slack.NewSectionBlock(
+					slack.NewTextBlockObject("mrkdwn",
+						fmt.Sprintf("*Context:*\n%s", contextText),
+						false, false,
+					),
+					nil, nil,
+				),
+			)
+		}
+	}
+
+	blocks = append(blocks, slack.NewDividerBlock())
+
+	// Show all options with the chosen one marked
+	for i, opt := range decision.Options {
+		label := opt.Label
+		prefix := fmt.Sprintf("%d.", i+1)
+		if i+1 == decision.ChosenIndex {
+			prefix = "✅"
+			label = "*" + label + "* (chosen)"
+		}
+		if opt.Recommended {
+			label = "⭐ " + label
+		}
+
+		optText := fmt.Sprintf("%s %s", prefix, label)
+		if opt.Description != "" {
+			optText += fmt.Sprintf("\n_%s_", opt.Description)
+		}
+
+		blocks = append(blocks,
+			slack.NewSectionBlock(
+				slack.NewTextBlockObject("mrkdwn", optText, false, false),
+				nil, nil,
+			),
+		)
+	}
+
+	blocks = append(blocks, slack.NewDividerBlock())
+
+	// Resolution details
+	resolutionText := fmt.Sprintf("*Resolved by:* %s", resolverText)
+	if decision.Rationale != "" {
+		// Truncate long rationales
+		rationale := decision.Rationale
+		if len(rationale) > 300 {
+			rationale = rationale[:297] + "..."
+		}
+		resolutionText += fmt.Sprintf("\n*Rationale:* %s", rationale)
+	}
+
+	blocks = append(blocks,
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn", resolutionText, false, false),
+			nil, nil,
+		),
+		slack.NewContextBlock("",
+			slack.NewTextBlockObject("mrkdwn",
+				"_This decision has already been resolved._",
+				false, false,
+			),
+		),
+	)
+
+	_, _, err := b.client.PostMessage(callback.Channel.ID,
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionResponseURL(callback.ResponseURL, slack.ResponseTypeEphemeral),
+	)
+	if err != nil {
+		log.Printf("Slack: Error posting resolved decision view: %v", err)
 	}
 }
 
@@ -707,26 +812,25 @@ func (b *Bot) handleResolveDecision(callback slack.InteractionCallback, action *
 	var chosenIndex int
 	_, _ = fmt.Sscanf(parts[1], "%d", &chosenIndex)
 
-	// Fetch decision details for the modal
+	// Fetch decision by ID
 	ctx := context.Background()
-	decisions, err := b.rpcClient.ListPendingDecisions(ctx)
+	decision, err := b.rpcClient.GetDecision(ctx, decisionID)
 	if err != nil {
 		b.postEphemeral(callback.Channel.ID, callback.User.ID,
 			fmt.Sprintf("Error fetching decision: %v", err))
 		return
 	}
 
-	var decision *rpcclient.Decision
-	for _, d := range decisions {
-		if d.ID == decisionID {
-			decision = &d
-			break
-		}
-	}
-
 	if decision == nil {
 		b.postEphemeral(callback.Channel.ID, callback.User.ID,
-			fmt.Sprintf("Decision %s not found or already resolved.", decisionID))
+			fmt.Sprintf("Decision %s not found.", decisionID))
+		return
+	}
+
+	// Check if already resolved
+	if decision.Resolved {
+		b.postEphemeral(callback.Channel.ID, callback.User.ID,
+			fmt.Sprintf("Decision %s has already been resolved.", decisionID))
 		return
 	}
 
