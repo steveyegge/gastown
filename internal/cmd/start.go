@@ -409,7 +409,8 @@ func startOrRestartCrewMember(t *tmux.Tmux, r *rig.Rig, crewName, townRoot strin
 				Sender:    "human",
 				Topic:     "restart",
 			})
-			agentCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, beacon)
+			crewPath := filepath.Join(r.Path, "crew", crewName)
+			agentCmd := config.BuildCrewStartupCommand(r.Name, crewName, r.Path, beacon, crewPath)
 			if err := t.SendKeys(sessionID, agentCmd); err != nil {
 				return fmt.Sprintf("  %s %s/%s restart failed: %v\n", style.Dim.Render("○"), r.Name, crewName, err), false
 			}

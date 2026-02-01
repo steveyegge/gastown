@@ -1001,7 +1001,7 @@ func TestBuildAgentStartupCommand(t *testing.T) {
 
 func TestBuildPolecatStartupCommand(t *testing.T) {
 	t.Parallel()
-	cmd := BuildPolecatStartupCommand("gastown", "toast", "", "")
+	cmd := BuildPolecatStartupCommand("gastown", "toast", "", "", "")
 
 	if !strings.Contains(cmd, "GT_ROLE=gastown/polecats/toast") {
 		t.Error("expected GT_ROLE=gastown/polecats/toast in command")
@@ -1019,7 +1019,7 @@ func TestBuildPolecatStartupCommand(t *testing.T) {
 
 func TestBuildCrewStartupCommand(t *testing.T) {
 	t.Parallel()
-	cmd := BuildCrewStartupCommand("gastown", "max", "", "")
+	cmd := BuildCrewStartupCommand("gastown", "max", "", "", "")
 
 	if !strings.Contains(cmd, "GT_ROLE=gastown/crew/max") {
 		t.Error("expected GT_ROLE=gastown/crew/max in command")
@@ -1125,7 +1125,7 @@ func TestBuildPolecatStartupCommandWithAgentOverride(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	cmd, err := BuildPolecatStartupCommandWithAgentOverride("testrig", "toast", rigPath, "", "gemini")
+	cmd, err := BuildPolecatStartupCommandWithAgentOverride("testrig", "toast", rigPath, "", "gemini", "")
 	if err != nil {
 		t.Fatalf("BuildPolecatStartupCommandWithAgentOverride: %v", err)
 	}
@@ -1208,7 +1208,7 @@ func TestBuildCrewStartupCommandWithAgentOverride(t *testing.T) {
 		t.Fatalf("SaveRigSettings: %v", err)
 	}
 
-	cmd, err := BuildCrewStartupCommandWithAgentOverride("testrig", "max", rigPath, "gt prime", "gemini")
+	cmd, err := BuildCrewStartupCommandWithAgentOverride("testrig", "max", rigPath, "gt prime", "gemini", "")
 	if err != nil {
 		t.Fatalf("BuildCrewStartupCommandWithAgentOverride: %v", err)
 	}
@@ -2446,6 +2446,9 @@ func TestBuildCommandWithPromptRespectsPromptModeNone(t *testing.T) {
 //  4. Run: GT_NUKE_ACKNOWLEDGED=1 gt down --nuke
 //  5. Repeat for all 7 built-in agents
 func TestRoleAgentConfigWithCustomAgent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test has Windows file I/O issues - settings not persisting before read")
+	}
 	t.Parallel()
 
 	townRoot := t.TempDir()
@@ -2627,6 +2630,9 @@ func TestMultipleAgentTypes(t *testing.T) {
 // TestCustomClaudeVariants tests that Claude model variants (opus, sonnet, haiku) need
 // to be explicitly defined as custom agents since they are NOT built-in presets.
 func TestCustomClaudeVariants(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test has Windows file I/O issues - settings not persisting before read")
+	}
 	t.Parallel()
 
 	// Verify that claude-opus/sonnet/haiku are NOT built-in presets
