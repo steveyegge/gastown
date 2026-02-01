@@ -429,7 +429,8 @@ func buildRestartCommand(sessionName string) (string, error) {
 	// Build environment exports - role vars first, then Claude vars
 	var exports []string
 	if gtRole != "" {
-		runtimeConfig := config.LoadRuntimeConfig("")
+		simpleRole := config.ExtractSimpleRole(gtRole)
+		runtimeConfig := config.ResolveRoleAgentConfig(simpleRole, townRoot, "")
 		exports = append(exports, "GT_ROLE="+gtRole)
 		exports = append(exports, "BD_ACTOR="+gtRole)
 		exports = append(exports, "GIT_AUTHOR_NAME="+gtRole)

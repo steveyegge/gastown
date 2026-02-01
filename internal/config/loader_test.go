@@ -1497,11 +1497,12 @@ func TestExpectedPaneCommands(t *testing.T) {
 	})
 }
 
-func TestLoadRuntimeConfigFromSettings(t *testing.T) {
+func TestResolveRoleAgentConfigFromRigSettings(t *testing.T) {
 	t.Parallel()
-	// Create temp rig with custom runtime config
-	dir := t.TempDir()
-	settingsDir := filepath.Join(dir, "settings")
+	// Create temp town with rig containing custom runtime config
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "myrig")
+	settingsDir := filepath.Join(rigPath, "settings")
 	if err := os.MkdirAll(settingsDir, 0755); err != nil {
 		t.Fatalf("creating settings dir: %v", err)
 	}
@@ -1515,8 +1516,8 @@ func TestLoadRuntimeConfigFromSettings(t *testing.T) {
 		t.Fatalf("saving settings: %v", err)
 	}
 
-	// Load and verify
-	rc := LoadRuntimeConfig(dir)
+	// Load and verify using ResolveRoleAgentConfig
+	rc := ResolveRoleAgentConfig("polecat", townRoot, rigPath)
 	if rc.Command != "aider" {
 		t.Errorf("Command = %q, want %q", rc.Command, "aider")
 	}
@@ -1530,10 +1531,10 @@ func TestLoadRuntimeConfigFromSettings(t *testing.T) {
 	}
 }
 
-func TestLoadRuntimeConfigFallsBackToDefaults(t *testing.T) {
+func TestResolveRoleAgentConfigFallsBackToDefaults(t *testing.T) {
 	t.Parallel()
-	// Non-existent path should use defaults
-	rc := LoadRuntimeConfig("/nonexistent/path")
+	// Non-existent paths should use defaults
+	rc := ResolveRoleAgentConfig("polecat", "/nonexistent/town", "/nonexistent/rig")
 	if !isClaudeCommand(rc.Command) {
 		t.Errorf("Command = %q, want claude or path ending in /claude (default)", rc.Command)
 	}
@@ -2294,7 +2295,7 @@ func TestFillRuntimeDefaults(t *testing.T) {
 		}
 	})
 
-	t.Run("nil nested structs remain nil", func(t *testing.T) {
+	t.Run("nil nested structs remain nil except auto-filled Hooks", func(t *testing.T) {
 		t.Parallel()
 		input := &RuntimeConfig{
 			Command: "claude",
@@ -2307,8 +2308,12 @@ func TestFillRuntimeDefaults(t *testing.T) {
 		if result.Session != nil {
 			t.Error("Session should remain nil when input has nil Session")
 		}
-		if result.Hooks != nil {
-			t.Error("Hooks should remain nil when input has nil Hooks")
+		// Hooks is auto-filled for known agents (claude, opencode) to ensure
+		// EnsureSettingsForRole creates the correct settings files
+		if result.Hooks == nil {
+			t.Error("Hooks should be auto-filled for claude command")
+		} else if result.Hooks.Provider != "claude" {
+			t.Errorf("Hooks.Provider = %q, want %q", result.Hooks.Provider, "claude")
 		}
 		if result.Tmux != nil {
 			t.Error("Tmux should remain nil when input has nil Tmux")

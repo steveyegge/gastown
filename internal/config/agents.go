@@ -374,6 +374,25 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		rc.Command = resolveClaudePath()
 	}
 
+	// Add Hooks configuration for agents that support hooks.
+	// This ensures EnsureSettingsForRole creates the correct settings/plugin.
+	if info.SupportsHooks {
+		switch info.Command {
+		case "claude":
+			rc.Hooks = &RuntimeHooksConfig{
+				Provider:     "claude",
+				Dir:          ".claude",
+				SettingsFile: "settings.json",
+			}
+		case "opencode":
+			rc.Hooks = &RuntimeHooksConfig{
+				Provider:     "opencode",
+				Dir:          ".opencode/plugin",
+				SettingsFile: "gastown.js",
+			}
+		}
+	}
+
 	return rc
 }
 
