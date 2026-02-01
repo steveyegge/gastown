@@ -236,6 +236,11 @@ func (s *SpawnedPolecatInfo) StartSession() (string, error) {
 		fmt.Printf("Warning: could not update agent state: %v\n", err)
 	}
 
+	// Update issue status from hooked to in_progress
+	if err := polecatMgr.SetState(s.PolecatName, polecat.StateWorking); err != nil {
+		fmt.Printf("Warning: could not update issue status to in_progress: %v\n", err)
+	}
+
 	// Get pane
 	pane, err := getSessionPane(s.SessionName)
 	if err != nil {
