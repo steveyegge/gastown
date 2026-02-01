@@ -1182,18 +1182,23 @@ func (t *Tmux) IsRuntimeRunning(session string, processNames []string) bool {
 			return true
 		}
 	}
-	// If pane command is a shell, check for child processes.
-	// This handles agents started with "bash -c 'export ... && agent ...'"
+	// Check for child processes if pane command is a shell or unrecognized.
+	// This handles:
+	// - Agents started with "bash -c 'export ... && agent ...'"
+	// - Claude Code showing version as argv[0] (e.g., "2.1.29")
+	pid, err := t.GetPanePID(session)
+	if err != nil || pid == "" {
+		return false
+	}
+	// If pane command is a shell, check descendants
 	for _, shell := range constants.SupportedShells {
 		if cmd == shell {
-			pid, err := t.GetPanePID(session)
-			if err == nil && pid != "" {
-				return hasChildWithNames(pid, processNames)
-			}
-			break
+			return hasDescendantWithNames(pid, processNames, 0)
 		}
 	}
-	return false
+	// If pane command is unrecognized (not in processNames, not a shell),
+	// still check descendants as fallback. This handles version-as-argv[0].
+	return hasDescendantWithNames(pid, processNames, 0)
 }
 
 // IsAgentAlive checks if an agent is running in the session using agent-agnostic detection.
