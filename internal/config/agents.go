@@ -363,9 +363,10 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	}
 
 	rc := &RuntimeConfig{
-		Command: info.Command,
-		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
-		Env:     envCopy,
+		Provider: string(preset), // Set provider for hook configuration
+		Command:  info.Command,
+		Args:     append([]string(nil), info.Args...), // Copy to avoid mutation
+		Env:      envCopy,
 	}
 
 	// Resolve command path for claude preset (handles alias installations)
@@ -374,7 +375,9 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		rc.Command = resolveClaudePath()
 	}
 
-	return rc
+	// Apply defaults including hook configuration for agents that support them.
+	// This ensures Hooks is properly set up based on the provider.
+	return normalizeRuntimeConfig(rc)
 }
 
 // BuildResumeCommand builds a command to resume an agent session.
