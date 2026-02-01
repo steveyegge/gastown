@@ -402,10 +402,8 @@ func (c *ClaudeSettingsCheck) checkSettings(path, agentType string) []string {
 		missing = append(missing, "turn-clear hook")
 	}
 
-	// Check PostToolUse hook has turn-mark (turn enforcement)
-	if !c.hookHasPattern(hooks, "PostToolUse", "gt decision turn-mark") {
-		missing = append(missing, "turn-mark hook")
-	}
+	// Note: turn-mark hook is no longer required - marker is set directly in gt decision request
+	// (commit 4f1918e8)
 
 	// Check PostToolUse hook has inject drain (queue-based injection pipeline)
 	if !c.hookHasPattern(hooks, "PostToolUse", "gt inject drain") {

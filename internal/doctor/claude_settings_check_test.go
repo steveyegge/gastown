@@ -77,15 +77,6 @@ func createValidSettings(t *testing.T, path string) {
 						},
 					},
 				},
-				map[string]any{
-					"matcher": "Bash",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": "gt decision turn-mark",
-						},
-					},
-				},
 			},
 			"Stop": []any{
 				map[string]any{

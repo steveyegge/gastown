@@ -75,15 +75,6 @@
             "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt inject drain --quiet && gt nudge drain --quiet"
           }
         ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && gt decision turn-mark"
-          }
-        ]
       }
     ],
     "Stop": [
