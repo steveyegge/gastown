@@ -257,8 +257,8 @@ func (p *Pruner) pruneFile(filePath string) (*PruneResult, error) {
 		return nil, err
 	}
 	defer func() {
-		tmpFile.Close()
-		os.Remove(tmpPath) // Clean up on error
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath) // Clean up on error
 	}()
 
 	now := time.Now()
@@ -331,8 +331,10 @@ func (p *Pruner) pruneFile(filePath string) (*PruneResult, error) {
 	result.BytesAfter = tmpInfo.Size()
 
 	// Close files before rename
-	srcFile.Close()
-	tmpFile.Close()
+	_ = srcFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return nil, fmt.Errorf("closing temp file: %w", err)
+	}
 
 	// Atomic replace
 	if err := os.Rename(tmpPath, filePath); err != nil {
