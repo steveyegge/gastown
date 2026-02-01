@@ -870,26 +870,29 @@ func (t *Tmux) NudgeSession(session, message string) error {
 		return err
 	}
 
-	// 2. Wait 500ms for paste to complete (tested, required)
-	time.Sleep(500 * time.Millisecond)
+	// 2. Wait for paste to complete - Claude's TUI needs time to render the text and be ready
+	// for input. Shorter delays cause Enter to be interpreted as newline instead of submit.
+	// (gt-izluj7: increased from 500ms to 5s for reliable submission)
+	time.Sleep(5 * time.Second)
 
 	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
 	_, _ = t.run("send-keys", "-t", session, "Escape")
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	// 4. Send Enter with retry (critical for message submission)
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(300 * time.Millisecond)
 		}
 		if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
 			lastErr = err
 			continue
 		}
-		// 5. Wake the pane to trigger SIGWINCH for detached sessions
-		t.WakePaneIfDetached(session)
+		// 5. Wake the pane to trigger SIGWINCH - needed for both attached and detached sessions
+		// to ensure Claude's TUI processes the Enter key (gt-izluj7)
+		t.WakePane(session)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
@@ -897,7 +900,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 // NudgePane sends a message to a specific pane reliably.
 // Same pattern as NudgeSession but targets a pane ID (e.g., "%9") instead of session name.
-// After sending, triggers SIGWINCH to wake Claude in detached sessions.
+// After sending, triggers SIGWINCH to wake Claude's TUI event loop.
 // Nudges to the same pane are serialized to prevent interleaving.
 func (t *Tmux) NudgePane(pane, message string) error {
 	// Serialize nudges to this pane to prevent interleaving
@@ -910,26 +913,29 @@ func (t *Tmux) NudgePane(pane, message string) error {
 		return err
 	}
 
-	// 2. Wait 500ms for paste to complete (tested, required)
-	time.Sleep(500 * time.Millisecond)
+	// 2. Wait for paste to complete - Claude's TUI needs time to render the text and be ready
+	// for input. Shorter delays cause Enter to be interpreted as newline instead of submit.
+	// (gt-izluj7: increased from 500ms to 5s for reliable submission)
+	time.Sleep(5 * time.Second)
 
 	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	// See: https://github.com/anthropics/gastown/issues/307
 	_, _ = t.run("send-keys", "-t", pane, "Escape")
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	// 4. Send Enter with retry (critical for message submission)
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(300 * time.Millisecond)
 		}
 		if _, err := t.run("send-keys", "-t", pane, "Enter"); err != nil {
 			lastErr = err
 			continue
 		}
-		// 5. Wake the pane to trigger SIGWINCH for detached sessions
-		t.WakePaneIfDetached(pane)
+		// 5. Wake the pane to trigger SIGWINCH - needed for both attached and detached sessions
+		// to ensure Claude's TUI processes the Enter key (gt-izluj7)
+		t.WakePane(pane)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
