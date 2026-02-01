@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -189,9 +188,9 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 			// procps-ng kill (v4.0.4+) misparses "-PGID" and can kill ALL processes.
 			// syscall.Kill with negative PID targets the process group (POSIX).
 			pgidInt, _ := strconv.Atoi(pgid)
-			_ = syscall.Kill(-pgidInt, syscall.SIGTERM)
+			_ = killProcessGroup(pgidInt, sigTERM)
 			time.Sleep(100 * time.Millisecond)
-			_ = syscall.Kill(-pgidInt, syscall.SIGKILL)
+			_ = killProcessGroup(pgidInt, sigKILL)
 		}
 
 		// Also walk the process tree for any descendants that might have called setsid()
@@ -388,12 +387,12 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 	// - Are not direct children but stayed in the same process group
 	pgid := getProcessGroupID(pid)
 	if pgid != "" && pgid != "0" && pgid != "1" {
-		// Kill process group using syscall.Kill() directly.
+		// Kill process group using platform-specific helper.
 		// See comment in KillSessionWithProcesses for why we avoid exec.Command("kill").
 		pgidInt, _ := strconv.Atoi(pgid)
-		_ = syscall.Kill(-pgidInt, syscall.SIGTERM)
+		_ = killProcessGroup(pgidInt, sigTERM)
 		time.Sleep(100 * time.Millisecond)
-		_ = syscall.Kill(-pgidInt, syscall.SIGKILL)
+		_ = killProcessGroup(pgidInt, sigKILL)
 	}
 
 	// Also walk the process tree for any descendants that might have called setsid()
