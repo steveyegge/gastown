@@ -361,7 +361,7 @@ func detectRole(cwd, townRoot string) RoleInfo {
 // runBdPrime runs `bd prime` and outputs the result.
 // This provides beads workflow context to the agent.
 func runBdPrime(workDir string) {
-	cmd := exec.Command("bd", "--no-daemon", "prime")
+	cmd := exec.Command("bd", "prime")
 	cmd.Dir = workDir
 
 	var stdout, stderr bytes.Buffer
@@ -561,7 +561,7 @@ func checkSlungWork(ctx RoleContext) bool {
 	} else {
 		// No molecule - show bead preview using bd show
 		fmt.Println("**Bead details:**")
-		cmd := exec.Command("bd", "--no-daemon", "show", hookedBead.ID)
+		cmd := exec.Command("bd", "show", hookedBead.ID)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -803,7 +803,7 @@ func ensureBeadsRedirect(ctx RoleContext) {
 // This is called on Mayor startup to surface issues needing human attention.
 func checkPendingEscalations(ctx RoleContext) {
 	// Query for open escalations using bd list with tag filter
-	cmd := exec.Command("bd", "--no-daemon", "list", "--status=open", "--tag=escalation", "--json")
+	cmd := exec.Command("bd", "list", "--status=open", "--tag=escalation", "--json")
 	cmd.Dir = ctx.WorkDir
 
 	var stdout, stderr bytes.Buffer

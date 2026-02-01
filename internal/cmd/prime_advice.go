@@ -100,7 +100,7 @@ func buildAgentID(ctx RoleInfo) string {
 
 // queryAdviceBeads fetches all advice beads from the beads database.
 func queryAdviceBeads() ([]AdviceBead, error) {
-	cmd := exec.Command("bd", "--no-daemon", "list", "-t", "advice", "--json", "--limit", "100")
+	cmd := exec.Command("bd", "list", "-t", "advice", "--json", "--limit", "100")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bd list advice: %w", err)

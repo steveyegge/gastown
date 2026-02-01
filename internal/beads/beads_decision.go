@@ -276,7 +276,6 @@ func (b *Beads) CreateBdDecision(fields *DecisionFields) (*Issue, error) {
 	args := []string{"decision", "create", "--json",
 		"--prompt=" + fields.Question,
 		"--options=" + string(optionsJSON),
-		"--no-daemon", // Use direct mode to avoid daemon issues
 	}
 
 	// Add urgency if specified (gt-7eew9)
@@ -448,7 +447,7 @@ func (b *Beads) resolveBdDecision(dp *BdDecisionPoint, id string, chosenIndex in
 	optionID := dp.Options[chosenIndex-1].ID
 
 	// Build respond command
-	args := []string{"decision", "respond", id, "--select=" + optionID, "--no-daemon"}
+	args := []string{"decision", "respond", id, "--select=" + optionID}
 	if rationale != "" {
 		args = append(args, "--text="+rationale)
 	}
@@ -469,7 +468,7 @@ func (b *Beads) ResolveDecisionWithCustomText(id, customText, resolvedBy string)
 	}
 
 	// Build respond command with --accept-guidance to accept custom text as directive
-	args := []string{"decision", "respond", id, "--text=" + customText, "--accept-guidance", "--no-daemon"}
+	args := []string{"decision", "respond", id, "--text=" + customText, "--accept-guidance"}
 	if resolvedBy != "" {
 		args = append(args, "--by="+resolvedBy)
 	}
@@ -575,7 +574,7 @@ func (b *Beads) GetDecisionBead(id string) (*Issue, *DecisionFields, error) {
 
 // GetBdDecision retrieves a decision from the decision_points table by issue ID.
 func (b *Beads) GetBdDecision(id string) (*BdDecisionPoint, error) {
-	out, err := b.run("decision", "show", id, "--json", "--no-daemon")
+	out, err := b.run("decision", "show", id, "--json")
 	if err != nil {
 		return nil, err
 	}
@@ -710,8 +709,7 @@ type BdDecisionPoint = BdDecisionShowResponse
 // These are decisions created with `bd decision create` (not `gt decision request`).
 func (b *Beads) ListBdDecisions() ([]*Issue, error) {
 	// Note: bd decision list shows pending by default (no --pending flag)
-	// Use --no-daemon since daemon doesn't support Dolt backend
-	out, err := b.run("decision", "list", "--json", "--no-daemon")
+	out, err := b.run("decision", "list", "--json")
 	if err != nil {
 		// If bd decision list fails, return empty (not all beads DBs have decision_points)
 		return nil, nil

@@ -37,7 +37,7 @@ type PatrolConfig struct {
 func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool) {
 	// Check for in-progress patrol first (if configured)
 	if cfg.CheckInProgress {
-		cmdList := exec.Command("bd", "--no-daemon", "list", "--status=in_progress", "--type=epic")
+		cmdList := exec.Command("bd", "list", "--status=in_progress", "--type=epic")
 		cmdList.Dir = cfg.BeadsDir
 		var stdoutList, stderrList bytes.Buffer
 		cmdList.Stdout = &stdoutList
@@ -61,7 +61,7 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 	}
 
 	// Check for open patrols with open children (active wisp)
-	cmdOpen := exec.Command("bd", "--no-daemon", "list", "--status=open", "--type=epic")
+	cmdOpen := exec.Command("bd", "list", "--status=open", "--type=epic")
 	cmdOpen.Dir = cfg.BeadsDir
 	var stdoutOpen, stderrOpen bytes.Buffer
 	cmdOpen.Stdout = &stdoutOpen
@@ -79,7 +79,7 @@ func findActivePatrol(cfg PatrolConfig) (patrolID, patrolLine string, found bool
 				if len(parts) > 0 {
 					molID := parts[0]
 					// Check if this molecule has open children
-					cmdShow := exec.Command("bd", "--no-daemon", "show", molID)
+					cmdShow := exec.Command("bd", "show", molID)
 					cmdShow.Dir = cfg.BeadsDir
 					var stdoutShow, stderrShow bytes.Buffer
 					cmdShow.Stdout = &stdoutShow
@@ -144,7 +144,7 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Create the patrol wisp with JSON output for reliable parsing
-	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName, "--json")
+	cmdSpawn := exec.Command("bd", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName, "--json")
 	cmdSpawn.Dir = cfg.BeadsDir
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
@@ -166,7 +166,7 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Hook the wisp to the agent so gt mol status sees it
-	cmdPin := exec.Command("bd", "--no-daemon", "update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee)
+	cmdPin := exec.Command("bd", "update", patrolID, "--status=hooked", "--assignee="+cfg.Assignee)
 	cmdPin.Dir = cfg.BeadsDir
 	if err := cmdPin.Run(); err != nil {
 		return patrolID, fmt.Errorf("created wisp %s but failed to hook", patrolID)
@@ -258,7 +258,7 @@ func setPatrolAgentHookSlot(patrolID string, cfg PatrolConfig) {
 		return
 	}
 
-	cmdHookSlot := exec.Command("bd", "--no-daemon", "slot", "set", agentBeadID, "hook", patrolID)
+	cmdHookSlot := exec.Command("bd", "slot", "set", agentBeadID, "hook", patrolID)
 	cmdHookSlot.Dir = cfg.BeadsDir
 	if err := cmdHookSlot.Run(); err != nil {
 		// Non-fatal: the work is still hooked (status=hooked), but the agent bead's hook slot

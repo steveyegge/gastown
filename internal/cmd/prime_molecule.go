@@ -31,7 +31,7 @@ type MoleculeCurrentOutput struct {
 // with execution instructions. This is the core of the Propulsion Principle.
 func showMoleculeExecutionPrompt(workDir, moleculeID string) {
 	// Call bd mol current with JSON output
-	cmd := exec.Command("bd", "--no-daemon", "mol", "current", moleculeID, "--json")
+	cmd := exec.Command("bd", "mol", "current", moleculeID, "--json")
 	cmd.Dir = workDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

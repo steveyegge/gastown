@@ -45,8 +45,6 @@ func verifyBeadExists(beadID string) error {
 	if townRoot, err := workspace.FindFromCwd(); err == nil {
 		cmd.Dir = townRoot
 	}
-	// Use Output() instead of Run() to detect bd --no-daemon exit 0 bug:
-	// when issue not found, --no-daemon exits 0 but produces empty stdout.
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("bead '%s' not found (bd show failed)", beadID)
@@ -59,9 +57,9 @@ func verifyBeadExists(beadID string) error {
 
 // getBeadInfo returns status and assignee for a bead.
 // Uses bd's native prefix-based routing via routes.jsonl.
-// Uses --no-daemon with --allow-stale for consistency with verifyBeadExists.
+// Uses --allow-stale for consistency with verifyBeadExists.
 func getBeadInfo(beadID string) (*beadInfo, error) {
-	cmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
+	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
 	// Run from town root so bd can find routes.jsonl for prefix-based routing.
 	if townRoot, err := workspace.FindFromCwd(); err == nil {
 		cmd.Dir = townRoot
@@ -70,8 +68,7 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
 	}
-	// Handle bd --no-daemon exit 0 bug: when issue not found,
-	// --no-daemon exits 0 but produces empty stdout (error goes to stderr).
+	// Handle empty stdout case: issue not found.
 	if len(out) == 0 {
 		return nil, fmt.Errorf("bead '%s' not found", beadID)
 	}
@@ -90,12 +87,12 @@ func getBeadInfo(beadID string) (*beadInfo, error) {
 // This enables no-tmux mode where agents discover args via gt prime / bd show.
 func storeArgsInBead(beadID, args string) error {
 	// Get the bead to preserve existing description content
-	showCmd := exec.Command("bd", "--no-daemon", "show", beadID, "--json", "--allow-stale")
+	showCmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
 	out, err := showCmd.Output()
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
 	}
-	// Handle bd --no-daemon exit 0 bug: empty stdout means not found
+	// Handle empty stdout case: bead not found
 	if len(out) == 0 {
 		return fmt.Errorf("bead not found")
 	}
@@ -130,7 +127,7 @@ func storeArgsInBead(beadID, args string) error {
 	}
 
 	// Update the bead
-	updateCmd := exec.Command("bd", "--no-daemon", "update", beadID, "--description="+newDesc)
+	updateCmd := exec.Command("bd", "update", beadID, "--description="+newDesc)
 	updateCmd.Stderr = os.Stderr
 	if err := updateCmd.Run(); err != nil {
 		return fmt.Errorf("updating bead description: %w", err)
@@ -141,7 +138,7 @@ func storeArgsInBead(beadID, args string) error {
 
 // storeDispatcherInBead stores the dispatcher agent ID in the bead's description.
 // This enables polecats to notify the dispatcher when work is complete.
-// Uses daemon-first approach: daemon mode if available, --no-daemon fallback.
+// Uses daemon for database operations.
 func storeDispatcherInBead(beadID, dispatcher string) error {
 	if dispatcher == "" {
 		return nil
@@ -153,7 +150,7 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 	if err != nil {
 		return fmt.Errorf("fetching bead: %w", err)
 	}
-	// Handle bd --no-daemon exit 0 bug: empty stdout means not found
+	// Handle empty stdout case: bead not found
 	if len(out) == 0 {
 		return fmt.Errorf("bead not found")
 	}
@@ -193,7 +190,7 @@ func storeDispatcherInBead(beadID, dispatcher string) error {
 // storeAttachedMoleculeInBead sets the attached_molecule field in a bead's description.
 // This is required for gt hook to recognize that a molecule is attached to the bead.
 // Called after bonding a formula wisp to a bead via "gt sling <formula> --on <bead>".
-// Uses daemon-first approach: daemon mode if available, --no-daemon fallback.
+// Uses daemon for database operations.
 func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 	if moleculeID == "" {
 		return nil
@@ -211,7 +208,7 @@ func storeAttachedMoleculeInBead(beadID, moleculeID string) error {
 		if err != nil {
 			return fmt.Errorf("fetching bead: %w", err)
 		}
-		// Handle bd --no-daemon exit 0 bug: empty stdout means not found
+		// Handle empty stdout case: bead not found
 		if len(out) == 0 {
 			return fmt.Errorf("bead not found")
 		}
@@ -741,7 +738,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 
 	// Step 1: Cook the formula (ensures proto exists)
 	if !skipCook {
-		cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
+		cookCmd := exec.Command("bd", "cook", formulaName)
 		cookCmd.Dir = formulaWorkDir
 		cookCmd.Stderr = os.Stderr
 		if err := cookCmd.Run(); err != nil {
@@ -752,7 +749,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	// Step 2: Create wisp with feature and issue variables from bead
 	featureVar := fmt.Sprintf("feature=%s", title)
 	issueVar := fmt.Sprintf("issue=%s", beadID)
-	wispArgs := []string{"--no-daemon", "mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar}
+	wispArgs := []string{"mol", "wisp", formulaName, "--var", featureVar, "--var", issueVar}
 	for _, variable := range extraVars {
 		wispArgs = append(wispArgs, "--var", variable)
 	}
@@ -773,7 +770,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 	}
 
 	// Step 3: Bond wisp to original bead (creates compound)
-	bondArgs := []string{"--no-daemon", "mol", "bond", wispRootID, beadID, "--json"}
+	bondArgs := []string{"mol", "bond", wispRootID, beadID, "--json"}
 	bondCmd := exec.Command("bd", bondArgs...)
 	bondCmd.Dir = formulaWorkDir
 	bondCmd.Stderr = os.Stderr
@@ -799,7 +796,7 @@ func InstantiateFormulaOnBead(formulaName, beadID, title, hookWorkDir, townRoot 
 // CookFormula cooks a formula to ensure its proto exists.
 // This is useful for batch mode where we cook once before processing multiple beads.
 func CookFormula(formulaName, workDir string) error {
-	cookCmd := exec.Command("bd", "--no-daemon", "cook", formulaName)
+	cookCmd := exec.Command("bd", "cook", formulaName)
 	cookCmd.Dir = workDir
 	cookCmd.Stderr = os.Stderr
 	return cookCmd.Run()

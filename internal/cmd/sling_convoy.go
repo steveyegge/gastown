@@ -119,7 +119,7 @@ func createAutoConvoyWithOptions(beadID, beadTitle, assignee string, opts Convoy
 		createArgs = append(createArgs, "--force")
 	}
 
-	createCmd := exec.Command("bd", append([]string{"--no-daemon"}, createArgs...)...)
+	createCmd := exec.Command("bd", createArgs...)
 	createCmd.Dir = townRoot // Run from town root so bd can find .beads/config.yaml
 	createCmd.Stderr = os.Stderr
 
@@ -129,7 +129,7 @@ func createAutoConvoyWithOptions(beadID, beadTitle, assignee string, opts Convoy
 
 	// Add tracking relation: convoy tracks the issue
 	trackBeadID := formatTrackBeadID(beadID)
-	depArgs := []string{"--no-daemon", "dep", "add", convoyID, trackBeadID, "--type=tracks"}
+	depArgs := []string{"dep", "add", convoyID, trackBeadID, "--type=tracks"}
 	depCmd := exec.Command("bd", depArgs...)
 	depCmd.Dir = townRoot // Run from town root so bd can find .beads/config.yaml
 	depCmd.Stderr = os.Stderr
@@ -151,7 +151,7 @@ func addToConvoy(convoyID, beadID string) error {
 	}
 
 	// Check if convoy exists and get its status
-	showArgs := []string{"--no-daemon", "show", convoyID, "--json"}
+	showArgs := []string{"show", convoyID, "--json"}
 	showCmd := exec.Command("bd", showArgs...)
 	showCmd.Dir = townRoot
 	out, err := showCmd.Output()
@@ -176,7 +176,7 @@ func addToConvoy(convoyID, beadID string) error {
 
 	// If convoy is closed, reopen it
 	if convoy.Status == "closed" {
-		reopenArgs := []string{"--no-daemon", "update", convoyID, "--status=open"}
+		reopenArgs := []string{"update", convoyID, "--status=open"}
 		reopenCmd := exec.Command("bd", reopenArgs...)
 		reopenCmd.Dir = townRoot
 		if err := reopenCmd.Run(); err != nil {
@@ -187,7 +187,7 @@ func addToConvoy(convoyID, beadID string) error {
 
 	// Add tracking relation: convoy tracks the issue
 	trackBeadID := formatTrackBeadID(beadID)
-	depArgs := []string{"--no-daemon", "dep", "add", convoyID, trackBeadID, "--type=tracks"}
+	depArgs := []string{"dep", "add", convoyID, trackBeadID, "--type=tracks"}
 	depCmd := exec.Command("bd", depArgs...)
 	depCmd.Dir = townRoot
 	depCmd.Stderr = os.Stderr

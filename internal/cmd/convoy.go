@@ -1681,7 +1681,7 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 
 	// Build args: bd --no-daemon show id1 id2 id3 ... --json
 	// Use --no-daemon to ensure fresh data (avoid stale cache from daemon)
-	args := append([]string{"--no-daemon", "show"}, issueIDs...)
+	args := append([]string{"show"}, issueIDs...)
 	args = append(args, "--json")
 
 	showCmd := exec.Command("bd", args...)
@@ -1728,7 +1728,7 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 func getIssueDetails(issueID string) *issueDetails {
 	// Use bd show with routing - it should find the issue in the right rig
 	// Use --no-daemon to ensure fresh data (avoid stale cache)
-	showCmd := exec.Command("bd", "--no-daemon", "show", issueID, "--json")
+	showCmd := exec.Command("bd", "show", issueID, "--json")
 	var stdout bytes.Buffer
 	showCmd.Stdout = &stdout
 
