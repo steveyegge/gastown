@@ -23,27 +23,52 @@ Static role templates capture general patterns, but every deployment evolves:
 The advice system bridges the gap between static documentation and dynamic operational
 learning, creating a feedback loop where failures become guidance for future agents.
 
-## Targeting Hierarchy
+## Subscription Model
 
-Advice uses a three-level targeting hierarchy. Each advice bead specifies one target
-scope, and agents receive advice that matches their context:
+Advice uses a **label-based subscription model**. Advice is tagged with labels,
+and agents automatically subscribe to labels matching their context.
 
-| Scope | Field | Example | Matches |
-|-------|-------|---------|---------|
-| **Agent** | `advice_target_agent` | `gastown/polecats/alpha` | Only that specific agent |
-| **Role** | `advice_target_role` | `polecat` | All polecats in all rigs |
-| **Rig** | `advice_target_rig` | `gastown` | All agents in gastown |
-| **Global** | (all empty) | - | Every agent everywhere |
+### Auto-Subscriptions
+
+When `gt prime` runs, it queries `bd advice list --for=<agent-id>` which
+auto-subscribes the agent to:
+
+| Label | Example | What it matches |
+|-------|---------|-----------------|
+| `global` | `global` | All agents |
+| `agent:<id>` | `agent:gastown/crew/prime_analyst` | Specific agent |
+| `rig:<name>` | `rig:gastown` | All agents in that rig |
+| `role:<type>` | `role:crew` | All agents of that role type |
+
+### Creating Advice with Labels
+
+```bash
+# Global advice (use -l global or let beads add it automatically)
+bd advice add "Always verify git status" -l global
+
+# Role-targeted advice
+bd advice add "Complete work before gt done" -l role:polecat
+
+# Rig-targeted advice
+bd advice add "Use fimbaz account" -l rig:gastown
+
+# Multiple labels (advice appears if ANY label matches)
+bd advice add "Go testing tips" -l testing -l go
+```
+
+### Convenience Flags
+
+The `--rig`, `--role`, and `--agent` flags add the corresponding labels:
+
+```bash
+bd advice add "Check hook first" --role polecat
+# Equivalent to: bd advice add "Check hook first" -l role:polecat
+```
 
 ### Matching Rules
 
-1. **Agent-specific** advice matches only if `advice_target_agent` equals the agent's full ID
-2. **Role-specific** advice matches if `advice_target_role` equals the agent's role type
-3. **Rig-specific** advice matches if `advice_target_rig` equals the agent's rig
-4. **Global** advice (no targeting fields set) matches all agents
-
-All matching advice is shown - there's no "most specific wins" exclusion. An agent
-might see global advice, role advice, and agent-specific advice simultaneously.
+An agent sees advice where **any** of their subscribed labels matches **any**
+label on the advice. All matching advice is shown - there's no "most specific wins".
 
 ## Agent Identity Format
 
@@ -235,9 +260,11 @@ bd create -t advice "Verify git status before pushing" \
 The advice delivery is implemented in `internal/cmd/prime_advice.go`:
 
 - `outputAdviceContext()` - Main entry point, called from `gt prime`
-- `queryAdviceBeads()` - Fetches all advice via `bd list -t advice --json`
-- `filterApplicableAdvice()` - Matches advice to agent context
+- `queryAdviceForAgent()` - Fetches advice via `bd advice list --for=<agent-id>`
 - `buildAgentID()` - Constructs agent identity from role context
+- `getAdviceScope()` - Determines display scope from labels
+
+The subscription matching is delegated to beads - see `beads/docs/design/advice-subscription-model-v2.md`.
 
 ### Query Limit
 
