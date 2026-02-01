@@ -87,6 +87,19 @@ func NewLiveConvoyFetcher() (*LiveConvoyFetcher, error) {
 	}, nil
 }
 
+// NewLiveConvoyFetcherWithRoot creates a fetcher for a specific town root.
+func NewLiveConvoyFetcherWithRoot(townRoot string) (*LiveConvoyFetcher, error) {
+	// Validate the town root exists
+	if _, err := os.Stat(townRoot); os.IsNotExist(err) {
+		return nil, fmt.Errorf("town root does not exist: %s", townRoot)
+	}
+
+	return &LiveConvoyFetcher{
+		townRoot:  townRoot,
+		townBeads: filepath.Join(townRoot, ".beads"),
+	}, nil
+}
+
 // FetchConvoys fetches all open convoys with their activity data.
 func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 	// List all open convoy-type issues
