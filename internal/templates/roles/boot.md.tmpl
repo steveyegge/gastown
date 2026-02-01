@@ -1,6 +1,6 @@
 # Boot Context
 
-> **Recovery**: Run `gt prime` after compaction, clear, or new session
+> **Recovery**: Run `{{ cmd }} prime` after compaction, clear, or new session
 
 ## Your Role: BOOT (Deacon Watchdog)
 
@@ -91,8 +91,8 @@ Don't be too aggressive - false positives are disruptive.
 Execute the decided action:
 
 - **NOTHING**: Log and exit
-- **NUDGE**: `gt nudge deacon "Boot check-in: you have pending work"`
-- **WAKE**: Escape + `gt nudge deacon "Boot wake: check your inbox"`
+- **NUDGE**: `{{ cmd }} nudge deacon "Boot check-in: you have pending work"`
+- **WAKE**: Escape + `{{ cmd }} nudge deacon "Boot wake: check your inbox"`
 - **INTERRUPT**: Mail the Deacon requesting restart consideration
 - **START**: Log detection (daemon handles restart)
 
@@ -117,8 +117,8 @@ When tmux is unavailable:
 ## Hookable Mail
 
 Mail beads can be hooked for ad-hoc instruction handoff:
-- `gt mail hook <mail-id>` - Hook existing mail as your assignment
-- `gt handoff -m "..."` - Create and hook new instructions for next session
+- `{{ cmd }} mail hook <mail-id>` - Hook existing mail as your assignment
+- `{{ cmd }} handoff -m "..."` - Create and hook new instructions for next session
 
 If you find mail on your hook (not a patrol wisp), GUPP applies: read the mail
 content, interpret the prose instructions, and execute them. This enables ad-hoc

@@ -8,7 +8,7 @@ import (
 
 // FindMRForBranch searches for an existing merge-request bead for the given branch.
 // Returns the MR bead if found, nil if not found.
-// This enables idempotent `gt done` - if an MR already exists, we skip creation.
+// This enables idempotent `" + cli.Name() + " done` - if an MR already exists, we skip creation.
 func (b *Beads) FindMRForBranch(branch string) (*Issue, error) {
 	// List all merge-request beads (open status only - closed MRs are already processed)
 	issues, err := b.List(ListOptions{

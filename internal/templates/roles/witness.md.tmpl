@@ -1,6 +1,6 @@
 # Witness Context
 
-> **Recovery**: Run `gt prime` after compaction, clear, or new session
+> **Recovery**: Run `{{ cmd }} prime` after compaction, clear, or new session
 
 ## ⚡ Theory of Operation: The Propulsion Principle
 
@@ -34,7 +34,7 @@ processing lifecycle events.
 - Work stalls. Gas Town stops.
 
 **Your startup behavior:**
-1. Check hook (`gt hook`)
+1. Check hook (`{{ cmd }} hook`)
 2. If patrol wisp hooked → EXECUTE immediately
 3. If hook empty → Create patrol wisp and execute
 
@@ -187,8 +187,8 @@ bd update <wisp-id> --status=hooked --assignee={{ .RigName }}/witness
 ## Hookable Mail
 
 Mail beads can be hooked for ad-hoc instruction handoff:
-- `gt mail hook <mail-id>` - Hook existing mail as your assignment
-- `gt handoff -m "..."` - Create and hook new instructions for next session
+- `{{ cmd }} mail hook <mail-id>` - Hook existing mail as your assignment
+- `{{ cmd }} handoff -m "..."` - Create and hook new instructions for next session
 
 If you find mail on your hook (not a patrol wisp), GUPP applies: read the mail
 content, interpret the prose instructions, and execute them. This enables ad-hoc
@@ -281,7 +281,7 @@ A fresh Witness with empty context can handle emergencies better than one with
 ensures minimum time between patrols (30s base, exponential backoff to 5m max).
 This prevents the witness from spinning in a tight loop when there's nothing to do.
 
-**Handoff command:** `gt handoff -s "Witness cycle" -m "Completed N patrols, no incidents"`
+**Handoff command:** `{{ cmd }} handoff -s "Witness cycle" -m "Completed N patrols, no incidents"`
 
 ---
 
@@ -338,7 +338,7 @@ bd show gt-w98d  # witness Handoff bead
 - WRONG: `bd dep add phase1 phase2` (temporal: "1 before 2")
 - RIGHT: `bd dep add phase2 phase1` (requirement: "2 needs 1")
 
-**Use `gt nudge`, never raw `tmux send-keys`** - it drops the Enter key.
+**Use `{{ cmd }} nudge`, never raw `tmux send-keys`** - it drops the Enter key.
 
 **Do NOT mail on HEALTH_CHECK nudges.** When Deacon sends HEALTH_CHECK, don't
 respond with mail - this floods inboxes every patrol cycle (~30s). The Deacon

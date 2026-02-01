@@ -532,7 +532,7 @@ func (m *Manager) RemoveWithOptions(name string, force, nuclear, selfNuke bool) 
 
 	// Check if user's shell is cd'd into the worktree (prevents broken shell)
 	// This check runs unless selfNuke=true (polecat deleting its own worktree).
-	// When a polecat calls `gt done`, it's inside its worktree by design - the session
+	// When a polecat calls `" + cli.Name() + " done`, it's inside its worktree by design - the session
 	// will be killed immediately after, so breaking the shell is expected and harmless.
 	// See: https://github.com/steveyegge/gastown/issues/942
 	if !selfNuke {

@@ -7,8 +7,32 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"text/template"
 )
+
+var (
+	cmdName     string
+	cmdNameOnce sync.Once
+)
+
+// CmdName returns the Gas Town CLI command name.
+// Defaults to "gt", but can be overridden with GT_COMMAND env var.
+// This allows coexistence with other tools that use "gt" (e.g., Graphite).
+func CmdName() string {
+	cmdNameOnce.Do(func() {
+		cmdName = os.Getenv("GT_COMMAND")
+		if cmdName == "" {
+			cmdName = "gt"
+		}
+	})
+	return cmdName
+}
+
+// templateFuncs provides custom functions for templates.
+var templateFuncs = template.FuncMap{
+	"cmd": CmdName, // {{ cmd }} returns the CLI command name
+}
 
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
@@ -85,15 +109,15 @@ type HandoffData struct {
 func New() (*Templates, error) {
 	t := &Templates{}
 
-	// Parse role templates
-	roleTempl, err := template.ParseFS(templateFS, "roles/*.md.tmpl")
+	// Parse role templates with custom functions
+	roleTempl, err := template.New("").Funcs(templateFuncs).ParseFS(templateFS, "roles/*.md.tmpl")
 	if err != nil {
 		return nil, fmt.Errorf("parsing role templates: %w", err)
 	}
 	t.roleTemplates = roleTempl
 
-	// Parse message templates
-	msgTempl, err := template.ParseFS(templateFS, "messages/*.md.tmpl")
+	// Parse message templates with custom functions
+	msgTempl, err := template.New("").Funcs(templateFuncs).ParseFS(templateFS, "messages/*.md.tmpl")
 	if err != nil {
 		return nil, fmt.Errorf("parsing message templates: %w", err)
 	}
