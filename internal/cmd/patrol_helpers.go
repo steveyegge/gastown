@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"bytes"
 	"fmt"
 	"os"
@@ -196,7 +197,7 @@ func outputPatrolContext(cfg PatrolConfig) {
 				fmt.Printf("⚠ %s\n", err.Error())
 			} else {
 				fmt.Println(style.Dim.Render(err.Error()))
-				fmt.Println(style.Dim.Render(fmt.Sprintf("Run `gt formula list` to troubleshoot.")))
+				fmt.Println(style.Dim.Render(fmt.Sprintf("Run `" + cli.Name() + " formula list` to troubleshoot.")))
 				return
 			}
 		} else {

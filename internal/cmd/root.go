@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/ui"
@@ -16,14 +17,21 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:     "gt",
+	Use:     "gt", // Updated in init() based on GT_COMMAND
 	Short:   "Gas Town - Multi-agent workspace manager",
 	Version: Version,
-	Long: `Gas Town (gt) manages multi-agent workspaces called rigs.
+	Long:    "", // Updated in init() based on GT_COMMAND
+	PersistentPreRunE: persistentPreRun,
+}
+
+func init() {
+	// Update command name based on GT_COMMAND env var
+	cmdName := cli.Name()
+	rootCmd.Use = cmdName
+	rootCmd.Long = fmt.Sprintf(`Gas Town (%s) manages multi-agent workspaces called rigs.
 
 It coordinates agent spawning, work distribution, and communication
-across distributed teams of AI agents working on shared codebases.`,
-	PersistentPreRunE: persistentPreRun,
+across distributed teams of AI agents working on shared codebases.`, cmdName)
 }
 
 // Commands that don't require beads to be installed/checked.

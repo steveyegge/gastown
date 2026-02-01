@@ -1,6 +1,7 @@
 package rig
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1072,7 +1073,7 @@ func (m *Manager) ListRigNames() []string {
 }
 
 // createRoleCLAUDEmd creates a minimal bootstrap pointer CLAUDE.md file.
-// Full context is injected ephemerally by `gt prime` at session start.
+// Full context is injected ephemerally by `" + cli.Name() + " prime` at session start.
 // This keeps on-disk files small (<30 lines) per the priming architecture.
 func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName string, workerName string) error {
 	// Create role-specific bootstrap pointer
@@ -1081,21 +1082,21 @@ func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName 
 	case "mayor":
 		bootstrap = `# Mayor Context (` + rigName + `)
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 `
 	case "refinery":
 		bootstrap = `# Refinery Context (` + rigName + `)
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 
 ## Quick Reference
 
-- Check MQ: ` + "`gt mq list`" + `
-- Process next: ` + "`gt mq process`" + `
+- Check MQ: ` + "`" + cli.Name() + " mq list`" + `
+- Process next: ` + "`" + cli.Name() + " mq process`" + `
 `
 	case "crew":
 		name := workerName
@@ -1104,14 +1105,14 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 		}
 		bootstrap = `# Crew Context (` + rigName + `/` + name + `)
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 
 ## Quick Reference
 
-- Check hook: ` + "`gt hook`" + `
-- Check mail: ` + "`gt mail inbox`" + `
+- Check hook: ` + "`" + cli.Name() + " hook`" + `
+- Check mail: ` + "`" + cli.Name() + " mail inbox`" + `
 `
 	case "polecat":
 		name := workerName
@@ -1120,21 +1121,21 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 		}
 		bootstrap = `# Polecat Context (` + rigName + `/` + name + `)
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 
 ## Quick Reference
 
-- Check hook: ` + "`gt hook`" + `
-- Report done: ` + "`gt done`" + `
+- Check hook: ` + "`" + cli.Name() + " hook`" + `
+- Report done: ` + "`" + cli.Name() + " done`" + `
 `
 	default:
 		bootstrap = `# Agent Context
 
-> **Recovery**: Run ` + "`gt prime`" + ` after compaction, clear, or new session
+> **Recovery**: Run ` + "`" + cli.Name() + " prime`" + ` after compaction, clear, or new session
 
-Full context is injected by ` + "`gt prime`" + ` at session start.
+Full context is injected by ` + "`" + cli.Name() + " prime`" + ` at session start.
 `
 	}
 

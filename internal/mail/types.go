@@ -49,7 +49,7 @@ type Delivery string
 
 const (
 	// DeliveryQueue creates the message in the mailbox for periodic checking.
-	// This is the default delivery mode. Agent checks with `gt mail check`.
+	// This is the default delivery mode. Agent checks with `" + cli.Name() + " mail check`.
 	DeliveryQueue Delivery = "queue"
 
 	// DeliveryInterrupt injects a system-reminder directly into the agent's session.

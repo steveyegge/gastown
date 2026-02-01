@@ -526,7 +526,7 @@ type agentBeadResponse struct {
 // Returns empty string if agent bead doesn't exist or has no cleanup_status.
 //
 // ZFC #10: This enables the Witness to verify it's safe to nuke before proceeding.
-// The polecat self-reports its git state when running `gt done`, and we trust that report.
+// The polecat self-reports its git state when running `" + cli.Name() + " done`, and we trust that report.
 func getCleanupStatus(workDir, rigName, polecatName string) string {
 	// Construct agent bead ID using the rig's configured prefix
 	// This supports non-gt prefixes like "bd-" for the beads rig

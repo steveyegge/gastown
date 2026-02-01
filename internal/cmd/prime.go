@@ -366,7 +366,7 @@ func runBdPrime(workDir string) {
 	}
 }
 
-// runMailCheckInject runs `gt mail check --inject` and outputs the result.
+// runMailCheckInject runs `" + cli.Name() + " mail check --inject` and outputs the result.
 // This injects any pending mail into the agent's context.
 func runMailCheckInject(workDir string) {
 	cmd := exec.Command("gt", "mail", "check", "--inject")

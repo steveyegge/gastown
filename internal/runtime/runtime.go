@@ -2,6 +2,7 @@
 package runtime
 
 import (
+	"github.com/steveyegge/gastown/internal/cli"
 	"os"
 	"strings"
 	"time"
@@ -168,10 +169,10 @@ func GetStartupFallbackInfo(rc *config.RuntimeConfig) *StartupFallbackInfo {
 
 // StartupNudgeContent returns the work instructions to send as a startup nudge.
 func StartupNudgeContent() string {
-	return "Check your hook with `gt hook`. If work is present, begin immediately."
+	return "Check your hook with `" + cli.Name() + " hook`. If work is present, begin immediately."
 }
 
 // BeaconPrimeInstruction returns the instruction to add to beacon for non-hook agents.
 func BeaconPrimeInstruction() string {
-	return "\n\nRun `gt prime` to initialize your context."
+	return "\n\nRun `" + cli.Name() + " prime` to initialize your context."
 }

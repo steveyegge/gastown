@@ -1570,7 +1570,7 @@ func (t *Tmux) SetCycleBindings(session string) error {
 
 // SetFeedBinding configures C-b a to jump to the activity feed window.
 // This creates the feed window if it doesn't exist, or switches to it if it does.
-// Uses `gt feed --window` which handles both creation and switching.
+// Uses `" + cli.Name() + " feed --window` which handles both creation and switching.
 //
 // IMPORTANT: This binding is conditional - it only runs for Gas Town sessions
 // (those starting with "gt-" or "hq-"). For non-GT sessions, a help message is shown.
@@ -1586,7 +1586,7 @@ func (t *Tmux) SetFeedBinding(session string) error {
 
 // CleanupOrphanedSessions scans for zombie Gas Town sessions and kills them.
 // A zombie session is one where tmux is alive but the Claude process has died.
-// This runs at `gt start` time to prevent session name conflicts and resource accumulation.
+// This runs at `" + cli.Name() + " start` time to prevent session name conflicts and resource accumulation.
 //
 // Returns:
 //   - cleaned: number of zombie sessions that were killed

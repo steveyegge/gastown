@@ -112,7 +112,7 @@ func FindFromCwdOrError() (string, error) {
 
 // FindFromCwdWithFallback is like FindFromCwdOrError but returns (townRoot, cwd, error).
 // If getcwd fails, returns (townRoot, "", nil) using GT_TOWN_ROOT fallback.
-// This is useful for commands like `gt done` that need to continue even if the
+// This is useful for commands like `" + cli.Name() + " done` that need to continue even if the
 // working directory is deleted (e.g., polecat worktree nuked by Witness).
 func FindFromCwdWithFallback() (townRoot string, cwd string, err error) {
 	cwd, err = os.Getwd()
