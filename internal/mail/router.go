@@ -477,10 +477,7 @@ func (r *Router) resolveOverseer() ([]string, error) {
 // resolveTownAgents resolves @town to all town-level agents (mayor, deacon).
 func (r *Router) resolveTownAgents() ([]string, error) {
 	// Town-level agents have rig=null in their description
-	agents, err := r.queryAgents("rig: null")
-	if err != nil {
-		return nil, err
-	}
+	agents := r.queryAgents("rig: null")
 
 	var addresses []string
 	for _, agent := range agents {
@@ -497,10 +494,7 @@ func (r *Router) resolveTownAgents() ([]string, error) {
 func (r *Router) resolveAgentsByRole(roleType, rig string) ([]string, error) {
 	// Build query filter
 	query := "role_type: " + roleType
-	agents, err := r.queryAgents(query)
-	if err != nil {
-		return nil, err
-	}
+	agents := r.queryAgents(query)
 
 	var addresses []string
 	for _, agent := range agents {
@@ -523,10 +517,7 @@ func (r *Router) resolveAgentsByRole(roleType, rig string) ([]string, error) {
 func (r *Router) resolveAgentsByRig(rig string) ([]string, error) {
 	// Query for agents with matching rig in description
 	query := "rig: " + rig
-	agents, err := r.queryAgents(query)
-	if err != nil {
-		return nil, err
-	}
+	agents := r.queryAgents(query)
 
 	var addresses []string
 	for _, agent := range agents {
@@ -540,7 +531,7 @@ func (r *Router) resolveAgentsByRig(rig string) ([]string, error) {
 
 // queryAgents queries agent beads using bd list with description filtering.
 // Searches both town-level and rig-level beads to find all agents.
-func (r *Router) queryAgents(descContains string) ([]*agentBead, error) {
+func (r *Router) queryAgents(descContains string) []*agentBead {
 	var allAgents []*agentBead
 
 	// Query town-level beads
@@ -582,7 +573,7 @@ func (r *Router) queryAgents(descContains string) ([]*agentBead, error) {
 		}
 	}
 
-	return unique, nil
+	return unique
 }
 
 // queryAgentsInDir queries agent beads in a specific beads directory with optional description filtering.
@@ -726,10 +717,7 @@ func (r *Router) validateRecipient(identity string) error {
 	}
 
 	// Query agents from town-level beads
-	agents, err := r.queryAgents("")
-	if err != nil {
-		return fmt.Errorf("failed to query town agents: %w", err)
-	}
+	agents := r.queryAgents("")
 
 	for _, agent := range agents {
 		if agentBeadToAddress(agent) == identity {

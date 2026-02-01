@@ -80,6 +80,20 @@ type RigConfig struct {
 	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
 	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
 	Beads         *BeadsConfig `json:"beads,omitempty"`
+	Git           *GitConfig   `json:"git,omitempty"`
+	Setup         *SetupConfig `json:"setup,omitempty"`
+}
+
+// GitConfig represents git remote configuration for a rig.
+type GitConfig struct {
+	Origin   string `json:"origin,omitempty"`
+	Upstream string `json:"upstream,omitempty"`
+}
+
+// SetupConfig stores a rig setup command and workdir.
+type SetupConfig struct {
+	Command string `json:"command,omitempty"`
+	Workdir string `json:"workdir,omitempty"`
 }
 
 // BeadsConfig represents beads configuration for the rig.
@@ -153,12 +167,27 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 		return nil, fmt.Errorf("not a directory: %s", rigPath)
 	}
 
+	gitURL := entry.GitURL
+	originURL := entry.GitURL
+	upstreamURL := ""
+	if entry.Git != nil {
+		if entry.Git.Origin != "" {
+			gitURL = entry.Git.Origin
+			originURL = entry.Git.Origin
+		}
+		if entry.Git.Upstream != "" {
+			upstreamURL = entry.Git.Upstream
+		}
+	}
+
 	rig := &Rig{
-		Name:      name,
-		Path:      rigPath,
-		GitURL:    entry.GitURL,
-		LocalRepo: entry.LocalRepo,
-		Config:    entry.BeadsConfig,
+		Name:        name,
+		Path:        rigPath,
+		GitURL:      gitURL,
+		OriginURL:   originURL,
+		UpstreamURL: upstreamURL,
+		LocalRepo:   entry.LocalRepo,
+		Config:      entry.BeadsConfig,
 	}
 
 	// Scan for polecats
@@ -214,6 +243,10 @@ type AddRigOptions struct {
 	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
 	LocalRepo     string // Optional local repo for reference clones
 	DefaultBranch string // Default branch (defaults to auto-detected from remote)
+	OriginURL     string // Optional origin remote URL
+	UpstreamURL   string // Optional upstream remote URL
+	SetupCommand  string // Optional setup command to store
+	SetupWorkdir  string // Optional setup workdir to store
 }
 
 func resolveLocalRepo(path, gitURL string) (string, string) {
@@ -306,16 +339,32 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	}()
 
 	// Create rig config
+	originURL := opts.OriginURL
+	if originURL == "" {
+		originURL = opts.GitURL
+	}
 	rigConfig := &RigConfig{
 		Type:      "rig",
 		Version:   CurrentRigConfigVersion,
 		Name:      opts.Name,
-		GitURL:    opts.GitURL,
+		GitURL:    originURL,
 		LocalRepo: localRepo,
 		CreatedAt: time.Now(),
 		Beads: &BeadsConfig{
 			Prefix: opts.BeadsPrefix,
 		},
+	}
+	if originURL != "" || opts.UpstreamURL != "" {
+		rigConfig.Git = &GitConfig{
+			Origin:   originURL,
+			Upstream: opts.UpstreamURL,
+		}
+	}
+	if opts.SetupCommand != "" {
+		rigConfig.Setup = &SetupConfig{
+			Command: opts.SetupCommand,
+			Workdir: opts.SetupWorkdir,
+		}
 	}
 	if err := m.saveRigConfig(rigPath, rigConfig); err != nil {
 		return nil, fmt.Errorf("saving rig config: %w", err)
@@ -429,9 +478,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		}
 	}
 
-	// Create mayor CLAUDE.md (overrides any from cloned repo)
-	if err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
+	// Create mayor CLAUDE.md (preserves existing from cloned repo)
+	if created, err := m.createRoleCLAUDEmd(mayorRigPath, "mayor", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating mayor CLAUDE.md: %w", err)
+	} else if !created {
+		fmt.Printf("   ✓ Preserved existing mayor/rig/CLAUDE.md\n")
 	}
 
 	// Initialize beads at rig level BEFORE creating worktrees.
@@ -467,9 +518,11 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 	if err := beads.SetupRedirect(m.townRoot, refineryRigPath); err != nil {
 		fmt.Printf("  Warning: Could not set up refinery beads redirect: %v\n", err)
 	}
-	// Create refinery CLAUDE.md (overrides any from cloned repo)
-	if err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
+	// Create refinery CLAUDE.md (preserves existing from cloned repo)
+	if created, err := m.createRoleCLAUDEmd(refineryRigPath, "refinery", opts.Name, ""); err != nil {
 		return nil, fmt.Errorf("creating refinery CLAUDE.md: %w", err)
+	} else if !created {
+		fmt.Printf("   ✓ Preserved existing refinery/rig/CLAUDE.md\n")
 	}
 	// Copy overlay files from .runtime/overlay/ to refinery root.
 	// This allows services to have .env and other config files at their root.
@@ -576,14 +629,25 @@ Use crew for your own workspace. Polecats are for batch work dispatch.
 	}
 
 	// Register in town config
-	m.config.Rigs[opts.Name] = config.RigEntry{
-		GitURL:    opts.GitURL,
+	entry := config.RigEntry{
+		GitURL:    originURL,
 		LocalRepo: localRepo,
 		AddedAt:   time.Now(),
 		BeadsConfig: &config.BeadsConfig{
 			Prefix: opts.BeadsPrefix,
 		},
+		Git: &config.RigGitConfig{
+			Origin:   originURL,
+			Upstream: opts.UpstreamURL,
+		},
 	}
+	if opts.SetupCommand != "" {
+		entry.Setup = &config.RigSetupConfig{
+			Command: opts.SetupCommand,
+			Workdir: opts.SetupWorkdir,
+		}
+	}
+	m.config.Rigs[opts.Name] = entry
 
 	success = true
 	return m.loadRig(opts.Name, m.config.Rigs[opts.Name])
@@ -1074,7 +1138,19 @@ func (m *Manager) ListRigNames() []string {
 // createRoleCLAUDEmd creates a minimal bootstrap pointer CLAUDE.md file.
 // Full context is injected ephemerally by `gt prime` at session start.
 // This keeps on-disk files small (<30 lines) per the priming architecture.
-func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName string, workerName string) error {
+//
+// Returns (created bool, error) - created is false if file already exists.
+// Existing files are preserved to respect user customizations from cloned repos.
+func (m *Manager) createRoleCLAUDEmd(workspacePath string, role string, rigName string, workerName string) (bool, error) {
+	claudePath := filepath.Join(workspacePath, "CLAUDE.md")
+
+	// Check if file already exists - preserve existing from cloned repo
+	if _, err := os.Stat(claudePath); err == nil {
+		return false, nil // File exists, preserve it
+	} else if !os.IsNotExist(err) {
+		return false, err // Unexpected error
+	}
+
 	// Create role-specific bootstrap pointer
 	var bootstrap string
 	switch role {
@@ -1138,8 +1214,7 @@ Full context is injected by ` + "`gt prime`" + ` at session start.
 `
 	}
 
-	claudePath := filepath.Join(workspacePath, "CLAUDE.md")
-	return os.WriteFile(claudePath, []byte(bootstrap), 0644)
+	return true, os.WriteFile(claudePath, []byte(bootstrap), 0644)
 }
 
 // createPatrolHooks creates .claude/settings.json with hooks for patrol roles.

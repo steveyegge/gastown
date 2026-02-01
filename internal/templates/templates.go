@@ -138,10 +138,22 @@ func (t *Templates) MessageNames() []string {
 
 // CreateMayorCLAUDEmd creates the Mayor's CLAUDE.md file at the specified directory.
 // This is used by both gt install and gt doctor --fix.
-func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSession string) error {
+//
+// Returns (created bool, error) - created is false if file already exists.
+// Existing files are preserved to respect user customizations.
+func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSession string) (bool, error) {
+	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
+
+	// Check if file already exists - preserve user customizations
+	if _, err := os.Stat(claudePath); err == nil {
+		return false, nil // File exists, preserve it
+	} else if !os.IsNotExist(err) {
+		return false, err // Unexpected error
+	}
+
 	tmpl, err := New()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	data := RoleData{
@@ -155,11 +167,10 @@ func CreateMayorCLAUDEmd(mayorDir, townRoot, townName, mayorSession, deaconSessi
 
 	content, err := tmpl.RenderRole("mayor", data)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	claudePath := filepath.Join(mayorDir, "CLAUDE.md")
-	return os.WriteFile(claudePath, []byte(content), 0644)
+	return true, os.WriteFile(claudePath, []byte(content), 0644)
 }
 
 // GetAllRoleTemplates returns all role templates as a map of filename to content.
