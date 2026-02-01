@@ -363,9 +363,18 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 		return nil, fmt.Errorf("creating polecat dir: %w", err)
 	}
 
+	// cleanupOnError removes polecatDir if worktree creation fails.
+	// This ensures exists() returns false for incomplete polecats, preventing
+	// a partial state where polecatDir exists but the worktree doesn't.
+	// See: br-w2ee9 (worktrees not being created)
+	cleanupOnError := func() {
+		_ = os.RemoveAll(polecatDir)
+	}
+
 	// Get the repo base (bare repo or mayor/rig)
 	repoGit, err := m.repoBase()
 	if err != nil {
+		cleanupOnError()
 		return nil, fmt.Errorf("finding repo base: %w", err)
 	}
 
@@ -387,6 +396,7 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (*Polecat, error)
 	// git worktree add -b polecat/<name>-<timestamp> <path> <startpoint>
 	// Worktree goes in polecats/<name>/<rigname>/ for LLM ergonomics
 	if err := repoGit.WorktreeAddFromRef(clonePath, branchName, startPoint); err != nil {
+		cleanupOnError()
 		return nil, fmt.Errorf("creating worktree from %s: %w", startPoint, err)
 	}
 
