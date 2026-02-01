@@ -108,11 +108,8 @@ export PATH="$PATH:$HOME/go/bin"
 gt install ~/gt --git
 cd ~/gt
 
-# Add your first project
-gt rig add myproject https://github.com/you/repo.git
-
-# Create your crew workspace
-gt crew add yourname --rig myproject
+# Add your first project + crew workspace
+gt rig add myproject https://github.com/you/repo.git --crew yourname
 cd myproject/crew/yourname
 
 # Start the Mayor session (your main interface)
@@ -320,9 +317,10 @@ Gas Town supports multiple AI coding runtimes. Per-rig runtime settings are in `
 
 ```bash
 gt install <path>           # Initialize workspace
-gt rig add <name> <repo>    # Add project
+gt rig add <name> <repo> --crew <name>  # Add project + crew
 gt rig list                 # List projects
-gt crew add <name> --rig <rig>  # Create crew workspace
+gt rig update <rig> --check     # Check upstream status
+gt crew add <name> --rig <rig>  # Add another crew workspace
 ```
 
 ### Agent Operations

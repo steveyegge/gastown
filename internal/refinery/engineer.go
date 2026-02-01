@@ -100,6 +100,9 @@ type Engineer struct {
 	output  io.Writer    // Output destination for user-facing messages
 	router  *mail.Router // Mail router for sending protocol messages
 
+	// dag tracks branch dependencies for stacked PRs
+	dag *DAGOrchestrator
+
 	// stopCh is used for graceful shutdown
 	stopCh chan struct{}
 }
@@ -118,6 +121,12 @@ func NewEngineer(r *rig.Rig) *Engineer {
 		gitDir = filepath.Join(r.Path, "mayor", "rig")
 	}
 
+	// Create DAG orchestrator for tracking stacked PR dependencies
+	gitOps := NewRealGitOps(gitDir)
+	dag := NewDAGOrchestrator(gitDir, cfg.TargetBranch, "upstream", "origin", gitOps, nil)
+	// Load existing DAG state (ignore errors - may not exist yet)
+	_ = dag.LoadDAG()
+
 	return &Engineer{
 		rig:     r,
 		beads:   beads.New(r.Path),
@@ -126,6 +135,7 @@ func NewEngineer(r *rig.Rig) *Engineer {
 		workDir: gitDir,
 		output:  os.Stdout,
 		router:  mail.NewRouter(r.Path),
+		dag:     dag,
 		stopCh:  make(chan struct{}),
 	}
 }
@@ -564,6 +574,17 @@ func (e *Engineer) HandleMRInfoSuccess(mr *MRInfo, result ProcessResult) {
 		}
 	}
 
+	// Notify DAG that this branch was merged (for stacked PRs)
+	// This will retarget any dependent branches and mark them as needing rebase
+	if mr.Branch != "" {
+		if err := e.dag.HandleBranchMerged(mr.Branch); err != nil {
+			// Non-fatal: DAG tracking is best-effort
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Note: DAG update for %s: %v\n", mr.Branch, err)
+		} else {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Updated DAG: %s marked as merged\n", mr.Branch)
+		}
+	}
+
 	// 1. Close source issue with reference to MR
 	if mr.SourceIssue != "" {
 		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
@@ -803,6 +824,18 @@ func (e *Engineer) ListReadyMRs() ([]*MRInfo, error) {
 		if issue.Assignee != "" {
 			// TODO: Add stale claim detection based on updated_at
 			continue
+		}
+
+		// Check DAG dependencies - skip if branch depends on another unmerged branch
+		if fields.DependsOn != "" && fields.DependsOn != e.config.TargetBranch {
+			// Branch has a dependency - check if it's merged
+			if depNode, ok := e.dag.GetBranchStatus(fields.DependsOn); ok {
+				if depNode.Status != BranchStatusMerged {
+					// Dependency not merged yet - skip this MR
+					continue
+				}
+			}
+			// If dependency not in DAG, assume it's either not tracked or already merged
 		}
 
 		// Parse convoy created_at if present
