@@ -72,3 +72,4 @@ storage-backend: dolt
 
 sync.mode: "dolt-native"
 
+# Daemon configuration handled at system level
