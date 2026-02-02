@@ -3169,7 +3169,7 @@ func extractTypeFromContext(context string) string {
 // formatContextForSlack formats JSON context for Slack display.
 // If context is valid JSON, it pretty-prints it in a code block.
 // Otherwise returns the context as-is (truncated if needed).
-// Removes internal fields like _type from display.
+// Extracts _value from wrapped contexts and removes internal fields like _type, _session_id.
 func formatContextForSlack(context string, maxLen int) string {
 	if context == "" {
 		return ""
@@ -3188,23 +3188,40 @@ func formatContextForSlack(context string, maxLen int) string {
 	// Extract and handle special fields
 	var schemaInfo string
 	if obj, ok := parsed.(map[string]interface{}); ok {
-		// Remove internal fields from display
-		delete(obj, "_type")
-		delete(obj, "_value")
-
-		if _, hasSchemas := obj["successor_schemas"]; hasSchemas {
-			schemaInfo = "\n📋 _Has successor schemas defined_"
-			delete(obj, "successor_schemas")
-		}
-
-		// If object is now empty, just return schema info
-		if len(obj) == 0 {
-			if schemaInfo != "" {
-				return schemaInfo
+		// Extract _value if present - this is the actual user-provided context (gt-hlabht)
+		if valueField, hasValue := obj["_value"]; hasValue {
+			// If _value is a string, use it directly
+			if strVal, isStr := valueField.(string); isStr {
+				if len(strVal) > maxLen {
+					return strVal[:maxLen-3] + "..."
+				}
+				return strVal
 			}
-			return ""
+			// If _value is non-string, use it as the parsed content
+			parsed = valueField
+			// Still need to check for schema info in the wrapper
+			if _, hasSchemas := obj["successor_schemas"]; hasSchemas {
+				schemaInfo = "\n📋 _Has successor schemas defined_"
+			}
+		} else {
+			// No _value field - remove internal fields from display
+			delete(obj, "_type")
+			delete(obj, "_session_id")
+
+			if _, hasSchemas := obj["successor_schemas"]; hasSchemas {
+				schemaInfo = "\n📋 _Has successor schemas defined_"
+				delete(obj, "successor_schemas")
+			}
+
+			// If object is now empty, just return schema info
+			if len(obj) == 0 {
+				if schemaInfo != "" {
+					return schemaInfo
+				}
+				return ""
+			}
+			parsed = obj
 		}
-		parsed = obj
 	}
 
 	// Pretty-print JSON

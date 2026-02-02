@@ -395,6 +395,85 @@ func TestFormatContextForSlack_EdgeCases(t *testing.T) {
 	})
 }
 
+// TestFormatContextForSlack_ValueExtraction tests that _value field is extracted (gt-hlabht).
+// When context is wrapped as {"_session_id":"...","_value":"actual text"},
+// we should display "actual text" not the raw JSON.
+func TestFormatContextForSlack_ValueExtraction(t *testing.T) {
+	t.Run("extracts string _value", func(t *testing.T) {
+		context := `{"_session_id":"abc-123","_value":"This is the actual context text"}`
+		result := formatContextForSlack(context, 500)
+
+		// Should extract _value content
+		if result != "This is the actual context text" {
+			t.Errorf("expected extracted _value, got: %q", result)
+		}
+
+		// Should NOT contain the raw JSON fields
+		if strings.Contains(result, "_session_id") {
+			t.Error("result should not contain _session_id")
+		}
+		if strings.Contains(result, "abc-123") {
+			t.Error("result should not contain session ID value")
+		}
+	})
+
+	t.Run("extracts object _value", func(t *testing.T) {
+		context := `{"_session_id":"xyz","_value":{"key":"value","nested":{"a":1}}}`
+		result := formatContextForSlack(context, 500)
+
+		// Should be formatted as JSON (the extracted object)
+		if !strings.Contains(result, "```") {
+			t.Error("expected code block for JSON object _value")
+		}
+		if !strings.Contains(result, "key") || !strings.Contains(result, "value") {
+			t.Error("expected _value object contents to be present")
+		}
+		if strings.Contains(result, "_session_id") {
+			t.Error("result should not contain _session_id")
+		}
+	})
+
+	t.Run("extracts array _value", func(t *testing.T) {
+		context := `{"_session_id":"xyz","_value":["item1","item2"]}`
+		result := formatContextForSlack(context, 500)
+
+		// Should be formatted as JSON (the extracted array)
+		if !strings.Contains(result, "```") {
+			t.Error("expected code block for JSON array _value")
+		}
+		if !strings.Contains(result, "item1") {
+			t.Error("expected array items to be present")
+		}
+	})
+
+	t.Run("truncates long string _value", func(t *testing.T) {
+		longText := strings.Repeat("a", 100)
+		context := `{"_session_id":"abc","_value":"` + longText + `"}`
+		result := formatContextForSlack(context, 50)
+
+		// Should be truncated
+		if len(result) > 50 {
+			t.Errorf("expected result to be truncated to 50 chars, got %d", len(result))
+		}
+		if !strings.Contains(result, "...") {
+			t.Error("expected truncation marker")
+		}
+	})
+
+	t.Run("context without _value uses normal processing", func(t *testing.T) {
+		context := `{"_session_id":"abc","regular_key":"regular_value"}`
+		result := formatContextForSlack(context, 500)
+
+		// Should show regular_key but not _session_id
+		if !strings.Contains(result, "regular_key") {
+			t.Error("expected regular_key to be present")
+		}
+		if strings.Contains(result, "_session_id") {
+			t.Error("result should not contain _session_id")
+		}
+	})
+}
+
 func TestExtractTypeFromContext(t *testing.T) {
 	tests := []struct {
 		name     string
