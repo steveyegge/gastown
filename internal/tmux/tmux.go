@@ -880,7 +880,14 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	_, _ = t.run("send-keys", "-t", session, "Escape")
 	time.Sleep(200 * time.Millisecond)
 
-	// 4. Send Enter with retry (critical for message submission)
+	// 4. Wake the pane BEFORE Enter to ensure Claude's TUI is ready (gt-h4x50t)
+	// This triggers SIGWINCH to activate Claude's event loop before we send Enter.
+	t.WakePane(session)
+	time.Sleep(100 * time.Millisecond)
+
+	// 5. Send Enter multiple times with wake between each (gt-h4x50t)
+	// Claude Code's input handling can be flaky - the first Enter sometimes doesn't
+	// register as a submit. Sending multiple times with wakes ensures delivery.
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -890,12 +897,15 @@ func (t *Tmux) NudgeSession(session, message string) error {
 			lastErr = err
 			continue
 		}
-		// 5. Wake the pane to trigger SIGWINCH - needed for both attached and detached sessions
-		// to ensure Claude's TUI processes the Enter key (gt-izluj7)
+		// Wake after each Enter to ensure Claude processes it
+		time.Sleep(50 * time.Millisecond)
 		t.WakePane(session)
-		return nil
 	}
-	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+	// All attempts succeeded at the tmux level (or we had transient failures)
+	if lastErr != nil {
+		return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+	}
+	return nil
 }
 
 // NudgePane sends a message to a specific pane reliably.
@@ -923,7 +933,11 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	_, _ = t.run("send-keys", "-t", pane, "Escape")
 	time.Sleep(200 * time.Millisecond)
 
-	// 4. Send Enter with retry (critical for message submission)
+	// 4. Wake the pane BEFORE Enter to ensure Claude's TUI is ready (gt-h4x50t)
+	t.WakePane(pane)
+	time.Sleep(100 * time.Millisecond)
+
+	// 5. Send Enter multiple times with wake between each (gt-h4x50t)
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -933,12 +947,13 @@ func (t *Tmux) NudgePane(pane, message string) error {
 			lastErr = err
 			continue
 		}
-		// 5. Wake the pane to trigger SIGWINCH - needed for both attached and detached sessions
-		// to ensure Claude's TUI processes the Enter key (gt-izluj7)
+		time.Sleep(50 * time.Millisecond)
 		t.WakePane(pane)
-		return nil
 	}
-	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+	if lastErr != nil {
+		return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+	}
+	return nil
 }
 
 // AcceptBypassPermissionsWarning dismisses the Claude Code bypass permissions warning dialog.
