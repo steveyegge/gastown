@@ -47,6 +47,7 @@ type DecisionFields struct {
 	PredecessorID   string           `json:"predecessor_id,omitempty"`    // Predecessor decision ID for chaining
 	ParentBeadID    string           `json:"parent_bead_id,omitempty"`    // Parent bead ID (e.g., epic) for hierarchy
 	ParentBeadTitle string           `json:"parent_bead_title,omitempty"` // Parent bead title for channel derivation
+	SessionID       string           `json:"session_id,omitempty"`        // Claude Code session ID for turn enforcement
 }
 
 // DecisionState constants for decision status tracking.

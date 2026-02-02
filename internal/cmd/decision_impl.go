@@ -209,6 +209,12 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		contextToStore = embedTypeInContext(decisionContext, decisionType)
 	}
 
+	// Embed session_id in context for turn enforcement
+	sessionID := runtime.SessionIDFromEnv()
+	if sessionID != "" {
+		contextToStore = embedSessionIDInContext(contextToStore, sessionID)
+	}
+
 	// Build decision fields
 	fields := &beads.DecisionFields{
 		Question:      decisionPrompt,
@@ -220,6 +226,7 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		Urgency:       urgency,
 		PredecessorID: decisionPredecessor,
 		ParentBeadID:  decisionParent,
+		SessionID:     runtime.SessionIDFromEnv(), // For turn enforcement
 	}
 
 	// Add blocker if specified
@@ -1347,35 +1354,82 @@ func runDecisionTurnCheck(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	markerPath := turnMarkerPath(input.SessionID)
-	markerExists := turnMarkerExists(input.SessionID)
-
 	if decisionTurnCheckVerbose {
-		fmt.Fprintf(os.Stderr, "[turn-check] Marker path: %s\n", markerPath)
-		fmt.Fprintf(os.Stderr, "[turn-check] Marker exists: %v\n", markerExists)
 		fmt.Fprintf(os.Stderr, "[turn-check] Soft mode: %v\n", decisionTurnCheckSoft)
 	}
 
-	// Every turn requires a fresh decision - no bypass for pending decisions.
-	// Agent must create a new decision point each turn to pass the stop hook.
-	result := checkTurnMarker(input.SessionID, decisionTurnCheckSoft)
+	// Check if agent created a decision with this session_id
+	hasDecisionThisSession := checkAgentHasDecisionForSession(input.SessionID)
 
-	if result != nil {
-		if decisionTurnCheckVerbose {
-			fmt.Fprintf(os.Stderr, "[turn-check] BLOCKING: No decision offered this turn\n")
-		}
-		// Output block JSON
-		out, _ := json.Marshal(result)
-		fmt.Println(string(out))
-		// Exit non-zero to fail the hook (unless soft mode)
-		if !decisionTurnCheckSoft {
-			return NewSilentExit(1)
-		}
-	} else if decisionTurnCheckVerbose {
-		fmt.Fprintf(os.Stderr, "[turn-check] OK: Decision was offered or soft mode\n")
+	if decisionTurnCheckVerbose {
+		fmt.Fprintf(os.Stderr, "[turn-check] Has decision this session: %v\n", hasDecisionThisSession)
 	}
 
-	return nil
+	if hasDecisionThisSession || decisionTurnCheckSoft {
+		if decisionTurnCheckVerbose {
+			fmt.Fprintf(os.Stderr, "[turn-check] OK: Decision was offered this session\n")
+		}
+		return nil
+	}
+
+	// No decision offered this session - block
+	if decisionTurnCheckVerbose {
+		fmt.Fprintf(os.Stderr, "[turn-check] BLOCKING: No decision offered this turn\n")
+	}
+
+	result := &TurnBlockResult{
+		Decision: "block",
+		Reason: `You must offer a formal decision point using 'gt decision request' before ending this turn. This ensures humans stay informed about progress and can provide guidance.
+
+When the decision is created, it will be assigned a semantic slug (e.g., gt-dec-cache_strategyzfyl8) that makes it easy to identify in Slack and logs. Use clear, descriptive prompts so the generated slug is meaningful.`,
+	}
+	out, _ := json.Marshal(result)
+	fmt.Println(string(out))
+	return NewSilentExit(1)
+}
+
+// checkAgentHasDecisionForSession checks if the current agent created a decision
+// with the given session_id in its context. This is used for turn enforcement -
+// the decision record itself serves as the "marker" that a decision was offered.
+func checkAgentHasDecisionForSession(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+
+	agentID := detectSender()
+	if agentID == "" || agentID == "unknown" {
+		return false
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return false
+	}
+
+	bd := beads.New(beads.ResolveBeadsDir(townRoot))
+
+	// Get pending decisions from this agent
+	decisions, err := bd.ListPendingDecisionsForRequester(agentID)
+	if err != nil {
+		return false
+	}
+
+	// Check if any decision has matching session_id in context
+	for _, issue := range decisions {
+		// Get the full decision to access context
+		_, fields, err := bd.GetDecisionBead(issue.ID)
+		if err != nil || fields == nil {
+			continue
+		}
+
+		// Check session_id in context
+		decisionSessionID := extractSessionIDFromContext(fields.Context)
+		if decisionSessionID == sessionID {
+			return true
+		}
+	}
+
+	return false
 }
 
 // checkAgentHasPendingDecisions checks if the current agent has any pending decisions.
@@ -1997,6 +2051,55 @@ func extractTypeFromContext(context string) string {
 
 	if typeVal, ok := obj["_type"].(string); ok {
 		return typeVal
+	}
+	return ""
+}
+
+// embedSessionIDInContext adds a _session_id field to the context JSON.
+// Similar to embedTypeInContext but for session tracking.
+func embedSessionIDInContext(context, sessionID string) string {
+	if context == "" {
+		obj := map[string]interface{}{"_session_id": sessionID}
+		result, _ := json.Marshal(obj)
+		return string(result)
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(context), &parsed); err != nil {
+		// Invalid JSON - create new object
+		obj := map[string]interface{}{"_session_id": sessionID}
+		result, _ := json.Marshal(obj)
+		return string(result)
+	}
+
+	if obj, ok := parsed.(map[string]interface{}); ok {
+		obj["_session_id"] = sessionID
+		result, _ := json.Marshal(obj)
+		return string(result)
+	}
+
+	// Non-object: wrap
+	wrapper := map[string]interface{}{
+		"_session_id": sessionID,
+		"_value":      parsed,
+	}
+	result, _ := json.Marshal(wrapper)
+	return string(result)
+}
+
+// extractSessionIDFromContext extracts the _session_id field from context JSON.
+func extractSessionIDFromContext(context string) string {
+	if context == "" {
+		return ""
+	}
+
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(context), &obj); err != nil {
+		return ""
+	}
+
+	if sessionID, ok := obj["_session_id"].(string); ok {
+		return sessionID
 	}
 	return ""
 }

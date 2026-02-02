@@ -47,8 +47,9 @@ func EnsureSettingsForRoleWithAccount(workDir, role, accountConfigDir string, rc
 
 // SessionIDFromEnv returns the runtime session ID, if present.
 // It checks GT_SESSION_ID_ENV first, then CLAUDE_SESSION_ID env var,
-// then falls back to the persisted .runtime/session_id file.
-// The file fallback is needed because hook subprocesses (UserPromptSubmit,
+// then falls back to the persisted .runtime/session_id file,
+// and finally checks /tmp/.claude-session-current (written by SessionStart hook).
+// The file fallbacks are needed because hook subprocesses (UserPromptSubmit,
 // PostToolUse) don't inherit env vars set by gt prime --hook.
 func SessionIDFromEnv() string {
 	if envName := os.Getenv("GT_SESSION_ID_ENV"); envName != "" {
@@ -59,7 +60,21 @@ func SessionIDFromEnv() string {
 	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
 		return id
 	}
-	return readPersistedSessionID()
+	if id := readPersistedSessionID(); id != "" {
+		return id
+	}
+	return SessionIDFromFile()
+}
+
+// SessionIDFromFile reads the session ID from /tmp/.claude-session-current.
+// This file is written by the SessionStart hook and provides the session ID
+// to commands like gt decision request that need it for turn enforcement.
+func SessionIDFromFile() string {
+	data, err := os.ReadFile("/tmp/.claude-session-current")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // readPersistedSessionID reads the session ID from .runtime/session_id.
