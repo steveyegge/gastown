@@ -2384,7 +2384,9 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 	// Resolve channel based on parent epic or agent identity
 	targetChannel := b.resolveChannelForDecision(decision)
 	if targetChannel == "" {
-		return nil
+		log.Printf("Slack: No target channel resolved for decision %s (agent=%q) - cannot post notification",
+			decision.ID, decision.RequestedBy)
+		return fmt.Errorf("no target channel for decision %s", decision.ID)
 	}
 
 	urgencyEmoji := ":white_circle:"
@@ -2587,7 +2589,11 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 	}
 
 	_, ts, err := b.client.PostMessage(targetChannel, msgOpts...)
-	if err == nil && ts != "" {
+	if err != nil {
+		log.Printf("Slack: Error posting decision %s to channel %s: %v", decision.ID, targetChannel, err)
+		return err
+	}
+	if ts != "" {
 		// Track the message for auto-dismiss
 		b.decisionMessagesMu.Lock()
 		b.decisionMessages[decision.ID] = messageInfo{
@@ -2600,12 +2606,13 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 		if predecessorThreadTS != "" {
 			b.markDecisionSuperseded(decision.PredecessorID, decision.ID, targetChannel, predecessorThreadTS)
 		}
+		log.Printf("Slack: Posted decision %s to channel %s (ts=%s)", decision.ID, targetChannel, ts)
 	}
 
 	// Send DMs to users who have opted in
 	b.sendDMsToOptedInUsers(decision, blocks)
 
-	return err
+	return nil
 }
 
 // sendDMsToOptedInUsers sends the decision notification to all users who have opted in to DMs.
