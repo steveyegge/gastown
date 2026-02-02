@@ -216,6 +216,9 @@ func TestAtomicWriteFileReadOnlyDir(t *testing.T) {
 }
 
 func TestAtomicWriteFileConcurrent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("concurrent atomic writes have different semantics on Windows")
+	}
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "concurrent.txt")
 

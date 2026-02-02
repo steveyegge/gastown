@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/git"
+	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/workspace"
@@ -191,6 +192,30 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("creating merge request bead: %w", err)
 		}
 	}
+
+	// Auto-register branch in DAG for stacked PR tracking
+	// If target is not the default branch, this branch depends on the target
+	rigPath := filepath.Join(townRoot, rigName)
+	gitOps := refinery.NewRealGitOps(cwd)
+	dag := refinery.NewDAGOrchestrator(cwd, defaultBranch, "upstream", "origin", gitOps, nil)
+	_ = dag.LoadDAG() // Load existing state
+
+	// Determine dependency: if target != defaultBranch, depend on target
+	dependsOn := ""
+	if target != defaultBranch {
+		dependsOn = target
+	}
+
+	// Register branch (idempotent - will update if exists)
+	if err := dag.RegisterBranch(branch, dependsOn, "", issueID, worker); err != nil {
+		// Non-fatal: just note it
+		fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("(DAG: %v)", err)))
+	} else {
+		if dependsOn != "" {
+			fmt.Printf("  %s Branch registered in stack (depends on %s)\n", style.Dim.Render("ℹ"), dependsOn)
+		}
+	}
+	_ = rigPath // silence unused warning if not needed
 
 	// Success output
 	fmt.Printf("%s Submitted to merge queue\n", style.Bold.Render("✓"))

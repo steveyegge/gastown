@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -684,6 +685,9 @@ func TestKillSessionWithProcessesExcluding_NonexistentSession(t *testing.T) {
 }
 
 func TestGetProcessGroupID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process groups are not supported on Windows")
+	}
 	// Test with current process
 	pid := fmt.Sprintf("%d", os.Getpid())
 	pgid := getProcessGroupID(pid)

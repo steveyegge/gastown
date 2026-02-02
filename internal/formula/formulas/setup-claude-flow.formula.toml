@@ -1,0 +1,102 @@
+description = "Setup claude-flow MCP for a crew workspace. Initializes claude-flow, starts daemons, and enables 60+ specialized agents, swarm coordination, and self-learning capabilities."
+formula = "setup-claude-flow"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "init"
+title = "Initialize claude-flow in {{rig}}/crew/{{crew}}"
+description = """
+Navigate to the crew workspace and initialize claude-flow:
+
+```bash
+cd {{rig}}/crew/{{crew}}
+npx claude-flow@v3alpha init --non-interactive
+```
+
+This creates:
+- .claude-flow/ directory with config, data, logs, sessions
+- .claude/settings.json with hook configurations
+- .claude/skills/ (30 skills)
+- .claude/commands/ (10 commands)
+- .claude/agents/ (92 agents)
+- .mcp.json with MCP server config
+"""
+
+[[steps]]
+id = "daemon"
+title = "Start claude-flow daemon"
+needs = ["init"]
+description = """
+Start the background daemon worker:
+
+```bash
+npx claude-flow@v3alpha daemon start
+```
+
+Verify with: claude-flow daemon status
+Logs at: .claude-flow/daemon.log
+"""
+
+[[steps]]
+id = "memory"
+title = "Initialize memory database"
+needs = ["daemon"]
+description = """
+Initialize the hybrid memory backend with vector embeddings:
+
+```bash
+npx claude-flow@v3alpha memory init
+```
+
+This enables:
+- Vector embeddings for semantic search
+- Pattern learning
+- Temporal decay
+- HNSW indexing (150x-12,500x faster search)
+"""
+
+[[steps]]
+id = "mcp"
+title = "Start MCP server"
+needs = ["memory"]
+description = """
+Start the MCP server to expose claude-flow tools to Claude:
+
+```bash
+npx claude-flow@v3alpha mcp start
+```
+
+This enables 27 MCP tools for agent orchestration.
+"""
+
+[[steps]]
+id = "verify"
+title = "Verify setup"
+needs = ["mcp"]
+description = """
+Check claude-flow status:
+
+```bash
+npx claude-flow@v3alpha status
+```
+
+Should show:
+- MCP Server: Running (27 tools)
+- Daemon: Running
+- Memory: Initialized
+
+Then restart the crew session so Claude picks up the MCP config:
+
+```bash
+gt crew restart {{rig}} {{crew}}
+```
+"""
+
+[vars]
+[vars.rig]
+description = "Target rig name (e.g., axon, gastown)"
+required = true
+[vars.crew]
+description = "Crew workspace name (e.g., hebb, mal)"
+required = true
