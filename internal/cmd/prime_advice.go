@@ -98,20 +98,13 @@ func buildAgentID(ctx RoleInfo) string {
 }
 
 // queryAdviceForAgent fetches advice beads matching the agent's subscriptions.
-// Uses `bd advice list --for=<agent-id>` which auto-subscribes to:
-//   - global
-//   - agent:<agent-id>
-//   - rig:<rig-name>
-//   - role:<role-type>
+// Uses `bd advice list --for=<agent-id> --json` which:
+//   - Auto-subscribes to: global, agent:<id>, rig:<rig>, role:<role>
+//   - Handles rig-scoping (rig:X advice only matches agents subscribed to rig:X)
+//   - Returns labels in JSON output (fixed in beads commit 794e5326)
 //
-// Beads handles all filtering including rig-scoping internally, so we trust
-// the returned results without additional filtering.
-//
-// Note: We still need a two-step fetch because `bd advice list --for --json`
-// doesn't include labels (needed for scope display). We fetch IDs from --for,
-// then look up full beads from `bd list -t advice --json` which includes labels.
+// Beads handles all filtering internally, so we trust the returned results.
 func queryAdviceForAgent(agentID string) ([]AdviceBead, error) {
-	// Step 1: Get filtered IDs using subscription model (beads handles all filtering)
 	cmd := exec.Command("bd", "advice", "list", "--for="+agentID, "--json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -123,44 +116,12 @@ func queryAdviceForAgent(agentID string) ([]AdviceBead, error) {
 		return nil, nil
 	}
 
-	// Parse to get IDs
-	var filteredBeads []AdviceBead
-	if err := json.Unmarshal(output, &filteredBeads); err != nil {
-		return nil, fmt.Errorf("parsing filtered advice: %w", err)
+	var beads []AdviceBead
+	if err := json.Unmarshal(output, &beads); err != nil {
+		return nil, fmt.Errorf("parsing advice: %w", err)
 	}
 
-	if len(filteredBeads) == 0 {
-		return nil, nil
-	}
-
-	// Build ID set for lookup
-	wantIDs := make(map[string]bool)
-	for _, b := range filteredBeads {
-		wantIDs[b.ID] = true
-	}
-
-	// Step 2: Fetch all advice with labels (for scope display)
-	cmd2 := exec.Command("bd", "list", "-t", "advice", "--json", "--limit", "200")
-	output2, err := cmd2.Output()
-	if err != nil {
-		// Fall back to filtered results without labels (scope will show as "Global")
-		return filteredBeads, nil
-	}
-
-	var allBeads []AdviceBead
-	if err := json.Unmarshal(output2, &allBeads); err != nil {
-		return filteredBeads, nil
-	}
-
-	// Step 3: Return only matching beads (with labels for display)
-	var result []AdviceBead
-	for _, b := range allBeads {
-		if wantIDs[b.ID] {
-			result = append(result, b)
-		}
-	}
-
-	return result, nil
+	return beads, nil
 }
 
 // getAdviceScope returns a human-readable scope indicator for the advice.
