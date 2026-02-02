@@ -417,13 +417,13 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		// beads.db is gitignored so it won't exist after clone - we need to create it.
 		// bd init --prefix will create the database and auto-import from issues.jsonl.
 		if _, err := os.Stat(sourceBeadsDB); os.IsNotExist(err) {
-			cmd := exec.Command("bd", "init", "--prefix", opts.BeadsPrefix) // opts.BeadsPrefix validated earlier
+			cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", opts.BeadsPrefix) // opts.BeadsPrefix validated earlier
 			cmd.Dir = mayorRigPath
 			if output, err := cmd.CombinedOutput(); err != nil {
 				fmt.Printf("  Warning: Could not init bd database: %v (%s)\n", err, strings.TrimSpace(string(output)))
 			}
 			// Configure custom types for Gas Town (beads v0.46.0+)
-			configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+			configCmd := exec.Command("bd", "--no-daemon", "config", "set", "types.custom", constants.BeadsCustomTypes)
 			configCmd.Dir = mayorRigPath
 			_, _ = configCmd.CombinedOutput() // Ignore errors - older beads don't need this
 		}
@@ -657,7 +657,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
 
 	// Run bd init if available
-	cmd := exec.Command("bd", "init", "--prefix", prefix)
+	cmd := exec.Command("bd", "--no-daemon", "init", "--prefix", prefix)
 	cmd.Dir = rigPath
 	cmd.Env = filteredEnv
 	_, err := cmd.CombinedOutput()
@@ -673,7 +673,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 
 	// Configure custom types for Gas Town (agent, role, rig, convoy).
 	// These were extracted from beads core in v0.46.0 and now require explicit config.
-	configCmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	configCmd := exec.Command("bd", "--no-daemon", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	configCmd.Dir = rigPath
 	configCmd.Env = filteredEnv
 	// Ignore errors - older beads versions don't need this
@@ -682,7 +682,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	// Ensure database has repository fingerprint (GH #25).
 	// This is idempotent - safe on both new and legacy (pre-0.17.5) databases.
 	// Without fingerprint, the bd daemon fails to start silently.
-	migrateCmd := exec.Command("bd", "migrate", "--update-repo-id")
+	migrateCmd := exec.Command("bd", "--no-daemon", "migrate", "--update-repo-id")
 	migrateCmd.Dir = rigPath
 	migrateCmd.Env = filteredEnv
 	// Ignore errors - fingerprint is optional for functionality
@@ -1205,7 +1205,7 @@ func (m *Manager) createPatrolHooks(workspacePath string, runtimeConfig *config.
 // These molecules define the work loops for Deacon, Witness, and Refinery roles.
 func (m *Manager) seedPatrolMolecules(rigPath string) error {
 	// Use bd command to seed molecules (more reliable than internal API)
-	cmd := exec.Command("bd", "mol", "seed", "--patrol")
+	cmd := exec.Command("bd", "--no-daemon", "mol", "seed", "--patrol")
 	cmd.Dir = rigPath
 	if err := cmd.Run(); err != nil {
 		// Fallback: bd mol seed might not support --patrol yet
@@ -1238,7 +1238,7 @@ func (m *Manager) seedPatrolMoleculesManually(rigPath string) error {
 
 	for _, mol := range patrolMols {
 		// Check if already exists by title
-		checkCmd := exec.Command("bd", "list", "--type=molecule", "--format=json")
+		checkCmd := exec.Command("bd", "--no-daemon", "list", "--type=molecule", "--format=json")
 		checkCmd.Dir = rigPath
 		output, _ := checkCmd.Output()
 		if strings.Contains(string(output), mol.title) {
@@ -1246,7 +1246,7 @@ func (m *Manager) seedPatrolMoleculesManually(rigPath string) error {
 		}
 
 		// Create the molecule
-		cmd := exec.Command("bd", "create", //nolint:gosec // G204: bd is a trusted internal tool
+		cmd := exec.Command("bd", "--no-daemon", "create", //nolint:gosec // G204: bd is a trusted internal tool
 			"--type=molecule",
 			"--title="+mol.title,
 			"--description="+mol.desc,
