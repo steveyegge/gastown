@@ -24,6 +24,17 @@ type BeaconConfig struct {
 	// MolID is an optional molecule ID being worked.
 	// If provided, appended to topic as "topic:mol-id"
 	MolID string
+
+	// IncludePrimeInstruction adds "Run gt prime" to beacon for non-hook agents.
+	// When true, the beacon tells the agent to manually run gt prime since
+	// there's no SessionStart hook to do it automatically.
+	IncludePrimeInstruction bool
+
+	// ExcludeWorkInstructions omits work instructions from the beacon.
+	// When true, work instructions will be sent as a separate nudge later.
+	// Used for non-hook agents where gt prime must complete first.
+	// Default (false) preserves backward compatible behavior.
+	ExcludeWorkInstructions bool
 }
 
 // FormatStartupBeacon builds the formatted startup beacon message.
@@ -54,6 +65,15 @@ func FormatStartupBeacon(cfg BeaconConfig) string {
 	beacon := fmt.Sprintf("[GAS TOWN] %s <- %s • %s • %s",
 		cfg.Recipient, cfg.Sender, timestamp, topic)
 
+	// For non-hook agents, add "Run gt prime" instruction since there's no
+	// SessionStart hook to do it automatically. Work instructions will
+	// come as a separate nudge after gt prime completes.
+	if cfg.IncludePrimeInstruction {
+		beacon += "\n\nRun `gt prime` to initialize your context."
+		// Don't add work instructions here - they come as a delayed nudge after gt prime
+		return beacon
+	}
+
 	// For handoff, cold-start, and attach, add explicit instructions so the agent knows
 	// what to do even if hooks haven't loaded CLAUDE.md yet
 	if cfg.Topic == "handoff" || cfg.Topic == "cold-start" || cfg.Topic == "attach" {
@@ -66,16 +86,9 @@ func FormatStartupBeacon(cfg BeaconConfig) string {
 
 	// For assigned, work is already on the hook - just tell them to run it
 	// This prevents the "helpful assistant" exploration pattern (see PRIMING.md)
-	if cfg.Topic == "assigned" {
+	// Exclude work instructions only if explicitly set (non-hook agents get them via delayed nudge)
+	if cfg.Topic == "assigned" && !cfg.ExcludeWorkInstructions {
 		beacon += "\n\nWork is on your hook. Run `gt hook` now and begin immediately."
-	}
-
-	// For start/restart, add fallback instructions in case SessionStart hook fails
-	// to inject context via gt prime. This prevents the "No recent activity" state
-	// where agents sit idle because they received only metadata, no instructions.
-	// See: gt-uoc64 (crew workers starting without proper context injection)
-	if cfg.Topic == "start" || cfg.Topic == "restart" {
-		beacon += "\n\nRun `gt prime` now for full context, then check your hook and mail."
 	}
 
 	return beacon

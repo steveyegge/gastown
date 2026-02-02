@@ -44,9 +44,10 @@ type Daemon struct {
 	logger       *log.Logger
 	ctx          context.Context
 	cancel       context.CancelFunc
-	curator      *feed.Curator
+	curator       *feed.Curator
 	convoyWatcher *ConvoyWatcher
-	doltServer   *DoltServerManager
+	doltServer    *DoltServerManager
+	krcPruner     *KRCPruner
 
 	// Mass death detection: track recent session deaths
 	deathsMu     sync.Mutex
@@ -178,6 +179,19 @@ func (d *Daemon) Run() error {
 		d.logger.Println("Convoy watcher started")
 	}
 
+	// Start KRC pruner for automatic ephemeral data cleanup
+	krcPruner, err := NewKRCPruner(d.config.TownRoot, d.logger.Printf)
+	if err != nil {
+		d.logger.Printf("Warning: failed to create KRC pruner: %v", err)
+	} else {
+		d.krcPruner = krcPruner
+		if err := d.krcPruner.Start(); err != nil {
+			d.logger.Printf("Warning: failed to start KRC pruner: %v", err)
+		} else {
+			d.logger.Println("KRC pruner started")
+		}
+	}
+
 	// Initial heartbeat
 	d.heartbeat(state)
 
@@ -240,6 +254,10 @@ func (d *Daemon) heartbeat(state *State) {
 		d.ensureDeaconRunning()
 	} else {
 		d.logger.Printf("Deacon patrol disabled in config, skipping")
+		// Kill leftover deacon/boot sessions from before patrol was disabled.
+		// Without this, a stale deacon keeps running its own patrol loop,
+		// spawning witnesses and refineries despite daemon config. (hq-2mstj)
+		d.killDeaconSessions()
 	}
 
 	// 2. Poke Boot for intelligent triage (stuck/nudge/interrupt)
@@ -262,6 +280,8 @@ func (d *Daemon) heartbeat(state *State) {
 		d.ensureWitnessesRunning()
 	} else {
 		d.logger.Printf("Witness patrol disabled in config, skipping")
+		// Kill leftover witness sessions from before patrol was disabled. (hq-2mstj)
+		d.killWitnessSessions()
 	}
 
 	// 5. Ensure Refineries are running for all rigs (restart if dead)
@@ -270,6 +290,8 @@ func (d *Daemon) heartbeat(state *State) {
 		d.ensureRefineriesRunning()
 	} else {
 		d.logger.Printf("Refinery patrol disabled in config, skipping")
+		// Kill leftover refinery sessions from before patrol was disabled. (hq-2mstj)
+		d.killRefinerySessions()
 	}
 
 	// 6. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
@@ -563,6 +585,51 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	d.logger.Printf("Refinery session for %s started successfully", rigName)
 }
 
+// killDeaconSessions kills leftover deacon and boot tmux sessions.
+// Called when the deacon patrol is disabled to prevent stale deacons from
+// running their own patrol loops and spawning agents. (hq-2mstj)
+func (d *Daemon) killDeaconSessions() {
+	for _, name := range []string{session.DeaconSessionName(), session.BootSessionName()} {
+		exists, _ := d.tmux.HasSession(name)
+		if exists {
+			d.logger.Printf("Killing leftover %s session (patrol disabled)", name)
+			if err := d.tmux.KillSessionWithProcesses(name); err != nil {
+				d.logger.Printf("Error killing %s session: %v", name, err)
+			}
+		}
+	}
+}
+
+// killWitnessSessions kills leftover witness tmux sessions for all rigs.
+// Called when the witness patrol is disabled. (hq-2mstj)
+func (d *Daemon) killWitnessSessions() {
+	for _, rigName := range d.getKnownRigs() {
+		name := session.WitnessSessionName(rigName)
+		exists, _ := d.tmux.HasSession(name)
+		if exists {
+			d.logger.Printf("Killing leftover %s session (patrol disabled)", name)
+			if err := d.tmux.KillSessionWithProcesses(name); err != nil {
+				d.logger.Printf("Error killing %s session: %v", name, err)
+			}
+		}
+	}
+}
+
+// killRefinerySessions kills leftover refinery tmux sessions for all rigs.
+// Called when the refinery patrol is disabled. (hq-2mstj)
+func (d *Daemon) killRefinerySessions() {
+	for _, rigName := range d.getKnownRigs() {
+		name := session.RefinerySessionName(rigName)
+		exists, _ := d.tmux.HasSession(name)
+		if exists {
+			d.logger.Printf("Killing leftover %s session (patrol disabled)", name)
+			if err := d.tmux.KillSessionWithProcesses(name); err != nil {
+				d.logger.Printf("Error killing %s session: %v", name, err)
+			}
+		}
+	}
+}
+
 // getKnownRigs returns list of registered rig names.
 func (d *Daemon) getKnownRigs() []string {
 	rigsPath := filepath.Join(d.config.TownRoot, "mayor", "rigs.json")
@@ -710,6 +777,12 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 	if d.convoyWatcher != nil {
 		d.convoyWatcher.Stop()
 		d.logger.Println("Convoy watcher stopped")
+	}
+
+	// Stop KRC pruner
+	if d.krcPruner != nil {
+		d.krcPruner.Stop()
+		d.logger.Println("KRC pruner stopped")
 	}
 
 	// Stop Dolt server if we're managing it

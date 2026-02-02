@@ -1834,6 +1834,58 @@ func TestSetupRedirect(t *testing.T) {
 		}
 	})
 
+	t.Run("crew worktree with rig beads but no database", func(t *testing.T) {
+		// Setup: rig/.beads exists (has metadata.json) but no actual database.
+		// This is the dolt architecture where rig/.beads has metadata only and
+		// the actual dolt DB lives at mayor/rig/.beads/dolt/.
+		// The redirect should point to mayor/rig/.beads, not rig/.beads.
+		townRoot := t.TempDir()
+		rigRoot := filepath.Join(townRoot, "testrig")
+		rigBeads := filepath.Join(rigRoot, ".beads")
+		mayorRigBeads := filepath.Join(rigRoot, "mayor", "rig", ".beads")
+		crewPath := filepath.Join(rigRoot, "crew", "max")
+
+		// Create rig/.beads with metadata but NO database (no dolt/ or beads.db)
+		if err := os.MkdirAll(rigBeads, 0755); err != nil {
+			t.Fatalf("mkdir rig beads: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(rigBeads, "metadata.json"),
+			[]byte(`{"database":"dolt","backend":"dolt","dolt_mode":"embedded"}`), 0644); err != nil {
+			t.Fatalf("write metadata: %v", err)
+		}
+		// Create mayor/rig/.beads with dolt DB marker
+		doltDir := filepath.Join(mayorRigBeads, "dolt")
+		if err := os.MkdirAll(doltDir, 0755); err != nil {
+			t.Fatalf("mkdir mayor dolt: %v", err)
+		}
+		if err := os.MkdirAll(crewPath, 0755); err != nil {
+			t.Fatalf("mkdir crew: %v", err)
+		}
+
+		// Run SetupRedirect - should detect no DB at rig/.beads and fall back to mayor/rig/.beads
+		if err := SetupRedirect(townRoot, crewPath); err != nil {
+			t.Fatalf("SetupRedirect failed: %v", err)
+		}
+
+		// Verify redirect points to mayor/rig/.beads (not rig/.beads)
+		redirectPath := filepath.Join(crewPath, ".beads", "redirect")
+		content, err := os.ReadFile(redirectPath)
+		if err != nil {
+			t.Fatalf("read redirect: %v", err)
+		}
+
+		want := "../../mayor/rig/.beads\n"
+		if string(content) != want {
+			t.Errorf("redirect content = %q, want %q", string(content), want)
+		}
+
+		// Verify redirect resolves correctly
+		resolved := ResolveBeadsDir(crewPath)
+		if resolved != mayorRigBeads {
+			t.Errorf("resolved = %q, want %q", resolved, mayorRigBeads)
+		}
+	})
+
 	t.Run("crew worktree with mayor/rig beads only", func(t *testing.T) {
 		// Setup: no rig/.beads, only mayor/rig/.beads exists
 		// This is the tracked beads architecture where rig root has no .beads directory

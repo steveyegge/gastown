@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/base32"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -290,13 +292,74 @@ func dryRunFormula(f *formulaData, formulaName, targetRig string) error {
 	}
 
 	if f.Type == "convoy" && len(f.Legs) > 0 {
+		// Generate review ID for dry-run display
+		reviewID := generateFormulaShortID()
+
+		// Build target description
+		var targetDescription string
+		if formulaRunPR > 0 {
+			targetDescription = fmt.Sprintf("PR #%d", formulaRunPR)
+		} else {
+			targetDescription = "local files"
+		}
+
+		// Fetch PR info if --pr flag is set
+		var prTitle string
+		var changedFiles []map[string]interface{}
+		if formulaRunPR > 0 {
+			prTitle, changedFiles = fetchPRInfo(formulaRunPR)
+			if prTitle != "" {
+				fmt.Printf("  PR Title: %s\n", prTitle)
+			}
+			if len(changedFiles) > 0 {
+				fmt.Printf("  Changed files: %d\n", len(changedFiles))
+			}
+		}
+
+		// Show output directory if configured
+		var outputDir string
+		if f.Output != nil && f.Output.Directory != "" {
+			dirCtx := map[string]interface{}{
+				"review_id":    reviewID,
+				"formula_name": formulaName,
+			}
+			outputDir = renderTemplateOrDefault(f.Output.Directory, dirCtx, ".reviews/"+reviewID)
+			fmt.Printf("\n  Output directory: %s\n", outputDir)
+		}
+
 		fmt.Printf("\n  Legs (%d parallel):\n", len(f.Legs))
 		for _, leg := range f.Legs {
-			fmt.Printf("    • %s: %s\n", leg.ID, leg.Title)
+			// Show rendered output path for each leg
+			if f.Output != nil && outputDir != "" {
+				legCtx := map[string]interface{}{
+					"formula_name":       formulaName,
+					"target_description": targetDescription,
+					"review_id":          reviewID,
+					"pr_number":          formulaRunPR,
+					"pr_title":           prTitle,
+					"leg": map[string]interface{}{
+						"id":          leg.ID,
+						"title":       leg.Title,
+						"focus":       leg.Focus,
+						"description": leg.Description,
+					},
+					"changed_files": changedFiles,
+				}
+				legPattern := renderTemplateOrDefault(f.Output.LegPattern, legCtx, leg.ID+"-findings.md")
+				outputPath := filepath.Join(outputDir, legPattern)
+				fmt.Printf("    • %s: %s\n      → %s\n", leg.ID, leg.Title, outputPath)
+			} else {
+				fmt.Printf("    • %s: %s\n", leg.ID, leg.Title)
+			}
 		}
 		if f.Synthesis != nil {
 			fmt.Printf("\n  Synthesis:\n")
-			fmt.Printf("    • %s\n", f.Synthesis.Title)
+			if f.Output != nil && outputDir != "" {
+				synthPath := filepath.Join(outputDir, f.Output.Synthesis)
+				fmt.Printf("    • %s\n      → %s\n", f.Synthesis.Title, synthPath)
+			} else {
+				fmt.Printf("    • %s\n", f.Synthesis.Title)
+			}
 		}
 	}
 
@@ -349,6 +412,43 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 
 	fmt.Printf("%s Created convoy: %s\n", style.Bold.Render("✓"), convoyID)
 
+	// Generate a unique review ID for this convoy run
+	reviewID := generateFormulaShortID()
+
+	// Build target description
+	var targetDescription string
+	if formulaRunPR > 0 {
+		targetDescription = fmt.Sprintf("PR #%d", formulaRunPR)
+	} else {
+		targetDescription = "local files"
+	}
+
+	// Fetch PR info if --pr flag is set
+	var prTitle string
+	var changedFiles []map[string]interface{}
+	if formulaRunPR > 0 {
+		prTitle, changedFiles = fetchPRInfo(formulaRunPR)
+	}
+
+	// Create output directory if configured
+	var outputDir string
+	if f.Output != nil && f.Output.Directory != "" {
+		// Build minimal context for directory rendering
+		dirCtx := map[string]interface{}{
+			"review_id":    reviewID,
+			"formula_name": formulaName,
+		}
+		outputDir = renderTemplateOrDefault(f.Output.Directory, dirCtx, ".reviews/"+reviewID)
+
+		// Create the directory
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			fmt.Printf("%s Failed to create output directory %s: %v\n",
+				style.Dim.Render("Warning:"), outputDir, err)
+		} else {
+			fmt.Printf("  %s Output directory: %s\n", style.Dim.Render("📁"), outputDir)
+		}
+	}
+
 	// Step 2: Create leg beads and track them
 	legBeads := make(map[string]string) // leg.ID -> bead ID
 	for _, leg := range f.Legs {
@@ -358,7 +458,42 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 		legDesc := leg.Description
 		if f.Prompts != nil {
 			if basePrompt, ok := f.Prompts["base"]; ok {
-				legDesc = fmt.Sprintf("%s\n\n---\nBase Prompt:\n%s", leg.Description, basePrompt)
+				// Build template context for this leg
+				legCtx := map[string]interface{}{
+					"formula_name":       formulaName,
+					"target_description": targetDescription,
+					"review_id":          reviewID,
+					"pr_number":          formulaRunPR,
+					"pr_title":           prTitle,
+					"leg": map[string]interface{}{
+						"id":          leg.ID,
+						"title":       leg.Title,
+						"focus":       leg.Focus,
+						"description": leg.Description,
+					},
+					"changed_files": changedFiles,
+					"files":         []string{}, // TODO: support --files flag
+				}
+
+				// Compute output path for this leg
+				if f.Output != nil {
+					legPattern := renderTemplateOrDefault(f.Output.LegPattern, legCtx, leg.ID+"-findings.md")
+					outputPath := filepath.Join(outputDir, legPattern)
+					legCtx["output_path"] = outputPath
+					legCtx["output"] = map[string]interface{}{
+						"directory": outputDir,
+						"synthesis": f.Output.Synthesis,
+					}
+				}
+
+				// Render the base prompt with template context
+				renderedPrompt, err := renderTemplate(basePrompt, legCtx)
+				if err != nil {
+					fmt.Printf("%s Failed to render template for %s: %v\n",
+						style.Dim.Render("Warning:"), leg.ID, err)
+					renderedPrompt = basePrompt // Fall back to raw template
+				}
+				legDesc = fmt.Sprintf("%s\n\n---\nBase Prompt:\n%s", leg.Description, renderedPrompt)
 			}
 		}
 
@@ -500,6 +635,13 @@ type formulaData struct {
 	Legs        []formulaLeg
 	Synthesis   *formulaSynthesis
 	Prompts     map[string]string
+	Output      *formulaOutput
+}
+
+type formulaOutput struct {
+	Directory  string
+	LegPattern string
+	Synthesis  string
 }
 
 type formulaLeg struct {
@@ -587,6 +729,9 @@ func parseFormulaFile(path string) (*formulaData, error) {
 
 	// Parse prompts
 	f.Prompts = extractPrompts(content)
+
+	// Parse output config
+	f.Output = extractOutput(content)
 
 	return f, nil
 }
@@ -721,6 +866,94 @@ func extractPrompts(content string) map[string]string {
 	}
 
 	return prompts
+}
+
+// extractOutput parses [output] section from TOML
+func extractOutput(content string) *formulaOutput {
+	idx := strings.Index(content, "[output]")
+	if idx == -1 {
+		return nil
+	}
+
+	section := content[idx:]
+	// Find where section ends (next [ that isn't part of output)
+	if endIdx := strings.Index(section[1:], "\n["); endIdx != -1 {
+		section = section[:endIdx+1]
+	}
+
+	out := &formulaOutput{
+		Directory:  extractTOMLValue(section, "directory"),
+		LegPattern: extractTOMLValue(section, "leg_pattern"),
+		Synthesis:  extractTOMLValue(section, "synthesis"),
+	}
+
+	if out.Directory == "" && out.LegPattern == "" && out.Synthesis == "" {
+		return nil
+	}
+
+	return out
+}
+
+// renderTemplate renders a Go text/template with the given context map
+func renderTemplate(tmplText string, ctx map[string]interface{}) (string, error) {
+	tmpl, err := template.New("prompt").Parse(tmplText)
+	if err != nil {
+		return "", fmt.Errorf("parsing template: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, ctx); err != nil {
+		return "", fmt.Errorf("executing template: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// renderTemplateOrDefault renders a template, returning defaultVal on error
+func renderTemplateOrDefault(tmplText string, ctx map[string]interface{}, defaultVal string) string {
+	if tmplText == "" {
+		return defaultVal
+	}
+	result, err := renderTemplate(tmplText, ctx)
+	if err != nil {
+		return defaultVal
+	}
+	return result
+}
+
+// fetchPRInfo fetches PR title and changed files from GitHub using gh CLI
+func fetchPRInfo(prNumber int) (string, []map[string]interface{}) {
+	var prTitle string
+	var changedFiles []map[string]interface{}
+
+	// Get PR title
+	titleCmd := exec.Command("gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "title", "--jq", ".title")
+	titleOut, err := titleCmd.Output()
+	if err == nil {
+		prTitle = strings.TrimSpace(string(titleOut))
+	}
+
+	// Get changed files with stats
+	filesCmd := exec.Command("gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "files", "--jq", ".files[] | \"\\(.path) \\(.additions) \\(.deletions)\"")
+	filesOut, err := filesCmd.Output()
+	if err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(filesOut)), "\n") {
+			if line == "" {
+				continue
+			}
+			parts := strings.Fields(line)
+			if len(parts) >= 3 {
+				var additions, deletions int
+				fmt.Sscanf(parts[1], "%d", &additions)
+				fmt.Sscanf(parts[2], "%d", &deletions)
+				changedFiles = append(changedFiles, map[string]interface{}{
+					"path":      parts[0],
+					"additions": additions,
+					"deletions": deletions,
+				})
+			}
+		}
+	}
+
+	return prTitle, changedFiles
 }
 
 // generateFormulaShortID generates a short random ID (5 lowercase chars)

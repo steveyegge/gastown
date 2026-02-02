@@ -1545,35 +1545,28 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		return result
 	}
 
-	// Discover rigs with beads databases
+	// Build a set of target issue IDs for fast lookup
+	targetIDs := make(map[string]bool, len(issueIDs))
+	for _, id := range issueIDs {
+		targetIDs[id] = true
+	}
+
+	// Discover rigs with beads directories
 	rigDirs, _ := filepath.Glob(filepath.Join(townRoot, "*", "polecats"))
-	var beadsDBS []string
+	var beadsDirs []string
 	for _, polecatsDir := range rigDirs {
 		rigDir := filepath.Dir(polecatsDir)
-		beadsDB := filepath.Join(rigDir, "mayor", "rig", ".beads", "beads.db")
-		if _, err := os.Stat(beadsDB); err == nil {
-			beadsDBS = append(beadsDBS, beadsDB)
+		beadsDir := filepath.Join(rigDir, "mayor", "rig", ".beads")
+		if info, err := os.Stat(beadsDir); err == nil && info.IsDir() {
+			beadsDirs = append(beadsDirs, filepath.Join(rigDir, "mayor", "rig"))
 		}
 	}
 
-	if len(beadsDBS) == 0 {
+	if len(beadsDirs) == 0 {
 		return result
 	}
 
-	// Build the IN clause with properly escaped issue IDs
-	var quotedIDs []string
-	for _, id := range issueIDs {
-		safeID := strings.ReplaceAll(id, "'", "''")
-		quotedIDs = append(quotedIDs, fmt.Sprintf("'%s'", safeID))
-	}
-	inClause := strings.Join(quotedIDs, ", ")
-
-	// Batch query: fetch all matching agents in one query per rig
-	query := fmt.Sprintf(
-		`SELECT id, hook_bead, last_activity FROM issues WHERE issue_type = 'agent' AND status = 'open' AND hook_bead IN (%s)`,
-		inClause)
-
-	// Query all rigs in parallel
+	// Query all rigs in parallel using bd list
 	type rigResult struct {
 		agents []struct {
 			ID           string `json:"id"`
@@ -1582,18 +1575,19 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		}
 	}
 
-	resultChan := make(chan rigResult, len(beadsDBS))
+	resultChan := make(chan rigResult, len(beadsDirs))
 	var wg sync.WaitGroup
 
-	for _, beadsDB := range beadsDBS {
+	for _, dir := range beadsDirs {
 		wg.Add(1)
-		go func(db string) {
+		go func(beadsDir string) {
 			defer wg.Done()
 
-			queryCmd := exec.Command("sqlite3", "-json", db, query)
+			cmd := exec.Command("bd", "list", "--type=agent", "--status=open", "--json", "--limit=0")
+			cmd.Dir = beadsDir
 			var stdout bytes.Buffer
-			queryCmd.Stdout = &stdout
-			if err := queryCmd.Run(); err != nil {
+			cmd.Stdout = &stdout
+			if err := cmd.Run(); err != nil {
 				resultChan <- rigResult{}
 				return
 			}
@@ -1604,7 +1598,7 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 				return
 			}
 			resultChan <- rr
-		}(beadsDB)
+		}(dir)
 	}
 
 	// Wait for all queries to complete
@@ -1613,9 +1607,14 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		close(resultChan)
 	}()
 
-	// Collect results from all rigs
+	// Collect results from all rigs, filtering by target issue IDs
 	for rr := range resultChan {
 		for _, agent := range rr.agents {
+			// Only include agents working on issues we care about
+			if !targetIDs[agent.HookBead] {
+				continue
+			}
+
 			// Skip if we already found a worker for this issue
 			if _, ok := result[agent.HookBead]; ok {
 				continue

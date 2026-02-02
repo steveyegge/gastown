@@ -401,7 +401,12 @@ bd show {{issue}}
 bd update {{issue}} --notes "Implemented: <brief summary of what was done>"
 ```
 
-**Exit criteria:** Issue updated with completion notes."""
+**3. Sync beads:**
+```bash
+bd sync
+```
+
+**Exit criteria:** Issue updated with completion notes, beads synced."""
 
 [[steps]]
 id = "submit-and-exit"

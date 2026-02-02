@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/refinery"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -23,6 +24,7 @@ var rigDockCmd = &cobra.Command{
 Docking a rig:
   - Stops the witness if running
   - Stops the refinery if running
+  - Stops all polecat sessions if running
   - Sets status:docked label on the rig identity bead
   - Syncs via git so all clones see the docked status
 
@@ -149,6 +151,18 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Stop polecat sessions if any
+	polecatMgr := polecat.NewSessionManager(t, r)
+	polecatInfos, err := polecatMgr.List()
+	if err == nil && len(polecatInfos) > 0 {
+		fmt.Printf("  Stopping %d polecat session(s)...\n", len(polecatInfos))
+		if err := polecatMgr.StopAll(false); err != nil {
+			fmt.Printf("  %s Failed to stop polecat sessions: %v\n", style.Warning.Render("!"), err)
+		} else {
+			stoppedAgents = append(stoppedAgents, fmt.Sprintf("%d polecat session(s) stopped", len(polecatInfos)))
+		}
+	}
+
 	// Set docked label on rig identity bead
 	if err := bd.Update(rigBeadID, beads.UpdateOptions{
 		AddLabels: []string{RigDockedLabel},
@@ -162,6 +176,7 @@ func runRigDock(cmd *cobra.Command, args []string) error {
 	for _, msg := range stoppedAgents {
 		fmt.Printf("  %s\n", msg)
 	}
+	fmt.Printf("  Beads changes persisted via Dolt\n")
 
 	return nil
 }

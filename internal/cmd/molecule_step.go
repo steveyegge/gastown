@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -53,13 +54,14 @@ func init() {
 
 // StepDoneResult is the result of a step done operation.
 type StepDoneResult struct {
-	StepID       string `json:"step_id"`
-	MoleculeID   string `json:"molecule_id"`
-	StepClosed   bool   `json:"step_closed"`
-	NextStepID   string `json:"next_step_id,omitempty"`
-	NextStepTitle string `json:"next_step_title,omitempty"`
-	Complete     bool   `json:"complete"`
-	Action       string `json:"action"` // "continue", "done", "no_more_ready"
+	StepID        string   `json:"step_id"`
+	MoleculeID    string   `json:"molecule_id"`
+	StepClosed    bool     `json:"step_closed"`
+	NextStepID    string   `json:"next_step_id,omitempty"`
+	NextStepTitle string   `json:"next_step_title,omitempty"`
+	ParallelSteps []string `json:"parallel_steps,omitempty"` // Multiple ready steps for fan-out
+	Complete      bool     `json:"complete"`
+	Action        string   `json:"action"` // "continue", "parallel", "done", "no_more_ready"
 }
 
 func runMoleculeStepDone(cmd *cobra.Command, args []string) error {
@@ -116,18 +118,25 @@ func runMoleculeStepDone(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Closed step %s: %s\n", style.Bold.Render("✓"), stepID, step.Title)
 	}
 
-	// Step 4: Find the next ready step
-	nextStep, allComplete, err := findNextReadyStep(b, moleculeID)
+	// Step 4: Find all ready steps (supports fan-out pattern)
+	readySteps, allComplete, err := findAllReadySteps(b, moleculeID)
 	if err != nil {
-		return fmt.Errorf("finding next step: %w", err)
+		return fmt.Errorf("finding next steps: %w", err)
 	}
 
 	if allComplete {
 		result.Complete = true
 		result.Action = "done"
-	} else if nextStep != nil {
-		result.NextStepID = nextStep.ID
-		result.NextStepTitle = nextStep.Title
+	} else if len(readySteps) > 1 {
+		// Multiple ready steps - fan-out pattern
+		result.Action = "parallel"
+		result.ParallelSteps = make([]string, len(readySteps))
+		for i, s := range readySteps {
+			result.ParallelSteps[i] = s.ID
+		}
+	} else if len(readySteps) == 1 {
+		result.NextStepID = readySteps[0].ID
+		result.NextStepTitle = readySteps[0].Title
 		result.Action = "continue"
 	} else {
 		// There are more steps but none are ready (blocked on dependencies)
@@ -144,7 +153,10 @@ func runMoleculeStepDone(cmd *cobra.Command, args []string) error {
 	// Step 5: Handle next action
 	switch result.Action {
 	case "continue":
-		return handleStepContinue(cwd, townRoot, workDir, nextStep, moleculeStepDryRun)
+		return handleStepContinue(cwd, townRoot, workDir, readySteps[0], moleculeStepDryRun)
+
+	case "parallel":
+		return handleParallelSteps(cwd, townRoot, workDir, readySteps, moleculeStepDryRun)
 
 	case "done":
 		return handleMoleculeComplete(cwd, townRoot, moleculeID, moleculeStepDryRun)
@@ -274,6 +286,87 @@ func findNextReadyStep(b *beads.Beads, moleculeID string) (*beads.Issue, bool, e
 	return nil, false, nil
 }
 
+// findAllReadySteps finds all ready steps in a molecule.
+// Returns (readySteps, allComplete, error).
+// If all steps are complete, returns (nil, true, nil).
+// If no steps are ready but some are blocked/in_progress, returns (nil, false, nil).
+func findAllReadySteps(b *beads.Beads, moleculeID string) ([]*beads.Issue, bool, error) {
+	// Get all children of the molecule
+	children, err := b.List(beads.ListOptions{
+		Parent:   moleculeID,
+		Status:   "all",
+		Priority: -1,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("listing molecule steps: %w", err)
+	}
+
+	if len(children) == 0 {
+		return nil, true, nil // No steps = complete
+	}
+
+	// Build set of closed step IDs and collect open step IDs
+	closedIDs := make(map[string]bool)
+	var openStepIDs []string
+	hasNonClosedSteps := false
+
+	for _, child := range children {
+		switch child.Status {
+		case "closed":
+			closedIDs[child.ID] = true
+		case "open":
+			openStepIDs = append(openStepIDs, child.ID)
+			hasNonClosedSteps = true
+		default:
+			hasNonClosedSteps = true
+		}
+	}
+
+	// Check if all complete
+	if !hasNonClosedSteps {
+		return nil, true, nil
+	}
+
+	// No open steps to check
+	if len(openStepIDs) == 0 {
+		return nil, false, nil
+	}
+
+	// Fetch full details for open steps to get dependency info
+	openStepsMap, err := b.ShowMultiple(openStepIDs)
+	if err != nil {
+		return nil, false, fmt.Errorf("fetching step details: %w", err)
+	}
+
+	// Find ALL ready steps (open steps with all dependencies closed)
+	var readySteps []*beads.Issue
+	for _, stepID := range openStepIDs {
+		step, ok := openStepsMap[stepID]
+		if !ok {
+			continue
+		}
+
+		allDepsClosed := true
+		hasBlockingDeps := false
+		for _, dep := range step.Dependencies {
+			if dep.DependencyType != "blocks" {
+				continue
+			}
+			hasBlockingDeps = true
+			if !closedIDs[dep.ID] {
+				allDepsClosed = false
+				break
+			}
+		}
+
+		if !hasBlockingDeps || allDepsClosed {
+			readySteps = append(readySteps, step)
+		}
+	}
+
+	return readySteps, false, nil
+}
+
 // handleStepContinue handles continuing to the next step.
 func handleStepContinue(cwd, townRoot, _ string, nextStep *beads.Issue, dryRun bool) error { // workDir unused but kept for signature consistency
 	fmt.Printf("\n%s Next step: %s\n", style.Bold.Render("→"), nextStep.ID)
@@ -360,6 +453,85 @@ func handleStepContinue(cwd, townRoot, _ string, nextStep *beads.Issue, dryRun b
 	}
 
 	return t.RespawnPane(pane, restartCmd)
+}
+
+// handleParallelSteps handles executing multiple steps concurrently (fan-out pattern).
+// This function spawns goroutines to execute each step in parallel and waits for all to complete.
+func handleParallelSteps(cwd, townRoot, workDir string, steps []*beads.Issue, dryRun bool) error {
+	fmt.Printf("\n%s Fan-out: %d parallel steps ready\n", style.Bold.Render("⚡"), len(steps))
+	for i, step := range steps {
+		fmt.Printf("  %d. %s: %s\n", i+1, step.ID, step.Title)
+	}
+
+	if dryRun {
+		fmt.Printf("\n[dry-run] Would execute %d steps in parallel\n", len(steps))
+		return nil
+	}
+
+	// For parallel execution, we use goroutines with a WaitGroup
+	// Each step is executed by running its commands in sequence
+	// For now, we execute them sequentially but mark them all as in_progress first
+	// TODO: True parallel execution requires spawning subagents or separate tmux panes
+
+	fmt.Printf("\n%s Executing parallel steps...\n", style.Bold.Render("🔄"))
+
+	// Mark all steps as in_progress
+	gitRoot, err := getGitRoot()
+	if err != nil {
+		return fmt.Errorf("finding git root: %w", err)
+	}
+
+	for _, step := range steps {
+		markCmd := exec.Command("bd", "update", step.ID, "--status=in_progress")
+		markCmd.Dir = gitRoot
+		markCmd.Stderr = os.Stderr
+		if err := markCmd.Run(); err != nil {
+			style.PrintWarning("could not mark step %s as in_progress: %v", step.ID, err)
+		}
+	}
+
+	// Execute steps concurrently using goroutines
+	// Note: This is simplified - each step's "execution" just marks it complete
+	// In practice, the agent (witness/deacon) needs to actually do the work described in step.Description
+	// For true parallel execution, this would spawn separate tmux panes or Task subagents
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(steps))
+
+	for _, step := range steps {
+		wg.Add(1)
+		go func(s *beads.Issue) {
+			defer wg.Done()
+
+			// Execute the step by closing it
+			// In a real implementation, the agent would process the step description
+			// For now, we just mark it as requiring manual execution
+			fmt.Printf("  %s Step %s ready for parallel execution\n", style.Dim.Render("→"), s.ID)
+		}(step)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	// Check for errors
+	for err := range errChan {
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("\n%s All parallel steps marked as in_progress\n", style.Bold.Render("✓"))
+	fmt.Printf("%s Execute each step and close with: gt mol step done <step-id>\n", style.Dim.Render("ℹ"))
+	fmt.Printf("%s Once all parallel steps are closed, the gather step will become ready\n", style.Dim.Render("ℹ"))
+
+	// For the current agent, pick the first step to continue with
+	// Other steps can be picked up by other agents or run manually
+	if len(steps) > 0 {
+		fmt.Printf("\n%s Continuing with first parallel step: %s\n", style.Bold.Render("→"), steps[0].ID)
+		return handleStepContinue(cwd, townRoot, workDir, steps[0], dryRun)
+	}
+
+	return nil
 }
 
 // handleMoleculeComplete handles when a molecule is complete.

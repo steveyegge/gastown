@@ -5,898 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gas Town Dashboard</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <style>
-        :root {
-            --bg-dark: #0f1419;
-            --bg-card: #1a1f26;
-            --bg-card-hover: #242b33;
-            --text-primary: #e6e1cf;
-            --text-secondary: #6c7680;
-            --text-muted: #4a5159;
-            --border: #2d363f;
-            --border-accent: #3d4752;
-            --green: #c2d94c;
-            --yellow: #ffb454;
-            --red: #f07178;
-            --blue: #59c2ff;
-            --purple: #d2a6ff;
-            --cyan: #95e6cb;
-            --orange: #ff8f40;
-            --pink: #ff79c6;
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
-            background: var(--bg-dark);
-            color: var(--text-primary);
-            padding: 16px;
-            min-height: 100vh;
-            font-size: 13px;
-            line-height: 1.5;
-        }
-
-        .dashboard {
-            width: 100%;
-            max-width: 100%;
-        }
-
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 12px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        h1 {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .refresh-info {
-            color: var(--text-muted);
-            font-size: 0.75rem;
-        }
-
-        /* Grid layout for panels - auto-fit responsive */
-        .panels {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 16px;
-            margin-bottom: 16px;
-            width: 100%;
-        }
-
-        .panel {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            overflow: hidden;
-        }
-
-        .panel-full {
-            grid-column: 1 / -1;
-        }
-
-        .panel-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 14px;
-            background: var(--bg-dark);
-            border-bottom: 1px solid var(--border);
-        }
-
-        .panel-header h2 {
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .panel-header .count {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            background: var(--border);
-            padding: 2px 8px;
-            border-radius: 10px;
-        }
-
-        .panel-header .count-alert {
-            background: var(--red);
-            color: var(--bg-dark);
-        }
-
-        .panel-body {
-            max-height: 280px;
-            overflow-y: auto;
-        }
-
-        /* Tables */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        th, td {
-            padding: 6px 10px;
-            text-align: left;
-            border-bottom: 1px solid var(--border);
-        }
-
-        th {
-            font-weight: 500;
-            color: var(--text-muted);
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            background: var(--bg-card);
-            position: sticky;
-            top: 0;
-        }
-
-        tr:hover {
-            background: var(--bg-card-hover);
-        }
-
-        /* Status badges */
-        .badge {
-            display: inline-block;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 0.65rem;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .badge-green { background: var(--green); color: var(--bg-dark); }
-        .badge-yellow { background: var(--yellow); color: var(--bg-dark); }
-        .badge-red { background: var(--red); color: var(--bg-dark); }
-        .badge-blue { background: var(--blue); color: var(--bg-dark); }
-        .badge-purple { background: var(--purple); color: var(--bg-dark); }
-        .badge-cyan { background: var(--cyan); color: var(--bg-dark); }
-        .badge-orange { background: var(--orange); color: var(--bg-dark); }
-        .badge-muted { background: var(--border-accent); color: var(--text-secondary); }
-
-        /* Activity dots */
-        .activity-dot {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 6px;
-        }
-
-        .activity-green .activity-dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
-        .activity-yellow .activity-dot { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
-        .activity-red .activity-dot { background: var(--red); box-shadow: 0 0 6px var(--red); }
-        .activity-unknown .activity-dot { background: var(--text-muted); }
-
-        /* Convoy-specific styles */
-        .convoy-row {
-            cursor: pointer;
-        }
-
-        .convoy-id {
-            font-weight: 600;
-            color: var(--blue);
-        }
-
-        .convoy-title {
-            color: var(--text-secondary);
-            margin-left: 8px;
-        }
-
-        .progress-bar {
-            width: 60px;
-            height: 4px;
-            background: var(--border);
-            border-radius: 2px;
-            overflow: hidden;
-            margin-top: 4px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: var(--green);
-            border-radius: 2px;
-            transition: width 0.3s ease;
-        }
-
-        /* Expandable issues */
-        .tracked-issues {
-            background: var(--bg-dark);
-            border-top: 1px solid var(--border);
-        }
-
-        .tracked-issue {
-            display: flex;
-            align-items: center;
-            padding: 6px 12px 6px 32px;
-            border-bottom: 1px solid var(--border);
-            font-size: 0.8rem;
-        }
-
-        .tracked-issue:last-child {
-            border-bottom: none;
-        }
-
-        .issue-status-icon {
-            width: 16px;
-            margin-right: 8px;
-            text-align: center;
-        }
-
-        .issue-status-icon.open { color: var(--text-muted); }
-        .issue-status-icon.in_progress { color: var(--yellow); }
-        .issue-status-icon.closed { color: var(--green); }
-
-        .issue-id {
-            color: var(--text-secondary);
-            margin-right: 8px;
-            font-size: 0.75rem;
-        }
-
-        .issue-title {
-            flex: 1;
-            color: var(--text-primary);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .issue-assignee {
-            color: var(--purple);
-            font-size: 0.75rem;
-            margin-left: 8px;
-        }
-
-        /* Polecat styles */
-        .polecat-name {
-            font-weight: 600;
-            color: var(--cyan);
-        }
-
-        .polecat-rig {
-            color: var(--text-muted);
-        }
-
-        .polecat-work {
-            color: var(--text-secondary);
-            font-size: 0.8rem;
-        }
-
-        .status-hint {
-            color: var(--text-muted);
-            font-size: 0.75rem;
-            max-width: 200px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        /* Polecat issue styles */
-        .polecat-issue {
-            font-size: 0.8rem;
-            max-width: 180px;
-        }
-
-        .polecat-issue .issue-id {
-            color: var(--blue);
-            font-weight: 600;
-            margin-right: 4px;
-        }
-
-        .polecat-issue .issue-title {
-            color: var(--text-secondary);
-        }
-
-        .polecat-issue .no-issue {
-            color: var(--text-muted);
-        }
-
-        /* Polecat status row highlights */
-        tr.polecat-working { }
-        tr.polecat-stale { background: rgba(255, 180, 84, 0.05); }
-        tr.polecat-stuck { background: rgba(240, 113, 120, 0.08); }
-        tr.polecat-idle { opacity: 0.7; }
-
-        /* Mail styles */
-        .mail-unread {
-            background: var(--bg-card-hover);
-        }
-
-        .mail-from, .mail-to {
-            font-size: 0.8rem;
-        }
-
-        .mail-to {
-            color: var(--text-secondary);
-        }
-
-        /* Sender color classes - consistent color per sender */
-        .sender-cyan .mail-from { color: var(--cyan); }
-        .sender-purple .mail-from { color: var(--purple); }
-        .sender-green .mail-from { color: var(--green); }
-        .sender-yellow .mail-from { color: var(--yellow); }
-        .sender-orange .mail-from { color: var(--orange); }
-        .sender-blue .mail-from { color: var(--blue); }
-        .sender-red .mail-from { color: var(--red); }
-        .sender-pink .mail-from { color: var(--pink); }
-        .sender-default .mail-from { color: var(--text-secondary); }
-
-        /* Sender color stripe on left */
-        .sender-cyan { border-left: 3px solid var(--cyan); }
-        .sender-purple { border-left: 3px solid var(--purple); }
-        .sender-green { border-left: 3px solid var(--green); }
-        .sender-yellow { border-left: 3px solid var(--yellow); }
-        .sender-orange { border-left: 3px solid var(--orange); }
-        .sender-blue { border-left: 3px solid var(--blue); }
-        .sender-red { border-left: 3px solid var(--red); }
-        .sender-pink { border-left: 3px solid var(--pink); }
-        .sender-default { border-left: 3px solid var(--border); }
-
-        .mail-subject {
-            color: var(--text-primary);
-            max-width: 200px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .mail-time {
-            color: var(--text-muted);
-            font-size: 0.75rem;
-        }
-
-        .priority-urgent { color: var(--red); font-weight: bold; }
-        .priority-high { color: var(--orange); }
-        .priority-normal { color: var(--text-secondary); }
-        .priority-low { color: var(--text-muted); }
-
-        /* PR styles */
-        .pr-link {
-            color: var(--blue);
-            text-decoration: none;
-        }
-
-        .pr-link:hover {
-            text-decoration: underline;
-        }
-
-        .pr-title {
-            color: var(--text-secondary);
-            max-width: 250px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .mq-green { background: rgba(194, 217, 76, 0.08); }
-        .mq-yellow { background: rgba(255, 180, 84, 0.08); }
-        .mq-red { background: rgba(240, 113, 120, 0.08); }
-
-        /* Severity styles */
-        .severity-critical { color: var(--red); font-weight: bold; }
-        .severity-high { color: var(--orange); }
-        .severity-medium { color: var(--yellow); }
-        .severity-low { color: var(--text-muted); }
-
-        /* Dog state styles */
-        .dog-idle { color: var(--green); }
-        .dog-working { color: var(--yellow); }
-
-        /* Session role styles */
-        .role-deacon { color: var(--purple); }
-        .role-witness { color: var(--cyan); }
-        .role-refinery { color: var(--orange); }
-        .role-polecat { color: var(--green); }
-        .role-crew { color: var(--blue); }
-
-        /* Health status */
-        .health-good { color: var(--green); }
-        .health-warning { color: var(--yellow); }
-        .health-bad { color: var(--red); }
-
-        /* Health panel specific */
-        .health-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            padding: 12px;
-        }
-
-        .health-item {
-            padding: 8px 12px;
-            background: var(--bg-dark);
-            border-radius: 4px;
-        }
-
-        .health-label {
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            margin-bottom: 4px;
-        }
-
-        .health-value {
-            font-size: 1rem;
-            font-weight: 600;
-        }
-
-        .health-value.good { color: var(--green); }
-        .health-value.warning { color: var(--yellow); }
-        .health-value.bad { color: var(--red); }
-
-        /* Rig styles */
-        .rig-name {
-            font-weight: 600;
-            color: var(--blue);
-        }
-
-        .rig-url {
-            color: var(--text-muted);
-            font-size: 0.75rem;
-            max-width: 150px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .agent-icons {
-            display: flex;
-            gap: 4px;
-        }
-
-        .agent-icon {
-            font-size: 0.8rem;
-            opacity: 0.3;
-        }
-
-        .agent-icon.active {
-            opacity: 1;
-        }
-
-        /* Hook styles */
-        .hook-id {
-            font-weight: 600;
-            color: var(--purple);
-        }
-
-        .hook-title {
-            color: var(--text-secondary);
-            max-width: 180px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .hook-agent {
-            color: var(--cyan);
-            font-size: 0.8rem;
-        }
-
-        tr.hook-stale {
-            background: rgba(255, 180, 84, 0.08);
-        }
-
-        tr.hook-stale .hook-id {
-            color: var(--orange);
-        }
-
-        /* Issue styles */
-        .issue-id {
-            font-weight: 600;
-            color: var(--blue);
-        }
-
-        .issue-title {
-            color: var(--text-secondary);
-            max-width: 200px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .issue-type {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            text-transform: lowercase;
-        }
-
-        tr.priority-1 {
-            background: rgba(240, 113, 120, 0.08);
-        }
-
-        tr.priority-2 {
-            background: rgba(255, 180, 84, 0.05);
-        }
-
-        /* Activity feed styles */
-        .activity-feed {
-            padding: 8px !important;
-        }
-
-        .feed-list {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            max-height: 280px;
-            overflow-y: auto;
-        }
-
-        .feed-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 8px;
-            background: rgba(0, 0, 0, 0.15);
-            border-radius: 4px;
-            font-size: 0.8rem;
-        }
-
-        .feed-icon {
-            font-size: 0.9rem;
-            flex-shrink: 0;
-        }
-
-        .feed-summary {
-            flex: 1;
-            color: var(--text-secondary);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .feed-time {
-            color: var(--text-muted);
-            font-size: 0.7rem;
-            flex-shrink: 0;
-        }
-
-        /* Empty state */
-        .empty-state {
-            text-align: center;
-            padding: 24px;
-            color: var(--text-muted);
-        }
-
-        .empty-state p {
-            font-size: 0.8rem;
-        }
-
-        /* htmx loading indicator */
-        .htmx-request .htmx-indicator {
-            opacity: 1;
-        }
-
-        .htmx-indicator {
-            opacity: 0;
-            transition: opacity 200ms ease-in;
-        }
-
-        /* Scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: var(--bg-dark);
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--border-accent);
-            border-radius: 3px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: var(--text-muted);
-        }
-
-        /* Mayor status banner */
-        .mayor-banner {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 20px;
-            margin-bottom: 16px;
-            background: var(--bg-elevated);
-            border-radius: 8px;
-            border: 1px solid var(--border);
-        }
-
-        .mayor-banner.attached {
-            border-color: var(--green);
-            background: rgba(166, 209, 137, 0.08);
-        }
-
-        .mayor-banner.detached {
-            border-color: var(--text-muted);
-            opacity: 0.7;
-        }
-
-        .mayor-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .mayor-icon {
-            font-size: 1.5rem;
-        }
-
-        .mayor-title {
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .mayor-status {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .mayor-stat {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-        }
-
-        .mayor-stat-label {
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-        }
-
-        .mayor-stat-value {
-            font-size: 0.85rem;
-            font-weight: 500;
-        }
-
-        .mayor-stat-value.active {
-            color: var(--green);
-        }
-
-        .mayor-stat-value.idle {
-            color: var(--yellow);
-        }
-
-        /* Summary & Alerts Banner */
-        .summary-banner {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 20px;
-            margin-bottom: 16px;
-            background: var(--bg-elevated);
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            gap: 20px;
-        }
-
-        .summary-stats {
-            display: flex;
-            gap: 24px;
-        }
-
-        .stat {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-
-        .stat-value {
-            font-size: 1.4rem;
-            font-weight: 700;
-            color: var(--text-primary);
-            line-height: 1;
-        }
-
-        .stat-label {
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            margin-top: 4px;
-        }
-
-        .summary-alerts {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-        }
-
-        .alert-item {
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-
-        .alert-red {
-            background: rgba(240, 113, 120, 0.2);
-            color: var(--red);
-        }
-
-        .alert-orange {
-            background: rgba(255, 180, 84, 0.2);
-            color: var(--orange);
-        }
-
-        .alert-yellow {
-            background: rgba(255, 214, 102, 0.2);
-            color: var(--yellow);
-        }
-
-        .alert-green {
-            background: rgba(166, 209, 137, 0.15);
-            color: var(--green);
-        }
-
-        /* Responsive - adapt to different screen sizes */
-
-        /* Medium screens */
-        @media (max-width: 900px) {
-            .summary-stats {
-                gap: 16px;
-            }
-
-            .stat-value {
-                font-size: 1.2rem;
-            }
-
-            .panel-body {
-                padding: 10px;
-            }
-
-            table {
-                font-size: 0.75rem;
-            }
-
-            th, td {
-                padding: 6px 8px;
-            }
-        }
-
-        /* Expand mode (client-side JS) */
-        .panel-header {
-            display: flex;
-            align-items: center;
-        }
-
-        .expand-btn {
-            margin-left: auto;
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            cursor: pointer;
-            padding: 2px 8px;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            background: none;
-        }
-
-        .expand-btn:hover {
-            color: var(--text-secondary);
-            border-color: var(--text-muted);
-        }
-
-        .panel.expanded {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            z-index: 100;
-            margin: 0;
-            border-radius: 0;
-            overflow: auto;
-            background: #0f1419; /* Solid opaque background */
-        }
-
-        .panel.expanded .panel-body {
-            max-height: calc(100vh - 50px);
-            overflow: auto;
-        }
-
-        .panel.expanded table {
-            font-size: 0.95rem;
-        }
-
-        .panel.expanded .expand-btn {
-            color: var(--red);
-            border-color: var(--red);
-        }
-
-        /* Don't truncate text when expanded */
-        .panel.expanded .pr-title,
-        .panel.expanded .convoy-id,
-        .panel.expanded .polecat-issue,
-        .panel.expanded .issue-title,
-        .panel.expanded .hook-title,
-        .panel.expanded .mail-subject,
-        .panel.expanded .feed-summary,
-        .panel.expanded td {
-            max-width: none;
-            white-space: normal;
-            overflow: visible;
-            text-overflow: unset;
-        }
-
-        /* Small screens (< 600px) */
-        @media (max-width: 600px) {
-            body {
-                padding: 8px;
-            }
-
-            .panels {
-                grid-template-columns: 1fr;
-            }
-
-            header {
-                flex-direction: column;
-                gap: 8px;
-                text-align: center;
-            }
-
-            header h1 {
-                font-size: 1.2rem;
-            }
-
-            .mayor-banner {
-                flex-direction: column;
-                gap: 12px;
-                text-align: center;
-            }
-
-            .mayor-status {
-                justify-content: center;
-            }
-
-            .summary-banner {
-                flex-direction: column;
-                gap: 12px;
-            }
-
-            .summary-stats {
-                flex-wrap: wrap;
-                justify-content: center;
-                gap: 10px;
-            }
-
-            .summary-alerts {
-                justify-content: center;
-            }
-
-            .stat-value {
-                font-size: 1.1rem;
-            }
-
-            .stat-label {
-                font-size: 0.65rem;
-            }
-
-            .alert-item {
-                font-size: 0.7rem;
-                padding: 3px 8px;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
-    <div class="dashboard" hx-get="/" hx-trigger="every 10s" hx-swap="outerHTML">
+    <div class="dashboard" id="dashboard-main" hx-get="/" hx-trigger="every 10s [!window.pauseRefresh]" hx-swap="outerHTML">
         <header>
             <h1>🚚 Gas Town Control Center</h1>
-            <span class="refresh-info">
-                Auto-refresh: 10s
-                <span class="htmx-indicator">⟳</span>
-            </span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="cmd-btn" id="open-palette-btn">
+                    <span>⌘</span> Commands <kbd>⌘K</kbd>
+                </button>
+                <span class="refresh-info">
+                    Auto-refresh: 10s
+                    <span class="htmx-indicator">⟳</span>
+                </span>
+            </div>
         </header>
 
         <!-- Mayor Status Banner -->
@@ -1045,19 +168,20 @@
                 </div>
             </div>
 
-            <!-- Polecats Panel -->
+            <!-- Workers Panel (Polecats + Refinery) -->
             <div class="panel">
                 <div class="panel-header">
-                    <h2>🐾 Polecats</h2>
-                    <span class="count">{{len .Polecats}}</span>
+                    <h2>👷 Workers</h2>
+                    <span class="count">{{len .Workers}}</span>
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Polecats}}
+                    {{if .Workers}}
                     <table>
                         <thead>
                             <tr>
                                 <th>Worker</th>
+                                <th>Type</th>
                                 <th>Rig</th>
                                 <th>Working On</th>
                                 <th>Status</th>
@@ -1065,9 +189,16 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {{range .Polecats}}
+                            {{range .Workers}}
                             <tr class="{{polecatStatusClass .WorkStatus}}">
                                 <td><span class="polecat-name">{{.Name}}</span></td>
+                                <td>
+                                    {{if eq .AgentType "refinery"}}
+                                    <span class="badge badge-blue">refinery</span>
+                                    {{else}}
+                                    <span class="badge badge-muted">polecat</span>
+                                    {{end}}
+                                </td>
                                 <td><span class="polecat-rig">{{.Rig}}</span></td>
                                 <td class="polecat-issue">
                                     {{if .IssueID}}
@@ -1172,90 +303,196 @@
             <!-- Row 2: Mail, Merge Queue, Escalations -->
 
             <!-- Mail Panel -->
-            <div class="panel">
+            <div class="panel" id="mail-panel">
                 <div class="panel-header">
                     <h2>✉️ Mail</h2>
-                    <span class="count">{{len .Mail}}</span>
+                    <span class="count" id="mail-count">{{len .Mail}}</span>
+                    <div class="mail-tabs">
+                        <button class="mail-tab active" data-tab="inbox">Inbox</button>
+                        <button class="mail-tab" data-tab="all">All Traffic</button>
+                    </div>
+                    <button class="compose-btn" id="compose-mail-btn" title="Compose new message">✎</button>
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Mail}}
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>From</th>
-                                <th>To</th>
-                                <th>Subject</th>
-                                <th>Age</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .Mail}}
-                            <tr class="{{senderColorClass .FromRaw}}{{if not .Read}} mail-unread{{end}}">
-                                <td class="mail-from">{{.From}}</td>
-                                <td class="mail-to">{{.To}}</td>
-                                <td>
-                                    {{if eq .Priority "urgent"}}<span class="priority-urgent">⚡</span>{{end}}
-                                    {{if eq .Priority "high"}}<span class="priority-high">!</span>{{end}}
-                                    <span class="mail-subject">{{.Subject}}</span>
-                                </td>
-                                <td class="mail-time">{{.Age}}</td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                    {{else}}
-                    <div class="empty-state">
-                        <p>No recent mail</p>
+                    <!-- Inbox view (overseer inbox via API) -->
+                    <div id="mail-list">
+                        <div class="loading-state" id="mail-loading">Loading inbox...</div>
+                        <table id="mail-table" style="display: none;">
+                            <thead>
+                                <tr>
+                                    <th>From</th>
+                                    <th>Subject</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mail-tbody">
+                            </tbody>
+                        </table>
+                        <div class="empty-state" id="mail-empty" style="display: none;">
+                            <p>No mail in inbox</p>
+                        </div>
                     </div>
-                    {{end}}
+                    <!-- All Mail view (all traffic from beads) -->
+                    <div id="mail-all" style="display: none;">
+                        {{if .Mail}}
+                        <table class="mail-all-table">
+                            <thead>
+                                <tr>
+                                    <th>From</th>
+                                    <th>To</th>
+                                    <th>Subject</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .Mail}}
+                                <tr class="mail-row {{if not .Read}}mail-unread{{end}}" data-msg-id="{{.ID}}" data-from="{{.FromRaw}}">
+                                    <td class="mail-from">{{.From}}</td>
+                                    <td class="mail-to">{{.To}}</td>
+                                    <td>
+                                        {{if eq .Priority "urgent"}}<span class="priority-urgent">⚡</span>{{end}}
+                                        {{if eq .Priority "high"}}<span class="priority-high">!</span>{{end}}
+                                        <span class="mail-subject">{{.Subject}}</span>
+                                    </td>
+                                    <td class="mail-time">{{.Age}}</td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                        {{else}}
+                        <div class="empty-state">
+                            <p>No mail traffic</p>
+                        </div>
+                        {{end}}
+                    </div>
+                    <!-- Message detail view (hidden by default) -->
+                    <div id="mail-detail" class="mail-detail" style="display: none;">
+                        <div class="mail-detail-header">
+                            <button class="mail-back-btn" id="mail-back-btn">← Back</button>
+                            <span class="mail-detail-subject" id="mail-detail-subject"></span>
+                        </div>
+                        <div class="mail-detail-meta">
+                            <span class="mail-detail-from">From: <strong id="mail-detail-from"></strong></span>
+                            <span class="mail-detail-time" id="mail-detail-time"></span>
+                        </div>
+                        <div class="mail-detail-body" id="mail-detail-body"></div>
+                        <div class="mail-detail-actions">
+                            <button class="mail-reply-btn" id="mail-reply-btn">↩ Reply</button>
+                        </div>
+                    </div>
+                    <!-- Compose form (hidden by default) -->
+                    <div id="mail-compose" class="mail-compose" style="display: none;">
+                        <div class="mail-compose-header">
+                            <button class="mail-back-btn" id="compose-back-btn">← Back</button>
+                            <span class="mail-compose-title" id="mail-compose-title">New Message</span>
+                        </div>
+                        <div class="mail-compose-form">
+                            <div class="mail-compose-field">
+                                <label for="compose-to">To:</label>
+                                <select id="compose-to" class="mail-compose-input"></select>
+                            </div>
+                            <div class="mail-compose-field">
+                                <label for="compose-subject">Subject:</label>
+                                <input type="text" id="compose-subject" class="mail-compose-input" placeholder="Enter subject...">
+                            </div>
+                            <div class="mail-compose-field">
+                                <label for="compose-body">Message:</label>
+                                <textarea id="compose-body" class="mail-compose-textarea" placeholder="Enter message..." rows="4"></textarea>
+                            </div>
+                            <input type="hidden" id="compose-reply-to" value="">
+                            <div class="mail-compose-actions">
+                                <button class="mail-send-btn" id="mail-send-btn">Send</button>
+                                <button class="mail-cancel-btn" id="compose-cancel-btn">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <!-- Merge Queue Panel -->
-            <div class="panel">
+            <div class="panel" id="merge-queue-panel">
                 <div class="panel-header">
                     <h2>🔀 Merge Queue</h2>
                     <span class="count">{{len .MergeQueue}}</span>
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .MergeQueue}}
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>PR</th>
-                                <th>Repo</th>
-                                <th>Title</th>
-                                <th>CI</th>
-                                <th>Merge</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .MergeQueue}}
-                            <tr class="{{.ColorClass}}">
-                                <td><a href="{{.URL}}" target="_blank" class="pr-link">#{{.Number}}</a></td>
-                                <td>{{.Repo}}</td>
-                                <td class="pr-title">{{.Title}}</td>
-                                <td>
-                                    {{if eq .CIStatus "pass"}}<span class="badge badge-green">CI Pass</span>
-                                    {{else if eq .CIStatus "fail"}}<span class="badge badge-red">CI Fail</span>
-                                    {{else}}<span class="badge badge-yellow">CI Running</span>{{end}}
-                                </td>
-                                <td>
-                                    {{if eq .Mergeable "ready"}}<span class="badge badge-green">Ready</span>
-                                    {{else if eq .Mergeable "conflict"}}<span class="badge badge-red">Conflict</span>
-                                    {{else}}<span class="badge badge-muted">Pending</span>{{end}}
-                                </td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                    {{else}}
-                    <div class="empty-state">
-                        <p>No PRs in queue</p>
+                    <!-- PR List View -->
+                    <div id="pr-list">
+                        {{if .MergeQueue}}
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>PR</th>
+                                    <th>Repo</th>
+                                    <th>Title</th>
+                                    <th>CI</th>
+                                    <th>Merge</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .MergeQueue}}
+                                <tr class="pr-row {{.ColorClass}}" data-pr-url="{{.URL}}" data-pr-repo="{{.Repo}}" data-pr-number="{{.Number}}">
+                                    <td><span class="pr-link">#{{.Number}}</span></td>
+                                    <td>{{.Repo}}</td>
+                                    <td class="pr-title">{{.Title}}</td>
+                                    <td>
+                                        {{if eq .CIStatus "pass"}}<span class="badge badge-green">CI Pass</span>
+                                        {{else if eq .CIStatus "fail"}}<span class="badge badge-red">CI Fail</span>
+                                        {{else}}<span class="badge badge-yellow">CI Running</span>{{end}}
+                                    </td>
+                                    <td>
+                                        {{if eq .Mergeable "ready"}}<span class="badge badge-green">Ready</span>
+                                        {{else if eq .Mergeable "conflict"}}<span class="badge badge-red">Conflict</span>
+                                        {{else}}<span class="badge badge-muted">Pending</span>{{end}}
+                                    </td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                        {{else}}
+                        <div class="empty-state">
+                            <p>No PRs in queue</p>
+                        </div>
+                        {{end}}
                     </div>
-                    {{end}}
+                    <!-- PR Detail View (hidden by default) -->
+                    <div id="pr-detail" style="display: none;">
+                        <div class="detail-header">
+                            <button id="pr-back-btn" class="btn-back">← Back</button>
+                            <a id="pr-detail-link" href="#" target="_blank" class="btn-link">Open in GitHub ↗</a>
+                        </div>
+                        <div class="pr-detail-content">
+                            <div class="pr-detail-title">
+                                <span id="pr-detail-state" class="pr-state"></span>
+                                <span id="pr-detail-number" class="pr-number"></span>
+                            </div>
+                            <h3 id="pr-detail-title-text"></h3>
+                            <div class="pr-detail-meta">
+                                <span id="pr-detail-author"></span>
+                                <span id="pr-detail-branches"></span>
+                                <span id="pr-detail-created"></span>
+                            </div>
+                            <div class="pr-detail-stats">
+                                <span id="pr-detail-additions" class="stat-additions"></span>
+                                <span id="pr-detail-deletions" class="stat-deletions"></span>
+                                <span id="pr-detail-files"></span>
+                            </div>
+                            <div class="pr-detail-section">
+                                <h4>Description</h4>
+                                <pre id="pr-detail-body"></pre>
+                            </div>
+                            <div id="pr-detail-labels-section" class="pr-detail-section" style="display: none;">
+                                <h4>Labels</h4>
+                                <div id="pr-detail-labels"></div>
+                            </div>
+                            <div id="pr-detail-checks-section" class="pr-detail-section" style="display: none;">
+                                <h4>Checks</h4>
+                                <div id="pr-detail-checks"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1472,46 +709,79 @@
             {{end}}
 
             <!-- Open Issues Panel -->
-            <div class="panel">
+            <div class="panel" id="issues-panel">
                 <div class="panel-header">
                     <h2>📿 Open Issues</h2>
                     <span class="count">{{len .Issues}}</span>
                     <button class="expand-btn">Expand</button>
                 </div>
                 <div class="panel-body">
-                    {{if .Issues}}
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Pri</th>
-                                <th>ID</th>
-                                <th>Title</th>
-                                <th>Type</th>
-                                <th>Age</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .Issues}}
-                            <tr class="issue-row priority-{{.Priority}}">
-                                <td>
-                                    {{if eq .Priority 1}}<span class="badge badge-red">P1</span>
-                                    {{else if eq .Priority 2}}<span class="badge badge-orange">P2</span>
-                                    {{else if eq .Priority 3}}<span class="badge badge-yellow">P3</span>
-                                    {{else}}<span class="badge badge-muted">P4</span>{{end}}
-                                </td>
-                                <td><span class="issue-id">{{.ID}}</span></td>
-                                <td class="issue-title">{{.Title}}</td>
-                                <td class="issue-type">{{.Type}}</td>
-                                <td>{{.Age}}</td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                    {{else}}
-                    <div class="empty-state">
-                        <p>No open issues</p>
+                    <!-- Issues List View -->
+                    <div id="issues-list">
+                        {{if .Issues}}
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Pri</th>
+                                    <th>ID</th>
+                                    <th>Title</th>
+                                    <th>Type</th>
+                                    <th>Age</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .Issues}}
+                                <tr class="issue-row priority-{{.Priority}}" data-issue-id="{{.ID}}">
+                                    <td>
+                                        {{if eq .Priority 1}}<span class="badge badge-red">P1</span>
+                                        {{else if eq .Priority 2}}<span class="badge badge-orange">P2</span>
+                                        {{else if eq .Priority 3}}<span class="badge badge-yellow">P3</span>
+                                        {{else}}<span class="badge badge-muted">P4</span>{{end}}
+                                    </td>
+                                    <td><span class="issue-id">{{.ID}}</span></td>
+                                    <td class="issue-title">{{.Title}}</td>
+                                    <td class="issue-type">{{.Type}}</td>
+                                    <td>{{.Age}}</td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                        {{else}}
+                        <div class="empty-state">
+                            <p>No open issues</p>
+                        </div>
+                        {{end}}
                     </div>
-                    {{end}}
+                    <!-- Issue Detail View (hidden by default) -->
+                    <div id="issue-detail" style="display: none;">
+                        <div class="detail-header">
+                            <button id="issue-back-btn" class="btn-back">← Back</button>
+                        </div>
+                        <div class="issue-detail-content">
+                            <div class="issue-detail-title">
+                                <span id="issue-detail-priority" class="badge"></span>
+                                <span id="issue-detail-id" class="issue-id"></span>
+                                <span id="issue-detail-status" class="issue-status"></span>
+                            </div>
+                            <h3 id="issue-detail-title-text"></h3>
+                            <div class="issue-detail-meta">
+                                <span id="issue-detail-type"></span>
+                                <span id="issue-detail-created"></span>
+                            </div>
+                            <div class="issue-detail-section">
+                                <h4>Description</h4>
+                                <pre id="issue-detail-description"></pre>
+                            </div>
+                            <div id="issue-detail-deps" class="issue-detail-section" style="display: none;">
+                                <h4>Dependencies</h4>
+                                <div id="issue-detail-depends-on"></div>
+                            </div>
+                            <div id="issue-detail-blocks-section" class="issue-detail-section" style="display: none;">
+                                <h4>Blocks</h4>
+                                <div id="issue-detail-blocks"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1559,52 +829,38 @@
             </div>
         </div>
     </div>
-    <script>
-    (function() {
-        // Use event delegation - ONE handler, no re-attachment needed
-        document.addEventListener('click', function(e) {
-            const btn = e.target.closest('.expand-btn');
-            if (!btn) return;
-            
-            e.preventDefault();
-            const panel = btn.closest('.panel');
-            if (!panel) return;
-            
-            if (panel.classList.contains('expanded')) {
-                // Collapse
-                panel.classList.remove('expanded');
-                btn.textContent = 'Expand';
-            } else {
-                // Collapse any other expanded panel first
-                document.querySelectorAll('.panel.expanded').forEach(p => {
-                    p.classList.remove('expanded');
-                    const b = p.querySelector('.expand-btn');
-                    if (b) b.textContent = 'Expand';
-                });
-                // Expand this one
-                panel.classList.add('expanded');
-                btn.textContent = '✕ Close';
-            }
-        });
-        
-        // Escape to close
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') {
-                document.querySelectorAll('.panel.expanded').forEach(p => {
-                    p.classList.remove('expanded');
-                    const btn = p.querySelector('.expand-btn');
-                    if (btn) btn.textContent = 'Expand';
-                });
-            }
-        });
-        
-        // After HTMX swap, close any expanded panels (fresh state)
-        document.body.addEventListener('htmx:afterSwap', function() {
-            document.querySelectorAll('.panel.expanded').forEach(p => {
-                p.classList.remove('expanded');
-            });
-        });
-    })();
-    </script>
+
+    <!-- Command Palette (outside HTMX-refreshed area) -->
+    <div id="command-palette-overlay" class="command-palette-overlay">
+        <div class="command-palette">
+            <input type="text" id="command-palette-input" class="command-palette-input" placeholder="Search commands..." autocomplete="off">
+            <div id="command-palette-results" class="command-palette-results"></div>
+            <div class="command-palette-footer">
+                <span><kbd>↑↓</kbd> navigate</span>
+                <span><kbd>↵</kbd> execute</span>
+                <span><kbd>esc</kbd> close</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Output Panel -->
+    <div id="output-panel" class="output-panel">
+        <div class="output-panel-header">
+            <span class="output-panel-title">
+                <span>📋</span>
+                <span id="output-panel-cmd">Command Output</span>
+            </span>
+            <div class="output-panel-actions">
+                <button id="output-copy-btn" class="output-panel-btn">Copy</button>
+                <button id="output-close-btn" class="output-panel-btn">Close</button>
+            </div>
+        </div>
+        <div id="output-panel-content" class="output-panel-content"></div>
+    </div>
+
+    <script src="/static/dashboard.js?v=2"></script>
 </body>
 </html>

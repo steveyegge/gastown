@@ -90,7 +90,7 @@ func TestFormatStartupBeacon(t *testing.T) {
 			},
 		},
 		{
-			name: "start includes fallback instructions",
+			name: "start beacon has no prime instruction",
 			cfg: BeaconConfig{
 				Recipient: "beads/crew/fang",
 				Sender:    "human",
@@ -101,11 +101,13 @@ func TestFormatStartupBeacon(t *testing.T) {
 				"beads/crew/fang",
 				"<- human",
 				"start",
-				"gt prime", // fallback instruction for when SessionStart hook fails
+			},
+			wantNot: []string{
+				"gt prime",
 			},
 		},
 		{
-			name: "restart includes fallback instructions",
+			name: "restart beacon has no prime instruction",
 			cfg: BeaconConfig{
 				Recipient: "gastown/crew/george",
 				Sender:    "human",
@@ -115,7 +117,9 @@ func TestFormatStartupBeacon(t *testing.T) {
 				"[GAS TOWN]",
 				"gastown/crew/george",
 				"restart",
-				"gt prime", // fallback instruction for when SessionStart hook fails
+			},
+			wantNot: []string{
+				"gt prime",
 			},
 		},
 	}

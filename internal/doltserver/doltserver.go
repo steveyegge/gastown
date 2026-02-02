@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/util"
 )
 
@@ -517,8 +518,9 @@ func FindMigratableDatabases(townRoot string) []Migration {
 	var migrations []Migration
 	config := DefaultConfig(townRoot)
 
-	// Check town-level beads database: .beads/dolt/beads -> .dolt-data/hq
-	townSource := filepath.Join(townRoot, ".beads", "dolt", "beads")
+	// Check town-level beads database -> .dolt-data/hq
+	townBeadsDir := beads.ResolveBeadsDir(townRoot)
+	townSource := filepath.Join(townBeadsDir, "dolt", "beads")
 	if _, err := os.Stat(filepath.Join(townSource, ".dolt")); err == nil {
 		// Check target doesn't already have data
 		targetDir := filepath.Join(config.DataDir, "hq")
@@ -532,7 +534,7 @@ func FindMigratableDatabases(townRoot string) []Migration {
 	}
 
 	// Check rig-level beads databases
-	// Look for directories in townRoot that have .beads/dolt/beads
+	// Look for directories in townRoot, following .beads/redirect if present
 	entries, err := os.ReadDir(townRoot)
 	if err != nil {
 		return migrations
@@ -544,7 +546,8 @@ func FindMigratableDatabases(townRoot string) []Migration {
 		}
 
 		rigName := entry.Name()
-		rigSource := filepath.Join(townRoot, rigName, ".beads", "dolt", "beads")
+		resolvedBeadsDir := beads.ResolveBeadsDir(filepath.Join(townRoot, rigName))
+		rigSource := filepath.Join(resolvedBeadsDir, "dolt", "beads")
 
 		if _, err := os.Stat(filepath.Join(rigSource, ".dolt")); err == nil {
 			// Check target doesn't already have data

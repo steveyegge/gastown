@@ -13,7 +13,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/claude"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
@@ -408,9 +407,10 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 		return fmt.Errorf("creating deacon directory: %w", err)
 	}
 
-	// Ensure Claude settings exist (autonomous role needs mail in SessionStart)
-	if err := claude.EnsureSettingsForRole(deaconDir, "deacon"); err != nil {
-		return fmt.Errorf("creating deacon settings: %w", err)
+	// Ensure runtime settings exist (autonomous role needs mail in SessionStart)
+	runtimeConfig := config.ResolveRoleAgentConfig("deacon", townRoot, deaconDir)
+	if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", runtimeConfig); err != nil {
+		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
 	initialPrompt := session.BuildStartupPrompt(session.BeaconConfig{
@@ -451,8 +451,8 @@ func startDeaconSession(t *tmux.Tmux, sessionName, agentOverride string) error {
 	}
 	time.Sleep(constants.ShutdownNotifyDelay)
 
-	runtimeConfig := config.LoadRuntimeConfig("")
-	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeConfig)
+	runtimeCfg := config.LoadRuntimeConfig("")
+	_ = runtime.RunStartupFallback(t, sessionName, "deacon", runtimeCfg)
 
 	return nil
 }

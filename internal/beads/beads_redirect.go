@@ -184,17 +184,36 @@ func SetupRedirect(townRoot, worktreePath string) error {
 	rigBeadsPath := filepath.Join(rigRoot, ".beads")
 	mayorBeadsPath := filepath.Join(rigRoot, "mayor", "rig", ".beads")
 
-	// Check rig-level .beads first, fall back to mayor/rig/.beads (tracked beads architecture)
+	// Check rig-level .beads first, fall back to mayor/rig/.beads (tracked beads architecture).
+	// For dolt backend, the actual database lives at mayor/rig/.beads/dolt/, not at rig/.beads/.
+	// The rig-root .beads/ only has metadata.json (runtime state). If rig/.beads exists but has
+	// no database (no dolt/ and no beads.db), redirect to mayor/rig/.beads where the DB is.
 	usesMayorFallback := false
-	if _, err := os.Stat(rigBeadsPath); os.IsNotExist(err) {
-		// No rig/.beads - check for mayor/rig/.beads (tracked beads architecture)
-		if _, err := os.Stat(mayorBeadsPath); os.IsNotExist(err) {
-			return fmt.Errorf("no beads found at %s or %s", rigBeadsPath, mayorBeadsPath)
+	rigBeadsExists := false
+	if _, err := os.Stat(rigBeadsPath); err == nil {
+		rigBeadsExists = true
+	}
+	rigHasDB := false
+	if rigBeadsExists {
+		// Check for actual database: dolt/ directory or beads.db file
+		if _, err := os.Stat(filepath.Join(rigBeadsPath, "dolt")); err == nil {
+			rigHasDB = true
+		} else if _, err := os.Stat(filepath.Join(rigBeadsPath, "beads.db")); err == nil {
+			rigHasDB = true
 		}
-		// Using mayor fallback - warn user to run bd doctor
-		fmt.Fprintf(os.Stderr, "Warning: rig .beads not found at %s, using %s\n", rigBeadsPath, mayorBeadsPath)
-		fmt.Fprintf(os.Stderr, "  Run 'bd doctor' to fix rig beads configuration\n")
-		usesMayorFallback = true
+	}
+
+	if !rigBeadsExists || !rigHasDB {
+		// Rig .beads doesn't exist or has no database — check mayor/rig/.beads
+		if _, err := os.Stat(mayorBeadsPath); os.IsNotExist(err) {
+			if !rigBeadsExists {
+				return fmt.Errorf("no beads found at %s or %s", rigBeadsPath, mayorBeadsPath)
+			}
+			// Rig .beads exists but has no DB and mayor path doesn't exist either.
+			// Fall through to use rig path (best effort).
+		} else {
+			usesMayorFallback = true
+		}
 	}
 
 	// Clean up runtime files in .beads/ but preserve tracked files (formulas/, README.md, etc.)

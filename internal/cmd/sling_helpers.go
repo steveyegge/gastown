@@ -352,7 +352,8 @@ func ensureAgentReady(sessionName string) error {
 	}
 
 	// Claude-only: accept bypass permissions warning if present
-	if t.IsClaudeRunning(sessionName) {
+	agentName, _ := t.GetEnvironment(sessionName, "GT_AGENT")
+	if agentName == "" || agentName == "claude" {
 		_ = t.AcceptBypassPermissionsWarning(sessionName)
 
 		// PRAGMATIC APPROACH: fixed delay rather than prompt detection.
@@ -419,6 +420,9 @@ func agentIDToBeadID(agentID, townRoot string) string {
 		return beads.CrewBeadIDWithPrefix(prefix, rig, parts[2])
 	case len(parts) == 3 && parts[1] == "polecats":
 		return beads.PolecatBeadIDWithPrefix(prefix, rig, parts[2])
+	case len(parts) == 3 && parts[0] == "deacon" && parts[1] == "dogs":
+		// Dogs are town-level agents with hq- prefix
+		return beads.DogBeadIDTown(parts[2])
 	default:
 		return ""
 	}
@@ -476,6 +480,10 @@ func updateAgentHookBead(agentID, beadID, workDir, townBeadsDir string) {
 	if err := bd.SetHookBead(agentBeadID, beadID); err != nil {
 		// Log warning instead of silent ignore - helps debug cross-beads issues
 		fmt.Fprintf(os.Stderr, "Warning: couldn't set agent %s hook: %v\n", agentBeadID, err)
+		// Dogs created before canonical IDs need recreation: gt dog rm <name> && gt dog add <name>
+		if strings.Contains(agentBeadID, "-dog-") {
+			fmt.Fprintf(os.Stderr, "  (Old dog? Recreate with: gt dog rm <name> && gt dog add <name>)\n")
+		}
 		return
 	}
 }

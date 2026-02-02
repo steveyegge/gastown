@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -153,33 +152,21 @@ func (w *ConvoyWatcher) processLine(line string) {
 }
 
 // getTrackingConvoys returns convoy IDs that track the given issue.
+// Uses bd dep list to query the dependency graph.
 func (w *ConvoyWatcher) getTrackingConvoys(issueID string) []string {
-	townBeads := filepath.Join(w.townRoot, ".beads")
-	dbPath := filepath.Join(townBeads, "beads.db")
-
-	// Query for convoys that track this issue
-	// Handle both direct ID and external reference format
-	safeIssueID := strings.ReplaceAll(issueID, "'", "''")
-
-	// Query for dependencies where this issue is the target
-	// Convoys use "tracks" type: convoy -> tracked issue (depends_on_id)
-	query := fmt.Sprintf(`
-		SELECT DISTINCT issue_id FROM dependencies
-		WHERE type = 'tracks'
-		AND (depends_on_id = '%s' OR depends_on_id LIKE '%%:%s')
-	`, safeIssueID, safeIssueID)
-
-	queryCmd := exec.Command("sqlite3", "-json", dbPath, query)
-	queryCmd.Env = os.Environ() // Inherit PATH to find sqlite3 executable
+	// Query for convoys that track this issue (direction=up finds dependents)
+	cmd := exec.Command("bd", "dep", "list", issueID, "--direction=up", "-t", "tracks", "--json")
+	cmd.Dir = w.townRoot
+	cmd.Env = os.Environ()
 	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
+	cmd.Stdout = &stdout
 
-	if err := queryCmd.Run(); err != nil {
+	if err := cmd.Run(); err != nil {
 		return nil
 	}
 
 	var results []struct {
-		IssueID string `json:"issue_id"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
 		return nil
@@ -187,7 +174,7 @@ func (w *ConvoyWatcher) getTrackingConvoys(issueID string) []string {
 
 	convoyIDs := make([]string, 0, len(results))
 	for _, r := range results {
-		convoyIDs = append(convoyIDs, r.IssueID)
+		convoyIDs = append(convoyIDs, r.ID)
 	}
 	return convoyIDs
 }
@@ -195,19 +182,14 @@ func (w *ConvoyWatcher) getTrackingConvoys(issueID string) []string {
 // checkConvoyCompletion checks if all issues tracked by a convoy are closed.
 // If so, runs gt convoy check to close the convoy.
 func (w *ConvoyWatcher) checkConvoyCompletion(convoyID string) {
-	townBeads := filepath.Join(w.townRoot, ".beads")
-	dbPath := filepath.Join(townBeads, "beads.db")
-
 	// First check if the convoy is still open
-	convoyQuery := fmt.Sprintf(`SELECT status FROM issues WHERE id = '%s'`,
-		strings.ReplaceAll(convoyID, "'", "''"))
-
-	queryCmd := exec.Command("sqlite3", "-json", dbPath, convoyQuery)
-	queryCmd.Env = os.Environ() // Inherit PATH to find sqlite3 executable
+	showCmd := exec.Command("bd", "show", convoyID, "--json")
+	showCmd.Dir = w.townRoot
+	showCmd.Env = os.Environ()
 	var stdout bytes.Buffer
-	queryCmd.Stdout = &stdout
+	showCmd.Stdout = &stdout
 
-	if err := queryCmd.Run(); err != nil {
+	if err := showCmd.Run(); err != nil {
 		return
 	}
 

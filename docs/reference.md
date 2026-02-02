@@ -382,18 +382,19 @@ persisting it to disk.
 ### Sparse Checkout (Source Repo Isolation)
 
 When agents work on source repositories that have their own Claude Code configuration,
-Gas Town uses git sparse checkout to exclude all context files:
+Gas Town uses git sparse checkout to exclude Claude Code context files:
 
 ```bash
 # Automatically configured for worktrees - excludes:
 # - .claude/       : settings, rules, agents, commands
 # - CLAUDE.md      : primary context file
 # - CLAUDE.local.md: personal context file
-# - .mcp.json      : MCP server configuration
-git sparse-checkout set --no-cone '/*' '!/.claude/' '!/CLAUDE.md' '!/CLAUDE.local.md' '!/.mcp.json'
+# Note: .mcp.json is NOT excluded so worktrees inherit MCP server config
+git sparse-checkout set --no-cone '/*' '!/.claude/' '!/CLAUDE.md' '!/CLAUDE.local.md'
 ```
 
 This ensures agents use Gas Town's context, not the source repo's instructions.
+MCP servers defined in `.mcp.json` are inherited by all worktrees for tool access.
 
 **Doctor check**: `gt doctor` verifies sparse checkout is configured correctly.
 Run `gt doctor --fix` to update legacy configurations missing the newer patterns.
