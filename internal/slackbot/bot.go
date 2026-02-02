@@ -2438,14 +2438,17 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 	}
 
 	// Show full context inline (gt-xeejgo - no "Show Full Context" button needed)
+	// Only add block if context formats to non-empty string (gt-wpe4ca)
 	if decision.Context != "" {
 		contextText := formatContextForSlack(decision.Context)
-		blocks = append(blocks,
-			slack.NewSectionBlock(
-				slack.NewTextBlockObject("mrkdwn", contextText, false, false),
-				nil, nil,
-			),
-		)
+		if contextText != "" {
+			blocks = append(blocks,
+				slack.NewSectionBlock(
+					slack.NewTextBlockObject("mrkdwn", contextText, false, false),
+					nil, nil,
+				),
+			)
+		}
 	}
 
 	// Show options inline with resolve buttons (gt-1bc64)
@@ -2695,14 +2698,17 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 	}
 
 	// Show full context inline (gt-xeejgo - no "Show Full Context" button needed)
+	// Only add block if context formats to non-empty string (gt-wpe4ca)
 	if decision.Context != "" {
 		contextText := formatContextForSlack(decision.Context)
-		blocks = append(blocks,
-			slack.NewSectionBlock(
-				slack.NewTextBlockObject("mrkdwn", contextText, false, false),
-				nil, nil,
-			),
-		)
+		if contextText != "" {
+			blocks = append(blocks,
+				slack.NewSectionBlock(
+					slack.NewTextBlockObject("mrkdwn", contextText, false, false),
+					nil, nil,
+				),
+			)
+		}
 	}
 
 	if len(decision.Options) > 0 {
