@@ -391,7 +391,7 @@ func (b *Bot) handleInteraction(callback slack.InteractionCallback) {
 		case "dismiss_decision":
 			b.handleDismissDecision(callback, action.Value)
 		case "open_preferences":
-			b.handleOpenPreferences(callback)
+			b.handleOpenPreferences(callback, action.Value)
 		default:
 			if strings.HasPrefix(action.ActionID, "peek_") {
 				decisionID := strings.TrimPrefix(action.ActionID, "peek_")
@@ -1047,15 +1047,14 @@ func (b *Bot) handleShowContext(callback slack.InteractionCallback, decisionID s
 
 // handleOpenPreferences handles the "DM Me" button click.
 // Immediately sends the current decision as a DM, then opens the preferences modal (gt-5uqg3k).
-func (b *Bot) handleOpenPreferences(callback slack.InteractionCallback) {
+func (b *Bot) handleOpenPreferences(callback slack.InteractionCallback, decisionID string) {
 	userID := callback.User.ID
 
-	// Get the decision ID from the button value and send it as a DM immediately (gt-5uqg3k)
-	if len(callback.ActionCallback.BlockActions) > 0 {
-		decisionID := callback.ActionCallback.BlockActions[0].Value
-		if decisionID != "" {
-			b.sendDecisionAsDM(decisionID, userID, callback.Channel.ID)
-		}
+	// Send the decision as a DM immediately (gt-5uqg3k, gt-vc2jrc)
+	if decisionID != "" {
+		b.sendDecisionAsDM(decisionID, userID, callback.Channel.ID)
+	} else {
+		log.Printf("Slack: DM Me button clicked but no decision ID provided")
 	}
 
 	// Then open the preferences modal for future DM settings
@@ -1068,8 +1067,9 @@ func (b *Bot) handleOpenPreferences(callback slack.InteractionCallback) {
 	}
 }
 
-// sendDecisionAsDM sends a specific decision to a user via DM (gt-5uqg3k).
+// sendDecisionAsDM sends a specific decision to a user via DM (gt-5uqg3k, gt-vc2jrc).
 func (b *Bot) sendDecisionAsDM(decisionID, userID, sourceChannelID string) {
+	log.Printf("Slack: Sending decision %s as DM to user %s", decisionID, userID)
 	ctx := context.Background()
 	decision, err := b.rpcClient.GetDecision(ctx, decisionID)
 	if err != nil || decision == nil {
