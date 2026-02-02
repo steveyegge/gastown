@@ -359,3 +359,49 @@ func TestNormalizeAgent(t *testing.T) {
 		}
 	}
 }
+
+func TestGetAgentByChannel(t *testing.T) {
+	cfg := &Config{
+		Enabled:        true,
+		DefaultChannel: "C0DEFAULT",
+		Overrides: map[string]string{
+			"gastown/crew/decisions": "C0DECISIONS",
+			"gastown/crew/wolf":      "C0WOLF",
+			"beads/crew/quartz":      "C0QUARTZ",
+		},
+	}
+
+	r := NewRouter(cfg)
+
+	tests := []struct {
+		channelID string
+		want      string
+	}{
+		{"C0DECISIONS", "gastown/crew/decisions"},
+		{"C0WOLF", "gastown/crew/wolf"},
+		{"C0QUARTZ", "beads/crew/quartz"},
+		{"C0UNKNOWN", ""},
+		{"C0DEFAULT", ""},
+	}
+
+	for _, tt := range tests {
+		got := r.GetAgentByChannel(tt.channelID)
+		if got != tt.want {
+			t.Errorf("GetAgentByChannel(%q) = %q, want %q", tt.channelID, got, tt.want)
+		}
+	}
+}
+
+func TestGetAgentByChannel_NilOverrides(t *testing.T) {
+	cfg := &Config{
+		Enabled:        true,
+		DefaultChannel: "C0DEFAULT",
+	}
+
+	r := NewRouter(cfg)
+
+	got := r.GetAgentByChannel("C0ANYTHING")
+	if got != "" {
+		t.Errorf("GetAgentByChannel with nil overrides = %q, want empty string", got)
+	}
+}

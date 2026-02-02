@@ -2753,11 +2753,19 @@ func (b *Bot) handleEventsAPI(event slackevents.EventsAPIEvent) {
 		case *slackevents.ChannelCreatedEvent:
 			b.handleChannelCreated(ev)
 		case *slackevents.MessageEvent:
-			// Handle thread replies on decision messages (gt-8d5q52.1)
-			// Only process thread replies (has ThreadTimeStamp) that are not subtypes (edits, deletes, etc.)
-			if ev.ThreadTimeStamp != "" && ev.SubType == "" {
-				b.handleThreadReply(ev)
+			// Skip subtypes (edits, deletes, etc.) and bot messages
+			if ev.SubType != "" {
+				return
 			}
+
+			// Handle thread replies on decision messages (gt-8d5q52.1)
+			if ev.ThreadTimeStamp != "" {
+				b.handleThreadReply(ev)
+				return
+			}
+
+			// Handle messages in agent-specific channels (gt-2ndxuv.1)
+			b.handleAgentChannelMessage(ev)
 		}
 	}
 }
@@ -2858,6 +2866,63 @@ func (b *Bot) forwardThreadReplyToAgent(agentAddress, decisionID, question, user
 	}
 	if err := router.Send(msg); err != nil {
 		log.Printf("Slack: Failed to mail %s for thread reply: %v", agentAddress, err)
+	}
+}
+
+// handleAgentChannelMessage processes messages in agent-specific channels (gt-2ndxuv.1).
+// When a user sends a message in a channel dedicated to a specific agent (created via Break Out),
+// the message is forwarded to that agent.
+func (b *Bot) handleAgentChannelMessage(ev *slackevents.MessageEvent) {
+	// Filter out bot's own messages
+	if ev.User == b.botUserID || ev.BotID != "" {
+		return
+	}
+
+	// Check if this channel is mapped to an agent
+	if b.router == nil {
+		return
+	}
+	agentAddress := b.router.GetAgentByChannel(ev.Channel)
+	if agentAddress == "" {
+		return // Not an agent channel
+	}
+
+	// Get user info for display name
+	userName := ev.User
+	if userInfo, err := b.client.GetUserInfo(ev.User); err == nil {
+		userName = userInfo.RealName
+		if userName == "" {
+			userName = userInfo.Name
+		}
+	}
+
+	// Forward message to agent
+	b.forwardChannelMessageToAgent(agentAddress, userName, ev.Text)
+
+	log.Printf("Slack: Forwarded channel message from %s to %s", userName, agentAddress)
+}
+
+// forwardChannelMessageToAgent sends a channel message to the agent via nudge and mail.
+func (b *Bot) forwardChannelMessageToAgent(agentAddress, userName, message string) {
+	// Send nudge (immediate notification)
+	nudgeMsg := fmt.Sprintf("[CHANNEL MESSAGE] %s says: %s", userName, message)
+	nudgeCmd := exec.Command("gt", "nudge", agentAddress, nudgeMsg) //nolint:gosec // trusted internal command
+	if err := nudgeCmd.Run(); err != nil {
+		log.Printf("Slack: Failed to nudge %s for channel message: %v", agentAddress, err)
+	}
+
+	// Send mail (persistent notification)
+	router := mail.NewRouter(b.townRoot)
+	msg := &mail.Message{
+		From:     userName,
+		To:       agentAddress,
+		Subject:  fmt.Sprintf("[CHANNEL MESSAGE] from %s", userName),
+		Body:     fmt.Sprintf("Message from %s in your agent channel:\n\n%s", userName, message),
+		Type:     mail.TypeTask,
+		Priority: mail.PriorityNormal,
+	}
+	if err := router.Send(msg); err != nil {
+		log.Printf("Slack: Failed to mail %s for channel message: %v", agentAddress, err)
 	}
 }
 

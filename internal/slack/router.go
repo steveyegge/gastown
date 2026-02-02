@@ -405,6 +405,24 @@ func (r *Router) GetOverride(agent string) string {
 	return r.config.Overrides[agent]
 }
 
+// GetAgentByChannel returns the agent address for a channel ID (reverse lookup).
+// Returns empty string if no agent is mapped to this channel.
+// This is used for forwarding messages from agent-specific channels to the agent.
+func (r *Router) GetAgentByChannel(channelID string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.config.Overrides == nil {
+		return ""
+	}
+	for agent, ch := range r.config.Overrides {
+		if ch == channelID {
+			return agent
+		}
+	}
+	return ""
+}
+
 // AddOverride sets a dedicated channel override for an agent.
 // The override takes precedence over pattern matching.
 func (r *Router) AddOverride(agent, channelID string) {
