@@ -122,6 +122,7 @@
                                 <th>Status</th>
                                 <th>Convoy</th>
                                 <th>Progress</th>
+                                <th>E2E</th>
                                 <th>Activity</th>
                             </tr>
                         </thead>
@@ -150,6 +151,23 @@
                                     <div class="progress-bar">
                                         <div class="progress-fill" style="width: {{progressPercent .Completed .Total}}%;"></div>
                                     </div>
+                                    {{end}}
+                                </td>
+                                <td class="{{e2eStatusClass .E2EStatus}}">
+                                    {{if eq .E2EStatus "passed"}}
+                                    <span class="badge badge-green" title="{{.E2EPassed}}/{{.E2ETotal}} tests passed">✓ {{.E2EPassed}}/{{.E2ETotal}}</span>
+                                    {{else if eq .E2EStatus "failed"}}
+                                    {{if .ReportPath}}
+                                    <a href="/artifacts/{{.ID}}/report" target="_blank" class="e2e-link">
+                                        <span class="badge badge-red" title="{{.E2EFailed}} test(s) failed - click for report">✗ {{.E2EFailed}} fail</span>
+                                    </a>
+                                    {{else}}
+                                    <span class="badge badge-red" title="{{.E2EFailed}} test(s) failed">✗ {{.E2EFailed}} fail</span>
+                                    {{end}}
+                                    {{else if eq .E2EStatus "pending"}}
+                                    <span class="badge badge-yellow" title="E2E tests in progress">⏳</span>
+                                    {{else}}
+                                    <span class="badge badge-muted" title="No E2E tests run">—</span>
                                     {{end}}
                                 </td>
                                 <td class="{{activityClass .LastActivity}}">

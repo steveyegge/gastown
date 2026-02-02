@@ -1874,3 +1874,29 @@
             from { transform: translateX(100%); opacity: 0; }
             to { transform: translateX(0); opacity: 1; }
         }
+
+        /* E2E Test Status Styles */
+        .e2e-passed {
+            color: var(--green);
+        }
+
+        .e2e-failed {
+            color: var(--red);
+        }
+
+        .e2e-pending {
+            color: var(--yellow);
+        }
+
+        .e2e-none {
+            color: var(--text-muted);
+        }
+
+        .e2e-link {
+            text-decoration: none;
+        }
+
+        .e2e-link:hover .badge {
+            opacity: 0.8;
+            text-decoration: underline;
+        }
