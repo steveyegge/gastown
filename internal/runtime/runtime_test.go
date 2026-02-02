@@ -29,6 +29,14 @@ func TestSessionIDFromEnv_Default(t *testing.T) {
 	os.Unsetenv("GT_SESSION_ID_ENV")
 	os.Unsetenv("CLAUDE_SESSION_ID")
 
+	// Also handle /tmp/.claude-session-current file that SessionIDFromFile reads
+	sessionFile := "/tmp/.claude-session-current"
+	backupFile := sessionFile + ".test-backup"
+	if _, err := os.Stat(sessionFile); err == nil {
+		os.Rename(sessionFile, backupFile)
+		defer os.Rename(backupFile, sessionFile)
+	}
+
 	// Change to a temp dir with no .runtime/session_id file
 	tmpDir := t.TempDir()
 	oldCwd, _ := os.Getwd()

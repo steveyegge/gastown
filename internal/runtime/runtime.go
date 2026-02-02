@@ -33,7 +33,11 @@ func EnsureSettingsForRoleWithAccount(workDir, role, accountConfigDir string, rc
 
 	switch rc.Hooks.Provider {
 	case "claude":
-		return claude.EnsureSettingsForAccount(workDir, role, accountConfigDir)
+		if err := claude.EnsureSettingsForAccount(workDir, role, accountConfigDir); err != nil {
+			return err
+		}
+		// Also ensure .mcp.json exists for MCP server configuration (e.g., Playwright)
+		return claude.EnsureMCPConfig(workDir)
 	case "opencode":
 		return opencode.EnsurePluginAt(workDir, rc.Hooks.Dir, rc.Hooks.SettingsFile)
 	default:
