@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/style"
@@ -93,17 +92,6 @@ func runRigQuickAdd(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  Town: %s\n", townRoot)
 	}
 
-	addArgs := []string{"rig", "add", rigName, gitURL}
-	addCmd := exec.Command("gt", addArgs...)
-	addCmd.Dir = townRoot
-	addCmd.Stdout = os.Stdout
-	addCmd.Stderr = os.Stderr
-	if err := addCmd.Run(); err != nil {
-		fmt.Printf("\n%s Failed to add rig. You can try manually:\n", style.Warning.Render("⚠"))
-		fmt.Printf("  cd %s && gt rig add %s %s\n", townRoot, rigName, gitURL)
-		return fmt.Errorf("gt rig add failed: %w", err)
-	}
-
 	user := quickAddUser
 	if user == "" {
 		user = os.Getenv("USER")
@@ -112,18 +100,22 @@ func runRigQuickAdd(cmd *cobra.Command, args []string) error {
 		user = "default"
 	}
 
-	if !quickAddQuiet {
-		fmt.Printf("\nCreating crew workspace for %s...\n", user)
+	addArgs := []string{"rig", "add", rigName, gitURL, "--crew", user}
+	if quickAddYes {
+		addArgs = append(addArgs, "--yes")
 	}
-
-	crewArgs := []string{"crew", "add", user, "--rig", rigName}
-	crewCmd := exec.Command("gt", crewArgs...)
-	crewCmd.Dir = filepath.Join(townRoot, rigName)
-	crewCmd.Stdout = os.Stdout
-	crewCmd.Stderr = os.Stderr
-	if err := crewCmd.Run(); err != nil {
-		fmt.Printf("  %s Could not create crew workspace: %v\n", style.Dim.Render("⚠"), err)
-		fmt.Printf("  Run manually: cd %s && gt crew add %s --rig %s\n", filepath.Join(townRoot, rigName), user, rigName)
+	addCmd := exec.Command("gt", addArgs...)
+	addCmd.Dir = townRoot
+	addCmd.Stdout = os.Stdout
+	addCmd.Stderr = os.Stderr
+	if err := addCmd.Run(); err != nil {
+		manualCmd := fmt.Sprintf("gt rig add %s %s --crew %s", rigName, gitURL, user)
+		if quickAddYes {
+			manualCmd += " --yes"
+		}
+		fmt.Printf("\n%s Failed to add rig. You can try manually:\n", style.Warning.Render("⚠"))
+		fmt.Printf("  cd %s && %s\n", townRoot, manualCmd)
+		return fmt.Errorf("gt rig add failed: %w", err)
 	}
 
 	crewPath := filepath.Join(townRoot, rigName, "crew", user)
@@ -135,33 +127,6 @@ func runRigQuickAdd(cmd *cobra.Command, args []string) error {
 	fmt.Printf("GT_CREW_PATH=%s\n", crewPath)
 
 	return nil
-}
-
-func findGitRoot(path string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmd.Dir = path
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func findGitRemoteURL(gitRoot string) (string, error) {
-	cmd := exec.Command("git", "remote", "get-url", "origin")
-	cmd.Dir = gitRoot
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func sanitizeRigName(name string) string {
-	name = strings.ReplaceAll(name, "-", "_")
-	name = strings.ReplaceAll(name, ".", "_")
-	name = strings.ReplaceAll(name, " ", "_")
-	return name
 }
 
 func findOrCreateTown() (string, error) {

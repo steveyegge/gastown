@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 )
 
@@ -17,6 +18,7 @@ func TestAgentEnv_Mayor(t *testing.T) {
 	assertEnv(t, env, "GT_ROOT", "/town")
 	assertNotSet(t, env, "GT_RIG")
 	assertNotSet(t, env, "BEADS_NO_DAEMON")
+	assertNotSet(t, env, "BEADS_SYNC_BRANCH")
 }
 
 func TestAgentEnv_Witness(t *testing.T) {
@@ -32,6 +34,7 @@ func TestAgentEnv_Witness(t *testing.T) {
 	assertEnv(t, env, "BD_ACTOR", "myrig/witness")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "myrig/witness")
 	assertEnv(t, env, "GT_ROOT", "/town")
+	assertNotSet(t, env, "BEADS_SYNC_BRANCH")
 }
 
 func TestAgentEnv_Polecat(t *testing.T) {
@@ -51,6 +54,7 @@ func TestAgentEnv_Polecat(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "Toast")
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/Toast")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertNotSet(t, env, "BEADS_SYNC_BRANCH") // Not set without redirect
 }
 
 func TestAgentEnv_Crew(t *testing.T) {
@@ -70,6 +74,7 @@ func TestAgentEnv_Crew(t *testing.T) {
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "emma")
 	assertEnv(t, env, "BEADS_AGENT_NAME", "myrig/emma")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertNotSet(t, env, "BEADS_SYNC_BRANCH") // Not set without redirect
 }
 
 func TestAgentEnv_Refinery(t *testing.T) {
@@ -86,6 +91,7 @@ func TestAgentEnv_Refinery(t *testing.T) {
 	assertEnv(t, env, "BD_ACTOR", "myrig/refinery")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "myrig/refinery")
 	assertEnv(t, env, "BEADS_NO_DAEMON", "1")
+	assertNotSet(t, env, "BEADS_SYNC_BRANCH")
 }
 
 func TestAgentEnv_Deacon(t *testing.T) {
@@ -101,6 +107,7 @@ func TestAgentEnv_Deacon(t *testing.T) {
 	assertEnv(t, env, "GT_ROOT", "/town")
 	assertNotSet(t, env, "GT_RIG")
 	assertNotSet(t, env, "BEADS_NO_DAEMON")
+	assertNotSet(t, env, "BEADS_SYNC_BRANCH")
 }
 
 func TestAgentEnv_Boot(t *testing.T) {
@@ -116,6 +123,7 @@ func TestAgentEnv_Boot(t *testing.T) {
 	assertEnv(t, env, "GT_ROOT", "/town")
 	assertNotSet(t, env, "GT_RIG")
 	assertNotSet(t, env, "BEADS_NO_DAEMON")
+	assertNotSet(t, env, "BEADS_SYNC_BRANCH")
 }
 
 func TestAgentEnv_WithRuntimeConfigDir(t *testing.T) {
@@ -418,6 +426,45 @@ func TestEnvToSlice(t *testing.T) {
 	if !found["A=1"] || !found["B=2"] {
 		t.Errorf("EnvToSlice() = %v, want [A=1, B=2]", result)
 	}
+}
+
+func TestAgentEnv_WithBeadsRedirect(t *testing.T) {
+	t.Parallel()
+	// Create temp dir with .beads/redirect file
+	workDir := t.TempDir()
+	beadsDir := workDir + "/.beads"
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(beadsDir+"/redirect", []byte("../../mayor/rig/.beads\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "crew",
+		Rig:       "myrig",
+		AgentName: "emma",
+		WorkDir:   workDir,
+	})
+
+	// With redirect present, BEADS_SYNC_BRANCH should be set to empty string
+	assertEnv(t, env, "BEADS_SYNC_BRANCH", "")
+}
+
+func TestAgentEnv_WithoutBeadsRedirect(t *testing.T) {
+	t.Parallel()
+	// Create temp dir WITHOUT redirect file
+	workDir := t.TempDir()
+
+	env := AgentEnv(AgentEnvConfig{
+		Role:      "crew",
+		Rig:       "myrig",
+		AgentName: "emma",
+		WorkDir:   workDir,
+	})
+
+	// Without redirect, BEADS_SYNC_BRANCH should NOT be set
+	assertNotSet(t, env, "BEADS_SYNC_BRANCH")
 }
 
 // Helper functions

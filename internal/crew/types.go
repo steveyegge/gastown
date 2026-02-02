@@ -17,6 +17,21 @@ type CrewWorker struct {
 	// Branch is the current git branch.
 	Branch string `json:"branch"`
 
+	// Agent is the default agent alias to use for this crew worker.
+	Agent string `json:"agent,omitempty"`
+
+	// Model is the default model name for this crew worker.
+	Model string `json:"model,omitempty"`
+
+	// Account is the default account handle for this crew worker.
+	Account string `json:"account,omitempty"`
+
+	// Args are extra runtime CLI args for this crew worker.
+	Args []string `json:"args,omitempty"`
+
+	// Env contains environment variables for this crew worker.
+	Env map[string]string `json:"env,omitempty"`
+
 	// CreatedAt is when the crew worker was created.
 	CreatedAt time.Time `json:"created_at"`
 
