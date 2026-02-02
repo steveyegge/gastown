@@ -23,7 +23,7 @@ type ActivityEntry struct {
 	Message   string
 }
 
-// handlePeekButton handles the Peek button click to show agent activity in thread.
+// handlePeekButton handles the Peek button click to show agent terminal output in thread.
 func (b *Bot) handlePeekButton(callback slack.InteractionCallback, decisionID string) {
 	// Get the message info from our tracked messages
 	b.decisionMessagesMu.RLock()
@@ -52,11 +52,40 @@ func (b *Bot) handlePeekButton(callback slack.InteractionCallback, decisionID st
 		return
 	}
 
-	// Get agent activity - show up to 100 entries
-	activities := b.getAgentActivity(agent, 100)
+	// Run gt peek to get terminal output (100 lines)
+	cmd := exec.Command("gt", "peek", agent, "-n", "100")
+	cmd.Dir = b.townRoot
+	output, err := cmd.Output()
+
+	var peekOutput string
+	if err != nil {
+		peekOutput = fmt.Sprintf("Could not peek agent %s: %v", agent, err)
+	} else {
+		peekOutput = string(output)
+		if peekOutput == "" {
+			peekOutput = "(no terminal output captured)"
+		}
+	}
+
+	// Truncate if too long for Slack (max ~3000 chars in a block)
+	if len(peekOutput) > 2900 {
+		peekOutput = peekOutput[len(peekOutput)-2900:]
+		peekOutput = "...(truncated)\n" + peekOutput
+	}
 
 	// Format as code block
-	blocks := formatActivityBlocks(agent, activities)
+	blocks := []slack.Block{
+		slack.NewHeaderBlock(
+			slack.NewTextBlockObject("plain_text",
+				fmt.Sprintf("👁️ Peek: %s", extractAgentShortName(agent)),
+				false, false),
+		),
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn",
+				fmt.Sprintf("```%s```", peekOutput),
+				false, false),
+			nil, nil),
+	}
 
 	// Post to thread
 	_, _, err = b.client.PostMessage(
@@ -66,7 +95,7 @@ func (b *Bot) handlePeekButton(callback slack.InteractionCallback, decisionID st
 	)
 	if err != nil {
 		b.postEphemeral(callback.Channel.ID, callback.User.ID,
-			fmt.Sprintf("Error posting activity: %v", err))
+			fmt.Sprintf("Error posting peek output: %v", err))
 	}
 }
 
