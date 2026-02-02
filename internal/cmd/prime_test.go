@@ -642,6 +642,7 @@ func TestBuildAgentID(t *testing.T) {
 		ctx  RoleInfo
 		want string
 	}{
+		// Basic cases
 		{
 			name: "polecat",
 			ctx:  RoleInfo{Role: RolePolecat, Rig: "gastown", Polecat: "alpha"},
@@ -672,6 +673,7 @@ func TestBuildAgentID(t *testing.T) {
 			ctx:  RoleInfo{Role: RoleDeacon},
 			want: "deacon",
 		},
+		// Edge cases: missing required fields
 		{
 			name: "polecat_no_rig",
 			ctx:  RoleInfo{Role: RolePolecat, Polecat: "alpha"},
@@ -680,6 +682,85 @@ func TestBuildAgentID(t *testing.T) {
 		{
 			name: "polecat_no_name",
 			ctx:  RoleInfo{Role: RolePolecat, Rig: "gastown"},
+			want: "",
+		},
+		{
+			name: "crew_no_rig",
+			ctx:  RoleInfo{Role: RoleCrew, Polecat: "analyst"},
+			want: "",
+		},
+		{
+			name: "crew_no_name",
+			ctx:  RoleInfo{Role: RoleCrew, Rig: "gastown"},
+			want: "",
+		},
+		{
+			name: "witness_no_rig",
+			ctx:  RoleInfo{Role: RoleWitness},
+			want: "",
+		},
+		{
+			name: "refinery_no_rig",
+			ctx:  RoleInfo{Role: RoleRefinery},
+			want: "",
+		},
+		// Edge cases: empty string values (treated same as missing)
+		{
+			name: "polecat_empty_rig",
+			ctx:  RoleInfo{Role: RolePolecat, Rig: "", Polecat: "alpha"},
+			want: "",
+		},
+		{
+			name: "polecat_empty_name",
+			ctx:  RoleInfo{Role: RolePolecat, Rig: "gastown", Polecat: ""},
+			want: "",
+		},
+		{
+			name: "witness_empty_rig",
+			ctx:  RoleInfo{Role: RoleWitness, Rig: ""},
+			want: "",
+		},
+		// Edge cases: special characters in names
+		{
+			name: "polecat_with_hyphen",
+			ctx:  RoleInfo{Role: RolePolecat, Rig: "gastown", Polecat: "alpha-1"},
+			want: "gastown/polecats/alpha-1",
+		},
+		{
+			name: "polecat_with_underscore",
+			ctx:  RoleInfo{Role: RolePolecat, Rig: "gastown", Polecat: "alpha_beta"},
+			want: "gastown/polecats/alpha_beta",
+		},
+		{
+			name: "rig_with_hyphen",
+			ctx:  RoleInfo{Role: RoleWitness, Rig: "gas-town"},
+			want: "gas-town/witness",
+		},
+		{
+			name: "crew_with_numbers",
+			ctx:  RoleInfo{Role: RoleCrew, Rig: "gastown", Polecat: "analyst123"},
+			want: "gastown/crew/analyst123",
+		},
+		// Edge cases: town-level roles ignore extra fields
+		{
+			name: "mayor_with_extra_fields",
+			ctx:  RoleInfo{Role: RoleMayor, Rig: "gastown", Polecat: "ignored"},
+			want: "mayor",
+		},
+		{
+			name: "deacon_with_extra_fields",
+			ctx:  RoleInfo{Role: RoleDeacon, Rig: "beads", Polecat: "ignored"},
+			want: "deacon",
+		},
+		// Edge cases: unknown role
+		{
+			name: "unknown_role",
+			ctx:  RoleInfo{Role: "unknown", Rig: "gastown"},
+			want: "",
+		},
+		{
+			name: "empty_role",
+			ctx:  RoleInfo{Role: "", Rig: "gastown"},
 			want: "",
 		},
 	}
@@ -703,6 +784,7 @@ func TestGetAdviceScope(t *testing.T) {
 		bead AdviceBead
 		want string
 	}{
+		// Basic cases
 		{
 			name: "global",
 			bead: AdviceBead{ID: "test"},
@@ -722,6 +804,108 @@ func TestGetAdviceScope(t *testing.T) {
 			name: "agent",
 			bead: AdviceBead{ID: "test", Labels: []string{"agent:gastown/polecats/alpha"}},
 			want: "Agent",
+		},
+		// Edge cases: empty scope values
+		{
+			name: "empty_role_value",
+			bead: AdviceBead{ID: "test", Labels: []string{"role:"}},
+			want: "", // Empty role returns empty string
+		},
+		{
+			name: "empty_rig_value",
+			bead: AdviceBead{ID: "test", Labels: []string{"rig:"}},
+			want: "", // Empty rig returns empty string
+		},
+		{
+			name: "empty_agent_value",
+			bead: AdviceBead{ID: "test", Labels: []string{"agent:"}},
+			want: "Agent", // Agent label always returns "Agent" regardless of value
+		},
+		// Edge cases: multiple scope labels (first match wins)
+		{
+			name: "multiple_labels_agent_first",
+			bead: AdviceBead{ID: "test", Labels: []string{"agent:foo", "role:polecat", "rig:gastown"}},
+			want: "Agent",
+		},
+		{
+			name: "multiple_labels_role_first",
+			bead: AdviceBead{ID: "test", Labels: []string{"role:witness", "rig:gastown", "agent:bar"}},
+			want: "Witness",
+		},
+		{
+			name: "multiple_labels_rig_first",
+			bead: AdviceBead{ID: "test", Labels: []string{"rig:beads", "agent:foo", "role:polecat"}},
+			want: "beads",
+		},
+		// Edge cases: non-scope labels
+		{
+			name: "non_scope_labels_only",
+			bead: AdviceBead{ID: "test", Labels: []string{"type:advice", "priority:high", "area:auth"}},
+			want: "Global",
+		},
+		{
+			name: "non_scope_before_scope",
+			bead: AdviceBead{ID: "test", Labels: []string{"type:advice", "priority:high", "rig:gastown"}},
+			want: "gastown",
+		},
+		// Edge cases: role capitalization
+		{
+			name: "role_uppercase_preserved",
+			bead: AdviceBead{ID: "test", Labels: []string{"role:Polecat"}},
+			want: "Polecat", // Already capitalized
+		},
+		{
+			name: "role_mixed_case",
+			bead: AdviceBead{ID: "test", Labels: []string{"role:poLECAT"}},
+			want: "PoLECAT", // Only first char uppercased
+		},
+		{
+			name: "role_all_caps",
+			bead: AdviceBead{ID: "test", Labels: []string{"role:POLECAT"}},
+			want: "POLECAT", // Already starts with uppercase
+		},
+		// Edge cases: empty and nil labels
+		{
+			name: "nil_labels",
+			bead: AdviceBead{ID: "test", Labels: nil},
+			want: "Global",
+		},
+		{
+			name: "empty_labels_slice",
+			bead: AdviceBead{ID: "test", Labels: []string{}},
+			want: "Global",
+		},
+		// Edge cases: partial prefix matches (should not match)
+		{
+			name: "partial_agent_prefix",
+			bead: AdviceBead{ID: "test", Labels: []string{"agentfoo"}},
+			want: "Global", // "agentfoo" doesn't start with "agent:"
+		},
+		{
+			name: "partial_role_prefix",
+			bead: AdviceBead{ID: "test", Labels: []string{"roleplay"}},
+			want: "Global", // "roleplay" doesn't start with "role:"
+		},
+		{
+			name: "partial_rig_prefix",
+			bead: AdviceBead{ID: "test", Labels: []string{"rigging"}},
+			want: "Global", // "rigging" doesn't start with "rig:"
+		},
+		// Edge cases: special characters in values
+		{
+			name: "rig_with_hyphens",
+			bead: AdviceBead{ID: "test", Labels: []string{"rig:gas-town-v2"}},
+			want: "gas-town-v2",
+		},
+		{
+			name: "agent_with_slashes",
+			bead: AdviceBead{ID: "test", Labels: []string{"agent:gastown/polecats/alpha-1"}},
+			want: "Agent",
+		},
+		{
+			name: "role_with_underscore",
+			bead: AdviceBead{ID: "test", Labels: []string{"role:crew_worker"}},
+			want: "Crew_worker",
 		},
 	}
 
