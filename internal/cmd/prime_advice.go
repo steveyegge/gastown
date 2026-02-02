@@ -23,6 +23,10 @@ type AdviceBead struct {
 //   - rig:<their-rig>
 //   - role:<their-role>
 //
+// After fetching from beads, we apply additional filtering to ensure rig-scoped
+// advice only appears in the correct rig (beads uses "any label matches" which
+// can leak rig-scoped advice to other rigs via role: label matches).
+//
 // See docs/design/advice-subscription-model-v2.md in beads repo for details.
 func outputAdviceContext(ctx RoleInfo) {
 	// Build agent identity for subscription matching
@@ -33,7 +37,7 @@ func outputAdviceContext(ctx RoleInfo) {
 	}
 
 	// Query advice using beads subscription model
-	adviceBeads, err := queryAdviceForAgent(agentID)
+	adviceBeads, err := queryAdviceForAgent(agentID, ctx.Rig)
 	if err != nil {
 		// Silently skip if bd isn't available or query fails
 		explain(false, fmt.Sprintf("Advice query failed: %v", err))
@@ -103,10 +107,16 @@ func buildAgentID(ctx RoleInfo) string {
 //   - rig:<rig-name>
 //   - role:<role-type>
 //
+// The currentRig parameter is used to filter out rig-scoped advice that doesn't
+// belong to this rig. This is necessary because beads uses "any label matches"
+// logic, which can cause advice with both rig: and role: labels to appear in
+// the wrong rig (e.g., advice labeled "rig:gastown,role:crew" would show up
+// for any crew member, even in the beads rig).
+//
 // Note: Due to gt-1n0zy5, `bd advice list --for --json` returns null labels.
 // We work around this by fetching IDs from --for, then looking up full beads
 // from `bd list -t advice --json` which includes labels.
-func queryAdviceForAgent(agentID string) ([]AdviceBead, error) {
+func queryAdviceForAgent(agentID string, currentRig string) ([]AdviceBead, error) {
 	// Step 1: Get filtered IDs using subscription model
 	cmd := exec.Command("bd", "advice", "list", "--for="+agentID, "--json")
 	output, err := cmd.Output()
@@ -139,7 +149,7 @@ func queryAdviceForAgent(agentID string) ([]AdviceBead, error) {
 	cmd2 := exec.Command("bd", "list", "-t", "advice", "--json", "--limit", "200")
 	output2, err := cmd2.Output()
 	if err != nil {
-		// Fall back to filtered results without labels
+		// Fall back to filtered results without labels (can't filter by rig)
 		return filteredBeads, nil
 	}
 
@@ -148,15 +158,38 @@ func queryAdviceForAgent(agentID string) ([]AdviceBead, error) {
 		return filteredBeads, nil
 	}
 
-	// Step 3: Return only matching beads (with labels)
+	// Step 3: Return only matching beads (with labels), filtering by rig
 	var result []AdviceBead
 	for _, b := range allBeads {
-		if wantIDs[b.ID] {
+		if wantIDs[b.ID] && adviceMatchesRig(b, currentRig) {
 			result = append(result, b)
 		}
 	}
 
 	return result, nil
+}
+
+// adviceMatchesRig checks if advice should be shown to an agent in the given rig.
+// If the advice has a rig: label, it must match the current rig.
+// If the advice has no rig: label, it matches any rig (global or role-scoped).
+// Town-level agents (currentRig == "") see all advice regardless of rig labels.
+func adviceMatchesRig(advice AdviceBead, currentRig string) bool {
+	// Town-level agents (Mayor, Deacon) see all advice
+	if currentRig == "" {
+		return true
+	}
+
+	// Check for rig: labels
+	for _, label := range advice.Labels {
+		if strings.HasPrefix(label, "rig:") {
+			rigValue := strings.TrimPrefix(label, "rig:")
+			// If advice has a rig: label, it must match
+			return rigValue == currentRig
+		}
+	}
+
+	// No rig: label means it's global or role-scoped, show to everyone
+	return true
 }
 
 // getAdviceScope returns a human-readable scope indicator for the advice.

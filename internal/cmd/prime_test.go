@@ -919,6 +919,94 @@ func TestGetAdviceScope(t *testing.T) {
 	}
 }
 
+// TestAdviceMatchesRig tests rig-based filtering of advice.
+// This prevents rig-scoped advice from leaking to other rigs.
+func TestAdviceMatchesRig(t *testing.T) {
+	cases := []struct {
+		name       string
+		advice     AdviceBead
+		currentRig string
+		want       bool
+	}{
+		{
+			name:       "global_advice_no_labels",
+			advice:     AdviceBead{ID: "test1", Labels: nil},
+			currentRig: "gastown",
+			want:       true,
+		},
+		{
+			name:       "global_advice_empty_labels",
+			advice:     AdviceBead{ID: "test2", Labels: []string{}},
+			currentRig: "gastown",
+			want:       true,
+		},
+		{
+			name:       "role_only_advice_matches_any_rig",
+			advice:     AdviceBead{ID: "test3", Labels: []string{"role:polecat"}},
+			currentRig: "beads",
+			want:       true,
+		},
+		{
+			name:       "rig_advice_matches_same_rig",
+			advice:     AdviceBead{ID: "test4", Labels: []string{"rig:gastown"}},
+			currentRig: "gastown",
+			want:       true,
+		},
+		{
+			name:       "rig_advice_rejected_for_different_rig",
+			advice:     AdviceBead{ID: "test5", Labels: []string{"rig:gastown"}},
+			currentRig: "beads",
+			want:       false, // This is the key test - rig:gastown should not show in beads
+		},
+		{
+			name:       "rig_and_role_advice_matches_correct_rig",
+			advice:     AdviceBead{ID: "test6", Labels: []string{"rig:gastown", "role:crew"}},
+			currentRig: "gastown",
+			want:       true,
+		},
+		{
+			name:       "rig_and_role_advice_rejected_wrong_rig",
+			advice:     AdviceBead{ID: "test7", Labels: []string{"rig:gastown", "role:crew"}},
+			currentRig: "beads",
+			want:       false, // Even though role:crew matches, rig:gastown should filter it out
+		},
+		{
+			name:       "town_level_agent_sees_all_rig_advice",
+			advice:     AdviceBead{ID: "test8", Labels: []string{"rig:gastown"}},
+			currentRig: "", // Empty rig means town-level (Mayor, Deacon)
+			want:       true,
+		},
+		{
+			name:       "agent_specific_advice_shown",
+			advice:     AdviceBead{ID: "test9", Labels: []string{"agent:gastown/polecats/alpha"}},
+			currentRig: "gastown",
+			want:       true, // agent: label doesn't have rig:, so it passes through
+		},
+		{
+			name:       "multiple_labels_with_matching_rig",
+			advice:     AdviceBead{ID: "test10", Labels: []string{"testing", "rig:beads", "role:polecat"}},
+			currentRig: "beads",
+			want:       true,
+		},
+		{
+			name:       "multiple_labels_with_wrong_rig",
+			advice:     AdviceBead{ID: "test11", Labels: []string{"testing", "rig:gastown", "role:polecat"}},
+			currentRig: "beads",
+			want:       false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := adviceMatchesRig(tc.advice, tc.currentRig)
+			if got != tc.want {
+				t.Errorf("adviceMatchesRig(%v, %q) = %v, want %v",
+					tc.advice.Labels, tc.currentRig, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDryRunSkipsSideEffects(t *testing.T) {
 	// Find the gt binary
 	gtBin, err := exec.LookPath("gt")
