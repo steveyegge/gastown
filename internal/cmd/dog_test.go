@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -155,9 +154,8 @@ func detectDogNameFromPath(path string) (string, bool) {
 		return "", false
 	}
 
-	// Use strings.Split with filepath.Separator to split the path
-	// This matches the logic in runDogDone
-	parts := strings.Split(path, string(filepath.Separator))
+	// Use the same split logic as runDogDone
+	parts := splitPathComponents(path)
 
 	for i := 0; i < len(parts)-1; i++ {
 		if parts[i] == "dogs" && i > 0 && parts[i-1] == "deacon" {

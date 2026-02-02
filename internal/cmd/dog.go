@@ -522,7 +522,7 @@ func runDogDone(cmd *cobra.Command, args []string) error {
 		}
 
 		// Look for /deacon/dogs/<name>/ in path
-		parts := strings.Split(cwd, string(filepath.Separator))
+		parts := splitPathComponents(cwd)
 		for i := 0; i < len(parts)-1; i++ {
 			if parts[i] == "dogs" && i > 0 && parts[i-1] == "deacon" {
 				name = parts[i+1]
@@ -551,6 +551,16 @@ func runDogDone(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("✓ Dog %s returned to kennel (idle)\n", name)
 	return nil
+}
+
+func splitPathComponents(path string) []string {
+	if path == "" {
+		return nil
+	}
+
+	return strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
 }
 
 func runDogStatus(cmd *cobra.Command, args []string) error {
