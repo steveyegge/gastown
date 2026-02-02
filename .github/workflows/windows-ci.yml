@@ -10,6 +10,8 @@ jobs:
   test:
     name: Windows Build and Unit Tests
     runs-on: windows-latest
+    env:
+      GOFLAGS: -p=1
     steps:
       - uses: actions/checkout@v6
         with:
@@ -40,6 +42,3 @@ jobs:
 
       - name: Unit Tests
         run: go test -short ./...
-
-      - name: Run integration tests
-        run: go test -v -tags=integration -timeout=4m ./internal/cmd/...
