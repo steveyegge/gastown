@@ -1595,6 +1595,31 @@ func (b *Bot) updateMessageAsResolved(channelID, messageTs, decisionID, question
 	}
 }
 
+// markDecisionSuperseded updates the original decision message to show it has been superseded (gt-8d5q52.2).
+// This is called when a follow-up decision is posted in a thread.
+func (b *Bot) markDecisionSuperseded(predecessorID, newDecisionID, channelID, messageTs string) {
+	supersededText := fmt.Sprintf("⏭️ *Superseded*\n\nA follow-up decision (`%s`) has been posted in this thread.\n_Please refer to the latest decision in the thread below._", newDecisionID)
+
+	blocks := []slack.Block{
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn", supersededText, false, false),
+			nil, nil,
+		),
+		slack.NewContextBlock("",
+			slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("Original decision: `%s`", predecessorID), false, false),
+		),
+	}
+
+	_, _, _, err := b.client.UpdateMessage(channelID, messageTs,
+		slack.MsgOptionBlocks(blocks...),
+	)
+	if err != nil {
+		log.Printf("Slack: Failed to mark decision %s as superseded: %v", predecessorID, err)
+	} else {
+		log.Printf("Slack: Marked decision %s as superseded by %s", predecessorID, newDecisionID)
+	}
+}
+
 func (b *Bot) postResolutionConfirmation(channelID, userID, _, optionLabel, rationale string) {
 	// Truncate rationale for display
 	displayRationale := rationale
@@ -2423,9 +2448,25 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 		)
 	}
 
-	_, ts, err := b.client.PostMessage(targetChannel,
-		slack.MsgOptionBlocks(blocks...),
-	)
+	// Check if this is a follow-up decision in a thread (gt-8d5q52.2)
+	var msgOpts []slack.MsgOption
+	msgOpts = append(msgOpts, slack.MsgOptionBlocks(blocks...))
+
+	var predecessorThreadTS string
+	if decision.PredecessorID != "" {
+		b.decisionMessagesMu.RLock()
+		predMsgInfo, hasPredecessor := b.decisionMessages[decision.PredecessorID]
+		b.decisionMessagesMu.RUnlock()
+
+		if hasPredecessor && predMsgInfo.channelID == targetChannel {
+			// Post as a thread reply to the predecessor
+			predecessorThreadTS = predMsgInfo.timestamp
+			msgOpts = append(msgOpts, slack.MsgOptionTS(predecessorThreadTS))
+			log.Printf("Slack: Posting follow-up decision %s as thread reply to %s", decision.ID, decision.PredecessorID)
+		}
+	}
+
+	_, ts, err := b.client.PostMessage(targetChannel, msgOpts...)
 	if err == nil && ts != "" {
 		// Track the message for auto-dismiss
 		b.decisionMessagesMu.Lock()
@@ -2434,6 +2475,11 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 			timestamp: ts,
 		}
 		b.decisionMessagesMu.Unlock()
+
+		// Mark predecessor as superseded if this was a thread reply
+		if predecessorThreadTS != "" {
+			b.markDecisionSuperseded(decision.PredecessorID, decision.ID, targetChannel, predecessorThreadTS)
+		}
 	}
 
 	// Send DMs to users who have opted in
@@ -2662,9 +2708,25 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 		)
 	}
 
-	_, ts, err := b.client.PostMessage(channelID,
-		slack.MsgOptionBlocks(blocks...),
-	)
+	// Check if this is a follow-up decision in a thread (gt-8d5q52.2)
+	var msgOpts []slack.MsgOption
+	msgOpts = append(msgOpts, slack.MsgOptionBlocks(blocks...))
+
+	var predecessorThreadTS string
+	if decision.PredecessorID != "" {
+		b.decisionMessagesMu.RLock()
+		predMsgInfo, hasPredecessor := b.decisionMessages[decision.PredecessorID]
+		b.decisionMessagesMu.RUnlock()
+
+		if hasPredecessor && predMsgInfo.channelID == channelID {
+			// Post as a thread reply to the predecessor
+			predecessorThreadTS = predMsgInfo.timestamp
+			msgOpts = append(msgOpts, slack.MsgOptionTS(predecessorThreadTS))
+			log.Printf("Slack: Posting follow-up decision %s as thread reply to %s (break-out channel)", decision.ID, decision.PredecessorID)
+		}
+	}
+
+	_, ts, err := b.client.PostMessage(channelID, msgOpts...)
 	if err == nil && ts != "" {
 		// Track the message for auto-dismiss
 		b.decisionMessagesMu.Lock()
@@ -2673,6 +2735,11 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 			timestamp: ts,
 		}
 		b.decisionMessagesMu.Unlock()
+
+		// Mark predecessor as superseded if this was a thread reply
+		if predecessorThreadTS != "" {
+			b.markDecisionSuperseded(decision.PredecessorID, decision.ID, channelID, predecessorThreadTS)
+		}
 	}
 	return err
 }

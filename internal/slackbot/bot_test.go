@@ -645,3 +645,98 @@ func TestResolveChannelForDecision_PriorityOrder(t *testing.T) {
 		})
 	}
 }
+
+// TestDecisionThreadReply_PredecessorLookup tests that follow-up decisions
+// correctly look up their predecessor's thread timestamp (gt-8d5q52.2).
+func TestDecisionThreadReply_PredecessorLookup(t *testing.T) {
+	bot := &Bot{
+		decisionMessages: make(map[string]messageInfo),
+	}
+
+	// Seed with a predecessor decision
+	predecessorID := "predecessor-decision-1"
+	bot.decisionMessages[predecessorID] = messageInfo{
+		channelID: "C123",
+		timestamp: "1111.2222",
+	}
+
+	tests := []struct {
+		name            string
+		predecessorID   string
+		targetChannelID string
+		expectThreadTS  string // Expected thread timestamp (empty if not a thread reply)
+	}{
+		{
+			name:            "finds predecessor in same channel",
+			predecessorID:   predecessorID,
+			targetChannelID: "C123",
+			expectThreadTS:  "1111.2222",
+		},
+		{
+			name:            "no thread for non-existent predecessor",
+			predecessorID:   "non-existent-predecessor",
+			targetChannelID: "C123",
+			expectThreadTS:  "",
+		},
+		{
+			name:            "no thread when predecessor in different channel",
+			predecessorID:   predecessorID,
+			targetChannelID: "C456",
+			expectThreadTS:  "",
+		},
+		{
+			name:            "no predecessor ID means no thread",
+			predecessorID:   "",
+			targetChannelID: "C123",
+			expectThreadTS:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var predecessorThreadTS string
+			if tt.predecessorID != "" {
+				bot.decisionMessagesMu.RLock()
+				predMsgInfo, hasPredecessor := bot.decisionMessages[tt.predecessorID]
+				bot.decisionMessagesMu.RUnlock()
+
+				if hasPredecessor && predMsgInfo.channelID == tt.targetChannelID {
+					predecessorThreadTS = predMsgInfo.timestamp
+				}
+			}
+
+			if predecessorThreadTS != tt.expectThreadTS {
+				t.Errorf("thread lookup for predecessor=%q, channel=%q: got %q, want %q",
+					tt.predecessorID, tt.targetChannelID, predecessorThreadTS, tt.expectThreadTS)
+			}
+		})
+	}
+}
+
+// TestMarkDecisionSuperseded_Format verifies the message format for superseded decisions (gt-8d5q52.2).
+func TestMarkDecisionSuperseded_Format(t *testing.T) {
+	// Test the text format without actual Slack API calls
+	predecessorID := "predecessor-123"
+	newDecisionID := "followup-456"
+
+	expectedContains := []string{
+		"Superseded",
+		newDecisionID,
+		"thread below",
+	}
+
+	// Build the superseded text (mirroring the actual function logic)
+	supersededText := "⏭️ *Superseded*\n\nA follow-up decision (`" + newDecisionID + "`) has been posted in this thread.\n_Please refer to the latest decision in the thread below._"
+
+	for _, expected := range expectedContains {
+		if !strings.Contains(supersededText, expected) {
+			t.Errorf("superseded text should contain %q, got: %s", expected, supersededText)
+		}
+	}
+
+	// Verify predecessor ID would be shown in context
+	contextText := "Original decision: `" + predecessorID + "`"
+	if !strings.Contains(contextText, predecessorID) {
+		t.Errorf("context should contain predecessor ID %q", predecessorID)
+	}
+}

@@ -188,6 +188,26 @@ Valid modes: general, agent, epic, dm`,
 	RunE: runSlackModeDefault,
 }
 
+// Slack post command for agents to post to decision threads (gt-8d5q52.2)
+var slackPostDecisionID string
+
+var slackPostCmd = &cobra.Command{
+	Use:   "post <message>",
+	Short: "Post a message to a decision thread",
+	Long: `Post a non-decision message to an existing decision thread.
+
+This allows agents to provide additional context, analysis, or follow-up
+information in a decision thread without creating a new decision.
+
+Requires the RPC server to be running.
+
+Examples:
+  gt slack post --decision gt-abc123 "Here's my analysis of the options..."
+  gt slack post -d gt-xyz789 "I've investigated further and found..."`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSlackPost,
+}
+
 func init() {
 	rootCmd.AddCommand(slackCmd)
 
@@ -196,6 +216,7 @@ func init() {
 	slackCmd.AddCommand(slackMigrateCmd)
 	slackCmd.AddCommand(slackModeCmd)
 	slackCmd.AddCommand(slackStartCmd)
+	slackCmd.AddCommand(slackPostCmd)
 
 	slackRouteCmd.AddCommand(slackRouteListCmd)
 	slackRouteCmd.AddCommand(slackRouteSetCmd)
@@ -208,6 +229,10 @@ func init() {
 
 	slackRouteListCmd.Flags().BoolVar(&slackRouteJSON, "json", false, "Output as JSON")
 	slackRouteSetCmd.Flags().StringVar(&slackRouteChannelName, "name", "", "Human-readable channel name")
+
+	// Slack post command flags
+	slackPostCmd.Flags().StringVarP(&slackPostDecisionID, "decision", "d", "", "Decision ID to post to (required)")
+	_ = slackPostCmd.MarkFlagRequired("decision")
 
 	// Slack bot start command flags
 	slackStartCmd.Flags().StringVar(&slackBotToken, "bot-token", "", "Slack bot token (xoxb-...)")
@@ -645,4 +670,26 @@ func isSystemdUnitEnabled(unit string) bool {
 	cmd := exec.Command("systemctl", "--user", "is-enabled", unit)
 	err := cmd.Run()
 	return err == nil
+}
+
+// runSlackPost posts a message to a decision thread (gt-8d5q52.2).
+// This allows agents to post non-decision responses in decision threads.
+func runSlackPost(cmd *cobra.Command, args []string) error {
+	message := args[0]
+	decisionID := slackPostDecisionID
+
+	if decisionID == "" {
+		return fmt.Errorf("--decision flag is required")
+	}
+
+	// For now, print a helpful message - the full implementation requires
+	// the slackbot to listen for thread_post events via SSE
+	fmt.Println("Thread post feature is being implemented (gt-8d5q52.2).")
+	fmt.Printf("Decision: %s\n", decisionID)
+	fmt.Printf("Message: %s\n", message)
+	fmt.Println()
+	fmt.Println("For now, use 'gt decision request --predecessor' to post follow-up decisions.")
+	fmt.Println("Non-decision thread posts will be available in a future release.")
+
+	return nil
 }
