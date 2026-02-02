@@ -302,24 +302,170 @@ func TestDecisionServerCancel(t *testing.T) {
 	}
 }
 
-// TestStatusServerGetAgentStatus tests unimplemented method returns correct error.
+// TestStatusServerGetAgentStatus tests GetAgentStatus returns correct errors for various inputs.
 func TestStatusServerGetAgentStatus(t *testing.T) {
 	server := NewStatusServer("/tmp/test")
-	req := connect.NewRequest(&gastownv1.GetAgentStatusRequest{
-		Address: &gastownv1.AgentAddress{Name: "test"},
+
+	t.Run("NilAddress", func(t *testing.T) {
+		req := connect.NewRequest(&gastownv1.GetAgentStatusRequest{
+			Address: nil,
+		})
+
+		_, err := server.GetAgentStatus(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error for nil address")
+		}
+
+		connectErr, ok := err.(*connect.Error)
+		if !ok {
+			t.Fatalf("expected connect.Error, got %T", err)
+		}
+		if connectErr.Code() != connect.CodeInvalidArgument {
+			t.Errorf("error code = %v, want InvalidArgument", connectErr.Code())
+		}
 	})
 
-	_, err := server.GetAgentStatus(context.Background(), req)
-	if err == nil {
-		t.Fatal("expected error for unimplemented method")
+	t.Run("AgentNotFound", func(t *testing.T) {
+		req := connect.NewRequest(&gastownv1.GetAgentStatusRequest{
+			Address: &gastownv1.AgentAddress{Name: "nonexistent-agent"},
+		})
+
+		_, err := server.GetAgentStatus(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error for nonexistent agent")
+		}
+
+		connectErr, ok := err.(*connect.Error)
+		if !ok {
+			t.Fatalf("expected connect.Error, got %T", err)
+		}
+		if connectErr.Code() != connect.CodeNotFound {
+			t.Errorf("error code = %v, want NotFound", connectErr.Code())
+		}
+	})
+}
+
+// TestMatchesAgentAddress tests the agent address matching logic.
+func TestMatchesAgentAddress(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentAddr *gastownv1.AgentAddress
+		reqAddr   *gastownv1.AgentAddress
+		want      bool
+	}{
+		{
+			name:      "NilAgentAddr",
+			agentAddr: nil,
+			reqAddr:   &gastownv1.AgentAddress{Name: "test"},
+			want:      false,
+		},
+		{
+			name:      "NilReqAddr",
+			agentAddr: &gastownv1.AgentAddress{Name: "test"},
+			reqAddr:   nil,
+			want:      false,
+		},
+		{
+			name:      "EmptyReqAddr",
+			agentAddr: &gastownv1.AgentAddress{Name: "test"},
+			reqAddr:   &gastownv1.AgentAddress{},
+			want:      false,
+		},
+		{
+			name:      "MatchByName",
+			agentAddr: &gastownv1.AgentAddress{Name: "mayor"},
+			reqAddr:   &gastownv1.AgentAddress{Name: "mayor"},
+			want:      true,
+		},
+		{
+			name:      "NoMatchByName",
+			agentAddr: &gastownv1.AgentAddress{Name: "mayor"},
+			reqAddr:   &gastownv1.AgentAddress{Name: "deacon"},
+			want:      false,
+		},
+		{
+			name:      "MatchByRigAndRole",
+			agentAddr: &gastownv1.AgentAddress{Rig: "gastown", Role: "witness"},
+			reqAddr:   &gastownv1.AgentAddress{Rig: "gastown", Role: "witness"},
+			want:      true,
+		},
+		{
+			name:      "NoMatchByRig",
+			agentAddr: &gastownv1.AgentAddress{Rig: "gastown", Role: "witness"},
+			reqAddr:   &gastownv1.AgentAddress{Rig: "beads", Role: "witness"},
+			want:      false,
+		},
+		{
+			name:      "MatchByRigRoleAndName",
+			agentAddr: &gastownv1.AgentAddress{Rig: "gastown", Role: "polecats", Name: "furiosa"},
+			reqAddr:   &gastownv1.AgentAddress{Rig: "gastown", Role: "polecats", Name: "furiosa"},
+			want:      true,
+		},
+		{
+			name:      "PartialMatch_RigOnly",
+			agentAddr: &gastownv1.AgentAddress{Rig: "gastown", Role: "witness"},
+			reqAddr:   &gastownv1.AgentAddress{Rig: "gastown"},
+			want:      true,
+		},
+		{
+			name:      "PartialMatch_RoleOnly",
+			agentAddr: &gastownv1.AgentAddress{Rig: "gastown", Role: "witness"},
+			reqAddr:   &gastownv1.AgentAddress{Role: "witness"},
+			want:      true,
+		},
 	}
 
-	connectErr, ok := err.(*connect.Error)
-	if !ok {
-		t.Fatalf("expected connect.Error, got %T", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesAgentAddress(tt.agentAddr, tt.reqAddr)
+			if got != tt.want {
+				t.Errorf("matchesAgentAddress() = %v, want %v", got, tt.want)
+			}
+		})
 	}
-	if connectErr.Code() != connect.CodeUnimplemented {
-		t.Errorf("error code = %v, want Unimplemented", connectErr.Code())
+}
+
+// TestFormatAgentAddressForError tests error message formatting.
+func TestFormatAgentAddressForError(t *testing.T) {
+	tests := []struct {
+		name string
+		addr *gastownv1.AgentAddress
+		want string
+	}{
+		{
+			name: "NilAddress",
+			addr: nil,
+			want: "<nil>",
+		},
+		{
+			name: "FullAddress",
+			addr: &gastownv1.AgentAddress{Rig: "gastown", Role: "polecats", Name: "furiosa"},
+			want: "gastown/polecats/furiosa",
+		},
+		{
+			name: "RigAndRole",
+			addr: &gastownv1.AgentAddress{Rig: "gastown", Role: "witness"},
+			want: "gastown/witness",
+		},
+		{
+			name: "RigOnly",
+			addr: &gastownv1.AgentAddress{Rig: "gastown"},
+			want: "gastown",
+		},
+		{
+			name: "NameOnly",
+			addr: &gastownv1.AgentAddress{Name: "mayor"},
+			want: "mayor",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatAgentAddressForError(tt.addr)
+			if got != tt.want {
+				t.Errorf("formatAgentAddressForError() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

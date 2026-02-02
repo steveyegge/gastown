@@ -94,8 +94,87 @@ func (s *StatusServer) GetAgentStatus(
 	ctx context.Context,
 	req *connect.Request[gastownv1.GetAgentStatusRequest],
 ) (*connect.Response[gastownv1.GetAgentStatusResponse], error) {
-	// TODO: Implement agent-specific lookup
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("GetAgentStatus not yet implemented"))
+	if req.Msg.Address == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("address is required"))
+	}
+
+	status, err := s.collectTownStatus(false)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	addr := req.Msg.Address
+
+	// Check global agents first (mayor, deacon) - identified by Name only
+	if addr.Rig == "" && addr.Name != "" {
+		for _, agent := range status.GlobalAgents {
+			if agent.Name == addr.Name {
+				return connect.NewResponse(&gastownv1.GetAgentStatusResponse{Agent: agent}), nil
+			}
+		}
+	}
+
+	// Check rig agents
+	for _, rig := range status.Rigs {
+		// Match by rig name if specified
+		if addr.Rig != "" && rig.Name != addr.Rig {
+			continue
+		}
+
+		for _, agent := range rig.Agents {
+			if matchesAgentAddress(agent.Address, addr) {
+				return connect.NewResponse(&gastownv1.GetAgentStatusResponse{Agent: agent}), nil
+			}
+		}
+	}
+
+	return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("agent not found: %s", formatAgentAddressForError(addr)))
+}
+
+// matchesAgentAddress checks if an agent's address matches the requested address.
+func matchesAgentAddress(agentAddr, reqAddr *gastownv1.AgentAddress) bool {
+	if agentAddr == nil || reqAddr == nil {
+		return false
+	}
+
+	// If rig is specified, it must match
+	if reqAddr.Rig != "" && agentAddr.Rig != reqAddr.Rig {
+		return false
+	}
+
+	// If role is specified, it must match
+	if reqAddr.Role != "" && agentAddr.Role != reqAddr.Role {
+		return false
+	}
+
+	// If name is specified, it must match
+	if reqAddr.Name != "" && agentAddr.Name != reqAddr.Name {
+		return false
+	}
+
+	// At least one field must be specified
+	if reqAddr.Rig == "" && reqAddr.Role == "" && reqAddr.Name == "" {
+		return false
+	}
+
+	return true
+}
+
+// formatAgentAddressForError formats an agent address for error messages.
+func formatAgentAddressForError(addr *gastownv1.AgentAddress) string {
+	if addr == nil {
+		return "<nil>"
+	}
+	if addr.Rig != "" && addr.Role != "" && addr.Name != "" {
+		return fmt.Sprintf("%s/%s/%s", addr.Rig, addr.Role, addr.Name)
+	}
+	if addr.Rig != "" && addr.Role != "" {
+		return fmt.Sprintf("%s/%s", addr.Rig, addr.Role)
+	}
+	if addr.Rig != "" {
+		return addr.Rig
+	}
+	return addr.Name
 }
 
 func (s *StatusServer) WatchStatus(

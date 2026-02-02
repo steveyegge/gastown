@@ -171,24 +171,45 @@ func TestStatusServiceIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("GetAgentStatus_Unimplemented", func(t *testing.T) {
+	t.Run("GetAgentStatus_NotFound", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		req := connect.NewRequest(&gastownv1.GetAgentStatusRequest{
-			Address: &gastownv1.AgentAddress{Name: "test-agent"},
+			Address: &gastownv1.AgentAddress{Name: "nonexistent-agent"},
 		})
 		_, err := statusClient.GetAgentStatus(ctx, req)
 		if err == nil {
-			t.Fatal("expected error for unimplemented method")
+			t.Fatal("expected error for nonexistent agent")
 		}
 
 		connectErr, ok := err.(*connect.Error)
 		if !ok {
 			t.Fatalf("expected connect.Error, got %T", err)
 		}
-		if connectErr.Code() != connect.CodeUnimplemented {
-			t.Errorf("error code = %v, want Unimplemented", connectErr.Code())
+		if connectErr.Code() != connect.CodeNotFound {
+			t.Errorf("error code = %v, want NotFound", connectErr.Code())
+		}
+	})
+
+	t.Run("GetAgentStatus_InvalidArgument_NilAddress", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		req := connect.NewRequest(&gastownv1.GetAgentStatusRequest{
+			Address: nil,
+		})
+		_, err := statusClient.GetAgentStatus(ctx, req)
+		if err == nil {
+			t.Fatal("expected error for nil address")
+		}
+
+		connectErr, ok := err.(*connect.Error)
+		if !ok {
+			t.Fatalf("expected connect.Error, got %T", err)
+		}
+		if connectErr.Code() != connect.CodeInvalidArgument {
+			t.Errorf("error code = %v, want InvalidArgument", connectErr.Code())
 		}
 	})
 }
