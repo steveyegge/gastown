@@ -1,5 +1,5 @@
 description = """
-Feed stranded convoys by dispatching ready work to available polecats.
+Feed stranded convoys by dispatching ready work to target rigs.
 
 Dogs execute this formula when the Deacon detects a stranded convoy. A convoy
 is stranded when it has ready issues (open, unblocked, no assignee) but no
@@ -10,8 +10,8 @@ workers are processing them.
 This is infrastructure work. You:
 1. Receive convoy ID via variable
 2. Load convoy and find ready issues
-3. Check idle polecat capacity across rigs
-4. Dispatch min(ready_issues, idle_polecats) using gt sling
+3. Determine target rig for each issue (from prefix)
+4. Dispatch ready issues to target rigs using gt sling
 5. Report actions taken
 6. Return to kennel
 
@@ -25,7 +25,7 @@ This is infrastructure work. You:
 
 Dog doesn't babysit or wait for completion. The workflow is:
 1. Find ready issues in convoy
-2. Dispatch each to an available polecat
+2. Dispatch each to its target rig (gt sling spawns fresh polecats)
 3. Exit immediately
 
 If convoy is still stranded next Deacon patrol cycle, another dog will be
@@ -37,7 +37,7 @@ dispatched. This keeps the system stateless and batch-oriented.
 |-----------|--------|
 | Convoy not found | Exit with error, notify Deacon |
 | No ready issues | Exit success (false positive, convoy is fine) |
-| No idle polecats | Exit success, note in report (will retry next cycle) |
+| No target rigs | Exit success, note in report (prefix routing failed) |
 | Sling fails | Continue with remaining issues, note failures |"""
 formula = "mol-convoy-feed"
 version = 1
@@ -100,67 +100,70 @@ Sort by priority (P0 first) for dispatch order.
 
 [[steps]]
 id = "check-capacity"
-title = "Check polecat capacity across rigs"
+title = "Map issues to target rigs"
 needs = ["load-convoy"]
 description = """
-Determine how many polecats are available for dispatch.
+Determine target rig for each ready issue.
 
-**1. For each rig that has ready issues:**
-```bash
-gt polecats <rig>
-# Shows polecat status: idle, working, etc.
-```
+**Polecats are ephemeral** - they are spawned fresh for each task and nuked
+when done. There is NO idle state. Don't look for "available" polecats;
+`gt sling` spawns fresh ones on demand.
 
-**2. Count available capacity:**
-Available polecats are those that:
-- Exist in the rig's polecat pool
-- Currently idle (no hooked work)
-- Session is running
+**1. Map each ready issue to its target rig:**
 
-**3. Calculate dispatch count:**
-```
-dispatch_count = min(ready_issues, available_polecats)
-```
-
-If dispatch_count = 0:
-- Log: "No capacity available, will retry next cycle"
-- Proceed to report step (no dispatches to make)
-
-**4. Match issues to rigs:**
-For each ready issue, determine target rig from issue prefix:
+Determine target rig from issue prefix:
 - gt-* issues → gastown rig
 - bd-* issues → beads rig
+- da-* issues → da rig
 - etc.
+
+Use the routes configuration to resolve prefix → rig:
+```bash
+cat $GT_TOWN_ROOT/.beads/routes.jsonl
+```
+
+**2. Build dispatch plan:**
+
+For each ready issue, record:
+- Issue ID
+- Target rig (from prefix)
+
+**3. Handle unmapped prefixes:**
+
+If an issue prefix doesn't map to any rig:
+- Log warning: "Unknown prefix for <issue-id>, skipping"
+- Continue with remaining issues
 
 **Exit criteria:** Dispatch plan created with issue→rig mappings."""
 
 [[steps]]
 id = "dispatch-work"
-title = "Dispatch ready issues to polecats"
+title = "Dispatch ready issues to rigs"
 needs = ["check-capacity"]
 description = """
-Sling each ready issue to an available polecat.
+Sling each ready issue to its target rig.
 
 **For each issue in dispatch plan:**
 
 ```bash
-# Dispatch issue to the appropriate rig
-# This spawns a fresh polecat or assigns to idle one
+# Dispatch issue to the target rig
+# gt sling spawns a fresh polecat automatically
 gt sling <issue-id> <rig>
 
 # Example:
 gt sling gt-abc123 gastown
 gt sling bd-xyz789 beads
+gt sling da-xyz123 da
 ```
 
 **Track results:**
 For each dispatch:
-- Success: Note issue ID, target rig, polecat assigned
+- Success: Note issue ID, target rig, polecat name (from sling output)
 - Failure: Note issue ID, error message
 
 **Important notes:**
-- `gt sling` handles polecat selection automatically
-- It will spawn a new polecat if none available
+- `gt sling` spawns a fresh polecat for each issue
+- Polecats are ephemeral: spawned for one task, nuked when done
 - The polecat gets the issue hooked and starts immediately
 - Don't wait for polecat to complete - fire and forget
 
@@ -183,18 +186,18 @@ Create summary report of convoy feeding actions.
 ## Convoy Feed Report: {{convoy}}
 
 **Ready issues found**: {{ready_count}}
-**Polecats available**: {{available_count}}
 **Issues dispatched**: {{dispatch_count}}
+**Issues skipped**: {{skipped_count}}
 
 ### Dispatched Work
 {{#each dispatched}}
 - {{issue_id}}: {{title}} → {{rig}}/{{polecat}}
 {{/each}}
 
-### Skipped (no capacity)
+### Skipped (unmapped prefix)
 {{#if skipped}}
 {{#each skipped}}
-- {{issue_id}}: {{title}} (will retry next cycle)
+- {{issue_id}}: {{title}} (unknown rig for prefix)
 {{/each}}
 {{else}}
 (none)
