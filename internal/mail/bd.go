@@ -64,5 +64,15 @@ func runBdCommand(args []string, workDir, beadsDir string, extraEnv ...string) (
 		}
 	}
 
+	// Check for error messages in stderr even when exit code is 0 (bd-m654).
+	// bd close sometimes prints "Error resolving..." to stderr but returns 0.
+	stderrStr := strings.TrimSpace(stderr.String())
+	if strings.HasPrefix(stderrStr, "Error") || strings.Contains(stderrStr, "no issue found") {
+		return nil, &bdError{
+			Err:    nil,
+			Stderr: stderrStr,
+		}
+	}
+
 	return stdout.Bytes(), nil
 }
