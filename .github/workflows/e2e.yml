@@ -1,0 +1,34 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'internal/cmd/install*.go'
+      - 'internal/cmd/rig*.go'
+      - 'internal/cmd/crew*.go'
+      - 'internal/cmd/doctor*.go'
+      - 'internal/cmd/daemon*.go'
+      - 'internal/config/**'
+      - 'internal/routing/**'
+      - 'internal/doctor/**'
+      - 'internal/cmd/*_integration_test.go'
+      - 'Dockerfile.e2e'
+      - 'Makefile'
+      - '.github/workflows/e2e.yml'
+
+jobs:
+  e2e:
+    name: E2E Tests (Container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build test container
+        run: docker build -f Dockerfile.e2e -t gastown-test .
+
+      - name: Run E2E tests
+        run: docker run --rm gastown-test
