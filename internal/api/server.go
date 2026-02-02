@@ -488,6 +488,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/mail/send", s.handleSendMail)
 	mux.HandleFunc("GET /api/rigs/{rig}/agents/{agent}/inbox", s.handleGetInbox)
 
+	// Nudge
+	mux.HandleFunc("POST /api/nudge", s.handleNudge)
+
 	// Dashboard (HTML UI) - mount if enabled
 	if s.includeDashboard {
 		fetcher, err := web.NewLiveConvoyFetcherWithRoot(s.townRoot)
@@ -2181,5 +2184,49 @@ func (s *Server) handleGetInbox(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, InboxResponse{
 		Agent: agentAddr,
 		Inbox: stdout,
+	})
+}
+
+// ============================================================================
+// Nudge
+// ============================================================================
+
+// NudgeRequest represents a request to nudge an agent
+type NudgeRequest struct {
+	// Target agent address (e.g., "mayor", "myproject/witness")
+	Target string `json:"target" example:"mayor" binding:"required"`
+	// Message to send
+	Message string `json:"message" example:"Check inbox" binding:"required"`
+}
+
+// NudgeResponse represents the response from a nudge
+type NudgeResponse struct {
+	Status string `json:"status" example:"nudged"`
+	Target string `json:"target" example:"mayor"`
+	Output string `json:"output"`
+}
+
+func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
+	var req NudgeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if req.Target == "" || req.Message == "" {
+		jsonError(w, http.StatusBadRequest, "target and message are required")
+		return
+	}
+
+	stdout, stderr, err := s.runGT("nudge", req.Target, req.Message)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("gt nudge failed: %s %s", stderr, err))
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, NudgeResponse{
+		Status: "nudged",
+		Target: req.Target,
+		Output: stdout,
 	})
 }
