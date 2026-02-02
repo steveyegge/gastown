@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -74,18 +75,29 @@ func TestSSEListener_ParseEvent(t *testing.T) {
 }
 
 func TestSSEListener_Reconnect(t *testing.T) {
+	var mu sync.Mutex
 	connectionCount := 0
+	secondConnCh := make(chan struct{}, 1) // Signal when second connection occurs
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		connectionCount++
-		if connectionCount == 1 {
-			// First connection - close immediately
+		currentConn := connectionCount
+		mu.Unlock()
+
+		if currentConn == 1 {
+			// First connection - close immediately to trigger reconnect
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		// Second connection - stay open briefly
+		// Second connection - signal and stay open briefly
+		select {
+		case secondConnCh <- struct{}{}:
+		default:
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}))
 	defer server.Close()
 
@@ -98,34 +110,49 @@ func TestSSEListener_Reconnect(t *testing.T) {
 	rpcClient := rpcclient.NewClient("http://localhost:8443")
 	listener := NewSSEListener(server.URL, bot, rpcClient)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	go func() {
 		_ = listener.Run(ctx)
 	}()
 
-	// Wait for reconnection attempts
-	time.Sleep(2 * time.Second)
-
-	if connectionCount < 2 {
-		t.Errorf("expected at least 2 connections (reconnect), got %d", connectionCount)
+	// Wait for second connection with timeout
+	select {
+	case <-secondConnCh:
+		// Success - reconnection occurred
+	case <-time.After(4 * time.Second):
+		mu.Lock()
+		count := connectionCount
+		mu.Unlock()
+		t.Errorf("expected at least 2 connections (reconnect), got %d", count)
 	}
 }
 
 func TestSSEListener_ServerError(t *testing.T) {
 	// Test that server returning 500 triggers reconnect
+	var mu sync.Mutex
 	connectionCount := 0
+	secondConnCh := make(chan struct{}, 1) // Signal when second connection occurs
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		connectionCount++
-		if connectionCount == 1 {
+		currentConn := connectionCount
+		mu.Unlock()
+
+		if currentConn == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		// Subsequent connections succeed briefly
+		// Subsequent connections - signal and succeed briefly
+		select {
+		case secondConnCh <- struct{}{}:
+		default:
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}))
 	defer server.Close()
 
@@ -138,17 +165,22 @@ func TestSSEListener_ServerError(t *testing.T) {
 	rpcClient := rpcclient.NewClient("http://localhost:8443")
 	listener := NewSSEListener(server.URL, bot, rpcClient)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	go func() {
 		_ = listener.Run(ctx)
 	}()
 
-	time.Sleep(2 * time.Second)
-
-	if connectionCount < 2 {
-		t.Errorf("expected reconnect after 500 error, got %d connections", connectionCount)
+	// Wait for second connection with timeout
+	select {
+	case <-secondConnCh:
+		// Success - reconnection occurred after 500 error
+	case <-time.After(4 * time.Second):
+		mu.Lock()
+		count := connectionCount
+		mu.Unlock()
+		t.Errorf("expected reconnect after 500 error, got %d connections", count)
 	}
 }
 
