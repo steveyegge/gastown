@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/config"
@@ -189,9 +188,7 @@ func (t *Tmux) KillSessionWithProcesses(name string) error {
 			// procps-ng kill (v4.0.4+) misparses "-PGID" and can kill ALL processes.
 			// syscall.Kill with negative PID targets the process group (POSIX).
 			pgidInt, _ := strconv.Atoi(pgid)
-			_ = syscall.Kill(-pgidInt, syscall.SIGTERM)
-			time.Sleep(100 * time.Millisecond)
-			_ = syscall.Kill(-pgidInt, syscall.SIGKILL)
+			killProcessGroup(pgidInt)
 		}
 
 		// Also walk the process tree for any descendants that might have called setsid()
@@ -329,37 +326,6 @@ func getAllDescendants(pid string) []string {
 	return result
 }
 
-// getProcessGroupID returns the process group ID (PGID) for a given PID.
-// Returns empty string if the process doesn't exist or PGID can't be determined.
-func getProcessGroupID(pid string) string {
-	out, err := exec.Command("ps", "-o", "pgid=", "-p", pid).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// getProcessGroupMembers returns all PIDs in a process group.
-// This finds processes that share the same PGID, including those that reparented to init.
-func getProcessGroupMembers(pgid string) []string {
-	// Use ps to find all processes with this PGID
-	// On macOS: ps -axo pid,pgid
-	// On Linux: ps -eo pid,pgid
-	out, err := exec.Command("ps", "-axo", "pid,pgid").Output()
-	if err != nil {
-		return nil
-	}
-
-	var members []string
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && strings.TrimSpace(fields[1]) == pgid {
-			members = append(members, strings.TrimSpace(fields[0]))
-		}
-	}
-	return members
-}
-
 // KillPaneProcesses explicitly kills all processes associated with a tmux pane.
 // This prevents orphan processes that survive pane respawn due to SIGHUP being ignored.
 //
@@ -391,9 +357,7 @@ func (t *Tmux) KillPaneProcesses(pane string) error {
 		// Kill process group using syscall.Kill() directly.
 		// See comment in KillSessionWithProcesses for why we avoid exec.Command("kill").
 		pgidInt, _ := strconv.Atoi(pgid)
-		_ = syscall.Kill(-pgidInt, syscall.SIGTERM)
-		time.Sleep(100 * time.Millisecond)
-		_ = syscall.Kill(-pgidInt, syscall.SIGKILL)
+		killProcessGroup(pgidInt)
 	}
 
 	// Also walk the process tree for any descendants that might have called setsid()
