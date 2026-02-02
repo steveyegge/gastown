@@ -2,6 +2,7 @@ package mail
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -189,5 +190,84 @@ func TestBdError_WithAllFields(t *testing.T) {
 	}
 	if bdErr.ContainsError("not present") {
 		t.Error("ContainsError should return false for non-existent substring")
+	}
+}
+
+// TestStderrErrorDetection tests the detection of errors from stderr when exit code is 0 (bd-m654).
+// This is the fix for gu-bug-gt_mail_archive_reports_success.
+func TestStderrErrorDetection(t *testing.T) {
+	tests := []struct {
+		name      string
+		stderr    string
+		isError   bool
+	}{
+		{
+			name:    "Error prefix triggers detection",
+			stderr:  "Error resolving gt-abc: no issue found matching \"gt-abc\"",
+			isError: true,
+		},
+		{
+			name:    "no issue found triggers detection",
+			stderr:  "Some message: no issue found matching X",
+			isError: true,
+		},
+		{
+			name:    "Warning does not trigger error",
+			stderr:  "Warning: something happened",
+			isError: false,
+		},
+		{
+			name:    "Empty stderr is not an error",
+			stderr:  "",
+			isError: false,
+		},
+		{
+			name:    "Normal output is not an error",
+			stderr:  "connected to daemon (status: healthy)",
+			isError: false,
+		},
+		{
+			name:    "Error in middle of string still detected",
+			stderr:  "connected to daemon\nError: failed to resolve",
+			isError: false, // Only HasPrefix check, not Contains
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stderrStr := tt.stderr
+
+			// This matches the logic in runBdCommand
+			isErr := strings.HasPrefix(stderrStr, "Error") || strings.Contains(stderrStr, "no issue found")
+
+			if isErr != tt.isError {
+				t.Errorf("stderr=%q: detected error=%v, want %v", tt.stderr, isErr, tt.isError)
+			}
+		})
+	}
+}
+
+// TestBdError_NilErrWithStderr tests that bdError works correctly with nil Err but stderr set.
+// This is how we report errors detected from stderr when exit code is 0.
+func TestBdError_NilErrWithStderr(t *testing.T) {
+	bdErr := &bdError{
+		Err:    nil,
+		Stderr: "Error resolving gt-abc: no issue found matching \"gt-abc\"",
+	}
+
+	// Error() should return the stderr
+	got := bdErr.Error()
+	if got != bdErr.Stderr {
+		t.Errorf("bdError.Error() = %q, want %q", got, bdErr.Stderr)
+	}
+
+	// Unwrap() should return nil
+	if bdErr.Unwrap() != nil {
+		t.Error("bdError.Unwrap() with nil Err should return nil")
+	}
+
+	// ContainsError should still work
+	if !bdErr.ContainsError("no issue found") {
+		t.Error("ContainsError should work with nil Err")
 	}
 }

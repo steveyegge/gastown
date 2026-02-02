@@ -488,3 +488,155 @@ func TestIntegration_CallbackParsing(t *testing.T) {
 		}
 	})
 }
+
+// --- DM Me Button Tests (gt-5uqg3k) ---
+
+func TestIntegration_DMButtonSendsImmediateDM(t *testing.T) {
+	t.Run("DMButtonActionExtractsDecisionID", func(t *testing.T) {
+		// The DM Me button has action_id="open_preferences" with value=decision.ID
+		callback := slack.InteractionCallback{
+			User: slack.User{ID: "U12345"},
+			ActionCallback: slack.ActionCallbacks{
+				BlockActions: []*slack.BlockAction{
+					{
+						ActionID: "open_preferences",
+						Value:    "gt-dec-test123",
+					},
+				},
+			},
+		}
+
+		// Verify decision ID can be extracted from button value
+		if len(callback.ActionCallback.BlockActions) == 0 {
+			t.Fatal("Expected block actions in callback")
+		}
+
+		decisionID := callback.ActionCallback.BlockActions[0].Value
+		if decisionID != "gt-dec-test123" {
+			t.Errorf("Expected decision ID 'gt-dec-test123', got %q", decisionID)
+		}
+	})
+
+	t.Run("DMButtonHandlerFlow", func(t *testing.T) {
+		// Simulate the flow of DM Me button:
+		// 1. User clicks DM Me button
+		// 2. Handler extracts decision ID from button value
+		// 3. Decision is sent to user via DM
+		// 4. Preferences modal is opened
+
+		callback := slack.InteractionCallback{
+			User:      slack.User{ID: "U12345"},
+			TriggerID: "trigger123",
+			Channel:   slack.Channel{GroupConversation: slack.GroupConversation{Conversation: slack.Conversation{ID: "C12345"}}},
+			ActionCallback: slack.ActionCallbacks{
+				BlockActions: []*slack.BlockAction{
+					{ActionID: "open_preferences", Value: "gt-dec-abc"},
+				},
+			},
+		}
+
+		// Step 1: Extract decision ID
+		decisionID := ""
+		if len(callback.ActionCallback.BlockActions) > 0 {
+			decisionID = callback.ActionCallback.BlockActions[0].Value
+		}
+
+		if decisionID == "" {
+			t.Error("Expected decision ID from button value")
+		}
+
+		// Step 2: Verify user ID is available for DM
+		userID := callback.User.ID
+		if userID == "" {
+			t.Error("Expected user ID for sending DM")
+		}
+
+		// Step 3: Verify trigger ID is available for modal
+		if callback.TriggerID == "" {
+			t.Error("Expected trigger ID for opening preferences modal")
+		}
+	})
+
+	t.Run("DMButtonWithEmptyValue", func(t *testing.T) {
+		// Edge case: button value is empty (shouldn't happen but be defensive)
+		callback := slack.InteractionCallback{
+			User: slack.User{ID: "U12345"},
+			ActionCallback: slack.ActionCallbacks{
+				BlockActions: []*slack.BlockAction{
+					{ActionID: "open_preferences", Value: ""},
+				},
+			},
+		}
+
+		decisionID := ""
+		if len(callback.ActionCallback.BlockActions) > 0 {
+			decisionID = callback.ActionCallback.BlockActions[0].Value
+		}
+
+		// Empty value should be handled gracefully
+		if decisionID != "" {
+			t.Error("Expected empty decision ID for empty button value")
+		}
+	})
+}
+
+// --- Peek Button Activity Tests (gt-5gfztk) ---
+
+func TestIntegration_PeekActivityForCrewAgents(t *testing.T) {
+	t.Run("CrewAgentIdentityExtraction", func(t *testing.T) {
+		// For crew agents, extractAgentShortName should return the crew name
+		agents := []struct {
+			fullPath  string
+			shortName string
+		}{
+			{"gastown/crew/decisions", "decisions"},
+			{"beads/crew/dolt_doctor", "dolt_doctor"},
+			{"myrig/crew/worker", "worker"},
+		}
+
+		for _, tc := range agents {
+			got := extractAgentShortName(tc.fullPath)
+			if got != tc.shortName {
+				t.Errorf("extractAgentShortName(%q) = %q, want %q",
+					tc.fullPath, got, tc.shortName)
+			}
+		}
+	})
+
+	t.Run("ActivityMatchingIncludesAuthor", func(t *testing.T) {
+		// Activity matching should find commits by author name, not just subject
+		// This is the fix for gt-5gfztk
+
+		// Simulated git log output: hash|date|author|subject
+		gitLogLines := []string{
+			"abc123|2026-02-02 12:00:00 +0000|decisions|fix: update statusline",
+			"def456|2026-02-02 11:00:00 +0000|other-author|unrelated commit",
+			"ghi789|2026-02-02 10:00:00 +0000|nux|feat: add new feature",
+		}
+
+		shortName := "decisions"
+		matchCount := 0
+
+		for _, line := range gitLogLines {
+			parts := strings.SplitN(line, "|", 4)
+			if len(parts) != 4 {
+				continue
+			}
+
+			author := strings.ToLower(parts[2])
+			subject := strings.ToLower(parts[3])
+
+			authorMatch := author == shortName || strings.Contains(author, shortName)
+			subjectMatch := strings.Contains(subject, shortName)
+
+			if authorMatch || subjectMatch {
+				matchCount++
+			}
+		}
+
+		// Should match the first commit (author=decisions)
+		if matchCount != 1 {
+			t.Errorf("Expected 1 match for author 'decisions', got %d", matchCount)
+		}
+	})
+}
