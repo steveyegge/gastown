@@ -1,0 +1,332 @@
+description = """
+CI/CD issue diagnosis and fix workflow for polecats.
+
+This molecule guides a polecat through diagnosing and fixing CI/CD failures
+including test failures, build errors, and cross-platform issues.
+
+## Task Recognition
+
+CI/CD fix tasks are identified by:
+- Type: bug
+- Labels containing: ci, test-failure, build-failure, cross-platform
+- Title patterns: "Test*fail*", "Build*fail*", "*CI*"
+
+## Workflow Overview
+
+1. **Reproduce** - Verify the failure locally
+2. **Diagnose** - Identify root cause and affected files
+3. **Fix** - Implement the fix following codebase patterns
+4. **Verify** - Run targeted and broad tests
+5. **Complete** - Commit, push, close bead
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| task | hook_bead | The CI/CD bug ID assigned to this polecat |
+| rig | task metadata | Which rig the bug is in (gastown, beads, etc.) |
+| failure_type | analysis | test, build, or cross-platform |
+
+## Common Failure Types
+
+| Type | Indicators | Typical Fix |
+|------|------------|-------------|
+| Test failure | go test fails, specific test name | Fix test or implementation |
+| Build failure | go build fails, compile error | Fix syntax/types |
+| Cross-platform | GOOS=windows fails, syscall issues | Add build tags |
+| Flaky test | Intermittent failures | Add retries or fix race |
+"""
+formula = "mol-cicd-fix"
+version = 1
+
+[[steps]]
+id = "load-task"
+title = "Load task and understand the failure"
+description = """
+Initialize your session and understand the CI/CD issue.
+
+**1. Prime your environment:**
+```bash
+gt prime                    # Load role context
+bd prime                    # Load beads context
+```
+
+**2. Check your hook:**
+```bash
+gt hook                     # Shows your pinned molecule and hook_bead
+```
+
+**3. Read the bug report:**
+```bash
+bd show {{task}}
+```
+
+**4. Extract key information:**
+
+From the bug description, identify:
+- **failure_type**: Is this a test failure, build failure, or cross-platform issue?
+- **affected_files**: Which files are mentioned?
+- **error_message**: What's the specific error?
+- **rig**: Which repo is affected (gastown, beads)?
+
+**5. Check if this is in a different rig:**
+
+If the bug is in a different repo than your current workspace:
+```bash
+gt worktree <rig>           # Create worktree for cross-rig work
+cd /path/to/worktree        # Work from there
+```
+
+**Exit criteria:** You understand the failure and have access to the relevant code."""
+
+[[steps]]
+id = "reproduce"
+title = "Reproduce the failure locally"
+needs = ["load-task"]
+description = """
+Verify you can reproduce the failure before attempting to fix it.
+
+**1. For test failures:**
+```bash
+go test ./... -run "TestName" -v
+```
+
+**2. For build failures:**
+```bash
+go build ./...
+```
+
+**3. For cross-platform issues:**
+```bash
+GOOS=windows GOARCH=amd64 go build ./cmd/...
+GOOS=darwin GOARCH=arm64 go build ./cmd/...
+```
+
+**4. Document the exact error:**
+
+Copy the error output. You'll need this to verify the fix.
+
+**If you CANNOT reproduce:**
+- Check if the issue was already fixed on main
+- Pull latest: `git pull origin main`
+- If still can't reproduce, update the bead:
+  ```bash
+  bd comment {{task}} "Cannot reproduce on main as of $(git rev-parse --short HEAD)"
+  ```
+
+**Exit criteria:** You can reproduce the failure OR confirmed it's already fixed."""
+
+[[steps]]
+id = "diagnose"
+title = "Identify root cause and affected code"
+needs = ["reproduce"]
+description = """
+Analyze the failure to understand the root cause.
+
+**1. For compile errors:**
+
+The error message tells you exactly where:
+```
+internal/foo/bar.go:123:45: undefined: SomeSymbol
+```
+→ Go to that file and line.
+
+**2. For test failures:**
+
+Read the test code:
+```bash
+# Find the test file
+find . -name "*_test.go" -exec grep -l "TestName" {} \;
+
+# Read the test
+cat <test_file>
+```
+
+Understand what the test expects vs. what's happening.
+
+**3. For cross-platform issues:**
+
+Look for platform-specific code:
+- `syscall.*` calls (often Unix-only)
+- `/` vs `\` path separators
+- File permissions (0755 doesn't mean the same on Windows)
+
+Check if build tags are needed:
+```go
+//go:build unix
+//go:build windows
+```
+
+**4. Check for similar patterns in codebase:**
+```bash
+# How do other files handle this?
+grep -r "similar_pattern" --include="*.go" .
+```
+
+**Exit criteria:** You understand what's causing the failure and how to fix it."""
+
+[[steps]]
+id = "implement-fix"
+title = "Implement the fix"
+needs = ["diagnose"]
+description = """
+Make the necessary code changes to fix the issue.
+
+**Key principles:**
+
+1. **Follow existing patterns** - Look at how similar issues are handled elsewhere
+2. **Minimal change** - Fix the bug, don't refactor unrelated code
+3. **Don't break other platforms** - If fixing Windows, verify Linux still works
+
+**For cross-platform fixes (build tags):**
+
+Create platform-specific files:
+```go
+// foo_unix.go
+//go:build unix
+
+package foo
+
+func platformSpecific() { /* Unix implementation */ }
+```
+
+```go
+// foo_windows.go
+//go:build windows
+
+package foo
+
+func platformSpecific() { /* Windows stub or implementation */ }
+```
+
+**For test fixes:**
+
+- If the test is wrong: fix the test
+- If the implementation is wrong: fix the implementation
+- If both: fix implementation first, then update test expectations
+
+**Exit criteria:** Code changes are complete (not yet committed)."""
+
+[[steps]]
+id = "verify-fix"
+title = "Verify the fix works"
+needs = ["implement-fix"]
+description = """
+Run tests to verify your fix works and doesn't break anything.
+
+**1. Run the specific failing test/build:**
+```bash
+# For tests
+go test ./... -run "TestName" -v
+
+# For cross-platform
+GOOS=windows GOARCH=amd64 go build ./cmd/...
+```
+
+The original error should be gone.
+
+**2. Run the broader test suite:**
+```bash
+go test ./...
+```
+
+ALL tests must pass. If other tests fail:
+- Determine if it's related to your fix
+- If related: fix it
+- If pre-existing: file a separate bead, but note it
+
+**3. For cross-platform fixes, verify ALL platforms:**
+```bash
+# Run the cross-platform build test if one exists
+go test ./... -run "CrossPlatform" -v
+
+# Or manually check each platform
+GOOS=linux GOARCH=amd64 go build ./cmd/...
+GOOS=darwin GOARCH=amd64 go build ./cmd/...
+GOOS=windows GOARCH=amd64 go build ./cmd/...
+```
+
+**Exit criteria:** All tests pass, original failure is fixed."""
+
+[[steps]]
+id = "commit-and-push"
+title = "Commit and push the fix"
+needs = ["verify-fix"]
+description = """
+Commit the fix with a good message and push.
+
+**1. Stage your changes:**
+```bash
+git status
+git add <files>
+```
+
+**2. Commit with descriptive message:**
+```bash
+git commit -m "$(cat <<'EOF'
+fix(<area>): <brief description>
+
+<explanation of what was wrong and how this fixes it>
+
+Fixes: {{task}}
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+**3. Push:**
+
+For crew members (direct push):
+```bash
+git push origin main
+```
+
+For polecats (use merge queue):
+```bash
+gt done
+```
+
+**Exit criteria:** Changes are pushed (crew) or submitted to queue (polecat)."""
+
+[[steps]]
+id = "close-bead"
+title = "Close the bead and clean up"
+needs = ["commit-and-push"]
+description = """
+Close the bug and sync beads.
+
+**1. Close the bug:**
+```bash
+bd close {{task}} --reason="Fixed: <brief summary>"
+```
+
+**2. Sync beads:**
+```bash
+bd sync
+```
+
+**3. Clean up (if you created a worktree):**
+```bash
+gt worktree remove <rig>
+```
+
+**4. For polecats, signal completion:**
+```bash
+gt done
+```
+
+**Exit criteria:** Bug is closed, work is complete."""
+
+[vars]
+[vars.task]
+description = "The CI/CD bug ID assigned to this polecat"
+required = true
+
+[vars.rig]
+description = "The rig where the bug exists (gastown, beads)"
+required = false
+
+[vars.failure_type]
+description = "Type of failure: test, build, or cross-platform"
+required = false
