@@ -578,9 +578,24 @@ func runDecisionResolve(cmd *cobra.Command, args []string) error {
 		effectiveRationale = chosenOption.Description
 	}
 
-	// Resolve the decision
-	if err := bd.ResolveDecision(decisionID, decisionChoice, effectiveRationale, resolvedBy); err != nil {
-		return fmt.Errorf("resolving decision: %w", err)
+	// Try RPC first if gtmobile is available (enables real-time event bus notifications)
+	rpcUsed := false
+	rpcClient := rpcclient.NewClient("http://localhost:8443")
+	if rpcClient.IsAvailable(context.Background()) {
+		_, rpcErr := rpcClient.ResolveDecision(context.Background(), decisionID, decisionChoice, effectiveRationale, resolvedBy)
+		if rpcErr == nil {
+			rpcUsed = true
+		} else {
+			// Log RPC error for debugging
+			style.PrintWarning("RPC Resolve failed (falling back to direct BD): %v", rpcErr)
+		}
+	}
+
+	// Fall back to direct BD if RPC not available or failed
+	if !rpcUsed {
+		if err := bd.ResolveDecision(decisionID, decisionChoice, effectiveRationale, resolvedBy); err != nil {
+			return fmt.Errorf("resolving decision: %w", err)
+		}
 	}
 
 	// Notify requestor: mail + nudge + unblock + activity log
