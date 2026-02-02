@@ -52,8 +52,8 @@ func (b *Bot) handlePeekButton(callback slack.InteractionCallback, decisionID st
 		return
 	}
 
-	// Get agent activity
-	activities := b.getAgentActivity(agent, 10)
+	// Get agent activity - show up to 100 entries
+	activities := b.getAgentActivity(agent, 100)
 
 	// Format as code block
 	blocks := formatActivityBlocks(agent, activities)
@@ -284,30 +284,24 @@ func formatActivityBlocks(agent string, activities []ActivityEntry) []slack.Bloc
 	// Build activity text as code block
 	var sb strings.Builder
 	sb.WriteString("```\n")
-	sb.WriteString("─────────────────────────────────────────\n")
+	sb.WriteString(fmt.Sprintf("%-19s %-8s %s\n", "TIMESTAMP", "TYPE", "MESSAGE"))
+	sb.WriteString("─────────────────────────────────────────────────────────────────────────────────\n")
 
 	for _, a := range activities {
-		timeStr := a.Timestamp.Format("15:04")
-		typeIcon := "•"
-		switch a.Type {
-		case "commit":
-			typeIcon = "📝"
-		case "event":
-			typeIcon = "⚡"
-		case "session":
-			typeIcon = "💬"
+		timeStr := a.Timestamp.Format("2006-01-02 15:04")
+		typeStr := a.Type
+		if typeStr == "" {
+			typeStr = "unknown"
 		}
 
-		// Truncate long messages
+		// Show full message (Slack will handle overflow)
 		msg := a.Message
-		if len(msg) > 60 {
-			msg = msg[:57] + "..."
-		}
 
-		sb.WriteString(fmt.Sprintf("[%s] %s %s\n", timeStr, typeIcon, msg))
+		sb.WriteString(fmt.Sprintf("%-19s %-8s %s\n", timeStr, typeStr, msg))
 	}
 
-	sb.WriteString("─────────────────────────────────────────\n")
+	sb.WriteString("─────────────────────────────────────────────────────────────────────────────────\n")
+	sb.WriteString(fmt.Sprintf("Total: %d entries\n", len(activities)))
 	sb.WriteString("```")
 
 	blocks = append(blocks,
