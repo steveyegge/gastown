@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && (gt decision auto-close --inject || true) && (gt mail check --inject || true) && (bd decision check --inject || true) && (gt decision turn-clear || true)"
+            "command": "export PATH=\"$HOME/.local/bin:$HOME/go/bin:$PATH\" && _stdin=$(cat) && (gt decision auto-close --inject || true) && (gt mail check --inject || true) && (echo \"$_stdin\" | bd decision check --inject || true) && (echo \"$_stdin\" | gt decision turn-clear || true)"
           }
         ]
       }
