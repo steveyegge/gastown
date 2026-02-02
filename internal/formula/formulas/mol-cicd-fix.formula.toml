@@ -140,7 +140,7 @@ internal/foo/bar.go:123:45: undefined: SomeSymbol
 Read the test code:
 ```bash
 # Find the test file
-find . -name "*_test.go" -exec grep -l "TestName" {} \;
+find . -name "*_test.go" -exec grep -l "TestName" {} \\;
 
 # Read the test
 cat <test_file>
