@@ -1,0 +1,17 @@
+version = 1
+
+[rig]
+name = "gastown"
+prefix = "gt"
+default_branch = "main"
+
+[git]
+upstream = "https://github.com/steveyegge/gastown.git"
+fork_policy = "prompt"
+
+[setup]
+command = "go install ./cmd/gt"
+workdir = "."
+
+[[crew]]
+name = "max"
