@@ -27,7 +27,7 @@ CI/CD fix tasks are identified by:
 
 | Variable | Source | Description |
 |----------|--------|-------------|
-| task | hook_bead | The CI/CD bug ID assigned to this polecat |
+| issue | hook_bead | The CI/CD bug ID assigned to this polecat |
 | rig | task metadata | Which rig the bug is in (gastown, beads, etc.) |
 | failure_type | analysis | test, build, or cross-platform |
 
@@ -62,7 +62,7 @@ gt hook                     # Shows your pinned molecule and hook_bead
 
 **3. Read the bug report:**
 ```bash
-bd show {{task}}
+bd show {{issue}}
 ```
 
 **4. Extract key information:**
@@ -115,7 +115,7 @@ Copy the error output. You'll need this to verify the fix.
 - Pull latest: `git pull origin main`
 - If still can't reproduce, update the bead:
   ```bash
-  bd comment {{task}} "Cannot reproduce on main as of $(git rev-parse --short HEAD)"
+  bd comment {{issue}} "Cannot reproduce on main as of $(git rev-parse --short HEAD)"
   ```
 
 **Exit criteria:** You can reproduce the failure OR confirmed it's already fixed."""
@@ -272,7 +272,7 @@ fix(<area>): <brief description>
 
 <explanation of what was wrong and how this fixes it>
 
-Fixes: {{task}}
+Fixes: {{issue}}
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 EOF
@@ -302,7 +302,7 @@ Close the bug and sync beads.
 
 **1. Close the bug:**
 ```bash
-bd close {{task}} --reason="Fixed: <brief summary>"
+bd close {{issue}} --reason="Fixed: <brief summary>"
 ```
 
 **2. Sync beads:**
@@ -323,7 +323,7 @@ gt done
 **Exit criteria:** Bug is closed, work is complete."""
 
 [vars]
-[vars.task]
+[vars.issue]
 description = "The CI/CD bug ID assigned to this polecat"
 required = true
 
