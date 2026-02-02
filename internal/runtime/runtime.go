@@ -47,10 +47,12 @@ func EnsureSettingsForRoleWithAccount(workDir, role, accountConfigDir string, rc
 
 // SessionIDFromEnv returns the runtime session ID, if present.
 // It checks GT_SESSION_ID_ENV first, then CLAUDE_SESSION_ID env var,
-// then falls back to the persisted .runtime/session_id file,
-// and finally checks /tmp/.claude-session-current (written by SessionStart hook).
-// The file fallbacks are needed because hook subprocesses (UserPromptSubmit,
-// PostToolUse) don't inherit env vars set by gt prime --hook.
+// then falls back to the persisted .runtime/session_id file.
+//
+// NOTE: Previously this also checked /tmp/.claude-session-current, but that
+// global file causes race conditions when multiple sessions run concurrently.
+// Each session overwrites the file, causing other sessions to read wrong IDs.
+// The persisted .runtime/session_id file is workspace-specific and safe.
 func SessionIDFromEnv() string {
 	if envName := os.Getenv("GT_SESSION_ID_ENV"); envName != "" {
 		if sessionID := os.Getenv(envName); sessionID != "" {
@@ -60,15 +62,17 @@ func SessionIDFromEnv() string {
 	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
 		return id
 	}
-	if id := readPersistedSessionID(); id != "" {
-		return id
-	}
-	return SessionIDFromFile()
+	return readPersistedSessionID()
 }
 
 // SessionIDFromFile reads the session ID from /tmp/.claude-session-current.
-// This file is written by the SessionStart hook and provides the session ID
-// to commands like gt decision request that need it for turn enforcement.
+//
+// Deprecated: This function reads from a global file that is overwritten by
+// all Claude sessions, causing race conditions in multi-session environments.
+// Use SessionIDFromEnv() instead, which reads from workspace-local files.
+//
+// This function is kept for backwards compatibility but should not be used
+// for any session-specific operations like turn enforcement.
 func SessionIDFromFile() string {
 	data, err := os.ReadFile("/tmp/.claude-session-current")
 	if err != nil {

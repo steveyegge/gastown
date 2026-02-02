@@ -29,13 +29,8 @@ func TestSessionIDFromEnv_Default(t *testing.T) {
 	os.Unsetenv("GT_SESSION_ID_ENV")
 	os.Unsetenv("CLAUDE_SESSION_ID")
 
-	// Also handle /tmp/.claude-session-current file that SessionIDFromFile reads
-	sessionFile := "/tmp/.claude-session-current"
-	backupFile := sessionFile + ".test-backup"
-	if _, err := os.Stat(sessionFile); err == nil {
-		os.Rename(sessionFile, backupFile)
-		defer os.Rename(backupFile, sessionFile)
-	}
+	// Note: SessionIDFromEnv no longer reads from /tmp/.claude-session-current
+	// to avoid race conditions in multi-session environments.
 
 	// Change to a temp dir with no .runtime/session_id file
 	tmpDir := t.TempDir()
@@ -178,6 +173,54 @@ func TestSessionIDFromEnv_EnvTakesPrecedenceOverFile(t *testing.T) {
 	result := SessionIDFromEnv()
 	if result != "env-session-xyz" {
 		t.Errorf("SessionIDFromEnv() should prefer env over file, got %q, want %q", result, "env-session-xyz")
+	}
+}
+
+func TestSessionIDFromEnv_IgnoresGlobalFile(t *testing.T) {
+	// Verify that SessionIDFromEnv does NOT read from /tmp/.claude-session-current
+	// This file causes race conditions in multi-session environments.
+	oldGSEnv := os.Getenv("GT_SESSION_ID_ENV")
+	oldClaudeID := os.Getenv("CLAUDE_SESSION_ID")
+	defer func() {
+		if oldGSEnv != "" {
+			os.Setenv("GT_SESSION_ID_ENV", oldGSEnv)
+		} else {
+			os.Unsetenv("GT_SESSION_ID_ENV")
+		}
+		if oldClaudeID != "" {
+			os.Setenv("CLAUDE_SESSION_ID", oldClaudeID)
+		} else {
+			os.Unsetenv("CLAUDE_SESSION_ID")
+		}
+	}()
+	os.Unsetenv("GT_SESSION_ID_ENV")
+	os.Unsetenv("CLAUDE_SESSION_ID")
+
+	// Write a session ID to the global file
+	globalFile := "/tmp/.claude-session-current"
+	oldContent, _ := os.ReadFile(globalFile)
+	os.WriteFile(globalFile, []byte("global-session-should-be-ignored\n"), 0644)
+	defer func() {
+		if len(oldContent) > 0 {
+			os.WriteFile(globalFile, oldContent, 0644)
+		} else {
+			os.Remove(globalFile)
+		}
+	}()
+
+	// Change to a temp dir with no .runtime/session_id file
+	tmpDir := t.TempDir()
+	oldCwd, _ := os.Getwd()
+	defer os.Chdir(oldCwd)
+	os.Chdir(tmpDir)
+
+	// SessionIDFromEnv should return empty, NOT the global file content
+	result := SessionIDFromEnv()
+	if result != "" {
+		t.Errorf("SessionIDFromEnv() should not read from global file, got %q", result)
+	}
+	if result == "global-session-should-be-ignored" {
+		t.Error("SessionIDFromEnv() is still reading from /tmp/.claude-session-current (race condition bug!)")
 	}
 }
 
