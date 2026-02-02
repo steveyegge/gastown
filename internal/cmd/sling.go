@@ -37,6 +37,11 @@ Auto-Convoy:
   gt sling gt-abc gastown              # Creates "Work: <issue-title>" convoy
   gt sling gt-abc gastown --no-convoy  # Skip auto-convoy creation
 
+Stale Polecat Cleanup:
+  Before spawning a new polecat for a rig, sling may clean up stale polecats
+  that are safe to nuke (no session, clean git state, no open MR). This keeps
+  the transient model intact and prevents accumulation without reusing them.
+
 Target Resolution:
   gt sling gt-abc                       # Self (current agent)
   gt sling gt-abc crew                  # Crew worker in current rig
@@ -98,6 +103,7 @@ var (
 	slingAgent    string // --agent: override runtime agent for this sling/spawn
 	slingNoConvoy bool   // --no-convoy: skip auto-convoy creation
 	slingNoMerge  bool   // --no-merge: skip merge queue on completion (for upstream PRs/human review)
+	slingWorkers  string // --workers: worker type for batch sling (crew or polecats)
 )
 
 func init() {
@@ -116,6 +122,7 @@ func init() {
 	slingCmd.Flags().BoolVar(&slingNoConvoy, "no-convoy", false, "Skip auto-convoy creation for single-issue sling")
 	slingCmd.Flags().BoolVar(&slingHookRawBead, "hook-raw-bead", false, "Hook raw bead without default formula (expert mode)")
 	slingCmd.Flags().BoolVar(&slingNoMerge, "no-merge", false, "Skip merge queue on completion (keep work on feature branch for review)")
+	slingCmd.Flags().StringVar(&slingWorkers, "workers", "", "Worker type for batch sling: crew or polecats (default: crew if crew exist)")
 
 	rootCmd.AddCommand(slingCmd)
 }

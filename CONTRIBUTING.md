@@ -49,6 +49,12 @@ Run the full test suite before submitting:
 go test ./...
 ```
 
+If you want to verify in a clean container (with the same steps used in CI), run:
+
+```bash
+make container-test
+```
+
 For specific packages:
 
 ```bash
