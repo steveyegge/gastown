@@ -87,26 +87,31 @@ func testTownWithGitRigs(t *testing.T) (*Manager, string) {
 
 	// Set up bare repo with proper remote configuration
 	// Add mayor/rig as a remote to bare repo and fetch
-	cmd = exec.Command("git", "-C", bareRepoPath, "remote", "add", "origin", mayorPath)
+	cmd = gitBareCommand(bareRepoPath, "remote", "add", "origin", mayorPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to add remote: %v\n%s", err, out)
 	}
-	cmd = exec.Command("git", "-C", bareRepoPath, "fetch", "origin")
+	cmd = gitBareCommand(bareRepoPath, "fetch", "origin")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to fetch: %v\n%s", err, out)
 	}
 	// Create refs/remotes/origin/main so worktrees can use origin/main
-	cmd = exec.Command("git", "-C", bareRepoPath, "branch", "main", "FETCH_HEAD")
+	cmd = gitBareCommand(bareRepoPath, "branch", "main", "FETCH_HEAD")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to create main branch: %v\n%s", err, out)
 	}
-	cmd = exec.Command("git", "-C", bareRepoPath, "update-ref", "refs/remotes/origin/main", "FETCH_HEAD")
+	cmd = gitBareCommand(bareRepoPath, "update-ref", "refs/remotes/origin/main", "FETCH_HEAD")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to update origin/main ref: %v\n%s", err, out)
 	}
 
 	m := NewManager(tmpDir, rigsConfig)
 	return m, tmpDir
+}
+
+func gitBareCommand(bareRepoPath string, args ...string) *exec.Cmd {
+	cmdArgs := append([]string{"-C", bareRepoPath, "-c", "safe.bareRepository=all"}, args...)
+	return exec.Command("git", cmdArgs...)
 }
 
 // =============================================================================
