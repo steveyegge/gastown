@@ -1,0 +1,261 @@
+syntax = "proto3";
+
+package gastown.v1;
+
+option go_package = "github.com/steveyegge/gastown/gen/gastown/v1;gastownv1";
+
+import "google/protobuf/timestamp.proto";
+import "gastown/v1/common.proto";
+
+// AgentService provides unified management of crew workers and polecats
+service AgentService {
+  // ListAgents returns all agents (crew + polecats) in a rig or town
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+
+  // GetAgent returns details for a specific agent
+  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
+
+  // SpawnPolecat creates a new polecat in a rig
+  rpc SpawnPolecat(SpawnPolecatRequest) returns (SpawnPolecatResponse);
+
+  // StartCrew starts a crew worker session
+  rpc StartCrew(StartCrewRequest) returns (StartCrewResponse);
+
+  // StopAgent stops an agent's session
+  rpc StopAgent(StopAgentRequest) returns (StopAgentResponse);
+
+  // NudgeAgent sends a message to an agent's terminal
+  rpc NudgeAgent(NudgeAgentRequest) returns (NudgeAgentResponse);
+
+  // PeekAgent returns recent terminal output from an agent
+  rpc PeekAgent(PeekAgentRequest) returns (PeekAgentResponse);
+
+  // WatchAgents streams agent status updates
+  rpc WatchAgents(WatchAgentsRequest) returns (stream AgentUpdate);
+}
+
+// Agent type enum
+enum AgentType {
+  AGENT_TYPE_UNSPECIFIED = 0;
+  AGENT_TYPE_CREW = 1;
+  AGENT_TYPE_POLECAT = 2;
+  AGENT_TYPE_WITNESS = 3;
+  AGENT_TYPE_REFINERY = 4;
+  AGENT_TYPE_MAYOR = 5;
+  AGENT_TYPE_DEACON = 6;
+}
+
+// Agent state enum
+enum AgentState {
+  AGENT_STATE_UNSPECIFIED = 0;
+  AGENT_STATE_RUNNING = 1;      // Session active
+  AGENT_STATE_STOPPED = 2;      // No session
+  AGENT_STATE_WORKING = 3;      // Actively working on hooked work
+  AGENT_STATE_IDLE = 4;         // Running but no hooked work
+  AGENT_STATE_STUCK = 5;        // Needs intervention
+  AGENT_STATE_DONE = 6;         // Completed, awaiting cleanup (polecats)
+}
+
+message ListAgentsRequest {
+  // Filter by rig (empty = all rigs)
+  string rig = 1;
+
+  // Filter by agent type
+  AgentType type = 2;
+
+  // Include stopped agents
+  bool include_stopped = 3;
+
+  // Include global agents (mayor, deacon)
+  bool include_global = 4;
+}
+
+message ListAgentsResponse {
+  repeated Agent agents = 1;
+  int32 total = 2;
+  int32 running = 3;
+}
+
+message GetAgentRequest {
+  // Agent address (e.g., "gastown/crew/mobile", "gastown/polecats/furiosa")
+  string agent = 1;
+}
+
+message GetAgentResponse {
+  Agent agent = 1;
+  // Recent terminal output (last 20 lines)
+  repeated string recent_output = 2;
+}
+
+message SpawnPolecatRequest {
+  // Target rig
+  string rig = 1;
+
+  // Optional: specific polecat name (otherwise auto-assigned)
+  string name = 2;
+
+  // Claude Code account handle
+  string account = 3;
+
+  // Agent override (claude, gemini, codex, etc.)
+  string agent_override = 4;
+
+  // Bead to hook immediately after spawn
+  string hook_bead = 5;
+}
+
+message SpawnPolecatResponse {
+  // The spawned polecat
+  Agent agent = 1;
+
+  // Session name
+  string session = 2;
+}
+
+message StartCrewRequest {
+  // Rig containing the crew
+  string rig = 1;
+
+  // Crew worker name
+  string name = 2;
+
+  // Claude Code account handle
+  string account = 3;
+
+  // Agent override
+  string agent_override = 4;
+
+  // Create if doesn't exist
+  bool create = 5;
+}
+
+message StartCrewResponse {
+  Agent agent = 1;
+  string session = 2;
+  bool created = 3;  // True if crew was created
+}
+
+message StopAgentRequest {
+  // Agent address
+  string agent = 1;
+
+  // Force stop even if work is incomplete
+  bool force = 2;
+
+  // Reason for stopping
+  string reason = 3;
+}
+
+message StopAgentResponse {
+  // The stopped agent
+  Agent agent = 1;
+
+  // True if work was incomplete
+  bool had_incomplete_work = 2;
+}
+
+message NudgeAgentRequest {
+  // Agent address
+  string agent = 1;
+
+  // Message to send
+  string message = 2;
+
+  // Priority (affects display)
+  bool urgent = 3;
+}
+
+message NudgeAgentResponse {
+  bool delivered = 1;
+  string session = 2;
+}
+
+message PeekAgentRequest {
+  // Agent address
+  string agent = 1;
+
+  // Number of lines to return (default 50)
+  int32 lines = 2;
+
+  // Return all scrollback history
+  bool all = 3;
+}
+
+message PeekAgentResponse {
+  // Terminal output
+  string output = 1;
+
+  // Output as lines
+  repeated string lines = 2;
+
+  // True if agent session exists
+  bool exists = 3;
+}
+
+message WatchAgentsRequest {
+  // Filter by rig
+  string rig = 1;
+
+  // Filter by type
+  AgentType type = 2;
+
+  // Include global agents
+  bool include_global = 3;
+
+  // Polling interval in milliseconds (default 5000)
+  int32 interval_ms = 4;
+}
+
+message AgentUpdate {
+  google.protobuf.Timestamp timestamp = 1;
+  string update_type = 2;  // spawned, started, stopped, state_changed
+  Agent agent = 3;
+}
+
+// Agent represents a crew worker or polecat
+message Agent {
+  // Full address (e.g., "gastown/crew/mobile", "gastown/polecats/furiosa")
+  string address = 1;
+
+  // Short name (e.g., "mobile", "furiosa")
+  string name = 2;
+
+  // Rig name
+  string rig = 3;
+
+  // Agent type
+  AgentType type = 4;
+
+  // Current state
+  AgentState state = 5;
+
+  // Tmux session name
+  string session = 6;
+
+  // Working directory / clone path
+  string work_dir = 7;
+
+  // Current git branch
+  string branch = 8;
+
+  // Hooked work (bead ID)
+  string hooked_bead = 9;
+
+  // Hooked work title
+  string hooked_title = 10;
+
+  // Unread mail count
+  int32 unread_mail = 11;
+
+  // Session started at
+  google.protobuf.Timestamp started_at = 12;
+
+  // Last activity timestamp
+  google.protobuf.Timestamp last_activity = 13;
+
+  // Git status (clean, modified, etc.)
+  string git_status = 14;
+
+  // Convoy tracking this agent's work
+  string convoy_id = 15;
+}
