@@ -360,12 +360,56 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		}
 	}
 
-	// Step 7: Push to origin
+	// Step 7: Acquire merge slot before pushing (GH#594: prevent race with conflict-resolution polecats)
+	// The merge slot serializes all pushes to main, ensuring only one agent pushes at a time.
+	holder := e.rig.Name + "/refinery"
+	slotAcquired := false
+	if _, err := e.beads.MergeSlotEnsureExists(); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not ensure merge slot: %v (continuing)\n", err)
+	} else {
+		status, err := e.beads.MergeSlotAcquire(holder, false)
+		if err != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not acquire merge slot: %v (continuing)\n", err)
+		} else if !status.Available && status.Holder != "" && status.Holder != holder {
+			// Slot is held by another agent - wait and retry
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Merge slot held by %s, waiting...\n", status.Holder)
+			// Try to acquire with wait (blocking)
+			status, err = e.beads.MergeSlotAcquire(holder, true)
+			if err != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: could not acquire merge slot after wait: %v (continuing)\n", err)
+			} else {
+				slotAcquired = true
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Acquired merge slot after wait\n")
+			}
+		} else {
+			slotAcquired = true
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Acquired merge slot\n")
+		}
+	}
+
+	// Step 8: Push to origin
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Pushing to origin/%s...\n", target)
 	if err := e.git.Push("origin", target, false); err != nil {
+		// Release merge slot on push failure
+		if slotAcquired {
+			if releaseErr := e.beads.MergeSlotRelease(holder); releaseErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to release merge slot: %v\n", releaseErr)
+			}
+		}
 		return ProcessResult{
 			Success: false,
 			Error:   fmt.Sprintf("failed to push to origin: %v", err),
+		}
+	}
+
+	// Release merge slot after successful push
+	// Note: The slot is also released in HandleMRInfoSuccess, but we release here too
+	// in case the caller doesn't call HandleMRInfoSuccess (defensive)
+	if slotAcquired {
+		if releaseErr := e.beads.MergeSlotRelease(holder); releaseErr != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to release merge slot: %v\n", releaseErr)
+		} else {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Released merge slot\n")
 		}
 	}
 
