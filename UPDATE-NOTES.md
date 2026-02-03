@@ -30,6 +30,7 @@ upstream/main: e2116bbd (v0.5.0+184)
 | #1127 | f8b01d83 | feat: add gt dog clear and gt warrant commands |
 | #1161 | ef45859a | fix(dashboard): use townRoot for bd commands in cross-rig routing |
 | #1168 | 450a661d | fix(refinery): nudge refinery when MR is created, not at sling time (dcosson) |
+| #1172 | 6759181d | fix(done): retry molecule close with exponential backoff |
 | - | bbf0aa07 | fix: resolve interface mismatches from cherry-picks |
 
 ## Skipped PRs
