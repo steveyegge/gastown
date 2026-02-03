@@ -548,6 +548,7 @@ func TestKillSessionWithProcesses(t *testing.T) {
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
+	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Verify session exists
 	has, err := tm.HasSession(sessionName)
@@ -603,6 +604,7 @@ func TestKillSessionWithProcessesExcluding(t *testing.T) {
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
+	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Verify session exists
 	has, err := tm.HasSession(sessionName)
@@ -745,6 +747,7 @@ func TestKillSessionWithProcesses_KillsProcessGroup(t *testing.T) {
 	if err := tm.NewSessionWithCommand(sessionName, "", cmd); err != nil {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
+	defer func() { _ = tm.KillSession(sessionName) }()
 
 	// Give processes time to start
 	time.Sleep(200 * time.Millisecond)
