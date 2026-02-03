@@ -55,6 +55,16 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Auto-enrich context with bead descriptions if --auto-context is set
+	if decisionAutoContext {
+		enriched, err := enrichContextWithBeads(decisionPrompt, decisionContext)
+		if err != nil {
+			style.PrintWarning("Failed to auto-enrich context: %v", err)
+		} else {
+			decisionContext = enriched
+		}
+	}
+
 	// Validate recommend index
 	if decisionRecommend < 0 || decisionRecommend > len(decisionOptions) {
 		return fmt.Errorf("--recommend must be between 1 and %d", len(decisionOptions))
@@ -2175,6 +2185,105 @@ func validateReferencedBeads(prompt, contextJSON string, contextMap map[string]i
 	}
 
 	return nil
+}
+
+// enrichContextWithBeads extracts bead IDs from prompt and context, fetches their
+// info via `bd show --json`, and adds them to the context's referenced_beads field.
+// This is called when --auto-context is specified.
+func enrichContextWithBeads(prompt, contextJSON string) (string, error) {
+	// Extract all bead IDs from prompt and context
+	beadIDs := beads.ExtractBeadIDsFromAll(prompt, contextJSON)
+	if len(beadIDs) == 0 {
+		return contextJSON, nil // No beads to enrich
+	}
+
+	// Parse existing context (or create new object)
+	var contextMap map[string]interface{}
+	if contextJSON == "" {
+		contextMap = make(map[string]interface{})
+	} else {
+		if err := json.Unmarshal([]byte(contextJSON), &contextMap); err != nil {
+			// Context isn't a JSON object - wrap it
+			contextMap = map[string]interface{}{"_original": contextJSON}
+		}
+	}
+
+	// Get or create referenced_beads map
+	var referencedBeads map[string]interface{}
+	if rb, ok := contextMap["referenced_beads"].(map[string]interface{}); ok {
+		referencedBeads = rb
+	} else {
+		referencedBeads = make(map[string]interface{})
+	}
+
+	// Fetch info for each bead ID (skip if already in context)
+	for _, beadID := range beadIDs {
+		// Skip if we already have info for this bead
+		if _, exists := referencedBeads[beadID]; exists {
+			continue
+		}
+
+		// Fetch bead info via bd show --json
+		beadInfo := fetchBeadInfo(beadID)
+		referencedBeads[beadID] = beadInfo
+	}
+
+	// Update context with enriched referenced_beads
+	contextMap["referenced_beads"] = referencedBeads
+
+	// Marshal back to JSON
+	result, err := json.Marshal(contextMap)
+	if err != nil {
+		return contextJSON, fmt.Errorf("failed to marshal enriched context: %w", err)
+	}
+
+	return string(result), nil
+}
+
+// fetchBeadInfo runs `bd show <id> --json` and extracts relevant fields.
+// Returns a map with title, type, status, and description_summary (first 200 chars).
+// On error, returns a map with an "error" field.
+func fetchBeadInfo(beadID string) map[string]interface{} {
+	cmd := exec.Command("bd", "show", beadID, "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		// Bead not found or command failed
+		return map[string]interface{}{
+			"error": "not found",
+		}
+	}
+
+	// Parse the JSON output
+	var beadData map[string]interface{}
+	if err := json.Unmarshal(output, &beadData); err != nil {
+		return map[string]interface{}{
+			"error": "failed to parse bead data",
+		}
+	}
+
+	// Extract relevant fields
+	result := make(map[string]interface{})
+
+	if title, ok := beadData["title"].(string); ok {
+		result["title"] = title
+	}
+	if beadType, ok := beadData["type"].(string); ok {
+		result["type"] = beadType
+	}
+	if status, ok := beadData["status"].(string); ok {
+		result["status"] = status
+	}
+
+	// Get description and truncate to 200 chars
+	if desc, ok := beadData["description"].(string); ok && desc != "" {
+		if len(desc) > 200 {
+			result["description_summary"] = desc[:200] + "..."
+		} else {
+			result["description_summary"] = desc
+		}
+	}
+
+	return result
 }
 
 // Note: Fail-then-File and successor schema validation moved to scripts:

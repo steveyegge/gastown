@@ -1446,3 +1446,97 @@ func TestDecisionRequestNoBeadCheckFlag(t *testing.T) {
 		t.Error("missing --no-bead-check flag")
 	}
 }
+
+// TestDecisionRequestAutoContextFlag tests that --auto-context flag exists.
+func TestDecisionRequestAutoContextFlag(t *testing.T) {
+	if decisionRequestCmd == nil {
+		t.Fatal("decisionRequestCmd is nil")
+	}
+
+	flags := decisionRequestCmd.Flags()
+	autoContextFlag := flags.Lookup("auto-context")
+	if autoContextFlag == nil {
+		t.Error("missing --auto-context flag")
+	}
+
+	// Verify it's a boolean flag with correct default
+	if autoContextFlag.DefValue != "false" {
+		t.Errorf("--auto-context default value = %q, want %q", autoContextFlag.DefValue, "false")
+	}
+}
+
+// TestEnrichContextWithBeads tests the auto-context enrichment logic.
+func TestEnrichContextWithBeads(t *testing.T) {
+	tests := []struct {
+		name        string
+		prompt      string
+		contextJSON string
+		wantHasRB   bool // should have referenced_beads field
+	}{
+		{
+			name:        "no beads in prompt",
+			prompt:      "What should we do?",
+			contextJSON: "",
+			wantHasRB:   false, // no beads to enrich
+		},
+		{
+			name:        "bead in prompt empty context",
+			prompt:      "How should we handle gt-abc123?",
+			contextJSON: "",
+			wantHasRB:   true, // should add referenced_beads
+		},
+		{
+			name:        "bead in existing context",
+			prompt:      "Question about gt-xyz789",
+			contextJSON: `{"existing": "data"}`,
+			wantHasRB:   true, // should add referenced_beads while preserving existing
+		},
+		{
+			name:   "bead already in referenced_beads",
+			prompt: "About gt-abc123",
+			contextJSON: `{
+				"referenced_beads": {
+					"gt-abc123": {"title": "Already here", "type": "task"}
+				}
+			}`,
+			wantHasRB: true, // should preserve existing without overwriting
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := enrichContextWithBeads(tt.prompt, tt.contextJSON)
+			if err != nil {
+				t.Errorf("enrichContextWithBeads() error = %v", err)
+				return
+			}
+
+			// Parse result to check structure
+			var parsed map[string]interface{}
+			if result != "" {
+				if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+					t.Errorf("result is not valid JSON: %v", err)
+					return
+				}
+
+				_, hasRB := parsed["referenced_beads"]
+				if hasRB != tt.wantHasRB {
+					t.Errorf("referenced_beads present = %v, want %v", hasRB, tt.wantHasRB)
+				}
+			}
+		})
+	}
+}
+
+// TestFetchBeadInfo tests the bead info fetcher (handles command errors).
+func TestFetchBeadInfo(t *testing.T) {
+	// Test with a non-existent bead ID
+	result := fetchBeadInfo("gt-nonexistent-12345")
+
+	// Should return an error entry
+	if errVal, ok := result["error"]; !ok {
+		t.Error("fetchBeadInfo should return error for non-existent bead")
+	} else if errVal != "not found" {
+		t.Errorf("fetchBeadInfo error = %q, want %q", errVal, "not found")
+	}
+}

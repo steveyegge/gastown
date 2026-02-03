@@ -423,6 +423,7 @@ var decisionCheckIdentity string
 var decisionNoFileCheck bool
 var decisionNoBeadCheck bool
 var decisionIgnoreSuggestedType bool
+var decisionAutoContext bool
 
 // Chain-specific flags
 var decisionChainDescendants bool
@@ -443,6 +444,7 @@ func init() {
 	decisionRequestCmd.Flags().BoolVar(&decisionNoFileCheck, "no-file-check", false, "Skip FILE option validation for failure contexts")
 	decisionRequestCmd.Flags().BoolVar(&decisionNoBeadCheck, "no-bead-check", false, "Skip validation of referenced bead descriptions in context")
 	decisionRequestCmd.Flags().BoolVar(&decisionIgnoreSuggestedType, "ignore-suggested-type", false, "Override predecessor's suggested successor type")
+	decisionRequestCmd.Flags().BoolVar(&decisionAutoContext, "auto-context", false, "Auto-fetch descriptions for referenced beads")
 	decisionRequestCmd.Flags().StringVar(&decisionType, "type", "", "Decision type (validated by create-decision-type-{name} script if present)")
 
 	// Aliases for backward compatibility
