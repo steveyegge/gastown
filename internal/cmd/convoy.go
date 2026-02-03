@@ -1437,11 +1437,12 @@ func getExternalIssueDetails(townBeads, rigName, issueID string) *issueDetails {
 
 // issueDetails holds basic issue info.
 type issueDetails struct {
-	ID        string
-	Title     string
-	Status    string
-	IssueType string
-	Assignee  string
+	ID          string
+	Title       string
+	Status      string
+	IssueType   string
+	Assignee    string
+	Description string
 }
 
 // getIssueDetailsBatch fetches details for multiple issues in a single bd show call.
@@ -1473,11 +1474,12 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 	}
 
 	var issues []struct {
-		ID        string `json:"id"`
-		Title     string `json:"title"`
-		Status    string `json:"status"`
-		IssueType string `json:"issue_type"`
-		Assignee  string `json:"assignee"`
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Status      string `json:"status"`
+		IssueType   string `json:"issue_type"`
+		Assignee    string `json:"assignee"`
+		Description string `json:"description"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
 		return result
@@ -1485,11 +1487,12 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 
 	for _, issue := range issues {
 		result[issue.ID] = &issueDetails{
-			ID:        issue.ID,
-			Title:     issue.Title,
-			Status:    issue.Status,
-			IssueType: issue.IssueType,
-			Assignee:  issue.Assignee,
+			ID:          issue.ID,
+			Title:       issue.Title,
+			Status:      issue.Status,
+			IssueType:   issue.IssueType,
+			Assignee:    issue.Assignee,
+			Description: issue.Description,
 		}
 	}
 
@@ -1514,22 +1517,24 @@ func getIssueDetails(issueID string) *issueDetails {
 	}
 
 	var issues []struct {
-		ID        string `json:"id"`
-		Title     string `json:"title"`
-		Status    string `json:"status"`
-		IssueType string `json:"issue_type"`
-		Assignee  string `json:"assignee"`
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Status      string `json:"status"`
+		IssueType   string `json:"issue_type"`
+		Assignee    string `json:"assignee"`
+		Description string `json:"description"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil || len(issues) == 0 {
 		return nil
 	}
 
 	return &issueDetails{
-		ID:        issues[0].ID,
-		Title:     issues[0].Title,
-		Status:    issues[0].Status,
-		IssueType: issues[0].IssueType,
-		Assignee:  issues[0].Assignee,
+		ID:          issues[0].ID,
+		Title:       issues[0].Title,
+		Status:      issues[0].Status,
+		IssueType:   issues[0].IssueType,
+		Assignee:    issues[0].Assignee,
+		Description: issues[0].Description,
 	}
 }
 

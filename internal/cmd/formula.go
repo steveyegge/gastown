@@ -413,8 +413,13 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 
 	fmt.Printf("%s Created convoy: %s\n", style.Bold.Render("✓"), convoyID)
 
-	// Generate a unique review ID for this convoy run
-	reviewID := generateFormulaShortID()
+	// Derive review_id from PR or convoyID
+	reviewID := ""
+	if formulaRunPR > 0 {
+		reviewID = fmt.Sprintf("pr-%d", formulaRunPR)
+	} else {
+		reviewID = strings.TrimPrefix(convoyID, "hq-cv-")
+	}
 
 	// Build target description
 	var targetDescription string
@@ -496,6 +501,16 @@ func executeConvoyFormula(f *formulaData, formulaName, targetRig string) error {
 				}
 				legDesc = fmt.Sprintf("%s\n\n---\nBase Prompt:\n%s", leg.Description, renderedPrompt)
 			}
+		}
+
+		// Add output_path metadata if output config is available
+		if f.Output != nil && f.Output.Directory != "" && f.Output.LegPattern != "" {
+			// Expand output path template
+			outputPath := filepath.Join(
+				strings.ReplaceAll(f.Output.Directory, "{{review_id}}", reviewID),
+				strings.ReplaceAll(f.Output.LegPattern, "{{leg.id}}", leg.ID),
+			)
+			legDesc = fmt.Sprintf("%s\n\noutput_path: %s", legDesc, outputPath)
 		}
 
 		legArgs := []string{
@@ -633,10 +648,17 @@ type formulaData struct {
 	Name        string
 	Description string
 	Type        string
+	Output      *formulaOutput
 	Legs        []formulaLeg
 	Synthesis   *formulaSynthesis
 	Prompts     map[string]string
 	Output      *formulaOutput
+}
+
+type formulaOutput struct {
+	Directory  string
+	LegPattern string
+	Synthesis  string
 }
 
 type formulaOutput struct {
@@ -721,6 +743,9 @@ func parseFormulaFile(path string) (*formulaData, error) {
 	if match := extractTOMLValue(content, "type"); match != "" {
 		f.Type = match
 	}
+
+	// Parse output section
+	f.Output = extractOutput(content)
 
 	// Parse legs (convoy formulas)
 	f.Legs = extractLegs(content)
@@ -882,17 +907,17 @@ func extractOutput(content string) *formulaOutput {
 		section = section[:endIdx+1]
 	}
 
-	out := &formulaOutput{
+	output := &formulaOutput{
 		Directory:  extractTOMLValue(section, "directory"),
 		LegPattern: extractTOMLValue(section, "leg_pattern"),
 		Synthesis:  extractTOMLValue(section, "synthesis"),
 	}
 
-	if out.Directory == "" && out.LegPattern == "" && out.Synthesis == "" {
+	if output.Directory == "" && output.LegPattern == "" && output.Synthesis == "" {
 		return nil
 	}
 
-	return out
+	return output
 }
 
 // renderTemplate renders a Go text/template with the given context map
