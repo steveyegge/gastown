@@ -1320,21 +1320,25 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		// Try to detect town root from cwd for town-level agents (mayor, deacon)
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			rc = DefaultRuntimeConfig()
-		} else {
-			if role != "" {
-				// Use role-based agent resolution for per-role model selection
-				rc = ResolveRoleAgentConfig(role, townRoot, "")
-			} else {
-				rc = ResolveAgentConfig(townRoot, "")
+		// Use GT_ROOT from envVars if available, otherwise detect from cwd
+		townRoot = envVars["GT_ROOT"]
+		if townRoot == "" {
+			var err error
+			townRoot, err = findTownRootFromCwd()
+			if err != nil {
+				rc = DefaultRuntimeConfig()
+				goto buildCommand
 			}
+		}
+		if role != "" {
+			// Use role-based agent resolution for per-role model selection
+			rc = ResolveRoleAgentConfig(role, townRoot, "")
+		} else {
+			rc = ResolveAgentConfig(townRoot, "")
 		}
 	}
 
+buildCommand:
 	// Copy env vars to avoid mutating caller map
 	resolvedEnv := make(map[string]string, len(envVars)+2)
 	for k, v := range envVars {
@@ -1425,11 +1429,16 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		var err error
-		townRoot, err = findTownRootFromCwd()
-		if err != nil {
-			rc = DefaultRuntimeConfig()
-		} else {
+		townRoot = envVars["GT_ROOT"]
+		if townRoot == "" {
+			var err error
+			townRoot, err = findTownRootFromCwd()
+			if err != nil {
+				rc = DefaultRuntimeConfig()
+				goto buildCommand
+			}
+		}
+		{
 			if agentOverride != "" {
 				var resolveErr error
 				rc, _, resolveErr = ResolveAgentConfigWithOverride(townRoot, "", agentOverride)
@@ -1445,6 +1454,7 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 		}
 	}
 
+buildCommand:
 	// Copy env vars to avoid mutating caller map
 	resolvedEnv := make(map[string]string, len(envVars)+2)
 	for k, v := range envVars {
