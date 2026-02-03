@@ -9,6 +9,7 @@ import (
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/hooks"
+	"github.com/steveyegge/gastown/internal/session"
 )
 
 // HookAttachmentValidCheck verifies that attached molecules exist and are not closed.
@@ -439,49 +440,65 @@ func (c *OrphanedAttachmentsCheck) checkBeadsDir(beadsDir, townRoot string) []or
 
 // agentExists checks if an agent's worktree exists.
 // Agent identities follow patterns like:
-//   - "gastown/nux" → polecat at <townRoot>/gastown/polecats/nux
+//   - "gastown/nux" or "gastown/polecats/nux" → polecat at <townRoot>/gastown/polecats/nux
 //   - "gastown/crew/joe" → crew at <townRoot>/gastown/crew/joe
 //   - "mayor" → mayor at <townRoot>/mayor
-//   - "gastown-witness" → witness at <townRoot>/gastown/witness
-//   - "gastown-refinery" → refinery at <townRoot>/gastown/refinery
+//   - "gastown/witness" or "gastown-witness" → witness at <townRoot>/gastown/witness
+//   - "gastown/refinery" or "gastown-refinery" → refinery at <townRoot>/gastown/refinery
+//
+// Uses session.ParseAddress() for standard slash-format parsing, with fallback
+// for legacy hyphenated formats (witness/refinery).
 func (c *OrphanedAttachmentsCheck) agentExists(agent, townRoot string) bool {
-	// Handle special roles with hyphen separator
+	// First try parsing as standard address format (slash-separated)
+	identity, err := session.ParseAddress(agent)
+	if err == nil {
+		return c.identityWorktreeExists(identity, townRoot)
+	}
+
+	// Fallback: Handle legacy hyphenated formats for witness/refinery
+	// These are used in older handoff beads: "gastown-witness", "gastown-refinery"
 	if strings.HasSuffix(agent, "-witness") {
 		rig := strings.TrimSuffix(agent, "-witness")
-		path := filepath.Join(townRoot, rig, "witness")
-		return dirExists(path)
+		if rig != "" {
+			path := filepath.Join(townRoot, rig, "witness")
+			return dirExists(path)
+		}
 	}
 	if strings.HasSuffix(agent, "-refinery") {
 		rig := strings.TrimSuffix(agent, "-refinery")
-		path := filepath.Join(townRoot, rig, "refinery")
-		return dirExists(path)
-	}
-
-	// Handle mayor
-	if agent == "mayor" {
-		return dirExists(filepath.Join(townRoot, "mayor"))
-	}
-
-	// Handle crew (rig/crew/name pattern)
-	if strings.Contains(agent, "/crew/") {
-		parts := strings.SplitN(agent, "/crew/", 2)
-		if len(parts) == 2 {
-			path := filepath.Join(townRoot, parts[0], "crew", parts[1])
+		if rig != "" {
+			path := filepath.Join(townRoot, rig, "refinery")
 			return dirExists(path)
 		}
 	}
 
-	// Handle polecats (rig/name pattern) - most common case
-	if strings.Contains(agent, "/") {
-		parts := strings.SplitN(agent, "/", 2)
-		if len(parts) == 2 {
-			path := filepath.Join(townRoot, parts[0], "polecats", parts[1])
-			return dirExists(path)
-		}
-	}
+	// Unknown pattern - return false to surface as potential orphan
+	// This is intentional: unrecognized patterns should be flagged for review
+	// rather than silently assumed to exist (which caused false negatives)
+	return false
+}
 
-	// Unknown pattern - assume exists to avoid false positives
-	return true
+// identityWorktreeExists checks if the worktree for a parsed AgentIdentity exists.
+func (c *OrphanedAttachmentsCheck) identityWorktreeExists(identity *session.AgentIdentity, townRoot string) bool {
+	var path string
+	switch identity.Role {
+	case session.RoleMayor:
+		path = filepath.Join(townRoot, "mayor")
+	case session.RoleDeacon:
+		path = filepath.Join(townRoot, "deacon")
+	case session.RoleWitness:
+		path = filepath.Join(townRoot, identity.Rig, "witness")
+	case session.RoleRefinery:
+		path = filepath.Join(townRoot, identity.Rig, "refinery")
+	case session.RoleCrew:
+		path = filepath.Join(townRoot, identity.Rig, "crew", identity.Name)
+	case session.RolePolecat:
+		path = filepath.Join(townRoot, identity.Rig, "polecats", identity.Name)
+	default:
+		// Unknown role - return false to surface as potential orphan
+		return false
+	}
+	return dirExists(path)
 }
 
 // dirExists checks if a directory exists.

@@ -291,22 +291,39 @@ func TestOrphanedAttachmentsCheck_AgentExists(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	refineryDir := filepath.Join(tmpDir, "gastown", "refinery")
+	if err := os.MkdirAll(refineryDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
 	check := NewOrphanedAttachmentsCheck()
 
 	tests := []struct {
 		agent    string
 		expected bool
 	}{
-		// Existing agents
+		// Existing agents - slash format (preferred)
 		{"gastown/nux", true},
+		{"gastown/polecats/nux", true}, // explicit polecats path
 		{"gastown/crew/joe", true},
 		{"mayor", true},
+		{"gastown/witness", true},   // slash format for witness
+		{"gastown/refinery", true},  // slash format for refinery
+
+		// Existing agents - legacy hyphenated format (backward compat)
 		{"gastown-witness", true},
+		{"gastown-refinery", true},
 
 		// Non-existent agents
 		{"gastown/deleted", false},
 		{"gastown/crew/gone", false},
 		{"otherrig-witness", false},
+		{"otherrig/witness", false},
+
+		// Unknown patterns should return false (not true)
+		// This prevents silent false negatives for new agent types
+		{"some-random-thing", false},
+		{"", false},
 	}
 
 	for _, tt := range tests {
