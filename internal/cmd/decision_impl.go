@@ -203,7 +203,7 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 
 		// Run referenced bead validation (unless --no-bead-check)
 		if !decisionNoBeadCheck {
-			if err := validateReferencedBeads(decisionPrompt, decisionContext, contextMap); err != nil {
+			if err := validateReferencedBeads(decisionPrompt, decisionContext, contextMap, options); err != nil {
 				return err
 			}
 		}
@@ -2138,12 +2138,34 @@ func checkPredecessorSuggestedType(townRoot, predecessorID string) string {
 	return remaining[:endIdx]
 }
 
-// validateReferencedBeads checks that all bead IDs referenced in the prompt
-// and context have descriptions provided in the context's referenced_beads field.
+// validateReferencedBeads checks that all bead IDs referenced in the prompt,
+// context, and option labels/descriptions have descriptions provided in the
+// context's referenced_beads field.
 // Returns an error if any referenced beads are missing descriptions.
-func validateReferencedBeads(prompt, contextJSON string, contextMap map[string]interface{}) error {
+func validateReferencedBeads(prompt, contextJSON string, contextMap map[string]interface{}, options []beads.DecisionOption) error {
 	// Extract all bead IDs from prompt and context
 	referencedIDs := beads.ExtractBeadIDsFromAll(prompt, contextJSON)
+
+	// Also extract bead IDs from option labels and descriptions
+	for _, opt := range options {
+		if optIDs := beads.ExtractBeadIDs(opt.Label); len(optIDs) > 0 {
+			referencedIDs = append(referencedIDs, optIDs...)
+		}
+		if optIDs := beads.ExtractBeadIDs(opt.Description); len(optIDs) > 0 {
+			referencedIDs = append(referencedIDs, optIDs...)
+		}
+	}
+
+	// Deduplicate
+	seen := make(map[string]bool)
+	var uniqueIDs []string
+	for _, id := range referencedIDs {
+		if !seen[id] {
+			seen[id] = true
+			uniqueIDs = append(uniqueIDs, id)
+		}
+	}
+	referencedIDs = uniqueIDs
 	if len(referencedIDs) == 0 {
 		return nil // No beads referenced, nothing to validate
 	}

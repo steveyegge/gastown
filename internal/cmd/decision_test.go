@@ -1315,6 +1315,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 		prompt     string
 		contextStr string
 		contextMap map[string]interface{}
+		options    []beads.DecisionOption
 		wantErr    bool
 	}{
 		{
@@ -1322,6 +1323,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 			prompt:     "Which approach should we take?",
 			contextStr: `{"analysis": "some analysis"}`,
 			contextMap: map[string]interface{}{"analysis": "some analysis"},
+			options:    nil,
 			wantErr:    false,
 		},
 		{
@@ -1336,6 +1338,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 					},
 				},
 			},
+			options: nil,
 			wantErr: false,
 		},
 		{
@@ -1343,6 +1346,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 			prompt:     "How should we fix gt-xyz789?",
 			contextStr: `{"analysis": "some analysis"}`,
 			contextMap: map[string]interface{}{"analysis": "some analysis"},
+			options:    nil,
 			wantErr:    true,
 		},
 		{
@@ -1355,6 +1359,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 					"bd-def456": map[string]interface{}{"title": "Bug B"},
 				},
 			},
+			options: nil,
 			wantErr: false,
 		},
 		{
@@ -1366,6 +1371,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 					"gt-abc123": map[string]interface{}{"title": "Bug A"},
 				},
 			},
+			options: nil,
 			wantErr: true, // bd-def456 is missing
 		},
 		{
@@ -1373,6 +1379,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 			prompt:     "How to proceed with gt-task1?",
 			contextStr: `{}`,
 			contextMap: map[string]interface{}{},
+			options:    nil,
 			wantErr:    true,
 		},
 		{
@@ -1380,6 +1387,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 			prompt:     "How to proceed with gt-task1?",
 			contextStr: "",
 			contextMap: nil,
+			options:    nil,
 			wantErr:    true,
 		},
 		{
@@ -1387,6 +1395,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 			prompt:     "What about this?",
 			contextStr: `{"note": "relates to gt-hidden"}`,
 			contextMap: map[string]interface{}{"note": "relates to gt-hidden"},
+			options:    nil,
 			wantErr:    true, // gt-hidden referenced but not in referenced_beads
 		},
 		{
@@ -1398,6 +1407,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 					"gt-empty": map[string]interface{}{},
 				},
 			},
+			options: nil,
 			wantErr: true, // entry exists but has no content
 		},
 		{
@@ -1409,6 +1419,7 @@ func TestValidateReferencedBeads(t *testing.T) {
 					"gt-titleonly": map[string]interface{}{"title": "Has title"},
 				},
 			},
+			options: nil,
 			wantErr: false,
 		},
 		{
@@ -1420,13 +1431,100 @@ func TestValidateReferencedBeads(t *testing.T) {
 					"gt-desconly": map[string]interface{}{"description_summary": "Has desc"},
 				},
 			},
+			options: nil,
 			wantErr: false,
+		},
+		// New tests for option extraction (gt-vlf2rs)
+		{
+			name:       "bead in option label without description",
+			prompt:     "What should we work on?",
+			contextStr: `{}`,
+			contextMap: map[string]interface{}{},
+			options: []beads.DecisionOption{
+				{Label: "Fix gt-opt123", Description: "Fix the bug"},
+				{Label: "Skip", Description: "Do nothing"},
+			},
+			wantErr: true, // gt-opt123 in option label not in referenced_beads
+		},
+		{
+			name:       "bead in option description without description",
+			prompt:     "What should we work on?",
+			contextStr: `{}`,
+			contextMap: map[string]interface{}{},
+			options: []beads.DecisionOption{
+				{Label: "Option A", Description: "This relates to gt-desc456"},
+				{Label: "Option B", Description: "Something else"},
+			},
+			wantErr: true, // gt-desc456 in option description not in referenced_beads
+		},
+		{
+			name:       "bead in option label with description provided",
+			prompt:     "What should we work on?",
+			contextStr: `{"referenced_beads": {"gt-opt789": {"title": "The bug"}}}`,
+			contextMap: map[string]interface{}{
+				"referenced_beads": map[string]interface{}{
+					"gt-opt789": map[string]interface{}{"title": "The bug"},
+				},
+			},
+			options: []beads.DecisionOption{
+				{Label: "Fix gt-opt789", Description: "Fix the bug"},
+				{Label: "Skip", Description: "Do nothing"},
+			},
+			wantErr: false, // gt-opt789 has description in context
+		},
+		{
+			name:       "multiple beads in options all described",
+			prompt:     "Which tasks to prioritize?",
+			contextStr: `{"referenced_beads": {"gt-task1": {"title": "Task 1"}, "gt-task2": {"title": "Task 2"}, "gt-task3": {"title": "Task 3"}}}`,
+			contextMap: map[string]interface{}{
+				"referenced_beads": map[string]interface{}{
+					"gt-task1": map[string]interface{}{"title": "Task 1"},
+					"gt-task2": map[string]interface{}{"title": "Task 2"},
+					"gt-task3": map[string]interface{}{"title": "Task 3"},
+				},
+			},
+			options: []beads.DecisionOption{
+				{Label: "gt-task1", Description: "First task"},
+				{Label: "gt-task2", Description: "Second task"},
+				{Label: "Both gt-task3 and more", Description: "Everything"},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "beads in both prompt and options",
+			prompt:     "How to handle gt-main?",
+			contextStr: `{"referenced_beads": {"gt-main": {"title": "Main"}, "gt-opt1": {"title": "Opt1"}}}`,
+			contextMap: map[string]interface{}{
+				"referenced_beads": map[string]interface{}{
+					"gt-main": map[string]interface{}{"title": "Main"},
+					"gt-opt1": map[string]interface{}{"title": "Opt1"},
+				},
+			},
+			options: []beads.DecisionOption{
+				{Label: "Use gt-opt1", Description: "Use option 1"},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "duplicate beads in options deduplicated",
+			prompt:     "What to do?",
+			contextStr: `{"referenced_beads": {"gt-dup": {"title": "Duplicate"}}}`,
+			contextMap: map[string]interface{}{
+				"referenced_beads": map[string]interface{}{
+					"gt-dup": map[string]interface{}{"title": "Duplicate"},
+				},
+			},
+			options: []beads.DecisionOption{
+				{Label: "gt-dup option", Description: "References gt-dup again"},
+				{Label: "Also gt-dup", Description: "And gt-dup here too"},
+			},
+			wantErr: false, // gt-dup appears multiple times but only needs one description
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateReferencedBeads(tt.prompt, tt.contextStr, tt.contextMap)
+			err := validateReferencedBeads(tt.prompt, tt.contextStr, tt.contextMap, tt.options)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateReferencedBeads() error = %v, wantErr %v", err, tt.wantErr)
 			}
