@@ -51,27 +51,17 @@ func (c *RoleConfigCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	// Check rig-level overrides for each rig
-	// Discover rigs by looking for directories with rig.json
-	if entries, err := os.ReadDir(ctx.TownRoot); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			rigName := entry.Name()
-			// Check if this is a rig (has rig.json)
-			if _, err := os.Stat(filepath.Join(ctx.TownRoot, rigName, "rig.json")); err != nil {
-				continue
-			}
-			rigRolesDir := filepath.Join(ctx.TownRoot, rigName, "roles")
-			if roleEntries, err := os.ReadDir(rigRolesDir); err == nil {
-				for _, roleEntry := range roleEntries {
-					if !roleEntry.IsDir() && filepath.Ext(roleEntry.Name()) == ".toml" {
-						overrideCount++
-						path := filepath.Join(rigRolesDir, roleEntry.Name())
-						if err := validateRoleOverride(path); err != nil {
-							warnings = append(warnings, fmt.Sprintf("rig %s override %s: %v", rigName, roleEntry.Name(), err))
-						}
+	// Check rig-level overrides for each rig using shared discovery
+	discovery := DiscoverRigs(ctx.TownRoot)
+	for rigName, rig := range discovery.Rigs {
+		rigRolesDir := filepath.Join(rig.Path, "roles")
+		if roleEntries, err := os.ReadDir(rigRolesDir); err == nil {
+			for _, roleEntry := range roleEntries {
+				if !roleEntry.IsDir() && filepath.Ext(roleEntry.Name()) == ".toml" {
+					overrideCount++
+					path := filepath.Join(rigRolesDir, roleEntry.Name())
+					if err := validateRoleOverride(path); err != nil {
+						warnings = append(warnings, fmt.Sprintf("rig %s override %s: %v", rigName, roleEntry.Name(), err))
 					}
 				}
 			}

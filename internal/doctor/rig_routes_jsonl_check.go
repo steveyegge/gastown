@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
-	"github.com/steveyegge/gastown/internal/config"
 )
 
 // RigRoutesJSONLCheck detects and fixes routes.jsonl files in rig .beads directories.
@@ -47,8 +45,8 @@ func NewRigRoutesJSONLCheck() *RigRoutesJSONLCheck {
 func (c *RigRoutesJSONLCheck) Run(ctx *CheckContext) *CheckResult {
 	c.affectedRigs = nil // Reset
 
-	// Get list of rigs from multiple sources
-	rigDirs := c.findRigDirectories(ctx.TownRoot)
+	// Get list of rigs using shared discovery utility
+	rigDirs := DiscoverRigPaths(ctx.TownRoot)
 
 	if len(rigDirs) == 0 {
 		return &CheckResult{
@@ -120,61 +118,3 @@ func (c *RigRoutesJSONLCheck) Fix(ctx *CheckContext) error {
 	return nil
 }
 
-// findRigDirectories finds all rig directories in the town.
-func (c *RigRoutesJSONLCheck) findRigDirectories(townRoot string) []string {
-	var rigDirs []string
-	seen := make(map[string]bool)
-
-	// Source 1: rigs.json registry
-	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
-	if rigsConfig, err := config.LoadRigsConfig(rigsPath); err == nil {
-		for rigName := range rigsConfig.Rigs {
-			rigPath := filepath.Join(townRoot, rigName)
-			if _, err := os.Stat(rigPath); err == nil && !seen[rigPath] {
-				rigDirs = append(rigDirs, rigPath)
-				seen[rigPath] = true
-			}
-		}
-	}
-
-	// Source 2: routes.jsonl (for rigs that may not be in registry)
-	townBeadsDir := filepath.Join(townRoot, ".beads")
-	if routes, err := beads.LoadRoutes(townBeadsDir); err == nil {
-		for _, route := range routes {
-			if route.Path == "." || route.Path == "" {
-				continue // Skip town root
-			}
-			// Extract rig name (first path component)
-			parts := strings.Split(route.Path, "/")
-			if len(parts) > 0 && parts[0] != "" {
-				rigPath := filepath.Join(townRoot, parts[0])
-				if _, err := os.Stat(rigPath); err == nil && !seen[rigPath] {
-					rigDirs = append(rigDirs, rigPath)
-					seen[rigPath] = true
-				}
-			}
-		}
-	}
-
-	// Source 3: Look for directories with .beads subdirs (for unregistered rigs)
-	entries, err := os.ReadDir(townRoot)
-	if err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			// Skip known non-rig directories
-			if entry.Name() == "mayor" || entry.Name() == ".beads" || entry.Name() == ".git" {
-				continue
-			}
-			rigPath := filepath.Join(townRoot, entry.Name())
-			beadsDir := filepath.Join(rigPath, ".beads")
-			if _, err := os.Stat(beadsDir); err == nil && !seen[rigPath] {
-				rigDirs = append(rigDirs, rigPath)
-				seen[rigPath] = true
-			}
-		}
-	}
-
-	return rigDirs
-}

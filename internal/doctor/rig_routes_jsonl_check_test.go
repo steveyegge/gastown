@@ -148,7 +148,7 @@ func TestRigRoutesJSONLCheck_Fix(t *testing.T) {
 	})
 }
 
-func TestRigRoutesJSONLCheck_FindRigDirectories(t *testing.T) {
+func TestDiscoverRigPaths(t *testing.T) {
 	t.Run("finds rigs from multiple sources", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
@@ -177,8 +177,7 @@ func TestRigRoutesJSONLCheck_FindRigDirectories(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		check := NewRigRoutesJSONLCheck()
-		rigs := check.findRigDirectories(tmpDir)
+		rigs := DiscoverRigPaths(tmpDir)
 
 		if len(rigs) != 2 {
 			t.Errorf("expected 2 rigs, got %d: %v", len(rigs), rigs)
@@ -196,8 +195,7 @@ func TestRigRoutesJSONLCheck_FindRigDirectories(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		check := NewRigRoutesJSONLCheck()
-		rigs := check.findRigDirectories(tmpDir)
+		rigs := DiscoverRigPaths(tmpDir)
 
 		if len(rigs) != 0 {
 			t.Errorf("expected 0 rigs (mayor and .beads should be excluded), got %d: %v", len(rigs), rigs)
