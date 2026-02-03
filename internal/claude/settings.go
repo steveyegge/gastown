@@ -2,6 +2,7 @@
 package claude
 
 import (
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"os"
@@ -33,6 +34,37 @@ func RoleTypeFor(role string) RoleType {
 	default:
 		return Interactive
 	}
+}
+
+// TemplateVersion returns a short hash of the embedded template content.
+// Used by gt doctor to detect stale installed settings.
+func TemplateVersion(roleType RoleType) string {
+	var templateName string
+	switch roleType {
+	case Autonomous:
+		templateName = "config/settings-autonomous.json"
+	default:
+		templateName = "config/settings-interactive.json"
+	}
+	content, err := configFS.ReadFile(templateName)
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256(content)
+	return fmt.Sprintf("%x", hash)[:8]
+}
+
+// TemplateContent returns the raw content of the embedded template.
+// Used for comparing installed settings against templates.
+func TemplateContent(roleType RoleType) ([]byte, error) {
+	var templateName string
+	switch roleType {
+	case Autonomous:
+		templateName = "config/settings-autonomous.json"
+	default:
+		templateName = "config/settings-interactive.json"
+	}
+	return configFS.ReadFile(templateName)
 }
 
 // EnsureSettings ensures .claude/settings.json exists in the given directory.

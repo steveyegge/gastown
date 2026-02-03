@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/claude"
 )
 
 func TestNewClaudeSettingsCheck(t *testing.T) {
@@ -35,73 +37,41 @@ func TestClaudeSettingsCheck_NoSettingsFiles(t *testing.T) {
 }
 
 // createValidSettings creates a valid settings.json with all required elements.
+// It uses the actual embedded template to avoid template drift detection.
 func createValidSettings(t *testing.T, path string) {
 	t.Helper()
-
-	settings := map[string]any{
-		"enabledPlugins": []string{"plugin1"},
-		"hooks": map[string]any{
-			"SessionStart": []any{
-				map[string]any{
-					"matcher": "**",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": "export PATH=/usr/local/bin:$PATH",
-						},
-						map[string]any{
-							"type":    "command",
-							"command": "gt prime --hook && gt mail check --inject && gt nudge deacon session-started",
-						},
-					},
-				},
-			},
-			"UserPromptSubmit": []any{
-				map[string]any{
-					"matcher": "**",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": "_stdin=$(cat) && (echo \"$_stdin\" | bd decision check --inject) && (echo \"$_stdin\" | gt decision turn-clear)",
-						},
-					},
-				},
-			},
-			"PostToolUse": []any{
-				map[string]any{
-					"matcher": "",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": "gt inject drain --quiet && gt nudge drain --quiet",
-						},
-					},
-				},
-			},
-			"Stop": []any{
-				map[string]any{
-					"matcher": "**",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": "_stdin=$(cat) && echo \"$_stdin\" | gt decision turn-check",
-						},
-					},
-				},
-			},
-		},
-	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	data, err := json.MarshalIndent(settings, "", "  ")
+	// Use actual template content to avoid template drift
+	// For test purposes, use autonomous template (most common)
+	content, err := claude.TemplateContent(claude.Autonomous)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// createValidSettingsWithRole creates settings using the appropriate template for the role.
+func createValidSettingsWithRole(t *testing.T, path, role string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	roleType := claude.RoleTypeFor(role)
+	content, err := claude.TemplateContent(roleType)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, content, 0644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -204,7 +174,7 @@ func TestClaudeSettingsCheck_ValidMayorSettings(t *testing.T) {
 	// Create valid mayor settings at correct location (mayor/.claude/settings.json)
 	// NOT at town root (.claude/settings.json) which is wrong location
 	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
-	createValidSettings(t, mayorSettings)
+	createValidSettingsWithRole(t, mayorSettings, "mayor")
 
 	check := NewClaudeSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
@@ -275,7 +245,7 @@ func TestClaudeSettingsCheck_ValidCrewSettings(t *testing.T) {
 
 	// Create valid crew settings in correct location (crew/.claude/, shared by all crew)
 	crewSettings := filepath.Join(tmpDir, rigName, "crew", ".claude", "settings.json")
-	createValidSettings(t, crewSettings)
+	createValidSettingsWithRole(t, crewSettings, "crew")
 
 	check := NewClaudeSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
@@ -445,7 +415,7 @@ func TestClaudeSettingsCheck_MissingStdinPiping(t *testing.T) {
 					"matcher": "**",
 					"hooks": []any{
 						map[string]any{
-							"type":    "command",
+							"type": "command",
 							// Missing stdin piping - this is the bug gt-te4okj
 							"command": "bd decision check --inject && gt decision turn-clear",
 						},
@@ -692,17 +662,17 @@ func TestClaudeSettingsCheck_MixedValidAndStale(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
-	// Create valid mayor settings (at correct location)
+	// Create valid mayor settings (at correct location) - using actual template
 	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
-	createValidSettings(t, mayorSettings)
+	createValidSettingsWithRole(t, mayorSettings, "mayor")
 
 	// Create stale witness settings in correct location (missing PATH)
 	witnessSettings := filepath.Join(tmpDir, rigName, "witness", ".claude", "settings.json")
 	createStaleSettings(t, witnessSettings, "PATH")
 
-	// Create valid refinery settings in correct location
+	// Create valid refinery settings in correct location - using actual template
 	refinerySettings := filepath.Join(tmpDir, rigName, "refinery", ".claude", "settings.json")
-	createValidSettings(t, refinerySettings)
+	createValidSettingsWithRole(t, refinerySettings, "refinery")
 
 	check := NewClaudeSettingsCheck()
 	ctx := &CheckContext{TownRoot: tmpDir}
@@ -1290,5 +1260,226 @@ func TestClaudeSettingsCheck_TownRootSettingsWarnsInsteadOfKilling(t *testing.T)
 	expectedTarget := filepath.Join("..", "mayor", ".claude", "settings.json")
 	if target != expectedTarget {
 		t.Errorf("expected symlink target %q, got %q", expectedTarget, target)
+	}
+}
+
+// TestClaudeSettingsCheck_TemplateDrift tests detection of settings that have valid
+// patterns but differ from the current template (template drift).
+func TestClaudeSettingsCheck_TemplateDrift(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create valid settings with all required patterns but with extra content
+	// that makes it different from the template
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	settings := map[string]any{
+		"enabledPlugins": []string{"plugin1"},
+		"extraField":     "this makes the file different from template",
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
+					"matcher": "**",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "export PATH=/usr/local/bin:$PATH",
+						},
+						map[string]any{
+							"type":    "command",
+							"command": "gt prime --hook && gt mail check --inject && gt nudge deacon session-started",
+						},
+					},
+				},
+			},
+			"UserPromptSubmit": []any{
+				map[string]any{
+					"matcher": "**",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "_stdin=$(cat) && (echo \"$_stdin\" | bd decision check --inject) && (echo \"$_stdin\" | gt decision turn-clear)",
+						},
+					},
+				},
+			},
+			"PostToolUse": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "gt inject drain --quiet && gt nudge drain --quiet",
+						},
+					},
+				},
+			},
+			"Stop": []any{
+				map[string]any{
+					"matcher": "**",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "_stdin=$(cat) && echo \"$_stdin\" | gt decision turn-check",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := os.MkdirAll(filepath.Dir(mayorSettings), 0755); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.MarshalIndent(settings, "", "  ")
+	if err := os.WriteFile(mayorSettings, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// Should detect template drift (patterns valid but file differs from template)
+	if result.Status != StatusWarning {
+		t.Errorf("expected StatusWarning for template drift, got %v: %s", result.Status, result.Message)
+	}
+
+	// Should mention template drift in details
+	found := false
+	for _, d := range result.Details {
+		if strings.Contains(d, "template drift") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected details to mention template drift, got %v", result.Details)
+	}
+}
+
+// TestClaudeSettingsCheck_TemplateDriftFixUpdatesFromTemplate verifies that --fix
+// updates settings with template drift from the current template.
+func TestClaudeSettingsCheck_TemplateDriftFixUpdatesFromTemplate(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create valid settings with drift (all patterns valid but extra content)
+	mayorSettings := filepath.Join(tmpDir, "mayor", ".claude", "settings.json")
+	settings := map[string]any{
+		"enabledPlugins": []string{"plugin1"},
+		"extraField":     "this makes the file different from template",
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
+					"matcher": "**",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "gt prime --hook && gt mail check --inject && gt nudge deacon session-started",
+						},
+					},
+				},
+			},
+			"UserPromptSubmit": []any{
+				map[string]any{
+					"matcher": "**",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "_stdin=$(cat) && (echo \"$_stdin\" | bd decision check --inject) && (echo \"$_stdin\" | gt decision turn-clear)",
+						},
+					},
+				},
+			},
+			"PostToolUse": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "gt inject drain --quiet",
+						},
+					},
+				},
+			},
+			"Stop": []any{
+				map[string]any{
+					"matcher": "**",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "_stdin=$(cat) && echo \"$_stdin\" | gt decision turn-check",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := os.MkdirAll(filepath.Dir(mayorSettings), 0755); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.MarshalIndent(settings, "", "  ")
+	if err := os.WriteFile(mayorSettings, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get original file content
+	originalContent, _ := os.ReadFile(mayorSettings)
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	// Run to detect drift
+	result := check.Run(ctx)
+	if result.Status != StatusWarning {
+		t.Fatalf("expected StatusWarning before fix, got %v: %s", result.Status, result.Message)
+	}
+
+	// Apply fix
+	if err := check.Fix(ctx); err != nil {
+		t.Fatalf("Fix failed: %v", err)
+	}
+
+	// Verify file was updated (content changed)
+	newContent, err := os.ReadFile(mayorSettings)
+	if err != nil {
+		t.Fatalf("failed to read settings after fix: %v", err)
+	}
+
+	if string(newContent) == string(originalContent) {
+		t.Error("expected settings content to change after fix")
+	}
+
+	// Run check again - should pass now
+	result = check.Run(ctx)
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK after fix, got %v: %s", result.Status, result.Message)
+	}
+}
+
+// TestClaudeSettingsCheck_NoTemplateDriftWhenFresh verifies that fresh settings
+// (matching template exactly) don't trigger template drift warning.
+func TestClaudeSettingsCheck_NoTemplateDriftWhenFresh(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create settings directory and let EnsureSettingsForRole create the file
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// This creates settings from the template - should be fresh
+	if err := claude.EnsureSettingsForRole(mayorDir, "mayor"); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewClaudeSettingsCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+
+	result := check.Run(ctx)
+
+	// Should NOT detect template drift for fresh template-created settings
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK for fresh settings, got %v: %s", result.Status, result.Message)
 	}
 }

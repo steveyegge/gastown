@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -42,6 +43,7 @@ type staleSettingsInfo struct {
 	missing       []string      // What's missing from the settings
 	wrongLocation bool          // True if file is in wrong location (should be deleted)
 	gitStatus     gitFileStatus // Git status for wrong-location files (for safe deletion)
+	templateDrift bool          // True if patterns are valid but template hash differs
 }
 
 // NewClaudeSettingsCheck creates a new Claude settings validation check.
@@ -97,6 +99,13 @@ func (c *ClaudeSettingsCheck) Run(ctx *CheckContext) *CheckResult {
 			sf.missing = missing
 			c.staleSettings = append(c.staleSettings, sf)
 			details = append(details, fmt.Sprintf("%s: missing %s", sf.path, strings.Join(missing, ", ")))
+		} else {
+			// Patterns are valid - check if template has drifted
+			if !c.checkSettingsFreshness(sf.path, sf.agentType) {
+				sf.templateDrift = true
+				c.staleSettings = append(c.staleSettings, sf)
+				details = append(details, fmt.Sprintf("%s: template drift (patterns valid but settings outdated)", sf.path))
+			}
 		}
 	}
 
@@ -108,15 +117,36 @@ func (c *ClaudeSettingsCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
-	fixHint := "Run 'gt doctor --fix' to update settings and restart affected agents"
+	// Categorize issues: template drift only = warning, wrong location/missing = error
+	var hasErrors bool
+	var driftCount int
+	for _, sf := range c.staleSettings {
+		if sf.wrongLocation || len(sf.missing) > 0 {
+			hasErrors = true
+		}
+		if sf.templateDrift {
+			driftCount++
+		}
+	}
+
+	status := StatusWarning
+	message := fmt.Sprintf("Found %d settings file(s) with template drift", driftCount)
+	fixHint := "Run 'gt doctor --fix' to update settings from templates"
+
+	if hasErrors {
+		status = StatusError
+		message = fmt.Sprintf("Found %d stale Claude config file(s)", len(c.staleSettings))
+		fixHint = "Run 'gt doctor --fix' to update settings and restart affected agents"
+	}
+
 	if hasModifiedFiles {
 		fixHint = "Run 'gt doctor --fix' to fix issues. Files with local modifications will be renamed to .bak files."
 	}
 
 	return &CheckResult{
 		Name:    c.Name(),
-		Status:  StatusError,
-		Message: fmt.Sprintf("Found %d stale Claude config file(s) in wrong location", len(c.staleSettings)),
+		Status:  status,
+		Message: message,
 		Details: details,
 		FixHint: fixHint,
 	}
@@ -430,6 +460,24 @@ func (c *ClaudeSettingsCheck) checkSettings(path, agentType string) []string {
 	}
 
 	return missing
+}
+
+// checkSettingsFreshness compares installed settings hash against the template hash.
+// Returns true if the settings match the template (fresh), false if stale.
+func (c *ClaudeSettingsCheck) checkSettingsFreshness(path, agentType string) bool {
+	// Read installed settings
+	installed, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+
+	// Calculate hash of installed settings
+	installedHash := fmt.Sprintf("%x", sha256.Sum256(installed))[:8]
+
+	// Get template hash for this agent type
+	templateHash := claude.TemplateVersion(claude.RoleTypeFor(agentType))
+
+	return installedHash == templateHash
 }
 
 // getGitFileStatus determines the git status of a file.
