@@ -35,6 +35,18 @@ func (d *Doctor) Checks() []Check {
 	return d.checks
 }
 
+// FilterByName filters the check list to only include the check with the given name.
+// Returns an error if no check with that name is found.
+func (d *Doctor) FilterByName(name string) error {
+	for _, check := range d.checks {
+		if check.Name() == name {
+			d.checks = []Check{check}
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown check: %q (use --list-checks to see available checks)", name)
+}
+
 // categoryGetter interface for checks that provide a category
 type categoryGetter interface {
 	Category() string

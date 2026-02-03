@@ -16,6 +16,8 @@ var (
 	doctorRig             string
 	doctorRestartSessions bool
 	doctorSlow            string
+	doctorCheck           string
+	doctorListChecks      bool
 )
 
 var doctorCmd = &cobra.Command{
@@ -95,6 +97,8 @@ func init() {
 	doctorCmd.Flags().StringVar(&doctorRig, "rig", "", "Check specific rig only")
 	doctorCmd.Flags().BoolVar(&doctorRestartSessions, "restart-sessions", false, "Restart patrol sessions when fixing stale settings (use with --fix)")
 	doctorCmd.Flags().StringVar(&doctorSlow, "slow", "", "Highlight slow checks (optional threshold, default 1s)")
+	doctorCmd.Flags().StringVar(&doctorCheck, "check", "", "Run only the specified check (use --list-checks to see names)")
+	doctorCmd.Flags().BoolVar(&doctorListChecks, "list-checks", false, "List available check names and exit")
 	// Allow --slow without a value (uses default 1s)
 	doctorCmd.Flags().Lookup("slow").NoOptDefVal = "1s"
 	rootCmd.AddCommand(doctorCmd)
@@ -196,6 +200,22 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Rig-specific checks (only when --rig is specified)
 	if doctorRig != "" {
 		d.RegisterAll(doctor.RigChecks()...)
+	}
+
+	// Handle --list-checks: print available check names and exit
+	if doctorListChecks {
+		fmt.Println("Available checks:")
+		for _, check := range d.Checks() {
+			fmt.Printf("  %s\n", check.Name())
+		}
+		return nil
+	}
+
+	// Handle --check: filter to only the specified check
+	if doctorCheck != "" {
+		if err := d.FilterByName(doctorCheck); err != nil {
+			return err
+		}
 	}
 
 	// Parse slow threshold (0 = disabled)
