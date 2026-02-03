@@ -413,8 +413,8 @@ func TestConvoyHandler_PolecatWorkersRendering(t *testing.T) {
 	body := w.Body.String()
 
 	// Check polecat section header
-	if !strings.Contains(body, "Polecats") {
-		t.Error("Response should contain polecat section header")
+	if !strings.Contains(body, "Workers") {
+		t.Error("Response should contain workers section header")
 	}
 
 	// Check polecat names
@@ -642,8 +642,8 @@ func TestConvoyHandler_FullDashboard(t *testing.T) {
 	if !strings.Contains(body, "#789") {
 		t.Error("Response should contain PR data")
 	}
-	if !strings.Contains(body, "Polecats") {
-		t.Error("Response should contain polecat section")
+	if !strings.Contains(body, "Workers") {
+		t.Error("Response should contain workers section")
 	}
 	if !strings.Contains(body, "worker1") {
 		t.Error("Response should contain polecat data")
@@ -736,7 +736,7 @@ func TestE2E_Server_FullDashboard(t *testing.T) {
 		{"Merge queue section", "Merge Queue"},
 		{"PR number", "#101"},
 		{"PR repo", "roxas"},
-		{"Polecat section", "Polecats"},
+		{"Workers section", "Workers"},
 		{"Polecat name", "furiosa"},
 		{"HTMX auto-refresh", `hx-trigger="every 10s`}, // trigger has conditional suffix
 	}
@@ -922,7 +922,7 @@ func TestE2E_Server_HTMLStructure(t *testing.T) {
 		"<!DOCTYPE html>",
 		"<html",
 		"<head>",
-		"<title>Gas Town Dashboard</title>",
+		"<title>Gastown Control Center</title>",
 		"htmx.org",
 		"<body>",
 		"</body>",
