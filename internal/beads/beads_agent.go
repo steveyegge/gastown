@@ -113,6 +113,13 @@ func FormatAgentDescription(title string, fields *AgentFields) string {
 		lines = append(lines, "notification_level: null")
 	}
 
+	// OwnedFormulas: comma-separated list of formula names (gt-2hb5rf)
+	if len(fields.OwnedFormulas) > 0 {
+		lines = append(lines, fmt.Sprintf("owned_formulas: %s", strings.Join(fields.OwnedFormulas, ",")))
+	} else {
+		lines = append(lines, "owned_formulas: null")
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -154,6 +161,15 @@ func ParseAgentFields(description string) *AgentFields {
 			fields.ActiveMR = value
 		case "notification_level":
 			fields.NotificationLevel = value
+		case "owned_formulas":
+			// Parse comma-separated list of formula names (gt-2hb5rf)
+			if value != "" {
+				formulas := strings.Split(value, ",")
+				for i := range formulas {
+					formulas[i] = strings.TrimSpace(formulas[i])
+				}
+				fields.OwnedFormulas = formulas
+			}
 		}
 	}
 
