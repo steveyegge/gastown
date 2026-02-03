@@ -340,7 +340,7 @@ func (c *StaleBeadsRedirectCheck) verifyRedirectTopology(townRoot, rigDir string
 	mayorBeadsPath := filepath.Join(rigDir, "mayor", "rig", ".beads")
 
 	// If neither location has beads, skip this rig (not configured)
-	if !beadsDirExists(rigBeadsPath) && !beadsDirExists(mayorBeadsPath) {
+	if !dirExists(rigBeadsPath) && !dirExists(mayorBeadsPath) {
 		return nil, nil
 	}
 
@@ -349,7 +349,7 @@ func (c *StaleBeadsRedirectCheck) verifyRedirectTopology(townRoot, rigDir string
 
 	for _, worktreePath := range worktrees {
 		// Skip if worktree doesn't exist
-		if !beadsDirExists(worktreePath) {
+		if !dirExists(worktreePath) {
 			continue
 		}
 
@@ -383,12 +383,6 @@ func (c *StaleBeadsRedirectCheck) verifyRedirectTopology(townRoot, rigDir string
 	return missing, incorrect
 }
 
-// beadsDirExists checks if a directory exists.
-func beadsDirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
-}
-
 // getWorktreePaths returns all worktree paths that should have redirects.
 func getWorktreePaths(rigDir string) []string {
 	var paths []string
@@ -419,7 +413,7 @@ func getWorktreePaths(rigDir string) []string {
 
 	// Refinery: <rig>/refinery/rig
 	refineryPath := filepath.Join(rigDir, "refinery", "rig")
-	if beadsDirExists(refineryPath) {
+	if dirExists(refineryPath) {
 		paths = append(paths, refineryPath)
 	}
 

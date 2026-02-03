@@ -3,6 +3,7 @@ package doctor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -423,7 +424,7 @@ func TestStaleBeadsRedirectCheck_IncorrectRedirect(t *testing.T) {
 	// Verify details mention incorrect redirect
 	foundIncorrect := false
 	for _, detail := range result.Details {
-		if len(detail) > 0 && (detail[0:9] == "incorrect" || len(detail) > 10) {
+		if strings.HasPrefix(detail, "incorrect redirect:") {
 			foundIncorrect = true
 			break
 		}
