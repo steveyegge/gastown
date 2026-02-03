@@ -7,8 +7,12 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 //go:embed static
@@ -314,10 +318,114 @@ func NewDashboardMux(fetcher ConvoyFetcher) (http.Handler, error) {
 	}
 	staticHandler := http.FileServer(http.FS(staticFS))
 
+	// Create artifacts handler for serving Playwright reports and snapshots
+	artifactsHandler, err := NewArtifactsHandler()
+	if err != nil {
+		// Non-fatal: dashboard can work without artifacts
+		log.Printf("dashboard: artifacts handler unavailable: %v", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/static/", http.StripPrefix("/static/", staticHandler))
+	if artifactsHandler != nil {
+		mux.Handle("/artifacts/", artifactsHandler)
+	}
 	mux.Handle("/", convoyHandler)
 
 	return mux, nil
+}
+
+// ArtifactsHandler serves Playwright test artifacts (reports, screenshots, etc.)
+type ArtifactsHandler struct {
+	artifactsDir string
+}
+
+// NewArtifactsHandler creates a handler for serving test artifacts.
+// Artifacts are stored at <town>/.beads/artifacts/
+func NewArtifactsHandler() (*ArtifactsHandler, error) {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return nil, err
+	}
+
+	artifactsDir := filepath.Join(townRoot, ".beads", "artifacts")
+	return &ArtifactsHandler{
+		artifactsDir: artifactsDir,
+	}, nil
+}
+
+// ServeHTTP handles requests for artifact files.
+// URL format: /artifacts/{convoy-id}/report -> serves playwright-report/index.html
+//
+//	/artifacts/{convoy-id}/snapshots/{path} -> serves test snapshots
+//	/artifacts/{convoy-id}/results/{path} -> serves test results (screenshots, traces)
+func (h *ArtifactsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Parse URL path: /artifacts/{convoy-id}/{type}[/{path}]
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/")
+	parts := strings.SplitN(path, "/", 3)
+
+	if len(parts) < 2 {
+		http.NotFound(w, r)
+		return
+	}
+
+	convoyID := parts[0]
+	resourceType := parts[1]
+
+	// Validate convoy ID (prevent directory traversal)
+	if strings.Contains(convoyID, "..") || strings.Contains(convoyID, "/") {
+		http.Error(w, "Invalid convoy ID", http.StatusBadRequest)
+		return
+	}
+
+	var filePath string
+	switch resourceType {
+	case "report":
+		// Serve the HTML report
+		filePath = filepath.Join(h.artifactsDir, "convoys", convoyID, "playwright-report", "index.html")
+	case "snapshots":
+		// Serve snapshot images
+		if len(parts) < 3 {
+			http.NotFound(w, r)
+			return
+		}
+		subPath := parts[2]
+		// Prevent directory traversal
+		if strings.Contains(subPath, "..") {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+		filePath = filepath.Join(h.artifactsDir, "convoys", convoyID, "test-results", subPath)
+	case "results":
+		// Serve any file from test-results (screenshots, traces, etc.)
+		if len(parts) < 3 {
+			http.NotFound(w, r)
+			return
+		}
+		subPath := parts[2]
+		if strings.Contains(subPath, "..") {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+		filePath = filepath.Join(h.artifactsDir, "convoys", convoyID, "test-results", subPath)
+	case "report-assets":
+		// Serve assets needed by the HTML report (css, js, etc.)
+		if len(parts) < 3 {
+			http.NotFound(w, r)
+			return
+		}
+		subPath := parts[2]
+		if strings.Contains(subPath, "..") {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+		filePath = filepath.Join(h.artifactsDir, "convoys", convoyID, "playwright-report", subPath)
+	default:
+		http.NotFound(w, r)
+		return
+	}
+
+	// Serve the file
+	http.ServeFile(w, r, filePath)
 }

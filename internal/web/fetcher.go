@@ -184,6 +184,15 @@ func (f *LiveConvoyFetcher) FetchConvoys() ([]ConvoyRow, error) {
 			}
 		}
 
+		// Fetch E2E test results from artifacts
+		e2eResults := f.getE2ETestResults(c.ID)
+		row.E2EStatus = e2eResults.Status
+		row.E2ETotal = e2eResults.Total
+		row.E2EPassed = e2eResults.Passed
+		row.E2EFailed = e2eResults.Failed
+		row.HasArtifacts = e2eResults.HasArtifacts
+		row.ReportPath = e2eResults.ReportPath
+
 		rows = append(rows, row)
 	}
 
@@ -198,6 +207,75 @@ type trackedIssueInfo struct {
 	Assignee     string
 	LastActivity time.Time
 	UpdatedAt    time.Time // Fallback for activity when no assignee
+}
+
+// e2eTestResults holds E2E test result data from Playwright synthesis.
+type e2eTestResults struct {
+	Status       string // "passed", "failed", "pending", "none"
+	Total        int
+	Passed       int
+	Failed       int
+	HasArtifacts bool
+	ReportPath   string // Relative path to HTML report
+}
+
+// getE2ETestResults fetches E2E test results from the artifacts directory.
+// Artifacts are stored at .beads/artifacts/convoys/<convoy-id>/summary.json
+func (f *LiveConvoyFetcher) getE2ETestResults(convoyID string) e2eTestResults {
+	result := e2eTestResults{Status: "none"}
+
+	// Build path to artifacts directory
+	artifactsDir := filepath.Join(f.townBeads, "artifacts", "convoys", convoyID)
+
+	// Check if artifacts directory exists
+	if _, err := os.Stat(artifactsDir); os.IsNotExist(err) {
+		return result
+	}
+	result.HasArtifacts = true
+
+	// Check for HTML report
+	reportPath := filepath.Join(artifactsDir, "playwright-report", "index.html")
+	if _, err := os.Stat(reportPath); err == nil {
+		// Store relative path for serving
+		result.ReportPath = filepath.Join("artifacts", "convoys", convoyID, "playwright-report", "index.html")
+	}
+
+	// Read summary.json
+	summaryPath := filepath.Join(artifactsDir, "summary.json")
+	data, err := os.ReadFile(summaryPath)
+	if err != nil {
+		// No summary yet - might be in progress
+		result.Status = "pending"
+		return result
+	}
+
+	// Parse summary
+	var summary struct {
+		Convoy   string `json:"convoy"`
+		ExitCode int    `json:"exit_code"`
+		Total    int    `json:"total"`
+		Passed   int    `json:"passed"`
+		Failed   int    `json:"failed"`
+	}
+	if err := json.Unmarshal(data, &summary); err != nil {
+		result.Status = "pending"
+		return result
+	}
+
+	result.Total = summary.Total
+	result.Passed = summary.Passed
+	result.Failed = summary.Failed
+
+	// Determine status based on exit code and counts
+	if summary.ExitCode == 0 && summary.Failed == 0 {
+		result.Status = "passed"
+	} else if summary.Failed > 0 || summary.ExitCode != 0 {
+		result.Status = "failed"
+	} else {
+		result.Status = "pending"
+	}
+
+	return result
 }
 
 // getTrackedIssues fetches tracked issues for a convoy.

@@ -200,6 +200,14 @@ type ConvoyRow struct {
 	Total         int
 	LastActivity  activity.Info
 	TrackedIssues []TrackedIssue
+
+	// E2E Test Results (from Playwright synthesis)
+	E2EStatus    string // "passed", "failed", "pending", "none"
+	E2ETotal     int    // Total tests run
+	E2EPassed    int    // Tests passed
+	E2EFailed    int    // Tests failed
+	HasArtifacts bool   // True if artifacts directory exists
+	ReportPath   string // Path to HTML report (for linking)
 }
 
 // TrackedIssue represents an issue tracked by a convoy.
@@ -223,6 +231,7 @@ func LoadTemplates() (*template.Template, error) {
 		"dogStateClass":      dogStateClass,
 		"queueStatusClass":   queueStatusClass,
 		"polecatStatusClass": polecatStatusClass,
+		"e2eStatusClass":     e2eStatusClass,
 	}
 
 	// Get the templates subdirectory
@@ -371,5 +380,19 @@ func polecatStatusClass(status string) string {
 		return "polecat-idle"
 	default:
 		return "polecat-unknown"
+	}
+}
+
+// e2eStatusClass returns CSS class for E2E test status.
+func e2eStatusClass(status string) string {
+	switch status {
+	case "passed":
+		return "e2e-passed"
+	case "failed":
+		return "e2e-failed"
+	case "pending":
+		return "e2e-pending"
+	default:
+		return "e2e-none"
 	}
 }
