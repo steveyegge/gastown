@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -164,7 +163,7 @@ func (r *Runner) Execute(hook *Hook) *HookResult {
 	cmd.Dir = r.WorkDir
 
 	// Set up process group so we can kill child processes on timeout
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setSysProcAttr(cmd)
 
 	// Set environment
 	cmd.Env = os.Environ()
@@ -204,8 +203,7 @@ func (r *Runner) Execute(hook *Hook) *HookResult {
 	case <-ctx.Done():
 		// Timeout - kill the entire process group
 		if cmd.Process != nil {
-			// Kill the process group (negative PID kills the group)
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = killProcessGroup(cmd.Process.Pid)
 		}
 		// Wait for process to actually exit
 		<-done
