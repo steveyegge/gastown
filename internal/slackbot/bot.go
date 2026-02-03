@@ -532,9 +532,9 @@ func (b *Bot) showResolvedDecisionView(callback slack.InteractionCallback, decis
 		),
 	}
 
-	if decision.Context != "" {
-		// Format context nicely
-		contextText := formatContextForSlack(decision.Context)
+	if decision.Context != "" || len(decision.Blockers) > 0 {
+		// Format context with referenced beads and blockers (gt-subr1i.4)
+		contextText := formatContextWithBlockersForSlack(decision.Context, decision.Blockers)
 		if contextText != "" {
 			blocks = append(blocks,
 				slack.NewSectionBlock(
@@ -2445,8 +2445,9 @@ func (b *Bot) NotifyNewDecision(decision rpcclient.Decision) error {
 
 	// Show full context inline (gt-xeejgo - no "Show Full Context" button needed)
 	// Only add block if context formats to non-empty string (gt-wpe4ca)
-	if decision.Context != "" {
-		contextText := formatContextForSlack(decision.Context)
+	// Format with referenced beads and blockers (gt-subr1i.4)
+	if decision.Context != "" || len(decision.Blockers) > 0 {
+		contextText := formatContextWithBlockersForSlack(decision.Context, decision.Blockers)
 		if contextText != "" {
 			blocks = append(blocks,
 				slack.NewSectionBlock(
@@ -2710,8 +2711,9 @@ func (b *Bot) notifyDecisionToChannel(decision rpcclient.Decision, channelID str
 
 	// Show full context inline (gt-xeejgo - no "Show Full Context" button needed)
 	// Only add block if context formats to non-empty string (gt-wpe4ca)
-	if decision.Context != "" {
-		contextText := formatContextForSlack(decision.Context)
+	// Format with referenced beads and blockers (gt-subr1i.4)
+	if decision.Context != "" || len(decision.Blockers) > 0 {
+		contextText := formatContextWithBlockersForSlack(decision.Context, decision.Blockers)
 		if contextText != "" {
 			blocks = append(blocks,
 				slack.NewSectionBlock(
@@ -3143,11 +3145,125 @@ func extractTypeFromContext(context string) string {
 	return ""
 }
 
+// BeadSummary contains summary info about a referenced bead for display. (gt-subr1i.4)
+type BeadSummary struct {
+	Title              string `json:"title"`
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	DescriptionSummary string `json:"description_summary"`
+}
+
+// formatReferencedBeads formats a map of referenced beads for Slack display. (gt-subr1i.4)
+// Returns a formatted string showing bead summaries, or empty string if no beads.
+func formatReferencedBeads(beads map[string]BeadSummary) string {
+	if len(beads) == 0 {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, "📌 *Referenced Beads:*")
+	for id, summary := range beads {
+		line := fmt.Sprintf("• `%s`: %s", id, summary.Title)
+		if summary.Type != "" || summary.Status != "" {
+			var tags []string
+			if summary.Type != "" {
+				tags = append(tags, summary.Type)
+			}
+			if summary.Status != "" {
+				tags = append(tags, summary.Status)
+			}
+			line += fmt.Sprintf(" [%s]", strings.Join(tags, ", "))
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// formatBlockers formats a list of blocker bead IDs for Slack display. (gt-subr1i.4)
+// Uses referenced_beads to look up bead titles when available.
+func formatBlockers(blockers []string, referencedBeads map[string]BeadSummary) string {
+	if len(blockers) == 0 {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, "🚫 *Blocks:*")
+	for _, id := range blockers {
+		if summary, ok := referencedBeads[id]; ok {
+			lines = append(lines, fmt.Sprintf("• `%s`: %s", id, summary.Title))
+		} else {
+			lines = append(lines, fmt.Sprintf("• `%s`", id))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// formatContextWithBlockersForSlack formats context and blockers for Slack display. (gt-subr1i.4)
+// Extracts referenced_beads from context and displays them prominently, along with blockers.
+func formatContextWithBlockersForSlack(context string, blockers []string) string {
+	if context == "" && len(blockers) == 0 {
+		return ""
+	}
+
+	var sections []string
+
+	// Parse context to extract referenced_beads
+	referencedBeads := extractReferencedBeads(context)
+
+	// Format referenced beads section
+	if beadsSection := formatReferencedBeads(referencedBeads); beadsSection != "" {
+		sections = append(sections, beadsSection)
+	}
+
+	// Format blockers section
+	if blockersSection := formatBlockers(blockers, referencedBeads); blockersSection != "" {
+		sections = append(sections, blockersSection)
+	}
+
+	// Format remaining context (without referenced_beads)
+	if contextSection := formatContextForSlack(context); contextSection != "" {
+		sections = append(sections, contextSection)
+	}
+
+	return strings.Join(sections, "\n\n")
+}
+
+// extractReferencedBeads extracts the referenced_beads map from context JSON. (gt-subr1i.4)
+func extractReferencedBeads(context string) map[string]BeadSummary {
+	if context == "" {
+		return nil
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(context), &parsed); err != nil {
+		return nil
+	}
+
+	referencedBeadsRaw, ok := parsed["referenced_beads"]
+	if !ok {
+		return nil
+	}
+
+	// Convert to JSON and back to get proper typing
+	referencedBeadsJSON, err := json.Marshal(referencedBeadsRaw)
+	if err != nil {
+		return nil
+	}
+
+	var result map[string]BeadSummary
+	if err := json.Unmarshal(referencedBeadsJSON, &result); err != nil {
+		return nil
+	}
+
+	return result
+}
+
 // formatContextForSlack formats JSON context for Slack display.
 // If context is valid JSON, it pretty-prints it in a code block.
 // Otherwise returns the context as-is.
 // Extracts _value from wrapped contexts and removes internal fields like _type, session_id.
 // Shows full context inline (up to Slack's ~2900 char block limit). (gt-xeejgo)
+// Note: referenced_beads are removed from the output since they're displayed separately. (gt-subr1i.4)
 func formatContextForSlack(context string) string {
 	if context == "" {
 		return ""
@@ -3188,7 +3304,8 @@ func formatContextForSlack(context string) string {
 			// No _value field - remove internal fields from display
 			delete(obj, "_type")
 			delete(obj, "_session_id")
-			delete(obj, "session_id") // Also remove without underscore (gt-xeejgo)
+			delete(obj, "session_id")          // Also remove without underscore (gt-xeejgo)
+			delete(obj, "referenced_beads")    // Displayed separately (gt-subr1i.4)
 
 			if _, hasSchemas := obj["successor_schemas"]; hasSchemas {
 				schemaInfo = "\n📋 _Has successor schemas defined_"

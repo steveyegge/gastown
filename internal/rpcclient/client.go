@@ -61,9 +61,10 @@ type Decision struct {
 	ResolvedBy      string
 	Urgency         string
 	Resolved        bool
-	PredecessorID   string // For decision chaining
-	ParentBeadID    string // Parent bead ID (e.g., epic) for hierarchy
-	ParentBeadTitle string // Parent bead title for channel derivation
+	PredecessorID   string   // For decision chaining
+	ParentBeadID    string   // Parent bead ID (e.g., epic) for hierarchy
+	ParentBeadTitle string   // Parent bead title for channel derivation
+	Blockers        []string // Work IDs blocked by this decision (gt-subr1i.4)
 }
 
 // DecisionOption represents an option in a decision.
@@ -158,9 +159,10 @@ func (c *Client) ListPendingDecisions(ctx context.Context) ([]Decision, error) {
 			RequestedBy   struct {
 				Name string `json:"name"`
 			} `json:"requestedBy"`
-			Urgency       string `json:"urgency"`
-			Resolved      bool   `json:"resolved"`
-			PredecessorID string `json:"predecessorId"`
+			Urgency       string   `json:"urgency"`
+			Resolved      bool     `json:"resolved"`
+			PredecessorID string   `json:"predecessorId"`
+			Blockers      []string `json:"blockers"` // (gt-subr1i.4)
 		} `json:"decisions"`
 	}
 
@@ -189,6 +191,7 @@ func (c *Client) ListPendingDecisions(ctx context.Context) ([]Decision, error) {
 			Urgency:       urgencyToString(d.Urgency),
 			Resolved:      d.Resolved,
 			PredecessorID: d.PredecessorID,
+			Blockers:      d.Blockers, // (gt-subr1i.4)
 		})
 	}
 
@@ -330,7 +333,8 @@ func (c *Client) CreateDecision(ctx context.Context, req CreateDecisionRequest) 
 			RequestedBy struct {
 				Name string `json:"name"`
 			} `json:"requestedBy"`
-			Urgency string `json:"urgency"`
+			Urgency  string   `json:"urgency"`
+			Blockers []string `json:"blockers"` // (gt-subr1i.4)
 		} `json:"decision"`
 	}
 
@@ -354,6 +358,7 @@ func (c *Client) CreateDecision(ctx context.Context, req CreateDecisionRequest) 
 		Options:     opts,
 		RequestedBy: result.Decision.RequestedBy.Name,
 		Urgency:     urgencyToString(result.Decision.Urgency),
+		Blockers:    result.Decision.Blockers, // (gt-subr1i.4)
 	}, nil
 }
 
@@ -574,10 +579,11 @@ func (c *Client) GetDecision(ctx context.Context, decisionID string) (*Decision,
 			RequestedBy struct {
 				Name string `json:"name"`
 			} `json:"requestedBy"`
-			Urgency         string `json:"urgency"`
-			Resolved        bool   `json:"resolved"`
-			ParentBead      string `json:"parentBead"`
-			ParentBeadTitle string `json:"parentBeadTitle"`
+			Urgency         string   `json:"urgency"`
+			Resolved        bool     `json:"resolved"`
+			ParentBead      string   `json:"parentBead"`
+			ParentBeadTitle string   `json:"parentBeadTitle"`
+			Blockers        []string `json:"blockers"` // (gt-subr1i.4)
 		} `json:"decision"`
 	}
 
@@ -607,6 +613,7 @@ func (c *Client) GetDecision(ctx context.Context, decisionID string) (*Decision,
 		Resolved:        result.Decision.Resolved,
 		ParentBeadID:    result.Decision.ParentBead,
 		ParentBeadTitle: result.Decision.ParentBeadTitle,
+		Blockers:        result.Decision.Blockers, // (gt-subr1i.4)
 	}, nil
 }
 

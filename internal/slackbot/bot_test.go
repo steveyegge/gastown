@@ -256,6 +256,275 @@ func TestFormatContextForSlack_InvalidJSON(t *testing.T) {
 	}
 }
 
+// TestFormatReferencedBeads tests the bead summary formatter. (gt-subr1i.4)
+func TestFormatReferencedBeads(t *testing.T) {
+	tests := []struct {
+		name     string
+		beads    map[string]BeadSummary
+		wantContains []string
+		wantEmpty    bool
+	}{
+		{
+			name:      "nil map",
+			beads:     nil,
+			wantEmpty: true,
+		},
+		{
+			name:      "empty map",
+			beads:     map[string]BeadSummary{},
+			wantEmpty: true,
+		},
+		{
+			name: "single bead with all fields",
+			beads: map[string]BeadSummary{
+				"gt-abc123": {
+					Title:  "Fix authentication bug",
+					Type:   "bug",
+					Status: "open",
+				},
+			},
+			wantContains: []string{"📌", "Referenced Beads", "gt-abc123", "Fix authentication bug", "bug", "open"},
+		},
+		{
+			name: "bead with only title",
+			beads: map[string]BeadSummary{
+				"bd-xyz789": {
+					Title: "Add caching layer",
+				},
+			},
+			wantContains: []string{"bd-xyz789", "Add caching layer"},
+		},
+		{
+			name: "multiple beads",
+			beads: map[string]BeadSummary{
+				"gt-abc123": {Title: "First bead", Type: "bug"},
+				"hq-def456": {Title: "Second bead", Status: "in_progress"},
+			},
+			wantContains: []string{"gt-abc123", "First bead", "hq-def456", "Second bead"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatReferencedBeads(tt.beads)
+
+			if tt.wantEmpty {
+				if result != "" {
+					t.Errorf("expected empty string, got %q", result)
+				}
+				return
+			}
+
+			for _, s := range tt.wantContains {
+				if !strings.Contains(result, s) {
+					t.Errorf("result should contain %q, got %q", s, result)
+				}
+			}
+		})
+	}
+}
+
+// TestFormatBlockers tests the blocker formatter. (gt-subr1i.4)
+func TestFormatBlockers(t *testing.T) {
+	referencedBeads := map[string]BeadSummary{
+		"gt-abc123": {Title: "Fix authentication bug"},
+		"bd-xyz789": {Title: "Add caching layer"},
+	}
+
+	tests := []struct {
+		name         string
+		blockers     []string
+		refBeads     map[string]BeadSummary
+		wantContains []string
+		wantEmpty    bool
+	}{
+		{
+			name:      "nil blockers",
+			blockers:  nil,
+			refBeads:  referencedBeads,
+			wantEmpty: true,
+		},
+		{
+			name:      "empty blockers",
+			blockers:  []string{},
+			refBeads:  referencedBeads,
+			wantEmpty: true,
+		},
+		{
+			name:         "blockers with references",
+			blockers:     []string{"gt-abc123"},
+			refBeads:     referencedBeads,
+			wantContains: []string{"🚫", "Blocks", "gt-abc123", "Fix authentication bug"},
+		},
+		{
+			name:         "blockers without references",
+			blockers:     []string{"gt-unknown"},
+			refBeads:     referencedBeads,
+			wantContains: []string{"🚫", "Blocks", "gt-unknown"},
+		},
+		{
+			name:         "mixed blockers",
+			blockers:     []string{"gt-abc123", "gt-unknown"},
+			refBeads:     referencedBeads,
+			wantContains: []string{"gt-abc123", "Fix authentication bug", "gt-unknown"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatBlockers(tt.blockers, tt.refBeads)
+
+			if tt.wantEmpty {
+				if result != "" {
+					t.Errorf("expected empty string, got %q", result)
+				}
+				return
+			}
+
+			for _, s := range tt.wantContains {
+				if !strings.Contains(result, s) {
+					t.Errorf("result should contain %q, got %q", s, result)
+				}
+			}
+		})
+	}
+}
+
+// TestExtractReferencedBeads tests bead extraction from context JSON. (gt-subr1i.4)
+func TestExtractReferencedBeads(t *testing.T) {
+	tests := []struct {
+		name        string
+		context     string
+		wantBeadIDs []string
+		wantEmpty   bool
+	}{
+		{
+			name:      "empty context",
+			context:   "",
+			wantEmpty: true,
+		},
+		{
+			name:      "invalid JSON",
+			context:   "not json",
+			wantEmpty: true,
+		},
+		{
+			name:      "no referenced_beads",
+			context:   `{"key": "value"}`,
+			wantEmpty: true,
+		},
+		{
+			name: "with referenced_beads",
+			context: `{
+				"referenced_beads": {
+					"gt-abc123": {"title": "First", "type": "bug"},
+					"bd-xyz789": {"title": "Second", "status": "open"}
+				}
+			}`,
+			wantBeadIDs: []string{"gt-abc123", "bd-xyz789"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractReferencedBeads(tt.context)
+
+			if tt.wantEmpty {
+				if len(result) != 0 {
+					t.Errorf("expected empty map, got %v", result)
+				}
+				return
+			}
+
+			for _, id := range tt.wantBeadIDs {
+				if _, ok := result[id]; !ok {
+					t.Errorf("expected bead %q in result, got %v", id, result)
+				}
+			}
+		})
+	}
+}
+
+// TestFormatContextWithBlockersForSlack tests the combined context and blocker formatter. (gt-subr1i.4)
+func TestFormatContextWithBlockersForSlack(t *testing.T) {
+	tests := []struct {
+		name         string
+		context      string
+		blockers     []string
+		wantContains []string
+		wantEmpty    bool
+	}{
+		{
+			name:      "empty context and blockers",
+			context:   "",
+			blockers:  nil,
+			wantEmpty: true,
+		},
+		{
+			name: "context with referenced_beads shows them",
+			context: `{
+				"referenced_beads": {
+					"gt-abc123": {"title": "Fix bug", "type": "bug"}
+				},
+				"other_field": "value"
+			}`,
+			blockers:     nil,
+			wantContains: []string{"📌", "Referenced Beads", "gt-abc123", "Fix bug"},
+		},
+		{
+			name: "context with blockers shows them",
+			context: `{
+				"referenced_beads": {
+					"gt-abc123": {"title": "Fix bug"}
+				}
+			}`,
+			blockers:     []string{"gt-abc123"},
+			wantContains: []string{"🚫", "Blocks", "gt-abc123"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatContextWithBlockersForSlack(tt.context, tt.blockers)
+
+			if tt.wantEmpty {
+				if result != "" {
+					t.Errorf("expected empty string, got %q", result)
+				}
+				return
+			}
+
+			for _, s := range tt.wantContains {
+				if !strings.Contains(result, s) {
+					t.Errorf("result should contain %q, got %q", s, result)
+				}
+			}
+		})
+	}
+}
+
+// TestFormatContextForSlack_ReferencedBeadsRemoved tests that referenced_beads are removed from output. (gt-subr1i.4)
+func TestFormatContextForSlack_ReferencedBeadsRemoved(t *testing.T) {
+	context := `{
+		"referenced_beads": {
+			"gt-abc123": {"title": "Fix bug"}
+		},
+		"other_field": "value"
+	}`
+
+	result := formatContextForSlack(context)
+
+	// Should NOT contain referenced_beads
+	if strings.Contains(result, "referenced_beads") {
+		t.Errorf("result should not contain 'referenced_beads', got %q", result)
+	}
+
+	// Should still contain other fields
+	if !strings.Contains(result, "other_field") {
+		t.Errorf("result should contain 'other_field', got %q", result)
+	}
+}
+
 // TestBuildChainInfoText tests the chain info text builder.
 func TestBuildChainInfoText(t *testing.T) {
 	tests := []struct {
