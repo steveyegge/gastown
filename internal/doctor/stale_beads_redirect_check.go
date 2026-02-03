@@ -105,7 +105,7 @@ func (c *StaleBeadsRedirectCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 
 		// Verify redirect topology for this rig
-		missing, incorrect := c.verifyRedirectTopology(ctx.TownRoot, rigDir)
+		missing, incorrect := c.verifyRedirectTopology(ctx, rigDir)
 		missingRedirects = append(missingRedirects, missing...)
 		incorrectRedirects = append(incorrectRedirects, incorrect...)
 	}
@@ -334,7 +334,9 @@ func cleanStaleBeadsFiles(beadsDir string) error {
 
 // verifyRedirectTopology checks that all worktrees in a rig have correct redirects.
 // Returns lists of missing and incorrect redirect issues.
-func (c *StaleBeadsRedirectCheck) verifyRedirectTopology(townRoot, rigDir string) (missing, incorrect []redirectIssue) {
+func (c *StaleBeadsRedirectCheck) verifyRedirectTopology(ctx *CheckContext, rigDir string) (missing, incorrect []redirectIssue) {
+	townRoot := ctx.TownRoot
+
 	// Check if rig has beads configured at all
 	rigBeadsPath := filepath.Join(rigDir, ".beads")
 	mayorBeadsPath := filepath.Join(rigDir, "mayor", "rig", ".beads")
@@ -357,7 +359,12 @@ func (c *StaleBeadsRedirectCheck) verifyRedirectTopology(townRoot, rigDir string
 		// This ensures doctor check and SetupRedirect stay in sync
 		expected, err := beads.ComputeRedirectTarget(townRoot, worktreePath)
 		if err != nil {
-			// Can't compute expected - skip this worktree (e.g., no beads configured)
+			// "no beads found" is expected when beads isn't configured for this rig.
+			// Other errors may indicate real problems - log them in verbose mode.
+			if ctx.Verbose && !strings.Contains(err.Error(), "no beads found") {
+				relPath, _ := filepath.Rel(townRoot, worktreePath)
+				fmt.Printf("  [verbose] skipping %s: %v\n", relPath, err)
+			}
 			continue
 		}
 		actual := readRedirectTarget(worktreePath)
