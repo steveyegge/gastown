@@ -81,11 +81,15 @@ func runStabilize(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Could not detect installed version: %v\n", style.Warning.Render("⚠"), err)
 	} else {
 		currentVersion := Version // From version.go
-		if installedVersion != currentVersion {
+		// Compare just the core version (strip -dirty suffix for comparison)
+		installedCore := strings.TrimSuffix(installedVersion, "-dirty")
+		currentCore := strings.TrimSuffix(currentVersion, "-dirty")
+
+		if installedCore != currentCore {
 			fmt.Printf("%s Version change: %s → %s\n",
 				style.Info.Render("ℹ"), currentVersion, installedVersion)
 		} else {
-			fmt.Printf("%s Version: %s (unchanged)\n", style.Success.Render("✓"), currentVersion)
+			fmt.Printf("%s Version: %s\n", style.Success.Render("✓"), installedVersion)
 		}
 	}
 
@@ -185,6 +189,7 @@ func validateGastownSrc(path string) error {
 }
 
 // getInstalledGtVersion runs the installed gt binary and returns its version.
+// Returns just the version string (e.g., "v0.5.0-214-g13461161") without prefix or suffix.
 func getInstalledGtVersion() (string, error) {
 	// Find gt in PATH (the newly installed one)
 	gtPath, err := exec.LookPath("gt")
@@ -192,17 +197,23 @@ func getInstalledGtVersion() (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command(gtPath, "version", "--short")
+	cmd := exec.Command(gtPath, "version")
 	out, err := cmd.Output()
 	if err != nil {
-		// Try without --short flag
-		cmd = exec.Command(gtPath, "version")
-		out, err = cmd.Output()
-		if err != nil {
-			return "", err
+		return "", err
+	}
+
+	// Parse version from output like "gt version v0.5.0-214-g13461161-dirty (dev: 13461161)"
+	// Extract just the version part (v0.5.0-...)
+	output := strings.TrimSpace(string(out))
+	parts := strings.Fields(output)
+	for _, part := range parts {
+		if strings.HasPrefix(part, "v") && strings.Contains(part, ".") {
+			return part, nil
 		}
 	}
-	return strings.TrimSpace(string(out)), nil
+	// Fallback: return full output if we can't parse it
+	return output, nil
 }
 
 // syncGastownWorktrees syncs gastown worktrees with origin.
