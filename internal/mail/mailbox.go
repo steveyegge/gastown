@@ -322,8 +322,11 @@ func (m *Mailbox) Get(id string) (*Message, error) {
 }
 
 func (m *Mailbox) getBeads(id string) (*Message, error) {
-	// Single DB query - wisps and persistent messages in same store
-	return m.getFromDir(id, m.beadsDir)
+	// Don't set BEADS_DIR - let bd use prefix-based routing to find the
+	// correct beads database for the message ID. This fixes gt-iprl41 where
+	// messages with different prefixes (e.g., fhc-) weren't found when the
+	// mailbox was configured for a different beads directory (e.g., gt-).
+	return m.getFromDir(id, "")
 }
 
 // getFromDir retrieves a message from a beads directory.

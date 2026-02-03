@@ -49,7 +49,12 @@ func runBdCommand(args []string, workDir, beadsDir string, extraEnv ...string) (
 	cmd := exec.Command("bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
 	// Don't set cmd.Dir - use current directory to avoid daemon timeout issue
 
-	env := append(cmd.Environ(), "BEADS_DIR="+beadsDir)
+	// Only set BEADS_DIR if explicitly provided. When empty, bd uses prefix-based
+	// routing to find the correct beads database for the message ID. (gt-iprl41)
+	env := cmd.Environ()
+	if beadsDir != "" {
+		env = append(env, "BEADS_DIR="+beadsDir)
+	}
 	env = append(env, extraEnv...)
 	cmd.Env = env
 
