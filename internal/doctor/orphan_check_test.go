@@ -224,16 +224,60 @@ func TestOrphanSessionCheck_IsValidSession_EdgeCases(t *testing.T) {
 			want:    false,
 			reason:  "malformed session (too few parts) should be orphan",
 		},
-
-		// Edge case: rig name with hyphen would be tricky
-		// Current implementation uses SplitN with limit 3
-		// gt-my-rig-witness would parse as rig="my" role="rig-witness"
-		// This is a known limitation documented here
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := check.isValidSession(tt.session, validRigs, mayorSession, deaconSession)
+			if got != tt.want {
+				t.Errorf("isValidSession(%q) = %v, want %v: %s", tt.session, got, tt.want, tt.reason)
+			}
+		})
+	}
+
+	// Test hyphenated rig names separately with custom validRigs list
+	hyphenatedRigs := []string{"gastown", "beads", "my-rig", "another-test-rig"}
+	hyphenatedTests := []struct {
+		name    string
+		session string
+		want    bool
+		reason  string
+	}{
+		{
+			name:    "hyphenated_rig_witness",
+			session: "gt-my-rig-witness",
+			want:    true,
+			reason:  "hyphenated rig name should be correctly parsed",
+		},
+		{
+			name:    "hyphenated_rig_refinery",
+			session: "gt-my-rig-refinery",
+			want:    true,
+			reason:  "hyphenated rig name should be correctly parsed",
+		},
+		{
+			name:    "hyphenated_rig_polecat",
+			session: "gt-my-rig-abc123",
+			want:    true,
+			reason:  "hyphenated rig name with polecat should be correctly parsed",
+		},
+		{
+			name:    "multi_hyphen_rig",
+			session: "gt-another-test-rig-witness",
+			want:    true,
+			reason:  "multi-hyphenated rig name should be correctly parsed",
+		},
+		{
+			name:    "non_existent_hyphenated_rig",
+			session: "gt-not-real-witness",
+			want:    false,
+			reason:  "non-existent hyphenated rig should be orphan",
+		},
+	}
+
+	for _, tt := range hyphenatedTests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := check.isValidSession(tt.session, hyphenatedRigs, mayorSession, deaconSession)
 			if got != tt.want {
 				t.Errorf("isValidSession(%q) = %v, want %v: %s", tt.session, got, tt.want, tt.reason)
 			}

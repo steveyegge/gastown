@@ -3,6 +3,7 @@ package doctor
 import (
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/daemon"
@@ -46,14 +47,14 @@ func (c *DaemonCheck) Run(ctx *CheckContext) *CheckResult {
 			uptime := time.Since(state.StartedAt).Round(time.Second)
 			details = append(details, "Uptime: "+uptime.String())
 			if state.HeartbeatCount > 0 {
-				details = append(details, "Heartbeats: "+string(rune(state.HeartbeatCount)))
+				details = append(details, "Heartbeats: "+strconv.Itoa(int(state.HeartbeatCount)))
 			}
 		}
 
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
-			Message: "Daemon is running (PID " + itoa(pid) + ")",
+			Message: "Daemon is running (PID " + strconv.Itoa(pid) + ")",
 			Details: details,
 		}
 	}
@@ -89,24 +90,4 @@ func (c *DaemonCheck) Fix(ctx *CheckContext) error {
 	time.Sleep(300 * time.Millisecond)
 
 	return nil
-}
-
-// itoa is a simple int to string helper
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	s := ""
-	neg := i < 0
-	if neg {
-		i = -i
-	}
-	for i > 0 {
-		s = string(rune('0'+i%10)) + s
-		i /= 10
-	}
-	if neg {
-		s = "-" + s
-	}
-	return s
 }

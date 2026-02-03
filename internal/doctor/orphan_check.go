@@ -218,40 +218,24 @@ func (c *OrphanSessionCheck) isValidSession(sess string, validRigs []string, may
 		return true
 	}
 
-	// For rig-specific sessions, extract rig name
+	// For rig-specific sessions, match against known rigs
 	// Pattern: gt-<rig>-<role>
-	parts := strings.SplitN(sess, "-", 3)
-	if len(parts) < 3 {
-		// Invalid format - must be gt-<rig>-<something>
-		return false
-	}
-
-	rigName := parts[1]
-
-	// Check if this rig exists
-	rigFound := false
-	for _, r := range validRigs {
-		if r == rigName {
-			rigFound = true
-			break
+	// We iterate through known rigs to handle hyphenated rig names correctly
+	// (e.g., "gt-my-rig-witness" where rig is "my-rig")
+	for _, rig := range validRigs {
+		prefix := "gt-" + rig + "-"
+		if strings.HasPrefix(sess, prefix) {
+			// Matched a known rig - extract role
+			role := strings.TrimPrefix(sess, prefix)
+			if role != "" {
+				// Any non-empty role is valid (witness, refinery, polecat name, crew name)
+				return true
+			}
 		}
 	}
 
-	if !rigFound {
-		// Unknown rig - this is an orphan
-		return false
-	}
-
-	role := parts[2]
-
-	// witness and refinery are valid roles
-	if role == "witness" || role == "refinery" {
-		return true
-	}
-
-	// Any other name is assumed to be a polecat or crew member
-	// We can't easily verify without reading state, so accept it
-	return true
+	// No known rig matched - this is an orphan
+	return false
 }
 
 // OrphanProcessCheck detects runtime processes that are not
