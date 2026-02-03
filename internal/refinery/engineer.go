@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -367,6 +368,10 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 			Error:   fmt.Sprintf("failed to push to origin: %v", err),
 		}
 	}
+
+	// Step 8: Trigger Vercel deployment via Blaze API
+	// This bypasses GitHub webhooks which fail when git author isn't on Vercel team
+	e.triggerDeployment(e.rig.Name)
 
 	_, _ = fmt.Fprintf(e.output, "[Engineer] Successfully merged: %s\n", mergeCommit[:8])
 	return ProcessResult{
@@ -947,4 +952,57 @@ func (e *Engineer) ReleaseMR(mrID string) error {
 	return e.beads.Update(mrID, beads.UpdateOptions{
 		Assignee: &empty,
 	})
+}
+
+// triggerDeployment calls the Blaze API to trigger a Vercel deployment.
+// This bypasses GitHub webhooks which fail when git author isn't on Vercel team.
+// Checks BLAZE_API_URL env var or reads from {town}/.env file.
+func (e *Engineer) triggerDeployment(rigName string) {
+	blazeURL := os.Getenv("BLAZE_API_URL")
+	if blazeURL == "" {
+		// Try reading from town's .env file
+		// Rig path is like /path/to/town/rigname, so parent is town root
+		townRoot := filepath.Dir(e.rig.Path)
+		envPath := filepath.Join(townRoot, ".env")
+		if data, err := os.ReadFile(envPath); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "BLAZE_API_URL=") || strings.HasPrefix(line, "export BLAZE_API_URL=") {
+					// Extract value, handling quotes
+					parts := strings.SplitN(line, "=", 2)
+					if len(parts) == 2 {
+						blazeURL = strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+					}
+				}
+			}
+		}
+	}
+	if blazeURL == "" {
+		// Not configured - skip silently (not all rigs use Blaze)
+		return
+	}
+
+	deployURL := fmt.Sprintf("%s/api/rigs/%s/deploy", blazeURL, rigName)
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Triggering deployment: %s\n", deployURL)
+
+	req, err := http.NewRequest("POST", deployURL, nil)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to create deploy request: %v\n", err)
+		return
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: failed to trigger deployment: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Deployment triggered successfully\n")
+	} else {
+		body, _ := io.ReadAll(resp.Body)
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: deployment trigger returned %d: %s\n", resp.StatusCode, string(body))
+	}
 }
