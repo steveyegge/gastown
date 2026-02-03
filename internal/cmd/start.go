@@ -182,6 +182,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	} else if cleaned > 0 {
 		fmt.Printf("  %s Cleaned up %d orphaned session(s)\n", style.Bold.Render("✓"), cleaned)
 	}
+	}
 
 	fmt.Printf("Starting Gas Town from %s\n\n", style.Dim.Render(townRoot))
 	fmt.Println("Starting all agents in parallel...")
