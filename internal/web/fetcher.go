@@ -1479,13 +1479,9 @@ func (f *LiveConvoyFetcher) FetchMayor() (*MayorStatus, error) {
 
 // FetchIssues returns open issues (the backlog).
 func (f *LiveConvoyFetcher) FetchIssues() ([]IssueRow, error) {
-	// Query open issues (excluding internal types like messages, convoys, queues)
-	stdout, err := runBdCmd(f.townRoot, "list", "--status=open", "--json", "--limit=50")
-	if err != nil {
-		return nil, nil // No issues or bd not available
-	}
-
-	var beads []struct {
+	// Query both open AND hooked issues for the Work panel
+	// Open = ready to assign, Hooked = in progress
+	var allBeads []struct {
 		ID        string   `json:"id"`
 		Title     string   `json:"title"`
 		Type      string   `json:"type"`
@@ -1493,9 +1489,38 @@ func (f *LiveConvoyFetcher) FetchIssues() ([]IssueRow, error) {
 		Labels    []string `json:"labels"`
 		CreatedAt string   `json:"created_at"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &beads); err != nil {
-		return nil, fmt.Errorf("parsing issues: %w", err)
+
+	// Fetch open issues
+	if stdout, err := runBdCmd(f.townRoot, "list", "--status=open", "--json", "--limit=50"); err == nil {
+		var openBeads []struct {
+			ID        string   `json:"id"`
+			Title     string   `json:"title"`
+			Type      string   `json:"type"`
+			Priority  int      `json:"priority"`
+			Labels    []string `json:"labels"`
+			CreatedAt string   `json:"created_at"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &openBeads); err == nil {
+			allBeads = append(allBeads, openBeads...)
+		}
 	}
+
+	// Fetch hooked issues (in progress)
+	if stdout, err := runBdCmd(f.townRoot, "list", "--status=hooked", "--json", "--limit=50"); err == nil {
+		var hookedBeads []struct {
+			ID        string   `json:"id"`
+			Title     string   `json:"title"`
+			Type      string   `json:"type"`
+			Priority  int      `json:"priority"`
+			Labels    []string `json:"labels"`
+			CreatedAt string   `json:"created_at"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &hookedBeads); err == nil {
+			allBeads = append(allBeads, hookedBeads...)
+		}
+	}
+
+	beads := allBeads
 
 	var rows []IssueRow
 	for _, bead := range beads {
