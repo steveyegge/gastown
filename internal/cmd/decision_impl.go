@@ -2253,13 +2253,21 @@ func fetchBeadInfo(beadID string) map[string]interface{} {
 		}
 	}
 
-	// Parse the JSON output
-	var beadData map[string]interface{}
-	if err := json.Unmarshal(output, &beadData); err != nil {
+	// Parse the JSON output - bd show --json returns an array [issue, ...dependencies]
+	var beadArray []map[string]interface{}
+	if err := json.Unmarshal(output, &beadArray); err != nil {
 		return map[string]interface{}{
 			"error": "failed to parse bead data",
 		}
 	}
+
+	// Take the first element (the main issue)
+	if len(beadArray) == 0 {
+		return map[string]interface{}{
+			"error": "empty response",
+		}
+	}
+	beadData := beadArray[0]
 
 	// Extract relevant fields
 	result := make(map[string]interface{})
@@ -2267,7 +2275,8 @@ func fetchBeadInfo(beadID string) map[string]interface{} {
 	if title, ok := beadData["title"].(string); ok {
 		result["title"] = title
 	}
-	if beadType, ok := beadData["type"].(string); ok {
+	// bd show --json uses "issue_type" not "type"
+	if beadType, ok := beadData["issue_type"].(string); ok {
 		result["type"] = beadType
 	}
 	if status, ok := beadData["status"].(string); ok {
