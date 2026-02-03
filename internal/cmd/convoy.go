@@ -584,6 +584,9 @@ func checkSingleConvoy(townBeads, convoyID string, dryRun bool) error {
 
 	if !allClosed {
 		fmt.Printf("%s Convoy %s has %d open issue(s) remaining\n", style.Dim.Render("○"), convoyID, openCount)
+
+		// Check for ready-to-dispatch issues and notify Mayor if any exist
+		notifyMayorOfReadyTasks(townBeads, convoyID, tracked)
 		return nil
 	}
 
@@ -985,6 +988,84 @@ func notifyConvoyCompletion(townBeads, convoyID, title string) {
 			notified[addr] = true
 		}
 	}
+}
+
+// notifyMayorOfReadyTasks checks for issues that are open but not blocked and not being worked on.
+// If any are found, sends a nudge to Mayor to continue dispatching the convoy.
+func notifyMayorOfReadyTasks(townBeads, convoyID string, tracked []trackedIssueInfo) {
+	// Find issues that are:
+	// 1. Not closed
+	// 2. Not currently being worked (no Worker assigned)
+	// 3. Not blocked (need to check dependencies)
+	readyIssues := []trackedIssueInfo{}
+
+	for _, t := range tracked {
+		if t.Status == "closed" {
+			continue
+		}
+		// If already has a worker, skip - it's being worked on
+		if t.Worker != "" {
+			continue
+		}
+		// If status is "hooked" or "in_progress", skip - it's being worked on
+		if t.Status == "hooked" || t.Status == "in_progress" {
+			continue
+		}
+		// Check if this issue is blocked
+		if isIssueBlocked(townBeads, t.ID) {
+			continue
+		}
+		// This issue is ready to be dispatched
+		readyIssues = append(readyIssues, t)
+	}
+
+	if len(readyIssues) == 0 {
+		return // No ready issues - nothing to do
+	}
+
+	// Build list of ready issue IDs for the message
+	issueList := ""
+	for _, t := range readyIssues {
+		issueList += fmt.Sprintf("  - %s: %s\n", t.ID, t.Title)
+	}
+
+	// Send nudge to Mayor to continue dispatching
+	mailArgs := []string{"mail", "send", "mayor/",
+		"-s", fmt.Sprintf("CONVOY_READY: %s has %d task(s) ready", convoyID, len(readyIssues)),
+		"-m", fmt.Sprintf("Convoy %s has unblocked tasks ready to dispatch:\n\n%s\nPlease sling these to polecats to continue the convoy.", convoyID, issueList)}
+	mailCmd := exec.Command("gt", mailArgs...)
+	_ = mailCmd.Run() // Best effort
+}
+
+// isIssueBlocked checks if an issue has any open blockers.
+func isIssueBlocked(townBeads string, issueID string) bool {
+	townRoot := filepath.Dir(townBeads)
+	// Use bd blocked to check if this specific issue is blocked
+	blockedCmd := exec.Command("bd", "--no-daemon", "dep", "list", issueID, "--direction=up", "--type=depends", "--json")
+	blockedCmd.Dir = townRoot
+
+	var stdout bytes.Buffer
+	blockedCmd.Stdout = &stdout
+	if err := blockedCmd.Run(); err != nil {
+		return false // Assume not blocked if we can't check
+	}
+
+	// Parse dependencies
+	var deps []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
+		return false
+	}
+
+	// If any dependency is not closed, this issue is blocked
+	for _, dep := range deps {
+		if dep.Status != "closed" && dep.Status != "tombstone" {
+			return true
+		}
+	}
+	return false
 }
 
 func runConvoyStatus(cmd *cobra.Command, args []string) error {
