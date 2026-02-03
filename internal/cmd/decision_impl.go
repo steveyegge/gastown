@@ -183,6 +183,13 @@ func runDecisionRequest(cmd *cobra.Command, args []string) error {
 				style.PrintWarning("%s", w)
 			}
 		}
+
+		// Run referenced bead validation (unless --no-bead-check)
+		if !decisionNoBeadCheck {
+			if err := validateReferencedBeads(decisionPrompt, decisionContext, contextMap); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Check if predecessor suggested a successor type (blocking unless --ignore-suggested-type)
@@ -2112,6 +2119,62 @@ func checkPredecessorSuggestedType(townRoot, predecessorID string) string {
 	}
 
 	return remaining[:endIdx]
+}
+
+// validateReferencedBeads checks that all bead IDs referenced in the prompt
+// and context have descriptions provided in the context's referenced_beads field.
+// Returns an error if any referenced beads are missing descriptions.
+func validateReferencedBeads(prompt, contextJSON string, contextMap map[string]interface{}) error {
+	// Extract all bead IDs from prompt and context
+	referencedIDs := beads.ExtractBeadIDsFromAll(prompt, contextJSON)
+	if len(referencedIDs) == 0 {
+		return nil // No beads referenced, nothing to validate
+	}
+
+	// Get the referenced_beads map from context
+	var providedBeads map[string]interface{}
+	if contextMap != nil {
+		if rb, ok := contextMap["referenced_beads"].(map[string]interface{}); ok {
+			providedBeads = rb
+		}
+	}
+
+	// Check which bead IDs are missing descriptions
+	var missingBeads []string
+	for _, beadID := range referencedIDs {
+		if providedBeads == nil {
+			missingBeads = append(missingBeads, beadID)
+			continue
+		}
+
+		beadInfo, exists := providedBeads[beadID]
+		if !exists {
+			missingBeads = append(missingBeads, beadID)
+			continue
+		}
+
+		// Check that the bead has at least a title or description
+		if beadMap, ok := beadInfo.(map[string]interface{}); ok {
+			hasTitle := beadMap["title"] != nil && beadMap["title"] != ""
+			hasDesc := beadMap["description"] != nil && beadMap["description"] != ""
+			hasDescSummary := beadMap["description_summary"] != nil && beadMap["description_summary"] != ""
+			if !hasTitle && !hasDesc && !hasDescSummary {
+				missingBeads = append(missingBeads, beadID)
+			}
+		} else {
+			// Entry exists but isn't a proper object
+			missingBeads = append(missingBeads, beadID)
+		}
+	}
+
+	if len(missingBeads) > 0 {
+		style.PrintError("Missing descriptions for referenced beads: %s", strings.Join(missingBeads, ", "))
+		style.PrintWarning("Hint: Use --auto-context to auto-fetch, or add to --context JSON:")
+		style.PrintWarning(`  --context '{"referenced_beads": {"%s": {"title": "...", "description_summary": "..."}}}'`, missingBeads[0])
+		return fmt.Errorf("referenced beads validation failed: %d bead(s) missing descriptions (use --no-bead-check to skip)", len(missingBeads))
+	}
+
+	return nil
 }
 
 // Note: Fail-then-File and successor schema validation moved to scripts:

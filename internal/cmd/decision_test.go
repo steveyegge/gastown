@@ -1305,3 +1305,144 @@ func TestRoundTripTypeEmbedding(t *testing.T) {
 		}
 	}
 }
+
+// --- Referenced Beads Validation Tests ---
+
+// TestValidateReferencedBeads tests bead validation logic.
+func TestValidateReferencedBeads(t *testing.T) {
+	tests := []struct {
+		name       string
+		prompt     string
+		contextStr string
+		contextMap map[string]interface{}
+		wantErr    bool
+	}{
+		{
+			name:       "no beads referenced",
+			prompt:     "Which approach should we take?",
+			contextStr: `{"analysis": "some analysis"}`,
+			contextMap: map[string]interface{}{"analysis": "some analysis"},
+			wantErr:    false,
+		},
+		{
+			name:       "bead referenced with description",
+			prompt:     "How should we fix gt-abc123?",
+			contextStr: `{"referenced_beads": {"gt-abc123": {"title": "Bug fix", "description_summary": "Fix the auth bug"}}}`,
+			contextMap: map[string]interface{}{
+				"referenced_beads": map[string]interface{}{
+					"gt-abc123": map[string]interface{}{
+						"title":               "Bug fix",
+						"description_summary": "Fix the auth bug",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "bead referenced without description",
+			prompt:     "How should we fix gt-xyz789?",
+			contextStr: `{"analysis": "some analysis"}`,
+			contextMap: map[string]interface{}{"analysis": "some analysis"},
+			wantErr:    true,
+		},
+		{
+			name:       "multiple beads all described",
+			prompt:     "Should we merge gt-abc123 with bd-def456?",
+			contextStr: `{"referenced_beads": {"gt-abc123": {"title": "Bug A"}, "bd-def456": {"title": "Bug B"}}}`,
+			contextMap: map[string]interface{}{
+				"referenced_beads": map[string]interface{}{
+					"gt-abc123": map[string]interface{}{"title": "Bug A"},
+					"bd-def456": map[string]interface{}{"title": "Bug B"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "multiple beads some missing",
+			prompt:     "Should we merge gt-abc123 with bd-def456?",
+			contextStr: `{"referenced_beads": {"gt-abc123": {"title": "Bug A"}}}`,
+			contextMap: map[string]interface{}{
+				"referenced_beads": map[string]interface{}{
+					"gt-abc123": map[string]interface{}{"title": "Bug A"},
+				},
+			},
+			wantErr: true, // bd-def456 is missing
+		},
+		{
+			name:       "empty context map",
+			prompt:     "How to proceed with gt-task1?",
+			contextStr: `{}`,
+			contextMap: map[string]interface{}{},
+			wantErr:    true,
+		},
+		{
+			name:       "nil context map",
+			prompt:     "How to proceed with gt-task1?",
+			contextStr: "",
+			contextMap: nil,
+			wantErr:    true,
+		},
+		{
+			name:       "bead in context string but not map",
+			prompt:     "What about this?",
+			contextStr: `{"note": "relates to gt-hidden"}`,
+			contextMap: map[string]interface{}{"note": "relates to gt-hidden"},
+			wantErr:    true, // gt-hidden referenced but not in referenced_beads
+		},
+		{
+			name:       "bead entry exists but no title or description",
+			prompt:     "Fix gt-empty?",
+			contextStr: `{"referenced_beads": {"gt-empty": {}}}`,
+			contextMap: map[string]interface{}{
+				"referenced_beads": map[string]interface{}{
+					"gt-empty": map[string]interface{}{},
+				},
+			},
+			wantErr: true, // entry exists but has no content
+		},
+		{
+			name:       "bead with title only is valid",
+			prompt:     "Fix gt-titleonly?",
+			contextStr: `{"referenced_beads": {"gt-titleonly": {"title": "Has title"}}}`,
+			contextMap: map[string]interface{}{
+				"referenced_beads": map[string]interface{}{
+					"gt-titleonly": map[string]interface{}{"title": "Has title"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "bead with description_summary only is valid",
+			prompt:     "Fix gt-desconly?",
+			contextStr: `{"referenced_beads": {"gt-desconly": {"description_summary": "Has desc"}}}`,
+			contextMap: map[string]interface{}{
+				"referenced_beads": map[string]interface{}{
+					"gt-desconly": map[string]interface{}{"description_summary": "Has desc"},
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateReferencedBeads(tt.prompt, tt.contextStr, tt.contextMap)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateReferencedBeads() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestDecisionRequestNoBeadCheckFlag tests that --no-bead-check flag exists.
+func TestDecisionRequestNoBeadCheckFlag(t *testing.T) {
+	if decisionRequestCmd == nil {
+		t.Fatal("decisionRequestCmd is nil")
+	}
+
+	flags := decisionRequestCmd.Flags()
+	noBeadCheckFlag := flags.Lookup("no-bead-check")
+	if noBeadCheckFlag == nil {
+		t.Error("missing --no-bead-check flag")
+	}
+}

@@ -421,6 +421,7 @@ var decisionCheckIdentity string
 
 // Request validation flags
 var decisionNoFileCheck bool
+var decisionNoBeadCheck bool
 var decisionIgnoreSuggestedType bool
 
 // Chain-specific flags
@@ -440,6 +441,7 @@ func init() {
 	decisionRequestCmd.Flags().StringVarP(&decisionUrgency, "urgency", "u", "medium", "Urgency level: high, medium, low")
 	decisionRequestCmd.Flags().BoolVar(&decisionJSON, "json", false, "Output as JSON")
 	decisionRequestCmd.Flags().BoolVar(&decisionNoFileCheck, "no-file-check", false, "Skip FILE option validation for failure contexts")
+	decisionRequestCmd.Flags().BoolVar(&decisionNoBeadCheck, "no-bead-check", false, "Skip validation of referenced bead descriptions in context")
 	decisionRequestCmd.Flags().BoolVar(&decisionIgnoreSuggestedType, "ignore-suggested-type", false, "Override predecessor's suggested successor type")
 	decisionRequestCmd.Flags().StringVar(&decisionType, "type", "", "Decision type (validated by create-decision-type-{name} script if present)")
 
