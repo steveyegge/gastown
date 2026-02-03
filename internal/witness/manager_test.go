@@ -29,8 +29,8 @@ func TestBuildWitnessStartCommand_DefaultsToRuntime(t *testing.T) {
 		t.Fatalf("buildWitnessStartCommand: %v", err)
 	}
 
-	if !strings.Contains(got, "GT_ROLE=witness") {
-		t.Errorf("expected GT_ROLE=witness in command, got %q", got)
+	if !strings.Contains(got, "GT_ROLE=gastown/witness") {
+		t.Errorf("expected GT_ROLE=gastown/witness in command, got %q", got)
 	}
 	if !strings.Contains(got, "BD_ACTOR=gastown/witness") {
 		t.Errorf("expected BD_ACTOR=gastown/witness in command, got %q", got)
@@ -49,7 +49,7 @@ func TestBuildWitnessStartCommand_AgentOverrideWins(t *testing.T) {
 	if strings.Contains(got, "exec run") {
 		t.Fatalf("expected agent override to bypass role start_command, got %q", got)
 	}
-	if !strings.Contains(got, "GT_ROLE=witness") {
-		t.Errorf("expected GT_ROLE=witness in command, got %q", got)
+	if !strings.Contains(got, "GT_ROLE=gastown/witness") {
+		t.Errorf("expected GT_ROLE=gastown/witness in command, got %q", got)
 	}
 }

@@ -464,8 +464,8 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 				return fmt.Errorf("killing existing session: %w", err)
 			}
 		} else {
-			// Normal start - session exists, check if Claude is actually running
-			if t.IsClaudeRunning(sessionID) {
+			// Normal start - session exists, check if agent is actually running
+			if t.IsAgentAlive(sessionID) {
 				return fmt.Errorf("%w: %s", ErrSessionRunning, sessionID)
 			}
 			// Zombie session - kill and recreate.
@@ -476,14 +476,13 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 		}
 	}
 
-	// Resolve agent config from town settings to get role-specific agent
+	// Ensure runtime settings exist in crew/ (not crew/<name>/) so we don't
+	// write into the source repo. Claude walks up the tree to find settings.
+	// All crew members share the same settings file.
+	crewBaseDir := filepath.Join(m.rig.Path, "crew")
 	townRoot := filepath.Dir(m.rig.Path)
-	runtimeConfig := config.ResolveAgentConfig(townRoot, m.rig.Path)
-
-	// Ensure runtime settings exist in worker.ClonePath where session runs.
-	// OpenCode looks for plugins relative to the working directory, not by directory traversal.
-	// Note: .opencode/ should be in .gitignore to avoid committing to source repo.
-	if err := runtime.EnsureSettingsForRole(worker.ClonePath, "crew", runtimeConfig); err != nil {
+	runtimeConfig := config.ResolveRoleAgentConfig("crew", townRoot, m.rig.Path)
+	if err := runtime.EnsureSettingsForRole(crewBaseDir, "crew", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
@@ -539,10 +538,10 @@ func (m *Manager) Start(name string, opts StartOptions) error {
 	// Set up C-b n/p keybindings for crew session cycling (non-fatal)
 	_ = t.SetCrewCycleBindings(sessionID)
 
-	// Note: We intentionally don't wait for Claude to start here.
+	// Note: We intentionally don't wait for the agent to start here.
 	// The session is created in detached mode, and blocking for 60 seconds
-	// serves no purpose. If the caller needs to know when Claude is ready,
-	// they can check with IsClaudeRunning().
+	// serves no purpose. If the caller needs to know when the agent is ready,
+	// they can check with IsAgentAlive().
 
 	return nil
 }

@@ -68,5 +68,9 @@ sync-branch: beads-sync
 external_projects:
   beads: ../../../beads/mayor/rig
 
+# Sync mode: dolt-native means no JSONL, just Dolt commits/push
+sync:
+  mode: dolt-native
+
 # Custom issue types for Gas Town (fallback when database is unavailable)
 types.custom: "agent,role,rig,convoy,slot,queue,event,message,molecule,gate,merge-request"

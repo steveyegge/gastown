@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -308,16 +309,51 @@ func runDegradedTriage(b *boot.Boot) (action, target string, err error) {
 				if err := tm.KillSessionWithProcesses(deaconSession); err == nil {
 					return "restart", "deacon-stuck", nil
 				}
+				// Kill failed - report it (daemon will retry next tick)
+				fmt.Printf("Failed to kill session: %v\n", err)
+				return "restart-failed", "deacon-stuck", nil
 			} else {
 				// Stuck but not critically - try nudging first
 				fmt.Printf("Deacon heartbeat is %s old - nudging session\n", age.Round(time.Minute))
 				_ = tm.NudgeSession(deaconSession, "HEALTH_CHECK: heartbeat is stale, respond to confirm responsiveness")
 				return "nudge", "deacon-stale", nil
 			}
+		} else {
+			// Heartbeat is fresh - but is Deacon actually working?
+			// Check for idle state (no work on hook)
+			if !hasDeaconWork() {
+				fmt.Println("Deacon heartbeat fresh but no work on hook - nudging to restart patrol")
+				_ = tm.NudgeSession(deaconSession, "IDLE_CHECK: No active work on hook. If idle, start patrol: gt deacon patrol")
+				return "nudge", "deacon-idle", nil
+			}
 		}
 	}
 
 	return "nothing", "", nil
+}
+
+// hasDeaconWork checks if the Deacon has work on its hook.
+// Uses bd slot show to check the hook slot on the deacon agent bead.
+func hasDeaconWork() bool {
+	// The deacon agent bead is hq-deacon (town-level)
+	cmd := exec.Command("bd", "slot", "show", "hq-deacon", "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		// If we can't check, assume it has work (don't false-positive nudge)
+		return true
+	}
+
+	// Parse JSON to check if hook slot is set
+	var result struct {
+		Slots struct {
+			Hook *string `json:"hook"`
+		} `json:"slots"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return true // Parse error - assume has work
+	}
+
+	return result.Slots.Hook != nil
 }
 
 // formatDurationAgo formats a duration for human display.

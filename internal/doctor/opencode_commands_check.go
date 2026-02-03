@@ -33,17 +33,10 @@ func (c *OpenCodeCommandsCheck) Run(ctx *CheckContext) *CheckResult {
 	c.townRoot = ctx.TownRoot
 	c.missingCommands = nil
 
-	missing, err := templates.MissingCommandsOpenCode(ctx.TownRoot)
-	if err != nil {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Error checking OpenCode commands: %v", err),
-		}
-	}
+	missing := templates.MissingCommandsFor(ctx.TownRoot, "opencode")
 
 	if len(missing) == 0 {
-		names, _ := templates.CommandNamesOpenCode()
+		names := templates.CommandNames()
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  StatusOK,
@@ -70,5 +63,5 @@ func (c *OpenCodeCommandsCheck) Fix(ctx *CheckContext) error {
 		return nil
 	}
 
-	return templates.ProvisionCommandsOpenCode(c.townRoot)
+	return templates.ProvisionCommandsFor(c.townRoot, "opencode")
 }

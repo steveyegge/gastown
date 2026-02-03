@@ -493,6 +493,14 @@ func (c *AgentSettingsCheck) Fix(ctx *CheckContext) error {
 		if sf.wrongLocation {
 			mayorDir := filepath.Join(ctx.TownRoot, "mayor")
 
+			// For mayor settings.json at town root, create at mayor/.claude/
+			if sf.agentType == "mayor" && strings.HasSuffix(hooksDir, ".claude") && !strings.Contains(sf.path, "/mayor/") {
+				if err := os.MkdirAll(mayorDir, 0755); err == nil {
+					runtimeConfig := config.ResolveRoleAgentConfig("mayor", ctx.TownRoot, mayorDir)
+					_ = runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig)
+				}
+			}
+
 			// For mayor CLAUDE.md at town root, create at mayor/
 			// Note: Mayor settings.json at town root are now CORRECT (Mayor runs from townRoot)
 			if sf.agentType == "mayor" && strings.HasSuffix(sf.path, "CLAUDE.md") && !strings.Contains(sf.path, "/mayor/") {
@@ -513,9 +521,9 @@ func (c *AgentSettingsCheck) Fix(ctx *CheckContext) error {
 			continue
 		}
 
-		// Recreate settings using runtime.EnsureSettingsForRole for OpenCode support
+		// Recreate settings using EnsureSettingsForRole
 		workDir := filepath.Dir(hooksDir) // agent work directory
-		runtimeConfig := config.ResolveAgentConfig(ctx.TownRoot, workDir)
+		runtimeConfig := config.ResolveRoleAgentConfig(sf.agentType, ctx.TownRoot, workDir)
 		if err := runtime.EnsureSettingsForRole(workDir, sf.agentType, runtimeConfig); err != nil {
 			errors = append(errors, fmt.Sprintf("failed to recreate settings for %s: %v", sf.path, err))
 			continue

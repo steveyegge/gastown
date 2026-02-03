@@ -15,6 +15,7 @@ func TestAgentEnv_Mayor(t *testing.T) {
 	assertEnv(t, env, "BD_ACTOR", "mayor")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "mayor")
 	assertEnv(t, env, "GT_ROOT", "/town")
+	assertEnv(t, env, "GIT_CEILING_DIRECTORIES", "/town") // prevents git walking to umbrella
 	assertNotSet(t, env, "GT_RIG")
 	assertNotSet(t, env, "BEADS_NO_DAEMON")
 }
@@ -27,7 +28,7 @@ func TestAgentEnv_Witness(t *testing.T) {
 		TownRoot: "/town",
 	})
 
-	assertEnv(t, env, "GT_ROLE", "witness")
+	assertEnv(t, env, "GT_ROLE", "myrig/witness") // compound format
 	assertEnv(t, env, "GT_RIG", "myrig")
 	assertEnv(t, env, "BD_ACTOR", "myrig/witness")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "myrig/witness")
@@ -44,7 +45,7 @@ func TestAgentEnv_Polecat(t *testing.T) {
 		BeadsNoDaemon: true,
 	})
 
-	assertEnv(t, env, "GT_ROLE", "polecat")
+	assertEnv(t, env, "GT_ROLE", "myrig/polecats/Toast") // compound format
 	assertEnv(t, env, "GT_RIG", "myrig")
 	assertEnv(t, env, "GT_POLECAT", "Toast")
 	assertEnv(t, env, "BD_ACTOR", "myrig/polecats/Toast")
@@ -63,7 +64,7 @@ func TestAgentEnv_Crew(t *testing.T) {
 		BeadsNoDaemon: true,
 	})
 
-	assertEnv(t, env, "GT_ROLE", "crew")
+	assertEnv(t, env, "GT_ROLE", "myrig/crew/emma") // compound format
 	assertEnv(t, env, "GT_RIG", "myrig")
 	assertEnv(t, env, "GT_CREW", "emma")
 	assertEnv(t, env, "BD_ACTOR", "myrig/crew/emma")
@@ -81,7 +82,7 @@ func TestAgentEnv_Refinery(t *testing.T) {
 		BeadsNoDaemon: true,
 	})
 
-	assertEnv(t, env, "GT_ROLE", "refinery")
+	assertEnv(t, env, "GT_ROLE", "myrig/refinery") // compound format
 	assertEnv(t, env, "GT_RIG", "myrig")
 	assertEnv(t, env, "BD_ACTOR", "myrig/refinery")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "myrig/refinery")
@@ -110,7 +111,7 @@ func TestAgentEnv_Boot(t *testing.T) {
 		TownRoot: "/town",
 	})
 
-	assertEnv(t, env, "GT_ROLE", "boot")
+	assertEnv(t, env, "GT_ROLE", "deacon/boot") // compound format
 	assertEnv(t, env, "BD_ACTOR", "deacon-boot")
 	assertEnv(t, env, "GIT_AUTHOR_NAME", "boot")
 	assertEnv(t, env, "GT_ROOT", "/town")
@@ -147,7 +148,7 @@ func TestAgentEnvSimple(t *testing.T) {
 	t.Parallel()
 	env := AgentEnvSimple("polecat", "myrig", "Toast")
 
-	assertEnv(t, env, "GT_ROLE", "polecat")
+	assertEnv(t, env, "GT_ROLE", "myrig/polecats/Toast") // compound format
 	assertEnv(t, env, "GT_RIG", "myrig")
 	assertEnv(t, env, "GT_POLECAT", "Toast")
 	// Simple doesn't set TownRoot, so key should be absent
@@ -169,9 +170,10 @@ func TestAgentEnv_EmptyTownRootOmitted(t *testing.T) {
 
 	// Key should be absent, not empty string
 	assertNotSet(t, env, "GT_ROOT")
+	assertNotSet(t, env, "GIT_CEILING_DIRECTORIES") // also not set when TownRoot empty
 
 	// Other keys should still be set
-	assertEnv(t, env, "GT_ROLE", "polecat")
+	assertEnv(t, env, "GT_ROLE", "myrig/polecats/Toast") // compound format
 	assertEnv(t, env, "GT_RIG", "myrig")
 }
 

@@ -53,6 +53,7 @@ var beadsExemptCommands = map[string]bool{
 	"install":    true,
 	"tap":        true,
 	"dnd":        true,
+	"krc":        true, // KRC doesn't require beads
 }
 
 // Commands exempt from the town root branch warning.
@@ -100,8 +101,12 @@ func persistentPreRun(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Check beads version
-	return CheckBeadsVersion()
+	// Check beads version (non-blocking - warn only)
+	if err := CheckBeadsVersion(); err != nil {
+		// Just warn, don't block - beads issues shouldn't prevent gt from running
+		fmt.Fprintf(os.Stderr, "⚠ beads check: %v\n", err)
+	}
+	return nil
 }
 
 // initCLITheme initializes the CLI color theme based on settings and environment.
@@ -209,7 +214,7 @@ func checkStaleBinaryWarning() {
 				info.CommitsBehind, version.ShortCommit(info.BinaryCommit), version.ShortCommit(info.RepoCommit))
 		}
 		fmt.Fprintf(os.Stderr, "%s %s\n", style.WarningPrefix, msg)
-		fmt.Fprintf(os.Stderr, "    %s Run 'gt install' to update\n", style.ArrowPrefix)
+		fmt.Fprintf(os.Stderr, "    %s Run 'make install' in gastown repo to update\n", style.ArrowPrefix)
 	}
 }
 
@@ -280,4 +285,22 @@ func requireSubcommand(cmd *cobra.Command, args []string) error {
 	}
 	return fmt.Errorf("unknown command %q for %q\n\nRun '%s --help' for available commands",
 		args[0], buildCommandPath(cmd), buildCommandPath(cmd))
+}
+
+// checkHelpFlag checks if --help or -h is the first argument and shows help if so.
+// Returns true if help was shown, false otherwise.
+//
+// This is needed for commands with DisableFlagParsing: true, which bypass
+// Cobra's automatic help flag handling.
+//
+// We only check the FIRST argument to avoid false positives like:
+//
+//	gt commit -m "--help"  # User wants message "--help", not help output
+//
+// This covers the common case (gt commit --help) without breaking edge cases.
+func checkHelpFlag(cmd *cobra.Command, args []string) (bool, error) {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		return true, cmd.Help()
+	}
+	return false, nil
 }

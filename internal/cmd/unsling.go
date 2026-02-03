@@ -166,6 +166,24 @@ func runUnsling(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("clearing hook from agent bead %s: %w", agentBeadID, err)
 	}
 
+	// Update hooked bead status from "hooked" back to "open".
+	// Previously, only the agent's hook slot was cleared but the bead itself stayed
+	// in "hooked" status forever. Now we update the bead to match the documented
+	// behavior: "The bead's status changes from 'hooked' back to 'open'."
+	if hookedBead.Status == beads.StatusHooked {
+		openStatus := "open"
+		emptyAssignee := ""
+		if err := b.Update(hookedBeadID, beads.UpdateOptions{
+			Status:   &openStatus,
+			Assignee: &emptyAssignee,
+		}); err != nil {
+			// Non-fatal: warn but don't fail the unsling. The hook slot is already
+			// cleared, so the agent is unblocked. The bead status is a bookkeeping
+			// issue that can be fixed manually.
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: couldn't update bead %s status: %v\n", hookedBeadID, err)
+		}
+	}
+
 	// Log unhook event
 	_ = events.LogFeed(events.TypeUnhook, agentID, events.UnhookPayload(hookedBeadID))
 

@@ -8,13 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"text/template"
+
+	"github.com/steveyegge/gastown/internal/templates/commands"
 )
 
 //go:embed roles/*.md.tmpl messages/*.md.tmpl
 var templateFS embed.FS
-
-//go:embed commands/*.md commands-opencode/*.md
-var commandsFS embed.FS
 
 // Templates manages role and message templates.
 type Templates struct {
@@ -206,120 +205,35 @@ func GetAllRoleTemplates() (map[string][]byte, error) {
 // even if the source repo doesn't have them tracked.
 // If a command already exists, it is skipped (no overwrite).
 func ProvisionCommands(workspacePath string) error {
-	return provisionCommandsTo(workspacePath, ".claude", "commands")
+	return commands.ProvisionFor(workspacePath, "claude")
 }
 
-// ProvisionCommandsOpenCode creates the .opencode/commands/ directory with OpenCode-compatible
-// slash commands. Uses templates from commands-opencode/ which have proper YAML frontmatter.
-// If a command already exists, it is skipped (no overwrite).
-func ProvisionCommandsOpenCode(workspacePath string) error {
-	return provisionCommandsTo(workspacePath, ".opencode", "commands-opencode")
-}
-
-// provisionCommandsTo provisions commands from a source directory to a target directory.
-func provisionCommandsTo(workspacePath, targetDir, sourceDir string) error {
-	commandsDir := filepath.Join(workspacePath, targetDir, "commands")
-	if err := os.MkdirAll(commandsDir, 0755); err != nil {
-		return fmt.Errorf("creating commands directory: %w", err)
-	}
-
-	entries, err := commandsFS.ReadDir(sourceDir)
-	if err != nil {
-		return fmt.Errorf("reading commands directory %s: %w", sourceDir, err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		destPath := filepath.Join(commandsDir, entry.Name())
-
-		// Skip if command already exists (don't overwrite user customizations)
-		if _, err := os.Stat(destPath); err == nil {
-			continue
-		}
-
-		content, err := commandsFS.ReadFile(sourceDir + "/" + entry.Name())
-		if err != nil {
-			return fmt.Errorf("reading %s/%s: %w", sourceDir, entry.Name(), err)
-		}
-
-		if err := os.WriteFile(destPath, content, 0644); err != nil { //nolint:gosec // G306: template files are non-sensitive
-			return fmt.Errorf("writing %s: %w", entry.Name(), err)
-		}
-	}
-
-	return nil
+// ProvisionCommandsFor provisions commands for a specific agent.
+func ProvisionCommandsFor(workspacePath, agent string) error {
+	return commands.ProvisionFor(workspacePath, agent)
 }
 
 // CommandNames returns the list of embedded slash commands.
-func CommandNames() ([]string, error) {
-	return commandNamesFor("commands")
-}
-
-// CommandNamesOpenCode returns the list of embedded OpenCode slash commands.
-func CommandNamesOpenCode() ([]string, error) {
-	return commandNamesFor("commands-opencode")
+func CommandNames() []string {
+	return commands.Names()
 }
 
 // HasCommands checks if a workspace has the .claude/commands/ directory provisioned.
 func HasCommands(workspacePath string) bool {
-	commandsDir := filepath.Join(workspacePath, ".claude", "commands")
-	info, err := os.Stat(commandsDir)
-	return err == nil && info.IsDir()
+	return HasCommandsFor(workspacePath, "claude")
 }
 
-// HasCommandsOpenCode checks if a workspace has the .opencode/commands/ directory provisioned.
-func HasCommandsOpenCode(workspacePath string) bool {
-	commandsDir := filepath.Join(workspacePath, ".opencode", "commands")
-	info, err := os.Stat(commandsDir)
-	return err == nil && info.IsDir()
+// HasCommandsFor checks if a workspace has commands provisioned for an agent.
+func HasCommandsFor(workspacePath, agent string) bool {
+	return len(commands.MissingFor(workspacePath, agent)) == 0
 }
 
 // MissingCommands returns the list of embedded commands missing from the workspace.
-func MissingCommands(workspacePath string) ([]string, error) {
-	return missingCommandsFor(workspacePath, "commands", ".claude")
+func MissingCommands(workspacePath string) []string {
+	return commands.MissingFor(workspacePath, "claude")
 }
 
-// MissingCommandsOpenCode returns the list of embedded OpenCode commands missing from the workspace.
-func MissingCommandsOpenCode(workspacePath string) ([]string, error) {
-	return missingCommandsFor(workspacePath, "commands-opencode", ".opencode")
-}
-
-func commandNamesFor(sourceDir string) ([]string, error) {
-	entries, err := commandsFS.ReadDir(sourceDir)
-	if err != nil {
-		return nil, fmt.Errorf("reading commands directory: %w", err)
-	}
-
-	var names []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			names = append(names, entry.Name())
-		}
-	}
-	return names, nil
-}
-
-func missingCommandsFor(workspacePath, sourceDir, targetDir string) ([]string, error) {
-	entries, err := commandsFS.ReadDir(sourceDir)
-	if err != nil {
-		return nil, fmt.Errorf("reading commands directory: %w", err)
-	}
-
-	commandsDir := filepath.Join(workspacePath, targetDir, "commands")
-	var missing []string
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		destPath := filepath.Join(commandsDir, entry.Name())
-		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			missing = append(missing, entry.Name())
-		}
-	}
-
-	return missing, nil
+// MissingCommandsFor returns missing commands for a specific agent.
+func MissingCommandsFor(workspacePath, agent string) []string {
+	return commands.MissingFor(workspacePath, agent)
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/rig"
@@ -175,22 +176,31 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	townRoot := filepath.Dir(m.rig.Path)
 	runtimeConfig := config.ResolveAgentConfig(townRoot, m.rig.Path)
 
-	// Ensure runtime settings exist in workDir where session runs.
-	// OpenCode looks for plugins relative to the working directory, not by directory traversal.
-	// Note: .opencode/ should be in .gitignore to avoid committing to source repo.
-	if err := runtime.EnsureSettingsForRole(workDir, "polecat", runtimeConfig); err != nil {
+	// Ensure runtime settings exist in polecat's home directory (polecats/<name>/).
+	// This keeps settings out of the git worktree while allowing runtime to find them
+	// when walking up the tree from workDir (polecats/<name>/<rigname>/).
+	// Each polecat gets isolated settings rather than sharing a single settings file.
+	polecatHomeDir := m.polecatDir(polecat)
+	if err := runtime.EnsureSettingsForRole(polecatHomeDir, "polecat", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
+	// Get fallback info to determine beacon content based on agent capabilities.
+	// Non-hook agents need "Run gt prime" in beacon; work instructions come as delayed nudge.
+	fallbackInfo := runtime.GetStartupFallbackInfo(runtimeConfig)
+
 	// Build startup command with beacon for predecessor discovery.
-	// Topic "assigned" already includes instructions in FormatStartupBeacon.
+	// Configure beacon based on agent's hook/prompt capabilities.
 	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
-	beacon := session.FormatStartupBeacon(session.BeaconConfig{
-		Recipient: address,
-		Sender:    "witness",
-		Topic:     "assigned",
-		MolID:     opts.Issue,
-	})
+	beaconConfig := session.BeaconConfig{
+		Recipient:               address,
+		Sender:                  "witness",
+		Topic:                   "assigned",
+		MolID:                   opts.Issue,
+		IncludePrimeInstruction: fallbackInfo.IncludePrimeInBeacon,
+		ExcludeWorkInstructions: fallbackInfo.SendStartupNudge,
+	}
+	beacon := session.FormatStartupBeacon(beaconConfig)
 
 	command := opts.Command
 	if command == "" {
@@ -246,6 +256,31 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 
 	// Wait for runtime to be fully ready at the prompt (not just started)
 	runtime.SleepForReadyDelay(runtimeConfig)
+
+	// Handle fallback nudges for non-hook agents.
+	// See StartupFallbackInfo in runtime package for the fallback matrix.
+	if fallbackInfo.SendBeaconNudge && fallbackInfo.SendStartupNudge && fallbackInfo.StartupNudgeDelayMs == 0 {
+		// Hooks + no prompt: Single combined nudge (hook already ran gt prime synchronously)
+		combined := beacon + "\n\n" + runtime.StartupNudgeContent()
+		debugSession("SendCombinedNudge", m.tmux.NudgeSession(sessionID, combined))
+	} else {
+		if fallbackInfo.SendBeaconNudge {
+			// Agent doesn't support CLI prompt - send beacon via nudge
+			debugSession("SendBeaconNudge", m.tmux.NudgeSession(sessionID, beacon))
+		}
+
+		if fallbackInfo.StartupNudgeDelayMs > 0 {
+			// Wait for agent to run gt prime before sending work instructions
+			time.Sleep(time.Duration(fallbackInfo.StartupNudgeDelayMs) * time.Millisecond)
+		}
+
+		if fallbackInfo.SendStartupNudge {
+			// Send work instructions via nudge
+			debugSession("SendStartupNudge", m.tmux.NudgeSession(sessionID, runtime.StartupNudgeContent()))
+		}
+	}
+
+	// Legacy fallback for other startup paths (non-fatal)
 	_ = runtime.RunStartupFallback(m.tmux, sessionID, "polecat", runtimeConfig)
 
 	// Verify session survived startup - if the command crashed, the session may have died.
@@ -454,12 +489,22 @@ func (m *SessionManager) StopAll(force bool) error {
 	return lastErr
 }
 
+// resolveBeadsDir determines the correct working directory for bd commands
+// on a given issue. This enables cross-rig beads resolution via routes.jsonl.
+// This is the core fix for GitHub issue #1056.
+func (m *SessionManager) resolveBeadsDir(issueID, fallbackDir string) string {
+	townRoot := filepath.Dir(m.rig.Path)
+	return beads.ResolveHookDir(townRoot, issueID, fallbackDir)
+}
+
 // validateIssue checks that an issue exists and is not tombstoned.
 // This must be called before starting a session to avoid CPU spin loops
 // from agents retrying work on invalid issues.
 func (m *SessionManager) validateIssue(issueID, workDir string) error {
+	bdWorkDir := m.resolveBeadsDir(issueID, workDir)
+
 	cmd := exec.Command("bd", "show", issueID, "--json") //nolint:gosec
-	cmd.Dir = workDir
+	cmd.Dir = bdWorkDir
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrIssueInvalid, issueID)
@@ -482,8 +527,10 @@ func (m *SessionManager) validateIssue(issueID, workDir string) error {
 
 // hookIssue pins an issue to a polecat's hook using bd update.
 func (m *SessionManager) hookIssue(issueID, agentID, workDir string) error {
+	bdWorkDir := m.resolveBeadsDir(issueID, workDir)
+
 	cmd := exec.Command("bd", "update", issueID, "--status=hooked", "--assignee="+agentID) //nolint:gosec
-	cmd.Dir = workDir
+	cmd.Dir = bdWorkDir
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("bd update failed: %w", err)

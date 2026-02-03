@@ -247,3 +247,44 @@ Dog returns to available state in the pool.
 [vars.mode]
 description = "GC mode: 'conservative' or 'aggressive'"
 default = "conservative"
+
+# Computed variables (issue #1133)
+[vars.age]
+description = "Computed: age of item"
+default = ""
+
+[vars.bytes_freed]
+description = "Computed: bytes freed by GC"
+default = ""
+
+[vars.error]
+description = "Computed: error message"
+default = ""
+
+[vars.identifier]
+description = "Computed: item identifier"
+default = ""
+
+[vars.item]
+description = "Computed: current item"
+default = ""
+
+[vars.reason]
+description = "Computed: reason for GC"
+default = ""
+
+[vars.report]
+description = "Computed: GC report"
+default = ""
+
+[vars.timestamp]
+description = "Computed: timestamp"
+default = ""
+
+[vars.total_cleaned]
+description = "Computed: total items cleaned"
+default = ""
+
+[vars.type]
+description = "Computed: item type"
+default = ""

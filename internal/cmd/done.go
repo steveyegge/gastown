@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
@@ -289,6 +290,34 @@ func runDone(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Work was likely pushed directly to main or already merged.\n")
 			fmt.Printf("  Skipping MR creation - completing without merge request.\n\n")
 
+			// G15 fix: Close the base issue when completing with no MR.
+			// Without this, no-op polecats (bug already fixed) leave issues stuck
+			// in HOOKED state with assignee pointing to the nuked polecat.
+			// Normally the Refinery closes after merge, but with no MR, nothing
+			// would ever close the issue.
+			if issueID != "" {
+				bd := beads.New(beads.ResolveBeadsDir(cwd))
+				closeReason := "Completed with no code changes (already fixed or pushed directly to main)"
+				// G15 fix: Force-close bypasses molecule dependency checks.
+				// The polecat is about to be nuked — open wisps should not block closure.
+				// Retry with backoff handles transient dolt lock contention (A2).
+				var closeErr error
+				for attempt := 1; attempt <= 3; attempt++ {
+					closeErr = bd.ForceCloseWithReason(closeReason, issueID)
+					if closeErr == nil {
+						fmt.Printf("%s Issue %s closed (no MR needed)\n", style.Bold.Render("✓"), issueID)
+						break
+					}
+					if attempt < 3 {
+						style.PrintWarning("close attempt %d/3 failed: %v (retrying in %ds)", attempt, closeErr, attempt*2)
+						time.Sleep(time.Duration(attempt*2) * time.Second)
+					}
+				}
+				if closeErr != nil {
+					style.PrintWarning("could not close issue %s after 3 attempts: %v (issue may be left HOOKED)", issueID, closeErr)
+				}
+			}
+
 			// Skip straight to witness notification (no MR needed)
 			goto notifyWitness
 		}
@@ -297,8 +326,14 @@ func runDone(cmd *cobra.Command, args []string) error {
 		// The MR bead triggers Refinery to process this branch. If the branch
 		// isn't pushed yet, Refinery finds nothing to merge. The worktree gets
 		// nuked at the end of gt done, so the commits are lost forever.
+		//
+		// Use explicit refspec (branch:branch) to create the remote branch.
+		// Without refspec, git push follows the tracking config — polecat branches
+		// track origin/main, so a bare push sends commits to main directly,
+		// bypassing the MR/refinery flow (G20 root cause).
 		fmt.Printf("Pushing branch to remote...\n")
-		if err := g.Push("origin", branch, false); err != nil {
+		refspec := branch + ":" + branch
+		if err := g.Push("origin", refspec, false); err != nil {
 			return fmt.Errorf("pushing branch '%s' to origin: %w\nCommits exist locally but failed to push. Fix the issue and retry.", branch, err)
 		}
 		fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
@@ -415,6 +450,9 @@ func runDone(cmd *cobra.Command, args []string) error {
 			// Success output
 			fmt.Printf("%s Work submitted to merge queue\n", style.Bold.Render("✓"))
 			fmt.Printf("  MR ID: %s\n", style.Bold.Render(mrID))
+
+			// Nudge refinery to pick up the new MR
+			nudgeRefinery(rigName, fmt.Sprintf("MR submitted: %s branch=%s", mrID, branch))
 		}
 		fmt.Printf("  Source: %s\n", branch)
 		fmt.Printf("  Target: %s\n", target)
@@ -765,7 +803,8 @@ func selfNukePolecat(roleInfo RoleInfo, _ string) error {
 
 	// Use nuclear=true since we know we just pushed our work
 	// The branch is pushed, MR is created, we're clean
-	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, true); err != nil {
+	// selfNuke=true because polecat is deleting its own worktree from inside it
+	if err := mgr.RemoveWithOptions(roleInfo.Polecat, true, true, true); err != nil {
 		return fmt.Errorf("removing worktree: %w", err)
 	}
 

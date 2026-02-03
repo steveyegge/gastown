@@ -32,6 +32,11 @@ func init() {
 }
 
 func runClose(cmd *cobra.Command, args []string) error {
+	// Handle --help since DisableFlagParsing bypasses Cobra's help handling
+	if helped, err := checkHelpFlag(cmd, args); helped || err != nil {
+		return err
+	}
+
 	// Convert --comment to --reason (alias support)
 	convertedArgs := make([]string, len(args))
 	for i, arg := range args {

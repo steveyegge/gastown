@@ -46,39 +46,46 @@ type AgentEnvConfig struct {
 func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	env := make(map[string]string)
 
-	env["GT_ROLE"] = cfg.Role
-
 	// Set role-specific variables
+	// GT_ROLE is set in compound format (e.g., "beads/crew/jane") so that
+	// beads can parse it without knowing about Gas Town role types.
 	switch cfg.Role {
 	case "mayor":
+		env["GT_ROLE"] = "mayor"
 		env["BD_ACTOR"] = "mayor"
 		env["GIT_AUTHOR_NAME"] = "mayor"
 
 	case "deacon":
+		env["GT_ROLE"] = "deacon"
 		env["BD_ACTOR"] = "deacon"
 		env["GIT_AUTHOR_NAME"] = "deacon"
 
 	case "boot":
+		env["GT_ROLE"] = "deacon/boot"
 		env["BD_ACTOR"] = "deacon-boot"
 		env["GIT_AUTHOR_NAME"] = "boot"
 
 	case "witness":
+		env["GT_ROLE"] = fmt.Sprintf("%s/witness", cfg.Rig)
 		env["GT_RIG"] = cfg.Rig
 		env["BD_ACTOR"] = fmt.Sprintf("%s/witness", cfg.Rig)
 		env["GIT_AUTHOR_NAME"] = fmt.Sprintf("%s/witness", cfg.Rig)
 
 	case "refinery":
+		env["GT_ROLE"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 		env["GT_RIG"] = cfg.Rig
 		env["BD_ACTOR"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 		env["GIT_AUTHOR_NAME"] = fmt.Sprintf("%s/refinery", cfg.Rig)
 
 	case "polecat":
+		env["GT_ROLE"] = fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
 		env["GT_RIG"] = cfg.Rig
 		env["GT_POLECAT"] = cfg.AgentName
 		env["BD_ACTOR"] = fmt.Sprintf("%s/polecats/%s", cfg.Rig, cfg.AgentName)
 		env["GIT_AUTHOR_NAME"] = cfg.AgentName
 
 	case "crew":
+		env["GT_ROLE"] = fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
 		env["GT_RIG"] = cfg.Rig
 		env["GT_CREW"] = cfg.AgentName
 		env["BD_ACTOR"] = fmt.Sprintf("%s/crew/%s", cfg.Rig, cfg.AgentName)
@@ -89,6 +96,10 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Empty values would override tmux session environment
 	if cfg.TownRoot != "" {
 		env["GT_ROOT"] = cfg.TownRoot
+		// Prevent git from walking up to umbrella repo when running in rig worktrees.
+		// This stops accidental commits to the umbrella when running git commands from
+		// intermediate directories (e.g., polecats/) that don't have their own .git.
+		env["GIT_CEILING_DIRECTORIES"] = cfg.TownRoot
 	}
 
 	// Set BEADS_AGENT_NAME for polecat/crew (uses same format as BD_ACTOR)

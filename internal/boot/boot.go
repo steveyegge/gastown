@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -34,11 +35,12 @@ type Status struct {
 
 // Boot manages the Boot watchdog lifecycle.
 type Boot struct {
-	townRoot  string
-	bootDir   string // ~/gt/deacon/dogs/boot/
-	deaconDir string // ~/gt/deacon/
-	tmux      *tmux.Tmux
-	degraded  bool
+	townRoot   string
+	bootDir    string // ~/gt/deacon/dogs/boot/
+	deaconDir  string // ~/gt/deacon/
+	tmux       *tmux.Tmux
+	degraded   bool
+	lockHandle *flock.Flock // held during triage execution
 }
 
 // New creates a new Boot manager.
@@ -79,28 +81,39 @@ func (b *Boot) IsSessionAlive() bool {
 	return err == nil && has
 }
 
-// AcquireLock creates the marker file to indicate Boot is starting.
-// Returns error if Boot is already running.
+// AcquireLock acquires an exclusive flock on the marker file.
+// Returns error if another triage is already running.
+// Uses flock instead of session existence check because triage runs inside
+// the Boot session - checking session existence would always fail.
 func (b *Boot) AcquireLock() error {
-	if b.IsRunning() {
-		return fmt.Errorf("boot is already running (session exists)")
-	}
-
 	if err := b.EnsureDir(); err != nil {
 		return fmt.Errorf("ensuring boot dir: %w", err)
 	}
 
-	// Create marker file
-	f, err := os.Create(b.markerPath())
+	// Use flock for actual mutual exclusion
+	b.lockHandle = flock.New(b.markerPath())
+	locked, err := b.lockHandle.TryLock()
 	if err != nil {
-		return fmt.Errorf("creating marker: %w", err)
+		return fmt.Errorf("acquiring lock: %w", err)
 	}
-	return f.Close()
+	if !locked {
+		return fmt.Errorf("boot triage is already running (lock held)")
+	}
+
+	return nil
 }
 
-// ReleaseLock removes the marker file.
+// ReleaseLock releases the flock and removes the marker file.
 func (b *Boot) ReleaseLock() error {
-	return os.Remove(b.markerPath())
+	if b.lockHandle != nil {
+		if err := b.lockHandle.Unlock(); err != nil {
+			return fmt.Errorf("releasing lock: %w", err)
+		}
+		b.lockHandle = nil
+	}
+	// Remove marker file (ignore error if already gone)
+	_ = os.Remove(b.markerPath())
+	return nil
 }
 
 // SaveStatus saves Boot's execution status.
@@ -139,10 +152,10 @@ func (b *Boot) LoadStatus() (*Status, error) {
 // Boot runs the mol-boot-triage molecule and exits when done.
 // In degraded mode (no tmux), it runs in a subprocess.
 // The agentOverride parameter allows specifying an agent alias to use instead of the town default.
+// Boot is ephemeral - each spawn kills any existing session and starts fresh.
 func (b *Boot) Spawn(agentOverride string) error {
-	if b.IsRunning() {
-		return fmt.Errorf("boot is already running")
-	}
+	// No IsRunning() guard here - Boot is ephemeral by design.
+	// spawnTmux() kills any existing session before spawning fresh.
 
 	// Check for degraded mode
 	if b.degraded {

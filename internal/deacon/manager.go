@@ -58,11 +58,11 @@ func (m *Manager) Start(agentOverride string) error {
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		if t.IsAgentAlive(sessionID) {
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		// Use KillSessionWithProcesses to ensure all descendant processes are killed.
 		if err := t.KillSessionWithProcesses(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
@@ -76,7 +76,7 @@ func (m *Manager) Start(agentOverride string) error {
 	}
 
 	// Ensure runtime settings exist in deaconDir where session runs.
-	runtimeConfig := config.ResolveAgentConfig(m.townRoot, deaconDir)
+	runtimeConfig := config.ResolveRoleAgentConfig("deacon", m.townRoot, deaconDir)
 	if err := runtime.EnsureSettingsForRole(deaconDir, "deacon", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}

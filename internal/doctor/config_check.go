@@ -520,6 +520,14 @@ func (c *SessionHookCheck) findSettingsFiles(townRoot string) []string {
 		}
 	}
 
+	// Town-level agents (mayor, deacon) - these are not rigs but have their own settings
+	for _, agent := range []string{"mayor", "deacon"} {
+		agentSettings := filepath.Join(townRoot, agent, ".claude", "settings.json")
+		if _, err := os.Stat(agentSettings); err == nil {
+			files = append(files, agentSettings)
+		}
+	}
+
 	// Find all rigs
 	rigs := findAllRigs(townRoot)
 	for _, rig := range rigs {
@@ -706,7 +714,7 @@ func (c *CustomTypesCheck) Run(ctx *CheckContext) *CheckResult {
 
 	// Get current custom types configuration
 	// Use Output() not CombinedOutput() to avoid capturing bd's stderr messages
-	cmd := exec.Command("bd", "config", "get", "types.custom")
+	cmd := exec.Command("bd", "--no-daemon", "config", "get", "types.custom")
 	cmd.Dir = ctx.TownRoot
 	output, err := cmd.Output()
 	if err != nil {
@@ -779,7 +787,7 @@ func parseConfigOutput(output []byte) string {
 
 // Fix registers the missing custom types.
 func (c *CustomTypesCheck) Fix(ctx *CheckContext) error {
-	cmd := exec.Command("bd", "config", "set", "types.custom", constants.BeadsCustomTypes)
+	cmd := exec.Command("bd", "--no-daemon", "config", "set", "types.custom", constants.BeadsCustomTypes)
 	cmd.Dir = c.townRoot
 	output, err := cmd.CombinedOutput()
 	if err != nil {

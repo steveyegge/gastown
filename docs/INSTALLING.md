@@ -99,7 +99,7 @@ export PATH="$PATH:$HOME/go/bin"
 
 ```bash
 # Create a Gas Town workspace (HQ)
-gt install ~/gt
+gt install ~/gt --shell
 
 # This creates:
 #   ~/gt/
@@ -128,6 +128,11 @@ gt rig add myproject https://github.com/you/repo.git
 
 ```bash
 cd ~/gt
+
+gt enable              # enable Gas Town system-wide
+gt git-init            # initialize a git repo for your HQ
+gt up                  # Start all services. Use gt down or gt shutdown for stopping. 
+
 gt doctor              # Run health checks
 gt status              # Show workspace status
 ```

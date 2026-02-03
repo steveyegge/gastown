@@ -759,7 +759,7 @@ func runConvoyStranded(cmd *cobra.Command, args []string) error {
 
 // findStrandedConvoys finds convoys with ready work but no workers.
 func findStrandedConvoys(townBeads string) ([]strandedConvoyInfo, error) {
-	var stranded []strandedConvoyInfo
+	stranded := []strandedConvoyInfo{} // Initialize as empty slice for proper JSON encoding
 
 	// Get blocked issues (we need this to filter out blocked issues)
 	blockedIssues := getBlockedIssueIDs()
@@ -840,12 +840,12 @@ func getBlockedIssueIDs() map[string]bool {
 
 // isReadyIssue checks if an issue is ready for dispatch (stranded).
 // An issue is ready if:
-// - status = "open" (not in_progress, closed, hooked)
-// - not in blocked set
-// - no assignee OR assignee session is dead
+// - status = "open" AND (no assignee OR assignee session is dead)
+// - OR status = "in_progress"/"hooked" AND assignee session is dead (orphaned molecule)
+// - AND not in blocked set
 func isReadyIssue(t trackedIssueInfo, blockedIssues map[string]bool) bool {
-	// Must be open status (not in_progress, closed, hooked)
-	if t.Status != "open" {
+	// Closed issues are never ready
+	if t.Status == "closed" || t.Status == "tombstone" {
 		return false
 	}
 
@@ -854,9 +854,17 @@ func isReadyIssue(t trackedIssueInfo, blockedIssues map[string]bool) bool {
 		return false
 	}
 
-	// Check assignee
+	// Open issues with no assignee are trivially ready
+	if t.Status == "open" && t.Assignee == "" {
+		return true
+	}
+
+	// For issues with an assignee (or non-open status with molecule attached),
+	// check if the worker session is still alive
 	if t.Assignee == "" {
-		return true // No assignee = ready
+		// Non-open status but no assignee is an edge case (shouldn't happen
+		// normally, but could occur if molecule detached improperly)
+		return true
 	}
 
 	// Has assignee - check if session is alive
@@ -869,10 +877,13 @@ func isReadyIssue(t trackedIssueInfo, blockedIssues map[string]bool) bool {
 	// Check if tmux session exists
 	checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
 	if err := checkCmd.Run(); err != nil {
-		return true // Session doesn't exist = ready
+		// Session doesn't exist = orphaned molecule or dead worker
+		// This is the key fix: issues with in_progress/hooked status but
+		// dead workers are now correctly detected as stranded
+		return true
 	}
 
-	return false // Session exists = not ready (worker is active)
+	return false // Session exists = worker is active
 }
 
 // checkAndCloseCompletedConvoys finds open convoys where all tracked issues are closed
@@ -1545,35 +1556,28 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		return result
 	}
 
-	// Discover rigs with beads databases
+	// Build a set of target issue IDs for fast lookup
+	targetIDs := make(map[string]bool, len(issueIDs))
+	for _, id := range issueIDs {
+		targetIDs[id] = true
+	}
+
+	// Discover rigs with beads directories
 	rigDirs, _ := filepath.Glob(filepath.Join(townRoot, "*", "polecats"))
-	var beadsDBS []string
+	var beadsDirs []string
 	for _, polecatsDir := range rigDirs {
 		rigDir := filepath.Dir(polecatsDir)
-		beadsDB := filepath.Join(rigDir, "mayor", "rig", ".beads", "beads.db")
-		if _, err := os.Stat(beadsDB); err == nil {
-			beadsDBS = append(beadsDBS, beadsDB)
+		beadsDir := filepath.Join(rigDir, "mayor", "rig", ".beads")
+		if info, err := os.Stat(beadsDir); err == nil && info.IsDir() {
+			beadsDirs = append(beadsDirs, filepath.Join(rigDir, "mayor", "rig"))
 		}
 	}
 
-	if len(beadsDBS) == 0 {
+	if len(beadsDirs) == 0 {
 		return result
 	}
 
-	// Build the IN clause with properly escaped issue IDs
-	var quotedIDs []string
-	for _, id := range issueIDs {
-		safeID := strings.ReplaceAll(id, "'", "''")
-		quotedIDs = append(quotedIDs, fmt.Sprintf("'%s'", safeID))
-	}
-	inClause := strings.Join(quotedIDs, ", ")
-
-	// Batch query: fetch all matching agents in one query per rig
-	query := fmt.Sprintf(
-		`SELECT id, hook_bead, last_activity FROM issues WHERE issue_type = 'agent' AND status = 'open' AND hook_bead IN (%s)`,
-		inClause)
-
-	// Query all rigs in parallel
+	// Query all rigs in parallel using bd list
 	type rigResult struct {
 		agents []struct {
 			ID           string `json:"id"`
@@ -1582,18 +1586,19 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		}
 	}
 
-	resultChan := make(chan rigResult, len(beadsDBS))
+	resultChan := make(chan rigResult, len(beadsDirs))
 	var wg sync.WaitGroup
 
-	for _, beadsDB := range beadsDBS {
+	for _, dir := range beadsDirs {
 		wg.Add(1)
-		go func(db string) {
+		go func(beadsDir string) {
 			defer wg.Done()
 
-			queryCmd := exec.Command("sqlite3", "-json", db, query)
+			cmd := exec.Command("bd", "list", "--type=agent", "--status=open", "--json", "--limit=0")
+			cmd.Dir = beadsDir
 			var stdout bytes.Buffer
-			queryCmd.Stdout = &stdout
-			if err := queryCmd.Run(); err != nil {
+			cmd.Stdout = &stdout
+			if err := cmd.Run(); err != nil {
 				resultChan <- rigResult{}
 				return
 			}
@@ -1604,7 +1609,7 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 				return
 			}
 			resultChan <- rr
-		}(beadsDB)
+		}(dir)
 	}
 
 	// Wait for all queries to complete
@@ -1613,9 +1618,14 @@ func getWorkersForIssues(issueIDs []string) map[string]*workerInfo {
 		close(resultChan)
 	}()
 
-	// Collect results from all rigs
+	// Collect results from all rigs, filtering by target issue IDs
 	for rr := range resultChan {
 		for _, agent := range rr.agents {
+			// Only include agents working on issues we care about
+			if !targetIDs[agent.HookBead] {
+				continue
+			}
+
 			// Skip if we already found a worker for this issue
 			if _, ok := result[agent.HookBead]; ok {
 				continue

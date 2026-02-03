@@ -15,6 +15,19 @@ import (
 )
 
 func runCrewAdd(cmd *cobra.Command, args []string) error {
+	// Deduplicate args to handle cases like "gt crew add foo --branch foo"
+	// where "foo" appears twice because --branch is a boolean flag.
+	// This prevents confusing "already exists" errors after a successful create.
+	seen := make(map[string]bool)
+	var dedupedArgs []string
+	for _, arg := range args {
+		if !seen[arg] {
+			seen[arg] = true
+			dedupedArgs = append(dedupedArgs, arg)
+		}
+	}
+	args = dedupedArgs
+
 	// Find workspace first (needed for all names)
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {

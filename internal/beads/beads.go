@@ -41,6 +41,7 @@ type Issue struct {
 	Blocks      []string `json:"blocks,omitempty"`
 	BlockedBy   []string `json:"blocked_by,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
+	Ephemeral   bool     `json:"ephemeral,omitempty"` // Wisp/ephemeral issues not synced to git
 
 	// Agent bead slots (type=agent only)
 	HookBead   string `json:"hook_bead,omitempty"`   // Current work attached to agent's hook
@@ -218,7 +219,10 @@ func (b *Beads) run(args ...string) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	// Limit concurrent bd processes to prevent dolt embedded lock contention.
+	AcquireBd()
 	err := cmd.Run()
+	ReleaseBd()
 	if err != nil {
 		return nil, b.wrapError(err, stderr.String(), args)
 	}
@@ -336,8 +340,8 @@ func (b *Beads) ListByAssignee(assignee string) ([]*Issue, error) {
 	})
 }
 
-// GetAssignedIssue returns the first open issue assigned to the given assignee.
-// Returns nil if no open issue is assigned.
+// GetAssignedIssue returns the first open or hooked issue assigned to the given assignee.
+// Returns nil if no open or hooked issue is assigned.
 func (b *Beads) GetAssignedIssue(assignee string) (*Issue, error) {
 	issues, err := b.List(ListOptions{
 		Status:   "open",
@@ -352,6 +356,18 @@ func (b *Beads) GetAssignedIssue(assignee string) (*Issue, error) {
 	if len(issues) == 0 {
 		issues, err = b.List(ListOptions{
 			Status:   "in_progress",
+			Assignee: assignee,
+			Priority: -1,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Also check hooked status - polecat may have work attached but not yet started
+	if len(issues) == 0 {
+		issues, err = b.List(ListOptions{
+			Status:   "hooked",
 			Assignee: assignee,
 			Priority: -1,
 		})
@@ -624,6 +640,26 @@ func (b *Beads) CloseWithReason(reason string, ids ...string) error {
 
 	args := append([]string{"close"}, ids...)
 	args = append(args, "--reason="+reason)
+
+	// Pass session ID for work attribution if available
+	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {
+		args = append(args, "--session="+sessionID)
+	}
+
+	_, err := b.run(args...)
+	return err
+}
+
+// ForceCloseWithReason closes one or more issues with --force, bypassing
+// dependency checks. Used by gt done where the polecat is about to be nuked
+// and open molecule wisps should not block issue closure.
+func (b *Beads) ForceCloseWithReason(reason string, ids ...string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	args := append([]string{"close"}, ids...)
+	args = append(args, "--reason="+reason, "--force")
 
 	// Pass session ID for work attribution if available
 	if sessionID := runtime.SessionIDFromEnv(); sessionID != "" {

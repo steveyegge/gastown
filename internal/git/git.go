@@ -4,10 +4,10 @@ package git
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -43,70 +43,14 @@ func moveDir(src, dest string) error {
 		return nil
 	}
 
-	// Rename failed, try copy+delete as fallback for cross-filesystem moves
-	if err := copyDir(src, dest); err != nil {
+	// Rename failed, use platform-specific copy for cross-filesystem moves
+	if err := copyDirPreserving(src, dest); err != nil {
 		return fmt.Errorf("copying directory: %w", err)
 	}
 	if err := os.RemoveAll(src); err != nil {
 		return fmt.Errorf("removing source after copy: %w", err)
 	}
 	return nil
-}
-
-// copyDir recursively copies a directory from src to dest.
-func copyDir(src, dest string) error {
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll(dest, srcInfo.Mode()); err != nil {
-		return err
-	}
-
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		destPath := filepath.Join(dest, entry.Name())
-
-		if entry.IsDir() {
-			if err := copyDir(srcPath, destPath); err != nil {
-				return err
-			}
-		} else {
-			if err := copyFile(srcPath, destPath); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// copyFile copies a single file from src to dest, preserving permissions.
-func copyFile(src, dest string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	srcInfo, err := srcFile.Stat()
-	if err != nil {
-		return err
-	}
-
-	destFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, srcFile)
-	return err
 }
 
 // Git wraps git operations for a working directory.
@@ -246,14 +190,18 @@ func (g *Git) CloneWithReference(url, dest, reference string) error {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tmpDest := filepath.Join(tmpDir, filepath.Base(dest))
-	cmd := exec.Command("git", "clone", "--reference-if-able", reference, url, tmpDest)
+	args := []string{"clone", "--reference-if-able", reference, url, tmpDest}
+	if runtime.GOOS == "windows" {
+		args = append([]string{"-c", "core.symlinks=true"}, args...)
+	}
+	cmd := exec.Command("git", args...)
 	cmd.Dir = tmpDir
 	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+tmpDir)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return g.wrapError(err, stdout.String(), stderr.String(), []string{"clone", "--reference-if-able", url})
+		return g.wrapError(err, stdout.String(), stderr.String(), args)
 	}
 
 	// Move to final destination (handles cross-filesystem moves)
@@ -882,13 +830,13 @@ func ConfigureSparseCheckout(repoPath string) error {
 	// - CLAUDE.md       : Claude primary context file
 	// - AGENTS.md       : OpenCode/agent instructions file
 	// - CLAUDE.local.md : personal context file
-	// - .mcp.json       : MCP server configuration
+	// Note: .mcp.json is NOT excluded so worktrees can inherit MCP server config
 	infoDir := filepath.Join(gitDir, "info")
 	if err := os.MkdirAll(infoDir, 0755); err != nil {
 		return fmt.Errorf("creating info dir: %w", err)
 	}
 	sparseFile := filepath.Join(infoDir, "sparse-checkout")
-	sparsePatterns := "/*\n!/.claude/\n!/.opencode/\n!/CLAUDE.md\n!/AGENTS.md\n!/CLAUDE.local.md\n!/.mcp.json\n"
+	sparsePatterns := "/*\n!/.claude/\n!/.opencode/\n!/CLAUDE.md\n!/AGENTS.md\n!/CLAUDE.local.md\n"
 	if err := os.WriteFile(sparseFile, []byte(sparsePatterns), 0644); err != nil {
 		return fmt.Errorf("writing sparse-checkout: %w", err)
 	}
@@ -912,13 +860,13 @@ func ConfigureSparseCheckout(repoPath string) error {
 }
 
 // ExcludedContextFiles lists all agent context files that should be excluded by sparse checkout.
+// Note: .mcp.json is NOT excluded so worktrees can inherit MCP server config (e.g., Puppeteer).
 var ExcludedContextFiles = []string{
 	".claude",
 	".opencode",
 	"CLAUDE.md",
 	"AGENTS.md",
 	"CLAUDE.local.md",
-	".mcp.json",
 }
 
 // CheckExcludedFilesExist checks if any agent context files still exist in the repo

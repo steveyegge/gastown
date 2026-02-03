@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -17,10 +15,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// convoyIDPattern validates convoy IDs to prevent SQL injection.
+// convoyIDPattern validates convoy IDs.
 var convoyIDPattern = regexp.MustCompile(`^hq-[a-zA-Z0-9-]+$`)
 
-// subprocessTimeout is the timeout for bd and sqlite3 calls.
+// subprocessTimeout is the timeout for bd subprocess calls.
 const subprocessTimeout = 5 * time.Second
 
 // IssueItem represents a tracked issue within a convoy.
@@ -125,7 +123,7 @@ func loadConvoys(townBeads string) ([]ConvoyItem, error) {
 
 // loadTrackedIssues loads issues tracked by a convoy.
 func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
-	// Validate convoy ID to prevent SQL injection
+	// Validate convoy ID for safety
 	if !convoyIDPattern.MatchString(convoyID) {
 		return nil, 0, 0
 	}
@@ -133,16 +131,9 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 	ctx, cancel := context.WithTimeout(context.Background(), subprocessTimeout)
 	defer cancel()
 
-	dbPath := filepath.Join(townBeads, "beads.db")
-
-	// Query tracked issues from SQLite (ID validated above)
-	query := fmt.Sprintf(`
-		SELECT d.depends_on_id
-		FROM dependencies d
-		WHERE d.issue_id = '%s' AND d.type = 'tracks'
-	`, convoyID)
-
-	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, query) //nolint:gosec // G204: sqlite3 with controlled query
+	// Query tracked issues using bd dep list (returns full issue details)
+	cmd := exec.CommandContext(ctx, "bd", "dep", "list", convoyID, "-t", "tracks", "--json")
+	cmd.Dir = townBeads
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
@@ -150,37 +141,25 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 		return nil, 0, 0
 	}
 
-	var deps []struct {
-		DependsOnID string `json:"depends_on_id"`
+	var tracked []struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Status string `json:"status"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &deps); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &tracked); err != nil {
 		return nil, 0, 0
 	}
 
-	// Collect issue IDs, handling external references
-	issueIDs := make([]string, 0, len(deps))
-	for _, dep := range deps {
-		issueID := dep.DependsOnID
-		if strings.HasPrefix(issueID, "external:") {
-			parts := strings.SplitN(issueID, ":", 3)
-			if len(parts) == 3 {
-				issueID = parts[2]
-			}
-		}
-		issueIDs = append(issueIDs, issueID)
-	}
-
-	// Batch fetch all issue details in one call
-	detailsMap := getIssueDetailsBatch(townBeads, issueIDs)
-
-	issues := make([]IssueItem, 0, len(deps))
+	issues := make([]IssueItem, 0, len(tracked))
 	completed := 0
-	for _, id := range issueIDs {
-		if issue, ok := detailsMap[id]; ok {
-			issues = append(issues, issue)
-			if issue.Status == "closed" {
-				completed++
-			}
+	for _, t := range tracked {
+		issues = append(issues, IssueItem{
+			ID:     t.ID,
+			Title:  t.Title,
+			Status: t.Status,
+		})
+		if t.Status == "closed" {
+			completed++
 		}
 	}
 
@@ -193,50 +172,6 @@ func loadTrackedIssues(townBeads, convoyID string) ([]IssueItem, int, int) {
 	})
 
 	return issues, completed, len(issues)
-}
-
-// getIssueDetailsBatch fetches details for multiple issues in a single bd show call.
-// Returns a map from issue ID to details.
-func getIssueDetailsBatch(townBeads string, issueIDs []string) map[string]IssueItem {
-	result := make(map[string]IssueItem)
-	if len(issueIDs) == 0 {
-		return result
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), subprocessTimeout)
-	defer cancel()
-
-	// Build args: bd show id1 id2 id3 ... --json
-	args := append([]string{"show"}, issueIDs...)
-	args = append(args, "--json")
-
-	cmd := exec.CommandContext(ctx, "bd", args...) //nolint:gosec // G204: bd is a trusted internal tool
-	cmd.Dir = townBeads
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return result // Return empty map on error
-	}
-
-	var issues []struct {
-		ID     string `json:"id"`
-		Title  string `json:"title"`
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &issues); err != nil {
-		return result
-	}
-
-	for _, issue := range issues {
-		result[issue.ID] = IssueItem{
-			ID:     issue.ID,
-			Title:  issue.Title,
-			Status: issue.Status,
-		}
-	}
-
-	return result
 }
 
 // Update handles messages.

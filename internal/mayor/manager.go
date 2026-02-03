@@ -57,11 +57,11 @@ func (m *Manager) Start(agentOverride string) error {
 	// Check if session already exists
 	running, _ := t.HasSession(sessionID)
 	if running {
-		// Session exists - check if Claude is actually running (healthy vs zombie)
-		if t.IsClaudeRunning(sessionID) {
+		// Session exists - check if agent is actually running (healthy vs zombie)
+		if t.IsAgentAlive(sessionID) {
 			return ErrAlreadyRunning
 		}
-		// Zombie - tmux alive but Claude dead. Kill and recreate.
+		// Zombie - tmux alive but agent dead. Kill and recreate.
 		if err := t.KillSession(sessionID); err != nil {
 			return fmt.Errorf("killing zombie session: %w", err)
 		}
@@ -73,12 +73,9 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
-	// Resolve runtime config for role-specific agent settings
-	rc := config.ResolveAgentConfig(m.townRoot, mayorDir)
-
-	// Ensure runtime settings exist in townRoot because Mayor session runs from there.
-	// OpenCode looks for plugins relative to the working directory, not by directory traversal.
-	if err := runtime.EnsureSettingsForRole(m.townRoot, "mayor", rc); err != nil {
+	// Ensure runtime settings exist
+	runtimeConfig := config.ResolveRoleAgentConfig("mayor", m.townRoot, mayorDir)
+	if err := runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig); err != nil {
 		return fmt.Errorf("ensuring runtime settings: %w", err)
 	}
 
@@ -97,10 +94,10 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
-	// Create session in townRoot (not mayorDir) to match gt handoff behavior
-	// This ensures Mayor works from the town root where all tools work correctly
-	// See: https://github.com/anthropics/gastown/issues/280
-	if err := t.NewSessionWithCommand(sessionID, m.townRoot, startupCmd); err != nil {
+	// Create session in mayorDir - Mayor's home directory within the town.
+	// Tools like gt prime use workspace.FindFromCwd() which walks UP to find
+	// town root, so running from ~/gt/mayor/ still finds ~/gt/ correctly.
+	if err := t.NewSessionWithCommand(sessionID, mayorDir, startupCmd); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 

@@ -131,7 +131,7 @@ Town ({{ .TownRoot }})
 **Key points:**
 - Mail ALWAYS uses town beads - `gt mail` routes there automatically
 - Project issues use your clone's beads - `bd` commands use local `.beads/`
-- Beads changes are persisted immediately to Dolt - no sync step needed
+- Beads changes are persisted immediately via Dolt - no sync step needed
 - **GitHub URLs**: Use `git remote -v` to verify repo URLs - never assume orgs like `anthropics/`
 
 ## Prefix-Based Routing
@@ -245,7 +245,7 @@ Your hooked work persists across sessions. The handoff mail is just context note
 ## Hookable Mail
 
 Mail beads can be hooked for ad-hoc instruction handoff:
-- `gt hook attach <mail-id>` - Hook existing mail as your assignment
+- `gt mail hook <mail-id>` - Hook existing mail as your assignment
 - `gt handoff -m "..."` - Create and hook new instructions for next session
 
 If you find mail on your hook (not a molecule), GUPP applies: read the mail
@@ -262,13 +262,13 @@ instructions immediately. Useful for one-off tasks that don't warrant a full bea
 
 ### No PRs in Maintainer Repos
 
-If the remote origin is `steveyegge/beads` or `steveyegge/gastown`:
-- **NEVER create GitHub PRs** - you have direct push access
+If you have direct push access to the repo (you're a maintainer):
+- **NEVER create GitHub PRs** - push directly to main instead
 - Crew workers: push directly to main
 - Polecats: use `gt done` → Refinery merges to main
 
 PRs are for external contributors submitting to repos they don't own.
-Check `git remote -v` if unsure about repo ownership.
+Check `git remote -v` to identify repo ownership.
 
 ### The Landing Rule
 
@@ -379,6 +379,7 @@ Raw `tmux send-keys` is unreliable. Always use `gt nudge` for agent-to-agent com
 - Managing your own progress
 - Asking for help when stuck
 - Keeping your git state clean
+- Pushing commits before long breaks
 
 ## Context Cycling (Handoff)
 

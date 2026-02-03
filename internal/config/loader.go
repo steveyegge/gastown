@@ -981,6 +981,9 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	// Check rig's RoleAgents first
 	if rigSettings != nil && rigSettings.RoleAgents != nil {
 		if agentName, ok := rigSettings.RoleAgents[role]; ok && agentName != "" {
+			if rc := lookupCustomAgentConfig(agentName, townSettings, rigSettings); rc != nil {
+				return rc
+			}
 			if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: role_agents[%s]=%s - %v, falling back to default\n", role, agentName, err)
 			} else {
@@ -992,6 +995,9 @@ func ResolveRoleAgentConfig(role, townRoot, rigPath string) *RuntimeConfig {
 	// Check town's RoleAgents
 	if townSettings.RoleAgents != nil {
 		if agentName, ok := townSettings.RoleAgents[role]; ok && agentName != "" {
+			if rc := lookupCustomAgentConfig(agentName, townSettings, rigSettings); rc != nil {
+				return rc
+			}
 			if err := ValidateAgentConfig(agentName, townSettings, rigSettings); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: role_agents[%s]=%s - %v, falling back to default\n", role, agentName, err)
 			} else {
@@ -1072,6 +1078,25 @@ func lookupAgentConfig(name string, townSettings *TownSettings, rigSettings *Rig
 
 	// Fallback to claude defaults
 	return DefaultRuntimeConfig()
+}
+
+// lookupCustomAgentConfig looks up custom agents only (rig or town).
+// It skips binary validation so tests and config resolution can proceed
+// even if the command isn't on PATH yet.
+func lookupCustomAgentConfig(name string, townSettings *TownSettings, rigSettings *RigSettings) *RuntimeConfig {
+	if rigSettings != nil && rigSettings.Agents != nil {
+		if custom, ok := rigSettings.Agents[name]; ok && custom != nil {
+			return fillRuntimeDefaults(custom)
+		}
+	}
+
+	if townSettings != nil && townSettings.Agents != nil {
+		if custom, ok := townSettings.Agents[name]; ok && custom != nil {
+			return fillRuntimeDefaults(custom)
+		}
+	}
+
+	return nil
 }
 
 // fillRuntimeDefaults fills in default values for empty RuntimeConfig fields.
@@ -1261,6 +1286,37 @@ func findTownRootFromCwd() (string, error) {
 	}
 }
 
+// extractSimpleRole extracts the simple role name from a GT_ROLE value.
+// GT_ROLE can be:
+//   - Simple: "mayor", "deacon"
+//   - Compound: "rig/witness", "rig/refinery", "rig/crew/name", "rig/polecats/name"
+//
+// For compound format, returns the role segment (second part).
+// For simple format, returns the role as-is.
+func extractSimpleRole(gtRole string) string {
+	if gtRole == "" {
+		return ""
+	}
+	parts := strings.Split(gtRole, "/")
+	switch len(parts) {
+	case 1:
+		// Simple format: "mayor", "deacon"
+		return parts[0]
+	case 2:
+		// "rig/witness", "rig/refinery"
+		return parts[1]
+	case 3:
+		// "rig/crew/name" → "crew", "rig/polecats/name" → "polecat"
+		role := parts[1]
+		if role == "polecats" {
+			return "polecat"
+		}
+		return role
+	default:
+		return gtRole
+	}
+}
+
 // BuildStartupCommand builds a full startup command with environment exports.
 // envVars is a map of environment variable names to values.
 // rigPath is optional - if empty, tries to detect town root from cwd.
@@ -1273,8 +1329,10 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	var rc *RuntimeConfig
 	var townRoot string
 
-	// Extract role from envVars for role-based agent resolution
-	role := envVars["GT_ROLE"]
+	// Extract role from envVars for role-based agent resolution.
+	// GT_ROLE may be compound format (e.g., "rig/refinery") so we extract
+	// the simple role name for role_agents lookup.
+	role := extractSimpleRole(envVars["GT_ROLE"])
 
 	if rigPath != "" {
 		// Derive town root from rig path

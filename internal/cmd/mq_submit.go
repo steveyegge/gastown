@@ -190,6 +190,9 @@ func runMqSubmit(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("creating merge request bead: %w", err)
 		}
+
+		// Nudge refinery to pick up the new MR
+		nudgeRefinery(rigName, fmt.Sprintf("MR submitted: %s branch=%s", mrIssue.ID, branch))
 	}
 
 	// Success output
