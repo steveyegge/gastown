@@ -19,6 +19,7 @@ var (
 	witnessStatusJSON    bool
 	witnessAgentOverride string
 	witnessEnvOverrides  []string
+	witnessRespawnDryRun bool
 )
 
 var witnessCmd = &cobra.Command{
@@ -119,6 +120,21 @@ Examples:
 	RunE: runWitnessRestart,
 }
 
+var witnessRespawnHookedCmd = &cobra.Command{
+	Use:   "respawn-hooked <rig>",
+	Short: "Respawn polecats with hooked work but no session",
+	Long: `Respawn polecats that have hooked work but no active tmux session.
+
+This is used when work is slung to a polecat that has already completed
+and self-nuked its session. The hook_bead is authoritative for pending work.
+
+Examples:
+  gt witness respawn-hooked greenplace
+  gt witness respawn-hooked greenplace --dry-run`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWitnessRespawnHooked,
+}
+
 func init() {
 	// Start flags
 	witnessStartCmd.Flags().BoolVar(&witnessForeground, "foreground", false, "Run in foreground (default: background)")
@@ -132,12 +148,16 @@ func init() {
 	witnessRestartCmd.Flags().StringVar(&witnessAgentOverride, "agent", "", "Agent alias to run the Witness with (overrides town default)")
 	witnessRestartCmd.Flags().StringArrayVar(&witnessEnvOverrides, "env", nil, "Environment variable override (KEY=VALUE, can be repeated)")
 
+	// Respawn flags
+	witnessRespawnHookedCmd.Flags().BoolVar(&witnessRespawnDryRun, "dry-run", false, "Show what would be respawned without starting sessions")
+
 	// Add subcommands
 	witnessCmd.AddCommand(witnessStartCmd)
 	witnessCmd.AddCommand(witnessStopCmd)
 	witnessCmd.AddCommand(witnessRestartCmd)
 	witnessCmd.AddCommand(witnessStatusCmd)
 	witnessCmd.AddCommand(witnessAttachCmd)
+	witnessCmd.AddCommand(witnessRespawnHookedCmd)
 
 	rootCmd.AddCommand(witnessCmd)
 }
@@ -216,6 +236,39 @@ func runWitnessStop(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Witness stopped for %s\n", style.Bold.Render("✓"), rigName)
+	return nil
+}
+
+func runWitnessRespawnHooked(cmd *cobra.Command, args []string) error {
+	rigName := args[0]
+
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return err
+	}
+
+	items, err := witness.FindPolecatsWithHookedWork(townRoot, rigName)
+	if err != nil {
+		return err
+	}
+
+	if len(items) == 0 {
+		fmt.Printf("%s No polecats with hooked work to respawn\n", style.Dim.Render("○"))
+		return nil
+	}
+
+	for _, item := range items {
+		if witnessRespawnDryRun {
+			fmt.Printf("%s Would respawn %s (hook: %s)\n", style.Dim.Render("○"), item.PolecatName, item.HookBead)
+			continue
+		}
+		fmt.Printf("Respawning %s (hook: %s)...\n", item.PolecatName, item.HookBead)
+		if err := witness.RespawnPolecatWithHookedWork(townRoot, rigName, item.PolecatName); err != nil {
+			return fmt.Errorf("respawning %s: %w", item.PolecatName, err)
+		}
+		fmt.Printf("%s Respawned %s\n", style.Bold.Render("✓"), item.PolecatName)
+	}
+
 	return nil
 }
 
