@@ -310,3 +310,71 @@ Dog returns to available state in the pool.
 description = "Scan scope: 'town' or specific rig name"
 required = true
 default = "town"
+
+[vars.action]
+description = "Action taken (computed)"
+default = ""
+
+[vars.action_summary]
+description = "Summary of actions (computed)"
+default = ""
+
+[vars.burn_count]
+description = "Number of items burned (computed)"
+default = ""
+
+[vars.escalate_count]
+description = "Number of escalations (computed)"
+default = ""
+
+[vars.escalations_section]
+description = "Section for escalations (computed)"
+default = ""
+
+[vars.id]
+description = "Item ID (computed)"
+default = ""
+
+[vars.issue_count]
+description = "Number of issues (computed)"
+default = ""
+
+[vars.mol_count]
+description = "Number of molecules (computed)"
+default = ""
+
+[vars.reason]
+description = "Reason for action (computed)"
+default = ""
+
+[vars.reassign_count]
+description = "Number of reassignments (computed)"
+default = ""
+
+[vars.recover_count]
+description = "Number of recoveries (computed)"
+default = ""
+
+[vars.report]
+description = "Scan report (computed)"
+default = ""
+
+[vars.reset_count]
+description = "Number of resets (computed)"
+default = ""
+
+[vars.timestamp]
+description = "Timestamp (computed)"
+default = ""
+
+[vars.total_count]
+description = "Total count (computed)"
+default = ""
+
+[vars.type]
+description = "Item type (computed)"
+default = ""
+
+[vars.wisp_count]
+description = "Number of wisps (computed)"
+default = ""
