@@ -719,8 +719,8 @@ func (t *Tmux) WakePaneIfDetached(target string) {
 
 // NudgeSession sends a message to a Claude Code session reliably.
 // This is the canonical way to send messages to Claude sessions.
-// Uses: literal mode + 500ms debounce + ESC (for vim mode) + separate Enter.
-// After sending, triggers SIGWINCH to wake Claude in detached sessions.
+// Uses: literal mode + 500ms debounce + ESC (for vim mode) + wake + separate Enter.
+// Wakes detached sessions BEFORE sending Enter to ensure event loop is active.
 // Verification is the Witness's job (AI), not this function.
 //
 // IMPORTANT: Nudges to the same session are serialized to prevent interleaving.
@@ -746,7 +746,13 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	_, _ = t.run("send-keys", "-t", session, "Escape")
 	time.Sleep(100 * time.Millisecond)
 
-	// 4. Send Enter with retry (critical for message submission)
+	// 4. Wake the pane BEFORE sending Enter to ensure event loop is active.
+	// In detached sessions, Claude's event loop may be sleeping. Waking first
+	// ensures Enter is processed immediately rather than sitting in the buffer.
+	t.WakePaneIfDetached(session)
+	time.Sleep(100 * time.Millisecond)
+
+	// 5. Send Enter with retry (critical for message submission)
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -756,8 +762,6 @@ func (t *Tmux) NudgeSession(session, message string) error {
 			lastErr = err
 			continue
 		}
-		// 5. Wake the pane to trigger SIGWINCH for detached sessions
-		t.WakePaneIfDetached(session)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
@@ -765,7 +769,7 @@ func (t *Tmux) NudgeSession(session, message string) error {
 
 // NudgePane sends a message to a specific pane reliably.
 // Same pattern as NudgeSession but targets a pane ID (e.g., "%9") instead of session name.
-// After sending, triggers SIGWINCH to wake Claude in detached sessions.
+// Wakes detached sessions BEFORE sending Enter to ensure event loop is active.
 // Nudges to the same pane are serialized to prevent interleaving.
 func (t *Tmux) NudgePane(pane, message string) error {
 	// Serialize nudges to this pane to prevent interleaving
@@ -786,7 +790,13 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	_, _ = t.run("send-keys", "-t", pane, "Escape")
 	time.Sleep(100 * time.Millisecond)
 
-	// 4. Send Enter with retry (critical for message submission)
+	// 4. Wake the pane BEFORE sending Enter to ensure event loop is active.
+	// In detached sessions, Claude's event loop may be sleeping. Waking first
+	// ensures Enter is processed immediately rather than sitting in the buffer.
+	t.WakePaneIfDetached(pane)
+	time.Sleep(100 * time.Millisecond)
+
+	// 5. Send Enter with retry (critical for message submission)
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -796,8 +806,6 @@ func (t *Tmux) NudgePane(pane, message string) error {
 			lastErr = err
 			continue
 		}
-		// 5. Wake the pane to trigger SIGWINCH for detached sessions
-		t.WakePaneIfDetached(pane)
 		return nil
 	}
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
