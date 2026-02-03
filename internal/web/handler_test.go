@@ -922,7 +922,7 @@ func TestE2E_Server_HTMLStructure(t *testing.T) {
 		"<!DOCTYPE html>",
 		"<html",
 		"<head>",
-		"<title>Gastown Control Center</title>",
+		"<title>Gas Town Control Center</title>",
 		"htmx.org",
 		"<body>",
 		"</body>",
