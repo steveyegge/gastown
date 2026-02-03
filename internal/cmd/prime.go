@@ -73,7 +73,39 @@ Output includes:
   - Auto-seance project context
   - Hooked work details (for autonomous mode)
 
-See docs/concepts/agent-advice.md for advice system documentation.`,
+See docs/concepts/agent-advice.md for advice system documentation.
+
+ADVICE SYSTEM:
+  Advice beads provide context to agents via gt prime output.
+
+  Creating advice:
+    bd create --rig <rig> -t advice "Title" -d "Description"
+
+  Targeting with labels:
+    [global]              - All agents in all rigs
+    [role:crew]           - All crew members
+    [role:polecat]        - All polecats
+    [role:mayor]          - Mayor only
+    [rig:gastown]         - Agents in gastown rig only
+    [rig:gastown role:crew] - Crew in gastown only
+    [agent:gastown/crew/X]  - Specific agent only
+
+  Label format matters:
+    ✓ [global]           - Works
+    ✗ [advice:global]    - Wrong prefix, won't match
+
+  Multiple roles:
+    bd update <id> --add-label "role:crew" --add-label "role:polecat"
+
+  Verify targeting:
+    bd advice list --for=<agent-id>
+    GT_ROLE=crew gt prime | grep "Your advice title"
+
+  Best practices:
+    - Use [global] for advice all agents need
+    - Use [role:X] to target specific worker types
+    - Use [rig:X] to scope to one project
+    - Combine: [rig:X role:crew] for project-specific crew advice`,
 	RunE: runPrime,
 }
 
