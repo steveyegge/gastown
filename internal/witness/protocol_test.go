@@ -20,7 +20,6 @@ func TestClassifyMessage(t *testing.T) {
 		{"MERGE_FAILED ace", ProtoMergeFailed},
 		{"🤝 HANDOFF: Patrol context", ProtoHandoff},
 		{"🤝HANDOFF: No space", ProtoHandoff},
-		{"SWARM_START", ProtoSwarmStart},
 		{"Unknown message", ProtoUnknown},
 		{"", ProtoUnknown},
 	}

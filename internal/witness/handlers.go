@@ -414,35 +414,6 @@ Please fix the issue and resubmit with 'gt done'.`,
 	return result
 }
 
-// HandleSwarmStart processes a SWARM_START message from the Mayor.
-// Creates a swarm tracking wisp to monitor batch polecat work.
-func HandleSwarmStart(workDir string, msg *mail.Message) *HandlerResult {
-	result := &HandlerResult{
-		MessageID:    msg.ID,
-		ProtocolType: ProtoSwarmStart,
-	}
-
-	// Parse the message
-	payload, err := ParseSwarmStart(msg.Body)
-	if err != nil {
-		result.Error = fmt.Errorf("parsing SWARM_START: %w", err)
-		return result
-	}
-
-	// Create a swarm tracking wisp
-	wispID, err := createSwarmWisp(workDir, payload)
-	if err != nil {
-		result.Error = fmt.Errorf("creating swarm wisp: %w", err)
-		return result
-	}
-
-	result.Handled = true
-	result.WispCreated = wispID
-	result.Action = fmt.Sprintf("created swarm tracking wisp %s for %s", wispID, payload.SwarmID)
-
-	return result
-}
-
 // createCleanupWisp creates a wisp to track polecat cleanup.
 func createCleanupWisp(workDir, polecatName, issueID, branch string) (string, error) {
 	title := fmt.Sprintf("cleanup:%s", polecatName)
@@ -490,30 +461,6 @@ func createCleanupWisp(workDir, polecatName, issueID, branch string) (string, er
 		if strings.Contains(line, "-") && len(line) < 40 {
 			return line, nil
 		}
-	}
-
-	return output, nil
-}
-
-// createSwarmWisp creates a wisp to track swarm (batch) work.
-func createSwarmWisp(workDir string, payload *SwarmStartPayload) (string, error) {
-	title := fmt.Sprintf("swarm:%s", payload.SwarmID)
-	description := fmt.Sprintf("Tracking batch: %s\nTotal: %d polecats", payload.SwarmID, payload.Total)
-
-	labels := strings.Join(SwarmWispLabels(payload.SwarmID, payload.Total, 0, payload.StartedAt), ",")
-
-	output, err := util.ExecWithOutput(workDir, "bd", "create",
-		"--ephemeral",
-		"--title", title,
-		"--description", description,
-		"--labels", labels,
-	)
-	if err != nil {
-		return "", err
-	}
-
-	if strings.HasPrefix(output, "Created:") {
-		return strings.TrimSpace(strings.TrimPrefix(output, "Created:")), nil
 	}
 
 	return output, nil

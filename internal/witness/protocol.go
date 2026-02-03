@@ -28,9 +28,6 @@ var (
 	// HANDOFF - session continuity message
 	PatternHandoff = regexp.MustCompile(`^🤝\s*HANDOFF`)
 
-	// SWARM_START - mayor initiating batch work
-	PatternSwarmStart = regexp.MustCompile(`^SWARM_START`)
-
 	// RATE_LIMITED <source> - rate limit detected
 	PatternRateLimited = regexp.MustCompile(`^RATE_LIMITED\s+(\S+)`)
 )
@@ -45,7 +42,6 @@ const (
 	ProtoMerged            ProtocolType = "merged"
 	ProtoMergeFailed       ProtocolType = "merge_failed"
 	ProtoHandoff           ProtocolType = "handoff"
-	ProtoSwarmStart        ProtocolType = "swarm_start"
 	ProtoRateLimited       ProtocolType = "rate_limited"
 	ProtoUnknown           ProtocolType = "unknown"
 )
@@ -88,14 +84,6 @@ type MergeFailedPayload struct {
 	FailedAt    time.Time
 }
 
-// SwarmStartPayload contains parsed data from a SWARM_START message.
-type SwarmStartPayload struct {
-	SwarmID   string
-	BeadIDs   []string
-	Total     int
-	StartedAt time.Time
-}
-
 // RateLimitedPayload contains parsed data from a RATE_LIMITED message.
 type RateLimitedPayload struct {
 	Source          string        // Where rate limit was detected (e.g., "polecat:nux", "spawn")
@@ -120,8 +108,6 @@ func ClassifyMessage(subject string) ProtocolType {
 		return ProtoMergeFailed
 	case PatternHandoff.MatchString(subject):
 		return ProtoHandoff
-	case PatternSwarmStart.MatchString(subject):
-		return ProtoSwarmStart
 	case PatternRateLimited.MatchString(subject):
 		return ProtoRateLimited
 	default:
@@ -275,27 +261,6 @@ func ParseMergeFailed(subject, body string) (*MergeFailedPayload, error) {
 	return payload, nil
 }
 
-// ParseSwarmStart extracts payload from a SWARM_START message.
-// Body format is JSON: {"swarm_id": "batch-123", "beads": ["bd-a", "bd-b"]}
-func ParseSwarmStart(body string) (*SwarmStartPayload, error) {
-	payload := &SwarmStartPayload{
-		StartedAt: time.Now(),
-	}
-
-	// Parse the JSON-like body (simplified parsing for key-value extraction)
-	// Full JSON parsing would require encoding/json import
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "SwarmID:") || strings.HasPrefix(line, "swarm_id:") {
-			payload.SwarmID = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "SwarmID:"), "swarm_id:"))
-		} else if strings.HasPrefix(line, "Total:") {
-			_, _ = fmt.Sscanf(line, "Total: %d", &payload.Total)
-		}
-	}
-
-	return payload, nil
-}
-
 // ParseRateLimited extracts payload from a RATE_LIMITED message.
 // Subject format: RATE_LIMITED <source>
 // Body format:
@@ -345,17 +310,6 @@ func CleanupWispLabels(polecatName, state string) []string {
 		"cleanup",
 		fmt.Sprintf("polecat:%s", polecatName),
 		fmt.Sprintf("state:%s", state),
-	}
-}
-
-// SwarmWispLabels generates labels for a swarm tracking wisp.
-func SwarmWispLabels(swarmID string, total, completed int, startTime time.Time) []string {
-	return []string{
-		"swarm",
-		fmt.Sprintf("swarm_id:%s", swarmID),
-		fmt.Sprintf("total:%d", total),
-		fmt.Sprintf("completed:%d", completed),
-		fmt.Sprintf("start:%s", startTime.Format(time.RFC3339)),
 	}
 }
 
