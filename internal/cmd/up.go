@@ -59,6 +59,10 @@ Use --restore to also start:
   • Crew       - Per rig settings (settings/config.json crew.startup)
   • Polecats   - Those with pinned beads (work attached)
 
+Use --restart to stop running services before starting. This is useful
+when agents need to pick up new configuration. Equivalent to 'gt down && gt up'
+or simply 'gt restart'.
+
 Running 'gt up' multiple times is safe - it only starts services that
 aren't already running.`,
 	RunE: runUp,
@@ -67,11 +71,13 @@ aren't already running.`,
 var (
 	upQuiet   bool
 	upRestore bool
+	upRestart bool
 )
 
 func init() {
 	upCmd.Flags().BoolVarP(&upQuiet, "quiet", "q", false, "Only show errors")
 	upCmd.Flags().BoolVar(&upRestore, "restore", false, "Also restore crew (from settings) and polecats (from hooks)")
+	upCmd.Flags().BoolVar(&upRestart, "restart", false, "Stop running services before starting (equivalent to 'gt down && gt up')")
 	rootCmd.AddCommand(upCmd)
 }
 
@@ -79,6 +85,42 @@ func runUp(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// If --restart flag is set, stop services first
+	if upRestart {
+		if !upQuiet {
+			fmt.Println("Stopping services first (--restart)...")
+		}
+		// Save and set down flags
+		savedDownQuiet := downQuiet
+		savedDownPolecats := downPolecats
+		savedDownForce := downForce
+		savedDownAll := downAll
+		savedDownNuke := downNuke
+		savedDownDryRun := downDryRun
+
+		downQuiet = upQuiet
+		downPolecats = false
+		downForce = false
+		downAll = false
+		downNuke = false
+		downDryRun = false
+
+		_ = runDown(cmd, []string{}) // Ignore errors, continue with startup
+
+		// Restore down flags
+		downQuiet = savedDownQuiet
+		downPolecats = savedDownPolecats
+		downForce = savedDownForce
+		downAll = savedDownAll
+		downNuke = savedDownNuke
+		downDryRun = savedDownDryRun
+
+		if !upQuiet {
+			fmt.Println()
+			fmt.Println("Starting services...")
+		}
 	}
 
 	allOK := true
