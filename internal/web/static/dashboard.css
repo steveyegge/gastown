@@ -346,6 +346,7 @@
         .mail-time {
             color: var(--text-muted);
             font-size: 0.75rem;
+            white-space: nowrap;
         }
 
         .priority-urgent { color: var(--red); font-weight: bold; }

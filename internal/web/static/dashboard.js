@@ -15,6 +15,8 @@
         if (panel.classList.contains('expanded')) {
             panel.classList.remove('expanded');
             btn.textContent = 'Expand';
+            // Resume refresh when panel is collapsed
+            window.pauseRefresh = false;
         } else {
             document.querySelectorAll('.panel.expanded').forEach(function(p) {
                 p.classList.remove('expanded');
@@ -23,14 +25,27 @@
             });
             panel.classList.add('expanded');
             btn.textContent = '✕ Close';
+            // Pause refresh while panel is expanded
+            window.pauseRefresh = true;
         }
     });
 
-    // After HTMX swap, close any expanded panels
+    // After HTMX swap - morph preserves most state, but we need to re-init some things
     document.body.addEventListener('htmx:afterSwap', function() {
-        document.querySelectorAll('.panel.expanded').forEach(function(p) {
-            p.classList.remove('expanded');
-        });
+        // Morph preserves expanded class, so we don't need to close panels anymore
+        // Just check if we should resume refresh
+        var hasExpanded = document.querySelector('.panel.expanded');
+        var mailDetail = document.getElementById('mail-detail');
+        var mailCompose = document.getElementById('mail-compose');
+        var issueDetail = document.getElementById('issue-detail');
+        var prDetail = document.getElementById('pr-detail');
+        var inDetailView = (mailDetail && mailDetail.style.display !== 'none') ||
+                          (mailCompose && mailCompose.style.display !== 'none') ||
+                          (issueDetail && issueDetail.style.display !== 'none') ||
+                          (prDetail && prDetail.style.display !== 'none');
+        if (!inDetailView && !hasExpanded) {
+            window.pauseRefresh = false;
+        }
     });
 
     // ============================================
@@ -612,11 +627,26 @@
         var now = new Date();
         var diff = now - d;
 
-        if (diff < 60000) return 'just now';
-        if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
-        if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-        if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
-        return d.toLocaleDateString();
+        // Format: "Jan 26, 3:45 PM" or "Jan 26 2025, 3:45 PM" if different year
+        var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        var month = months[d.getMonth()];
+        var day = d.getDate();
+        var hours = d.getHours();
+        var minutes = d.getMinutes();
+        var ampm = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12 || 12;
+        var minStr = minutes < 10 ? '0' + minutes : minutes;
+        var yearPart = d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() + ',' : '';
+        var dateStr = month + ' ' + day + yearPart + ', ' + hours + ':' + minStr + ' ' + ampm;
+
+        // Add relative time in parentheses for recent messages
+        var relative = '';
+        if (diff < 60000) relative = ' (just now)';
+        else if (diff < 3600000) relative = ' (' + Math.floor(diff / 60000) + 'm ago)';
+        else if (diff < 86400000) relative = ' (' + Math.floor(diff / 3600000) + 'h ago)';
+        else if (diff < 604800000) relative = ' (' + Math.floor(diff / 86400000) + 'd ago)';
+
+        return dateStr + relative;
     }
 
     // Load mail on page load
@@ -719,7 +749,9 @@
         // Populate To dropdown
         populateToDropdown(null);
 
+        // Hide all mail views, show compose
         mailList.style.display = 'none';
+        if (mailAll) mailAll.style.display = 'none';
         mailDetail.style.display = 'none';
         mailCompose.style.display = 'block';
         document.getElementById('compose-to').focus();
@@ -730,6 +762,8 @@
         mailCompose.style.display = 'none';
         if (currentMessageId) {
             mailDetail.style.display = 'block';
+        } else if (currentMailTab === 'all' && mailAll) {
+            mailAll.style.display = 'block';
         } else {
             mailList.style.display = 'block';
         }
@@ -799,7 +833,10 @@
     // Returns a Promise so callers can wait for it
     function populateToDropdown(selectedValue) {
         var select = document.getElementById('compose-to');
-        select.innerHTML = '<option value="">Select recipient...</option>';
+        
+        // Show loading state
+        select.innerHTML = '<option value="">⏳ Loading recipients...</option>';
+        select.disabled = true;
 
         // If we have a selected value for reply, add it immediately so it's available
         if (selectedValue) {
@@ -809,12 +846,26 @@
             opt.textContent = cleanValue + ' (replying to)';
             opt.selected = true;
             select.appendChild(opt);
+            select.disabled = false;
         }
 
         // Fetch agents from options API
         return fetch('/api/options')
             .then(function(r) { return r.json(); })
             .then(function(data) {
+                // Clear loading state, rebuild options
+                select.innerHTML = '<option value="">Select recipient...</option>';
+                
+                // Re-add reply-to if present
+                if (selectedValue) {
+                    var cleanVal = selectedValue.replace(/\/$/, '').trim();
+                    var replyOpt = document.createElement('option');
+                    replyOpt.value = cleanVal;
+                    replyOpt.textContent = cleanVal + ' (replying to)';
+                    replyOpt.selected = true;
+                    select.appendChild(replyOpt);
+                }
+                
                 var agents = data.agents || [];
                 var addedValues = selectedValue ? [selectedValue.replace(/\/$/, '').toLowerCase()] : [];
 
@@ -833,9 +884,13 @@
                     if (!running) opt.disabled = true;
                     select.appendChild(opt);
                 });
+                
+                select.disabled = false;
             })
             .catch(function(err) {
                 console.error('Failed to load agents for To dropdown:', err);
+                select.innerHTML = '<option value="">⚠ Failed to load recipients</option>';
+                select.disabled = false;
             });
     }
 

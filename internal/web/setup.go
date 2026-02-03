@@ -677,7 +677,25 @@ const setupHTML = `<!DOCTYPE html>
 <body>
     <div class="setup-container">
         <div class="setup-header">
-            <h1>🚚 Gas Town</h1>
+            <pre style="font-size:10px;line-height:1.1;color:#58a6ff;margin:0 0 16px 0;white-space:pre;font-family:monospace;"> __       __  ________  __        ______    ______   __       __  ________                        
+|  \  _  |  \|        \|  \      /      \  /      \ |  \     /  \|        \                       
+| $$ / \ | $$| $$$$$$$$| $$     |  $$$$$$\|  $$$$$$\| $$\   /  $$| $$$$$$$$                       
+| $$/  $\| $$| $$__    | $$     | $$   \$$| $$  | $$| $$$\ /  $$$| $$__                           
+| $$  $$$\ $$| $$  \   | $$     | $$      | $$  | $$| $$$$\  $$$$| $$  \                          
+| $$ $$\$$\$$| $$$$$   | $$     | $$   __ | $$  | $$| $$\$$ $$ $$| $$$$$                          
+| $$$$  \$$$$| $$_____ | $$_____| $$__/  \| $$__/ $$| $$ \$$$| $$| $$_____                        
+| $$$    \$$$| $$     \| $$     \\$$    $$ \$$    $$| $$  \$ | $$| $$     \                       
+ \$$      \$$ \$$$$$$$$ \$$$$$$$$ \$$$$$$   \$$$$$$  \$$      \$$ \$$$$$$$$                       
+                                                                                                  
+ ________   ______          ______    ______    ______  ________   ______   __       __  __    __ 
+|        \ /      \        /      \  /      \  /      \|        \ /      \ |  \  _  |  \|  \  |  \
+ \$$$$$$$$|  $$$$$$\      |  $$$$$$\|  $$$$$$\|  $$$$$$\\$$$$$$$$|  $$$$$$\| $$ / \ | $$| $$\ | $$
+   | $$   | $$  | $$      | $$ __\$$| $$__| $$| $$___\$$  | $$   | $$  | $$| $$/  $\| $$| $$$\| $$
+   | $$   | $$  | $$      | $$|    \| $$    $$ \$$    \   | $$   | $$  | $$| $$  $$$\ $$| $$$$\ $$
+   | $$   | $$  | $$      | $$ \$$$$| $$$$$$$$ _\$$$$$$\  | $$   | $$  | $$| $$ $$\$$\$$| $$\$$ $$
+   | $$   | $$__/ $$      | $$__| $$| $$  | $$|  \__| $$  | $$   | $$__/ $$| $$$$  \$$$$| $$ \$$$$
+   | $$    \$$    $$       \$$    $$| $$  | $$ \$$    $$  | $$    \$$    $$| $$$    \$$$| $$  \$$$
+    \$$     \$$$$$$         \$$$$$$  \$$   \$$  \$$$$$$    \$$     \$$$$$$  \$$      \$$ \$$   \$$</pre>
             <p>Let's set up your workspace</p>
         </div>
 
@@ -831,11 +849,10 @@ const setupHTML = `<!DOCTYPE html>
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.success) {
-                    // Show launching message
-                    document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d1117;">' +
-                        '<div style="font-size:2rem;margin-bottom:16px;">🚚</div>' +
-                        '<div style="font-size:1.2rem;margin-bottom:8px;">Launching Dashboard...</div>' +
-                        '<div style="color:#8b949e;">Redirecting...</div>' +
+                    // Show loading message
+                    document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;color:#e6edf3;font-family:monospace;background:#0d1117;">' +
+                        '<div style="font-size:1.5rem;color:#58a6ff;margin-bottom:16px;">🚚</div>' +
+                        '<div style="font-size:1rem;color:#8b949e;">loading control center...</div>' +
                         '</div>';
                     // Redirect to the new dashboard
                     if (data.redirect) {

@@ -49,7 +49,13 @@ type APIHandler struct {
 	gtPath string
 	// workDir is the working directory for command execution.
 	workDir string
+	// Options cache
+	optionsCache     *OptionsResponse
+	optionsCacheTime time.Time
+	optionsCacheMu   sync.RWMutex
 }
+
+const optionsCacheTTL = 30 * time.Second
 
 // NewAPIHandler creates a new API handler.
 func NewAPIHandler() *APIHandler {
@@ -452,89 +458,108 @@ type OptionsResponse struct {
 }
 
 // handleOptions returns dynamic options for command arguments.
-// All commands are run in parallel to minimize response time.
+// Results are cached for 30 seconds to avoid slow repeated fetches.
 func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
-	resp := OptionsResponse{}
+	// Check cache first
+	h.optionsCacheMu.RLock()
+	if h.optionsCache != nil && time.Since(h.optionsCacheTime) < optionsCacheTTL {
+		cached := h.optionsCache
+		h.optionsCacheMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Cache", "HIT")
+		_ = json.NewEncoder(w).Encode(cached)
+		return
+	}
+	h.optionsCacheMu.RUnlock()
+
+	// Cache miss - fetch fresh data
+	resp := &OptionsResponse{}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	// Run all fetches in parallel
+	// Run all fetches in parallel with shorter timeouts
 	wg.Add(7)
 
-	// Fetch rigs (parse text output - no JSON support)
+	// Fetch rigs
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"rig", "list"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"rig", "list"}); err == nil {
 			mu.Lock()
 			resp.Rigs = parseRigListOutput(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch polecats (has JSON support)
+	// Fetch polecats
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"polecat", "list", "--all", "--json"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"polecat", "list", "--all", "--json"}); err == nil {
 			mu.Lock()
-			resp.Polecats = parseJSONPaths(output) // rig/name format
+			resp.Polecats = parseJSONPaths(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch convoys (parse text output)
+	// Fetch convoys
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"convoy", "list"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"convoy", "list"}); err == nil {
 			mu.Lock()
 			resp.Convoys = parseConvoyListOutput(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch hooks (parse text output)
+	// Fetch hooks
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"hooks", "list"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"hooks", "list"}); err == nil {
 			mu.Lock()
 			resp.Hooks = parseHooksListOutput(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch mail messages (parse text output)
+	// Fetch mail messages
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"mail", "inbox"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"mail", "inbox"}); err == nil {
 			mu.Lock()
 			resp.Messages = parseMailInboxOutput(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch crew members (parse text output)
+	// Fetch crew members
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"crew", "list", "--all"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"crew", "list", "--all"}); err == nil {
 			mu.Lock()
 			resp.Crew = parseCrewListOutput(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Fetch agents with status from status --json (needs longer timeout - can take 20+ seconds)
+	// Fetch agents - shorter timeout, skip if slow
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 30*time.Second, []string{"status", "--json"}); err == nil {
+		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"status", "--json"}); err == nil {
 			mu.Lock()
 			resp.Agents = parseAgentsFromStatus(output)
 			mu.Unlock()
 		}
 	}()
 
-	// Wait for all commands to complete
 	wg.Wait()
 
+	// Update cache
+	h.optionsCacheMu.Lock()
+	h.optionsCache = resp
+	h.optionsCacheTime = time.Now()
+	h.optionsCacheMu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Cache", "MISS")
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
