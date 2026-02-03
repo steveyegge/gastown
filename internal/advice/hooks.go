@@ -2,7 +2,7 @@
 //
 // Advice hooks are commands defined in advice beads that run at specific
 // lifecycle points (session-end, before-commit, before-push, before-handoff).
-// This package implements the hook execution engine (hq--uaim.6).
+// This package implements the hook execution engine (gt-08ast5).
 package advice
 
 import (
@@ -32,9 +32,9 @@ const (
 
 // Default values
 const (
-	DefaultTimeout      = 30   // seconds
-	MaxTimeout          = 300  // seconds (5 minutes)
-	MaxCommandLength    = 1000 // characters
+	DefaultTimeout   = 30   // seconds
+	MaxTimeout       = 300  // seconds (5 minutes)
+	MaxCommandLength = 1000 // characters
 )
 
 // ValidTriggers lists all valid hook trigger values.
@@ -267,7 +267,7 @@ func (r *Runner) RunAll(hooks []*Hook) ([]*HookResult, error) {
 
 			if onFailure == OnFailureBlock && blockingError == nil {
 				blockingError = fmt.Errorf("hook %q failed with exit code %d: %s",
-					hook.ID, result.ExitCode, truncateOutput(result.Output, 200))
+					hook.ID, result.ExitCode, TruncateOutput(result.Output, 200))
 			}
 		}
 
@@ -337,7 +337,8 @@ func isValidOnFailure(onFailure string) bool {
 	return false
 }
 
-func truncateOutput(s string, maxLen int) string {
+// TruncateOutput truncates a string to maxLen characters, adding "..." if truncated.
+func TruncateOutput(s string, maxLen int) string {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, "\n", " ")
 	if len(s) > maxLen {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/advice"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/events"
@@ -154,14 +155,34 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Handing off %s...\n", style.Bold.Render("🤝"), currentSession)
 
 	// Log handoff event (both townlog and events feed)
+	var agent string
+	var cwd string
 	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
-		agent := sessionToGTRole(currentSession)
+		agent = sessionToGTRole(currentSession)
 		if agent == "" {
 			agent = currentSession
 		}
 		_ = LogHandoff(townRoot, agent, handoffSubject)
 		// Also log to activity feed
 		_ = events.LogFeed(events.TypeHandoff, agent, events.HandoffPayload(handoffSubject, true))
+	}
+	cwd, _ = os.Getwd()
+
+	// Run before-handoff advice hooks (gt-08ast5)
+	// These hooks run before session respawn for cleanup or state saving.
+	if agent != "" && cwd != "" {
+		if results, err := advice.RunHooksForTrigger(cwd, agent, advice.TriggerBeforeHandoff); err != nil {
+			// A blocking hook failed - abort the handoff
+			return fmt.Errorf("before-handoff hook failed: %w", err)
+		} else if len(results) > 0 {
+			for _, result := range results {
+				if result.Success {
+					fmt.Printf("%s Hook %s completed\n", style.Bold.Render("✓"), result.Hook.Title)
+				} else if result.Hook.OnFailure == advice.OnFailureWarn {
+					style.PrintWarning("hook %s failed: %s", result.Hook.Title, advice.TruncateOutput(result.Output, 100))
+				}
+			}
+		}
 	}
 
 	// Dry run mode - show what would happen (BEFORE any side effects)
@@ -197,7 +218,7 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 	// Write handoff marker for successor detection (prevents handoff loop bug).
 	// The marker is cleared by gt prime after it outputs the warning.
 	// This tells the new session "you're post-handoff, don't re-run /handoff"
-	if cwd, err := os.Getwd(); err == nil {
+	if cwd != "" {
 		runtimeDir := filepath.Join(cwd, constants.DirRuntime)
 		_ = os.MkdirAll(runtimeDir, 0755)
 		markerPath := filepath.Join(runtimeDir, constants.FileHandoffMarker)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/advice"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
@@ -310,6 +311,21 @@ func runDone(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		// Run before-commit advice hooks (gt-08ast5)
+		// These hooks run before pushing, allowing validation or cleanup.
+		if results, err := advice.RunHooksForTrigger(cwd, sender, advice.TriggerBeforeCommit); err != nil {
+			// A blocking hook failed - abort the done process
+			return fmt.Errorf("before-commit hook failed: %w", err)
+		} else if len(results) > 0 {
+			for _, result := range results {
+				if result.Success {
+					fmt.Printf("%s Hook %s completed\n", style.Bold.Render("✓"), result.Hook.Title)
+				} else if result.Hook.OnFailure == advice.OnFailureWarn {
+					style.PrintWarning("hook %s failed: %s", result.Hook.Title, advice.TruncateOutput(result.Output, 100))
+				}
+			}
+		}
+
 		// CRITICAL: Push branch BEFORE creating MR bead (hq-6dk53, hq-a4ksk)
 		// The MR bead triggers Refinery to process this branch. If the branch
 		// isn't pushed yet, Refinery finds nothing to merge. The worktree gets
@@ -576,6 +592,22 @@ notifyWitness:
 
 	// Update agent bead state (ZFC: self-report completion)
 	updateAgentStateOnDone(cwd, townRoot, exitType, issueID)
+
+	// Run session-end advice hooks (gt-08ast5)
+	// These hooks run before session termination for final cleanup/reporting.
+	// We don't block on these - session must end regardless.
+	if results, err := advice.RunHooksForTrigger(cwd, sender, advice.TriggerSessionEnd); err != nil {
+		// Log but don't block - session must end
+		style.PrintWarning("session-end hook error: %v", err)
+	} else if len(results) > 0 {
+		for _, result := range results {
+			if result.Success {
+				fmt.Printf("%s Session hook %s completed\n", style.Bold.Render("✓"), result.Hook.Title)
+			} else {
+				style.PrintWarning("session hook %s failed: %s", result.Hook.Title, advice.TruncateOutput(result.Output, 100))
+			}
+		}
+	}
 
 	// Self-cleaning: Nuke our own sandbox and session (if we're a polecat)
 	// This is the self-cleaning model - polecats clean up after themselves
