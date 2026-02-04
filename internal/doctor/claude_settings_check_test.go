@@ -554,22 +554,11 @@ func TestClaudeSettingsCheck_FixDeletesStaleFile(t *testing.T) {
 		t.Error("expected wrong location settings to be deleted")
 	}
 
-	// After fix, the working directory still exists but settings.local.json is missing
-	// This is expected - the user needs to restart agents to create settings.local.json
+	// After fix, settings.local.json is recreated at the correct location by EnsureSettingsForRole.
+	// The check should now pass since the correct file exists.
 	result = check.Run(ctx)
-	if result.Status != StatusError {
-		t.Errorf("expected StatusError after fix (missing settings.local.json), got %v", result.Status)
-	}
-	// Should report missing file now
-	foundMissing := false
-	for _, d := range result.Details {
-		if strings.Contains(d, "missing") {
-			foundMissing = true
-			break
-		}
-	}
-	if !foundMissing {
-		t.Errorf("expected details to mention missing settings.local.json after fix, got %v", result.Details)
+	if result.Status != StatusOK {
+		t.Errorf("expected StatusOK after fix (settings recreated at correct location), got %v: %v", result.Status, result.Details)
 	}
 }
 

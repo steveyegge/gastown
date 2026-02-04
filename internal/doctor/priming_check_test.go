@@ -452,6 +452,11 @@ func TestPrimingCheck_DoesNotFlagAgentLevelClaudeMd(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
 
+	// Create town root CLAUDE.md identity anchor (required by upstream check)
+	if err := os.WriteFile(filepath.Join(tmpDir, "CLAUDE.md"), []byte("# Gas Town\nRun gt prime\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	// Set up rig with .beads
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")
 	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
@@ -500,6 +505,11 @@ func TestPrimingCheck_DoesNotFlagAgentLevelClaudeMd(t *testing.T) {
 func TestPrimingCheck_NoIssuesWhenCorrectlyConfigured(t *testing.T) {
 	tmpDir := t.TempDir()
 	rigName := "testrig"
+
+	// Create town root CLAUDE.md identity anchor (required by upstream check)
+	if err := os.WriteFile(filepath.Join(tmpDir, "CLAUDE.md"), []byte("# Gas Town\nRun gt prime\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Set up rig with .beads and PRIME.md
 	rigBeadsDir := filepath.Join(tmpDir, rigName, ".beads")

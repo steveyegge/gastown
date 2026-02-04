@@ -638,20 +638,13 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 		claudeDir := filepath.Dir(sf.path)
 		_ = os.Remove(claudeDir) // Best-effort, will fail if not empty
 
-		// For mayor CLAUDE.md at town root, move it to mayor/
-		if sf.agentType == "mayor" && strings.HasSuffix(sf.path, "CLAUDE.md") && !strings.Contains(sf.path, "/mayor/") {
+		// Handle town-root files: redirect to mayor/ instead of recreating at root.
+		// Town-root settings pollute ALL agents via directory traversal.
+		if sf.agentType == "mayor" && !strings.Contains(sf.path, "/mayor/") {
 			mayorDir := filepath.Join(ctx.TownRoot, "mayor")
 
-			// For mayor settings.json at town root, create at mayor/.claude/
-			if sf.agentType == "mayor" && strings.HasSuffix(claudeDir, ".claude") && !strings.Contains(sf.path, "/mayor/") {
-				if err := os.MkdirAll(mayorDir, 0755); err == nil {
-					runtimeConfig := config.ResolveRoleAgentConfig("mayor", ctx.TownRoot, mayorDir)
-					_ = runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig)
-				}
-			}
-
-			// For mayor CLAUDE.md at town root, create at mayor/
-			if sf.agentType == "mayor" && strings.HasSuffix(sf.path, "CLAUDE.md") && !strings.Contains(sf.path, "/mayor/") {
+			if strings.HasSuffix(sf.path, "CLAUDE.md") {
+				// Town-root CLAUDE.md → recreate at mayor/
 				townName, _ := workspace.GetTownName(ctx.TownRoot)
 				if _, err := templates.CreateMayorCLAUDEmd(
 					mayorDir,
@@ -662,12 +655,17 @@ func (c *ClaudeSettingsCheck) Fix(ctx *CheckContext) error {
 				); err != nil {
 					errors = append(errors, fmt.Sprintf("failed to create mayor/CLAUDE.md: %v", err))
 				}
+			} else if strings.HasSuffix(claudeDir, ".claude") {
+				// Town-root .claude/settings.json → recreate at mayor/.claude/
+				if err := os.MkdirAll(mayorDir, 0755); err == nil {
+					runtimeConfig := config.ResolveRoleAgentConfig("mayor", ctx.TownRoot, mayorDir)
+					_ = runtime.EnsureSettingsForRole(mayorDir, "mayor", runtimeConfig)
+				}
 			}
 
 			// Town-root files were inherited by ALL agents via directory traversal.
 			// Warn user to restart agents - don't auto-kill sessions as that's too disruptive,
 			// especially since deacon runs gt doctor automatically which would create a loop.
-			// Settings are only read at startup, so running agents already have config loaded.
 			fmt.Printf("\n  %s Town-root settings were moved. Restart agents to pick up new config:\n", style.Warning.Render("⚠"))
 			fmt.Printf("      gt up --restart\n\n")
 			continue
