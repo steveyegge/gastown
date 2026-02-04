@@ -1249,10 +1249,12 @@ func NewSSEHandler(bus *eventbus.Bus, townRoot string) http.HandlerFunc {
 				if fields == nil {
 					continue
 				}
+				// Include options in SSE event so clients don't need RPC fallback (gt-hk4u6l)
+				optionsJSON := serializeBeadsOptionsForSSE(fields.Options)
 				// Send as SSE event
 				fmt.Fprintf(w, "event: decision\n")
-				fmt.Fprintf(w, "data: {\"id\":\"%s\",\"question\":\"%s\",\"urgency\":\"%s\",\"type\":\"pending\"}\n\n",
-					issue.ID, escapeJSON(fields.Question), fields.Urgency)
+				fmt.Fprintf(w, "data: {\"id\":\"%s\",\"question\":\"%s\",\"urgency\":\"%s\",\"type\":\"pending\",\"options\":%s}\n\n",
+					issue.ID, escapeJSON(fields.Question), fields.Urgency, optionsJSON)
 				flusher.Flush()
 			}
 		}
@@ -1291,9 +1293,11 @@ func NewSSEHandler(bus *eventbus.Bus, townRoot string) http.HandlerFunc {
 							continue // Already sent via backup poll
 						}
 						seen[decision.Id] = true
+						// Include options in the SSE event so clients don't need RPC fallback (gt-hk4u6l)
+						optionsJSON := serializeOptionsForSSE(decision.Options)
 						fmt.Fprintf(w, "event: decision\n")
-						fmt.Fprintf(w, "data: {\"id\":\"%s\",\"question\":\"%s\",\"urgency\":\"%s\",\"type\":\"created\"}\n\n",
-							decision.Id, escapeJSON(decision.Question), fromUrgency(decision.Urgency))
+						fmt.Fprintf(w, "data: {\"id\":\"%s\",\"question\":\"%s\",\"urgency\":\"%s\",\"type\":\"created\",\"options\":%s}\n\n",
+							decision.Id, escapeJSON(decision.Question), fromUrgency(decision.Urgency), optionsJSON)
 						flusher.Flush()
 						continue
 					}
@@ -1344,6 +1348,48 @@ func escapeJSON(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// serializeOptionsForSSE serializes decision options to JSON for SSE events.
+// This allows clients to display options even if the RPC GetDecision call fails. (gt-hk4u6l)
+func serializeOptionsForSSE(options []*gastownv1.DecisionOption) string {
+	if len(options) == 0 {
+		return "[]"
+	}
+	var parts []string
+	for _, opt := range options {
+		desc := ""
+		if opt.Description != "" {
+			desc = fmt.Sprintf(",\"description\":\"%s\"", escapeJSON(opt.Description))
+		}
+		rec := ""
+		if opt.Recommended {
+			rec = ",\"recommended\":true"
+		}
+		parts = append(parts, fmt.Sprintf("{\"label\":\"%s\"%s%s}", escapeJSON(opt.Label), desc, rec))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+// serializeBeadsOptionsForSSE serializes beads.DecisionOption slice to JSON for SSE events.
+// Used when sending initial pending decisions from beads data. (gt-hk4u6l)
+func serializeBeadsOptionsForSSE(options []beads.DecisionOption) string {
+	if len(options) == 0 {
+		return "[]"
+	}
+	var parts []string
+	for _, opt := range options {
+		desc := ""
+		if opt.Description != "" {
+			desc = fmt.Sprintf(",\"description\":\"%s\"", escapeJSON(opt.Description))
+		}
+		rec := ""
+		if opt.Recommended {
+			rec = ",\"recommended\":true"
+		}
+		parts = append(parts, fmt.Sprintf("{\"label\":\"%s\"%s%s}", escapeJSON(opt.Label), desc, rec))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 // ConvoyServer implements the ConvoyService.

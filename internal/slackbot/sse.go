@@ -42,10 +42,18 @@ type sseEvent struct {
 
 // decisionEvent represents the JSON data in a decision SSE event.
 type decisionEvent struct {
-	ID       string `json:"id"`
-	Question string `json:"question"`
-	Urgency  string `json:"urgency"`
-	Type     string `json:"type"` // "pending", "created", "resolved", "canceled"
+	ID       string           `json:"id"`
+	Question string           `json:"question"`
+	Urgency  string           `json:"urgency"`
+	Type     string           `json:"type"`              // "pending", "created", "resolved", "canceled"
+	Options  []decisionOption `json:"options,omitempty"` // Options from SSE event (gt-hk4u6l)
+}
+
+// decisionOption represents an option in a decision event.
+type decisionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
 }
 
 // Run starts listening for SSE events. Blocks until context is canceled.
@@ -212,17 +220,30 @@ func (l *SSEListener) notifyNewDecision(de decisionEvent) {
 
 	if err != nil {
 		log.Printf("SSE: All attempts failed to fetch decision %s: %v", de.ID, err)
-		// Fall back to basic notification with what we have from the event
-		// WARNING: This notification will NOT have clickable option buttons
+		// Fall back to notification with data from the SSE event
 		if de.Question == "" {
 			log.Printf("SSE: No question in event data, skipping notification for %s", de.ID)
 			return
 		}
-		log.Printf("SSE: Falling back to buttonless notification for %s (RPC unavailable)", de.ID)
+		// Use options from SSE event if available (gt-hk4u6l)
+		var options []rpcclient.DecisionOption
+		for _, opt := range de.Options {
+			options = append(options, rpcclient.DecisionOption{
+				Label:       opt.Label,
+				Description: opt.Description,
+				Recommended: opt.Recommended,
+			})
+		}
+		if len(options) > 0 {
+			log.Printf("SSE: Falling back to SSE event data with %d options for %s", len(options), de.ID)
+		} else {
+			log.Printf("SSE: Falling back to buttonless notification for %s (RPC unavailable, no options in event)", de.ID)
+		}
 		fallback := rpcclient.Decision{
 			ID:       de.ID,
 			Question: de.Question,
 			Urgency:  de.Urgency,
+			Options:  options,
 		}
 		if err := l.bot.NotifyNewDecision(fallback); err != nil {
 			log.Printf("SSE: Error notifying Slack: %v", err)
@@ -349,4 +370,3 @@ func (l *SSEListener) addSlackNotifiedLabel(decisionID string) {
 		log.Printf("SSE: Warning: failed to add slack_notified label to %s: %v", decisionID, err)
 	}
 }
-
