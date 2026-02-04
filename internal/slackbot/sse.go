@@ -190,17 +190,35 @@ func (l *SSEListener) notifyNewDecision(de decisionEvent) {
 	l.seenMu.Unlock()
 
 	// Fetch full decision details from RPC using GetDecision (works even if resolved)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Retry with backoff to avoid falling back to buttonless notification on transient failures
+	var decision *rpcclient.Decision
+	var err error
+	retryDelays := []time.Duration{0, 500 * time.Millisecond, 1 * time.Second, 2 * time.Second}
 
-	decision, err := l.rpcClient.GetDecision(ctx, de.ID)
+	for attempt, delay := range retryDelays {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		decision, err = l.rpcClient.GetDecision(ctx, de.ID)
+		cancel()
+		if err == nil {
+			break
+		}
+		if attempt < len(retryDelays)-1 {
+			log.Printf("SSE: Attempt %d failed to fetch decision %s: %v, retrying...", attempt+1, de.ID, err)
+		}
+	}
+
 	if err != nil {
-		log.Printf("SSE: Error fetching decision %s: %v", de.ID, err)
+		log.Printf("SSE: All attempts failed to fetch decision %s: %v", de.ID, err)
 		// Fall back to basic notification with what we have from the event
+		// WARNING: This notification will NOT have clickable option buttons
 		if de.Question == "" {
 			log.Printf("SSE: No question in event data, skipping notification for %s", de.ID)
 			return
 		}
+		log.Printf("SSE: Falling back to buttonless notification for %s (RPC unavailable)", de.ID)
 		fallback := rpcclient.Decision{
 			ID:       de.ID,
 			Question: de.Question,
