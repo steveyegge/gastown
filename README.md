@@ -43,6 +43,12 @@ graph TB
     style Rig2 fill:#fff4e1,color:#000000
 ```
 
+## Tundra Dome (KIND + Kafka + Airflow)
+
+Gas Town can run alongside **Tundra Dome**, the Kafka/Airflow-based coordination stack that powers lanes, observability, and cross-agent routing. For local dev, we deploy Tundra Dome with KIND (2 workers), and layer Datadog env/tags across all services so logs/metrics/LLM observability are consistent.
+
+See the Tundra Dome docs in this repo for deployment and operations details.
+
 ## Core Concepts
 
 ### The Mayor 🎩
