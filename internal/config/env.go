@@ -43,6 +43,10 @@ type AgentEnvConfig struct {
 	// BaseURL is an optional ANTHROPIC_BASE_URL for custom API endpoints.
 	// Used with AuthToken for alternative API providers (e.g., LiteLLM).
 	BaseURL string
+
+	// BDDaemonHost is an optional BD_DAEMON_HOST for connecting to the beads daemon.
+	// If set, spawned agents will use this host instead of the default localhost.
+	BDDaemonHost string
 }
 
 // AgentEnv returns all environment variables for an agent based on the config.
@@ -138,6 +142,11 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	// Add optional Anthropic API base URL (for custom endpoints like LiteLLM)
 	if cfg.BaseURL != "" {
 		env["ANTHROPIC_BASE_URL"] = cfg.BaseURL
+	}
+
+	// Add optional beads daemon host
+	if cfg.BDDaemonHost != "" {
+		env["BD_DAEMON_HOST"] = cfg.BDDaemonHost
 	}
 
 	return env

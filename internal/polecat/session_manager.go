@@ -255,6 +255,7 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		BeadsNoDaemon:    true,
 		AuthToken:        opts.AuthToken,
 		BaseURL:          opts.BaseURL,
+		BDDaemonHost:     os.Getenv("BD_DAEMON_HOST"),
 	})
 	for k, v := range envVars {
 		debugSession("SetEnvironment "+k, m.tmux.SetEnvironment(sessionID, k, v))
