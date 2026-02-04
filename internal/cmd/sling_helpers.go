@@ -472,10 +472,10 @@ func detectActor() string {
 }
 
 // agentIDToBeadID converts an agent ID to its corresponding agent bead ID.
-// Uses canonical naming: prefix-rig-role-name
-// Town-level agents (Mayor, Deacon) use hq- prefix and are stored in town beads.
-// Rig-level agents use the rig's configured prefix (default "gt-").
-// townRoot is needed to look up the rig's configured prefix.
+// Uses canonical naming for town-level agent beads: hq-<town>-<rig>-<role>-<name>
+// All agent beads are now stored in town beads with hq- prefix (fixes gt-w7sr31).
+// This ensures consistent lookup regardless of which rig's database is active.
+// townRoot is needed to look up the town name for the ID.
 func agentIDToBeadID(agentID, townRoot string) string {
 	// Normalize: strip trailing slash (resolveSelfTarget returns "mayor/" not "mayor")
 	agentID = strings.TrimSuffix(agentID, "/")
@@ -495,17 +495,24 @@ func agentIDToBeadID(agentID, townRoot string) string {
 	}
 
 	rig := parts[0]
-	prefix := beads.GetPrefixForRig(townRoot, rig)
+
+	// Get town name for town-level agent bead IDs (gt-w7sr31)
+	// All rig-level agents now use hq-<town>-<rig>-<role>[-<name>] format
+	townName, err := workspace.GetTownName(townRoot)
+	if err != nil {
+		// Fall back to empty town name (generates hq-<rig>-<role>-<name>)
+		townName = ""
+	}
 
 	switch {
 	case len(parts) == 2 && parts[1] == "witness":
-		return beads.WitnessBeadIDWithPrefix(prefix, rig)
+		return beads.WitnessBeadIDTown(townName, rig)
 	case len(parts) == 2 && parts[1] == "refinery":
-		return beads.RefineryBeadIDWithPrefix(prefix, rig)
+		return beads.RefineryBeadIDTown(townName, rig)
 	case len(parts) == 3 && parts[1] == "crew":
-		return beads.CrewBeadIDWithPrefix(prefix, rig, parts[2])
+		return beads.CrewBeadIDTown(townName, rig, parts[2])
 	case len(parts) == 3 && parts[1] == "polecats":
-		return beads.PolecatBeadIDWithPrefix(prefix, rig, parts[2])
+		return beads.PolecatBeadIDTown(townName, rig, parts[2])
 	case len(parts) == 3 && parts[0] == "deacon" && parts[1] == "dogs":
 		// Dogs are town-level agents with hq- prefix
 		return beads.DogBeadIDTown(parts[2])
